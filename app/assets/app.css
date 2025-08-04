@@ -1,2 +1,63 @@
 @import "tailwindcss";
-@plugin "daisyui";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark, synthwave;
+}
+
+@theme {
+	--color-hero: #e9b151;
+	--color-bg-dark: #161f30;
+	--color-bg-light: #f7f1e5;
+	--color-accent1: #769899;
+	--color-accent2: #e9b151;
+	--color-accent3: #f7f1e5;
+	--color-accent4: #24475e;
+	--color-accent5: #161f30;
+}
+
+@font-face {
+	font-family: 'Caprasimo';
+	src: url('/font/Caprasimo-Regular.woff') format('woff');
+	font-weight: normal;
+	font-style: normal;
+	font-display: swap;
+}
+
+/* Custom font utility that works independently of Tailwind */
+.font-hero {
+	font-family: 'Caprasimo', cursive, sans-serif !important;
+    font-size: 2.5rem;
+}
+
+
+/* Apply your color palette to the body and common elements */
+body {
+	background-color: var(--color-bg-light);
+	color: var(--color-bg-dark);
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+	body {
+		background-color: var(--color-bg-dark);
+		color: var(--color-bg-light);
+	}
+}
+
+/* Custom utility classes for your color palette */
+.bg-hero { background-color: var(--color-hero); }
+.bg-dark { background-color: var(--color-bg-dark); }
+.bg-light { background-color: var(--color-bg-light); }
+.bg-accent-1 { background-color: var(--color-accent1); }
+.bg-accent-2 { background-color: var(--color-accent2); }
+.bg-accent-3 { background-color: var(--color-accent3); }
+.bg-accent-4 { background-color: var(--color-accent4); }
+.bg-accent-5 { background-color: var(--color-accent5); }
+
+.text-hero { color: var(--color-hero); }
+.text-dark { color: var(--color-bg-dark); }
+.text-light { color: var(--color-bg-light); }
+.text-accent-1 { color: var(--color-accent1); }
+.text-accent-2 { color: var(--color-accent2); }
+.text-accent-3 { color: var(--color-accent3); }
+.text-accent-4 { color: var(--color-accent4); }
+.text-accent-5 { color: var(--color-accent5); }
