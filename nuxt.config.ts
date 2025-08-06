@@ -15,13 +15,13 @@ export default defineNuxtConfig({
 
   pwa: {
     strategies: 'injectManifest',
-    srcDir: 'public',
+    srcDir: '../public',
     filename: 'sw.js',
     registerType: 'autoUpdate',
-    injectManifest: {
-      swSrc: 'public/sw.js',
-      swDest: 'sw.js'
-    },
+    // injectManifest: {
+    //   swSrc: 'sw.js',
+    //   swDest: 'sw.js'
+    // },
     devOptions: {
       enabled: true
     }
