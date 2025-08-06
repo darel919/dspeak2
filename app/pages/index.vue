@@ -23,6 +23,15 @@
                             </svg>
                             Join Room
                         </button>
+                                <button 
+                                    class="btn btn-ghost btn-sm"
+                                    @click="showCreateModal = true"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    Create Room
+                                </button>
                         <button 
                             class="btn btn-ghost btn-sm"
                             :class="{ 'loading': roomsStore.loading }"
@@ -112,6 +121,61 @@
             </div>
             <div class="modal-backdrop" @click="closeJoinModal"></div>
         </div>
+
+            <!-- Create Room Modal -->
+            <div v-if="showCreateModal" class="modal modal-open">
+                <div class="modal-box">
+                    <h3 class="font-bold text-lg mb-4">Create Room</h3>
+                    <div class="form-control mb-4">
+                        <label class="label">
+                            <span class="label-text">Room Name <span class="text-error">*</span></span>
+                        </label>
+                        <input 
+                            v-model="createName"
+                            type="text" 
+                            placeholder="Enter room name..."
+                            class="input input-bordered w-full"
+                            @keyup.enter="handleCreateSubmit"
+                        />
+                    </div>
+                    <div class="form-control mb-4">
+                        <label class="label">
+                            <span class="label-text">Description</span>
+                        </label>
+                        <input 
+                            v-model="createDesc"
+                            type="text" 
+                            placeholder="Optional description..."
+                            class="input input-bordered w-full"
+                            @keyup.enter="handleCreateSubmit"
+                        />
+                    </div>
+                    <div v-if="createError" class="alert alert-error mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>{{ createError }}</span>
+                    </div>
+                    <div class="modal-action">
+                        <button 
+                            class="btn btn-ghost" 
+                            @click="closeCreateModal"
+                            :disabled="creatingRoom"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            class="btn btn-primary" 
+                            @click="handleCreateSubmit"
+                            :disabled="!createName.trim() || creatingRoom"
+                            :class="{ 'loading': creatingRoom }"
+                        >
+                            {{ creatingRoom ? 'Creating...' : 'Create Room' }}
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-backdrop" @click="closeCreateModal"></div>
+            </div>
     </section>
 </template>
 
@@ -129,6 +193,12 @@ const showJoinModal = ref(false)
 const joinInput = ref('')
 const joinError = ref(null)
 const joiningRoom = ref(false)
+
+const showCreateModal = ref(false)
+const createName = ref('')
+const createDesc = ref('')
+const createError = ref(null)
+const creatingRoom = ref(false)
 
 const isAuthenticated = computed(() => {
   const token = localStorage.getItem('token')
@@ -152,6 +222,14 @@ function closeJoinModal() {
     joinInput.value = ''
     joinError.value = null
     joiningRoom.value = false
+}
+
+function closeCreateModal() {
+    showCreateModal.value = false
+    createName.value = ''
+    createDesc.value = ''
+    createError.value = null
+    creatingRoom.value = false
 }
 
 function extractRoomIdFromInput(input) {
@@ -180,6 +258,24 @@ async function handleJoinSubmit() {
         joinError.value = err.message || 'Failed to join room'
     } finally {
         joiningRoom.value = false
+    }
+}
+
+async function handleCreateSubmit() {
+    if (!createName.value.trim()) return
+    creatingRoom.value = true
+    createError.value = null
+    try {
+        const room = await roomsStore.createRoom(createName.value, createDesc.value)
+        success('Room created successfully!')
+        closeCreateModal()
+        if (room && room.id) {
+            router.push(`/room?roomId=${room.id}`)
+        }
+    } catch (err) {
+        createError.value = err.message || 'Failed to create room'
+    } finally {
+        creatingRoom.value = false
     }
 }
 </script>

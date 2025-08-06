@@ -8,6 +8,31 @@ export const useRoomsStore = defineStore('rooms', () => {
     const error = ref(null)
     const config = useRuntimeConfig()
 
+        async function createRoom(name, desc = "") {
+            const authStore = useAuthStore()
+            const userData = authStore.getUserData()
+            const apiPath = config.public.apiPath
+            if (!name || typeof name !== 'string' || !name.trim()) throw new Error('Room name is required')
+            if (!userData || !userData.id) throw new Error('User not authenticated')
+            if (!apiPath) throw new Error('API path is not defined')
+            const body = { name: name.trim() }
+            if (desc && typeof desc === 'string' && desc.trim()) body.desc = desc.trim()
+            const response = await fetch(`${apiPath}/room/`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': userData.id,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            })
+            if (!response.ok) {
+                const errorText = await response.text()
+                throw new Error(`Failed to create room: ${response.status} ${errorText}`)
+            }
+            const data = await response.json()
+            await fetchRooms()
+            return data
+        }
     async function fetchRooms() {
         loading.value = true
         error.value = null
@@ -93,12 +118,13 @@ export const useRoomsStore = defineStore('rooms', () => {
             const apiPath = config.public.apiPath
             if (!userData || !userData.id) throw new Error('User not authenticated')
             if (!apiPath) throw new Error('API path is not defined')
-            const response = await fetch(`${apiPath}/room/${roomId}`, {
+            const response = await fetch(`${apiPath}/room/`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': userData.id,
                     'Content-Type': 'application/json'
-                }
+                },
+                body: JSON.stringify({"roomId": roomId})
             })
             if (!response.ok) throw new Error('Failed to delete room')
             await fetchRooms()
@@ -244,6 +270,7 @@ export const useRoomsStore = defineStore('rooms', () => {
         isOwner,
         clearRooms,
         getRoomDetails,
-        deleteRoom
+        deleteRoom, 
+        createRoom
     }
 })
