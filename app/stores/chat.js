@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import BackgroundWorker from '../utils/BackgroundWorker';
 import { useRuntimeConfig } from '#app';
 import { useAuthStore } from './auth';
 
@@ -18,6 +19,118 @@ export const useChatStore = defineStore('chat', () => {
 
     let reconnectInterval = null;
     let reconnectTimer = null;
+
+    // Listen for Service Worker messages
+    if (process.client && 'serviceWorker' in navigator) {
+        console.log('[ChatStore] Service Worker supported');
+        
+        // Check current registration status
+        navigator.serviceWorker.getRegistration().then(reg => {
+            if (reg) {
+                console.log('[ChatStore] Service Worker registered:', reg);
+                console.log('[ChatStore] SW active:', !!reg.active);
+                console.log('[ChatStore] SW controller:', !!navigator.serviceWorker.controller);
+            } else {
+                console.log('[ChatStore] No Service Worker registration found');
+            }
+        });
+
+        navigator.serviceWorker.addEventListener('message', event => {
+            console.log('[ChatStore] Received SW message:', event.data);
+            if (event.data.type === 'BACKGROUND_SYNC_SUCCESS') {
+                handleBackgroundSyncSuccess(event.data.pendingId);
+            }
+        });
+
+        // Send API configuration to Service Worker when ready
+        const sendConfigToSW = () => {
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'SET_API_CONFIG',
+                    config: {
+                        apiPath: config.public.apiPath
+                    }
+                });
+                console.log('[ChatStore] Sent API config to SW:', config.public.apiPath);
+            } else {
+                console.log('[ChatStore] No SW controller available');
+            }
+        };
+
+        // Send config immediately if SW is already controlling
+        if (navigator.serviceWorker.controller) {
+            sendConfigToSW();
+        }
+
+        // Also send config when SW becomes ready
+        navigator.serviceWorker.ready.then(reg => {
+            console.log('[ChatStore] Service Worker ready:', reg);
+            if (reg.active) {
+                reg.active.postMessage({
+                    type: 'SET_API_CONFIG',
+                    config: {
+                        apiPath: config.public.apiPath
+                    }
+                });
+                console.log('[ChatStore] Sent API config to SW (ready):', config.public.apiPath);
+            }
+        });
+
+        // Listen for SW controller changes
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('[ChatStore] SW controller changed, sending config');
+            sendConfigToSW();
+        });
+
+        // Listen for online events to trigger sync
+        window.addEventListener('online', () => {
+            console.log('[ChatStore] Came back online, triggering background sync');
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                // First ensure config is sent
+                sendConfigToSW();
+                
+                // Then trigger sync with multiple approaches
+                setTimeout(() => {
+                    console.log('[ChatStore] Attempting sync via multiple methods...');
+                    
+                    // Method 1: Background Sync API
+                    navigator.serviceWorker.ready.then(reg => {
+                        if (reg.sync) {
+                            console.log('[ChatStore] Using Background Sync API');
+                            reg.sync.register('chat-sync');
+                        }
+                    });
+                    
+                    // Method 2: Direct message to SW
+                    if (navigator.serviceWorker.controller) {
+                        console.log('[ChatStore] Sending FORCE_SYNC message');
+                        navigator.serviceWorker.controller.postMessage({
+                            type: 'FORCE_SYNC'
+                        });
+                    }
+                }, 500);
+            }
+        });
+    }
+
+    // Manual sync function for testing
+    function triggerManualSync() {
+        console.log('[ChatStore] Manual sync triggered');
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+                type: 'SET_API_CONFIG',
+                config: {
+                    apiPath: config.public.apiPath
+                }
+            });
+            
+            setTimeout(() => {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'FORCE_SYNC'
+                });
+            }, 100);
+        }
+    }
 
     async function connectToRoom(roomId, roomName = null) {
         disconnectFromRoom();
@@ -107,6 +220,14 @@ export const useChatStore = defineStore('chat', () => {
                     
                 case 'new_message':
                     console.log('[ChatStore] New message received:', data.data);
+                    
+                    // Check for duplicates before adding
+                    const existingMessage = messages.value.find(msg => msg.id === data.data.id);
+                    if (existingMessage) {
+                        console.log('[ChatStore] Duplicate message detected, skipping:', data.data.id);
+                        break;
+                    }
+                    
                     messages.value.push(data.data);
                     
                     // Show notification for messages from other users
@@ -199,30 +320,100 @@ export const useChatStore = defineStore('chat', () => {
         try {
             const authStore = useAuthStore();
             const userData = authStore.getUserData();
-            
             if (!userData || !userData.id) {
                 throw new Error('User not authenticated');
             }
 
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/chat/message`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
+            // Create a pending message to show immediately in UI
+            const pendingMessage = {
+                id: `pending_${Date.now()}`,
+                content,
+                room: roomId,
+                sender: {
+                    id: userData.id,
+                    name: userData.name || 'You',
+                    email: userData.email
                 },
-                body: JSON.stringify({
-                    roomId,
-                    content
-                })
-            });
+                created: new Date().toISOString(),
+                read_by: [userData.id],
+                status: 'pending' // Mark as pending
+            };
 
-            if (!response.ok) {
-                throw new Error(`Failed to send message: ${response.status}`);
+            // Add pending message to UI immediately
+            messages.value.push(pendingMessage);
+
+            // Check if we're offline
+            if (!navigator.onLine) {
+                // Queue message for background sync
+                const queuedMessage = {
+                    id: Date.now(),
+                    roomId,
+                    content,
+                    sender: userData.id,
+                    pendingId: pendingMessage.id // Link to pending message
+                };
+                await BackgroundWorker.enqueueMessage(queuedMessage);
+                if ('serviceWorker' in navigator && 'SyncManager' in window) {
+                    navigator.serviceWorker.ready.then(reg => {
+                        // Ensure config is sent before registering sync
+                        if (reg.active) {
+                            reg.active.postMessage({
+                                type: 'SET_API_CONFIG',
+                                config: {
+                                    apiPath: config.public.apiPath
+                                }
+                            });
+                        }
+                        reg.sync.register('chat-sync');
+                    });
+                }
+                return { status: 'queued-offline', id: queuedMessage.id };
             }
 
-            const message = await response.json();
-            return message;
+            try {
+                const apiPath = config.public.apiPath;
+                const response = await fetch(`${apiPath}/chat/message`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': userData.id,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        roomId,
+                        content
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const message = await response.json();
+                
+                // Remove pending message and let the real message come via WebSocket
+                const pendingIndex = messages.value.findIndex(msg => msg.id === pendingMessage.id);
+                if (pendingIndex !== -1) {
+                    messages.value.splice(pendingIndex, 1);
+                }
+                
+                return message;
+            } catch (fetchError) {
+                // If failed, queue for background sync but keep pending message
+                const queuedMessage = {
+                    id: Date.now(),
+                    roomId,
+                    content,
+                    sender: userData.id,
+                    pendingId: pendingMessage.id
+                };
+                await BackgroundWorker.enqueueMessage(queuedMessage);
+                if ('serviceWorker' in navigator && 'SyncManager' in window) {
+                    navigator.serviceWorker.ready.then(reg => {
+                        reg.sync.register('chat-sync');
+                    });
+                }
+                return { status: 'queued-error', error: fetchError.message };
+            }
         } catch (err) {
             error.value = err.message;
             console.error('[ChatStore] Error sending message:', err);
@@ -389,6 +580,14 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
+    // Handle successful background sync
+    function handleBackgroundSyncSuccess(pendingId) {
+        const pendingIndex = messages.value.findIndex(msg => msg.id === pendingId);
+        if (pendingIndex !== -1) {
+            messages.value.splice(pendingIndex, 1);
+        }
+    }
+
     return {
         messages,
         loading,
@@ -405,6 +604,8 @@ export const useChatStore = defineStore('chat', () => {
         markMessageAsRead,
         sendTypingIndicator,
         sendPing,
-        clearChat
+        clearChat,
+        handleBackgroundSyncSuccess,
+        triggerManualSync
     };
 });

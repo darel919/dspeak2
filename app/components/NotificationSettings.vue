@@ -66,7 +66,6 @@
 <script setup>
 import { useNotifications } from '../composables/useNotifications'
 import { useToast } from '../composables/useToast'
-import { ref } from 'vue'
 
 const { isSupported, permission, isEnabled, setEnabled, showNotification } = useNotifications()
 const { success, error, info } = useToast()

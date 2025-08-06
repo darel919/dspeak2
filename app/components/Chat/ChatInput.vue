@@ -7,7 +7,7 @@
           type="text"
           placeholder="Type a message..."
           class="input input-bordered w-full"
-          :disabled="!connected || sending"
+          :disabled="sending"
           @input="handleTyping"
           @focus="handleFocus"
           @blur="handleBlur"
@@ -17,7 +17,7 @@
       <button
         type="submit"
         class="btn btn-primary"
-        :disabled="!messageText.trim() || !connected || sending"
+        :disabled="!messageText.trim() || sending"
         :class="{ 'loading': sending }"
       >
         <svg 
@@ -49,12 +49,15 @@
     </div>
     
     <!-- Connection status -->
-    <div v-if="!connected" class="mt-2 text-xs text-error">
+    <div v-if="!connected" class="mt-2 text-xs text-warning">
       <div class="flex items-center gap-2">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 5.636M5.636 18.364l12.728-12.728" />
         </svg>
-        <span>Disconnected - messages cannot be sent</span>
+        <span>We're offline</span>
+        <button @click="triggerSync" class="btn btn-xs btn-outline btn-warning ml-2">
+          Sync Now
+        </button>
       </div>
     </div>
   </div>
@@ -87,7 +90,7 @@ const isTyping = ref(false)
 const typingTimeout = ref(null)
 
 async function handleSendMessage() {
-  if (!messageText.value.trim() || !props.connected || sending.value) {
+  if (!messageText.value.trim() || sending.value) {
     return
   }
 
@@ -95,13 +98,19 @@ async function handleSendMessage() {
   sending.value = true
 
   try {
-    await chatStore.sendMessage(props.roomId, content)
+    const result = await chatStore.sendMessage(props.roomId, content)
     messageText.value = ''
     
     // Stop typing indicator when message is sent
     if (isTyping.value) {
       chatStore.sendTypingIndicator(false)
       isTyping.value = false
+    }
+    
+    // Show feedback based on result
+    if (result.status && result.status.includes('queued')) {
+      console.log('Message queued for background sync')
+      // Could show a toast notification here
     }
     
     emit('message-sent')
@@ -163,6 +172,11 @@ function getTypingText() {
   } else {
     return `${count} people are typing...`
   }
+}
+
+function triggerSync() {
+  console.log('[ChatInput] Manual sync triggered');
+  chatStore.triggerManualSync();
 }
 
 // Cleanup on unmount

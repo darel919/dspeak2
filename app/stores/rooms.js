@@ -11,44 +11,63 @@ export const useRoomsStore = defineStore('rooms', () => {
     async function fetchRooms() {
         loading.value = true
         error.value = null
-        
         try {
             const authStore = useAuthStore()
             const userData = authStore.getUserData()
-            
             if (!userData || !userData.id) {
                 throw new Error('User not authenticated')
             }
-
             const apiPath = config.public.apiPath
             if (!apiPath) {
                 throw new Error('API path is not defined')
             }
-
             console.log('[RoomsStore] Fetching rooms from:', `${apiPath}/rooms`)
             console.log('[RoomsStore] Using authorization:', userData.id)
-
             const response = await fetch(`${apiPath}/room`, {
                 headers: {
                     'Authorization': userData.id,
                     'Content-Type': 'application/json'
                 }
             })
-
             if (!response.ok) {
                 const errorText = await response.text()
                 console.error('[RoomsStore] Failed to fetch rooms:', response.status, errorText)
                 throw new Error(`Failed to fetch rooms: ${response.status}`)
             }
-
             const data = await response.json()
             console.log('[RoomsStore] Rooms fetched successfully:', data)
             rooms.value = data
+            loading.value = false
+            // ...existing code...
+            loading.value = false
         } catch (err) {
             error.value = err.message
             console.error('[RoomsStore] Error fetching rooms:', err)
-        } finally {
-            loading.value = false
+            // Offline fallback: load cached rooms from IndexedDB
+            if (window.indexedDB) {
+                try {
+                    const { openDB } = await import('../../public/idb.js')
+                    const db = await openDB()
+                    const tx = db.transaction('roomsCache', 'readonly')
+                    const store = tx.objectStore('roomsCache')
+                    const req = store.getAll()
+                    req.onsuccess = () => {
+                        loading.value = false
+                        rooms.value = req.result
+                        error.value = null
+                        console.log('[RoomsStore] Loaded rooms from cache:', req.result)
+                    }
+                    req.onerror = () => {
+                        loading.value = false
+                        console.warn('[RoomsStore] Failed to load cached rooms')
+                    }
+                } catch (e) {
+                    loading.value = false
+                    console.warn('[RoomsStore] Offline fallback failed:', e)
+                }
+            } else {
+                loading.value = false
+            }
         }
     }
     
@@ -159,7 +178,34 @@ export const useRoomsStore = defineStore('rooms', () => {
             
             // Refresh rooms list to include the newly joined room
             await fetchRooms()
-            
+
+            // Automatically subscribe user to push notifications for this room
+            if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+                try {
+                    const vapidKey = config.public.VAPID_PUBLIC_KEY;
+                    if (!vapidKey) {
+                        throw new Error('VAPID public key is not defined in runtime config');
+                    }
+                    const registration = await navigator.serviceWorker.ready;
+                    const subscription = await registration.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: urlBase64ToUint8Array(vapidKey)
+                    });
+                    // Construct push subscription endpoint using apiPath from runtime config
+                    const subscribeUrl = `${config.public.apiPath}/chat/subscribe`;
+                    await fetch(subscribeUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': userData.id
+                        },
+                        body: JSON.stringify({ roomId: trimmedRoomId, subscription })
+                    });
+                } catch (err) {
+                    console.error('[RoomsStore] Failed to subscribe to push notifications:', err);
+                }
+            }
+
             return data
         } catch (err) {
             error.value = err.message
@@ -175,15 +221,29 @@ export const useRoomsStore = defineStore('rooms', () => {
         error.value = null
     }
 
+    // Helper: convert VAPID key to Uint8Array
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding)
+            .replace(/-/g, '+')
+            .replace(/_/g, '/');
+        const rawData = (typeof window !== 'undefined' && window.atob) ? window.atob(base64) : Buffer.from(base64, 'base64').toString('binary');
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
     return { 
-    rooms, 
-    loading, 
-    error, 
-    fetchRooms, 
-    joinRoom,
-    isOwner,
-    clearRooms,
-    getRoomDetails,
-    deleteRoom
+        rooms, 
+        loading, 
+        error, 
+        fetchRooms, 
+        joinRoom,
+        isOwner,
+        clearRooms,
+        getRoomDetails,
+        deleteRoom
     }
 })

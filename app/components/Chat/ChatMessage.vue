@@ -6,15 +6,15 @@
     @mouseenter="showActions = true" 
     @mouseleave="showActions = false"
   >
-    <div class="chat-image avatar">
+    <div v-if="message.sender.id != authStore.getUserData()?.id" class="chat-image avatar">
       <div class="w-10 rounded-full">
         <img :src="getAvatarUrl(message.sender.avatar)" :alt="message.sender.name" />
       </div>
     </div>
     
     <div class="chat-header">
-      {{ isOwnMessage ? 'You' : message.sender.name }}
-      <time class="text-xs opacity-50 ml-1">{{ formatTime(message.created) }}</time>
+      {{ isOwnMessage ? null : message.sender.name }}
+      <time class="text-xs opacity-50 ml-1 pb-1">{{ formatTime(message.created) }}</time>
       
       <!-- Message Actions -->
       <div 
@@ -37,10 +37,20 @@
       {{ message.content }}
     </div>
     
-    <div v-if="showReadStatus" class="chat-footer opacity-50">
+    <div v-if="showReadStatus || isPending" class="chat-footer opacity-50">
       <div class="flex items-center gap-1 text-xs">
         <svg 
-          v-if="isRead" 
+          v-if="isPending"
+          xmlns="http://www.w3.org/2000/svg" 
+          class="h-3 w-3 text-warning animate-spin" 
+          fill="none" 
+          viewBox="0 0 24 24" 
+          stroke="currentColor"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <svg 
+          v-else-if="isRead" 
           xmlns="http://www.w3.org/2000/svg" 
           class="h-3 w-3 text-primary" 
           fill="none" 
@@ -59,7 +69,7 @@
         >
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        <span>{{ getReadStatus() }}</span>
+        <span>{{ getStatusText() }}</span>
       </div>
     </div>
   </div>
@@ -91,8 +101,12 @@ const isOwnMessage = computed(() => {
   return userData && props.message.sender.id === userData.id
 })
 
+const isPending = computed(() => {
+  return props.message.status === 'pending'
+})
+
 const showReadStatus = computed(() => {
-  return isOwnMessage.value
+  return isOwnMessage.value && !isPending.value
 })
 
 const isRead = computed(() => {
@@ -159,6 +173,13 @@ function handleMarkRead(messageId) {
 
 function handleShowDetails(message) {
   emit('show-details', message)
+}
+
+function getStatusText() {
+  if (isPending.value) {
+    return 'Pending'
+  }
+  return getReadStatus()
 }
 
 function getReadStatus() {

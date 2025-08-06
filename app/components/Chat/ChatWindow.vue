@@ -130,7 +130,6 @@ import { useChatStore } from '../../stores/chat'
 import ChatMessage from './ChatMessage.vue'
 import ChatInput from './ChatInput.vue'
 import MessageDetailsModal from './MessageDetailsModal.vue'
-import { useRouter } from 'vue-router'
 
 const props = defineProps({
   roomId: {
