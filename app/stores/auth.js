@@ -7,6 +7,7 @@ export const useAuthStore = defineStore('auths', () => {
     const config = useRuntimeConfig()
 
     function setUser(val) {
+        console.log('[AuthStore] Setting user:', val)
         user.value = val
     }
     function setToken(val) {
@@ -40,6 +41,7 @@ export const useAuthStore = defineStore('auths', () => {
         }
     }
     function saveToken(val) {
+        console.log('[AuthStore] Saving token:', val)
         setToken(val)
         localStorage.setItem('token', val)
     }
@@ -47,6 +49,22 @@ export const useAuthStore = defineStore('auths', () => {
         setToken(null)
         setUser(null)
         localStorage.removeItem('token')
+        
+        // Import stores dynamically to avoid circular dependency
+        Promise.all([
+            import('./rooms.js').then(({ useRoomsStore }) => {
+                const roomsStore = useRoomsStore()
+                if (roomsStore) {
+                    roomsStore.clearRooms()
+                }
+            }).catch(() => {}),
+            import('./chat.js').then(({ useChatStore }) => {
+                const chatStore = useChatStore()
+                if (chatStore) {
+                    chatStore.clearChat()
+                }
+            }).catch(() => {})
+        ])
     }
     function getUserData() {
         return user.value ? user.value.user.user_metadata : null

@@ -9,8 +9,10 @@
 
 <script setup>
 import { useAuthStore } from "../stores/auth";
+import { useRoomsStore } from "../stores/rooms";
 
 const authStore = useAuthStore();
+const roomsStore = useRoomsStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -23,8 +25,11 @@ onMounted(async () => {
     authStore.saveToken(at);
     const valid = await authStore.verifyToken(at);
     if (valid) {
-      console.log('Token verified successfully, redirecting to home')
-      router.replace("/");
+      console.log('Token verified successfully, fetching rooms and redirecting to home')
+      // Fetch rooms after successful authentication
+      await roomsStore.fetchRooms();
+      // Force a page reload to ensure all reactive dependencies are updated
+      window.location.href = '/';
       return;
     } else {
       console.log('Token verification failed, waiting 3 seconds before redirect')
@@ -40,7 +45,9 @@ onMounted(async () => {
     console.log('Found saved token, verifying...')
     const valid = await authStore.verifyToken(savedToken);
     if (valid) {
-      console.log('Saved token is valid, redirecting to home')
+      console.log('Saved token is valid, fetching rooms and redirecting to home')
+      // Fetch rooms after successful authentication
+      await roomsStore.fetchRooms();
       router.replace("/");
       return;
     } else {
