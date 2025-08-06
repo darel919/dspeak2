@@ -66,8 +66,8 @@
 </template>
 
 <script setup>
-import { useAuthStore } from '../stores/auth'
-import { useChatStore } from '../stores/chat'
+import { useAuthStore } from '../../stores/auth'
+import { useChatStore } from '../../stores/chat'
 import { useRuntimeConfig } from '#app'
 import MessageActions from './MessageActions.vue'
 

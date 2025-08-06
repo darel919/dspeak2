@@ -159,8 +159,8 @@
 import { useRoomsStore } from '../../stores/rooms'
 import { useAuthStore } from '../../stores/auth'
 import { useChatStore } from '../../stores/chat'
-import ChatWindow from '../../components/ChatWindow.vue'
-import ChatNotifications from '../../components/ChatNotifications.vue'
+import ChatWindow from '../../components/Chat/ChatWindow.vue'
+import ChatNotifications from '../../components/Chat/ChatNotifications.vue'
 import { useRuntimeConfig } from '#app'
 
 definePageMeta({

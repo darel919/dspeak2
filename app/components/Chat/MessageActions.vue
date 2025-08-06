@@ -49,8 +49,8 @@
 </template>
 
 <script setup>
-import { useChatStore } from '../stores/chat'
-import { useAuthStore } from '../stores/auth'
+import { useChatStore } from '../../stores/chat'
+import { useAuthStore } from '../../stores/auth'
 
 const props = defineProps({
   message: {

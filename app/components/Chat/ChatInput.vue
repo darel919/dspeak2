@@ -61,7 +61,7 @@
 </template>
 
 <script setup>
-import { useChatStore } from '../stores/chat'
+import { useChatStore } from '../../stores/chat'
 
 const props = defineProps({
   roomId: {

@@ -111,7 +111,7 @@
 
 <script setup>
 import { useRoomsStore } from '../../../stores/rooms'
-import ChatWindow from '../../../components/ChatWindow.vue'
+import ChatWindow from '../../../components/Chat/ChatWindow.vue'
 
 const roomsStore = useRoomsStore()
 const route = useRoute()
