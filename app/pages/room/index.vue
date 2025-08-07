@@ -6,8 +6,8 @@
         class="w-80 bg-base-200 border-r border-base-300 flex flex-col"
       >
         <!-- Sidebar Header -->
-        <div class="p-4 border-b border-base-300">
-          <div class="flex items-center justify-between mb-4">
+        <div class="mt-2 px-4 border-b border-base-300">
+          <div class="flex items-center justify-between">
             <h1 class="font-hero text-xl">Rooms</h1>
             <button 
               class="btn btn-ghost btn-sm"

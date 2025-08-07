@@ -28,6 +28,12 @@
         </span>
         <span v-else-if="permission === 'granted' && isEnabled" class="text-success">
           ✅ You'll receive notifications for new messages
+          <span v-if="pushSub.isSupported.value && pushSub.isSubscribed.value" class="block text-xs mt-1">
+            📱 Push notifications: Active
+          </span>
+          <span v-else-if="pushSub.isSupported.value && !pushSub.isSubscribed.value" class="block text-xs mt-1 text-warning">
+            📱 Push notifications: Not subscribed
+          </span>
         </span>
         <span v-else-if="permission === 'granted' && !isEnabled" class="text-info">
           💤 Notifications available but disabled
@@ -65,9 +71,11 @@
 
 <script setup>
 import { useNotifications } from '../composables/useNotifications'
+import { usePushSubscription } from '../composables/usePushSubscription'
 import { useToast } from '../composables/useToast'
 
 const { isSupported, permission, isEnabled, setEnabled, showNotification } = useNotifications()
+const pushSub = usePushSubscription()
 const { success, error, info } = useToast()
 const loading = ref(false)
 const testingNotification = ref(false)
@@ -107,6 +115,17 @@ async function handleToggle(event) {
     
     if (enabled && result) {
       success('Notifications enabled! You\'ll receive alerts for new messages.')
+      
+      // Also ensure push subscription is available
+      if (pushSub.isSupported.value && !pushSub.isSubscribed.value) {
+        try {
+          await pushSub.subscribe()
+          console.log('Push subscription created')
+        } catch (pushErr) {
+          console.warn('Failed to create push subscription:', pushErr)
+        }
+      }
+      
       setTimeout(() => {
         if (isEnabled.value) {
           const testNotification = new Notification('dSpeak Notifications', {
@@ -126,6 +145,16 @@ async function handleToggle(event) {
       event.target.checked = false
     } else {
       info('Notifications disabled.')
+      
+      // Also unsubscribe from push notifications if they're disabled
+      if (pushSub.isSubscribed.value) {
+        try {
+          await pushSub.unsubscribe()
+          console.log('Push subscription removed')
+        } catch (pushErr) {
+          console.warn('Failed to remove push subscription:', pushErr)
+        }
+      }
     }
   } catch (err) {
     console.error('Error toggling notifications:', err)

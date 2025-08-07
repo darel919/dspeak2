@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen container mx-auto py-8">
+  <div class="min-h-screen container p-8">
     <h1 class="text-2xl font-bold mb-6">Room Details</h1>
     <div v-if="room">
       <div class="mb-4">

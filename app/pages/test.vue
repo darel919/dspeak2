@@ -1,14 +1,39 @@
 <template>
-  <div>
-    <h1>Mediasoup Test</h1>
-    <div>
-      <button @click="connect">Connect</button>
-      <button @click="startAudio" :disabled="!connected">Start Audio</button>
-      <button @click="listenAudio" :disabled="!connected">Listen</button>
+  <div class="container mx-auto p-4 space-y-6">
+    <h1 class="text-3xl font-bold mb-6">dSpeak Test Suite</h1>
+    
+    <!-- Push Notification Tests -->
+    <div class="space-y-4">
+      <h2 class="text-2xl font-semibold">Push Notification Tests</h2>
+      <PushNotificationTest />
     </div>
-    <div>
-      <p>Status: {{ status }}</p>
-      <audio ref="remoteAudio" autoplay></audio>
+    
+    <!-- Mediasoup Tests -->
+    <div class="space-y-4">
+      <h2 class="text-2xl font-semibold">Mediasoup Audio Test</h2>
+      <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+          <h3 class="card-title">Audio Connection Test</h3>
+          
+          <div class="grid grid-cols-3 gap-4 mb-4">
+            <button @click="connect" class="btn btn-primary" :disabled="connected">
+              Connect
+            </button>
+            <button @click="startAudio" class="btn btn-secondary" :disabled="!connected">
+              Start Audio
+            </button>
+            <button @click="listenAudio" class="btn btn-accent" :disabled="!connected">
+              Listen
+            </button>
+          </div>
+          
+          <div class="alert alert-info">
+            <span class="font-medium">Status:</span> {{ status }}
+          </div>
+          
+          <audio ref="remoteAudio" autoplay class="w-full"></audio>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -80,7 +105,7 @@ function connect() {
               sctpParameters: transportParams.value.sctpParameters || undefined
             })
             // Add connect event handler for DTLS negotiation
-            recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
+            recvTransport.on('connect', ({ dtlsParameters }: any, callback: any, errback: any) => {
               ws.value?.send(JSON.stringify({ type: 'connect-transport', data: { dtlsParameters } }))
               callback()
             })

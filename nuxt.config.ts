@@ -22,6 +22,27 @@ export default defineNuxtConfig({
     //   swSrc: 'sw.js',
     //   swDest: 'sw.js'
     // },
+    manifest: {
+      name: "dSpeak",
+      short_name: "dSpeak",
+      description: "DWS communication app.",
+      theme_color: "#4A90E2",
+      background_color: "#FFFFFF",
+      display: "standalone",
+      orientation: "portrait",
+      icons: [
+        {
+          src: "/android-chrome-192x192.png",
+          sizes: "192x192",
+          type: "image/png"
+        },
+        {
+          src: "/android-chrome-512x512.png",
+          sizes: "512x512",
+          type: "image/png"
+        }
+      ]
+    },
     devOptions: {
       enabled: true
     }

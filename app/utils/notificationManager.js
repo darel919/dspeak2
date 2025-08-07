@@ -94,7 +94,23 @@ class NotificationManager {
   
   showMessageNotification(message, roomName) {
     console.log('[NotificationManager] showMessageNotification called:', { message, roomName })
-    
+
+    // Prevent notification for own messages (final safeguard)
+    try {
+      // Try to get user id from localStorage (set by auth system)
+      const userDataRaw = localStorage.getItem('userData')
+      if (userDataRaw) {
+        const userData = JSON.parse(userDataRaw)
+        if (userData && userData.id && message.sender && message.sender.id === userData.id) {
+          console.log('[NotificationManager] Skipping notification for own message (user id match)')
+          return null
+        }
+      }
+    } catch (e) {
+      // If any error, fallback to showing notification
+      console.warn('[NotificationManager] Could not check user id for notification:', e)
+    }
+
     if (!this.isEnabled) {
       console.log('[NotificationManager] Notifications not enabled, skipping')
       return null
@@ -102,10 +118,9 @@ class NotificationManager {
 
     const title = roomName ? `New message in ${roomName}` : 'New message'
     const body = `${message.sender.name}: ${message.content}`
-    
-    // Play notification sound
+
     this.playNotificationSound()
-    
+
     return this.showNotification(title, {
       body: body.length > 100 ? body.substring(0, 97) + '...' : body,
       tag: `message-${message.id}`,

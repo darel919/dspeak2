@@ -9,6 +9,33 @@ export const useAuthStore = defineStore('auths', () => {
     function setUser(val) {
         console.log('[AuthStore] Setting user:', val)
         user.value = val
+        // Send user id to service worker for notification filtering
+        if (typeof window !== 'undefined' && navigator.serviceWorker && val && val.user && val.user.user_metadata && val.user.user_metadata.id) {
+            // Always try to send to all service worker clients, not just controller
+            const userId = val.user.user_metadata.id;
+            if (navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'SET_USER_ID', userId });
+                console.log('[AuthStore] Posted user id to service worker controller:', userId);
+            }
+            if (navigator.serviceWorker.getRegistrations) {
+                navigator.serviceWorker.getRegistrations().then(regs => {
+                    regs.forEach(reg => {
+                        if (reg.active) {
+                            reg.active.postMessage({ type: 'SET_USER_ID', userId });
+                            console.log('[AuthStore] Posted user id to SW registration:', userId);
+                        }
+                    });
+                });
+            }
+            if (navigator.serviceWorker.ready) {
+                navigator.serviceWorker.ready.then(reg => {
+                    if (reg.active) {
+                        reg.active.postMessage({ type: 'SET_USER_ID', userId });
+                        console.log('[AuthStore] Posted user id to SW ready registration:', userId);
+                    }
+                });
+            }
+        }
     }
     function setToken(val) {
         token.value = val

@@ -7,7 +7,7 @@
         </div>
     </section>
     <section v-else class="min-h-screen p-6">
-        <div class="max-w-6xl mx-auto">
+        <div class="">
             <h1 class="font-hero text-3xl mb-2">Home</h1>
             <p class="text-base-content/70 mb-8">Welcome to dSpeak</p>
             <div class="mb-6">

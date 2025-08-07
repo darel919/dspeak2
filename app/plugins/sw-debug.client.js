@@ -1,8 +1,9 @@
-export default defineNuxtPlugin(() => {
+import { watch } from 'vue'
+
+export default defineNuxtPlugin((nuxtApp) => {
   if ('serviceWorker' in navigator) {
     console.log('[SW-Debug] Service Worker API available');
-    
-    navigator.serviceWorker.getRegistration().then(registration => {
+    navigator.serviceWorker.getRegistration().then(async registration => {
         if (registration) {
           console.log('[SW-Debug] Service Worker registered:', registration);
           console.log('[SW-Debug] Active:', !!registration.active);
@@ -15,6 +16,22 @@ export default defineNuxtPlugin(() => {
               timestamp: Date.now()
             });
           }
+          // Ensure push subscription after registration and authentication
+          const { useAuthStore } = await import('../stores/auth')
+          const authStore = useAuthStore()
+          // Watch for authentication changes
+          watch(
+            () => authStore.getUserData()?.id,
+            async (id) => {
+              if (id) {
+                const { usePushSubscription } = await import('../composables/usePushSubscription')
+                const { updateSubscription } = usePushSubscription()
+                await updateSubscription()
+                console.log('[SW-Debug] updateSubscription called on auth change')
+              }
+            },
+            { immediate: true }
+          )
         } else {
           console.log('[SW-Debug] No Service Worker registration found. Registering /sw.js...');
           navigator.serviceWorker.register('/sw.js').then(newRegistration => {

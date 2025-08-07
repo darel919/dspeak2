@@ -182,6 +182,21 @@ export const useChatStore = defineStore('chat', () => {
                 console.error('[ChatStore] WebSocket error:', error);
                 error.value = 'WebSocket connection failed';
             };
+            
+            // Ensure push subscription is active for this room
+            if (typeof window !== 'undefined') {
+                try {
+                    const { usePushSubscription } = await import('../composables/usePushSubscription')
+                    const { updateSubscription, isSupported, isSubscribed } = usePushSubscription()
+                    
+                    if (isSupported.value && !isSubscribed.value) {
+                        await updateSubscription(roomId)
+                        console.log('[ChatStore] Push subscription updated for room:', roomId)
+                    }
+                } catch (err) {
+                    console.warn('[ChatStore] Failed to update push subscription:', err)
+                }
+            }
 
         } catch (err) {
             error.value = err.message;

@@ -31,6 +31,10 @@ export const useRoomsStore = defineStore('rooms', () => {
             }
             const data = await response.json()
             await fetchRooms()
+            // Automatically join the newly created room to trigger push subscription
+            if (data && data.id) {
+                await joinRoom(data.id)
+            }
             return data
         }
     async function fetchRooms() {
@@ -156,7 +160,17 @@ export const useRoomsStore = defineStore('rooms', () => {
             const existingRoom = rooms.value.find(room => room.id === trimmedRoomId)
             if (existingRoom) {
                 console.log('[RoomsStore] User is already a member of this room')
-                // Don't throw an error, just return the existing room
+                // Still ensure push subscription is up to date
+                if (typeof window !== 'undefined') {
+                    try {
+                        const { usePushSubscription } = await import('../composables/usePushSubscription')
+                        const { updateSubscription } = usePushSubscription()
+                        await updateSubscription(trimmedRoomId)
+                        console.log('[RoomsStore] Ensured push subscription for room:', trimmedRoomId)
+                    } catch (err) {
+                        console.error('[RoomsStore] Failed to update push subscription:', err)
+                    }
+                }
                 return existingRoom
             }
 
@@ -206,29 +220,14 @@ export const useRoomsStore = defineStore('rooms', () => {
             await fetchRooms()
 
             // Automatically subscribe user to push notifications for this room
-            if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+            if (typeof window !== 'undefined') {
                 try {
-                    const vapidKey = config.public.VAPID_PUBLIC_KEY;
-                    if (!vapidKey) {
-                        throw new Error('VAPID public key is not defined in runtime config');
-                    }
-                    const registration = await navigator.serviceWorker.ready;
-                    const subscription = await registration.pushManager.subscribe({
-                        userVisibleOnly: true,
-                        applicationServerKey: urlBase64ToUint8Array(vapidKey)
-                    });
-                    // Construct push subscription endpoint using apiPath from runtime config
-                    const subscribeUrl = `${config.public.apiPath}/chat/subscribe`;
-                    await fetch(subscribeUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': userData.id
-                        },
-                        body: JSON.stringify({ roomId: trimmedRoomId, subscription })
-                    });
+                    const { usePushSubscription } = await import('../composables/usePushSubscription')
+                    const { updateSubscription } = usePushSubscription()
+                    await updateSubscription(trimmedRoomId)
+                    console.log('[RoomsStore] Successfully subscribed to push notifications for room:', trimmedRoomId)
                 } catch (err) {
-                    console.error('[RoomsStore] Failed to subscribe to push notifications:', err);
+                    console.error('[RoomsStore] Failed to subscribe to push notifications:', err)
                 }
             }
 
@@ -242,23 +241,71 @@ export const useRoomsStore = defineStore('rooms', () => {
         }
     }
 
+    async function leaveRoom(roomId) {
+        try {
+            loading.value = true
+            error.value = null
+
+            const authStore = useAuthStore()
+            const userData = authStore.getUserData()
+            if (!userData) {
+                throw new Error('User not authenticated')
+            }
+
+            const trimmedRoomId = roomId.trim()
+            const apiPath = config.public.apiPath
+            const response = await fetch(`${apiPath}/chat/room/leave`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': userData.id,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ roomId: trimmedRoomId })
+            })
+
+            if (!response.ok) {
+                let errorMessage = 'Failed to leave room'
+                if (response.status === 404) {
+                    errorMessage = 'Room not found'
+                } else if (response.status === 403) {
+                    errorMessage = 'Not authorized to leave this room'
+                } else if (response.status >= 500) {
+                    errorMessage = 'Server error. Please try again later.'
+                }
+                throw new Error(errorMessage)
+            }
+
+            const data = await response.json()
+            console.log('[RoomsStore] Successfully left room:', data)
+            
+            // Unsubscribe from push notifications for this room
+            if (typeof window !== 'undefined') {
+                try {
+                    const { usePushSubscription } = await import('../composables/usePushSubscription')
+                    const { unsubscribe } = usePushSubscription()
+                    await unsubscribe(trimmedRoomId)
+                    console.log('[RoomsStore] Successfully unsubscribed from push notifications for room:', trimmedRoomId)
+                } catch (err) {
+                    console.error('[RoomsStore] Failed to unsubscribe from push notifications:', err)
+                }
+            }
+            
+            // Refresh rooms list
+            await fetchRooms()
+
+            return data
+        } catch (err) {
+            error.value = err.message
+            console.error('[RoomsStore] Error leaving room:', err)
+            throw err
+        } finally {
+            loading.value = false
+        }
+    }
+
     function clearRooms() {
         rooms.value = []
         error.value = null
-    }
-
-    // Helper: convert VAPID key to Uint8Array
-    function urlBase64ToUint8Array(base64String) {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding)
-            .replace(/-/g, '+')
-            .replace(/_/g, '/');
-        const rawData = (typeof window !== 'undefined' && window.atob) ? window.atob(base64) : Buffer.from(base64, 'base64').toString('binary');
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
     }
 
     return { 
@@ -267,6 +314,7 @@ export const useRoomsStore = defineStore('rooms', () => {
         error, 
         fetchRooms, 
         joinRoom,
+        leaveRoom,
         isOwner,
         clearRooms,
         getRoomDetails,
