@@ -21,22 +21,32 @@
             >
               {{ room?.name || 'Chat' }}
             </h2>
-            <p v-if="room?.desc" class="text-sm text-base-content/60">{{ room.desc }}</p>
+            <!-- <p v-if="room?.desc" class="text-sm text-base-content/60">{{ room.desc }}</p> -->
+            <!-- Online users with tooltips -->
+            <div class="text-xs text-base-content/50 mt-1">
+              <template v-if="props.room?.members && props.room.members.length > 0">
+                <span v-for="(member, index) in props.room.members" :key="member.id">
+                  <template v-if="member.id === currentUserId">
+                    <span class="font-semibold">You</span>
+                  </template>
+                  <template v-else>
+                    <span
+                      class="tooltip cursor-pointer hover:text-base-content/70 transition-colors"
+                      :data-tip="`${member.name || 'Unknown User'}${member.email ? ` (${member.email})` : ''}`"
+                      :class="onlineUsers.some(u => (u.id || u) === member.id) ? 'text-success font-semibold' : ''"
+                    >
+                      {{ member.name?.split(' ')[0] || member.name || 'Unknown' }}
+                    </span>
+                  </template>
+                  <span v-if="index < props.room.members.length - 1">, </span>
+                </span>
+              </template>
+              <span v-else>No members</span>
+            </div>
           </div>
         </div>
         
         <div class="flex items-center gap-2">
-          <!-- Connection status indicator -->
-          <div class="flex items-center gap-2">
-            <div 
-              class="w-2 h-2 rounded-full"
-              :class="connected ? 'bg-success' : 'bg-error'"
-            ></div>
-            <span class="text-xs text-base-content/60">
-              {{ connected ? 'Connected' : 'Disconnected' }}
-            </span>
-          </div>
-          
           <!-- Online members count -->
           <div v-if="room?.members" class="badge badge-ghost badge-sm">
             {{ room.members.length }} members
@@ -127,6 +137,7 @@
 
 <script setup>
 import { useChatStore } from '../../stores/chat'
+import { useAuthStore } from '../../stores/auth'
 import ChatMessage from './ChatMessage.vue'
 import ChatInput from './ChatInput.vue'
 import MessageDetailsModal from './MessageDetailsModal.vue'
@@ -155,6 +166,8 @@ const showScrollButton = ref(false)
 const isNearBottom = ref(true)
 const showDetailsModal = ref(false)
 const selectedMessage = ref(null)
+const authStore = useAuthStore()
+const currentUserId = computed(() => authStore.getUserData()?.id)
 
 // Computed properties
 // Deduplicate: Only show pending if no sent version exists
@@ -177,6 +190,16 @@ const loading = computed(() => chatStore.loading)
 const error = computed(() => chatStore.error)
 const connected = computed(() => chatStore.connected)
 const typingUsers = computed(() => chatStore.typingUsers)
+const onlineUsers = computed(() => chatStore.onlineUsers)
+
+// Helper function to get display name for a member
+function getDisplayName(member) {
+  if (member.id === currentUserId.value) return 'You'
+  const onlineUserIds = new Set(onlineUsers.value.map(user => user.id))
+  const isOnline = onlineUserIds.has(member.id)
+  const firstName = member.name?.split(' ')[0] || member.name || 'Unknown'
+  return isOnline ? `${firstName} (online)` : firstName
+}
 
 // Lifecycle
 onMounted(async () => {

@@ -1,3 +1,4 @@
+
 <script setup lang="ts">
 import { useAuthStore } from '../stores/auth'
 import { useNotifications } from '../composables/useNotifications'
@@ -9,6 +10,14 @@ const profile = computed(() => authStore.getUserData());
 // Get notification status for indicator
 const { isSupported: notificationSupported, isEnabled: notificationEnabled } = useNotifications();
 
+const presenceStatus = inject('presenceStatus', ref(null)) as Ref<string|null>
+
+const avatarStatusClass = computed(() => {
+    if (!presenceStatus?.value) return ''
+    if (presenceStatus.value === 'connected') return 'avatar-online'
+    if (presenceStatus.value === 'permanently-disconnected') return 'avatar-offline'
+    return 'avatar-offline'
+})
 </script>
 
 <template>
@@ -39,13 +48,17 @@ const { isSupported: notificationSupported, isEnabled: notificationEnabled } = u
                     <p class="text-sm font-bold group-hover:underline">{{ profile?.name }}</p>
                     <p class="text-xs text-accent-1">{{ profile?.email }}</p>
                 </div>
-                <div class="avatar avatar-online select-none">
+                <div class="avatar select-none" :class="avatarStatusClass">
                     <div class="w-12 rounded-full">
                         <img :src="profile?.avatar" alt="User avatar" />
                     </div>
                 </div>
             </NuxtLink>
+            <div v-if="presenceStatus && presenceStatus.value === 'permanently-disconnected'" class="ml-2 text-red-500 text-xs font-semibold">
+                Connection lost. Please refresh the page.
+            </div>
         </section>
     </section>
    
+
 </template>

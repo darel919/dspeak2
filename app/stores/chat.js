@@ -13,10 +13,8 @@ export const useChatStore = defineStore('chat', () => {
     const onlineUsers = ref([]);
     const typingUsers = ref([]);
     const config = useRuntimeConfig();
-    
     // Notification-related state
     const currentRoomName = ref(null);
-
     let reconnectInterval = null;
     let reconnectTimer = null;
 
@@ -145,6 +143,7 @@ export const useChatStore = defineStore('chat', () => {
             currentRoomName.value = roomName;
             await fetchMessages(roomId);
 
+            // Connect to chat WebSocket
             const websocketPath = config.public.websocketPath;
             const wsUrl = `${websocketPath}/chat/socket?roomId=${roomId}&auth=${encodeURIComponent(userData.id)}`;
             ws.value = new WebSocket(wsUrl);
@@ -160,6 +159,12 @@ export const useChatStore = defineStore('chat', () => {
                 if (currentRoomId.value) {
                     fetchMessages(currentRoomId.value);
                 }
+                // Request current online members for this room after a short delay to avoid race condition
+                setTimeout(() => {
+                    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+                        ws.value.send(JSON.stringify({ type: 'currentlyInRoom', roomId: currentRoomId.value }));
+                    }
+                }, 100);
             };
 
             ws.value.onmessage = handleWebSocketMessage;
@@ -182,13 +187,12 @@ export const useChatStore = defineStore('chat', () => {
                 console.error('[ChatStore] WebSocket error:', error);
                 error.value = 'WebSocket connection failed';
             };
-            
+
             // Ensure push subscription is active for this room
             if (typeof window !== 'undefined') {
                 try {
                     const { usePushSubscription } = await import('../composables/usePushSubscription')
                     const { updateSubscription, isSupported, isSubscribed } = usePushSubscription()
-                    
                     if (isSupported.value && !isSubscribed.value) {
                         await updateSubscription(roomId)
                         console.log('[ChatStore] Push subscription updated for room:', roomId)
@@ -197,7 +201,6 @@ export const useChatStore = defineStore('chat', () => {
                     console.warn('[ChatStore] Failed to update push subscription:', err)
                 }
             }
-
         } catch (err) {
             error.value = err.message;
             console.error('[ChatStore] Error connecting to room:', err);
@@ -222,63 +225,69 @@ export const useChatStore = defineStore('chat', () => {
         console.log('[ChatStore] Disconnected from room and cleared state');
     }
 
+
+
     // Handle incoming WebSocket messages
     function handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
             console.log('[ChatStore] Received WebSocket message:', data);
-            
             switch (data.type) {
                 case 'connected':
                     console.log('[ChatStore] Connection confirmed:', data.data);
                     break;
-                    
                 case 'new_message':
                     console.log('[ChatStore] New message received:', data.data);
-                    
                     // Check for duplicates before adding
                     const existingMessage = messages.value.find(msg => msg.id === data.data.id);
                     if (existingMessage) {
                         console.log('[ChatStore] Duplicate message detected, skipping:', data.data.id);
                         break;
                     }
-                    
                     messages.value.push(data.data);
-                    
                     // Show notification for messages from other users
                     handleNewMessageNotification(data.data);
                     break;
-                    
                 case 'message_updated':
                     console.log('[ChatStore] Message updated:', data.data);
                     updateMessageReadBy(data.data.id, data.data.read_by);
                     break;
-                    
                 case 'message_deleted':
                     console.log('[ChatStore] Message deleted:', data.data);
                     removeMessage(data.data.id);
                     break;
-                    
                 case 'room_updated':
                     console.log('[ChatStore] Room updated:', data.data);
                     // Handle room updates if needed
                     break;
-                    
                 case 'room_deleted':
                     console.log('[ChatStore] Room deleted:', data.data);
                     disconnectFromRoom();
                     break;
-                    
                 case 'user_typing':
                     console.log('[ChatStore] User typing status:', data.data);
                     updateTypingStatus(data.data.userId, data.data.isTyping);
                     break;
-                    
                 case 'pong':
                     console.log('[ChatStore] Pong received');
                     // Handle pong response
                     break;
-                    
+                // --- Presence events now handled here ---
+                case 'currentlyInRoom':
+                    if (Array.isArray(data.inRoom)) {
+                        // Normalize to array of objects with id
+                        onlineUsers.value = data.inRoom.map(u =>
+                            typeof u === 'string' ? { id: u } : u
+                        );
+                    }
+                    break;
+                case 'user_joined':
+                case 'user_left':
+                    // Always re-request currentlyInRoom to ensure onlineUsers stays in sync
+                    if (ws.value && ws.value.readyState === WebSocket.OPEN && currentRoomId.value) {
+                        ws.value.send(JSON.stringify({ type: 'currentlyInRoom', roomId: currentRoomId.value }));
+                    }
+                    break;
                 default:
                     console.log('[ChatStore] Unknown message type:', data.type, data);
             }

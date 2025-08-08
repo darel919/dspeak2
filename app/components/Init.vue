@@ -13,11 +13,13 @@
   </div>
 </template>
 
+
 <script setup>
 import { useAuthStore } from '../stores/auth'
 import { useRoomsStore } from '../stores/rooms'
 import { useNotifications } from '../composables/useNotifications'
 import NotificationWarning from './NotificationWarning.vue'
+import { usePresence } from '../composables/usePresence.js'
 
 const authStore = useAuthStore()
 const roomsStore = useRoomsStore()
@@ -51,6 +53,15 @@ const shouldShowNotificationWarning = computed(() => {
   return permission.value === 'denied'
 })
 
+// Presence connection logic
+const userId = computed(() => {
+  const user = authStore.getUserData()
+  console.log('[Init] Computing userId:', user?.id)
+  return user && user.id ? user.id : null
+})
+const { status: presenceStatus, connect: connectPresence, disconnect: disconnectPresence } = usePresence(userId)
+provide('presenceStatus', presenceStatus)
+
 onMounted(async () => {
   // Only check auth if not on /auth page and token exists
   if (!isAuthPage.value && localStorage.getItem('token')) {
@@ -64,7 +75,10 @@ onMounted(async () => {
   }
   // Always send user ID to service worker on page load
   sendUserIdToServiceWorker()
+})
 
+onUnmounted(() => {
+  disconnectPresence()
 })
 
 function sendUserIdToServiceWorker() {
