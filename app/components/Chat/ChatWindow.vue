@@ -157,7 +157,22 @@ const showDetailsModal = ref(false)
 const selectedMessage = ref(null)
 
 // Computed properties
-const messages = computed(() => chatStore.messages)
+// Deduplicate: Only show pending if no sent version exists
+const messages = computed(() => {
+  const all = chatStore.messages
+  const sentIds = new Set(all.filter(m => m.status !== 'pending').map(m => m.id))
+  // If a sent message exists with same content, sender, and close timestamp, hide the pending
+  return all.filter((msg, idx, arr) => {
+    if (msg.status !== 'pending') return true
+    // Find a sent message with same content, sender, and created within 10s
+    return !arr.some(other =>
+      other.status !== 'pending' &&
+      other.sender?.id === msg.sender?.id &&
+      other.content === msg.content &&
+      Math.abs(new Date(other.created) - new Date(msg.created)) < 15000
+    )
+  })
+})
 const loading = computed(() => chatStore.loading)
 const error = computed(() => chatStore.error)
 const connected = computed(() => chatStore.connected)

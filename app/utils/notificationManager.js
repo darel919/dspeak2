@@ -101,7 +101,9 @@ class NotificationManager {
       const userDataRaw = localStorage.getItem('userData')
       if (userDataRaw) {
         const userData = JSON.parse(userDataRaw)
-        if (userData && userData.id && message.sender && message.sender.id === userData.id) {
+        const senderId = (message.sender && typeof message.sender === 'object') ? message.sender.id : message.sender
+        console.log('[NotificationManager] userData.id:', userData && userData.id, 'senderId:', senderId)
+        if (userData && userData.id && senderId && senderId === userData.id) {
           console.log('[NotificationManager] Skipping notification for own message (user id match)')
           return null
         }

@@ -2,35 +2,30 @@
   <div class="bg-base-100 border-t border-base-200 p-4">
     <form @submit.prevent="handleSendMessage" class="flex gap-2">
       <div class="flex-1">
-        <input
+        <textarea
           v-model="messageText"
-          type="text"
+          ref="chatTextarea"
           placeholder="Type a message..."
-          class="input input-bordered w-full"
-          :disabled="sending"
-          @input="handleTyping"
+          class="textarea textarea-bordered w-full resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[2.5rem] max-h-[6.5rem] overflow-y-auto"
+          @input="handleTextareaInput"
           @focus="handleFocus"
           @blur="handleBlur"
+          @keydown="handleKeydown"
           maxlength="1000"
-        />
+          rows="1"
+          autocomplete="off"
+          spellcheck="false"
+        ></textarea>
       </div>
       <button
         type="submit"
         class="btn btn-primary"
-        :disabled="!messageText.trim() || sending"
-        :class="{ 'loading': sending }"
+  :disabled="!messageText.trim()"
+
       >
-        <svg 
-          v-if="!sending"
-          xmlns="http://www.w3.org/2000/svg" 
-          class="h-5 w-5" 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
         </svg>
-        {{ sending ? '' : 'Send' }}
       </button>
     </form>
     
@@ -85,41 +80,54 @@ const emit = defineEmits(['message-sent'])
 
 const chatStore = useChatStore()
 const messageText = ref('')
-const sending = ref(false)
+
 const isTyping = ref(false)
 const typingTimeout = ref(null)
 
+const chatTextarea = ref(null)
+
 async function handleSendMessage() {
-  if (!messageText.value.trim() || sending.value) {
+  if (!messageText.value.trim()) {
     return
   }
-
-  const content = messageText.value.trim()
-  sending.value = true
-
-  try {
-    const result = await chatStore.sendMessage(props.roomId, content)
+  let content = messageText.value.trim()
+  if (typeof content !== 'string') {
     messageText.value = ''
-    
-    // Stop typing indicator when message is sent
-    if (isTyping.value) {
-      chatStore.sendTypingIndicator(false)
-      isTyping.value = false
-    }
-    
-    // Show feedback based on result
-    if (result.status && result.status.includes('queued')) {
-      console.log('Message queued for background sync')
-      // Could show a toast notification here
-    }
-    
-    emit('message-sent')
-  } catch (error) {
-    console.error('Failed to send message:', error)
-  } finally {
-    sending.value = false
+    return
   }
+  messageText.value = ''
+  nextTick(() => adjustTextareaHeight())
+  if (isTyping.value) {
+    chatStore.sendTypingIndicator(false)
+    isTyping.value = false
+  }
+  chatStore.sendMessage(props.roomId, content)
+    .then(result => {
+      if (result.status && result.status.includes('queued')) {
+        console.log('Message queued for background sync')
+      }
+      emit('message-sent')
+    })
+    .catch(error => {
+      console.error('Failed to send message:', error)
+    })
 }
+
+function handleTextareaInput(e) {
+  handleTyping()
+  adjustTextareaHeight()
+}
+
+function adjustTextareaHeight() {
+  const el = chatTextarea.value
+  if (!el) return
+  el.style.height = 'auto'
+  // 3 lines max, line-height: 2.1rem (from daisyUI textarea), padding included
+  const maxHeight = 3 * 2.1 + 0.8 // 3 lines * line-height + padding fudge
+  el.style.height = Math.min(el.scrollHeight, maxHeight * 16) + 'px'
+}
+
+watch(messageText, () => nextTick(() => adjustTextareaHeight()))
 
 function handleTyping() {
   if (!props.connected) return
@@ -142,6 +150,15 @@ function handleTyping() {
       chatStore.sendTypingIndicator(false)
     }
   }, 3000)
+}
+
+function handleKeydown(event) {
+  // Enter without shift sends message
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    handleSendMessage()
+  }
+  // Enter with shift allows multiline (default behavior)
 }
 
 function handleFocus() {

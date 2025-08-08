@@ -62,13 +62,48 @@ onMounted(async () => {
   } else {
     authChecked.value = true
   }
+  // Always send user ID to service worker on page load
+  sendUserIdToServiceWorker()
+
 })
+
+function sendUserIdToServiceWorker() {
+  if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+    const userData = authStore.getUserData()
+    if (userData && userData.id) {
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'SET_USER_ID', userId: userData.id })
+        console.log('[Init] Sent user id to service worker controller:', userData.id)
+      }
+      if (navigator.serviceWorker.getRegistrations) {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          regs.forEach(reg => {
+            if (reg.active) {
+              reg.active.postMessage({ type: 'SET_USER_ID', userId: userData.id })
+              console.log('[Init] Sent user id to SW registration:', userData.id)
+            }
+          })
+        })
+      }
+      if (navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(reg => {
+          if (reg.active) {
+            reg.active.postMessage({ type: 'SET_USER_ID', userId: userData.id })
+            console.log('[Init] Sent user id to SW ready registration:', userData.id)
+          }
+        })
+      }
+    }
+  }
+}
 
 // Watch for authentication changes to fetch rooms
 watch(() => authStore.getUserData(), async (userData) => {
   if (userData && !isAuthPage.value) {
     console.log('[Init] User authenticated, fetching rooms')
     await roomsStore.fetchRooms()
+    // Also send user ID to service worker after login/auth
+    sendUserIdToServiceWorker()
   }
 })
 

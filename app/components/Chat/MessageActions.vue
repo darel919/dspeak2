@@ -77,13 +77,13 @@ const isRead = computed(() => {
 })
 
 async function handleMarkAsRead() {
-  if (isRead.value || isOwnMessage.value) return
-  
+  if (isRead.value || isOwnMessage.value) return;
   try {
-    await chatStore.markMessageAsRead(props.message.id)
-    emit('mark-read', props.message.id)
+    // Only batch locally, do not send immediately
+    await chatStore.markMessageAsRead(props.message.id);
+    emit('mark-read', props.message.id);
   } catch (error) {
-    console.error('Failed to mark message as read:', error)
+    console.error('Failed to mark message as read:', error);
   }
 }
 

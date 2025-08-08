@@ -12,29 +12,35 @@
       </div>
     </div>
     
-    <div class="chat-header">
-      {{ isOwnMessage ? null : message.sender.name }}
+    <div class="chat-header flex items-center">
+      <span v-if="!isOwnMessage">{{ message.sender.name }}</span>
       <time class="text-xs opacity-50 ml-1 pb-1">{{ formatTime(message.created) }}</time>
-      
-      <!-- Message Actions -->
-      <div 
-        v-if="showActions" 
-        class="inline-block ml-2"
+      <!-- Message Actions: always render, but toggle visibility -->
+      <div
+  class="ml-2 min-w-[32px] min-h-[32px] flex items-center justify-center"
         :class="isOwnMessage ? 'order-first mr-2 ml-0' : ''"
+        style="transition:opacity 0.15s;"
       >
-        <MessageActions 
-          :message="message"
-          @mark-read="handleMarkRead"
-          @show-details="handleShowDetails"
-        />
+        <div :style="showActions ? 'opacity:1;pointer-events:auto;' : 'opacity:0;pointer-events:none;'">
+          <MessageActions 
+            :message="message"
+            @mark-read="handleMarkRead"
+            @show-details="handleShowDetails"
+          />
+        </div>
       </div>
     </div>
     
     <div 
+      v-if="typeof message.content === 'string'"
       class="chat-bubble" 
       :class="isOwnMessage ? 'chat-bubble-primary' : 'chat-bubble-secondary'"
+      style="white-space: pre-wrap; word-break: break-word;"
     >
       {{ message.content }}
+    </div>
+    <div v-else class="chat-bubble chat-bubble-secondary opacity-50 italic">
+      [Unsupported message type]
     </div>
     
     <div v-if="showReadStatus || isPending" class="chat-footer opacity-50">

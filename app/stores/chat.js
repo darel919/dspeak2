@@ -322,6 +322,27 @@ export const useChatStore = defineStore('chat', () => {
                 messages.value = [];
             }
             console.log('[ChatStore] Assigned messages:', messages.value);
+
+            // --- Reconcile local unread IDs with server read state ---
+            try {
+                const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
+                let unreadIds = [];
+                try {
+                    unreadIds = JSON.parse(localStorage.getItem(storageKey)) || [];
+                } catch (e) {
+                    unreadIds = [];
+                }
+                // Remove IDs that are already read on the server
+                const alreadyReadIds = messages.value
+                    .filter(msg => Array.isArray(msg.read_by) && msg.read_by.includes(userData.id))
+                    .map(msg => msg.id);
+                const filteredUnread = unreadIds.filter(id => !alreadyReadIds.includes(id));
+                if (filteredUnread.length !== unreadIds.length) {
+                    localStorage.setItem(storageKey, JSON.stringify(filteredUnread));
+                }
+            } catch (e) {
+                console.warn('[ChatStore] Failed to reconcile local unread IDs:', e);
+            }
         } catch (err) {
             error.value = err.message;
             console.error('[ChatStore] Error fetching messages:', err);
@@ -438,37 +459,76 @@ export const useChatStore = defineStore('chat', () => {
 
     // Mark message as read
     async function markMessageAsRead(messageId) {
+        // Store unread message IDs in localStorage for batching
         try {
             const authStore = useAuthStore();
             const userData = authStore.getUserData();
-            
             if (!userData || !userData.id) {
                 throw new Error('User not authenticated');
             }
 
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/chat/read`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    messageId
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to mark message as read: ${response.status}`);
+            // Use a key per user for safety
+            const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
+            let unreadIds = [];
+            try {
+                unreadIds = JSON.parse(localStorage.getItem(storageKey)) || [];
+            } catch (e) {
+                unreadIds = [];
             }
-
-            return await response.json();
+            // Only add if not already present
+            if (!unreadIds.includes(messageId)) {
+                unreadIds.push(messageId);
+                localStorage.setItem(storageKey, JSON.stringify(unreadIds));
+            }
         } catch (err) {
             error.value = err.message;
-            console.error('[ChatStore] Error marking message as read:', err);
+            console.error('[ChatStore] Error batching message as read:', err);
             throw err;
         }
     }
+
+    // Periodically send batched read requests to the server
+    function startReadBatchSync() {
+        setInterval(async () => {
+            try {
+                const authStore = useAuthStore();
+                const userData = authStore.getUserData();
+                if (!userData || !userData.id) return;
+                const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
+                let unreadIds = [];
+                try {
+                    unreadIds = JSON.parse(localStorage.getItem(storageKey)) || [];
+                } catch (e) {
+                    unreadIds = [];
+                }
+                if (unreadIds.length === 0) return;
+
+                const apiPath = config.public.apiPath;
+                const response = await fetch(`${apiPath}/chat/read`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': userData.id,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        messageIds: unreadIds
+                    })
+                });
+                if (response.ok) {
+                    // Clear sent IDs from localStorage
+                    localStorage.setItem(storageKey, JSON.stringify([]));
+                } else {
+                    // Optionally handle retry/backoff
+                    console.warn('[ChatStore] Failed to batch mark messages as read:', response.status);
+                }
+            } catch (err) {
+                console.error('[ChatStore] Error in batch read sync:', err);
+            }
+        }, 5000); // every 5 seconds
+    }
+
+    // Start the batch sync when the store is initialized
+    startReadBatchSync();
 
     // Send typing indicator
     function sendTypingIndicator(isTyping) {

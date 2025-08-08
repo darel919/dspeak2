@@ -9,6 +9,14 @@ export const useAuthStore = defineStore('auths', () => {
     function setUser(val) {
         console.log('[AuthStore] Setting user:', val)
         user.value = val
+        // Sync user metadata to localStorage for notificationManager
+        if (typeof window !== 'undefined') {
+            if (val && val.user && val.user.user_metadata) {
+                localStorage.setItem('userData', JSON.stringify(val.user.user_metadata));
+            } else {
+                localStorage.removeItem('userData');
+            }
+        }
         // Send user id to service worker for notification filtering
         if (typeof window !== 'undefined' && navigator.serviceWorker && val && val.user && val.user.user_metadata && val.user.user_metadata.id) {
             // Always try to send to all service worker clients, not just controller
@@ -76,7 +84,7 @@ export const useAuthStore = defineStore('auths', () => {
         setToken(null)
         setUser(null)
         localStorage.removeItem('token')
-        
+        localStorage.removeItem('userData')
         // Import stores dynamically to avoid circular dependency
         Promise.all([
             import('./rooms.js').then(({ useRoomsStore }) => {
