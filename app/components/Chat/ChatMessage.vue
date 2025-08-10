@@ -14,7 +14,7 @@
     
     <div class="chat-header flex items-center">
       <span v-if="!isOwnMessage">{{ message.sender.name }}</span>
-      <time class="text-xs opacity-50 ml-1 pb-1">{{ formatTime(message.created) }}</time>
+  <time class="text-xs opacity-50 ml-1 pb-1">{{ formatChatDisplayTime(message.created) }}</time>
       <!-- Message Actions: always render, but toggle visibility -->
       <div
   class="ml-2 min-w-[32px] min-h-[32px] flex items-center justify-center"
@@ -43,38 +43,37 @@
       [Unsupported message type]
     </div>
     
-    <div v-if="showReadStatus || isPending" class="chat-footer opacity-50">
+  <div v-if="isPending || (isOwnMessage ? hasBeenReadByOthers : isRead)" class="chat-footer opacity-50">
+
       <div class="flex items-center gap-1 text-xs">
-        <svg 
-          v-if="isPending"
-          xmlns="http://www.w3.org/2000/svg" 
-          class="h-3 w-3 text-warning animate-spin" 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        <svg 
-          v-else-if="isRead" 
-          xmlns="http://www.w3.org/2000/svg" 
-          class="h-3 w-3 text-primary" 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-        </svg>
-        <svg 
-          v-else 
-          xmlns="http://www.w3.org/2000/svg" 
-          class="h-3 w-3 text-base-content/30" 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <template v-if="isPending">
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            class="h-6 w-6 text-warning animate-spin" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </template>
+        <template v-else>
+          <span v-if="isOwnMessage && props.roomMembers && getStatusText() === 'Read by all'" style="position: relative; display: inline-block; width: 16px; height: 14px;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+
+          </span>
+          <svg v-else
+            xmlns="http://www.w3.org/2000/svg" 
+            class="h-4 w-4 text-info" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+          </svg>
+        </template>
         <span>{{ getStatusText() }}</span>
       </div>
     </div>
@@ -82,15 +81,28 @@
 </template>
 
 <script setup>
+const hasBeenReadByOthers = computed(() => {
+  if (!isOwnMessage.value || !props.message.read_by) return false
+  const readBy = Array.isArray(props.message.read_by) ? [...new Set(props.message.read_by)] : []
+  return readBy.some(id => id !== props.message.sender.id)
+})
+
 import { useAuthStore } from '../../stores/auth'
 import { useChatStore } from '../../stores/chat'
 import { useRuntimeConfig } from '#app'
 import MessageActions from './MessageActions.vue'
+import { useChatUtils } from '../../composables/useChatUtils'
+
+const { formatChatDisplayTime } = useChatUtils()
 
 const props = defineProps({
   message: {
     type: Object,
     required: true
+  },
+  roomMembers: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -118,14 +130,14 @@ const showReadStatus = computed(() => {
 const isRead = computed(() => {
   const userData = authStore.getUserData()
   if (!userData || !props.message.read_by) return false
-  
-  // For own messages, check if anyone else has read it
+  const readBy = Array.isArray(props.message.read_by) ? [...new Set(props.message.read_by)] : []
   if (isOwnMessage.value) {
-    return props.message.read_by.some(readBy => readBy !== userData.id)
+    // Only show as read if at least one id in readBy is not the sender
+    const others = readBy.filter(id => id !== props.message.sender.id)
+    return others.length > 0
   }
-  
-  // For other messages, check if current user has read it
-  return props.message.read_by.includes(userData.id)
+  // For other messages, check if current user has read it (and is not the sender)
+  return readBy.includes(userData.id) && userData.id !== props.message.sender.id
 })
 
 const shouldAutoMarkAsRead = computed(() => {
@@ -185,52 +197,22 @@ function getStatusText() {
   if (isPending.value) {
     return 'Pending'
   }
-  return getReadStatus()
-}
-
-function getReadStatus() {
   const userData = authStore.getUserData()
   if (!userData) return 'Sent'
-  
-  if (!props.message.read_by || props.message.read_by.length === 0) {
-    return 'Sent'
-  }
-  
-  // Count how many people have read it (excluding sender)
-  const readCount = props.message.read_by.filter(id => id !== props.message.sender.id).length
-  
-  if (readCount === 0) {
-    return 'Sent'
-  } else if (readCount === 1) {
-    return 'Read'
+  let readBy = Array.isArray(props.message.read_by) ? props.message.read_by : []
+  readBy = readBy.map(entry => typeof entry === 'object' && entry !== null ? entry.id : entry)
+  const isOwn = isOwnMessage.value
+  if (isOwn) {
+    const others = readBy.filter(id => id && id !== props.message.sender.id)
+    const totalOthers = props.roomMembers.filter(m => m.id !== props.message.sender.id).length
+    if (others.length === 0) return ''
+    if (totalOthers > 0 && others.length === totalOthers) return `Read by all`
+    return `Read by ${others.length}`
   } else {
-    return `Read by ${readCount}`
-  }
-}
-
-function formatTime(dateString) {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffMs = now - date
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMins < 1) {
-    return 'Just now'
-  } else if (diffMins < 60) {
-    return `${diffMins}m ago`
-  } else if (diffHours < 24) {
-    return `${diffHours}h ago`
-  } else if (diffDays < 7) {
-    return `${diffDays}d ago`
-  } else {
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    if (readBy.includes(userData.id) && userData.id !== props.message.sender.id) {
+      return 'Read'
+    }
+    return ''
   }
 }
 

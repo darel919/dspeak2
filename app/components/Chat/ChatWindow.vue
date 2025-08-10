@@ -97,6 +97,7 @@
           v-for="message in messages" 
           :key="message.id"
           :message="message"
+          :room-members="room?.members || []"
           @message-read="handleMessageRead"
           @show-details="handleShowDetails"
         />

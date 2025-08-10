@@ -24,12 +24,15 @@ const avatarStatusClass = computed(() => {
     
     <section class="navbar w-full flex justify-between py-2 px-4 bg-accent-4 text-light">
         <div class="flex items-center gap-4">
-            <img class="w-13 rounded-sm select-none pointer-events-none" src="/assets/logo/logo_96.png"/>
+            <NuxtLink to="/" class="">
+                <img class="w-13 rounded-sm select-none pointer-events-none" src="/assets/logo/logo_96.png"/>
+            </NuxtLink>
+            
             
             <!-- Navigation Links -->
             <div class="hidden md:flex items-center gap-2">
-                <NuxtLink to="/" class="btn btn-ghost btn-sm">Home</NuxtLink>
-                <button @click="$router.push('/room')" class="btn btn-ghost btn-sm">Rooms</button>
+                
+                <!-- <button @click="$router.push('/room')" class="btn btn-ghost btn-sm">Rooms</button> -->
             </div>
         </div>
         

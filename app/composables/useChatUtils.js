@@ -30,6 +30,49 @@ export const useChatUtils = () => {
   }
 
   /**
+   * Format a timestamp for chat display:
+   * - Today: HH:mm
+   * - Yesterday: ddd h:mmA (e.g. Thu 6.52pm)
+   * - Last week: d/M (e.g. 8/8)
+   * - Else: yyyy/M/d
+   */
+  function formatChatDisplayTime(dateString) {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffMs = now - date
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    // Helper for day of week
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    // Helper for zero pad
+    const pad = n => n.toString().padStart(2, '0')
+    // Helper for 12-hour time
+    const hour12 = date.getHours() % 12 || 12
+    const min = pad(date.getMinutes())
+    const ampm = date.getHours() < 12 ? 'am' : 'pm'
+    const timeStr = hour12 + '.' + min + ampm
+
+    if (date.toDateString() === now.toDateString()) {
+      // Today: h.mmam/pm
+      return timeStr
+    }
+    // Yesterday
+    const yesterday = new Date(now)
+    yesterday.setDate(now.getDate() - 1)
+    if (date.toDateString() === yesterday.toDateString()) {
+      // e.g. Thu 6.52pm
+      return days[date.getDay()] + ' ' + timeStr
+    }
+    // Last week (within 7 days)
+    if (diffDays < 7) {
+      // e.g. 8/8 6.52pm
+      return (date.getMonth() + 1) + '/' + date.getDate() + ' ' + timeStr
+    }
+    // Else: yyyy/M/d 6.52pm
+    return date.getFullYear() + '/' + (date.getMonth() + 1) + '/' + date.getDate() + ' ' + timeStr
+  }
+
+  /**
    * Format a full date for detailed views
    */
   function formatFullDate(dateString) {
@@ -195,6 +238,7 @@ export const useChatUtils = () => {
 
   return {
     formatChatTime,
+    formatChatDisplayTime,
     formatFullDate,
     getAvatarUrl,
     validateMessage,
