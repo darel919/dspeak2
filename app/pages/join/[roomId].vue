@@ -181,7 +181,11 @@ function retryJoin() {
 }
 
 function goToRoom() {
-  router.push(`/room?roomId=${roomId.value}`)
+  if (roomId.value && roomId.value.trim()) {
+    router.push(`/room/${roomId.value}`)
+  } else {
+    router.push('/room/')
+  }
 }
 
 function goToHome() {

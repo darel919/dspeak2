@@ -109,6 +109,7 @@
           </label>
           <input 
             v-model="joinInput"
+            ref="joinInputRef"
             type="text" 
             placeholder="Enter room ID or paste join link..."
             class="input input-bordered w-full"
@@ -152,6 +153,7 @@
           </label>
           <input 
             v-model="createName"
+            ref="createNameRef"
             type="text" 
             placeholder="Enter room name..."
             class="input input-bordered w-full"
@@ -213,6 +215,9 @@ const roomsStore = useRoomsStore()
 const router = useRouter()
 const { success, error } = useToast()
 
+
+import { ref, nextTick, watch } from 'vue'
+
 const showJoinModal = ref(false)
 const joinInput = ref('')
 const joinError = ref(null)
@@ -223,6 +228,27 @@ const createName = ref('')
 const createDesc = ref('')
 const createError = ref(null)
 const creatingRoom = ref(false)
+
+const joinInputRef = ref(null)
+const createNameRef = ref(null)
+
+watch(showJoinModal, (val) => {
+  if (val) {
+    nextTick(() => {
+      joinInputRef.value?.focus()
+    })
+  }
+})
+
+watch(showCreateModal, (val) => {
+  if (val) {
+    nextTick(() => {
+      setTimeout(() => {
+        createNameRef.value?.focus()
+      }, 100)
+    })
+  }
+})
 
 function closeJoinModal() {
     showJoinModal.value = false
@@ -260,7 +286,7 @@ async function handleJoinSubmit() {
         await roomsStore.joinRoom(roomId)
         success('Successfully joined room!')
         closeJoinModal()
-        router.push(`/room?roomId=${roomId}`)
+        router.push(`/room/${roomId}`)
     } catch (err) {
         joinError.value = err.message || 'Failed to join room'
     } finally {
@@ -277,7 +303,7 @@ async function handleCreateSubmit() {
         success('Room created successfully!')
         closeCreateModal()
         if (room && room.id) {
-            router.push(`/room?roomId=${room.id}`)
+            router.push(`/room/${room.id}`)
         }
     } catch (err) {
         createError.value = err.message || 'Failed to create room'
