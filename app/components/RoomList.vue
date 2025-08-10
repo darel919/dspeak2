@@ -1,8 +1,8 @@
 <template>
-  <div class="w-80 bg-base-200 border-r border-base-300 flex flex-col">
+  <div class="w-72 bg-base-200 border-r border-base-300 flex flex-col">
     <div class="mt-2 px-4 border-b border-base-300">
       <div class="flex items-center justify-between gap-2">
-        <h1 class="font-hero text-xl">Rooms</h1>
+        <h1 class="font-hero text-4xl py-2">Rooms</h1>
         <div class="flex gap-1">
           <button class="btn btn-ghost btn-xs" @click="showJoinModal = true" title="Join Room">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
