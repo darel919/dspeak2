@@ -9,7 +9,6 @@ const authStore = useAuthStore();
 const profile = computed(() => authStore.getUserData());
 const route = useRoute();
 
-// Get current room ID from route if we're on a room page
 const currentRoomId = computed(() => {
     if (route.path.startsWith('/room/')) {
         return route.params.roomId as string;
@@ -17,7 +16,6 @@ const currentRoomId = computed(() => {
     return null;
 });
 
-// Get notification status for indicator
 const { isSupported: notificationSupported, isEnabled: notificationEnabled } = useNotifications();
 
 const presenceStatus = inject('presenceStatus', ref(null)) as Ref<string|null>
@@ -36,7 +34,7 @@ const isDisconnected = computed(() => {
 
 <template>
     
-    <section class="navbar w-full flex justify-between py-2 px-4 bg-accent-4 text-light">
+    <section class="navbar w-full flex justify-between py-2 px-4 bg-accent-4 text-light fixed top-0 left-0 z-50" style="height: var(--navbar-height);">
         <div class="flex items-center gap-4">
             <NuxtLink to="/" class="">
                 <img class="w-13 rounded-sm select-none pointer-events-none" src="/assets/logo/logo_96.png"/>
@@ -45,16 +43,6 @@ const isDisconnected = computed(() => {
             <!-- Room Navigation -->
             <div v-if="profile" class="hidden md:flex">
                 <RoomList :model-value="currentRoomId || undefined" />
-            </div>
-
-            <!-- Mobile: Back/Home button when in a room -->
-            <div v-if="profile && currentRoomId" class="md:hidden">
-                <NuxtLink to="/" class="btn btn-ghost btn-sm" title="Back to servers">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                    </svg>
-                    Rooms
-                </NuxtLink>
             </div>
         </div>
         
@@ -68,7 +56,7 @@ const isDisconnected = computed(() => {
 
             <!-- User Profile (clickable) -->
             <NuxtLink to="/account" class="flex items-center cursor-pointer group" title="Your Account">
-                <div class="flex flex-col items-end pr-4">
+                <div class="flex flex-col items-end pr-4 hidden md:flex">
                     <p class="text-sm font-bold group-hover:underline">{{ profile?.name }}</p>
                     <p class="text-xs text-accent-1">{{ profile?.email }}</p>
                 </div>

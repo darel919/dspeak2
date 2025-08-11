@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen max-w-lg mx-auto pt-20 px-6">
+  <div class="min-h-screen-minus-navbar max-w-lg mx-auto pt-20 px-6">
     <h1 class="text-2xl font-bold mb-6">Your Account</h1>
     <section class="mb-8">
       <h2 class="text-lg font-semibold mb-3">Profile</h2>
@@ -25,7 +25,21 @@ import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
 const router = useRouter()
-const profile = computed(() => authStore.getUserData())
+
+import { useRuntimeConfig } from '#app'
+const config = useRuntimeConfig()
+import { useChatUtils } from '../composables/useChatUtils'
+const { getAvatarUrl } = useChatUtils()
+
+const profile = computed(() => {
+  const user = authStore.getUserData()
+  if (!user) return null
+  // Patch avatar URL if needed
+  return {
+    ...user,
+    avatar: getAvatarUrl(user.avatar, config.public.baseApiPath)
+  }
+})
 
 async function handleLogout() {
   authStore.clearAuth()

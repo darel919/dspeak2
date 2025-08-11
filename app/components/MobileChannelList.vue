@@ -161,11 +161,13 @@ const emit = defineEmits(['channel-selected', 'back'])
 
 const channelsStore = useChannelsStore()
 
-// Channel lists
 const textChannels = computed(() => channelsStore.getTextChannels())
 const voiceChannels = computed(() => channelsStore.getMediaChannels())
 
 function selectChannel(channel) {
   emit('channel-selected', channel)
+  if (props.room && channel && channel.id) {
+    navigateTo(`/room/${props.room.id}/${channel.id}`)
+  }
 }
 </script>

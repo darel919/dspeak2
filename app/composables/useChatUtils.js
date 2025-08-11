@@ -42,33 +42,33 @@ export const useChatUtils = () => {
     const diffMs = now - date
     const diffDays = Math.floor(diffMs / 86400000)
 
-    // Helper for day of week
+    
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    // Helper for zero pad
+    
     const pad = n => n.toString().padStart(2, '0')
-    // Helper for 12-hour time
+    
     const hour12 = date.getHours() % 12 || 12
     const min = pad(date.getMinutes())
     const ampm = date.getHours() < 12 ? 'am' : 'pm'
     const timeStr = hour12 + '.' + min + ampm
 
     if (date.toDateString() === now.toDateString()) {
-      // Today: h.mmam/pm
+      
       return timeStr
     }
-    // Yesterday
+    
     const yesterday = new Date(now)
     yesterday.setDate(now.getDate() - 1)
     if (date.toDateString() === yesterday.toDateString()) {
-      // e.g. Thu 6.52pm
+      
       return days[date.getDay()] + ' ' + timeStr
     }
-    // Last week (within 7 days)
+    
     if (diffDays < 7) {
-      // e.g. 8/8 6.52pm
+      
       return (date.getMonth() + 1) + '/' + date.getDate() + ' ' + timeStr
     }
-    // Else: yyyy/M/d 6.52pm
+    
     return date.getFullYear() + '/' + (date.getMonth() + 1) + '/' + date.getDate() + ' ' + timeStr
   }
 
@@ -153,16 +153,16 @@ export const useChatUtils = () => {
     
     let formatted = escapeHtml(text)
     
-    // Bold text **text**
+    
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     
-    // Italic text *text*
+    
     formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>')
     
-    // Code text `text`
+    
     formatted = formatted.replace(/`(.*?)`/g, '<code class="bg-base-200 px-1 rounded text-sm">$1</code>')
     
-    // URLs
+    
     const urlRegex = /(https?:\/\/[^\s]+)/g
     formatted = formatted.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" class="link link-primary">$1</a>')
     
@@ -175,10 +175,10 @@ export const useChatUtils = () => {
   function shouldGroupMessages(prevMessage, currentMessage) {
     if (!prevMessage || !currentMessage) return false
     
-    // Different senders
+    
     if (prevMessage.sender.id !== currentMessage.sender.id) return false
     
-    // Time difference > 5 minutes
+    
     const timeDiff = new Date(currentMessage.created) - new Date(prevMessage.created)
     if (timeDiff > 5 * 60 * 1000) return false
     
@@ -205,7 +205,7 @@ export const useChatUtils = () => {
         await navigator.clipboard.writeText(text)
         return true
       } else {
-        // Fallback for older browsers
+        
         const textArea = document.createElement('textarea')
         textArea.value = text
         textArea.style.position = 'fixed'

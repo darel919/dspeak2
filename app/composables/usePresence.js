@@ -1,13 +1,14 @@
-// GLOBAL PRESENCE HANDLER
-// THIS WILL INFORM BACKEND IF USER IS ONLINE OR NOT.
+ 
+ 
 
 import { useRuntimeConfig } from '#app'
 
 export function usePresence(userId) {
-  const status = ref('disconnected') // 'connected', 'disconnected', 'permanently-disconnected'
+  const status = ref('disconnected') 
   let ws = null
   let retryCount = 0
   let retryTimer = null
+  let pingInterval = null
   const config = useRuntimeConfig()
 
   function connect(id) {
@@ -28,10 +29,21 @@ export function usePresence(userId) {
       status.value = 'connected'
       retryCount = 0
       clearTimeout(retryTimer)
+      
+      if (pingInterval) clearInterval(pingInterval)
+      pingInterval = setInterval(() => {
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'ping' }))
+        }
+      }, 30000)
     }
     ws.onclose = () => {
       console.log('[usePresence] Connection closed, retry count:', retryCount)
       status.value = 'disconnected'
+      if (pingInterval) {
+        clearInterval(pingInterval)
+        pingInterval = null
+      }
       if (retryCount < 10) {
         retryCount++
         retryTimer = setTimeout(() => connect(id), 2000)
@@ -46,12 +58,16 @@ export function usePresence(userId) {
   }
   function disconnect() {
     if (ws) ws.close()
+    if (pingInterval) {
+      clearInterval(pingInterval)
+      pingInterval = null
+    }
     clearTimeout(retryTimer)
     ws = null
     retryCount = 0
   }
 
-  // Only reconnect when userId changes and is a non-empty string
+  
   if (isRef(userId)) {
     console.log('[usePresence] Setting up watcher for reactive userId')
     watch(userId, (id, oldId) => {

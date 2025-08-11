@@ -1,4 +1,4 @@
-// Singleton notification manager that works outside of Vue component context
+ 
 class NotificationManager {
   constructor() {
     this.isSupported = false
@@ -16,7 +16,7 @@ class NotificationManager {
     if (this.isSupported) {
       this.permission = Notification.permission
       
-      // Load saved preference
+      
       const savedPreference = localStorage.getItem('notificationsEnabled')
       if (savedPreference !== null) {
         this.isEnabled = JSON.parse(savedPreference) && Notification.permission === 'granted'
@@ -47,7 +47,7 @@ class NotificationManager {
       this.permission = result
       this.isEnabled = result === 'granted'
       
-      // Save preference
+      
       localStorage.setItem('notificationsEnabled', JSON.stringify(this.isEnabled))
       
       return result === 'granted'
@@ -80,7 +80,7 @@ class NotificationManager {
 
       console.log('[NotificationManager] Notification created successfully')
       
-      // Auto-close notification after 5 seconds
+      
       setTimeout(() => {
         notification.close()
       }, 5000)
@@ -95,9 +95,9 @@ class NotificationManager {
   showMessageNotification(message, roomName) {
     console.log('[NotificationManager] showMessageNotification called:', { message, roomName })
 
-    // Prevent notification for own messages (final safeguard)
+    
     try {
-      // Try to get user id from localStorage (set by auth system)
+      
       const userDataRaw = localStorage.getItem('userData')
       if (userDataRaw) {
         const userData = JSON.parse(userDataRaw)
@@ -109,7 +109,7 @@ class NotificationManager {
         }
       }
     } catch (e) {
-      // If any error, fallback to showing notification
+      
       console.warn('[NotificationManager] Could not check user id for notification:', e)
     }
 
@@ -167,22 +167,22 @@ class NotificationManager {
     
     this.isEnabled = enabled && this.permission === 'granted'
     
-    // Save preference
+    
     localStorage.setItem('notificationsEnabled', JSON.stringify(this.isEnabled))
     
     return this.isEnabled
   }
   
   shouldShowNotification() {
-    // For testing purposes, allow notifications even when page is focused
+    
     return true
     
-    // Uncomment for production behavior
-    // return document.hidden || !document.hasFocus()
+    
+    
   }
 }
 
-// Create singleton instance
+ 
 const notificationManager = new NotificationManager()
 
 export default notificationManager

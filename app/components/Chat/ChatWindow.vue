@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-full bg-base-100">
+  <div v-if="!channel?.isMedia" class="flex flex-col h-full bg-base-100">
     <!-- Chat Header -->
     <div class="bg-base-200 border-b border-base-300 p-4">
       <div class="flex items-center justify-between">
@@ -34,9 +34,9 @@
             {{ channel.inRoom.length }} online
           </div>
           <!-- Room members count -->
-          <div v-if="room?.members" class="badge badge-outline badge-sm">
+          <!-- <div v-if="room?.members" class="badge badge-outline badge-sm">
             {{ room.members.length }} members
-          </div>
+          </div> -->
         </div>
       </div>
     </div>
@@ -119,6 +119,7 @@
       :message="selectedMessage"
       @close="closeDetailsModal"
     />
+
   </div>
 </template>
 

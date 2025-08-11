@@ -45,16 +45,21 @@
         >
           <!-- Room Avatar -->
           <div class="avatar placeholder">
-            <div 
-              class="w-12 h-12 rounded-full text-sm font-semibold"
-              :class="[
-                selectedRoomId === room.id 
-                  ? 'bg-primary-content text-primary' 
-                  : 'bg-neutral text-neutral-content'
-              ]"
-            >
-              <span>{{ room.name.charAt(0).toUpperCase() }}</span>
-            </div>
+            <template v-if="getRoomPictureUrl(room)">
+              <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover" :alt="room.name" />
+            </template>
+            <template v-else>
+              <div 
+                class="w-12 h-12 rounded-full text-sm font-semibold"
+                :class="[
+                  selectedRoomId === room.id 
+                    ? 'bg-primary-content text-primary' 
+                    : 'bg-neutral text-neutral-content'
+                ]"
+              >
+                <span>{{ room.name.charAt(0).toUpperCase() }}</span>
+              </div>
+            </template>
           </div>
 
           <!-- Room Info -->
@@ -227,6 +232,7 @@
 import { ref, nextTick, watch } from 'vue'
 import { useRoomsStore } from '../stores/rooms'
 import { useToast } from '../composables/useToast'
+const config = useRuntimeConfig()
 
 const props = defineProps({
   selectedRoomId: String
@@ -238,7 +244,6 @@ const roomsStore = useRoomsStore()
 const router = useRouter()
 const { success, error } = useToast()
 
-// Modal states
 const showJoinModal = ref(false)
 const joinInput = ref('')
 const joinError = ref(null)
@@ -253,19 +258,24 @@ const creatingRoom = ref(false)
 const joinInputRef = ref(null)
 const createNameRef = ref(null)
 
-// Functions
-function selectRoom(room) {
+function getRoomPictureUrl(room) {
+  if (room.picture) {
+    return `${config.public.apiPath.replace(/\/$/, '')}/${room.picture.replace(/^\//, '')}`
+  }
+  return null
+}
+
+
+async function selectRoom(room) {
   emit('room-selected', room)
   router.push(`/room/${room.id}`)
 }
 
 function hasActivity(room) {
-  // Placeholder function for activity detection
-  // You can implement real activity detection here
-  return Math.random() > 0.7 // Random activity for demo
+  return 0
+  // return Math.random() > 0.7
 }
 
-// Modal functions
 function closeJoinModal() {
   showJoinModal.value = false
   joinInput.value = ''
@@ -322,13 +332,16 @@ async function handleCreateSubmit() {
       router.push(`/room/${room.id}`)
     }
   } catch (err) {
-    createError.value = err.message || 'Failed to create server'
+    const msg = typeof err?.message === 'string' ? err.message : ''
+    if (msg.includes('409') && msg.includes('already exists')) {
+      createError.value = 'Pick another name, this name is already taken'
+    } else {
+      createError.value = msg || 'Failed to create server'
+    }
   } finally {
     creatingRoom.value = false
   }
 }
-
-// Focus input when modals open
 watch(showJoinModal, (newValue) => {
   if (newValue) {
     nextTick(() => {

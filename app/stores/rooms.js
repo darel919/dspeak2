@@ -55,7 +55,7 @@ export const useRoomsStore = defineStore('rooms', () => {
             }
             const data = await response.json()
             await fetchRooms()
-            // Automatically join the newly created room to trigger push subscription
+            
             if (data && data.id) {
                 await joinRoom(data.id)
             }
@@ -74,8 +74,6 @@ export const useRoomsStore = defineStore('rooms', () => {
             if (!apiPath) {
                 throw new Error('API path is not defined')
             }
-            console.log('[RoomsStore] Fetching rooms from:', `${apiPath}/rooms`)
-            console.log('[RoomsStore] Using authorization:', userData.id)
             const response = await fetch(`${apiPath}/room`, {
                 headers: {
                     'Authorization': userData.id,
@@ -84,19 +82,17 @@ export const useRoomsStore = defineStore('rooms', () => {
             })
             if (!response.ok) {
                 const errorText = await response.text()
-                console.error('[RoomsStore] Failed to fetch rooms:', response.status, errorText)
                 throw new Error(`Failed to fetch rooms: ${response.status}`)
             }
             const data = await response.json()
-            console.log('[RoomsStore] Rooms fetched successfully:', data)
             rooms.value = data
             loading.value = false
-            // ...existing code...
+            
             loading.value = false
         } catch (err) {
             error.value = err.message
             console.error('[RoomsStore] Error fetching rooms:', err)
-            // Offline fallback: load cached rooms from IndexedDB
+            
             if (window.indexedDB) {
                 try {
                     const { openDB } = await import('../../public/idb.js')
@@ -108,15 +104,12 @@ export const useRoomsStore = defineStore('rooms', () => {
                         loading.value = false
                         rooms.value = req.result
                         error.value = null
-                        console.log('[RoomsStore] Loaded rooms from cache:', req.result)
                     }
                     req.onerror = () => {
                         loading.value = false
-                        console.warn('[RoomsStore] Failed to load cached rooms')
                     }
                 } catch (e) {
                     loading.value = false
-                    console.warn('[RoomsStore] Offline fallback failed:', e)
                 }
             } else {
                 loading.value = false
@@ -180,19 +173,16 @@ export const useRoomsStore = defineStore('rooms', () => {
 
             const trimmedRoomId = roomId.trim()
 
-            // Check if user is already a member of this room
+            
             const existingRoom = rooms.value.find(room => room.id === trimmedRoomId)
             if (existingRoom) {
-                console.log('[RoomsStore] User is already a member of this room')
-                // Still ensure push subscription is up to date (global)
+                
                 if (typeof window !== 'undefined') {
                     try {
                         const { usePushSubscription } = await import('../composables/usePushSubscription')
                         const { updateSubscription } = usePushSubscription()
                         await updateSubscription()
-                        console.log('[RoomsStore] Ensured global push subscription')
                     } catch (err) {
-                        console.error('[RoomsStore] Failed to update push subscription:', err)
                     }
                 }
                 return existingRoom
@@ -203,8 +193,6 @@ export const useRoomsStore = defineStore('rooms', () => {
                 throw new Error('API path is not defined')
             }
 
-            console.log('[RoomsStore] Joining room:', trimmedRoomId)
-            console.log('[RoomsStore] Using authorization:', userData.id)
 
             const response = await fetch(`${apiPath}/room/join`, {
                 method: 'POST',
@@ -238,27 +226,23 @@ export const useRoomsStore = defineStore('rooms', () => {
             }
 
             const data = await response.json()
-            console.log('[RoomsStore] Successfully joined room:', data)
             
-            // Refresh rooms list to include the newly joined room
+            
             await fetchRooms()
 
-            // Automatically subscribe user to push notifications (global subscription)
+            
             if (typeof window !== 'undefined') {
                 try {
                     const { usePushSubscription } = await import('../composables/usePushSubscription')
                     const { updateSubscription } = usePushSubscription()
                     await updateSubscription()
-                    console.log('[RoomsStore] Successfully updated global push subscription')
                 } catch (err) {
-                    console.error('[RoomsStore] Failed to update push subscription:', err)
                 }
             }
 
             return data
         } catch (err) {
             error.value = err.message
-            console.error('[RoomsStore] Error joining room:', err)
             throw err
         } finally {
             loading.value = false
@@ -300,27 +284,23 @@ export const useRoomsStore = defineStore('rooms', () => {
             }
 
             const data = await response.json()
-            console.log('[RoomsStore] Successfully left room:', data)
             
-            // Unsubscribe from push notifications for this room
+            
             if (typeof window !== 'undefined') {
                 try {
                     const { usePushSubscription } = await import('../composables/usePushSubscription')
                     const { unsubscribe } = usePushSubscription()
                     await unsubscribe(trimmedRoomId)
-                    console.log('[RoomsStore] Successfully unsubscribed from push notifications for room:', trimmedRoomId)
                 } catch (err) {
-                    console.error('[RoomsStore] Failed to unsubscribe from push notifications:', err)
                 }
             }
             
-            // Refresh rooms list
+            
             await fetchRooms()
 
             return data
         } catch (err) {
             error.value = err.message
-            console.error('[RoomsStore] Error leaving room:', err)
             throw err
         } finally {
             loading.value = false

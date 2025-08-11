@@ -47,9 +47,14 @@
                 :class="{ 'active': modelValue === room.id }"
               >
                 <div class="avatar placeholder">
-                  <div class="w-12 h-12 rounded-full bg-primary text-primary-content text-sm">
-                    <span>{{ room.name.charAt(0).toUpperCase() }}</span>
-                  </div>
+                  <template v-if="getRoomPictureUrl(room)">
+                    <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover" :alt="room.name" />
+                  </template>
+                  <template v-else>
+                    <div class="w-12 h-12 rounded-full bg-primary text-primary-content text-sm flex items-center justify-center">
+                      <span>{{ room.name.charAt(0).toUpperCase() }}</span>
+                    </div>
+                  </template>
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center justify-between">
@@ -89,12 +94,17 @@
           :title="room.name"
         >
           <div class="avatar placeholder">
-            <div 
-              class="w-12 h-12 rounded-full text-xs font-semibold transition-all"
-              :class="modelValue === room.id ? 'bg-primary text-primary-content ring-2 ring-primary ring-offset-2' : 'bg-neutral text-neutral-content hover:bg-primary hover:text-primary-content'"
-            >
-              <span>{{ room.name.charAt(0).toUpperCase() }}</span>
-            </div>
+            <template v-if="getRoomPictureUrl(room)">
+              <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover transition-all" :class="modelValue === room.id ? 'ring-2 ring-primary ring-offset-2' : ''" :alt="room.name" />
+            </template>
+            <template v-else>
+              <div
+                class="w-12 h-12 rounded-full text-xs font-semibold transition-all flex items-center justify-center"
+                :class="modelValue === room.id ? 'bg-primary text-primary-content ring-2 ring-primary ring-offset-2' : 'bg-neutral text-neutral-content hover:bg-primary hover:text-primary-content'"
+              >
+                <span>{{ room.name.charAt(0).toUpperCase() }}</span>
+              </div>
+            </template>
           </div>
           <div v-if="hasActivity(room)" class="absolute -top-1 -right-1 w-3 h-3 bg-accent rounded-full"></div>
         </button>
@@ -113,9 +123,14 @@
                 :class="{ 'active': modelValue === room.id }"
               >
                 <div class="avatar placeholder">
-                  <div class="w-6 h-6 rounded-full bg-primary text-primary-content text-xs">
-                    <span>{{ room.name.charAt(0).toUpperCase() }}</span>
-                  </div>
+                  <template v-if="getRoomPictureUrl(room)">
+                    <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover" :alt="room.name" />
+                  </template>
+                  <template v-else>
+                    <div class="w-6 h-6 rounded-full bg-primary text-primary-content text-xs flex items-center justify-center">
+                      <span>{{ room.name.charAt(0).toUpperCase() }}</span>
+                    </div>
+                  </template>
                 </div>
                 <span class="truncate">{{ room.name }}</span>
                 <div v-if="hasActivity(room)" class="w-2 h-2 bg-accent rounded-full ml-auto"></div>
@@ -319,11 +334,23 @@
 }
 </style>
 
+
 <script setup>
+import { useRuntimeConfig } from '#app'
 import { useRoomsStore } from '../stores/rooms'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../composables/useTimeUtils'
 import { useToast } from '../composables/useToast'
+
+const config = useRuntimeConfig()
+
+function getRoomPictureUrl(room) {
+  if (room.picture) {
+
+    return `${config.public.apiPath.replace(/\/$/, '')}/${room.picture.replace(/^\//, '')}`
+  }
+  return null
+}
 
 const props = defineProps({
   modelValue: [String, Number]
@@ -337,14 +364,11 @@ const { success, error } = useToast()
 
 import { ref, nextTick, watch, computed, onMounted } from 'vue'
 
-// Collapse state - default to collapsed for navbar
 const isCollapsed = ref(true)
 const showContextMenu = ref(false)
 
-// Maximum number of room icons to show in expanded horizontal mode
 const MAX_VISIBLE_ROOMS = 5
 
-// Computed properties for room display
 const selectedRoom = computed(() => 
   roomsStore.rooms.find(r => r.id === props.modelValue)
 )
@@ -359,7 +383,6 @@ const hiddenRooms = computed(() =>
     : []
 )
 
-// Modal states
 const showJoinModal = ref(false)
 const joinInput = ref('')
 const joinError = ref(null)
@@ -374,41 +397,29 @@ const creatingRoom = ref(false)
 const joinInputRef = ref(null)
 const createNameRef = ref(null)
 
-// Toggle collapse/expand
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
-  // Store preference in localStorage
+
   localStorage.setItem('roomListCollapsed', isCollapsed.value.toString())
 }
 
-// Load collapse preference on mount - default to collapsed for navbar
 onMounted(() => {
   const stored = localStorage.getItem('roomListCollapsed')
   if (stored !== null) {
     isCollapsed.value = stored === 'true'
   } else {
-    // Default to collapsed for navbar layout
+
     isCollapsed.value = true
   }
 })
 
-// Check if room has activity (you can implement actual activity detection)
 function hasActivity(room) {
-  // This is a placeholder function. You could implement real activity detection
-  // by checking for unread messages, online members, recent activity, etc.
-  // For example:
-  // - Check if there are unread messages in any channel
-  // - Check if there are active users in the room
-  // - Check recent message timestamps
-  
-  // For now, we'll show activity for rooms that have the current user and simulate some activity
   const hasCurrentUser = room.members?.some(member => member.id === getCurrentUserId())
-  const simulatedActivity = room.id && (parseInt(room.id, 36) % 3 === 0) // Deterministic "random" based on room ID
+  const simulatedActivity = room.id && (parseInt(room.id, 36) % 3 === 0)
   
   return hasCurrentUser && simulatedActivity
 }
 
-// Helper to get current user ID
 function getCurrentUserId() {
   const userData = authStore.getUserData()
   return userData?.id || null
@@ -468,7 +479,17 @@ async function handleJoinSubmit() {
         await roomsStore.joinRoom(roomId)
         success('Successfully joined room!')
         closeJoinModal()
-        router.push(`/room/${roomId}`)
+        try {
+          const channels = await useChannelsStore().fetchChannels(roomId)
+          const firstChannel = channels && channels.length > 0 ? channels[0] : null
+          if (firstChannel) {
+            router.push(`/room/${roomId}/${firstChannel.id}`)
+          } else {
+            router.push(`/room/${roomId}`)
+          }
+        } catch {
+          router.push(`/room/${roomId}`)
+        }
     } catch (err) {
         joinError.value = err.message || 'Failed to join room'
     } finally {
@@ -485,10 +506,25 @@ async function handleCreateSubmit() {
         success('Room created successfully!')
         closeCreateModal()
         if (room && room.id) {
-            router.push(`/room/${room.id}`)
+            try {
+              const channels = await useChannelsStore().fetchChannels(room.id)
+              const firstChannel = channels && channels.length > 0 ? channels[0] : null
+              if (firstChannel) {
+                router.push(`/room/${room.id}/${firstChannel.id}`)
+              } else {
+                router.push(`/room/${room.id}`)
+              }
+            } catch {
+              router.push(`/room/${room.id}`)
+            }
         }
     } catch (err) {
-        createError.value = err.message || 'Failed to create room'
+        const msg = typeof err?.message === 'string' ? err.message : ''
+        if (msg.includes('409') && msg.includes('already exists')) {
+          createError.value = 'Pick another name, this name is already taken'
+        } else {
+          createError.value = msg || 'Failed to create room'
+        }
     } finally {
         creatingRoom.value = false
     }
@@ -498,10 +534,20 @@ function refreshRooms() {
   roomsStore.fetchRooms?.()
 }
 
-function navigateToRoom(r) {
+async function navigateToRoom(r) {
   if (props.modelValue !== r.id) {
     emit('update:modelValue', r.id)
-    router.push(`/room/${r.id}`)
+    try {
+      const channels = await roomsStore.rooms.find(room => room.id === r.id) ? await useChannelsStore().fetchChannels(r.id) : [];
+      const firstChannel = channels && channels.length > 0 ? channels[0] : null;
+      if (firstChannel) {
+        router.push(`/room/${r.id}/${firstChannel.id}`)
+      } else {
+        router.push(`/room/${r.id}`)
+      }
+    } catch {
+      router.push(`/room/${r.id}`)
+    }
   }
 }
 </script>

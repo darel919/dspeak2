@@ -1,7 +1,7 @@
 import { useAuthStore } from '../stores/auth'
 import { useRuntimeConfig } from '#app'
 
-// No lifecycle hooks should be used here
+ 
 export function usePushSubscription() {
   const isSupported = ref(false)
   const subscription = ref(null)
@@ -46,7 +46,7 @@ export function usePushSubscription() {
     try {
       const registration = await navigator.serviceWorker.ready
       let existingSubscription = await registration.pushManager.getSubscription()
-      // If a subscription exists, but its endpoint does not match the current origin, unsubscribe and clear it
+      
       if (existingSubscription && existingSubscription.endpoint && !existingSubscription.endpoint.includes(location.hostname)) {
         console.warn('[PushSubscription] Existing subscription endpoint does not match current origin. Unsubscribing and resubscribing.')
         await existingSubscription.unsubscribe()
@@ -95,7 +95,7 @@ export function usePushSubscription() {
       const registration = await navigator.serviceWorker.ready
       console.log('[PushSubscription] Service worker registration:', registration)
       const applicationServerKey = urlBase64ToUint8Array(vapidKey)
-      // Always unsubscribe before creating a new subscription to ensure a fresh one
+      
       const existing = await registration.pushManager.getSubscription()
       if (existing) {
         await existing.unsubscribe()
@@ -121,11 +121,11 @@ export function usePushSubscription() {
       if (!response.ok) {
         const errorText = await response.text()
         console.error('[PushSubscription] Failed to register global subscription:', response.status, errorText)
-        // Try to resubscribe once if backend did not accept
+        
         if (existing) {
           await existing.unsubscribe()
         }
-        // Try again
+        
         const retrySub = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey
@@ -226,7 +226,7 @@ export function usePushSubscription() {
     }
   }
   
-  // Do not use onMounted here. Call getExistingSubscription() or updateSubscription() explicitly from your store or component.
+  
   
   return {
     isSupported: readonly(isSupported),

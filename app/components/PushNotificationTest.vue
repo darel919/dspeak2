@@ -1,4 +1,3 @@
-// Test component to validate push notification implementation
 <template>
   <div class="card bg-base-100 shadow-xl">
     <div class="card-body">
@@ -154,8 +153,6 @@ const subscriptionStatus = computed(() => {
 function addResult(type, message) {
   const timestamp = new Date().toLocaleTimeString()
   testResults.value.unshift({ type, message, timestamp })
-  
-  // Keep only last 20 results
   if (testResults.value.length > 20) {
     testResults.value = testResults.value.slice(0, 20)
   }
@@ -166,14 +163,13 @@ async function runBasicTests() {
   addResult('info', 'Starting basic tests...')
   
   try {
-    // Test 1: Browser support
+
     if (pushSub.isSupported.value) {
       addResult('success', '✓ Browser supports push notifications')
     } else {
       addResult('error', '✗ Browser does not support push notifications')
     }
-    
-    // Test 2: Service Worker
+
     if ('serviceWorker' in navigator) {
       const registration = await navigator.serviceWorker.getRegistration()
       if (registration) {
@@ -190,16 +186,14 @@ async function runBasicTests() {
     } else {
       addResult('error', '✗ Service Worker not supported')
     }
-    
-    // Test 3: VAPID key
+
     const vapidKey = config.public.VAPID_PUBLIC_KEY
     if (vapidKey && vapidKey.length >= 80) {
       addResult('success', '✓ VAPID key is configured')
     } else {
       addResult('error', '✗ VAPID key is missing or invalid')
     }
-    
-    // Test 4: Notification permission
+
     if (typeof window !== 'undefined' && 'Notification' in window) {
       const permission = Notification.permission
       if (permission === 'granted') {
@@ -234,8 +228,7 @@ async function testSubscription() {
     addResult('info', 'Creating new subscription...')
     await pushSub.subscribe()
     addResult('success', '✓ Subscribed successfully')
-    
-    // Test subscription details
+
     const subscription = pushSub.subscription.value
     if (subscription) {
       addResult('info', `Endpoint: ${subscription.endpoint.substring(0, 50)}...`)
@@ -254,8 +247,6 @@ async function testNotification() {
   addResult('info', 'Testing push notification...')
   
   try {
-    // This would normally be sent from your server
-    // For testing, we'll just show a local notification
     const notification = new Notification('dSpeak Test', {
       body: 'This is a test push notification',
       icon: '/favicon-32x32.png',
@@ -286,7 +277,6 @@ function clearResults() {
   testResults.value = []
 }
 
-// Run basic tests on mount
 onMounted(() => {
   setTimeout(() => {
     runBasicTests()

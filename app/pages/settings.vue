@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen max-w-lg mx-auto pt-20 px-6">
+  <div class="min-h-screen-minus-navbar max-w-lg mx-auto pt-20 px-6">
     <h1 class="text-2xl font-bold mb-6">Settings</h1>
     <section class="mb-8">
       <h2 class="text-lg font-semibold mb-3">Notification Settings</h2>

@@ -36,11 +36,9 @@ const { info } = useToast()
 
 const dismissed = ref(false)
 
-// Only show warning when notifications are actually blocked/denied
 const shouldShowWarning = computed(() => {
   if (dismissed.value || !isSupported.value) return false
-  
-  // Only show for denied permission (actual problem)
+
   return permission.value === 'denied'
 })
 
@@ -50,7 +48,6 @@ function openBrowserSettings() {
 
 function dismissWarning() {
   dismissed.value = true
-  // Store dismissal with a timestamp, so it can be shown again after some time
   localStorage.setItem('notificationErrorDismissed', JSON.stringify({
     dismissed: true,
     timestamp: Date.now()
@@ -63,8 +60,6 @@ onMounted(() => {
     try {
       const parsed = JSON.parse(dismissedData)
       const daysPassed = (Date.now() - parsed.timestamp) / (1000 * 60 * 60 * 24)
-      
-      // Show warning again after 7 days
       if (daysPassed < 7) {
         dismissed.value = parsed.dismissed
       } else {
@@ -76,7 +71,6 @@ onMounted(() => {
   }
 })
 
-// Reset dismissed state when permission changes from denied to default (user may have reset browser settings)
 watch(() => permission.value, (newPermission, oldPermission) => {
   if (oldPermission === 'denied' && newPermission === 'default') {
     dismissed.value = false

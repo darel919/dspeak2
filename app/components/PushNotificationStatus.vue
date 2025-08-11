@@ -80,7 +80,6 @@ async function handleUnsubscribe() {
   }
 }
 
-// Auto-hide after 10 seconds if user doesn't interact
 onMounted(() => {
   setTimeout(() => {
     if (showStatus.value && isSubscribed.value) {

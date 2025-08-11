@@ -9,7 +9,7 @@ export const useChannelsStore = defineStore('channels', () => {
     const currentChannelId = ref(null);
     const config = useRuntimeConfig();
 
-    // Get all channels for a specific room
+    
     async function fetchChannels(roomId) {
         if (!roomId) {
             throw new Error('Room ID is required');
@@ -52,7 +52,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Create a new channel
+    
     async function createChannel(roomId, channelData) {
         if (!roomId) {
             throw new Error('Room ID is required');
@@ -97,7 +97,7 @@ export const useChannelsStore = defineStore('channels', () => {
             const newChannel = await response.json();
             console.log('[ChannelsStore] Created channel:', newChannel);
             
-            // Refresh channels list
+            
             await fetchChannels(roomId);
             
             return newChannel;
@@ -110,7 +110,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Edit an existing channel
+    
     async function editChannel(channelId, channelData) {
         if (!channelId) {
             throw new Error('Channel ID is required');
@@ -149,7 +149,7 @@ export const useChannelsStore = defineStore('channels', () => {
 
             console.log('[ChannelsStore] Edited channel:', channelId);
             
-            // Update local channel data
+            
             const channelIndex = channels.value.findIndex(c => c.id === channelId);
             if (channelIndex !== -1) {
                 channels.value[channelIndex] = { ...channels.value[channelIndex], ...channelData };
@@ -165,7 +165,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Delete a channel
+    
     async function deleteChannel(channelId) {
         if (!channelId) {
             throw new Error('Channel ID is required');
@@ -201,10 +201,10 @@ export const useChannelsStore = defineStore('channels', () => {
 
             console.log('[ChannelsStore] Deleted channel:', channelId);
             
-            // Remove from local channels
+            
             channels.value = channels.value.filter(c => c.id !== channelId);
             
-            // Clear current channel if it was deleted
+            
             if (currentChannelId.value === channelId) {
                 currentChannelId.value = null;
             }
@@ -219,7 +219,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Join a channel
+    
     async function joinChannel(channelId) {
         if (!channelId) {
             throw new Error('Channel ID is required');
@@ -252,7 +252,7 @@ export const useChannelsStore = defineStore('channels', () => {
 
             console.log('[ChannelsStore] Joined channel:', channelId);
             
-            // Update local channel data to reflect user is in room
+            
             const channelIndex = channels.value.findIndex(c => c.id === channelId);
             if (channelIndex !== -1) {
                 const channel = channels.value[channelIndex];
@@ -268,7 +268,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Leave a channel
+    
     async function leaveChannel(channelId) {
         if (!channelId) {
             throw new Error('Channel ID is required');
@@ -301,7 +301,7 @@ export const useChannelsStore = defineStore('channels', () => {
 
             console.log('[ChannelsStore] Left channel:', channelId);
             
-            // Update local channel data to reflect user left room
+            
             const channelIndex = channels.value.findIndex(c => c.id === channelId);
             if (channelIndex !== -1) {
                 const channel = channels.value[channelIndex];
@@ -315,7 +315,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Get channel details
+    
     async function getChannelDetails(channelId) {
         if (!channelId) {
             throw new Error('Channel ID is required');
@@ -351,7 +351,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Get unread message counts for all accessible channels
+    
     async function getUnreadCounts() {
         try {
             const authStore = useAuthStore();
@@ -383,7 +383,7 @@ export const useChannelsStore = defineStore('channels', () => {
         }
     }
 
-    // Helper functions
+    
     function getChannelById(channelId) {
         return channels.value.find(c => c.id === channelId);
     }

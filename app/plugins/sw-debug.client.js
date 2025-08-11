@@ -16,10 +16,10 @@ export default defineNuxtPlugin((nuxtApp) => {
               timestamp: Date.now()
             });
           }
-          // Ensure push subscription after registration and authentication
+          
           const { useAuthStore } = await import('../stores/auth')
           const authStore = useAuthStore()
-          // Watch for authentication changes
+          
           watch(
             () => authStore.getUserData()?.id,
             async (id) => {

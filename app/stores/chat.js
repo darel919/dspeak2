@@ -17,12 +17,13 @@ export const useChatStore = defineStore('chat', () => {
     const config = useRuntimeConfig();
     let reconnectInterval = null;
     let reconnectTimer = null;
+    let pingInterval = null;
 
-    // Listen for Service Worker messages
+    
     if (process.client && 'serviceWorker' in navigator) {
         console.log('[ChatStore] Service Worker supported');
         
-        // Check current registration status
+        
         navigator.serviceWorker.getRegistration().then(reg => {
             if (reg) {
                 console.log('[ChatStore] Service Worker registered:', reg);
@@ -40,7 +41,7 @@ export const useChatStore = defineStore('chat', () => {
             }
         });
 
-        // Send API configuration to Service Worker when ready
+        
         const sendConfigToSW = () => {
             if (navigator.serviceWorker.controller) {
                 navigator.serviceWorker.controller.postMessage({
@@ -55,12 +56,12 @@ export const useChatStore = defineStore('chat', () => {
             }
         };
 
-        // Send config immediately if SW is already controlling
+        
         if (navigator.serviceWorker.controller) {
             sendConfigToSW();
         }
 
-        // Also send config when SW becomes ready
+        
         navigator.serviceWorker.ready.then(reg => {
             console.log('[ChatStore] Service Worker ready:', reg);
             if (reg.active) {
@@ -74,24 +75,24 @@ export const useChatStore = defineStore('chat', () => {
             }
         });
 
-        // Listen for SW controller changes
+        
         navigator.serviceWorker.addEventListener('controllerchange', () => {
             console.log('[ChatStore] SW controller changed, sending config');
             sendConfigToSW();
         });
 
-        // Listen for online events to trigger sync
+        
         window.addEventListener('online', () => {
             console.log('[ChatStore] Came back online, triggering background sync');
             if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                // First ensure config is sent
+                
                 sendConfigToSW();
                 
-                // Then trigger sync with multiple approaches
+                
                 setTimeout(() => {
                     console.log('[ChatStore] Attempting sync via multiple methods...');
                     
-                    // Method 1: Background Sync API
+                    
                     navigator.serviceWorker.ready.then(reg => {
                         if (reg.sync) {
                             console.log('[ChatStore] Using Background Sync API');
@@ -99,7 +100,7 @@ export const useChatStore = defineStore('chat', () => {
                         }
                     });
                     
-                    // Method 2: Direct message to SW
+                    
                     if (navigator.serviceWorker.controller) {
                         console.log('[ChatStore] Sending FORCE_SYNC message');
                         navigator.serviceWorker.controller.postMessage({
@@ -111,7 +112,7 @@ export const useChatStore = defineStore('chat', () => {
         });
     }
 
-    // Manual sync function for testing
+    
     function triggerManualSync() {
         console.log('[ChatStore] Manual sync triggered');
         if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
@@ -144,7 +145,7 @@ export const useChatStore = defineStore('chat', () => {
             currentRoomId.value = roomId;
             await fetchMessages(channelId);
 
-            // Connect to chat WebSocket
+            
             const websocketPath = config.public.websocketPath;
             const wsUrl = `${websocketPath}/chat/socket?channelId=${channelId}&auth=${encodeURIComponent(userData.id)}`;
             ws.value = new WebSocket(wsUrl);
@@ -156,7 +157,12 @@ export const useChatStore = defineStore('chat', () => {
                     clearInterval(reconnectInterval);
                     reconnectInterval = null;
                 }
-                // Refetch messages after reconnect
+                
+                if (pingInterval) clearInterval(pingInterval);
+                pingInterval = setInterval(() => {
+                    sendPing();
+                }, 30000);
+                
                 if (currentChannelId.value) {
                     fetchMessages(currentChannelId.value);
                 }
@@ -167,7 +173,12 @@ export const useChatStore = defineStore('chat', () => {
             ws.value.onclose = () => {
                 connected.value = false;
                 console.log('[ChatStore] WebSocket connection closed');
-                // Start reconnect attempts every 7 seconds
+                
+                if (pingInterval) {
+                    clearInterval(pingInterval);
+                    pingInterval = null;
+                }
+                
                 if (!reconnectInterval && currentChannelId.value) {
                     reconnectInterval = setInterval(() => {
                         if (!connected.value && currentChannelId.value) {
@@ -183,7 +194,7 @@ export const useChatStore = defineStore('chat', () => {
                 error.value = 'WebSocket connection failed';
             };
 
-            // Ensure push subscription is active (global subscription)
+            
             if (typeof window !== 'undefined') {
                 try {
                     const { usePushSubscription } = await import('../composables/usePushSubscription')
@@ -207,6 +218,10 @@ export const useChatStore = defineStore('chat', () => {
             ws.value.close();
             ws.value = null;
         }
+        if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
+        }
         if (reconnectInterval) {
             clearInterval(reconnectInterval);
             reconnectInterval = null;
@@ -223,25 +238,25 @@ export const useChatStore = defineStore('chat', () => {
 
 
 
-    // Handle incoming WebSocket messages
+    
     function handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
-            console.log('[ChatStore] Received WebSocket message:', data);
+            
             switch (data.type) {
                 case 'connected':
                     console.log('[ChatStore] Connection confirmed:', data.data);
                     break;
                 case 'new_message':
                     console.log('[ChatStore] New message received:', data.data);
-                    // Check for duplicates before adding
+                    
                     const existingMessage = messages.value.find(msg => msg.id === data.data.id);
                     if (existingMessage) {
                         console.log('[ChatStore] Duplicate message detected, skipping:', data.data.id);
                         break;
                     }
                     messages.value.push(data.data);
-                    // Show notification for messages from other users
+                    
                     handleNewMessageNotification(data.data);
                     break;
                 case 'message_updated':
@@ -254,7 +269,7 @@ export const useChatStore = defineStore('chat', () => {
                     break;
                 case 'channel_updated':
                     console.log('[ChatStore] Channel updated:', data.data);
-                    // Handle channel updates if needed
+                    
                     break;
                 case 'channel_deleted':
                     console.log('[ChatStore] Channel deleted:', data.data);
@@ -265,13 +280,13 @@ export const useChatStore = defineStore('chat', () => {
                     updateTypingStatus(data.data.userId, data.data.isTyping);
                     break;
                 case 'pong':
-                    console.log('[ChatStore] Pong received');
-                    // Handle pong response
-                    break;
-                // --- Presence events now handled here ---
+                    
+                    
+                    
+                
                 case 'currentlyInChannel':
                     if (Array.isArray(data.inRoom)) {
-                        // Normalize to array of objects with id
+                        
                         onlineUsers.value = data.inRoom.map(u =>
                             typeof u === 'string' ? { id: u } : u
                         );
@@ -287,7 +302,7 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Fetch messages for a channel
+    
     async function fetchMessages(channelId) {
         loading.value = true;
         error.value = null;
@@ -323,7 +338,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             console.log('[ChatStore] Assigned messages:', messages.value);
 
-            // --- Reconcile local unread IDs with server read state ---
+            
             try {
                 const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
                 let unreadIds = [];
@@ -332,7 +347,7 @@ export const useChatStore = defineStore('chat', () => {
                 } catch (e) {
                     unreadIds = [];
                 }
-                // Remove IDs that are already read on the server
+                
                 const alreadyReadIds = messages.value
                     .filter(msg => Array.isArray(msg.read_by) && msg.read_by.includes(userData.id))
                     .map(msg => msg.id);
@@ -351,7 +366,7 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Send a message
+    
     async function sendMessage(channelId, content) {
         try {
             const authStore = useAuthStore();
@@ -360,7 +375,7 @@ export const useChatStore = defineStore('chat', () => {
                 throw new Error('User not authenticated');
             }
 
-            // Create a pending message to show immediately in UI
+            
             const pendingMessage = {
                 id: `pending_${Date.now()}`,
                 content,
@@ -372,26 +387,26 @@ export const useChatStore = defineStore('chat', () => {
                 },
                 created: new Date().toISOString(),
                 read_by: [userData.id],
-                status: 'pending' // Mark as pending
+                status: 'pending' 
             };
 
-            // Add pending message to UI immediately
+            
             messages.value.push(pendingMessage);
 
-            // Check if we're offline
+            
             if (!navigator.onLine) {
-                // Queue message for background sync
+                
                 const queuedMessage = {
                     id: Date.now(),
                     channelId,
                     content,
                     sender: userData.id,
-                    pendingId: pendingMessage.id // Link to pending message
+                    pendingId: pendingMessage.id 
                 };
                 await BackgroundWorker.enqueueMessage(queuedMessage);
                 if ('serviceWorker' in navigator && 'SyncManager' in window) {
                     navigator.serviceWorker.ready.then(reg => {
-                        // Ensure config is sent before registering sync
+                        
                         if (reg.active) {
                             reg.active.postMessage({
                                 type: 'SET_API_CONFIG',
@@ -426,7 +441,7 @@ export const useChatStore = defineStore('chat', () => {
 
                 const message = await response.json();
                 
-                // Remove pending message and let the real message come via WebSocket
+                
                 const pendingIndex = messages.value.findIndex(msg => msg.id === pendingMessage.id);
                 if (pendingIndex !== -1) {
                     messages.value.splice(pendingIndex, 1);
@@ -434,7 +449,7 @@ export const useChatStore = defineStore('chat', () => {
                 
                 return message;
             } catch (fetchError) {
-                // If failed, queue for background sync but keep pending message
+                
                 const queuedMessage = {
                     id: Date.now(),
                     channelId,
@@ -457,9 +472,9 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Mark message as read
+    
     async function markMessageAsRead(messageId) {
-        // Store unread message IDs in localStorage for batching
+        
         try {
             const authStore = useAuthStore();
             const userData = authStore.getUserData();
@@ -467,7 +482,7 @@ export const useChatStore = defineStore('chat', () => {
                 throw new Error('User not authenticated');
             }
 
-            // Use a key per user for safety
+            
             const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
             let unreadIds = [];
             try {
@@ -475,7 +490,7 @@ export const useChatStore = defineStore('chat', () => {
             } catch (e) {
                 unreadIds = [];
             }
-            // Only add if not already present
+            
             if (!unreadIds.includes(messageId)) {
                 unreadIds.push(messageId);
                 localStorage.setItem(storageKey, JSON.stringify(unreadIds));
@@ -487,7 +502,7 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Periodically send batched read requests to the server
+    
     function startReadBatchSync() {
         setInterval(async () => {
             try {
@@ -515,22 +530,22 @@ export const useChatStore = defineStore('chat', () => {
                     })
                 });
                 if (response.ok) {
-                    // Clear sent IDs from localStorage
+                    
                     localStorage.setItem(storageKey, JSON.stringify([]));
                 } else {
-                    // Optionally handle retry/backoff
+                    
                     console.warn('[ChatStore] Failed to batch mark messages as read:', response.status);
                 }
             } catch (err) {
                 console.error('[ChatStore] Error in batch read sync:', err);
             }
-        }, 5000); // every 5 seconds
+    }, 5000); 
     }
 
-    // Start the batch sync when the store is initialized
+    
     startReadBatchSync();
 
-    // Send typing indicator
+    
     function sendTypingIndicator(isTyping) {
         console.log('[ChatStore] Sending typing indicator:', { isTyping, connected: connected.value });
         if (ws.value && connected.value) {
@@ -545,7 +560,7 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Send ping
+    
     function sendPing() {
         if (ws.value && connected.value) {
             ws.value.send(JSON.stringify({
@@ -554,7 +569,7 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Helper functions
+    
     function updateMessageReadBy(messageId, readBy) {
         const messageIndex = messages.value.findIndex(msg => msg.id === messageId);
         if (messageIndex !== -1) {
@@ -575,7 +590,7 @@ export const useChatStore = defineStore('chat', () => {
         
         console.log('[ChatStore] Typing status update:', { userId, isTyping, currentUser: userData?.id });
         
-        // Don't show typing indicator for current user
+        
         if (userData && userId === userData.id) {
             console.log('[ChatStore] Ignoring typing status for current user');
             return;
@@ -597,7 +612,7 @@ export const useChatStore = defineStore('chat', () => {
         console.log('[ChatStore] Current typing users:', typingUsers.value);
     }
 
-    // Clear all data
+    
     function clearChat() {
         disconnectFromChannel();
         messages.value = [];
@@ -606,13 +621,13 @@ export const useChatStore = defineStore('chat', () => {
         typingUsers.value = [];
     }
 
-    // Handle new message notification
+    
     async function handleNewMessageNotification(message) {
         try {
             const authStore = useAuthStore();
             const userData = authStore.getUserData();
             
-            // Don't show notification for own messages
+            
             if (userData && message.sender.id === userData.id) {
                 console.log('[ChatStore] Skipping notification for own message');
                 return;
@@ -621,7 +636,7 @@ export const useChatStore = defineStore('chat', () => {
             console.log('[ChatStore] Checking notification conditions...');
             console.log('[ChatStore] Page visibility - hidden:', document.hidden, 'focused:', document.hasFocus());
             
-            // Use notification manager instead of composable to avoid Vue context issues
+            
             const notificationManager = (await import('../utils/notificationManager')).default;
             
             console.log('[ChatStore] Notification settings:');
@@ -630,13 +645,13 @@ export const useChatStore = defineStore('chat', () => {
             console.log('  - Permission:', notificationManager.permission);
             console.log('  - Should show:', notificationManager.shouldShowNotification());
             
-            // Show notification if enabled and supported
+            
             if (notificationManager.isSupported && notificationManager.isEnabled) {
                 console.log('[ChatStore] Attempting to show notification for message:', message);
                 
                 const notification = notificationManager.showMessageNotification(message, currentChannelName.value);
                 
-                // Handle notification click to focus the tab
+                
                 if (notification) {
                     console.log('[ChatStore] Notification created successfully');
                     notification.onclick = () => {
@@ -655,7 +670,7 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Handle successful background sync
+    
     function handleBackgroundSyncSuccess(pendingId) {
         const pendingIndex = messages.value.findIndex(msg => msg.id === pendingId);
         if (pendingIndex !== -1) {

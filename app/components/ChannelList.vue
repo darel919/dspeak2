@@ -17,6 +17,12 @@
                 Room Settings
               </a>
             </li>
+            <li v-if="isRoomOwnerOrAdmin">
+              <a @click="handleDeleteRoom" class="text-error cursor-pointer hover:bg-error/20">Delete Room</a>
+            </li>
+            <li v-else>
+              <a @click="handleLeaveRoom" class="text-warning cursor-pointer hover:bg-warning/20">Leave Room</a>
+            </li>
           </div>
         </div>
       </div>
@@ -227,6 +233,7 @@
 <script setup>
 import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'
+import { useRoomsStore } from '../stores/rooms'
 
 const props = defineProps({
   room: {
@@ -243,25 +250,44 @@ const emit = defineEmits(['channel-selected'])
 
 const channelsStore = useChannelsStore()
 const authStore = useAuthStore()
-
-// Reactive state
+const roomsStore = useRoomsStore()
 const showCreateChannel = ref(false)
 const showEditChannel = ref(false)
 const editingChannel = ref(null)
 const unreadCounts = ref([])
-
-// New channel form
 const newChannelName = ref('')
 const newChannelDesc = ref('')
 const newChannelType = ref('text')
 const newChannelBitrate = ref(64)
-
-// Computed properties
 const textChannels = computed(() => channelsStore.getTextChannels())
 const voiceChannels = computed(() => channelsStore.getMediaChannels())
 const currentUserId = computed(() => authStore.getUserData()?.id)
+const isRoomOwnerOrAdmin = computed(() => {
+  if (!props.room || !props.room.owner) return false
+  return props.room.owner.id === currentUserId.value
+})
+async function handleDeleteRoom() {
+  if (!props.room || !props.room.id) return
+  if (!confirm(`Are you sure you want to delete the room "${props.room.name}"? This cannot be undone.`)) return
+  try {
+    await roomsStore.deleteRoom(props.room.id)
+    navigateTo('/')
+  } catch (err) {
+    console.error('Failed to delete room:', err)
+  }
+}
 
-// Methods
+async function handleLeaveRoom() {
+  if (!props.room || !props.room.id) return
+  if (!confirm(`Are you sure you want to leave the room "${props.room.name}"?`)) return
+  try {
+    await roomsStore.leaveRoom(props.room.id)
+    navigateTo('/')
+  } catch (err) {
+    console.error('Failed to leave room:', err)
+  }
+}
+
 async function loadChannels() {
   try {
     await channelsStore.fetchChannels(props.room.id)
@@ -287,6 +313,9 @@ function getUnreadCount(channelId) {
 
 function selectChannel(channel) {
   emit('channel-selected', channel)
+  if (props.room && channel && channel.id) {
+    navigateTo(`/room/${props.room.id}/${channel.id}`)
+  }
 }
 
 async function handleCreateChannel() {
@@ -302,7 +331,6 @@ async function handleCreateChannel() {
     closeCreateModal()
   } catch (error) {
     console.error('Failed to create channel:', error)
-    // You could show an error toast here
   }
 }
 
@@ -331,7 +359,6 @@ async function deleteChannel(channel) {
 }
 
 function canDeleteChannel(channel) {
-  // Can delete if user is channel owner or room owner
   return channel.owner?.id === currentUserId.value || props.room.owner?.id === currentUserId.value
 }
 
@@ -354,12 +381,9 @@ function goToRoomSettings() {
   }
 }
 
-// Lifecycle
 onMounted(() => {
   loadChannels()
 })
-
-// Watch for room changes
 watch(() => props.room.id, () => {
   if (props.room.id) {
     loadChannels()

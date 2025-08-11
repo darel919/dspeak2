@@ -7,8 +7,8 @@
                 </div>
         </section>
 
-        <section v-else class="min-h-screen bg-base-100">
-            <div class="h-screen">
+        <section v-else class="min-h-screen-minus-navbar bg-base-100">
+            <div class="h-screen-minus-navbar">
                 <div class="h-full flex">
                     <!-- Desktop Layout -->
                     <div v-if="!isMobile" class="flex w-full">

@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-base-100">
+  <div class="min-h-screen-minus-navbar flex items-center justify-center bg-base-100">
     <div class="max-w-md w-full mx-4">
       <div class="card bg-base-100 shadow-xl border border-base-200">
         <div class="card-body text-center">

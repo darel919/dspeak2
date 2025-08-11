@@ -221,7 +221,7 @@ function getAvatarUrl(avatarPath) {
   
   if (avatarPath.startsWith('http')) return avatarPath
   
-  const apiPath = config.public.apiPath
-  return `${apiPath}/files/${avatarPath}`
+  const apiPath = config.public.baseApiPath
+  return `${apiPath}/${avatarPath}`
 }
 </script>

@@ -14,6 +14,10 @@
 	--color-accent5: #161f30;
 }
 
+:root {
+	--navbar-height: 4.5rem; /* 80px - adjust as needed */
+}
+
 @font-face {
 	font-family: 'Caprasimo';
 	src: url('/font/Caprasimo-Regular.woff') format('woff');
@@ -61,3 +65,12 @@ body {
 .text-accent-3 { color: var(--color-accent3); }
 .text-accent-4 { color: var(--color-accent4); }
 .text-accent-5 { color: var(--color-accent5); }
+
+/* Layout utilities for proper viewport handling */
+.h-screen-minus-navbar {
+	height: calc(100vh - var(--navbar-height));
+}
+
+.min-h-screen-minus-navbar {
+	min-height: calc(100vh - var(--navbar-height));
+}

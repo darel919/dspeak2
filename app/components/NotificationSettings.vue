@@ -115,8 +115,6 @@ async function handleToggle(event) {
     
     if (enabled && result) {
       success('Notifications enabled! You\'ll receive alerts for new messages.')
-      
-      // Also ensure push subscription is available
       if (pushSub.isSupported.value && !pushSub.isSubscribed.value) {
         try {
           await pushSub.subscribe()
@@ -145,8 +143,7 @@ async function handleToggle(event) {
       event.target.checked = false
     } else {
       info('Notifications disabled.')
-      
-      // Also unsubscribe from push notifications if they're disabled
+
       if (pushSub.isSubscribed.value) {
         try {
           await pushSub.unsubscribe()

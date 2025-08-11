@@ -41,19 +41,13 @@ const isAuthenticated = computed(() => {
 })
 
 const isAuthPage = computed(() => route.path === '/auth')
-
-// Get notification composable for checking if we should show warning
 const { isSupported, permission, isEnabled } = useNotifications()
 
-// Only show notification warning when there are actual problems
 const shouldShowNotificationWarning = computed(() => {
   if (!isSupported.value) return false
-  
-  // Show warning only if notifications are blocked/denied
   return permission.value === 'denied'
 })
 
-// Presence connection logic
 const userId = computed(() => {
   const user = authStore.getUserData()
   console.log('[Init] Computing userId:', user?.id)
@@ -63,17 +57,14 @@ const { status: presenceStatus, connect: connectPresence, disconnect: disconnect
 provide('presenceStatus', presenceStatus)
 
 onMounted(async () => {
-  // Only check auth if not on /auth page and token exists
   if (!isAuthPage.value && localStorage.getItem('token')) {
     await checkAuth()
-    // Automatically request notification permission on app start if user is authenticated
     if (authChecked.value) {
       await requestNotificationPermissionAutomatically()
     }
   } else {
     authChecked.value = true
   }
-  // Always send user ID to service worker on page load
   sendUserIdToServiceWorker()
 })
 
@@ -110,13 +101,10 @@ function sendUserIdToServiceWorker() {
     }
   }
 }
-
-// Watch for authentication changes to fetch rooms
 watch(() => authStore.getUserData(), async (userData) => {
   if (userData && !isAuthPage.value) {
     console.log('[Init] User authenticated, fetching rooms')
     await roomsStore.fetchRooms()
-    // Also send user ID to service worker after login/auth
     sendUserIdToServiceWorker()
   }
 })
@@ -129,7 +117,6 @@ watch(() => route.path, async () => {
 
 async function requestNotificationPermissionAutomatically() {
   try {
-    // Use notification manager for more reliable initialization
     const notificationManager = (await import('../utils/notificationManager')).default
     
     console.log('[Init] Notification manager state:', {
@@ -138,7 +125,6 @@ async function requestNotificationPermissionAutomatically() {
       enabled: notificationManager.isEnabled
     })
     
-    // Automatically request permission if it's the first time (default state)
     if (notificationManager.isSupported && notificationManager.permission === 'default') {
       console.log('[Init] Requesting notification permission automatically')
       await notificationManager.requestPermission()
@@ -149,7 +135,7 @@ async function requestNotificationPermissionAutomatically() {
 }
 
 async function checkAuth() {
-  // Always skip auth check on auth page
+
   if (route.path === '/auth') {
     authChecked.value = true
     return
@@ -161,12 +147,10 @@ async function checkAuth() {
     const isValid = await authStore.verifyToken(savedToken)
     if (isValid) {
       authChecked.value = true
-      // Fetch rooms after successful authentication
       await roomsStore.fetchRooms()
       return
     }
     authStore.clearAuth()
-    // After logout, redirect to home, not /auth
     if (route.path !== '/') {
       router.push('/')
     }
@@ -174,7 +158,6 @@ async function checkAuth() {
     return
   }
 
-  // Only redirect to /auth if user is trying to access a protected page
   if (route.path !== '/' && route.path !== '/auth') {
     router.push('/')
   }
