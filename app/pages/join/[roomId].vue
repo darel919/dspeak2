@@ -109,6 +109,10 @@ const error = ref(null)
 const initialized = ref(false) // Add initialization flag
 
 onMounted(async () => {
+  console.log('[JoinRoom] Component mounted - Route params:', route.params)
+  console.log('[JoinRoom] Room ID:', roomId.value)
+  console.log('[JoinRoom] Current URL:', window.location.href)
+  
   // First check if user is authenticated from localStorage
   await checkAuthentication()
   await attemptJoin()
@@ -155,6 +159,10 @@ async function attemptJoin() {
     if (!userData || !userData.id) {
       console.log('[JoinRoom] User not authenticated, redirecting to auth page')
       loadingMessage.value = 'Redirecting to login...'
+      // Save the current full URL so we can return here after auth
+      const currentUrl = window.location.href
+      localStorage.setItem('redirectAfterAuth', currentUrl)
+      console.log('[JoinRoom] Saved redirect URL:', currentUrl)
       setTimeout(() => {
         router.push('/auth')
       }, 1500)

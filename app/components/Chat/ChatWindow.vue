@@ -27,8 +27,8 @@
         
         <div class="flex items-center gap-2">
           <!-- Online members count for channel -->
-          <div v-if="channel?.inRoom" class="badge badge-ghost badge-sm">
-            {{ channel.inRoom.length }} online
+          <div v-if="onlineUsers?.length > 0" class="badge badge-ghost badge-sm">
+            {{ onlineUsers.length }} online
           </div>
           <!-- Room members count -->
           <!-- <div v-if="room?.members" class="badge badge-outline badge-sm">

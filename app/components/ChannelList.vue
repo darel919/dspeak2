@@ -17,6 +17,9 @@
                 Room Settings
               </a>
             </li>
+            <li>
+              <a @click="handleCopyInviteLink" class="cursor-pointer hover:bg-base-200">Copy Invite Link</a>
+            </li>
             <li v-if="isRoomOwnerOrAdmin">
               <a @click="handleDeleteRoom" class="text-error cursor-pointer hover:bg-error/20">Delete Room</a>
             </li>
@@ -234,6 +237,23 @@
 import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'
 import { useRoomsStore } from '../stores/rooms'
+
+import { useChatUtils } from '../composables/useChatUtils'
+import { useToast } from '../composables/useToast'
+const { copyToClipboard } = useChatUtils()
+const { success, error } = useToast()
+// Copies the invite link for the current room to clipboard
+async function handleCopyInviteLink() {
+  if (!props.room || !props.room.id) return
+  const baseUrl = window.location.origin
+  const inviteLink = `${baseUrl}/join/${props.room.id}`
+  const copied = await copyToClipboard(inviteLink)
+  if (copied) {
+    success('Link successfully copied to clipboard.')
+  } else {
+    error('Failed to copy invite link')
+  }
+}
 
 const props = defineProps({
   room: {

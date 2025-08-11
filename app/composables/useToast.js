@@ -1,23 +1,27 @@
+
+// Module-level singleton for global toast state
+const toasts = ref([])
+
 export function useToast() {
-  const toasts = ref([])
 
   function addToast(type, message, duration = 3000) {
-    const id = Date.now() + Math.random()
+    let id = Date.now()
+    // Ensure uniqueness if called rapidly
+    while (toasts.value.some(t => t.id === id)) {
+      id++
+    }
     const toast = {
       id,
       type,
       message,
       duration
     }
-    
     toasts.value.push(toast)
-    
     if (duration > 0) {
       setTimeout(() => {
         removeToast(id)
       }, duration)
     }
-    
     return id
   }
 

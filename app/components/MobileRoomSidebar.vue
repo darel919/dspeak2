@@ -271,8 +271,11 @@ async function selectRoom(room) {
 }
 
 function hasActivity(room) {
-  return 0
-  // return Math.random() > 0.7
+  // Only show activity if there is at least one other member (not the current user) who is online
+  if (!room.members || !Array.isArray(room.members)) return false
+  // Try to get current user id from store, fallback to null
+  const currentUserId = roomsStore?.$state?.authUserId || null
+  return room.members.some(member => member.id !== currentUserId && member.online === true)
 }
 
 function closeJoinModal() {

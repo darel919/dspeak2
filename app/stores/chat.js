@@ -242,21 +242,18 @@ export const useChatStore = defineStore('chat', () => {
     function handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
-            
             switch (data.type) {
                 case 'connected':
                     console.log('[ChatStore] Connection confirmed:', data.data);
                     break;
                 case 'new_message':
                     console.log('[ChatStore] New message received:', data.data);
-                    
                     const existingMessage = messages.value.find(msg => msg.id === data.data.id);
                     if (existingMessage) {
                         console.log('[ChatStore] Duplicate message detected, skipping:', data.data.id);
                         break;
                     }
                     messages.value.push(data.data);
-                    
                     handleNewMessageNotification(data.data);
                     break;
                 case 'message_updated':
@@ -269,7 +266,6 @@ export const useChatStore = defineStore('chat', () => {
                     break;
                 case 'channel_updated':
                     console.log('[ChatStore] Channel updated:', data.data);
-                    
                     break;
                 case 'channel_deleted':
                     console.log('[ChatStore] Channel deleted:', data.data);
@@ -280,16 +276,15 @@ export const useChatStore = defineStore('chat', () => {
                     updateTypingStatus(data.data.userId, data.data.isTyping);
                     break;
                 case 'pong':
-                    
-                    
-                    
-                
+                    break;
                 case 'currentlyInChannel':
+                case 'currentlyInRoom':
+                    console.log('[ChatStore] Received online users update:', data.inRoom);
                     if (Array.isArray(data.inRoom)) {
-                        
                         onlineUsers.value = data.inRoom.map(u =>
                             typeof u === 'string' ? { id: u } : u
                         );
+                        console.log('[ChatStore] Updated onlineUsers:', onlineUsers.value);
                     }
                     break;
                 case 'user_joined':

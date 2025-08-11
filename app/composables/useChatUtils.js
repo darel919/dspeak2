@@ -122,8 +122,10 @@ export const useChatUtils = () => {
   /**
    * Generate a temporary message ID for optimistic updates
    */
-  function generateTempId() {
-    return `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  function generateTempId(userId = '') {
+    // Use timestamp and userId for uniqueness, no random or mock
+    const ts = Date.now()
+    return `msg_${userId ? userId + '_' : ''}${ts}`
   }
 
   /**

@@ -290,8 +290,11 @@
           </svg>
         </button>
         <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
-          <li><a @click="showJoinModal = true">Join Room</a></li>
-          <li><a @click="showCreateModal = true">Create Room</a></li>
+            <li><a @click="showJoinModal = true">Join Room</a></li>
+            <li><a @click="showCreateModal = true">Create Room</a></li>
+            <li>
+              <a @click="handleCopyInviteLink" :class="{ 'disabled': !selectedRoom }">Copy Invite Link</a>
+            </li>
         </div>
       </div>
     </div>
@@ -336,13 +339,23 @@
 
 
 <script setup>
-import { useRuntimeConfig } from '#app'
-import { useRoomsStore } from '../stores/rooms'
-import { useAuthStore } from '../stores/auth'
-import { formatTime } from '../composables/useTimeUtils'
-import { useToast } from '../composables/useToast'
+
+import { useChatUtils } from '../composables/useChatUtils'
 
 const config = useRuntimeConfig()
+const { copyToClipboard } = useChatUtils()
+// Copies the invite link for the currently selected room to clipboard
+async function handleCopyInviteLink() {
+  if (!selectedRoom.value) return
+  const baseUrl = window.location.origin
+  const inviteLink = `${baseUrl}/join/${selectedRoom.value.id}`
+  const copied = await copyToClipboard(inviteLink)
+  if (copied) {
+    success('Invite link copied!')
+  } else {
+    error('Failed to copy invite link')
+  }
+}
 
 function getRoomPictureUrl(room) {
   if (room.picture) {
@@ -412,10 +425,10 @@ onMounted(() => {
 })
 
 function hasActivity(room) {
-  const hasCurrentUser = room.members?.some(member => member.id === getCurrentUserId())
-  const simulatedActivity = room.id && (parseInt(room.id, 36) % 3 === 0)
-  
-  return hasCurrentUser && simulatedActivity
+  // Only show activity if there is at least one other member (not the current user) who is online
+  if (!room.members || !Array.isArray(room.members)) return false
+  const currentUserId = getCurrentUserId()
+  return room.members.some(member => member.id !== currentUserId && member.online === true)
 }
 
 function getCurrentUserId() {
