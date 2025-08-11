@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col h-full bg-base-200">
     <!-- Channel list header -->
-    <div class="p-4 border-b border-base-300">
+    <div class="p-4 border-base-300">
       <div class="flex items-center justify-between">
         <h3 class="font-semibold text-lg">{{ room?.name || 'Channels' }}</h3>
         <div class="dropdown dropdown-end">

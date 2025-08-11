@@ -5,7 +5,7 @@
         <!-- Desktop Layout -->
         <div v-if="!isMobile" class="flex w-full">
           <!-- Channel List Sidebar -->
-          <div class="w-64 border-r border-base-300">
+          <div class="w-64 border-base-300">
             <ChannelList
               v-if="room"
               :room="room"
@@ -64,7 +64,6 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRoomsStore } from '../../../../stores/rooms'
 import { useChannelsStore } from '../../../../stores/channels'
 import ChatWindow from '../../../../components/Chat/ChatWindow.vue'

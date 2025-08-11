@@ -1,7 +1,7 @@
 <template>
   <div class="h-full bg-base-200 flex flex-col">
     <!-- Sidebar Header -->
-    <div class="p-4 border-b border-base-300">
+    <div class="p-4 border-base-300">
       <h2 class="text-lg font-semibold">Rooms</h2>
     </div>
 
@@ -229,7 +229,6 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch } from 'vue'
 import { useRoomsStore } from '../stores/rooms'
 import { useToast } from '../composables/useToast'
 const config = useRuntimeConfig()

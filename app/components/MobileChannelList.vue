@@ -1,7 +1,7 @@
 <template>
   <div class="h-full bg-base-200 flex flex-col">
     <!-- Header with back button -->
-    <div class="p-4 border-b border-base-300">
+    <div class="p-4 border-base-300">
       <div class="flex items-center gap-3">
         <button 
           @click="$emit('back')"
@@ -148,7 +148,6 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
 import { useChannelsStore } from '../stores/channels'
 
 const props = defineProps({

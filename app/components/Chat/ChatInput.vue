@@ -85,6 +85,13 @@ const isTyping = ref(false)
 const typingTimeout = ref(null)
 
 const chatTextarea = ref(null)
+onMounted(() => {
+  nextTick(() => {
+    if (chatTextarea.value) {
+      chatTextarea.value.focus()
+    }
+  })
+})
 
 async function handleSendMessage() {
   if (!messageText.value.trim()) {

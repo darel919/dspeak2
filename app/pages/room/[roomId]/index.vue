@@ -18,7 +18,6 @@
 </template>
 
 <script setup>
-import { computed, watchEffect, ref, onMounted, onUnmounted } from 'vue'
 import { useRoomsStore } from '../../../stores/rooms'
 import { useChannelsStore } from '../../../stores/channels'
 import MobileChannelList from '../../../components/MobileChannelList.vue'

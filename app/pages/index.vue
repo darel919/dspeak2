@@ -13,7 +13,7 @@
                     <!-- Desktop Layout -->
                     <div v-if="!isMobile" class="flex w-full">
                         <!-- Channel List Sidebar (desktop only) -->
-                        <div v-if="selectedRoom" class="w-64 border-r border-base-300">
+                        <div v-if="selectedRoom" class="w-64 border-base-300">
                             <ChannelList
                                 :room="selectedRoom"
                                 :selected-channel-id="selectedChannelId"
@@ -100,7 +100,6 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRoomsStore } from '../stores/rooms'
 import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'

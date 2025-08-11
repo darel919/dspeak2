@@ -1,7 +1,7 @@
 <template>
   <div v-if="!channel?.isMedia" class="flex flex-col h-full bg-base-100">
     <!-- Chat Header -->
-    <div class="bg-base-200 border-b border-base-300 p-4">
+    <div class="bg-base-200 border-base-300 p-4">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <button 
@@ -14,17 +14,14 @@
             </svg>
           </button>
           
-          <div>
-            <h2 class="font-semibold text-lg">
-              # {{ channel?.name || 'Channel' }}
-            </h2>
-            <p v-if="channel?.desc" class="text-sm text-base-content/60">{{ channel.desc }}</p>
+          <div class="flex flex-col sm:flex-row items-start sm:items-center gap-0 sm:gap-3">
             <!-- Channel type indicator -->
-            <div class="text-xs text-base-content/50 mt-1">
-              <span v-if="channel?.isMedia" class="badge badge-warning badge-sm">Voice Channel</span>
-              <span v-else class="badge badge-info badge-sm">Text Channel</span>
-              <span class="ml-2">{{ room?.name || 'Room' }}</span>
-            </div>
+            <span v-if="channel?.isMedia" class="badge badge-warning badge-sm rounded-xs">Voice Channel</span>
+            <span v-else class="badge badge-info badge-sm rounded-xs">Text Channel</span>
+            <p class="font-semibold text-md" :title="channel?.desc || 'No description'">
+              #{{ channel?.name || 'Channel' }}
+            </p>
+            <p class="text-sm opacity-40">{{ room?.name || 'Room' }}</p>
           </div>
         </div>
         
