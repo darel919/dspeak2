@@ -1,5 +1,5 @@
 // BackgroundWorker.js
-// Handles message queueing and background sync for chat
+// Handles message queueing and background sync for chat (channel-based)
 
 const DB_NAME = 'chat-bg-worker';
 const STORE_NAME = 'messageQueue';

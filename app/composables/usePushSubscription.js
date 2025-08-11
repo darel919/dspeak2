@@ -62,8 +62,8 @@ export function usePushSubscription() {
     }
   }
   
-  async function subscribe(roomId = null) {
-    console.log('[PushSubscription] subscribe called for room:', roomId)
+  async function subscribe() {
+    console.log('[PushSubscription] subscribe called (global)')
     if (!checkSupport()) {
       console.warn('[PushSubscription] Browser does not support push notifications')
       throw new Error('Push notifications are not supported')
@@ -162,7 +162,7 @@ export function usePushSubscription() {
     }
   }
   
-  async function unsubscribe(roomId = null) {
+  async function unsubscribe() {
     if (!subscription.value) {
       console.log('[PushSubscription] No subscription to unsubscribe from')
       return true
@@ -207,18 +207,18 @@ export function usePushSubscription() {
     }
   }
   
-  async function updateSubscription(roomId) {
-    console.log('[PushSubscription] updateSubscription called for room:', roomId)
+  async function updateSubscription() {
+    console.log('[PushSubscription] updateSubscription called (global)')
     try {
       const existingSubscription = await getExistingSubscription()
       console.log('[PushSubscription] existingSubscription:', existingSubscription)
       
       if (existingSubscription) {
-        console.log('[PushSubscription] Updating existing subscription for room:', roomId)
-        await subscribe(roomId)
+        console.log('[PushSubscription] Updating existing global subscription')
+        await subscribe()
       } else {
-        console.log('[PushSubscription] Creating new subscription for room:', roomId)
-        await subscribe(roomId)
+        console.log('[PushSubscription] Creating new global subscription')
+        await subscribe()
       }
     } catch (err) {
       console.error('[PushSubscription] Error updating subscription:', err)

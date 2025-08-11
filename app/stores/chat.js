@@ -9,12 +9,12 @@ export const useChatStore = defineStore('chat', () => {
     const error = ref(null);
     const ws = ref(null);
     const connected = ref(false);
+    const currentChannelId = ref(null);
+    const currentChannelName = ref(null);
     const currentRoomId = ref(null);
     const onlineUsers = ref([]);
     const typingUsers = ref([]);
     const config = useRuntimeConfig();
-    // Notification-related state
-    const currentRoomName = ref(null);
     let reconnectInterval = null;
     let reconnectTimer = null;
 
@@ -130,8 +130,8 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    async function connectToRoom(roomId, roomName = null) {
-        disconnectFromRoom();
+    async function connectToChannel(channelId, channelName = null, roomId = null) {
+        disconnectFromChannel();
         try {
             const authStore = useAuthStore();
             const userData = authStore.getUserData();
@@ -139,32 +139,27 @@ export const useChatStore = defineStore('chat', () => {
                 throw new Error('User not authenticated');
             }
 
+            currentChannelId.value = channelId;
+            currentChannelName.value = channelName;
             currentRoomId.value = roomId;
-            currentRoomName.value = roomName;
-            await fetchMessages(roomId);
+            await fetchMessages(channelId);
 
             // Connect to chat WebSocket
             const websocketPath = config.public.websocketPath;
-            const wsUrl = `${websocketPath}/chat/socket?roomId=${roomId}&auth=${encodeURIComponent(userData.id)}`;
+            const wsUrl = `${websocketPath}/chat/socket?channelId=${channelId}&auth=${encodeURIComponent(userData.id)}`;
             ws.value = new WebSocket(wsUrl);
 
             ws.value.onopen = () => {
                 connected.value = true;
-                console.log(`[ChatStore] Connected to room ${roomId}`);
+                console.log(`[ChatStore] Connected to channel ${channelId}`);
                 if (reconnectInterval) {
                     clearInterval(reconnectInterval);
                     reconnectInterval = null;
                 }
                 // Refetch messages after reconnect
-                if (currentRoomId.value) {
-                    fetchMessages(currentRoomId.value);
+                if (currentChannelId.value) {
+                    fetchMessages(currentChannelId.value);
                 }
-                // Request current online members for this room after a short delay to avoid race condition
-                setTimeout(() => {
-                    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-                        ws.value.send(JSON.stringify({ type: 'currentlyInRoom', roomId: currentRoomId.value }));
-                    }
-                }, 100);
             };
 
             ws.value.onmessage = handleWebSocketMessage;
@@ -173,11 +168,11 @@ export const useChatStore = defineStore('chat', () => {
                 connected.value = false;
                 console.log('[ChatStore] WebSocket connection closed');
                 // Start reconnect attempts every 7 seconds
-                if (!reconnectInterval && currentRoomId.value) {
+                if (!reconnectInterval && currentChannelId.value) {
                     reconnectInterval = setInterval(() => {
-                        if (!connected.value && currentRoomId.value) {
+                        if (!connected.value && currentChannelId.value) {
                             console.log('[ChatStore] Attempting to reconnect...');
-                            connectToRoom(currentRoomId.value, currentRoomName.value);
+                            connectToChannel(currentChannelId.value, currentChannelName.value, currentRoomId.value);
                         }
                     }, 7000);
                 }
@@ -188,14 +183,14 @@ export const useChatStore = defineStore('chat', () => {
                 error.value = 'WebSocket connection failed';
             };
 
-            // Ensure push subscription is active for this room
+            // Ensure push subscription is active (global subscription)
             if (typeof window !== 'undefined') {
                 try {
                     const { usePushSubscription } = await import('../composables/usePushSubscription')
                     const { updateSubscription, isSupported, isSubscribed } = usePushSubscription()
                     if (isSupported.value && !isSubscribed.value) {
-                        await updateSubscription(roomId)
-                        console.log('[ChatStore] Push subscription updated for room:', roomId)
+                        await updateSubscription()
+                        console.log('[ChatStore] Push subscription updated (global)')
                     }
                 } catch (err) {
                     console.warn('[ChatStore] Failed to update push subscription:', err)
@@ -203,11 +198,11 @@ export const useChatStore = defineStore('chat', () => {
             }
         } catch (err) {
             error.value = err.message;
-            console.error('[ChatStore] Error connecting to room:', err);
+            console.error('[ChatStore] Error connecting to channel:', err);
         }
     }
 
-    function disconnectFromRoom() {
+    function disconnectFromChannel() {
         if (ws.value) {
             ws.value.close();
             ws.value = null;
@@ -217,12 +212,13 @@ export const useChatStore = defineStore('chat', () => {
             reconnectInterval = null;
         }
         connected.value = false;
+        currentChannelId.value = null;
+        currentChannelName.value = null;
         currentRoomId.value = null;
-        currentRoomName.value = null;
         messages.value = [];
         onlineUsers.value = [];
         typingUsers.value = [];
-        console.log('[ChatStore] Disconnected from room and cleared state');
+        console.log('[ChatStore] Disconnected from channel and cleared state');
     }
 
 
@@ -256,13 +252,13 @@ export const useChatStore = defineStore('chat', () => {
                     console.log('[ChatStore] Message deleted:', data.data);
                     removeMessage(data.data.id);
                     break;
-                case 'room_updated':
-                    console.log('[ChatStore] Room updated:', data.data);
-                    // Handle room updates if needed
+                case 'channel_updated':
+                    console.log('[ChatStore] Channel updated:', data.data);
+                    // Handle channel updates if needed
                     break;
-                case 'room_deleted':
-                    console.log('[ChatStore] Room deleted:', data.data);
-                    disconnectFromRoom();
+                case 'channel_deleted':
+                    console.log('[ChatStore] Channel deleted:', data.data);
+                    disconnectFromChannel();
                     break;
                 case 'user_typing':
                     console.log('[ChatStore] User typing status:', data.data);
@@ -273,7 +269,7 @@ export const useChatStore = defineStore('chat', () => {
                     // Handle pong response
                     break;
                 // --- Presence events now handled here ---
-                case 'currentlyInRoom':
+                case 'currentlyInChannel':
                     if (Array.isArray(data.inRoom)) {
                         // Normalize to array of objects with id
                         onlineUsers.value = data.inRoom.map(u =>
@@ -283,11 +279,6 @@ export const useChatStore = defineStore('chat', () => {
                     break;
                 case 'user_joined':
                 case 'user_left':
-                    // Always re-request currentlyInRoom to ensure onlineUsers stays in sync
-                    if (ws.value && ws.value.readyState === WebSocket.OPEN && currentRoomId.value) {
-                        ws.value.send(JSON.stringify({ type: 'currentlyInRoom', roomId: currentRoomId.value }));
-                    }
-                    break;
                 default:
                     console.log('[ChatStore] Unknown message type:', data.type, data);
             }
@@ -296,8 +287,8 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    // Fetch messages for a room
-    async function fetchMessages(roomId) {
+    // Fetch messages for a channel
+    async function fetchMessages(channelId) {
         loading.value = true;
         error.value = null;
         
@@ -310,7 +301,7 @@ export const useChatStore = defineStore('chat', () => {
             }
 
             const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/chat/messages?roomId=${roomId}`, {
+            const response = await fetch(`${apiPath}/chat/messages?channelId=${channelId}`, {
                 headers: {
                     'Authorization': userData.id,
                     'Content-Type': 'application/json'
@@ -361,7 +352,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // Send a message
-    async function sendMessage(roomId, content) {
+    async function sendMessage(channelId, content) {
         try {
             const authStore = useAuthStore();
             const userData = authStore.getUserData();
@@ -373,7 +364,7 @@ export const useChatStore = defineStore('chat', () => {
             const pendingMessage = {
                 id: `pending_${Date.now()}`,
                 content,
-                room: roomId,
+                room_channel: channelId,
                 sender: {
                     id: userData.id,
                     name: userData.name || 'You',
@@ -392,7 +383,7 @@ export const useChatStore = defineStore('chat', () => {
                 // Queue message for background sync
                 const queuedMessage = {
                     id: Date.now(),
-                    roomId,
+                    channelId,
                     content,
                     sender: userData.id,
                     pendingId: pendingMessage.id // Link to pending message
@@ -424,7 +415,7 @@ export const useChatStore = defineStore('chat', () => {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        roomId,
+                        channelId,
                         content
                     })
                 });
@@ -446,7 +437,7 @@ export const useChatStore = defineStore('chat', () => {
                 // If failed, queue for background sync but keep pending message
                 const queuedMessage = {
                     id: Date.now(),
-                    roomId,
+                    channelId,
                     content,
                     sender: userData.id,
                     pendingId: pendingMessage.id
@@ -608,7 +599,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // Clear all data
     function clearChat() {
-        disconnectFromRoom();
+        disconnectFromChannel();
         messages.value = [];
         error.value = null;
         onlineUsers.value = [];
@@ -643,7 +634,7 @@ export const useChatStore = defineStore('chat', () => {
             if (notificationManager.isSupported && notificationManager.isEnabled) {
                 console.log('[ChatStore] Attempting to show notification for message:', message);
                 
-                const notification = notificationManager.showMessageNotification(message, currentRoomName.value);
+                const notification = notificationManager.showMessageNotification(message, currentChannelName.value);
                 
                 // Handle notification click to focus the tab
                 if (notification) {
@@ -677,12 +668,13 @@ export const useChatStore = defineStore('chat', () => {
         loading,
         error,
         connected,
+        currentChannelId,
+        currentChannelName,
         currentRoomId,
-        currentRoomName,
         onlineUsers,
         typingUsers,
-        connectToRoom,
-        disconnectFromRoom,
+        connectToChannel,
+        disconnectFromChannel,
         fetchMessages,
         sendMessage,
         markMessageAsRead,

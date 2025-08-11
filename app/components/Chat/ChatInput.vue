@@ -62,7 +62,7 @@
 import { useChatStore } from '../../stores/chat'
 
 const props = defineProps({
-  roomId: {
+  channelId: {
     type: String,
     required: true
   },
@@ -101,7 +101,7 @@ async function handleSendMessage() {
     chatStore.sendTypingIndicator(false)
     isTyping.value = false
   }
-  chatStore.sendMessage(props.roomId, content)
+  chatStore.sendMessage(props.channelId, content)
     .then(result => {
       if (result.status && result.status.includes('queued')) {
         console.log('Message queued for background sync')

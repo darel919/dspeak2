@@ -15,40 +15,26 @@
           </button>
           
           <div>
-            <h2 
-              class="font-semibold text-lg cursor-pointer hover:underline"
-              @click="goToRoomDetails"
-            >
-              {{ room?.name || 'Chat' }}
+            <h2 class="font-semibold text-lg">
+              # {{ channel?.name || 'Channel' }}
             </h2>
-            <!-- <p v-if="room?.desc" class="text-sm text-base-content/60">{{ room.desc }}</p> -->
-            <!-- Online users with tooltips -->
+            <p v-if="channel?.desc" class="text-sm text-base-content/60">{{ channel.desc }}</p>
+            <!-- Channel type indicator -->
             <div class="text-xs text-base-content/50 mt-1">
-              <template v-if="props.room?.members && props.room.members.length > 0">
-                <span v-for="(member, index) in props.room.members" :key="member.id">
-                  <template v-if="member.id === currentUserId">
-                    <span class="font-semibold">You</span>
-                  </template>
-                  <template v-else>
-                    <span
-                      class="tooltip cursor-pointer hover:text-base-content/70 transition-colors"
-                      :data-tip="`${member.name || 'Unknown User'}${member.email ? ` (${member.email})` : ''}`"
-                      :class="onlineUsers.some(u => (u.id || u) === member.id) ? 'text-success font-semibold' : ''"
-                    >
-                      {{ member.name?.split(' ')[0] || member.name || 'Unknown' }}
-                    </span>
-                  </template>
-                  <span v-if="index < props.room.members.length - 1">, </span>
-                </span>
-              </template>
-              <span v-else>No members</span>
+              <span v-if="channel?.isMedia" class="badge badge-warning badge-sm">Voice Channel</span>
+              <span v-else class="badge badge-info badge-sm">Text Channel</span>
+              <span class="ml-2">{{ room?.name || 'Room' }}</span>
             </div>
           </div>
         </div>
         
         <div class="flex items-center gap-2">
-          <!-- Online members count -->
-          <div v-if="room?.members" class="badge badge-ghost badge-sm">
+          <!-- Online members count for channel -->
+          <div v-if="channel?.inRoom" class="badge badge-ghost badge-sm">
+            {{ channel.inRoom.length }} online
+          </div>
+          <!-- Room members count -->
+          <div v-if="room?.members" class="badge badge-outline badge-sm">
             {{ room.members.length }} members
           </div>
         </div>
@@ -121,7 +107,7 @@
 
     <!-- Chat Input -->
     <ChatInput 
-      :room-id="roomId"
+      :channel-id="channelId"
       :connected="connected"
       :typing-users="typingUsers"
       @message-sent="handleMessageSent"
@@ -144,9 +130,13 @@ import ChatInput from './ChatInput.vue'
 import MessageDetailsModal from './MessageDetailsModal.vue'
 
 const props = defineProps({
-  roomId: {
+  channelId: {
     type: String,
     required: true
+  },
+  channel: {
+    type: Object,
+    default: null
   },
   room: {
     type: Object,
@@ -208,12 +198,12 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  chatStore.disconnectFromRoom()
+  chatStore.disconnectFromChannel()
 })
 
-// Watch for room changes
-watch(() => props.roomId, async (newRoomId, oldRoomId) => {
-  if (newRoomId !== oldRoomId) {
+// Watch for channel changes
+watch(() => props.channelId, async (newChannelId, oldChannelId) => {
+  if (newChannelId !== oldChannelId) {
     await initializeChat()
   }
 })
@@ -229,11 +219,11 @@ watch(messages, () => {
 
 // Methods
 async function initializeChat() {
-  if (!props.roomId) return
+  if (!props.channelId) return
 
   try {
-    // Connect to WebSocket for real-time updates with room name
-    await chatStore.connectToRoom(props.roomId, props.room?.name)
+    // Connect to WebSocket for real-time updates with channel name
+    await chatStore.connectToChannel(props.channelId, props.channel?.name, props.room?.id)
     
     // Scroll to bottom after loading
     nextTick(() => {
@@ -289,10 +279,10 @@ function handleMessageClick(message) {
 }
 
 async function refreshMessages() {
-  if (!props.roomId) return
+  if (!props.channelId) return
   
   try {
-    await chatStore.fetchMessages(props.roomId)
+    await chatStore.fetchMessages(props.channelId)
     nextTick(() => {
       scrollToBottom()
     })
@@ -301,10 +291,7 @@ async function refreshMessages() {
   }
 }
 
-function goToRoomDetails() {
-  if (!props.room?.id) return
-  router.push({ path: '/room/details', query: { roomId: props.room.id } })
-}
+
 
 // No need for manual reconnect logic here; handled in chatStore
 </script>

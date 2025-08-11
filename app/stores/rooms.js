@@ -2,11 +2,35 @@ import { defineStore } from "pinia";
 import { useRuntimeConfig } from '#app'
 import { useAuthStore } from './auth'
 
+const rooms = ref([])
+const loading = ref(false)
+const error = ref(null)
+
 export const useRoomsStore = defineStore('rooms', () => {
-    const rooms = ref([])
-    const loading = ref(false)
-    const error = ref(null)
     const config = useRuntimeConfig()
+
+    async function updateRoom(roomId, data) {
+        const authStore = useAuthStore()
+        const userData = authStore.getUserData()
+        const apiPath = config.public.apiPath
+        if (!userData || !userData.id) throw new Error('User not authenticated')
+        if (!apiPath) throw new Error('API path is not defined')
+        const response = await fetch(`${apiPath}/room/`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': userData.id,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ roomId, ...data })
+        })
+        if (!response.ok) throw new Error('Failed to update room')
+        await fetchRooms()
+        return await response.json()
+    }
+    
+    function getRoomById(id) {
+        return Array.isArray(rooms?.value) ? rooms.value.find(room => room.id === id) : undefined
+    }
 
         async function createRoom(name, desc = "") {
             const authStore = useAuthStore()
@@ -160,13 +184,13 @@ export const useRoomsStore = defineStore('rooms', () => {
             const existingRoom = rooms.value.find(room => room.id === trimmedRoomId)
             if (existingRoom) {
                 console.log('[RoomsStore] User is already a member of this room')
-                // Still ensure push subscription is up to date
+                // Still ensure push subscription is up to date (global)
                 if (typeof window !== 'undefined') {
                     try {
                         const { usePushSubscription } = await import('../composables/usePushSubscription')
                         const { updateSubscription } = usePushSubscription()
-                        await updateSubscription(trimmedRoomId)
-                        console.log('[RoomsStore] Ensured push subscription for room:', trimmedRoomId)
+                        await updateSubscription()
+                        console.log('[RoomsStore] Ensured global push subscription')
                     } catch (err) {
                         console.error('[RoomsStore] Failed to update push subscription:', err)
                     }
@@ -219,15 +243,15 @@ export const useRoomsStore = defineStore('rooms', () => {
             // Refresh rooms list to include the newly joined room
             await fetchRooms()
 
-            // Automatically subscribe user to push notifications for this room
+            // Automatically subscribe user to push notifications (global subscription)
             if (typeof window !== 'undefined') {
                 try {
                     const { usePushSubscription } = await import('../composables/usePushSubscription')
                     const { updateSubscription } = usePushSubscription()
-                    await updateSubscription(trimmedRoomId)
-                    console.log('[RoomsStore] Successfully subscribed to push notifications for room:', trimmedRoomId)
+                    await updateSubscription()
+                    console.log('[RoomsStore] Successfully updated global push subscription')
                 } catch (err) {
-                    console.error('[RoomsStore] Failed to subscribe to push notifications:', err)
+                    console.error('[RoomsStore] Failed to update push subscription:', err)
                 }
             }
 
@@ -319,6 +343,8 @@ export const useRoomsStore = defineStore('rooms', () => {
         clearRooms,
         getRoomDetails,
         deleteRoom, 
-        createRoom
+        createRoom,
+        getRoomById,
+        updateRoom
     }
 })
