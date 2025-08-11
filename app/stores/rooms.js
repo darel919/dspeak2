@@ -262,7 +262,7 @@ export const useRoomsStore = defineStore('rooms', () => {
 
             const trimmedRoomId = roomId.trim()
             const apiPath = config.public.apiPath
-            const response = await fetch(`${apiPath}/chat/room/leave`, {
+            const response = await fetch(`${apiPath}/room/leave`, {
                 method: 'POST',
                 headers: {
                     'Authorization': userData.id,

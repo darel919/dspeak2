@@ -239,7 +239,7 @@ export const useChatStore = defineStore('chat', () => {
 
 
     
-    function handleWebSocketMessage(event) {
+    async function handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
             switch (data.type) {
@@ -289,11 +289,37 @@ export const useChatStore = defineStore('chat', () => {
                     break;
                 case 'user_joined':
                 case 'user_left':
+                    console.log('[ChatStore] User presence change:', data.type, data);
+                    break;
+                case 'participant_change':
+                    console.log('[ChatStore] Participant change detected:', data);
+                    await handleParticipantChange();
+                    break;
                 default:
                     console.log('[ChatStore] Unknown message type:', data.type, data);
             }
         } catch (err) {
             console.error('[ChatStore] Error parsing WebSocket message:', err, event.data);
+        }
+    }
+
+    
+    async function handleParticipantChange() {
+        try {
+            console.log('[ChatStore] Handling participant change - refreshing room data');
+            
+            if (currentRoomId.value) {
+                const { useRoomsStore } = await import('./rooms');
+                const roomsStore = useRoomsStore();
+                
+                // Refresh the entire rooms list to update member data
+                await roomsStore.fetchRooms();
+                console.log('[ChatStore] Room data refreshed after participant change');
+            } else {
+                console.log('[ChatStore] No current room ID, skipping room refresh');
+            }
+        } catch (error) {
+            console.error('[ChatStore] Error handling participant change:', error);
         }
     }
 

@@ -1,7 +1,9 @@
 <template>
-  <div v-if="!channel?.isMedia" class="flex flex-col h-full bg-base-100">
-    <!-- Chat Header -->
-    <div class="bg-base-200 border-base-300 p-4">
+  <div v-if="!channel?.isMedia" class="flex flex-row h-full bg-base-100">
+    <!-- Main Chat + MemberList Layout -->
+    <div class="flex-1 flex flex-col">
+      <!-- Chat Header -->
+      <div class="bg-base-200 border-base-300 p-4">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <button 
@@ -38,12 +40,12 @@
       </div>
     </div>
 
-    <!-- Messages Container -->
-    <div 
-      ref="messagesContainer"
-      class="flex-1 overflow-y-auto p-4 space-y-4"
-      @scroll="handleScroll"
-    >
+      <!-- Messages Container -->
+      <div 
+        ref="messagesContainer"
+        class="flex-1 overflow-y-auto p-4 space-y-4"
+        @scroll="handleScroll"
+      >
       <!-- Loading indicator -->
       <div v-if="loading" class="flex justify-center py-8">
         <div class="loading loading-spinner loading-lg"></div>
@@ -102,21 +104,49 @@
       </div>
     </div>
 
-    <!-- Chat Input -->
-    <ChatInput 
-      :channel-id="channelId"
-      :connected="connected"
-      :typing-users="typingUsers"
-      @message-sent="handleMessageSent"
-    />
 
-    <!-- Message Details Modal -->
-    <MessageDetailsModal 
-      :show="showDetailsModal"
-      :message="selectedMessage"
-      @close="closeDetailsModal"
-    />
+      <!-- Chat Input -->
+      <ChatInput 
+        :channel-id="channelId"
+        :connected="connected"
+        :typing-users="typingUsers"
+        @message-sent="handleMessageSent"
+      />
 
+      <!-- Message Details Modal -->
+      <MessageDetailsModal 
+        :show="showDetailsModal"
+        :message="selectedMessage"
+        @close="closeDetailsModal"
+      />
+    </div>
+
+    <!-- MemberList Sidebar -->
+    <transition name="fade">
+      <div v-if="showMemberList" class="hidden md:flex flex-col w-64 min-w-[16rem] max-w-xs border-l border-base-300 bg-base-100 h-full relative">
+        <button
+          class="absolute top-2 right-2 btn btn-xs btn-circle btn-ghost z-10"
+          @click="toggleMemberList"
+          :title="'Hide member list'"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <MemberList :members="room?.members || []" :room="room" :room-id="room?.id || ''" :channel-id="channelId" />
+      </div>
+    </transition>
+    <!-- Show button when hidden -->
+    <button
+      v-if="!showMemberList"
+      class="hidden md:flex fixed right-4 top-24 z-30 btn btn-circle btn-primary btn-sm shadow-lg"
+      @click="toggleMemberList"
+      :title="'Show member list'"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+      </svg>
+    </button>
   </div>
 </template>
 
@@ -126,6 +156,24 @@ import { useAuthStore } from '../../stores/auth'
 import ChatMessage from './ChatMessage.vue'
 import ChatInput from './ChatInput.vue'
 import MessageDetailsModal from './MessageDetailsModal.vue'
+import MemberList from '../MemberList.vue'
+// MemberList sidebar state
+const MEMBER_LIST_KEY = 'chat_member_list_visible'
+const showMemberList = ref(true)
+
+onMounted(() => {
+  // Load sidebar state from localStorage
+  const saved = localStorage.getItem(MEMBER_LIST_KEY)
+  showMemberList.value = saved === null ? true : saved === 'true'
+})
+
+watch(showMemberList, (val) => {
+  localStorage.setItem(MEMBER_LIST_KEY, val ? 'true' : 'false')
+})
+
+function toggleMemberList() {
+  showMemberList.value = !showMemberList.value
+}
 
 const props = defineProps({
   channelId: {
