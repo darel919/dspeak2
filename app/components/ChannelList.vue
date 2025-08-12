@@ -84,12 +84,21 @@
             :key="channel.id"
             @click="selectChannel(channel)"
             class="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-base-300 transition-colors group"
-            :class="{ 'bg-primary text-primary-content': selectedChannelId === channel.id }"
+            :class="{ 
+              'bg-primary text-primary-content': selectedChannelId === channel.id,
+              'bg-success/20 border border-success/50': voiceStore.isInVoiceChannel(channel.id)
+            }"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m-2.829-2.829a2 2 0 010-2.828m4.95-1.414a8 8 0 010 11.314m-9.9-9.9a8 8 0 000 11.314m2.829-2.829a2 2 0 000-2.828m2.829-2.829a5 5 0 000 7.072" />
             </svg>
             <span class="flex-1 text-sm truncate">{{ channel.name }}</span>
+            
+            <!-- Voice connection indicator -->
+            <div v-if="voiceStore.isInVoiceChannel(channel.id)" class="flex items-center gap-1">
+              <div class="w-2 h-2 bg-success rounded-full animate-pulse" title="Connected to voice"></div>
+            </div>
+            
             <div v-if="channel.inRoom?.length" class="text-xs text-base-content/60">
               {{ channel.inRoom.length }}
             </div>
@@ -237,6 +246,7 @@
 import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'
 import { useRoomsStore } from '../stores/rooms'
+import { useVoiceStore } from '../stores/voice'
 
 import { useChatUtils } from '../composables/useChatUtils'
 import { useToast } from '../composables/useToast'
@@ -271,6 +281,7 @@ const emit = defineEmits(['channel-selected'])
 const channelsStore = useChannelsStore()
 const authStore = useAuthStore()
 const roomsStore = useRoomsStore()
+const voiceStore = useVoiceStore()
 const showCreateChannel = ref(false)
 const showEditChannel = ref(false)
 const editingChannel = ref(null)

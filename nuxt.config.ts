@@ -53,6 +53,7 @@ export default defineNuxtConfig({
       authPath: process.env.AUTH_PATH,
       websocketPath: process.env.NODE_ENV === 'production' ? `wss://${process.env.BASE_API_EXT}${process.env.BASE_PATH}` : `ws://${process.env.BASE_API}${process.env.BASE_PATH}`,
       baseApiPath: process.env.NODE_ENV === 'production' ? `https://${process.env.BASE_API_EXT}` : `http://${process.env.BASE_API}`,
+      sfuPath: process.env.NODE_ENV === 'production' ? `wss://${process.env.BASE_SFU_EXT}${process.env.BASE_SFU_PATH}` : `ws://${process.env.BASE_SFU}${process.env.BASE_SFU_PATH}`,
       apiPath: process.env.NODE_ENV === 'production' ? `https://${process.env.BASE_API_EXT}${process.env.BASE_PATH}` : `http://${process.env.BASE_API}${process.env.BASE_PATH}`,
       VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY
     }
