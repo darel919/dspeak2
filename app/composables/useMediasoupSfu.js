@@ -8,6 +8,8 @@ export function useMediasoupSfu() {
   
   const device = ref(null)
   const ws = ref(null)
+  // ICE servers config for WebRTC transports - loaded dynamically from backend
+  const iceServers = ref([])
   const sendTransport = ref(null)
   const recvTransport = ref(null)
   const producers = ref(new Map())
@@ -42,6 +44,9 @@ export function useMediasoupSfu() {
   let rtpCapabilitiesTimeout = null
   let reconnectTimeoutId = null
   let allowReconnect = true
+  let pingIntervalId = null // For keepalive pings
+  let audioEnsureIntervalId = null // For re-attaching audio elements across navigation
+  let producersRequested = false
 
   function setupMessageHandler(type, handler) {
     messageHandlers.set(type, handler)
@@ -52,6 +57,25 @@ export function useMediasoupSfu() {
       ws.value.send(JSON.stringify(message))
     } else {
       messageQueue.push(message)
+    }
+  }
+
+  async function fetchIceServers() {
+    try {
+      console.log('[SFU] Fetching ICE servers from backend...')
+      const runtimeConfig = useRuntimeConfig()
+      const backend = runtimeConfig.public.apiPath
+      const servers = await $fetch(`${backend}/config`)
+      if (Array.isArray(servers) && servers.length > 0) {
+        iceServers.value = servers
+        console.log('[SFU] ICE servers loaded:')
+      } else {
+        throw new Error('Invalid ICE servers response format')
+      }
+    } catch (err) {
+      console.error('[SFU] Failed to fetch ICE servers:', err)
+      error.value = 'Unable to load ICE servers. Voice capability is disabled.'
+      throw err
     }
   }
 
@@ -77,6 +101,10 @@ export function useMediasoupSfu() {
         reconnectTimeoutId = null
       }
       error.value = null
+
+      // Fetch ICE servers configuration before establishing connection
+      await fetchIceServers()
+
       const userData = authStore.getUserData()
       
       if (!userData || !userData.id) {
@@ -96,6 +124,10 @@ export function useMediasoupSfu() {
       console.log('[SFU] Connecting to:', wsUrl)
       
       ws.value = new WebSocket(wsUrl)
+      // Patch mediasoup-client device to use custom ICE servers for transports
+      if (device.value && typeof device.value === 'object') {
+        device.value.iceServers = iceServers.value
+      }
 
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -108,9 +140,22 @@ export function useMediasoupSfu() {
           connected.value = true
           reconnectAttempts = 0
           processMessageQueue()
-          
+
+          // Start keepalive ping every 30 seconds
+          if (pingIntervalId) clearInterval(pingIntervalId)
+          pingIntervalId = setInterval(() => {
+            if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+              ws.value.send(JSON.stringify({ type: 'ping' }))
+            }
+          }, 30000)
+          // Periodically ensure audio elements are attached
+          if (audioEnsureIntervalId) clearInterval(audioEnsureIntervalId)
+          audioEnsureIntervalId = setInterval(() => {
+            try { ensureAudioElements() } catch (_) { /* noop */ }
+          }, 2000)
+
           setupEventHandlers()
-          
+
           // Wait for server to send initial status messages before requesting capabilities
           setTimeout(() => {
             initializeDevice()
@@ -129,6 +174,15 @@ export function useMediasoupSfu() {
         ws.value.onclose = () => {
           console.log('[SFU] WebSocket closed')
           connected.value = false
+          // Stop keepalive ping
+          if (pingIntervalId) {
+            clearInterval(pingIntervalId)
+            pingIntervalId = null
+          }
+          if (audioEnsureIntervalId) {
+            clearInterval(audioEnsureIntervalId)
+            audioEnsureIntervalId = null
+          }
           // Avoid reconnection if manual/user-initiated or reconnection disabled
           if (!manualDisconnect && allowReconnect && !isShuttingDown) {
             handleDisconnection(channelId)
@@ -181,19 +235,18 @@ export function useMediasoupSfu() {
         // The server sends transport params directly in data, without type field
         // We need to determine if this is send or recv transport based on order
         // First transport-params received = send, second = recv
+        const transportOptions = {
+          id: data.id,
+          iceParameters: data.iceParameters,
+          iceCandidates: data.iceCandidates,
+          dtlsParameters: data.dtlsParameters,
+          ...(data.sctpParameters && { sctpParameters: data.sctpParameters }),
+          appData: {}, // Clean appData object
+          iceServers: iceServers.value // <-- ensure ICE servers are included
+        }
         if (!sendTransport.value) {
           console.log('[SFU] Creating send transport with params:', data)
           try {
-            // Ensure we have clean transport options
-            const transportOptions = {
-              id: data.id,
-              iceParameters: data.iceParameters,
-              iceCandidates: data.iceCandidates,
-              dtlsParameters: data.dtlsParameters,
-              ...(data.sctpParameters && { sctpParameters: data.sctpParameters }),
-              appData: {} // Clean appData object
-            }
-            
             sendTransport.value = device.value.createSendTransport(transportOptions)
             if (!sendTransport.value) {
               console.warn('[SFU] createSendTransport returned falsy value!', transportOptions)
@@ -208,16 +261,6 @@ export function useMediasoupSfu() {
         } else if (!recvTransport.value) {
           console.log('[SFU] Creating recv transport with params:', data)
           try {
-            // Ensure we have clean transport options
-            const transportOptions = {
-              id: data.id,
-              iceParameters: data.iceParameters,
-              iceCandidates: data.iceCandidates,
-              dtlsParameters: data.dtlsParameters,
-              ...(data.sctpParameters && { sctpParameters: data.sctpParameters }),
-              appData: {} // Clean appData object
-            }
-            
             recvTransport.value = device.value.createRecvTransport(transportOptions)
             if (!recvTransport.value) {
               console.warn('[SFU] createRecvTransport returned falsy value!', transportOptions)
@@ -361,11 +404,68 @@ export function useMediasoupSfu() {
       }
     })
 
-    setupMessageHandler('currentlyInChannel', ({ data }) => {
-      console.log('[SFU] Currently in channel info:', data)
+    setupMessageHandler('currentlyInChannel', (message) => {
+      // Support both shapes: { type, data: {...} } and { type, inRoom, producers }
+      const data = message && message.data ? message.data : {
+        inRoom: message?.inRoom,
+        producers: message?.producers
+      }
+      if (typeof console !== 'undefined' && typeof console.log === 'function') {
+        console.log('[SFU] Currently in channel info:', data)
+      }
       // Handle channel state information
       // This indicates the server is ready to handle requests
       
+      // Sync connected users with inRoom and hydrate profiles from rooms store
+      (async () => {
+        try {
+          const { useVoiceStore } = await import('~/stores/voice');
+          const { useAuthStore } = await import('~/stores/auth');
+          const { useRoomsStore } = await import('~/stores/rooms');
+          const voiceStore = useVoiceStore();
+          const authStore = useAuthStore();
+          const roomsStore = useRoomsStore();
+          const myUserId = authStore.getUserData()?.id;
+          // Try to find current room and hydrate directory from its members
+          const room = roomsStore.getRoomById && voiceStore.currentRoomId ? roomsStore.getRoomById(voiceStore.currentRoomId) : undefined
+          if (room && Array.isArray(room.members)) {
+            room.members.forEach(m => {
+              // Normalize minimal profile shape we use in UI
+              voiceStore.upsertUserProfile({
+                id: m.id,
+                username: m.name || m.email || m.id,
+                display_name: m.name || m.email || m.id,
+                avatar: m.avatar
+              })
+            })
+            // Also include owner
+            if (room.owner && room.owner.id) {
+              voiceStore.upsertUserProfile({
+                id: room.owner.id,
+                username: room.owner.name || room.owner.email || room.owner.id,
+                display_name: room.owner.name || room.owner.email || room.owner.id,
+                avatar: room.owner.avatar
+              })
+            }
+          }
+          if (data && Array.isArray(data.inRoom)) {
+            // Add all users in inRoom
+            data.inRoom.forEach(userId => {
+              if (!voiceStore.isUserConnected(userId)) {
+                voiceStore.addConnectedUser(userId, { id: userId });
+              }
+            });
+            // Remove users not in inRoom
+            voiceStore.getConnectedUsersArray().forEach(user => {
+              if (!data.inRoom.includes(user.id)) {
+                voiceStore.removeConnectedUser(user.id);
+              }
+            });
+          }
+        } catch (e) {
+          window.console && window.console.warn && window.console.warn('[SFU] Failed to sync connected users:', e);
+        }
+      })();
       // If there are existing producers, request consumers for them
       if (data && data.producers && Array.isArray(data.producers)) {
         console.log('[SFU] Requesting consumers for existing producers:', data.producers)
@@ -379,10 +479,7 @@ export function useMediasoupSfu() {
       console.log('[SFU] Connection confirmed by server:', data)
       // Handle connection confirmation
       // Server is now fully ready for mediasoup operations
-      if (!producersRequested) {
-        producersRequested = true
-        try { sendMessage({ type: 'get-producers' }) } catch (_) { /* noop */ }
-      }
+  // Removed sending 'get-producers' message since SFU server does not support it
     })
     
   setupMessageHandler('producers-list', ({ data }) => {
@@ -402,16 +499,23 @@ export function useMediasoupSfu() {
   function handleMessage(event) {
     try {
       const message = JSON.parse(event.data)
-      console.log('[SFU] Received message:', message.type)
+      if (typeof console !== 'undefined' && typeof console.log === 'function') {
+        console.log('[SFU] Received message:', message.type)
+      }
       
       const handler = messageHandlers.get(message.type)
       if (handler) {
         handler(message)
       } else {
-        console.warn('[SFU] Unhandled message type:', message.type)
+        if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+          console.warn('[SFU] Unhandled message type:', message.type)
+        }
       }
     } catch (err) {
       console.error('[SFU] Error parsing message:', err)
+      // On type error, consider call failed and disconnect socket
+      error.value = 'Call failed: invalid message from server'
+      disconnect()
     }
   }
 
@@ -700,7 +804,25 @@ export function useMediasoupSfu() {
           try { window.structuredClone = undefined } catch (_) { /* noop */ }
         }
         try {
-          producer = await sendTransport.value.produce({ track: cleanTrack })
+          // Respect channel-configured audio bitrate if available
+          let bitrateBps = null
+          try {
+            const { useVoiceStore } = await import('~/stores/voice')
+            const { useChannelsStore } = await import('~/stores/channels')
+            const v = useVoiceStore()
+            const chStore = useChannelsStore()
+            const channel = v.currentChannelId ? chStore.getChannelById(v.currentChannelId) : null
+            const kbps = channel && typeof channel.audio_bitrate !== 'undefined' ? Number(channel.audio_bitrate) : null
+            if (kbps && !Number.isNaN(kbps) && kbps > 0) bitrateBps = Math.floor(kbps * 1000)
+          } catch (_) { /* optional */ }
+          const produceOpts = { track: cleanTrack }
+          if (bitrateBps) {
+            // Use RTCRtpSender encodings to cap average bitrate
+            produceOpts.encodings = [{ maxBitrate: bitrateBps }]
+            // Encourage better battery/idle behavior on silence
+            produceOpts.codecOptions = { opusDtx: true }
+          }
+          producer = await sendTransport.value.produce(produceOpts)
         } finally {
           if (typeof window !== 'undefined') {
             try { window.structuredClone = savedStructuredClone } catch (_) { /* noop */ }
@@ -745,7 +867,23 @@ export function useMediasoupSfu() {
                 try { window.structuredClone = undefined } catch (_) { /* noop */ }
               }
               try {
-                producer = await sendTransport.value.produce({ track: minimalTrack })
+                // Respect channel-configured audio bitrate if available
+                let bitrateBps2 = null
+                try {
+                  const { useVoiceStore } = await import('~/stores/voice')
+                  const { useChannelsStore } = await import('~/stores/channels')
+                  const v2 = useVoiceStore()
+                  const chStore2 = useChannelsStore()
+                  const channel2 = v2.currentChannelId ? chStore2.getChannelById(v2.currentChannelId) : null
+                  const kbps2 = channel2 && typeof channel2.audio_bitrate !== 'undefined' ? Number(channel2.audio_bitrate) : null
+                  if (kbps2 && !Number.isNaN(kbps2) && kbps2 > 0) bitrateBps2 = Math.floor(kbps2 * 1000)
+                } catch (_) { /* optional */ }
+                const produceOpts2 = { track: minimalTrack }
+                if (bitrateBps2) {
+                  produceOpts2.encodings = [{ maxBitrate: bitrateBps2 }]
+                  produceOpts2.codecOptions = { opusDtx: true }
+                }
+                producer = await sendTransport.value.produce(produceOpts2)
               } finally {
                 if (typeof window !== 'undefined') {
                   try { window.structuredClone = savedStructuredClone2 } catch (_) { /* noop */ }
@@ -990,10 +1128,7 @@ export function useMediasoupSfu() {
         consumers.value.delete(consumerData.producerId)
       })
 
-      sendMessage({
-        type: 'consumer-resume',
-        data: { consumerId: consumer.id }
-      })
+  // Removed sending 'consumer-resume' message since SFU server does not support it
 
       console.log('[SFU] Consumer created:', consumer.id)
       return consumer
@@ -1002,12 +1137,25 @@ export function useMediasoupSfu() {
     }
   }
 
-  function createAudioElement(producerId, track) {
-    const container = document.getElementById('voice-audio-container')
+  function getOrCreateGlobalAudioContainer() {
+    let container = document.getElementById('webrtc-audio-global')
     if (!container) {
-      console.warn('[SFU] Audio container not found')
-      return
+      container = document.createElement('div')
+      container.id = 'webrtc-audio-global'
+      // Hidden but present container to persist across navigations
+      container.style.position = 'fixed'
+      container.style.left = '-9999px'
+      container.style.top = '0'
+      container.style.width = '1px'
+      container.style.height = '1px'
+      document.body.appendChild(container)
+      console.log('[SFU] Created global audio container')
     }
+    return container
+  }
+
+  function createAudioElement(producerId, track) {
+    const container = getOrCreateGlobalAudioContainer()
 
     // Remove existing audio element if any
     removeAudioElement(producerId)
@@ -1022,19 +1170,31 @@ export function useMediasoupSfu() {
     // Set audio properties for better quality
     audio.volume = 1.0
 
-    // Debug: log MediaStream and track state
+    // Detailed debug logging for audio element and track state
     const stream = audio.srcObject
     if (stream && stream.getAudioTracks) {
       const tracks = stream.getAudioTracks()
-      console.log('[SFU][Debug] MediaStream tracks:', tracks.map(t => ({
-        id: t.id,
-        enabled: t.enabled,
-        readyState: t.readyState,
-        muted: t.muted
-      })))
+      tracks.forEach((t, idx) => {
+        console.log(`[SFU][Debug] MediaStream track[${idx}]:`, {
+          id: t.id,
+          kind: t.kind,
+          enabled: t.enabled,
+          readyState: t.readyState,
+          muted: t.muted,
+          label: t.label,
+          settings: t.getSettings ? t.getSettings() : undefined
+        })
+      })
     }
+    console.log('[SFU][Debug] Audio element initial state:', {
+      paused: audio.paused,
+      muted: audio.muted,
+      volume: audio.volume,
+      readyState: audio.readyState,
+      srcObject: audio.srcObject
+    })
 
-  container.appendChild(audio)
+    container.appendChild(audio)
     console.log('[SFU] Created audio element for producer:', producerId, audio)
 
     // Explicitly attempt playback to surface and possibly bypass autoplay restrictions
@@ -1062,6 +1222,14 @@ export function useMediasoupSfu() {
       if (audio.paused) {
         audio.play().catch(() => { /* noop */ })
       }
+      // Log state after metadata loads
+      console.log('[SFU][Debug] Audio element state after metadata loaded:', {
+        paused: audio.paused,
+        muted: audio.muted,
+        volume: audio.volume,
+        readyState: audio.readyState,
+        srcObject: audio.srcObject
+      })
     }
     // Debug: log after attempting play
     setTimeout(() => {
@@ -1069,9 +1237,28 @@ export function useMediasoupSfu() {
         paused: audio.paused,
         muted: audio.muted,
         volume: audio.volume,
-        readyState: audio.readyState
+        readyState: audio.readyState,
+        srcObject: audio.srcObject
       })
     }, 1000)
+  }
+
+  // Ensure audio elements exist for all live consumers; recreate if missing
+  function ensureAudioElements() {
+    try {
+      const container = getOrCreateGlobalAudioContainer()
+      consumers.value.forEach((consumer, producerId) => {
+        if (!consumer || consumer.kind !== 'audio') return
+        const audioEl = document.getElementById(`audio-${producerId}`)
+        if (!audioEl) {
+          if (consumer.track && consumer.track.readyState === 'live') {
+            createAudioElement(producerId, consumer.track)
+          }
+        }
+      })
+    } catch (e) {
+      // swallow
+    }
   }
 
   function removeAudioElement(producerId) {
@@ -1181,6 +1368,11 @@ export function useMediasoupSfu() {
       try { ws.value.close() } catch (_) { /* noop */ }
       ws.value = null
     }
+    // Stop keepalive ping
+    if (pingIntervalId) {
+      clearInterval(pingIntervalId)
+      pingIntervalId = null
+    }
     
     connected.value = false
     isProducing.value = false
@@ -1201,6 +1393,144 @@ export function useMediasoupSfu() {
   // Ready to accept a future connect() which will reset flags
   }
 
+  // Collect a snapshot of WebRTC stats from underlying RTCPeerConnections (send/recv)
+  // Returns a structured object safe for UI consumption
+  async function getWebRTCStatsSnapshot() {
+    const buildSnapshotForPc = async (pc, kind) => {
+      if (!pc) return null
+      try {
+        const report = await pc.getStats()
+        const byId = new Map()
+        report.forEach(s => byId.set(s.id, s))
+
+        // Find transport and selected candidate pair
+        let transportStat = null
+        report.forEach(s => {
+          if (s.type === 'transport' && (s.selectedCandidatePairId || s.dtlsState)) {
+            transportStat = s
+          }
+        })
+
+        let selectedPair = null
+        if (transportStat && transportStat.selectedCandidatePairId) {
+          selectedPair = byId.get(transportStat.selectedCandidatePairId) || null
+        }
+        if (!selectedPair) {
+          report.forEach(s => {
+            if (s.type === 'candidate-pair' && (s.nominated || s.state === 'succeeded')) {
+              selectedPair = s
+            }
+          })
+        }
+
+        // Resolve local/remote candidates
+        let localCandidate = null
+        let remoteCandidate = null
+        if (selectedPair) {
+          if (selectedPair.localCandidateId) localCandidate = byId.get(selectedPair.localCandidateId) || null
+          if (selectedPair.remoteCandidateId) remoteCandidate = byId.get(selectedPair.remoteCandidateId) || null
+        }
+
+        // Find RTP stats
+        let inboundAudio = null
+        let outboundAudio = null
+        let remoteInboundAudio = null
+        report.forEach(s => {
+          if (s.type === 'inbound-rtp' && s.kind === 'audio' && !s.isRemote) inboundAudio = s
+          if (s.type === 'outbound-rtp' && s.kind === 'audio' && !s.isRemote) outboundAudio = s
+          if (s.type === 'remote-inbound-rtp' && s.kind === 'audio') remoteInboundAudio = s
+        })
+
+        return {
+          kind,
+          pcStates: {
+            connectionState: pc.connectionState,
+            iceConnectionState: pc.iceConnectionState,
+            signalingState: pc.signalingState
+          },
+          transport: transportStat ? {
+            id: transportStat.id,
+            dtlsState: transportStat.dtlsState,
+            iceRole: transportStat.iceRole,
+            selectedCandidatePairId: transportStat.selectedCandidatePairId || null,
+            srtpCipher: transportStat.srtpCipher || null
+          } : null,
+          candidatePair: selectedPair ? {
+            id: selectedPair.id,
+            state: selectedPair.state,
+            nominated: !!selectedPair.nominated,
+            currentRoundTripTime: selectedPair.currentRoundTripTime ?? null,
+            availableOutgoingBitrate: selectedPair.availableOutgoingBitrate ?? null,
+            bytesSent: selectedPair.bytesSent ?? null,
+            bytesReceived: selectedPair.bytesReceived ?? null,
+            packetsSent: selectedPair.packetsSent ?? null,
+            packetsReceived: selectedPair.packetsReceived ?? null,
+            requestsSent: selectedPair.requestsSent ?? null,
+            responsesReceived: selectedPair.responsesReceived ?? null,
+            local: localCandidate ? {
+              id: localCandidate.id,
+              address: localCandidate.address || localCandidate.ip || null,
+              port: localCandidate.port || null,
+              protocol: localCandidate.protocol || null,
+              candidateType: localCandidate.candidateType || null,
+              networkType: localCandidate.networkType || null
+            } : null,
+            remote: remoteCandidate ? {
+              id: remoteCandidate.id,
+              address: remoteCandidate.address || remoteCandidate.ip || null,
+              port: remoteCandidate.port || null,
+              protocol: remoteCandidate.protocol || null,
+              candidateType: remoteCandidate.candidateType || null
+            } : null
+          } : null,
+          inboundAudio: inboundAudio ? {
+            id: inboundAudio.id,
+            ssrc: inboundAudio.ssrc,
+            jitter: inboundAudio.jitter ?? null,
+            packetsReceived: inboundAudio.packetsReceived ?? null,
+            packetsLost: inboundAudio.packetsLost ?? null,
+            bytesReceived: inboundAudio.bytesReceived ?? null,
+            audioLevel: inboundAudio.audioLevel ?? null,
+            totalSamplesDuration: inboundAudio.totalSamplesDuration ?? null
+          } : null,
+          outboundAudio: outboundAudio ? {
+            id: outboundAudio.id,
+            ssrc: outboundAudio.ssrc,
+            packetsSent: outboundAudio.packetsSent ?? null,
+            bytesSent: outboundAudio.bytesSent ?? null,
+            retransmittedPacketsSent: outboundAudio.retransmittedPacketsSent ?? null,
+            targetBitrate: outboundAudio.targetBitrate ?? null
+          } : null,
+          remoteInboundAudio: remoteInboundAudio ? {
+            id: remoteInboundAudio.id,
+            ssrc: remoteInboundAudio.ssrc,
+            roundTripTime: remoteInboundAudio.roundTripTime ?? null,
+            fractionLost: remoteInboundAudio.fractionLost ?? null
+          } : null
+        }
+      } catch (e) {
+        console.warn('[SFU] getWebRTCStatsSnapshot failed for', kind, e)
+        return { kind, error: e?.message || String(e) }
+      }
+    }
+
+    // Extract underlying RTCPeerConnections from mediasoup transports (private API)
+    const pcSend = sendTransport.value && sendTransport.value._handler && sendTransport.value._handler._pc
+      ? sendTransport.value._handler._pc : null
+    const pcRecv = recvTransport.value && recvTransport.value._handler && recvTransport.value._handler._pc
+      ? recvTransport.value._handler._pc : null
+
+    const [sendSnap, recvSnap] = await Promise.all([
+      buildSnapshotForPc(pcSend, 'send'),
+      buildSnapshotForPc(pcRecv, 'recv')
+    ])
+
+    return {
+      timestamp: Date.now(),
+      transports: [sendSnap, recvSnap].filter(Boolean)
+    }
+  }
+
   return {
     connected: readonly(connected),
     error: readonly(error),
@@ -1212,6 +1542,8 @@ export function useMediasoupSfu() {
     disconnect,
   startAudioProduction,
   stopAudioProduction,
-  applyOutputDeviceToAll
+  applyOutputDeviceToAll,
+  getWebRTCStatsSnapshot,
+  ensureAudioElements
   }
 }

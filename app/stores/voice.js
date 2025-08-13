@@ -1,10 +1,13 @@
 import { defineStore } from "pinia";
 import { useAuthStore } from './auth';
 
+
 export const useVoiceStore = defineStore('voice', () => {
     const currentChannelId = ref(null);
     const currentRoomId = ref(null);
     const connectedUsers = ref(new Map());
+    // Cached user profiles keyed by userId, populated from room data
+    const userDirectory = ref(new Map());
     const micMuted = ref(true);
     const deafened = ref(false);
     const connecting = ref(false);
@@ -12,6 +15,45 @@ export const useVoiceStore = defineStore('voice', () => {
     const error = ref(null);
 
     const sfuComposable = ref(null);
+
+    // Initialize persisted preferences
+    if (typeof window !== 'undefined') {
+        try {
+            const persistedMic = localStorage.getItem('voice.micMuted');
+            if (persistedMic !== null) micMuted.value = persistedMic === 'true';
+        } catch (_) { /* noop */ }
+    }
+
+    // Persist preferences on change
+    if (typeof window !== 'undefined') {
+        watch(micMuted, (v) => {
+            try { localStorage.setItem('voice.micMuted', String(!!v)) } catch (_) { /* noop */ }
+        }, { immediate: true })
+        watch(deafened, (v) => {
+            try { localStorage.setItem('voice.deafened', String(!!v)) } catch (_) { /* noop */ }
+        }, { immediate: true })
+    }
+
+    // Watch for critical SFU errors and set connected to false and propagate error if error occurs
+    if (typeof window !== 'undefined') {
+        watch(
+            () => sfuComposable.value && sfuComposable.value.error,
+            (sfuError) => {
+                if (sfuError && typeof sfuError === 'string' && (
+                    sfuError.includes('Router not ready') ||
+                    sfuError.includes('Connection failed') ||
+                    sfuError.includes('Failed to get RTP capabilities') ||
+                    sfuError.includes('Failed to create transport') ||
+                    sfuError.includes('Server error') ||
+                    sfuError.includes('Connection lost')
+                )) {
+                    connected.value = false;
+                    error.value = sfuError;
+                }
+            },
+            { immediate: true }
+        );
+    }
 
     function setCurrentChannel(channelId) {
         currentChannelId.value = channelId;
@@ -22,15 +64,18 @@ export const useVoiceStore = defineStore('voice', () => {
                 const channelsStore = useChannelsStore();
                 const channel = channelsStore.getChannelById(channelId);
                 if (channel) {
-                    currentRoomId.value = channel.room_id;
+                    // Server returns 'room' for roomId; keep fallbacks for compatibility
+                    currentRoomId.value = channel.room || channel.room_id || channel.roomId || null;
                 }
             });
         }
     }
 
     function addConnectedUser(userId, userInfo) {
+        const cached = userDirectory.value.get(userId) || {};
         connectedUsers.value.set(userId, {
             id: userId,
+            ...cached,
             ...userInfo,
             speaking: false,
             muted: false
@@ -97,30 +142,61 @@ export const useVoiceStore = defineStore('voice', () => {
 
             await sfuComposable.value.connect(channelId);
             setCurrentChannel(channelId);
-            connected.value = true;
 
-            // If permission is denied, keep mic muted
-            if (micPermission === 'denied') {
-                micMuted.value = true;
-            } else if (micPermission === 'granted') {
-                micMuted.value = false;
-            } else {
-                // If prompt, ask for permission now
+            // Only set connected if there is no SFU error
+            if (!sfuComposable.value.error) {
+                connected.value = true;
+
+                // Respect persisted mic preference if available; otherwise follow permission-based default
+                let persistedMic = null;
                 try {
-                    await navigator.mediaDevices.getUserMedia({ audio: true });
-                    micMuted.value = false;
-                } catch (err) {
-                    micMuted.value = true;
+                    if (typeof window !== 'undefined') {
+                        const v = localStorage.getItem('voice.micMuted');
+                        if (v !== null) persistedMic = v === 'true';
+                    }
+                } catch (_) { /* noop */ }
+
+                if (persistedMic !== null) {
+                    micMuted.value = persistedMic;
+                    if (!persistedMic) {
+                        // Attempt to start mic if unmuted and transports ready
+                        try {
+                            if (sfuComposable.value.transportReady) {
+                                await sfuComposable.value.startAudioProduction();
+                            }
+                        } catch (err) {
+                            // keep state; error will show via toast
+                        }
+                    }
+                } else {
+                    // If permission is denied, keep mic muted
+                    if (micPermission === 'denied') {
+                        micMuted.value = true;
+                    } else if (micPermission === 'granted') {
+                        micMuted.value = false;
+                    } else {
+                        // If prompt, ask for permission now
+                        try {
+                            await navigator.mediaDevices.getUserMedia({ audio: true });
+                            micMuted.value = false;
+                        } catch (err) {
+                            micMuted.value = true;
+                        }
+                    }
                 }
-            }
 
-            console.log('[VoiceStore] Successfully joined voice channel:', channelId);
+                console.log('[VoiceStore] Successfully joined voice channel:', channelId);
 
-            // Show success notification
-            if (typeof window !== 'undefined') {
-                const { useToast } = await import('~/composables/useToast');
-                const { success } = useToast();
-                success('Connected to voice channel');
+                // Show success notification
+                if (typeof window !== 'undefined') {
+                    const { useToast } = await import('~/composables/useToast');
+                    const { success } = useToast();
+                    success('Connected to voice channel');
+                }
+            } else {
+                connected.value = false;
+                error.value = sfuComposable.value.error;
+                throw new Error(sfuComposable.value.error);
             }
         } catch (err) {
             console.error('[VoiceStore] Failed to join voice channel:', err);
@@ -156,8 +232,6 @@ export const useVoiceStore = defineStore('voice', () => {
             currentRoomId.value = null;
             connectedUsers.value.clear();
             connected.value = false;
-            micMuted.value = true;
-            deafened.value = false;
             error.value = null;
 
             console.log('[VoiceStore] Successfully left voice channel');
@@ -248,7 +322,7 @@ export const useVoiceStore = defineStore('voice', () => {
             return;
         }
 
-        deafened.value = !deafened.value;
+    deafened.value = !deafened.value;
         
         if (deafened.value && !micMuted.value) {
             toggleMic();
@@ -264,8 +338,6 @@ export const useVoiceStore = defineStore('voice', () => {
         
         setCurrentChannel(null);
         connectedUsers.value.clear();
-        micMuted.value = true;
-        deafened.value = false;
         connecting.value = false;
         connected.value = false;
         error.value = null;
@@ -288,6 +360,58 @@ export const useVoiceStore = defineStore('voice', () => {
         return currentChannelId.value === channelId && connected.value;
     }
 
+    // Directory helpers
+    function upsertUserProfile(profile) {
+        if (profile && profile.id) {
+            const prev = userDirectory.value.get(profile.id) || {};
+            const merged = { ...prev, ...profile };
+            userDirectory.value.set(profile.id, merged);
+            // Update live connected user if present
+            const cu = connectedUsers.value.get(profile.id)
+            if (cu) {
+                connectedUsers.value.set(profile.id, { ...cu, ...merged })
+            }
+        }
+    }
+    function getUserProfile(userId) {
+        return userDirectory.value.get(userId)
+    }
+
+    // When channels list refreshes or currentRoomId changes, hydrate directory from room members
+    if (typeof window !== 'undefined') {
+        import('~/stores/rooms').then(({ useRoomsStore }) => {
+            const roomsStore = useRoomsStore()
+            watch([() => roomsStore.rooms, currentRoomId], ([rooms]) => {
+                try {
+                    if (!currentRoomId.value) return
+                    const room = Array.isArray(rooms) ? rooms.find(r => r.id === currentRoomId.value) : null
+                    if (room) {
+                        if (Array.isArray(room.members)) {
+                            room.members.forEach((m) => upsertUserProfile({
+                                id: m.id,
+                                display_name: m.name || m.email || m.id,
+                                username: m.name || m.email || m.id,
+                                name: m.name,
+                                email: m.email,
+                                avatar: m.avatar
+                            }))
+                        }
+                        if (room.owner && room.owner.id) {
+                            upsertUserProfile({
+                                id: room.owner.id,
+                                display_name: room.owner.name || room.owner.email || room.owner.id,
+                                username: room.owner.name || room.owner.email || room.owner.id,
+                                name: room.owner.name,
+                                email: room.owner.email,
+                                avatar: room.owner.avatar
+                            })
+                        }
+                    }
+                } catch (_) { /* noop */ }
+            }, { immediate: true, deep: true })
+        })
+    }
+
     return {
         currentChannelId: readonly(currentChannelId),
         currentRoomId: readonly(currentRoomId),
@@ -296,7 +420,7 @@ export const useVoiceStore = defineStore('voice', () => {
         deafened: readonly(deafened),
         connecting: readonly(connecting),
         connected: readonly(connected),
-        error: readonly(error),
+        error, // not readonly, so it can be set from components
         sfuComposable: readonly(sfuComposable),
         joinVoiceChannel,
         leaveVoiceChannel,
@@ -311,5 +435,7 @@ export const useVoiceStore = defineStore('voice', () => {
         isUserConnected,
         getUserById,
         isInVoiceChannel
+    , upsertUserProfile
+    , getUserProfile
     };
 });

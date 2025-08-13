@@ -13,7 +13,39 @@
           <span class="text-sm font-medium">Voice Connected</span>
           <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div>
         </div>
-        
+        <div class="flex items-center gap-2">
+          <!-- Signal Strength Indicator (click to open WebRTC Stats) -->
+          <button
+            v-if="voiceStore.connected"
+            @click="openStats"
+            class="btn btn-ghost btn-xs px-2 h-6 min-h-0"
+            :title="signalTooltip"
+          >
+            <div class="flex items-end gap-0.5">
+              <span
+                class="w-1.5 rounded-sm"
+                :class="[barClass(1), barColorClass]"
+                style="height: 6px"
+              ></span>
+              <span
+                class="w-1.5 rounded-sm"
+                :class="[barClass(2), barColorClass]"
+                style="height: 9px"
+              ></span>
+              <span
+                class="w-1.5 rounded-sm"
+                :class="[barClass(3), barColorClass]"
+                style="height: 12px"
+              ></span>
+              <span
+                class="w-1.5 rounded-sm"
+                :class="[barClass(4), barColorClass]"
+                style="height: 15px"
+              ></span>
+            </div>
+          </button>
+
+          
         <button
           @click="voiceStore.leaveVoiceChannel"
           class="btn btn-ghost btn-xs btn-circle"
@@ -23,11 +55,19 @@
             <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
           </svg>
         </button>
+        </div>
       </div>
 
       <!-- Channel Info -->
       <div class="text-xs text-base-content/60 mb-3">
         {{ currentChannelName }} • {{ connectedUsers.length }} participant{{ connectedUsers.length !== 1 ? 's' : '' }}
+      </div>
+      <!-- Mini Network Status -->
+      <div v-if="voiceStore.connected" class="text-[11px] text-base-content/50 mb-2">
+        <span class="mr-2">Net:</span>
+        <span class="mr-2">RTT {{ lastRttMs != null ? Math.round(lastRttMs) + 'ms' : '-' }}</span>
+        <span class="mr-2">Jitter {{ lastJitterMs != null ? Math.round(lastJitterMs) + 'ms' : '-' }}</span>
+        <span>Loss {{ lastLoss != null ? (lastLoss*100).toFixed(1) + '%' : '-' }}</span>
       </div>
 
       <!-- Connected Users (Mini List) -->
@@ -120,10 +160,7 @@
       </div>
     </div>
 
-    <!-- Audio Elements Container -->
-  <div id="voice-audio-container">
-      <!-- Audio elements for remote users will be dynamically added here -->
-    </div>
+  <!-- Audio elements are managed in a global hidden container to persist across navigation -->
   </Teleport>
 </template>
 
@@ -144,7 +181,7 @@ const currentChannelName = computed(() => {
 })
 
 function getUserDisplayName(user) {
-  return user.username || user.display_name || user.email || `User ${user.id}`
+  return user.display_name || user.username || user.name || user.email || `User ${user.id}`
 }
 
 function getUserInitials(user) {
@@ -163,4 +200,100 @@ function navigateToVoiceChannel() {
     router.push(`/room/${voiceStore.currentRoomId}/${voiceStore.currentChannelId}`)
   }
 }
+
+// Shared UI state to toggle the WebRTC stats panel
+const statsVisible = useState('webrtc-stats-visible', () => false)
+function openStats() { statsVisible.value = true }
+
+// Signal strength computation
+const signalLevel = ref(0) // 0-4
+const signalLabel = ref('Disconnected')
+const lastRttMs = ref(null)
+const lastJitterMs = ref(null)
+const lastLoss = ref(null)
+let statTimer = null
+
+function barClass(n) {
+  return signalLevel.value >= n ? '' : 'opacity-25'
+}
+const barColorClass = computed(() => {
+  if (signalLevel.value >= 4) return 'bg-success'
+  if (signalLevel.value === 3) return 'bg-success'
+  if (signalLevel.value === 2) return 'bg-warning'
+  if (signalLevel.value === 1) return 'bg-error'
+  return 'bg-base-content/40'
+})
+const signalTooltip = computed(() => {
+  const parts = [signalLabel.value]
+  if (lastRttMs.value != null) parts.push(`RTT ${Math.round(lastRttMs.value)} ms`)
+  if (lastJitterMs.value != null) parts.push(`Jitter ${Math.round(lastJitterMs.value)} ms`)
+  if (lastLoss.value != null) parts.push(`Loss ${(lastLoss.value*100).toFixed(1)}%`)
+  return parts.join(' • ')
+})
+
+async function pollSignal() {
+  try {
+    const sfu = voiceStore.sfuComposable
+    if (!voiceStore.connected || !sfu || !sfu.getWebRTCStatsSnapshot) {
+      signalLevel.value = 0
+      signalLabel.value = 'Disconnected'
+      return
+    }
+    const snap = await sfu.getWebRTCStatsSnapshot()
+    const t = snap?.transports?.find(x => x.kind === 'send') || snap?.transports?.[0]
+    if (!t) {
+      signalLevel.value = 1
+      signalLabel.value = 'No transport'
+      return
+    }
+    if (t.pcStates.iceConnectionState !== 'connected') {
+      signalLevel.value = 1
+      signalLabel.value = 'Connecting'
+      return
+    }
+    let rttMs = null
+    if (t.candidatePair?.currentRoundTripTime != null) {
+      const v = Number(t.candidatePair.currentRoundTripTime)
+      rttMs = v < 10 ? v * 1000 : v
+    }
+    let jitterMs = null
+    if (t.inboundAudio?.jitter != null) {
+      jitterMs = Number(t.inboundAudio.jitter) * 1000
+    }
+    let loss = null
+    if (t.remoteInboundAudio?.fractionLost != null) {
+      loss = Number(t.remoteInboundAudio.fractionLost)
+    }
+    lastRttMs.value = rttMs
+    lastJitterMs.value = jitterMs
+    lastLoss.value = loss
+
+    // Compute score starting from 4
+    let score = 4
+    if (rttMs != null) {
+      if (rttMs > 400) score -= 2
+      else if (rttMs > 150) score -= 1
+    }
+    if (jitterMs != null) {
+      if (jitterMs > 30) score -= 2
+      else if (jitterMs > 15) score -= 1
+    }
+    if (loss != null) {
+      if (loss > 0.05) score -= 2
+      else if (loss > 0.01) score -= 1
+    }
+    if (score < 1) score = 1
+    signalLevel.value = score
+    signalLabel.value = score >= 4 ? 'Excellent' : score === 3 ? 'Good' : score === 2 ? 'Fair' : 'Poor'
+  } catch (_) {
+    // Keep previous signal state on transient errors
+  }
+}
+
+onMounted(() => {
+  statTimer = setInterval(pollSignal, 1000)
+})
+onBeforeUnmount(() => {
+  if (statTimer) { clearInterval(statTimer); statTimer = null }
+})
 </script>

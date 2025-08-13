@@ -15,18 +15,18 @@
           <span class="text-sm">Connecting...</span>
         </div>
         
-        <div v-else-if="voiceStore.connected" class="flex items-center gap-2 text-success">
+        <!-- <div v-else-if="voiceStore.connected" class="flex items-center gap-2 text-success">
           <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div>
           <span class="text-sm font-medium">Connected</span>
-        </div>
+        </div> -->
         
-        <button
+        <!-- <button
           v-if="voiceStore.connected"
           @click="leaveChannel"
           class="btn btn-sm btn-error"
         >
           Leave
-        </button>
+        </button> -->
       </div>
     </div>
 
@@ -80,7 +80,18 @@
             >
               <!-- User Avatar -->
               <div class="avatar mb-4">
-                <div class="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content flex items-center justify-center text-2xl font-bold">
+                <div
+                  v-if="getUserAvatar(user)"
+                  class="w-20 h-20 rounded-full overflow-hidden ring-2 transition-all duration-150"
+                  :class="user.speaking ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]' : 'ring-base-300'"
+                >
+                  <img :src="getUserAvatar(user)" class="w-full h-full object-cover" alt="avatar"/>
+                </div>
+                <div
+                  v-else
+                  class="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content flex items-center justify-center text-2xl font-bold ring-2 transition-all duration-150"
+                  :class="user.speaking ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]' : 'ring-base-300'"
+                >
                   {{ getUserInitials(user) }}
                 </div>
               </div>
@@ -98,17 +109,19 @@
                 
                 <!-- Muted Indicator -->
                 <div v-if="user.muted" class="flex items-center gap-1 text-error">
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l2 2a1 1 0 01-1.414 1.414L13 7.414V8a3 3 0 11-6 0v-3a1 1 0 012 0v3a1 1 0 002 0V5a1 1 0 01.293-.707zM11 14.93A7.001 7.001 0 017 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-5v-2.07z" clip-rule="evenodd" />
+                  
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
                   </svg>
+
                   <span class="text-sm">Muted</span>
                 </div>
                 
                 <!-- Active Status -->
-                <div v-if="!user.muted && !user.speaking" class="flex items-center gap-1 text-base-content/60">
+                <!-- <div v-if="!user.muted && !user.speaking" class="flex items-center gap-1 text-base-content/60">
                   <div class="w-2 h-2 bg-base-content/60 rounded-full"></div>
                   <span class="text-sm">Active</span>
-                </div>
+                </div> -->
               </div>
             </div>
           </div>
@@ -192,10 +205,7 @@
       </div>
     </div>
 
-    <!-- Audio Elements Container -->
-  <div id="voice-audio-container">
-      <!-- Audio elements for remote users will be dynamically added here -->
-    </div>
+  <!-- Audio elements are managed in a global hidden container to persist across navigation -->
 
     <!-- Not Connected State -->
     <div v-if="!voiceStore.connected" class="flex-1 flex flex-col items-center justify-center py-12">
@@ -238,6 +248,7 @@ const voiceStore = useVoiceStore()
 const authStore = useAuthStore()
 const channelsStore = useChannelsStore()
 const router = useRouter()
+const config = useRuntimeConfig()
 
 const connectedUsers = computed(() => voiceStore.getConnectedUsersArray())
 
@@ -253,7 +264,23 @@ function getUserInitials(user) {
 }
 
 function getUserDisplayName(user) {
-  return user.username || user.display_name || user.email || `User ${user.id}`
+  // Prefer mapped profile from the voice store directory
+  const profile = (voiceStore.getUserProfile && user?.id) ? voiceStore.getUserProfile(user.id) : null
+  const merged = { ...profile, ...user }
+  return merged.display_name || merged.name || merged.username || merged.email || `User ${merged.id}`
+}
+
+function getUserAvatar(user) {
+  const profile = (voiceStore.getUserProfile && user?.id) ? voiceStore.getUserProfile(user.id) : null
+  const merged = { ...profile, ...user }
+  const avatar = merged.avatar
+  if (!avatar) return null
+  // Absolute URLs pass through as-is
+  if (typeof avatar === 'string' && /^(https?:)?\/\//i.test(avatar)) return avatar
+  const base = (config?.public?.baseApiPath || '').replace(/\/$/, '')
+  const clean = String(avatar).replace(/^\/+/, '')
+  const path = clean.startsWith('auth/') ? clean : `auth/${clean}`
+  return `${base}/${path}`
 }
 
 function getButtonTitle() {
@@ -262,18 +289,24 @@ function getButtonTitle() {
   return voiceStore.micMuted ? 'Unmute Microphone' : 'Mute Microphone'
 }
 
+
 async function joinThisChannel() {
   try {
     await voiceStore.joinVoiceChannel(props.channel.id)
+    // Do not navigate away on error; error modal will show if needed
   } catch (error) {
+    // Stay in the channel view, just show error
     console.error('Failed to join voice channel:', error)
   }
 }
 
+
 async function switchToThisChannel() {
   try {
     await voiceStore.joinVoiceChannel(props.channel.id)
+    // Do not navigate away on error; error modal will show if needed
   } catch (error) {
+    // Stay in the channel view, just show error
     console.error('Failed to switch voice channel:', error)
   }
 }

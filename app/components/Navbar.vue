@@ -25,7 +25,9 @@ const currentRoomId = computed(() => {
 
 const presenceStatus = inject('presenceStatus', ref(null)) as Ref<string|null>
 
+
 const avatarStatusClass = computed(() => {
+    if (voiceStore.error && !voiceStore.connected) return 'avatar-offline ring-2 ring-error ring-offset-2';
     if (!presenceStatus?.value) return ''
     if (presenceStatus.value === 'connected') return 'avatar-online'
     if (presenceStatus.value === 'permanently-disconnected') return 'avatar-offline'
@@ -51,13 +53,81 @@ function navigateToVoiceChannel() {
     }
 }
 
-function handleProfileClick() {
+function handleProfileClick(e: MouseEvent) {
+    // If connected, distinguish between avatar and background click
     if (voiceStore.connected) {
-        navigateToVoiceChannel()
-    } else {
-        router.push('/settings')
+        // Find if click was inside avatar
+        const avatarEl = document.querySelector('.avatar.select-none.relative .w-12.rounded-full');
+        if (avatarEl && avatarEl.contains(e.target as Node)) {
+            router.push('/settings');
+            return;
+        }
+        // Otherwise, treat as background click
+        navigateToVoiceChannel();
+        return;
+    }
+    // Not connected: always go to settings
+    router.push('/settings');
+}
+
+// Shared state to toggle the WebRTC stats panel
+const statsVisible = useState<boolean>('webrtc-stats-visible', () => false)
+
+// Signal strength polling for the top-right voice bubble
+const lastRttMs = ref<number|null>(null)
+const lastJitterMs = ref<number|null>(null)
+const lastLoss = ref<number|null>(null)
+const signalLevel = ref(0) // 0-4
+let signalTimer: any = null
+
+function barClass(n: number) { return signalLevel.value >= n ? '' : 'opacity-25' }
+const barColorClass = computed(() => {
+    if (signalLevel.value >= 4) return 'bg-success'
+    if (signalLevel.value === 3) return 'bg-success'
+    if (signalLevel.value === 2) return 'bg-warning'
+    if (signalLevel.value === 1) return 'bg-error'
+    return 'bg-base-content/40'
+})
+const signalTooltip = computed(() => {
+    const label = signalLevel.value >= 4 ? 'Excellent' : signalLevel.value === 3 ? 'Good' : signalLevel.value === 2 ? 'Fair' : 'Poor'
+    const parts: string[] = [label]
+    if (lastRttMs.value != null) parts.push(`RTT ${Math.round(lastRttMs.value)} ms`)
+    if (lastJitterMs.value != null) parts.push(`Jitter ${Math.round(lastJitterMs.value)} ms`)
+    if (lastLoss.value != null) parts.push(`Loss ${(lastLoss.value*100).toFixed(1)}%`)
+    return parts.join(' • ')
+})
+
+async function pollSignal() {
+    try {
+        // @ts-ignore - sfuComposable is a runtime prop
+        const sfu: any = (voiceStore as any).sfuComposable
+        if (!voiceStore.connected || !sfu || !sfu.getWebRTCStatsSnapshot) {
+            signalLevel.value = 0
+            return
+        }
+        if (sfu.ensureAudioElements) sfu.ensureAudioElements()
+        const snap = await sfu.getWebRTCStatsSnapshot()
+        const t = snap?.transports?.find((x: any) => x.kind === 'send') || snap?.transports?.[0]
+        if (!t || t.pcStates.iceConnectionState !== 'connected') { signalLevel.value = 1; return }
+        const rtt = t.candidatePair?.currentRoundTripTime
+        const jitter = t.inboundAudio?.jitter
+        const loss = t.remoteInboundAudio?.fractionLost
+        lastRttMs.value = rtt != null ? (rtt < 10 ? rtt * 1000 : rtt) : null
+        lastJitterMs.value = jitter != null ? jitter * 1000 : null
+        lastLoss.value = loss != null ? loss : null
+        let score = 4
+        if (lastRttMs.value != null) { if (lastRttMs.value > 400) score -= 2; else if (lastRttMs.value > 150) score -= 1 }
+        if (lastJitterMs.value != null) { if (lastJitterMs.value > 30) score -= 2; else if (lastJitterMs.value > 15) score -= 1 }
+        if (lastLoss.value != null) { if (lastLoss.value > 0.05) score -= 2; else if (lastLoss.value > 0.01) score -= 1 }
+        if (score < 1) score = 1
+        signalLevel.value = score
+    } catch {
+        // ignore transient errors
     }
 }
+
+onMounted(() => { signalTimer = setInterval(pollSignal, 1000) })
+onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTimer = null } })
 </script>
 
 
@@ -76,22 +146,41 @@ function handleProfileClick() {
         </div>
         
         <section v-if="profile" class="flex items-center gap-4 ml-4">
-            <!-- Settings Link -->
-            <!-- <NuxtLink to="/settings" class="btn btn-ghost btn-sm" title="Settings">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12a7.5 7.5 0 0 0 15 0m-15 0a7.5 7.5 0 1 1 15 0m-15 0H3m16.5 0H21m-1.5 0H12m-8.457 3.077 1.41-.513m14.095-5.13 1.41-.513M5.106 17.785l1.15-.964m11.49-9.642 1.149-.964M7.501 19.795l.75-1.3m7.5-12.99.75-1.3m-6.063 16.658.26-1.477m2.605-14.772.26-1.477m0 17.726-.26-1.477M10.698 4.614l-.26-1.477M16.5 19.794l-.75-1.299M7.5 4.205 12 12m6.894 5.785-1.149-.964M6.256 7.178l-1.15-.964m15.352 8.864-1.41-.513M4.954 9.435l-1.41-.514M12.002 12l-3.75 6.495" />
-                </svg>
-            </NuxtLink> -->
+            <!-- Settings Link intentionally removed to prevent redirect on voice channel error -->
 
             <!-- Smart Profile/Voice Control -->
             <div 
                 @click="handleProfileClick"
                 class="flex items-center cursor-pointer group relative"
-                :class="{ 'bg-success/20 border border-success/40 rounded-lg px-2 py-1': voiceStore.connected }"
-                :title="voiceStore.connected ? `Connected to ${currentVoiceChannel?.name} • Click to go to voice channel` : 'Your Account'"
+                :class="[
+                    voiceStore.connected ? 'bg-success/20 border border-success/40 rounded-lg px-2 py-1' : '',
+                    voiceStore.error && !voiceStore.connected ? 'bg-error/20 border border-error/40 rounded-lg px-2 py-1' : ''
+                ]"
+                :title="voiceStore.connected ? `Connected to ${currentVoiceChannel?.name} • Click to go to voice channel` : (voiceStore.error && !voiceStore.connected ? 'Unable to make call' : 'Your Account')"
             >
                 <!-- Voice Controls (when connected) -->
                 <div v-if="voiceStore.connected" class="flex items-center gap-2 mr-3">
+                    <!-- Live RTT and Loss Warning -->
+                    <div class="text-sm text-base-content/70 select-none">
+                        <span v-if="lastRttMs != null">{{ Math.round(lastRttMs) }}ms</span>
+                    </div>
+                    <div v-if="lastLoss != null && lastLoss > 0.05" class="tooltip" data-tip="Packet loss {{ (lastLoss*100).toFixed(1) }}%">
+                        <span class="w-3 h-3 rounded-full bg-warning animate-pulse inline-block"></span>
+                    </div>
+                    <!-- Signal Strength (click to open WebRTC Stats) -->
+                    <button
+                        class="btn btn-ghost btn-xs px-2 h-6 min-h-0"
+                        :title="signalTooltip"
+                        @click.stop="statsVisible = true"
+                    >
+                        <div class="flex items-end gap-0.5">
+                            <span class="w-1.5 rounded-sm" :class="[barClass(1), barColorClass]" style="height:6px"></span>
+                            <span class="w-1.5 rounded-sm" :class="[barClass(2), barColorClass]" style="height:9px"></span>
+                            <span class="w-1.5 rounded-sm" :class="[barClass(3), barColorClass]" style="height:12px"></span>
+                            <span class="w-1.5 rounded-sm" :class="[barClass(4), barColorClass]" style="height:15px"></span>
+                        </div>
+                    </button>
+                                        
                     <!-- Microphone Control -->
                     <button
                         @click.stop="voiceStore.toggleMic"
@@ -102,12 +191,14 @@ function handleProfileClick() {
                         ]"
                         :title="voiceStore.micMuted ? 'Unmute Microphone' : 'Mute Microphone'"
                     >
-                        <svg v-if="!voiceStore.micMuted" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 0 1 7 15a1 1 0 0 0-2 0 7.001 7.001 0 0 0 6 6.93V17H6a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.07z" clip-rule="evenodd" />
+                        <svg v-if="!voiceStore.micMuted" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
+                        </svg>   
+
+                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
                         </svg>
-                        <svg v-else class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l2 2a1 1 0 01-1.414 1.414L13 7.414V8a3 3 0 11-6 0v-3a1 1 0 012 0v3a1 1 0 002 0V5a1 1 0 01.293-.707zM11 14.93A7.001 7.001 0 717 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-5v-2.07z" clip-rule="evenodd" />
-                        </svg>
+
                     </button>
 
                     <!-- Deafen Control -->
@@ -153,11 +244,15 @@ function handleProfileClick() {
                 <div class="avatar select-none relative" :class="avatarStatusClass">
                     <div 
                         class="w-12 rounded-full transition-all duration-200"
-                        :class="{ 'ring-2 ring-success ring-offset-2 ring-offset-base-100': voiceStore.connected }"
+                        :class="{
+                          'ring-2 ring-success ring-offset-2 ring-offset-base-100': voiceStore.connected,
+                          'ring-2 ring-error ring-offset-2 ring-offset-base-100': voiceStore.error && !voiceStore.connected
+                        }"
+                        @click.stop="router.push('/settings')"
+                        style="cursor:pointer"
                     >
                         <img :src="profile?.avatar" alt="User avatar" />
                     </div>
-                    
                     <!-- Voice Connection Indicator -->
                     <div 
                         v-if="voiceStore.connected" 
@@ -167,7 +262,15 @@ function handleProfileClick() {
                             <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 0 1 7 15a1 1 0 0 0-2 0 7.001 7.001 0 0 0 6 6.93V17H6a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.07z" clip-rule="evenodd" />
                         </svg>
                     </div>
-                    
+                    <!-- Error Indicator -->
+                    <div 
+                        v-if="voiceStore.error && !voiceStore.connected" 
+                        class="absolute -bottom-1 -right-1 w-4 h-4 bg-error rounded-full flex items-center justify-center animate-pulse"
+                    >
+                        <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.293l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
                     <!-- Connection Status Pulse -->
                     <div 
                         v-if="voiceStore.connected && !(voiceStore.sfuComposable as any)?.transportReady" 
@@ -175,10 +278,21 @@ function handleProfileClick() {
                     >
                     </div>
                 </div>
+        <!-- Voice Error Modal -->
+        <div v-if="voiceStore.error && !voiceStore.connected" class="modal modal-open">
+            <div class="modal-box">
+                <h3 class="font-bold text-lg mb-4 text-error">Unable to make call</h3>
+                <p class="text-base-content/70 mb-4">{{ voiceStore.error }}</p>
+                <div class="modal-action">
+                    <button class="btn btn-error" @click="voiceStore.error = null">Close</button>
+                </div>
+            </div>
+            <div class="modal-backdrop" @click="voiceStore.error = null"></div>
+        </div>
             </div>
 
             <div v-if="isDisconnected" class="ml-2 text-red-500 text-xs font-semibold">
-                Connection lost. Please refresh the page.
+                Connection lost.<br> Please refresh the page.
             </div>
         </section>
     </section>
