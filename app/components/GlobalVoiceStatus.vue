@@ -172,7 +172,7 @@ const voiceStore = useVoiceStore()
 const channelsStore = useChannelsStore()
 const router = useRouter()
 
-const connectedUsers = computed(() => voiceStore.getConnectedUsersArray())
+const connectedUsers = computed(() => voiceStore.getDisplayUsersArray())
 
 const currentChannelName = computed(() => {
   if (!voiceStore.currentChannelId) return 'Voice Channel'

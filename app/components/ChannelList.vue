@@ -89,9 +89,10 @@
               'bg-success/20 border border-success/50': voiceStore.isInVoiceChannel(channel.id)
             }"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m-2.829-2.829a2 2 0 010-2.828m4.95-1.414a8 8 0 010 11.314m-9.9-9.9a8 8 0 000 11.314m2.829-2.829a2 2 0 000-2.828m2.829-2.829a5 5 0 000 7.072" />
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
             </svg>
+
             <span class="flex-1 text-sm truncate">{{ channel.name }}</span>
             
             <!-- Voice connection indicator -->
@@ -100,7 +101,9 @@
             </div>
             
             <div v-if="channel.inRoom?.length" class="text-xs text-base-content/60">
-              {{ channel.inRoom.length }}
+              <span v-for="uid in channel.inRoom" :key="uid" class="inline-block mr-1">
+                <span class="bg-base-300 rounded px-1">{{ getUserName(uid) }}</span>
+              </span>
             </div>
             <!-- Channel actions dropdown -->
             <div class="dropdown dropdown-end" @click.stop>
@@ -243,6 +246,10 @@
 </template>
 
 <script setup>
+function getUserName(userId) {
+  const user = voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId)
+  return user?.display_name || user?.name || user?.username || userId
+}
 import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'
 import { useRoomsStore } from '../stores/rooms'

@@ -6,6 +6,8 @@ export const useVoiceStore = defineStore('voice', () => {
     const currentChannelId = ref(null);
     const currentRoomId = ref(null);
     const connectedUsers = ref(new Map());
+    // Per-participant volume (userId -> volume [0..1])
+    const userVolumes = ref({});
     // Cached user profiles keyed by userId, populated from room data
     const userDirectory = ref(new Map());
     const micMuted = ref(true);
@@ -13,6 +15,7 @@ export const useVoiceStore = defineStore('voice', () => {
     const connecting = ref(false);
     const connected = ref(false);
     const error = ref(null);
+    const connectedAt = ref(null);
 
     const sfuComposable = ref(null);
 
@@ -21,6 +24,16 @@ export const useVoiceStore = defineStore('voice', () => {
         try {
             const persistedMic = localStorage.getItem('voice.micMuted');
             if (persistedMic !== null) micMuted.value = persistedMic === 'true';
+            // Restore userVolumes from localStorage
+            const persistedVolumes = localStorage.getItem('voice.userVolumes');
+            if (persistedVolumes) {
+                try {
+                    const parsed = JSON.parse(persistedVolumes);
+                    if (parsed && typeof parsed === 'object') {
+                        Object.assign(userVolumes.value, parsed);
+                    }
+                } catch (_) { /* ignore */ }
+            }
         } catch (_) { /* noop */ }
     }
 
@@ -32,6 +45,9 @@ export const useVoiceStore = defineStore('voice', () => {
         watch(deafened, (v) => {
             try { localStorage.setItem('voice.deafened', String(!!v)) } catch (_) { /* noop */ }
         }, { immediate: true })
+        watch(userVolumes, (vols) => {
+            try { localStorage.setItem('voice.userVolumes', JSON.stringify(vols)) } catch (_) { /* noop */ }
+        }, { deep: true, immediate: true })
     }
 
     // Watch for critical SFU errors and set connected to false and propagate error if error occurs
@@ -53,6 +69,21 @@ export const useVoiceStore = defineStore('voice', () => {
             },
             { immediate: true }
         );
+
+        // Watch for output device changes and apply them to audio elements
+        import('~/stores/settings').then(({ useSettingsStore }) => {
+            const settingsStore = useSettingsStore();
+            watch(
+                () => settingsStore.outputDeviceId,
+                () => {
+                    if (sfuComposable.value && sfuComposable.value.applyOutputDeviceToAll) {
+                        sfuComposable.value.applyOutputDeviceToAll();
+                    }
+                }
+            );
+        }).catch(() => {
+            // Settings store not available, ignore
+        });
     }
 
     function setCurrentChannel(channelId) {
@@ -73,30 +104,63 @@ export const useVoiceStore = defineStore('voice', () => {
 
     function addConnectedUser(userId, userInfo) {
         const cached = userDirectory.value.get(userId) || {};
-        connectedUsers.value.set(userId, {
+    connectedUsers.value.set(userId, {
             id: userId,
             ...cached,
             ...userInfo,
             speaking: false,
             muted: false
         });
+    // Force reactivity by replacing the Map reference
+    connectedUsers.value = new Map(connectedUsers.value);
+        // Default volume to 1.0 if not set
+        if (typeof userVolumes.value[userId] === 'undefined') {
+            userVolumes.value[userId] = 1.0;
+        }
     }
 
     function removeConnectedUser(userId) {
-        connectedUsers.value.delete(userId);
+    connectedUsers.value.delete(userId);
+    connectedUsers.value = new Map(connectedUsers.value);
+        delete userVolumes.value[userId];
+    }
+    function setUserVolume(userId, volume) {
+        const v = Math.max(0, Math.min(1, Number(volume)));
+        userVolumes.value[userId] = v;
+        // Apply immediately to any live audio element(s)
+        if (typeof window !== 'undefined') {
+            try {
+                // Direct element by final user id
+                const audio = document.getElementById(`audio-${userId}`);
+                if (audio) {
+                    audio.volume = v;
+                }
+                // Use SFU helper to cover mapping races or multiple elements
+                if (sfuComposable.value && typeof sfuComposable.value.applyVolumeForUser === 'function') {
+                    sfuComposable.value.applyVolumeForUser(userId, v);
+                }
+            } catch (_) { /* noop */ }
+        }
+    }
+    function getUserVolume(userId) {
+        return typeof userVolumes.value[userId] !== 'undefined' ? userVolumes.value[userId] : 1.0;
     }
 
     function updateUserSpeaking(userId, speaking) {
+        // Only update known users to prevent phantom entries created from producer IDs
         const user = connectedUsers.value.get(userId);
-        if (user) {
-            user.speaking = speaking;
+        if (!user) {
+            return;
         }
+        connectedUsers.value.set(userId, { ...user, speaking });
+        connectedUsers.value = new Map(connectedUsers.value);
     }
 
     function updateUserMuted(userId, muted) {
         const user = connectedUsers.value.get(userId);
         if (user) {
-            user.muted = muted;
+            connectedUsers.value.set(userId, { ...user, muted });
+            connectedUsers.value = new Map(connectedUsers.value);
         }
     }
 
@@ -146,6 +210,7 @@ export const useVoiceStore = defineStore('voice', () => {
             // Only set connected if there is no SFU error
             if (!sfuComposable.value.error) {
                 connected.value = true;
+                connectedAt.value = Date.now();
 
                 // Respect persisted mic preference if available; otherwise follow permission-based default
                 let persistedMic = null;
@@ -158,27 +223,46 @@ export const useVoiceStore = defineStore('voice', () => {
 
                 if (persistedMic !== null) {
                     micMuted.value = persistedMic;
-                    if (!persistedMic) {
-                        // Attempt to start mic if unmuted and transports ready
-                        try {
-                            if (sfuComposable.value.transportReady) {
-                                await sfuComposable.value.startAudioProduction();
-                            }
-                        } catch (err) {
-                            // keep state; error will show via toast
+                }
+
+                // Always ensure micMuted state is respected: do NOT start audio if muted
+                if (!micMuted.value) {
+                    // Attempt to start mic if unmuted and transports ready
+                    try {
+                        if (sfuComposable.value.transportReady) {
+                            await sfuComposable.value.startAudioProduction();
                         }
+                    } catch (err) {
+                        // keep state; error will show via toast
                     }
                 } else {
-                    // If permission is denied, keep mic muted
+                    // If muted, ensure audio is NOT started
+                    try {
+                        if (sfuComposable.value.stopAudioProduction) {
+                            sfuComposable.value.stopAudioProduction();
+                        }
+                    } catch (_) { /* noop */ }
+                }
+
+                // If no persistedMic, set based on permission
+                if (persistedMic === null) {
                     if (micPermission === 'denied') {
                         micMuted.value = true;
                     } else if (micPermission === 'granted') {
                         micMuted.value = false;
+                        try {
+                            if (sfuComposable.value.transportReady) {
+                                await sfuComposable.value.startAudioProduction();
+                            }
+                        } catch (_) { /* noop */ }
                     } else {
                         // If prompt, ask for permission now
                         try {
                             await navigator.mediaDevices.getUserMedia({ audio: true });
                             micMuted.value = false;
+                            if (sfuComposable.value.transportReady) {
+                                await sfuComposable.value.startAudioProduction();
+                            }
                         } catch (err) {
                             micMuted.value = true;
                         }
@@ -232,6 +316,7 @@ export const useVoiceStore = defineStore('voice', () => {
             currentRoomId.value = null;
             connectedUsers.value.clear();
             connected.value = false;
+            connectedAt.value = null;
             error.value = null;
 
             console.log('[VoiceStore] Successfully left voice channel');
@@ -322,10 +407,21 @@ export const useVoiceStore = defineStore('voice', () => {
             return;
         }
 
-    deafened.value = !deafened.value;
+        deafened.value = !deafened.value;
         
         if (deafened.value && !micMuted.value) {
             toggleMic();
+        }
+
+        // Apply deafened state to all audio elements
+        if (typeof window !== 'undefined') {
+            const container = document.getElementById('webrtc-audio-global');
+            if (container) {
+                const audios = container.querySelectorAll('audio');
+                audios.forEach(audio => {
+                    audio.muted = deafened.value;
+                });
+            }
         }
 
         console.log('[VoiceStore] Deafened:', deafened.value);
@@ -348,6 +444,45 @@ export const useVoiceStore = defineStore('voice', () => {
         return Array.from(connectedUsers.value.values());
     }
 
+    // Returns a sanitized list safe for UI display:
+    // - Always include users present in userDirectory (room members/owner)
+    // - Include any connected user that has a live audio element
+    // - Include non-UUID-looking IDs (often short ids)
+    // - Exclude only IDs that look like producer-only UUIDs and have no audio/userDirectory backing
+    function getDisplayUsersArray() {
+        const users = Array.from(connectedUsers.value.values());
+        const isUuidV4 = (id) => typeof id === 'string' && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(id);
+        const knownIds = new Set(Array.from(userDirectory.value.keys()));
+        const liveAudioIds = new Set();
+        
+        if (typeof window !== 'undefined') {
+            const container = document.getElementById('webrtc-audio-global');
+            if (container) {
+                container.querySelectorAll('audio').forEach((el) => {
+                    const uid = el.getAttribute('data-user-id');
+                    if (uid) liveAudioIds.add(uid);
+                })
+            }
+        }
+        
+        const result = [];
+        const seen = new Set();
+        for (const u of users) {
+            const id = String(u.id);
+            const inDirectory = knownIds.has(id);
+            const hasAudio = liveAudioIds.has(id);
+            const notUuid = !isUuidV4(id);
+            const include = inDirectory || hasAudio || notUuid;
+            
+            if (include && !seen.has(id)) {
+                seen.add(id);
+                result.push(u);
+            }
+        }
+        
+        return result;
+    }
+
     function isUserConnected(userId) {
         return connectedUsers.value.has(userId);
     }
@@ -358,6 +493,12 @@ export const useVoiceStore = defineStore('voice', () => {
 
     function isInVoiceChannel(channelId) {
         return currentChannelId.value === channelId && connected.value;
+    }
+
+    async function applyOutputDevice() {
+        if (sfuComposable.value && sfuComposable.value.applyOutputDeviceToAll) {
+            await sfuComposable.value.applyOutputDeviceToAll();
+        }
     }
 
     // Directory helpers
@@ -421,6 +562,7 @@ export const useVoiceStore = defineStore('voice', () => {
         connecting: readonly(connecting),
         connected: readonly(connected),
         error, // not readonly, so it can be set from components
+    connectedAt: readonly(connectedAt),
         sfuComposable: readonly(sfuComposable),
         joinVoiceChannel,
         leaveVoiceChannel,
@@ -432,10 +574,15 @@ export const useVoiceStore = defineStore('voice', () => {
         updateUserMuted,
         clearVoiceState,
         getConnectedUsersArray,
+    getDisplayUsersArray,
         isUserConnected,
         getUserById,
-        isInVoiceChannel
-    , upsertUserProfile
-    , getUserProfile
+        isInVoiceChannel,
+        upsertUserProfile,
+        getUserProfile,
+        setUserVolume,
+        getUserVolume,
+        userVolumes: readonly(userVolumes),
+        applyOutputDevice
     };
 });

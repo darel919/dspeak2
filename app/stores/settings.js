@@ -41,6 +41,18 @@ export const useSettingsStore = defineStore('settings', () => {
   function setOutputDeviceId(id) {
     outputDeviceId.value = id || null
     persist('audioOutputDeviceId', outputDeviceId.value)
+    
+    // Trigger voice store to apply the new output device
+    if (typeof window !== 'undefined') {
+      import('~/stores/voice').then(({ useVoiceStore }) => {
+        const voiceStore = useVoiceStore()
+        if (voiceStore.applyOutputDevice) {
+          voiceStore.applyOutputDevice()
+        }
+      }).catch(() => {
+        // Voice store not available, ignore
+      })
+    }
   }
 
   function loadPersisted(key, fallback) {

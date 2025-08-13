@@ -47,6 +47,187 @@ export function useMediasoupSfu() {
   let pingIntervalId = null // For keepalive pings
   let audioEnsureIntervalId = null // For re-attaching audio elements across navigation
   let producersRequested = false
+  // Map producerId -> userId when provided by server
+  const producerOwner = new Map()
+
+  function rebindAudioAndDetectionIfNeeded(producerId, userId) {
+    try {
+      if (!producerId || !userId) return
+      // Always try to rebind audio element from producerId to userId
+      const oldEl = document.getElementById(`audio-${producerId}`)
+      const newId = `audio-${userId}`
+      const existingNew = document.getElementById(newId)
+      if (oldEl) {
+        // If not already renamed, rename and reapply userId
+        if (oldEl.id !== newId) {
+          oldEl.id = newId
+        }
+        if (oldEl.getAttribute('data-user-id') !== String(userId)) {
+          oldEl.setAttribute('data-user-id', String(userId))
+        }
+        // Reapply sink/output
+        try {
+          import('~/stores/settings').then(({ useSettingsStore }) => {
+            const settings = useSettingsStore()
+            const sinkId = settings.outputDeviceId
+            if (sinkId && typeof oldEl.setSinkId === 'function') {
+              oldEl.setSinkId(sinkId).catch(() => { /* noop */ })
+            }
+          })
+        } catch (_) { /* noop */ }
+        // Reapply user volume
+        try {
+          import('~/stores/voice').then(({ useVoiceStore }) => {
+            const voiceStore = useVoiceStore()
+            oldEl.volume = voiceStore.getUserVolume(userId)
+          })
+        } catch (_) { /* noop */ }
+      }
+      // Always restart voice detection under userId if it exists under producerId
+      if (voiceDetection.has(producerId)) {
+        cleanupVoiceDetection(producerId)
+        const consumer = consumers.value.get(producerId)
+        if (consumer && consumer.track && consumer.kind === 'audio') {
+          setupVoiceDetection(userId, consumer.track)
+        }
+      }
+    } catch (_) { /* noop */ }
+  }
+  // Shared Web Audio resources for voice detection to avoid per-interval AudioContext creation
+  let voiceDetectCtx = null
+  // Map: producerId -> { source, analyser, data, intervalId }
+  const voiceDetection = new Map()
+
+  function getVoiceDetectCtx() {
+    if (typeof window === 'undefined') return null
+    if (!voiceDetectCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext
+      if (!AC) return null
+      voiceDetectCtx = new AC()
+    }
+    // Some browsers require resume before use
+    try { voiceDetectCtx.resume && voiceDetectCtx.resume() } catch (_) { /* noop */ }
+    return voiceDetectCtx
+  }
+
+  function setupVoiceDetection(ownerId, track) {
+    try {
+      // ownerId might be a producer ID - find the real user ID
+  const isUuidV4 = (id) => typeof id === 'string' && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(id)
+  let initialUserId = producerOwner.get(ownerId) || ownerId
+  console.log(`[SFU] Setting up voice detection for producer ${ownerId} → user ${initialUserId}`)
+      
+      // Avoid duplicates under the same owner key
+      cleanupVoiceDetection(ownerId)
+      
+      // Use WebRTC native stats for voice activity detection - much more reliable than manual analysis
+      let lastSpeaking = false
+      let fadeTimeout = null
+
+      const intervalId = setInterval(async () => {
+        try {
+          // If track ended, stop detection
+          if (!track || track.readyState !== 'live' || !voiceDetection.has(ownerId)) {
+            cleanupVoiceDetection(ownerId)
+            return
+          }
+
+          // Find the consumer for this track to get WebRTC stats
+          let consumer = null
+          for (const [producerId, c] of consumers.value.entries()) {
+            if (c.track === track) {
+              consumer = c
+              break
+            }
+          }
+
+          if (consumer && consumer.rtpReceiver && consumer.rtpReceiver.getStats) {
+            // Re-resolve mapping each tick to keep in sync with late-arriving maps
+            const mappedUserId = producerOwner.get(ownerId) || initialUserId
+            // If looks like pure producer UUID and has no mapping yet, skip UI updates this tick
+            if (isUuidV4(mappedUserId) && mappedUserId === ownerId) {
+              // Still collect stats but don't mutate UI state until mapped
+            }
+            try {
+              const stats = await consumer.rtpReceiver.getStats()
+              let audioLevel = 0
+              let foundStats = false
+              
+              // Look for inbound-rtp stats with audioLevel
+              for (const [id, stat] of stats.entries()) {
+                if (stat.type === 'inbound-rtp' && stat.kind === 'audio' && typeof stat.audioLevel === 'number') {
+                  audioLevel = stat.audioLevel
+                  foundStats = true
+                  break
+                }
+              }
+
+              if (foundStats) {
+                // Use WebRTC's audioLevel - more reliable than manual analysis
+                // Threshold: > 0.001 for stability
+                const speaking = audioLevel > 0.001
+
+                if (speaking !== lastSpeaking) {
+                  try {
+                    const { useVoiceStore } = await import('~/stores/voice')
+                    const voiceStore = useVoiceStore()
+                    const targetUserId = producerOwner.get(ownerId) || initialUserId
+                    // Only update when targetUserId is a real user id (not an unmapped producer UUID)
+                    if (!(isUuidV4(targetUserId) && targetUserId === ownerId)) {
+                      voiceStore.updateUserSpeaking(targetUserId, speaking)
+                    }
+                  } catch (_) { /* noop */ }
+                  lastSpeaking = speaking
+                  if (fadeTimeout) clearTimeout(fadeTimeout)
+                  if (speaking) {
+                    // Auto-fade speaking state if no updates for a bit
+                    fadeTimeout = setTimeout(async () => {
+                      try {
+                        const { useVoiceStore } = await import('~/stores/voice')
+                        const voiceStore = useVoiceStore()
+                        const targetUserId = producerOwner.get(ownerId) || initialUserId
+                        if (!(isUuidV4(targetUserId) && targetUserId === ownerId)) {
+                          voiceStore.updateUserSpeaking(targetUserId, false)
+                        }
+                      } catch (_) { /* noop */ }
+                      lastSpeaking = false
+                    }, 1000)
+                  }
+                }
+              }
+            } catch (statsError) {
+              // Fallback: if stats unavailable, assume not speaking
+              if (lastSpeaking) {
+                try {
+                  const { useVoiceStore } = await import('~/stores/voice')
+                  const voiceStore = useVoiceStore()
+                  voiceStore.updateUserSpeaking(realUserId, false)
+                } catch (_) { /* noop */ }
+                lastSpeaking = false
+              }
+            }
+          }
+        } catch (_) { /* swallow tick errors */ }
+      }, 200) // 5Hz - good balance of responsiveness and efficiency
+
+      voiceDetection.set(ownerId, { intervalId, track })
+    } catch (_) { /* noop */ }
+  }
+
+  function cleanupVoiceDetection(ownerId) {
+    const entry = voiceDetection.get(ownerId)
+    if (!entry) return
+    try {
+      if (entry.intervalId) clearInterval(entry.intervalId)
+    } catch (_) { /* noop */ }
+    voiceDetection.delete(ownerId)
+  }
+
+  function cleanupAllVoiceDetections() {
+    for (const key of Array.from(voiceDetection.keys())) {
+      cleanupVoiceDetection(key)
+    }
+  }
 
   function setupMessageHandler(type, handler) {
     messageHandlers.set(type, handler)
@@ -152,7 +333,7 @@ export function useMediasoupSfu() {
           if (audioEnsureIntervalId) clearInterval(audioEnsureIntervalId)
           audioEnsureIntervalId = setInterval(() => {
             try { ensureAudioElements() } catch (_) { /* noop */ }
-          }, 2000)
+          }, 10000)
 
           setupEventHandlers()
 
@@ -183,6 +364,9 @@ export function useMediasoupSfu() {
             clearInterval(audioEnsureIntervalId)
             audioEnsureIntervalId = null
           }
+          // Cleanup voice detection on close to prevent leaks
+          cleanupAllVoiceDetections()
+          producerOwner.clear()
           // Avoid reconnection if manual/user-initiated or reconnection disabled
           if (!manualDisconnect && allowReconnect && !isShuttingDown) {
             handleDisconnection(channelId)
@@ -368,11 +552,34 @@ export function useMediasoupSfu() {
 
     setupMessageHandler('consumer-params', async ({ data }) => {
       console.log('[SFU] Received consumer params:', data)
+      console.log('[SFU] Full consumer-params data structure:', JSON.stringify(data, null, 2))
+      // Capture owner mapping if provided
+      if (data && data.producerId) {
+        const owner = data.userId || data.user_id || data.uid || data.ownerId || data.owner_id || (data.user && data.user.id)
+        if (owner) {
+          console.log(`[SFU] Mapping producer ${data.producerId} to user ${owner}`)
+          producerOwner.set(data.producerId, owner)
+          rebindAudioAndDetectionIfNeeded(data.producerId, owner)
+        } else {
+          console.log(`[SFU] No user mapping found in consumer params for producer ${data.producerId}`)
+          console.log('[SFU] Available fields:', Object.keys(data))
+        }
+      }
       await createConsumer(data)
     })
 
     setupMessageHandler('new-producer', ({ data }) => {
       console.log('[SFU] New producer available:', data.producerId)
+      if (data && data.producerId) {
+        const owner = data.userId || data.user_id || data.uid || data.ownerId || data.owner_id || (data.user && data.user.id)
+        if (owner) {
+          console.log(`[SFU] Mapping new producer ${data.producerId} to user ${owner}`)
+          producerOwner.set(data.producerId, owner)
+          rebindAudioAndDetectionIfNeeded(data.producerId, owner)
+        } else {
+          console.log(`[SFU] No user mapping in new-producer for ${data.producerId}`)
+        }
+      }
       // Ignore our own producer announcements (robust: check both set and map)
       if (localProducerIds.has(data.producerId) || producers.value.has(data.producerId)) {
         console.log('[SFU] Ignoring own producer')
@@ -388,8 +595,13 @@ export function useMediasoupSfu() {
       if (consumer) {
         consumer.close()
         consumers.value.delete(data.producerId)
-        removeAudioElement(data.producerId)
+        const ownerId = producerOwner.get(data.producerId) || data.producerId
+        removeAudioElement(ownerId)
+        // Ensure detection cleanup
+        cleanupVoiceDetection(ownerId)
       }
+      // Drop mapping
+      if (data && data.producerId) producerOwner.delete(data.producerId)
     })
 
     setupMessageHandler('error', ({ data }) => {
@@ -404,15 +616,56 @@ export function useMediasoupSfu() {
       }
     })
 
-    setupMessageHandler('currentlyInChannel', (message) => {
+    setupMessageHandler('currentlyInChannel', async (message) => {
       // Support both shapes: { type, data: {...} } and { type, inRoom, producers }
       const data = message && message.data ? message.data : {
         inRoom: message?.inRoom,
-        producers: message?.producers
+        producers: message?.producers,
+        producerUserMap: message?.producerUserMap
       }
       if (typeof console !== 'undefined' && typeof console.log === 'function') {
         console.log('[SFU] Currently in channel info:', data)
+        console.log('[SFU] Full currentlyInChannel message:', JSON.stringify(message, null, 2))
       }
+      
+      // CRITICAL: Establish producer → user mapping if provided
+      if (data.producerUserMap && typeof data.producerUserMap === 'object') {
+        console.log('[SFU] Setting up producer→user mapping:', data.producerUserMap)
+        for (const [producerId, userId] of Object.entries(data.producerUserMap)) {
+          producerOwner.set(producerId, userId)
+          console.log(`[SFU] Mapped producer ${producerId} → user ${userId}`)
+        }
+      } else if (data.producers && data.inRoom) {
+        // FALLBACK: If no explicit mapping but we have both arrays, try to correlate
+        // This is a heuristic - ideally the server should provide explicit mapping
+        console.log('[SFU] No explicit producer→user mapping, using fallback correlation')
+        console.log('[SFU] Producers:', data.producers)
+        console.log('[SFU] Users in room:', data.inRoom)
+        
+        // Simple fallback: assume producers are in same order as users (excluding self)
+        const { useAuthStore } = await import('~/stores/auth')
+        const authStore = useAuthStore()
+        const myUserId = authStore.getUserData()?.id
+        // Only unmapped producers and users
+        const unmappedProducers = data.producers.filter(pid => !producerOwner.has(pid))
+        const mappedUserIds = new Set(Array.from(producerOwner.values()))
+        const otherUsers = data.inRoom.filter(userId => userId !== myUserId && !mappedUserIds.has(userId))
+
+        // Try to map by matching patterns (if producerId == userId, skip)
+        let usedUserIds = new Set()
+        unmappedProducers.forEach((producerId) => {
+          // Prefer userId not already mapped
+          const userId = otherUsers.find(uid => !usedUserIds.has(uid))
+          if (userId && producerId !== userId) {
+            producerOwner.set(producerId, userId)
+            usedUserIds.add(userId)
+            console.log(`[SFU] FALLBACK mapped producer ${producerId} → user ${userId}`)
+          } else {
+            console.warn(`[SFU] Could not reliably map producer ${producerId} in fallback logic`)
+          }
+        })
+      }
+      
       // Handle channel state information
       // This indicates the server is ready to handle requests
       
@@ -449,18 +702,20 @@ export function useMediasoupSfu() {
             }
           }
           if (data && Array.isArray(data.inRoom)) {
-            // Add all users in inRoom
-            data.inRoom.forEach(userId => {
+            // Always hydrate and add all users in inRoom
+            const incomingIds = data.inRoom.map(u => typeof u === 'string' ? u : (u && u.id)).filter(Boolean)
+            incomingIds.forEach(userId => {
               if (!voiceStore.isUserConnected(userId)) {
                 voiceStore.addConnectedUser(userId, { id: userId });
               }
-            });
+            })
             // Remove users not in inRoom
+            const validSet = new Set(incomingIds)
             voiceStore.getConnectedUsersArray().forEach(user => {
-              if (!data.inRoom.includes(user.id)) {
-                voiceStore.removeConnectedUser(user.id);
+              if (!validSet.has(user.id)) {
+                voiceStore.removeConnectedUser(user.id)
               }
-            });
+            })
           }
         } catch (e) {
           window.console && window.console.warn && window.console.warn('[SFU] Failed to sync connected users:', e);
@@ -931,11 +1186,13 @@ export function useMediasoupSfu() {
           producers.value.delete(producer.id)
         }
         isProducing.value = producers.value.size > 0
+  // No consumer voice detection for local producer, but keep function symmetry
       })
 
       producer.on('trackended', () => {
         console.log('[SFU] Producer track ended')
         stopAudioProduction(producer.id)
+  // No consumer detection associated; nothing else to clean here
       })
 
       console.log('[SFU] Audio producer setup complete:', producer.id)
@@ -1113,19 +1370,26 @@ export function useMediasoupSfu() {
           readyState: consumer.track.readyState,
           muted: consumer.track.muted
         })
-        createAudioElement(consumerData.producerId, consumer.track)
+        const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
+        createAudioElement(ownerId, consumer.track)
+        // Voice detection with shared AudioContext
+  setupVoiceDetection(ownerId, consumer.track)
       }
 
       consumer.on('transportclose', () => {
         console.log('[SFU] Consumer transport closed')
-        removeAudioElement(consumerData.producerId)
+        const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
+        removeAudioElement(ownerId)
         consumers.value.delete(consumerData.producerId)
+        cleanupVoiceDetection(ownerId)
       })
 
       consumer.on('trackended', () => {
         console.log('[SFU] Consumer track ended')
-        removeAudioElement(consumerData.producerId)
+        const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
+        removeAudioElement(ownerId)
         consumers.value.delete(consumerData.producerId)
+        cleanupVoiceDetection(ownerId)
       })
 
   // Removed sending 'consumer-resume' message since SFU server does not support it
@@ -1154,93 +1418,69 @@ export function useMediasoupSfu() {
     return container
   }
 
-  function createAudioElement(producerId, track) {
+  function createAudioElement(ownerId, track) {
     const container = getOrCreateGlobalAudioContainer()
 
-    // Remove existing audio element if any
-    removeAudioElement(producerId)
+    // ownerId might be a producer ID - find the real user ID
+    const realUserId = producerOwner.get(ownerId) || ownerId
+    console.log(`[SFU] Creating audio element for producer ${ownerId} → user ${realUserId}`)
+
+    // Remove existing audio element if any (by both producer ID and user ID)
+    removeAudioElement(ownerId)
+    removeAudioElement(realUserId)
 
     const audio = document.createElement('audio')
-    audio.id = `audio-${producerId}`
+    // Use the real user ID for the element ID and data attribute
+    audio.id = `audio-${realUserId}`
+    audio.setAttribute('data-user-id', String(realUserId))
+    audio.setAttribute('data-producer-id', String(ownerId))
     audio.autoplay = true
     audio.controls = false
     audio.playsInline = true
+    
+    // Prevent feedback and echo issues
+    audio.muted = false  // Don't mute the audio element itself
+    
     audio.srcObject = new MediaStream([track])
 
-    // Set audio properties for better quality
-    audio.volume = 1.0
-
-    // Detailed debug logging for audio element and track state
-    const stream = audio.srcObject
-    if (stream && stream.getAudioTracks) {
-      const tracks = stream.getAudioTracks()
-      tracks.forEach((t, idx) => {
-        console.log(`[SFU][Debug] MediaStream track[${idx}]:`, {
-          id: t.id,
-          kind: t.kind,
-          enabled: t.enabled,
-          readyState: t.readyState,
-          muted: t.muted,
-          label: t.label,
-          settings: t.getSettings ? t.getSettings() : undefined
-        })
-      })
-    }
-    console.log('[SFU][Debug] Audio element initial state:', {
-      paused: audio.paused,
-      muted: audio.muted,
-      volume: audio.volume,
-      readyState: audio.readyState,
-      srcObject: audio.srcObject
-    })
-
-    container.appendChild(audio)
-    console.log('[SFU] Created audio element for producer:', producerId, audio)
-
-    // Explicitly attempt playback to surface and possibly bypass autoplay restrictions
-    // Apply preferred output device if supported
+    // Set audio volume from voiceStore - with logging
     try {
-      if (typeof audio.setSinkId === 'function') {
-        import('~/stores/settings').then(({ useSettingsStore }) => {
-          const settings = useSettingsStore()
-          const sinkId = settings.outputDeviceId
-          if (sinkId) {
-            audio.setSinkId(sinkId).catch(() => { /* ignore */ })
-          }
-        }).catch(() => { /* noop */ })
-      }
+      import('~/stores/voice').then(({ useVoiceStore }) => {
+        const voiceStore = useVoiceStore()
+        const volume = voiceStore.getUserVolume(realUserId)
+        console.log(`[SFU] Setting initial volume for audio-${realUserId}: ${volume}`)
+        audio.volume = volume
+      })
+    } catch (_) { 
+      console.log(`[SFU] Setting default volume for audio-${realUserId}: 1.0`)
+      audio.volume = 1.0 
+    }
+
+    // Apply output device setting immediately
+    try {
+      import('~/stores/settings').then(({ useSettingsStore }) => {
+        const settings = useSettingsStore()
+        const sinkId = settings.outputDeviceId
+        if (sinkId && typeof audio.setSinkId === 'function') {
+          audio.setSinkId(sinkId).catch((err) => {
+            console.warn('[SFU] Failed to set output device on audio element:', err)
+          })
+        }
+      })
     } catch (_) { /* noop */ }
 
-    const playPromise = audio.play()
-    if (playPromise && typeof playPromise.then === 'function') {
-      playPromise.catch((err) => {
-        console.warn('[SFU] Autoplay prevented, user gesture may be required:', err)
+    // Apply deafened state if user is deafened
+    try {
+      import('~/stores/voice').then(({ useVoiceStore }) => {
+        const voiceStore = useVoiceStore()
+        if (voiceStore.deafened) {
+          audio.muted = true
+        }
       })
-    }
-    // Retry play on metadata load
-    audio.onloadedmetadata = () => {
-      if (audio.paused) {
-        audio.play().catch(() => { /* noop */ })
-      }
-      // Log state after metadata loads
-      console.log('[SFU][Debug] Audio element state after metadata loaded:', {
-        paused: audio.paused,
-        muted: audio.muted,
-        volume: audio.volume,
-        readyState: audio.readyState,
-        srcObject: audio.srcObject
-      })
-    }
-    // Debug: log after attempting play
-    setTimeout(() => {
-      console.log('[SFU][Debug] Audio element state after play attempt:', {
-        paused: audio.paused,
-        muted: audio.muted,
-        volume: audio.volume,
-        readyState: audio.readyState,
-        srcObject: audio.srcObject
-      })
-    }, 1000)
+    } catch (_) { /* noop */ }
+
+    container.appendChild(audio)
+    console.log('[SFU] Created audio element for user:', realUserId, 'with sinkId applied')
   }
 
   // Ensure audio elements exist for all live consumers; recreate if missing
@@ -1249,11 +1489,41 @@ export function useMediasoupSfu() {
       const container = getOrCreateGlobalAudioContainer()
       consumers.value.forEach((consumer, producerId) => {
         if (!consumer || consumer.kind !== 'audio') return
-        const audioEl = document.getElementById(`audio-${producerId}`)
+        const ownerId = producerOwner.get(producerId) || producerId
+        // Try either userId-style or producerId-style element; reconcile if mismatched
+        let audioEl = document.getElementById(`audio-${ownerId}`)
+        if (!audioEl) {
+          // If element exists under producer id while mapping is known, rename it
+          const prodEl = document.getElementById(`audio-${producerId}`)
+          if (prodEl && ownerId !== producerId) {
+            prodEl.id = `audio-${ownerId}`
+            prodEl.setAttribute('data-user-id', String(ownerId))
+            prodEl.setAttribute('data-producer-id', String(producerId))
+            audioEl = prodEl
+          }
+        }
         if (!audioEl) {
           if (consumer.track && consumer.track.readyState === 'live') {
-            createAudioElement(producerId, consumer.track)
+            createAudioElement(ownerId, consumer.track)
           }
+        } else {
+          // Apply current output device to existing elements
+          try {
+            import('~/stores/settings').then(({ useSettingsStore }) => {
+              const settings = useSettingsStore()
+              const sinkId = settings.outputDeviceId
+              if (sinkId && typeof audioEl.setSinkId === 'function') {
+                audioEl.setSinkId(sinkId).catch(() => { /* noop */ })
+              }
+            })
+          } catch (_) { /* noop */ }
+          // Keep volume in sync as well
+          try {
+            import('~/stores/voice').then(({ useVoiceStore }) => {
+              const voiceStore = useVoiceStore()
+              audioEl.volume = voiceStore.getUserVolume(ownerId)
+            })
+          } catch (_) { /* noop */ }
         }
       })
     } catch (e) {
@@ -1261,12 +1531,34 @@ export function useMediasoupSfu() {
     }
   }
 
-  function removeAudioElement(producerId) {
-    const audio = document.getElementById(`audio-${producerId}`)
-    if (audio) {
-      audio.remove()
-      console.log('[SFU] Removed audio element for producer:', producerId)
-    }
+  function removeAudioElement(ownerId) {
+    try {
+      // Try to remove by the given ID (could be producer ID or user ID)
+      const direct = document.getElementById(`audio-${ownerId}`)
+      if (direct) {
+        direct.remove()
+        console.log(`[SFU] Removed audio element: audio-${ownerId}`)
+        return
+      }
+
+      // Also try to find by data-user-id or data-producer-id
+      const container = document.getElementById('webrtc-audio-global')
+      if (container) {
+        const byUserId = container.querySelector(`audio[data-user-id="${ownerId}"]`)
+        if (byUserId) {
+          byUserId.remove()
+          console.log(`[SFU] Removed audio element by data-user-id: ${ownerId}`)
+          return
+        }
+
+        const byProducerId = container.querySelector(`audio[data-producer-id="${ownerId}"]`)
+        if (byProducerId) {
+          byProducerId.remove()
+          console.log(`[SFU] Removed audio element by data-producer-id: ${ownerId}`)
+          return
+        }
+      }
+    } catch (_) { /* noop */ }
   }
 
   async function applyOutputDeviceToAll() {
@@ -1274,7 +1566,7 @@ export function useMediasoupSfu() {
       const { useSettingsStore } = await import('~/stores/settings')
       const settings = useSettingsStore()
       const sinkId = settings.outputDeviceId
-      const container = document.getElementById('voice-audio-container')
+      const container = document.getElementById('webrtc-audio-global')
       if (!container) return
       const audios = container.querySelectorAll('audio')
       audios.forEach(el => {
@@ -1284,6 +1576,72 @@ export function useMediasoupSfu() {
           }
         }
       })
+    } catch (_) { /* noop */ }
+  }
+
+  // Apply volume to any audio element that represents the given userId.
+  // This is robust against race conditions where producer->user mapping has not yet been
+  // finalized by trying multiple selectors.
+  function applyVolumeForUser(userId, volume) {
+    try {
+      const v = Math.max(0, Math.min(1, Number(volume)))
+      
+      let elementsFound = 0
+      
+      // 1) Direct ID based on userId (the steady-state case)
+      const elById = document.getElementById(`audio-${userId}`)
+      if (elById && typeof elById.volume === 'number') {
+        elById.volume = v
+        elementsFound++
+        console.log(`[SFU] Volume updated via direct user ID: audio-${userId}`)
+      }
+
+      // 2) Any element explicitly tagged with this userId
+      const container = document.getElementById('webrtc-audio-global')
+      if (container) {
+        container.querySelectorAll('audio').forEach((el) => {
+          if (!el) return
+          const dataUid = el.getAttribute('data-user-id')
+          if (String(dataUid) === String(userId)) {
+            try { 
+              el.volume = v
+              elementsFound++
+              console.log(`[SFU] Volume updated via data-user-id: ${userId}`)
+            } catch (_) { /* noop */ }
+          }
+        })
+      }
+
+      // 3) Use producerOwner mapping (reverse lookup) to find any producer currently
+      // associated with this user and update that element defensively.
+      for (const [producerId, owner] of Array.from(producerOwner.entries())) {
+        if (String(owner) === String(userId)) {
+          const alt = document.getElementById(`audio-${producerId}`)
+          if (alt && typeof alt.volume === 'number') {
+            try { 
+              alt.volume = v
+              elementsFound++
+              console.log(`[SFU] Volume updated via producer mapping: producer ${producerId} → user ${userId}`)
+            } catch (_) { /* noop */ }
+          }
+        }
+      }
+      
+      // Debug: Show mapping issues only if no elements found
+      if (elementsFound === 0) {
+        console.log(`[SFU] Volume mapping issue: No audio elements found for user ${userId}`)
+        if (container) {
+          const available = Array.from(container.querySelectorAll('audio')).map(el => ({
+            id: el.id, 
+            dataUserId: el.getAttribute('data-user-id'),
+            dataProducerId: el.getAttribute('data-producer-id')
+          }))
+          console.log(`[SFU] Available audio elements:`, available)
+          console.log(`[SFU] Producer→User mappings:`, Array.from(producerOwner.entries()))
+        }
+      } else {
+        console.log(`[SFU] Volume successfully updated on ${elementsFound} audio element(s) for user ${userId}`)
+      }
     } catch (_) { /* noop */ }
   }
 
@@ -1343,9 +1701,11 @@ export function useMediasoupSfu() {
     consumers.value.forEach((consumer, producerId) => {
       consumer.close()
       removeAudioElement(producerId)
+      cleanupVoiceDetection(producerId)
     })
     consumers.value.clear()
   localProducerIds.clear()
+  producerOwner.clear()
     
     if (sendTransport.value) {
       sendTransport.value.close()
@@ -1373,6 +1733,13 @@ export function useMediasoupSfu() {
       clearInterval(pingIntervalId)
       pingIntervalId = null
     }
+    // Stop audio ensure interval
+    if (audioEnsureIntervalId) {
+      clearInterval(audioEnsureIntervalId)
+      audioEnsureIntervalId = null
+    }
+    // Cleanup voice detection context/nodes
+    cleanupAllVoiceDetections()
     
     connected.value = false
     isProducing.value = false
@@ -1540,10 +1907,11 @@ export function useMediasoupSfu() {
     consumers: readonly(consumers),
     connect,
     disconnect,
-  startAudioProduction,
-  stopAudioProduction,
-  applyOutputDeviceToAll,
-  getWebRTCStatsSnapshot,
-  ensureAudioElements
+    startAudioProduction,
+    stopAudioProduction,
+    applyOutputDeviceToAll,
+  applyVolumeForUser,
+    getWebRTCStatsSnapshot,
+    ensureAudioElements
   }
 }

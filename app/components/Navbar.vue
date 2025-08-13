@@ -44,7 +44,7 @@ const currentVoiceChannel = computed(() => {
     return channelsStore.getChannelById(voiceStore.currentChannelId) as any
 })
 
-const connectedUsers = computed(() => voiceStore.getConnectedUsersArray())
+const connectedUsers = computed(() => voiceStore.getDisplayUsersArray())
 
 // Voice control functions
 function navigateToVoiceChannel() {
@@ -79,6 +79,42 @@ const lastJitterMs = ref<number|null>(null)
 const lastLoss = ref<number|null>(null)
 const signalLevel = ref(0) // 0-4
 let signalTimer: any = null
+
+// Elapsed call time near the signal/ping
+const elapsedText = ref('')
+let elapsedTimer: any = null
+
+function formatElapsed(ms: number) {
+    if (ms <= 0 || !isFinite(ms)) return ''
+    const totalSec = Math.floor(ms / 1000)
+    const h = Math.floor(totalSec / 3600)
+    const m = Math.floor((totalSec % 3600) / 60)
+    const s = totalSec % 60
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+}
+
+function startElapsedTimer() {
+    if (elapsedTimer) return
+    const tick = () => {
+        if (voiceStore.connected && (voiceStore as any).connectedAt) {
+            const ms = Date.now() - (voiceStore as any).connectedAt
+            elapsedText.value = formatElapsed(ms)
+        } else {
+            elapsedText.value = ''
+        }
+    }
+    tick()
+    elapsedTimer = setInterval(tick, 1000)
+}
+
+watch(() => voiceStore.connected, (c) => {
+    if (c) startElapsedTimer()
+    else {
+        if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
+        elapsedText.value = ''
+    }
+}, { immediate: true })
 
 function barClass(n: number) { return signalLevel.value >= n ? '' : 'opacity-25' }
 const barColorClass = computed(() => {
@@ -126,7 +162,7 @@ async function pollSignal() {
     }
 }
 
-onMounted(() => { signalTimer = setInterval(pollSignal, 1000) })
+onMounted(() => { signalTimer = setInterval(pollSignal, 1000); startElapsedTimer() })
 onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTimer = null } })
 </script>
 
@@ -160,6 +196,10 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
             >
                 <!-- Voice Controls (when connected) -->
                 <div v-if="voiceStore.connected" class="flex items-center gap-2 mr-3">
+                    <!-- Elapsed call time -->
+                    <div class="text-sm text-base-content/70 select-none min-w-[3.5rem] text-right" v-if="elapsedText">
+                        {{ elapsedText }}
+                    </div>
                     <!-- Live RTT and Loss Warning -->
                     <div class="text-sm text-base-content/70 select-none">
                         <span v-if="lastRttMs != null">{{ Math.round(lastRttMs) }}ms</span>

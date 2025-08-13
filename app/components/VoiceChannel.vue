@@ -75,8 +75,9 @@
             <div
               v-for="user in connectedUsers"
               :key="user.id"
-              class="flex flex-col items-center justify-center p-6 bg-base-100 rounded-lg shadow-sm border border-base-300 min-h-[200px] relative"
-              :class="{ 'ring-2 ring-success': user.speaking }"
+              class="flex flex-col items-center justify-center p-6 bg-base-100 rounded-lg shadow-sm border border-base-300 min-h-[200px] relative transition-all duration-500"
+              :class="user.speaking ? 'ring-2 ring-success' : ''"
+              @contextmenu.prevent="openVolumeMenu(user)"
             >
               <!-- User Avatar -->
               <div class="avatar mb-4">
@@ -95,33 +96,30 @@
                   {{ getUserInitials(user) }}
                 </div>
               </div>
-              
               <!-- User Name -->
               <h4 class="text-lg font-semibold text-center mb-2">{{ getUserDisplayName(user) }}</h4>
-              
               <!-- User Status -->
               <div class="flex items-center gap-2">
-                <!-- Speaking Indicator -->
                 <div v-if="user.speaking" class="flex items-center gap-1 text-success">
                   <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div>
-                  <span class="text-sm">Speaking</span>
+                  <!-- <span class="text-sm">Speaking</span> -->
                 </div>
-                
-                <!-- Muted Indicator -->
                 <div v-if="user.muted" class="flex items-center gap-1 text-error">
-                  
                   <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
                   </svg>
-
                   <span class="text-sm">Muted</span>
                 </div>
-                
-                <!-- Active Status -->
-                <!-- <div v-if="!user.muted && !user.speaking" class="flex items-center gap-1 text-base-content/60">
-                  <div class="w-2 h-2 bg-base-content/60 rounded-full"></div>
-                  <span class="text-sm">Active</span>
-                </div> -->
+              </div>
+              <!-- Volume Control Context Menu -->
+              <div v-if="volumeMenuUser && volumeMenuUser.id === user.id" class="absolute top-2 right-2 bg-base-200 border border-base-300 rounded-lg shadow-lg p-3 z-50 w-48">
+                <div class="text-xs font-semibold mb-2">User Volume</div>
+                <input type="range" min="0" max="1" step="0.01" :value="voiceStore.getUserVolume(user.id)" @input="onVolumeChange(user.id, $event)" class="w-full" />
+                <div class="flex justify-between text-xs mt-1">
+                  <span>0%</span>
+                  <span>100%</span>
+                </div>
+                <button class="btn btn-xs btn-outline w-full mt-2" @click="closeVolumeMenu">Close</button>
               </div>
             </div>
           </div>
@@ -161,9 +159,9 @@
               <path fill-rule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l2 2a1 1 0 01-1.414 1.414L13 7.414V8a3 3 0 11-6 0v-3a1 1 0 012 0v3a1 1 0 002 0V5a1 1 0 01.293-.707zM11 14.93A7.001 7.001 0 017 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-5v-2.07z" clip-rule="evenodd" />
             </svg>
           </button>
-          <span class="text-xs mt-1 text-center">
+          <!-- <span class="text-xs mt-1 text-center">
             {{ voiceStore.micMuted ? 'Muted' : 'Mic' }}
-          </span>
+          </span> -->
         </div>
 
         <!-- Deafen Control -->
@@ -183,9 +181,9 @@
               <path fill-rule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019 10a1 1 0 10-2 0 8.1 8.1 0 01-1.879 5.131l-1.297-1.297a5.99 5.99 0 001.176-3.834 1 1 0 10-2 0 3.99 3.99 0 01-.849 2.205l-1.356-1.356a1.99 1.99 0 00-.205-.849V4a1 1 0 00-1.707-.707L4.586 7H2a1 1 0 00-1 1v4a1 1 0 001 1h2.586l.707.707L3.707 2.293z" clip-rule="evenodd" />
             </svg>
           </button>
-          <span class="text-xs mt-1 text-center">
+          <!-- <span class="text-xs mt-1 text-center">
             {{ voiceStore.deafened ? 'Deafened' : 'Audio' }}
-          </span>
+          </span> -->
         </div>
 
         <!-- Connection Status -->
@@ -250,7 +248,64 @@ const channelsStore = useChannelsStore()
 const router = useRouter()
 const config = useRuntimeConfig()
 
-const connectedUsers = computed(() => voiceStore.getConnectedUsersArray())
+const connectedUsers = computed(() => {
+  const display = voiceStore.getDisplayUsersArray()
+  // Also log available audio elements for comparison
+  if (typeof window !== 'undefined') {
+    const container = document.getElementById('webrtc-audio-global')
+    if (container) {
+      const audioElements = Array.from(container.querySelectorAll('audio')).map(el => ({
+        id: el.id,
+        dataUserId: el.getAttribute('data-user-id'),
+        volume: el.volume
+      }))
+      // console.log('[VoiceChannel] Available audio elements:', audioElements)
+    }
+  }
+  return display
+})
+const volumeMenuUser = ref(null)
+function openVolumeMenu(user) {
+  console.log('[VoiceChannel] Opening volume menu for user:', user)
+  volumeMenuUser.value = user
+}
+function closeVolumeMenu() {
+  volumeMenuUser.value = null
+}
+function onVolumeChange(userId, event) {
+  console.log('[VoiceChannel] Volume change for user:', userId, 'value:', event.target.value)
+  voiceStore.setUserVolume(userId, Number(event.target.value))
+  
+  // Also try to directly find and update any matching audio element
+  // This is a workaround for mapping mismatches
+  const container = document.getElementById('webrtc-audio-global')
+  if (container) {
+    const allAudio = container.querySelectorAll('audio')
+    console.log('[VoiceChannel] Available audio elements during volume change:', 
+      Array.from(allAudio).map(el => ({ id: el.id, dataUserId: el.getAttribute('data-user-id') })))
+    
+    // Try multiple strategies to find the right element
+    let found = false
+    allAudio.forEach(audio => {
+      // Strategy 1: Direct ID match
+      if (audio.id === `audio-${userId}`) {
+        audio.volume = Number(event.target.value)
+        console.log('[VoiceChannel] Updated volume via direct ID match')
+        found = true
+      }
+      // Strategy 2: data-user-id match
+      else if (audio.getAttribute('data-user-id') === userId) {
+        audio.volume = Number(event.target.value)
+        console.log('[VoiceChannel] Updated volume via data-user-id match')
+        found = true
+      }
+    })
+    
+    if (!found) {
+      console.log('[VoiceChannel] No audio element found for user', userId)
+    }
+  }
+}
 
 const currentConnectedChannelName = computed(() => {
   if (!voiceStore.currentChannelId) return ''
