@@ -61,8 +61,6 @@ export function useMediasoupSfu() {
         // If not already renamed, rename and reapply userId
         if (oldEl.id !== newId) {
           oldEl.id = newId
-        }
-        if (oldEl.getAttribute('data-user-id') !== String(userId)) {
           oldEl.setAttribute('data-user-id', String(userId))
         }
         // Reapply sink/output
@@ -121,96 +119,87 @@ export function useMediasoupSfu() {
       cleanupVoiceDetection(ownerId)
       
       // Use WebRTC native stats for voice activity detection - much more reliable than manual analysis
-      let lastSpeaking = false
-      let fadeTimeout = null
-
+      // Debounce logic for VAD
+      let lastSpeaking = false;
+      let speakingCount = 0;
+      let notSpeakingCount = 0;
+      const SPEAKING_DEBOUNCE = 3; // require 3 consecutive intervals
+      const NOT_SPEAKING_DEBOUNCE = 3;
       const intervalId = setInterval(async () => {
         try {
-          // If track ended, stop detection
           if (!track || track.readyState !== 'live' || !voiceDetection.has(ownerId)) {
-            cleanupVoiceDetection(ownerId)
-            return
+            cleanupVoiceDetection(ownerId);
+            return;
           }
-
-          // Find the consumer for this track to get WebRTC stats
-          let consumer = null
+          let consumer = null;
           for (const [producerId, c] of consumers.value.entries()) {
             if (c.track === track) {
-              consumer = c
-              break
+              consumer = c;
+              break;
             }
           }
-
           if (consumer && consumer.rtpReceiver && consumer.rtpReceiver.getStats) {
-            // Re-resolve mapping each tick to keep in sync with late-arriving maps
-            const mappedUserId = producerOwner.get(ownerId) || initialUserId
-            // If looks like pure producer UUID and has no mapping yet, skip UI updates this tick
+            const mappedUserId = producerOwner.get(ownerId) || initialUserId;
             if (isUuidV4(mappedUserId) && mappedUserId === ownerId) {
-              // Still collect stats but don't mutate UI state until mapped
+              // Wait for mapping
             }
             try {
-              const stats = await consumer.rtpReceiver.getStats()
-              let audioLevel = 0
-              let foundStats = false
-              
-              // Look for inbound-rtp stats with audioLevel
+              const stats = await consumer.rtpReceiver.getStats();
+              let audioLevel = 0;
+              let foundStats = false;
               for (const [id, stat] of stats.entries()) {
                 if (stat.type === 'inbound-rtp' && stat.kind === 'audio' && typeof stat.audioLevel === 'number') {
-                  audioLevel = stat.audioLevel
-                  foundStats = true
-                  break
+                  audioLevel = stat.audioLevel;
+                  foundStats = true;
+                  break;
                 }
               }
-
               if (foundStats) {
-                // Use WebRTC's audioLevel - more reliable than manual analysis
-                // Threshold: > 0.001 for stability
-                const speaking = audioLevel > 0.001
-
-                if (speaking !== lastSpeaking) {
+                const speaking = audioLevel > 0.005;
+                if (speaking) {
+                  speakingCount++;
+                  notSpeakingCount = 0;
+                } else {
+                  notSpeakingCount++;
+                  speakingCount = 0;
+                }
+                // Only update if debounce threshold met
+                if (speaking && !lastSpeaking && speakingCount >= SPEAKING_DEBOUNCE) {
                   try {
-                    const { useVoiceStore } = await import('~/stores/voice')
-                    const voiceStore = useVoiceStore()
-                    const targetUserId = producerOwner.get(ownerId) || initialUserId
-                    // Only update when targetUserId is a real user id (not an unmapped producer UUID)
+                    const { useVoiceStore } = await import('~/stores/voice');
+                    const voiceStore = useVoiceStore();
+                    const targetUserId = producerOwner.get(ownerId) || initialUserId;
                     if (!(isUuidV4(targetUserId) && targetUserId === ownerId)) {
-                      voiceStore.updateUserSpeaking(targetUserId, speaking)
+                      voiceStore.updateUserSpeaking(targetUserId, true);
                     }
                   } catch (_) { /* noop */ }
-                  lastSpeaking = speaking
-                  if (fadeTimeout) clearTimeout(fadeTimeout)
-                  if (speaking) {
-                    // Auto-fade speaking state if no updates for a bit
-                    fadeTimeout = setTimeout(async () => {
-                      try {
-                        const { useVoiceStore } = await import('~/stores/voice')
-                        const voiceStore = useVoiceStore()
-                        const targetUserId = producerOwner.get(ownerId) || initialUserId
-                        if (!(isUuidV4(targetUserId) && targetUserId === ownerId)) {
-                          voiceStore.updateUserSpeaking(targetUserId, false)
-                        }
-                      } catch (_) { /* noop */ }
-                      lastSpeaking = false
-                    }, 1000)
-                  }
+                  lastSpeaking = true;
+                } else if (!speaking && lastSpeaking && notSpeakingCount >= NOT_SPEAKING_DEBOUNCE) {
+                  try {
+                    const { useVoiceStore } = await import('~/stores/voice');
+                    const voiceStore = useVoiceStore();
+                    const targetUserId = producerOwner.get(ownerId) || initialUserId;
+                    if (!(isUuidV4(targetUserId) && targetUserId === ownerId)) {
+                      voiceStore.updateUserSpeaking(targetUserId, false);
+                    }
+                  } catch (_) { /* noop */ }
+                  lastSpeaking = false;
                 }
               }
             } catch (statsError) {
-              // Fallback: if stats unavailable, assume not speaking
               if (lastSpeaking) {
                 try {
-                  const { useVoiceStore } = await import('~/stores/voice')
-                  const voiceStore = useVoiceStore()
-                  voiceStore.updateUserSpeaking(realUserId, false)
+                  const { useVoiceStore } = await import('~/stores/voice');
+                  const voiceStore = useVoiceStore();
+                  voiceStore.updateUserSpeaking(initialUserId, false);
                 } catch (_) { /* noop */ }
-                lastSpeaking = false
+                lastSpeaking = false;
               }
             }
           }
         } catch (_) { /* swallow tick errors */ }
-      }, 200) // 5Hz - good balance of responsiveness and efficiency
-
-      voiceDetection.set(ownerId, { intervalId, track })
+      }, 200);
+      voiceDetection.set(ownerId, { intervalId, track });
     } catch (_) { /* noop */ }
   }
 
@@ -234,38 +223,44 @@ export function useMediasoupSfu() {
   }
 
   function sendMessage(message) {
-    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      ws.value.send(JSON.stringify(message))
-    } else {
-      messageQueue.push(message)
+    try {
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify(message));
+      } else {
+        messageQueue.push(message);
+      }
+    } catch (e) {
+      // If sending fails for any reason, queue the message for later
+      try { messageQueue.push(message) } catch (_) { /* noop */ }
+      console.error('[SFU] Failed to send message, queued instead', e);
     }
   }
 
   async function fetchIceServers() {
     try {
-      console.log('[SFU] Fetching ICE servers from backend...')
-      const runtimeConfig = useRuntimeConfig()
-      const backend = runtimeConfig.public.apiPath
-      const servers = await $fetch(`${backend}/config`)
+      console.log('[SFU] Fetching ICE servers from backend...');
+      const runtimeConfig = useRuntimeConfig();
+      const backend = runtimeConfig.public.apiPath;
+      const servers = await $fetch(`${backend}/config`);
       if (Array.isArray(servers) && servers.length > 0) {
-        iceServers.value = servers
-        console.log('[SFU] ICE servers loaded:')
+        iceServers.value = servers;
+        console.log('[SFU] ICE servers loaded:', servers);
       } else {
-        throw new Error('Invalid ICE servers response format')
+        throw new Error('Invalid ICE servers response format');
       }
     } catch (err) {
-      console.error('[SFU] Failed to fetch ICE servers:', err)
-      error.value = 'Unable to load ICE servers. Voice capability is disabled.'
-      throw err
+      console.error('[SFU] Failed to fetch ICE servers:', err);
+      error.value = 'Unable to load ICE servers. Voice capability is disabled.';
+      throw err;
     }
   }
 
   function processMessageQueue() {
-    while (messageQueue.length > 0 && ws.value && ws.value.readyState === WebSocket.OPEN) {
-      const message = messageQueue.shift()
-      ws.value.send(JSON.stringify(message))
+      while (messageQueue.length > 0 && ws.value && ws.value.readyState === WebSocket.OPEN) {
+        const message = messageQueue.shift();
+        ws.value.send(JSON.stringify(message));
+      }
     }
-  }
 
   async function connect(channelId) {
     try {
@@ -798,18 +793,46 @@ export function useMediasoupSfu() {
 
   // Helper function to create a clean, cloneable device
   async function createCleanDevice(rtpCapabilities) {
+    // Dynamically import mediasoup-client in client context to avoid init order/SSR issues
+    const { Device } = await import('mediasoup-client');
     // Create a new device instance
-    const newDevice = new Device()
-    
-    // Deep clone the RTP capabilities to ensure they're completely clean
-    const cleanCapabilities = JSON.parse(JSON.stringify(rtpCapabilities))
-    
+    const newDevice = new Device();
+
+    // Deep clone and sanitize RTP capabilities
+    let cleanCapabilities;
+    try {
+      cleanCapabilities = JSON.parse(JSON.stringify(rtpCapabilities));
+    } catch (e) {
+      console.error('[SFU] Failed to deep clone RTP capabilities:', e, rtpCapabilities);
+      throw new Error('Malformed RTP capabilities from server');
+    }
+
+    // Remove any unexpected properties that could cause mediasoup-client to fail
+    if (cleanCapabilities && typeof cleanCapabilities === 'object') {
+      for (const key in cleanCapabilities) {
+        if (typeof cleanCapabilities[key] === 'function' || typeof cleanCapabilities[key] === 'undefined') {
+          delete cleanCapabilities[key];
+        }
+      }
+    }
+
+    // Validate required fields
+    if (!cleanCapabilities.codecs || !Array.isArray(cleanCapabilities.codecs)) {
+      throw new Error('RTP capabilities missing codecs array');
+    }
+    if (!cleanCapabilities.headerExtensions || !Array.isArray(cleanCapabilities.headerExtensions)) {
+      throw new Error('RTP capabilities missing headerExtensions array');
+    }
+
+    // Log sanitized capabilities for debugging
+    console.log('[SFU] Sanitized RTP capabilities:', cleanCapabilities);
+
     // Load the device with clean capabilities
-    await newDevice.load({ 
+    await newDevice.load({
       routerRtpCapabilities: cleanCapabilities
-    })
-    
-    return newDevice
+    });
+
+    return newDevice;
   }
 
   function createTransports() {
