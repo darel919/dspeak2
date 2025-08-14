@@ -129,16 +129,19 @@ export const useVoiceStore = defineStore('voice', () => {
         });
     // Force reactivity by replacing the Map reference
     connectedUsers.value = new Map(connectedUsers.value);
-        // Default volume to 1.0 if not set
-        if (typeof userVolumes.value[userId] === 'undefined') {
-            userVolumes.value[userId] = 1.0;
+        // If there is no saved volume for this user, initialize it based on current element volume if available; otherwise leave undefined until the first control change
+        if (typeof userVolumes.value[userId] === 'undefined' && typeof window !== 'undefined') {
+            const el = document.getElementById(`audio-${userId}`)
+            if (el && typeof el.volume === 'number') {
+                userVolumes.value[userId] = el.volume
+            }
         }
     }
 
     function removeConnectedUser(userId) {
     connectedUsers.value.delete(userId);
     connectedUsers.value = new Map(connectedUsers.value);
-        delete userVolumes.value[userId];
+    // Do NOT delete userVolumes on disconnect; preserve user-defined settings across re-joins
     }
     function setUserVolume(userId, volume) {
         const v = Math.max(0, Math.min(1, Number(volume)));
@@ -250,6 +253,10 @@ export const useVoiceStore = defineStore('voice', () => {
                 while (!sfuComposable.value.transportReady) {
                     await new Promise(res => setTimeout(res, 50));
                 }
+                
+                // Give SFU time to process initial messages (currentlyInChannel, etc.)
+                await new Promise(res => setTimeout(res, 200));
+                
                 // Broadcast mode: only require send transport ICE connection
                 const { useSettingsStore } = await import('~/stores/settings');
                 const settingsStore = useSettingsStore();
@@ -259,7 +266,38 @@ export const useVoiceStore = defineStore('voice', () => {
                 let connectedOk = false;
                 // Use the new areTransportsIceConnected helper for both modes
                 while (Date.now() - startTime < timeoutMs) {
-                    if (await sfuComposable.value.areTransportsIceConnected?.(isBroadcast)) { connectedOk = true; break; }
+                    // If truly alone, treat as connected
+                    if (sfuComposable.value) {
+                        try {
+                            console.log('[VoiceStore] SFU object keys:', Object.keys(sfuComposable.value));
+                            console.log('[VoiceStore] remoteProducersCount ref:', sfuComposable.value.remoteProducersCount);
+                            console.log('[VoiceStore] lastInRoom ref:', sfuComposable.value.lastInRoom);
+                            
+                            // Access values directly - they're already unwrapped in this context
+                            const remoteCount = sfuComposable.value.remoteProducersCount ?? -1;
+                            const roomUsers = sfuComposable.value.lastInRoom ?? [];
+                            
+                            console.log('[VoiceStore] Direct access remoteCount:', remoteCount);
+                            console.log('[VoiceStore] Direct access roomUsers:', roomUsers);
+                            console.log('[VoiceStore] Checking alone status:', {
+                                remoteProducersCount: remoteCount,
+                                lastInRoom: roomUsers,
+                                isAlone: remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1
+                            });
+                            
+                            if (remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1) {
+                                console.log('[VoiceStore] User is alone, treating as connected');
+                                connectedOk = true;
+                                break;
+                            }
+                        } catch (err) {
+                            console.error('[VoiceStore] Error checking alone status:', err);
+                        }
+                    }
+                    if (await sfuComposable.value.areTransportsIceConnected?.(isBroadcast)) {
+                        connectedOk = true;
+                        break;
+                    }
                     if (sfuComposable.value.error) throw new Error(sfuComposable.value.error);
                     await new Promise(res => setTimeout(res, 100));
                 }
@@ -286,13 +324,6 @@ export const useVoiceStore = defineStore('voice', () => {
                 connected.value = true;
                 connectedAt.value = Date.now();
                 console.log('[VoiceStore] Successfully joined voice channel:', channelId);
-
-                // Show success notification only after both ICE transports are connected
-                if (typeof window !== 'undefined') {
-                    const { useToast } = await import('~/composables/useToast');
-                    const { success } = useToast();
-                    success('Connected to voice channel');
-                }
             } else {
                 connected.value = false;
                 error.value = sfuComposable.value.error;

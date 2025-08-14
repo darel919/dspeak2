@@ -10,7 +10,7 @@
       </div>
       
       <div class="flex items-center gap-2">
-        <div v-if="voiceStore.connecting" class="flex items-center gap-2 text-info">
+  <div v-if="voiceStore.connecting && !voiceStore.connected" class="flex items-center gap-2 text-info">
           <span class="loading loading-spinner loading-sm"></span>
           <span class="text-sm">Connecting...</span>
         </div>
