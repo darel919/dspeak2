@@ -5,7 +5,7 @@
         <div class="flex items-center justify-between px-3 py-2 bg-base-300 border-b border-base-content/10">
           <div class="flex items-center gap-2">
             <span class="w-2 h-2 rounded-full" :class="statusDotClass"></span>
-            <span class="text-sm font-medium">WebRTC Stats</span>
+            <span class="text-sm font-medium">RTC Statistics</span>
           </div>
           <div class="flex items-center gap-1">
             <button class="btn btn-ghost btn-xs" @click="togglePolling">

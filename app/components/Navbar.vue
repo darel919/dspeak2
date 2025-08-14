@@ -3,6 +3,7 @@
 import { useAuthStore } from '../stores/auth'
 import { useVoiceStore } from '../stores/voice'
 import { useChannelsStore } from '../stores/channels'
+import { useSettingsStore } from '../stores/settings'
 // import { useNotifications } from '../composables/useNotifications'
 import RoomList from './RoomList.vue'
 // import NotificationSettings from './NotificationSettings.vue'
@@ -10,6 +11,11 @@ import RoomList from './RoomList.vue'
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
+const settingsStore = useSettingsStore();
+const broadcastMode = computed(() => settingsStore.broadcastMode)
+function toggleBroadcastMode() {
+    settingsStore.setBroadcastMode(!settingsStore.broadcastMode)
+}
 const profile = computed(() => authStore.getUserData());
 const route = useRoute();
 const router = useRouter();
@@ -190,9 +196,13 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                 class="flex items-center cursor-pointer group relative"
                 :class="[
                     voiceStore.connected ? 'bg-success/20 border border-success/40 rounded-lg px-2 py-1' : '',
-                    voiceStore.error && !voiceStore.connected ? 'bg-error/20 border border-error/40 rounded-lg px-2 py-1' : ''
+                    (!voiceStore.connected && (voiceStore.connecting || voiceStore.error)) ? 'bg-warning/20 border border-warning/40 rounded-lg px-2 py-1' : ''
                 ]"
-                :title="voiceStore.connected ? `Connected to ${currentVoiceChannel?.name} • Click to go to voice channel` : (voiceStore.error && !voiceStore.connected ? 'Unable to make call' : 'Your Account')"
+                :title="voiceStore.connected 
+                    ? `Connected to ${currentVoiceChannel?.name} • Click to go to voice channel` 
+                    : (voiceStore.connecting 
+                        ? 'Connecting…' 
+                        : (voiceStore.error && !voiceStore.connected ? 'Call dropped or unavailable' : 'Your Account'))"
             >
                 <!-- Voice Controls (when connected) -->
                 <div v-if="voiceStore.connected" class="flex items-center gap-2 mr-3">
@@ -221,6 +231,17 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         </div>
                     </button>
                                         
+                    <!-- Broadcast Mode Toggle -->
+                    <button
+                      @click.stop="toggleBroadcastMode"
+                      :class="['btn btn-xs', broadcastMode ? 'btn-warning' : 'btn-outline']"
+                      :title="broadcastMode ? 'Broadcast Mode ON: You only send audio' : 'Broadcast Mode OFF: You can hear others'"
+                      v-if="voiceStore.connected"
+                    >
+                      <svg v-if="broadcastMode" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-5"><path d="M12 3v2a7 7 0 0 1 0 14v2a9 9 0 0 0 0-18zm0 4v2a3 3 0 0 1 0 6v2a5 5 0 0 0 0-10z"/></svg>
+                      <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-5"><path d="M12 3v2a7 7 0 0 1 0 14v2a9 9 0 0 0 0-18zm0 4v2a3 3 0 0 1 0 6v2a5 5 0 0 0 0-10z"/></svg>
+                      {{ broadcastMode ? 'Broadcast ON' : 'Broadcast OFF' }}
+                    </button>
                     <!-- Microphone Control -->
                     <button
                         @click.stop="voiceStore.toggleMic"
@@ -238,7 +259,6 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
                         </svg>
-
                     </button>
 
                     <!-- Deafen Control -->
@@ -286,7 +306,8 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         class="w-12 rounded-full transition-all duration-200"
                         :class="{
                           'ring-2 ring-success ring-offset-2 ring-offset-base-100': voiceStore.connected,
-                          'ring-2 ring-error ring-offset-2 ring-offset-base-100': voiceStore.error && !voiceStore.connected
+                          'ring-2 ring-warning ring-offset-2 ring-offset-base-100': !voiceStore.connected && (voiceStore.connecting || voiceStore.error),
+                          'ring-2 ring-error ring-offset-2 ring-offset-base-100': voiceStore.error && !voiceStore.connected && !voiceStore.connecting
                         }"
                         @click.stop="router.push('/settings')"
                         style="cursor:pointer"
@@ -302,26 +323,13 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                             <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 0 1 7 15a1 1 0 0 0-2 0 7.001 7.001 0 0 0 6 6.93V17H6a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.07z" clip-rule="evenodd" />
                         </svg>
                     </div>
-                    <!-- Error Indicator -->
-                    <div 
-                        v-if="voiceStore.error && !voiceStore.connected" 
-                        class="absolute -bottom-1 -right-1 w-4 h-4 bg-error rounded-full flex items-center justify-center animate-pulse"
-                    >
-                        <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.293l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clip-rule="evenodd" />
-                        </svg>
-                    </div>
-                    <!-- Connection Status Pulse -->
-                    <div 
-                        v-if="voiceStore.connected && !(voiceStore.sfuComposable as any)?.transportReady" 
-                        class="absolute -bottom-1 -right-1 w-4 h-4 bg-warning rounded-full animate-pulse"
-                    >
-                    </div>
+                    <!-- Connecting / Dropped Indicator (Yellow) -->
+                    <div v-else-if="!voiceStore.connected && (voiceStore.connecting || voiceStore.error)" class="absolute -bottom-1 -right-1 w-4 h-4 bg-warning rounded-full animate-pulse"></div>
                 </div>
         <!-- Voice Error Modal -->
         <div v-if="voiceStore.error && !voiceStore.connected" class="modal modal-open">
             <div class="modal-box">
-                <h3 class="font-bold text-lg mb-4 text-error">Unable to make call</h3>
+                <h3 class="font-bold text-lg mb-4 text-error">Call Failed</h3>
                 <p class="text-base-content/70 mb-4">{{ voiceStore.error }}</p>
                 <div class="modal-action">
                     <button class="btn btn-error" @click="voiceStore.error = null">Close</button>

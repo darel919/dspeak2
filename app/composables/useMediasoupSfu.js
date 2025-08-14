@@ -49,6 +49,8 @@ export function useMediasoupSfu() {
   let producersRequested = false
   // Map producerId -> userId when provided by server
   const producerOwner = new Map()
+  // Helper ref to reflect when both transports are ICE-connected
+  const iceConnectedBoth = ref(false)
 
   function rebindAudioAndDetectionIfNeeded(producerId, userId) {
     try {
@@ -581,7 +583,14 @@ export function useMediasoupSfu() {
         return
       }
       console.log('[SFU][Debug] Requesting consumer for remote producer:', data.producerId)
-      requestConsumer(data.producerId)
+      const tryRequest = () => {
+        if (device.value && device.value.loaded) {
+          requestConsumer(data.producerId);
+        } else {
+          setTimeout(tryRequest, 100);
+        }
+      };
+      tryRequest();
     })
 
     setupMessageHandler('producer-closed', ({ data }) => {
@@ -720,7 +729,14 @@ export function useMediasoupSfu() {
       if (data && data.producers && Array.isArray(data.producers)) {
         console.log('[SFU] Requesting consumers for existing producers:', data.producers)
         data.producers.forEach(producerId => {
-          setTimeout(() => requestConsumer(producerId), 200)
+          const tryRequest = () => {
+            if (device.value && device.value.loaded) {
+              requestConsumer(producerId);
+            } else {
+              setTimeout(tryRequest, 100);
+            }
+          };
+          tryRequest();
         })
       }
     })
@@ -851,19 +867,17 @@ export function useMediasoupSfu() {
   function setupSendTransportEvents() {
     sendTransport.value.on('connect', ({ dtlsParameters }, callback, errback) => {
       console.log('[SFU] Send transport connecting')
-      
       // Ensure dtlsParameters are cloneable
       const cleanDtlsParameters = JSON.parse(JSON.stringify(dtlsParameters))
-      
-  sendMessage({
+      sendMessage({
         type: 'connect-transport',
         data: {
           transportId: sendTransport.value.id,
           dtlsParameters: cleanDtlsParameters
         }
       })
-  // Store callback to be resolved when we receive transport-connected for this transportId
-  pendingTransportConnect.set(sendTransport.value.id, callback)
+      // Store callback to be resolved when we receive transport-connected for this transportId
+      pendingTransportConnect.set(sendTransport.value.id, callback)
     })
 
     sendTransport.value.on('produce', ({ kind, rtpParameters }, callback, errback) => {
@@ -871,7 +885,6 @@ export function useMediasoupSfu() {
       try {
         // Ensure rtpParameters are cloneable
         const cleanRtpParameters = JSON.parse(JSON.stringify(rtpParameters))
-        
         sendMessage({
           type: 'produce',
           data: {
@@ -896,22 +909,132 @@ export function useMediasoupSfu() {
         errback(err)
       }
     })
+
+    // Robust ICE/DTLS recovery: listen for transport failures
+    sendTransport.value.on('connectionstatechange', () => {
+      const state = sendTransport.value.connectionState
+      console.log('[SFU] Send transport connection state changed:', state)
+  // Update ICE-connected snapshot whenever connection state changes
+  try { updateIceConnectedFlag() } catch (_) { /* noop */ }
+      if (state === 'failed') {
+        // Drop the call immediately on hard failure; do not attempt recovery
+        error.value = 'Connection lost'
+        // Perform a clean shutdown and disable reconnection
+        disconnect()
+        return
+      }
+      if (state === 'disconnected') {
+        // Preserve previous behavior for transient disconnects: attempt recovery
+        if (!manualDisconnect && allowReconnect && !isShuttingDown) {
+          const channelId = authStore?.currentChannelId || null
+          disconnect()
+          if (channelId) handleDisconnection(channelId)
+        }
+      }
+    })
+    // If mediasoup exposes iceconnectionstatechange, add similar logic here
   }
 
   function setupRecvTransportEvents() {
     recvTransport.value.on('connect', ({ dtlsParameters }, callback, errback) => {
       console.log('[SFU] Recv transport connecting')
-    // Ensure dtlsParameters are cloneable to avoid any structuredClone issues downstream
-    const cleanDtlsParameters = JSON.parse(JSON.stringify(dtlsParameters))
-    sendMessage({
+      // Ensure dtlsParameters are cloneable to avoid any structuredClone issues downstream
+      const cleanDtlsParameters = JSON.parse(JSON.stringify(dtlsParameters))
+      sendMessage({
         type: 'connect-transport',
         data: {
           transportId: recvTransport.value.id,
-      dtlsParameters: cleanDtlsParameters
+          dtlsParameters: cleanDtlsParameters
         }
       })
       // Store callback to be resolved when we receive transport-connected for this transportId
       pendingTransportConnect.set(recvTransport.value.id, callback)
+    })
+
+    // Robust ICE/DTLS recovery: listen for transport failures
+    recvTransport.value.on('connectionstatechange', () => {
+      const state = recvTransport.value.connectionState
+      console.log('[SFU] Recv transport connection state changed:', state)
+      // Update ICE-connected snapshot whenever connection state changes
+      try { updateIceConnectedFlag() } catch (_) { /* noop */ }
+      if (state === 'failed') {
+        // Drop the call immediately on hard failure; do not attempt recovery
+        error.value = 'Connection lost'
+        disconnect()
+        return
+      }
+      if (state === 'disconnected') {
+        // Attempt recovery only for transient disconnections
+        if (!manualDisconnect && allowReconnect && !isShuttingDown) {
+          const channelId = authStore?.currentChannelId || null
+          disconnect()
+          if (channelId) handleDisconnection(channelId)
+        }
+      }
+    })
+  }
+
+  // Consider ICE connected: in broadcast mode, only send transport; otherwise, both.
+  async function getCandidatePairStats(pc) {
+    if (!pc) return null;
+    try {
+      const stats = await pc.getStats();
+      let selectedPair = null;
+      stats.forEach(s => {
+        if (s.type === 'candidate-pair' && s.selected) selectedPair = s;
+      });
+      if (!selectedPair) {
+        stats.forEach(s => {
+          if (s.type === 'candidate-pair' && s.state === 'succeeded') selectedPair = s;
+        });
+      }
+      return selectedPair;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function areTransportsIceConnected(broadcastMode = false) {
+    try {
+      const pcSend = sendTransport.value && sendTransport.value._handler && sendTransport.value._handler._pc
+        ? sendTransport.value._handler._pc : null;
+      const pcRecv = recvTransport.value && recvTransport.value._handler && recvTransport.value._handler._pc
+        ? recvTransport.value._handler._pc : null;
+      const ok = (s) => s === 'connected' || s === 'completed';
+      if (broadcastMode) {
+        if (!pcSend || !ok(pcSend.iceConnectionState)) return false;
+        const pair = await getCandidatePairStats(pcSend);
+        return pair && pair.state === 'succeeded' && ((pair.bytesSent ?? 0) > 0 || (pair.bytesReceived ?? 0) > 0);
+      } else {
+        if (!pcSend || !pcRecv || !ok(pcSend.iceConnectionState) || !ok(pcRecv.iceConnectionState)) return false;
+        const pairSend = await getCandidatePairStats(pcSend);
+        const pairRecv = await getCandidatePairStats(pcRecv);
+        // Only require bytes for send transport; recv may be idle if no remote audio
+        return pairSend && pairRecv && pairSend.state === 'succeeded' && pairRecv.state === 'succeeded' &&
+          ((pairSend.bytesSent ?? 0) > 0 || (pairSend.bytesReceived ?? 0) > 0);
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function updateIceConnectedFlag(broadcastMode = false) {
+    iceConnectedBoth.value = areTransportsIceConnected(broadcastMode)
+  }
+
+  async function waitForIceConnected(timeoutMs = 12000, broadcastMode = false) {
+    const start = Date.now()
+    // Quick optimistic check
+    if (areTransportsIceConnected(broadcastMode)) { iceConnectedBoth.value = true; return true }
+    return new Promise((resolve) => {
+      const interval = setInterval(() => {
+        const done = areTransportsIceConnected(broadcastMode)
+        if (done || (Date.now() - start) > timeoutMs) {
+          clearInterval(interval)
+          iceConnectedBoth.value = done
+          resolve(done)
+        }
+      }, 150)
     })
   }
 
@@ -1316,7 +1439,17 @@ export function useMediasoupSfu() {
     isProducing.value = producers.value.size > 0
   }
 
-  function requestConsumer(producerId) {
+  async function requestConsumer(producerId) {
+    // Broadcast Mode: skip receiving audio
+    try {
+      const { useSettingsStore } = await import('~/stores/settings')
+      const settings = useSettingsStore()
+      if (settings.broadcastMode) {
+        console.log('[SFU] Broadcast Mode enabled: skipping consumer for', producerId)
+        return
+      }
+    } catch (_) { /* fallback: allow consume */ }
+
     if (!device.value || !device.value.rtpCapabilities) {
       console.error('[SFU] Device not ready for consuming')
       return
@@ -1334,7 +1467,7 @@ export function useMediasoupSfu() {
     }
 
     console.log('[SFU] Requesting consumer for producer:', producerId)
-    sendMessage({
+  sendMessage({
       type: 'consume',
       data: {
         producerId,
@@ -1774,6 +1907,7 @@ export function useMediasoupSfu() {
     reconnectAttempts = 0
     transportPromiseResolve = null
     transportPromise = null
+  iceConnectedBoth.value = false
     
     if (rtpCapabilitiesTimeout) {
       clearTimeout(rtpCapabilitiesTimeout)
@@ -1926,6 +2060,7 @@ export function useMediasoupSfu() {
     error: readonly(error),
     isProducing: readonly(isProducing),
     transportReady: readonly(transportReady),
+  iceConnectedBoth: readonly(iceConnectedBoth),
     producers: readonly(producers),
     consumers: readonly(consumers),
     connect,
@@ -1935,6 +2070,8 @@ export function useMediasoupSfu() {
     applyOutputDeviceToAll,
   applyVolumeForUser,
     getWebRTCStatsSnapshot,
-    ensureAudioElements
+  ensureAudioElements,
+  waitForIceConnected,
+  areTransportsIceConnected
   }
 }

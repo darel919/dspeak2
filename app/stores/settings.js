@@ -10,6 +10,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const audio = ref(loadPersisted('audioSettings', defaultAudio))
   const micDeviceId = ref(loadPersisted('audioDeviceId', null))
   const outputDeviceId = ref(loadPersisted('audioOutputDeviceId', null))
+  const broadcastMode = ref(loadPersisted('broadcastMode', false))
 
   const supported = computed(() => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getSupportedConstraints) {
@@ -31,6 +32,11 @@ export const useSettingsStore = defineStore('settings', () => {
     if (!(key in audio.value)) return
     audio.value = { ...audio.value, [key]: !!value }
     persist('audioSettings', audio.value)
+  }
+
+  function setBroadcastMode(val) {
+    broadcastMode.value = !!val
+    persist('broadcastMode', broadcastMode.value)
   }
 
   function setMicDeviceId(id) {
@@ -83,10 +89,12 @@ export const useSettingsStore = defineStore('settings', () => {
   return {
     audio,
     supported,
-  micDeviceId,
-  outputDeviceId,
-  setAudioSetting,
-  setMicDeviceId,
-  setOutputDeviceId
+    micDeviceId,
+    outputDeviceId,
+    broadcastMode,
+    setAudioSetting,
+    setMicDeviceId,
+    setOutputDeviceId,
+    setBroadcastMode
   }
 })

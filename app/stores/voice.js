@@ -18,6 +18,8 @@ export const useVoiceStore = defineStore('voice', () => {
     const connectedAt = ref(null);
 
     const sfuComposable = ref(null);
+    // Stopper for dynamic watcher mirroring ICE connection state to connected flag
+    let stopIceWatcher = null;
 
     // Initialize persisted preferences
     if (typeof window !== 'undefined') {
@@ -61,10 +63,24 @@ export const useVoiceStore = defineStore('voice', () => {
                     sfuError.includes('Failed to get RTP capabilities') ||
                     sfuError.includes('Failed to create transport') ||
                     sfuError.includes('Server error') ||
-                    sfuError.includes('Connection lost')
+                    sfuError.includes('Connection lost') ||
+                    sfuError.toLowerCase().includes('call failed')
                 )) {
-                    connected.value = false;
-                    error.value = sfuError;
+                    const wasConnected = connected.value === true;
+                    // If we were previously connected and reconnection ultimately failed, drop the call and surface a clear message
+                    if (wasConnected && (
+                        sfuError.includes('Connection lost') ||
+                        sfuError.toLowerCase().includes('call failed')
+                    )) {
+                        try { clearVoiceState() } catch (_) { /* noop */ }
+                        import('~/composables/useToast').then(({ useToast }) => {
+                            const { error: showError } = useToast();
+                            showError('Call Dropped');
+                        }).catch(() => { /* noop */ });
+                    } else {
+                        connected.value = false;
+                        error.value = sfuError;
+                    }
                 }
             },
             { immediate: true }
@@ -203,15 +219,21 @@ export const useVoiceStore = defineStore('voice', () => {
 
             const { useMediasoupSfu } = await import('~/composables/useMediasoupSfu');
             sfuComposable.value = useMediasoupSfu();
+            // Keep voiceStore.connected in sync with actual ICE state after we attach SFU
+            if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
+            stopIceWatcher = watch(
+                () => sfuComposable.value && sfuComposable.value.iceConnectedBoth,
+                (v) => {
+                    // Only reflect true connected state when both transports are ICE-connected
+                    connected.value = !!v;
+                }
+            );
 
             await sfuComposable.value.connect(channelId);
             setCurrentChannel(channelId);
 
-            // Only set connected if there is no SFU error
+            // Only proceed if there is no immediate SFU error
             if (!sfuComposable.value.error) {
-                connected.value = true;
-                connectedAt.value = Date.now();
-
                 // Respect persisted mic preference if available; otherwise follow permission-based default
                 let persistedMic = null;
                 try {
@@ -220,58 +242,52 @@ export const useVoiceStore = defineStore('voice', () => {
                         if (v !== null) persistedMic = v === 'true';
                     }
                 } catch (_) { /* noop */ }
-
                 if (persistedMic !== null) {
                     micMuted.value = persistedMic;
                 }
 
-                // Always ensure micMuted state is respected: do NOT start audio if muted
+                // Wait until transports are created
+                while (!sfuComposable.value.transportReady) {
+                    await new Promise(res => setTimeout(res, 50));
+                }
+                // Broadcast mode: only require send transport ICE connection
+                const { useSettingsStore } = await import('~/stores/settings');
+                const settingsStore = useSettingsStore();
+                const isBroadcast = settingsStore.broadcastMode;
+                const timeoutMs = 45000;
+                const startTime = Date.now();
+                let connectedOk = false;
+                // Use the new areTransportsIceConnected helper for both modes
+                while (Date.now() - startTime < timeoutMs) {
+                    if (await sfuComposable.value.areTransportsIceConnected?.(isBroadcast)) { connectedOk = true; break; }
+                    if (sfuComposable.value.error) throw new Error(sfuComposable.value.error);
+                    await new Promise(res => setTimeout(res, 100));
+                }
+                if (!connectedOk) {
+                    error.value = 'Call Failed: Connection timed out';
+                    if (sfuComposable.value && sfuComposable.value.disconnect) {
+                        try { sfuComposable.value.disconnect(); } catch (_) {}
+                    }
+                    throw new Error(error.value);
+                }
+
+                // Start mic only if not muted
                 if (!micMuted.value) {
-                    // Attempt to start mic if unmuted and transports ready
                     try {
-                        if (sfuComposable.value.transportReady) {
-                            await sfuComposable.value.startAudioProduction();
-                        }
+                        await sfuComposable.value.startAudioProduction();
                     } catch (err) {
-                        // keep state; error will show via toast
-                    }
-                } else {
-                    // If muted, ensure audio is NOT started
-                    try {
-                        if (sfuComposable.value.stopAudioProduction) {
-                            sfuComposable.value.stopAudioProduction();
-                        }
-                    } catch (_) { /* noop */ }
-                }
-
-                // If no persistedMic, set based on permission
-                if (persistedMic === null) {
-                    if (micPermission === 'denied') {
+                        // If mic fails to start, keep muted but still consider connected at transport level
                         micMuted.value = true;
-                    } else if (micPermission === 'granted') {
-                        micMuted.value = false;
-                        try {
-                            if (sfuComposable.value.transportReady) {
-                                await sfuComposable.value.startAudioProduction();
-                            }
-                        } catch (_) { /* noop */ }
-                    } else {
-                        // If prompt, ask for permission now
-                        try {
-                            await navigator.mediaDevices.getUserMedia({ audio: true });
-                            micMuted.value = false;
-                            if (sfuComposable.value.transportReady) {
-                                await sfuComposable.value.startAudioProduction();
-                            }
-                        } catch (err) {
-                            micMuted.value = true;
-                        }
                     }
+                } else if (sfuComposable.value.stopAudioProduction) {
+                    try { await sfuComposable.value.stopAudioProduction() } catch (_) { /* noop */ }
                 }
 
+                connected.value = true;
+                connectedAt.value = Date.now();
                 console.log('[VoiceStore] Successfully joined voice channel:', channelId);
 
-                // Show success notification
+                // Show success notification only after both ICE transports are connected
                 if (typeof window !== 'undefined') {
                     const { useToast } = await import('~/composables/useToast');
                     const { success } = useToast();
@@ -308,9 +324,13 @@ export const useVoiceStore = defineStore('voice', () => {
             console.log('[VoiceStore] Leaving voice channel:', currentChannelId.value);
             
             if (sfuComposable.value) {
-                sfuComposable.value.disconnect();
+                // Stop local audio production if any
+                try { if (sfuComposable.value.stopAudioProduction) { await sfuComposable.value.stopAudioProduction() } } catch (_) { /* noop */ }
+                // Disconnect from SFU and cleanup
+                try { if (sfuComposable.value.disconnect) { sfuComposable.value.disconnect() } } catch (_) { /* noop */ }
                 sfuComposable.value = null;
             }
+            if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
 
             setCurrentChannel(null);
             currentRoomId.value = null;
@@ -318,85 +338,59 @@ export const useVoiceStore = defineStore('voice', () => {
             connected.value = false;
             connectedAt.value = null;
             error.value = null;
-
-            console.log('[VoiceStore] Successfully left voice channel');
-            
-            // Show leave notification
-            if (typeof window !== 'undefined') {
-                const { useToast } = await import('~/composables/useToast');
-                const { info } = useToast();
-                info('Disconnected from voice channel');
-            }
         } catch (err) {
-            console.error('[VoiceStore] Error leaving voice channel:', err);
-            error.value = err.message;
+            console.error('[VoiceStore] Error while leaving voice channel:', err);
+            // Keep clearing state even if disconnect throws
+            setCurrentChannel(null);
+            currentRoomId.value = null;
+            connectedUsers.value.clear();
+            connected.value = false;
+            connectedAt.value = null;
+            error.value = err?.message || String(err);
+            if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
         }
     }
 
     async function toggleMic() {
-        if (!connected.value || !sfuComposable.value) {
-            console.warn('[VoiceStore] Cannot toggle mic: not connected');
+        if (!sfuComposable.value) {
+            console.warn('[VoiceStore] Cannot toggle mic: SFU not initialized');
             return;
         }
 
         try {
             if (micMuted.value) {
-                // Ask for permission if not already granted
-                let micPermission = 'prompt';
-                if (typeof navigator !== 'undefined' && navigator.permissions) {
-                    try {
-                        const status = await navigator.permissions.query({ name: 'microphone' });
-                        micPermission = status.state;
-                    } catch (e) {
-                        // fallback
-                    }
+                // Unmute flow
+                // Ensure transports are ready (bounded wait)
+                const start = Date.now();
+                const waitMs = 5000;
+                while (!sfuComposable.value.transportReady && (Date.now() - start) < waitMs) {
+                    await new Promise(res => setTimeout(res, 50));
                 }
-                if (micPermission !== 'granted') {
-                    try {
-                        await navigator.mediaDevices.getUserMedia({ audio: true });
-                        micPermission = 'granted';
-                    } catch (err) {
-                        micPermission = 'denied';
-                    }
-                }
-                if (micPermission !== 'granted') {
-                    micMuted.value = true;
-                    if (typeof window !== 'undefined') {
-                        const { useToast } = await import('~/composables/useToast');
-                        const { error: showError } = useToast();
-                        showError('Microphone permission denied. Please allow access to unmute.');
-                    }
-                    return;
-                }
-                // Check if transports are ready before starting audio production
                 if (!sfuComposable.value.transportReady) {
-                    console.log('[VoiceStore] Waiting for transports to be ready...');
-                    // Wait a bit for transports to be ready
-                    let attempts = 0;
-                    while (!sfuComposable.value.transportReady && attempts < 50) {
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        attempts++;
-                    }
-                    if (!sfuComposable.value.transportReady) {
-                        throw new Error('Transports not ready. Please try again in a moment.');
-                    }
+                    throw new Error('Voice transport not ready');
                 }
-                await sfuComposable.value.startAudioProduction();
-                micMuted.value = false;
-                console.log('[VoiceStore] Microphone unmuted');
+
+                try {
+                    await sfuComposable.value.startAudioProduction();
+                    micMuted.value = false;
+                    console.log('[VoiceStore] Microphone unmuted');
+                } catch (err) {
+                    micMuted.value = true;
+                    throw err;
+                }
             } else {
-                sfuComposable.value.stopAudioProduction();
+                // Mute flow
+                try { if (sfuComposable.value.stopAudioProduction) { await sfuComposable.value.stopAudioProduction() } } catch (_) { /* noop */ }
                 micMuted.value = true;
                 console.log('[VoiceStore] Microphone muted');
             }
         } catch (err) {
             console.error('[VoiceStore] Error toggling microphone:', err);
-            error.value = err.message;
-            // Show error notification
+            error.value = err?.message || String(err);
             if (typeof window !== 'undefined') {
                 const { useToast } = await import('~/composables/useToast');
                 const { error: showError } = useToast();
-                showError(`Microphone error: ${err.message}`);
+                showError(`Microphone error: ${error.value}`);
             }
         }
     }
@@ -431,6 +425,7 @@ export const useVoiceStore = defineStore('voice', () => {
         if (connected.value) {
             leaveVoiceChannel();
         }
+    if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
         
         setCurrentChannel(null);
         connectedUsers.value.clear();
@@ -562,7 +557,7 @@ export const useVoiceStore = defineStore('voice', () => {
         connecting: readonly(connecting),
         connected: readonly(connected),
         error, // not readonly, so it can be set from components
-    connectedAt: readonly(connectedAt),
+        connectedAt: readonly(connectedAt),
         sfuComposable: readonly(sfuComposable),
         joinVoiceChannel,
         leaveVoiceChannel,
@@ -574,7 +569,7 @@ export const useVoiceStore = defineStore('voice', () => {
         updateUserMuted,
         clearVoiceState,
         getConnectedUsersArray,
-    getDisplayUsersArray,
+        getDisplayUsersArray,
         isUserConnected,
         getUserById,
         isInVoiceChannel,
