@@ -240,7 +240,6 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                     >
                       <svg v-if="broadcastMode" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-5"><path d="M12 3v2a7 7 0 0 1 0 14v2a9 9 0 0 0 0-18zm0 4v2a3 3 0 0 1 0 6v2a5 5 0 0 0 0-10z"/></svg>
                       <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-5"><path d="M12 3v2a7 7 0 0 1 0 14v2a9 9 0 0 0 0-18zm0 4v2a3 3 0 0 1 0 6v2a5 5 0 0 0 0-10z"/></svg>
-                      {{ broadcastMode ? 'Broadcast ON' : 'Broadcast OFF' }}
                     </button>
                     <!-- Microphone Control -->
                     <button
@@ -248,15 +247,15 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         :disabled="!voiceStore.connected || (!!voiceStore.sfuComposable && !(voiceStore.sfuComposable as any)?.transportReady)"
                         :class="[
                             'btn btn-circle btn-xs',
-                            voiceStore.micMuted ? 'btn-error' : 'btn-success'
+                            voiceStore.micMuted ? 'btn-error' : 'btn-outline'
                         ]"
                         :title="voiceStore.micMuted ? 'Unmute Microphone' : 'Mute Microphone'"
                     >
-                        <svg v-if="!voiceStore.micMuted" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                        <svg v-if="!voiceStore.micMuted" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 text-current">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
                         </svg>   
 
-                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 text-white">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
                         </svg>
                     </button>

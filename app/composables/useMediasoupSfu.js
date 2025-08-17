@@ -10,6 +10,8 @@ export function useMediasoupSfu() {
   
   const device = ref(null)
   const ws = ref(null)
+  // Timestamp of last 'pong' message received from server (for keepalive diagnostics)
+  const lastPong = ref(null)
   // Runtime debug refs for capturing last sent/received protocol objects
   const lastSentClientRtpCapabilities = ref(null)
   const lastReceivedConsumerParams = ref(null)
@@ -75,6 +77,7 @@ export function useMediasoupSfu() {
           return {
             lastSentClientRtpCapabilities: lastSentClientRtpCapabilities?.value || null,
             lastReceivedConsumerParams: lastReceivedConsumerParams?.value || null,
+            lastPong: lastPong?.value || null,
             producerOwner: Array.from(producerOwner.entries()),
             failedConsumeProducers: Array.from(failedConsumeProducers.values())
           }
@@ -1038,6 +1041,13 @@ export function useMediasoupSfu() {
       // Handle connection confirmation
       // Server is now fully ready for mediasoup operations
   // Removed sending 'get-producers' message since SFU server does not support it
+    })
+    // Handle keepalive pong responses from server
+    setupMessageHandler('pong', ({ data }) => {
+      try {
+        // Update last pong timestamp for diagnostics and optionally use for connection health
+        lastPong.value = Date.now()
+      } catch (_) { /* noop */ }
     })
     
   setupMessageHandler('producers-list', ({ data }) => {
