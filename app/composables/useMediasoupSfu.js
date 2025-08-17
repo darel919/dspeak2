@@ -3,11 +3,16 @@ import { useRuntimeConfig } from '#app'
 import { useAuthStore } from '~/stores/auth'
 
 export function useMediasoupSfu() {
+  // Track producerIds that failed to consume
+  const failedConsumeProducers = new Set()
   const config = useRuntimeConfig()
   const authStore = useAuthStore()
   
   const device = ref(null)
   const ws = ref(null)
+  // Runtime debug refs for capturing last sent/received protocol objects
+  const lastSentClientRtpCapabilities = ref(null)
+  const lastReceivedConsumerParams = ref(null)
   // ICE servers config for WebRTC transports - loaded dynamically from backend
   const iceServers = ref([])
   const sendTransport = ref(null)
@@ -55,10 +60,29 @@ export function useMediasoupSfu() {
   const lastInRoom = ref([])
   // Track count of remote producers to decide send-only connectivity when alone
   const remoteProducersCount = ref(0)
+  // Map producerId -> RTCP CNAME (to group multiple producers/tracks from same remote peer)
+  const producerCname = new Map()
+  // Map RTCP CNAME -> userId assignment to keep grouping consistent
+  const cnameOwner = new Map()
+
+  // Expose quick debug access in browser console: window.sfuDebug
+  try {
+    if (typeof window !== 'undefined') {
+      Object.defineProperty(window, 'sfuDebug', {
+        configurable: true,
+        enumerable: false,
+        get() {
+          return {
+            lastSentClientRtpCapabilities: lastSentClientRtpCapabilities?.value || null,
+            lastReceivedConsumerParams: lastReceivedConsumerParams?.value || null,
+            producerOwner: Array.from(producerOwner.entries()),
+            failedConsumeProducers: Array.from(failedConsumeProducers.values())
+          }
+        }
+      })
+    }
+  } catch (_) { /* noop */ }
   
-  // Debug initial values
-  console.log('[SFU] Initial lastInRoom.value:', lastInRoom.value)
-  console.log('[SFU] Initial remoteProducersCount.value:', remoteProducersCount.value)
 
   function rebindAudioAndDetectionIfNeeded(producerId, userId) {
     try {
@@ -409,8 +433,17 @@ export function useMediasoupSfu() {
         
         // Create a completely clean device to avoid any DataCloneError issues
         device.value = await createCleanDevice(data)
-        
+
         console.log('[SFU] Device loaded with RTP capabilities:', device.value.loaded, device.value)
+        // Proactively inform server of our client recv RTP capabilities to aid consume negotiation
+        try {
+          let caps = null
+          try { caps = JSON.parse(JSON.stringify(device.value.rtpCapabilities)) } catch (_) { caps = device.value.rtpCapabilities }
+          console.log('[SFU] Sending client RTP capabilities back to server for consume checks:', caps)
+          try { lastSentClientRtpCapabilities.value = caps } catch (_) { /* noop */ }
+          sendMessage({ type: 'client-rtp-capabilities', data: { rtpCapabilities: caps } })
+        } catch (e) { /* noop */ }
+
         createTransports()
       } catch (err) {
         console.error('[SFU] Error loading device:', err)
@@ -565,56 +598,43 @@ export function useMediasoupSfu() {
       }
     })
 
-  setupMessageHandler('consumer-params', async ({ data }) => {
+    setupMessageHandler('consumer-params', async ({ data }) => {
       console.log('[SFU] Received consumer params:', data)
+      try { lastReceivedConsumerParams.value = data } catch (_) { /* noop */ }
       console.log('[SFU] Full consumer-params data structure:', JSON.stringify(data, null, 2))
-      // Capture owner mapping if provided
-      if (data && data.producerId) {
-        const owner = data.userId || data.user_id || data.uid || data.ownerId || data.owner_id || (data.user && data.user.id)
-        if (owner) {
-          console.log(`[SFU] Mapping producer ${data.producerId} to user ${owner}`)
-          producerOwner.set(data.producerId, owner)
-          rebindAudioAndDetectionIfNeeded(data.producerId, owner)
-          // After mapping, immediately apply stored volume for this user
-          try {
-            const { useVoiceStore } = await import('~/stores/voice')
-            const v = useVoiceStore().getUserVolume(owner)
-            applyVolumeForUser(owner, v)
-          } catch (_) { /* noop */ }
-        } else {
-          // Fallback: map using lastInRoom. If only one other user is present, map to them even if already used.
-          try {
-            const { useAuthStore } = await import('~/stores/auth')
-            const auth = useAuthStore()
-            const myId = auth.getUserData()?.id
-            const others = Array.isArray(lastInRoom.value) ? lastInRoom.value.filter(uid => String(uid) !== String(myId) && typeof uid === 'string' && !uid.includes('-')) : []
-            let candidate = null
-            if (others.length === 1) {
-              candidate = others[0]
-            } else {
-              const taken = new Set(Array.from(producerOwner.values()).map(String))
-              candidate = others.find(uid => !taken.has(String(uid)))
-            }
-            if (candidate) {
-              console.log(`[SFU] Fallback mapping consumer producer ${data.producerId} → user ${candidate}`)
-              producerOwner.set(data.producerId, candidate)
-              rebindAudioAndDetectionIfNeeded(data.producerId, candidate)
-              try {
-                const { useVoiceStore } = await import('~/stores/voice')
-                const v = useVoiceStore().getUserVolume(candidate)
-                applyVolumeForUser(candidate, v)
-              } catch (_) { /* noop */ }
-            } else {
-              console.log(`[SFU] No user mapping found in consumer params for producer ${data.producerId}`)
-              console.log('[SFU] Available fields:', Object.keys(data))
-            }
-          } catch (_) {
-            console.log(`[SFU] No user mapping found in consumer params for producer ${data.producerId}`)
-            console.log('[SFU] Available fields:', Object.keys(data))
+      try {
+        const codecs = data?.rtpParameters?.codecs || []
+        codecs.forEach(c => {
+          if (c.parameters && Object.keys(c.parameters).length > 0) {
+            console.log(`[SFU] consumer codec ${c.mimeType} parameters:`, c.parameters)
           }
+        })
+      } catch (_) { /* noop */ }
+      // Track RTCP CNAME for this producer (if available)
+      try {
+        const cname = data?.rtpParameters?.rtcp?.cname
+        if (data?.producerId && cname) {
+          producerCname.set(data.producerId, cname)
         }
+      } catch (_) { /* noop */ }
+      // Always use explicit mapping if provided
+      if (data && data.producerId && data.userId) {
+        console.log(`[SFU] Explicit mapping: producer ${data.producerId} → user ${data.userId}`)
+        producerOwner.set(data.producerId, data.userId)
+        try {
+          const cname = data?.rtpParameters?.rtcp?.cname
+          if (cname) cnameOwner.set(cname, data.userId)
+        } catch (_) { /* noop */ }
+        rebindAudioAndDetectionIfNeeded(data.producerId, data.userId)
+        try {
+          const { useVoiceStore } = await import('~/stores/voice')
+          const v = useVoiceStore().getUserVolume(data.userId)
+          applyVolumeForUser(data.userId, v)
+        } catch (_) { /* noop */ }
+      } else {
+        console.warn(`[SFU] No explicit user mapping in consumer-params for producer ${data.producerId}`)
       }
-      await createConsumer(data)
+  await createConsumer(data)
     })
 
     setupMessageHandler('new-producer', async ({ data }) => {
@@ -624,6 +644,7 @@ export function useMediasoupSfu() {
         if (owner) {
           console.log(`[SFU] Mapping new producer ${data.producerId} to user ${owner}`)
           producerOwner.set(data.producerId, owner)
+          try { if (data.cname) cnameOwner.set(data.cname, owner) } catch (_) { /* noop */ }
           rebindAudioAndDetectionIfNeeded(data.producerId, owner)
           try {
             const { useVoiceStore } = await import('~/stores/voice')
@@ -636,16 +657,25 @@ export function useMediasoupSfu() {
             const { useAuthStore } = await import('~/stores/auth')
             const myId = useAuthStore().getUserData()?.id
             const others = Array.isArray(lastInRoom.value) ? lastInRoom.value.filter(uid => String(uid) !== String(myId) && typeof uid === 'string' && !uid.includes('-')) : []
+            const taken = new Set(Array.from(producerOwner.values()).map(String))
             let candidate = null
-            if (others.length === 1) {
-              candidate = others[0]
-            } else {
-              const taken = new Set(Array.from(producerOwner.values()).map(String))
-              candidate = others.find(uid => !taken.has(String(uid)))
-            }
+            // If we already learned the CNAME for this producer elsewhere, prefer an existing owner
+            try {
+              const cname = producerCname.get(data.producerId)
+              if (cname && cnameOwner.has(cname)) {
+                const mapped = cnameOwner.get(cname)
+                if (others.includes(mapped)) candidate = mapped
+              }
+            } catch (_) { /* noop */ }
+            if (!candidate) candidate = others.find(uid => !taken.has(String(uid))) || null
+            if (!candidate && others.length > 0) candidate = others[0]
             if (candidate) {
               console.log(`[SFU] Fallback mapping new producer ${data.producerId} → user ${candidate}`)
               producerOwner.set(data.producerId, candidate)
+              try {
+                const cname = producerCname.get(data.producerId)
+                if (cname) cnameOwner.set(cname, candidate)
+              } catch (_) { /* noop */ }
               rebindAudioAndDetectionIfNeeded(data.producerId, candidate)
               try {
                 const { useVoiceStore } = await import('~/stores/voice')
@@ -667,7 +697,7 @@ export function useMediasoupSfu() {
       }
       console.log('[SFU][Debug] Requesting consumer for remote producer:', data.producerId)
       const tryRequest = () => {
-        if (device.value && device.value.loaded) {
+        if (device.value && device.value.loaded && recvTransport.value) {
           requestConsumer(data.producerId);
         } else {
           setTimeout(tryRequest, 100);
@@ -689,6 +719,18 @@ export function useMediasoupSfu() {
       }
       // Drop mapping
       if (data && data.producerId) producerOwner.delete(data.producerId)
+      try {
+        const cname = producerCname.get(data.producerId)
+        if (cname) {
+          producerCname.delete(data.producerId)
+          // If no other producer uses this cname, drop cnameOwner entry too
+          let stillUsed = false
+          for (const [pid, cn] of producerCname.entries()) {
+            if (cn === cname) { stillUsed = true; break }
+          }
+          if (!stillUsed) cnameOwner.delete(cname)
+        }
+      } catch (_) { /* noop */ }
     })
 
     setupMessageHandler('error', ({ data }) => {
@@ -733,7 +775,8 @@ export function useMediasoupSfu() {
         const myId = useAuthStore().getUserData()?.id
         const localSet = new Set(localProducerIds)
         const list = Array.isArray(data.producers) ? data.producers : []
-        const newCount = list.filter(pid => !localSet.has(pid)).length
+        // Exclude producers we have marked as unconsumable so they don't block ICE/connect logic
+        const newCount = list.filter(pid => !localSet.has(pid) && !failedConsumeProducers.has(pid)).length
         console.log('[SFU] Setting remoteProducersCount.value to:', newCount)
         remoteProducersCount.value = newCount
         console.log('[SFU] remoteProducersCount.value after setting:', remoteProducersCount.value)
@@ -744,25 +787,49 @@ export function useMediasoupSfu() {
         console.log('[SFU] remoteProducersCount.value after setting (fallback):', remoteProducersCount.value)
       }
       
-      // CRITICAL: Establish producer → user mapping if provided
-      if (data.producerUserMap && typeof data.producerUserMap === 'object') {
-        console.log('[SFU] Setting up producer→user mapping:', data.producerUserMap)
-        // Hoist voice store once for volume application
-        let voiceStoreInstance = null
-        try {
-          const { useVoiceStore } = await import('~/stores/voice')
-          voiceStoreInstance = useVoiceStore()
-        } catch (_) { /* noop */ }
-        for (const [producerId, userId] of Object.entries(data.producerUserMap)) {
-          producerOwner.set(producerId, userId)
-          console.log(`[SFU] Mapped producer ${producerId} → user ${userId}`)
-          rebindAudioAndDetectionIfNeeded(producerId, userId)
+        // CRITICAL: Establish producer → user mapping if provided
+        if (data.producerUserMap && typeof data.producerUserMap === 'object' && Object.keys(data.producerUserMap).length > 0) {
+          console.log('[SFU] Setting up producer→user mapping:', data.producerUserMap)
+          let voiceStoreInstance = null
           try {
-            const v = voiceStoreInstance ? voiceStoreInstance.getUserVolume(userId) : undefined
-            if (typeof v !== 'undefined') applyVolumeForUser(userId, v)
+            const { useVoiceStore } = await import('~/stores/voice')
+            voiceStoreInstance = useVoiceStore()
           } catch (_) { /* noop */ }
-        }
-      } else if (data.producers && data.inRoom) {
+          for (const [producerId, userId] of Object.entries(data.producerUserMap)) {
+            producerOwner.set(producerId, userId)
+            console.log(`[SFU] Mapped producer ${producerId} → user ${userId}`)
+            // Ensure audio element exists for this user
+            let audioEl = document.getElementById(`audio-${userId}`)
+            if (!audioEl) {
+              audioEl = document.createElement('audio')
+              audioEl.id = `audio-${userId}`
+              audioEl.setAttribute('data-user-id', String(userId))
+              audioEl.setAttribute('data-producer-id', String(producerId))
+              audioEl.autoplay = true
+              audioEl.controls = false
+              audioEl.style.display = 'none'
+              document.body.appendChild(audioEl)
+              console.log(`[SFU] Created audio element for user ${userId} and producer ${producerId}`)
+            } else {
+              audioEl.setAttribute('data-producer-id', String(producerId))
+              console.log(`[SFU] Reusing existing audio element for user ${userId} and producer ${producerId}`)
+            }
+            rebindAudioAndDetectionIfNeeded(producerId, userId)
+            // Diagnostics: log all audio elements
+            const allAudioEls = Array.from(document.querySelectorAll('audio[data-user-id]')).map(el => ({
+              id: el.id,
+              userId: el.getAttribute('data-user-id'),
+              producerId: el.getAttribute('data-producer-id')
+            }))
+            console.log('[SFU] Current audio elements:', allAudioEls)
+            try {
+              const v = voiceStoreInstance ? voiceStoreInstance.getUserVolume(userId) : undefined
+              if (typeof v !== 'undefined') applyVolumeForUser(userId, v)
+            } catch (_) { /* noop */ }
+          }
+        } else if (data.producerUserMap && typeof data.producerUserMap === 'object' && Object.keys(data.producerUserMap).length === 0) {
+          console.warn('[SFU] WARNING: producerUserMap is empty. Backend must provide explicit mapping for stable audio routing.')
+        } else if (data.producers && data.inRoom) {
         // FALLBACK: If no explicit mapping but we have both arrays, try to correlate
         // This is a heuristic - ideally the server should provide explicit mapping
         console.log('[SFU] No explicit producer→user mapping, using fallback correlation')
@@ -787,40 +854,71 @@ export function useMediasoupSfu() {
             const { useVoiceStore } = await import('~/stores/voice')
             voiceStoreInstance = useVoiceStore()
           } catch (_) { /* noop */ }
-          let userIdx = 0
-           unmappedProducers.forEach((producerId) => {
-             if (otherUsers.length > 0) {
-               let userId = otherUsers[userIdx % otherUsers.length]
-               // Only map if userId is valid (does not contain '-')
-               if (typeof userId === 'string' && !userId.includes('-')) {
-                 producerOwner.set(producerId, userId)
-                 console.log(`[SFU] FALLBACK mapped producer ${producerId} → user ${userId}`)
-                 rebindAudioAndDetectionIfNeeded(producerId, userId)
-                 // Remove any audio element with producerId, ensure only userId element exists
-                 removeAudioElementById(producerId)
-                 // If an element exists with userId, ensure its attributes are correct
-                 const userEl = document.getElementById(`audio-${userId}`)
-                 if (userEl) {
-                   userEl.setAttribute('data-user-id', String(userId))
-                   userEl.setAttribute('data-producer-id', String(producerId))
-                 }
-                 // Apply saved volume immediately for mapped user
-                 try {
-                   if (voiceStoreInstance) {
-                     const v = voiceStoreInstance.getUserVolume(userId)
-                     applyVolumeForUser(userId, v)
-                   }
-                 } catch (_) { /* noop */ }
-                 userIdx++
-               } else {
-                 // Invalid userId, skip mapping
-                 console.log(`[SFU] Invalid userId for producer ${producerId}, skipping mapping.`)
-               }
-             } else {
-               // No valid userId found, skip mapping
-               console.log(`[SFU] No valid userId for producer ${producerId}, skipping mapping.`)
-             }
-           })
+          // Build desired unique assignment using CNAME grouping if possible
+          const takenUsers = new Set(Array.from(producerOwner.values()).map(String))
+          const availableUsers = otherUsers.filter(u => !takenUsers.has(String(u)))
+          let nextIdx = 0
+          for (const producerId of unmappedProducers) {
+            let assign = null
+            // Prefer owner via cname
+            try {
+              const cname = producerCname.get(producerId)
+              if (cname && cnameOwner.has(cname)) {
+                const mapped = cnameOwner.get(cname)
+                if (otherUsers.includes(mapped)) assign = mapped
+              }
+            } catch (_) { /* noop */ }
+            if (!assign) {
+              assign = availableUsers[nextIdx] || otherUsers[nextIdx % Math.max(1, otherUsers.length)]
+              if (availableUsers[nextIdx]) nextIdx++
+            }
+            if (assign && typeof assign === 'string' && !assign.includes('-')) {
+              producerOwner.set(producerId, assign)
+              console.log(`[SFU] FALLBACK mapped producer ${producerId} → user ${assign}`)
+              try { const cname = producerCname.get(producerId); if (cname) cnameOwner.set(cname, assign) } catch (_) { /* noop */ }
+              rebindAudioAndDetectionIfNeeded(producerId, assign)
+              removeAudioElementById(producerId)
+              const userEl = document.getElementById(`audio-${assign}`)
+              if (userEl) {
+                userEl.setAttribute('data-user-id', String(assign))
+                userEl.setAttribute('data-producer-id', String(producerId))
+              }
+              try {
+                if (voiceStoreInstance) {
+                  const v = voiceStoreInstance.getUserVolume(assign)
+                  applyVolumeForUser(assign, v)
+                }
+              } catch (_) { /* noop */ }
+            }
+          }
+          // Rebalance: if after a new user joins we ended up with two producers mapped to the same user while another user has none, fix it
+          try {
+            const currentMappings = new Map(producerOwner)
+            const counts = new Map()
+            for (const uid of otherUsers) counts.set(uid, 0)
+            for (const [pid, uid] of currentMappings.entries()) {
+              if (typeof uid === 'string' && !uid.includes('-') && otherUsers.includes(uid) && !localProducerIds.has(pid)) {
+                counts.set(uid, (counts.get(uid) || 0) + 1)
+              }
+            }
+            const lacking = otherUsers.filter(u => (counts.get(u) || 0) === 0)
+            if (lacking.length > 0) {
+              for (const [pid, uid] of currentMappings.entries()) {
+                if (lacking.length === 0) break
+                if (!localProducerIds.has(pid) && otherUsers.includes(uid) && (counts.get(uid) || 0) > 1) {
+                  const target = lacking.shift()
+                  if (target) {
+                    producerOwner.set(pid, target)
+                    try { const cname = producerCname.get(pid); if (cname) cnameOwner.set(cname, target) } catch (_) { /* noop */ }
+                    rebindAudioAndDetectionIfNeeded(pid, target)
+                    try { const v = voiceStoreInstance?.getUserVolume(target); if (typeof v !== 'undefined') applyVolumeForUser(target, v) } catch (_) { /* noop */ }
+                    counts.set(uid, (counts.get(uid) || 0) - 1)
+                    counts.set(target, 1)
+                  }
+                }
+              }
+            }
+          } catch (_) { /* noop */ }
         // After all fallback mappings, force reconciliation of audio element IDs and cleanup
         try {
           const container = document.getElementById('webrtc-audio-global')
@@ -918,11 +1016,11 @@ export function useMediasoupSfu() {
         }
       })();
       // If there are existing producers, request consumers for them
-      if (data && data.producers && Array.isArray(data.producers)) {
+  if (data && data.producers && Array.isArray(data.producers)) {
         console.log('[SFU] Requesting consumers for existing producers:', data.producers)
         data.producers.forEach(producerId => {
           const tryRequest = () => {
-            if (device.value && device.value.loaded) {
+    if (device.value && device.value.loaded && recvTransport.value) {
               requestConsumer(producerId);
             } else {
               setTimeout(tryRequest, 100);
@@ -953,6 +1051,28 @@ export function useMediasoupSfu() {
           }
         })
       }
+    })
+    // New server broadcast: authoritative list of currently available producers
+    setupMessageHandler('available-producers', ({ data }) => {
+      // data may be either an array or { producers: [] }
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.producers) ? data.producers : [])
+      console.log('[SFU] Received available-producers:', list)
+      // Update remoteProducersCount excluding producers we know are unconsumable or local
+      try {
+        const localSet = new Set(localProducerIds)
+        const filtered = list.filter(pid => !localSet.has(pid) && !failedConsumeProducers.has(pid))
+        remoteProducersCount.value = filtered.length
+        console.log('[SFU] remoteProducersCount updated from available-producers:', remoteProducersCount.value)
+      } catch (_) { /* noop */ }
+
+      // Request consumers for each valid producerId in the broadcast
+      list.forEach(pid => {
+        if (!pid) return
+        if (localProducerIds.has(pid) || producers.value.has(pid)) return
+        if (failedConsumeProducers.has(pid)) return
+        // Defer if device/recvTransport not ready; requestConsumer handles that
+        requestConsumer(pid)
+      })
     })
   }
 
@@ -1419,13 +1539,26 @@ export function useMediasoupSfu() {
       // Small delay to allow browser to stabilize the track
       await new Promise(resolve => setTimeout(resolve, 50))
       
-      // Final validation right before produce call
+  // Final validation right before produce call
       if (audioTrack.readyState !== 'live') {
         stream.getTracks().forEach(track => track.stop())
         throw new Error(`Track state changed to ${audioTrack.readyState} before produce call`)
       }
       
       console.log('[SFU] Creating producer with track in state:', audioTrack.readyState)
+
+      // Preserve multi-channel (stereo) audio: if the capture reports >1 channels,
+      // request Opus stereo in codecOptions so the SFU/router can negotiate stereo properly.
+      let maybeStereo = false
+      try {
+        let settings = {}
+        try { settings = audioTrack.getSettings ? audioTrack.getSettings() : {} } catch (_) { settings = {} }
+        const channelCount = settings.channelCount || (audioTrack && audioTrack.channelCount) || null
+        if (channelCount && Number(channelCount) > 1) {
+          maybeStereo = true
+          console.log('[SFU] Detected multi-channel audio track (channelCount=' + channelCount + '), requesting opus stereo in producer options')
+        }
+      } catch (e) { /* noop */ }
       
   // Always use a native, cloned MediaStreamTrack to avoid DataCloneError
   let producer
@@ -1479,8 +1612,14 @@ export function useMediasoupSfu() {
           if (bitrateBps) {
             // Use RTCRtpSender encodings to cap average bitrate
             produceOpts.encodings = [{ maxBitrate: bitrateBps }]
-            // Encourage better battery/idle behavior on silence
-            produceOpts.codecOptions = { opusDtx: true }
+          }
+          // Always set opusDtx when bitrate cap is used; if stereo was detected, request opus stereo
+          produceOpts.codecOptions = { opusDtx: true }
+          if (maybeStereo) {
+            // Request stereo support; mediasoup may accept or ignore this field but it helps
+            // signal intent to produce stereo audio.
+            try { produceOpts.codecOptions.opusStereo = true } catch (_) { /* noop */ }
+            try { produceOpts.codecOptions.stereo = true } catch (_) { /* noop */ }
           }
           producer = await sendTransport.value.produce(produceOpts)
         } finally {
@@ -1695,6 +1834,11 @@ export function useMediasoupSfu() {
       })
       producers.value.clear()
     }
+        // If this producer has previously failed to consume, skip
+        if (failedConsumeProducers.has(producerId)) {
+          console.log('[SFU] Skipping consume request for failed producer:', producerId)
+          return
+        }
     isProducing.value = producers.value.size > 0
   }
 
@@ -1709,7 +1853,6 @@ export function useMediasoupSfu() {
 
     // Do not consume our own producer
     if (localProducerIds.has(producerId) || producers.value.has(producerId)) {
-      console.log('[SFU] Skipping consume request for local producer:', producerId)
       return
     }
 
@@ -1718,12 +1861,45 @@ export function useMediasoupSfu() {
       return
     }
 
-    console.log('[SFU] Requesting consumer for producer:', producerId)
-  sendMessage({
+    // Ensure recv transport exists before sending consume to avoid race "Transport not found"
+    if (!recvTransport.value) {
+      let attempts = 0
+      await new Promise((resolve) => {
+        const check = () => {
+          if (recvTransport.value && recvTransport.value.connectionState !== 'closed') return resolve()
+          if (++attempts > 50) return resolve() // ~5s max
+          setTimeout(check, 100)
+        }
+        check()
+      })
+      if (!recvTransport.value) {
+        console.error('[SFU] recvTransport still not ready; deferring consume for', producerId)
+  // Defer and retry later but do not mark as permanently failed yet.
+  // Give a slightly longer delay to allow recv transport to be created.
+  setTimeout(() => { if (!consumers.value.has(producerId)) requestConsumer(producerId) }, 750)
+        return
+      }
+    }
+
+  // Request a consumer for the specific producerId using a sanitized rtpCapabilities
+    let safeCaps = null
+    try {
+      // Prefer mediasoup Device internal recvRtpCapabilities if available
+      const preferred = device.value && device.value._recvRtpCapabilities ? device.value._recvRtpCapabilities : device.value.rtpCapabilities
+      safeCaps = JSON.parse(JSON.stringify(preferred))
+    } catch (_) { safeCaps = device.value.rtpCapabilities }
+    // Inform server of our RTP capabilities (new required step) before requesting consume
+    try {
+  console.log('[SFU] Sending client-rtp-capabilities for consume:', safeCaps)
+  try { lastSentClientRtpCapabilities.value = safeCaps } catch (_) { /* noop */ }
+  sendMessage({ type: 'client-rtp-capabilities', data: { rtpCapabilities: safeCaps } })
+    } catch (e) { console.warn('[SFU] Failed to send client-rtp-capabilities:', e) }
+    sendMessage({
       type: 'consume',
       data: {
         producerId,
-        rtpCapabilities: device.value.rtpCapabilities
+        rtpCapabilities: safeCaps,
+        transportId: recvTransport.value.id
       }
     })
 
@@ -1731,21 +1907,31 @@ export function useMediasoupSfu() {
     if (pendingConsume.has(producerId)) {
       clearTimeout(pendingConsume.get(producerId))
     }
-    const timeoutId = setTimeout(() => {
+  const timeoutId = setTimeout(() => {
       // If still no consumer created for this producer, try generic consume once
       if (!consumers.value.has(producerId)) {
         console.log('[SFU] Specific consume timed out, attempting generic consume')
         try {
+          let safeCaps2 = null
+          try { safeCaps2 = JSON.parse(JSON.stringify(device.value.rtpCapabilities)) } catch (_) { safeCaps2 = device.value.rtpCapabilities }
           sendMessage({
             type: 'consume',
             data: {
-              rtpCapabilities: device.value.rtpCapabilities
+              rtpCapabilities: safeCaps2,
+              transportId: recvTransport.value.id
             }
           })
         } catch (_) { /* noop */ }
       }
+      // After attempting generic, if still no consumer, mark producer as failed
+      try {
+        if (!consumers.value.has(producerId)) {
+          failedConsumeProducers.add(producerId)
+          console.log('[SFU] Marking producer as failed to consume:', producerId)
+        }
+      } catch (_) { /* noop */ }
       pendingConsume.delete(producerId)
-    }, 1500)
+  }, 3000)
     pendingConsume.set(producerId, timeoutId)
   }
 
@@ -1834,6 +2020,10 @@ export function useMediasoupSfu() {
                   el.remove()
                 } else {
                   seenUserIds.add(uid)
+                    // If this producer was previously marked as failed, clear it (success)
+                    if (failedConsumeProducers.has(consumerData.producerId)) {
+                      failedConsumeProducers.delete(consumerData.producerId)
+                    }
                   el.id = `audio-${uid}`
                 }
               }
@@ -1842,6 +2032,8 @@ export function useMediasoupSfu() {
         } catch (_) { /* noop */ }
       }
 
+                    // Success path: do NOT mark producer as failed here. If consumer creation
+                    // fails we will handle it in the catch handler instead.
       consumer.on('transportclose', () => {
         console.log('[SFU] Consumer transport closed')
         const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
@@ -2170,42 +2362,6 @@ export function useMediasoupSfu() {
       error.value = 'Connection lost'
     }
   }
-
-  function disconnect() {
-    console.log('[SFU] Disconnecting')
-    // Mark shutdown and disable reconnection
-    manualDisconnect = true
-    isShuttingDown = true
-    allowReconnect = false
-    
-    // Cancel any pending auto-start timer
-    if (autoStartTimeoutId) {
-      clearTimeout(autoStartTimeoutId)
-      autoStartTimeoutId = null
-    }
-    // Cancel any pending reconnection timer
-    if (reconnectTimeoutId) {
-      clearTimeout(reconnectTimeoutId)
-      reconnectTimeoutId = null
-    }
-    
-    // Stop all audio production with proper cleanup
-    stopAudioProduction()
-    // Also stop any in-flight local mic resources acquired but not yet attached to a producer
-    if (pendingStream) {
-      try { pendingStream.getTracks().forEach(t => t.stop()) } catch (_) { /* noop */ }
-      pendingStream = null
-      pendingTrack = null
-    }
-    
-    consumers.value.forEach((consumer, producerId) => {
-      consumer.close()
-      removeAudioElement(producerId)
-      cleanupVoiceDetection(producerId)
-    })
-    consumers.value.clear()
-  localProducerIds.clear()
-  producerOwner.clear()
     
     if (sendTransport.value) {
       sendTransport.value.close()
@@ -2252,6 +2408,97 @@ export function useMediasoupSfu() {
     transportPromiseResolve = null
     transportPromise = null
   iceConnectedBoth.value = false
+    
+    if (rtpCapabilitiesTimeout) {
+      clearTimeout(rtpCapabilitiesTimeout)
+      rtpCapabilitiesTimeout = null
+    }
+    
+  // Ready to accept a future connect() which will reset flags
+
+  function disconnect() {
+    console.log('[SFU] Disconnecting')
+    // Mark shutdown and disable reconnection
+    manualDisconnect = true
+    isShuttingDown = true
+    allowReconnect = false
+    
+    // Cancel any pending auto-start timer
+    if (autoStartTimeoutId) {
+      clearTimeout(autoStartTimeoutId)
+      autoStartTimeoutId = null
+    }
+    // Cancel any pending reconnection timer
+    if (reconnectTimeoutId) {
+      clearTimeout(reconnectTimeoutId)
+      reconnectTimeoutId = null
+    }
+    
+    // Stop all audio production with proper cleanup
+    stopAudioProduction()
+    // Also stop any in-flight local mic resources acquired but not yet attached to a producer
+    if (pendingStream) {
+      try { pendingStream.getTracks().forEach(t => t.stop()) } catch (_) { /* noop */ }
+      pendingStream = null
+      pendingTrack = null
+    }
+    
+    consumers.value.forEach((consumer, producerId) => {
+      try { consumer.close() } catch (_) { /* noop */ }
+      removeAudioElement(producerId)
+      cleanupVoiceDetection(producerId)
+    })
+    consumers.value.clear()
+    localProducerIds.clear()
+    producerOwner.clear()
+    producerCname.clear()
+    cnameOwner.clear()
+    
+    if (sendTransport.value) {
+      try { sendTransport.value.close() } catch (_) { /* noop */ }
+      sendTransport.value = null
+    }
+    
+    if (recvTransport.value) {
+      try { recvTransport.value.close() } catch (_) { /* noop */ }
+      recvTransport.value = null
+    }
+    
+    if (ws.value) {
+      // Prevent onclose handler from triggering reconnection on this instance
+      try {
+        ws.value.onopen = null
+        ws.value.onmessage = null
+        ws.value.onerror = null
+        ws.value.onclose = null
+      } catch (_) { /* noop */ }
+      try { ws.value.close() } catch (_) { /* noop */ }
+      ws.value = null
+    }
+    // Stop keepalive ping
+    if (pingIntervalId) {
+      clearInterval(pingIntervalId)
+      pingIntervalId = null
+    }
+    // Stop audio ensure interval
+    if (audioEnsureIntervalId) {
+      clearInterval(audioEnsureIntervalId)
+      audioEnsureIntervalId = null
+    }
+    // Cleanup voice detection context/nodes
+    cleanupAllVoiceDetections()
+    
+    connected.value = false
+    isProducing.value = false
+    isProducingAudio.value = false
+    transportReady.value = false
+    device.value = null
+    messageHandlers.clear()
+    messageQueue.length = 0
+    reconnectAttempts = 0
+    transportPromiseResolve = null
+    transportPromise = null
+    iceConnectedBoth.value = false
     
     if (rtpCapabilitiesTimeout) {
       clearTimeout(rtpCapabilitiesTimeout)
@@ -2419,5 +2666,9 @@ export function useMediasoupSfu() {
     ensureAudioElements,
     waitForIceConnected,
     areTransportsIceConnected
+  ,
+  // Debug hooks
+  lastSentClientRtpCapabilities: readonly(lastSentClientRtpCapabilities),
+  lastReceivedConsumerParams: readonly(lastReceivedConsumerParams)
   }
 }

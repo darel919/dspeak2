@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
 import { useAuthStore } from './auth';
 
-
 export const useVoiceStore = defineStore('voice', () => {
     const currentChannelId = ref(null);
     const currentRoomId = ref(null);
@@ -57,30 +56,29 @@ export const useVoiceStore = defineStore('voice', () => {
         watch(
             () => sfuComposable.value && sfuComposable.value.error,
             (sfuError) => {
-                if (sfuError && typeof sfuError === 'string' && (
-                    sfuError.includes('Router not ready') ||
-                    sfuError.includes('Connection failed') ||
-                    sfuError.includes('Failed to get RTP capabilities') ||
-                    sfuError.includes('Failed to create transport') ||
-                    sfuError.includes('Server error') ||
-                    sfuError.includes('Connection lost') ||
-                    sfuError.toLowerCase().includes('call failed')
-                )) {
-                    const wasConnected = connected.value === true;
-                    // If we were previously connected and reconnection ultimately failed, drop the call and surface a clear message
-                    if (wasConnected && (
+                try {
+                    if (sfuError && typeof sfuError === 'string' && (
+                        sfuError.includes('Router not ready') ||
+                        sfuError.includes('Connection failed') ||
+                        sfuError.includes('Failed to get RTP capabilities') ||
+                        sfuError.includes('Failed to create transport') ||
+                        sfuError.includes('Server error') ||
                         sfuError.includes('Connection lost') ||
                         sfuError.toLowerCase().includes('call failed')
                     )) {
-                        try { clearVoiceState() } catch (_) { /* noop */ }
-                        import('~/composables/useToast').then(({ useToast }) => {
-                            const { error: showError } = useToast();
-                            showError('Call Dropped');
-                        }).catch(() => { /* noop */ });
-                    } else {
                         connected.value = false;
                         error.value = sfuError;
                     }
+                } catch (err) {
+                    console.error('[VoiceStore] Error while leaving voice channel:', err);
+                    // Keep clearing state even if disconnect throws
+                    setCurrentChannel(null);
+                    currentRoomId.value = null;
+                    connectedUsers.value.clear();
+                    connected.value = false;
+                    connectedAt.value = null;
+                    error.value = err?.message || String(err);
+                    if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
                 }
             },
             { immediate: true }
@@ -116,6 +114,51 @@ export const useVoiceStore = defineStore('voice', () => {
                 }
             });
         }
+    }
+
+    // Gracefully leave the current voice channel and clear SFU state
+    async function leaveVoiceChannel() {
+        try {
+            // Stop local production if present
+            if (sfuComposable.value && typeof sfuComposable.value.stopAudioProduction === 'function') {
+                try { await sfuComposable.value.stopAudioProduction(); } catch (_) { /* noop */ }
+            }
+
+            // Disconnect SFU
+            if (sfuComposable.value && typeof sfuComposable.value.disconnect === 'function') {
+                try { await sfuComposable.value.disconnect(); } catch (_) { /* noop */ }
+            }
+        } catch (err) {
+            // Best-effort only
+        } finally {
+            if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
+            setCurrentChannel(null);
+            currentRoomId.value = null;
+            connectedUsers.value.clear();
+            connecting.value = false;
+            connected.value = false;
+            connectedAt.value = null;
+            error.value = null;
+            sfuComposable.value = null;
+        }
+    }
+
+    // Upsert a user profile into the directory and merge into any connected user entry
+    function upsertUserProfile(profile) {
+        if (!profile || !profile.id) return;
+        const prev = userDirectory.value.get(profile.id) || {};
+        const merged = { ...prev, ...profile };
+        userDirectory.value.set(profile.id, merged);
+        // If the user is currently connected, merge into that entry as well
+        const cu = connectedUsers.value.get(profile.id);
+        if (cu) {
+            connectedUsers.value.set(profile.id, { ...cu, ...merged });
+            connectedUsers.value = new Map(connectedUsers.value);
+        }
+    }
+
+    function isInVoiceChannel() {
+        return !!currentChannelId.value && !!connected.value;
     }
 
     function addConnectedUser(userId, userInfo) {
@@ -185,21 +228,19 @@ export const useVoiceStore = defineStore('voice', () => {
 
     async function joinVoiceChannel(channelId) {
         if (currentChannelId.value === channelId && connected.value && !connecting.value) {
-            console.log('[VoiceStore] Already connected to channel:', channelId);
             return;
         }
 
         if (connecting.value) {
-            console.log('[VoiceStore] Already connecting, ignoring duplicate request');
             return;
         }
 
-        try {
+    let joinedSuccessfully = false;
+    try {
             connecting.value = true;
             error.value = null;
 
-            if (connected.value && currentChannelId.value !== channelId) {
-                console.log('[VoiceStore] Switching from channel', currentChannelId.value, 'to', channelId);
+                if (connected.value && currentChannelId.value !== channelId) {
                 await leaveVoiceChannel();
             }
 
@@ -269,24 +310,11 @@ export const useVoiceStore = defineStore('voice', () => {
                     // If truly alone, treat as connected
                     if (sfuComposable.value) {
                         try {
-                            console.log('[VoiceStore] SFU object keys:', Object.keys(sfuComposable.value));
-                            console.log('[VoiceStore] remoteProducersCount ref:', sfuComposable.value.remoteProducersCount);
-                            console.log('[VoiceStore] lastInRoom ref:', sfuComposable.value.lastInRoom);
-                            
                             // Access values directly - they're already unwrapped in this context
                             const remoteCount = sfuComposable.value.remoteProducersCount ?? -1;
                             const roomUsers = sfuComposable.value.lastInRoom ?? [];
-                            
-                            console.log('[VoiceStore] Direct access remoteCount:', remoteCount);
-                            console.log('[VoiceStore] Direct access roomUsers:', roomUsers);
-                            console.log('[VoiceStore] Checking alone status:', {
-                                remoteProducersCount: remoteCount,
-                                lastInRoom: roomUsers,
-                                isAlone: remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1
-                            });
-                            
+                            // Treat single-user rooms as connected
                             if (remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1) {
-                                console.log('[VoiceStore] User is alone, treating as connected');
                                 connectedOk = true;
                                 break;
                             }
@@ -323,7 +351,8 @@ export const useVoiceStore = defineStore('voice', () => {
 
                 connected.value = true;
                 connectedAt.value = Date.now();
-                console.log('[VoiceStore] Successfully joined voice channel:', channelId);
+                // Mark success so finalizer doesn't tear down a working connection
+                joinedSuccessfully = true;
             } else {
                 connected.value = false;
                 error.value = sfuComposable.value.error;
@@ -341,44 +370,31 @@ export const useVoiceStore = defineStore('voice', () => {
             }
 
             throw err;
-        } finally {
+        }
+        finally {
+            // Always stop the connecting flag when the attempt finishes
             connecting.value = false;
-        }
-    }
 
-    async function leaveVoiceChannel() {
-        if (!connected.value) {
-            return;
-        }
-
-        try {
-            console.log('[VoiceStore] Leaving voice channel:', currentChannelId.value);
-            
-            if (sfuComposable.value) {
-                // Stop local audio production if any
-                try { if (sfuComposable.value.stopAudioProduction) { await sfuComposable.value.stopAudioProduction() } } catch (_) { /* noop */ }
-                // Disconnect from SFU and cleanup
-                try { if (sfuComposable.value.disconnect) { sfuComposable.value.disconnect() } } catch (_) { /* noop */ }
-                sfuComposable.value = null;
+            // Only clear SFU state when we did NOT join successfully.
+            // If joinedSuccessfully is true, keep sfuComposable and connected state intact.
+            if (!joinedSuccessfully) {
+                try {
+                    // Access values directly - they're already unwrapped in this context
+                    const remoteCount = sfuComposable.value?.remoteProducersCount ?? -1;
+                    const roomUsers = sfuComposable.value?.lastInRoom ?? [];
+                    if (remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1) {
+                        // no-op
+                    }
+                } catch (err) {
+                    // Error checking alone status
+                }
+                connectedUsers.value.clear();
+                connected.value = false;
+                connectedAt.value = null;
+                // preserve any error set by catch so callers can inspect it
+                // do not overwrite error.value here
+                sfuComposable.value = joinedSuccessfully ? sfuComposable.value : null;
             }
-            if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
-
-            setCurrentChannel(null);
-            currentRoomId.value = null;
-            connectedUsers.value.clear();
-            connected.value = false;
-            connectedAt.value = null;
-            error.value = null;
-        } catch (err) {
-            console.error('[VoiceStore] Error while leaving voice channel:', err);
-            // Keep clearing state even if disconnect throws
-            setCurrentChannel(null);
-            currentRoomId.value = null;
-            connectedUsers.value.clear();
-            connected.value = false;
-            connectedAt.value = null;
-            error.value = err?.message || String(err);
-            if (stopIceWatcher) { try { stopIceWatcher(); } catch (_) { /* noop */ } stopIceWatcher = null; }
         }
     }
 
@@ -404,7 +420,6 @@ export const useVoiceStore = defineStore('voice', () => {
                 try {
                     await sfuComposable.value.startAudioProduction();
                     micMuted.value = false;
-                    console.log('[VoiceStore] Microphone unmuted');
                 } catch (err) {
                     micMuted.value = true;
                     throw err;
@@ -413,7 +428,6 @@ export const useVoiceStore = defineStore('voice', () => {
                 // Mute flow
                 try { if (sfuComposable.value.stopAudioProduction) { await sfuComposable.value.stopAudioProduction() } } catch (_) { /* noop */ }
                 micMuted.value = true;
-                console.log('[VoiceStore] Microphone muted');
             }
         } catch (err) {
             console.error('[VoiceStore] Error toggling microphone:', err);
@@ -433,12 +447,10 @@ export const useVoiceStore = defineStore('voice', () => {
         }
 
         deafened.value = !deafened.value;
-        
         if (deafened.value && !micMuted.value) {
             toggleMic();
         }
 
-        // Apply deafened state to all audio elements
         if (typeof window !== 'undefined') {
             const container = document.getElementById('webrtc-audio-global');
             if (container) {
@@ -447,9 +459,10 @@ export const useVoiceStore = defineStore('voice', () => {
                     audio.muted = deafened.value;
                 });
             }
+
         }
 
-        console.log('[VoiceStore] Deafened:', deafened.value);
+    // Deafened state updated
     }
 
     function clearVoiceState() {
@@ -517,26 +530,13 @@ export const useVoiceStore = defineStore('voice', () => {
         return connectedUsers.value.get(userId);
     }
 
-    function isInVoiceChannel(channelId) {
-        return currentChannelId.value === channelId && connected.value;
-    }
 
     async function applyOutputDevice() {
-        if (sfuComposable.value && sfuComposable.value.applyOutputDeviceToAll) {
-            await sfuComposable.value.applyOutputDeviceToAll();
-        }
-    }
-
-    // Directory helpers
-    function upsertUserProfile(profile) {
-        if (profile && profile.id) {
-            const prev = userDirectory.value.get(profile.id) || {};
-            const merged = { ...prev, ...profile };
-            userDirectory.value.set(profile.id, merged);
-            // Update live connected user if present
-            const cu = connectedUsers.value.get(profile.id)
-            if (cu) {
-                connectedUsers.value.set(profile.id, { ...cu, ...merged })
+        if (sfuComposable.value && typeof sfuComposable.value.applyOutputDeviceToAll === 'function') {
+            try {
+                await sfuComposable.value.applyOutputDeviceToAll();
+            } catch (_) {
+                /* noop */
             }
         }
     }
@@ -610,5 +610,5 @@ export const useVoiceStore = defineStore('voice', () => {
         getUserVolume,
         userVolumes: readonly(userVolumes),
         applyOutputDevice
-    };
+    }
 });
