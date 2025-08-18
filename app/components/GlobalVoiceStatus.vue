@@ -181,6 +181,10 @@ const currentChannelName = computed(() => {
 })
 
 function getUserDisplayName(user) {
+  try {
+    const me = useAuthStore && useAuthStore().getUserData ? useAuthStore().getUserData() : null
+    if (me && me.id && String(me.id) === String(user.id)) return 'You'
+  } catch (_) { /* noop */ }
   return user.display_name || user.username || user.name || user.email || `User ${user.id}`
 }
 

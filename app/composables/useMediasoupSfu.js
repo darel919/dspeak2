@@ -52,6 +52,8 @@ export function useMediasoupSfu() {
   let reconnectTimeoutId = null
   let allowReconnect = true
   let pingIntervalId = null // For keepalive pings
+  let missedPongCount = 0
+  const allowedMisses = 5
   let audioEnsureIntervalId = null // For re-attaching audio elements across navigation
   let producersRequested = false
   // Map producerId -> userId when provided by server
@@ -141,6 +143,8 @@ export function useMediasoupSfu() {
   let voiceDetectCtx = null
   // Map: producerId -> { source, analyser, data, intervalId }
   const voiceDetection = new Map()
+  // Map for local producer VAD cleanup: producerId -> { intervalId, audioCtx }
+  const localProducerVads = new Map()
 
   function getVoiceDetectCtx() {
     if (typeof window === 'undefined') return null
@@ -169,8 +173,8 @@ export function useMediasoupSfu() {
       let lastSpeaking = false;
       let speakingCount = 0;
       let notSpeakingCount = 0;
-      const SPEAKING_DEBOUNCE = 3; // require 3 consecutive intervals
-      const NOT_SPEAKING_DEBOUNCE = 3;
+  const SPEAKING_DEBOUNCE = 1; // require 1 consecutive interval to be more responsive
+  const NOT_SPEAKING_DEBOUNCE = 2; // small debounce to avoid flicker
       const intervalId = setInterval(async () => {
         try {
           if (!track || track.readyState !== 'live' || !voiceDetection.has(ownerId)) {
@@ -262,6 +266,94 @@ export function useMediasoupSfu() {
     for (const key of Array.from(voiceDetection.keys())) {
       cleanupVoiceDetection(key)
     }
+  }
+
+  // Setup a simple local VAD on a produced track. This attaches to the live
+  // producer-managed track (cleanTrack) so it survives the produce flow.
+  function setupLocalVADForProducer(producerId, track, userId) {
+    try {
+      if (!track || track.readyState !== 'live' || !userId) return
+      // Avoid duplicates
+      if (localProducerVads.has(producerId)) return
+      const AC = window.AudioContext || window.webkitAudioContext
+      if (!AC) return
+      const audioCtx = new AC()
+      try { audioCtx.resume && audioCtx.resume() } catch (_) {}
+      const src = audioCtx.createMediaStreamSource(new MediaStream([track]))
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 512
+      src.connect(analyser)
+      const dataArray = new Uint8Array(analyser.fftSize)
+      let speaking = false
+      let silentCount = 0
+  const SPEAKING_DEBOUNCE = 1
+  const NOT_SPEAKING_DEBOUNCE = 2
+      let speakingCount = 0
+      // Normalize userId to string for consistent Map keys and audio element lookup
+      const normalizedUserId = String(userId)
+      let lastRmsLog = 0
+      const intervalId = setInterval(async () => {
+        try {
+          analyser.getByteTimeDomainData(dataArray)
+          // Compute RMS on byte data centered at 128
+          let sum = 0
+          for (let i = 0; i < dataArray.length; i++) {
+            const v = dataArray[i] - 128
+            sum += v * v
+          }
+          const rms = Math.sqrt(sum / dataArray.length)
+          // Trigger around rms > 0.9 (byte RMS measured on 0..128 scale is ~1 equals small audio)
+          // The original code used >6 which misses lower-amplitude signals on some devices.
+          // Use a normalized threshold where rms > 0.9 is treated as speaking for local VAD.
+          const speakingNow = rms > 1.2
+          // (debug logs removed)
+          if (speakingNow) {
+            speakingCount++
+            silentCount = 0
+          } else {
+            silentCount++
+            speakingCount = 0
+          }
+          if (speakingNow && !speaking && speakingCount >= SPEAKING_DEBOUNCE) {
+            speaking = true
+            try {
+              const { useVoiceStore } = await import('~/stores/voice')
+              // Update using normalized id
+              useVoiceStore().updateUserSpeaking(normalizedUserId, true)
+            } catch (e) { console.log('[SFU][LocalVAD] updateUserSpeaking error', e) }
+          } else if (!speakingNow && speaking && silentCount >= NOT_SPEAKING_DEBOUNCE) {
+            speaking = false
+            try {
+              const { useVoiceStore } = await import('~/stores/voice')
+              useVoiceStore().updateUserSpeaking(normalizedUserId, false)
+            } catch (e) { console.log('[SFU][LocalVAD] updateUserSpeaking error', e) }
+          }
+        } catch (_) { /* noop */ }
+      }, 100)
+      // Cleanup when track ends
+    const endedHandler = () => {
+        try { clearInterval(intervalId) } catch (_) {}
+        try { audioCtx.close() } catch (_) {}
+        try {
+      const { useVoiceStore } = import('~/stores/voice')
+      useVoiceStore().updateUserSpeaking(normalizedUserId, false)
+        } catch (_) {}
+        localProducerVads.delete(producerId)
+      }
+      track.addEventListener && track.addEventListener('ended', endedHandler)
+      localProducerVads.set(producerId, { intervalId, audioCtx, endedHandler, track })
+    } catch (_) { /* noop */ }
+  }
+
+  function cleanupLocalVAD(producerId) {
+    try {
+      const entry = localProducerVads.get(producerId)
+      if (!entry) return
+      try { clearInterval(entry.intervalId) } catch (_) {}
+      try { entry.track && entry.track.removeEventListener && entry.track.removeEventListener('ended', entry.endedHandler) } catch (_) {}
+      try { entry.audioCtx && entry.audioCtx.close && entry.audioCtx.close() } catch (_) {}
+    } catch (_) { /* noop */ }
+    try { localProducerVads.delete(producerId) } catch (_) {}
   }
 
   function setupMessageHandler(type, handler) {
@@ -363,13 +455,45 @@ export function useMediasoupSfu() {
           reconnectAttempts = 0
           processMessageQueue()
 
-          // Start keepalive ping every 30 seconds
+          // Start keepalive ping every 15 seconds (server expected to send pings too)
           if (pingIntervalId) clearInterval(pingIntervalId)
           pingIntervalId = setInterval(() => {
-            if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-              ws.value.send(JSON.stringify({ type: 'ping' }))
+            try {
+              if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+                ws.value.send(JSON.stringify({ type: 'ping' }))
+              }
+            } catch (_) { /* noop */ }
+          }, 15000)
+          // Missed-pong watchdog: check every 15s if we have seen a recent pong
+          try { missedPongCount = 0 } catch (_) { /* noop */ }
+          const pongWatchdog = () => {
+            try {
+              // If lastPong is null or older than 15s, consider a missed pong
+              const now = Date.now()
+              if (!lastPong.value || (now - (lastPong.value || 0) > 15000)) {
+                missedPongCount++
+                console.log('[SFU] Missed pong count:', missedPongCount)
+              } else {
+                missedPongCount = 0
+              }
+              if (missedPongCount >= allowedMisses) {
+                console.error('[SFU] Pong missed threshold reached, handling disconnection')
+                // Reset to avoid multiple triggers
+                missedPongCount = 0
+                handleDisconnection(channelId)
+              }
+            } catch (_) { /* noop */ }
+          }
+          if (pingIntervalId) {
+            // reuse the same interval timer to run the watchdog after each ping
+            // create a parallel interval to avoid interfering with ping timer
+            if (typeof window !== 'undefined') {
+              try {
+                if (typeof window.__sfuPongWatchdogId === 'number') clearInterval(window.__sfuPongWatchdogId)
+                window.__sfuPongWatchdogId = setInterval(pongWatchdog, 15000)
+              } catch (_) { /* noop */ }
             }
-          }, 30000)
+          }
           // Periodically ensure audio elements are attached
           if (audioEnsureIntervalId) clearInterval(audioEnsureIntervalId)
           audioEnsureIntervalId = setInterval(() => {
@@ -394,7 +518,20 @@ export function useMediasoupSfu() {
         }
 
         ws.value.onclose = () => {
-          console.log('[SFU] WebSocket closed')
+            try { console.log('[SFU] WebSocket closed') } catch (_) { /* noop */ }
+            // If the browser provides more details, log them (event not passed in some browsers),
+            // attempt to get last WS close info via means available on the socket object where possible.
+            try {
+              const code = ws.value && typeof ws.value.code !== 'undefined' ? ws.value.code : null
+              const reason = ws.value && typeof ws.value.reason === 'string' ? ws.value.reason : null
+              if (code || reason) console.log('[SFU] WebSocket close details - code:', code, 'reason:', reason)
+            } catch (_) { /* noop */ }
+            // Debug snapshot: if debug enabled, capture a compact stats snapshot to help diagnose
+            try {
+              if (typeof window !== 'undefined' && window.__sfuDebugEnabled && typeof getWebRTCStatsSnapshot === 'function') {
+                getWebRTCStatsSnapshot().then(snap => console.log('[SFU] Debug stats snapshot on WS close:', snap)).catch(() => { /* noop */ })
+              }
+            } catch (_) { /* noop */ }
           connected.value = false
           // Stop keepalive ping
           if (pingIntervalId) {
@@ -1045,8 +1182,49 @@ export function useMediasoupSfu() {
     // Handle keepalive pong responses from server
     setupMessageHandler('pong', ({ data }) => {
       try {
-        // Update last pong timestamp for diagnostics and optionally use for connection health
         lastPong.value = Date.now()
+        try { missedPongCount = 0 } catch (_) { /* noop */ }
+      } catch (_) { /* noop */ }
+    })
+    setupMessageHandler('ping', ({ data }) => {
+      try {
+        // console.log('[SFU] Received server ping (no reply sent)')
+      } catch (_) { /* noop */ }
+    })
+
+    // Server intends to shutdown or restart soon — log and optionally prepare to reconnect
+    setupMessageHandler('server-shutdown', ({ data }) => {
+      try {
+        console.log('[SFU] Server shutdown message received:', data)
+        // If server requests an immediate shutdown, perform a graceful disconnect
+        const reason = data && data.reason ? data.reason : 'unknown'
+        const eta = data && typeof data.eta !== 'undefined' ? Number(data.eta) : null
+        // If ETA is small or missing, proactively disconnect to allow client reconnect logic to run
+        if (!eta || eta <= 10) {
+          console.log('[SFU] Server requested shutdown, disconnecting to allow reconnect flow')
+          // Mark manualDisconnect false so reconnect logic can run
+          manualDisconnect = false
+          disconnect()
+        }
+        // Debug snapshot if enabled
+        try {
+          if (typeof window !== 'undefined' && window.__sfuDebugEnabled && typeof getWebRTCStatsSnapshot === 'function') {
+            getWebRTCStatsSnapshot().then(snap => console.log('[SFU] Debug stats snapshot on server-shutdown:', snap)).catch(() => { /* noop */ })
+          }
+        } catch (_) { /* noop */ }
+      } catch (_) { /* noop */ }
+    })
+
+    setupMessageHandler('server-restarting', ({ data }) => {
+      try {
+        console.log('[SFU] Server restarting advisory:', data)
+        // Server advised restart: backoff immediate reconnects if ETA provided
+        const eta = data && typeof data.eta !== 'undefined' ? Number(data.eta) : null
+        if (eta && eta > 0) {
+          // Temporarily prevent aggressive reconnection attempts
+          allowReconnect = false
+          setTimeout(() => { allowReconnect = true }, Math.min(60000, eta * 1000))
+        }
       } catch (_) { /* noop */ }
     })
     
@@ -1728,11 +1906,17 @@ export function useMediasoupSfu() {
       })
   // Track locally created producer ids to avoid self-consume
   localProducerIds.add(producer.id)
+      // Attach VAD to the producer-managed track so local speech is detected reliably
+      try {
+        const { useAuthStore } = await import('~/stores/auth')
+        const myId = useAuthStore().getUserData()?.id
+        if (myId) setupLocalVADForProducer(producer.id, audioTrack, myId)
+      } catch (_) { /* noop */ }
       
       isProducing.value = true
 
       producer.on('transportclose', () => {
-        console.log('[SFU] Producer transport closed')
+        try { console.log('[SFU] Producer transport closed - producerId:', producer?.id) } catch (_) { console.log('[SFU] Producer transport closed') }
         const producerData = producers.value.get(producer.id)
         if (producerData) {
           // Clean up the stream we're managing
@@ -1741,12 +1925,15 @@ export function useMediasoupSfu() {
         }
         isProducing.value = producers.value.size > 0
   // No consumer voice detection for local producer, but keep function symmetry
+        // Also cleanup any local VAD attached to this producer
+        try { cleanupLocalVAD(producer.id) } catch (_) {}
       })
 
       producer.on('trackended', () => {
         console.log('[SFU] Producer track ended')
         stopAudioProduction(producer.id)
   // No consumer detection associated; nothing else to clean here
+        try { cleanupLocalVAD(producer.id) } catch (_) {}
       })
 
       console.log('[SFU] Audio producer setup complete:', producer.id)
@@ -1830,7 +2017,8 @@ export function useMediasoupSfu() {
         if (producerData.stream) {
           producerData.stream.getTracks().forEach(track => track.stop())
         }
-        producers.value.delete(producerId)
+  producers.value.delete(producerId)
+  try { cleanupLocalVAD(producerId) } catch (_) {}
       }
     } else {
       // Stop all producers
@@ -1842,7 +2030,9 @@ export function useMediasoupSfu() {
           producerData.stream.getTracks().forEach(track => track.stop())
         }
       })
-      producers.value.clear()
+  // cleanup local VADs for all producers
+  Array.from(producers.value.keys()).forEach(pid => { try { cleanupLocalVAD(pid) } catch (_) {} })
+  producers.value.clear()
     }
         // If this producer has previously failed to consume, skip
         if (failedConsumeProducers.has(producerId)) {
@@ -2045,7 +2235,9 @@ export function useMediasoupSfu() {
                     // Success path: do NOT mark producer as failed here. If consumer creation
                     // fails we will handle it in the catch handler instead.
       consumer.on('transportclose', () => {
-        console.log('[SFU] Consumer transport closed')
+        try {
+          console.log('[SFU] Consumer transport closed - consumerId:', consumer?.id, 'producerId:', consumerData?.producerId)
+        } catch (_) { console.log('[SFU] Consumer transport closed') }
         const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
         removeAudioElement(ownerId)
         consumers.value.delete(consumerData.producerId)

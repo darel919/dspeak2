@@ -210,12 +210,27 @@ export const useVoiceStore = defineStore('voice', () => {
 
     function updateUserSpeaking(userId, speaking) {
         // Only update known users to prevent phantom entries created from producer IDs
-        const user = connectedUsers.value.get(userId);
+        // However, allow updating ourself (local user) even if the connected map
+        // doesn't yet contain an entry - this ensures local VAD immediately
+        // reflects in the UI for the local participant.
+        let user = connectedUsers.value.get(userId);
         if (!user) {
-            return;
+            try {
+                // If this is our own user id, create a minimal connected user entry
+                const auth = useAuthStore && useAuthStore().getUserData ? useAuthStore().getUserData() : null;
+                if (auth && String(auth.id) === String(userId)) {
+                    // Add a lightweight connected user so speaking state can be stored
+                    addConnectedUser(userId, { id: userId });
+                    user = connectedUsers.value.get(userId);
+                }
+            } catch (_) {
+                // ignore and bail out below if still missing
+            }
         }
-        connectedUsers.value.set(userId, { ...user, speaking });
-        connectedUsers.value = new Map(connectedUsers.value);
+    if (!user) return;
+    // try { console.log('[VoiceStore] updateUserSpeaking', { userId, speaking }) } catch (_) {}
+    connectedUsers.value.set(userId, { ...user, speaking });
+    connectedUsers.value = new Map(connectedUsers.value);
     }
 
     function updateUserMuted(userId, muted) {

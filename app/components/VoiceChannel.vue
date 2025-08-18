@@ -98,6 +98,13 @@
               </div>
               <!-- User Name -->
               <h4 class="text-lg font-semibold text-center mb-2">{{ getUserDisplayName(user) }}</h4>
+              <!-- ICE / Connection Status for local user when not fully connected -->
+              <div v-if="isLocalUser(user) && !voiceStore.connected" class="text-xs text-base-content/60 mb-2">
+                <span v-if="voiceStore.connecting && !voiceStore.connected">Waiting</span>
+                <span v-else-if="voiceStore.sfuComposable && !voiceStore.sfuComposable.transportReady">Connecting</span>
+                <span class="text-error" v-else-if="voiceStore.sfuComposable?.iceConnectedBoth === false">Disconnected</span>
+                <span v-else>Not connected</span>
+              </div>
               <!-- User Status -->
               <div class="flex items-center gap-2">
                 <!-- <div v-if="user.speaking" class="flex items-center gap-1 text-success"> -->
@@ -322,6 +329,11 @@ function getUserDisplayName(user) {
   // Prefer mapped profile from the voice store directory
   const profile = (voiceStore.getUserProfile && user?.id) ? voiceStore.getUserProfile(user.id) : null
   const merged = { ...profile, ...user }
+  // If this is the local user, show "You"
+  try {
+    const me = useAuthStore().getUserData && useAuthStore().getUserData()
+    if (me && me.id && String(me.id) === String(merged.id)) return 'You'
+  } catch (_) { /* noop */ }
   return merged.display_name || merged.name || merged.username || merged.email || `User ${merged.id}`
 }
 
@@ -342,6 +354,13 @@ function getButtonTitle() {
   if (!voiceStore.connected) return 'Not connected'
   if (voiceStore.sfuComposable && !voiceStore.sfuComposable.transportReady) return 'Setting up connection...'
   return voiceStore.micMuted ? 'Unmute Microphone' : 'Mute Microphone'
+}
+
+function isLocalUser(user) {
+  try {
+    const me = authStore.getUserData && authStore.getUserData()
+    return me && me.id && user && String(user.id) === String(me.id)
+  } catch (_) { return false }
 }
 
 
