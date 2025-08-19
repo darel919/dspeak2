@@ -51,9 +51,14 @@ export function useMediasoupSfu() {
   let rtpCapabilitiesTimeout = null
   let reconnectTimeoutId = null
   let allowReconnect = true
+  // Track last client RTP capabilities send to avoid spamming server
+  let lastClientRtpCapsSentAt = 0
+  let lastClientRtpCapsPayload = null
   let pingIntervalId = null // For keepalive pings
   let missedPongCount = 0
-  const allowedMisses = 5
+  const defaultPingIntervalMs = 15000
+  const desiredGraceMs = 120000 // 120 seconds
+  const allowedMisses = Math.max(1, Math.ceil(desiredGraceMs / defaultPingIntervalMs))
   let audioEnsureIntervalId = null // For re-attaching audio elements across navigation
   let producersRequested = false
   // Map producerId -> userId when provided by server
@@ -88,6 +93,39 @@ export function useMediasoupSfu() {
     }
   } catch (_) { /* noop */ }
   
+  // Normalize RTP capabilities before advertising to server to avoid strict
+  // canConsume failures when servers compare codec parameters. This fills
+  // common opus receive parameters (sprop-stereo, usedtx) and ensures a
+  // parameters object exists for each codec entry.
+  function normalizeRtpCapabilities(orig) {
+    try {
+      if (!orig) return orig
+      const caps = JSON.parse(JSON.stringify(orig))
+  if (!Array.isArray(caps.codecs)) return caps
+      caps.codecs = caps.codecs.map(c => {
+        try {
+          const out = Object.assign({}, c)
+          if (!out.parameters || typeof out.parameters !== 'object') out.parameters = {}
+          const mime = (out.mimeType || '').toLowerCase()
+          if (mime.includes('opus')) {
+            // If stereo support or DTX are relevant, advertise they are supported.
+            // Setting these flags informs server the client can receive stereo/DTX.
+            if (typeof out.parameters['sprop-stereo'] === 'undefined') out.parameters['sprop-stereo'] = 1
+            if (typeof out.parameters['usedtx'] === 'undefined') out.parameters['usedtx'] = 1
+            // Ensure channels exists (default to 2 for modern browsers where stereo is common)
+            if (typeof out.channels === 'undefined' || out.channels === null) out.channels = 2
+          }
+          return out
+        } catch (_) { return c }
+      })
+  // Keep headerExtensions unchanged — some SFU/routers expect exact
+  // header extension sets and IDs. Altering them can cause canConsume
+  // to fail even when codecs match. Return caps with codec parameter
+  // adjustments only.
+  return caps
+    } catch (_) { return orig }
+  }
+
 
   function rebindAudioAndDetectionIfNeeded(producerId, userId) {
     try {
@@ -292,8 +330,48 @@ export function useMediasoupSfu() {
       // Normalize userId to string for consistent Map keys and audio element lookup
       const normalizedUserId = String(userId)
       let lastRmsLog = 0
+      // Define cleanup handlers (defined before interval for safe referencing)
+      const endedHandler = () => {
+        try { clearInterval(intervalId) } catch (_) {}
+        try { audioCtx.close() } catch (_) {}
+        try {
+          const { useVoiceStore } = import('~/stores/voice')
+          useVoiceStore().updateUserSpeaking(normalizedUserId, false)
+        } catch (_) {}
+        try { track && track.removeEventListener && track.removeEventListener('mute', muteHandler) } catch (_) {}
+        try { track && track.removeEventListener && track.removeEventListener('ended', endedHandler) } catch (_) {}
+        localProducerVads.delete(producerId)
+      }
+
+      const muteHandler = () => {
+        // If the track has been muted by the system/user, treat as ended and cleanup
+        try { clearInterval(intervalId) } catch (_) {}
+        try { audioCtx.close() } catch (_) {}
+        try {
+          const { useVoiceStore } = import('~/stores/voice')
+          useVoiceStore().updateUserSpeaking(normalizedUserId, false)
+        } catch (_) {}
+        try { track && track.removeEventListener && track.removeEventListener('ended', endedHandler) } catch (_) {}
+        try { track && track.removeEventListener && track.removeEventListener('mute', muteHandler) } catch (_) {}
+        localProducerVads.delete(producerId)
+      }
+
       const intervalId = setInterval(async () => {
         try {
+          // If the track becomes disabled/muted or stops being live, force cleanup and mark not speaking
+          if (!track || track.readyState !== 'live' || track.muted === true || track.enabled === false) {
+            try { clearInterval(intervalId) } catch (_) {}
+            try { audioCtx.close() } catch (_) {}
+            try {
+              const { useVoiceStore } = import('~/stores/voice')
+              useVoiceStore().updateUserSpeaking(normalizedUserId, false)
+            } catch (_) {}
+            try { track && track.removeEventListener && track.removeEventListener('ended', endedHandler) } catch (_) {}
+            try { track && track.removeEventListener && track.removeEventListener('mute', muteHandler) } catch (_) {}
+            localProducerVads.delete(producerId)
+            return
+          }
+
           analyser.getByteTimeDomainData(dataArray)
           // Compute RMS on byte data centered at 128
           let sum = 0
@@ -305,8 +383,7 @@ export function useMediasoupSfu() {
           // Trigger around rms > 0.9 (byte RMS measured on 0..128 scale is ~1 equals small audio)
           // The original code used >6 which misses lower-amplitude signals on some devices.
           // Use a normalized threshold where rms > 0.9 is treated as speaking for local VAD.
-          const speakingNow = rms > 1.2
-          // (debug logs removed)
+          const speakingNow = rms > 1
           if (speakingNow) {
             speakingCount++
             silentCount = 0
@@ -329,19 +406,12 @@ export function useMediasoupSfu() {
             } catch (e) { console.log('[SFU][LocalVAD] updateUserSpeaking error', e) }
           }
         } catch (_) { /* noop */ }
-      }, 100)
-      // Cleanup when track ends
-    const endedHandler = () => {
-        try { clearInterval(intervalId) } catch (_) {}
-        try { audioCtx.close() } catch (_) {}
-        try {
-      const { useVoiceStore } = import('~/stores/voice')
-      useVoiceStore().updateUserSpeaking(normalizedUserId, false)
-        } catch (_) {}
-        localProducerVads.delete(producerId)
-      }
+      }, 200)
+
+      // Attach ended/mute listeners and store handlers for cleanup
       track.addEventListener && track.addEventListener('ended', endedHandler)
-      localProducerVads.set(producerId, { intervalId, audioCtx, endedHandler, track })
+      track.addEventListener && track.addEventListener('mute', muteHandler)
+      localProducerVads.set(producerId, { intervalId, audioCtx, endedHandler, muteHandler, track })
     } catch (_) { /* noop */ }
   }
 
@@ -350,7 +420,8 @@ export function useMediasoupSfu() {
       const entry = localProducerVads.get(producerId)
       if (!entry) return
       try { clearInterval(entry.intervalId) } catch (_) {}
-      try { entry.track && entry.track.removeEventListener && entry.track.removeEventListener('ended', entry.endedHandler) } catch (_) {}
+  try { entry.track && entry.track.removeEventListener && entry.track.removeEventListener('ended', entry.endedHandler) } catch (_) {}
+  try { entry.track && entry.track.removeEventListener && entry.track.removeEventListener('mute', entry.muteHandler) } catch (_) {}
       try { entry.audioCtx && entry.audioCtx.close && entry.audioCtx.close() } catch (_) {}
     } catch (_) { /* noop */ }
     try { localProducerVads.delete(producerId) } catch (_) {}
@@ -466,8 +537,15 @@ export function useMediasoupSfu() {
           }, 15000)
           // Missed-pong watchdog: check every 15s if we have seen a recent pong
           try { missedPongCount = 0 } catch (_) { /* noop */ }
+          // Missed-pong watchdog. To avoid false positives when the page is hidden
+          // (system sleep or tab background), pause counting and reset on visibility change.
           const pongWatchdog = () => {
             try {
+              if (typeof document !== 'undefined' && document.hidden) {
+                // Page is hidden (likely sleeping); do not increment missed counters
+                // but keep lastPong value intact so we can resume when visible again.
+                return
+              }
               // If lastPong is null or older than 15s, consider a missed pong
               const now = Date.now()
               if (!lastPong.value || (now - (lastPong.value || 0) > 15000)) {
@@ -491,6 +569,21 @@ export function useMediasoupSfu() {
               try {
                 if (typeof window.__sfuPongWatchdogId === 'number') clearInterval(window.__sfuPongWatchdogId)
                 window.__sfuPongWatchdogId = setInterval(pongWatchdog, 15000)
+                // Reset missedPongCount when the page becomes visible again to avoid
+                // immediately triggering a disconnect after resume from sleep.
+                const visibilityHandler = () => {
+                  try {
+                    if (!document.hidden) {
+                      missedPongCount = 0
+                      // update lastPong to now so there's a grace period to receive next pong
+                      lastPong.value = Date.now()
+                    }
+                  } catch (_) { /* noop */ }
+                }
+                document.addEventListener && document.addEventListener('visibilitychange', visibilityHandler)
+                // Store handler for potential cleanup later (best-effort)
+                if (!window.__sfuVisibilityHandlers) window.__sfuVisibilityHandlers = []
+                window.__sfuVisibilityHandlers.push(visibilityHandler)
               } catch (_) { /* noop */ }
             }
           }
@@ -580,8 +673,8 @@ export function useMediasoupSfu() {
           let caps = null
           try { caps = JSON.parse(JSON.stringify(device.value.rtpCapabilities)) } catch (_) { caps = device.value.rtpCapabilities }
           console.log('[SFU] Sending client RTP capabilities back to server for consume checks:', caps)
-          try { lastSentClientRtpCapabilities.value = caps } catch (_) { /* noop */ }
-          sendMessage({ type: 'client-rtp-capabilities', data: { rtpCapabilities: caps } })
+          try { lastSentClientRtpCapabilities.value = normalizeRtpCapabilities(caps) } catch (_) { /* noop */ }
+          sendMessage({ type: 'client-rtp-capabilities', data: { rtpCapabilities: normalizeRtpCapabilities(caps) } })
         } catch (e) { /* noop */ }
 
         createTransports()
@@ -589,6 +682,20 @@ export function useMediasoupSfu() {
         console.error('[SFU] Error loading device:', err)
         error.value = 'Failed to load media device'
       }
+    })
+
+    // Some servers send an acknowledgement wrapper for RTP capabilities
+    // Handle it gracefully to avoid unhandled message logs
+    setupMessageHandler('rtp-capabilities-ack', async (message) => {
+      try {
+        const data = message && message.data ? message.data : null
+        console.log('[SFU] Received rtp-capabilities-ack', data ? (typeof data === 'object' ? JSON.stringify(data) : data) : '')
+        // If the server included capabilities, treat like a normal rtp-capabilities message
+        if (data && (data.codecs || data.headerExtensions)) {
+          const handler = messageHandlers.get('rtp-capabilities')
+          if (handler) handler({ data })
+        }
+      } catch (e) { /* noop */ }
     })
 
     setupMessageHandler('transport-params', async ({ data }) => {
@@ -736,6 +843,21 @@ export function useMediasoupSfu() {
       if (entry && typeof entry.callback === 'function') {
         try { entry.callback({ id: data.id }) } catch (_) { /* noop */ }
       }
+    })
+
+    // Some servers send a simple 'produced' event payload after produce
+    setupMessageHandler('produced', (message) => {
+      try {
+        const data = message && message.data ? message.data : null
+        console.log('[SFU] Produced event received:', data)
+        // If server sent id, resolve pending produce queue as well
+        if (data && data.id) {
+          const entry = pendingProduceQueue.shift()
+          if (entry && typeof entry.callback === 'function') {
+            try { entry.callback({ id: data.id }) } catch (_) { /* noop */ }
+          }
+        }
+      } catch (e) { /* noop */ }
     })
 
     setupMessageHandler('consumer-params', async ({ data }) => {
@@ -889,6 +1011,87 @@ export function useMediasoupSfu() {
         if (entry && typeof entry.errback === 'function') {
           try { entry.errback(new Error(data.message || 'Producer creation failed')) } catch (_) { /* noop */ }
         }
+      }
+
+      // If server reports a codec/parameter mismatch while attempting to create a consumer,
+      // print a concise diff between the last client RTP capabilities we sent and the
+      // consumer-params we most recently received. This helps identify which codec or
+      // codec parameter caused the canConsume() check to fail on the server.
+      try {
+        // Support multiple server error shapes: string, { message }, or other fields
+        let msg = ''
+        if (typeof data === 'string') {
+          msg = data
+        } else if (data && typeof data === 'object') {
+          msg = String(data.message || data.msg || data.error || '')
+        }
+        // Fallback: if msg still empty but data contains text when stringified, use that
+        if (!msg && data && typeof data !== 'string') {
+          try { msg = JSON.stringify(data) } catch (_) { msg = '' }
+        }
+        if (msg && /cannot consume this producer|codec\/parameter mismatch|cannot consume/i.test(msg)) {
+          const caps = lastSentClientRtpCapabilities?.value || null
+          const consumer = lastReceivedConsumerParams?.value || null
+          console.warn('[SFU] Detected consume codec/parameter mismatch — showing compact diff')
+          // Helper to summarize codecs
+          const summarizeCodecs = (list) => {
+            if (!Array.isArray(list)) return []
+            return list.map(c => ({ mimeType: c.mimeType, clockRate: c.clockRate, channels: c.channels, parameters: c.parameters }))
+          }
+          // Normalize codec lists and guard against unexpected shapes
+          const rawClientCodecs = Array.isArray(caps?.codecs) ? caps.codecs : (caps && Array.isArray(caps) ? caps : [])
+          const rawConsumerCodecs = Array.isArray(consumer?.rtpParameters?.codecs) ? consumer.rtpParameters.codecs : (consumer && Array.isArray(consumer) ? consumer : [])
+          const clientCodecs = summarizeCodecs(rawClientCodecs)
+          const consumerCodecs = summarizeCodecs(rawConsumerCodecs)
+          console.log('[SFU] client.rtpCapabilities.codecs:', clientCodecs)
+          console.log('[SFU] consumer.rtpParameters.codecs:', consumerCodecs)
+
+          // Produce a short human-readable diff (defensive)
+          const diffs = []
+          if (!Array.isArray(consumerCodecs)) {
+            console.warn('[SFU] Unexpected consumer codec shape:', typeof consumerCodecs, consumerCodecs)
+          } else {
+            for (let i = 0; i < consumerCodecs.length; i++) {
+              try {
+                const cc = consumerCodecs[i]
+                const mime = cc.mimeType || 'unknown'
+                const match = Array.isArray(clientCodecs) ? clientCodecs.find(c2 => c2.mimeType && c2.mimeType.toLowerCase() === mime.toLowerCase()) : null
+                if (!match) {
+                  diffs.push(`Missing client codec: ${mime}`)
+                  continue
+                }
+                // Compare channels
+                const cChannels = Number(match.channels || 1)
+                const pChannels = Number(cc.channels || 1)
+                if (cChannels !== pChannels) diffs.push(`Channels mismatch for ${mime}: client=${cChannels} producer=${pChannels}`)
+                // Compare parameter keys/values
+                const cp = match.parameters || {}
+                const pp = cc.parameters || {}
+                const keys = Array.from(new Set(Object.keys(cp || {}).concat(Object.keys(pp || {}))))
+                for (let kIdx = 0; kIdx < keys.length; kIdx++) {
+                  const k = keys[kIdx]
+                  const a = typeof cp[k] === 'undefined' ? '<none>' : String(cp[k])
+                  const b = typeof pp[k] === 'undefined' ? '<none>' : String(pp[k])
+                  if (a !== b) diffs.push(`Param mismatch ${mime}.${k}: client=${a} producer=${b}`)
+                }
+              } catch (innerE) {
+                diffs.push(`Error inspecting consumer codec at index ${i}: ${String(innerE)}`)
+              }
+            }
+          }
+
+          if (diffs.length === 0) {
+            console.log('[SFU] No codec-level diffs detected. Check headerExtensions or server-side router policies.')
+            // Also display header extension URIs for inspection
+            const hdr = (arr) => Array.isArray(arr) ? arr.map(h => h.uri || h) : []
+            console.log('[SFU] client.headerExtensions:', hdr(caps?.headerExtensions))
+            console.log('[SFU] consumer.headerExtensions:', hdr(consumer?.rtpParameters?.headerExtensions))
+          } else {
+            console.warn('[SFU] Codec diffs:', diffs)
+          }
+        }
+      } catch (e) {
+        console.warn('[SFU] Failed to generate codec diff:', e)
       }
     })
 
@@ -1265,7 +1468,7 @@ export function useMediasoupSfu() {
   }
 
   function handleMessage(event) {
-    try {
+  try {
       const message = JSON.parse(event.data)
       if (typeof console !== 'undefined' && typeof console.log === 'function') {
         console.log('[SFU] Received message:', message.type)
@@ -2090,9 +2293,25 @@ export function useMediasoupSfu() {
     } catch (_) { safeCaps = device.value.rtpCapabilities }
     // Inform server of our RTP capabilities (new required step) before requesting consume
     try {
-  console.log('[SFU] Sending client-rtp-capabilities for consume:', safeCaps)
-  try { lastSentClientRtpCapabilities.value = safeCaps } catch (_) { /* noop */ }
-  sendMessage({ type: 'client-rtp-capabilities', data: { rtpCapabilities: safeCaps } })
+  // Only send client-rtp-capabilities if not sent recently or payload changed
+  try {
+    const now = Date.now()
+    const payloadStr = JSON.stringify(safeCaps || {})
+    const shouldSend = (now - lastClientRtpCapsSentAt) > 2000 || payloadStr !== lastClientRtpCapsPayload
+    if (shouldSend) {
+      const norm = normalizeRtpCapabilities(safeCaps)
+      console.log('[SFU] Sending client-rtp-capabilities for consume:', norm)
+      try { lastSentClientRtpCapabilities.value = norm } catch (_) { /* noop */ }
+      sendMessage({ type: 'client-rtp-capabilities', data: { rtpCapabilities: norm } })
+      lastClientRtpCapsSentAt = now
+      lastClientRtpCapsPayload = payloadStr
+    } else {
+      // Avoid noisy repeated capability announcements
+      console.log('[SFU] Skipping duplicate client-rtp-capabilities send')
+    }
+  } catch (e) {
+    console.warn('[SFU] Failed to send client-rtp-capabilities:', e)
+  }
     } catch (e) { console.warn('[SFU] Failed to send client-rtp-capabilities:', e) }
     sendMessage({
       type: 'consume',
@@ -2108,28 +2327,14 @@ export function useMediasoupSfu() {
       clearTimeout(pendingConsume.get(producerId))
     }
   const timeoutId = setTimeout(() => {
-      // If still no consumer created for this producer, try generic consume once
+      // If still no consumer created for this producer, mark as failed and log.
       if (!consumers.value.has(producerId)) {
-        console.log('[SFU] Specific consume timed out, attempting generic consume')
+        console.log('[SFU] Specific consume timed out; will not send generic consume without producerId to avoid server errors')
         try {
-          let safeCaps2 = null
-          try { safeCaps2 = JSON.parse(JSON.stringify(device.value.rtpCapabilities)) } catch (_) { safeCaps2 = device.value.rtpCapabilities }
-          sendMessage({
-            type: 'consume',
-            data: {
-              rtpCapabilities: safeCaps2,
-              transportId: recvTransport.value.id
-            }
-          })
-        } catch (_) { /* noop */ }
-      }
-      // After attempting generic, if still no consumer, mark producer as failed
-      try {
-        if (!consumers.value.has(producerId)) {
           failedConsumeProducers.add(producerId)
           console.log('[SFU] Marking producer as failed to consume:', producerId)
-        }
-      } catch (_) { /* noop */ }
+        } catch (_) { /* noop */ }
+      }
       pendingConsume.delete(producerId)
   }, 3000)
     pendingConsume.set(producerId, timeoutId)

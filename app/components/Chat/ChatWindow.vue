@@ -46,6 +46,8 @@
         class="flex-1 overflow-y-auto p-4 space-y-4"
         @scroll="handleScroll"
       >
+      <ChatErrorBanner :channel-id="props.channelId" :channel-name="props.channel?.name" :room-id="props.room?.id" />
+
       <!-- Loading indicator -->
       <div v-if="loading" class="flex justify-center py-8">
         <div class="loading loading-spinner loading-lg"></div>
@@ -157,6 +159,7 @@ import ChatMessage from './ChatMessage.vue'
 import ChatInput from './ChatInput.vue'
 import MessageDetailsModal from './MessageDetailsModal.vue'
 import MemberList from '../MemberList.vue'
+import ChatErrorBanner from './ChatErrorBanner.vue'
 // MemberList sidebar state
 const MEMBER_LIST_KEY = 'chat_member_list_visible'
 const showMemberList = ref(true)
@@ -244,7 +247,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  chatStore.disconnectFromChannel()
+  // Keep chat connection alive across in-room navigation (e.g. switching to VoiceChannel)
+  // Chat disconnect will be handled when leaving the room page instead.
 })
 
 // Watch for channel changes

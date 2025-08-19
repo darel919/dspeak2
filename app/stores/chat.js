@@ -9,6 +9,8 @@ export const useChatStore = defineStore('chat', () => {
     const error = ref(null);
     const ws = ref(null);
     const connected = ref(false);
+    const connecting = ref(false);
+    const intentionalDisconnect = ref(false);
     const currentChannelId = ref(null);
     const currentChannelName = ref(null);
     const currentRoomId = ref(null);
@@ -17,7 +19,11 @@ export const useChatStore = defineStore('chat', () => {
     const config = useRuntimeConfig();
     let reconnectInterval = null;
     let reconnectTimer = null;
+    let backoffAttempts = 0;
+    let lastConnectRequest = 0;
+    const CONNECT_DEBOUNCE_MS = 200; // debounce multiple rapid connect requests
     let pingInterval = null;
+    let suppressClearState = false;
 
     
     if (process.client && 'serviceWorker' in navigator) {
@@ -131,8 +137,44 @@ export const useChatStore = defineStore('chat', () => {
         }
     }
 
-    async function connectToChannel(channelId, channelName = null, roomId = null) {
-        disconnectFromChannel();
+    async function connectToChannel(channelId, channelName = null, roomId = null, isReconnect = false) {
+        // If we're already connected to the requested channel, do nothing
+        if (currentChannelId.value && currentChannelId.value === channelId && connected.value) {
+            console.log('[ChatStore] Already connected to channel, skipping reconnect:', channelId);
+            return;
+        }
+
+        // If a connect is in progress for the same channel, skip starting another
+        if (connecting.value && currentChannelId.value === channelId) {
+            console.log('[ChatStore] Connect already in progress for channel, skipping:', channelId);
+            return;
+        }
+
+        // Debounce rapid connect requests
+        try {
+            const now = Date.now();
+            const elapsed = now - lastConnectRequest;
+            lastConnectRequest = now;
+            if (elapsed < CONNECT_DEBOUNCE_MS) {
+                await new Promise(r => setTimeout(r, CONNECT_DEBOUNCE_MS - elapsed));
+            }
+        } catch (e) {
+            // noop
+        }
+
+        // Ensure any existing connection is torn down before creating a new one
+        // But if this call is an automatic reconnect attempt, don't clear state
+        if (!isReconnect) {
+            // mark that we're about to intentionally clear state unless suppressed
+            suppressClearState = false;
+            disconnectFromChannel(true);
+        } else {
+            // For automatic reconnect we want to preserve UI state and avoid clearing
+            suppressClearState = true;
+        }
+
+        // mark that we're trying to connect so concurrent calls don't race
+        connecting.value = true;
         try {
             const authStore = useAuthStore();
             const userData = authStore.getUserData();
@@ -151,18 +193,25 @@ export const useChatStore = defineStore('chat', () => {
             ws.value = new WebSocket(wsUrl);
 
             ws.value.onopen = () => {
+                connecting.value = false;
                 connected.value = true;
+                intentionalDisconnect.value = false;
                 console.log(`[ChatStore] Connected to channel ${channelId}`);
-                if (reconnectInterval) {
-                    clearInterval(reconnectInterval);
-                    reconnectInterval = null;
+                // Clear any scheduled reconnect and reset backoff counter
+                if (reconnectTimer) {
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = null;
                 }
-                
+                backoffAttempts = 0;
+
+                // connection succeeded; stop suppressing state clears
+                suppressClearState = false;
+
                 if (pingInterval) clearInterval(pingInterval);
                 pingInterval = setInterval(() => {
                     sendPing();
                 }, 30000);
-                
+
                 if (currentChannelId.value) {
                     fetchMessages(currentChannelId.value);
                 }
@@ -170,26 +219,63 @@ export const useChatStore = defineStore('chat', () => {
 
             ws.value.onmessage = handleWebSocketMessage;
 
-            ws.value.onclose = () => {
+            // Track recent close timestamps for rapid-failure detection
+            const recentCloses = [];
+
+            ws.value.onclose = (event) => {
+                connecting.value = false;
                 connected.value = false;
-                console.log('[ChatStore] WebSocket connection closed');
-                
+                try {
+                    console.log('[ChatStore] WebSocket connection closed', { code: event?.code, reason: event?.reason });
+                } catch (e) {
+                    console.log('[ChatStore] WebSocket connection closed');
+                }
+
+                // record close time and prune older entries
+                recentCloses.push(Date.now());
+                const cutoff = Date.now() - 30000; // 30s window
+                while (recentCloses.length && recentCloses[0] < cutoff) recentCloses.shift();
+                if (recentCloses.length > 3) {
+                    console.warn('[ChatStore] Multiple closes detected in short time:', recentCloses.length);
+                    // Increase backoff attempts to avoid tight loops
+                    backoffAttempts = Math.min(backoffAttempts + 2, 20);
+                }
+
                 if (pingInterval) {
                     clearInterval(pingInterval);
                     pingInterval = null;
                 }
-                
-                if (!reconnectInterval && currentChannelId.value) {
-                    reconnectInterval = setInterval(() => {
+
+                // Only attempt automatic reconnect if the disconnect was not intentional
+                // If server rejected access (common code/reason), stop reconnecting and surface an error
+                if (event && (event.code === 1011 || (event.reason && typeof event.reason === 'string' && event.reason.toLowerCase().includes('verify')))) {
+                    console.error('[ChatStore] Server rejected channel access - aborting reconnect', { code: event.code, reason: event.reason });
+                    error.value = 'Failed to verify channel access';
+                    intentionalDisconnect.value = true;
+                    return;
+                }
+
+                if (!intentionalDisconnect.value && !reconnectTimer && currentChannelId.value) {
+                    // Increase backoff attempts immediately on close
+                    backoffAttempts = Math.min(backoffAttempts + 1, 10);
+                    // exponential backoff: 1s, 2s, 4s, 8s, ... capped at 30s
+                    const baseDelay = Math.min(30000, 1000 * Math.pow(2, Math.max(0, backoffAttempts - 1)));
+                    // add small jitter to spread reconnects
+                    const jitter = 0.8 + Math.random() * 0.4; // 0.8 - 1.2
+                    const delay = Math.round(baseDelay * jitter);
+                    console.log(`[ChatStore] Scheduling reconnect in ${delay}ms (attempt ${backoffAttempts})`);
+                    reconnectTimer = setTimeout(() => {
+                        reconnectTimer = null;
                         if (!connected.value && currentChannelId.value) {
                             console.log('[ChatStore] Attempting to reconnect...');
-                            connectToChannel(currentChannelId.value, currentChannelName.value, currentRoomId.value);
+                            connectToChannel(currentChannelId.value, currentChannelName.value, currentRoomId.value, true);
                         }
-                    }, 7000);
+                    }, delay);
                 }
             };
 
             ws.value.onerror = (error) => {
+                connecting.value = false;
                 console.error('[ChatStore] WebSocket error:', error);
                 error.value = 'WebSocket connection failed';
             };
@@ -208,14 +294,31 @@ export const useChatStore = defineStore('chat', () => {
                 }
             }
         } catch (err) {
+            // Clear connecting flag on error
+            connecting.value = false;
             error.value = err.message;
             console.error('[ChatStore] Error connecting to channel:', err);
         }
     }
 
-    function disconnectFromChannel() {
+    function disconnectFromChannel(intentional = false) {
+        // Instrumentation: log a stack trace to find unexpected callers
+        try {
+            const err = new Error('disconnectFromChannel called');
+            console.log('[ChatStore] disconnectFromChannel invoked - stack:', err.stack);
+        } catch (e) {
+            console.log('[ChatStore] disconnectFromChannel invoked');
+        }
+
+        // Mark as intentional to avoid automatic reconnect attempts when requested
+        intentionalDisconnect.value = !!intentional;
+
         if (ws.value) {
-            ws.value.close();
+            try {
+                ws.value.close();
+            } catch (e) {
+                console.warn('[ChatStore] Error closing WebSocket cleanly:', e)
+            }
             ws.value = null;
         }
         if (pingInterval) {
@@ -226,6 +329,14 @@ export const useChatStore = defineStore('chat', () => {
             clearInterval(reconnectInterval);
             reconnectInterval = null;
         }
+
+        // If we're suppressing state clears (because a reconnect is in progress),
+        // don't wipe UI state — just close the socket and leave messages/online lists intact.
+        if (suppressClearState) {
+            console.log('[ChatStore] Disconnected from channel (state preserved)');
+            return;
+        }
+
         connected.value = false;
         currentChannelId.value = null;
         currentChannelName.value = null;
@@ -269,7 +380,7 @@ export const useChatStore = defineStore('chat', () => {
                     break;
                 case 'channel_deleted':
                     console.log('[ChatStore] Channel deleted:', data.data);
-                    disconnectFromChannel();
+                    disconnectFromChannel(true);
                     break;
                 case 'user_typing':
                     console.log('[ChatStore] User typing status:', data.data);
@@ -635,7 +746,7 @@ export const useChatStore = defineStore('chat', () => {
 
     
     function clearChat() {
-        disconnectFromChannel();
+    disconnectFromChannel(true);
         messages.value = [];
         error.value = null;
         onlineUsers.value = [];

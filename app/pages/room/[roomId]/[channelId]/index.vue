@@ -140,6 +140,11 @@ onUnmounted(() => {
   
   // Don't auto-disconnect voice when leaving the page
   // Voice should persist globally across navigation
+  // Disconnect chat when fully leaving the room page to clean up WebSocket
+  const chatStore = useChatStore()
+  if (chatStore && chatStore.disconnectFromChannel) {
+    chatStore.disconnectFromChannel(true)
+  }
 })
 
 async function onChannelSelected(channel) {
