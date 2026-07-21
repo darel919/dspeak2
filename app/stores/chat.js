@@ -188,7 +188,8 @@ export const useChatStore = defineStore('chat', () => {
             await fetchMessages(channelId);
 
             
-            const websocketPath = config.public.websocketPath;
+            const origin = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+            const websocketPath = config.public.websocketPath || `${origin}/dspeak`;
             const wsUrl = `${websocketPath}/chat/socket?channelId=${channelId}&auth=${encodeURIComponent(userData.id)}`;
             ws.value = new WebSocket(wsUrl);
 

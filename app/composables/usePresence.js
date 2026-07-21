@@ -16,11 +16,8 @@ export function usePresence(userId) {
       console.log('[usePresence] No userId provided for connection')
       return
     }
-    const base = config.public.websocketPath
-    if (!base) {
-      console.log('[usePresence] No websocketPath in config')
-      return
-    }
+    const origin = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+    const base = config.public.websocketPath || `${origin}/dspeak`
     const wsUrl = `${base}/presence?userId=${encodeURIComponent(id)}`
     console.log('[usePresence] Connecting to:', wsUrl)
     ws = new WebSocket(wsUrl)

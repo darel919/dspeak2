@@ -1,5 +1,20 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 import tailwindcss from "@tailwindcss/vite";
+import { chmodSync, copyFileSync, mkdirSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+
+function copyMediasoupWorker(nitro) {
+  if (nitro.options.dev) return
+
+  const source = resolve('node_modules/mediasoup/worker/out/Release/mediasoup-worker')
+  const destination = resolve(
+    nitro.options.output.serverDir,
+    'node_modules/mediasoup/worker/out/Release/mediasoup-worker'
+  )
+  mkdirSync(dirname(destination), { recursive: true })
+  copyFileSync(source, destination)
+  chmodSync(destination, 0o755)
+}
 
 export default defineNuxtConfig({
   ssr: false,
@@ -12,6 +27,15 @@ export default defineNuxtConfig({
 
   css: ["~/assets/app.css"],
   modules: ["@pinia/nuxt", "@vite-pwa/nuxt"],
+
+  nitro: {
+    experimental: {
+      websocket: true
+    },
+    hooks: {
+      compiled: copyMediasoupWorker
+    }
+  },
 
   pwa: {
     strategies: 'injectManifest',
@@ -49,12 +73,25 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
+    pocketbase: {
+      url: process.env.POCKETBASE_URL || '',
+      adminEmail: process.env.PBASE_ADMIN_EMAIL || '',
+      adminPassword: process.env.PBASE_ADMIN_PASSWORD || '',
+      vapidPublicKey: process.env.VAPID_PUBKEY || '',
+      vapidPrivateKey: process.env.VAPID_PRIVKEY || ''
+    },
+    mediasoup: {
+      listenIp: process.env.MEDIASOUP_LISTEN_IP || '127.0.0.1',
+      announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || '',
+      rtcMinPort: Number(process.env.MEDIASOUP_RTC_MIN_PORT || 40000),
+      rtcMaxPort: Number(process.env.MEDIASOUP_RTC_MAX_PORT || 49999)
+    },
     public: {
       authPath: process.env.AUTH_PATH,
-      websocketPath: process.env.NODE_ENV === 'production' ? `wss://${process.env.BASE_API_EXT}${process.env.BASE_PATH}` : `ws://${process.env.BASE_API}${process.env.BASE_PATH}`,
-      baseApiPath: process.env.NODE_ENV === 'production' ? `https://${process.env.BASE_API_EXT}` : `http://${process.env.BASE_API}`,
-      sfuPath: process.env.NODE_ENV === 'production' ? `wss://${process.env.BASE_SFU_EXT}${process.env.BASE_SFU_PATH}` : `ws://${process.env.BASE_SFU}${process.env.BASE_SFU_PATH}`,
-      apiPath: process.env.NODE_ENV === 'production' ? `https://${process.env.BASE_API_EXT}${process.env.BASE_PATH}` : `http://${process.env.BASE_API}${process.env.BASE_PATH}`,
+      websocketPath: process.env.DSPEAK_WS_URL || '',
+      baseApiPath: process.env.AUTH_PATH?.replace(/\/auth\/?$/, '') || '',
+      sfuPath: process.env.DSPEAK_SFU_URL || '',
+      apiPath: process.env.DSPEAK_API_URL || '/dspeak',
       VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY
     }
   }

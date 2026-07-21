@@ -500,10 +500,8 @@ export function useMediasoupSfu() {
         throw new Error('Channel ID is required')
       }
 
-      const sfuPath = config.public.sfuPath
-      if (!sfuPath) {
-        throw new Error('SFU path not configured')
-      }
+      const origin = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+      const sfuPath = config.public.sfuPath || `${origin}/socket`
 
       const wsUrl = `${sfuPath}?auth=${encodeURIComponent(userData.id)}&channelId=${encodeURIComponent(channelId)}`
       console.log('[SFU] Connecting to:', wsUrl)

@@ -125,8 +125,10 @@ function getAvatarUrl(avatarPath) {
   
   if (avatarPath.startsWith('http')) return avatarPath
   
-  const apiPath = config.public.apiPath
-  return `${apiPath}/files/${avatarPath}`
+  const baseApiPath = config.public.baseApiPath
+  if (avatarPath.startsWith('auth/')) return `${baseApiPath}/${avatarPath}`
+  if (avatarPath.startsWith('assets/')) return `${baseApiPath}/auth/${avatarPath}`
+  return `${config.public.apiPath}/files/${avatarPath}`
 }
 
 async function copyDetails() {
