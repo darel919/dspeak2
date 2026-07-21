@@ -1,0 +1,42 @@
+services:
+  dspeak:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+
+      AUTH_PATH: ${AUTH_PATH:-}
+      POCKETBASE_URL: ${POCKETBASE_URL:-}
+      PBASE_ADMIN_EMAIL: ${PBASE_ADMIN_EMAIL:-}
+      PBASE_ADMIN_PASSWORD: ${PBASE_ADMIN_PASSWORD:-}
+
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PUBKEY: ${VAPID_PUBKEY:-}
+      VAPID_PRIVKEY: ${VAPID_PRIVKEY:-}
+
+      MEDIASOUP_LISTEN_IP: ${MEDIASOUP_LISTEN_IP:-0.0.0.0}
+      MEDIASOUP_ANNOUNCED_ADDRESS: ${MEDIASOUP_ANNOUNCED_ADDRESS:-}
+      MEDIASOUP_RTC_MIN_PORT: ${MEDIASOUP_RTC_MIN_PORT:-40000}
+      MEDIASOUP_RTC_MAX_PORT: ${MEDIASOUP_RTC_MAX_PORT:-40199}
+
+      DSPEAK_API_URL: ${DSPEAK_API_URL:-}
+      DSPEAK_WS_URL: ${DSPEAK_WS_URL:-}
+      DSPEAK_SFU_URL: ${DSPEAK_SFU_URL:-}
+    ports:
+      - "${DSPEAK_HTTP_PORT:-31100}:3000/tcp"
+      - "${MEDIASOUP_RTC_MIN_PORT:-40000}-${MEDIASOUP_RTC_MAX_PORT:-40199}:${MEDIASOUP_RTC_MIN_PORT:-40000}-${MEDIASOUP_RTC_MAX_PORT:-40199}/udp"
+      - "${MEDIASOUP_RTC_MIN_PORT:-40000}-${MEDIASOUP_RTC_MAX_PORT:-40199}:${MEDIASOUP_RTC_MIN_PORT:-40000}-${MEDIASOUP_RTC_MAX_PORT:-40199}/tcp"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped

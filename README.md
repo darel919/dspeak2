@@ -65,7 +65,7 @@ Local mediasoup defaults:
 MEDIASOUP_LISTEN_IP=127.0.0.1
 MEDIASOUP_ANNOUNCED_ADDRESS=
 MEDIASOUP_RTC_MIN_PORT=40000
-MEDIASOUP_RTC_MAX_PORT=49999
+MEDIASOUP_RTC_MAX_PORT=40199
 ```
 
 Production mediasoup configuration:
@@ -74,7 +74,7 @@ Production mediasoup configuration:
 MEDIASOUP_LISTEN_IP=0.0.0.0
 MEDIASOUP_ANNOUNCED_ADDRESS=203.0.113.10
 MEDIASOUP_RTC_MIN_PORT=40000
-MEDIASOUP_RTC_MAX_PORT=49999
+MEDIASOUP_RTC_MAX_PORT=40199
 ```
 
 `MEDIASOUP_ANNOUNCED_ADDRESS` must be reachable by browsers. It is mandatory
@@ -119,14 +119,49 @@ bun run start
 `bun run start` explicitly loads `.env`. Container deployments inject the same
 variables through the container environment.
 
-### Docker
+### Docker Compose and Coolify
+
+The repository includes `docker-compose.yml` with these default host mappings:
+
+- `31100/tcp` → Nitro HTTP and WebSockets on container port `3000`
+- `40000-40199/udp` → mediasoup RTP
+- `40000-40199/tcp` → mediasoup TCP fallback
+
+Start it locally with:
+
+```bash
+docker compose up --build -d
+```
+
+For Coolify, select the **Docker Compose** build pack and use
+`/docker-compose.yml`. Add every required value from `.env.example` in
+Coolify's Environment Variables page. Do not configure a Coolify domain or
+extra port mapping for this service when Zoraxy owns HTTP routing; the Compose
+file already publishes host port `31100`.
+
+Configure Zoraxy to forward `dspeak.darelisme.my.id` to:
+
+```text
+http://<coolify-server-ip>:31100
+```
+
+Zoraxy handles HTTPS and WebSocket traffic. RTP bypasses Zoraxy and reaches the
+Coolify host directly on the published mediasoup range.
+
+The HTTP host port can be changed with:
+
+```dotenv
+DSPEAK_HTTP_PORT=31100
+```
+
+Equivalent direct Docker commands are:
 
 ```bash
 docker build -t dspeak .
 docker run --env-file .env \
-  -p 3000:3000 \
-  -p 40000-49999:40000-49999/udp \
-  -p 40000-49999:40000-49999/tcp \
+  -p 31100:3000 \
+  -p 40000-40199:40000-40199/udp \
+  -p 40000-40199:40000-40199/tcp \
   dspeak
 ```
 
