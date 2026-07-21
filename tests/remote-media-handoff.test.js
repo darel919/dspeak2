@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { RemoteMediaHandoff } from '../app/shared/remote-media-handoff.js'
+import { RemoteMediaRegistry, replaceMediaStreamTrack } from '../app/shared/remote-media-registry.js'
 
 function harness() {
   const calls = []
@@ -63,4 +64,46 @@ test('an inactive staged track ending cannot remove the active provider feed', (
 
   assert.equal(calls.filter(call => call[0] === 'remove').length, 0)
   assert.equal(handoff.count('p2p'), 1)
+})
+
+test('video handoff replaces the track without replacing the logical stream', () => {
+  const oldTrack = { id: 'p2p-track' }
+  const newTrack = { id: 'sfu-track' }
+  const tracks = [oldTrack]
+  const stream = {
+    getTracks: () => [...tracks],
+    removeTrack: track => tracks.splice(tracks.indexOf(track), 1),
+    addTrack: track => tracks.push(track)
+  }
+
+  assert.equal(replaceMediaStreamTrack(stream, newTrack), stream)
+  assert.deepEqual(tracks, [newTrack])
+})
+
+test('video registry keeps the rendered stream while its provider changes', () => {
+  const oldTrack = { id: 'p2p-track', kind: 'video' }
+  const newTrack = { id: 'sfu-track', kind: 'video' }
+  const tracks = [oldTrack]
+  const stream = {
+    getTracks: () => [...tracks],
+    removeTrack: track => tracks.splice(tracks.indexOf(track), 1),
+    addTrack: track => tracks.push(track)
+  }
+  const videoFeeds = { value: new Map() }
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {}
+  })
+
+  registry.bind({ key: 'remote:user-1:screen', provider: 'p2p', track: oldTrack, stream })
+  registry.bind({ key: 'remote:user-1:screen', provider: 'sfu', track: newTrack, stream: {} })
+
+  assert.equal(videoFeeds.value.get('remote:user-1:screen').stream, stream)
+  assert.equal(videoFeeds.value.get('remote:user-1:screen').provider, 'sfu')
+  assert.deepEqual(tracks, [newTrack])
 })

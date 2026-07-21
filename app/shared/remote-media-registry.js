@@ -1,3 +1,11 @@
+export function replaceMediaStreamTrack(stream, track) {
+  for (const currentTrack of stream.getTracks()) {
+    if (currentTrack !== track) stream.removeTrack(currentTrack)
+  }
+  if (!stream.getTracks().includes(track)) stream.addTrack(track)
+  return stream
+}
+
 export class RemoteMediaRegistry {
   constructor({ audioFeeds, videoFeeds, getVolume, getOutputDevice, isDeafened, isBroadcastMode, onSpeaking }) {
     this.audioFeeds = audioFeeds
@@ -11,12 +19,15 @@ export class RemoteMediaRegistry {
   }
 
   bind(entry, { staged = false } = {}) {
-    this.remove(entry.key)
     if (entry.track.kind === 'video') {
-      this.videoFeeds.value.set(entry.key, { ...entry, stream: entry.stream || new MediaStream([entry.track]) })
+      const current = this.videoFeeds.value.get(entry.key)
+      const stream = current?.stream || entry.stream || new MediaStream([entry.track])
+      if (current?.stream) replaceMediaStreamTrack(stream, entry.track)
+      this.videoFeeds.value.set(entry.key, { ...entry, stream })
       this.videoFeeds.value = new Map(this.videoFeeds.value)
       return
     }
+    this.remove(entry.key)
     this.audioFeeds.value.set(entry.key, entry)
     this.audioFeeds.value = new Map(this.audioFeeds.value)
     this.createAudioElement(entry, staged)

@@ -37,7 +37,9 @@ so a concurrent final departure cannot dispose the router prematurely.
 Capture and transport ownership are separate. Microphone, camera, screen video,
 and screen audio tracks are reused across topology changes. The destination path
 is prepared before the previous path is closed, and remote rendering uses stable
-participant and source identities to avoid duplicated playback.
+participant and source identities to avoid duplicated playback. Video handoffs
+replace the track inside the existing rendered `MediaStream`, preserving the
+video element and browser fullscreen session while the transport changes.
 P2P source toggles reuse their existing RTP sender and receiver track, avoiding
 unbounded transceiver growth while explicitly restoring the remote feed.
 
