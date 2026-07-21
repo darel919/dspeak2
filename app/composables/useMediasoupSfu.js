@@ -5,7 +5,7 @@ import { useChannelsStore } from '~/stores/channels'
 import { useRoomsStore } from '~/stores/rooms'
 import { useSettingsStore } from '~/stores/settings'
 import { useVoiceStore } from '~/stores/voice'
-import { buildVideoConstraints, buildVideoProduceOptions, calculateEncodedFps, calculateFrameTimeMs, classifyCodecImplementation, rankVideoCodecsByHardwarePreference, updateVideoAdaptationState } from '~/shared/video-settings'
+import { buildVideoConstraints, buildVideoProduceOptions, calculateEncodedFps, calculateFrameTimeMs, classifyCodecImplementation, inspectH264ProfileCapabilities, inspectVideoCodecCapabilities, rankVideoCodecsByHardwarePreference, updateVideoAdaptationState } from '~/shared/video-settings'
 import { buildVoiceProducerOptions, getActiveMediaDirections, getAverageJitterBufferDelayMs, getReconnectDelayMs, getTransportRecoveryDelayMs } from '~/shared/voice-transport'
 
 export function useMediasoupSfu() {
@@ -951,7 +951,7 @@ export function useMediasoupSfu() {
           appData: {},
           iceServers: iceServers.value
         }
-        if (!sendTransport.value) {
+        if (data.direction === 'send' && !sendTransport.value) {
           console.debug('[SFU] Creating send transport with params:', data)
           try {
             sendTransport.value = device.value.createSendTransport(transportOptions)
@@ -965,7 +965,7 @@ export function useMediasoupSfu() {
             console.error('[SFU] Error creating send transport:', err, data)
             error.value = 'Failed to create send transport: ' + err.message
           }
-        } else if (!recvTransport.value) {
+        } else if (data.direction === 'recv' && !recvTransport.value) {
           console.debug('[SFU] Creating recv transport with params:', data)
           try {
             recvTransport.value = device.value.createRecvTransport(transportOptions)
@@ -979,6 +979,8 @@ export function useMediasoupSfu() {
             console.error('[SFU] Error creating recv transport:', err, data)
             error.value = 'Failed to create recv transport: ' + err.message
           }
+        } else if (data.direction !== 'send' && data.direction !== 'recv') {
+          throw new Error('Server returned an invalid transport direction')
         } else {
           console.warn('[SFU] Received extra transport-params, ignoring:', data)
         }
@@ -2452,85 +2454,48 @@ export function useMediasoupSfu() {
         frameRate,
         screen: isScreen
       })
+      const videoConfiguration = {
+        width: trackSettings.width,
+        height: trackSettings.height,
+        framerate: frameRate,
+        bitrate: Math.max(2_500_000, (Number(trackSettings.width) || 1280) * (Number(trackSettings.height) || 720) * Number(frameRate || 30) * 0.08)
+      }
+      const codecCapabilityReports = await inspectVideoCodecCapabilities(
+        device.value?.rtpCapabilities?.codecs || [],
+        videoConfiguration
+      )
+      const h264ProfileReports = await inspectH264ProfileCapabilities(videoConfiguration)
       const rankedCodecs = await rankVideoCodecsByHardwarePreference(
         device.value?.rtpCapabilities?.codecs || [],
-        {
-          width: trackSettings.width,
-          height: trackSettings.height,
-          framerate: frameRate,
-          bitrate: Math.max(2_500_000, (Number(trackSettings.width) || 1280) * (Number(trackSettings.height) || 720) * Number(frameRate || 30) * 0.08)
-        }
+        videoConfiguration,
+        navigator.mediaCapabilities,
+        codecCapabilityReports
       )
-      const waitForEncoderStats = async (producer, timeoutMs = 1500) => {
-        const deadline = Date.now() + timeoutMs
-        while (Date.now() < deadline) {
-          try {
-            const report = await producer.getStats()
-            let outbound = null
-            report.forEach((stat) => {
-              if (stat.type === 'outbound-rtp' && stat.kind === 'video' && stat.framesEncoded > 0) outbound = stat
-            })
-            if (outbound) {
-              const classified = classifyCodecImplementation(outbound.encoderImplementation)
-              const framesEncoded = Number(outbound.framesEncoded)
-              const totalEncodeTime = Number(outbound.totalEncodeTime)
-              const frameTimeMs = Number.isFinite(framesEncoded) && framesEncoded > 0 && Number.isFinite(totalEncodeTime)
-                ? totalEncodeTime / framesEncoded * 1000
-                : null
-              if (classified.type !== 'unknown') return { type: classified.type, frameTimeMs }
-              if (outbound.powerEfficientEncoder === true) return { type: 'hardware', frameTimeMs }
-              if (outbound.powerEfficientEncoder === false) return { type: 'software', frameTimeMs }
-            }
-          } catch (_) { /* stats may not exist until the first encoded frame */ }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-        return { type: 'unknown', frameTimeMs: null }
-      }
-
       let producer = null
-      let selectedCodec = null
-      let bestSoftware = null
-      for (let index = 0; index < Math.max(1, rankedCodecs.length); index++) {
-        const codec = rankedCodecs[index] || null
-        producer = await sendTransport.value.produce({
-          track,
-          stopTracks: false,
-          appData: { source },
-          ...(codec ? { codec } : {}),
-          ...videoProduceOptions
-        })
-        selectedCodec = codec
-        const encoder = await waitForEncoderStats(producer)
-        if (encoder.type === 'hardware') break
-        if (!bestSoftware || (encoder.frameTimeMs != null && (bestSoftware.frameTimeMs == null || encoder.frameTimeMs < bestSoftware.frameTimeMs))) {
-          bestSoftware = { codec, frameTimeMs: encoder.frameTimeMs }
+      let lastProduceError = null
+      const codecCandidates = rankedCodecs.length ? rankedCodecs : [null]
+      for (const codec of codecCandidates) {
+        try {
+          producer = await sendTransport.value.produce({
+            track,
+            stopTracks: false,
+            appData: { source },
+            ...(codec ? { codec } : {}),
+            ...videoProduceOptions
+          })
+          break
+        } catch (produceError) {
+          lastProduceError = produceError
         }
-        const hasAnotherCodec = index < rankedCodecs.length - 1
-        if (!hasAnotherCodec) break
-
-        console.info(`[SFU] ${codec?.mimeType || 'default'} used ${encoder.type} encoding; trying the next codec`)
-        sendMessage({ type: 'close-producer', data: { producerId: producer.id } })
-        producer.close()
-        producer = null
       }
-      if (!producer) throw new Error('No compatible video encoder is available')
-      if (bestSoftware?.codec && selectedCodec !== bestSoftware.codec) {
-        console.info(`[SFU] No hardware encoder was instantiated; using fastest software codec ${bestSoftware.codec.mimeType}`)
-        sendMessage({ type: 'close-producer', data: { producerId: producer.id } })
-        producer.close()
-        producer = await sendTransport.value.produce({
-          track,
-          stopTracks: false,
-          appData: { source },
-          codec: bestSoftware.codec,
-          ...videoProduceOptions
-        })
-      }
+      if (!producer) throw lastProduceError || new Error('No compatible video encoder is available')
       const entry = {
         producer,
         stream,
         track,
         source,
+        codecCapabilityReports: codecCapabilityReports.map(({ codec, ...report }) => report),
+        h264ProfileReports,
         targetFrameRate: Math.round(frameRate || 30),
         videoEncoding: videoProduceOptions.encodings[0],
         captureConstraints: constraints,
@@ -2840,8 +2805,18 @@ export function useMediasoupSfu() {
       return
     }
 
+    const producerUserId = producerOwner.get(producerId)
+    const currentUserId = authStore.getUserData()?.id
+    if (producerUserId && currentUserId && String(producerUserId) === String(currentUserId)) {
+      return
+    }
+
 
     if (consumers.value.has(producerId)) {
+      return
+    }
+
+    if (pendingConsume.has(producerId)) {
       return
     }
 
@@ -2936,6 +2911,11 @@ export function useMediasoupSfu() {
       })
 
       consumers.value.set(consumerData.producerId, consumer)
+
+      sendMessage({
+        type: 'resume-consumer',
+        data: { consumerId: consumer.id }
+      })
 
       if (consumer.kind === 'audio' && consumer.rtpReceiver) {
         try {
@@ -3750,6 +3730,9 @@ export function useMediasoupSfu() {
       results.push({
         producerId: entry.producer.id,
         source: entry.source,
+        captureFps: Number(settings.frameRate) || null,
+        codecCapabilities: entry.codecCapabilityReports || [],
+        h264ProfileCapabilities: entry.h264ProfileReports || [],
         width: Number(outbound?.frameWidth || settings.width) || null,
         height: Number(outbound?.frameHeight || settings.height) || null,
         fps: Number.isFinite(outboundFps) ? outboundFps : null,

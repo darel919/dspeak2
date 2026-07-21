@@ -11,6 +11,9 @@
             <button class="btn btn-ghost btn-xs" @click="togglePolling">
               {{ polling ? 'Pause' : 'Start' }}
             </button>
+            <button class="btn btn-ghost btn-xs" @click="copyDebug">
+              {{ copied ? 'Copied' : 'Copy' }}
+            </button>
             <button class="btn btn-ghost btn-xs" @click="showDebug = !showDebug" title="SFU Debug">
               SFU
             </button>
@@ -40,6 +43,8 @@
               <div class="grid grid-cols-2 gap-x-3 gap-y-1">
                 <div class="text-base-content/60">Send / target FPS</div>
                 <div>{{ formatFps(screenShareStats.fps) }} / {{ formatFps(screenShareStats.targetFps) }}</div>
+                <div class="text-base-content/60">Capture track FPS</div>
+                <div>{{ formatFps(screenShareStats.captureFps) }}</div>
                 <template v-if="screenShareStats.backgroundFps != null">
                   <div class="text-base-content/60">Last background FPS</div>
                   <div>{{ formatFps(screenShareStats.backgroundFps) }}</div>
@@ -59,6 +64,37 @@
                 <div class="text-base-content/60">Quality limitation</div>
                 <div>{{ screenShareStats.qualityLimitationReason || 'none' }}</div>
               </div>
+              <div v-if="screenShareStats.codecCapabilities?.length" class="mt-3 border-t border-base-content/10 pt-2">
+                <div class="mb-1 font-semibold">Brave codec capability report</div>
+                <div
+                  v-for="codec in screenShareStats.codecCapabilities"
+                  :key="codec.contentType"
+                  class="mb-1 rounded bg-base-300/50 px-2 py-1 font-mono text-[11px]"
+                  :title="codec.contentType"
+                >
+                  <div>{{ codec.mimeType }}</div>
+                  <div v-if="codec.error" class="text-warning">query error: {{ codec.error }}</div>
+                  <div v-else class="text-base-content/70">
+                    supported {{ formatCapability(codec.supported) }} · smooth {{ formatCapability(codec.smooth) }} · power {{ formatCapability(codec.powerEfficient) }}
+                  </div>
+                  <div class="truncate text-base-content/50">{{ codec.contentType }}</div>
+                </div>
+              </div>
+              <div v-if="screenShareStats.h264ProfileCapabilities?.length" class="mt-3 border-t border-base-content/10 pt-2">
+                <div class="mb-1 font-semibold">H.264 profile probes</div>
+                <div
+                  v-for="profile in screenShareStats.h264ProfileCapabilities"
+                  :key="profile.profileLevelId"
+                  class="mb-1 grid grid-cols-[4.5rem_1fr] gap-2 rounded bg-base-300/50 px-2 py-1 font-mono text-[11px]"
+                  :title="profile.contentType"
+                >
+                  <div>{{ profile.profileLevelId }}</div>
+                  <div v-if="profile.error" class="text-warning">query error: {{ profile.error }}</div>
+                  <div v-else>
+                    supported {{ formatCapability(profile.supported) }} · smooth {{ formatCapability(profile.smooth) }} · power {{ formatCapability(profile.powerEfficient) }}
+                  </div>
+                </div>
+              </div>
             </div>
             <div v-for="(video, index) in inboundVideoStats" :key="video.consumerId || index" class="mb-3 rounded-lg border border-base-content/20 p-2">
               <div class="mb-2 font-semibold">Received video {{ inboundVideoStats.length > 1 ? index + 1 : '' }}</div>
@@ -70,10 +106,11 @@
               </div>
             </div>
             <div class="mb-3 rounded-lg border border-base-content/20 p-2">
-              <div class="mb-2 font-semibold">Device utilization</div>
+              <div class="mb-1 font-semibold">Media pipeline occupancy</div>
+              <div class="mb-2 text-[11px] text-base-content/50">Estimated from codec processing time, not system CPU/GPU utilization.</div>
               <div class="grid grid-cols-2 gap-x-3 gap-y-1">
-                <div class="text-base-content/60">CPU media</div><div>{{ formatPercent(deviceUtilization.cpu) }}</div>
-                <div class="text-base-content/60">GPU media</div><div>{{ formatPercent(deviceUtilization.gpu) }}</div>
+                <div class="text-base-content/60">Software codecs</div><div>{{ formatPercent(deviceUtilization.cpu) }}</div>
+                <div class="text-base-content/60">Hardware codecs</div><div>{{ formatPercent(deviceUtilization.gpu) }}</div>
               </div>
             </div>
             <div v-for="t in snapshot.transports" :key="t.kind" class="mb-3">
@@ -188,7 +225,9 @@ const snapshot = ref(null)
 const outboundVideoStats = ref([])
 const inboundVideoStats = ref([])
 const lastError = ref('')
+const copied = ref(false)
 let intervalId = null
+let copiedResetTimer = null
 const showDebug = ref(false)
 const sfu = useMediasoupSfu()
 const screenShareStats = computed(() => outboundVideoStats.value.find(stat => stat.source === 'screen') || null)
@@ -271,10 +310,17 @@ async function copyDebug() {
   const cons = JSON.stringify(consumersList.value, null, 2)
   const map = JSON.stringify(mappings.value, null, 2)
   const failed = JSON.stringify(failedList.value, null, 2)
-  const text = `Sent:\n${sentJson.value}\n\nReceived:\n${receivedJson.value}\n\nProducers:\n${prod}\n\nConsumers:\n${cons}\n\nMappings:\n${map}\n\nFailedConsumers:\n${failed}`
+  const rtcSnapshot = JSON.stringify(snapshot.value, null, 2)
+  const outbound = JSON.stringify(outboundVideoStats.value, null, 2)
+  const inbound = JSON.stringify(inboundVideoStats.value, null, 2)
+  const text = `RTC Snapshot:\n${rtcSnapshot}\n\nOutbound Video:\n${outbound}\n\nInbound Video:\n${inbound}\n\nSent RTP Capabilities:\n${sentJson.value}\n\nReceived Consumer Parameters:\n${receivedJson.value}\n\nProducers:\n${prod}\n\nConsumers:\n${cons}\n\nMappings:\n${map}\n\nFailed Consumers:\n${failed}`
     await navigator.clipboard.writeText(text)
-
-    console.debug('[SFU] Debug copied to clipboard')
+    copied.value = true
+    if (copiedResetTimer) clearTimeout(copiedResetTimer)
+    copiedResetTimer = setTimeout(() => {
+      copied.value = false
+      copiedResetTimer = null
+    }, 1500)
   } catch (e) { console.warn('[SFU] Copy debug failed', e) }
 }
 
@@ -312,6 +358,11 @@ function formatFrameTime(v) {
 }
 function formatPercent(v) {
   return Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}%` : '-'
+}
+function formatCapability(value) {
+  if (value === true) return 'yes'
+  if (value === false) return 'no'
+  return 'not reported'
 }
 function formatCodecEngine(stat, direction) {
   const efficient = stat?.[direction === 'encoder' ? 'powerEfficientEncoder' : 'powerEfficientDecoder']
@@ -390,6 +441,7 @@ function startPolling() {
 }
 function stopPolling() {
   if (intervalId) { clearInterval(intervalId); intervalId = null }
+  if (copiedResetTimer) { clearTimeout(copiedResetTimer); copiedResetTimer = null }
 }
 function togglePolling() { polling.value = !polling.value }
 

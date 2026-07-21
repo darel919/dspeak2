@@ -143,6 +143,20 @@ Camera and screen-share quality are configured independently under **Settings â†
 Voice & Video**. Each source supports original/full capture resolution or a
 720p, 1080p, 1440p, or 2160p limit. Frame rate is configurable from 25 through
 60 FPS. Resolution limits cap capture dimensions and do not force upscaling.
+The SFU advertises separate H.264 Baseline, Main, and Constrained Baseline
+profiles with level asymmetry. The sender ranks profiles using the browser's
+MediaCapabilities report, allowing hardware-efficient profiles to win while
+retaining a broadly compatible fallback. The RTC statistics panel reports the
+capture track, encoded, and received frame rates separately because the selected
+display surface or browser may accept a lower capture cadence than requested.
+Video negotiation also offers VP9 profile 0 for compatible browsers, while
+retaining H.264 and VP8 for hardware-efficient and broadly compatible fallback.
+Send and receive WebRTC transports are direction-bound, prefer UDP with TCP
+fallback, and do not allocate SCTP because DSpeak signaling and chat use the
+existing WebSocket paths. Receive-side congestion control starts conservatively
+and ramps from live Transport-CC or REMB feedback. Consumers are created paused
+on the SFU and resume only after the browser creates its local consumer, avoiding
+early RTP association failures and missed initial video keyframes.
 Screen video is encoded as motion content with a resolution-aware bitrate and
 high network priority so game sharing preserves the selected frame cadence when
 the capture source, encoder, and connection can sustain it. When outbound FPS
@@ -154,6 +168,11 @@ When the DSpeak tab is backgrounded, capture constraints and RTP priorities are
 reinforced on the active screen producer. Frame adaptation uses encoder counters
 and RTC timestamps rather than page-timer cadence, and RTC Statistics reports the
 average encoded FPS observed across the most recent background interval.
+The sender's local screen preview starts paused to avoid continuously compositing
+the captured surface back into itself. It can be enabled from the screen tile
+when a local preview is needed. RTC Statistics reports codec pipeline occupancy
+estimated from per-frame processing time; it is not an operating-system CPU or
+GPU utilization measurement.
 
 ## Development
 

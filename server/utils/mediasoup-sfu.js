@@ -1,35 +1,8 @@
 import * as mediasoup from 'mediasoup'
 import { usePocketBaseAdmin } from './pocketbase'
 import { buildPublicIceCandidates, buildWebRtcListenInfos } from './ice-candidates'
-
-const mediaCodecs = [
-  {
-    kind: 'audio',
-    mimeType: 'audio/opus',
-    clockRate: 48000,
-    channels: 2,
-    parameters: {
-      minptime: 10,
-      useinbandfec: 1
-    }
-  },
-  {
-    kind: 'video',
-    mimeType: 'video/VP8',
-    clockRate: 90000,
-    parameters: {}
-  },
-  {
-    kind: 'video',
-    mimeType: 'video/H264',
-    clockRate: 90000,
-    parameters: {
-      'packetization-mode': 1,
-      'level-asymmetry-allowed': 1,
-      'profile-level-id': '42e01f'
-    }
-  }
-]
+import { mediaCodecs } from './mediasoup-codecs'
+import { assertTransportDirection, buildConsumerOptions, buildWebRtcTransportOptions } from './mediasoup-transport'
 
 const stateKey = Symbol.for('dspeak.mediasoup.sfu')
 
@@ -40,6 +13,7 @@ function send(peer, type, data) {
 async function publicTransportData(transport, config) {
   return {
     id: transport.id,
+    direction: transport.appData.direction,
     iceParameters: transport.iceParameters,
     iceCandidates: await buildPublicIceCandidates(transport.iceCandidates, config),
     dtlsParameters: transport.dtlsParameters,
@@ -221,15 +195,10 @@ function closeSession(state, session) {
   }
 }
 
-async function createTransport(state, session) {
-  const transport = await session.room.router.createWebRtcTransport({
-    webRtcServer: state.webRtcServer,
-    enableUdp: true,
-    enableTcp: true,
-    preferUdp: true,
-    initialAvailableOutgoingBitrate: 10_000_000,
-    appData: { peerId: session.peer.id }
-  })
+async function createTransport(state, session, direction) {
+  const transport = await session.room.router.createWebRtcTransport(
+    buildWebRtcTransportOptions(state.webRtcServer, session.peer.id, direction)
+  )
 
   session.transports.set(transport.id, transport)
   transport.on('routerclose', () => session.transports.delete(transport.id))
@@ -292,7 +261,8 @@ async function handleMessage(state, session, message) {
       return
 
     case 'create-transport': {
-      const transport = await createTransport(state, session)
+      const direction = String(data.type || '')
+      const transport = await createTransport(state, session, direction)
       send(session.peer, 'transport-params', await publicTransportData(transport, state.config))
       return
     }
@@ -308,6 +278,7 @@ async function handleMessage(state, session, message) {
     case 'produce': {
       const transport = session.transports.get(data.transportId)
       if (!transport) throw new Error('Transport not found')
+      assertTransportDirection(transport, 'send', 'Producing')
 
       const producer = await transport.produce({
         kind: data.kind,
@@ -348,22 +319,23 @@ async function handleMessage(state, session, message) {
     case 'consume': {
       const transport = session.transports.get(data.transportId)
       if (!transport) throw new Error('Transport not found')
+      assertTransportDirection(transport, 'recv', 'Consuming')
       const capabilities = data.rtpCapabilities || session.rtpCapabilities
       if (!capabilities) throw new Error('Client RTP capabilities are required')
       if (!session.room.router.canConsume({ producerId: data.producerId, rtpCapabilities: capabilities })) {
         throw new Error('Cannot consume this producer with the supplied RTP capabilities')
+      }
+      if ([...session.consumers.values()].some(consumer => consumer.producerId === data.producerId)) {
+        throw new Error('Producer is already consumed by this peer')
       }
 
       const owner = [...session.room.sessions.values()].find(candidate => candidate.producers.has(data.producerId))
       if (!owner) throw new Error('Producer not found in this channel')
       if (owner === session) throw new Error('A peer cannot consume its own producer')
 
-      const consumer = await transport.consume({
-        producerId: data.producerId,
-        rtpCapabilities: capabilities,
-        paused: false,
-        appData: { userId: owner.userId }
-      })
+      const consumer = await transport.consume(
+        buildConsumerOptions(data.producerId, capabilities, owner.userId)
+      )
       session.consumers.set(consumer.id, consumer)
       consumer.on('transportclose', () => session.consumers.delete(consumer.id))
       consumer.on('producerclose', () => {
@@ -376,8 +348,20 @@ async function handleMessage(state, session, message) {
         producerId: data.producerId,
         kind: consumer.kind,
         rtpParameters: consumer.rtpParameters,
-        userId: owner.userId
-        , source: owner.producers.get(data.producerId)?.appData?.source || consumer.kind
+        userId: owner.userId,
+        source: owner.producers.get(data.producerId)?.appData?.source || consumer.kind,
+        producerPaused: consumer.producerPaused
+      })
+      return
+    }
+
+    case 'resume-consumer': {
+      const consumer = session.consumers.get(data.consumerId)
+      if (!consumer) throw new Error('Consumer not found')
+      await consumer.resume()
+      send(session.peer, 'consumer-resumed', {
+        consumerId: consumer.id,
+        producerId: consumer.producerId
       })
       return
     }

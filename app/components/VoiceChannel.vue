@@ -79,6 +79,7 @@
               :source="feed.source"
               :label="feed.label"
               :muted="feed.local"
+              :local="feed.local"
             />
           </div>
         </div>

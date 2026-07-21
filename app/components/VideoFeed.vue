@@ -7,12 +7,26 @@
     @dblclick.prevent="toggleFullscreen"
   >
     <video
+      v-show="previewEnabled"
       ref="videoElement"
       autoplay
       playsinline
       :muted="muted"
       class="block h-full w-full object-contain"
     />
+    <div
+      v-if="localScreenPreviewPaused"
+      class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
+    >
+      <Icon name="lucide:monitor-pause" class="size-10 text-primary" />
+      <div>
+        <div class="font-medium">Your screen is being shared</div>
+        <div class="mt-1 text-sm text-base-content/60">Local preview is paused to reduce GPU compositing.</div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline" @click="enablePreview">
+        Show preview
+      </button>
+    </div>
     <figcaption class="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white">
       {{ label }} · {{ source === 'screen' ? 'Screen' : 'Camera' }}
     </figcaption>
@@ -34,12 +48,15 @@ const props = defineProps({
   stream: { type: Object, required: true },
   source: { type: String, required: true },
   label: { type: String, required: true },
-  muted: { type: Boolean, default: false }
+  muted: { type: Boolean, default: false },
+  local: { type: Boolean, default: false }
 })
 
 const videoElement = ref(null)
 const feedElement = ref(null)
 const isFullscreen = ref(false)
+const previewEnabled = ref(!(props.local && props.source === 'screen'))
+const localScreenPreviewPaused = computed(() => props.local && props.source === 'screen' && !previewEnabled.value)
 
 function currentFullscreenElement() {
   if (typeof document === 'undefined') return null
@@ -71,10 +88,15 @@ async function toggleFullscreen() {
 }
 
 function attachStream() {
-  if (videoElement.value && videoElement.value.srcObject !== props.stream) {
+  if (previewEnabled.value && videoElement.value && videoElement.value.srcObject !== props.stream) {
     videoElement.value.srcObject = props.stream
     videoElement.value.play?.().catch(() => {})
   }
+}
+
+function enablePreview() {
+  previewEnabled.value = true
+  nextTick(attachStream)
 }
 
 onMounted(() => {

@@ -107,9 +107,40 @@
                 <template v-for="u in voiceStore.getDisplayUsersArray()" :key="u.id || u">
                   <div class="flex items-center gap-2 text-sm text-base-content/70">
                     <span class="min-w-0 flex-1 truncate">{{ getUserName(u.id || u) }}</span>
-                    <span class="shrink-0 text-[10px] tabular-nums text-base-content/50">
-                      {{ getUserPing(u.id || u) }}
-                    </span>
+                    <div class="dropdown dropdown-end shrink-0" @click.stop>
+                      <button
+                        tabindex="0"
+                        type="button"
+                        class="flex h-6 items-end gap-0.5 rounded px-1 py-1 transition-colors hover:bg-base-content/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        :aria-label="getConnectionQualityAriaLabel(u.id || u)"
+                        :title="getConnectionQualityTitle(u.id || u)"
+                      >
+                        <span
+                          v-for="bar in 5"
+                          :key="bar"
+                          class="w-0.5 rounded-full bg-current transition-opacity"
+                          :class="bar <= getUserConnectionQuality(u.id || u) ? 'text-success opacity-100' : 'text-base-content opacity-20'"
+                          :style="{ height: `${4 + (bar * 2)}px` }"
+                        ></span>
+                      </button>
+                      <div tabindex="0" class="dropdown-content z-[20] mt-1 w-56 rounded-box border border-base-300 bg-base-100 p-3 text-base-content shadow-xl">
+                        <div class="truncate text-sm font-semibold">{{ getUserName(u.id || u) }}</div>
+                        <div class="mt-2 space-y-1.5 text-xs">
+                          <div class="flex items-center justify-between gap-3">
+                            <span class="text-base-content/60">Connection quality</span>
+                            <span class="font-medium">{{ getUserConnectionQualityLabel(u.id || u) }}</span>
+                          </div>
+                          <div class="flex items-center justify-between gap-3">
+                            <span class="text-base-content/60">SFU RTT</span>
+                            <span class="font-mono tabular-nums">{{ formatRtt(getUserSfuRtt(u.id || u)) }}</span>
+                          </div>
+                          <div class="flex items-center justify-between gap-3">
+                            <span class="text-base-content/60">Peer RTT</span>
+                            <span class="font-mono tabular-nums">{{ formatPeerRtt(u.id || u) }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </template>
               </div>
@@ -297,19 +328,49 @@ function getUserName(userId) {
   const user = voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId)
   return user?.display_name || user?.name || user?.username || userId
 }
-function getUserPing(userId) {
+function getUserSfuRtt(userId) {
   const sfu = voiceStore.sfuComposable
-  if (!sfu) return '-'
+  if (!sfu) return null
   const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
   const value = isCurrentUser
     ? sfu.sfuRoundTripTime
     : sfu.participantSfuRoundTripTimes?.[String(userId)]
-  return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}ms` : '-'
+  return Number.isFinite(Number(value)) ? Number(value) : null
+}
+function getUserPeerRtt(userId) {
+  const sfu = voiceStore.sfuComposable
+  const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
+  if (!sfu || isCurrentUser) return null
+  const value = sfu.peerRoundTripTimes?.[String(userId)]
+  return Number.isFinite(Number(value)) ? Number(value) : null
+}
+function getUserConnectionQuality(userId) {
+  return getConnectionQualityBars(getUserSfuRtt(userId))
+}
+function getUserConnectionQualityLabel(userId) {
+  return getConnectionQualityLabel(getUserConnectionQuality(userId))
+}
+function getConnectionQualityAriaLabel(userId) {
+  const name = getUserName(userId)
+  const label = getUserConnectionQualityLabel(userId)
+  const rtt = formatRtt(getUserSfuRtt(userId))
+  return `${name} connection quality: ${label}, SFU RTT ${rtt}. Show RTT statistics.`
+}
+function getConnectionQualityTitle(userId) {
+  return `${getUserConnectionQualityLabel(userId)} connection · Click for RTT statistics`
+}
+function formatRtt(value) {
+  return Number.isFinite(Number(value)) ? `${Math.round(Number(value))} ms` : 'Waiting'
+}
+function formatPeerRtt(userId) {
+  const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
+  return isCurrentUser ? 'Current device' : formatRtt(getUserPeerRtt(userId))
 }
 import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'
 import { useRoomsStore } from '../stores/rooms'
 import { useVoiceStore } from '../stores/voice'
+import { getConnectionQualityBars, getConnectionQualityLabel } from '../shared/connection-quality'
 
 import { useChatUtils } from '../composables/useChatUtils'
 import { useToast } from '../composables/useToast'

@@ -6,6 +6,7 @@ import { useChannelsStore } from '../stores/channels'
 import { useSettingsStore } from '../stores/settings'
 import { isScreenShareFpsBelowTarget } from '../shared/video-settings'
 import { getRtcSignalMetrics } from '../shared/voice-transport'
+import { getConnectionQualityBars, getConnectionQualityLabel } from '../shared/connection-quality'
 
 import RoomList from './RoomList.vue'
 
@@ -137,7 +138,7 @@ const barColorClass = computed(() => {
     return 'bg-base-content/40'
 })
 const signalTooltip = computed(() => {
-    const label = signalLevel.value >= 4 ? 'Excellent' : signalLevel.value === 3 ? 'Good' : signalLevel.value === 2 ? 'Fair' : 'Poor'
+    const label = getConnectionQualityLabel(signalLevel.value)
     const parts: string[] = [label]
     if (lastRttMs.value != null) parts.push(`RTT ${Math.round(lastRttMs.value)} ms`)
     if (lastJitterMs.value != null) parts.push(`Jitter ${Math.round(lastJitterMs.value)} ms`)
@@ -193,7 +194,7 @@ async function pollSignal() {
         lastRttMs.value = metrics.rttMs
         lastJitterMs.value = metrics.jitterMs
         lastLoss.value = metrics.loss
-        signalLevel.value = metrics.score
+        signalLevel.value = getConnectionQualityBars(metrics.rttMs)
     } catch {
         outboundVideoStats.value = []
         lowScreenFpsSamples = 0
@@ -288,6 +289,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                             <span class="w-1.5 rounded-sm" :class="[barClass(2), barColorClass]" style="height:9px"></span>
                             <span class="w-1.5 rounded-sm" :class="[barClass(3), barColorClass]" style="height:12px"></span>
                             <span class="w-1.5 rounded-sm" :class="[barClass(4), barColorClass]" style="height:15px"></span>
+                            <span class="w-1.5 rounded-sm" :class="[barClass(5), barColorClass]" style="height:18px"></span>
                         </div>
                     </button>
 

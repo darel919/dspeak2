@@ -75,11 +75,11 @@ export function updateVideoAdaptationState(state = {}, sendFps, targetFps) {
     return { scale: currentScale, lowSamples: 0, healthySamples: 0, changed: false }
   }
 
-  const lowSamples = actual < target * 0.82 ? (state.lowSamples || 0) + 1 : 0
-  const healthySamples = actual >= target * 0.95 ? (state.healthySamples || 0) + 1 : 0
+  const lowSamples = actual < target * 0.8 ? (state.lowSamples || 0) + 1 : 0
+  const healthySamples = actual >= target * 0.93 ? (state.healthySamples || 0) + 1 : 0
   let scale = currentScale
 
-  if (lowSamples >= 2) {
+  if (lowSamples >= 3) {
     scale = VIDEO_SCALE_STEPS[Math.min(VIDEO_SCALE_STEPS.length - 1, VIDEO_SCALE_STEPS.indexOf(currentScale) + 1)]
   } else if (healthySamples >= 5) {
     scale = VIDEO_SCALE_STEPS[Math.max(0, VIDEO_SCALE_STEPS.indexOf(currentScale) - 1)]
@@ -170,9 +170,8 @@ export async function selectPowerEfficientVideoCodec(codecs = [], video = {}, me
   return ranked[0] || null
 }
 
-export async function rankVideoCodecsByHardwarePreference(codecs = [], video = {}, mediaCapabilities = globalThis.navigator?.mediaCapabilities) {
+export async function inspectVideoCodecCapabilities(codecs = [], video = {}, mediaCapabilities = globalThis.navigator?.mediaCapabilities) {
   const fallback = selectHardwarePreferredVideoCodec(codecs)
-
   const remaining = codecs.filter(codec => codec?.kind === 'video' && !/\/(rtx|red|ulpfec|flexfec)/i.test(codec.mimeType || ''))
   const ordered = []
   let next = fallback
@@ -182,31 +181,70 @@ export async function rankVideoCodecsByHardwarePreference(codecs = [], video = {
     next = selectHardwarePreferredVideoCodec(remaining)
   }
 
-  if (!mediaCapabilities?.encodingInfo) return ordered
-
-  const hardware = []
-  const softwareOrUnknown = []
+  const reports = []
   for (const codec of ordered) {
+    const contentType = buildWebRtcCodecContentType(codec)
+    const report = {
+      codec,
+      mimeType: codec.mimeType,
+      contentType,
+      supported: null,
+      smooth: null,
+      powerEfficient: null,
+      error: null
+    }
+    if (!mediaCapabilities?.encodingInfo) {
+      reports.push(report)
+      continue
+    }
+
     try {
       const info = await mediaCapabilities.encodingInfo({
         type: 'webrtc',
         video: {
-          contentType: buildWebRtcCodecContentType(codec),
+          contentType,
           width: Math.max(1, Math.round(Number(video.width) || 1280)),
           height: Math.max(1, Math.round(Number(video.height) || 720)),
           bitrate: Math.max(1, Math.round(Number(video.bitrate) || 8_000_000)),
           framerate: Math.max(1, Number(video.framerate) || 30)
         }
       })
-      if (info.supported && info.powerEfficient) hardware.push(codec)
-      else softwareOrUnknown.push(codec)
-    } catch (_) { softwareOrUnknown.push(codec) }
+      report.supported = typeof info.supported === 'boolean' ? info.supported : null
+      report.smooth = typeof info.smooth === 'boolean' ? info.smooth : null
+      report.powerEfficient = typeof info.powerEfficient === 'boolean' ? info.powerEfficient : null
+    } catch (error) {
+      report.error = error instanceof Error ? error.message : String(error)
+    }
+    reports.push(report)
   }
-  const softwarePriorities = ['video/VP8', 'video/VP9', 'video/AV1', 'video/H264', 'video/H265']
-  softwareOrUnknown.sort((a, b) => {
-    const aIndex = softwarePriorities.indexOf(a.mimeType)
-    const bIndex = softwarePriorities.indexOf(b.mimeType)
-    return (aIndex < 0 ? softwarePriorities.length : aIndex) - (bIndex < 0 ? softwarePriorities.length : bIndex)
-  })
+  return reports
+}
+
+export async function inspectH264ProfileCapabilities(video = {}, mediaCapabilities = globalThis.navigator?.mediaCapabilities) {
+  const profiles = ['42e01f', '42001f', '4d001f', '42e02a']
+  const codecs = profiles.map(profileLevelId => ({
+    kind: 'video',
+    mimeType: 'video/H264',
+    parameters: {
+      'packetization-mode': 1,
+      'level-asymmetry-allowed': 1,
+      'profile-level-id': profileLevelId
+    }
+  }))
+  const reports = await inspectVideoCodecCapabilities(codecs, video, mediaCapabilities)
+  return reports.map(({ codec, ...report }, index) => ({
+    ...report,
+    profileLevelId: profiles[index]
+  }))
+}
+
+export async function rankVideoCodecsByHardwarePreference(codecs = [], video = {}, mediaCapabilities = globalThis.navigator?.mediaCapabilities, capabilityReports = null) {
+  const reports = capabilityReports || await inspectVideoCodecCapabilities(codecs, video, mediaCapabilities)
+  const hardware = []
+  const softwareOrUnknown = []
+  for (const report of reports) {
+    if (report.supported && report.powerEfficient) hardware.push(report.codec)
+    else softwareOrUnknown.push(report.codec)
+  }
   return [...hardware, ...softwareOrUnknown]
 }

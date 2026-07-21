@@ -9,6 +9,8 @@ import {
   classifyCodecImplementation,
   calculateFrameTimeMs,
   isScreenShareFpsBelowTarget,
+  inspectVideoCodecCapabilities,
+  inspectH264ProfileCapabilities,
   normalizeVideoSettings,
   rankVideoCodecsByHardwarePreference,
   selectHardwarePreferredVideoCodec,
@@ -71,9 +73,18 @@ test('video production bitrate remains bounded for low and very large sources', 
 test('video adaptation trades resolution for frame cadence after sustained low FPS', () => {
   const first = updateVideoAdaptationState({}, 25, 60)
   const second = updateVideoAdaptationState(first, 25, 60)
+  const third = updateVideoAdaptationState(second, 25, 60)
   assert.equal(first.scale, 1)
-  assert.equal(second.scale, 1.25)
-  assert.equal(second.changed, true)
+  assert.equal(second.scale, 1)
+  assert.equal(third.scale, 1.25)
+  assert.equal(third.changed, true)
+})
+
+test('video adaptation accepts normal 60 FPS encoder variation as healthy', () => {
+  let state = { scale: 1.25, lowSamples: 0, healthySamples: 0 }
+  for (let sample = 0; sample < 5; sample++) state = updateVideoAdaptationState(state, 56, 60)
+  assert.equal(state.scale, 1)
+  assert.equal(state.changed, true)
 })
 
 test('video adaptation restores resolution gradually after sustained healthy FPS', () => {
@@ -154,6 +165,59 @@ test('hardware codec ranking keeps software codecs as ordered fallbacks', async 
     }
   })
   assert.deepEqual(ranked, [vp8, h264])
+})
+
+test('codec ranking preserves preferred order when the browser reports no power-efficient encoder', async () => {
+  const vp8 = { kind: 'video', mimeType: 'video/VP8' }
+  const vp9 = { kind: 'video', mimeType: 'video/VP9' }
+  const h264 = { kind: 'video', mimeType: 'video/H264' }
+  const ranked = await rankVideoCodecsByHardwarePreference([vp8, vp9, h264], {}, {
+    async encodingInfo() {
+      return { supported: true, powerEfficient: false }
+    }
+  })
+
+  assert.deepEqual(ranked, [h264, vp9, vp8])
+})
+
+test('codec capability inspection retains the exact browser report and query failures', async () => {
+  const h264 = { kind: 'video', mimeType: 'video/H264', parameters: { 'packetization-mode': 1 } }
+  const vp9 = { kind: 'video', mimeType: 'video/VP9', parameters: { 'profile-id': 0 } }
+  const reports = await inspectVideoCodecCapabilities([vp9, h264], {
+    width: 1920,
+    height: 1080,
+    bitrate: 12_000_000,
+    framerate: 60
+  }, {
+    async encodingInfo({ video }) {
+      if (video.contentType.startsWith('video/VP9')) throw new Error('VP9 query rejected')
+      return { supported: true, smooth: true, powerEfficient: false }
+    }
+  })
+
+  assert.equal(reports[0].mimeType, 'video/H264')
+  assert.equal(reports[0].contentType, 'video/H264;packetization-mode=1')
+  assert.equal(reports[0].supported, true)
+  assert.equal(reports[0].smooth, true)
+  assert.equal(reports[0].powerEfficient, false)
+  assert.equal(reports[1].mimeType, 'video/VP9')
+  assert.equal(reports[1].error, 'VP9 query rejected')
+})
+
+test('H264 capability inspection probes common WebRTC profiles independently', async () => {
+  const queried = []
+  const reports = await inspectH264ProfileCapabilities({}, {
+    async encodingInfo({ video }) {
+      queried.push(video.contentType)
+      return { supported: true, smooth: true, powerEfficient: video.contentType.includes('profile-level-id=42e01f') }
+    }
+  })
+
+  assert.deepEqual(reports.map(report => report.profileLevelId), ['42e01f', '42001f', '4d001f', '42e02a'])
+  assert.equal(reports[0].powerEfficient, true)
+  assert.equal(reports[3].powerEfficient, false)
+  assert.match(queried[0], /packetization-mode=1/)
+  assert.match(queried[0], /level-asymmetry-allowed=1/)
 })
 
 test('codec content type includes negotiated RTP parameters', () => {
