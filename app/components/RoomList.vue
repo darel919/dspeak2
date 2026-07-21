@@ -10,9 +10,7 @@
           :class="{ 'btn-active': selectedRoom }"
         >
           <span class="text-sm font-medium">Rooms</span>
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-            <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-          </svg>
+          <Icon name="lucide:chevron-down" class="w-4 h-4" />
         </button>
         <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 rounded-box w-80 max-h-96 overflow-y-auto">
           <!-- Loading State -->
@@ -32,9 +30,7 @@
           <!-- Error State -->
           <div v-else-if="roomsStore.error" class="p-2">
             <div class="alert alert-error alert-sm">
-              <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-4 w-4" />
               <span class="text-xs">{{ roomsStore.error }}</span>
             </div>
           </div>
@@ -68,8 +64,8 @@
               </a>
             </li>
             <div class="divider my-1"></div>
-            <li><a @click="showJoinModal = true" class="text-sm"><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" /></svg>Join Room</a></li>
-            <li><a @click="showCreateModal = true" class="text-sm"><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15" /></svg>Create Room</a></li>
+            <li><a @click="showJoinModal = true" class="text-sm"><Icon name="lucide:link" class="w-4 h-4" />Join Room</a></li>
+            <li><a @click="showCreateModal = true" class="text-sm"><Icon name="lucide:plus" class="w-4 h-4" />Create Room</a></li>
           </div>
           <!-- Empty State -->
           <div v-else class="p-4 text-center">
@@ -111,9 +107,7 @@
         <!-- More Rooms Dropdown (if there are too many) -->
         <div v-if="hiddenRooms.length > 0" class="dropdown dropdown-end" style="z-index:1000;">
           <button tabindex="0" class="btn btn-ghost btn-xs btn-circle">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-            </svg>
+            <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
           </button>
           <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 rounded-box w-64">
             <li v-for="room in hiddenRooms" :key="room.id">
@@ -145,18 +139,14 @@
             class="btn btn-ghost btn-xs btn-circle"
             title="Join Room"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-            </svg>
+            <Icon name="lucide:link" class="w-4 h-4" />
           </button>
           <button
             @click="showCreateModal = true"
             class="btn btn-ghost btn-xs btn-circle"
             title="Create Room"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
+            <Icon name="lucide:plus" class="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -166,12 +156,8 @@
         class="btn btn-ghost btn-xs btn-circle ml-2"
         :title="isCollapsed ? 'Show Room Icons' : 'Show Rooms Menu'"
       >
-        <svg v-if="isCollapsed" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-        </svg>
+        <Icon name="lucide:chevron-right" v-if="isCollapsed" class="w-4 h-4" />
+        <Icon name="lucide:chevron-left" v-else class="w-4 h-4" />
       </button>
     </div>
 
@@ -194,9 +180,7 @@
           />
         </div>
         <div v-if="joinError" class="alert alert-error mt-4">
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
           <span>{{ joinError }}</span>
         </div>
         <div class="modal-action">
@@ -250,9 +234,7 @@
           />
         </div>
         <div v-if="createError" class="alert alert-error mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
           <span>{{ createError }}</span>
         </div>
         <div class="modal-action">
@@ -285,9 +267,7 @@
           @click="showContextMenu = !showContextMenu"
           title="Room Actions"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-          </svg>
+          <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
         </button>
         <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
             <li><a @click="showJoinModal = true">Join Room</a></li>

@@ -23,9 +23,7 @@
       <!-- Error State -->
       <div v-else-if="roomsStore.error" class="p-4">
         <div class="alert alert-error alert-sm">
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
           <span class="text-xs">{{ roomsStore.error }}</span>
         </div>
       </div>
@@ -85,9 +83,7 @@
       <!-- Empty State -->
       <div v-else class="flex flex-col items-center justify-center h-64 text-center p-4">
         <div class="text-base-content/50 mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
+          <Icon name="lucide:message-circle" class="h-16 w-16 mx-auto mb-4" />
         </div>
         <h3 class="font-medium mb-2">No servers found</h3>
         <p class="text-sm text-base-content/60 mb-4">Join or create a server to get started</p>
@@ -110,9 +106,7 @@
           class="btn btn-sm btn-ghost flex-1"
           title="Join Server"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-          </svg>
+          <Icon name="lucide:link" class="h-4 w-4" />
           Join
         </button>
         <button
@@ -120,9 +114,7 @@
           class="btn btn-sm btn-ghost flex-1"
           title="Create Server"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
+          <Icon name="lucide:plus" class="h-4 w-4" />
           Create
         </button>
       </div>
@@ -144,9 +136,7 @@
           />
         </div>
         <div v-if="joinError" class="alert alert-error alert-sm mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
           <span>{{ joinError }}</span>
         </div>
         <div class="modal-action">
@@ -200,9 +190,7 @@
           />
         </div>
         <div v-if="createError" class="alert alert-error alert-sm mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
           <span>{{ createError }}</span>
         </div>
         <div class="modal-action">

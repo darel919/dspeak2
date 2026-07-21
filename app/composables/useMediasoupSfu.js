@@ -5,7 +5,7 @@ import { useChannelsStore } from '~/stores/channels'
 import { useRoomsStore } from '~/stores/rooms'
 import { useSettingsStore } from '~/stores/settings'
 import { useVoiceStore } from '~/stores/voice'
-import { buildVideoConstraints } from '~/shared/video-settings'
+import { buildVideoConstraints, calculateFrameTimeMs, classifyCodecImplementation, rankVideoCodecsByHardwarePreference } from '~/shared/video-settings'
 
 export function useMediasoupSfu() {
 
@@ -27,7 +27,10 @@ export function useMediasoupSfu() {
   const producers = ref(new Map())
   const consumers = ref(new Map())
   const localVideoFeeds = ref(new Map())
+  const outboundVideoStatsHistory = new Map()
+  const inboundVideoStatsHistory = new Map()
   const remoteVideoFeeds = ref(new Map())
+  const remoteAudioFeeds = ref(new Map())
   const producerSources = new Map()
 
   const localProducerIds = new Set()
@@ -140,15 +143,9 @@ export function useMediasoupSfu() {
       if (!producerId || !userId) return
 
       const oldEl = document.getElementById(`audio-${producerId}`)
-      const newId = `audio-${userId}`
-      const existingNew = document.getElementById(newId)
       if (oldEl) {
-
-        if (oldEl.id !== newId) {
-          oldEl.id = newId
-          oldEl.setAttribute('data-user-id', String(userId))
-          oldEl.setAttribute('data-producer-id', String(producerId))
-         }
+        oldEl.setAttribute('data-user-id', String(userId))
+        oldEl.setAttribute('data-producer-id', String(producerId))
 
         try {
           const sinkId = useSettingsStore().outputDeviceId
@@ -158,7 +155,8 @@ export function useMediasoupSfu() {
         } catch (_) { /* noop */ }
 
         try {
-          oldEl.volume = useVoiceStore().getUserVolume(userId)
+          const source = oldEl.getAttribute('data-source') || producerSources.get(producerId) || 'audio'
+          oldEl.volume = useVoiceStore().getTrackVolume(userId, source)
         } catch (_) { /* noop */ }
       }
 
@@ -171,8 +169,9 @@ export function useMediasoupSfu() {
       }
 
       try {
-        const volume = useVoiceStore().getUserVolume(userId)
-        applyVolumeForUser(userId, volume)
+        const voiceStore = useVoiceStore()
+        applyVolumeForTrack(userId, 'audio', voiceStore.getTrackVolume(userId, 'audio'))
+        applyVolumeForTrack(userId, 'screen-audio', voiceStore.getTrackVolume(userId, 'screen-audio'))
       } catch (_) { /* noop */ }
     } catch (_) { /* noop */ }
   }
@@ -958,10 +957,11 @@ export function useMediasoupSfu() {
       console.debug('[SFU] Producer closed:', data.producerId)
       const consumer = consumers.value.get(data.producerId)
       if (consumer) {
+        inboundVideoStatsHistory.delete(consumer.id)
         consumer.close()
         consumers.value.delete(data.producerId)
         const ownerId = producerOwner.get(data.producerId) || data.producerId
-        removeAudioElement(ownerId)
+        removeAudioElement(data.producerId)
 
         cleanupVoiceDetection(ownerId)
       }
@@ -971,6 +971,8 @@ export function useMediasoupSfu() {
         producerSources.delete(data.producerId)
         remoteVideoFeeds.value.delete(data.producerId)
         remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
+        remoteAudioFeeds.value.delete(data.producerId)
+        remoteAudioFeeds.value = new Map(remoteAudioFeeds.value)
       }
       try {
         const cname = producerCname.get(data.producerId)
@@ -1131,21 +1133,6 @@ export function useMediasoupSfu() {
             producerOwner.set(producerId, userId)
             console.debug(`[SFU] Mapped producer ${producerId} → user ${userId}`)
 
-            let audioEl = document.getElementById(`audio-${userId}`)
-            if (!audioEl) {
-              audioEl = document.createElement('audio')
-              audioEl.id = `audio-${userId}`
-              audioEl.setAttribute('data-user-id', String(userId))
-              audioEl.setAttribute('data-producer-id', String(producerId))
-              audioEl.autoplay = true
-              audioEl.controls = false
-              audioEl.style.display = 'none'
-              document.body.appendChild(audioEl)
-              console.debug(`[SFU] Created audio element for user ${userId} and producer ${producerId}`)
-            } else {
-              audioEl.setAttribute('data-producer-id', String(producerId))
-              console.debug(`[SFU] Reusing existing audio element for user ${userId} and producer ${producerId}`)
-            }
             rebindAudioAndDetectionIfNeeded(producerId, userId)
 
             const allAudioEls = Array.from(document.querySelectorAll('audio[data-user-id]')).map(el => ({
@@ -1174,11 +1161,6 @@ export function useMediasoupSfu() {
 
           const otherUsers = data.inRoom.filter(userId => userId !== myUserId && typeof userId === 'string' && !userId.includes('-'))
 
-          function removeAudioElementById(id) {
-            const el = document.getElementById(`audio-${id}`)
-            if (el) el.remove()
-          }
-
           let voiceStoreInstance = null
           try {
             voiceStoreInstance = useVoiceStore()
@@ -1206,12 +1188,6 @@ export function useMediasoupSfu() {
               console.debug(`[SFU] FALLBACK mapped producer ${producerId} → user ${assign}`)
               try { const cname = producerCname.get(producerId); if (cname) cnameOwner.set(cname, assign) } catch (_) { /* noop */ }
               rebindAudioAndDetectionIfNeeded(producerId, assign)
-              removeAudioElementById(producerId)
-              const userEl = document.getElementById(`audio-${assign}`)
-              if (userEl) {
-                userEl.setAttribute('data-user-id', String(assign))
-                userEl.setAttribute('data-producer-id', String(producerId))
-              }
               try {
                 if (voiceStoreInstance) {
                   const v = voiceStoreInstance.getUserVolume(assign)
@@ -1261,30 +1237,6 @@ export function useMediasoupSfu() {
               }
             })
 
-            consumers.value.forEach((consumer, producerId) => {
-              const mappedUserId = producerOwner.get(producerId)
-              if (mappedUserId && producerId !== mappedUserId) {
-                const prodEl = document.getElementById(`audio-${producerId}`)
-                if (prodEl) {
-                  prodEl.id = `audio-${mappedUserId}`
-                  prodEl.setAttribute('data-user-id', String(mappedUserId))
-                  prodEl.setAttribute('data-producer-id', String(producerId))
-                }
-              }
-            })
-
-            const seenUserIds = new Set()
-            container.querySelectorAll('audio').forEach(el => {
-              const uid = el.getAttribute('data-user-id')
-              if (uid) {
-                if (seenUserIds.has(uid)) {
-                  el.remove()
-                } else {
-                  seenUserIds.add(uid)
-                  el.id = `audio-${uid}`
-                }
-              }
-            })
           }
         } catch (_) { /* noop */ }
       }
@@ -2207,26 +2159,116 @@ export function useMediasoupSfu() {
     let stream
     try {
       stream = isScreen
-        ? await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: false })
+        ? await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: true })
         : await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false })
       const track = stream.getVideoTracks()[0]
       if (!track) throw new Error(`No ${source} video track is available`)
 
       const frameRate = track.getSettings?.().frameRate || (isScreen ? settings.screenVideo.frameRate : settings.cameraVideo.frameRate)
-      const producer = await sendTransport.value.produce({
-        track,
-        appData: { source },
-        encodings: [{ maxFramerate: Math.min(60, Math.max(25, Math.round(frameRate || 30))) }]
-      })
-      const entry = { producer, stream, track, source }
+      const trackSettings = track.getSettings?.() || {}
+      const rankedCodecs = await rankVideoCodecsByHardwarePreference(
+        device.value?.rtpCapabilities?.codecs || [],
+        {
+          width: trackSettings.width,
+          height: trackSettings.height,
+          framerate: frameRate,
+          bitrate: Math.max(2_500_000, (Number(trackSettings.width) || 1280) * (Number(trackSettings.height) || 720) * Number(frameRate || 30) * 0.08)
+        }
+      )
+      const waitForEncoderStats = async (producer, timeoutMs = 1500) => {
+        const deadline = Date.now() + timeoutMs
+        while (Date.now() < deadline) {
+          try {
+            const report = await producer.getStats()
+            let outbound = null
+            report.forEach((stat) => {
+              if (stat.type === 'outbound-rtp' && stat.kind === 'video' && stat.framesEncoded > 0) outbound = stat
+            })
+            if (outbound) {
+              const classified = classifyCodecImplementation(outbound.encoderImplementation)
+              const framesEncoded = Number(outbound.framesEncoded)
+              const totalEncodeTime = Number(outbound.totalEncodeTime)
+              const frameTimeMs = Number.isFinite(framesEncoded) && framesEncoded > 0 && Number.isFinite(totalEncodeTime)
+                ? totalEncodeTime / framesEncoded * 1000
+                : null
+              if (classified.type !== 'unknown') return { type: classified.type, frameTimeMs }
+              if (outbound.powerEfficientEncoder === true) return { type: 'hardware', frameTimeMs }
+              if (outbound.powerEfficientEncoder === false) return { type: 'software', frameTimeMs }
+            }
+          } catch (_) { /* stats may not exist until the first encoded frame */ }
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        return { type: 'unknown', frameTimeMs: null }
+      }
+
+      let producer = null
+      let selectedCodec = null
+      let bestSoftware = null
+      for (let index = 0; index < Math.max(1, rankedCodecs.length); index++) {
+        const codec = rankedCodecs[index] || null
+        producer = await sendTransport.value.produce({
+          track,
+          stopTracks: false,
+          appData: { source },
+          ...(codec ? { codec } : {}),
+          encodings: [{ maxFramerate: Math.min(60, Math.max(25, Math.round(frameRate || 30))) }]
+        })
+        selectedCodec = codec
+        const encoder = await waitForEncoderStats(producer)
+        if (encoder.type === 'hardware') break
+        if (!bestSoftware || (encoder.frameTimeMs != null && (bestSoftware.frameTimeMs == null || encoder.frameTimeMs < bestSoftware.frameTimeMs))) {
+          bestSoftware = { codec, frameTimeMs: encoder.frameTimeMs }
+        }
+        const hasAnotherCodec = index < rankedCodecs.length - 1
+        if (!hasAnotherCodec) break
+
+        console.info(`[SFU] ${codec?.mimeType || 'default'} used ${encoder.type} encoding; trying the next codec`)
+        sendMessage({ type: 'close-producer', data: { producerId: producer.id } })
+        producer.close()
+        producer = null
+      }
+      if (!producer) throw new Error('No compatible video encoder is available')
+      if (bestSoftware?.codec && selectedCodec !== bestSoftware.codec) {
+        console.info(`[SFU] No hardware encoder was instantiated; using fastest software codec ${bestSoftware.codec.mimeType}`)
+        sendMessage({ type: 'close-producer', data: { producerId: producer.id } })
+        producer.close()
+        producer = await sendTransport.value.produce({
+          track,
+          stopTracks: false,
+          appData: { source },
+          codec: bestSoftware.codec,
+          encodings: [{ maxFramerate: Math.min(60, Math.max(25, Math.round(frameRate || 30))) }]
+        })
+      }
+      const entry = { producer, stream, track, source, targetFrameRate: Math.round(frameRate || 30) }
       producers.value.set(producer.id, entry)
       localProducerIds.add(producer.id)
       producerSources.set(producer.id, source)
       localVideoFeeds.value.set(source, { producerId: producer.id, source, stream })
       localVideoFeeds.value = new Map(localVideoFeeds.value)
+      const displayAudioTrack = isScreen ? stream.getAudioTracks()[0] : null
+      if (displayAudioTrack && device.value?.canProduce('audio')) {
+        const audioProducer = await sendTransport.value.produce({
+          track: displayAudioTrack,
+          appData: { source: 'screen-audio' }
+        })
+        const audioEntry = {
+          producer: audioProducer,
+          stream,
+          track: displayAudioTrack,
+          source: 'screen-audio'
+        }
+        producers.value.set(audioProducer.id, audioEntry)
+        localProducerIds.add(audioProducer.id)
+        producerSources.set(audioProducer.id, 'screen-audio')
+        const cleanupAudio = () => stopVideoProduction('screen-audio', audioProducer.id)
+        audioProducer.on('trackended', cleanupAudio)
+        audioProducer.on('transportclose', cleanupAudio)
+      }
       isProducing.value = true
 
       const cleanup = () => stopVideoProduction(source, producer.id)
+      track.addEventListener?.('ended', cleanup, { once: true })
       producer.on('trackended', cleanup)
       producer.on('transportclose', cleanup)
       return producer
@@ -2244,12 +2286,17 @@ export function useMediasoupSfu() {
     const [producerId, entry] = match
     sendMessage({ type: 'close-producer', data: { producerId } })
     producers.value.delete(producerId)
+    outboundVideoStatsHistory.delete(producerId)
     localProducerIds.delete(producerId)
     producerSources.delete(producerId)
     localVideoFeeds.value.delete(source)
     localVideoFeeds.value = new Map(localVideoFeeds.value)
     try { if (!entry.producer.closed) entry.producer.close() } catch (_) { /* noop */ }
     entry.stream?.getTracks().forEach(track => track.stop())
+    if (source === 'screen') {
+      const screenAudio = Array.from(producers.value.entries()).find(([, candidate]) => candidate.source === 'screen-audio')
+      if (screenAudio) stopVideoProduction('screen-audio', screenAudio[0])
+    }
     isProducing.value = producers.value.size > 0
   }
 
@@ -2450,42 +2497,18 @@ export function useMediasoupSfu() {
         })
         const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
 
-        try {
-          const container = document.getElementById('webrtc-audio-global')
-          if (container) {
-            container.querySelectorAll('audio').forEach(el => {
-              if (el.getAttribute('data-user-id') === String(ownerId)) {
-                el.remove()
-                console.debug('[SFU] Removed audio element:', el.id)
-              }
-            })
-          }
-        } catch (_) { /* noop */ }
-        createAudioElement(ownerId, consumer.track)
+        const audioSource = consumerData.source || producerSources.get(consumerData.producerId) || 'audio'
+        producerSources.set(consumerData.producerId, audioSource)
+        remoteAudioFeeds.value.set(consumerData.producerId, {
+          producerId: consumerData.producerId,
+          userId: ownerId,
+          source: audioSource
+        })
+        remoteAudioFeeds.value = new Map(remoteAudioFeeds.value)
+        createAudioElement(consumerData.producerId, ownerId, consumer.track, audioSource)
 
   setupVoiceDetection(ownerId, consumer.track)
-
-        try {
-          const container = document.getElementById('webrtc-audio-global')
-          if (container) {
-            const seenUserIds = new Set()
-            container.querySelectorAll('audio').forEach(el => {
-              const uid = el.getAttribute('data-user-id')
-              if (uid) {
-                if (seenUserIds.has(uid)) {
-                  el.remove()
-                } else {
-                  seenUserIds.add(uid)
-
-                    if (failedConsumeProducers.has(consumerData.producerId)) {
-                      failedConsumeProducers.delete(consumerData.producerId)
-                    }
-                  el.id = `audio-${uid}`
-                }
-              }
-            })
-          }
-        } catch (_) { /* noop */ }
+        failedConsumeProducers.delete(consumerData.producerId)
       }
       if (consumer.track && consumer.kind === 'video') {
         const source = consumerData.source || producerSources.get(consumerData.producerId) || 'camera'
@@ -2507,21 +2530,27 @@ export function useMediasoupSfu() {
           console.debug('[SFU] Consumer transport closed - consumerId:', consumer?.id, 'producerId:', consumerData?.producerId)
         } catch (_) { console.debug('[SFU] Consumer transport closed') }
         const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
-        removeAudioElement(ownerId)
+        removeAudioElement(consumerData.producerId)
+        inboundVideoStatsHistory.delete(consumer.id)
         consumers.value.delete(consumerData.producerId)
         cleanupVoiceDetection(ownerId)
         remoteVideoFeeds.value.delete(consumerData.producerId)
         remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
+        remoteAudioFeeds.value.delete(consumerData.producerId)
+        remoteAudioFeeds.value = new Map(remoteAudioFeeds.value)
       })
 
       consumer.on('trackended', () => {
         console.debug('[SFU] Consumer track ended')
         const ownerId = producerOwner.get(consumerData.producerId) || consumerData.producerId
-        removeAudioElement(ownerId)
+        removeAudioElement(consumerData.producerId)
+        inboundVideoStatsHistory.delete(consumer.id)
         consumers.value.delete(consumerData.producerId)
         cleanupVoiceDetection(ownerId)
         remoteVideoFeeds.value.delete(consumerData.producerId)
         remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
+        remoteAudioFeeds.value.delete(consumerData.producerId)
+        remoteAudioFeeds.value = new Map(remoteAudioFeeds.value)
       })
 
 
@@ -2550,21 +2579,19 @@ export function useMediasoupSfu() {
     return container
   }
 
-  function createAudioElement(ownerId, track) {
+  function createAudioElement(producerId, ownerId, track, source = 'audio') {
     const container = getOrCreateGlobalAudioContainer()
 
+    const realUserId = producerOwner.get(producerId) || ownerId || producerId
+    console.debug(`[SFU] Creating audio element for producer ${producerId} → user ${realUserId}`)
 
-    let realUserId = producerOwner.get(ownerId) || ownerId
-    console.debug(`[SFU] Creating audio element for producer ${ownerId} → user ${realUserId}`)
-
-
-    removeAudioElement(ownerId)
-    removeAudioElement(realUserId)
+    removeAudioElement(producerId)
 
     const audio = document.createElement('audio')
-    audio.id = `audio-${realUserId}`
+    audio.id = `audio-${producerId}`
     audio.setAttribute('data-user-id', String(realUserId))
-    audio.setAttribute('data-producer-id', String(ownerId))
+    audio.setAttribute('data-producer-id', String(producerId))
+    audio.setAttribute('data-source', source)
     audio.autoplay = true
     audio.controls = false
     audio.playsInline = true
@@ -2574,9 +2601,7 @@ export function useMediasoupSfu() {
     function setInitialVolume(userId) {
       const voiceStore = useVoiceStore()
 
-      const saved = voiceStore.userVolumes && typeof voiceStore.userVolumes[userId] !== 'undefined'
-        ? Number(voiceStore.userVolumes[userId])
-        : undefined
+      const saved = voiceStore.getTrackVolume?.(userId, source)
       const volume = typeof saved === 'number' && !Number.isNaN(saved) ? saved : audio.volume
       audio.volume = volume
       applyVolumeForUser(userId, volume)
@@ -2584,14 +2609,13 @@ export function useMediasoupSfu() {
     setInitialVolume(realUserId)
 
 
-    if (!producerOwner.get(ownerId)) {
+    if (!producerOwner.get(producerId)) {
       let mappingInterval = setInterval(() => {
-        const mapped = producerOwner.get(ownerId)
-        if (mapped && mapped !== ownerId) {
+        const mapped = producerOwner.get(producerId)
+        if (mapped && mapped !== realUserId) {
 
-          audio.id = `audio-${mapped}`
           audio.setAttribute('data-user-id', String(mapped))
-          audio.setAttribute('data-producer-id', String(ownerId))
+          audio.setAttribute('data-producer-id', String(producerId))
           setInitialVolume(mapped)
           clearInterval(mappingInterval)
         }
@@ -2629,20 +2653,10 @@ export function useMediasoupSfu() {
         if (!consumer || consumer.kind !== 'audio') return
         const ownerId = producerOwner.get(producerId) || producerId
 
-        let audioEl = document.getElementById(`audio-${ownerId}`)
-        if (!audioEl) {
-
-          const prodEl = document.getElementById(`audio-${producerId}`)
-          if (prodEl && ownerId !== producerId) {
-            prodEl.id = `audio-${ownerId}`
-            prodEl.setAttribute('data-user-id', String(ownerId))
-            prodEl.setAttribute('data-producer-id', String(producerId))
-            audioEl = prodEl
-          }
-        }
+        let audioEl = document.getElementById(`audio-${producerId}`)
         if (!audioEl) {
           if (consumer.track && consumer.track.readyState === 'live') {
-            createAudioElement(ownerId, consumer.track)
+            createAudioElement(producerId, ownerId, consumer.track, producerSources.get(producerId) || 'audio')
           }
         } else {
 
@@ -2655,9 +2669,8 @@ export function useMediasoupSfu() {
 
           try {
             const voiceStore = useVoiceStore()
-            const saved = voiceStore.userVolumes && typeof voiceStore.userVolumes[ownerId] !== 'undefined'
-              ? Number(voiceStore.userVolumes[ownerId])
-              : undefined
+            const source = audioEl.getAttribute('data-source') || producerSources.get(producerId) || 'audio'
+            const saved = voiceStore.getTrackVolume?.(ownerId, source)
             if (typeof saved === 'number' && !Number.isNaN(saved)) audioEl.volume = saved
           } catch (_) { /* noop */ }
         }
@@ -2724,20 +2737,13 @@ export function useMediasoupSfu() {
       let elementsFound = 0
 
 
-      const elById = document.getElementById(`audio-${userId}`)
-      if (elById && typeof elById.volume === 'number') {
-        elById.volume = v
-        elementsFound++
-        console.debug(`[SFU] Volume updated via direct user ID: audio-${userId}`)
-      }
-
-
       const container = document.getElementById('webrtc-audio-global')
       if (container) {
         container.querySelectorAll('audio').forEach((el) => {
           if (!el) return
           const dataUid = el.getAttribute('data-user-id')
-          if (String(dataUid) === String(userId)) {
+          const source = el.getAttribute('data-source') || 'audio'
+          if (String(dataUid) === String(userId) && source === 'audio') {
             try {
               el.volume = v
               elementsFound++
@@ -2783,6 +2789,19 @@ export function useMediasoupSfu() {
       } else {
         console.debug(`[SFU] Volume successfully updated on ${elementsFound} audio element(s) for user ${userId}`)
       }
+    } catch (_) { /* noop */ }
+  }
+
+  function applyVolumeForTrack(userId, source, volume) {
+    try {
+      const v = Math.max(0, Math.min(1, Number(volume)))
+      const container = document.getElementById('webrtc-audio-global')
+      if (!container) return
+      container.querySelectorAll('audio').forEach((el) => {
+        if (String(el.getAttribute('data-user-id')) === String(userId) && el.getAttribute('data-source') === source) {
+          el.volume = v
+        }
+      })
     } catch (_) { /* noop */ }
   }
 
@@ -3095,6 +3114,87 @@ export function useMediasoupSfu() {
     }
   }
 
+  async function getOutboundVideoStats() {
+    const results = []
+    for (const entry of producers.value.values()) {
+      if (entry.source !== 'camera' && entry.source !== 'screen') continue
+      const settings = entry.track?.getSettings?.() || {}
+      let outbound = null
+      let report = null
+      try {
+        report = await entry.producer.getStats()
+        report.forEach((stat) => {
+          if (stat.type === 'outbound-rtp' && stat.kind === 'video' && !stat.isRemote) outbound = stat
+        })
+      } catch (_) { /* use track settings below */ }
+      const previous = outboundVideoStatsHistory.get(entry.producer.id) || null
+      const framesEncoded = Number(outbound?.framesEncoded)
+      const totalEncodeTime = Number(outbound?.totalEncodeTime)
+      const measuredFrameTimeMs = calculateFrameTimeMs(totalEncodeTime, framesEncoded, previous)
+      const frameTimeMs = measuredFrameTimeMs ?? previous?.frameTimeMs ?? null
+      const outboundFps = Number(outbound?.framesPerSecond)
+      if (Number.isFinite(framesEncoded) && Number.isFinite(totalEncodeTime)) {
+        outboundVideoStatsHistory.set(entry.producer.id, { framesEncoded, totalEncodeTime, frameTimeMs })
+      }
+      results.push({
+        producerId: entry.producer.id,
+        source: entry.source,
+        width: Number(outbound?.frameWidth || settings.width) || null,
+        height: Number(outbound?.frameHeight || settings.height) || null,
+        fps: Number.isFinite(outboundFps) ? outboundFps : null,
+        targetFps: Number(entry.targetFrameRate || settings.frameRate) || null,
+        frameTimeMs,
+        codec: outbound?.codecId ? report?.get?.(outbound.codecId)?.mimeType || null : null,
+        encoderImplementation: outbound?.encoderImplementation || null,
+        powerEfficientEncoder: typeof outbound?.powerEfficientEncoder === 'boolean' ? outbound.powerEfficientEncoder : null,
+        framesEncoded: Number.isFinite(framesEncoded) ? framesEncoded : null,
+        qualityLimitationReason: outbound?.qualityLimitationReason || null,
+        qualityLimitationDurations: outbound?.qualityLimitationDurations || null
+      })
+    }
+    return results
+  }
+
+  async function getInboundVideoStats() {
+    const results = []
+    for (const entry of consumers.value.values()) {
+      const consumer = entry?.consumer || entry
+      if (consumer?.kind !== 'video' && entry?.kind !== 'video') continue
+      try {
+        const report = await consumer.getStats()
+        let inbound = null
+        report.forEach((stat) => {
+          if (stat.type === 'inbound-rtp' && stat.kind === 'video' && !stat.isRemote) inbound = stat
+        })
+        if (!inbound) continue
+        const framesDecoded = Number(inbound.framesDecoded)
+        const totalDecodeTime = Number(inbound.totalDecodeTime)
+        const previous = inboundVideoStatsHistory.get(consumer.id) || null
+        const measuredDecodeTimeMs = calculateFrameTimeMs(totalDecodeTime, framesDecoded, previous)
+        const decodeTimeMs = measuredDecodeTimeMs ?? previous?.frameTimeMs ?? null
+        if (Number.isFinite(framesDecoded) && Number.isFinite(totalDecodeTime)) {
+          inboundVideoStatsHistory.set(consumer.id, {
+            framesEncoded: framesDecoded,
+            totalEncodeTime: totalDecodeTime,
+            frameTimeMs: decodeTimeMs
+          })
+        }
+        results.push({
+          consumerId: consumer.id || entry?.id || null,
+          width: Number(inbound.frameWidth) || null,
+          height: Number(inbound.frameHeight) || null,
+          fps: Number.isFinite(Number(inbound.framesPerSecond)) ? Number(inbound.framesPerSecond) : null,
+          codec: inbound.codecId ? report.get?.(inbound.codecId)?.mimeType || null : null,
+          decoderImplementation: inbound.decoderImplementation || null,
+          powerEfficientDecoder: typeof inbound.powerEfficientDecoder === 'boolean' ? inbound.powerEfficientDecoder : null,
+          decodeTimeMs,
+          framesDecoded: Number.isFinite(framesDecoded) ? framesDecoded : null
+        })
+      } catch (_) { /* stats support varies by browser */ }
+    }
+    return results
+  }
+
   return {
     connected: readonly(connected),
     error: readonly(error),
@@ -3105,6 +3205,7 @@ export function useMediasoupSfu() {
     consumers: readonly(consumers),
     localVideoFeeds: readonly(localVideoFeeds),
     remoteVideoFeeds: readonly(remoteVideoFeeds),
+    remoteAudioFeeds: readonly(remoteAudioFeeds),
     remoteProducersCount: remoteProducersCount,
     lastInRoom: lastInRoom,
     connect,
@@ -3115,7 +3216,10 @@ export function useMediasoupSfu() {
     stopVideoProduction,
     applyOutputDeviceToAll,
     applyVolumeForUser,
+    applyVolumeForTrack,
     getWebRTCStatsSnapshot,
+    getInboundVideoStats,
+    getOutboundVideoStats,
     ensureAudioElements,
     waitForIceConnected,
     areTransportsIceConnected

@@ -5,8 +5,7 @@
       autoplay
       playsinline
       :muted="muted"
-      class="block h-full w-full"
-      :class="source === 'screen' ? 'object-contain' : 'object-cover'"
+      class="block h-full w-full object-contain"
     />
     <figcaption class="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white">
       {{ label }} · {{ source === 'screen' ? 'Screen' : 'Camera' }}

@@ -8,6 +8,7 @@ export const useVoiceStore = defineStore('voice', () => {
     const connectedUsers = ref(new Map());
 
     const userVolumes = ref({});
+    const trackVolumes = ref({});
 
     const userDirectory = ref(new Map());
     const micMuted = ref(true);
@@ -38,6 +39,8 @@ export const useVoiceStore = defineStore('voice', () => {
                     }
                 } catch (_) { /* ignore */ }
             }
+            const persistedTrackVolumes = localStorage.getItem('voice.trackVolumes');
+            if (persistedTrackVolumes) Object.assign(trackVolumes.value, JSON.parse(persistedTrackVolumes));
         } catch (_) { /* noop */ }
     }
 
@@ -51,6 +54,9 @@ export const useVoiceStore = defineStore('voice', () => {
         }, { immediate: true })
         watch(userVolumes, (vols) => {
             try { localStorage.setItem('voice.userVolumes', JSON.stringify(vols)) } catch (_) { /* noop */ }
+        }, { deep: true, immediate: true })
+        watch(trackVolumes, (vols) => {
+            try { localStorage.setItem('voice.trackVolumes', JSON.stringify(vols)) } catch (_) { /* noop */ }
         }, { deep: true, immediate: true })
     }
 
@@ -213,6 +219,19 @@ export const useVoiceStore = defineStore('voice', () => {
     }
     function getUserVolume(userId) {
         return typeof userVolumes.value[userId] !== 'undefined' ? userVolumes.value[userId] : 1.0;
+    }
+
+    function setTrackVolume(userId, source, volume) {
+        const v = Math.max(0, Math.min(1, Number(volume)));
+        trackVolumes.value[`${userId}:${source}`] = v;
+        if (source === 'audio') userVolumes.value[userId] = v;
+        sfuComposable.value?.applyVolumeForTrack?.(userId, source, v);
+    }
+
+    function getTrackVolume(userId, source) {
+        const value = trackVolumes.value[`${userId}:${source}`];
+        if (typeof value !== 'undefined') return value;
+        return source === 'audio' ? getUserVolume(userId) : 1.0;
     }
 
     function updateUserSpeaking(userId, speaking) {
@@ -533,7 +552,11 @@ export const useVoiceStore = defineStore('voice', () => {
             } else {
                 const producer = await sfuComposable.value.startVideoProduction('screen');
                 screenSharing.value = true;
-                producer?.on?.('trackended', () => { screenSharing.value = false; });
+                const handleScreenShareEnded = () => {
+                    screenSharing.value = false;
+                };
+                producer?.track?.addEventListener?.('ended', handleScreenShareEnded, { once: true });
+                producer?.on?.('trackended', handleScreenShareEnded);
             }
             error.value = null;
         } catch (err) {
@@ -688,7 +711,10 @@ export const useVoiceStore = defineStore('voice', () => {
         getUserProfile,
         setUserVolume,
         getUserVolume,
+        setTrackVolume,
+        getTrackVolume,
         userVolumes: readonly(userVolumes),
+        trackVolumes: readonly(trackVolumes),
         applyOutputDevice
     }
 });

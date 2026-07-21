@@ -23,9 +23,7 @@
   :disabled="!messageText.trim()"
 
       >
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-        </svg>
+        <Icon name="lucide:send" class="size-6" />
       </button>
     </form>
 
@@ -46,9 +44,7 @@
     <!-- Connection status -->
     <div v-if="!connected" class="mt-2 text-xs text-warning">
       <div class="flex items-center gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 5.636M5.636 18.364l12.728-12.728" />
-        </svg>
+        <Icon name="lucide:ban" class="h-3 w-3" />
         <span>We're offline</span>
         <button @click="triggerSync" class="btn btn-xs btn-outline btn-warning ml-2">
           Sync Now

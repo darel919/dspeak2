@@ -94,8 +94,10 @@
                     </select>
                   </label>
                   <label class="block text-sm">
-                    <span class="mb-1 flex justify-between"><span>Frame rate</span><span>{{ cameraVideo.frameRate }} FPS</span></span>
-                    <input class="range range-primary range-sm" type="range" min="25" max="60" step="1" :value="cameraVideo.frameRate" @input="setCameraFrameRate($event.target.value)" />
+                    <span class="mb-1 block">Frame rate</span>
+                    <select class="select select-bordered select-sm w-full" :value="cameraVideo.frameRate" @change="setCameraFrameRate($event.target.value)">
+                      <option v-for="fps in frameRateOptions" :key="fps" :value="fps">{{ fps }} FPS</option>
+                    </select>
                   </label>
                 </div>
                 <div class="rounded-lg border border-base-300 p-4">
@@ -107,8 +109,10 @@
                     </select>
                   </label>
                   <label class="block text-sm">
-                    <span class="mb-1 flex justify-between"><span>Frame rate</span><span>{{ screenVideo.frameRate }} FPS</span></span>
-                    <input class="range range-primary range-sm" type="range" min="25" max="60" step="1" :value="screenVideo.frameRate" @input="setScreenFrameRate($event.target.value)" />
+                    <span class="mb-1 block">Frame rate</span>
+                    <select class="select select-bordered select-sm w-full" :value="screenVideo.frameRate" @change="setScreenFrameRate($event.target.value)">
+                      <option v-for="fps in frameRateOptions" :key="fps" :value="fps">{{ fps }} FPS</option>
+                    </select>
                   </label>
                 </div>
               </div>
@@ -240,6 +244,7 @@ const resolutionOptions = [
   { value: '1440p', label: '1440p' },
   { value: '2160p', label: '2160p (4K)' }
 ]
+const frameRateOptions = [25, 30, 50, 60]
 
 function setCameraResolution(resolution) { settingsStore.setCameraVideoSettings({ resolution }) }
 function setCameraFrameRate(frameRate) { settingsStore.setCameraVideoSettings({ frameRate: Number(frameRate) }) }

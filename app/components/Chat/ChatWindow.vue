@@ -11,9 +11,7 @@
             @click="$emit('back')"
             class="btn btn-ghost btn-sm btn-circle"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-            </svg>
+            <Icon name="lucide:chevron-left" class="h-5 w-5" />
           </button>
 
           <div class="flex flex-col sm:flex-row items-start sm:items-center gap-0 sm:gap-3">
@@ -55,9 +53,7 @@
 
       <!-- Error message -->
       <div v-else-if="error" class="alert alert-error">
-        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
         <div>
           <h3 class="font-bold">Error loading messages</h3>
           <div class="text-xs">{{ error }}</div>
@@ -70,9 +66,7 @@
       <!-- Empty state -->
       <div v-else-if="messages.length === 0" class="text-center py-12">
         <div class="text-base-content/50 mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
+          <Icon name="lucide:message-circle" class="h-16 w-16 mx-auto mb-4" />
           <p class="text-lg">No messages yet</p>
           <p class="text-sm">Start the conversation!</p>
         </div>
@@ -99,9 +93,7 @@
           @click="scrollToBottom"
           class="btn btn-circle btn-primary shadow-lg"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-          </svg>
+          <Icon name="lucide:arrow-down" class="h-5 w-5" />
         </button>
       </div>
     </div>
@@ -131,9 +123,7 @@
           @click="toggleMemberList"
           :title="'Hide member list'"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <Icon name="lucide:x" class="h-4 w-4" />
         </button>
         <MemberList :members="room?.members || []" :room="room" :room-id="room?.id || ''" :channel-id="channelId" />
       </div>
@@ -145,9 +135,7 @@
       @click="toggleMemberList"
       :title="'Show member list'"
     >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-      </svg>
+      <Icon name="lucide:chevron-left" class="h-5 w-5" />
     </button>
   </div>
 </template>

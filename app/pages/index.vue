@@ -7,11 +7,11 @@
                 </div>
         </section>
 
-        <section v-else class="min-h-screen-minus-navbar bg-base-100">
-            <div class="h-screen-minus-navbar">
+        <section v-else class="h-screen-minus-navbar overflow-hidden bg-base-100">
+            <div class="h-full min-h-0 overflow-hidden">
                 <div class="h-full flex">
                     <!-- Desktop Layout -->
-                    <div v-if="!isMobile" class="flex w-full">
+                    <div v-if="!isMobile" class="flex min-h-0 w-full overflow-hidden">
                         <!-- Channel List Sidebar (desktop only) -->
                         <div v-if="selectedRoom" class="w-64 border-base-300">
                             <ChannelList
@@ -22,7 +22,7 @@
                         </div>
 
                         <!-- Chat Area or Welcome -->
-                        <div class="flex-1 flex flex-col">
+                        <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
                             <!-- Chat Window -->
                             <ChatWindow
                                 v-if="selectedRoom && selectedChannel && selectedChannel.id"
@@ -43,18 +43,16 @@
                             <div v-else class="flex-1 flex items-center justify-center bg-base-100">
                                 <div class="text-center max-w-md">
                                     <div class="text-base-content/30 mb-6">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-24 w-24 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                                        </svg>
+                                        <Icon name="lucide:message-circle" class="h-24 w-24 mx-auto" />
                                     </div>
                                     <h2 class="text-2xl font-semibold mb-2">Welcome to DSpeak</h2>
                                     <p class="text-base-content/60 mb-6">
                                         Select a server from the navbar to start collaborating with your team.
                                     </p>
-                                    <div class="text-sm text-base-content/50">
-                                        <p>💬 Real-time messaging</p>
-                                        <p>📱 Responsive design</p>
-                                        <p>👥 Team collaboration</p>
+                                    <div class="flex flex-col items-center gap-2 text-sm text-base-content/50">
+                                        <p class="flex items-center gap-2"><Icon name="lucide:message-circle" class="size-4" />Real-time messaging</p>
+                                        <p class="flex items-center gap-2"><Icon name="lucide:smartphone" class="size-4" />Responsive design</p>
+                                        <p class="flex items-center gap-2"><Icon name="lucide:users" class="size-4" />Team collaboration</p>
                                     </div>
                                 </div>
                             </div>
@@ -62,7 +60,7 @@
                     </div>
 
                     <!-- Mobile Layout -->
-                    <div v-else class="w-full">
+                    <div v-else class="min-h-0 w-full overflow-hidden">
                         <!-- Mobile: Full-screen chat when channel is selected -->
                         <div v-if="selectedChannel && selectedChannel.id" class="h-full">
                             <ChatWindow

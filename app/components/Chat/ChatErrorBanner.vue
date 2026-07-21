@@ -1,9 +1,7 @@
 <template>
   <div v-if="error" class="alert alert-warning flex items-center justify-between mb-2">
     <div class="flex items-center gap-3">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636" />
-      </svg>
+      <Icon name="lucide:ban" class="h-5 w-5" />
       <div>
         <div class="font-semibold text-sm">Real-time connection issue</div>
         <div class="text-xs opacity-60">{{ error }}</div>

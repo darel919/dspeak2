@@ -1,35 +1,27 @@
 <template>
   <div class="dropdown dropdown-end">
     <label tabindex="0" class="btn btn-ghost btn-xs btn-circle">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" />
-      </svg>
+      <Icon name="lucide:ellipsis-vertical" class="h-4 w-4" />
     </label>
 
     <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
       <!-- <li v-if="!isOwnMessage">
         <button @click="handleMarkAsRead" :disabled="isRead">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
+          <Icon name="lucide:check" class="h-4 w-4" />
           {{ isRead ? 'Already read' : 'Mark as read' }}
         </button>
       </li>
        -->
       <li>
         <button @click="handleCopyMessage">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
+          <Icon name="lucide:copy" class="h-4 w-4" />
           Copy message
         </button>
       </li>
 
       <!-- <li>
         <button @click="handleReportMessage">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-          </svg>
+          <Icon name="lucide:triangle-alert" class="h-4 w-4" />
           Report message
         </button>
       </li>
@@ -38,9 +30,7 @@
 
       <li>
         <button @click="handleViewDetails">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="lucide:info" class="h-4 w-4" />
           Message details
         </button>
       </li>

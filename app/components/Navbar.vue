@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth'
 import { useVoiceStore } from '../stores/voice'
 import { useChannelsStore } from '../stores/channels'
 import { useSettingsStore } from '../stores/settings'
+import { isScreenShareFpsBelowTarget } from '../shared/video-settings'
 
 import RoomList from './RoomList.vue'
 
@@ -84,7 +85,11 @@ const lastRttMs = ref<number|null>(null)
 const lastJitterMs = ref<number|null>(null)
 const lastLoss = ref<number|null>(null)
 const signalLevel = ref(0)
+const outboundVideoStats = ref<any[]>([])
 let signalTimer: any = null
+let lowScreenFpsSamples = 0
+const screenShareFpsLow = ref(false)
+const SCREEN_FPS_WARNING_SAMPLES = 3
 
 
 const elapsedText = ref('')
@@ -139,18 +144,52 @@ const signalTooltip = computed(() => {
     return parts.join(' • ')
 })
 
+function formatVideoQuality(stat: any) {
+    if (!stat?.width || !stat?.height) return ''
+    const resolution = Math.min(stat.width, stat.height)
+    const fps = stat.fps ? Math.round(stat.fps) : null
+    return `${resolution}p${fps ? `@${fps}fps` : ''}`
+}
+
+function monitorScreenShareFps(stats: any[]) {
+    const screen = stats.find((stat) => stat.source === 'screen')
+    if (!voiceStore.screenSharing || !screen || !isScreenShareFpsBelowTarget(screen.fps, screen.targetFps)) {
+        lowScreenFpsSamples = 0
+        screenShareFpsLow.value = false
+        return
+    }
+    lowScreenFpsSamples += 1
+    screenShareFpsLow.value = lowScreenFpsSamples >= SCREEN_FPS_WARNING_SAMPLES
+}
+
+const outboundVideoLabels = computed(() => outboundVideoStats.value
+    .map((stat) => ({
+        source: stat.source,
+        text: formatVideoQuality(stat)
+    }))
+    .filter((item) => item.text))
+
 async function pollSignal() {
     try {
 
         const sfu: any = (voiceStore as any).sfuComposable
         if (!voiceStore.connected || !sfu || !sfu.getWebRTCStatsSnapshot) {
             signalLevel.value = 0
+            outboundVideoStats.value = []
+            lowScreenFpsSamples = 0
+            screenShareFpsLow.value = false
             return
         }
         if (sfu.ensureAudioElements) sfu.ensureAudioElements()
         const snap = await sfu.getWebRTCStatsSnapshot()
+        outboundVideoStats.value = sfu.getOutboundVideoStats ? await sfu.getOutboundVideoStats() : []
+        monitorScreenShareFps(outboundVideoStats.value)
         const t = snap?.transports?.find((x: any) => x.kind === 'send') || snap?.transports?.[0]
-        if (!t || t.pcStates.iceConnectionState !== 'connected') { signalLevel.value = 1; return }
+        if (!t || t.pcStates.iceConnectionState !== 'connected') {
+            signalLevel.value = 1
+            outboundVideoStats.value = []
+            return
+        }
         const rtt = t.candidatePair?.currentRoundTripTime
         const jitter = t.inboundAudio?.jitter
         const loss = t.remoteInboundAudio?.fractionLost
@@ -164,7 +203,9 @@ async function pollSignal() {
         if (score < 1) score = 1
         signalLevel.value = score
     } catch {
-
+        outboundVideoStats.value = []
+        lowScreenFpsSamples = 0
+        screenShareFpsLow.value = false
     }
 }
 
@@ -214,6 +255,33 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                     <div class="text-sm text-base-content/70 select-none">
                         <span v-if="lastRttMs != null">{{ Math.round(lastRttMs) }}ms</span>
                     </div>
+                    <div
+                        v-for="quality in outboundVideoLabels"
+                        :key="quality.source"
+                        class="text-sm text-base-content/70 select-none whitespace-nowrap"
+                        :class="quality.source === 'screen' ? 'cursor-pointer hover:text-base-content' : ''"
+                        :title="quality.source === 'screen' ? 'Open screen-share debug information' : 'Camera send quality'"
+                        @click.stop="quality.source === 'screen' && (statsVisible = true)"
+                    >
+                        <span v-if="outboundVideoLabels.length > 1">{{ quality.source === 'screen' ? 'Share' : 'Cam' }} </span>{{ quality.text }}
+                    </div>
+                    <button
+                        v-if="screenShareFpsLow"
+                        class="btn btn-ghost btn-xs btn-circle text-warning animate-pulse"
+                        title="Screen-share send FPS is below target — open debug information"
+                        aria-label="Screen-share send FPS is below target"
+                        @click.stop="statsVisible = true"
+                    >
+                        <Icon name="lucide:triangle-alert" class="size-4" />
+                    </button>
+                    <button
+                        v-if="voiceStore.screenSharing"
+                        class="btn btn-ghost btn-xs btn-circle"
+                        title="View screen-share debug information"
+                        @click.stop="statsVisible = true"
+                    >
+                        <Icon name="lucide:bug" class="size-4" />
+                    </button>
                     <div v-if="lastLoss != null && lastLoss > 0.05" class="tooltip" data-tip="Packet loss {{ (lastLoss*100).toFixed(1) }}%">
                         <span class="w-3 h-3 rounded-full bg-warning animate-pulse inline-block"></span>
                     </div>
@@ -231,6 +299,24 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         </div>
                     </button>
 
+                    <!-- Camera Control -->
+                    <button
+                        @click.stop="voiceStore.toggleCamera"
+                        :class="['btn btn-circle btn-xs', voiceStore.cameraEnabled ? 'btn-primary' : 'btn-outline']"
+                        :title="voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'"
+                    >
+                        <Icon name="lucide:camera" class="size-4" />
+                    </button>
+
+                    <!-- Screen Share Control -->
+                    <button
+                        @click.stop="voiceStore.toggleScreenShare"
+                        :class="['btn btn-circle btn-xs', voiceStore.screenSharing ? 'btn-primary' : 'btn-outline']"
+                        :title="voiceStore.screenSharing ? 'Stop screen sharing' : 'Share screen'"
+                    >
+                        <Icon name="lucide:monitor-up" class="size-4" />
+                    </button>
+
                     <!-- Broadcast Mode Toggle -->
                     <button
                       @click.stop="toggleBroadcastMode"
@@ -238,8 +324,8 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                       :title="broadcastMode ? 'Broadcast Mode ON: You only send audio' : 'Broadcast Mode OFF: You can hear others'"
                       v-if="voiceStore.connected"
                     >
-                      <svg v-if="broadcastMode" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-5"><path d="M12 3v2a7 7 0 0 1 0 14v2a9 9 0 0 0 0-18zm0 4v2a3 3 0 0 1 0 6v2a5 5 0 0 0 0-10z"/></svg>
-                      <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-5"><path d="M12 3v2a7 7 0 0 1 0 14v2a9 9 0 0 0 0-18zm0 4v2a3 3 0 0 1 0 6v2a5 5 0 0 0 0-10z"/></svg>
+                      <Icon name="lucide:radio" v-if="broadcastMode" class="size-5" />
+                      <Icon name="lucide:radio" v-else class="size-5" />
                     </button>
                     <!-- Microphone Control -->
                     <button
@@ -251,13 +337,9 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         ]"
                         :title="voiceStore.micMuted ? 'Unmute Microphone' : 'Mute Microphone'"
                     >
-                        <svg v-if="!voiceStore.micMuted" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 text-current">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
-                        </svg>
+                        <Icon name="lucide:mic" v-if="!voiceStore.micMuted" class="size-6 text-current" />
 
-                        <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 text-white">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
-                        </svg>
+                        <Icon name="lucide:mic-off" v-else class="size-6 text-white" />
                     </button>
 
                     <!-- Deafen Control -->
@@ -269,12 +351,8 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         ]"
                         :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
                     >
-                        <svg v-if="!voiceStore.deafened" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clip-rule="evenodd" />
-                        </svg>
-                        <svg v-else class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019 10a1 1 0 10-2 0 8.1 8.1 0 01-1.879 5.131l-1.297-1.297a5.99 5.99 0 001.176-3.834 1 1 0 10-2 0 3.99 3.99 0 01-.849 2.205l-1.356-1.356a1.99 1.99 0 00-.205-.849V4a1 1 0 00-1.707-.707L4.586 7H2a1 1 0 00-1 1v4a1 1 0 001 1h2.586l.707.707L3.707 2.293z" clip-rule="evenodd" />
-                        </svg>
+                        <Icon name="lucide:volume-2" v-if="!voiceStore.deafened" class="w-3 h-3" />
+                        <Icon name="lucide:volume-x" v-else class="w-3 h-3" />
                     </button>
 
                     <!-- Disconnect Button -->
@@ -283,9 +361,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         class="btn btn-error btn-xs btn-circle"
                         title="Disconnect from voice"
                     >
-                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                        </svg>
+                        <Icon name="lucide:x" class="w-3 h-3" />
                     </button>
                 </div>
 
@@ -318,9 +394,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         v-if="voiceStore.connected"
                         class="absolute -bottom-1 -right-1 w-4 h-4 bg-success rounded-full flex items-center justify-center"
                     >
-                        <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 0 1 7 15a1 1 0 0 0-2 0 7.001 7.001 0 0 0 6 6.93V17H6a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-2.07z" clip-rule="evenodd" />
-                        </svg>
+                        <Icon name="lucide:mic" class="w-2.5 h-2.5 text-white" />
                     </div>
                     <!-- Connecting / Dropped Indicator (Yellow) -->
                     <div v-else-if="!voiceStore.connected && (voiceStore.connecting || voiceStore.error)" class="absolute -bottom-1 -right-1 w-4 h-4 bg-warning rounded-full animate-pulse"></div>

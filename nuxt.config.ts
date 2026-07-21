@@ -26,7 +26,14 @@ export default defineNuxtConfig({
   },
 
   css: ["~/assets/app.css"],
-  modules: ["@pinia/nuxt", "@vite-pwa/nuxt"],
+  modules: ["@pinia/nuxt", "@vite-pwa/nuxt", "@nuxt/icon"],
+
+  icon: {
+    provider: 'server',
+    serverBundle: {
+      collections: ['lucide']
+    }
+  },
 
   nitro: {
     experimental: {

@@ -10,7 +10,7 @@
         :key="member.id"
         class="flex items-center gap-3 group relative"
         :style="getMemberPresenceStatus(member) === 'offline' && member.id !== currentUser?.id ? 'opacity: 0.3' : ''"
-        @contextmenu.prevent="openVolumeMenu(member)"
+        @contextmenu.prevent="openVolumeMenu(member, $event)"
       >
         <div class="avatar relative flex items-center" style="overflow: visible;">
           <div
@@ -38,23 +38,40 @@
         <div class="flex items-center gap-1 text-base-content font-medium">
           <span class="text-sm font-bold">{{ member.name }}</span>
           <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-accent">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.25-8.25-3.286Zm0 13.036h.008v.008H12v-.008Z" />
-            </svg>
+            <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
           </span>
-          <!-- Volume Control Context Menu -->
-          <div v-if="volumeMenuUser && volumeMenuUser.id === member.id" class="absolute top-2 right-2 bg-base-200 border border-base-300 rounded-lg shadow-lg p-3 z-50 w-48">
-            <div class="text-xs font-semibold mb-2">User Volume</div>
-            <input type="range" min="0" max="1" step="0.01" :value="voiceStore.getUserVolume(member.id)" @input="onVolumeChange(member.id, $event)" class="w-full" />
-            <div class="flex justify-between text-xs mt-1">
-              <span>0%</span>
-              <span>100%</span>
-            </div>
-            <button class="btn btn-xs btn-outline w-full mt-2" @click="closeVolumeMenu">Close</button>
-          </div>
         </div>
       </div>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="volumeMenuUser"
+        ref="volumeMenuElement"
+        class="fixed z-[100] w-48 rounded-lg border border-base-300 bg-base-200 p-3 text-base-content opacity-100 shadow-lg"
+        :style="volumeMenuStyle"
+        role="dialog"
+        aria-label="User volume control"
+        @pointerdown.stop
+        @contextmenu.prevent.stop
+      >
+        <div class="mb-2 text-xs font-semibold">User Volume</div>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          :value="voiceStore.getUserVolume(volumeMenuUser.id)"
+          class="w-full"
+          :aria-label="`Volume for ${volumeMenuUser.name}`"
+          @input="onVolumeChange(volumeMenuUser.id, $event)"
+        />
+        <div class="mt-1 flex justify-between text-xs">
+          <span>0%</span>
+          <span>100%</span>
+        </div>
+        <button class="btn btn-xs btn-outline mt-2 w-full" @click="closeVolumeMenu">Close</button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -62,8 +79,18 @@
 import { useVoiceStore } from '../stores/voice'
 const voiceStore = useVoiceStore()
 const volumeMenuUser = ref(null)
-function openVolumeMenu(member) {
+const volumeMenuElement = ref(null)
+const volumeMenuPosition = ref({ x: 0, y: 0 })
+const volumeMenuStyle = computed(() => ({
+  left: `${volumeMenuPosition.value.x}px`,
+  top: `${volumeMenuPosition.value.y}px`
+}))
+
+async function openVolumeMenu(member, event) {
   volumeMenuUser.value = member
+  volumeMenuPosition.value = { x: event.clientX, y: event.clientY }
+  await nextTick()
+  keepVolumeMenuInViewport()
 }
 function closeVolumeMenu() {
   volumeMenuUser.value = null
@@ -71,6 +98,35 @@ function closeVolumeMenu() {
 function onVolumeChange(userId, event) {
   voiceStore.setUserVolume(userId, Number(event.target.value))
 }
+
+function keepVolumeMenuInViewport() {
+  if (!volumeMenuElement.value) return
+
+  const viewportPadding = 8
+  const { width, height } = volumeMenuElement.value.getBoundingClientRect()
+  volumeMenuPosition.value = {
+    x: Math.max(viewportPadding, Math.min(volumeMenuPosition.value.x, window.innerWidth - width - viewportPadding)),
+    y: Math.max(viewportPadding, Math.min(volumeMenuPosition.value.y, window.innerHeight - height - viewportPadding))
+  }
+}
+
+function onDocumentKeydown(event) {
+  if (event.key === 'Escape') closeVolumeMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', closeVolumeMenu)
+  document.addEventListener('keydown', onDocumentKeydown)
+  window.addEventListener('resize', closeVolumeMenu)
+  window.addEventListener('scroll', closeVolumeMenu, true)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', closeVolumeMenu)
+  document.removeEventListener('keydown', onDocumentKeydown)
+  window.removeEventListener('resize', closeVolumeMenu)
+  window.removeEventListener('scroll', closeVolumeMenu, true)
+})
 import { useRuntimeConfig } from '#app'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'

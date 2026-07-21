@@ -15,7 +15,7 @@
               SFU
             </button>
             <button class="btn btn-ghost btn-xs btn-circle" @click="visible = false" title="Close">
-              ✕
+              <Icon name="lucide:x" class="size-3" />
             </button>
           </div>
         </div>
@@ -24,6 +24,46 @@
           <div v-if="!snapshot" class="text-base-content/60">No stats yet.</div>
           <template v-else>
             <div class="text-base-content/60 mb-2">Updated: {{ new Date(snapshot.timestamp).toLocaleTimeString() }}</div>
+            <div v-if="screenShareStats" class="mb-3 rounded-lg border border-primary/30 bg-primary/5 p-2">
+              <div class="mb-2 flex items-center justify-between">
+                <div class="font-semibold">Screen share</div>
+                <span class="badge badge-sm" :class="screenShareFpsLow ? 'badge-warning' : 'badge-success'">
+                  {{ screenShareFpsLow ? 'Below target' : 'Healthy' }}
+                </span>
+              </div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1">
+                <div class="text-base-content/60">Send / target FPS</div>
+                <div>{{ formatFps(screenShareStats.fps) }} / {{ formatFps(screenShareStats.targetFps) }}</div>
+                <div class="text-base-content/60">Encode time / frame</div>
+                <div>{{ formatFrameTime(screenShareStats.frameTimeMs) }}</div>
+                <div class="text-base-content/60">Encoder</div>
+                <div>{{ formatCodecEngine(screenShareStats, 'encoder') }}</div>
+                <div class="text-base-content/60">Codec</div>
+                <div>{{ screenShareStats.codec || '-' }}</div>
+                <div class="text-base-content/60">Send resolution</div>
+                <div>{{ formatResolution(screenShareStats) }}</div>
+                <div class="text-base-content/60">Frames encoded</div>
+                <div>{{ screenShareStats.framesEncoded ?? '-' }}</div>
+                <div class="text-base-content/60">Quality limitation</div>
+                <div>{{ screenShareStats.qualityLimitationReason || 'none' }}</div>
+              </div>
+            </div>
+            <div v-for="(video, index) in inboundVideoStats" :key="video.consumerId || index" class="mb-3 rounded-lg border border-base-content/20 p-2">
+              <div class="mb-2 font-semibold">Received video {{ inboundVideoStats.length > 1 ? index + 1 : '' }}</div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1">
+                <div class="text-base-content/60">Receive FPS</div><div>{{ formatFps(video.fps) }}</div>
+                <div class="text-base-content/60">Decode time / frame</div><div>{{ formatFrameTime(video.decodeTimeMs) }}</div>
+                <div class="text-base-content/60">Decoder</div><div>{{ formatCodecEngine(video, 'decoder') }}</div>
+                <div class="text-base-content/60">Codec</div><div>{{ video.codec || '-' }}</div>
+              </div>
+            </div>
+            <div class="mb-3 rounded-lg border border-base-content/20 p-2">
+              <div class="mb-2 font-semibold">Device utilization</div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1">
+                <div class="text-base-content/60">CPU media</div><div>{{ formatPercent(deviceUtilization.cpu) }}</div>
+                <div class="text-base-content/60">GPU media</div><div>{{ formatPercent(deviceUtilization.gpu) }}</div>
+              </div>
+            </div>
             <div v-for="t in snapshot.transports" :key="t.kind" class="mb-3">
               <div class="font-semibold mb-1 capitalize">{{ t.kind }} transport</div>
               <div class="grid grid-cols-2 gap-x-3 gap-y-1">
@@ -125,15 +165,41 @@
 <script setup>
 import { useVoiceStore } from '~/stores/voice'
 import { useMediasoupSfu } from '~/composables/useMediasoupSfu'
+import { calculateMediaEngineUtilization, classifyCodecImplementation, isScreenShareFpsBelowTarget } from '~/shared/video-settings'
 
 const voiceStore = useVoiceStore()
 const visible = useState('webrtc-stats-visible', () => false)
 const polling = ref(true)
 const snapshot = ref(null)
+const outboundVideoStats = ref([])
+const inboundVideoStats = ref([])
 const lastError = ref('')
 let intervalId = null
 const showDebug = ref(false)
 const sfu = useMediasoupSfu()
+const screenShareStats = computed(() => outboundVideoStats.value.find(stat => stat.source === 'screen') || null)
+const screenShareFpsLow = computed(() => isScreenShareFpsBelowTarget(screenShareStats.value?.fps, screenShareStats.value?.targetFps))
+const deviceUtilization = computed(() => {
+  const totals = { cpu: null, gpu: null }
+  const samples = [...outboundVideoStats.value.map(stat => ({ stat, direction: 'encoder', time: stat.frameTimeMs })), ...inboundVideoStats.value.map(stat => ({ stat, direction: 'decoder', time: stat.decodeTimeMs }))]
+  for (const sample of samples) {
+    const value = calculateMediaEngineUtilization(sample.time, sample.stat.fps)
+    if (value == null) continue
+    const efficient = sample.stat[sample.direction === 'encoder' ? 'powerEfficientEncoder' : 'powerEfficientDecoder']
+    const type = classifyCodecImplementation(sample.stat[`${sample.direction}Implementation`]).type
+    const engine = type === 'hardware' || efficient === true
+      ? 'gpu'
+      : type === 'software' || efficient === false
+        ? 'cpu'
+        : null
+    if (!engine) continue
+    totals[engine] = (totals[engine] ?? 0) + value
+  }
+  return {
+    cpu: totals.cpu == null ? null : Math.min(100, totals.cpu),
+    gpu: totals.gpu == null ? null : Math.min(100, totals.gpu)
+  }
+})
 const unwrap = (v) => {
   try {
     if (!v) return null
@@ -224,6 +290,27 @@ function formatBitrate(v) {
   while (bps >= 1000 && i < units.length - 1) { bps /= 1000; i++ }
   return `${bps.toFixed(1)} ${units[i]}`
 }
+function formatFps(v) {
+  return Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)} fps` : '-'
+}
+function formatFrameTime(v) {
+  return Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)} ms` : '-'
+}
+function formatPercent(v) {
+  return Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}%` : '-'
+}
+function formatCodecEngine(stat, direction) {
+  const efficient = stat?.[direction === 'encoder' ? 'powerEfficientEncoder' : 'powerEfficientDecoder']
+  const implementation = stat?.[`${direction}Implementation`]
+  const classified = classifyCodecImplementation(implementation)
+  if (classified.type !== 'unknown') return classified.label
+  if (efficient === true) return `Likely hardware${implementation ? ` (${implementation})` : ''}`
+  if (efficient === false) return `Likely software${implementation ? ` (${implementation})` : ''}`
+  return classified.label
+}
+function formatResolution(stat) {
+  return stat?.width && stat?.height ? `${stat.width} × ${stat.height}` : '-'
+}
 function summarizeCand(c) {
   if (!c) return '-'
   const addr = c.address ? `${c.address}:${c.port}` : ''
@@ -239,6 +326,8 @@ async function pollOnce() {
       return
     }
     const snap = await sfu.getWebRTCStatsSnapshot()
+    outboundVideoStats.value = sfu.getOutboundVideoStats ? await sfu.getOutboundVideoStats() : []
+    inboundVideoStats.value = sfu.getInboundVideoStats ? await sfu.getInboundVideoStats() : []
 
     try {
       const now = performance.now()
@@ -275,6 +364,8 @@ async function pollOnce() {
     snapshot.value = snap
   } catch (e) {
     lastError.value = e?.message || String(e)
+    outboundVideoStats.value = []
+    inboundVideoStats.value = []
   }
 }
 

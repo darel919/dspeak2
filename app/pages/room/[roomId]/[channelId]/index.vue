@@ -1,9 +1,9 @@
 <template>
-  <section class="min-h-screen-minus-navbar bg-base-100">
-    <div class="h-screen-minus-navbar">
+  <section class="h-screen-minus-navbar overflow-hidden bg-base-100">
+    <div class="h-full min-h-0 overflow-hidden">
       <div class="h-full flex">
         <!-- Desktop Layout -->
-        <div v-show="!isMobile" class="flex w-full">
+        <div v-show="!isMobile" class="flex min-h-0 w-full overflow-hidden">
           <!-- Channel List Sidebar -->
           <div class="w-64 border-base-300">
             <ChannelList
@@ -15,9 +15,9 @@
           </div>
 
           <!-- Main Content Area -->
-          <div class="flex-1 flex flex-col">
+          <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
             <!-- Voice Channel -->
-            <div v-if="selectedChannel && selectedChannel.isMedia" class="flex-1 p-4">
+            <div v-if="selectedChannel && selectedChannel.isMedia" class="min-h-0 flex-1 overflow-hidden p-4">
               <VoiceChannel
                 :key="`voice-${selectedChannel.id}`"
                 :channel="selectedChannel"
@@ -42,7 +42,7 @@
         </div>
 
         <!-- Mobile Layout -->
-        <div v-show="isMobile" class="w-full">
+        <div v-show="isMobile" class="min-h-0 w-full overflow-hidden">
           <!-- Mobile: Full-screen content when channel is selected -->
           <div v-if="selectedChannel && selectedChannel.id" class="h-full">
             <!-- Voice Channel -->

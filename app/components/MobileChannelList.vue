@@ -7,9 +7,7 @@
           @click="$emit('back')"
           class="btn btn-ghost btn-sm btn-circle"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-          </svg>
+          <Icon name="lucide:chevron-left" class="h-5 w-5" />
         </button>
         <div>
           <h2 class="text-lg font-semibold">{{ room?.name || 'Server' }}</h2>
@@ -39,9 +37,7 @@
           >
             <!-- Channel Icon -->
             <div class="flex-shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-              </svg>
+              <Icon name="lucide:message-square" class="h-5 w-5" />
             </div>
 
             <!-- Channel Info -->
@@ -89,9 +85,7 @@
           >
             <!-- Channel Icon -->
             <div class="flex-shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
+              <Icon name="lucide:mic" class="h-5 w-5" />
             </div>
 
             <!-- Channel Info -->
@@ -113,7 +107,8 @@
             <!-- Voice channel specific indicators -->
             <div class="flex-shrink-0">
               <div v-if="channel.inRoom?.length" class="badge badge-success badge-sm">
-                {{ channel.inRoom.length }} 🔊
+                <Icon name="lucide:volume-2" class="size-3" />
+                {{ channel.inRoom.length }}
               </div>
             </div>
           </button>
@@ -123,9 +118,7 @@
       <!-- No Channels State -->
       <div v-if="textChannels.length === 0 && voiceChannels.length === 0" class="flex flex-col items-center justify-center h-64 text-center">
         <div class="text-base-content/50 mb-4">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-          </svg>
+          <Icon name="lucide:message-square" class="h-16 w-16 mx-auto mb-4" />
         </div>
         <h3 class="font-medium mb-2">No channels found</h3>
         <p class="text-sm text-base-content/60">This server doesn't have any channels yet</p>

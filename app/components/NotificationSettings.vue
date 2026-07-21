@@ -3,9 +3,7 @@
     <label class="label cursor-pointer">
       <span class="label-text">
         <div class="flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-          </svg>
+          <Icon name="lucide:bell" class="h-5 w-5" />
           <span>Browser Notifications</span>
         </div>
       </span>
@@ -20,26 +18,35 @@
     
     <div class="label">
       <span class="label-text-alt text-base-content/60">
-        <span v-if="!isSupported" class="text-warning">
-          ⚠️ Notifications not supported in this browser
+        <span v-if="!isSupported" class="inline-flex items-center gap-1.5 text-warning">
+          <Icon name="lucide:triangle-alert" class="size-4" />
+          Notifications not supported in this browser
         </span>
-        <span v-else-if="permission === 'denied'" class="text-error">
-          🚫 Notifications blocked. Enable in browser settings.
+        <span v-else-if="permission === 'denied'" class="inline-flex items-center gap-1.5 text-error">
+          <Icon name="lucide:bell-off" class="size-4" />
+          Notifications blocked. Enable in browser settings.
         </span>
         <span v-else-if="permission === 'granted' && isEnabled" class="text-success">
-          ✅ You'll receive notifications for new messages
-          <span v-if="pushSub.isSupported.value && pushSub.isSubscribed.value" class="block text-xs mt-1">
-            📱 Push notifications: Active
+          <span class="inline-flex items-center gap-1.5">
+            <Icon name="lucide:circle-check" class="size-4" />
+            You'll receive notifications for new messages
           </span>
-          <span v-else-if="pushSub.isSupported.value && !pushSub.isSubscribed.value" class="block text-xs mt-1 text-warning">
-            📱 Push notifications: Not subscribed
+          <span v-if="pushSub.isSupported.value && pushSub.isSubscribed.value" class="mt-1 flex items-center gap-1.5 text-xs">
+            <Icon name="lucide:smartphone" class="size-3.5" />
+            Push notifications: Active
+          </span>
+          <span v-else-if="pushSub.isSupported.value && !pushSub.isSubscribed.value" class="mt-1 flex items-center gap-1.5 text-xs text-warning">
+            <Icon name="lucide:smartphone" class="size-3.5" />
+            Push notifications: Not subscribed
           </span>
         </span>
-        <span v-else-if="permission === 'granted' && !isEnabled" class="text-info">
-          💤 Notifications available but disabled
+        <span v-else-if="permission === 'granted' && !isEnabled" class="inline-flex items-center gap-1.5 text-info">
+          <Icon name="lucide:bell-off" class="size-4" />
+          Notifications available but disabled
         </span>
-        <span v-else-if="permission === 'default'" class="text-info">
-          💡 Click to enable notifications for new messages
+        <span v-else-if="permission === 'default'" class="inline-flex items-center gap-1.5 text-info">
+          <Icon name="lucide:lightbulb" class="size-4" />
+          Click to enable notifications for new messages
         </span>
         <span v-else class="text-base-content/40">
           Notifications disabled
@@ -48,9 +55,7 @@
     </div>
 
     <div v-if="showPermissionWarning" class="alert alert-warning mt-2">
-      <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-      </svg>
+      <Icon name="lucide:triangle-alert" class="stroke-current shrink-0 h-6 w-6" />
       <span>
         Notifications are blocked or not allowed. Please enable them in your browser settings to receive message alerts.
       </span>
@@ -85,7 +90,7 @@ async function testNotification() {
   testingNotification.value = true
   try {
     const notification = showNotification('Test Notification', {
-      body: 'This is a test notification from dSpeak! 🎉',
+      body: 'This is a test notification from dSpeak!',
       icon: '/favicon-32x32.png'
     })
     

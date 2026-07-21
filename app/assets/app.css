@@ -68,9 +68,10 @@ body {
 
 /* Layout utilities for proper viewport handling */
 .h-screen-minus-navbar {
-	height: calc(100vh - var(--navbar-height));
+	height: calc(100dvh - var(--navbar-height));
 }
 
 .min-h-screen-minus-navbar {
 	min-height: calc(100vh - var(--navbar-height));
+	min-height: calc(100dvh - var(--navbar-height));
 }

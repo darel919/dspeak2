@@ -49,6 +49,7 @@
             }"
           >
             <span class="text-xs">{{ result.timestamp }}</span>
+            <Icon :name="resultIcon(result.type)" class="size-4 shrink-0" />
             <span>{{ result.message }}</span>
           </div>
         </div>
@@ -103,6 +104,17 @@ const pushSub = usePushSubscription()
 const config = useRuntimeConfig()
 const running = ref(false)
 const testResults = ref([])
+
+function resultIcon(type) {
+  const icons = {
+    success: 'lucide:circle-check',
+    error: 'lucide:circle-x',
+    warning: 'lucide:triangle-alert',
+    info: 'lucide:info'
+  }
+
+  return icons[type] || icons.info
+}
 
 const supportStatus = computed(() => {
   if (!pushSub.isSupported.value) {
@@ -165,43 +177,43 @@ async function runBasicTests() {
   try {
 
     if (pushSub.isSupported.value) {
-      addResult('success', '✓ Browser supports push notifications')
+      addResult('success', 'Browser supports push notifications')
     } else {
-      addResult('error', '✗ Browser does not support push notifications')
+      addResult('error', 'Browser does not support push notifications')
     }
 
     if ('serviceWorker' in navigator) {
       const registration = await navigator.serviceWorker.getRegistration()
       if (registration) {
-        addResult('success', '✓ Service Worker is registered')
+        addResult('success', 'Service Worker is registered')
         
         if (registration.active) {
-          addResult('success', '✓ Service Worker is active')
+          addResult('success', 'Service Worker is active')
         } else {
-          addResult('warning', '⚠ Service Worker is not active')
+          addResult('warning', 'Service Worker is not active')
         }
       } else {
-        addResult('error', '✗ Service Worker is not registered')
+        addResult('error', 'Service Worker is not registered')
       }
     } else {
-      addResult('error', '✗ Service Worker not supported')
+      addResult('error', 'Service Worker not supported')
     }
 
     const vapidKey = config.public.VAPID_PUBLIC_KEY
     if (vapidKey && vapidKey.length >= 80) {
-      addResult('success', '✓ VAPID key is configured')
+      addResult('success', 'VAPID key is configured')
     } else {
-      addResult('error', '✗ VAPID key is missing or invalid')
+      addResult('error', 'VAPID key is missing or invalid')
     }
 
     if (typeof window !== 'undefined' && 'Notification' in window) {
       const permission = Notification.permission
       if (permission === 'granted') {
-        addResult('success', '✓ Notification permission granted')
+        addResult('success', 'Notification permission granted')
       } else if (permission === 'denied') {
-        addResult('error', '✗ Notification permission denied')
+        addResult('error', 'Notification permission denied')
       } else {
-        addResult('info', 'ℹ Notification permission not requested')
+        addResult('info', 'Notification permission not requested')
       }
     }
     
@@ -222,17 +234,17 @@ async function testSubscription() {
     if (pushSub.isSubscribed.value) {
       addResult('info', 'Already subscribed, testing unsubscribe...')
       await pushSub.unsubscribe()
-      addResult('success', '✓ Unsubscribed successfully')
+      addResult('success', 'Unsubscribed successfully')
     }
     
     addResult('info', 'Creating new subscription...')
     await pushSub.subscribe()
-    addResult('success', '✓ Subscribed successfully')
+    addResult('success', 'Subscribed successfully')
 
     const subscription = pushSub.subscription.value
     if (subscription) {
       addResult('info', `Endpoint: ${subscription.endpoint.substring(0, 50)}...`)
-      addResult('success', '✓ Subscription has valid endpoint')
+      addResult('success', 'Subscription has valid endpoint')
     }
     
   } catch (error) {
@@ -255,7 +267,7 @@ async function testNotification() {
     })
     
     notification.onclick = () => {
-      addResult('success', '✓ Notification clicked')
+      addResult('success', 'Notification clicked')
       notification.close()
     }
     
@@ -263,7 +275,7 @@ async function testNotification() {
       notification.close()
     }, 5000)
     
-    addResult('success', '✓ Test notification sent')
+    addResult('success', 'Test notification sent')
     addResult('info', 'Note: This is a local notification. Server push would come from your backend.')
     
   } catch (error) {
