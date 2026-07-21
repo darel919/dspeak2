@@ -12,6 +12,22 @@ const mediaCodecs = [
       minptime: 10,
       useinbandfec: 1
     }
+  },
+  {
+    kind: 'video',
+    mimeType: 'video/VP8',
+    clockRate: 90000,
+    parameters: {}
+  },
+  {
+    kind: 'video',
+    mimeType: 'video/H264',
+    clockRate: 90000,
+    parameters: {
+      'packetization-mode': 1,
+      'level-asymmetry-allowed': 1,
+      'profile-level-id': '42e01f'
+    }
   }
 ]
 
@@ -115,15 +131,17 @@ async function getRoom(state, channelId) {
 function producerSnapshot(room) {
   const producers = []
   const producerUserMap = {}
+  const producerSourceMap = {}
 
   for (const session of room.sessions.values()) {
     for (const producer of session.producers.values()) {
       producers.push(producer.id)
       producerUserMap[producer.id] = session.userId
+      producerSourceMap[producer.id] = producer.appData?.source || producer.kind
     }
   }
 
-  return { producers, producerUserMap }
+  return { producers, producerUserMap, producerSourceMap }
 }
 
 function broadcastChannelState(room) {
@@ -137,7 +155,8 @@ function broadcastChannelState(room) {
     send(session.peer, 'currentlyInChannel', data)
     send(session.peer, 'available-producers', {
       producers: snapshot.producers,
-      producerUserMap: snapshot.producerUserMap
+      producerUserMap: snapshot.producerUserMap,
+      producerSourceMap: snapshot.producerSourceMap
     })
   }
 }
@@ -208,7 +227,7 @@ async function createTransport(state, session) {
     enableUdp: true,
     enableTcp: true,
     preferUdp: true,
-    initialAvailableOutgoingBitrate: 1_000_000,
+    initialAvailableOutgoingBitrate: 10_000_000,
     appData: { peerId: session.peer.id }
   })
 
@@ -256,7 +275,10 @@ async function handleMessage(state, session, message) {
       const producer = await transport.produce({
         kind: data.kind,
         rtpParameters: data.rtpParameters,
-        appData: { userId: session.userId }
+        appData: {
+          userId: session.userId,
+          source: data.appData?.source || data.kind
+        }
       })
       session.producers.set(producer.id, producer)
 
@@ -268,10 +290,20 @@ async function handleMessage(state, session, message) {
         if (other !== session) {
           send(other.peer, 'new-producer', {
             producerId: producer.id,
-            userId: session.userId
+            userId: session.userId,
+            source: producer.appData.source
           })
         }
       }
+      broadcastChannelState(session.room)
+      return
+    }
+
+    case 'close-producer': {
+      const producer = session.producers.get(data.producerId)
+      if (!producer) return
+      session.producers.delete(producer.id)
+      producer.close()
       broadcastChannelState(session.room)
       return
     }
@@ -308,6 +340,7 @@ async function handleMessage(state, session, message) {
         kind: consumer.kind,
         rtpParameters: consumer.rtpParameters,
         userId: owner.userId
+        , source: owner.producers.get(data.producerId)?.appData?.source || consumer.kind
       })
       return
     }

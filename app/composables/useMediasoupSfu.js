@@ -1,6 +1,7 @@
 import { Device } from 'mediasoup-client'
 import { useRuntimeConfig } from '#app'
 import { useAuthStore } from '~/stores/auth'
+import { buildVideoConstraints } from '~/shared/video-settings'
 
 export function useMediasoupSfu() {
   // Track producerIds that failed to consume
@@ -21,6 +22,9 @@ export function useMediasoupSfu() {
   const recvTransport = ref(null)
   const producers = ref(new Map())
   const consumers = ref(new Map())
+  const localVideoFeeds = ref(new Map())
+  const remoteVideoFeeds = ref(new Map())
+  const producerSources = new Map()
   // Track local producer ids to avoid self-consume
   const localProducerIds = new Set()
   const connected = ref(false)
@@ -894,12 +898,14 @@ export function useMediasoupSfu() {
       } else {
         console.warn(`[SFU] No explicit user mapping in consumer-params for producer ${data.producerId}`)
       }
+      if (data?.producerId) producerSources.set(data.producerId, data.source || data.kind)
   await createConsumer(data)
     })
 
     setupMessageHandler('new-producer', async ({ data }) => {
       console.log('[SFU] New producer available:', data.producerId)
       if (data && data.producerId) {
+        producerSources.set(data.producerId, data.source || 'video')
         const owner = data.userId || data.user_id || data.uid || data.ownerId || data.owner_id || (data.user && data.user.id)
         if (owner) {
           console.log(`[SFU] Mapping new producer ${data.producerId} to user ${owner}`)
@@ -979,6 +985,11 @@ export function useMediasoupSfu() {
       }
       // Drop mapping
       if (data && data.producerId) producerOwner.delete(data.producerId)
+      if (data && data.producerId) {
+        producerSources.delete(data.producerId)
+        remoteVideoFeeds.value.delete(data.producerId)
+        remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
+      }
       try {
         const cname = producerCname.get(data.producerId)
         if (cname) {
@@ -1583,7 +1594,7 @@ export function useMediasoupSfu() {
       pendingTransportConnect.set(sendTransport.value.id, callback)
     })
 
-    sendTransport.value.on('produce', ({ kind, rtpParameters }, callback, errback) => {
+    sendTransport.value.on('produce', ({ kind, rtpParameters, appData }, callback, errback) => {
       console.log('[SFU] Producing:', kind)
       try {
         // Ensure rtpParameters are cloneable
@@ -1593,7 +1604,8 @@ export function useMediasoupSfu() {
           data: {
             transportId: sendTransport.value.id,
             kind,
-            rtpParameters: cleanRtpParameters
+            rtpParameters: cleanRtpParameters,
+            appData: JSON.parse(JSON.stringify(appData || {}))
           }
         })
         // Queue callbacks to be resolved when we receive producer-id or error
@@ -1770,7 +1782,7 @@ export function useMediasoupSfu() {
     
     try {
       // Check if we're already producing audio
-      if (isProducing.value && producers.value.size > 0) {
+      if (Array.from(producers.value.values()).some(entry => entry.source === 'audio')) {
         console.log('[SFU] Already producing audio, stopping existing production first')
         stopAudioProduction()
         // Give a small delay to ensure cleanup is complete
@@ -2103,7 +2115,8 @@ export function useMediasoupSfu() {
       producers.value.set(producer.id, {
         producer,
         stream,
-        track: audioTrack
+        track: audioTrack,
+        source: 'audio'
       })
   // Track locally created producer ids to avoid self-consume
   localProducerIds.add(producer.id)
@@ -2206,10 +2219,77 @@ export function useMediasoupSfu() {
     }
   }
 
+  async function startVideoProduction(source) {
+    if (source !== 'camera' && source !== 'screen') throw new Error('Invalid video source')
+    if (!transportReady.value && transportPromise) await transportPromise
+    if (!sendTransport.value || sendTransport.value.closed) throw new Error('Send transport not available')
+    if (!device.value?.canProduce('video')) throw new Error('This browser cannot produce video')
+
+    const existing = Array.from(producers.value.values()).find(entry => entry.source === source)
+    if (existing) return existing.producer
+
+    const { useSettingsStore } = await import('~/stores/settings')
+    const settings = useSettingsStore()
+    const isScreen = source === 'screen'
+    const constraints = buildVideoConstraints(
+      isScreen ? settings.screenVideo : settings.cameraVideo,
+      { display: isScreen, deviceId: isScreen ? null : settings.cameraDeviceId }
+    )
+
+    let stream
+    try {
+      stream = isScreen
+        ? await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: false })
+        : await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false })
+      const track = stream.getVideoTracks()[0]
+      if (!track) throw new Error(`No ${source} video track is available`)
+
+      const frameRate = track.getSettings?.().frameRate || (isScreen ? settings.screenVideo.frameRate : settings.cameraVideo.frameRate)
+      const producer = await sendTransport.value.produce({
+        track,
+        appData: { source },
+        encodings: [{ maxFramerate: Math.min(60, Math.max(25, Math.round(frameRate || 30))) }]
+      })
+      const entry = { producer, stream, track, source }
+      producers.value.set(producer.id, entry)
+      localProducerIds.add(producer.id)
+      producerSources.set(producer.id, source)
+      localVideoFeeds.value.set(source, { producerId: producer.id, source, stream })
+      localVideoFeeds.value = new Map(localVideoFeeds.value)
+      isProducing.value = true
+
+      const cleanup = () => stopVideoProduction(source, producer.id)
+      producer.on('trackended', cleanup)
+      producer.on('transportclose', cleanup)
+      return producer
+    } catch (err) {
+      stream?.getTracks().forEach(track => track.stop())
+      throw err
+    }
+  }
+
+  function stopVideoProduction(source, expectedProducerId = null) {
+    const match = Array.from(producers.value.entries()).find(([id, entry]) =>
+      entry.source === source && (!expectedProducerId || id === expectedProducerId)
+    )
+    if (!match) return
+    const [producerId, entry] = match
+    sendMessage({ type: 'close-producer', data: { producerId } })
+    producers.value.delete(producerId)
+    localProducerIds.delete(producerId)
+    producerSources.delete(producerId)
+    localVideoFeeds.value.delete(source)
+    localVideoFeeds.value = new Map(localVideoFeeds.value)
+    try { if (!entry.producer.closed) entry.producer.close() } catch (_) { /* noop */ }
+    entry.stream?.getTracks().forEach(track => track.stop())
+    isProducing.value = producers.value.size > 0
+  }
+
   function stopAudioProduction(producerId = null) {
     if (producerId) {
       const producerData = producers.value.get(producerId)
-      if (producerData) {
+      if (producerData?.source === 'audio') {
+        sendMessage({ type: 'close-producer', data: { producerId } })
         // Close the producer
         if (producerData.producer) {
           producerData.producer.close()
@@ -2219,11 +2299,14 @@ export function useMediasoupSfu() {
           producerData.stream.getTracks().forEach(track => track.stop())
         }
   producers.value.delete(producerId)
+  localProducerIds.delete(producerId)
   try { cleanupLocalVAD(producerId) } catch (_) {}
       }
     } else {
-      // Stop all producers
+      // Stop audio without interrupting camera or screen sharing.
       producers.value.forEach((producerData, id) => {
+        if (producerData.source !== 'audio') return
+        sendMessage({ type: 'close-producer', data: { producerId: id } })
         if (producerData.producer) {
           producerData.producer.close()
         }
@@ -2231,9 +2314,13 @@ export function useMediasoupSfu() {
           producerData.stream.getTracks().forEach(track => track.stop())
         }
       })
-  // cleanup local VADs for all producers
-  Array.from(producers.value.keys()).forEach(pid => { try { cleanupLocalVAD(pid) } catch (_) {} })
-  producers.value.clear()
+  Array.from(producers.value.entries()).forEach(([pid, entry]) => {
+    if (entry.source === 'audio') {
+      try { cleanupLocalVAD(pid) } catch (_) {}
+      producers.value.delete(pid)
+      localProducerIds.delete(pid)
+    }
+  })
     }
         // If this producer has previously failed to consume, skip
         if (failedConsumeProducers.has(producerId)) {
@@ -2434,6 +2521,18 @@ export function useMediasoupSfu() {
           }
         } catch (_) { /* noop */ }
       }
+      if (consumer.track && consumer.kind === 'video') {
+        const source = consumerData.source || producerSources.get(consumerData.producerId) || 'camera'
+        const ownerId = producerOwner.get(consumerData.producerId) || consumerData.userId || consumerData.producerId
+        producerSources.set(consumerData.producerId, source)
+        remoteVideoFeeds.value.set(consumerData.producerId, {
+          producerId: consumerData.producerId,
+          userId: ownerId,
+          source,
+          stream: new MediaStream([consumer.track])
+        })
+        remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
+      }
 
                     // Success path: do NOT mark producer as failed here. If consumer creation
                     // fails we will handle it in the catch handler instead.
@@ -2445,6 +2544,8 @@ export function useMediasoupSfu() {
         removeAudioElement(ownerId)
         consumers.value.delete(consumerData.producerId)
         cleanupVoiceDetection(ownerId)
+        remoteVideoFeeds.value.delete(consumerData.producerId)
+        remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
       })
 
       consumer.on('trackended', () => {
@@ -2453,6 +2554,8 @@ export function useMediasoupSfu() {
         removeAudioElement(ownerId)
         consumers.value.delete(consumerData.producerId)
         cleanupVoiceDetection(ownerId)
+        remoteVideoFeeds.value.delete(consumerData.producerId)
+        remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
       })
 
   // Removed sending 'consumer-resume' message since SFU server does not support it
@@ -3059,12 +3162,16 @@ export function useMediasoupSfu() {
     iceConnectedBoth: readonly(iceConnectedBoth),
     producers: readonly(producers),
     consumers: readonly(consumers),
+    localVideoFeeds: readonly(localVideoFeeds),
+    remoteVideoFeeds: readonly(remoteVideoFeeds),
     remoteProducersCount: remoteProducersCount,
     lastInRoom: lastInRoom,
     connect,
     disconnect,
     startAudioProduction,
     stopAudioProduction,
+    startVideoProduction,
+    stopVideoProduction,
     applyOutputDeviceToAll,
     applyVolumeForUser,
     getWebRTCStatsSnapshot,

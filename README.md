@@ -1,9 +1,9 @@
 # DSpeak
 
-DSpeak is a self-hosted room, text-chat, presence, and voice application built
+DSpeak is a self-hosted room, text-chat, presence, voice, and video application built
 as a Nuxt 4 monolith. The browser application and Nitro backend run in the same
 process, while PocketBase provides persistent storage and mediasoup provides
-the voice SFU.
+the voice and video SFU.
 
 ## Architecture
 
@@ -11,6 +11,7 @@ the voice SFU.
 - Nitro HTTP and WebSocket routes in `server/routes/`
 - PocketBase-backed room, channel, message, presence, and push services
 - Process-owned mediasoup worker, routers, transports, producers, and consumers
+- Independent camera and screen-share tracks, allowing either source or both at once
 - Same-origin API and WebSocket connections by default
 
 The Nitro server exposes:
@@ -120,6 +121,14 @@ DSPEAK_SFU_URL=
 
 Nitro rejects startup when required variables are missing, URLs are invalid,
 the RTC port is invalid, or a wildcard mediasoup bind has no announced address.
+
+## Video and screen sharing
+
+Connected users can publish a webcam, a screen share, or both simultaneously.
+Camera and screen-share quality are configured independently under **Settings →
+Voice & Video**. Each source supports original/full capture resolution or a
+720p, 1080p, 1440p, or 2160p limit. Frame rate is configurable from 25 through
+60 FPS. Resolution limits cap capture dimensions and do not force upscaling.
 
 ## Development
 

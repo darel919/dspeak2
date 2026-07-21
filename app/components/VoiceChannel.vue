@@ -67,6 +67,16 @@
 
     <!-- Main Content Area - Participants View -->
     <div v-if="voiceStore.connected && voiceStore.currentChannelId === props.channel.id" class="flex-1 flex flex-col overflow-hidden">
+      <div v-if="videoFeeds.length" class="grid shrink-0 grid-cols-1 gap-4 overflow-auto p-4 md:grid-cols-2">
+        <VideoFeed
+          v-for="feed in videoFeeds"
+          :key="feed.key"
+          :stream="feed.stream"
+          :source="feed.source"
+          :label="feed.label"
+          :muted="feed.local"
+        />
+      </div>
       <!-- Participants Grid -->
       <div class="flex-1 p-6">
         <div v-if="connectedUsers.length > 0" class="h-full">
@@ -193,6 +203,24 @@
           </span> -->
         </div>
 
+        <button
+          class="btn btn-circle btn-lg"
+          :class="voiceStore.cameraEnabled ? 'btn-primary' : 'btn-outline'"
+          title="Toggle camera"
+          @click="toggleCamera"
+        >
+          <span class="text-xl">📷</span>
+        </button>
+
+        <button
+          class="btn btn-circle btn-lg"
+          :class="voiceStore.screenSharing ? 'btn-primary' : 'btn-outline'"
+          title="Toggle screen sharing"
+          @click="toggleScreenShare"
+        >
+          <span class="text-xl">🖥️</span>
+        </button>
+
         <!-- Connection Status -->
         <div class="flex flex-col items-center ml-4">
           <div class="flex items-center gap-2">
@@ -271,6 +299,31 @@ const connectedUsers = computed(() => {
   }
   return display
 })
+const videoFeeds = computed(() => {
+  const sfu = voiceStore.sfuComposable
+  if (!sfu) return []
+  const local = Array.from(sfu.localVideoFeeds || []).map(([source, feed]) => ({
+    ...feed,
+    key: `local-${source}`,
+    local: true,
+    label: 'You'
+  }))
+  const remote = Array.from(sfu.remoteVideoFeeds || []).map(([producerId, feed]) => ({
+    ...feed,
+    key: producerId,
+    local: false,
+    label: getUserDisplayName(voiceStore.getUserById(feed.userId) || { id: feed.userId })
+  }))
+  return [...local, ...remote].sort((a, b) => Number(b.source === 'screen') - Number(a.source === 'screen'))
+})
+
+async function toggleCamera() {
+  try { await voiceStore.toggleCamera() } catch (err) { console.error('[VoiceChannel] Camera error:', err) }
+}
+
+async function toggleScreenShare() {
+  try { await voiceStore.toggleScreenShare() } catch (err) { console.error('[VoiceChannel] Screen share error:', err) }
+}
 const volumeMenuUser = ref(null)
 function openVolumeMenu(user) {
   console.log('[VoiceChannel] Opening volume menu for user:', user)

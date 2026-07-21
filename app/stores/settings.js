@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { normalizeVideoSettings } from '~/shared/video-settings'
 
 export const useSettingsStore = defineStore('settings', () => {
   const defaultAudio = {
@@ -10,6 +11,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const audio = ref(loadPersisted('audioSettings', defaultAudio))
   const micDeviceId = ref(loadPersisted('audioDeviceId', null))
   const outputDeviceId = ref(loadPersisted('audioOutputDeviceId', null))
+  const cameraDeviceId = ref(loadPersisted('videoDeviceId', null))
+  const cameraVideo = ref(normalizeVideoSettings(loadPersisted('cameraVideoSettings', {})))
+  const screenVideo = ref(normalizeVideoSettings(loadPersisted('screenVideoSettings', {})))
   const broadcastMode = ref(loadPersisted('broadcastMode', false))
 
   const supported = computed(() => {
@@ -61,6 +65,21 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  function setCameraDeviceId(id) {
+    cameraDeviceId.value = id || null
+    persist('videoDeviceId', cameraDeviceId.value)
+  }
+
+  function setCameraVideoSettings(value) {
+    cameraVideo.value = normalizeVideoSettings({ ...cameraVideo.value, ...value })
+    persist('cameraVideoSettings', cameraVideo.value)
+  }
+
+  function setScreenVideoSettings(value) {
+    screenVideo.value = normalizeVideoSettings({ ...screenVideo.value, ...value })
+    persist('screenVideoSettings', screenVideo.value)
+  }
+
   function loadPersisted(key, fallback) {
     try {
       if (typeof localStorage === 'undefined') return fallback
@@ -91,10 +110,16 @@ export const useSettingsStore = defineStore('settings', () => {
     supported,
     micDeviceId,
     outputDeviceId,
+    cameraDeviceId,
+    cameraVideo,
+    screenVideo,
     broadcastMode,
     setAudioSetting,
     setMicDeviceId,
     setOutputDeviceId,
+    setCameraDeviceId,
+    setCameraVideoSettings,
+    setScreenVideoSettings,
     setBroadcastMode
   }
 })

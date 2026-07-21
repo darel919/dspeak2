@@ -71,8 +71,48 @@
                   Refresh
                 </button>
               </div>
+              <div class="mt-2 flex items-center gap-3">
+                <label class="w-40 text-sm">Camera</label>
+                <select class="select select-bordered select-sm flex-1" :disabled="devicesLoading || videoDevices.length === 0" v-model="selectedCameraId" @change="onCameraDeviceChange">
+                  <option :value="''">System default</option>
+                  <option v-for="d in videoDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || 'Camera' }}</option>
+                </select>
+              </div>
               <p v-if="!canSetSinkId" class="text-xs text-base-content/60 mt-1">Output device selection not supported by this browser.</p>
               <p v-if="devicesError" class="text-xs text-error mt-1">{{ devicesError }}</p>
+            </div>
+
+            <div class="mb-6">
+              <h3 class="font-semibold mb-2">Video quality</h3>
+              <div class="grid gap-4 md:grid-cols-2">
+                <div class="rounded-lg border border-base-300 p-4">
+                  <h4 class="mb-3 font-medium">Camera</h4>
+                  <label class="mb-3 block text-sm">
+                    <span class="mb-1 block">Resolution</span>
+                    <select class="select select-bordered select-sm w-full" :value="cameraVideo.resolution" @change="setCameraResolution($event.target.value)">
+                      <option v-for="option in resolutionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <label class="block text-sm">
+                    <span class="mb-1 flex justify-between"><span>Frame rate</span><span>{{ cameraVideo.frameRate }} FPS</span></span>
+                    <input class="range range-primary range-sm" type="range" min="25" max="60" step="1" :value="cameraVideo.frameRate" @input="setCameraFrameRate($event.target.value)" />
+                  </label>
+                </div>
+                <div class="rounded-lg border border-base-300 p-4">
+                  <h4 class="mb-3 font-medium">Screen share</h4>
+                  <label class="mb-3 block text-sm">
+                    <span class="mb-1 block">Resolution</span>
+                    <select class="select select-bordered select-sm w-full" :value="screenVideo.resolution" @change="setScreenResolution($event.target.value)">
+                      <option v-for="option in resolutionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <label class="block text-sm">
+                    <span class="mb-1 flex justify-between"><span>Frame rate</span><span>{{ screenVideo.frameRate }} FPS</span></span>
+                    <input class="range range-primary range-sm" type="range" min="25" max="60" step="1" :value="screenVideo.frameRate" @input="setScreenFrameRate($event.target.value)" />
+                  </label>
+                </div>
+              </div>
+              <p class="mt-2 text-xs text-base-content/60">Original keeps the source's full resolution. Resolution limits never upscale the source.</p>
             </div>
 
             <!-- Input Processing -->
@@ -191,6 +231,20 @@ function scrollToSection(sectionKey) {
 
 const audio = computed(() => settingsStore.audio)
 const supported = computed(() => settingsStore.supported)
+const cameraVideo = computed(() => settingsStore.cameraVideo)
+const screenVideo = computed(() => settingsStore.screenVideo)
+const resolutionOptions = [
+  { value: 'original', label: 'Original (full resolution)' },
+  { value: '720p', label: '720p' },
+  { value: '1080p', label: '1080p' },
+  { value: '1440p', label: '1440p' },
+  { value: '2160p', label: '2160p (4K)' }
+]
+
+function setCameraResolution(resolution) { settingsStore.setCameraVideoSettings({ resolution }) }
+function setCameraFrameRate(frameRate) { settingsStore.setCameraVideoSettings({ frameRate: Number(frameRate) }) }
+function setScreenResolution(resolution) { settingsStore.setScreenVideoSettings({ resolution }) }
+function setScreenFrameRate(frameRate) { settingsStore.setScreenVideoSettings({ frameRate: Number(frameRate) }) }
 
 const config = useRuntimeConfig()
 const { getAvatarUrl } = useChatUtils()
@@ -302,6 +356,7 @@ function stopMicTest() {
 // Microphone devices handling
 const devices = ref([])
 const outputDevices = ref([])
+const videoDevices = ref([])
 const devicesLoading = ref(false)
 const devicesError = ref('')
 const selectedDeviceId = ref('')
@@ -309,6 +364,7 @@ const selectedDeviceId = ref('')
 onMounted(() => {
   selectedDeviceId.value = settingsStore.micDeviceId || ''
   selectedOutputId.value = settingsStore.outputDeviceId || ''
+  selectedCameraId.value = settingsStore.cameraDeviceId || ''
   refreshDevices()
 })
 
@@ -329,6 +385,7 @@ async function refreshDevices() {
   const list = await navigator.mediaDevices.enumerateDevices()
   devices.value = list.filter(d => d.kind === 'audioinput')
   outputDevices.value = list.filter(d => d.kind === 'audiooutput')
+  videoDevices.value = list.filter(d => d.kind === 'videoinput')
   } catch (e) {
     devicesError.value = 'Failed to enumerate devices.'
 
@@ -344,6 +401,10 @@ function onDeviceChange() {
 
 const canSetSinkId = typeof document !== 'undefined' && typeof document.createElement('audio').setSinkId === 'function'
 const selectedOutputId = ref('')
+const selectedCameraId = ref('')
+function onCameraDeviceChange() {
+  settingsStore.setCameraDeviceId(selectedCameraId.value || null)
+}
 function onOutputChange() {
   const id = selectedOutputId.value || null
   settingsStore.setOutputDeviceId(id)

@@ -15,6 +15,8 @@ export const useVoiceStore = defineStore('voice', () => {
     const connected = ref(false);
     const error = ref(null);
     const connectedAt = ref(null);
+    const cameraEnabled = ref(false);
+    const screenSharing = ref(false);
 
     const sfuComposable = ref(null);
     // Stopper for dynamic watcher mirroring ICE connection state to connected flag
@@ -123,6 +125,8 @@ export const useVoiceStore = defineStore('voice', () => {
             if (sfuComposable.value && typeof sfuComposable.value.stopAudioProduction === 'function') {
                 try { await sfuComposable.value.stopAudioProduction(); } catch (_) { /* noop */ }
             }
+            try { sfuComposable.value?.stopVideoProduction?.('camera'); } catch (_) { /* noop */ }
+            try { sfuComposable.value?.stopVideoProduction?.('screen'); } catch (_) { /* noop */ }
 
             // Disconnect SFU
             if (sfuComposable.value && typeof sfuComposable.value.disconnect === 'function') {
@@ -140,6 +144,8 @@ export const useVoiceStore = defineStore('voice', () => {
             connectedAt.value = null;
             error.value = null;
             sfuComposable.value = null;
+            cameraEnabled.value = false;
+            screenSharing.value = false;
         }
     }
 
@@ -500,6 +506,40 @@ export const useVoiceStore = defineStore('voice', () => {
     // Deafened state updated
     }
 
+    async function toggleCamera() {
+        if (!connected.value || !sfuComposable.value) return;
+        try {
+            if (cameraEnabled.value) {
+                sfuComposable.value.stopVideoProduction('camera');
+                cameraEnabled.value = false;
+            } else {
+                await sfuComposable.value.startVideoProduction('camera');
+                cameraEnabled.value = true;
+            }
+        } catch (err) {
+            error.value = err?.message || 'Unable to access the camera';
+            throw err;
+        }
+    }
+
+    async function toggleScreenShare() {
+        if (!connected.value || !sfuComposable.value) return;
+        try {
+            if (screenSharing.value) {
+                sfuComposable.value.stopVideoProduction('screen');
+                screenSharing.value = false;
+            } else {
+                const producer = await sfuComposable.value.startVideoProduction('screen');
+                screenSharing.value = true;
+                producer?.on?.('trackended', () => { screenSharing.value = false; });
+            }
+        } catch (err) {
+            if (err?.name !== 'NotAllowedError') error.value = err?.message || 'Unable to share the screen';
+            screenSharing.value = false;
+            throw err;
+        }
+    }
+
     function clearVoiceState() {
         if (connected.value) {
             leaveVoiceChannel();
@@ -624,11 +664,15 @@ export const useVoiceStore = defineStore('voice', () => {
         connected: readonly(connected),
         error, // not readonly, so it can be set from components
         connectedAt: readonly(connectedAt),
+        cameraEnabled: readonly(cameraEnabled),
+        screenSharing: readonly(screenSharing),
         sfuComposable: readonly(sfuComposable),
         joinVoiceChannel,
         leaveVoiceChannel,
         toggleMic,
         toggleDeafen,
+        toggleCamera,
+        toggleScreenShare,
         addConnectedUser,
         removeConnectedUser,
         updateUserSpeaking,
