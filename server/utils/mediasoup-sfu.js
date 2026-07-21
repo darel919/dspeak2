@@ -3,6 +3,9 @@ import { usePocketBaseAdmin } from './pocketbase'
 import { buildPublicIceCandidates, buildWebRtcListenInfos } from './ice-candidates'
 import { mediaCodecs } from './mediasoup-codecs'
 import { assertTransportDirection, buildConsumerOptions, buildWebRtcTransportOptions } from './mediasoup-transport'
+import { allClientsReady, hasCompleteMesh, membershipTopology } from './media-transition'
+
+const maxP2pParticipants = 4
 
 const stateKey = Symbol.for('dspeak.mediasoup.sfu')
 
@@ -23,6 +26,22 @@ async function publicTransportData(transport, config) {
 
 function serializeError(error) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function validP2pSignal(signal) {
+  if (!signal || typeof signal !== 'object') return false
+  if (signal.description) {
+    const type = String(signal.description.type || '')
+    const sdp = String(signal.description.sdp || '')
+    return (type === 'offer' || type === 'answer' || type === 'rollback') && sdp.length <= 500000
+  }
+  if (signal.candidate) {
+    return String(signal.candidate.candidate || '').length <= 4096 && String(signal.candidate.sdpMid || '').length <= 100
+  }
+  if (signal.source) {
+    return String(signal.source.trackId || '').length <= 200 && ['audio', 'camera', 'screen', 'screen-audio', 'video'].includes(String(signal.source.source || ''))
+  }
+  return false
 }
 
 async function createState(config) {
@@ -95,11 +114,144 @@ async function getRoom(state, channelId) {
     room = {
       id: channelId,
       router: await state.worker.createRouter({ mediaCodecs }),
-      sessions: new Map()
+      sessions: new Map(),
+      topology: {
+        mode: 'idle',
+        epoch: 0,
+        reason: 'waiting-for-peer',
+        activatedAt: Date.now(),
+        readiness: new Map(),
+        transitionReadiness: new Map(),
+        sourceRevision: 0,
+        target: null,
+        recovering: false,
+        recoveryTimer: null,
+        activationTimer: null,
+        transitionTimer: null
+      }
     }
     state.rooms.set(channelId, room)
+  } else {
+    if (!(room.topology.readiness instanceof Map)) room.topology.readiness = new Map()
+    if (!(room.topology.transitionReadiness instanceof Map)) room.topology.transitionReadiness = new Map()
+    room.topology.sourceRevision ||= 0
+    room.topology.target ||= null
+    room.topology.recoveryTimer ||= null
+    room.topology.activationTimer ||= null
+    room.topology.transitionTimer ||= null
   }
   return room
+}
+
+function topologyPayload(room) {
+  return {
+    mode: room.topology.mode,
+    epoch: room.topology.epoch,
+    reason: room.topology.reason,
+    activatedAt: room.topology.activatedAt,
+    target: room.topology.target,
+    sourceRevision: room.topology.sourceRevision,
+    peers: [...room.sessions.values()].map(session => ({
+      peerId: session.peer.id,
+      userId: session.userId,
+      sources: [...session.sources]
+    }))
+  }
+}
+
+function broadcastTopology(room) {
+  const data = topologyPayload(room)
+  for (const session of room.sessions.values()) send(session.peer, 'topology-state', data)
+}
+
+function setTopology(room, mode, reason, target = null) {
+  if (room.topology.recoveryTimer) clearTimeout(room.topology.recoveryTimer)
+  if (room.topology.activationTimer) clearTimeout(room.topology.activationTimer)
+  if (room.topology.transitionTimer) clearTimeout(room.topology.transitionTimer)
+  room.topology.recoveryTimer = null
+  room.topology.activationTimer = null
+  room.topology.transitionTimer = null
+  room.topology.mode = mode
+  room.topology.target = target
+  room.topology.reason = reason
+  room.topology.epoch += 1
+  room.topology.activatedAt = Date.now()
+  room.topology.readiness.clear()
+  room.topology.transitionReadiness.clear()
+  broadcastTopology(room)
+}
+
+function scheduleDirectRecovery(room) {
+  if (room.sessions.size < 2 || room.sessions.size > maxP2pParticipants) return
+  room.topology.recoveryTimer = setTimeout(() => {
+    if (room.topology.mode !== 'sfu' || room.sessions.size < 2 || room.sessions.size > maxP2pParticipants) return
+    room.topology.recovering = true
+    setTopology(room, 'probing', 'checking-recovered-direct-path')
+    room.topology.recovering = true
+  }, 10000)
+}
+
+function beginTransition(room, target, reason) {
+  setTopology(room, 'switching', reason, target)
+  const epoch = room.topology.epoch
+  room.topology.transitionTimer = setTimeout(() => {
+    if (room.topology.epoch !== epoch || room.topology.mode !== 'switching') return
+    if (target === 'sfu') {
+      beginTransition(room, 'sfu', 'retrying-sfu-preparation')
+      return
+    }
+    fallbackToSfu(room, 'direct-transition-timeout')
+  }, 10000)
+}
+
+function maybeActivateTransition(room) {
+  if (room.topology.mode !== 'switching' || !room.topology.target) return
+  const ready = allClientsReady([...room.sessions.keys()], room.topology.transitionReadiness, room.topology.sourceRevision)
+  if (!ready) return
+  const target = room.topology.target
+  setTopology(room, target, `all-clients-ready-${target}`)
+  if (target === 'sfu') scheduleDirectRecovery(room)
+}
+
+function reconcileTopology(room, reason) {
+  const count = room.sessions.size
+  const next = membershipTopology(count)
+  if (next === 'idle') {
+    room.topology.recovering = false
+    setTopology(room, 'idle', 'waiting-for-peer')
+    return
+  }
+  if (next === 'sfu') {
+    room.topology.recovering = false
+    if (room.topology.mode === 'sfu') broadcastTopology(room)
+    else beginTransition(room, 'sfu', 'participant-limit')
+    return
+  }
+  room.topology.recovering = false
+  setTopology(room, 'probing', reason || 'checking-direct-path')
+}
+
+function fallbackToSfu(room, reason) {
+  room.topology.recovering = false
+  beginTransition(room, 'sfu', reason)
+}
+
+function maybeActivateP2p(room) {
+  const peerIds = [...room.sessions.keys()].sort()
+  if (peerIds.length < 2 || peerIds.length > maxP2pParticipants) return
+  if (room.topology.readiness.size !== peerIds.length) return
+  const complete = hasCompleteMesh(peerIds, room.topology.readiness)
+  if (!complete) return
+  if (!room.topology.recovering) {
+    beginTransition(room, 'p2p', 'complete-direct-mesh')
+    return
+  }
+  if (room.topology.activationTimer) return
+  room.topology.activationTimer = setTimeout(() => {
+    room.topology.activationTimer = null
+    if (room.topology.mode !== 'probing' || room.topology.readiness.size !== peerIds.length) return
+    beginTransition(room, 'p2p', 'recovered-direct-mesh')
+  }, 10000)
 }
 
 function producerSnapshot(room) {
@@ -186,6 +338,7 @@ function closeSession(state, session) {
     state.rooms.delete(session.room.id)
   } else {
     broadcastChannelState(session.room)
+    reconcileTopology(session.room, 'membership-changed')
   }
 
   persistMediaPresence(session.room).catch(error => console.error('[SFU] failed to persist presence', error))
@@ -213,6 +366,83 @@ async function handleMessage(state, session, message) {
     case 'ping':
       send(session.peer, 'pong', { timestamp: Date.now() })
       return
+
+    case 'media-sources': {
+      const allowed = new Set(['audio', 'camera', 'screen', 'screen-audio'])
+      const sources = Array.isArray(data.sources) ? data.sources.map(String).filter(source => allowed.has(source)) : []
+      const previous = [...session.sources].sort().join(',')
+      const next = [...sources].sort().join(',')
+      if (previous === next) return
+      session.sources = new Set(sources)
+      session.room.topology.sourceRevision += 1
+      session.room.topology.transitionReadiness.clear()
+      broadcastTopology(session.room)
+      return
+    }
+
+    case 'p2p-signal': {
+      const targetPeerId = String(data.targetPeerId || '')
+      const target = session.room.sessions.get(targetPeerId)
+      if (!target || target === session) return
+      if (Number(data.epoch) !== session.room.topology.epoch) return
+      const signal = data.signal
+      if (!validP2pSignal(signal)) return
+      send(target.peer, 'p2p-signal', {
+        fromPeerId: session.peer.id,
+        epoch: session.room.topology.epoch,
+        signal
+      })
+      return
+    }
+
+    case 'p2p-ready': {
+      if (session.room.topology.mode !== 'probing') return
+      if (Number(data.epoch) !== session.room.topology.epoch) return
+      const expected = new Set([...session.room.sessions.keys()].filter(peerId => peerId !== session.peer.id))
+      const qualified = new Set(
+        (Array.isArray(data.qualifiedPeerIds) ? data.qualifiedPeerIds : [])
+          .map(String)
+          .filter(peerId => expected.has(peerId))
+      )
+      if (qualified.size !== expected.size) return
+      session.room.topology.readiness.set(session.peer.id, qualified)
+      maybeActivateP2p(session.room)
+      return
+    }
+
+    case 'topology-ready': {
+      if (session.room.topology.mode !== 'switching') return
+      if (Number(data.epoch) !== session.room.topology.epoch) return
+      if (String(data.target || '') !== session.room.topology.target) return
+      if (Number(data.sourceRevision) !== session.room.topology.sourceRevision) return
+      session.room.topology.transitionReadiness.set(session.peer.id, session.room.topology.sourceRevision)
+      maybeActivateTransition(session.room)
+      return
+    }
+
+    case 'topology-failed': {
+      if (session.room.topology.mode !== 'switching') return
+      if (Number(data.epoch) !== session.room.topology.epoch) return
+      if (String(data.target || '') !== session.room.topology.target) return
+      if (session.room.topology.target === 'p2p') {
+        fallbackToSfu(session.room, 'client-direct-preparation-failed')
+      } else {
+        clearTimeout(session.room.topology.transitionTimer)
+        const epoch = session.room.topology.epoch
+        session.room.topology.transitionTimer = setTimeout(() => {
+          if (session.room.topology.epoch === epoch && session.room.topology.mode === 'switching') {
+            beginTransition(session.room, 'sfu', 'retrying-client-sfu-preparation')
+          }
+        }, 500)
+      }
+      return
+    }
+
+    case 'p2p-failed': {
+      if (Number(data.epoch) !== session.room.topology.epoch) return
+      if (session.room.sessions.size >= 2) fallbackToSfu(session.room, 'direct-path-unavailable')
+      return
+    }
 
     case 'peer-rtt-probe': {
       const probeId = String(data.probeId || '')
@@ -401,6 +631,7 @@ export async function openSfuPeer(peer) {
     transports: new Map(),
     producers: new Map(),
     consumers: new Map(),
+    sources: new Set(),
     rtpCapabilities: null,
     queue: Promise.resolve(),
     closed: false
@@ -408,8 +639,9 @@ export async function openSfuPeer(peer) {
 
   state.sessions.set(peer.id, session)
   room.sessions.set(peer.id, session)
-  send(peer, 'connected', { userId, channelId })
+  send(peer, 'connected', { userId, channelId, peerId: peer.id })
   broadcastChannelState(room)
+  reconcileTopology(room, 'membership-changed')
   await persistMediaPresence(room)
   await createMediaUserState(userId, channelId)
 }
@@ -421,7 +653,9 @@ export async function handleSfuPeerMessage(peer, rawMessage) {
 
   session.queue = session.queue.then(async () => {
     try {
-      const message = JSON.parse(rawMessage.text())
+      const payload = rawMessage.text()
+      if (payload.length > 600000) throw new Error('Signaling message exceeds the maximum size')
+      const message = JSON.parse(payload)
       await handleMessage(state, session, message)
     } catch (error) {
       console.error('[SFU] signaling error', error)
@@ -441,6 +675,14 @@ export async function getSfuMetrics() {
   let transports = 0
   let producers = 0
   let consumers = 0
+  let p2pRooms = 0
+  let sfuRooms = 0
+  let probingRooms = 0
+  for (const room of state.rooms.values()) {
+    if (room.topology.mode === 'p2p') p2pRooms += 1
+    if (room.topology.mode === 'sfu') sfuRooms += 1
+    if (room.topology.mode === 'probing') probingRooms += 1
+  }
   for (const session of state.sessions.values()) {
     transports += session.transports.size
     producers += session.producers.size
@@ -452,6 +694,9 @@ export async function getSfuMetrics() {
     peers: state.sessions.size,
     transports,
     producers,
-    consumers
+    consumers,
+    p2pRooms,
+    sfuRooms,
+    probingRooms
   }
 }

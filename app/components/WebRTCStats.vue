@@ -14,8 +14,8 @@
             <button class="btn btn-ghost btn-xs" @click="copyDebug">
               {{ copied ? 'Copied' : 'Copy' }}
             </button>
-            <button class="btn btn-ghost btn-xs" @click="showDebug = !showDebug" title="SFU Debug">
-              SFU
+            <button class="btn btn-ghost btn-xs" @click="showDebug = !showDebug" title="RTC Debug">
+              RTC
             </button>
             <button class="btn btn-ghost btn-xs btn-circle" @click="visible = false" title="Close">
               <Icon name="lucide:x" class="size-3" />
@@ -27,6 +27,7 @@
           <div v-if="!snapshot" class="text-base-content/60">No stats yet.</div>
           <template v-else>
             <div class="text-base-content/60 mb-2">Updated: {{ new Date(snapshot.timestamp).toLocaleTimeString() }}</div>
+            <RtcTopologyMap class="mb-3" :topology="snapshot.topology" :nodes="snapshot.nodes" :edges="snapshot.edges" />
             <div class="mb-3 rounded-lg border border-base-content/20 p-2">
               <span class="text-base-content/60">Peer RTT</span>
               <span class="ml-2 font-mono">
@@ -99,10 +100,18 @@
             <div v-for="(video, index) in inboundVideoStats" :key="video.consumerId || index" class="mb-3 rounded-lg border border-base-content/20 p-2">
               <div class="mb-2 font-semibold">Received video {{ inboundVideoStats.length > 1 ? index + 1 : '' }}</div>
               <div class="grid grid-cols-2 gap-x-3 gap-y-1">
-                <div class="text-base-content/60">Receive FPS</div><div>{{ formatFps(video.fps) }}</div>
+                <div class="text-base-content/60">Resolution</div><div>{{ formatResolution(video) }}</div>
+                <div class="text-base-content/60">Received / decoded FPS</div><div>{{ formatFps(video.receivedFps ?? video.fps) }} / {{ formatFps(video.decodedFps ?? video.fps) }}</div>
+                <div class="text-base-content/60">Browser-reported FPS</div><div>{{ formatFps(video.fps) }}</div>
+                <div class="text-base-content/60">Video bitrate</div><div>{{ formatKbps(video.bitrateKbps) }}</div>
                 <div class="text-base-content/60">Decode time / frame</div><div>{{ formatFrameTime(video.decodeTimeMs) }}</div>
                 <div class="text-base-content/60">Decoder</div><div>{{ formatCodecEngine(video, 'decoder') }}</div>
                 <div class="text-base-content/60">Codec</div><div>{{ video.codec || '-' }}</div>
+                <div class="text-base-content/60">Frames recv / decoded / dropped</div><div>{{ formatCount(video.framesReceived) }} / {{ formatCount(video.framesDecoded) }} / {{ formatCount(video.framesDropped) }}</div>
+                <div class="text-base-content/60">Packets recv / lost</div><div>{{ formatCount(video.packetsReceived) }} / {{ formatCount(video.packetsLost) }}</div>
+                <div class="text-base-content/60">Jitter</div><div>{{ formatSecondsAsMs(video.jitter) }}</div>
+                <div class="text-base-content/60">Freezes</div><div>{{ formatCount(video.freezeCount) }} · {{ formatSeconds(video.totalFreezesDuration) }}</div>
+                <div class="text-base-content/60">PLI / FIR / NACK</div><div>{{ formatCount(video.pliCount) }} / {{ formatCount(video.firCount) }} / {{ formatCount(video.nackCount) }}</div>
               </div>
             </div>
             <div class="mb-3 rounded-lg border border-base-content/20 p-2">
@@ -161,7 +170,7 @@
           </template>
           <div v-if="showDebug" class="mt-3 border-t pt-3">
             <div class="flex items-center justify-between mb-2">
-              <div class="text-sm font-medium">SFU Debug</div>
+              <div class="text-sm font-medium">RTC Debug</div>
               <div class="flex items-center gap-2">
                 <button class="btn btn-ghost btn-xs" @click="refreshDebug">Refresh</button>
                 <button class="btn btn-ghost btn-xs" @click="copyDebug">Copy</button>
@@ -215,7 +224,6 @@
 
 <script setup>
 import { useVoiceStore } from '~/stores/voice'
-import { useMediasoupSfu } from '~/composables/useMediasoupSfu'
 import { calculateMediaEngineUtilization, classifyCodecImplementation, isScreenShareFpsBelowTarget } from '~/shared/video-settings'
 
 const voiceStore = useVoiceStore()
@@ -229,7 +237,7 @@ const copied = ref(false)
 let intervalId = null
 let copiedResetTimer = null
 const showDebug = ref(false)
-const sfu = useMediasoupSfu()
+const sfu = computed(() => voiceStore.sfuComposable)
 const screenShareStats = computed(() => outboundVideoStats.value.find(stat => stat.source === 'screen') || null)
 const screenShareFpsLow = computed(() => isScreenShareFpsBelowTarget(screenShareStats.value?.fps, screenShareStats.value?.targetFps))
 const deviceUtilization = computed(() => {
@@ -262,15 +270,16 @@ const unwrap = (v) => {
 }
 
 const sentJson = computed(() => {
-  try { const obj = unwrap(sfu.lastSentClientRtpCapabilities) || unwrap(window?.sfuDebug?.lastSentClientRtpCapabilities); return JSON.stringify(obj || null, null, 2) } catch (_) { return 'null' }
+  try { const obj = unwrap(sfu.value?.lastSentClientRtpCapabilities) || unwrap(window?.sfuDebug?.lastSentClientRtpCapabilities); return JSON.stringify(obj || null, null, 2) } catch (_) { return 'null' }
 })
 const receivedJson = computed(() => {
-  try { const obj = unwrap(sfu.lastReceivedConsumerParams) || unwrap(window?.sfuDebug?.lastReceivedConsumerParams); return JSON.stringify(obj || null, null, 2) } catch (_) { return 'null' }
+  try { const obj = unwrap(sfu.value?.lastReceivedConsumerParams) || unwrap(window?.sfuDebug?.lastReceivedConsumerParams); return JSON.stringify(obj || null, null, 2) } catch (_) { return 'null' }
 })
 
 const producersList = computed(() => {
   try {
-    const m = sfu.producers && sfu.producers.value ? sfu.producers.value : (window?.sfuDebug?.producers || [])
+    const active = sfu.value
+    const m = active?.producers?.value || active?.producers || window?.sfuDebug?.producers || []
     if (m && typeof m === 'object' && m instanceof Map) {
       return Array.from(m.entries()).map(([id, entry]) => ({ id, entry }))
     }
@@ -280,7 +289,8 @@ const producersList = computed(() => {
 
 const consumersList = computed(() => {
   try {
-    const m = sfu.consumers && sfu.consumers.value ? sfu.consumers.value : (window?.sfuDebug?.consumers || [])
+    const active = sfu.value
+    const m = active?.consumers?.value || active?.consumers || window?.sfuDebug?.consumers || []
     if (m && typeof m === 'object' && m instanceof Map) {
       return Array.from(m.entries()).map(([id, entry]) => ({ id, entry }))
     }
@@ -290,7 +300,8 @@ const consumersList = computed(() => {
 
 const mappings = computed(() => {
   try {
-    const po = sfu && sfu.producerOwner ? (sfu.producerOwner.value || sfu.producerOwner) : (window?.sfuDebug?.producerOwner || [])
+    const active = sfu.value
+    const po = active?.producerOwner?.value || active?.producerOwner || window?.sfuDebug?.producerOwner || []
     if (po && po instanceof Map) return Array.from(po.entries())
     return Array.isArray(po) ? po : Array.from(Object.entries(po || {}))
   } catch (_) { return [] }
@@ -325,7 +336,9 @@ async function copyDebug() {
 }
 
 const statusDotClass = computed(() => {
-  if (!snapshot.value || !snapshot.value.transports?.length) return 'bg-base-content/30'
+  if (!snapshot.value) return 'bg-base-content/30'
+  if (snapshot.value.topology?.mode === 'p2p-direct' || snapshot.value.topology?.mode === 'p2p-mesh') return 'bg-success'
+  if (!snapshot.value.transports?.length) return 'bg-base-content/30'
   const anyFailed = snapshot.value.transports.some(t => t.pcStates.iceConnectionState !== 'connected')
   return anyFailed ? 'bg-warning' : 'bg-success'
 })
@@ -349,6 +362,18 @@ function formatBitrate(v) {
   let i = 0
   while (bps >= 1000 && i < units.length - 1) { bps /= 1000; i++ }
   return `${bps.toFixed(1)} ${units[i]}`
+}
+function formatKbps(value) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} Kbps` : '-'
+}
+function formatCount(value) {
+  return Number.isFinite(Number(value)) ? String(Number(value)) : '-'
+}
+function formatSeconds(value) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)} s` : '-'
+}
+function formatSecondsAsMs(value) {
+  return Number.isFinite(Number(value)) ? `${(Number(value) * 1000).toFixed(1)} ms` : '-'
 }
 function formatFps(v) {
   return Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)} fps` : '-'
@@ -425,7 +450,7 @@ async function pollOnce() {
           pollOnce._last[keyIn] = { t: now, b: rxBytes }
         }
       })
-    } catch (_) { /* best effort */ }
+    } catch (_) {}
     snapshot.value = snap
   } catch (e) {
     lastError.value = e?.message || String(e)

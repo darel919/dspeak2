@@ -127,6 +127,18 @@ export function calculateEncodedFps(framesEncoded, timestamp, previous = null) {
   return encodedFrames * 1000 / elapsedMs
 }
 
+export function calculateBitrateKbps(bytes, timestamp, previous = null) {
+  const currentBytes = Number(bytes)
+  const currentTime = Number(timestamp)
+  const previousBytes = Number(previous?.bytes)
+  const previousTime = Number(previous?.timestamp)
+  if (![currentBytes, currentTime, previousBytes, previousTime].every(Number.isFinite)) return null
+  const elapsedMs = currentTime - previousTime
+  const transferredBytes = currentBytes - previousBytes
+  if (elapsedMs <= 0 || transferredBytes < 0) return null
+  return transferredBytes * 8 / elapsedMs
+}
+
 export function classifyCodecImplementation(implementation) {
   const value = typeof implementation === 'string' ? implementation.trim() : ''
   if (!value) return { type: 'unknown', label: 'Not reported by browser' }

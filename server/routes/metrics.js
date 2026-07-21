@@ -19,6 +19,11 @@ export default defineEventHandler(async (event) => {
     '# HELP dspeak_sfu_consumers Active media consumers.',
     '# TYPE dspeak_sfu_consumers gauge',
     `dspeak_sfu_consumers ${metrics.consumers}`,
+    '# HELP dspeak_media_topology_rooms Active rooms by bounded media topology.',
+    '# TYPE dspeak_media_topology_rooms gauge',
+    `dspeak_media_topology_rooms{topology="p2p"} ${metrics.p2pRooms}`,
+    `dspeak_media_topology_rooms{topology="sfu"} ${metrics.sfuRooms}`,
+    `dspeak_media_topology_rooms{topology="probing"} ${metrics.probingRooms}`,
     `dspeak_sfu_worker_info{pid="${metrics.workerPid}"} 1`,
     ''
   ].join('\n')

@@ -5,6 +5,7 @@ import {
   buildVideoProduceOptions,
   buildWebRtcCodecContentType,
   calculateEncodedFps,
+  calculateBitrateKbps,
   calculateMediaEngineUtilization,
   classifyCodecImplementation,
   calculateFrameTimeMs,
@@ -118,6 +119,12 @@ test('encoded FPS uses RTP statistics timestamps so delayed background timers st
   assert.equal(calculateEncodedFps(220, 5000, { framesEncoded: 100, timestamp: 1000 }), 30)
   assert.equal(calculateEncodedFps(100, 5000, { framesEncoded: 100, timestamp: 1000 }), 0)
   assert.equal(calculateEncodedFps(100, 1000, null), null)
+})
+
+test('received bitrate uses byte and RTC timestamp deltas', () => {
+  assert.equal(calculateBitrateKbps(1_100_000, 2000, { bytes: 100_000, timestamp: 1000 }), 8000)
+  assert.equal(calculateBitrateKbps(100, 1000, null), null)
+  assert.equal(calculateBitrateKbps(50, 2000, { bytes: 100, timestamp: 1000 }), null)
 })
 
 test('codec implementation reports only evidence available from the browser', () => {

@@ -1,60 +1,71 @@
 # DSpeak
 
-DSpeak is a self-hosted room, text-chat, presence, voice, and video application built
-as a Nuxt 4 monolith. The browser application and Nitro backend run in the same
-process, while PocketBase provides persistent storage and mediasoup provides
-the voice and video SFU.
+DSpeak is a self-hosted application for rooms, text chat, presence, voice, video,
+screen sharing, and system audio. Nuxt serves the browser application and Nitro
+backend from one long-running process. PocketBase stores application data, while
+native WebRTC and mediasoup carry realtime media.
 
-## Architecture
+## Highlights
 
-- Nuxt application and Pinia stores in `app/`
-- Nitro HTTP and WebSocket routes in `server/routes/`
-- PocketBase-backed room, channel, message, presence, and push services
-- Process-owned mediasoup worker, routers, transports, producers, and consumers
-- Independent camera, screen-share, and system-audio tracks, allowing each source to be shared separately
-- Same-origin API and WebSocket connections by default
+- Text chat, presence, voice, camera, screen sharing, and shared audio
+- Native direct WebRTC for two participants
+- Native WebRTC mesh for three or four participants
+- Automatic mediasoup SFU fallback for larger or unhealthy rooms
+- Seamless, all-client topology handoffs without restarting capture
+- IPv6-first SFU routing with an optional Playit IPv4 fallback
+- Animated RTC topology and transport diagnostics
+- Same-origin HTTP and WebSocket routes by default
 
-The Nitro server exposes:
+## Media routing
 
-| Path | Purpose |
+DSpeak automatically chooses the lowest-latency reliable route:
+
+| Participants | Route |
 | --- | --- |
-| `/dspeak/room/*` | Room management |
-| `/dspeak/channel/*` | Text and media channel management |
-| `/dspeak/chat/*` | Messages, read state, and push subscriptions |
-| `/dspeak/chat/socket` | Realtime chat WebSocket |
-| `/dspeak/presence` | User presence WebSocket |
-| `/socket` | Mediasoup signaling WebSocket |
-| `/health` | Application health check |
-| `/metrics` | Prometheus-compatible SFU metrics |
+| 1 | No media transport |
+| 2 | Direct P2P |
+| 3–4 | Full P2P mesh |
+| 5+ or unhealthy mesh | mediasoup SFU |
+
+Direct probes use STUN without TURN. A P2P route activates only when every peer
+edge is connected, non-relayed, healthy, and carrying the required RTP. Topology
+changes use make-before-break staging and activate only after every current
+client confirms the same topology epoch and media-source revision.
+
+The RTC Statistics panel shows the active route as Direct, Mesh, SFU, or SFU
+IPv4. During a handoff, it displays the active and pending routes together.
+
+See [Hybrid media topology](docs/hybrid-media-topology.md) for negotiation,
+health checks, failover, recovery, and implementation ownership.
 
 ## Requirements
 
-- Bun
+- Bun for dependency management and development
 - Node.js 24 for the production server
 - PocketBase with the existing DSpeak collections
 - A public IP or resolvable address for production WebRTC traffic
 
-This application requires a long-running Node process. Stateless serverless and
-edge runtimes are not supported because WebSockets and mediasoup resources are
-owned by the running process.
+DSpeak requires a long-running process because WebSockets and mediasoup
+resources are process-owned. Stateless serverless and edge runtimes are not
+supported.
 
-## Environment
-
-Create the local environment file before installing or starting the app:
+## Quick start
 
 ```bash
 cp .env.example .env
+bun install
+bun run dev
 ```
 
-Required variables:
+The development server runs at `http://localhost:3000`.
+
+Required environment values:
 
 ```dotenv
 AUTH_PATH=https://api.example.com/auth
-
 POCKETBASE_URL=https://pocketbase.example.com
 PBASE_ADMIN_EMAIL=admin@example.com
 PBASE_ADMIN_PASSWORD=change-me
-
 VAPID_PUBLIC_KEY=
 VAPID_PUBKEY=
 VAPID_PRIVKEY=
@@ -68,270 +79,101 @@ MEDIASOUP_ANNOUNCED_ADDRESS=
 MEDIASOUP_RTC_PORT=40000
 ```
 
-Production mediasoup configuration:
-
-```dotenv
-MEDIASOUP_LISTEN_IP=0.0.0.0
-MEDIASOUP_ANNOUNCED_ADDRESS=auto
-MEDIASOUP_ANNOUNCED_ADDRESS_URL=https://api6.ipify.org
-MEDIASOUP_RTC_PORT=40000
-MEDIASOUP_ANNOUNCED_PORT=40000
-MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
-MEDIASOUP_DIRECT_PORT=40000
-```
-
-`MEDIASOUP_ANNOUNCED_ADDRESS` must be reachable by browsers. Set it to `auto`
-to discover the container's globally routable outbound IPv6 address during
-startup. The server refuses to start if discovery fails or returns a private,
-link-local, loopback, or IPv4 address. Override
-`MEDIASOUP_ANNOUNCED_ADDRESS_URL` with an HTTPS endpoint that returns only the
-address as plain text if the default endpoint is unsuitable.
-
-When `MEDIASOUP_DIRECT_ADDRESS` is set, DSpeak sends two ICE candidates. The
-direct candidate has higher priority and the normal announced candidate is the
-fallback. Set the direct address to `auto` to discover a public IPv6 address;
-failure to discover IPv6 only disables the direct candidate and does not stop
-the Playit fallback. `MEDIASOUP_DIRECT_PORT` defaults to the local RTC port.
-
-Auto-discovery is correct only when inbound traffic to the discovered IPv6
-address on the RTC port reaches this container. If the public IPv6 is
-owned by another host, use a dedicated DNS-only hostname instead:
-
-```dotenv
-MEDIASOUP_ANNOUNCED_ADDRESS=rtc.dspeak.example.com
-```
-
-Keep that hostname updated through the host's dynamic-DNS client. It must not
-be proxied by Cloudflare: the normal Cloudflare proxy does not forward
-mediasoup RTP. The HTTPS application hostname can remain proxied.
-
-The Compose stack includes `favonia/cloudflare-ddns` in host-network mode. It
-reads the Coolify VM's global IPv6 directly from `ens3` and updates only the
-DNS-only RTC AAAA record. This avoids returning the TrueNAS host address or a
-Docker bridge address.
-
-The following variables are optional. Leave them empty to use the current
-origin and the built-in Nitro routes:
-
-```dotenv
-DSPEAK_API_URL=
-DSPEAK_WS_URL=
-DSPEAK_SFU_URL=
-```
-
-Nitro rejects startup when required variables are missing, URLs are invalid,
-the RTC port is invalid, or a wildcard mediasoup bind has no announced address.
-
-## Voice latency and resilience
-
-Voice remains on the SFU topology for predictable behavior as participants join
-and leave. Microphone and shared audio use 10 ms Opus packets, high RTP network
-priority, NACK, and in-band FEC; DTX is disabled so the beginning of speech is
-not gated by discontinuous transmission. Receivers request the browser's minimum
-playout delay while leaving jitter-buffer adaptation under browser control.
-
-RTC Statistics separates client-to-SFU RTT from average receive playout-buffer
-delay. A transient transport disconnect is allowed three seconds to recover on
-its own; a hard or sustained failure rebuilds the media session with bounded
-exponential retry. Direct UDP/IPv6 remains preferred, with TCP and Playit kept as
-fallback paths.
-
-## Video and screen sharing
-
-Connected users can publish a webcam, a screen share, or both simultaneously.
-Camera and screen-share quality are configured independently under **Settings →
-Voice & Video**. Each source supports original/full capture resolution or a
-720p, 1080p, 1440p, or 2160p limit. Frame rate is configurable from 25 through
-60 FPS. Resolution limits cap capture dimensions and do not force upscaling.
-The SFU advertises separate H.264 Baseline, Main, and Constrained Baseline
-profiles with level asymmetry. The sender ranks profiles using the browser's
-MediaCapabilities report, allowing hardware-efficient profiles to win while
-retaining a broadly compatible fallback. The RTC statistics panel reports the
-capture track, encoded, and received frame rates separately because the selected
-display surface or browser may accept a lower capture cadence than requested.
-Video negotiation also offers VP9 profile 0 for compatible browsers, while
-retaining H.264 and VP8 for hardware-efficient and broadly compatible fallback.
-Send and receive WebRTC transports are direction-bound, prefer UDP with TCP
-fallback, and do not allocate SCTP because DSpeak signaling and chat use the
-existing WebSocket paths. Receive-side congestion control starts conservatively
-and ramps from live Transport-CC or REMB feedback. Consumers are created paused
-on the SFU and resume only after the browser creates its local consumer, avoiding
-early RTP association failures and missed initial video keyframes.
-Screen video is encoded as motion content with a resolution-aware bitrate and
-high network priority so game sharing preserves the selected frame cadence when
-the capture source, encoder, and connection can sustain it. When outbound FPS
-remains below target, the sender progressively trades resolution for frame
-cadence and restores resolution after sustained recovery. Shared audio is
-monitored on both ends: suspended sender audio processing is resumed and remote
-playback bindings are repaired without requiring a participant to reconnect.
-When the DSpeak tab is backgrounded, capture constraints and RTP priorities are
-reinforced on the active screen producer. Frame adaptation uses encoder counters
-and RTC timestamps rather than page-timer cadence, and RTC Statistics reports the
-average encoded FPS observed across the most recent background interval.
-The sender's local screen preview starts paused to avoid continuously compositing
-the captured surface back into itself. It can be enabled from the screen tile
-when a local preview is needed. RTC Statistics reports codec pipeline occupancy
-estimated from per-frame processing time; it is not an operating-system CPU or
-GPU utilization measurement.
-
-## Development
-
-Install dependencies:
-
-```bash
-bun install
-```
-
-Start the development server at `http://localhost:3000`:
-
-```bash
-bun run dev
-```
+Use `.env.example` as the complete configuration reference. Startup validation
+rejects missing credentials, invalid URLs or ports, and unreachable wildcard
+mediasoup configurations.
 
 ## Production
 
-Build and start the Nitro server locally:
+Build and start the Nitro server:
 
 ```bash
 bun run build
 bun run start
 ```
 
-`bun run start` explicitly loads `.env`. Container deployments inject the same
-variables through the container environment.
+`bun run start` loads `.env`. Container deployments inject the same values
+through their environment.
 
-### Docker Compose and Coolify
-
-The repository includes `docker-compose.yml` with these default host mappings
-and an official Playit agent sidecar:
-
-- `31100/tcp` → Nitro HTTP and WebSockets on container port `3000`
-- `40000/udp` → mediasoup RTP
-- `40000/tcp` → mediasoup TCP fallback
-- `playit-agent` → public IPv4 tunnel into DSpeak's network namespace
-
-Mediasoup uses a shared `WebRtcServer`, so all send and receive transports use
-this single UDP/TCP port instead of allocating a port per transport.
-
-Start it locally with:
+Start the included Compose stack:
 
 ```bash
 docker compose up --build -d
 ```
 
-For Coolify, select the **Docker Compose** build pack and use
-`/docker-compose.yml`. Add every required value from `.env.example` in
-Coolify's Environment Variables page. Create a Docker agent in the Playit
-dashboard and set its secret as `PLAYIT_SECRET_KEY`; Compose refuses to deploy
-without it. Do not configure a Coolify domain or extra port mapping for this
-service when Zoraxy owns HTTP routing; the Compose file already publishes host
-port `31100`.
+Default host ports:
 
-Configure Zoraxy to forward `dspeak.darelisme.my.id` to:
+| Port | Purpose |
+| --- | --- |
+| `31100/tcp` | Nitro HTTP and WebSockets |
+| `40000/udp` | Preferred mediasoup RTP |
+| `40000/tcp` | mediasoup TCP fallback |
 
-```text
-http://<coolify-server-ip>:31100
-```
+The stack includes a Playit agent for IPv4 fallback and a Cloudflare DDNS
+updater for the direct RTC IPv6 hostname. See the [deployment runbook](docs/deployment.md)
+for Coolify, Zoraxy, Playit, dynamic IPv6, DNS, firewall, and ICE configuration.
 
-Zoraxy handles HTTPS and WebSocket traffic. RTP bypasses Zoraxy and reaches the
-Coolify host directly or through Playit on the shared mediasoup port.
+## Video and audio behavior
 
-For IPv6-only Internet access, the advertised IPv6 endpoint must forward both
-UDP and TCP port `40000` to `10.10.10.250` without changing the port number.
-This forwarding is separate from Zoraxy. If `10.10.10.250` has no routable IPv6
-of its own, the TrueNAS host or upstream router must provide working IPv6-to-
-IPv4 forwarding for that port; DNS and application auto-discovery cannot
-create that packet path.
+- Camera and screen capture are independent and can run together.
+- Screen audio is transported as a separate source.
+- Camera and screen quality can be set independently from 720p through 2160p,
+  or left at the original capture resolution.
+- Frame-rate settings range from 25 to 60 FPS.
+- H.264, VP9, and VP8 are negotiated according to browser capability, with
+  hardware-efficient codecs preferred when browser evidence supports them.
+- Sustained encoder pressure gradually trades resolution for frame cadence and
+  restores quality after recovery.
+- Audio uses low-latency Opus settings with NACK and in-band FEC.
+- RTC Statistics distinguishes capture, encode, receive, network, and playout
+  behavior without assuming that the SFU transcodes media.
 
-### Playit IPv4 tunnel
+## Service endpoints
 
-The agent shares DSpeak's container network namespace, so configure the Playit
-tunnel's local server address as:
+| Path | Purpose |
+| --- | --- |
+| `/dspeak/room/*` | Room management |
+| `/dspeak/channel/*` | Text and media channels |
+| `/dspeak/chat/*` | Messages, read state, and push subscriptions |
+| `/dspeak/chat/socket` | Realtime chat WebSocket |
+| `/dspeak/presence` | Presence WebSocket |
+| `/socket` | Media signaling WebSocket |
+| `/health` | Application health |
+| `/metrics` | Prometheus-compatible media metrics |
 
-```text
-127.0.0.1:40000
-```
+## Project structure
 
-Create a custom UDP tunnel with a port count of one and disable Proxy Protocol.
-Playit assigns the public port. Keep `MEDIASOUP_RTC_PORT` on the local port,
-set `MEDIASOUP_ANNOUNCED_PORT` to Playit's assigned public port, and set
-`MEDIASOUP_ANNOUNCED_ADDRESS` to the public hostname or IPv4 address shown for
-the tunnel:
+| Directory | Responsibility |
+| --- | --- |
+| `app/` | Nuxt UI, stores, capture, playback, and WebRTC clients |
+| `server/routes/` | Nitro HTTP and WebSocket routes |
+| `server/utils/` | PocketBase, mediasoup, ICE, and topology coordination |
+| `shared/` | Runtime-neutral topology policy |
+| `tests/` | Node unit and policy tests |
+| `docs/` | Deployment, topology, and migration details |
 
-```dotenv
-PLAYIT_SECRET_KEY=<docker-agent-secret>
-MEDIASOUP_RTC_PORT=40000
-MEDIASOUP_ANNOUNCED_PORT=<assigned-playit-public-port>
-MEDIASOUP_ANNOUNCED_ADDRESS=<playit-tunnel-hostname-or-ipv4>
-MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
-MEDIASOUP_DIRECT_PORT=40000
-```
-
-DSpeak rewrites the port in the ICE candidate sent to browsers while mediasoup
-continues listening on port `40000`. Direct IPv6 is advertised first with a
-higher ICE priority; Playit remains available to IPv4-only clients and when the
-direct candidate cannot connect. After entering Playit's assigned address and
-port, redeploy the stack.
-
-
-### Dynamic RTC IPv6
-
-Before enabling the stack updater, remove `rtc.dspeak.darelisme.my.id` from the
-TrueNAS DDNS updater so two clients do not overwrite the same record. Leave its
-Cloudflare proxy status set to **DNS only**.
-
-Create a scoped Cloudflare API token with `Zone / DNS / Edit` permission for
-`darelisme.my.id`, then add these runtime variables in Coolify:
-
-```dotenv
-DSPEAK_CLOUDFLARE_API_TOKEN=<scoped-token>
-DSPEAK_RTC_DOMAIN=rtc.dspeak.darelisme.my.id
-DSPEAK_DDNS_IP6_PROVIDER=local.iface:ens3
-```
-
-The default local-interface provider does not contact an external IP service;
-it reads the exact global address bound to the VM. To use a plain-text external
-recognizer instead, set for example:
-
-```dotenv
-DSPEAK_DDNS_IP6_PROVIDER=url:https://6.ident.me
-```
-
-Because the updater uses `network_mode: host`, the request originates from the
-VM's IPv6 rather than the DSpeak container network. The updater checks for
-changes periodically and reconciles the Cloudflare AAAA record automatically.
-
-The HTTP host port can be changed with:
-
-```dotenv
-DSPEAK_HTTP_PORT=31100
-```
-
-Equivalent direct Docker commands are:
+## Verification
 
 ```bash
-docker build -t dspeak .
-docker run --env-file .env \
-  -p 31100:3000 \
-  -p 40000:40000/udp \
-  -p 40000:40000/tcp \
-  dspeak
+bun run test
+bun run build
+curl http://localhost:3000/health
+curl http://localhost:3000/metrics
 ```
 
-The HTTP/WebSocket port and configured WebRTC UDP/TCP port must be allowed by
-the host firewall and deployment platform when direct access is enabled.
+Real releases should also be exercised across current Chrome, Edge, Firefox,
+and Safari on multiple networks and devices.
 
-## Authentication boundary
+## Security boundary
 
-The SFU validates that the supplied user belongs to the requested room and that
-the requested channel is a media channel. The inherited DSpeak API contract
-still passes a user identifier through the `Authorization` header or `auth`
-WebSocket query parameter. Replacing that identifier with a signed access token
-requires a coordinated client and account-service contract change.
+The media server verifies that a requested user belongs to the room and that the
+channel supports media. The inherited API contract currently supplies a user ID
+through the `Authorization` header or WebSocket `auth` query parameter. Replacing
+that identifier with a signed access token requires a coordinated client and
+account-service contract change.
 
-## Migration notes
+## Further documentation
 
-The previous `dws-backend` DSpeak routes and `dspeak2-sfu-master` service are now
-implemented inside this repository. See
-[`docs/backend-migration.md`](docs/backend-migration.md) for the migration map
-and runtime decisions.
+- [Deployment runbook](docs/deployment.md)
+- [Hybrid media topology](docs/hybrid-media-topology.md)
+- [Backend migration](docs/backend-migration.md)
