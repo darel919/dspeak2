@@ -79,6 +79,20 @@ async function getState() {
   return globalThis[stateKey]
 }
 
+export async function initializeSfu() {
+  return getState()
+}
+
+export async function closeSfu() {
+  const statePromise = globalThis[stateKey]
+  if (!statePromise) return
+
+  const state = await statePromise
+  for (const session of [...state.sessions.values()]) closeSession(state, session)
+  state.worker.close()
+  delete globalThis[stateKey]
+}
+
 async function getRoom(state, channelId) {
   let room = state.rooms.get(channelId)
   if (!room) {
