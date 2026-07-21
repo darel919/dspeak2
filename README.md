@@ -1,100 +1,74 @@
-# Nuxt Minimal Starter
+# DSpeak
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+DSpeak is a self-hosted room, text-chat, presence, and voice application built
+as a Nuxt 4 monolith. The browser application and Nitro backend run in the same
+process, while PocketBase provides persistent storage and mediasoup provides
+the voice SFU.
 
-## Setup
+## Architecture
 
-Make sure to install dependencies:
+- Nuxt application and Pinia stores in `app/`
+- Nitro HTTP and WebSocket routes in `server/routes/`
+- PocketBase-backed room, channel, message, presence, and push services
+- Process-owned mediasoup worker, routers, transports, producers, and consumers
+- Same-origin API and WebSocket connections by default
 
-```bash
-# npm
-npm install
+The Nitro server exposes:
 
-# pnpm
-pnpm install
+| Path | Purpose |
+| --- | --- |
+| `/dspeak/room/*` | Room management |
+| `/dspeak/channel/*` | Text and media channel management |
+| `/dspeak/chat/*` | Messages, read state, and push subscriptions |
+| `/dspeak/chat/socket` | Realtime chat WebSocket |
+| `/dspeak/presence` | User presence WebSocket |
+| `/socket` | Mediasoup signaling WebSocket |
+| `/health` | Application health check |
+| `/metrics` | Prometheus-compatible SFU metrics |
 
-# yarn
-yarn install
+## Requirements
 
-# bun
-bun install
-```
+- Bun
+- Node.js 24 for the production server
+- PocketBase with the existing DSpeak collections
+- A public IP or resolvable address for production WebRTC traffic
 
-## Development Server
+This application requires a long-running Node process. Stateless serverless and
+edge runtimes are not supported because WebSockets and mediasoup resources are
+owned by the running process.
 
-Start the development server on `http://localhost:3000`:
+## Environment
 
-```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
+Create the local environment file before installing or starting the app:
 
 ```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
+cp .env.example .env
 ```
 
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+Required variables:
 
-## Mediasoup SFU
+```dotenv
+AUTH_PATH=https://api.example.com/auth
 
-The Nitro server now owns the complete DSpeak backend surface:
+POCKETBASE_URL=https://pocketbase.example.com
+PBASE_ADMIN_EMAIL=admin@example.com
+PBASE_ADMIN_PASSWORD=change-me
 
-- `/dspeak/room/*`, `/dspeak/channel/*`, and `/dspeak/chat/*` HTTP APIs
-- `/dspeak/chat/socket` for chat events
-- `/dspeak/presence` for online state
-- `/socket` for mediasoup signaling
-- `/health` and `/metrics` for operations
+VAPID_PUBLIC_KEY=
+VAPID_PUBKEY=
+VAPID_PRIVKEY=
+```
 
-These endpoints use the current origin by default, so local development needs
-no API or WebSocket host overrides. Set the PocketBase credentials from
-`.env.example` before using rooms, channels, chat, or voice.
+Local mediasoup defaults:
 
-Nitro validates required environment variables during startup and terminates
-immediately when credentials are missing, URLs are invalid, the media port
-range is invalid, or a wildcard media bind has no announced address.
+```dotenv
+MEDIASOUP_LISTEN_IP=127.0.0.1
+MEDIASOUP_ANNOUNCED_ADDRESS=
+MEDIASOUP_RTC_MIN_PORT=40000
+MEDIASOUP_RTC_MAX_PORT=49999
+```
 
-Production must use the Node server preset (not an edge or serverless preset),
-run as a long-lived process, and expose both the HTTP/WebSocket port and the
-configured WebRTC UDP/TCP port range:
+Production mediasoup configuration:
 
 ```dotenv
 MEDIASOUP_LISTEN_IP=0.0.0.0
@@ -103,18 +77,73 @@ MEDIASOUP_RTC_MIN_PORT=40000
 MEDIASOUP_RTC_MAX_PORT=49999
 ```
 
-`MEDIASOUP_ANNOUNCED_ADDRESS` must be the public IP or resolvable address that
-browsers can reach. The SFU validates the supplied user against the channel's
-room membership and rejects non-media channels. The inherited DSpeak contract
-still identifies users through the `Authorization` header or `auth` query
-parameter; migrating that contract to signed access tokens is a separate auth
-boundary change.
+`MEDIASOUP_ANNOUNCED_ADDRESS` must be reachable by browsers. It is mandatory
+when `MEDIASOUP_LISTEN_IP` is `0.0.0.0` or `::`.
 
-Build and run the complete monolith with:
+The following variables are optional. Leave them empty to use the current
+origin and the built-in Nitro routes:
+
+```dotenv
+DSPEAK_API_URL=
+DSPEAK_WS_URL=
+DSPEAK_SFU_URL=
+```
+
+Nitro rejects startup when required variables are missing, URLs are invalid,
+the RTC port range is invalid, or a wildcard mediasoup bind has no announced
+address.
+
+## Development
+
+Install dependencies:
+
+```bash
+bun install
+```
+
+Start the development server at `http://localhost:3000`:
+
+```bash
+bun run dev
+```
+
+## Production
+
+Build and start the Nitro server locally:
+
+```bash
+bun run build
+bun run start
+```
+
+`bun run start` explicitly loads `.env`. Container deployments inject the same
+variables through the container environment.
+
+### Docker
 
 ```bash
 docker build -t dspeak .
-docker run --env-file .env -p 3000:3000 \
+docker run --env-file .env \
+  -p 3000:3000 \
   -p 40000-49999:40000-49999/udp \
-  -p 40000-49999:40000-49999/tcp dspeak
+  -p 40000-49999:40000-49999/tcp \
+  dspeak
 ```
+
+The HTTP/WebSocket port and the complete configured WebRTC UDP/TCP range must
+be allowed by the host firewall and deployment platform.
+
+## Authentication boundary
+
+The SFU validates that the supplied user belongs to the requested room and that
+the requested channel is a media channel. The inherited DSpeak API contract
+still passes a user identifier through the `Authorization` header or `auth`
+WebSocket query parameter. Replacing that identifier with a signed access token
+requires a coordinated client and account-service contract change.
+
+## Migration notes
+
+The previous `dws-backend` DSpeak routes and `dspeak2-sfu-master` service are now
+implemented inside this repository. See
+[`docs/backend-migration.md`](docs/backend-migration.md) for the migration map
+and runtime decisions.
