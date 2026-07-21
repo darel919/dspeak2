@@ -20,11 +20,14 @@ function send(peer, type, data) {
   peer.send(JSON.stringify({ type, data }))
 }
 
-function publicTransportData(transport) {
+function publicTransportData(transport, config) {
   return {
     id: transport.id,
     iceParameters: transport.iceParameters,
-    iceCandidates: transport.iceCandidates,
+    iceCandidates: transport.iceCandidates.map(candidate => ({
+      ...candidate,
+      port: config.announcedPort
+    })),
     dtlsParameters: transport.dtlsParameters,
     sctpParameters: transport.sctpParameters
   }
@@ -36,13 +39,25 @@ function serializeError(error) {
 
 async function createState(config) {
   const worker = await mediasoup.createWorker({
-    logLevel: process.env.NODE_ENV === 'production' ? 'warn' : 'debug',
-    rtcMinPort: config.rtcMinPort,
-    rtcMaxPort: config.rtcMaxPort
+    logLevel: process.env.NODE_ENV === 'production' ? 'warn' : 'debug'
+  })
+
+  const listenInfo = {
+    ip: config.listenIp,
+    port: config.rtcPort
+  }
+  if (config.announcedAddress) listenInfo.announcedAddress = config.announcedAddress
+
+  const webRtcServer = await worker.createWebRtcServer({
+    listenInfos: [
+      { ...listenInfo, protocol: 'udp' },
+      { ...listenInfo, protocol: 'tcp' }
+    ]
   })
 
   const state = {
     worker,
+    webRtcServer,
     rooms: new Map(),
     sessions: new Map(),
     config
@@ -62,13 +77,13 @@ async function createState(config) {
   return state
 }
 
-async function getState() {
+async function getState(resolvedConfig) {
   const runtimeConfig = useRuntimeConfig().mediasoup
-  const config = {
+  const config = resolvedConfig || {
     listenIp: process.env.MEDIASOUP_LISTEN_IP || runtimeConfig.listenIp,
     announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || runtimeConfig.announcedAddress,
-    rtcMinPort: Number(process.env.MEDIASOUP_RTC_MIN_PORT || runtimeConfig.rtcMinPort),
-    rtcMaxPort: Number(process.env.MEDIASOUP_RTC_MAX_PORT || runtimeConfig.rtcMaxPort)
+    rtcPort: Number(process.env.MEDIASOUP_RTC_PORT || runtimeConfig.rtcPort),
+    announcedPort: Number(process.env.MEDIASOUP_ANNOUNCED_PORT || runtimeConfig.announcedPort || runtimeConfig.rtcPort)
   }
   if (!globalThis[stateKey]) {
     globalThis[stateKey] = createState(config).catch((error) => {
@@ -79,8 +94,8 @@ async function getState() {
   return globalThis[stateKey]
 }
 
-export async function initializeSfu() {
-  return getState()
+export async function initializeSfu(config) {
+  return getState(config)
 }
 
 export async function closeSfu() {
@@ -197,23 +212,8 @@ function closeSession(state, session) {
 }
 
 async function createTransport(state, session) {
-  const { listenIp, announcedAddress } = state.config
-  if ((listenIp === '0.0.0.0' || listenIp === '::') && !announcedAddress) {
-    throw new Error('MEDIASOUP_ANNOUNCED_ADDRESS is required when binding to all interfaces')
-  }
-
-  const listenInfo = {
-    protocol: 'udp',
-    ip: listenIp,
-    portRange: {
-      min: state.config.rtcMinPort,
-      max: state.config.rtcMaxPort
-    }
-  }
-  if (announcedAddress) listenInfo.announcedAddress = announcedAddress
-
   const transport = await session.room.router.createWebRtcTransport({
-    listenInfos: [listenInfo, { ...listenInfo, protocol: 'tcp' }],
+    webRtcServer: state.webRtcServer,
     enableUdp: true,
     enableTcp: true,
     preferUdp: true,
@@ -246,7 +246,7 @@ async function handleMessage(state, session, message) {
 
     case 'create-transport': {
       const transport = await createTransport(state, session)
-      send(session.peer, 'transport-params', publicTransportData(transport))
+      send(session.peer, 'transport-params', publicTransportData(transport, state.config))
       return
     }
 
