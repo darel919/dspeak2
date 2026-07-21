@@ -1,4 +1,4 @@
-// idb.js - Simple IndexedDB wrapper for message queue (Service Worker compatible)
+
 const DB_NAME = 'chat-bg-worker';
 const STORE_NAME = 'messageQueue';
 
@@ -41,9 +41,9 @@ async function deleteMessage(id) {
   return tx.complete;
 }
 
-// Make functions available globally for Service Worker
+
 if (typeof self !== 'undefined' && self.constructor.name === 'ServiceWorkerGlobalScope') {
-  // Running in Service Worker context
+
   self.addMessage = addMessage;
   self.getAllMessages = getAllMessages;
   self.deleteMessage = deleteMessage;

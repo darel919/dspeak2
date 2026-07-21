@@ -14,7 +14,6 @@
                 v-if="u"
                 :class="[
                   'w-6 h-6 rounded-full overflow-hidden border-2 flex items-center justify-center text-xs',
-                  // If someone is speaking, highlight them. Otherwise highlight the first avatar.
                   (voiceStore.getDisplayUsersArray().some(x => x && x.speaking) ? (u.speaking ? 'ring-2 ring-success' : 'border-base-100') : (idx === 0 ? 'ring-2 ring-success' : 'border-base-100'))
                 ]"
                 :title="u.display_name || u.name || u.username || u.id"

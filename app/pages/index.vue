@@ -120,7 +120,7 @@ const showMobileRoomList = ref(false)
 const selectedRoom = computed(() => roomsStore.rooms.find(r => r.id === selectedRoomId.value) || null)
 const selectedChannel = computed(() => channelsStore.getChannelById(selectedChannelId.value))
 
-// Channel lists
+
 const textChannels = computed(() => channelsStore.getTextChannels())
 const voiceChannels = computed(() => channelsStore.getMediaChannels())
 
@@ -128,36 +128,36 @@ const isMobile = ref(false)
 let resizeHandler = null
 if (typeof window !== 'undefined') {
     const checkMobile = () => {
-        isMobile.value = window.innerWidth < 768 // md breakpoint (768px)
+        isMobile.value = window.innerWidth < 768
     }
     resizeHandler = checkMobile
     checkMobile()
     window.addEventListener('resize', checkMobile)
 }
 
-// Cleanup event listener
+
 onUnmounted(() => {
     if (typeof window !== 'undefined' && resizeHandler) {
         window.removeEventListener('resize', resizeHandler)
     }
 })
 
-// Watch for route changes to update selected room
+
 watch(() => route.path, async (newPath) => {
     if (newPath.startsWith('/room/')) {
         const roomId = route.params.roomId
         selectedRoomId.value = roomId
-        selectedChannelId.value = null // Reset channel selection
-        showMobileRoomList.value = false // Hide room list when room is selected
-        
+        selectedChannelId.value = null
+        showMobileRoomList.value = false
+
         if (roomId) {
             try {
-                // Fetch channels for this room
+
                 await channelsStore.fetchChannels(roomId)
-                
-                // On mobile, don't auto-select channel - show channel list instead
+
+
                 if (!isMobile.value) {
-                    // Auto-select first text channel on desktop
+
                     const textChannels = channelsStore.getTextChannels()
                     if (textChannels.length > 0) {
                         selectedChannelId.value = textChannels[0].id
@@ -170,7 +170,7 @@ watch(() => route.path, async (newPath) => {
     } else {
         selectedRoomId.value = null
         selectedChannelId.value = null
-        showMobileRoomList.value = true // Show room list on home page
+        showMobileRoomList.value = true
     }
 }, { immediate: true })
 
@@ -181,13 +181,13 @@ function onChannelSelected(channel) {
 function onRoomSelected(room) {
     selectedRoomId.value = room.id
     showMobileRoomList.value = false
-    // Navigation will be handled by the MobileRoomSidebar component
+
 }
 
 function onBackFromChat() {
     if (isMobile.value) {
         selectedChannelId.value = null
-        // This will show the channel list again
+
     } else {
         router.push('/')
     }
@@ -213,7 +213,7 @@ const isAuthenticated = computed(() => {
     return !!token && userData
 })
 
-// Watch for authentication changes and fetch rooms
+
 watch(isAuthenticated, async (newValue) => {
     if (newValue) {
         await roomsStore.fetchRooms()

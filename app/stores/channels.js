@@ -40,7 +40,7 @@ export const useChannelsStore = defineStore('channels', () => {
 
             const data = await response.json();
             channels.value = Array.isArray(data) ? data : [];
-            console.log('[ChannelsStore] Fetched channels:', channels.value);
+            console.debug('[ChannelsStore] Fetched channels:', channels.value);
             
             return channels.value;
         } catch (err) {
@@ -95,7 +95,7 @@ export const useChannelsStore = defineStore('channels', () => {
             }
 
             const newChannel = await response.json();
-            console.log('[ChannelsStore] Created channel:', newChannel);
+            console.debug('[ChannelsStore] Created channel:', newChannel);
             
             
             await fetchChannels(roomId);
@@ -147,7 +147,7 @@ export const useChannelsStore = defineStore('channels', () => {
                 throw new Error(`Failed to edit channel: ${response.status} ${errorText}`);
             }
 
-            console.log('[ChannelsStore] Edited channel:', channelId);
+            console.debug('[ChannelsStore] Edited channel:', channelId);
             
             
             const channelIndex = channels.value.findIndex(c => c.id === channelId);
@@ -199,7 +199,7 @@ export const useChannelsStore = defineStore('channels', () => {
                 throw new Error(`Failed to delete channel: ${response.status} ${errorText}`);
             }
 
-            console.log('[ChannelsStore] Deleted channel:', channelId);
+            console.debug('[ChannelsStore] Deleted channel:', channelId);
             
             
             channels.value = channels.value.filter(c => c.id !== channelId);
@@ -250,7 +250,7 @@ export const useChannelsStore = defineStore('channels', () => {
                 throw new Error(`Failed to join channel: ${response.status} ${errorText}`);
             }
 
-            console.log('[ChannelsStore] Joined channel:', channelId);
+            console.debug('[ChannelsStore] Joined channel:', channelId);
             
             
             const channelIndex = channels.value.findIndex(c => c.id === channelId);
@@ -299,7 +299,7 @@ export const useChannelsStore = defineStore('channels', () => {
                 throw new Error(`Failed to leave channel: ${response.status} ${errorText}`);
             }
 
-            console.log('[ChannelsStore] Left channel:', channelId);
+            console.debug('[ChannelsStore] Left channel:', channelId);
             
             
             const channelIndex = channels.value.findIndex(c => c.id === channelId);
@@ -342,7 +342,7 @@ export const useChannelsStore = defineStore('channels', () => {
             }
 
             const channelDetails = await response.json();
-            console.log('[ChannelsStore] Fetched channel details:', channelDetails);
+            console.debug('[ChannelsStore] Fetched channel details:', channelDetails);
             
             return channelDetails;
         } catch (err) {
@@ -374,7 +374,7 @@ export const useChannelsStore = defineStore('channels', () => {
             }
 
             const unreadCounts = await response.json();
-            console.log('[ChannelsStore] Fetched unread counts:', unreadCounts);
+            console.debug('[ChannelsStore] Fetched unread counts:', unreadCounts);
             
             return unreadCounts;
         } catch (err) {

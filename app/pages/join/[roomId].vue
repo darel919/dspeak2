@@ -85,7 +85,7 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Toast Container for notifications -->
     <ToastContainer />
   </div>
@@ -102,43 +102,43 @@ const roomsStore = useRoomsStore()
 const authStore = useAuthStore()
 
 const roomId = computed(() => route.params.roomId)
-const loading = ref(true) // Start with loading = true
+const loading = ref(true)
 const loadingMessage = ref('Initializing...')
 const joinSuccess = ref(false)
 const error = ref(null)
-const initialized = ref(false) // Add initialization flag
+const initialized = ref(false)
 
 onMounted(async () => {
-  console.log('[JoinRoom] Component mounted - Route params:', route.params)
-  console.log('[JoinRoom] Room ID:', roomId.value)
-  console.log('[JoinRoom] Current URL:', window.location.href)
-  
-  // First check if user is authenticated from localStorage
+  console.debug('[JoinRoom] Component mounted - Route params:', route.params)
+  console.debug('[JoinRoom] Room ID:', roomId.value)
+  console.debug('[JoinRoom] Current URL:', window.location.href)
+
+
   await checkAuthentication()
   await attemptJoin()
   initialized.value = true
 })
 
 async function checkAuthentication() {
-  console.log('[JoinRoom] Checking authentication...')
+  console.debug('[JoinRoom] Checking authentication...')
   const savedToken = localStorage.getItem('token')
-  console.log('[JoinRoom] Saved token:', savedToken ? 'exists' : 'not found')
-  
+  console.debug('[JoinRoom] Saved token:', savedToken ? 'exists' : 'not found')
+
   if (savedToken) {
-    console.log('[JoinRoom] Verifying token...')
+    console.debug('[JoinRoom] Verifying token...')
     const isValid = await authStore.verifyToken(savedToken)
-    console.log('[JoinRoom] Token validation result:', isValid)
+    console.debug('[JoinRoom] Token validation result:', isValid)
     if (!isValid) {
-      console.log('[JoinRoom] Token invalid, clearing auth')
+      console.debug('[JoinRoom] Token invalid, clearing auth')
       authStore.clearAuth()
     }
   }
 }
 
 async function attemptJoin() {
-  console.log('[JoinRoom] Starting join attempt for roomId:', roomId.value)
-  
-  // Check if we have a valid room ID first
+  console.debug('[JoinRoom] Starting join attempt for roomId:', roomId.value)
+
+
   if (!roomId.value || !roomId.value.trim()) {
     console.error('[JoinRoom] Invalid room ID:', roomId.value)
     error.value = 'Invalid room ID in the link'
@@ -152,28 +152,28 @@ async function attemptJoin() {
   joinSuccess.value = false
 
   try {
-    console.log('[JoinRoom] Checking user authentication...')
+    console.debug('[JoinRoom] Checking user authentication...')
     const userData = authStore.getUserData()
-    console.log('[JoinRoom] User data:', userData)
-    
+    console.debug('[JoinRoom] User data:', userData)
+
     if (!userData || !userData.id) {
-      console.log('[JoinRoom] User not authenticated, redirecting to auth page')
+      console.debug('[JoinRoom] User not authenticated, redirecting to auth page')
       loadingMessage.value = 'Redirecting to login...'
-      // Save the current full URL so we can return here after auth
+
       const currentUrl = window.location.href
       localStorage.setItem('redirectAfterAuth', currentUrl)
-      console.log('[JoinRoom] Saved redirect URL:', currentUrl)
+      console.debug('[JoinRoom] Saved redirect URL:', currentUrl)
       setTimeout(() => {
         router.push('/auth')
       }, 1500)
       return
     }
 
-    console.log('[JoinRoom] User authenticated, attempting to join room...')
+    console.debug('[JoinRoom] User authenticated, attempting to join room...')
     loadingMessage.value = 'Joining room...'
     const result = await roomsStore.joinRoom(roomId.value)
-    console.log('[JoinRoom] Join successful:', result)
-    
+    console.debug('[JoinRoom] Join successful:', result)
+
     joinSuccess.value = true
     loadingMessage.value = ''
   } catch (err) {

@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
-    <div 
-      v-if="voiceStore.connected" 
+    <div
+      v-if="voiceStore.connected"
       class="fixed bottom-4 left-4 z-50 bg-base-300 border border-base-content/20 rounded-lg shadow-lg p-3 min-w-[280px]"
     >
       <!-- Header -->
@@ -45,7 +45,7 @@
             </div>
           </button>
 
-          
+
         <button
           @click="voiceStore.leaveVoiceChannel"
           class="btn btn-ghost btn-xs btn-circle"
@@ -83,16 +83,16 @@
             </div>
           </div>
           <span class="truncate flex-1">{{ getUserDisplayName(user) }}</span>
-          
+
           <!-- Speaking Indicator -->
           <div v-if="user.speaking" class="w-1.5 h-1.5 bg-success rounded-full animate-pulse"></div>
-          
+
           <!-- Muted Indicator -->
           <svg v-if="user.muted" class="w-3 h-3 text-error" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l2 2a1 1 0 01-1.414 1.414L13 7.414V8a3 3 0 11-6 0v-3a1 1 0 012 0v3a1 1 0 002 0V5a1 1 0 01.293-.707zM11 14.93A7.001 7.001 0 017 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-5v-2.07z" clip-rule="evenodd" />
           </svg>
         </div>
-        
+
         <div v-if="connectedUsers.length > 4" class="text-xs text-base-content/40 text-center">
           +{{ connectedUsers.length - 4 }} more...
         </div>
@@ -205,12 +205,12 @@ function navigateToVoiceChannel() {
   }
 }
 
-// Shared UI state to toggle the WebRTC stats panel
+
 const statsVisible = useState('webrtc-stats-visible', () => false)
 function openStats() { statsVisible.value = true }
 
-// Signal strength computation
-const signalLevel = ref(0) // 0-4
+
+const signalLevel = ref(0)
 const signalLabel = ref('Disconnected')
 const lastRttMs = ref(null)
 const lastJitterMs = ref(null)
@@ -272,7 +272,7 @@ async function pollSignal() {
     lastJitterMs.value = jitterMs
     lastLoss.value = loss
 
-    // Compute score starting from 4
+
     let score = 4
     if (rttMs != null) {
       if (rttMs > 400) score -= 2
@@ -290,7 +290,7 @@ async function pollSignal() {
     signalLevel.value = score
     signalLabel.value = score >= 4 ? 'Excellent' : score === 3 ? 'Good' : score === 2 ? 'Fair' : 'Poor'
   } catch (_) {
-    // Keep previous signal state on transient errors
+
   }
 }
 

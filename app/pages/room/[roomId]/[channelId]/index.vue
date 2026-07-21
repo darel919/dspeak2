@@ -13,14 +13,14 @@
               @channel-selected="onChannelSelected"
             />
           </div>
-          
+
           <!-- Main Content Area -->
           <div class="flex-1 flex flex-col">
             <!-- Voice Channel -->
             <div v-if="selectedChannel && selectedChannel.isMedia" class="flex-1 p-4">
-              <VoiceChannel 
+              <VoiceChannel
                 :key="`voice-${selectedChannel.id}`"
-                :channel="selectedChannel" 
+                :channel="selectedChannel"
               />
             </div>
             <!-- Text Channel -->
@@ -46,7 +46,7 @@
           <!-- Mobile: Full-screen content when channel is selected -->
           <div v-if="selectedChannel && selectedChannel.id" class="h-full">
             <!-- Voice Channel -->
-            <VoiceChannel 
+            <VoiceChannel
               v-if="selectedChannel.isMedia"
               :key="`voice-mobile-${selectedChannel.id}`"
               :channel="selectedChannel"
@@ -99,48 +99,48 @@ const roomId = computed(() => route.params.roomId)
 const channelId = computed(() => route.params.channelId)
 const room = computed(() => roomsStore.rooms.find(r => r.id === roomId.value))
 const selectedChannelId = ref(channelId.value || null)
-const selectedChannel = computed(() => 
+const selectedChannel = computed(() =>
   channelsStore.getChannelById(selectedChannelId.value)
 )
 
-// Mobile detection with debouncing to prevent excessive updates
+
 const isMobile = ref(false)
 let resizeHandler = null
 let resizeTimeout = null
 
 if (typeof window !== 'undefined') {
   const checkMobile = () => {
-    // Debounce resize events to prevent excessive updates
+
     if (resizeTimeout) {
       clearTimeout(resizeTimeout)
     }
     resizeTimeout = setTimeout(() => {
-      const newIsMobile = window.innerWidth < 768 // md breakpoint (768px)
-      // Only update if the value actually changed
+      const newIsMobile = window.innerWidth < 768
+
       if (isMobile.value !== newIsMobile) {
         isMobile.value = newIsMobile
       }
-    }, 150) // 150ms debounce
+    }, 150)
   }
-  
+
   resizeHandler = checkMobile
   checkMobile()
   window.addEventListener('resize', checkMobile)
 }
 
-// Cleanup event listener
+
 onUnmounted(() => {
   if (typeof window !== 'undefined' && resizeHandler) {
     window.removeEventListener('resize', resizeHandler)
   }
-  
+
   if (resizeTimeout) {
     clearTimeout(resizeTimeout)
   }
-  
-  // Don't auto-disconnect voice when leaving the page
-  // Voice should persist globally across navigation
-  // Disconnect chat when fully leaving the room page to clean up WebSocket
+
+
+
+
   const chatStore = useChatStore()
   if (chatStore && chatStore.disconnectFromChannel) {
     chatStore.disconnectFromChannel(true)
@@ -153,8 +153,8 @@ async function onChannelSelected(channel) {
     name: 'room-roomId-channelId',
     params: { roomId: roomId.value, channelId: channel.id }
   })
-  
-  // Auto-join voice channel if it's a media channel
+
+
   if (channel.isMedia) {
     try {
       await voiceStore.joinVoiceChannel(channel.id)
@@ -162,8 +162,8 @@ async function onChannelSelected(channel) {
       console.error('Failed to auto-join voice channel:', error)
     }
   }
-  // Note: Don't disconnect from voice when switching to text channels
-  // Voice connection should persist globally
+
+
 }
 
 function onBackFromChat() {
@@ -184,7 +184,7 @@ watch(room, async (r) => {
     }
     try {
       await channelsStore.fetchChannels(r.id)
-      // Only auto-select channel on initial load, not on every room change
+
       if (!selectedChannelId.value) {
         const currentIsMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
         if (!currentIsMobile) {
@@ -211,8 +211,8 @@ watch(room, async (r) => {
 watch(() => route.params.channelId, async (newChannelId) => {
   if (newChannelId && newChannelId !== selectedChannelId.value) {
     selectedChannelId.value = newChannelId
-    
-    // Auto-join voice if the selected channel is a voice channel
+
+
     const channel = channelsStore.getChannelById(newChannelId)
     if (channel && channel.isMedia) {
       try {
@@ -221,8 +221,8 @@ watch(() => route.params.channelId, async (newChannelId) => {
         console.error('Failed to auto-join voice channel via URL:', error)
       }
     }
-    // Note: Don't disconnect from voice when navigating to text channels
-    // Voice connection should persist globally
+
+
   }
 }, { immediate: true })
 </script>

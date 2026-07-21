@@ -1,5 +1,5 @@
 export const useChatUtils = () => {
-  
+
   /**
    * Format a timestamp for display in chat
    */
@@ -42,33 +42,33 @@ export const useChatUtils = () => {
     const diffMs = now - date
     const diffDays = Math.floor(diffMs / 86400000)
 
-    
+
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    
+
     const pad = n => n.toString().padStart(2, '0')
-    
+
     const hour12 = date.getHours() % 12 || 12
     const min = pad(date.getMinutes())
     const ampm = date.getHours() < 12 ? 'am' : 'pm'
     const timeStr = hour12 + '.' + min + ampm
 
     if (date.toDateString() === now.toDateString()) {
-      
+
       return timeStr
     }
-    
+
     const yesterday = new Date(now)
     yesterday.setDate(now.getDate() - 1)
     if (date.toDateString() === yesterday.toDateString()) {
-      
+
       return days[date.getDay()] + ' ' + timeStr
     }
-    
+
     if (diffDays < 7) {
-      
+
       return (date.getMonth() + 1) + '/' + date.getDate() + ' ' + timeStr
     }
-    
+
     return date.getFullYear() + '/' + (date.getMonth() + 1) + '/' + date.getDate() + ' ' + timeStr
   }
 
@@ -93,9 +93,9 @@ export const useChatUtils = () => {
    */
   function getAvatarUrl(avatarPath, apiPath) {
     if (!avatarPath) return '/favicon-32x32.png'
-    
+
     if (avatarPath.startsWith('http')) return avatarPath
-    
+
     return `${apiPath}/files/${avatarPath}`
   }
 
@@ -123,7 +123,7 @@ export const useChatUtils = () => {
    * Generate a temporary message ID for optimistic updates
    */
   function generateTempId(userId = '') {
-    // Use timestamp and userId for uniqueness, no random or mock
+
     const ts = Date.now()
     return `msg_${userId ? userId + '_' : ''}${ts}`
   }
@@ -133,7 +133,7 @@ export const useChatUtils = () => {
    */
   function isUserMentioned(message, userId) {
     if (!message || !userId) return false
-    
+
     const mentionPattern = new RegExp(`@${userId}\\b`, 'i')
     return mentionPattern.test(message)
   }
@@ -161,22 +161,22 @@ export const useChatUtils = () => {
    */
   function parseMessageFormat(text) {
     if (!text) return ''
-    
+
     let formatted = escapeHtml(text)
-    
-    
+
+
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    
-    
+
+
     formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>')
-    
-    
+
+
     formatted = formatted.replace(/`(.*?)`/g, '<code class="bg-base-200 px-1 rounded text-sm">$1</code>')
-    
-    
+
+
     const urlRegex = /(https?:\/\/[^\s]+)/g
     formatted = formatted.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" class="link link-primary">$1</a>')
-    
+
     return formatted
   }
 
@@ -185,14 +185,14 @@ export const useChatUtils = () => {
    */
   function shouldGroupMessages(prevMessage, currentMessage) {
     if (!prevMessage || !currentMessage) return false
-    
-    
+
+
     if (prevMessage.sender.id !== currentMessage.sender.id) return false
-    
-    
+
+
     const timeDiff = new Date(currentMessage.created) - new Date(prevMessage.created)
     if (timeDiff > 5 * 60 * 1000) return false
-    
+
     return true
   }
 
@@ -201,9 +201,9 @@ export const useChatUtils = () => {
    */
   function getUserDisplayName(user, currentUserId) {
     if (!user) return 'Unknown User'
-    
+
     if (user.id === currentUserId) return 'You'
-    
+
     return user.name || user.email || `User ${user.id.slice(0, 8)}`
   }
 
@@ -218,7 +218,7 @@ export const useChatUtils = () => {
         await navigator.clipboard.writeText(text)
         return true
       } else {
-        
+
         const textArea = document.createElement('textarea')
         textArea.value = text
         textArea.style.position = 'fixed'
@@ -227,7 +227,7 @@ export const useChatUtils = () => {
         document.body.appendChild(textArea)
         textArea.focus()
         textArea.select()
-        
+
         const success = document.execCommand('copy')
         document.body.removeChild(textArea)
         return success

@@ -5,7 +5,7 @@ export default defineNitroPlugin(async (nitroApp) => {
   const config = await validateRuntimeEnvironment()
   const state = await initializeSfu(config)
 
-  console.log(
+  console.debug(
     `[Server] Nitro and mediasoup ready: worker=${state.worker.pid}, ` +
     `listen=${config.listenIp}, announced=${config.announcedAddress || 'none'}, ` +
     `rtc=${config.rtcPort}, announcedPort=${config.announcedPort}, ` +
@@ -14,6 +14,6 @@ export default defineNitroPlugin(async (nitroApp) => {
 
   nitroApp.hooks.hook('close', async () => {
     await closeSfu()
-    console.log('[Server] mediasoup worker stopped')
+    console.debug('[Server] mediasoup worker stopped')
   })
 })

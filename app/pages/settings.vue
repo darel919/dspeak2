@@ -176,14 +176,14 @@ const authStore = useAuthStore()
 const voiceStore = useVoiceStore()
 const settingsStore = useSettingsStore()
 
-// Local UI state
+
 const search = ref('')
 
-// Show all sections, but filter by search
+
 function sectionVisible(sectionKey) {
   if (!search.value) return true
   const q = search.value.toLowerCase()
-  // Section titles and labels to match
+
   if (sectionKey === 'account') {
     return (
       'my account' .includes(q) ||
@@ -216,14 +216,14 @@ function sectionVisible(sectionKey) {
 function scrollToSection(sectionKey) {
   const el = document.getElementById(sectionKey)
   if (el) {
-    // Get navbar height (fallback to 64px if not found)
+
     const navbar = document.querySelector('.navbar')
     const navHeight = navbar ? navbar.offsetHeight : 64
     const rect = el.getBoundingClientRect()
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop
-    // Scroll so the section top is just below the navbar
+
     window.scrollTo({
-      top: rect.top + scrollTop - navHeight - 16, // 16px extra spacing
+      top: rect.top + scrollTop - navHeight - 16,
       behavior: 'smooth'
     })
   }
@@ -270,19 +270,19 @@ const micTestActive = ref(false)
 let micTestStream = null
 const micTestAudio = ref(null)
 async function applyAudioSettings() {
-  console.log('[Settings] Apply audio settings button pressed')
-  console.log('[Settings] voiceStore.connected:', voiceStore.connected, 'voiceStore.sfuComposable:', voiceStore.sfuComposable)
+  console.debug('[Settings] Apply audio settings button pressed')
+  console.debug('[Settings] voiceStore.connected:', voiceStore.connected, 'voiceStore.sfuComposable:', voiceStore.sfuComposable)
   if (!voiceStore.connected || !voiceStore.sfuComposable) {
     console.warn('[Settings] Not applying audio settings: connected =', voiceStore.connected, 'sfuComposable =', voiceStore.sfuComposable)
     return
   }
   applyBusy.value = true
   try {
-    // Stop and re-start production with new constraints
+
     voiceStore.sfuComposable.stopAudioProduction()
     await voiceStore.sfuComposable.startAudioProduction()
   } catch (e) {
-    // no-op; UI remains simple
+
   } finally {
     applyBusy.value = false
   }
@@ -293,14 +293,14 @@ async function toggleMicTest() {
     stopMicTest()
     return
   }
-  // Mute/deafen all app audio and prevent sending to others
+
   if (voiceStore.sfuComposable && voiceStore.connected) {
-    // Deafen: stop all remote audio
+
     voiceStore.sfuComposable.applyOutputDeviceToAll('none')
-    // Optionally, stop audio production
+
     voiceStore.sfuComposable.stopAudioProduction()
   }
-  // Get current constraints
+
   let constraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
   try {
     const { useSettingsStore } = await import('../stores/settings')
@@ -308,7 +308,7 @@ async function toggleMicTest() {
     constraints = { ...constraints, ...settings.audio }
     if (settings.micDeviceId) constraints.deviceId = { exact: settings.micDeviceId }
   } catch (_) {}
-  // Only keep supported keys
+
   const supportedKeys = ['echoCancellation', 'noiseSuppression', 'autoGainControl', 'deviceId']
   const sanitizedConstraints = {}
   for (const key of supportedKeys) {
@@ -334,10 +334,10 @@ async function toggleMicTest() {
 }
 
 function stopMicTest() {
-  // Restore all app audio
+
   if (voiceStore.sfuComposable && voiceStore.connected) {
     voiceStore.sfuComposable.applyOutputDeviceToAll()
-    // Optionally, restart audio production if needed
+
     voiceStore.sfuComposable.startAudioProduction()
   }
   if (micTestStream) {
@@ -353,7 +353,7 @@ function stopMicTest() {
 }
 
 
-// Microphone devices handling
+
 const devices = ref([])
 const outputDevices = ref([])
 const videoDevices = ref([])
@@ -377,7 +377,7 @@ async function refreshDevices() {
       devices.value = []
       return
     }
-    // If labels are empty, request mic permission to reveal them
+
     const labelsKnown = (await navigator.mediaDevices.enumerateDevices()).some(d => d.label)
     if (!labelsKnown) {
       try { await navigator.mediaDevices.getUserMedia({ audio: true }) } catch (_) { /* ignore */ }
@@ -408,7 +408,7 @@ function onCameraDeviceChange() {
 function onOutputChange() {
   const id = selectedOutputId.value || null
   settingsStore.setOutputDeviceId(id)
-  // Apply to existing audio elements
+
   if (voiceStore.sfuComposable && voiceStore.connected) {
     voiceStore.sfuComposable.applyOutputDeviceToAll()
   }

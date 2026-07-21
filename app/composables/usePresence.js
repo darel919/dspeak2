@@ -13,16 +13,16 @@ export function usePresence(userId) {
 
   function connect(id) {
     if (!import.meta.client || !id) {
-      console.log('[usePresence] No userId provided for connection')
+      console.debug('[usePresence] No userId provided for connection')
       return
     }
     const origin = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
     const base = config.public.websocketPath || `${origin}/dspeak`
     const wsUrl = `${base}/presence?userId=${encodeURIComponent(id)}`
-    console.log('[usePresence] Connecting to:', wsUrl)
+    console.debug('[usePresence] Connecting to:', wsUrl)
     ws = new WebSocket(wsUrl)
     ws.onopen = () => {
-      console.log('[usePresence] Connected successfully')
+      console.debug('[usePresence] Connected successfully')
       status.value = 'connected'
       retryCount = 0
       clearTimeout(retryTimer)
@@ -35,7 +35,7 @@ export function usePresence(userId) {
       }, 30000)
     }
     ws.onclose = () => {
-      console.log('[usePresence] Connection closed, retry count:', retryCount)
+      console.debug('[usePresence] Connection closed, retry count:', retryCount)
       status.value = 'disconnected'
       if (pingInterval) {
         clearInterval(pingInterval)
@@ -49,7 +49,7 @@ export function usePresence(userId) {
       }
     }
     ws.onerror = (error) => {
-      console.log('[usePresence] WebSocket error:', error)
+      console.debug('[usePresence] WebSocket error:', error)
       ws.close()
     }
   }
@@ -66,14 +66,14 @@ export function usePresence(userId) {
 
   
   if (isRef(userId)) {
-    console.log('[usePresence] Setting up watcher for reactive userId')
+    console.debug('[usePresence] Setting up watcher for reactive userId')
     watch(userId, (id, oldId) => {
-      console.log('[usePresence] userId changed from', oldId, 'to', id)
+      console.debug('[usePresence] userId changed from', oldId, 'to', id)
       disconnect()
       if (id) connect(id)
     }, { immediate: true })
   } else {
-    console.log('[usePresence] Static userId provided:', userId)
+    console.debug('[usePresence] Static userId provided:', userId)
     if (userId) connect(userId)
   }
 

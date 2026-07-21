@@ -4,8 +4,8 @@
     <div class="flex items-center transition-all duration-300 ease-in-out">
       <!-- Collapsed State: Dropdown -->
   <div v-if="isCollapsed" class="dropdown dropdown-right" style="z-index:1000;">
-        <button 
-          tabindex="0" 
+        <button
+          tabindex="0"
           class="btn btn-ghost btn-sm flex items-center gap-2"
           :class="{ 'btn-active': selectedRoom }"
         >
@@ -41,7 +41,7 @@
           <!-- Rooms List -->
           <div v-else-if="roomsStore.rooms.length > 0">
             <li v-for="room in roomsStore.rooms" :key="room.id">
-              <a 
+              <a
                 @click="navigateToRoom(room)"
                 class="flex items-center gap-3 p-2"
                 :class="{ 'active': modelValue === room.id }"
@@ -117,7 +117,7 @@
           </button>
           <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 rounded-box w-64">
             <li v-for="room in hiddenRooms" :key="room.id">
-              <a 
+              <a
                 @click="navigateToRoom(room)"
                 class="flex items-center gap-2 text-sm"
                 :class="{ 'active': modelValue === room.id }"
@@ -140,18 +140,18 @@
         </div>
         <!-- Action Buttons -->
         <div class="flex items-center gap-1 ml-2 pl-2 border-l border-base-300">
-          <button 
-            @click="showJoinModal = true" 
-            class="btn btn-ghost btn-xs btn-circle" 
+          <button
+            @click="showJoinModal = true"
+            class="btn btn-ghost btn-xs btn-circle"
             title="Join Room"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
               <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
             </svg>
           </button>
-          <button 
-            @click="showCreateModal = true" 
-            class="btn btn-ghost btn-xs btn-circle" 
+          <button
+            @click="showCreateModal = true"
+            class="btn btn-ghost btn-xs btn-circle"
             title="Create Room"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
@@ -161,7 +161,7 @@
         </div>
       </div>
       <!-- Toggle Button -->
-      <button 
+      <button
         @click="toggleCollapse"
         class="btn btn-ghost btn-xs btn-circle ml-2"
         :title="isCollapsed ? 'Show Room Icons' : 'Show Rooms Menu'"
@@ -184,10 +184,10 @@
           <label class="label">
             <span class="label-text">Room ID or Join Link</span>
           </label>
-          <input 
+          <input
             v-model="joinInput"
             ref="joinInputRef"
-            type="text" 
+            type="text"
             placeholder="Enter room ID or paste join link..."
             class="input input-bordered w-full"
             @keyup.enter="handleJoinSubmit"
@@ -200,15 +200,15 @@
           <span>{{ joinError }}</span>
         </div>
         <div class="modal-action">
-          <button 
-            class="btn btn-ghost" 
+          <button
+            class="btn btn-ghost"
             @click="closeJoinModal"
             :disabled="joiningRoom"
           >
             Cancel
           </button>
-          <button 
-            class="btn btn-primary" 
+          <button
+            class="btn btn-primary"
             @click="handleJoinSubmit"
             :disabled="!joinInput.trim() || joiningRoom"
             :class="{ 'loading': joiningRoom }"
@@ -228,10 +228,10 @@
           <label class="label">
             <span class="label-text">Room Name <span class="text-error">*</span></span>
           </label>
-          <input 
+          <input
             v-model="createName"
             ref="createNameRef"
-            type="text" 
+            type="text"
             placeholder="Enter room name..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
@@ -241,9 +241,9 @@
           <label class="label">
             <span class="label-text">Description</span>
           </label>
-          <input 
+          <input
             v-model="createDesc"
-            type="text" 
+            type="text"
             placeholder="Optional description..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
@@ -256,15 +256,15 @@
           <span>{{ createError }}</span>
         </div>
         <div class="modal-action">
-          <button 
-            class="btn btn-ghost" 
+          <button
+            class="btn btn-ghost"
             @click="closeCreateModal"
             :disabled="creatingRoom"
           >
             Cancel
           </button>
-          <button 
-            class="btn btn-primary" 
+          <button
+            class="btn btn-primary"
             @click="handleCreateSubmit"
             :disabled="!createName.trim() || creatingRoom"
             :class="{ 'loading': creatingRoom }"
@@ -279,8 +279,8 @@
     <!-- Collapsed State Context Menu -->
     <div v-if="isCollapsed" class="absolute top-16 left-2 z-50">
       <div class="dropdown dropdown-right">
-        <button 
-          tabindex="0" 
+        <button
+          tabindex="0"
           class="btn btn-circle btn-ghost btn-xs opacity-0 hover:opacity-100 transition-opacity"
           @click="showContextMenu = !showContextMenu"
           title="Room Actions"
@@ -344,7 +344,7 @@ import { useChatUtils } from '../composables/useChatUtils'
 
 const config = useRuntimeConfig()
 const { copyToClipboard } = useChatUtils()
-// Copies the invite link for the currently selected room to clipboard
+
 async function handleCopyInviteLink() {
   if (!selectedRoom.value) return
   const baseUrl = window.location.origin
@@ -380,17 +380,17 @@ const showContextMenu = ref(false)
 
 const MAX_VISIBLE_ROOMS = 5
 
-const selectedRoom = computed(() => 
+const selectedRoom = computed(() =>
   roomsStore.rooms.find(r => r.id === props.modelValue)
 )
 
-const visibleRooms = computed(() => 
+const visibleRooms = computed(() =>
   roomsStore.rooms.slice(0, MAX_VISIBLE_ROOMS)
 )
 
-const hiddenRooms = computed(() => 
-  roomsStore.rooms.length > MAX_VISIBLE_ROOMS 
-    ? roomsStore.rooms.slice(MAX_VISIBLE_ROOMS) 
+const hiddenRooms = computed(() =>
+  roomsStore.rooms.length > MAX_VISIBLE_ROOMS
+    ? roomsStore.rooms.slice(MAX_VISIBLE_ROOMS)
     : []
 )
 
@@ -425,7 +425,7 @@ onMounted(() => {
 })
 
 function hasActivity(room) {
-  // Only show activity if there is at least one other member (not the current user) who is online
+
   if (!room.members || !Array.isArray(room.members)) return false
   const currentUserId = getCurrentUserId()
   return room.members.some(member => member.id !== currentUserId && member.online === true)

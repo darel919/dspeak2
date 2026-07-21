@@ -145,9 +145,9 @@
             <label class="label">
               <span class="label-text">Channel Name</span>
             </label>
-            <input 
+            <input
               v-model="newChannelName"
-              type="text" 
+              type="text"
               placeholder="channel-name"
               class="input input-bordered w-full"
               required
@@ -157,7 +157,7 @@
             <label class="label">
               <span class="label-text">Description (optional)</span>
             </label>
-            <textarea 
+            <textarea
               v-model="newChannelDesc"
               placeholder="Describe what this channel is for..."
               class="textarea textarea-bordered w-full"
@@ -171,19 +171,19 @@
             <div class="form-control">
               <label class="label cursor-pointer">
                 <span class="label-text">Text Channel</span>
-                <input 
-                  v-model="newChannelType" 
-                  type="radio" 
-                  value="text" 
+                <input
+                  v-model="newChannelType"
+                  type="radio"
+                  value="text"
                   class="radio"
                 />
               </label>
               <label class="label cursor-pointer">
                 <span class="label-text">Voice Channel</span>
-                <input 
-                  v-model="newChannelType" 
-                  type="radio" 
-                  value="voice" 
+                <input
+                  v-model="newChannelType"
+                  type="radio"
+                  value="voice"
                   class="radio"
                 />
               </label>
@@ -239,9 +239,9 @@
             <label class="label">
               <span class="label-text">Channel Name</span>
             </label>
-            <input 
+            <input
               v-model="editingChannel.name"
-              type="text" 
+              type="text"
               class="input input-bordered w-full"
               required
             />
@@ -250,7 +250,7 @@
             <label class="label">
               <span class="label-text">Description</span>
             </label>
-            <textarea 
+            <textarea
               v-model="editingChannel.desc"
               class="textarea textarea-bordered w-full"
               rows="3"
@@ -313,7 +313,7 @@ import { useChatUtils } from '../composables/useChatUtils'
 import { useToast } from '../composables/useToast'
 const { copyToClipboard } = useChatUtils()
 const { success, error } = useToast()
-// Copies the invite link for the current room to clipboard
+
 async function handleCopyInviteLink() {
   if (!props.room || !props.room.id) return
   const baseUrl = window.location.origin
@@ -356,9 +356,9 @@ const newChannelName = ref('')
 const newChannelDesc = ref('')
 const newChannelType = ref('text')
 const newChannelBitrate = ref(64)
-// Slider level (1..5) -> kbps mapping
+
 const bitrateLevelToKbps = [0, 64, 96, 128, 160, 256]
-const newChannelBitrateLevel = ref(3) // default level -> 128 kbps
+const newChannelBitrateLevel = ref(3)
 const newChannelBitrateKbps = computed(() => bitrateLevelToKbps[newChannelBitrateLevel.value] || 64)
 const textChannels = computed(() => channelsStore.getTextChannels())
 const voiceChannels = computed(() => channelsStore.getMediaChannels())
@@ -425,7 +425,7 @@ async function handleCreateChannel() {
       name: newChannelName.value.trim(),
       desc: newChannelDesc.value.trim(),
       isMedia: newChannelType.value === 'voice',
-      // use slider mapping for kbps value
+
       audio_bitrate: newChannelType.value === 'voice' ? Number(newChannelBitrateKbps.value) : null
     }
 
@@ -438,7 +438,7 @@ async function handleCreateChannel() {
 
 async function editChannel(channel) {
   editingChannel.value = { ...channel }
-  // initialize slider level for editing modal based on existing audio_bitrate
+
   const kbps = Number(channel.audio_bitrate) || 64
   const level = bitrateLevelToKbps.indexOf(kbps)
   editingChannelBitrateLevel.value = level > 0 ? level : 1
@@ -447,7 +447,7 @@ async function editChannel(channel) {
 
 async function handleEditChannel() {
   try {
-    // ensure the editingChannel.audio_bitrate reflects slider selection
+
     if (editingChannel.value) editingChannel.value.audio_bitrate = Number(editingChannelBitrateKbps.value)
     await channelsStore.editChannel(editingChannel.value.id, editingChannel.value)
     closeEditModal()

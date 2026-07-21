@@ -38,8 +38,8 @@
           @click="selectRoom(room)"
           class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200"
           :class="[
-            selectedRoomId === room.id 
-              ? 'bg-primary text-primary-content' 
+            selectedRoomId === room.id
+              ? 'bg-primary text-primary-content'
               : 'hover:bg-base-300 text-base-content'
           ]"
         >
@@ -49,11 +49,11 @@
               <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover" :alt="room.name" />
             </template>
             <template v-else>
-              <div 
+              <div
                 class="w-12 h-12 rounded-full text-sm font-semibold"
                 :class="[
-                  selectedRoomId === room.id 
-                    ? 'bg-primary-content text-primary' 
+                  selectedRoomId === room.id
+                    ? 'bg-primary-content text-primary'
                     : 'bg-neutral text-neutral-content'
                 ]"
               >
@@ -65,11 +65,11 @@
           <!-- Room Info -->
           <div class="flex-1 text-left overflow-hidden">
             <div class="font-medium truncate">{{ room.name }}</div>
-            <div 
+            <div
               class="text-sm opacity-70 truncate"
               :class="[
-                selectedRoomId === room.id 
-                  ? 'text-primary-content' 
+                selectedRoomId === room.id
+                  ? 'text-primary-content'
                   : 'text-base-content'
               ]"
             >
@@ -105,8 +105,8 @@
     <!-- Action Buttons -->
     <div class="p-3 border-t border-base-300">
       <div class="flex gap-2">
-        <button 
-          @click="showJoinModal = true" 
+        <button
+          @click="showJoinModal = true"
           class="btn btn-sm btn-ghost flex-1"
           title="Join Server"
         >
@@ -115,8 +115,8 @@
           </svg>
           Join
         </button>
-        <button 
-          @click="showCreateModal = true" 
+        <button
+          @click="showCreateModal = true"
           class="btn btn-sm btn-ghost flex-1"
           title="Create Server"
         >
@@ -134,10 +134,10 @@
         <h3 class="font-bold text-lg mb-4">Join Server</h3>
         <p class="text-base-content/70 mb-4">Enter a server ID or paste a join link to join a server.</p>
         <div class="form-control mb-4">
-          <input 
+          <input
             v-model="joinInput"
             ref="joinInputRef"
-            type="text" 
+            type="text"
             placeholder="Server ID or invite link..."
             class="input input-bordered w-full"
             @keyup.enter="handleJoinSubmit"
@@ -150,15 +150,15 @@
           <span>{{ joinError }}</span>
         </div>
         <div class="modal-action">
-          <button 
-            class="btn btn-ghost" 
+          <button
+            class="btn btn-ghost"
             @click="closeJoinModal"
             :disabled="joiningRoom"
           >
             Cancel
           </button>
-          <button 
-            class="btn btn-primary" 
+          <button
+            class="btn btn-primary"
             @click="handleJoinSubmit"
             :disabled="!joinInput.trim() || joiningRoom"
             :class="{ 'loading': joiningRoom }"
@@ -178,10 +178,10 @@
           <label class="label">
             <span class="label-text">Server Name <span class="text-error">*</span></span>
           </label>
-          <input 
+          <input
             v-model="createName"
             ref="createNameRef"
-            type="text" 
+            type="text"
             placeholder="Enter server name..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
@@ -191,9 +191,9 @@
           <label class="label">
             <span class="label-text">Description</span>
           </label>
-          <input 
+          <input
             v-model="createDesc"
-            type="text" 
+            type="text"
             placeholder="Optional description..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
@@ -206,15 +206,15 @@
           <span>{{ createError }}</span>
         </div>
         <div class="modal-action">
-          <button 
-            class="btn btn-ghost" 
+          <button
+            class="btn btn-ghost"
             @click="closeCreateModal"
             :disabled="creatingRoom"
           >
             Cancel
           </button>
-          <button 
-            class="btn btn-primary" 
+          <button
+            class="btn btn-primary"
             @click="handleCreateSubmit"
             :disabled="!createName.trim() || creatingRoom"
             :class="{ 'loading': creatingRoom }"
@@ -271,9 +271,9 @@ async function selectRoom(room) {
 }
 
 function hasActivity(room) {
-  // Only show activity if there is at least one other member (not the current user) who is online
+
   if (!room.members || !Array.isArray(room.members)) return false
-  // Try to get current user id from store, fallback to null
+
   const currentUserId = roomsStore?.$state?.authUserId || null
   return room.members.some(member => member.id !== currentUserId && member.online === true)
 }

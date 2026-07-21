@@ -30,3 +30,14 @@ test('limited resolution applies maximum dimensions without upscaling requiremen
   assert.deepEqual(constraints.deviceId, { exact: 'camera-1' })
   assert.equal(constraints.frameRate.max, 60)
 })
+
+test('display capture does not use constraints forbidden by getDisplayMedia', () => {
+  const constraints = buildVideoConstraints(
+    { resolution: '1080p', frameRate: 30 },
+    { display: true }
+  )
+
+  assert.deepEqual(constraints.frameRate, { ideal: 30, max: 30 })
+  assert.equal(constraints.frameRate.min, undefined)
+  assert.equal(constraints.deviceId, undefined)
+})

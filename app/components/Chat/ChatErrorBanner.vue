@@ -35,7 +35,7 @@ const error = toRef(chatStore, 'error')
 async function retry() {
   if (!props.channelId) return
   chatStore.error = null
-  // If we have a token, attempt to verify it first
+
   try {
     const token = authStore.token
     if (token) {

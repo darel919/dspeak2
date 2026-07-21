@@ -34,7 +34,7 @@ const { getAvatarUrl } = useChatUtils()
 const profile = computed(() => {
   const user = authStore.getUserData()
   if (!user) return null
-  // Patch avatar URL if needed
+
   return {
     ...user,
     avatar: getAvatarUrl(user.avatar, config.public.baseApiPath)
@@ -43,7 +43,7 @@ const profile = computed(() => {
 
 async function handleLogout() {
   authStore.clearAuth()
-  // Ensure localStorage is cleared before navigation
+
   await nextTick()
   router.push('/')
 }

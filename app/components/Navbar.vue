@@ -4,9 +4,9 @@ import { useAuthStore } from '../stores/auth'
 import { useVoiceStore } from '../stores/voice'
 import { useChannelsStore } from '../stores/channels'
 import { useSettingsStore } from '../stores/settings'
-// import { useNotifications } from '../composables/useNotifications'
+
 import RoomList from './RoomList.vue'
-// import NotificationSettings from './NotificationSettings.vue'
+
 
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
@@ -27,7 +27,7 @@ const currentRoomId = computed(() => {
     return null;
 });
 
-// useNotifications();
+
 
 const presenceStatus = inject('presenceStatus', ref(null)) as Ref<string|null>
 
@@ -44,7 +44,7 @@ const isDisconnected = computed(() => {
     return presenceStatus?.value === 'permanently-disconnected'
 })
 
-// Voice-related computeds
+
 const currentVoiceChannel = computed(() => {
     if (!voiceStore.currentChannelId) return null
     return channelsStore.getChannelById(voiceStore.currentChannelId) as any
@@ -52,7 +52,7 @@ const currentVoiceChannel = computed(() => {
 
 const connectedUsers = computed(() => voiceStore.getDisplayUsersArray())
 
-// Voice control functions
+
 function navigateToVoiceChannel() {
     if (voiceStore.currentChannelId && voiceStore.currentRoomId) {
         router.push(`/room/${voiceStore.currentRoomId}/${voiceStore.currentChannelId}`)
@@ -60,33 +60,33 @@ function navigateToVoiceChannel() {
 }
 
 function handleProfileClick(e: MouseEvent) {
-    // If connected, distinguish between avatar and background click
+
     if (voiceStore.connected) {
-        // Find if click was inside avatar
+
         const avatarEl = document.querySelector('.avatar.select-none.relative .w-12.rounded-full');
         if (avatarEl && avatarEl.contains(e.target as Node)) {
             router.push('/settings');
             return;
         }
-        // Otherwise, treat as background click
+
         navigateToVoiceChannel();
         return;
     }
-    // Not connected: always go to settings
+
     router.push('/settings');
 }
 
-// Shared state to toggle the WebRTC stats panel
+
 const statsVisible = useState<boolean>('webrtc-stats-visible', () => false)
 
-// Signal strength polling for the top-right voice bubble
+
 const lastRttMs = ref<number|null>(null)
 const lastJitterMs = ref<number|null>(null)
 const lastLoss = ref<number|null>(null)
-const signalLevel = ref(0) // 0-4
+const signalLevel = ref(0)
 let signalTimer: any = null
 
-// Elapsed call time near the signal/ping
+
 const elapsedText = ref('')
 let elapsedTimer: any = null
 
@@ -141,7 +141,7 @@ const signalTooltip = computed(() => {
 
 async function pollSignal() {
     try {
-        // @ts-ignore - sfuComposable is a runtime prop
+
         const sfu: any = (voiceStore as any).sfuComposable
         if (!voiceStore.connected || !sfu || !sfu.getWebRTCStatsSnapshot) {
             signalLevel.value = 0
@@ -164,7 +164,7 @@ async function pollSignal() {
         if (score < 1) score = 1
         signalLevel.value = score
     } catch {
-        // ignore transient errors
+
     }
 }
 
@@ -174,34 +174,34 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
 
 
 <template>
-    
+
     <section class="navbar w-full flex justify-between py-2 px-4 bg-accent-4 text-light fixed top-0 left-0 z-50" style="height: var(--navbar-height);">
         <div class="flex items-center gap-4">
             <NuxtLink to="/" class="">
                 <img class="w-13 rounded-sm select-none pointer-events-none" src="/assets/logo/logo_96.png"/>
             </NuxtLink>
-            
+
             <!-- Room Navigation -->
             <div v-if="profile" class="hidden md:flex">
                 <RoomList :model-value="currentRoomId || undefined" />
             </div>
         </div>
-        
+
         <section v-if="profile" class="flex items-center gap-4 ml-4">
             <!-- Settings Link intentionally removed to prevent redirect on voice channel error -->
 
             <!-- Smart Profile/Voice Control -->
-            <div 
+            <div
                 @click="handleProfileClick"
                 class="flex items-center cursor-pointer group relative"
                 :class="[
                     voiceStore.connected ? 'bg-success/20 border border-success/40 rounded-lg px-2 py-1' : '',
                     (!voiceStore.connected && (voiceStore.connecting || voiceStore.error)) ? 'bg-warning/20 border border-warning/40 rounded-lg px-2 py-1' : ''
                 ]"
-                :title="voiceStore.connected 
-                    ? `Connected to ${currentVoiceChannel?.name} • Click to go to voice channel` 
-                    : (voiceStore.connecting 
-                        ? 'Connecting…' 
+                :title="voiceStore.connected
+                    ? `Connected to ${currentVoiceChannel?.name} • Click to go to voice channel`
+                    : (voiceStore.connecting
+                        ? 'Connecting…'
                         : (voiceStore.error && !voiceStore.connected ? 'Call dropped or unavailable' : 'Your Account'))"
             >
                 <!-- Voice Controls (when connected) -->
@@ -230,7 +230,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                             <span class="w-1.5 rounded-sm" :class="[barClass(4), barColorClass]" style="height:15px"></span>
                         </div>
                     </button>
-                                        
+
                     <!-- Broadcast Mode Toggle -->
                     <button
                       @click.stop="toggleBroadcastMode"
@@ -253,7 +253,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                     >
                         <svg v-if="!voiceStore.micMuted" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 text-current">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
-                        </svg>   
+                        </svg>
 
                         <svg v-else xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6 text-white">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
@@ -301,7 +301,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
 
                 <!-- Avatar with Voice Indicator -->
                 <div class="avatar select-none relative" :class="avatarStatusClass">
-                    <div 
+                    <div
                         class="w-12 rounded-full transition-all duration-200"
                         :class="{
                           'ring-2 ring-success ring-offset-2 ring-offset-base-100': voiceStore.connected,
@@ -314,8 +314,8 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         <img :src="profile?.avatar" alt="User avatar" />
                     </div>
                     <!-- Voice Connection Indicator -->
-                    <div 
-                        v-if="voiceStore.connected" 
+                    <div
+                        v-if="voiceStore.connected"
                         class="absolute -bottom-1 -right-1 w-4 h-4 bg-success rounded-full flex items-center justify-center"
                     >
                         <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -343,6 +343,6 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
             </div>
         </section>
     </section>
-   
+
 
 </template>

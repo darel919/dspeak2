@@ -41,11 +41,11 @@ const isAuthenticated = computed(() => {
   const userData = authStore.getUserData()
   const hasToken = !!readSavedToken()
   const result = hasToken && authChecked.value && userData
-  console.log('[Init] isAuthenticated computed:', { 
+  console.debug('[Init] isAuthenticated computed:', {
     token: hasToken,
-    authChecked: authChecked.value, 
-    userData: !!userData, 
-    result 
+    authChecked: authChecked.value,
+    userData: !!userData,
+    result
   })
   return result
 })
@@ -60,7 +60,7 @@ const shouldShowNotificationWarning = computed(() => {
 
 const userId = computed(() => {
   const user = authStore.getUserData()
-  console.log('[Init] Computing userId:', user?.id)
+  console.debug('[Init] Computing userId:', user?.id)
   return user && user.id ? user.id : null
 })
 const { status: presenceStatus, connect: connectPresence, disconnect: disconnectPresence } = usePresence(userId)
@@ -88,14 +88,14 @@ function sendUserIdToServiceWorker() {
     if (userData && userData.id) {
       if (navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage({ type: 'SET_USER_ID', userId: userData.id })
-        console.log('[Init] Sent user id to service worker controller:', userData.id)
+        console.debug('[Init] Sent user id to service worker controller:', userData.id)
       }
       if (navigator.serviceWorker.getRegistrations) {
         navigator.serviceWorker.getRegistrations().then(regs => {
           regs.forEach(reg => {
             if (reg.active) {
               reg.active.postMessage({ type: 'SET_USER_ID', userId: userData.id })
-              console.log('[Init] Sent user id to SW registration:', userData.id)
+              console.debug('[Init] Sent user id to SW registration:', userData.id)
             }
           })
         })
@@ -104,7 +104,7 @@ function sendUserIdToServiceWorker() {
         navigator.serviceWorker.ready.then(reg => {
           if (reg.active) {
             reg.active.postMessage({ type: 'SET_USER_ID', userId: userData.id })
-            console.log('[Init] Sent user id to SW ready registration:', userData.id)
+            console.debug('[Init] Sent user id to SW ready registration:', userData.id)
           }
         })
       }
@@ -113,7 +113,7 @@ function sendUserIdToServiceWorker() {
 }
 watch(() => authStore.getUserData(), async (userData) => {
   if (userData && !isAuthPage.value) {
-    console.log('[Init] User authenticated, fetching rooms')
+    console.debug('[Init] User authenticated, fetching rooms')
     await roomsStore.fetchRooms()
     sendUserIdToServiceWorker()
   }
@@ -128,15 +128,15 @@ watch(() => route.path, async () => {
 async function requestNotificationPermissionAutomatically() {
   try {
     const notificationManager = (await import('../utils/notificationManager')).default
-    
-    console.log('[Init] Notification manager state:', {
+
+    console.debug('[Init] Notification manager state:', {
       supported: notificationManager.isSupported,
       permission: notificationManager.permission,
       enabled: notificationManager.isEnabled
     })
-    
+
     if (notificationManager.isSupported && notificationManager.permission === 'default') {
-      console.log('[Init] Requesting notification permission automatically')
+      console.debug('[Init] Requesting notification permission automatically')
       await notificationManager.requestPermission()
     }
   } catch (error) {

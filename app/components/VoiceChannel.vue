@@ -8,18 +8,18 @@
         </svg>
         <h3 class="font-semibold">{{ channel.name }}</h3>
       </div>
-      
+
       <div class="flex items-center gap-2">
   <div v-if="voiceStore.connecting && !voiceStore.connected" class="flex items-center gap-2 text-info">
           <span class="loading loading-spinner loading-sm"></span>
           <span class="text-sm">Connecting...</span>
         </div>
-        
+
         <!-- <div v-else-if="voiceStore.connected" class="flex items-center gap-2 text-success">
           <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div>
           <span class="text-sm font-medium">Connected</span>
         </div> -->
-        
+
         <!-- <button
           v-if="voiceStore.connected"
           @click="leaveChannel"
@@ -66,48 +66,73 @@
     </div>
 
     <!-- Main Content Area - Participants View -->
-    <div v-if="voiceStore.connected && voiceStore.currentChannelId === props.channel.id" class="flex-1 flex flex-col overflow-hidden">
-      <div v-if="videoFeeds.length" class="grid shrink-0 grid-cols-1 gap-4 overflow-auto p-4 md:grid-cols-2">
-        <VideoFeed
-          v-for="feed in videoFeeds"
-          :key="feed.key"
-          :stream="feed.stream"
-          :source="feed.source"
-          :label="feed.label"
-          :muted="feed.local"
-        />
+    <div v-if="voiceStore.connected && voiceStore.currentChannelId === props.channel.id" class="flex-1 flex min-h-0 flex-col overflow-hidden">
+      <!-- Video owns the available stage; the grid expands and reflows as feeds appear. -->
+      <div v-if="videoFeeds.length" class="flex min-h-0 flex-1 items-center justify-center p-4 md:p-6">
+        <div
+          class="grid h-full max-h-full w-full content-center justify-center gap-4"
+          :class="videoFeeds.length === 1
+            ? 'grid-cols-1 max-w-6xl'
+            : 'grid-cols-1 md:grid-cols-2'"
+        >
+          <div
+            v-for="feed in videoFeeds"
+            :key="feed.key"
+            class="mx-auto aspect-video max-h-full w-full overflow-hidden"
+          >
+            <VideoFeed
+              :stream="feed.stream"
+              :source="feed.source"
+              :label="feed.label"
+              :muted="feed.local"
+            />
+          </div>
+        </div>
       </div>
       <!-- Participants Grid -->
-      <div class="flex-1 p-6">
+      <div :class="videoFeeds.length ? 'shrink-0 border-t border-base-300 bg-base-200/70 px-4 py-3' : 'flex-1 p-6'">
         <div v-if="connectedUsers.length > 0" class="h-full">
           <!-- Participants Grid Layout -->
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 h-full auto-rows-max">
+          <div
+            :class="videoFeeds.length
+              ? 'flex max-w-full items-center justify-center gap-3 overflow-x-auto'
+              : 'grid h-full auto-rows-max grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'"
+          >
             <div
               v-for="user in connectedUsers"
               :key="user.id"
-              class="flex flex-col items-center justify-center p-6 bg-base-100 rounded-lg shadow-sm border border-base-300 min-h-[200px] relative transition-all duration-500"
-              :class="user.speaking ? 'ring-2 ring-success' : ''"
+              class="relative flex flex-col items-center justify-center bg-base-100 shadow-sm border border-base-300 transition-all duration-500"
+              :class="[
+                videoFeeds.length ? 'min-w-24 rounded-lg px-3 py-2' : 'min-h-[200px] rounded-lg p-6',
+                user.speaking ? 'ring-2 ring-success' : ''
+              ]"
               @contextmenu.prevent="openVolumeMenu(user)"
             >
               <!-- User Avatar -->
-              <div class="avatar mb-4">
+              <div class="avatar" :class="videoFeeds.length ? 'mb-1' : 'mb-4'">
                 <div
                   v-if="getUserAvatar(user)"
-                  class="w-20 h-20 rounded-full overflow-hidden ring-2 transition-all duration-150"
-                  :class="user.speaking ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]' : 'ring-base-300'"
+                  class="rounded-full overflow-hidden ring-2 transition-all duration-150"
+                  :class="[
+                    videoFeeds.length ? 'h-10 w-10' : 'h-20 w-20',
+                    user.speaking ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]' : 'ring-base-300'
+                  ]"
                 >
                   <img :src="getUserAvatar(user)" class="w-full h-full object-cover" alt="avatar"/>
                 </div>
                 <div
                   v-else
-                  class="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content flex items-center justify-center text-2xl font-bold ring-2 transition-all duration-150"
-                  :class="user.speaking ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]' : 'ring-base-300'"
+                  class="rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content flex items-center justify-center font-bold ring-2 transition-all duration-150"
+                  :class="[
+                    videoFeeds.length ? 'h-10 w-10 text-sm' : 'h-20 w-20 text-2xl',
+                    user.speaking ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]' : 'ring-base-300'
+                  ]"
                 >
                   {{ getUserInitials(user) }}
                 </div>
               </div>
               <!-- User Name -->
-              <h4 class="text-lg font-semibold text-center mb-2">{{ getUserDisplayName(user) }}</h4>
+              <h4 class="font-semibold text-center" :class="videoFeeds.length ? 'max-w-24 truncate text-xs' : 'mb-2 text-lg'">{{ getUserDisplayName(user) }}</h4>
               <!-- ICE / Connection Status for local user when not fully connected -->
               <div v-if="isLocalUser(user) && !voiceStore.connected" class="text-xs text-base-content/60 mb-2">
                 <span v-if="voiceStore.connecting && !voiceStore.connected">Waiting</span>
@@ -285,7 +310,7 @@ const config = useRuntimeConfig()
 
 const connectedUsers = computed(() => {
   const display = voiceStore.getDisplayUsersArray()
-  // Also log available audio elements for comparison
+
   if (typeof window !== 'undefined') {
     const container = document.getElementById('webrtc-audio-global')
     if (container) {
@@ -294,7 +319,7 @@ const connectedUsers = computed(() => {
         dataUserId: el.getAttribute('data-user-id'),
         volume: el.volume
       }))
-      // console.log('[VoiceChannel] Available audio elements:', audioElements)
+
     }
   }
   return display
@@ -326,43 +351,43 @@ async function toggleScreenShare() {
 }
 const volumeMenuUser = ref(null)
 function openVolumeMenu(user) {
-  console.log('[VoiceChannel] Opening volume menu for user:', user)
+  console.debug('[VoiceChannel] Opening volume menu for user:', user)
   volumeMenuUser.value = user
 }
 function closeVolumeMenu() {
   volumeMenuUser.value = null
 }
 function onVolumeChange(userId, event) {
-  console.log('[VoiceChannel] Volume change for user:', userId, 'value:', event.target.value)
+  console.debug('[VoiceChannel] Volume change for user:', userId, 'value:', event.target.value)
   voiceStore.setUserVolume(userId, Number(event.target.value))
-  
-  // Also try to directly find and update any matching audio element
-  // This is a workaround for mapping mismatches
+
+
+
   const container = document.getElementById('webrtc-audio-global')
   if (container) {
     const allAudio = container.querySelectorAll('audio')
-    console.log('[VoiceChannel] Available audio elements during volume change:', 
+    console.debug('[VoiceChannel] Available audio elements during volume change:',
       Array.from(allAudio).map(el => ({ id: el.id, dataUserId: el.getAttribute('data-user-id') })))
-    
-    // Try multiple strategies to find the right element
+
+
     let found = false
     allAudio.forEach(audio => {
-      // Strategy 1: Direct ID match
+
       if (audio.id === `audio-${userId}`) {
         audio.volume = Number(event.target.value)
-        console.log('[VoiceChannel] Updated volume via direct ID match')
+        console.debug('[VoiceChannel] Updated volume via direct ID match')
         found = true
       }
-      // Strategy 2: data-user-id match
+
       else if (audio.getAttribute('data-user-id') === userId) {
         audio.volume = Number(event.target.value)
-        console.log('[VoiceChannel] Updated volume via data-user-id match')
+        console.debug('[VoiceChannel] Updated volume via data-user-id match')
         found = true
       }
     })
-    
+
     if (!found) {
-      console.log('[VoiceChannel] No audio element found for user', userId)
+      console.debug('[VoiceChannel] No audio element found for user', userId)
     }
   }
 }
@@ -379,10 +404,10 @@ function getUserInitials(user) {
 }
 
 function getUserDisplayName(user) {
-  // Prefer mapped profile from the voice store directory
+
   const profile = (voiceStore.getUserProfile && user?.id) ? voiceStore.getUserProfile(user.id) : null
   const merged = { ...profile, ...user }
-  // If this is the local user, show "You"
+
   try {
     const me = useAuthStore().getUserData && useAuthStore().getUserData()
     if (me && me.id && String(me.id) === String(merged.id)) return 'You'
@@ -395,7 +420,7 @@ function getUserAvatar(user) {
   const merged = { ...profile, ...user }
   const avatar = merged.avatar
   if (!avatar) return null
-  // Absolute URLs pass through as-is
+
   if (typeof avatar === 'string' && /^(https?:)?\/\//i.test(avatar)) return avatar
   const base = (config?.public?.baseApiPath || '').replace(/\/$/, '')
   const clean = String(avatar).replace(/^\/+/, '')
@@ -420,9 +445,9 @@ function isLocalUser(user) {
 async function joinThisChannel() {
   try {
     await voiceStore.joinVoiceChannel(props.channel.id)
-    // Do not navigate away on error; error modal will show if needed
+
   } catch (error) {
-    // Stay in the channel view, just show error
+
     console.error('Failed to join voice channel:', error)
   }
 }
@@ -431,9 +456,9 @@ async function joinThisChannel() {
 async function switchToThisChannel() {
   try {
     await voiceStore.joinVoiceChannel(props.channel.id)
-    // Do not navigate away on error; error modal will show if needed
+
   } catch (error) {
-    // Stay in the channel view, just show error
+
     console.error('Failed to switch voice channel:', error)
   }
 }
@@ -453,8 +478,8 @@ async function leaveChannel() {
 }
 
 onUnmounted(() => {
-  // Don't auto-disconnect when leaving voice channel view
-  // Voice connection should persist globally
+
+
 })
 </script>
 

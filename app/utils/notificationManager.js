@@ -26,11 +26,6 @@ class NotificationManager {
     }
     
     this.initialized = true
-    console.log('[NotificationManager] Initialized:', {
-      supported: this.isSupported,
-      permission: this.permission,
-      enabled: this.isEnabled
-    })
   }
   
   async requestPermission() {
@@ -58,16 +53,7 @@ class NotificationManager {
   }
   
   showNotification(title, options = {}) {
-    console.log('[NotificationManager] showNotification called:', {
-      title,
-      options,
-      enabled: this.isEnabled,
-      supported: this.isSupported,
-      permission: this.permission
-    })
-    
     if (!this.isEnabled || !this.isSupported) {
-      console.log('[NotificationManager] Notifications not enabled/supported, skipping')
       return null
     }
 
@@ -78,9 +64,6 @@ class NotificationManager {
         ...options
       })
 
-      console.log('[NotificationManager] Notification created successfully')
-      
-      
       setTimeout(() => {
         notification.close()
       }, 5000)
@@ -93,18 +76,12 @@ class NotificationManager {
   }
   
   showMessageNotification(message, roomName) {
-    console.log('[NotificationManager] showMessageNotification called:', { message, roomName })
-
-    
     try {
-      
       const userDataRaw = localStorage.getItem('userData')
       if (userDataRaw) {
         const userData = JSON.parse(userDataRaw)
         const senderId = (message.sender && typeof message.sender === 'object') ? message.sender.id : message.sender
-        console.log('[NotificationManager] userData.id:', userData && userData.id, 'senderId:', senderId)
         if (userData && userData.id && senderId && senderId === userData.id) {
-          console.log('[NotificationManager] Skipping notification for own message (user id match)')
           return null
         }
       }
@@ -114,7 +91,6 @@ class NotificationManager {
     }
 
     if (!this.isEnabled) {
-      console.log('[NotificationManager] Notifications not enabled, skipping')
       return null
     }
 

@@ -92,7 +92,7 @@ async function testNotification() {
     if (notification) {
       success('Test notification sent!')
       notification.onclick = () => {
-        console.log('Test notification clicked')
+        console.debug('Test notification clicked')
         notification.close()
       }
     } else {
@@ -118,7 +118,7 @@ async function handleToggle(event) {
       if (pushSub.isSupported.value && !pushSub.isSubscribed.value) {
         try {
           await pushSub.subscribe()
-          console.log('Push subscription created')
+          console.debug('Push subscription created')
         } catch (pushErr) {
           console.warn('Failed to create push subscription:', pushErr)
         }
@@ -147,7 +147,7 @@ async function handleToggle(event) {
       if (pushSub.isSubscribed.value) {
         try {
           await pushSub.unsubscribe()
-          console.log('Push subscription removed')
+          console.debug('Push subscription removed')
         } catch (pushErr) {
           console.warn('Failed to remove push subscription:', pushErr)
         }

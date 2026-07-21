@@ -63,7 +63,6 @@ export function usePushSubscription() {
   }
   
   async function subscribe() {
-    console.log('[PushSubscription] subscribe called (global)')
     if (!checkSupport()) {
       console.warn('[PushSubscription] Browser does not support push notifications')
       throw new Error('Push notifications are not supported')
@@ -75,39 +74,28 @@ export function usePushSubscription() {
     try {
       const authStore = useAuthStore()
       const userData = authStore.getUserData()
-      console.log('[PushSubscription] userData:', userData)
       if (!userData?.id) {
         console.warn('[PushSubscription] No user id found')
         throw new Error('User not authenticated')
       }
       if (Notification.permission !== 'granted') {
         const permission = await Notification.requestPermission()
-        console.log('[PushSubscription] Notification permission result:', permission)
         if (permission !== 'granted') {
           throw new Error('Notification permission denied')
         }
       }
       const vapidKey = config.public.VAPID_PUBLIC_KEY
-      console.log('[PushSubscription] VAPID key:', vapidKey)
       if (!vapidKey) {
         throw new Error('VAPID public key not configured')
       }
       const registration = await navigator.serviceWorker.ready
-      console.log('[PushSubscription] Service worker registration:', registration)
       const applicationServerKey = urlBase64ToUint8Array(vapidKey)
-      
       const existing = await registration.pushManager.getSubscription()
-      if (existing) {
-        await existing.unsubscribe()
-        console.log('[PushSubscription] Unsubscribed previous subscription')
-      }
-      const pushSubscription = await registration.pushManager.subscribe({
+      const pushSubscription = existing || await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey
       })
-      console.log('[PushSubscription] pushManager.subscribe result:', pushSubscription)
       const subscribeUrl = `${config.public.apiPath}/chat/subscribe/global`
-      console.log('[PushSubscription] Sending global subscription to:', subscribeUrl)
       const response = await fetch(subscribeUrl, {
         method: 'POST',
         headers: {
@@ -119,39 +107,10 @@ export function usePushSubscription() {
         })
       })
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error('[PushSubscription] Failed to register global subscription:', response.status, errorText)
-        
-        if (existing) {
-          await existing.unsubscribe()
-        }
-        
-        const retrySub = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey
-        })
-        const retryResponse = await fetch(subscribeUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': userData.id
-          },
-          body: JSON.stringify({
-            subscription: retrySub.toJSON()
-          })
-        })
-        if (!retryResponse.ok) {
-          const retryErrorText = await retryResponse.text()
-          throw new Error(`Failed to register global subscription after retry: ${retryResponse.status} ${retryErrorText}`)
-        }
-        subscription.value = retrySub
-        isSubscribed.value = true
-        console.log('[PushSubscription] Successfully subscribed globally after retry:', retrySub)
-        return retrySub
+        throw new Error(`Failed to register push subscription: ${response.status}`)
       }
       subscription.value = pushSubscription
       isSubscribed.value = true
-      console.log('[PushSubscription] Successfully subscribed globally:', pushSubscription)
       return pushSubscription
     } catch (err) {
       console.error('[PushSubscription] Error subscribing:', err)
@@ -164,7 +123,6 @@ export function usePushSubscription() {
   
   async function unsubscribe() {
     if (!subscription.value) {
-      console.log('[PushSubscription] No subscription to unsubscribe from')
       return true
     }
     
@@ -195,7 +153,6 @@ export function usePushSubscription() {
       if (unsubscribed) {
         subscription.value = null
         isSubscribed.value = false
-        console.log('[PushSubscription] Successfully unsubscribed globally')
       }
       return unsubscribed
     } catch (err) {
@@ -208,22 +165,8 @@ export function usePushSubscription() {
   }
   
   async function updateSubscription() {
-    console.log('[PushSubscription] updateSubscription called (global)')
-    try {
-      const existingSubscription = await getExistingSubscription()
-      console.log('[PushSubscription] existingSubscription:', existingSubscription)
-      
-      if (existingSubscription) {
-        console.log('[PushSubscription] Updating existing global subscription')
-        await subscribe()
-      } else {
-        console.log('[PushSubscription] Creating new global subscription')
-        await subscribe()
-      }
-    } catch (err) {
-      console.error('[PushSubscription] Error updating subscription:', err)
-      throw err
-    }
+    if (!checkSupport() || Notification.permission !== 'granted') return null
+    return subscribe()
   }
   
   

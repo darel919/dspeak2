@@ -28,7 +28,7 @@
         </svg>
       </button>
     </form>
-    
+
     <!-- Typing indicators -->
     <div v-if="typingUsers.length > 0" class="mt-2 text-xs text-base-content/60">
       <div class="flex items-center gap-2">
@@ -42,7 +42,7 @@
         </span>
       </div>
     </div>
-    
+
     <!-- Connection status -->
     <div v-if="!connected" class="mt-2 text-xs text-warning">
       <div class="flex items-center gap-2">
@@ -111,7 +111,7 @@ async function handleSendMessage() {
   chatStore.sendMessage(props.channelId, content)
     .then(result => {
       if (result.status && result.status.includes('queued')) {
-        console.log('Message queued for background sync')
+        console.debug('Message queued for background sync')
       }
       emit('message-sent')
     })
@@ -129,8 +129,8 @@ function adjustTextareaHeight() {
   const el = chatTextarea.value
   if (!el) return
   el.style.height = 'auto'
-  // 3 lines max, line-height: 2.1rem (from daisyUI textarea), padding included
-  const maxHeight = 3 * 2.1 + 0.8 // 3 lines * line-height + padding fudge
+
+  const maxHeight = 3 * 2.1 + 0.8
   el.style.height = Math.min(el.scrollHeight, maxHeight * 16) + 'px'
 }
 
@@ -139,18 +139,18 @@ watch(messageText, () => nextTick(() => adjustTextareaHeight()))
 function handleTyping() {
   if (!props.connected) return
 
-  // Send typing indicator if not already typing
+
   if (!isTyping.value) {
     isTyping.value = true
     chatStore.sendTypingIndicator(true)
   }
 
-  // Reset typing timeout
+
   if (typingTimeout.value) {
     clearTimeout(typingTimeout.value)
   }
 
-  // Stop typing indicator after 3 seconds of inactivity
+
   typingTimeout.value = setTimeout(() => {
     if (isTyping.value) {
       isTyping.value = false
@@ -160,26 +160,26 @@ function handleTyping() {
 }
 
 function handleKeydown(event) {
-  // Enter without shift sends message
+
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     handleSendMessage()
   }
-  // Enter with shift allows multiline (default behavior)
+
 }
 
 function handleFocus() {
-  // Mark latest messages as read when user focuses on input
-  // This will be implemented when we add read receipt functionality
+
+
 }
 
 function handleBlur() {
-  // Stop typing indicator when input loses focus
+
   if (isTyping.value) {
     isTyping.value = false
     chatStore.sendTypingIndicator(false)
   }
-  
+
   if (typingTimeout.value) {
     clearTimeout(typingTimeout.value)
   }
@@ -188,7 +188,7 @@ function handleBlur() {
 function getTypingText() {
   const count = props.typingUsers.length
   if (count === 0) return ''
-  
+
   if (count === 1) {
     return 'Someone is typing...'
   } else if (count === 2) {
@@ -199,16 +199,16 @@ function getTypingText() {
 }
 
 function triggerSync() {
-  console.log('[ChatInput] Manual sync triggered');
+  console.debug('[ChatInput] Manual sync triggered');
   chatStore.triggerManualSync();
 }
 
-// Cleanup on unmount
+
 onUnmounted(() => {
   if (typingTimeout.value) {
     clearTimeout(typingTimeout.value)
   }
-  
+
   if (isTyping.value) {
     chatStore.sendTypingIndicator(false)
   }

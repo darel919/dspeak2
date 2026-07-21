@@ -18,7 +18,7 @@ export function useNotifications() {
       permission.value = notificationManager.permission
       isEnabled.value = notificationManager.isEnabled
       
-      console.log('[useNotifications] Initialized with manager:', {
+      console.debug('[useNotifications] Initialized with manager:', {
         supported: isSupported.value,
         permission: permission.value,
         enabled: isEnabled.value
@@ -35,7 +35,7 @@ export function useNotifications() {
       onMounted(initialize)
     } catch (error) {
       
-      console.log('[useNotifications] Not in component context, using immediate initialization')
+      console.debug('[useNotifications] Not in component context, using immediate initialization')
     }
   }
 
@@ -67,7 +67,7 @@ export function useNotifications() {
         }
       })
     } catch (error) {
-      console.log('[useNotifications] Watch not available in this context')
+      console.debug('[useNotifications] Watch not available in this context')
     }
   }
 
@@ -90,10 +90,10 @@ export function useNotifications() {
 
   
   function showNotification(title, options = {}) {
-    console.log('[useNotifications] showNotification called with:', { title, options, isEnabled: isEnabled.value });
+    console.debug('[useNotifications] showNotification called with:', { title, options, isEnabled: isEnabled.value });
     
     if (!notificationManager) {
-      console.log('[useNotifications] Notification manager not available')
+      console.debug('[useNotifications] Notification manager not available')
       return null
     }
     
@@ -102,10 +102,10 @@ export function useNotifications() {
 
   
   function showMessageNotification(message, roomName) {
-    console.log('[useNotifications] showMessageNotification called with:', { message, roomName, isEnabled: isEnabled.value });
+    console.debug('[useNotifications] showMessageNotification called with:', { message, roomName, isEnabled: isEnabled.value });
     
     if (!notificationManager) {
-      console.log('[useNotifications] Notification manager not available')
+      console.debug('[useNotifications] Notification manager not available')
       return null
     }
     

@@ -5,7 +5,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" />
       </svg>
     </label>
-    
+
     <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
       <!-- <li v-if="!isOwnMessage">
         <button @click="handleMarkAsRead" :disabled="isRead">
@@ -24,7 +24,7 @@
           Copy message
         </button>
       </li>
-      
+
       <!-- <li>
         <button @click="handleReportMessage">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -35,7 +35,7 @@
       </li>
        -->
       <div class="divider my-1"></div>
-      
+
       <li>
         <button @click="handleViewDetails">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -72,14 +72,14 @@ const isOwnMessage = computed(() => {
 const isRead = computed(() => {
   const userData = authStore.getUserData()
   if (!userData) return false
-  
+
   return props.message.read_by && props.message.read_by.includes(userData.id)
 })
 
 async function handleMarkAsRead() {
   if (isRead.value || isOwnMessage.value) return;
   try {
-    // Only batch locally, do not send immediately
+
     await chatStore.markMessageAsRead(props.message.id);
     emit('mark-read', props.message.id);
   } catch (error) {
@@ -90,17 +90,17 @@ async function handleMarkAsRead() {
 async function handleCopyMessage() {
   try {
     await navigator.clipboard.writeText(props.message.content)
-    // You could show a toast notification here
-    console.log('Message copied to clipboard')
+
+    console.debug('Message copied to clipboard')
   } catch (error) {
     console.error('Failed to copy message:', error)
   }
 }
 
 function handleReportMessage() {
-  // Implement reporting functionality
-  console.log('Report message:', props.message.id)
-  // You could open a modal or navigate to a report page
+
+  console.debug('Report message:', props.message.id)
+
 }
 
 function handleViewDetails() {

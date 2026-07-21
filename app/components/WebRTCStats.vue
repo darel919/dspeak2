@@ -182,7 +182,7 @@ const failedList = computed(() => {
 })
 
 function refreshDebug() {
-  // reactive getters will update automatically; this keeps an explicit hook for future enhancements
+
 }
 
 async function copyDebug() {
@@ -193,8 +193,8 @@ async function copyDebug() {
   const failed = JSON.stringify(failedList.value, null, 2)
   const text = `Sent:\n${sentJson.value}\n\nReceived:\n${receivedJson.value}\n\nProducers:\n${prod}\n\nConsumers:\n${cons}\n\nMappings:\n${map}\n\nFailedConsumers:\n${failed}`
     await navigator.clipboard.writeText(text)
-    // small toast could be used; for now, just console
-    console.log('[SFU] Debug copied to clipboard')
+
+    console.debug('[SFU] Debug copied to clipboard')
   } catch (e) { console.warn('[SFU] Copy debug failed', e) }
 }
 
@@ -239,12 +239,12 @@ async function pollOnce() {
       return
     }
     const snap = await sfu.getWebRTCStatsSnapshot()
-    // Augment with observed bitrate using outbound/inbound RTP deltas
+
     try {
       const now = performance.now()
       snap.transports?.forEach(t => {
         if (!pollOnce._last) pollOnce._last = {}
-        // Outbound observed (send PC)
+
         const ob = t.outboundAudio
         if (ob && typeof ob.bytesSent === 'number') {
           const key = (t.kind || 'send') + '-out'
@@ -255,9 +255,9 @@ async function pollOnce() {
           t.observedKbpsOut = kbps
           pollOnce._last[key] = { t: now, b: ob.bytesSent }
         }
-        // Inbound observed (recv PC)
+
         const ia = t.inboundAudio
-        // Prefer inbound-rtp.bytesReceived; fallback to candidatePair.bytesReceived
+
         const rxBytes = (ia && typeof ia.bytesReceived === 'number') ? ia.bytesReceived
                       : (t.candidatePair && typeof t.candidatePair.bytesReceived === 'number') ? t.candidatePair.bytesReceived
                       : null
@@ -291,7 +291,7 @@ function togglePolling() { polling.value = !polling.value }
 onMounted(startPolling)
 onBeforeUnmount(stopPolling)
 
-// Expose a small API for other components to toggle visibility
-// We use a shared state key so multiple components can control it
+
+
 
 </script>

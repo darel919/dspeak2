@@ -25,11 +25,13 @@ export function buildVideoConstraints(settings, { deviceId = null, display = fal
   const normalized = normalizeVideoSettings(settings)
   const resolution = VIDEO_RESOLUTIONS[normalized.resolution]
   const constraints = {
-    frameRate: {
-      min: VIDEO_FRAME_RATE_MIN,
-      ideal: normalized.frameRate,
-      max: normalized.frameRate
-    }
+    frameRate: display
+      ? { ideal: normalized.frameRate, max: normalized.frameRate }
+      : {
+          min: VIDEO_FRAME_RATE_MIN,
+          ideal: normalized.frameRate,
+          max: normalized.frameRate
+        }
   }
 
   if (resolution) {

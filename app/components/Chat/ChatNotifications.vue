@@ -1,24 +1,24 @@
 <template>
   <div class="toast toast-top toast-end">
-    <div 
-      v-for="notification in notifications" 
+    <div
+      v-for="notification in notifications"
       :key="notification.id"
       class="alert"
       :class="getAlertClass(notification.type)"
     >
       <div class="flex items-center gap-2">
-        <svg 
-          xmlns="http://www.w3.org/2000/svg" 
-          class="h-5 w-5" 
-          fill="none" 
-          viewBox="0 0 24 24" 
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          class="h-5 w-5"
+          fill="none"
+          viewBox="0 0 24 24"
           stroke="currentColor"
         >
-          <path 
-            stroke-linecap="round" 
-            stroke-linejoin="round" 
-            stroke-width="2" 
-            :d="getIconPath(notification.type)" 
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            :d="getIconPath(notification.type)"
           />
         </svg>
         <div>
@@ -26,8 +26,8 @@
           <div v-if="notification.message" class="text-xs">{{ notification.message }}</div>
         </div>
       </div>
-      
-      <button 
+
+      <button
         @click="removeNotification(notification.id)"
         class="btn btn-ghost btn-xs btn-circle"
       >
@@ -45,7 +45,7 @@ let notificationId = 0
 
 function addNotification(type, title, message = '', duration = 5000) {
   const id = ++notificationId
-  
+
   notifications.value.push({
     id,
     type,
@@ -53,7 +53,7 @@ function addNotification(type, title, message = '', duration = 5000) {
     message
   })
 
-  // Auto-remove after duration
+
   if (duration > 0) {
     setTimeout(() => {
       removeNotification(id)
@@ -102,7 +102,7 @@ function getIconPath(type) {
   }
 }
 
-// Expose functions for use in parent components
+
 defineExpose({
   addNotification,
   removeNotification,

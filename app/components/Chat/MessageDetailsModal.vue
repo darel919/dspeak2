@@ -146,7 +146,7 @@ async function copyDetails() {
   
   try {
     await navigator.clipboard.writeText(JSON.stringify(details, null, 2))
-    console.log('Message details copied to clipboard')
+    console.debug('Message details copied to clipboard')
   } catch (error) {
     console.error('Failed to copy details:', error)
   }

@@ -1,4 +1,4 @@
-// https://nuxt.com/docs/api/configuration/nuxt-config
+
 import tailwindcss from "@tailwindcss/vite";
 import { chmodSync, copyFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -42,10 +42,10 @@ export default defineNuxtConfig({
     srcDir: '../public',
     filename: 'sw.js',
     registerType: 'autoUpdate',
-    // injectManifest: {
-    //   swSrc: 'sw.js',
-    //   swDest: 'sw.js'
-    // },
+
+
+
+
     manifest: {
       name: "dSpeak",
       short_name: "dSpeak",

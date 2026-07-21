@@ -11,7 +11,7 @@
         @back="onBackToHome"
       />
     </div>
-    
+
     <!-- Desktop: Will redirect to first channel -->
     <div v-else />
   </section>
@@ -30,14 +30,14 @@ const router = useRouter()
 const roomId = computed(() => route.params.roomId)
 const room = computed(() => roomsStore.rooms.find(r => r.id === roomId.value))
 
-// Mobile detection
+
 const isMobile = ref(false)
 let resizeHandler = null
 
 onMounted(() => {
   if (typeof window !== 'undefined') {
     const checkMobile = () => {
-      isMobile.value = window.innerWidth < 768 // md breakpoint (768px)
+      isMobile.value = window.innerWidth < 768
     }
     resizeHandler = checkMobile
     checkMobile()
@@ -66,7 +66,7 @@ watchEffect(async () => {
   if (room.value) {
     await channelsStore.fetchChannels(room.value.id)
     const textChannels = channelsStore.getTextChannels()
-    // Only redirect to first channel if not on mobile (>= 768px)
+
     if (textChannels.length > 0 && !isMobile.value) {
       router.replace({ name: 'room-roomId-channelId', params: { roomId: roomId.value, channelId: textChannels[0].id } })
     }

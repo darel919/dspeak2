@@ -6,7 +6,7 @@
       <div class="bg-base-200 border-base-300 p-4">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <button 
+          <button
             v-if="showBackButton"
             @click="$emit('back')"
             class="btn btn-ghost btn-sm btn-circle"
@@ -15,7 +15,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          
+
           <div class="flex flex-col sm:flex-row items-start sm:items-center gap-0 sm:gap-3">
             <!-- Channel type indicator -->
             <span v-if="channel?.isMedia" class="badge badge-warning badge-sm rounded-xs">Voice Channel</span>
@@ -26,7 +26,7 @@
             <p class="text-sm opacity-40">{{ room?.name || 'Room' }}</p>
           </div>
         </div>
-        
+
         <div class="flex items-center gap-2">
           <!-- Online members count for channel -->
           <div v-if="onlineUsers?.length > 0" class="badge badge-ghost badge-sm">
@@ -41,7 +41,7 @@
     </div>
 
       <!-- Messages Container -->
-      <div 
+      <div
         ref="messagesContainer"
         class="flex-1 overflow-y-auto p-4 space-y-4"
         @scroll="handleScroll"
@@ -80,8 +80,8 @@
 
       <!-- Messages -->
       <div v-else class="space-y-4">
-        <ChatMessage 
-          v-for="message in messages" 
+        <ChatMessage
+          v-for="message in messages"
           :key="message.id"
           :message="message"
           :room-members="room?.members || []"
@@ -91,11 +91,11 @@
       </div>
 
       <!-- Scroll to bottom button -->
-      <div 
-        v-if="showScrollButton" 
+      <div
+        v-if="showScrollButton"
         class="fixed bottom-20 right-6 z-10"
       >
-        <button 
+        <button
           @click="scrollToBottom"
           class="btn btn-circle btn-primary shadow-lg"
         >
@@ -108,7 +108,7 @@
 
 
       <!-- Chat Input -->
-      <ChatInput 
+      <ChatInput
         :channel-id="channelId"
         :connected="connected"
         :typing-users="typingUsers"
@@ -116,7 +116,7 @@
       />
 
       <!-- Message Details Modal -->
-      <MessageDetailsModal 
+      <MessageDetailsModal
         :show="showDetailsModal"
         :message="selectedMessage"
         @close="closeDetailsModal"
@@ -160,12 +160,12 @@ import ChatInput from './ChatInput.vue'
 import MessageDetailsModal from './MessageDetailsModal.vue'
 import MemberList from '../MemberList.vue'
 import ChatErrorBanner from './ChatErrorBanner.vue'
-// MemberList sidebar state
+
 const MEMBER_LIST_KEY = 'chat_member_list_visible'
 const showMemberList = ref(true)
 
 onMounted(() => {
-  // Load sidebar state from localStorage
+
   const saved = localStorage.getItem(MEMBER_LIST_KEY)
   showMemberList.value = saved === null ? true : saved === 'true'
 })
@@ -209,15 +209,15 @@ const selectedMessage = ref(null)
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.getUserData()?.id)
 
-// Computed properties
-// Deduplicate: Only show pending if no sent version exists
+
+
 const messages = computed(() => {
   const all = chatStore.messages
   const sentIds = new Set(all.filter(m => m.status !== 'pending').map(m => m.id))
-  // If a sent message exists with same content, sender, and close timestamp, hide the pending
+
   return all.filter((msg, idx, arr) => {
     if (msg.status !== 'pending') return true
-    // Find a sent message with same content, sender, and created within 10s
+
     return !arr.some(other =>
       other.status !== 'pending' &&
       other.sender?.id === msg.sender?.id &&
@@ -232,7 +232,7 @@ const connected = computed(() => chatStore.connected)
 const typingUsers = computed(() => chatStore.typingUsers)
 const onlineUsers = computed(() => chatStore.onlineUsers)
 
-// Helper function to get display name for a member
+
 function getDisplayName(member) {
   if (member.id === currentUserId.value) return 'You'
   const onlineUserIds = new Set(onlineUsers.value.map(user => user.id))
@@ -241,24 +241,24 @@ function getDisplayName(member) {
   return isOnline ? `${firstName} (online)` : firstName
 }
 
-// Lifecycle
+
 onMounted(async () => {
   await initializeChat()
 })
 
 onUnmounted(() => {
-  // Keep chat connection alive across in-room navigation (e.g. switching to VoiceChannel)
-  // Chat disconnect will be handled when leaving the room page instead.
+
+
 })
 
-// Watch for channel changes
+
 watch(() => props.channelId, async (newChannelId, oldChannelId) => {
   if (newChannelId !== oldChannelId) {
     await initializeChat()
   }
 })
 
-// Watch for new messages to auto-scroll
+
 watch(messages, () => {
   nextTick(() => {
     if (isNearBottom.value) {
@@ -267,15 +267,15 @@ watch(messages, () => {
   })
 }, { deep: true })
 
-// Methods
+
 async function initializeChat() {
   if (!props.channelId) return
 
   try {
-    // Connect to WebSocket for real-time updates with channel name
+
     await chatStore.connectToChannel(props.channelId, props.channel?.name, props.room?.id)
-    
-    // Scroll to bottom after loading
+
+
     nextTick(() => {
       scrollToBottom()
     })
@@ -289,29 +289,29 @@ function handleScroll() {
 
   const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value
   const scrollFromBottom = scrollHeight - scrollTop - clientHeight
-  
+
   isNearBottom.value = scrollFromBottom < 100
   showScrollButton.value = scrollFromBottom > 200
 }
 
 function scrollToBottom() {
   if (!messagesContainer.value) return
-  
+
   messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
   isNearBottom.value = true
   showScrollButton.value = false
 }
 
 function handleMessageSent() {
-  // Auto-scroll to bottom when user sends a message
+
   nextTick(() => {
     scrollToBottom()
   })
 }
 
 function handleMessageRead(messageId) {
-  // Message read status is automatically updated via WebSocket
-  console.log('Message marked as read:', messageId)
+
+  console.debug('Message marked as read:', messageId)
 }
 
 function handleShowDetails(message) {
@@ -325,12 +325,12 @@ function closeDetailsModal() {
 }
 
 function handleMessageClick(message) {
-  // Legacy function - now handled by message actions
+
 }
 
 async function refreshMessages() {
   if (!props.channelId) return
-  
+
   try {
     await chatStore.fetchMessages(props.channelId)
     nextTick(() => {
@@ -343,5 +343,5 @@ async function refreshMessages() {
 
 
 
-// No need for manual reconnect logic here; handled in chatStore
+
 </script>

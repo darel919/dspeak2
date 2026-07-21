@@ -101,50 +101,50 @@ const authStore = useAuthStore()
 const onlineUsers = computed(() => chatStore.onlineUsers || [])
 const currentUser = computed(() => authStore.getUserData())
 
-// Create a Set of online user IDs for faster lookup
+
 const onlineUserIds = computed(() => new Set(onlineUsers.value.map(user => user.id)))
 
-// Sort members by status: owner first, then online users, then offline users
+
 const sortedMembers = computed(() => {
   if (!props.members) return []
-  
+
   return [...props.members].sort((a, b) => {
-    // Owner always first
+
     const aIsOwner = isOwner(a)
     const bIsOwner = isOwner(b)
     if (aIsOwner && !bIsOwner) return -1
     if (!aIsOwner && bIsOwner) return 1
-    
-    // Then sort by presence status
+
+
     const aStatus = getMemberPresenceStatus(a)
     const bStatus = getMemberPresenceStatus(b)
-    
+
     const statusOrder = { 'in-room': 0, 'online': 1, 'offline': 2 }
     const aOrder = statusOrder[aStatus] || 2
     const bOrder = statusOrder[bStatus] || 2
-    
+
     if (aOrder !== bOrder) return aOrder - bOrder
-    
-    // Finally sort alphabetically by name
+
+
     return (a.name || '').localeCompare(b.name || '')
   })
 })
 
-// Count online members
+
 const onlineMembersCount = computed(() => {
   if (!props.members) return 0
-  return props.members.filter(member => 
+  return props.members.filter(member =>
     onlineUserIds.value.has(member.id) || member.online === true
   ).length
 })
 
-// Count members currently in this room/channel
+
 
 function getAvatarUrl(avatarPath) {
   if (!avatarPath) return '/favicon-32x32.png'
-  
+
   if (avatarPath.startsWith('http')) return avatarPath
-  
+
   const apiPath = config.public.baseApiPath
   return `${apiPath}/auth/${avatarPath}`
 }
@@ -155,16 +155,16 @@ function isOwner(member) {
 
 
 function getMemberPresenceStatus(member) {
-  // Check if user is currently in this room/channel (from chat websocket)
+
   if (onlineUsers.value.some(user => user.id === member.id)) {
     return 'in-room'
   }
-  
-  // Check if user is online (from member data or general online status)
+
+
   if (onlineUserIds.value.has(member.id) || member.online === true) {
     return 'online'
   }
-  
+
   return 'offline'
 }
 
