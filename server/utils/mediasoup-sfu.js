@@ -1,5 +1,6 @@
 import * as mediasoup from 'mediasoup'
 import { usePocketBaseAdmin } from './pocketbase'
+import { buildPublicIceCandidates } from './ice-candidates'
 
 const mediaCodecs = [
   {
@@ -24,10 +25,7 @@ function publicTransportData(transport, config) {
   return {
     id: transport.id,
     iceParameters: transport.iceParameters,
-    iceCandidates: transport.iceCandidates.map(candidate => ({
-      ...candidate,
-      port: config.announcedPort
-    })),
+    iceCandidates: buildPublicIceCandidates(transport.iceCandidates, config),
     dtlsParameters: transport.dtlsParameters,
     sctpParameters: transport.sctpParameters
   }
@@ -83,7 +81,9 @@ async function getState(resolvedConfig) {
     listenIp: process.env.MEDIASOUP_LISTEN_IP || runtimeConfig.listenIp,
     announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || runtimeConfig.announcedAddress,
     rtcPort: Number(process.env.MEDIASOUP_RTC_PORT || runtimeConfig.rtcPort),
-    announcedPort: Number(process.env.MEDIASOUP_ANNOUNCED_PORT || runtimeConfig.announcedPort || runtimeConfig.rtcPort)
+    announcedPort: Number(process.env.MEDIASOUP_ANNOUNCED_PORT || runtimeConfig.announcedPort || runtimeConfig.rtcPort),
+    directAddress: process.env.MEDIASOUP_DIRECT_ADDRESS || runtimeConfig.directAddress,
+    directPort: Number(process.env.MEDIASOUP_DIRECT_PORT || runtimeConfig.directPort || runtimeConfig.rtcPort)
   }
   if (!globalThis[stateKey]) {
     globalThis[stateKey] = createState(config).catch((error) => {

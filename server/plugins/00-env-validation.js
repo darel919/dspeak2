@@ -8,7 +8,8 @@ export default defineNitroPlugin(async (nitroApp) => {
   console.log(
     `[Server] Nitro and mediasoup ready: worker=${state.worker.pid}, ` +
     `listen=${config.listenIp}, announced=${config.announcedAddress || 'none'}, ` +
-    `rtc=${config.rtcPort}, announcedPort=${config.announcedPort}`
+    `rtc=${config.rtcPort}, announcedPort=${config.announcedPort}, ` +
+    `direct=${config.directAddress || 'none'}:${config.directPort}`
   )
 
   nitroApp.hooks.hook('close', async () => {

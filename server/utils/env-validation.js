@@ -86,11 +86,23 @@ export async function validateRuntimeEnvironment() {
   const announcedPort = process.env.MEDIASOUP_ANNOUNCED_PORT?.trim()
     ? readPort('MEDIASOUP_ANNOUNCED_PORT', rtcPort)
     : rtcPort
+  const directPort = process.env.MEDIASOUP_DIRECT_PORT?.trim()
+    ? readPort('MEDIASOUP_DIRECT_PORT', rtcPort)
+    : rtcPort
 
   const listenIp = process.env.MEDIASOUP_LISTEN_IP?.trim() || '127.0.0.1'
   let announcedAddress = process.env.MEDIASOUP_ANNOUNCED_ADDRESS?.trim()
   if (announcedAddress?.toLowerCase() === 'auto') {
     announcedAddress = await discoverAnnouncedAddress()
+  }
+  let directAddress = process.env.MEDIASOUP_DIRECT_ADDRESS?.trim()
+  if (directAddress?.toLowerCase() === 'auto') {
+    try {
+      directAddress = await discoverAnnouncedAddress()
+    } catch (error) {
+      directAddress = undefined
+      console.warn(`[Server] Direct IPv6 discovery unavailable; continuing with fallback RTC only: ${error.message}`)
+    }
   }
   if ((listenIp === '0.0.0.0' || listenIp === '::') && !announcedAddress) {
     throw new Error(
@@ -104,6 +116,8 @@ export async function validateRuntimeEnvironment() {
     listenIp,
     announcedAddress,
     rtcPort,
-    announcedPort
+    announcedPort,
+    directAddress,
+    directPort
   }
 }

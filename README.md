@@ -75,6 +75,8 @@ MEDIASOUP_ANNOUNCED_ADDRESS=auto
 MEDIASOUP_ANNOUNCED_ADDRESS_URL=https://api6.ipify.org
 MEDIASOUP_RTC_PORT=40000
 MEDIASOUP_ANNOUNCED_PORT=40000
+MEDIASOUP_DIRECT_ADDRESS=auto
+MEDIASOUP_DIRECT_PORT=40000
 ```
 
 `MEDIASOUP_ANNOUNCED_ADDRESS` must be reachable by browsers. Set it to `auto`
@@ -83,6 +85,12 @@ startup. The server refuses to start if discovery fails or returns a private,
 link-local, loopback, or IPv4 address. Override
 `MEDIASOUP_ANNOUNCED_ADDRESS_URL` with an HTTPS endpoint that returns only the
 address as plain text if the default endpoint is unsuitable.
+
+When `MEDIASOUP_DIRECT_ADDRESS` is set, DSpeak sends two ICE candidates. The
+direct candidate has higher priority and the normal announced candidate is the
+fallback. Set the direct address to `auto` to discover a public IPv6 address;
+failure to discover IPv6 only disables the direct candidate and does not stop
+the Playit fallback. `MEDIASOUP_DIRECT_PORT` defaults to the local RTC port.
 
 Auto-discovery is correct only when inbound traffic to the discovered IPv6
 address on the RTC port reaches this container. If the public IPv6 is
@@ -197,11 +205,15 @@ PLAYIT_SECRET_KEY=<docker-agent-secret>
 MEDIASOUP_RTC_PORT=40000
 MEDIASOUP_ANNOUNCED_PORT=<assigned-playit-public-port>
 MEDIASOUP_ANNOUNCED_ADDRESS=<playit-tunnel-hostname-or-ipv4>
+MEDIASOUP_DIRECT_ADDRESS=auto
+MEDIASOUP_DIRECT_PORT=40000
 ```
 
 DSpeak rewrites the port in the ICE candidate sent to browsers while mediasoup
-continues listening on port `40000`. After entering Playit's assigned address
-and port, redeploy the stack.
+continues listening on port `40000`. Direct IPv6 is advertised first with a
+higher ICE priority; Playit remains available to IPv4-only clients and when the
+direct candidate cannot connect. After entering Playit's assigned address and
+port, redeploy the stack.
 
 The HTTP host port can be changed with:
 

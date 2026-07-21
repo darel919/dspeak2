@@ -84,7 +84,9 @@ export default defineNuxtConfig({
       listenIp: process.env.MEDIASOUP_LISTEN_IP || '127.0.0.1',
       announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || '',
       rtcPort: Number(process.env.MEDIASOUP_RTC_PORT || 40000),
-      announcedPort: Number(process.env.MEDIASOUP_ANNOUNCED_PORT || process.env.MEDIASOUP_RTC_PORT || 40000)
+      announcedPort: Number(process.env.MEDIASOUP_ANNOUNCED_PORT || process.env.MEDIASOUP_RTC_PORT || 40000),
+      directAddress: process.env.MEDIASOUP_DIRECT_ADDRESS || '',
+      directPort: Number(process.env.MEDIASOUP_DIRECT_PORT || process.env.MEDIASOUP_RTC_PORT || 40000)
     },
     public: {
       authPath: process.env.AUTH_PATH,
