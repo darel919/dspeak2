@@ -241,6 +241,40 @@ export const useVoiceStore = defineStore('voice', () => {
         }
     }
 
+    async function ensureMicrophonePermission() {
+        if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+            throw new Error('Microphone access is not supported by this browser');
+        }
+
+        if (navigator.permissions?.query) {
+            try {
+                const status = await navigator.permissions.query({ name: 'microphone' });
+                if (status.state === 'granted') return;
+                if (status.state === 'denied') {
+                    throw new Error('Microphone permission is required to join the room');
+                }
+            } catch (err) {
+                // Some browsers do not support querying microphone permission.
+                // Permission errors raised above must still prevent the room join.
+                if (err?.message === 'Microphone permission is required to join the room') {
+                    throw err;
+                }
+            }
+        }
+
+        let permissionStream;
+        try {
+            permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+            if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+                throw new Error('Microphone permission is required to join the room');
+            }
+            throw new Error(err?.message || 'Unable to access the microphone');
+        } finally {
+            permissionStream?.getTracks().forEach(track => track.stop());
+        }
+    }
+
     async function joinVoiceChannel(channelId) {
         if (currentChannelId.value === channelId && connected.value && !connecting.value) {
             return;
@@ -255,25 +289,11 @@ export const useVoiceStore = defineStore('voice', () => {
             connecting.value = true;
             error.value = null;
 
+            // Resolve the browser permission prompt before changing or joining a channel.
+            await ensureMicrophonePermission();
+
                 if (connected.value && currentChannelId.value !== channelId) {
                 await leaveVoiceChannel();
-            }
-
-            // Check microphone permission before connecting
-            let micPermission = 'prompt';
-            if (typeof navigator !== 'undefined' && navigator.permissions) {
-                try {
-                    const status = await navigator.permissions.query({ name: 'microphone' });
-                    micPermission = status.state;
-                } catch (e) {
-                    // Fallback: try to getUserMedia and catch error
-                    try {
-                        await navigator.mediaDevices.getUserMedia({ audio: true });
-                        micPermission = 'granted';
-                    } catch (err) {
-                        micPermission = 'denied';
-                    }
-                }
             }
 
             const { useMediasoupSfu } = await import('~/composables/useMediasoupSfu');
