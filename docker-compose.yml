@@ -22,7 +22,7 @@ services:
       MEDIASOUP_ANNOUNCED_ADDRESS_URL: ${MEDIASOUP_ANNOUNCED_ADDRESS_URL:-https://api6.ipify.org}
       MEDIASOUP_RTC_PORT: ${MEDIASOUP_RTC_PORT:-40000}
       MEDIASOUP_ANNOUNCED_PORT: ${MEDIASOUP_ANNOUNCED_PORT:-}
-      MEDIASOUP_DIRECT_ADDRESS: ${MEDIASOUP_DIRECT_ADDRESS:-auto}
+      MEDIASOUP_DIRECT_ADDRESS: ${MEDIASOUP_DIRECT_ADDRESS:-rtc.dspeak.darelisme.my.id}
       MEDIASOUP_DIRECT_PORT: ${MEDIASOUP_DIRECT_PORT:-}
 
       DSPEAK_API_URL: ${DSPEAK_API_URL:-}
@@ -52,4 +52,20 @@ services:
     depends_on:
       dspeak:
         condition: service_healthy
+    restart: unless-stopped
+
+  cloudflare-ddns:
+    image: favonia/cloudflare-ddns:1
+    network_mode: host
+    environment:
+      CLOUDFLARE_API_TOKEN: ${DSPEAK_CLOUDFLARE_API_TOKEN:?Create a Cloudflare token with Zone DNS Edit access}
+      IP6_DOMAINS: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}
+      IP4_PROVIDER: none
+      IP6_PROVIDER: ${DSPEAK_DDNS_IP6_PROVIDER:-local.iface:ens3}
+      PROXIED: "false"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped

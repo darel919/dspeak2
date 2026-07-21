@@ -75,7 +75,7 @@ MEDIASOUP_ANNOUNCED_ADDRESS=auto
 MEDIASOUP_ANNOUNCED_ADDRESS_URL=https://api6.ipify.org
 MEDIASOUP_RTC_PORT=40000
 MEDIASOUP_ANNOUNCED_PORT=40000
-MEDIASOUP_DIRECT_ADDRESS=auto
+MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
 MEDIASOUP_DIRECT_PORT=40000
 ```
 
@@ -103,6 +103,11 @@ MEDIASOUP_ANNOUNCED_ADDRESS=rtc.dspeak.example.com
 Keep that hostname updated through the host's dynamic-DNS client. It must not
 be proxied by Cloudflare: the normal Cloudflare proxy does not forward
 mediasoup RTP. The HTTPS application hostname can remain proxied.
+
+The Compose stack includes `favonia/cloudflare-ddns` in host-network mode. It
+reads the Coolify VM's global IPv6 directly from `ens3` and updates only the
+DNS-only RTC AAAA record. This avoids returning the TrueNAS host address or a
+Docker bridge address.
 
 The following variables are optional. Leave them empty to use the current
 origin and the built-in Nitro routes:
@@ -205,7 +210,7 @@ PLAYIT_SECRET_KEY=<docker-agent-secret>
 MEDIASOUP_RTC_PORT=40000
 MEDIASOUP_ANNOUNCED_PORT=<assigned-playit-public-port>
 MEDIASOUP_ANNOUNCED_ADDRESS=<playit-tunnel-hostname-or-ipv4>
-MEDIASOUP_DIRECT_ADDRESS=auto
+MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
 MEDIASOUP_DIRECT_PORT=40000
 ```
 
@@ -214,6 +219,33 @@ continues listening on port `40000`. Direct IPv6 is advertised first with a
 higher ICE priority; Playit remains available to IPv4-only clients and when the
 direct candidate cannot connect. After entering Playit's assigned address and
 port, redeploy the stack.
+
+### Dynamic RTC IPv6
+
+Before enabling the stack updater, remove `rtc.dspeak.darelisme.my.id` from the
+TrueNAS DDNS updater so two clients do not overwrite the same record. Leave its
+Cloudflare proxy status set to **DNS only**.
+
+Create a scoped Cloudflare API token with `Zone / DNS / Edit` permission for
+`darelisme.my.id`, then add these runtime variables in Coolify:
+
+```dotenv
+DSPEAK_CLOUDFLARE_API_TOKEN=<scoped-token>
+DSPEAK_RTC_DOMAIN=rtc.dspeak.darelisme.my.id
+DSPEAK_DDNS_IP6_PROVIDER=local.iface:ens3
+```
+
+The default local-interface provider does not contact an external IP service;
+it reads the exact global address bound to the VM. To use a plain-text external
+recognizer instead, set for example:
+
+```dotenv
+DSPEAK_DDNS_IP6_PROVIDER=url:https://6.ident.me
+```
+
+Because the updater uses `network_mode: host`, the request originates from the
+VM's IPv6 rather than the DSpeak container network. The updater checks for
+changes periodically and reconciles the Cloudflare AAAA record automatically.
 
 The HTTP host port can be changed with:
 
