@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { useRuntimeConfig } from '#app'
 import { useAuthStore } from './auth'
+import { cacheRooms, getCachedRooms } from '~/utils/roomsCache'
 
 const rooms = ref([])
 const loading = ref(false)
@@ -86,34 +87,32 @@ export const useRoomsStore = defineStore('rooms', () => {
             }
             const data = await response.json()
             rooms.value = data
-            loading.value = false
-            
+            if (import.meta.client && window.indexedDB) {
+                cacheRooms(userData.id, data).catch((cacheError) => {
+                    console.warn('[RoomsStore] Failed to cache rooms:', cacheError)
+                })
+            }
             loading.value = false
         } catch (err) {
             error.value = err.message
             console.error('[RoomsStore] Error fetching rooms:', err)
             
-            if (window.indexedDB) {
+            if (import.meta.client && window.indexedDB) {
                 try {
-                    const { openDB } = await import('../../public/idb.js')
-                    const db = await openDB()
-                    const tx = db.transaction('roomsCache', 'readonly')
-                    const store = tx.objectStore('roomsCache')
-                    const req = store.getAll()
-                    req.onsuccess = () => {
-                        loading.value = false
-                        rooms.value = req.result
-                        error.value = null
-                    }
-                    req.onerror = () => {
-                        loading.value = false
+                    const authStore = useAuthStore()
+                    const userData = authStore.getUserData()
+                    if (userData?.id) {
+                        const cachedRooms = await getCachedRooms(userData.id)
+                        if (cachedRooms.length > 0) {
+                            rooms.value = cachedRooms
+                            error.value = null
+                        }
                     }
                 } catch (e) {
-                    loading.value = false
+                    console.warn('[RoomsStore] Failed to load cached rooms:', e)
                 }
-            } else {
-                loading.value = false
             }
+            loading.value = false
         }
     }
     
