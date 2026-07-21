@@ -276,7 +276,7 @@ export const useVoiceStore = defineStore('voice', () => {
     function updateUserMuted(userId, muted) {
         const user = connectedUsers.value.get(userId);
         if (user) {
-            connectedUsers.value.set(userId, { ...user, muted });
+            connectedUsers.value.set(userId, { ...user, muted, ...(muted ? { speaking: false } : {}) });
             connectedUsers.value = new Map(connectedUsers.value);
         }
     }

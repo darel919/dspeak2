@@ -2,7 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildVideoConstraints,
+  buildVideoProduceOptions,
   buildWebRtcCodecContentType,
+  calculateEncodedFps,
   calculateMediaEngineUtilization,
   classifyCodecImplementation,
   calculateFrameTimeMs,
@@ -11,6 +13,7 @@ import {
   rankVideoCodecsByHardwarePreference,
   selectHardwarePreferredVideoCodec,
   selectPowerEfficientVideoCodec,
+  updateVideoAdaptationState,
   VIDEO_FRAME_RATE_MAX,
   VIDEO_FRAME_RATE_MIN
 } from '../app/shared/video-settings.js'
@@ -51,6 +54,43 @@ test('display capture does not use constraints forbidden by getDisplayMedia', ()
   assert.equal(constraints.deviceId, undefined)
 })
 
+test('screen-share production prioritizes frame cadence with a resolution-aware bitrate', () => {
+  const options = buildVideoProduceOptions({ width: 1920, height: 1080, frameRate: 60, screen: true })
+  assert.equal(options.encodings[0].maxFramerate, 60)
+  assert.equal(options.encodings[0].maxBitrate, 12_441_600)
+  assert.equal(options.encodings[0].networkPriority, 'high')
+  assert.equal(options.encodings[0].priority, 'high')
+  assert.equal(options.codecOptions.videoGoogleStartBitrate, 8709)
+})
+
+test('video production bitrate remains bounded for low and very large sources', () => {
+  assert.equal(buildVideoProduceOptions({ width: 320, height: 240, frameRate: 25 }).encodings[0].maxBitrate, 2_500_000)
+  assert.equal(buildVideoProduceOptions({ width: 7680, height: 4320, frameRate: 60, screen: true }).encodings[0].maxBitrate, 40_000_000)
+})
+
+test('video adaptation trades resolution for frame cadence after sustained low FPS', () => {
+  const first = updateVideoAdaptationState({}, 25, 60)
+  const second = updateVideoAdaptationState(first, 25, 60)
+  assert.equal(first.scale, 1)
+  assert.equal(second.scale, 1.25)
+  assert.equal(second.changed, true)
+})
+
+test('video adaptation restores resolution gradually after sustained healthy FPS', () => {
+  let state = { scale: 1.5, lowSamples: 0, healthySamples: 0 }
+  for (let sample = 0; sample < 5; sample++) state = updateVideoAdaptationState(state, 59, 60)
+  assert.equal(state.scale, 1.25)
+  assert.equal(state.changed, true)
+})
+
+test('video adaptation remains bounded and ignores missing measurements', () => {
+  assert.equal(updateVideoAdaptationState({ scale: 2.5 }, null, 60).scale, 2.5)
+  let state = { scale: 2.5, lowSamples: 1, healthySamples: 0 }
+  state = updateVideoAdaptationState(state, 10, 60)
+  assert.equal(state.scale, 2.5)
+  assert.equal(state.changed, false)
+})
+
 test('screen-share FPS health allows small send-rate variation', () => {
   assert.equal(isScreenShareFpsBelowTarget(24, 30), false)
   assert.equal(isScreenShareFpsBelowTarget(23.9, 30), true)
@@ -61,6 +101,12 @@ test('frame processing time uses the latest encoded-frame interval', () => {
   assert.equal(calculateFrameTimeMs(1.5, 100), 15)
   assert.equal(calculateFrameTimeMs(2, 125, { totalEncodeTime: 1.5, framesEncoded: 100 }), 20)
   assert.equal(calculateFrameTimeMs(2, 100, { totalEncodeTime: 1.5, framesEncoded: 100 }), null)
+})
+
+test('encoded FPS uses RTP statistics timestamps so delayed background timers stay accurate', () => {
+  assert.equal(calculateEncodedFps(220, 5000, { framesEncoded: 100, timestamp: 1000 }), 30)
+  assert.equal(calculateEncodedFps(100, 5000, { framesEncoded: 100, timestamp: 1000 }), 0)
+  assert.equal(calculateEncodedFps(100, 1000, null), null)
 })
 
 test('codec implementation reports only evidence available from the browser', () => {

@@ -1,5 +1,11 @@
 <template>
-  <figure class="relative h-full min-h-0 w-full overflow-hidden rounded-xl bg-black shadow-lg">
+  <figure
+    ref="feedElement"
+    class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden rounded-xl bg-black shadow-lg"
+    :class="source === 'screen' ? 'cursor-zoom-in fullscreen:cursor-default fullscreen:rounded-none' : ''"
+    :title="source === 'screen' && !isFullscreen ? 'Double-click to view fullscreen' : undefined"
+    @dblclick.prevent="toggleFullscreen"
+  >
     <video
       ref="videoElement"
       autoplay
@@ -10,6 +16,16 @@
     <figcaption class="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white">
       {{ label }} · {{ source === 'screen' ? 'Screen' : 'Camera' }}
     </figcaption>
+    <button
+      v-if="source === 'screen' && isFullscreen"
+      type="button"
+      class="btn btn-circle btn-sm absolute right-3 top-3 border-white/30 bg-black/70 text-white hover:bg-black/90"
+      title="Exit fullscreen"
+      aria-label="Exit fullscreen"
+      @click.stop="exitFullscreen"
+    >
+      <Icon name="lucide:minimize-2" class="size-4" />
+    </button>
   </figure>
 </template>
 
@@ -22,6 +38,37 @@ const props = defineProps({
 })
 
 const videoElement = ref(null)
+const feedElement = ref(null)
+const isFullscreen = ref(false)
+
+function currentFullscreenElement() {
+  if (typeof document === 'undefined') return null
+  return document.fullscreenElement || document.webkitFullscreenElement || null
+}
+
+function syncFullscreenState() {
+  isFullscreen.value = currentFullscreenElement() === feedElement.value
+}
+
+async function exitFullscreen() {
+  if (typeof document === 'undefined' || !currentFullscreenElement()) return
+  const exit = document.exitFullscreen || document.webkitExitFullscreen
+  if (exit) await exit.call(document)
+}
+
+async function toggleFullscreen() {
+  if (props.source !== 'screen' || !feedElement.value) return
+  try {
+    if (isFullscreen.value) {
+      await exitFullscreen()
+      return
+    }
+    const request = feedElement.value.requestFullscreen || feedElement.value.webkitRequestFullscreen
+    if (request) await request.call(feedElement.value)
+  } catch (error) {
+    console.warn('[VideoFeed] Could not enter fullscreen:', error)
+  }
+}
 
 function attachStream() {
   if (videoElement.value && videoElement.value.srcObject !== props.stream) {
@@ -30,10 +77,25 @@ function attachStream() {
   }
 }
 
-onMounted(attachStream)
+onMounted(() => {
+  attachStream()
+  document.addEventListener('fullscreenchange', syncFullscreenState)
+  document.addEventListener('webkitfullscreenchange', syncFullscreenState)
+})
 watch(() => props.stream, attachStream)
 
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncFullscreenState)
+  document.removeEventListener('webkitfullscreenchange', syncFullscreenState)
   if (videoElement.value) videoElement.value.srcObject = null
 })
 </script>
+
+<style scoped>
+.fullscreen-feed:fullscreen,
+.fullscreen-feed:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
+</style>

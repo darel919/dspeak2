@@ -2,6 +2,7 @@ export const VIDEO_FRAME_RATE_MIN = 25
 export const VIDEO_FRAME_RATE_MAX = 60
 export const VIDEO_FRAME_RATE_PRESETS = Object.freeze([25, 30, 50, 60])
 export const SCREEN_SHARE_FPS_HEALTH_RATIO = 0.8
+export const VIDEO_SCALE_STEPS = Object.freeze([1, 1.25, 1.5, 2, 2.5])
 
 export const VIDEO_RESOLUTIONS = Object.freeze({
   original: null,
@@ -47,6 +48,52 @@ export function buildVideoConstraints(settings, { deviceId = null, display = fal
   return constraints
 }
 
+export function buildVideoProduceOptions({ width, height, frameRate, screen = false } = {}) {
+  const pixels = Math.max(1, Number(width) || 1280) * Math.max(1, Number(height) || 720)
+  const fps = Math.min(VIDEO_FRAME_RATE_MAX, Math.max(VIDEO_FRAME_RATE_MIN, Number(frameRate) || 30))
+  const bitsPerPixel = screen ? 0.1 : 0.07
+  const maxBitrate = Math.min(40_000_000, Math.max(2_500_000, Math.round(pixels * fps * bitsPerPixel)))
+
+  return {
+    encodings: [{
+      maxBitrate,
+      maxFramerate: Math.round(fps),
+      networkPriority: 'high',
+      priority: 'high'
+    }],
+    codecOptions: {
+      videoGoogleStartBitrate: Math.max(1000, Math.round(maxBitrate * 0.7 / 1000))
+    }
+  }
+}
+
+export function updateVideoAdaptationState(state = {}, sendFps, targetFps) {
+  const currentScale = VIDEO_SCALE_STEPS.includes(state.scale) ? state.scale : 1
+  const actual = Number(sendFps)
+  const target = Number(targetFps)
+  if (!Number.isFinite(actual) || !Number.isFinite(target) || target <= 0) {
+    return { scale: currentScale, lowSamples: 0, healthySamples: 0, changed: false }
+  }
+
+  const lowSamples = actual < target * 0.82 ? (state.lowSamples || 0) + 1 : 0
+  const healthySamples = actual >= target * 0.95 ? (state.healthySamples || 0) + 1 : 0
+  let scale = currentScale
+
+  if (lowSamples >= 2) {
+    scale = VIDEO_SCALE_STEPS[Math.min(VIDEO_SCALE_STEPS.length - 1, VIDEO_SCALE_STEPS.indexOf(currentScale) + 1)]
+  } else if (healthySamples >= 5) {
+    scale = VIDEO_SCALE_STEPS[Math.max(0, VIDEO_SCALE_STEPS.indexOf(currentScale) - 1)]
+  }
+
+  const changed = scale !== currentScale
+  return {
+    scale,
+    lowSamples: changed ? 0 : lowSamples,
+    healthySamples: changed ? 0 : healthySamples,
+    changed
+  }
+}
+
 export function isScreenShareFpsBelowTarget(sendFps, targetFps, ratio = SCREEN_SHARE_FPS_HEALTH_RATIO) {
   if (sendFps == null || targetFps == null) return false
   const actual = Number(sendFps)
@@ -66,6 +113,18 @@ export function calculateFrameTimeMs(totalEncodeTime, framesEncoded, previous = 
   const encodedFrames = hasPrevious ? frames - previousFrames : frames
   if (encodeTime < 0 || encodedFrames <= 0) return null
   return (encodeTime / encodedFrames) * 1000
+}
+
+export function calculateEncodedFps(framesEncoded, timestamp, previous = null) {
+  const frames = Number(framesEncoded)
+  const time = Number(timestamp)
+  const previousFrames = Number(previous?.framesEncoded)
+  const previousTime = Number(previous?.timestamp)
+  if (![frames, time, previousFrames, previousTime].every(Number.isFinite)) return null
+  const elapsedMs = time - previousTime
+  const encodedFrames = frames - previousFrames
+  if (elapsedMs <= 0 || encodedFrames < 0) return null
+  return encodedFrames * 1000 / elapsedMs
 }
 
 export function classifyCodecImplementation(implementation) {

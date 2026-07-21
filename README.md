@@ -122,6 +122,20 @@ DSPEAK_SFU_URL=
 Nitro rejects startup when required variables are missing, URLs are invalid,
 the RTC port is invalid, or a wildcard mediasoup bind has no announced address.
 
+## Voice latency and resilience
+
+Voice remains on the SFU topology for predictable behavior as participants join
+and leave. Microphone and shared audio use 10 ms Opus packets, high RTP network
+priority, NACK, and in-band FEC; DTX is disabled so the beginning of speech is
+not gated by discontinuous transmission. Receivers request the browser's minimum
+playout delay while leaving jitter-buffer adaptation under browser control.
+
+RTC Statistics separates client-to-SFU RTT from average receive playout-buffer
+delay. A transient transport disconnect is allowed three seconds to recover on
+its own; a hard or sustained failure rebuilds the media session with bounded
+exponential retry. Direct UDP/IPv6 remains preferred, with TCP and Playit kept as
+fallback paths.
+
 ## Video and screen sharing
 
 Connected users can publish a webcam, a screen share, or both simultaneously.
@@ -129,6 +143,17 @@ Camera and screen-share quality are configured independently under **Settings â†
 Voice & Video**. Each source supports original/full capture resolution or a
 720p, 1080p, 1440p, or 2160p limit. Frame rate is configurable from 25 through
 60 FPS. Resolution limits cap capture dimensions and do not force upscaling.
+Screen video is encoded as motion content with a resolution-aware bitrate and
+high network priority so game sharing preserves the selected frame cadence when
+the capture source, encoder, and connection can sustain it. When outbound FPS
+remains below target, the sender progressively trades resolution for frame
+cadence and restores resolution after sustained recovery. Shared audio is
+monitored on both ends: suspended sender audio processing is resumed and remote
+playback bindings are repaired without requiring a participant to reconnect.
+When the DSpeak tab is backgrounded, capture constraints and RTP priorities are
+reinforced on the active screen producer. Frame adaptation uses encoder counters
+and RTC timestamps rather than page-timer cadence, and RTC Statistics reports the
+average encoded FPS observed across the most recent background interval.
 
 ## Development
 
@@ -228,6 +253,7 @@ continues listening on port `40000`. Direct IPv6 is advertised first with a
 higher ICE priority; Playit remains available to IPv4-only clients and when the
 direct candidate cannot connect. After entering Playit's assigned address and
 port, redeploy the stack.
+
 
 ### Dynamic RTC IPv6
 

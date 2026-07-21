@@ -245,6 +245,43 @@ async function handleMessage(state, session, message) {
       send(session.peer, 'pong', { timestamp: Date.now() })
       return
 
+    case 'peer-rtt-probe': {
+      const probeId = String(data.probeId || '')
+      if (!probeId || probeId.length > 100) return
+      for (const candidate of session.room.sessions.values()) {
+        if (candidate.peer.id === session.peer.id) continue
+        send(candidate.peer, 'peer-rtt-probe', {
+          probeId,
+          originPeerId: session.peer.id
+        })
+      }
+      return
+    }
+
+    case 'peer-rtt-echo': {
+      const probeId = String(data.probeId || '')
+      const originPeerId = String(data.originPeerId || '')
+      const origin = session.room.sessions.get(originPeerId)
+      if (!probeId || !origin) return
+      send(origin.peer, 'peer-rtt-result', {
+        probeId,
+        responderUserId: session.userId
+      })
+      return
+    }
+
+    case 'client-sfu-rtt': {
+      const rttMs = Number(data.rttMs)
+      if (!Number.isFinite(rttMs) || rttMs < 0 || rttMs > 60000) return
+      for (const candidate of session.room.sessions.values()) {
+        send(candidate.peer, 'participant-sfu-rtt', {
+          userId: session.userId,
+          rttMs
+        })
+      }
+      return
+    }
+
     case 'get-rtp-capabilities':
       send(session.peer, 'rtp-capabilities', session.room.router.rtpCapabilities)
       return

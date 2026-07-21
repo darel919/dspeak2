@@ -105,7 +105,12 @@
             <div v-if="(voiceStore.currentChannelId === channel.id && voiceStore.connected)" class="pl-8 pr-2 pb-2">
               <div class="flex flex-col gap-1">
                 <template v-for="u in voiceStore.getDisplayUsersArray()" :key="u.id || u">
-                  <div class="text-sm text-base-content/70 truncate">{{ getUserName(u.id || u) }}</div>
+                  <div class="flex items-center gap-2 text-sm text-base-content/70">
+                    <span class="min-w-0 flex-1 truncate">{{ getUserName(u.id || u) }}</span>
+                    <span class="shrink-0 text-[10px] tabular-nums text-base-content/50">
+                      {{ getUserPing(u.id || u) }}
+                    </span>
+                  </div>
                 </template>
               </div>
             </div>
@@ -291,6 +296,15 @@
 function getUserName(userId) {
   const user = voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId)
   return user?.display_name || user?.name || user?.username || userId
+}
+function getUserPing(userId) {
+  const sfu = voiceStore.sfuComposable
+  if (!sfu) return '-'
+  const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
+  const value = isCurrentUser
+    ? sfu.sfuRoundTripTime
+    : sfu.participantSfuRoundTripTimes?.[String(userId)]
+  return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}ms` : '-'
 }
 import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'

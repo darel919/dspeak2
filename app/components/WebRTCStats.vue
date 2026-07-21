@@ -24,6 +24,12 @@
           <div v-if="!snapshot" class="text-base-content/60">No stats yet.</div>
           <template v-else>
             <div class="text-base-content/60 mb-2">Updated: {{ new Date(snapshot.timestamp).toLocaleTimeString() }}</div>
+            <div class="mb-3 rounded-lg border border-base-content/20 p-2">
+              <span class="text-base-content/60">Peer RTT</span>
+              <span class="ml-2 font-mono">
+                {{ snapshot.peerRoundTripTime != null ? `${Math.round(snapshot.peerRoundTripTime)} ms` : 'waiting for another participant' }}
+              </span>
+            </div>
             <div v-if="screenShareStats" class="mb-3 rounded-lg border border-primary/30 bg-primary/5 p-2">
               <div class="mb-2 flex items-center justify-between">
                 <div class="font-semibold">Screen share</div>
@@ -34,6 +40,10 @@
               <div class="grid grid-cols-2 gap-x-3 gap-y-1">
                 <div class="text-base-content/60">Send / target FPS</div>
                 <div>{{ formatFps(screenShareStats.fps) }} / {{ formatFps(screenShareStats.targetFps) }}</div>
+                <template v-if="screenShareStats.backgroundFps != null">
+                  <div class="text-base-content/60">Last background FPS</div>
+                  <div>{{ formatFps(screenShareStats.backgroundFps) }}</div>
+                </template>
                 <div class="text-base-content/60">Encode time / frame</div>
                 <div>{{ formatFrameTime(screenShareStats.frameTimeMs) }}</div>
                 <div class="text-base-content/60">Encoder</div>
@@ -42,6 +52,8 @@
                 <div>{{ screenShareStats.codec || '-' }}</div>
                 <div class="text-base-content/60">Send resolution</div>
                 <div>{{ formatResolution(screenShareStats) }}</div>
+                <div class="text-base-content/60">Adaptive scale</div>
+                <div>{{ screenShareStats.resolutionScale > 1 ? `${screenShareStats.resolutionScale}× downscale` : 'Full resolution' }}</div>
                 <div class="text-base-content/60">Frames encoded</div>
                 <div>{{ screenShareStats.framesEncoded ?? '-' }}</div>
                 <div class="text-base-content/60">Quality limitation</div>
@@ -73,7 +85,7 @@
                 <div>{{ t.pcStates.signalingState }}</div>
 
                 <template v-if="t.candidatePair">
-                  <div class="text-base-content/60">RTT</div>
+                  <div class="text-base-content/60">Client–SFU RTT</div>
                   <div>{{ formatMs(t.candidatePair.currentRoundTripTime) }}</div>
                   <template v-if="t.kind === 'send'">
                     <div class="text-base-content/60">Bitrate (target/observed)</div>
@@ -96,6 +108,8 @@
                 <template v-if="t.inboundAudio">
                   <div class="text-base-content/60">Inbound</div>
                   <div>pkts {{ t.inboundAudio.packetsReceived }} lost {{ t.inboundAudio.packetsLost }} jitt {{ formatMs(t.inboundAudio.jitter) }}</div>
+                  <div class="text-base-content/60">Playout buffer</div>
+                  <div>{{ t.inboundAudio.averageJitterBufferDelayMs != null ? `${t.inboundAudio.averageJitterBufferDelayMs.toFixed(1)} ms` : '-' }}</div>
                 </template>
                 <template v-if="t.outboundAudio">
                   <div class="text-base-content/60">Outbound</div>

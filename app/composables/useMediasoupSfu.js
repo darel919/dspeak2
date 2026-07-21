@@ -5,7 +5,8 @@ import { useChannelsStore } from '~/stores/channels'
 import { useRoomsStore } from '~/stores/rooms'
 import { useSettingsStore } from '~/stores/settings'
 import { useVoiceStore } from '~/stores/voice'
-import { buildVideoConstraints, calculateFrameTimeMs, classifyCodecImplementation, rankVideoCodecsByHardwarePreference } from '~/shared/video-settings'
+import { buildVideoConstraints, buildVideoProduceOptions, calculateEncodedFps, calculateFrameTimeMs, classifyCodecImplementation, rankVideoCodecsByHardwarePreference, updateVideoAdaptationState } from '~/shared/video-settings'
+import { buildVoiceProducerOptions, getAverageJitterBufferDelayMs, getReconnectDelayMs, getTransportRecoveryDelayMs } from '~/shared/voice-transport'
 
 export function useMediasoupSfu() {
 
@@ -17,6 +18,12 @@ export function useMediasoupSfu() {
   const ws = ref(null)
 
   const lastPong = ref(null)
+  const peerRoundTripTime = ref(null)
+  const peerRoundTripTimes = ref({})
+  const sfuRoundTripTime = ref(null)
+  const participantSfuRoundTripTimes = ref({})
+  const pendingPeerRttProbes = new Map()
+  const peerRttSamples = new Map()
 
   const lastSentClientRtpCapabilities = ref(null)
   const lastReceivedConsumerParams = ref(null)
@@ -62,11 +69,17 @@ export function useMediasoupSfu() {
   let transportPromise = null
   let rtpCapabilitiesTimeout = null
   let reconnectTimeoutId = null
+  let transportDisconnectTimeoutId = null
+  let transportReconnectRequested = false
   let allowReconnect = true
+  let activeChannelId = null
+  let hasEstablishedSession = false
 
   let lastClientRtpCapsSentAt = 0
   let lastClientRtpCapsPayload = null
   let pingIntervalId = null
+  let peerRttIntervalId = null
+  let lastSfuRttReportAt = 0
   let missedPongCount = 0
   const defaultPingIntervalMs = 15000
   const desiredGraceMs = 120000
@@ -148,6 +161,10 @@ export function useMediasoupSfu() {
       return
     }
 
+    if (entry.audioContext?.state === 'suspended') {
+      try { await entry.audioContext.resume() } catch (_) { /* user activation may be required */ }
+    }
+
     let level = 0
     let dbfs = -60
     if (entry.analyserNode && entry.meterData) {
@@ -218,8 +235,9 @@ export function useMediasoupSfu() {
       codecOptions: {
         opusStereo: true,
         opusDtx: false,
-        opusFec: false,
+        opusFec: true,
         opusNack: true,
+        opusPtime: 10,
         opusMaxAverageBitrate: bitrate
       }
     }
@@ -383,11 +401,12 @@ export function useMediasoupSfu() {
       let lastSpeaking = false;
       let speakingCount = 0;
       let notSpeakingCount = 0;
+      let lastBytesReceived = null;
   const SPEAKING_DEBOUNCE = 1;
   const NOT_SPEAKING_DEBOUNCE = 2;
       const intervalId = setInterval(async () => {
         try {
-          if (!track || track.readyState !== 'live' || !voiceDetection.has(ownerId)) {
+          if (!track || track.readyState !== 'live' || track.muted === true || !voiceDetection.has(ownerId)) {
             cleanupVoiceDetection(ownerId);
             return;
           }
@@ -407,15 +426,19 @@ export function useMediasoupSfu() {
               const stats = await consumer.rtpReceiver.getStats();
               let audioLevel = 0;
               let foundStats = false;
+              let bytesReceived = null;
               for (const [id, stat] of stats.entries()) {
                 if (stat.type === 'inbound-rtp' && stat.kind === 'audio' && typeof stat.audioLevel === 'number') {
                   audioLevel = stat.audioLevel;
+                  bytesReceived = typeof stat.bytesReceived === 'number' ? stat.bytesReceived : null;
                   foundStats = true;
                   break;
                 }
               }
-              if (foundStats) {
-                const speaking = audioLevel > 0.005;
+              {
+                const receivedFreshAudio = bytesReceived === null || lastBytesReceived === null || bytesReceived > lastBytesReceived;
+                const speaking = foundStats && receivedFreshAudio && audioLevel > 0.005;
+                if (bytesReceived !== null) lastBytesReceived = bytesReceived;
                 if (speaking) {
                   speakingCount++;
                   notSpeakingCount = 0;
@@ -456,7 +479,7 @@ export function useMediasoupSfu() {
           }
         } catch (_) { /* swallow tick errors */ }
       }, 200);
-      voiceDetection.set(ownerId, { intervalId, track });
+      voiceDetection.set(ownerId, { intervalId, track, userId: initialUserId });
     } catch (_) { /* noop */ }
   }
 
@@ -467,6 +490,9 @@ export function useMediasoupSfu() {
       if (entry.intervalId) clearInterval(entry.intervalId)
     } catch (_) { /* noop */ }
     voiceDetection.delete(ownerId)
+    try {
+      useVoiceStore().updateUserSpeaking(entry.userId || ownerId, false)
+    } catch (_) { /* noop */ }
   }
 
   function cleanupAllVoiceDetections() {
@@ -609,6 +635,31 @@ export function useMediasoupSfu() {
     }
   }
 
+  function sendPeerRttProbe() {
+    const now = performance.now()
+    const sampleCutoff = now - 30000
+    for (const [userId, sample] of peerRttSamples) {
+      if (sample.measuredAt < sampleCutoff) peerRttSamples.delete(userId)
+    }
+    const freshSamples = [...peerRttSamples.values()]
+    peerRoundTripTime.value = freshSamples.length
+      ? Math.max(...freshSamples.map(sample => sample.value))
+      : null
+    peerRoundTripTimes.value = Object.fromEntries(
+      [...peerRttSamples].map(([userId, sample]) => [userId, sample.value])
+    )
+
+    if (!ws.value || ws.value.readyState !== WebSocket.OPEN || lastInRoom.value.length < 2) return
+    const probeId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    pendingPeerRttProbes.set(probeId, now)
+    sendMessage({ type: 'peer-rtt-probe', data: { probeId } })
+
+    const cutoff = now - 30000
+    for (const [id, startedAt] of pendingPeerRttProbes) {
+      if (startedAt < cutoff) pendingPeerRttProbes.delete(id)
+    }
+  }
+
   async function fetchIceServers() {
     try {
       console.debug('[SFU] Fetching ICE servers from backend...');
@@ -641,6 +692,7 @@ export function useMediasoupSfu() {
       manualDisconnect = false
       isShuttingDown = false
       allowReconnect = true
+      transportReconnectRequested = false
       if (autoStartTimeoutId) {
         clearTimeout(autoStartTimeoutId)
         autoStartTimeoutId = null
@@ -650,6 +702,7 @@ export function useMediasoupSfu() {
         reconnectTimeoutId = null
       }
       error.value = null
+      activeChannelId = channelId
 
 
       await fetchIceServers()
@@ -670,7 +723,8 @@ export function useMediasoupSfu() {
       const wsUrl = `${sfuPath}?auth=${encodeURIComponent(userData.id)}&channelId=${encodeURIComponent(channelId)}`
       console.debug('[SFU] Connecting to:', wsUrl)
 
-      ws.value = new WebSocket(wsUrl)
+      const socket = new WebSocket(wsUrl)
+      ws.value = socket
 
       if (device.value && typeof device.value === 'object') {
         device.value.iceServers = iceServers.value
@@ -678,13 +732,16 @@ export function useMediasoupSfu() {
 
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
+          try { socket.close() } catch (_) { /* noop */ }
           reject(new Error('Connection timeout'))
         }, 10000)
 
-        ws.value.onopen = () => {
+        socket.onopen = () => {
+          if (ws.value !== socket) return
           clearTimeout(timeout)
           console.debug('[SFU] WebSocket connected')
           connected.value = true
+          transportReconnectRequested = false
           reconnectAttempts = 0
           processMessageQueue()
 
@@ -697,6 +754,10 @@ export function useMediasoupSfu() {
               }
             } catch (_) { /* noop */ }
           }, 15000)
+
+          if (peerRttIntervalId) clearInterval(peerRttIntervalId)
+          peerRttIntervalId = setInterval(sendPeerRttProbe, 5000)
+          sendPeerRttProbe()
 
           try { missedPongCount = 0 } catch (_) { /* noop */ }
 
@@ -753,7 +814,7 @@ export function useMediasoupSfu() {
           if (audioEnsureIntervalId) clearInterval(audioEnsureIntervalId)
           audioEnsureIntervalId = setInterval(() => {
             try { ensureAudioElements() } catch (_) { /* noop */ }
-          }, 10000)
+          }, 2000)
 
           setupEventHandlers()
 
@@ -765,20 +826,22 @@ export function useMediasoupSfu() {
           }, 100)
         }
 
-        ws.value.onerror = (err) => {
+        socket.onerror = (err) => {
+          if (ws.value !== socket) return
           clearTimeout(timeout)
           console.error('[SFU] WebSocket error:', err)
           error.value = 'Connection failed'
           reject(new Error('WebSocket connection failed'))
         }
 
-        ws.value.onclose = () => {
+        socket.onclose = (event) => {
+          if (ws.value !== socket) return
             try { console.debug('[SFU] WebSocket closed') } catch (_) { /* noop */ }
 
 
             try {
-              const code = ws.value && typeof ws.value.code !== 'undefined' ? ws.value.code : null
-              const reason = ws.value && typeof ws.value.reason === 'string' ? ws.value.reason : null
+              const code = event?.code ?? null
+              const reason = event?.reason || null
               if (code || reason) console.debug('[SFU] WebSocket close details - code:', code, 'reason:', reason)
             } catch (_) { /* noop */ }
 
@@ -788,6 +851,7 @@ export function useMediasoupSfu() {
               }
             } catch (_) { /* noop */ }
           connected.value = false
+          ws.value = null
 
           if (pingIntervalId) {
             clearInterval(pingIntervalId)
@@ -801,12 +865,14 @@ export function useMediasoupSfu() {
           cleanupAllVoiceDetections()
           producerOwner.clear()
 
-          if (!manualDisconnect && allowReconnect && !isShuttingDown) {
+          resetMediaSessionForReconnect()
+
+          if (hasEstablishedSession && !manualDisconnect && allowReconnect && !isShuttingDown) {
             handleDisconnection(channelId)
           }
         }
 
-        ws.value.onmessage = handleMessage
+        socket.onmessage = handleMessage
       })
     } catch (err) {
       console.error('[SFU] Connection error:', err)
@@ -924,6 +990,7 @@ export function useMediasoupSfu() {
         if (!transportReady.value) {
           console.debug('[SFU] Transports initialized (send present). Setting transportReady = true')
           transportReady.value = true
+          hasEstablishedSession = true
           if (transportPromiseResolve) {
             transportPromiseResolve()
             transportPromiseResolve = null
@@ -939,6 +1006,11 @@ export function useMediasoupSfu() {
 
             if (isProducing.value) {
               console.debug('[SFU] Already producing audio, skipping auto-start')
+              return
+            }
+
+            if (useVoiceStore().micMuted) {
+              console.debug('[SFU] Microphone is muted; skipping automatic audio production')
               return
             }
 
@@ -1277,6 +1349,11 @@ export function useMediasoupSfu() {
       if (Array.isArray(data.inRoom)) {
         console.debug('[SFU] Setting lastInRoom.value to:', data.inRoom)
         lastInRoom.value = data.inRoom.slice()
+        const activeUsers = new Set(data.inRoom.map(userId => String(userId)))
+        participantSfuRoundTripTimes.value = Object.fromEntries(
+          Object.entries(participantSfuRoundTripTimes.value)
+            .filter(([userId]) => activeUsers.has(String(userId)))
+        )
         console.debug('[SFU] lastInRoom.value after setting:', lastInRoom.value)
       }
 
@@ -1507,6 +1584,38 @@ export function useMediasoupSfu() {
 
       } catch (_) { /* noop */ }
     })
+    setupMessageHandler('peer-rtt-probe', ({ data }) => {
+      if (!data?.probeId || !data?.originPeerId) return
+      sendMessage({
+        type: 'peer-rtt-echo',
+        data: { probeId: data.probeId, originPeerId: data.originPeerId }
+      })
+    })
+    setupMessageHandler('peer-rtt-result', ({ data }) => {
+      const startedAt = pendingPeerRttProbes.get(data?.probeId)
+      if (startedAt == null) return
+      const measuredRtt = performance.now() - startedAt
+      peerRttSamples.set(String(data.responderUserId || 'peer'), {
+        value: measuredRtt,
+        measuredAt: performance.now()
+      })
+      const cutoff = performance.now() - 30000
+      const freshSamples = [...peerRttSamples.values()].filter(sample => sample.measuredAt >= cutoff)
+      peerRoundTripTime.value = freshSamples.length
+        ? Math.max(...freshSamples.map(sample => sample.value))
+        : null
+      peerRoundTripTimes.value = Object.fromEntries(
+        [...peerRttSamples].map(([userId, sample]) => [userId, sample.value])
+      )
+    })
+    setupMessageHandler('participant-sfu-rtt', ({ data }) => {
+      const rttMs = Number(data?.rttMs)
+      if (!data?.userId || !Number.isFinite(rttMs)) return
+      participantSfuRoundTripTimes.value = {
+        ...participantSfuRoundTripTimes.value,
+        [String(data.userId)]: rttMs
+      }
+    })
 
 
     setupMessageHandler('server-shutdown', ({ data }) => {
@@ -1517,10 +1626,9 @@ export function useMediasoupSfu() {
         const eta = data && typeof data.eta !== 'undefined' ? Number(data.eta) : null
 
         if (!eta || eta <= 10) {
-          console.debug('[SFU] Server requested shutdown, disconnecting to allow reconnect flow')
-
+          console.debug('[SFU] Server requested shutdown, closing signaling to start recovery')
           manualDisconnect = false
-          disconnect()
+          if (ws.value?.readyState === WebSocket.OPEN) ws.value.close(4002, 'SFU server restart')
         }
 
         try {
@@ -1539,7 +1647,10 @@ export function useMediasoupSfu() {
         if (eta && eta > 0) {
 
           allowReconnect = false
-          setTimeout(() => { allowReconnect = true }, Math.min(60000, eta * 1000))
+          setTimeout(() => {
+            allowReconnect = true
+            if (!connected.value && activeChannelId) handleDisconnection(activeChannelId)
+          }, Math.min(60000, eta * 1000))
         }
       } catch (_) { /* noop */ }
     })
@@ -1738,20 +1849,7 @@ export function useMediasoupSfu() {
       console.debug('[SFU] Send transport connection state changed:', state)
 
       try { updateIceConnectedFlag() } catch (_) { /* noop */ }
-      if (state === 'failed') {
-
-        error.value = 'Connection lost'
-        disconnect()
-        return
-      }
-      if (state === 'disconnected') {
-
-        if (!manualDisconnect && allowReconnect && !isShuttingDown) {
-          const channelId = authStore?.currentChannelId || null
-          disconnect()
-          if (channelId) handleDisconnection(channelId)
-        }
-      }
+      handleTransportConnectionState(state)
     })
 
   }
@@ -1778,21 +1876,39 @@ export function useMediasoupSfu() {
       console.debug('[SFU] Recv transport connection state changed:', state)
 
       try { updateIceConnectedFlag() } catch (_) { /* noop */ }
-      if (state === 'failed') {
-
-        error.value = 'Connection lost'
-        disconnect()
-        return
-      }
-      if (state === 'disconnected') {
-
-        if (!manualDisconnect && allowReconnect && !isShuttingDown) {
-          const channelId = authStore?.currentChannelId || null
-          disconnect()
-          if (channelId) handleDisconnection(channelId)
-        }
-      }
+      handleTransportConnectionState(state)
     })
+  }
+
+  function handleTransportConnectionState(state) {
+    if (state === 'connected') {
+      if (transportDisconnectTimeoutId) {
+        clearTimeout(transportDisconnectTimeoutId)
+        transportDisconnectTimeoutId = null
+      }
+      transportReconnectRequested = false
+      return
+    }
+    const delay = getTransportRecoveryDelayMs(state)
+    if (delay == null) return
+    if (manualDisconnect || isShuttingDown || !allowReconnect || transportReconnectRequested) return
+
+    if (transportDisconnectTimeoutId) clearTimeout(transportDisconnectTimeoutId)
+    transportDisconnectTimeoutId = setTimeout(() => {
+      transportDisconnectTimeoutId = null
+      if (manualDisconnect || isShuttingDown || !allowReconnect || transportReconnectRequested) return
+      const sendState = sendTransport.value?.connectionState
+      const recvState = recvTransport.value?.connectionState
+      if (state === 'disconnected' && sendState !== 'disconnected' && recvState !== 'disconnected') return
+
+      transportReconnectRequested = true
+      console.warn('[SFU] RTC transport did not recover; restarting the signaling session')
+      if (ws.value?.readyState === WebSocket.OPEN) {
+        ws.value.close(4001, 'RTC transport recovery')
+      } else {
+        if (activeChannelId) handleDisconnection(activeChannelId)
+      }
+    }, delay)
   }
 
 
@@ -1845,8 +1961,8 @@ export function useMediasoupSfu() {
     }
   }
 
-  function updateIceConnectedFlag(broadcastMode = false) {
-    iceConnectedBoth.value = areTransportsIceConnected(broadcastMode)
+  async function updateIceConnectedFlag(broadcastMode = false) {
+    iceConnectedBoth.value = await areTransportsIceConnected(broadcastMode)
   }
 
   async function waitForIceConnected(timeoutMs = 12000, broadcastMode = false) {
@@ -1857,10 +1973,10 @@ export function useMediasoupSfu() {
     }
     const start = Date.now()
 
-    if (areTransportsIceConnected(broadcastMode)) { iceConnectedBoth.value = true; return true }
+    if (await areTransportsIceConnected(broadcastMode)) { iceConnectedBoth.value = true; return true }
     return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        const done = areTransportsIceConnected(broadcastMode)
+      const interval = setInterval(async () => {
+        const done = await areTransportsIceConnected(broadcastMode)
         if (done || (Date.now() - start) > timeoutMs) {
           clearInterval(interval)
           iceConnectedBoth.value = done
@@ -2040,9 +2156,6 @@ export function useMediasoupSfu() {
       audioTrack.addEventListener('ended', trackEndedHandler, { once: true })
 
 
-      await new Promise(resolve => setTimeout(resolve, 50))
-
-
       if (audioTrack.readyState !== 'live') {
         stream.getTracks().forEach(track => track.stop())
         throw new Error(`Track state changed to ${audioTrack.readyState} before produce call`)
@@ -2109,13 +2222,7 @@ export function useMediasoupSfu() {
             const kbps = channel && typeof channel.audio_bitrate !== 'undefined' ? Number(channel.audio_bitrate) : null
             if (kbps && !Number.isNaN(kbps) && kbps > 0) bitrateBps = Math.floor(kbps * 1000)
           } catch (_) { /* optional */ }
-          const produceOpts = { track: cleanTrack }
-          if (bitrateBps) {
-
-            produceOpts.encodings = [{ maxBitrate: bitrateBps }]
-          }
-
-          produceOpts.codecOptions = { opusDtx: true }
+          const produceOpts = buildVoiceProducerOptions(cleanTrack, bitrateBps)
           if (maybeStereo) {
 
 
@@ -2175,11 +2282,7 @@ export function useMediasoupSfu() {
                   const kbps2 = channel2 && typeof channel2.audio_bitrate !== 'undefined' ? Number(channel2.audio_bitrate) : null
                   if (kbps2 && !Number.isNaN(kbps2) && kbps2 > 0) bitrateBps2 = Math.floor(kbps2 * 1000)
                 } catch (_) { /* optional */ }
-                const produceOpts2 = { track: minimalTrack }
-                if (bitrateBps2) {
-                  produceOpts2.encodings = [{ maxBitrate: bitrateBps2 }]
-                  produceOpts2.codecOptions = { opusDtx: true }
-                }
+                const produceOpts2 = buildVoiceProducerOptions(minimalTrack, bitrateBps2)
                 producer = await sendTransport.value.produce(produceOpts2)
               } finally {
                 if (typeof window !== 'undefined') {
@@ -2338,8 +2441,19 @@ export function useMediasoupSfu() {
       const track = stream.getVideoTracks()[0]
       if (!track) throw new Error(`No ${source} video track is available`)
 
-      const frameRate = track.getSettings?.().frameRate || (isScreen ? settings.screenVideo.frameRate : settings.cameraVideo.frameRate)
+      if (isScreen) {
+        try { track.contentHint = 'motion' } catch (_) { /* browser may not expose contentHint */ }
+      }
+
+      const requestedFrameRate = isScreen ? settings.screenVideo.frameRate : settings.cameraVideo.frameRate
+      const frameRate = Number(requestedFrameRate) || track.getSettings?.().frameRate || 30
       const trackSettings = track.getSettings?.() || {}
+      const videoProduceOptions = buildVideoProduceOptions({
+        width: trackSettings.width,
+        height: trackSettings.height,
+        frameRate,
+        screen: isScreen
+      })
       const rankedCodecs = await rankVideoCodecsByHardwarePreference(
         device.value?.rtpCapabilities?.codecs || [],
         {
@@ -2385,7 +2499,7 @@ export function useMediasoupSfu() {
           stopTracks: false,
           appData: { source },
           ...(codec ? { codec } : {}),
-          encodings: [{ maxFramerate: Math.min(60, Math.max(25, Math.round(frameRate || 30))) }]
+          ...videoProduceOptions
         })
         selectedCodec = codec
         const encoder = await waitForEncoderStats(producer)
@@ -2411,10 +2525,22 @@ export function useMediasoupSfu() {
           stopTracks: false,
           appData: { source },
           codec: bestSoftware.codec,
-          encodings: [{ maxFramerate: Math.min(60, Math.max(25, Math.round(frameRate || 30))) }]
+          ...videoProduceOptions
         })
       }
-      const entry = { producer, stream, track, source, targetFrameRate: Math.round(frameRate || 30) }
+      const entry = {
+        producer,
+        stream,
+        track,
+        source,
+        targetFrameRate: Math.round(frameRate || 30),
+        videoEncoding: videoProduceOptions.encodings[0],
+        captureConstraints: constraints,
+        resolutionScale: 1,
+        backgroundFps: null,
+        backgroundStatsBaseline: null
+      }
+      await configureVideoProducer(entry, videoProduceOptions.encodings[0])
       producers.value.set(producer.id, entry)
       localProducerIds.add(producer.id)
       producerSources.set(producer.id, source)
@@ -2447,6 +2573,8 @@ export function useMediasoupSfu() {
         audioProducer.on('trackended', cleanupAudio)
         audioProducer.on('transportclose', cleanupAudio)
       }
+      startVideoFrameOptimization(entry)
+      if (isScreen) setupScreenShareVisibilityProtection(entry)
       isProducing.value = true
 
       const cleanup = () => stopVideoProduction(source, producer.id)
@@ -2460,6 +2588,110 @@ export function useMediasoupSfu() {
     }
   }
 
+  async function configureVideoProducer(entry, encoding) {
+    const sender = entry.producer?.rtpSender
+    if (sender?.getParameters && sender?.setParameters) {
+      try {
+        const parameters = sender.getParameters()
+        if (parameters.degradationPreference !== 'maintain-framerate') {
+          parameters.degradationPreference = 'maintain-framerate'
+          await sender.setParameters(parameters)
+        }
+      } catch (_) { /* browser controls degradation when this preference is unavailable */ }
+    }
+
+    try {
+      await entry.producer.setRtpEncodingParameters({
+        maxBitrate: encoding.maxBitrate,
+        maxFramerate: encoding.maxFramerate,
+        networkPriority: encoding.networkPriority,
+        priority: encoding.priority,
+        scaleResolutionDownBy: Number(entry.resolutionScale) || 1
+      })
+    } catch (_) { /* initial produce parameters remain active */ }
+  }
+
+  async function readEncodedFrameCounter(entry) {
+    try {
+      const report = await entry.producer.getStats()
+      let outbound = null
+      report.forEach((stat) => {
+        if (stat.type === 'outbound-rtp' && stat.kind === 'video' && !stat.isRemote) outbound = stat
+      })
+      if (!outbound) return null
+      const framesEncoded = Number(outbound.framesEncoded)
+      const timestamp = Number(outbound.timestamp)
+      return Number.isFinite(framesEncoded) && Number.isFinite(timestamp)
+        ? { framesEncoded, timestamp }
+        : null
+    } catch (_) {
+      return null
+    }
+  }
+
+  async function reinforceScreenSharePerformance(entry) {
+    if (!entry || entry.producer.closed || entry.track.readyState !== 'live') return
+    try { entry.track.contentHint = 'motion' } catch (_) { /* unsupported */ }
+    try {
+      await entry.track.applyConstraints(entry.captureConstraints)
+    } catch (_) { /* the selected display surface may have a fixed cadence */ }
+    await configureVideoProducer(entry, entry.videoEncoding)
+  }
+
+  function setupScreenShareVisibilityProtection(entry) {
+    if (typeof document === 'undefined') return
+    const onVisibilityChange = async () => {
+      if (entry.producer.closed || entry.track.readyState !== 'live') return
+      if (document.hidden) {
+        entry.backgroundStatsBaseline = await readEncodedFrameCounter(entry)
+        await reinforceScreenSharePerformance(entry)
+        return
+      }
+
+      const current = await readEncodedFrameCounter(entry)
+      entry.backgroundFps = current && entry.backgroundStatsBaseline
+        ? calculateEncodedFps(current.framesEncoded, current.timestamp, entry.backgroundStatsBaseline)
+        : null
+      entry.backgroundStatsBaseline = null
+      await reinforceScreenSharePerformance(entry)
+    }
+    entry.visibilityHandler = onVisibilityChange
+    document.addEventListener('visibilitychange', onVisibilityChange)
+  }
+
+  function startVideoFrameOptimization(entry) {
+    let adaptation = { scale: 1, lowSamples: 0, healthySamples: 0 }
+    let previous = null
+    let updating = false
+
+    entry.optimizationIntervalId = setInterval(async () => {
+      if (updating || entry.producer.closed || entry.track.readyState !== 'live') return
+      updating = true
+      try {
+        const report = await entry.producer.getStats()
+        let outbound = null
+        report.forEach((stat) => {
+          if (stat.type === 'outbound-rtp' && stat.kind === 'video' && !stat.isRemote) outbound = stat
+        })
+        if (!outbound) return
+
+        const frames = Number(outbound.framesEncoded)
+        const timestamp = Number(outbound.timestamp)
+        const measuredFps = calculateEncodedFps(frames, timestamp, previous)
+        let sendFps = measuredFps ?? Number(outbound.framesPerSecond)
+        previous = { framesEncoded: frames, timestamp }
+
+        const next = updateVideoAdaptationState(adaptation, sendFps, entry.targetFrameRate)
+        adaptation = next
+        if (!next.changed) return
+
+        await entry.producer.setRtpEncodingParameters({ scaleResolutionDownBy: next.scale })
+        entry.resolutionScale = next.scale
+      } catch (_) { /* optimization resumes on the next sample */ }
+      finally { updating = false }
+    }, 2000)
+  }
+
   async function startSystemAudioProduction() {
     if (!transportReady.value && transportPromise) await transportPromise
     if (!sendTransport.value || sendTransport.value.closed) throw new Error('Send transport not available')
@@ -2471,8 +2703,6 @@ export function useMediasoupSfu() {
 
     let stream
     try {
-      // Browsers require a display surface to authorize system/tab audio. The
-      // video track is stopped immediately and is never sent to the SFU.
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: getSharedAudioCaptureConstraints(),
@@ -2525,6 +2755,10 @@ export function useMediasoupSfu() {
     )
     if (!match) return
     const [producerId, entry] = match
+    if (entry.optimizationIntervalId) clearInterval(entry.optimizationIntervalId)
+    if (entry.visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', entry.visibilityHandler)
+    }
     sendMessage({ type: 'close-producer', data: { producerId } })
     producers.value.delete(producerId)
     outboundVideoStatsHistory.delete(producerId)
@@ -2705,6 +2939,14 @@ export function useMediasoupSfu() {
 
       consumers.value.set(consumerData.producerId, consumer)
 
+      if (consumer.kind === 'audio' && consumer.rtpReceiver) {
+        try {
+          if ('playoutDelayHint' in consumer.rtpReceiver) {
+            consumer.rtpReceiver.playoutDelayHint = 0
+          }
+        } catch (_) { /* browser may expose a read-only or unsupported hint */ }
+      }
+
 
       if (pendingConsume.has(consumerData.producerId)) {
         clearTimeout(pendingConsume.get(consumerData.producerId))
@@ -2845,6 +3087,10 @@ export function useMediasoupSfu() {
     audio.controls = false
     audio.playsInline = true
     audio.srcObject = new MediaStream([track])
+    const resumePlayback = () => {
+      if (!audio.muted && audio.paused) audio.play().catch(() => {})
+    }
+    audio.addEventListener('canplay', resumePlayback)
 
 
     function setInitialVolume(userId) {
@@ -2891,6 +3137,7 @@ export function useMediasoupSfu() {
     } catch (_) { /* noop */ }
 
     container.appendChild(audio)
+    resumePlayback()
     console.debug('[SFU] Created audio element for user:', realUserId, 'with sinkId applied')
   }
 
@@ -2908,6 +3155,15 @@ export function useMediasoupSfu() {
             createAudioElement(producerId, ownerId, consumer.track, producerSources.get(producerId) || 'audio')
           }
         } else {
+
+          const boundTrack = audioEl.srcObject?.getAudioTracks?.()[0]
+          if (boundTrack !== consumer.track || boundTrack?.readyState !== 'live') {
+            audioEl.srcObject = new MediaStream([consumer.track])
+          }
+
+          if (audioEl.paused && !audioEl.muted) {
+            audioEl.play().catch(() => {})
+          }
 
           try {
             const sinkId = useSettingsStore().outputDeviceId
@@ -3072,12 +3328,59 @@ export function useMediasoupSfu() {
         }
         connect(channelId).catch(err => {
           console.error('[SFU] Reconnection failed:', err)
+          handleDisconnection(channelId)
         })
-      }, 2000 * reconnectAttempts)
+      }, getReconnectDelayMs(reconnectAttempts))
     } else {
       console.error('[SFU] Max reconnection attempts reached')
       error.value = 'Connection lost'
     }
+  }
+
+  function resetMediaSessionForReconnect() {
+    if (transportDisconnectTimeoutId) {
+      clearTimeout(transportDisconnectTimeoutId)
+      transportDisconnectTimeoutId = null
+    }
+    for (const [producerId, entry] of producers.value) {
+      try { entry.producer?.close?.() } catch (_) { /* noop */ }
+      try { entry.track?.stop?.() } catch (_) { /* noop */ }
+      try { entry.stream?.getTracks?.().forEach(track => track.stop()) } catch (_) { /* noop */ }
+      try { entry.audioContext?.close?.() } catch (_) { /* noop */ }
+      cleanupLocalVAD(producerId)
+    }
+    producers.value.clear()
+    localProducerIds.clear()
+
+    for (const [producerId, entry] of consumers.value) {
+      const consumer = entry?.consumer || entry
+      try { consumer?.close?.() } catch (_) { /* noop */ }
+      removeAudioElement(producerId)
+      cleanupVoiceDetection(producerId)
+    }
+    consumers.value.clear()
+    remoteAudioFeeds.value.clear()
+    remoteAudioFeeds.value = new Map(remoteAudioFeeds.value)
+    remoteVideoFeeds.value.clear()
+    remoteVideoFeeds.value = new Map(remoteVideoFeeds.value)
+    producerOwner.clear()
+    producerCname.clear()
+    cnameOwner.clear()
+
+    try { sendTransport.value?.close?.() } catch (_) { /* noop */ }
+    try { recvTransport.value?.close?.() } catch (_) { /* noop */ }
+    sendTransport.value = null
+    recvTransport.value = null
+    device.value = null
+    transportReady.value = false
+    iceConnectedBoth.value = false
+    isProducing.value = false
+    isProducingAudio.value = false
+    pendingTransportConnect.clear()
+    pendingProduceQueue.splice(0)
+    for (const timeoutId of pendingConsume.values()) clearTimeout(timeoutId)
+    pendingConsume.clear()
+    messageHandlers.clear()
   }
 
     if (sendTransport.value) {
@@ -3106,6 +3409,16 @@ export function useMediasoupSfu() {
       clearInterval(pingIntervalId)
       pingIntervalId = null
     }
+    if (peerRttIntervalId) {
+      clearInterval(peerRttIntervalId)
+      peerRttIntervalId = null
+    }
+    pendingPeerRttProbes.clear()
+    peerRttSamples.clear()
+    peerRoundTripTime.value = null
+    peerRoundTripTimes.value = {}
+    sfuRoundTripTime.value = null
+    participantSfuRoundTripTimes.value = {}
 
     if (audioEnsureIntervalId) {
       clearInterval(audioEnsureIntervalId)
@@ -3139,6 +3452,14 @@ export function useMediasoupSfu() {
     manualDisconnect = true
     isShuttingDown = true
     allowReconnect = false
+    activeChannelId = null
+    hasEstablishedSession = false
+
+    if (transportDisconnectTimeoutId) {
+      clearTimeout(transportDisconnectTimeoutId)
+      transportDisconnectTimeoutId = null
+    }
+    transportReconnectRequested = false
 
 
     if (autoStartTimeoutId) {
@@ -3197,6 +3518,16 @@ export function useMediasoupSfu() {
       clearInterval(pingIntervalId)
       pingIntervalId = null
     }
+    if (peerRttIntervalId) {
+      clearInterval(peerRttIntervalId)
+      peerRttIntervalId = null
+    }
+    pendingPeerRttProbes.clear()
+    peerRttSamples.clear()
+    peerRoundTripTime.value = null
+    peerRoundTripTimes.value = {}
+    sfuRoundTripTime.value = null
+    participantSfuRoundTripTimes.value = {}
 
     if (audioEnsureIntervalId) {
       clearInterval(audioEnsureIntervalId)
@@ -3319,6 +3650,9 @@ export function useMediasoupSfu() {
             id: inboundAudio.id,
             ssrc: inboundAudio.ssrc,
             jitter: inboundAudio.jitter ?? null,
+            jitterBufferDelay: inboundAudio.jitterBufferDelay ?? null,
+            jitterBufferEmittedCount: inboundAudio.jitterBufferEmittedCount ?? null,
+            averageJitterBufferDelayMs: getAverageJitterBufferDelayMs(inboundAudio),
             packetsReceived: inboundAudio.packetsReceived ?? null,
             packetsLost: inboundAudio.packetsLost ?? null,
             bytesReceived: inboundAudio.bytesReceived ?? null,
@@ -3357,8 +3691,18 @@ export function useMediasoupSfu() {
       buildSnapshotForPc(pcRecv, 'recv')
     ])
 
+    const localRtt = sendSnap?.candidatePair?.currentRoundTripTime
+    sfuRoundTripTime.value = Number.isFinite(Number(localRtt))
+      ? Number(localRtt) * 1000
+      : null
+    if (sfuRoundTripTime.value != null && Date.now() - lastSfuRttReportAt >= 5000) {
+      lastSfuRttReportAt = Date.now()
+      sendMessage({ type: 'client-sfu-rtt', data: { rttMs: sfuRoundTripTime.value } })
+    }
+
     return {
       timestamp: Date.now(),
+      peerRoundTripTime: peerRoundTripTime.value,
       transports: [sendSnap, recvSnap].filter(Boolean)
     }
   }
@@ -3391,7 +3735,9 @@ export function useMediasoupSfu() {
         width: Number(outbound?.frameWidth || settings.width) || null,
         height: Number(outbound?.frameHeight || settings.height) || null,
         fps: Number.isFinite(outboundFps) ? outboundFps : null,
+        backgroundFps: Number.isFinite(Number(entry.backgroundFps)) ? Number(entry.backgroundFps) : null,
         targetFps: Number(entry.targetFrameRate || settings.frameRate) || null,
+        resolutionScale: Number(entry.resolutionScale) || 1,
         frameTimeMs,
         codec: outbound?.codecId ? report?.get?.(outbound.codecId)?.mimeType || null : null,
         encoderImplementation: outbound?.encoderImplementation || null,
@@ -3456,6 +3802,9 @@ export function useMediasoupSfu() {
     remoteVideoFeeds: readonly(remoteVideoFeeds),
     remoteAudioFeeds: readonly(remoteAudioFeeds),
     sharedAudioStats: readonly(sharedAudioStats),
+    peerRoundTripTimes: readonly(peerRoundTripTimes),
+    sfuRoundTripTime: readonly(sfuRoundTripTime),
+    participantSfuRoundTripTimes: readonly(participantSfuRoundTripTimes),
     remoteProducersCount: remoteProducersCount,
     lastInRoom: lastInRoom,
     connect,
