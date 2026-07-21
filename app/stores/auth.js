@@ -6,14 +6,30 @@ export const useAuthStore = defineStore('auths', () => {
     const token = ref(null)
     const config = useRuntimeConfig()
 
+    function writeStorage(key, value) {
+        if (!import.meta.client) return
+        try {
+            localStorage.setItem(key, value)
+        } catch (error) {
+            console.warn(`[Auth] Could not persist ${key}:`, error)
+        }
+    }
+
+    function removeStorage(key) {
+        if (!import.meta.client) return
+        try {
+            localStorage.removeItem(key)
+        } catch (error) {
+            console.warn(`[Auth] Could not remove ${key}:`, error)
+        }
+    }
+
     function setUser(val) {
         user.value = val
-        if (typeof window !== 'undefined') {
-            if (val && val.user && val.user.user_metadata) {
-                localStorage.setItem('userData', JSON.stringify(val.user.user_metadata));
-            } else {
-                localStorage.removeItem('userData');
-            }
+        if (val?.user?.user_metadata) {
+            writeStorage('userData', JSON.stringify(val.user.user_metadata))
+        } else {
+            removeStorage('userData')
         }
         if (typeof window !== 'undefined' && navigator.serviceWorker && val && val.user && val.user.user_metadata && val.user.user_metadata.id) {
             const userId = val.user.user_metadata.id;
@@ -59,19 +75,19 @@ export const useAuthStore = defineStore('auths', () => {
         } catch (error) {
             setToken(null)
             setUser(null)
-            localStorage.removeItem('token')
+            removeStorage('token')
             return false
         }
     }
     function saveToken(val) {
         setToken(val)
-        localStorage.setItem('token', val)
+        writeStorage('token', val)
     }
     function clearAuth() {
         setToken(null)
         setUser(null)
-        localStorage.removeItem('token')
-        localStorage.removeItem('userData')
+        removeStorage('token')
+        removeStorage('userData')
         Promise.all([
             import('./rooms.js').then(({ useRoomsStore }) => {
                 const roomsStore = useRoomsStore()
@@ -88,7 +104,7 @@ export const useAuthStore = defineStore('auths', () => {
         ])
     }
     function getUserData() {
-        return user.value ? user.value.user.user_metadata : null
+        return user.value?.user?.user_metadata || null
     }
     return { user, token, setUser, setToken, verifyToken, saveToken, clearAuth, getUserData }
 })

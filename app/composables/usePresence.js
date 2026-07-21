@@ -12,7 +12,7 @@ export function usePresence(userId) {
   const config = useRuntimeConfig()
 
   function connect(id) {
-    if (!id) {
+    if (!import.meta.client || !id) {
       console.log('[usePresence] No userId provided for connection')
       return
     }

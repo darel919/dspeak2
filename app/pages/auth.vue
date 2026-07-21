@@ -16,6 +16,23 @@ const roomsStore = useRoomsStore();
 const router = useRouter();
 const route = useRoute();
 
+function readStorage(key) {
+  try {
+    return localStorage.getItem(key)
+  } catch (error) {
+    console.warn(`[Auth] Could not read ${key}:`, error)
+    return null
+  }
+}
+
+function removeStorage(key) {
+  try {
+    localStorage.removeItem(key)
+  } catch (error) {
+    console.warn(`[Auth] Could not remove ${key}:`, error)
+  }
+}
+
 onMounted(async () => {
   const at = route.query.at;
   
@@ -30,10 +47,10 @@ onMounted(async () => {
       await roomsStore.fetchRooms();
       
       // Check if we need to redirect to a saved URL (like join link)
-      const redirectUrl = localStorage.getItem('redirectAfterAuth')
+      const redirectUrl = readStorage('redirectAfterAuth')
       console.log('Redirect URL from storage:', redirectUrl)
       if (redirectUrl) {
-        localStorage.removeItem('redirectAfterAuth')
+        removeStorage('redirectAfterAuth')
         console.log('Redirecting to saved URL:', redirectUrl)
         window.location.href = redirectUrl;
         return;
@@ -51,7 +68,7 @@ onMounted(async () => {
   }
   
   // Check if we already have a valid token
-  const savedToken = localStorage.getItem('token');
+  const savedToken = readStorage('token');
   if (savedToken && !at) {
     console.log('Found saved token, verifying...')
     const valid = await authStore.verifyToken(savedToken);
@@ -61,10 +78,10 @@ onMounted(async () => {
       await roomsStore.fetchRooms();
       
       // Check if we need to redirect to a saved URL (like join link)
-      const redirectUrl = localStorage.getItem('redirectAfterAuth')
+      const redirectUrl = readStorage('redirectAfterAuth')
       console.log('Redirect URL from storage:', redirectUrl)
       if (redirectUrl) {
-        localStorage.removeItem('redirectAfterAuth')
+        removeStorage('redirectAfterAuth')
         console.log('Redirecting to saved URL:', redirectUrl)
         window.location.href = redirectUrl;
         return;

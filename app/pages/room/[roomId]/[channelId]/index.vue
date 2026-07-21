@@ -179,7 +179,9 @@ function onBackToHome() {
 
 watch(room, async (r) => {
   if (r && r.name) {
-    document.title = `${r.name} - dSpeak`
+    if (import.meta.client) {
+      document.title = `${r.name} - dSpeak`
+    }
     try {
       await channelsStore.fetchChannels(r.id)
       // Only auto-select channel on initial load, not on every room change
@@ -200,7 +202,9 @@ watch(room, async (r) => {
       console.error('Failed to fetch channels:', error)
     }
   } else {
-    document.title = 'dSpeak'
+    if (import.meta.client) {
+      document.title = 'dSpeak'
+    }
   }
 }, { immediate: true })
 

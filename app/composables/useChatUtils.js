@@ -142,6 +142,15 @@ export const useChatUtils = () => {
    * Escape HTML to prevent XSS
    */
   function escapeHtml(text) {
+    if (!import.meta.client) {
+      return String(text)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;')
+    }
+
     const div = document.createElement('div')
     div.textContent = text
     return div.innerHTML
@@ -202,6 +211,8 @@ export const useChatUtils = () => {
    * Copy text to clipboard with fallback
    */
   async function copyToClipboard(text) {
+    if (!import.meta.client) return false
+
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text)

@@ -43,6 +43,8 @@ export function useNotifications() {
   if (typeof watch !== 'undefined') {
     try {
       watch(() => permission.value, (newPermission) => {
+        if (!import.meta.client) return
+
         if (notificationManager) {
           notificationManager.permission = newPermission
         }

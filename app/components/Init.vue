@@ -27,12 +27,22 @@ const router = useRouter()
 const route = useRoute()
 const authChecked = ref(false)
 
+function readSavedToken() {
+  if (!import.meta.client) return null
+  try {
+    return localStorage.getItem('token')
+  } catch (error) {
+    console.warn('[Init] Could not read saved token:', error)
+    return null
+  }
+}
+
 const isAuthenticated = computed(() => {
-  const token = localStorage.getItem('token')
   const userData = authStore.getUserData()
-  const result = !!token && authChecked.value && userData
+  const hasToken = !!readSavedToken()
+  const result = hasToken && authChecked.value && userData
   console.log('[Init] isAuthenticated computed:', { 
-    token: !!token, 
+    token: hasToken,
     authChecked: authChecked.value, 
     userData: !!userData, 
     result 
@@ -57,7 +67,7 @@ const { status: presenceStatus, connect: connectPresence, disconnect: disconnect
 provide('presenceStatus', presenceStatus)
 
 onMounted(async () => {
-  if (!isAuthPage.value && localStorage.getItem('token')) {
+  if (!isAuthPage.value && readSavedToken()) {
     await checkAuth()
     if (authChecked.value) {
       await requestNotificationPermissionAutomatically()
@@ -141,7 +151,7 @@ async function checkAuth() {
     return
   }
 
-  const savedToken = localStorage.getItem('token')
+  const savedToken = readSavedToken()
 
   if (savedToken) {
     const isValid = await authStore.verifyToken(savedToken)
