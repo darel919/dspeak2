@@ -160,8 +160,10 @@
                 <template v-if="t.inboundAudio">
                   <div class="text-base-content/60">Inbound</div>
                   <div>pkts {{ t.inboundAudio.packetsReceived }} lost {{ t.inboundAudio.packetsLost }} jitt {{ formatMs(t.inboundAudio.jitter) }}</div>
-                  <div class="text-base-content/60">Recent playout buffer</div>
+                  <div class="text-base-content/60">Average playout buffer</div>
                   <div>{{ t.inboundAudio.averageJitterBufferDelayMs != null ? `${t.inboundAudio.averageJitterBufferDelayMs.toFixed(1)} ms` : '-' }}</div>
+                  <div class="text-base-content/60">Target / network minimum</div>
+                  <div>{{ formatOptionalMs(t.inboundAudio.averageJitterBufferTargetDelayMs) }} / {{ formatOptionalMs(t.inboundAudio.averageJitterBufferMinimumDelayMs) }}</div>
                 </template>
                 <template v-if="t.outboundAudio">
                   <div class="text-base-content/60">Outbound</div>
@@ -329,6 +331,9 @@ function formatMs(v) {
   if (v == null) return '-'
   const ms = typeof v === 'number' && v < 10 ? v * 1000 : v
   return `${ms.toFixed(0)} ms`
+}
+function formatOptionalMs(v) {
+  return Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)} ms` : '-'
 }
 function formatBytes(v) {
   if (!v && v !== 0) return '-'

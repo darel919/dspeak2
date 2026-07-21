@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyOpusAudioProfile, NativeP2pMesh } from '../app/shared/native-p2p.js'
+import { applyOpusAudioProfile, NativeP2pMesh, setP2pJitterBufferTarget } from '../app/shared/native-p2p.js'
 
 test('P2P source toggles reuse their sender instead of accumulating transceivers', async () => {
   const signals = []
@@ -102,4 +102,11 @@ test('P2P video sender preserves frame cadence and applies its bitrate policy', 
     priority: 'high',
     networkPriority: 'high'
   })
+})
+
+test('P2P receiver requests a low-latency jitter buffer where supported', () => {
+  const receiver = { jitterBufferTarget: null }
+  assert.equal(setP2pJitterBufferTarget(receiver), true)
+  assert.equal(receiver.jitterBufferTarget, 30)
+  assert.equal(setP2pJitterBufferTarget({}), false)
 })

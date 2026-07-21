@@ -349,7 +349,8 @@ function getUserPeerRtt(userId) {
 }
 function getUserConnectionQuality(userId) {
   const sfu = voiceStore.sfuComposable
-  const rtt = sfu?.activeProvider === 'p2p' ? getUserPeerRtt(userId) : getUserSfuRtt(userId)
+  const provider = sfu?.activeProvider?.value ?? sfu?.activeProvider
+  const rtt = provider === 'p2p' ? getUserPeerRtt(userId) : getUserSfuRtt(userId)
   return getConnectionQualityBars(rtt)
 }
 function getUserConnectionQualityLabel(userId) {

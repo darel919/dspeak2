@@ -1,6 +1,7 @@
 export const VIDEO_FRAME_RATE_MIN = 25
 export const VIDEO_FRAME_RATE_MAX = 60
 export const VIDEO_FRAME_RATE_PRESETS = Object.freeze([25, 30, 50, 60])
+export const P2P_VIDEO_MAX_BITRATE = 16_000_000
 export const SCREEN_SHARE_FPS_HEALTH_RATIO = 0.8
 export const VIDEO_SCALE_STEPS = Object.freeze([1, 1.25, 1.5, 2, 2.5])
 
@@ -66,6 +67,27 @@ export function buildVideoProduceOptions({ width, height, frameRate, screen = fa
     },
     degradationPreference: 'maintain-framerate'
   }
+}
+
+export function buildP2pVideoSenderOptions(options = {}) {
+  const settings = buildVideoProduceOptions(options)
+  return {
+    ...settings,
+    encodings: settings.encodings.map(encoding => ({
+      ...encoding,
+      maxBitrate: P2P_VIDEO_MAX_BITRATE,
+      scaleResolutionDownBy: 1
+    }))
+  }
+}
+
+export function sortP2pVideoCodecPreferences(codecs = []) {
+  const priorities = ['video/H264', 'video/VP9', 'video/VP8']
+  return [...codecs].sort((left, right) => {
+    const leftIndex = priorities.findIndex(value => value.toLowerCase() === left?.mimeType?.toLowerCase())
+    const rightIndex = priorities.findIndex(value => value.toLowerCase() === right?.mimeType?.toLowerCase())
+    return (leftIndex < 0 ? priorities.length : leftIndex) - (rightIndex < 0 ? priorities.length : rightIndex)
+  })
 }
 
 export function updateVideoAdaptationState(state = {}, sendFps, targetFps) {

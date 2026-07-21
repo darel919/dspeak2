@@ -7,7 +7,7 @@ import { RemoteMediaRegistry } from '~/shared/remote-media-registry.js'
 import { RemoteMediaHandoff } from '~/shared/remote-media-handoff.js'
 import { addressFamily, buildTopologyGraph } from '~/shared/rtc-topology.js'
 import { collectVideoRtpStats } from '~/shared/rtc-media-stats.js'
-import { buildVideoProduceOptions } from '~/shared/video-settings.js'
+import { buildP2pVideoSenderOptions } from '~/shared/video-settings.js'
 import { buildVoiceProducerOptions, getAudioBitrateBps, mapPeerRoundTripTimes } from '~/shared/voice-transport.js'
 import { shouldAcceptTopologyEvent, topologyEventKey } from '#shared/media-transition.js'
 import { useAuthStore } from '~/stores/auth'
@@ -329,7 +329,7 @@ export function useHybridMediaSession() {
           return { encodings: options.encodings, dtx: 'disabled' }
         }
         const settings = track.getSettings?.() || {}
-        return buildVideoProduceOptions({
+        return buildP2pVideoSenderOptions({
           width: settings.width,
           height: settings.height,
           frameRate: getRequestedVideoSettings(source).frameRate,

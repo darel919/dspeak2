@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildVideoConstraints,
+  buildP2pVideoSenderOptions,
   buildVideoProduceOptions,
   buildWebRtcCodecContentType,
   calculateEncodedFps,
@@ -14,6 +15,7 @@ import {
   inspectH264ProfileCapabilities,
   normalizeVideoSettings,
   rankVideoCodecsByHardwarePreference,
+  sortP2pVideoCodecPreferences,
   selectHardwarePreferredVideoCodec,
   selectPowerEfficientVideoCodec,
   updateVideoAdaptationState,
@@ -65,6 +67,29 @@ test('screen-share production prioritizes frame cadence with a resolution-aware 
   assert.equal(options.encodings[0].priority, 'high')
   assert.equal(options.codecOptions.videoGoogleStartBitrate, 8709)
   assert.equal(options.degradationPreference, 'maintain-framerate')
+})
+
+test('P2P video uses a 16 Mbps ceiling and begins at full capture resolution', () => {
+  const options = buildP2pVideoSenderOptions({ width: 1920, height: 1080, frameRate: 60, screen: true })
+  assert.equal(options.encodings[0].maxBitrate, 16_000_000)
+  assert.equal(options.encodings[0].maxFramerate, 60)
+  assert.equal(options.encodings[0].scaleResolutionDownBy, 1)
+  assert.equal(options.degradationPreference, 'maintain-framerate')
+})
+
+test('P2P codec negotiation prefers H264 while retaining browser auxiliary codecs', () => {
+  const codecs = [
+    { mimeType: 'video/VP8' },
+    { mimeType: 'video/rtx' },
+    { mimeType: 'video/H264' },
+    { mimeType: 'video/VP9' }
+  ]
+  assert.deepEqual(sortP2pVideoCodecPreferences(codecs).map(codec => codec.mimeType), [
+    'video/H264',
+    'video/VP9',
+    'video/VP8',
+    'video/rtx'
+  ])
 })
 
 test('video production bitrate remains bounded for low and very large sources', () => {

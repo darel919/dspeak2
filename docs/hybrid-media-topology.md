@@ -101,6 +101,16 @@ requires degradation. Resolution may therefore fall below the requested target
 to protect cadence. Capture settings, sender encoding limits, available upload
 bandwidth, and encoder capacity remain independent constraints, so a requested
 frame rate is never reported as an achieved rate without outbound RTP evidence.
+Direct and Mesh video use a 16 Mbps sender ceiling and prefer H.264 when both
+browsers advertise it, retaining VP9 and VP8 as negotiated fallbacks.
+
+Native P2P receivers request a 30 ms jitter-buffer target when the browser
+implements `RTCRtpReceiver.jitterBufferTarget`. This is a latency preference,
+not a fixed buffer size; the browser may retain more media for network recovery
+or audio/video synchronization. Active direct routes allow twenty seconds for
+health or RTP progress and eight seconds for transient ICE disconnection before
+recovery begins, while hard ICE, DTLS, or peer-connection failures still fall
+back immediately.
 
 The current implementation assumes one Nitro process, matching the mediasoup
 router and WebSocket ownership model. Multiple application instances require a

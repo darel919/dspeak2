@@ -1,12 +1,14 @@
 import { P2P_QUALIFICATION_TIMEOUT_MS } from './rtc-topology.js'
 import { collectPeerConnectionStats } from './rtc-media-stats.js'
 import { applyRtpSenderSettings } from './rtp-sender-settings.js'
+import { sortP2pVideoCodecPreferences } from './video-settings.js'
 
-export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 10000
-export const P2P_ACTIVE_MEDIA_TIMEOUT_MS = 10000
+export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000
+export const P2P_ACTIVE_MEDIA_TIMEOUT_MS = 20000
 export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 5000
-export const P2P_DISCONNECT_GRACE_MS = 3000
-export const P2P_ICE_RESTART_TIMEOUT_MS = 8000
+export const P2P_DISCONNECT_GRACE_MS = 8000
+export const P2P_ICE_RESTART_TIMEOUT_MS = 12000
+export const P2P_JITTER_BUFFER_TARGET_MS = 30
 
 export function isP2pLivenessExpired(lastProgressAt, now, timeoutMs) {
   return (
@@ -51,6 +53,31 @@ export function applyOpusAudioProfile(sdp) {
       ? section.replace(/^a=ptime:[^\r\n]*/im, 'a=ptime:10')
       : `${section.replace(/\s*$/, '')}\r\na=ptime:10\r\n`
   }).join('')
+}
+
+export function applyP2pVideoCodecPreferences(pc) {
+  const capabilities = globalThis.RTCRtpReceiver?.getCapabilities?.('video')?.codecs
+    || globalThis.RTCRtpSender?.getCapabilities?.('video')?.codecs
+  if (!capabilities?.length) return false
+  const preferences = sortP2pVideoCodecPreferences(capabilities)
+  let applied = false
+  for (const transceiver of pc.getTransceivers?.() || []) {
+    const kind = transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind
+    if (kind !== 'video' || !transceiver.setCodecPreferences) continue
+    transceiver.setCodecPreferences(preferences)
+    applied = true
+  }
+  return applied
+}
+
+export function setP2pJitterBufferTarget(receiver) {
+  if (!receiver || !('jitterBufferTarget' in receiver)) return false
+  try {
+    receiver.jitterBufferTarget = P2P_JITTER_BUFFER_TARGET_MS
+    return true
+  } catch (_) {
+    return false
+  }
 }
 
 function directIceServers(servers) {
@@ -270,6 +297,7 @@ export class NativeP2pMesh {
     pc.onnegotiationneeded = async () => {
       try {
         state.makingOffer = true
+        applyP2pVideoCodecPreferences(pc)
         const offer = await pc.createOffer()
         await pc.setLocalDescription({ type: offer.type, sdp: applyOpusAudioProfile(offer.sdp) })
         this.signal(peerId, { description: pc.localDescription })
@@ -342,6 +370,7 @@ export class NativeP2pMesh {
       state.settingRemoteAnswer = signal.description.type === 'answer'
       try {
         await pc.setRemoteDescription(signal.description)
+        applyP2pVideoCodecPreferences(pc)
       } finally {
         state.settingRemoteAnswer = false
       }
@@ -453,6 +482,7 @@ export class NativeP2pMesh {
 
   handleTrack(state, event) {
     const track = event.track
+    setP2pJitterBufferTarget(event.receiver)
     const source =
       this.remoteSources.get(`${state.peerId}:${track.id}`) || track.kind
     const key = p2pRemoteFeedKey(state.peerId, source)
@@ -503,6 +533,7 @@ export class NativeP2pMesh {
       entry.track,
       entry.stream || new MediaStream([entry.track]),
     )
+    applyP2pVideoCodecPreferences(state.pc)
     state.senders.set(source, sender)
     this.configureSender(sender, source, entry.track).catch((error) =>
       this.fail('sender-configuration-failed', error),

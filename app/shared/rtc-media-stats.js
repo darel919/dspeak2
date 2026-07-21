@@ -98,9 +98,9 @@ export async function collectPeerConnectionStats(pc, kind) {
           packetsLost: stat.packetsLost ?? null,
           bytesReceived: stat.bytesReceived ?? null,
           jitter: stat.jitter ?? null,
-          averageJitterBufferDelayMs: emitted > 0 && Number.isFinite(Number(stat.jitterBufferDelay))
-            ? Number(stat.jitterBufferDelay) * 1000 / emitted
-            : null
+          averageJitterBufferDelayMs: averageJitterDelay(stat.jitterBufferDelay, emitted),
+          averageJitterBufferTargetDelayMs: averageJitterDelay(stat.jitterBufferTargetDelay, emitted),
+          averageJitterBufferMinimumDelayMs: averageJitterDelay(stat.jitterBufferMinimumDelay, emitted)
         }
       }
     }
@@ -143,6 +143,12 @@ export async function collectPeerConnectionStats(pc, kind) {
     outboundAudio,
     remoteInboundAudio
   }
+}
+
+function averageJitterDelay(value, emitted) {
+  return emitted > 0 && Number.isFinite(Number(value))
+    ? Number(value) * 1000 / emitted
+    : null
 }
 
 function candidateDetails(candidate) {
