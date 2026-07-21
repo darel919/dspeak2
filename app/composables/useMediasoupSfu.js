@@ -6,7 +6,7 @@ import { useRoomsStore } from '~/stores/rooms'
 import { useSettingsStore } from '~/stores/settings'
 import { useVoiceStore } from '~/stores/voice'
 import { buildVideoConstraints, buildVideoProduceOptions, calculateEncodedFps, calculateFrameTimeMs, classifyCodecImplementation, rankVideoCodecsByHardwarePreference, updateVideoAdaptationState } from '~/shared/video-settings'
-import { buildVoiceProducerOptions, getAverageJitterBufferDelayMs, getReconnectDelayMs, getTransportRecoveryDelayMs } from '~/shared/voice-transport'
+import { buildVoiceProducerOptions, getActiveMediaDirections, getAverageJitterBufferDelayMs, getReconnectDelayMs, getTransportRecoveryDelayMs } from '~/shared/voice-transport'
 
 export function useMediasoupSfu() {
 
@@ -1916,13 +1916,17 @@ export function useMediasoupSfu() {
     if (!pc) return null;
     try {
       const stats = await pc.getStats();
+      const byId = new Map()
+      stats.forEach(stat => byId.set(stat.id, stat))
       let selectedPair = null;
       stats.forEach(s => {
-        if (s.type === 'candidate-pair' && s.selected) selectedPair = s;
+        if (s.type === 'transport' && s.selectedCandidatePairId) {
+          selectedPair = byId.get(s.selectedCandidatePairId) || selectedPair
+        }
       });
       if (!selectedPair) {
         stats.forEach(s => {
-          if (s.type === 'candidate-pair' && s.state === 'succeeded') selectedPair = s;
+          if (s.type === 'candidate-pair' && s.state === 'succeeded' && (s.nominated || s.selected)) selectedPair = s;
         });
       }
       return selectedPair;
@@ -1938,24 +1942,22 @@ export function useMediasoupSfu() {
       const pcRecv = recvTransport.value && recvTransport.value._handler && recvTransport.value._handler._pc
         ? recvTransport.value._handler._pc : null;
       const ok = (s) => s === 'connected' || s === 'completed';
+      const directions = getActiveMediaDirections(producers.value.size, remoteProducersCount.value)
 
-      if (!pcRecv || broadcastMode) {
-
-        if (remoteProducersCount.value === 0 && lastInRoom.value.length === 1) {
-          return true;
-        }
-        if (!pcSend || !ok(pcSend.iceConnectionState)) return false;
-        const pair = await getCandidatePairStats(pcSend);
-
-        return !!(pair && pair.state === 'succeeded');
-      } else {
-        if (!pcSend || !pcRecv || !ok(pcSend.iceConnectionState) || !ok(pcRecv.iceConnectionState)) return false;
-        const pairSend = await getCandidatePairStats(pcSend);
-        const pairRecv = await getCandidatePairStats(pcRecv);
-
-        return pairSend && pairRecv && pairSend.state === 'succeeded' && pairRecv.state === 'succeeded' &&
-          ((pairSend.bytesSent ?? 0) > 0 || (pairSend.bytesReceived ?? 0) > 0);
+      // A mediasoup transport does not start ICE until it carries media. An
+      // unused send or receive direction must never block room admission.
+      if (!directions.send && !directions.receive) return transportReady.value
+      if (directions.send) {
+        if (!pcSend || !ok(pcSend.iceConnectionState)) return false
+        const pairSend = await getCandidatePairStats(pcSend)
+        if (!pairSend || pairSend.state !== 'succeeded') return false
       }
+      if (directions.receive) {
+        if (!pcRecv || !ok(pcRecv.iceConnectionState)) return false
+        const pairRecv = await getCandidatePairStats(pcRecv)
+        if (!pairRecv || pairRecv.state !== 'succeeded') return false
+      }
+      return true
     } catch (_) {
       return false;
     }
@@ -1966,11 +1968,6 @@ export function useMediasoupSfu() {
   }
 
   async function waitForIceConnected(timeoutMs = 12000, broadcastMode = false) {
-
-    if (remoteProducersCount.value === 0 && lastInRoom.value.length === 1) {
-      iceConnectedBoth.value = true;
-      return true;
-    }
     const start = Date.now()
 
     if (await areTransportsIceConnected(broadcastMode)) { iceConnectedBoth.value = true; return true }

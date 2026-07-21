@@ -33,3 +33,10 @@ export function getReconnectDelayMs(attempt) {
   const normalizedAttempt = Math.max(1, Math.floor(Number(attempt) || 1))
   return Math.min(8000, 500 * (2 ** (normalizedAttempt - 1)))
 }
+
+export function getActiveMediaDirections(localProducerCount, remoteProducerCount) {
+  return {
+    send: Number(localProducerCount) > 0,
+    receive: Number(remoteProducerCount) > 0
+  }
+}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildVoiceProducerOptions, getAverageJitterBufferDelayMs, getReconnectDelayMs, getTransportRecoveryDelayMs } from '../app/shared/voice-transport.js'
+import { buildVoiceProducerOptions, getActiveMediaDirections, getAverageJitterBufferDelayMs, getReconnectDelayMs, getTransportRecoveryDelayMs } from '../app/shared/voice-transport.js'
 
 test('voice producer favors low latency without dropping packet-loss protection', () => {
   const track = { id: 'microphone' }
@@ -36,4 +36,11 @@ test('transport recovery tolerates transient disconnects but restarts hard failu
 
 test('reconnection backoff starts quickly and remains bounded', () => {
   assert.deepEqual([1, 2, 3, 4, 5, 8].map(getReconnectDelayMs), [500, 1000, 2000, 4000, 8000, 8000])
+})
+
+test('room readiness only requires ICE for media directions that are active', () => {
+  assert.deepEqual(getActiveMediaDirections(0, 0), { send: false, receive: false })
+  assert.deepEqual(getActiveMediaDirections(0, 1), { send: false, receive: true })
+  assert.deepEqual(getActiveMediaDirections(1, 0), { send: true, receive: false })
+  assert.deepEqual(getActiveMediaDirections(1, 2), { send: true, receive: true })
 })
