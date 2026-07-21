@@ -317,6 +317,40 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         <Icon name="lucide:monitor-up" class="size-4" />
                     </button>
 
+                    <button
+                        @click.stop="voiceStore.toggleSystemAudioShare"
+                        :class="['btn btn-circle btn-xs', voiceStore.systemAudioSharing ? 'btn-primary' : 'btn-outline']"
+                        :title="voiceStore.systemAudioSharing ? 'Stop sharing system audio' : 'Share system audio only'"
+                    >
+                        <Icon name="lucide:audio-lines" class="size-4" />
+                    </button>
+
+                    <div
+                        v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
+                        class="flex items-center gap-1"
+                        title="Shared audio volume — what others hear"
+                        @click.stop
+                    >
+                        <Icon name="lucide:volume-2" class="size-3" />
+                        <input
+                            class="range range-primary range-xs w-20"
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            :value="voiceStore.sharedAudioVolume"
+                            @input="voiceStore.setSharedAudioVolume($event.target.value)"
+                        />
+                        <span class="w-8 text-right text-[10px] tabular-nums">{{ voiceStore.sharedAudioVolume }}%</span>
+                        <progress
+                            :class="['progress h-2 w-24', voiceStore.sharedAudioStats.dbfs >= -12 ? 'progress-error' : 'progress-success']"
+                            max="1"
+                            :value="voiceStore.sharedAudioStats.level"
+                            :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"
+                        ></progress>
+                        <span class="w-12 text-right text-[10px] tabular-nums">{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }}k</span>
+                    </div>
+
                     <!-- Broadcast Mode Toggle -->
                     <button
                       @click.stop="toggleBroadcastMode"

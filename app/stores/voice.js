@@ -1,6 +1,8 @@
 import { defineStore } from "pinia";
 import { useAuthStore } from './auth';
 import { useRoomsStore } from './rooms';
+import { useSettingsStore } from './settings';
+import { useChannelsStore } from './channels';
 
 export const useVoiceStore = defineStore('voice', () => {
     const currentChannelId = ref(null);
@@ -19,6 +21,16 @@ export const useVoiceStore = defineStore('voice', () => {
     const connectedAt = ref(null);
     const cameraEnabled = ref(false);
     const screenSharing = ref(false);
+    const systemAudioSharing = ref(false);
+    const settingsStore = useSettingsStore();
+    const channelsStore = useChannelsStore();
+    const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
+    const sharedAudioStats = computed(() => sfuComposable.value?.sharedAudioStats || { kbps: 0, level: 0, dbfs: -60 });
+    const effectiveSystemAudioBitrate = computed(() => {
+        const requested = Number(settingsStore.systemAudioBitrate) || 128;
+        const channelLimit = Number(channelsStore.getChannelById(currentChannelId.value)?.audio_bitrate);
+        return Number.isFinite(channelLimit) && channelLimit > 0 ? Math.min(requested, channelLimit) : requested;
+    });
 
     const sfuComposable = ref(null);
 
@@ -134,6 +146,7 @@ export const useVoiceStore = defineStore('voice', () => {
             }
             try { sfuComposable.value?.stopVideoProduction?.('camera'); } catch (_) { /* noop */ }
             try { sfuComposable.value?.stopVideoProduction?.('screen'); } catch (_) { /* noop */ }
+            try { sfuComposable.value?.stopSystemAudioProduction?.(); } catch (_) { /* noop */ }
 
 
             if (sfuComposable.value && typeof sfuComposable.value.disconnect === 'function') {
@@ -153,6 +166,7 @@ export const useVoiceStore = defineStore('voice', () => {
             sfuComposable.value = null;
             cameraEnabled.value = false;
             screenSharing.value = false;
+            systemAudioSharing.value = false;
         }
     }
 
@@ -566,6 +580,52 @@ export const useVoiceStore = defineStore('voice', () => {
         }
     }
 
+    async function toggleSystemAudioShare() {
+        if (!connected.value || !sfuComposable.value) return;
+        try {
+            if (systemAudioSharing.value) {
+                sfuComposable.value.stopSystemAudioProduction();
+                systemAudioSharing.value = false;
+            } else {
+                const confirmed = typeof window === 'undefined' || window.confirm(
+                    'Share system audio only?\n\n' +
+                    'Your browser will show its regular screen-sharing dialog because that is how it gives access to system audio.\n\n' +
+                    '1. Choose “Entire Screen” in the browser dialog.\n' +
+                    '2. Make sure “Share audio” is enabled.\n\n' +
+                    'Your screen video will not be shared—only the audio will be sent.'
+                );
+                if (!confirmed) return;
+                const producer = await sfuComposable.value.startSystemAudioProduction();
+                systemAudioSharing.value = true;
+                const handleEnded = () => { systemAudioSharing.value = false; };
+                producer?.track?.addEventListener?.('ended', handleEnded, { once: true });
+                producer?.on?.('trackended', handleEnded);
+            }
+            error.value = null;
+        } catch (err) {
+            if (err?.name !== 'NotAllowedError') error.value = err?.message || 'Unable to share system audio';
+            systemAudioSharing.value = false;
+            throw err;
+        }
+    }
+
+    function setSharedAudioVolume(value) {
+        settingsStore.setSharedAudioVolume(value);
+        sfuComposable.value?.setSharedAudioVolume?.(settingsStore.sharedAudioVolume);
+    }
+
+    async function setSystemAudioBitrate(value) {
+        settingsStore.setSystemAudioBitrate(value);
+        await sfuComposable.value?.setSystemAudioBitrate?.(settingsStore.systemAudioBitrate);
+    }
+
+    watch(
+        () => channelsStore.getChannelById(currentChannelId.value)?.audio_bitrate,
+        () => {
+            if (connected.value) sfuComposable.value?.setSystemAudioBitrate?.(settingsStore.systemAudioBitrate).catch(() => {});
+        }
+    );
+
     function clearVoiceState() {
         if (connected.value) {
             leaveVoiceChannel();
@@ -690,6 +750,10 @@ export const useVoiceStore = defineStore('voice', () => {
         connectedAt: readonly(connectedAt),
         cameraEnabled: readonly(cameraEnabled),
         screenSharing: readonly(screenSharing),
+        systemAudioSharing: readonly(systemAudioSharing),
+        sharedAudioVolume,
+        sharedAudioStats,
+        effectiveSystemAudioBitrate,
         sfuComposable: readonly(sfuComposable),
         joinVoiceChannel,
         leaveVoiceChannel,
@@ -697,6 +761,9 @@ export const useVoiceStore = defineStore('voice', () => {
         toggleDeafen,
         toggleCamera,
         toggleScreenShare,
+        toggleSystemAudioShare,
+        setSharedAudioVolume,
+        setSystemAudioBitrate,
         addConnectedUser,
         removeConnectedUser,
         updateUserSpeaking,

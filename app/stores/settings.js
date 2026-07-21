@@ -15,6 +15,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const cameraVideo = ref(normalizeVideoSettings(loadPersisted('cameraVideoSettings', {})))
   const screenVideo = ref(normalizeVideoSettings(loadPersisted('screenVideoSettings', {})))
   const broadcastMode = ref(loadPersisted('broadcastMode', false))
+  const sharedAudioVolume = ref(normalizeSharedAudioVolume(loadPersisted('sharedAudioVolume', 100)))
+  const systemAudioBitrate = ref(normalizeSystemAudioBitrate(loadPersisted('systemAudioBitrate', 128)))
 
   const supported = computed(() => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getSupportedConstraints) {
@@ -41,6 +43,27 @@ export const useSettingsStore = defineStore('settings', () => {
   function setBroadcastMode(val) {
     broadcastMode.value = !!val
     persist('broadcastMode', broadcastMode.value)
+  }
+
+  function normalizeSharedAudioVolume(value) {
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? Math.min(100, Math.max(0, Math.round(numeric))) : 100
+  }
+
+  function setSharedAudioVolume(value) {
+    sharedAudioVolume.value = normalizeSharedAudioVolume(value)
+    persist('sharedAudioVolume', sharedAudioVolume.value)
+  }
+
+  function normalizeSystemAudioBitrate(value) {
+    const options = [64, 96, 128, 160, 256]
+    const numeric = Number(value)
+    return options.includes(numeric) ? numeric : 128
+  }
+
+  function setSystemAudioBitrate(value) {
+    systemAudioBitrate.value = normalizeSystemAudioBitrate(value)
+    persist('systemAudioBitrate', systemAudioBitrate.value)
   }
 
   function setMicDeviceId(id) {
@@ -114,12 +137,16 @@ export const useSettingsStore = defineStore('settings', () => {
     cameraVideo,
     screenVideo,
     broadcastMode,
+    sharedAudioVolume,
+    systemAudioBitrate,
     setAudioSetting,
     setMicDeviceId,
     setOutputDeviceId,
     setCameraDeviceId,
     setCameraVideoSettings,
     setScreenVideoSettings,
-    setBroadcastMode
+    setBroadcastMode,
+    setSharedAudioVolume,
+    setSystemAudioBitrate
   }
 })

@@ -119,6 +119,25 @@
               <p class="mt-2 text-xs text-base-content/60">Original keeps the source's full resolution. Resolution limits never upscale the source.</p>
             </div>
 
+            <div class="mb-6">
+              <h3 class="font-semibold mb-2">System audio quality</h3>
+              <div class="max-w-md rounded-lg border border-base-300 p-4">
+                <label class="block text-sm">
+                  <span class="mb-1 block">Maximum bitrate</span>
+                  <select class="select select-bordered select-sm w-full" :value="systemAudioBitrate" @change="setSystemAudioBitrate($event.target.value)">
+                    <option v-for="kbps in systemAudioBitrateOptions" :key="kbps" :value="kbps">
+                      {{ kbps }} kbps{{ kbps === 256 ? ' (highest channel quality)' : '' }}
+                    </option>
+                  </select>
+                </label>
+                <p class="mt-2 text-xs text-base-content/60">
+                  Sets the preferred Opus ceiling for screen and system audio. The channel limit always wins.
+                  <span v-if="voiceStore.connected" class="font-medium">Effective limit here: {{ voiceStore.effectiveSystemAudioBitrate }} kbps.</span>
+                  Actual bitrate varies with the audio content and network conditions.
+                </p>
+              </div>
+            </div>
+
             <!-- Input Processing -->
             <div>
               <h3 class="font-semibold mb-2">Input Processing</h3>
@@ -237,6 +256,8 @@ const audio = computed(() => settingsStore.audio)
 const supported = computed(() => settingsStore.supported)
 const cameraVideo = computed(() => settingsStore.cameraVideo)
 const screenVideo = computed(() => settingsStore.screenVideo)
+const systemAudioBitrate = computed(() => settingsStore.systemAudioBitrate)
+const systemAudioBitrateOptions = [64, 96, 128, 160, 256]
 const resolutionOptions = [
   { value: 'original', label: 'Original (full resolution)' },
   { value: '720p', label: '720p' },
@@ -250,6 +271,7 @@ function setCameraResolution(resolution) { settingsStore.setCameraVideoSettings(
 function setCameraFrameRate(frameRate) { settingsStore.setCameraVideoSettings({ frameRate: Number(frameRate) }) }
 function setScreenResolution(resolution) { settingsStore.setScreenVideoSettings({ resolution }) }
 function setScreenFrameRate(frameRate) { settingsStore.setScreenVideoSettings({ frameRate: Number(frameRate) }) }
+function setSystemAudioBitrate(bitrate) { voiceStore.setSystemAudioBitrate(Number(bitrate)) }
 
 const config = useRuntimeConfig()
 const { getAvatarUrl } = useChatUtils()

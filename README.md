@@ -11,7 +11,7 @@ the voice and video SFU.
 - Nitro HTTP and WebSocket routes in `server/routes/`
 - PocketBase-backed room, channel, message, presence, and push services
 - Process-owned mediasoup worker, routers, transports, producers, and consumers
-- Independent camera and screen-share tracks, allowing either source or both at once
+- Independent camera, screen-share, and system-audio tracks, allowing each source to be shared separately
 - Same-origin API and WebSocket connections by default
 
 The Nitro server exposes:

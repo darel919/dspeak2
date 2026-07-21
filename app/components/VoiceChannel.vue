@@ -236,6 +236,15 @@
           <Icon name="lucide:monitor-up" class="size-5" />
         </button>
 
+        <button
+          class="btn btn-circle btn-lg"
+          :class="voiceStore.systemAudioSharing ? 'btn-primary' : 'btn-outline'"
+          :title="voiceStore.systemAudioSharing ? 'Stop sharing system audio' : 'Share system audio only'"
+          @click="toggleSystemAudioShare"
+        >
+          <Icon name="lucide:audio-lines" class="size-5" />
+        </button>
+
         <!-- Connection Status -->
         <div class="flex flex-col items-center ml-4">
           <div class="flex items-center gap-2">
@@ -249,6 +258,30 @@
             </div>
           </div>
           <span class="text-xs text-base-content/60">{{ connectedUsers.length }} participant{{ connectedUsers.length !== 1 ? 's' : '' }}</span>
+        </div>
+      </div>
+      <div v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing" class="mx-auto mt-3 flex max-w-2xl flex-wrap items-center justify-center gap-3">
+        <Icon name="lucide:volume-2" class="size-4 shrink-0" />
+        <label for="shared-audio-volume" class="whitespace-nowrap text-xs font-medium">Volume others hear</label>
+        <input
+          id="shared-audio-volume"
+          class="range range-primary range-xs min-w-24 flex-1"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          :value="voiceStore.sharedAudioVolume"
+          @input="voiceStore.setSharedAudioVolume($event.target.value)"
+        />
+        <span class="w-10 text-right text-xs tabular-nums">{{ voiceStore.sharedAudioVolume }}%</span>
+        <div class="flex items-center gap-2" :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`">
+          <span class="text-xs font-medium">Sent level</span>
+          <progress
+            :class="['progress h-3 w-48', voiceStore.sharedAudioStats.dbfs >= -12 ? 'progress-error' : 'progress-success']"
+            max="1"
+            :value="voiceStore.sharedAudioStats.level"
+          ></progress>
+          <span class="w-14 text-right text-xs tabular-nums">{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span>
         </div>
       </div>
     </div>
@@ -334,6 +367,10 @@ async function toggleCamera() {
 
 async function toggleScreenShare() {
   try { await voiceStore.toggleScreenShare() } catch (err) { console.error('[VoiceChannel] Screen share error:', err) }
+}
+
+async function toggleSystemAudioShare() {
+  try { await voiceStore.toggleSystemAudioShare() } catch (err) { console.error('[VoiceChannel] System audio share error:', err) }
 }
 const volumeMenuUser = ref(null)
 function openVolumeMenu(user) {

@@ -31,6 +31,7 @@ export function useMediasoupSfu() {
   const inboundVideoStatsHistory = new Map()
   const remoteVideoFeeds = ref(new Map())
   const remoteAudioFeeds = ref(new Map())
+  const sharedAudioStats = ref({ kbps: 0, level: 0, dbfs: -60 })
   const producerSources = new Map()
 
   const localProducerIds = new Set()
@@ -72,6 +73,154 @@ export function useMediasoupSfu() {
   const allowedMisses = Math.max(1, Math.ceil(desiredGraceMs / defaultPingIntervalMs))
   let audioEnsureIntervalId = null
   let producersRequested = false
+  let sharedAudioStatsIntervalId = null
+  const sharedAudioBitrateHistory = new Map()
+
+  function createSharedAudioTrack(sourceTrack) {
+    try { sourceTrack.contentHint = 'music' } catch (_) { /* browser may not expose contentHint */ }
+    if (typeof window === 'undefined') return { track: sourceTrack, sourceTrack }
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) return { track: sourceTrack, sourceTrack }
+
+    const audioContext = new AudioContextClass()
+    const mediaSource = audioContext.createMediaStreamSource(new MediaStream([sourceTrack]))
+    const gainNode = audioContext.createGain()
+    const analyserNode = audioContext.createAnalyser()
+    const destination = audioContext.createMediaStreamDestination()
+    try {
+      gainNode.channelCount = 2
+      gainNode.channelCountMode = 'explicit'
+      gainNode.channelInterpretation = 'speakers'
+      analyserNode.channelCount = 2
+      analyserNode.channelCountMode = 'explicit'
+      analyserNode.channelInterpretation = 'speakers'
+    } catch (_) { /* defaults are stereo where explicit channel controls are unavailable */ }
+    gainNode.gain.value = useSettingsStore().sharedAudioVolume / 100
+    analyserNode.fftSize = 512
+    analyserNode.smoothingTimeConstant = 0.65
+    mediaSource.connect(gainNode)
+    gainNode.connect(analyserNode)
+    analyserNode.connect(destination)
+    audioContext.resume?.().catch(() => {})
+    const processedTrack = destination.stream.getAudioTracks()[0]
+    try { processedTrack.contentHint = 'music' } catch (_) { /* browser may not expose contentHint */ }
+    return {
+      track: processedTrack,
+      sourceTrack,
+      audioContext,
+      mediaSource,
+      gainNode,
+      analyserNode,
+      meterData: new Uint8Array(analyserNode.fftSize),
+      destination
+    }
+  }
+
+  async function updateSharedAudioStats() {
+    const entry = Array.from(producers.value.values()).find(candidate => candidate.source === 'screen-audio')
+    if (!entry) {
+      sharedAudioStats.value = { kbps: 0, level: 0, dbfs: -60 }
+      return
+    }
+
+    let level = 0
+    let dbfs = -60
+    if (entry.analyserNode && entry.meterData) {
+      entry.analyserNode.getByteTimeDomainData(entry.meterData)
+      let sumSquares = 0
+      for (const sample of entry.meterData) {
+        const centered = (sample - 128) / 128
+        sumSquares += centered * centered
+      }
+      const rms = Math.sqrt(sumSquares / entry.meterData.length)
+      dbfs = rms > 0 ? Math.max(-60, 20 * Math.log10(rms)) : -60
+      level = Math.min(1, Math.max(0, (dbfs + 60) / 60))
+    }
+
+    let kbps = sharedAudioStats.value.kbps
+    try {
+      const report = await entry.producer.getStats()
+      let outbound = null
+      report.forEach((stat) => {
+        if (stat.type === 'outbound-rtp' && stat.kind === 'audio' && !stat.isRemote) outbound = stat
+      })
+      if (outbound) {
+        const previous = sharedAudioBitrateHistory.get(entry.producer.id)
+        const bytesSent = Number(outbound.bytesSent)
+        const timestamp = Number(outbound.timestamp)
+        if (previous && timestamp > previous.timestamp && bytesSent >= previous.bytesSent) {
+          kbps = (bytesSent - previous.bytesSent) * 8 / (timestamp - previous.timestamp)
+        }
+        sharedAudioBitrateHistory.set(entry.producer.id, { bytesSent, timestamp })
+      }
+    } catch (_) { /* outbound audio stats vary by browser */ }
+
+    sharedAudioStats.value = {
+      kbps: Number.isFinite(kbps) ? Math.max(0, kbps) : 0,
+      level,
+      dbfs
+    }
+  }
+
+  function ensureSharedAudioStatsTimer() {
+    if (sharedAudioStatsIntervalId) return
+    updateSharedAudioStats()
+    sharedAudioStatsIntervalId = setInterval(updateSharedAudioStats, 250)
+  }
+
+  function stopSharedAudioStatsTimerIfIdle() {
+    const hasSharedAudio = Array.from(producers.value.values()).some(entry => entry.source === 'screen-audio')
+    if (hasSharedAudio) return
+    if (sharedAudioStatsIntervalId) clearInterval(sharedAudioStatsIntervalId)
+    sharedAudioStatsIntervalId = null
+    sharedAudioBitrateHistory.clear()
+    sharedAudioStats.value = { kbps: 0, level: 0, dbfs: -60 }
+  }
+
+  function setSharedAudioVolume(value) {
+    const gain = Math.min(1, Math.max(0, Number(value) / 100))
+    producers.value.forEach((entry) => {
+      if (entry.source !== 'screen-audio' || !entry.gainNode) return
+      const now = entry.audioContext?.currentTime || 0
+      entry.gainNode.gain.setTargetAtTime(gain, now, 0.015)
+    })
+  }
+
+  function getSystemAudioProduceOptions() {
+    const bitrate = getEffectiveSystemAudioBitrate(useSettingsStore().systemAudioBitrate) * 1000
+    return {
+      encodings: [{ maxBitrate: bitrate }],
+      codecOptions: {
+        opusStereo: true,
+        opusDtx: false,
+        opusFec: false,
+        opusNack: true,
+        opusMaxAverageBitrate: bitrate
+      }
+    }
+  }
+
+  function getEffectiveSystemAudioBitrate(requestedValue) {
+    const requested = Math.min(256, Math.max(64, Number(requestedValue) || 128))
+    try {
+      const voiceStore = useVoiceStore()
+      const channel = voiceStore.currentChannelId
+        ? useChannelsStore().getChannelById(voiceStore.currentChannelId)
+        : null
+      const channelLimit = Number(channel?.audio_bitrate)
+      return Number.isFinite(channelLimit) && channelLimit > 0
+        ? Math.min(requested, channelLimit)
+        : requested
+    } catch (_) {
+      return requested
+    }
+  }
+
+  async function setSystemAudioBitrate(value) {
+    const maxBitrate = getEffectiveSystemAudioBitrate(value) * 1000
+    const entries = Array.from(producers.value.values()).filter(entry => entry.source === 'screen-audio')
+    await Promise.all(entries.map(entry => entry.producer.setRtpEncodingParameters?.({ maxBitrate })))
+  }
 
   const producerOwner = new Map()
 
@@ -2247,21 +2396,28 @@ export function useMediasoupSfu() {
       localVideoFeeds.value.set(source, { producerId: producer.id, source, stream })
       localVideoFeeds.value = new Map(localVideoFeeds.value)
       const displayAudioTrack = isScreen ? stream.getAudioTracks()[0] : null
-      if (displayAudioTrack && device.value?.canProduce('audio')) {
+      const existingDisplayAudio = Array.from(producers.value.values()).find(entry => entry.source === 'screen-audio')
+      if (displayAudioTrack && device.value?.canProduce('audio') && !existingDisplayAudio) {
+        const processedAudio = createSharedAudioTrack(displayAudioTrack)
         const audioProducer = await sendTransport.value.produce({
-          track: displayAudioTrack,
-          appData: { source: 'screen-audio' }
+          track: processedAudio.track,
+          stopTracks: false,
+          appData: { source: 'screen-audio' },
+          ...getSystemAudioProduceOptions()
         })
         const audioEntry = {
           producer: audioProducer,
           stream,
-          track: displayAudioTrack,
-          source: 'screen-audio'
+          ...processedAudio,
+          source: 'screen-audio',
+          ownerSource: 'screen'
         }
         producers.value.set(audioProducer.id, audioEntry)
         localProducerIds.add(audioProducer.id)
         producerSources.set(audioProducer.id, 'screen-audio')
+        ensureSharedAudioStatsTimer()
         const cleanupAudio = () => stopVideoProduction('screen-audio', audioProducer.id)
+        displayAudioTrack.addEventListener?.('ended', cleanupAudio, { once: true })
         audioProducer.on('trackended', cleanupAudio)
         audioProducer.on('transportclose', cleanupAudio)
       }
@@ -2278,6 +2434,64 @@ export function useMediasoupSfu() {
     }
   }
 
+  async function startSystemAudioProduction() {
+    if (!transportReady.value && transportPromise) await transportPromise
+    if (!sendTransport.value || sendTransport.value.closed) throw new Error('Send transport not available')
+    if (!device.value?.canProduce('audio')) throw new Error('This browser cannot produce audio')
+
+    const existing = Array.from(producers.value.values()).find(entry => entry.source === 'screen-audio')
+    if (existing?.ownerSource === 'system-audio') return existing.producer
+    if (existing) throw new Error('System audio is already being shared with your screen')
+
+    let stream
+    try {
+      // Browsers require a display surface to authorize system/tab audio. The
+      // video track is stopped immediately and is never sent to the SFU.
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+        systemAudio: 'include',
+        selfBrowserSurface: 'exclude'
+      })
+      const sourceAudioTrack = stream.getAudioTracks()[0]
+      if (!sourceAudioTrack) {
+        stream.getTracks().forEach(track => track.stop())
+        throw new Error('No system audio was shared. Select a source with audio and enable the share-audio option.')
+      }
+      stream.getVideoTracks().forEach(track => track.stop())
+      const processedAudio = createSharedAudioTrack(sourceAudioTrack)
+
+      const producer = await sendTransport.value.produce({
+        track: processedAudio.track,
+        stopTracks: false,
+        appData: { source: 'screen-audio' },
+        ...getSystemAudioProduceOptions()
+      })
+      const entry = { producer, stream, ...processedAudio, source: 'screen-audio', ownerSource: 'system-audio' }
+      producers.value.set(producer.id, entry)
+      localProducerIds.add(producer.id)
+      producerSources.set(producer.id, 'screen-audio')
+      isProducing.value = true
+      ensureSharedAudioStatsTimer()
+
+      const cleanup = () => stopSystemAudioProduction(producer.id)
+      sourceAudioTrack.addEventListener?.('ended', cleanup, { once: true })
+      producer.on('trackended', cleanup)
+      producer.on('transportclose', cleanup)
+      return producer
+    } catch (err) {
+      stream?.getTracks().forEach(track => track.stop())
+      throw err
+    }
+  }
+
+  function stopSystemAudioProduction(expectedProducerId = null) {
+    const match = Array.from(producers.value.entries()).find(([id, entry]) =>
+      entry.source === 'screen-audio' && entry.ownerSource === 'system-audio' && (!expectedProducerId || id === expectedProducerId)
+    )
+    if (match) stopVideoProduction('screen-audio', match[0])
+  }
+
   function stopVideoProduction(source, expectedProducerId = null) {
     const match = Array.from(producers.value.entries()).find(([id, entry]) =>
       entry.source === source && (!expectedProducerId || id === expectedProducerId)
@@ -2292,12 +2506,20 @@ export function useMediasoupSfu() {
     localVideoFeeds.value.delete(source)
     localVideoFeeds.value = new Map(localVideoFeeds.value)
     try { if (!entry.producer.closed) entry.producer.close() } catch (_) { /* noop */ }
+    try { entry.track?.stop?.() } catch (_) { /* noop */ }
+    try { entry.mediaSource?.disconnect?.() } catch (_) { /* noop */ }
+    try { entry.gainNode?.disconnect?.() } catch (_) { /* noop */ }
+    try { entry.analyserNode?.disconnect?.() } catch (_) { /* noop */ }
+    try { entry.audioContext?.close?.() } catch (_) { /* noop */ }
     entry.stream?.getTracks().forEach(track => track.stop())
     if (source === 'screen') {
-      const screenAudio = Array.from(producers.value.entries()).find(([, candidate]) => candidate.source === 'screen-audio')
+      const screenAudio = Array.from(producers.value.entries()).find(([, candidate]) =>
+        candidate.source === 'screen-audio' && candidate.ownerSource === 'screen'
+      )
       if (screenAudio) stopVideoProduction('screen-audio', screenAudio[0])
     }
     isProducing.value = producers.value.size > 0
+    stopSharedAudioStatsTimerIfIdle()
   }
 
   function stopAudioProduction(producerId = null) {
@@ -3206,6 +3428,7 @@ export function useMediasoupSfu() {
     localVideoFeeds: readonly(localVideoFeeds),
     remoteVideoFeeds: readonly(remoteVideoFeeds),
     remoteAudioFeeds: readonly(remoteAudioFeeds),
+    sharedAudioStats: readonly(sharedAudioStats),
     remoteProducersCount: remoteProducersCount,
     lastInRoom: lastInRoom,
     connect,
@@ -3214,6 +3437,10 @@ export function useMediasoupSfu() {
     stopAudioProduction,
     startVideoProduction,
     stopVideoProduction,
+    startSystemAudioProduction,
+    stopSystemAudioProduction,
+    setSharedAudioVolume,
+    setSystemAudioBitrate,
     applyOutputDeviceToAll,
     applyVolumeForUser,
     applyVolumeForTrack,
