@@ -64,6 +64,7 @@ test('screen-share production prioritizes frame cadence with a resolution-aware 
   assert.equal(options.encodings[0].networkPriority, 'high')
   assert.equal(options.encodings[0].priority, 'high')
   assert.equal(options.codecOptions.videoGoogleStartBitrate, 8709)
+  assert.equal(options.degradationPreference, 'maintain-framerate')
 })
 
 test('video production bitrate remains bounded for low and very large sources', () => {

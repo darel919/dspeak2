@@ -25,12 +25,13 @@ function waitFor(map, key, timeoutMs, label) {
 }
 
 export class MediasoupClientSession {
-  constructor({ send, iceServers, onRemoteTrack, onRemoteTrackEnded, onStateChange }) {
+  constructor({ send, iceServers, onRemoteTrack, onRemoteTrackEnded, onStateChange, getAudioBitrate }) {
     this.send = send
     this.iceServers = iceServers
     this.onRemoteTrack = onRemoteTrack
     this.onRemoteTrackEnded = onRemoteTrackEnded
     this.onStateChange = onStateChange
+    this.getAudioBitrate = getAudioBitrate
     this.device = null
     this.sendTransport = null
     this.recvTransport = null
@@ -180,7 +181,7 @@ export class MediasoupClientSession {
     const track = entry.track.clone()
     const settings = track.getSettings?.() || {}
     const options = track.kind === 'audio'
-      ? { ...buildVoiceProducerOptions(track), stopTracks: false, appData: { source: entry.source } }
+      ? { ...buildVoiceProducerOptions(track, this.getAudioBitrate?.(entry.source)), stopTracks: false, appData: { source: entry.source } }
       : {
           track,
           stopTracks: false,
@@ -216,6 +217,20 @@ export class MediasoupClientSession {
     this.send({ type: 'close-producer', data: { producerId: entry.producer.id } })
     entry.producer.close()
     entry.track.stop()
+  }
+
+  async updateAudioBitrate(source, maxBitrate) {
+    const entry = this.producers.get(source)
+    if (!entry || entry.track?.kind !== 'audio') return false
+    const bitrate = Number(maxBitrate)
+    if (!Number.isFinite(bitrate) || bitrate <= 0) return false
+    await entry.producer.setRtpEncodingParameters({
+      maxBitrate: Math.floor(bitrate),
+      priority: 'high',
+      networkPriority: 'high',
+      dtx: false
+    })
+    return true
   }
 
   requestConsumer(producerId) {

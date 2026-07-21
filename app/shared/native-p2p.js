@@ -1,5 +1,6 @@
 import { P2P_QUALIFICATION_TIMEOUT_MS } from './rtc-topology.js'
 import { collectPeerConnectionStats } from './rtc-media-stats.js'
+import { applyRtpSenderSettings } from './rtp-sender-settings.js'
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 10000
 export const P2P_ACTIVE_MEDIA_TIMEOUT_MS = 10000
@@ -21,6 +22,35 @@ export function requiresP2pLiveness(mode, readyReported) {
 
 export function p2pRemoteFeedKey(peerId, source) {
   return `p2p:${String(peerId)}:${String(source || 'media')}`
+}
+
+export function applyOpusAudioProfile(sdp) {
+  if (!sdp) return sdp
+  return String(sdp).split(/(?=m=)/).map(section => {
+    if (!section.startsWith('m=audio ')) return section
+    const match = section.match(/^a=rtpmap:(\d+) opus\/48000\/2\r?$/im)
+    if (!match) return section
+    const payloadType = match[1]
+    const required = {
+      stereo: '1',
+      'sprop-stereo': '1',
+      useinbandfec: '1',
+      usedtx: '0',
+      minptime: '10'
+    }
+    const fmtpPattern = new RegExp(`^a=fmtp:${payloadType} ([^\\r\\n]*)`, 'im')
+    const fmtp = section.match(fmtpPattern)
+    const parameters = new Map((fmtp?.[1] || '').split(';').filter(Boolean).map(value => {
+      const [key, ...rest] = value.trim().split('=')
+      return [key, rest.join('=')]
+    }))
+    for (const [key, value] of Object.entries(required)) parameters.set(key, value)
+    const nextFmtp = `a=fmtp:${payloadType} ${[...parameters].map(([key, value]) => `${key}=${value}`).join(';')}`
+    section = fmtp ? section.replace(fmtpPattern, nextFmtp) : section.replace(match[0], `${match[0]}\r\n${nextFmtp}`)
+    return /^a=ptime:/im.test(section)
+      ? section.replace(/^a=ptime:[^\r\n]*/im, 'a=ptime:10')
+      : `${section.replace(/\s*$/, '')}\r\na=ptime:10\r\n`
+  }).join('')
 }
 
 function directIceServers(servers) {
@@ -142,6 +172,7 @@ export class NativeP2pMesh {
     onRemoteTrackEnded,
     onFailure,
     onSnapshot,
+    getSenderOptions,
   }) {
     this.configuration = {
       iceServers: directIceServers(iceServers),
@@ -154,6 +185,7 @@ export class NativeP2pMesh {
     this.onRemoteTrackEnded = onRemoteTrackEnded
     this.onFailure = onFailure
     this.onSnapshot = onSnapshot
+    this.getSenderOptions = getSenderOptions
     this.connections = new Map()
     this.localSources = new Map()
     this.remoteSources = new Map()
@@ -238,7 +270,8 @@ export class NativeP2pMesh {
     pc.onnegotiationneeded = async () => {
       try {
         state.makingOffer = true
-        await pc.setLocalDescription()
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription({ type: offer.type, sdp: applyOpusAudioProfile(offer.sdp) })
         this.signal(peerId, { description: pc.localDescription })
       } catch (error) {
         this.fail('negotiation-failed', error)
@@ -315,7 +348,8 @@ export class NativeP2pMesh {
       for (const candidate of state.candidates.splice(0))
         await pc.addIceCandidate(candidate)
       if (signal.description.type === 'offer') {
-        await pc.setLocalDescription()
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription({ type: answer.type, sdp: applyOpusAudioProfile(answer.sdp) })
         this.signal(state.peerId, { description: pc.localDescription })
       }
       return
@@ -460,6 +494,7 @@ export class NativeP2pMesh {
     if (existing) {
       existing
         .replaceTrack(entry.track)
+        .then(() => this.configureSender(existing, source, entry.track))
         .catch((error) => this.fail('track-replacement-failed', error))
       this.signal(state.peerId, { sourceRestored: { source } })
       return
@@ -469,7 +504,25 @@ export class NativeP2pMesh {
       entry.stream || new MediaStream([entry.track]),
     )
     state.senders.set(source, sender)
+    this.configureSender(sender, source, entry.track).catch((error) =>
+      this.fail('sender-configuration-failed', error),
+    )
     this.signal(state.peerId, { source: { trackId: entry.track.id, source } })
+  }
+
+  async configureSender(sender, source, track) {
+    const options = this.getSenderOptions?.(source, track)
+    if (!options) return false
+    return applyRtpSenderSettings(sender, options)
+  }
+
+  reconfigureSource(source) {
+    const entry = this.localSources.get(source)
+    if (!entry) return Promise.resolve()
+    return Promise.all([...this.connections.values()].map(state => {
+      const sender = state.senders.get(source)
+      return sender ? this.configureSender(sender, source, entry.track) : Promise.resolve(false)
+    }))
   }
 
   unpublishSource(source) {
@@ -706,6 +759,14 @@ export class NativeP2pMesh {
       if (sender) return state.pc.getStats(sender)
     }
     return Promise.resolve(null)
+  }
+
+  getOutboundTrackParameters(source) {
+    for (const state of this.connections.values()) {
+      const sender = state.senders.get(source)
+      if (sender?.getParameters) return sender.getParameters()
+    }
+    return null
   }
 
   isMediaReady() {

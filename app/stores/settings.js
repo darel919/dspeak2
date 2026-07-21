@@ -5,7 +5,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultAudio = {
     echoCancellation: false,
     noiseSuppression: false,
-    autoGainControl: true
+    autoGainControl: false
   }
 
   const audio = ref(loadPersisted('audioSettings', defaultAudio))

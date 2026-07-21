@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildVoiceProducerOptions, getActiveMediaDirections, getAverageJitterBufferDelayMs, getReconnectDelayMs, getRtcSignalMetrics, getTransportRecoveryDelayMs } from '../app/shared/voice-transport.js'
+import { buildVoiceProducerOptions, getActiveMediaDirections, getAudioBitrateBps, getAverageJitterBufferDelayMs, getReconnectDelayMs, getRtcSignalMetrics, getTransportRecoveryDelayMs, mapPeerRoundTripTimes } from '../app/shared/voice-transport.js'
 
 test('voice producer favors low latency without dropping packet-loss protection', () => {
   const track = { id: 'microphone' }
@@ -16,8 +16,23 @@ test('voice producer favors low latency without dropping packet-loss protection'
     opusDtx: false,
     opusFec: true,
     opusNack: true,
+    opusStereo: true,
     opusPtime: 10
   })
+})
+
+test('audio bitrate follows the channel ceiling on both microphone and shared audio', () => {
+  assert.equal(getAudioBitrateBps('audio', 160, 256), 160000)
+  assert.equal(getAudioBitrateBps('screen-audio', 160, 256), 160000)
+  assert.equal(getAudioBitrateBps('screen-audio', 256, 128), 128000)
+  assert.equal(getAudioBitrateBps('audio', null, 128), null)
+})
+
+test('P2P RTT is addressable by both transport peer ID and participant user ID', () => {
+  assert.deepEqual(mapPeerRoundTripTimes(
+    [{ peerId: 'peer-2', rtt: 5 }],
+    [{ peerId: 'peer-2', userId: 'user-2' }]
+  ), { 'peer-2': 5, 'user-2': 5 })
 })
 
 test('jitter buffer delay is reported as a per-emitted-sample average', () => {

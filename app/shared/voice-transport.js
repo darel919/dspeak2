@@ -11,9 +11,30 @@ export function buildVoiceProducerOptions(track, maxBitrate) {
       opusDtx: false,
       opusFec: true,
       opusNack: true,
+      opusStereo: true,
       opusPtime: 10
     }
   }
+}
+
+export function getAudioBitrateBps(source, channelBitrateKbps, systemAudioBitrateKbps) {
+  const channel = Number(channelBitrateKbps)
+  const requested = source === 'screen-audio' ? Number(systemAudioBitrateKbps) : channel
+  const limits = [channel, requested].filter(value => Number.isFinite(value) && value > 0)
+  return limits.length ? Math.min(...limits) * 1000 : null
+}
+
+export function mapPeerRoundTripTimes(edges = [], peers = []) {
+  const userIds = new Map(peers.map(peer => [String(peer.peerId), String(peer.userId || peer.peerId)]))
+  const values = {}
+  for (const edge of edges) {
+    const rtt = Number(edge?.rtt)
+    if (!Number.isFinite(rtt)) continue
+    const peerId = String(edge.peerId)
+    values[peerId] = rtt
+    values[userIds.get(peerId) || peerId] = rtt
+  }
+  return values
 }
 
 export function getAverageJitterBufferDelayMs(stat, previous = null) {

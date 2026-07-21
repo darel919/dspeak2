@@ -63,7 +63,8 @@ export function buildVideoProduceOptions({ width, height, frameRate, screen = fa
     }],
     codecOptions: {
       videoGoogleStartBitrate: Math.max(1000, Math.round(maxBitrate * 0.7 / 1000))
-    }
+    },
+    degradationPreference: 'maintain-framerate'
   }
 }
 

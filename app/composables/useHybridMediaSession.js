@@ -7,8 +7,11 @@ import { RemoteMediaRegistry } from '~/shared/remote-media-registry.js'
 import { RemoteMediaHandoff } from '~/shared/remote-media-handoff.js'
 import { addressFamily, buildTopologyGraph } from '~/shared/rtc-topology.js'
 import { collectVideoRtpStats } from '~/shared/rtc-media-stats.js'
+import { buildVideoProduceOptions } from '~/shared/video-settings.js'
+import { buildVoiceProducerOptions, getAudioBitrateBps, mapPeerRoundTripTimes } from '~/shared/voice-transport.js'
 import { shouldAcceptTopologyEvent, topologyEventKey } from '#shared/media-transition.js'
 import { useAuthStore } from '~/stores/auth'
+import { useChannelsStore } from '~/stores/channels'
 import { useSettingsStore } from '~/stores/settings'
 import { useVoiceStore } from '~/stores/voice'
 
@@ -21,6 +24,7 @@ const signalingHeartbeatTimeoutMs = 15000
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig()
   const authStore = useAuthStore()
+  const channelsStore = useChannelsStore()
   const settingsStore = useSettingsStore()
   const voiceStore = useVoiceStore()
   const connected = ref(false)
@@ -318,7 +322,20 @@ export function useHybridMediaSession() {
       onRemoteTrack: entry => stageRemote({ ...entry, provider: 'p2p' }),
       onRemoteTrackEnded: entry => removeRemote({ ...entry, provider: 'p2p' }),
       onFailure: failure => send({ type: 'p2p-failed', data: failure }),
-      onSnapshot: updateP2pStats
+      onSnapshot: updateP2pStats,
+      getSenderOptions: (source, track) => {
+        if (track.kind === 'audio') {
+          const options = buildVoiceProducerOptions(track, getEffectiveAudioBitrate(source))
+          return { encodings: options.encodings, dtx: 'disabled' }
+        }
+        const settings = track.getSettings?.() || {}
+        return buildVideoProduceOptions({
+          width: settings.width,
+          height: settings.height,
+          frameRate: getRequestedVideoSettings(source).frameRate,
+          screen: source === 'screen'
+        })
+      }
     })
     return p2pMesh
   }
@@ -351,9 +368,21 @@ export function useHybridMediaSession() {
       onRemoteTrackEnded: removeRemote,
       onStateChange: (_, state) => {
         if (state === 'failed' && topologyState.value.mode === 'sfu') reportSfuFailure('media-transport-failed')
-      }
+      },
+      getAudioBitrate: getEffectiveAudioBitrate
     })
     return sfu
+  }
+
+  function getRequestedVideoSettings(source) {
+    return source === 'screen' ? settingsStore.screenVideo : settingsStore.cameraVideo
+  }
+
+  function getEffectiveAudioBitrate(source) {
+    const channelBitrate = voiceStore.currentChannelId
+      ? channelsStore.getChannelById(voiceStore.currentChannelId)?.audio_bitrate
+      : null
+    return getAudioBitrateBps(source, channelBitrate, settingsStore.systemAudioBitrate)
   }
 
   async function applyTopology(data) {
@@ -652,7 +681,15 @@ export function useHybridMediaSession() {
 
   function setSystemAudioBitrate(value) {
     settingsStore.systemAudioBitrate = Number(value)
-    return Promise.resolve()
+    return refreshAudioSenderSettings()
+  }
+
+  function refreshAudioSenderSettings() {
+    const sources = [...localSources.values()].filter(entry => entry.track.kind === 'audio').map(entry => entry.source)
+    return Promise.all(sources.flatMap(source => [
+      p2pMesh?.reconfigureSource(source),
+      sfu?.updateAudioBitrate(source, getEffectiveAudioBitrate(source))
+    ].filter(Boolean)))
   }
 
   function startSharedAudioMeter(track) {
@@ -696,8 +733,7 @@ export function useHybridMediaSession() {
 
   function updateP2pStats(edges) {
     lastP2pEdges = edges
-    const values = edges.filter(edge => Number.isFinite(Number(edge.rtt)))
-    peerRoundTripTimes.value = Object.fromEntries(values.map(edge => [edge.peerId, Number(edge.rtt)]))
+    peerRoundTripTimes.value = mapPeerRoundTripTimes(edges, topologyState.value.peers)
     refreshTopologyGraph()
   }
 
@@ -783,7 +819,19 @@ export function useHybridMediaSession() {
         : p2pMesh ? await p2pMesh.getOutboundTrackStats(entry.source).catch(() => null) : null
       const collected = report ? collectVideoRtpStats(report, 'outbound', settings, videoStatsSamples.get(key)) : null
       if (collected?.sample) videoStatsSamples.set(key, collected.sample)
-      results.push({ source: entry.source, captureFps: settings.frameRate || null, ...(collected?.stats || { width: settings.width || null, height: settings.height || null, fps: settings.frameRate || null }) })
+      const senderParameters = activeProvider === 'p2p'
+        ? p2pMesh?.getOutboundTrackParameters(entry.source)
+        : producer?.rtpParameters
+      const encoding = senderParameters?.encodings?.[0] || null
+      results.push({
+        source: entry.source,
+        targetFps: getRequestedVideoSettings(entry.source).frameRate,
+        captureFps: settings.frameRate || null,
+        configuredMaxBitrateKbps: Number.isFinite(Number(encoding?.maxBitrate)) ? Number(encoding.maxBitrate) / 1000 : null,
+        configuredMaxFramerate: Number.isFinite(Number(encoding?.maxFramerate)) ? Number(encoding.maxFramerate) : null,
+        degradationPreference: senderParameters?.degradationPreference || null,
+        ...(collected?.stats || { width: settings.width || null, height: settings.height || null, fps: settings.frameRate || null })
+      })
     }
     return results
   }

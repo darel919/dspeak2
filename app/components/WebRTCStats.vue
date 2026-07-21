@@ -44,6 +44,12 @@
               <div class="grid grid-cols-2 gap-x-3 gap-y-1">
                 <div class="text-base-content/60">Send / target FPS</div>
                 <div>{{ formatFps(screenShareStats.fps) }} / {{ formatFps(screenShareStats.targetFps) }}</div>
+                <div class="text-base-content/60">Browser target bitrate</div>
+                <div>{{ formatKbps(screenShareStats.targetBitrateKbps) }}</div>
+                <div class="text-base-content/60">Configured ceiling</div>
+                <div>{{ formatKbps(screenShareStats.configuredMaxBitrateKbps) }}</div>
+                <div class="text-base-content/60">Degradation policy</div>
+                <div>{{ screenShareStats.degradationPreference || '-' }}</div>
                 <div class="text-base-content/60">Capture track FPS</div>
                 <div>{{ formatFps(screenShareStats.captureFps) }}</div>
                 <template v-if="screenShareStats.backgroundFps != null">

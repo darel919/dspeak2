@@ -87,6 +87,21 @@ collectors as SFU transports. Codec, frame, packet, jitter, bitrate, candidate,
 and audio-buffer fields are displayed whenever the browser reports them;
 unsupported fields remain explicitly marked as unreported.
 
+Audio policy is topology-neutral. Microphone and shared-audio senders use the
+voice channel bitrate ceiling, with the user's shared-audio ceiling applied when
+it is lower. Both native P2P and SFU request 48 kHz stereo Opus, ten-millisecond
+packetization, in-band FEC, NACK, continuous transmission, and high sender
+priority. Changing the shared-audio or channel ceiling reapplies the effective
+limit to active audio senders.
+
+Video capture settings describe the requested source resolution and frame rate.
+Native P2P applies the same resolution-aware bitrate ceiling and high priority as
+SFU production, while asking the browser to maintain frame rate when congestion
+requires degradation. Resolution may therefore fall below the requested target
+to protect cadence. Capture settings, sender encoding limits, available upload
+bandwidth, and encoder capacity remain independent constraints, so a requested
+frame rate is never reported as an achieved rate without outbound RTP evidence.
+
 The current implementation assumes one Nitro process, matching the mediasoup
 router and WebSocket ownership model. Multiple application instances require a
 shared signaling/state backplane and mediasoup router piping before they can

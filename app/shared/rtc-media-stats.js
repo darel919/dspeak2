@@ -33,8 +33,9 @@ export function collectVideoRtpStats(report, direction, trackSettings = {}, prev
     codec: codec?.mimeType || null
   }
   const stats = direction === 'outbound'
-    ? {
+      ? {
         ...common,
+        targetBitrateKbps: finite(rtp.targetBitrate) == null ? null : finite(rtp.targetBitrate) / 1000,
         framesEncoded: frameCounter,
         frameTimeMs,
         qualityLimitationReason: rtp.qualityLimitationReason || null,

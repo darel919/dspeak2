@@ -2,9 +2,11 @@ import { buildVideoConstraints } from './video-settings.js'
 
 function audioConstraints(settings) {
   const processing = {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    channelCount: { ideal: 2 },
+    sampleRate: { ideal: 48000 },
     ...(settings.audio || {})
   }
   return settings.micDeviceId
@@ -17,6 +19,8 @@ function sharedAudioConstraints() {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
+    channelCount: { ideal: 2 },
+    sampleRate: { ideal: 48000 },
     suppressLocalAudioPlayback: false
   }
 }

@@ -23,7 +23,7 @@
         <div class="text-base-content/60">Protocol</div><div>{{ selectedEdges[0].network || '-' }}</div>
         <div class="text-base-content/60">Candidate</div><div>{{ selectedEdges[0].candidateType || '-' }}</div>
         <div class="text-base-content/60">Packet loss</div><div>{{ formatLoss(selectedEdges[0].packetLoss) }}</div>
-        <div class="text-base-content/60">Bitrate</div><div>{{ formatBitrate(selectedEdges[0].bitrate) }}</div>
+        <div class="text-base-content/60">Local outgoing estimate</div><div>{{ formatBitrate(selectedEdges[0].bitrate) }}</div>
       </template>
     </div>
   </section>

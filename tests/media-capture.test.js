@@ -9,7 +9,9 @@ test('microphone constraints preserve processing preferences and selected device
   }), {
     echoCancellation: false,
     noiseSuppression: true,
-    autoGainControl: true,
+    autoGainControl: false,
+    channelCount: { ideal: 2 },
+    sampleRate: { ideal: 48000 },
     deviceId: { exact: 'microphone-1' }
   })
 })
@@ -19,6 +21,8 @@ test('shared audio disables destructive speech processing', () => {
     echoCancellation: false,
     noiseSuppression: false,
     autoGainControl: false,
+    channelCount: { ideal: 2 },
+    sampleRate: { ideal: 48000 },
     suppressLocalAudioPlayback: false
   })
 })
