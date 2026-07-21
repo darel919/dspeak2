@@ -275,7 +275,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                     >
                         <Icon name="lucide:bug" class="size-4" />
                     </button>
-                    <div v-if="lastLoss != null && lastLoss > 0.05" class="tooltip" data-tip="Packet loss {{ (lastLoss*100).toFixed(1) }}%">
+                    <div v-if="lastLoss != null && lastLoss > 0.05" class="tooltip" :data-tip="`Packet loss ${(lastLoss * 100).toFixed(1)}%`">
                         <span class="w-3 h-3 rounded-full bg-warning animate-pulse inline-block"></span>
                     </div>
                     <!-- Signal Strength (click to open WebRTC Stats) -->
