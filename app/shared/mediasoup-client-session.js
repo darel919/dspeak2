@@ -2,6 +2,7 @@ import { Device } from 'mediasoup-client'
 import { buildVideoProduceOptions } from './video-settings.js'
 import { buildVoiceProducerOptions } from './voice-transport.js'
 import { collectPeerConnectionStats } from './rtc-media-stats.js'
+import { setReceiverJitterBufferTarget } from './receiver-settings.js'
 
 function waitFor(map, key, timeoutMs, label) {
   return new Promise((resolve, reject) => {
@@ -263,6 +264,7 @@ export class MediasoupClientSession {
       rtpParameters: data.rtpParameters,
       appData: { userId: data.userId, source: data.source }
     })
+    setReceiverJitterBufferTarget(consumer.rtpReceiver)
     const entry = {
       key: data.producerId,
       producerId: data.producerId,

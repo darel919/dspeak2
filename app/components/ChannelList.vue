@@ -119,7 +119,7 @@
                           v-for="bar in 5"
                           :key="bar"
                           class="w-0.5 rounded-full bg-current transition-opacity"
-                          :class="bar <= getUserConnectionQuality(u.id || u) ? 'text-success opacity-100' : 'text-base-content opacity-20'"
+                          :class="bar <= getUserConnectionQuality(u.id || u) ? `${getConnectionQualityColorClass(getUserConnectionQuality(u.id || u))} opacity-100` : 'text-base-content opacity-20'"
                           :style="{ height: `${4 + (bar * 2)}px` }"
                         ></span>
                       </button>
@@ -137,6 +137,14 @@
                           <div class="flex items-center justify-between gap-3">
                             <span class="text-base-content/60">Peer RTT</span>
                             <span class="font-mono tabular-nums">{{ formatPeerRtt(u.id || u) }}</span>
+                          </div>
+                          <div v-if="getUserPeerMetrics(u.id || u)" class="flex items-center justify-between gap-3">
+                            <span class="text-base-content/60">Packet loss</span>
+                            <span class="font-mono tabular-nums">{{ formatPercent(getUserPeerMetrics(u.id || u).packetLossPercent) }}</span>
+                          </div>
+                          <div v-if="getUserPeerMetrics(u.id || u)" class="flex items-center justify-between gap-3">
+                            <span class="text-base-content/60">Jitter</span>
+                            <span class="font-mono tabular-nums">{{ formatRtt(getUserPeerMetrics(u.id || u).jitterMs) }}</span>
                           </div>
                         </div>
                       </div>
@@ -329,29 +337,37 @@ function getUserName(userId) {
   return user?.display_name || user?.name || user?.username || userId
 }
 function getUserSfuRtt(userId) {
-  const sfu = voiceStore.sfuComposable
+  const sfu = unref(voiceStore.sfuComposable)
   if (!sfu) return null
   const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
   const value = isCurrentUser
-    ? sfu.sfuRoundTripTime
-    : sfu.participantSfuRoundTripTimes?.[String(userId)]
+    ? unref(sfu.sfuRoundTripTime)
+    : unref(sfu.participantSfuRoundTripTimes)?.[String(userId)]
   return Number.isFinite(Number(value)) ? Number(value) : null
 }
 function getUserPeerRtt(userId) {
-  const sfu = voiceStore.sfuComposable
+  const sfu = unref(voiceStore.sfuComposable)
   const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
   if (!sfu) return null
-  const values = Object.values(sfu.peerRoundTripTimes || {}).map(Number).filter(Number.isFinite)
+  const peerRoundTripTimes = unref(sfu.peerRoundTripTimes) || {}
+  const values = Object.values(peerRoundTripTimes).map(Number).filter(Number.isFinite)
   const value = isCurrentUser
     ? (values.length ? Math.max(...values) : null)
-    : sfu.peerRoundTripTimes?.[String(userId)]
+    : peerRoundTripTimes[String(userId)]
   return Number.isFinite(Number(value)) ? Number(value) : null
 }
 function getUserConnectionQuality(userId) {
-  const sfu = voiceStore.sfuComposable
-  const provider = sfu?.activeProvider?.value ?? sfu?.activeProvider
-  const rtt = provider === 'p2p' ? getUserPeerRtt(userId) : getUserSfuRtt(userId)
-  return getConnectionQualityBars(rtt)
+  const sfu = unref(voiceStore.sfuComposable)
+  const provider = unref(sfu?.activeProvider)
+  if (provider !== 'p2p') return getConnectionQualityBars(getUserSfuRtt(userId))
+  const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
+  const metrics = isCurrentUser ? null : getUserPeerMetrics(userId)
+  return getConnectionQualityBars(getUserPeerRtt(userId), metrics?.packetLossPercent, metrics?.jitterMs)
+}
+function getUserPeerMetrics(userId) {
+  const sfu = unref(voiceStore.sfuComposable)
+  const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
+  return isCurrentUser ? null : unref(sfu?.peerConnectionMetrics)?.[String(userId)] || null
 }
 function getUserConnectionQualityLabel(userId) {
   return getConnectionQualityLabel(getUserConnectionQuality(userId))
@@ -359,14 +375,17 @@ function getUserConnectionQualityLabel(userId) {
 function getConnectionQualityAriaLabel(userId) {
   const name = getUserName(userId)
   const label = getUserConnectionQualityLabel(userId)
-  const rtt = formatRtt(getUserSfuRtt(userId))
-  return `${name} connection quality: ${label}, SFU RTT ${rtt}. Show RTT statistics.`
+  const rtt = formatRtt(getUserPeerRtt(userId) ?? getUserSfuRtt(userId))
+  return `${name} connection quality: ${label}, RTT ${rtt}. Show connection statistics.`
 }
 function getConnectionQualityTitle(userId) {
   return `${getUserConnectionQualityLabel(userId)} connection · Click for RTT statistics`
 }
 function formatRtt(value) {
   return Number.isFinite(Number(value)) ? `${Math.round(Number(value))} ms` : 'Waiting'
+}
+function formatPercent(value) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : 'Waiting'
 }
 function formatPeerRtt(userId) {
   const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
@@ -376,7 +395,8 @@ import { useChannelsStore } from '../stores/channels'
 import { useAuthStore } from '../stores/auth'
 import { useRoomsStore } from '../stores/rooms'
 import { useVoiceStore } from '../stores/voice'
-import { getConnectionQualityBars, getConnectionQualityLabel } from '../shared/connection-quality'
+import { getConnectionQualityBars, getConnectionQualityColorClass, getConnectionQualityLabel } from '../shared/connection-quality'
+import { unref } from 'vue'
 
 import { useChatUtils } from '../composables/useChatUtils'
 import { useToast } from '../composables/useToast'

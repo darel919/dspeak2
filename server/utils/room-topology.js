@@ -86,7 +86,7 @@ export class RoomTopologyCoordinator {
         this.clearTimers(room)
         return this.broadcast(room)
       }
-      return this.beginTransition(room, 'sfu', 'participant-limit')
+      return this.beginTransition(room, 'sfu', room.sessions.size === 1 ? 'establishing-sfu' : 'participant-limit')
     }
     if (room.topology.recovering) {
       this.set(room, 'sfu', reason || 'membership-changed-during-direct-recovery')

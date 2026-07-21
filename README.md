@@ -24,12 +24,12 @@ direct path proves healthy. The table describes the preferred steady state:
 
 | Participants | Route |
 | --- | --- |
-| 1 | No media transport |
+| 1 | mediasoup SFU |
 | 2 | Direct P2P |
 | 3–4 | Full P2P mesh |
 | 5+ or unhealthy mesh | mediasoup SFU |
 
-Every call with at least two participants first establishes mediasoup SFU,
+Every occupied call first establishes mediasoup SFU,
 attempting native IPv6 before the IPv4 fallback. For rooms with two through four
 devices, the server then probes a complete Direct or Mesh path in the background
 and switches only after a stable

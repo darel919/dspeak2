@@ -6,7 +6,7 @@ import { useChannelsStore } from '../stores/channels'
 import { useSettingsStore } from '../stores/settings'
 import { isScreenShareFpsBelowTarget } from '../shared/video-settings'
 import { getRtcSignalMetrics } from '../shared/voice-transport'
-import { getConnectionQualityBars, getConnectionQualityLabel } from '../shared/connection-quality'
+import { getConnectionQualityLabel } from '../shared/connection-quality'
 
 import RoomList from './RoomList.vue'
 
@@ -132,8 +132,7 @@ watch(() => voiceStore.connected, (c) => {
 function barClass(n: number) { return signalLevel.value >= n ? '' : 'opacity-25' }
 const barColorClass = computed(() => {
     if (signalLevel.value >= 4) return 'bg-success'
-    if (signalLevel.value === 3) return 'bg-success'
-    if (signalLevel.value === 2) return 'bg-warning'
+    if (signalLevel.value >= 2) return 'bg-warning'
     if (signalLevel.value === 1) return 'bg-error'
     return 'bg-base-content/40'
 })
@@ -188,13 +187,13 @@ async function pollSignal() {
         monitorScreenShareFps(outboundVideoStats.value)
         const metrics = getRtcSignalMetrics(snap?.transports)
         if (!metrics.connected) {
-            signalLevel.value = 1
+            signalLevel.value = 0
             return
         }
         lastRttMs.value = metrics.rttMs
         lastJitterMs.value = metrics.jitterMs
         lastLoss.value = metrics.loss
-        signalLevel.value = getConnectionQualityBars(metrics.rttMs)
+        signalLevel.value = metrics.score
     } catch {
         outboundVideoStats.value = []
         lowScreenFpsSamples = 0
@@ -209,7 +208,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
 
 <template>
 
-    <section class="navbar w-full flex justify-between py-2 px-4 bg-accent-4 text-light fixed top-0 left-0 z-50" style="height: var(--navbar-height);">
+    <section class="navbar navbar-surface w-full flex justify-between py-2 px-4 fixed top-0 left-0 z-50" style="height: var(--navbar-height);">
         <div class="flex items-center gap-4">
             <NuxtLink to="/" class="">
                 <img class="w-13 rounded-sm select-none pointer-events-none" src="/assets/logo/logo_96.png"/>
@@ -241,18 +240,18 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                 <!-- Voice Controls (when connected) -->
                 <div v-if="voiceStore.connected" class="flex items-center gap-2 mr-3">
                     <!-- Elapsed call time -->
-                    <div class="text-sm text-base-content/70 select-none min-w-[3.5rem] text-right" v-if="elapsedText">
+                    <div class="text-sm text-current/70 select-none min-w-[3.5rem] text-right" v-if="elapsedText">
                         {{ elapsedText }}
                     </div>
                     <!-- Live RTT and Loss Warning -->
-                    <div class="text-sm text-base-content/70 select-none">
+                    <div class="text-sm text-current/70 select-none">
                         <span v-if="lastRttMs != null">{{ Math.round(lastRttMs) }}ms</span>
                     </div>
                     <div
                         v-for="quality in outboundVideoLabels"
                         :key="quality.source"
-                        class="text-sm text-base-content/70 select-none whitespace-nowrap"
-                        :class="quality.source === 'screen' ? 'cursor-pointer hover:text-base-content' : ''"
+                        class="text-sm text-current/70 select-none whitespace-nowrap"
+                        :class="quality.source === 'screen' ? 'cursor-pointer hover:text-current' : ''"
                         :title="quality.source === 'screen' ? 'Open screen-share debug information' : 'Camera send quality'"
                         @click.stop="quality.source === 'screen' && (statsVisible = true)"
                     >
@@ -429,7 +428,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                 </div>
         <!-- Voice Error Modal -->
         <div v-if="voiceStore.error && !voiceStore.connected" class="modal modal-open">
-            <div class="modal-box">
+            <div class="modal-box text-base-content">
                 <h3 class="font-bold text-lg mb-4 text-error">Call Failed</h3>
                 <p class="text-base-content/70 mb-4">{{ voiceStore.error }}</p>
                 <div class="modal-action">

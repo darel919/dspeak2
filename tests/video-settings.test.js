@@ -59,13 +59,14 @@ test('display capture does not use constraints forbidden by getDisplayMedia', ()
   assert.equal(constraints.deviceId, undefined)
 })
 
-test('screen-share production prioritizes frame cadence with a resolution-aware bitrate', () => {
+test('SFU screen-share production is capped at 8 Mbps, 1080p, and 60 FPS', () => {
   const options = buildVideoProduceOptions({ width: 1920, height: 1080, frameRate: 60, screen: true })
   assert.equal(options.encodings[0].maxFramerate, 60)
-  assert.equal(options.encodings[0].maxBitrate, 12_441_600)
+  assert.equal(options.encodings[0].maxBitrate, 8_000_000)
+  assert.equal(options.encodings[0].scaleResolutionDownBy, 1)
   assert.equal(options.encodings[0].networkPriority, 'high')
   assert.equal(options.encodings[0].priority, 'high')
-  assert.equal(options.codecOptions.videoGoogleStartBitrate, 8709)
+  assert.equal(options.codecOptions.videoGoogleStartBitrate, 5600)
   assert.equal(options.degradationPreference, 'maintain-framerate')
 })
 
@@ -94,7 +95,11 @@ test('P2P codec negotiation prefers H264 while retaining browser auxiliary codec
 
 test('video production bitrate remains bounded for low and very large sources', () => {
   assert.equal(buildVideoProduceOptions({ width: 320, height: 240, frameRate: 25 }).encodings[0].maxBitrate, 2_500_000)
-  assert.equal(buildVideoProduceOptions({ width: 7680, height: 4320, frameRate: 60, screen: true }).encodings[0].maxBitrate, 40_000_000)
+  const large = buildVideoProduceOptions({ width: 7680, height: 4320, frameRate: 60, screen: true })
+  assert.equal(large.encodings[0].maxBitrate, 8_000_000)
+  assert.equal(large.encodings[0].maxFramerate, 60)
+  assert.equal(large.encodings[0].scaleResolutionDownBy, 4)
+  assert.equal(large.degradationPreference, 'maintain-framerate')
 })
 
 test('video adaptation trades resolution for frame cadence after sustained low FPS', () => {

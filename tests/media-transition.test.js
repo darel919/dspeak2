@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { allClientsReady, hasCompleteMesh, membershipTopology, shouldAcceptTopologyEvent, topologyEventKey } from '../shared/media-transition.js'
+import { allClientsReady, hasCompleteMesh, membershipTopology, shouldAcceptTopologyEvent, topologyEventKey } from '../server/utils/media-transition.js'
 import { allClientsReady as serverClientsReady, hasCompleteMesh as serverCompleteMesh, membershipTopology as serverMembershipTopology } from '../server/utils/media-transition.js'
 
 test('membership topology enforces the four-device mesh limit', () => {
-  assert.equal(membershipTopology(1), 'idle')
+  assert.equal(membershipTopology(0), 'idle')
+  assert.equal(membershipTopology(1), 'sfu')
   assert.equal(membershipTopology(2), 'probing')
   assert.equal(membershipTopology(4), 'probing')
   assert.equal(membershipTopology(5), 'sfu')

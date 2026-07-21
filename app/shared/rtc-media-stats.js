@@ -82,6 +82,8 @@ export async function collectPeerConnectionStats(pc, kind) {
   const remote = pair ? byId.get(pair.remoteCandidateId) : null
   let packetsLost = 0
   let packetsReceived = 0
+  let outboundPacketsSent = 0
+  const remoteLossFractions = []
   let inboundAudio = null
   let outboundAudio = null
   let remoteInboundAudio = null
@@ -111,6 +113,9 @@ export async function collectPeerConnectionStats(pc, kind) {
         targetBitrate: stat.targetBitrate ?? null
       }
     }
+    if (stat.type === 'outbound-rtp' && !stat.isRemote) {
+      outboundPacketsSent += Math.max(0, Number(stat.packetsSent) || 0)
+    }
     if (stat.type === 'remote-inbound-rtp' && mediaKind === 'audio') {
       remoteInboundAudio = {
         roundTripTime: stat.roundTripTime ?? null,
@@ -118,6 +123,10 @@ export async function collectPeerConnectionStats(pc, kind) {
         packetsLost: stat.packetsLost ?? null,
         jitter: stat.jitter ?? null
       }
+    }
+    if (stat.type === 'remote-inbound-rtp') {
+      const fractionLost = Number(stat.fractionLost)
+      if (Number.isFinite(fractionLost) && fractionLost >= 0) remoteLossFractions.push(fractionLost)
     }
   }
 
@@ -135,7 +144,8 @@ export async function collectPeerConnectionStats(pc, kind) {
       bytesReceived: pair.bytesReceived ?? null,
       packetsSent: pair.packetsSent ?? null,
       packetsReceived: pair.packetsReceived ?? null,
-      packetLoss: packetsLost + packetsReceived > 0 ? packetsLost * 100 / (packetsLost + packetsReceived) : null,
+      packetLoss: outboundPacketsSent > 0 && remoteLossFractions.length ? Math.max(...remoteLossFractions) * 100 : null,
+      receivedPacketLoss: packetsLost + packetsReceived > 0 ? packetsLost * 100 / (packetsLost + packetsReceived) : null,
       local: local ? candidateDetails(local) : null,
       remote: remote ? candidateDetails(remote) : null
     } : null,

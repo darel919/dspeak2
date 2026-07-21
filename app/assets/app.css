@@ -16,6 +16,7 @@
 
 :root {
 	--navbar-height: 4.5rem; /* 80px - adjust as needed */
+	--navbar-surface: color-mix(in oklab, var(--color-base-100) 94%, var(--color-base-content));
 }
 
 @font-face {
@@ -35,16 +36,13 @@
 
 /* Apply your color palette to the body and common elements */
 body {
-	background-color: var(--color-bg-light);
-	color: var(--color-bg-dark);
+	background-color: var(--color-base-100);
+	color: var(--color-base-content);
 }
 
-/* Dark theme support */
-@media (prefers-color-scheme: dark) {
-	body {
-		background-color: var(--color-bg-dark);
-		color: var(--color-bg-light);
-	}
+.navbar-surface {
+	background-color: var(--navbar-surface);
+	color: var(--color-base-content);
 }
 
 /* Custom utility classes for your color palette */

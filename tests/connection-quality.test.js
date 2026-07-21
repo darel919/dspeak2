@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { getConnectionQualityBars, getConnectionQualityLabel } from '../app/shared/connection-quality.js'
+import { getConnectionQualityBars, getConnectionQualityColorClass, getConnectionQualityLabel } from '../app/shared/connection-quality.js'
 
 test('connection quality maps SFU RTT to five requested bar levels', () => {
   assert.equal(getConnectionQualityBars(0), 5)
@@ -25,5 +25,31 @@ test('connection quality handles unavailable data and labels every level', () =>
     'Good',
     'Very good',
     'Excellent'
+  ])
+})
+
+test('connection quality applies packet-loss penalties to RTT bars', () => {
+  assert.equal(getConnectionQualityBars(5, 5, 0), 5)
+  assert.equal(getConnectionQualityBars(5, 5.01, 0), 4)
+  assert.equal(getConnectionQualityBars(5, 7.01, 0), 3)
+  assert.equal(getConnectionQualityBars(5, 10.01, 0), 1)
+})
+
+test('connection quality applies the requested jitter rating bands', () => {
+  assert.equal(getConnectionQualityBars(5, 0, 15), 5)
+  assert.equal(getConnectionQualityBars(5, 0, 15.01), 4)
+  assert.equal(getConnectionQualityBars(5, 0, 30.01), 3)
+  assert.equal(getConnectionQualityBars(5, 0, 50.01), 2)
+  assert.equal(getConnectionQualityBars(5, 0, 100.01), 1)
+})
+
+test('connection quality colors distinguish healthy, degraded, and poor links', () => {
+  assert.deepEqual([5, 4, 3, 2, 1, 0].map(getConnectionQualityColorClass), [
+    'text-success',
+    'text-success',
+    'text-warning',
+    'text-warning',
+    'text-error',
+    'text-base-content'
   ])
 })

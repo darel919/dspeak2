@@ -1,3 +1,5 @@
+import { getConnectionQualityBars, getConnectionQualityLabel } from './connection-quality.js'
+
 export function buildVoiceProducerOptions(track, maxBitrate) {
   const bitrate = Number(maxBitrate)
   return {
@@ -37,6 +39,22 @@ export function mapPeerRoundTripTimes(edges = [], peers = []) {
   return values
 }
 
+export function mapPeerConnectionMetrics(edges = [], peers = []) {
+  const userIds = new Map(peers.map(peer => [String(peer.peerId), String(peer.userId || peer.peerId)]))
+  const values = {}
+  for (const edge of edges) {
+    const peerId = String(edge.peerId)
+    const value = {
+      rttMs: Number.isFinite(Number(edge?.rtt)) ? Number(edge.rtt) : null,
+      packetLossPercent: Number.isFinite(Number(edge?.packetLoss)) ? Number(edge.packetLoss) : null,
+      jitterMs: Number.isFinite(Number(edge?.jitter)) ? Number(edge.jitter) * 1000 : null
+    }
+    values[peerId] = value
+    values[userIds.get(peerId) || peerId] = value
+  }
+  return values
+}
+
 export function getAverageJitterBufferDelayMs(stat, previous = null) {
   const delay = Number(stat?.jitterBufferDelay)
   const emitted = Number(stat?.jitterBufferEmittedCount)
@@ -68,29 +86,23 @@ export function getRtcSignalMetrics(transports = []) {
     .map(value => value * 1000)
   const losses = []
   for (const transport of connected) {
+    const reportedPacketLoss = Number(transport?.candidatePair?.packetLoss)
     const fractionLost = Number(transport?.remoteInboundAudio?.fractionLost)
-    if (Number.isFinite(fractionLost)) losses.push(fractionLost)
-    const received = Number(transport?.inboundAudio?.packetsReceived)
-    const lost = Number(transport?.inboundAudio?.packetsLost)
-    if (Number.isFinite(received) && Number.isFinite(lost) && lost >= 0 && received + lost > 0) {
-      losses.push(lost / (received + lost))
-    }
+    const packetsSent = Number(transport?.outboundAudio?.packetsSent)
+    if (Number.isFinite(reportedPacketLoss)) losses.push(reportedPacketLoss / 100)
+    else if (Number.isFinite(fractionLost) && Number.isFinite(packetsSent) && packetsSent > 0) losses.push(fractionLost)
   }
   const rttMs = rtts.length ? Math.max(...rtts) : null
   const jitterMs = jitters.length ? Math.max(...jitters) : null
   const loss = losses.length ? Math.max(...losses) : null
-  let score = 4
-  if (rttMs != null) score -= rttMs > 400 ? 2 : rttMs > 150 ? 1 : 0
-  if (jitterMs != null) score -= jitterMs > 30 ? 2 : jitterMs > 15 ? 1 : 0
-  if (loss != null) score -= loss > 0.05 ? 2 : loss > 0.01 ? 1 : 0
-  score = Math.max(1, score)
+  const score = getConnectionQualityBars(rttMs, loss == null ? null : loss * 100, jitterMs)
   return {
     connected: true,
     rttMs,
     jitterMs,
     loss,
     score,
-    label: score >= 4 ? 'Excellent' : score === 3 ? 'Good' : score === 2 ? 'Fair' : 'Poor'
+    label: getConnectionQualityLabel(score)
   }
 }
 

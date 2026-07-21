@@ -5,8 +5,8 @@ mediasoup SFU media routing. The topology coordinator is process-owned and uses
 monotonically increasing epochs so messages from an older membership or
 transition cannot change the current room.
 
-Rooms with one device allocate no media transport. Rooms with two or more
-devices establish mediasoup first. Native IPv6 SFU candidates are explicitly
+Rooms with one device establish mediasoup and remain on it. Rooms with two or more
+devices also establish mediasoup first. Native IPv6 SFU candidates are explicitly
 prioritized over the Playit-routed IPv4 candidate. After SFU is active, rooms
 with two through four devices probe a complete native `RTCPeerConnection` mesh
 in the background. Direct probes use STUN only, trickle ICE, the WebRTC
@@ -14,7 +14,7 @@ perfect-negotiation pattern, an unreliable health data channel, and the selected
 ICE candidate pair. TURN candidates are excluded. Every pair must connect
 directly within eight seconds or the room remains on mediasoup.
 
-P2P health is checked every second. A ten-second health or RTP liveness timeout,
+P2P health is checked every second. A twenty-second health or RTP liveness timeout,
 failed ICE restart, signaling failure, closed health channel, or a relay-selected
 candidate causes the server to select SFU for the whole room. Brief browser stats
 stalls and muted or idle sources do not immediately fail an active direct route.
@@ -95,22 +95,32 @@ priority. Changing the shared-audio or channel ceiling reapplies the effective
 limit to active audio senders.
 
 Video capture settings describe the requested source resolution and frame rate.
-Native P2P applies the same resolution-aware bitrate ceiling and high priority as
-SFU production, while asking the browser to maintain frame rate when congestion
-requires degradation. Resolution may therefore fall below the requested target
-to protect cadence. Capture settings, sender encoding limits, available upload
+SFU production is capped at 8 Mbps, 1920 by 1080, and 60 FPS, and asks the
+browser to maintain frame rate when congestion requires degradation. Native P2P
+uses a 16 Mbps ceiling at the requested capture resolution with the same
+maintain-frame-rate policy. Resolution may therefore fall below the requested
+target when browser congestion control needs to protect cadence. Capture settings, sender encoding limits, available upload
 bandwidth, and encoder capacity remain independent constraints, so a requested
 frame rate is never reported as an achieved rate without outbound RTP evidence.
 Direct and Mesh video use a 16 Mbps sender ceiling and prefer H.264 when both
 browsers advertise it, retaining VP9 and VP8 as negotiated fallbacks.
 
-Native P2P receivers request a 30 ms jitter-buffer target when the browser
+Native P2P and SFU receivers request a 30 ms jitter-buffer target when the browser
 implements `RTCRtpReceiver.jitterBufferTarget`. This is a latency preference,
 not a fixed buffer size; the browser may retain more media for network recovery
 or audio/video synchronization. Active direct routes allow twenty seconds for
 health or RTP progress and eight seconds for transient ICE disconnection before
 recovery begins, while hard ICE, DTLS, or peer-connection failures still fall
 back immediately.
+
+Participant signal bars start with the measured RTT band and then apply receive
+quality penalties for the remote participant. Packet loss above 5 percent costs
+one bar, above 7 percent costs two bars, and above 10 percent forces one bar.
+Jitter through 15 ms has no penalty; values above 15, 30, and 50 ms cost one,
+two, and three bars respectively, while jitter above 100 ms forces one bar.
+Receive-only packet loss remains attached to the remote media source and is not
+presented as loss caused by the local participant when that participant has no
+outbound RTP.
 
 The current implementation assumes one Nitro process, matching the mediasoup
 router and WebSocket ownership model. Multiple application instances require a

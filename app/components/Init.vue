@@ -1,9 +1,18 @@
 <template>
   <div>
-    <div v-if="!authChecked && !isAuthPage" class="flex items-center justify-center min-h-screen">
-      <div class="text-center">
-        <div class="loading loading-spinner loading-lg"></div>
-        <p class="mt-4">Checking authentication...</p>
+    <div v-if="!startupComplete && !isAuthPage" class="relative flex min-h-screen items-center justify-center overflow-hidden bg-base-100 px-6 py-12">
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_color-mix(in_oklab,var(--color-hero)_18%,transparent),_transparent_55%)]"></div>
+      <div class="relative text-center">
+        <img :src="startupLogo" alt="" class="mx-auto mb-6 size-24 drop-shadow-lg" />
+        <p class="mb-2 text-sm font-semibold uppercase tracking-[0.3em] text-hero">dSpeak</p>
+        <h1 class="font-hero text-4xl sm:text-5xl">Welcome to dSpeak</h1>
+        <p class="mx-auto mt-4 max-w-md text-base text-base-content/60 sm:text-lg">
+          Your space for conversations that feel close, wherever you are.
+        </p>
+      </div>
+      <div class="absolute inset-x-6 bottom-8 flex items-center justify-center gap-3 text-sm text-base-content/60" role="status" aria-live="polite">
+        <span class="loading loading-spinner loading-sm text-hero" aria-hidden="true"></span>
+        <span>{{ startupStatus }}</span>
       </div>
     </div>
     <div v-else>
@@ -20,12 +29,16 @@ import { useRoomsStore } from '../stores/rooms'
 import { useNotifications } from '../composables/useNotifications'
 import NotificationWarning from './NotificationWarning.vue'
 import { usePresence } from '../composables/usePresence.js'
+import startupLogo from '../assets/logo/logo_96.png'
 
 const authStore = useAuthStore()
 const roomsStore = useRoomsStore()
 const router = useRouter()
 const route = useRoute()
 const authChecked = ref(false)
+const startupComplete = ref(false)
+const startupStatus = ref('Checking authentication…')
+const isBootstrapping = ref(true)
 
 function readSavedToken() {
   if (!import.meta.client) return null
@@ -67,15 +80,21 @@ const { status: presenceStatus, connect: connectPresence, disconnect: disconnect
 provide('presenceStatus', presenceStatus)
 
 onMounted(async () => {
-  if (!isAuthPage.value && readSavedToken()) {
-    await checkAuth()
-    if (authChecked.value) {
-      await requestNotificationPermissionAutomatically()
+  try {
+    if (!isAuthPage.value && readSavedToken()) {
+      await checkAuth()
+      if (authChecked.value) {
+        startupStatus.value = 'Preparing your workspace…'
+        await requestNotificationPermissionAutomatically()
+      }
+    } else {
+      authChecked.value = true
     }
-  } else {
-    authChecked.value = true
+    sendUserIdToServiceWorker()
+  } finally {
+    isBootstrapping.value = false
+    startupComplete.value = true
   }
-  sendUserIdToServiceWorker()
 })
 
 onUnmounted(() => {
@@ -112,7 +131,7 @@ function sendUserIdToServiceWorker() {
   }
 }
 watch(() => authStore.getUserData(), async (userData) => {
-  if (userData && !isAuthPage.value) {
+  if (userData && !isAuthPage.value && !isBootstrapping.value) {
     console.debug('[Init] User authenticated, fetching rooms')
     await roomsStore.fetchRooms()
     sendUserIdToServiceWorker()
@@ -156,8 +175,9 @@ async function checkAuth() {
   if (savedToken) {
     const isValid = await authStore.verifyToken(savedToken)
     if (isValid) {
-      authChecked.value = true
+      startupStatus.value = 'Loading your rooms…'
       await roomsStore.fetchRooms()
+      authChecked.value = true
       return
     }
     authStore.clearAuth()

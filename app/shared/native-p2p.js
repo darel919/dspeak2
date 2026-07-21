@@ -2,13 +2,13 @@ import { P2P_QUALIFICATION_TIMEOUT_MS } from './rtc-topology.js'
 import { collectPeerConnectionStats } from './rtc-media-stats.js'
 import { applyRtpSenderSettings } from './rtp-sender-settings.js'
 import { sortP2pVideoCodecPreferences } from './video-settings.js'
+import { setReceiverJitterBufferTarget } from './receiver-settings.js'
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000
 export const P2P_ACTIVE_MEDIA_TIMEOUT_MS = 20000
 export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 5000
 export const P2P_DISCONNECT_GRACE_MS = 8000
 export const P2P_ICE_RESTART_TIMEOUT_MS = 12000
-export const P2P_JITTER_BUFFER_TARGET_MS = 30
 
 export function isP2pLivenessExpired(lastProgressAt, now, timeoutMs) {
   return (
@@ -68,16 +68,6 @@ export function applyP2pVideoCodecPreferences(pc) {
     applied = true
   }
   return applied
-}
-
-export function setP2pJitterBufferTarget(receiver) {
-  if (!receiver || !('jitterBufferTarget' in receiver)) return false
-  try {
-    receiver.jitterBufferTarget = P2P_JITTER_BUFFER_TARGET_MS
-    return true
-  } catch (_) {
-    return false
-  }
 }
 
 function directIceServers(servers) {
@@ -482,7 +472,7 @@ export class NativeP2pMesh {
 
   handleTrack(state, event) {
     const track = event.track
-    setP2pJitterBufferTarget(event.receiver)
+    setReceiverJitterBufferTarget(event.receiver)
     const source =
       this.remoteSources.get(`${state.peerId}:${track.id}`) || track.kind
     const key = p2pRemoteFeedKey(state.peerId, source)
@@ -739,10 +729,13 @@ export class NativeP2pMesh {
       const report = await state.pc.getStats().catch(() => null)
       let packetsLost = 0
       let packetsReceived = 0
+      let jitter = null
       report?.forEach((stat) => {
         if (stat.type !== 'inbound-rtp' || stat.isRemote) return
         packetsLost += Math.max(0, Number(stat.packetsLost) || 0)
         packetsReceived += Math.max(0, Number(stat.packetsReceived) || 0)
+        const reportedJitter = Number(stat.jitter)
+        if (Number.isFinite(reportedJitter)) jitter = Math.max(jitter ?? 0, reportedJitter)
       })
       const packetLoss =
         packetsLost + packetsReceived > 0
@@ -764,6 +757,7 @@ export class NativeP2pMesh {
             : pair.currentRoundTripTime * 1000,
         bitrate: pair?.availableOutgoingBitrate ?? null,
         packetLoss,
+        jitter,
       })
     }
     return edges

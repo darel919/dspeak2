@@ -58,6 +58,17 @@ function reachP2p(room, coordinator, timers) {
   assert.equal(room.topology.mode, 'p2p')
 }
 
+test('one client establishes SFU without scheduling a direct upgrade', () => {
+  const { room, coordinator, timers } = harness(1)
+  coordinator.reconcile(room, 'joined')
+  assert.equal(room.topology.mode, 'switching')
+  assert.equal(room.topology.target, 'sfu')
+  assert.equal(room.topology.reason, 'establishing-sfu')
+  acknowledgeAll(room, coordinator)
+  assert.equal(room.topology.mode, 'sfu')
+  assert.equal(timers.some(timer => timer.active), false)
+})
+
 test('two clients activate direct P2P only after complete qualification and handoff consensus', () => {
   const { room, coordinator, timers } = harness(2)
   reachP2p(room, coordinator, timers)

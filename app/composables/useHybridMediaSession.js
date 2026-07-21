@@ -8,8 +8,8 @@ import { RemoteMediaHandoff } from '~/shared/remote-media-handoff.js'
 import { addressFamily, buildTopologyGraph } from '~/shared/rtc-topology.js'
 import { collectVideoRtpStats } from '~/shared/rtc-media-stats.js'
 import { buildP2pVideoSenderOptions } from '~/shared/video-settings.js'
-import { buildVoiceProducerOptions, getAudioBitrateBps, mapPeerRoundTripTimes } from '~/shared/voice-transport.js'
-import { shouldAcceptTopologyEvent, topologyEventKey } from '#shared/media-transition.js'
+import { buildVoiceProducerOptions, getAudioBitrateBps, mapPeerConnectionMetrics, mapPeerRoundTripTimes } from '~/shared/voice-transport.js'
+import { shouldAcceptTopologyEvent, topologyEventKey } from '~~/server/utils/media-transition.js'
 import { useAuthStore } from '~/stores/auth'
 import { useChannelsStore } from '~/stores/channels'
 import { useSettingsStore } from '~/stores/settings'
@@ -38,6 +38,7 @@ export function useHybridMediaSession() {
   const remoteProducersCount = ref(0)
   const sharedAudioStats = ref({ kbps: 0, level: 0, dbfs: -60 })
   const peerRoundTripTimes = ref({})
+  const peerConnectionMetrics = ref({})
   const sfuRoundTripTime = ref(null)
   const participantSfuRoundTripTimes = ref({})
   const topologyState = ref({ mode: 'idle', epoch: 0, reason: 'waiting-for-peer', peers: [], activatedAt: null })
@@ -165,6 +166,7 @@ export function useHybridMediaSession() {
           iceConnectedBoth.value = false
           remoteProducersCount.value = 0
           peerRoundTripTimes.value = {}
+          peerConnectionMetrics.value = {}
           sfuRoundTripTime.value = null
           participantSfuRoundTripTimes.value = {}
           resetTopologySequencing()
@@ -411,6 +413,7 @@ export function useHybridMediaSession() {
       handoff.clear()
       remoteProducersCount.value = 0
       peerRoundTripTimes.value = {}
+      peerConnectionMetrics.value = {}
       sfuRoundTripTime.value = null
       participantSfuRoundTripTimes.value = {}
       transportReady.value = true
@@ -734,6 +737,7 @@ export function useHybridMediaSession() {
   function updateP2pStats(edges) {
     lastP2pEdges = edges
     peerRoundTripTimes.value = mapPeerRoundTripTimes(edges, topologyState.value.peers)
+    peerConnectionMetrics.value = mapPeerConnectionMetrics(edges, topologyState.value.peers)
     refreshTopologyGraph()
   }
 
@@ -883,6 +887,7 @@ export function useHybridMediaSession() {
     resetTopologySequencing('disconnected')
     lastP2pEdges = []
     peerRoundTripTimes.value = {}
+    peerConnectionMetrics.value = {}
     sfuRoundTripTime.value = null
     participantSfuRoundTripTimes.value = {}
     refreshPublicMaps()
@@ -902,6 +907,7 @@ export function useHybridMediaSession() {
     remoteAudioFeeds: readonly(remoteAudioFeeds),
     sharedAudioStats: readonly(sharedAudioStats),
     peerRoundTripTimes: readonly(peerRoundTripTimes),
+    peerConnectionMetrics: readonly(peerConnectionMetrics),
     sfuRoundTripTime: readonly(sfuRoundTripTime),
     participantSfuRoundTripTimes: readonly(participantSfuRoundTripTimes),
     remoteProducersCount,

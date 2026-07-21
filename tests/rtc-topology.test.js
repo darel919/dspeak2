@@ -334,6 +334,23 @@ test('peer connection stats work without a transport selected-pair reference', a
 
   assert.equal(stats.kind, 'p2p:peer-2')
   assert.equal(stats.candidatePair.remote.address, '2001:db8::2')
-  assert.equal(stats.candidatePair.packetLoss, (2 * 100) / 102)
+  assert.equal(stats.candidatePair.packetLoss, null)
+  assert.equal(stats.candidatePair.receivedPacketLoss, (2 * 100) / 102)
   assert.equal(stats.inboundAudio.jitter, 0.003)
+})
+
+test('peer connection attributes only remotely reported outbound loss to the local edge', async () => {
+  const report = new Map([
+    ['pair', { id: 'pair', type: 'candidate-pair', state: 'succeeded', nominated: true }],
+    ['outbound', { id: 'outbound', type: 'outbound-rtp', kind: 'video', packetsSent: 100 }],
+    ['remote-inbound', { id: 'remote-inbound', type: 'remote-inbound-rtp', kind: 'video', fractionLost: 0.08 }]
+  ])
+  const stats = await collectPeerConnectionStats({
+    connectionState: 'connected',
+    iceConnectionState: 'connected',
+    signalingState: 'stable',
+    getStats: async () => report
+  }, 'send')
+  assert.equal(stats.candidatePair.packetLoss, 8)
+  assert.equal(stats.candidatePair.receivedPacketLoss, null)
 })

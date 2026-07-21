@@ -2,6 +2,9 @@ export const VIDEO_FRAME_RATE_MIN = 25
 export const VIDEO_FRAME_RATE_MAX = 60
 export const VIDEO_FRAME_RATE_PRESETS = Object.freeze([25, 30, 50, 60])
 export const P2P_VIDEO_MAX_BITRATE = 16_000_000
+export const SFU_VIDEO_MAX_BITRATE = 8_000_000
+export const SFU_VIDEO_MAX_WIDTH = 1920
+export const SFU_VIDEO_MAX_HEIGHT = 1080
 export const SCREEN_SHARE_FPS_HEALTH_RATIO = 0.8
 export const VIDEO_SCALE_STEPS = Object.freeze([1, 1.25, 1.5, 2, 2.5])
 
@@ -53,12 +56,14 @@ export function buildVideoProduceOptions({ width, height, frameRate, screen = fa
   const pixels = Math.max(1, Number(width) || 1280) * Math.max(1, Number(height) || 720)
   const fps = Math.min(VIDEO_FRAME_RATE_MAX, Math.max(VIDEO_FRAME_RATE_MIN, Number(frameRate) || 30))
   const bitsPerPixel = screen ? 0.1 : 0.07
-  const maxBitrate = Math.min(40_000_000, Math.max(2_500_000, Math.round(pixels * fps * bitsPerPixel)))
+  const maxBitrate = Math.min(SFU_VIDEO_MAX_BITRATE, Math.max(2_500_000, Math.round(pixels * fps * bitsPerPixel)))
+  const scaleResolutionDownBy = Math.max(1, (Number(width) || 1280) / SFU_VIDEO_MAX_WIDTH, (Number(height) || 720) / SFU_VIDEO_MAX_HEIGHT)
 
   return {
     encodings: [{
       maxBitrate,
       maxFramerate: Math.round(fps),
+      scaleResolutionDownBy,
       networkPriority: 'high',
       priority: 'high'
     }],

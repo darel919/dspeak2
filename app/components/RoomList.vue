@@ -12,7 +12,7 @@
           <span class="text-sm font-medium">Rooms</span>
           <Icon name="lucide:chevron-down" class="w-4 h-4" />
         </button>
-        <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 rounded-box w-80 max-h-96 overflow-y-auto">
+        <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-80 max-h-96 overflow-y-auto">
           <!-- Loading State -->
           <div v-if="roomsStore.loading" class="p-2">
             <div class="space-y-2">
@@ -91,12 +91,21 @@
         >
           <div class="avatar placeholder">
             <template v-if="getRoomPictureUrl(room)">
-              <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover transition-all" :class="modelValue === room.id ? 'ring-2 ring-primary ring-offset-2' : ''" :alt="room.name" />
+              <img
+                :src="getRoomPictureUrl(room)"
+                class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover transition-all"
+                :class="modelValue === room.id
+                  ? 'ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
+                  : 'ring-1 ring-base-content/30 group-hover:ring-base-content/60'"
+                :alt="room.name"
+              />
             </template>
             <template v-else>
               <div
                 class="w-12 h-12 rounded-full text-xs font-semibold transition-all flex items-center justify-center"
-                :class="modelValue === room.id ? 'bg-primary text-primary-content ring-2 ring-primary ring-offset-2' : 'bg-neutral text-neutral-content hover:bg-primary hover:text-primary-content'"
+                :class="modelValue === room.id
+                  ? 'bg-primary text-primary-content ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
+                  : 'bg-base-200 text-base-content ring-1 ring-base-content/30 group-hover:ring-base-content/60 hover:bg-primary hover:text-primary-content'"
               >
                 <span>{{ room.name.charAt(0).toUpperCase() }}</span>
               </div>
@@ -109,7 +118,7 @@
           <button tabindex="0" class="btn btn-ghost btn-xs btn-circle">
             <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
           </button>
-          <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 rounded-box w-64">
+          <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-64">
             <li v-for="room in hiddenRooms" :key="room.id">
               <a
                 @click="navigateToRoom(room)"
@@ -269,7 +278,7 @@
         >
           <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
         </button>
-        <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
+        <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52">
             <li><a @click="showJoinModal = true">Join Room</a></li>
             <li><a @click="showCreateModal = true">Create Room</a></li>
             <li>
