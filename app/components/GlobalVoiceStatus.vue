@@ -149,6 +149,7 @@
 </template>
 
 <script setup>
+import { getRtcSignalMetrics } from '../shared/voice-transport'
 import { useVoiceStore } from '~/stores/voice'
 import { useChannelsStore } from '~/stores/channels'
 
@@ -228,51 +229,17 @@ async function pollSignal() {
       return
     }
     const snap = await sfu.getWebRTCStatsSnapshot()
-    const t = snap?.transports?.find(x => x.kind === 'send') || snap?.transports?.[0]
-    if (!t) {
-      signalLevel.value = 1
-      signalLabel.value = 'No transport'
-      return
-    }
-    if (t.pcStates.iceConnectionState !== 'connected') {
+    const metrics = getRtcSignalMetrics(snap?.transports)
+    if (!metrics.connected) {
       signalLevel.value = 1
       signalLabel.value = 'Connecting'
       return
     }
-    let rttMs = null
-    if (t.candidatePair?.currentRoundTripTime != null) {
-      const v = Number(t.candidatePair.currentRoundTripTime)
-      rttMs = v < 10 ? v * 1000 : v
-    }
-    let jitterMs = null
-    if (t.inboundAudio?.jitter != null) {
-      jitterMs = Number(t.inboundAudio.jitter) * 1000
-    }
-    let loss = null
-    if (t.remoteInboundAudio?.fractionLost != null) {
-      loss = Number(t.remoteInboundAudio.fractionLost)
-    }
-    lastRttMs.value = rttMs
-    lastJitterMs.value = jitterMs
-    lastLoss.value = loss
-
-
-    let score = 4
-    if (rttMs != null) {
-      if (rttMs > 400) score -= 2
-      else if (rttMs > 150) score -= 1
-    }
-    if (jitterMs != null) {
-      if (jitterMs > 30) score -= 2
-      else if (jitterMs > 15) score -= 1
-    }
-    if (loss != null) {
-      if (loss > 0.05) score -= 2
-      else if (loss > 0.01) score -= 1
-    }
-    if (score < 1) score = 1
-    signalLevel.value = score
-    signalLabel.value = score >= 4 ? 'Excellent' : score === 3 ? 'Good' : score === 2 ? 'Fair' : 'Poor'
+    lastRttMs.value = metrics.rttMs
+    lastJitterMs.value = metrics.jitterMs
+    lastLoss.value = metrics.loss
+    signalLevel.value = metrics.score
+    signalLabel.value = metrics.label
   } catch (_) {
 
   }

@@ -108,7 +108,7 @@
                 <template v-if="t.inboundAudio">
                   <div class="text-base-content/60">Inbound</div>
                   <div>pkts {{ t.inboundAudio.packetsReceived }} lost {{ t.inboundAudio.packetsLost }} jitt {{ formatMs(t.inboundAudio.jitter) }}</div>
-                  <div class="text-base-content/60">Playout buffer</div>
+                  <div class="text-base-content/60">Recent playout buffer</div>
                   <div>{{ t.inboundAudio.averageJitterBufferDelayMs != null ? `${t.inboundAudio.averageJitterBufferDelayMs.toFixed(1)} ms` : '-' }}</div>
                 </template>
                 <template v-if="t.outboundAudio">

@@ -36,6 +36,7 @@ export function useMediasoupSfu() {
   const localVideoFeeds = ref(new Map())
   const outboundVideoStatsHistory = new Map()
   const inboundVideoStatsHistory = new Map()
+  const inboundAudioJitterHistory = new Map()
   const remoteVideoFeeds = ref(new Map())
   const remoteAudioFeeds = ref(new Map())
   const sharedAudioStats = ref({ kbps: 0, level: 0, dbfs: -60 })
@@ -3374,6 +3375,7 @@ export function useMediasoupSfu() {
     isProducing.value = false
     isProducingAudio.value = false
     pendingTransportConnect.clear()
+    inboundAudioJitterHistory.clear()
     pendingProduceQueue.splice(0)
     for (const timeoutId of pendingConsume.values()) clearTimeout(timeoutId)
     pendingConsume.clear()
@@ -3412,6 +3414,7 @@ export function useMediasoupSfu() {
     }
     pendingPeerRttProbes.clear()
     peerRttSamples.clear()
+    inboundAudioJitterHistory.clear()
     peerRoundTripTime.value = null
     peerRoundTripTimes.value = {}
     sfuRoundTripTime.value = null
@@ -3521,6 +3524,7 @@ export function useMediasoupSfu() {
     }
     pendingPeerRttProbes.clear()
     peerRttSamples.clear()
+    inboundAudioJitterHistory.clear()
     peerRoundTripTime.value = null
     peerRoundTripTimes.value = {}
     sfuRoundTripTime.value = null
@@ -3601,6 +3605,22 @@ export function useMediasoupSfu() {
           if (s.type === 'remote-inbound-rtp' && s.kind === 'audio') remoteInboundAudio = s
         })
 
+        let averageJitterBufferDelayMs = null
+        if (inboundAudio) {
+          const historyKey = `${kind}:${inboundAudio.id}`
+          const previous = inboundAudioJitterHistory.get(historyKey) || null
+          averageJitterBufferDelayMs = getAverageJitterBufferDelayMs(inboundAudio, previous)
+          const jitterBufferDelay = Number(inboundAudio.jitterBufferDelay)
+          const jitterBufferEmittedCount = Number(inboundAudio.jitterBufferEmittedCount)
+          if (Number.isFinite(jitterBufferDelay) && Number.isFinite(jitterBufferEmittedCount)) {
+            inboundAudioJitterHistory.set(historyKey, {
+              jitterBufferDelay,
+              jitterBufferEmittedCount,
+              averageMs: averageJitterBufferDelayMs
+            })
+          }
+        }
+
         return {
           kind,
           pcStates: {
@@ -3649,7 +3669,7 @@ export function useMediasoupSfu() {
             jitter: inboundAudio.jitter ?? null,
             jitterBufferDelay: inboundAudio.jitterBufferDelay ?? null,
             jitterBufferEmittedCount: inboundAudio.jitterBufferEmittedCount ?? null,
-            averageJitterBufferDelayMs: getAverageJitterBufferDelayMs(inboundAudio),
+            averageJitterBufferDelayMs,
             packetsReceived: inboundAudio.packetsReceived ?? null,
             packetsLost: inboundAudio.packetsLost ?? null,
             bytesReceived: inboundAudio.bytesReceived ?? null,
@@ -3689,6 +3709,7 @@ export function useMediasoupSfu() {
     ])
 
     const localRtt = sendSnap?.candidatePair?.currentRoundTripTime
+      ?? recvSnap?.candidatePair?.currentRoundTripTime
     sfuRoundTripTime.value = Number.isFinite(Number(localRtt))
       ? Number(localRtt) * 1000
       : null

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildVoiceProducerOptions, getActiveMediaDirections, getAverageJitterBufferDelayMs, getReconnectDelayMs, getTransportRecoveryDelayMs } from '../app/shared/voice-transport.js'
+import { buildVoiceProducerOptions, getActiveMediaDirections, getAverageJitterBufferDelayMs, getReconnectDelayMs, getRtcSignalMetrics, getTransportRecoveryDelayMs } from '../app/shared/voice-transport.js'
 
 test('voice producer favors low latency without dropping packet-loss protection', () => {
   const track = { id: 'microphone' }
@@ -25,7 +25,43 @@ test('jitter buffer delay is reported as a per-emitted-sample average', () => {
     jitterBufferDelay: 2.5,
     jitterBufferEmittedCount: 100
   }), 25)
+  assert.ok(Math.abs(getAverageJitterBufferDelayMs({
+    jitterBufferDelay: 2.7,
+    jitterBufferEmittedCount: 110
+  }, {
+    jitterBufferDelay: 2.5,
+    jitterBufferEmittedCount: 100,
+    averageMs: 25
+  }) - 20) < 0.000001)
+  assert.equal(getAverageJitterBufferDelayMs({
+    jitterBufferDelay: 2.5,
+    jitterBufferEmittedCount: 100
+  }, {
+    jitterBufferDelay: 2.5,
+    jitterBufferEmittedCount: 100,
+    averageMs: 25
+  }), 25)
   assert.equal(getAverageJitterBufferDelayMs({}), null)
+})
+
+test('signal quality uses the healthy active direction when the send transport is idle', () => {
+  const metrics = getRtcSignalMetrics([
+    { kind: 'send', pcStates: { iceConnectionState: 'new' } },
+    {
+      kind: 'recv',
+      pcStates: { iceConnectionState: 'connected' },
+      candidatePair: { currentRoundTripTime: 0.032 },
+      inboundAudio: { jitter: 0.003, packetsReceived: 607, packetsLost: 0 }
+    }
+  ])
+  assert.deepEqual(metrics, {
+    connected: true,
+    rttMs: 32,
+    jitterMs: 3,
+    loss: 0,
+    score: 4,
+    label: 'Excellent'
+  })
 })
 
 test('transport recovery tolerates transient disconnects but restarts hard failures immediately', () => {

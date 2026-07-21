@@ -5,6 +5,7 @@ import { useVoiceStore } from '../stores/voice'
 import { useChannelsStore } from '../stores/channels'
 import { useSettingsStore } from '../stores/settings'
 import { isScreenShareFpsBelowTarget } from '../shared/video-settings'
+import { getRtcSignalMetrics } from '../shared/voice-transport'
 
 import RoomList from './RoomList.vue'
 
@@ -184,24 +185,15 @@ async function pollSignal() {
         const snap = await sfu.getWebRTCStatsSnapshot()
         outboundVideoStats.value = sfu.getOutboundVideoStats ? await sfu.getOutboundVideoStats() : []
         monitorScreenShareFps(outboundVideoStats.value)
-        const t = snap?.transports?.find((x: any) => x.kind === 'send') || snap?.transports?.[0]
-        if (!t || t.pcStates.iceConnectionState !== 'connected') {
+        const metrics = getRtcSignalMetrics(snap?.transports)
+        if (!metrics.connected) {
             signalLevel.value = 1
-            outboundVideoStats.value = []
             return
         }
-        const rtt = t.candidatePair?.currentRoundTripTime
-        const jitter = t.inboundAudio?.jitter
-        const loss = t.remoteInboundAudio?.fractionLost
-        lastRttMs.value = rtt != null ? (rtt < 10 ? rtt * 1000 : rtt) : null
-        lastJitterMs.value = jitter != null ? jitter * 1000 : null
-        lastLoss.value = loss != null ? loss : null
-        let score = 4
-        if (lastRttMs.value != null) { if (lastRttMs.value > 400) score -= 2; else if (lastRttMs.value > 150) score -= 1 }
-        if (lastJitterMs.value != null) { if (lastJitterMs.value > 30) score -= 2; else if (lastJitterMs.value > 15) score -= 1 }
-        if (lastLoss.value != null) { if (lastLoss.value > 0.05) score -= 2; else if (lastLoss.value > 0.01) score -= 1 }
-        if (score < 1) score = 1
-        signalLevel.value = score
+        lastRttMs.value = metrics.rttMs
+        lastJitterMs.value = metrics.jitterMs
+        lastLoss.value = metrics.loss
+        signalLevel.value = metrics.score
     } catch {
         outboundVideoStats.value = []
         lowScreenFpsSamples = 0
