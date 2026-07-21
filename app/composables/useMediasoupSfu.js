@@ -76,6 +76,31 @@ export function useMediasoupSfu() {
   let sharedAudioStatsIntervalId = null
   const sharedAudioBitrateHistory = new Map()
 
+  function getSharedAudioCaptureConstraints() {
+    return {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      suppressLocalAudioPlayback: false
+    }
+  }
+
+  async function disableSharedAudioProcessing(track) {
+    if (!track) return
+    try { track.contentHint = 'music' } catch (_) { /* browser may not expose contentHint */ }
+    if (!track.applyConstraints) return
+    try {
+      const supported = navigator.mediaDevices?.getSupportedConstraints?.() || {}
+      const constraints = getSharedAudioCaptureConstraints()
+      const applicable = Object.fromEntries(
+        Object.entries(constraints).filter(([key]) => supported[key] === true)
+      )
+      if (Object.keys(applicable).length) await track.applyConstraints(applicable)
+    } catch (err) {
+      console.warn('[SFU] Browser did not accept all no-processing constraints for shared audio:', err)
+    }
+  }
+
   function createSharedAudioTrack(sourceTrack) {
     try { sourceTrack.contentHint = 'music' } catch (_) { /* browser may not expose contentHint */ }
     if (typeof window === 'undefined') return { track: sourceTrack, sourceTrack }
@@ -2308,7 +2333,7 @@ export function useMediasoupSfu() {
     let stream
     try {
       stream = isScreen
-        ? await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: true })
+        ? await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: getSharedAudioCaptureConstraints() })
         : await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false })
       const track = stream.getVideoTracks()[0]
       if (!track) throw new Error(`No ${source} video track is available`)
@@ -2398,6 +2423,7 @@ export function useMediasoupSfu() {
       const displayAudioTrack = isScreen ? stream.getAudioTracks()[0] : null
       const existingDisplayAudio = Array.from(producers.value.values()).find(entry => entry.source === 'screen-audio')
       if (displayAudioTrack && device.value?.canProduce('audio') && !existingDisplayAudio) {
+        await disableSharedAudioProcessing(displayAudioTrack)
         const processedAudio = createSharedAudioTrack(displayAudioTrack)
         const audioProducer = await sendTransport.value.produce({
           track: processedAudio.track,
@@ -2449,7 +2475,7 @@ export function useMediasoupSfu() {
       // video track is stopped immediately and is never sent to the SFU.
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: true,
+        audio: getSharedAudioCaptureConstraints(),
         systemAudio: 'include',
         selfBrowserSurface: 'exclude'
       })
@@ -2459,6 +2485,7 @@ export function useMediasoupSfu() {
         throw new Error('No system audio was shared. Select a source with audio and enable the share-audio option.')
       }
       stream.getVideoTracks().forEach(track => track.stop())
+      await disableSharedAudioProcessing(sourceAudioTrack)
       const processedAudio = createSharedAudioTrack(sourceAudioTrack)
 
       const producer = await sendTransport.value.produce({
