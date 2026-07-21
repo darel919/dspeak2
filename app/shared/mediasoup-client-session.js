@@ -1,6 +1,7 @@
 import { Device } from 'mediasoup-client'
 import { buildVideoProduceOptions } from './video-settings.js'
 import { buildVoiceProducerOptions } from './voice-transport.js'
+import { collectPeerConnectionStats } from './rtc-media-stats.js'
 
 function waitFor(map, key, timeoutMs, label) {
   return new Promise((resolve, reject) => {
@@ -8,9 +9,17 @@ function waitFor(map, key, timeoutMs, label) {
       map.delete(key)
       reject(new Error(`${label} timed out`))
     }, timeoutMs)
-    map.set(key, value => {
-      clearTimeout(timer)
-      resolve(value)
+    map.set(key, {
+      resolve(value) {
+        clearTimeout(timer)
+        map.delete(key)
+        resolve(value)
+      },
+      reject(error) {
+        clearTimeout(timer)
+        map.delete(key)
+        reject(error)
+      }
     })
   })
 }
@@ -31,11 +40,14 @@ export class MediasoupClientSession {
     this.pending = new Map()
     this.pendingProduce = []
     this.pendingConsumers = new Set()
+    this.requestedConsumers = new Set()
     this.readyPromise = null
     this.readyResolve = null
     this.readyReject = null
     this.initializationTimer = null
     this.closed = false
+    this.lastSentClientRtpCapabilities = null
+    this.lastReceivedConsumerParams = null
   }
 
   async initialize() {
@@ -59,6 +71,7 @@ export class MediasoupClientSession {
     if (type === 'rtp-capabilities') {
       this.device = new Device()
       await this.device.load({ routerRtpCapabilities: data })
+      this.lastSentClientRtpCapabilities = this.device.rtpCapabilities
       this.send({ type: 'client-rtp-capabilities', data: { rtpCapabilities: this.device.rtpCapabilities } })
       this.send({ type: 'create-transport', data: { type: 'send' } })
       this.send({ type: 'create-transport', data: { type: 'recv' } })
@@ -78,8 +91,7 @@ export class MediasoupClientSession {
       return true
     }
     if (type === 'transport-connected') {
-      this.pending.get(`connect:${data.transportId}`)?.()
-      this.pending.delete(`connect:${data.transportId}`)
+      this.pending.get(`connect:${data.transportId}`)?.resolve()
       return true
     }
     if (type === 'producer-id') {
@@ -104,6 +116,10 @@ export class MediasoupClientSession {
     }
     if (type === 'producer-closed') {
       this.closeConsumerByProducer(data.producerId)
+      return true
+    }
+    if (type === 'error') {
+      this.handleServerError(data)
       return true
     }
     return false
@@ -133,7 +149,7 @@ export class MediasoupClientSession {
       this.send({ type: 'connect-transport', data: { transportId: this.sendTransport.id, dtlsParameters } })
     })
     this.sendTransport.on('produce', ({ kind, rtpParameters, appData }, callback, errback) => {
-      const request = { resolve: callback, timer: null }
+      const request = { resolve: callback, reject: errback, timer: null }
       request.timer = setTimeout(() => {
         const index = this.pendingProduce.indexOf(request)
         if (index >= 0) this.pendingProduce.splice(index, 1)
@@ -184,7 +200,11 @@ export class MediasoupClientSession {
       throw error
     }
     this.producers.set(entry.source, { producer, track, source: entry.source })
-    producer.on('transportclose', () => this.producers.delete(entry.source))
+    producer.on('transportclose', () => {
+      if (this.producers.get(entry.source)?.producer !== producer) return
+      this.producers.delete(entry.source)
+      track.stop()
+    })
     return producer
   }
 
@@ -205,7 +225,8 @@ export class MediasoupClientSession {
       return
     }
     this.pendingConsumers.delete(producerId)
-    if ([...this.consumers.values()].some(entry => entry.producerId === producerId)) return
+    if (this.requestedConsumers.has(producerId) || [...this.consumers.values()].some(entry => entry.producerId === producerId)) return
+    this.requestedConsumers.add(producerId)
     this.send({
       type: 'consume',
       data: {
@@ -217,7 +238,9 @@ export class MediasoupClientSession {
   }
 
   async createConsumer(data) {
+    this.requestedConsumers.delete(data.producerId)
     if (!this.recvTransport || this.consumers.has(data.id)) return
+    this.lastReceivedConsumerParams = data
     const consumer = await this.recvTransport.consume({
       id: data.id,
       producerId: data.producerId,
@@ -236,10 +259,14 @@ export class MediasoupClientSession {
       stream: new MediaStream([consumer.track])
     }
     this.consumers.set(consumer.id, entry)
+    let closed = false
     const close = () => {
+      if (closed) return
+      closed = true
       this.consumers.delete(consumer.id)
       this.onRemoteTrackEnded?.(entry)
     }
+    entry.close = close
     consumer.on('transportclose', close)
     consumer.on('trackended', close)
     this.onRemoteTrack?.(entry)
@@ -247,11 +274,33 @@ export class MediasoupClientSession {
   }
 
   closeConsumerByProducer(producerId) {
+    this.requestedConsumers.delete(producerId)
     const match = [...this.consumers.values()].find(entry => entry.producerId === producerId)
     if (!match) return
     match.consumer.close()
-    this.consumers.delete(match.consumer.id)
-    this.onRemoteTrackEnded?.(match)
+    match.close()
+  }
+
+  handleServerError(data) {
+    const error = new Error(data?.message || 'SFU signaling request failed')
+    if (data?.requestType === 'produce') {
+      const request = this.pendingProduce.shift()
+      if (request) {
+        clearTimeout(request.timer)
+        request.reject(error)
+      }
+    }
+    if (data?.requestType === 'consume' && data.producerId) {
+      this.requestedConsumers.delete(data.producerId)
+      this.pendingConsumers.delete(data.producerId)
+    }
+    if (data?.requestType === 'connect-transport' && data.transportId) {
+      this.pending.get(`connect:${data.transportId}`)?.reject(error)
+    }
+    if (['get-rtp-capabilities', 'client-rtp-capabilities', 'create-transport'].includes(data?.requestType)) {
+      this.readyReject?.(error)
+      this.resetReadiness()
+    }
   }
 
   async stats() {
@@ -259,68 +308,51 @@ export class MediasoupClientSession {
     for (const [kind, transport] of [['send', this.sendTransport], ['recv', this.recvTransport]]) {
       const pc = transport?._handler?._pc
       if (!pc) continue
-      transports.push(await this.peerConnectionStats(pc, kind))
+      transports.push(await collectPeerConnectionStats(pc, kind))
     }
     return transports
   }
 
-  async mediaReady(expectedInbound) {
-    if (!this.sendTransport || !this.recvTransport) return false
-    let outbound = 0
-    let inbound = 0
-    for (const entry of this.producers.values()) {
-      const report = await entry.producer.getStats()
-      if ([...report.values()].some(stat => stat.type === 'outbound-rtp' && Number(stat.bytesSent) > 0)) outbound += 1
+  async mediaReadiness(expectedInbound) {
+    const outboundExpected = this.sources.size
+    const inboundExpected = Math.max(0, Number(expectedInbound) || 0)
+    if (!this.sendTransport || !this.recvTransport) {
+      return { ready: false, outboundExpected, outboundFlowing: 0, inboundExpected, inboundFlowing: 0 }
     }
-    for (const entry of this.consumers.values()) {
-      const report = await entry.consumer.getStats()
-      if ([...report.values()].some(stat => stat.type === 'inbound-rtp' && Number(stat.bytesReceived) > 0)) inbound += 1
-    }
-    return outbound >= this.sources.size && inbound >= expectedInbound
-  }
-
-  async peerConnectionStats(pc, kind) {
-    const report = await pc.getStats()
-    const byId = new Map()
-    report.forEach(stat => byId.set(stat.id, stat))
-    const transport = [...byId.values()].find(stat => stat.type === 'transport' && stat.selectedCandidatePairId)
-    const pair = transport ? byId.get(transport.selectedCandidatePairId) : null
-    const local = pair ? byId.get(pair.localCandidateId) : null
-    const remote = pair ? byId.get(pair.remoteCandidateId) : null
-    let packetsLost = 0
-    let packetsReceived = 0
-    for (const stat of byId.values()) {
-      if (stat.type !== 'inbound-rtp' || stat.isRemote) continue
-      packetsLost += Math.max(0, Number(stat.packetsLost) || 0)
-      packetsReceived += Math.max(0, Number(stat.packetsReceived) || 0)
-    }
+    const outboundChecks = [...this.producers.values()].map(async (entry) => {
+      const report = await entry.producer.getStats().catch(() => null)
+      return !!report && [...report.values()].some(stat => stat.type === 'outbound-rtp' && Number(stat.bytesSent) > 0)
+    })
+    const inboundChecks = [...this.consumers.values()].map(async (entry) => {
+      const report = await entry.consumer.getStats().catch(() => null)
+      return !!report && [...report.values()].some(stat => stat.type === 'inbound-rtp' && Number(stat.bytesReceived) > 0)
+    })
+    const [outboundResults, inboundResults] = await Promise.all([
+      Promise.all(outboundChecks),
+      Promise.all(inboundChecks)
+    ])
+    const outboundFlowing = outboundResults.filter(Boolean).length
+    const inboundFlowing = inboundResults.filter(Boolean).length
     return {
-      kind,
-      pcStates: {
-        connectionState: pc.connectionState,
-        iceConnectionState: pc.iceConnectionState,
-        signalingState: pc.signalingState
-      },
-      candidatePair: pair ? {
-        currentRoundTripTime: pair.currentRoundTripTime ?? null,
-        availableOutgoingBitrate: pair.availableOutgoingBitrate ?? null,
-        bytesSent: pair.bytesSent ?? null,
-        bytesReceived: pair.bytesReceived ?? null,
-        packetsSent: pair.packetsSent ?? null,
-        packetsReceived: pair.packetsReceived ?? null,
-        packetLoss: packetsLost + packetsReceived > 0 ? packetsLost * 100 / (packetsLost + packetsReceived) : null,
-        local: local ? { address: local.address || null, port: local.port, protocol: local.protocol, candidateType: local.candidateType } : null,
-        remote: remote ? { address: remote.address || null, port: remote.port, protocol: remote.protocol, candidateType: remote.candidateType } : null
-      } : null
+      ready: outboundFlowing >= outboundExpected && inboundFlowing >= inboundExpected,
+      outboundExpected,
+      outboundFlowing,
+      inboundExpected,
+      inboundFlowing
     }
   }
 
   closeMedia() {
+    const hadMedia = !!this.sendTransport || !!this.recvTransport || this.producers.size > 0 || this.consumers.size > 0
+    if (hadMedia && !this.closed) this.send({ type: 'close-media' })
     for (const entry of this.producers.values()) {
       entry.producer.close()
       entry.track.stop()
     }
-    for (const entry of this.consumers.values()) entry.consumer.close()
+    for (const entry of this.consumers.values()) {
+      entry.consumer.close()
+      entry.close()
+    }
     this.producers.clear()
     this.consumers.clear()
     this.sendTransport?.close()
@@ -330,8 +362,15 @@ export class MediasoupClientSession {
     this.device = null
     this.readyReject?.(new Error('SFU session closed'))
     this.resetReadiness()
+    const closedError = new Error('SFU media session closed')
+    for (const request of this.pending.values()) request.reject(closedError)
     this.pending.clear()
-    for (const request of this.pendingProduce) clearTimeout(request.timer)
+    this.pendingConsumers.clear()
+    this.requestedConsumers.clear()
+    for (const request of this.pendingProduce) {
+      clearTimeout(request.timer)
+      request.reject(closedError)
+    }
     this.pendingProduce.splice(0)
   }
 
@@ -348,5 +387,6 @@ export class MediasoupClientSession {
     this.closeMedia()
     this.sources.clear()
     this.pendingConsumers.clear()
+    this.requestedConsumers.clear()
   }
 }

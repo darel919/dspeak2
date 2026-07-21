@@ -1,11 +1,11 @@
 <template>
   <section class="rounded-lg border border-base-content/20 bg-base-300/30 p-2" aria-labelledby="rtc-topology-title">
     <div class="mb-2 flex items-start justify-between gap-2">
-      <div>
+      <div class="min-w-0">
         <div id="rtc-topology-title" class="font-semibold">Network topology</div>
         <div class="text-[11px] text-base-content/60" aria-live="polite">{{ summary }}</div>
       </div>
-      <span class="badge badge-sm" :class="badgeClass">{{ topology.label }}</span>
+      <span class="badge badge-sm shrink-0 whitespace-nowrap" :class="badgeClass">{{ topology.label }}</span>
     </div>
     <svg viewBox="0 0 320 190" class="h-auto w-full" role="img" :aria-label="summary">
       <line v-for="edge in renderedEdges" :key="edge.key" :x1="edge.from.x" :y1="edge.from.y" :x2="edge.to.x" :y2="edge.to.y" class="topology-edge" :class="[`edge-${edge.state}`, edge.state === 'active' ? 'edge-flowing' : '']" />
@@ -51,10 +51,14 @@ const renderedNodes = computed(() => {
   const participants = props.nodes.filter(node => node.role === 'local' || node.role === 'peer')
   const infrastructure = props.nodes.filter(node => node.role !== 'local' && node.role !== 'peer')
   const result = participants.map((node, index) => {
-    const angle = participants.length === 1 ? -Math.PI / 2 : -Math.PI / 2 + Math.PI * 2 * index / participants.length
-    return { ...node, x: 160 + Math.cos(angle) * 112, y: 95 + Math.sin(angle) * 66 }
+    const angle = participants.length === 1
+      ? -Math.PI / 2
+      : participants.length === 2
+        ? Math.PI + Math.PI * index
+        : -Math.PI / 2 + Math.PI * 2 * index / participants.length
+    return { ...node, x: 160 + Math.cos(angle) * 108, y: 92 + Math.sin(angle) * 58 }
   })
-  for (const node of infrastructure) result.push({ ...node, x: node.role === 'ipv4-fallback' ? 274 : 160, y: 95 })
+  for (const node of infrastructure) result.push({ ...node, x: node.role === 'ipv4-fallback' ? 238 : 160, y: 92 })
   return result
 })
 const renderedEdges = computed(() => props.edges.flatMap((edge, index) => {

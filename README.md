@@ -11,6 +11,7 @@ native WebRTC and mediasoup carry realtime media.
 - Native direct WebRTC for two participants
 - Native WebRTC mesh for three or four participants
 - Automatic mediasoup SFU fallback for larger or unhealthy rooms
+- Stable SFU-first startup before optional Direct or Mesh upgrades
 - Seamless, all-client topology handoffs without restarting capture
 - IPv6-first SFU routing with an optional Playit IPv4 fallback
 - Animated RTC topology and transport diagnostics
@@ -18,7 +19,8 @@ native WebRTC and mediasoup carry realtime media.
 
 ## Media routing
 
-DSpeak automatically chooses the lowest-latency reliable route:
+DSpeak establishes the most reliable route first, then upgrades when a complete
+direct path proves healthy. The table describes the preferred steady state:
 
 | Participants | Route |
 | --- | --- |
@@ -27,13 +29,51 @@ DSpeak automatically chooses the lowest-latency reliable route:
 | 3–4 | Full P2P mesh |
 | 5+ or unhealthy mesh | mediasoup SFU |
 
+Every call with at least two participants first establishes mediasoup SFU,
+attempting native IPv6 before the IPv4 fallback. For rooms with two through four
+devices, the server then probes a complete Direct or Mesh path in the background
+and switches only after a stable
+qualification window and all-client media consensus. Membership changes on an
+active P2P room return the room to SFU before qualifying the new mesh.
+
 Direct probes use STUN without TURN. A P2P route activates only when every peer
 edge is connected, non-relayed, healthy, and carrying the required RTP. Topology
 changes use make-before-break staging and activate only after every current
 client confirms the same topology epoch and media-source revision.
+Qualified edges remain monitored throughout the stability window; losing health
+or RTP cancels the upgrade before stale readiness can activate P2P.
+
+Switching is coordinated room-wide rather than independently per browser. A
+membership change, or a media-source change during handoff, starts a new epoch,
+invalidates stale client acknowledgements, and gives the replacement path a
+fresh preparation deadline.
+The active path remains bound until consensus is complete. Retired P2P peer
+connections and SFU transports are explicitly closed after activation so a
+later recovery cannot reuse stale tracks, consumers, or producers.
+Camera, screen, and audio playback entries keep one participant/source identity
+across providers, preventing a topology change or producer replacement from
+leaving duplicate remote tiles. Source changes on the active route are applied
+in place rather than starting another handoff.
 
 The RTC Statistics panel shows the active route as Direct, Mesh, SFU, or SFU
 IPv4. During a handoff, it displays the active and pending routes together.
+If direct media falls back, the topology reason retains the concrete trigger,
+such as an ICE failure, health timeout, stopped media flow, or signaling error.
+SFU IPv4 is the selected ICE path to the same SFU, not a separate application
+topology. Native IPv6 candidates have higher ICE priority; the Playit-routed
+IPv4 candidate is used only when IPv6 cannot connect. Changing between those
+paths does not duplicate media state.
+
+P2P media never operates without the server control connection. Browsers send
+sequenced topology heartbeats over the media-signaling WebSocket every five
+seconds. The server ACKs matching epochs, NACKs stale epochs with the current
+topology, and removes silent peers after twenty seconds. A browser that misses
+ACKs for fifteen seconds closes and reconnects its signaling session, allowing
+the coordinator to remove disappeared peers promptly without routing heartbeat
+data through the media SFU or PocketBase.
+Concurrent first joins share one room/router creation, and in-flight joins hold
+a reservation so the last departing peer cannot close a router underneath a
+new session.
 
 See [Hybrid media topology](docs/hybrid-media-topology.md) for negotiation,
 health checks, failover, recovery, and implementation ownership.
@@ -163,6 +203,14 @@ curl http://localhost:3000/metrics
 
 Real releases should also be exercised across current Chrome, Edge, Firefox,
 and Safari on multiple networks and devices.
+
+The automated topology suite covers direct two-client consensus, complete
+three/four-client mesh policy, five-client SFU selection, repeated SFU recovery,
+source changes during handoff, stale failure rejection, stable remote-feed
+identity, revocable P2P qualification, repeated source-toggle sender reuse,
+concurrent room creation, and IPv4 SFU graph classification. Browser smoke tests
+should still exercise real ICE candidates and device/network changes because
+those are not fully reproducible in a Node test process.
 
 ## Security boundary
 

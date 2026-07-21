@@ -1,6 +1,5 @@
 export const MAX_P2P_PARTICIPANTS = 4
-export const P2P_QUALIFICATION_TIMEOUT_MS = 2000
-export const P2P_RECOVERY_STABILITY_MS = 10000
+export const P2P_QUALIFICATION_TIMEOUT_MS = 8000
 
 export function isP2pParticipantCount(count) {
   return Number(count) >= 2 && Number(count) <= MAX_P2P_PARTICIPANTS
@@ -24,9 +23,9 @@ export function classifyTopology({ mode, participantCount, candidatePair, health
   }
   if (mode === 'sfu') {
     const family = addressFamily(candidatePair?.remote?.address)
-    return family === 'ipv4'
-      ? { mode: 'sfu', label: 'Relayed (SFU IPv4)', addressFamily: family }
-      : { mode: 'sfu', label: 'Relayed (SFU)', addressFamily: family }
+    if (family === 'ipv4') return { mode: 'sfu', label: 'SFU (IPv4 fallback)', addressFamily: family }
+    if (family === 'ipv6') return { mode: 'sfu', label: 'SFU (IPv6)', addressFamily: family }
+    return { mode: 'sfu', label: 'SFU', addressFamily: family }
   }
   return healthy
     ? { mode: 'idle', label: 'Waiting' }
@@ -44,7 +43,7 @@ function participantNode(id, index, localPeerId, health) {
 
 export function buildTopologyGraph(snapshot = {}) {
   const participantIds = Array.isArray(snapshot.participantIds) ? snapshot.participantIds.map(String) : []
-  const classification = classifyTopology(snapshot)
+  const classification = classifyTopology({ ...snapshot, participantCount: snapshot.participantCount ?? participantIds.length })
   const nodes = participantIds.map((id, index) => participantNode(id, index, snapshot.localPeerId, snapshot.peerHealth))
   const edges = []
   const switching = snapshot.mode === 'switching'
@@ -74,13 +73,15 @@ export function buildTopologyGraph(snapshot = {}) {
       nodes.push({ id: 'ipv4-fallback', role: 'ipv4-fallback', health: 'healthy' })
     }
     for (const node of nodes.filter(candidate => candidate.role === 'local' || candidate.role === 'peer')) {
+      const localEdge = node.role === 'local'
+      const detail = localEdge ? snapshot.sfuEdge || {} : snapshot.participantSfuEdges?.[node.id] || {}
       edges.push({
         from: node.id,
-        to: sfuAddressFamily === 'ipv4' ? 'ipv4-fallback' : 'sfu',
+        to: localEdge && sfuAddressFamily === 'ipv4' ? 'ipv4-fallback' : 'sfu',
         state: switching && snapshot.target === 'sfu' ? 'probing' : 'active',
         transport: 'sfu',
-        addressFamily: sfuAddressFamily,
-        ...(snapshot.sfuEdge || {})
+        addressFamily: localEdge ? sfuAddressFamily : 'unknown',
+        ...detail
       })
     }
     if (sfuAddressFamily === 'ipv4') {

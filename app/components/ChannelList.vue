@@ -340,12 +340,17 @@ function getUserSfuRtt(userId) {
 function getUserPeerRtt(userId) {
   const sfu = voiceStore.sfuComposable
   const isCurrentUser = String(userId) === String(authStore.getUserData()?.id)
-  if (!sfu || isCurrentUser) return null
-  const value = sfu.peerRoundTripTimes?.[String(userId)]
+  if (!sfu) return null
+  const values = Object.values(sfu.peerRoundTripTimes || {}).map(Number).filter(Number.isFinite)
+  const value = isCurrentUser
+    ? (values.length ? Math.max(...values) : null)
+    : sfu.peerRoundTripTimes?.[String(userId)]
   return Number.isFinite(Number(value)) ? Number(value) : null
 }
 function getUserConnectionQuality(userId) {
-  return getConnectionQualityBars(getUserSfuRtt(userId))
+  const sfu = voiceStore.sfuComposable
+  const rtt = sfu?.activeProvider === 'p2p' ? getUserPeerRtt(userId) : getUserSfuRtt(userId)
+  return getConnectionQualityBars(rtt)
 }
 function getUserConnectionQualityLabel(userId) {
   return getConnectionQualityLabel(getUserConnectionQuality(userId))

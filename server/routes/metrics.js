@@ -24,6 +24,8 @@ export default defineEventHandler(async (event) => {
     `dspeak_media_topology_rooms{topology="p2p"} ${metrics.p2pRooms}`,
     `dspeak_media_topology_rooms{topology="sfu"} ${metrics.sfuRooms}`,
     `dspeak_media_topology_rooms{topology="probing"} ${metrics.probingRooms}`,
+    `dspeak_media_topology_rooms{topology="switching"} ${metrics.switchingRooms}`,
+    `dspeak_media_topology_rooms{topology="idle"} ${metrics.idleRooms}`,
     `dspeak_sfu_worker_info{pid="${metrics.workerPid}"} 1`,
     ''
   ].join('\n')

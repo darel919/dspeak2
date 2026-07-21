@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="visible && voiceStore.connected" class="fixed bottom-4 right-4 z-[60] max-w-[380px] w-[90vw] md:w-[360px]">
+    <div v-if="visible && voiceStore.connected" class="fixed bottom-4 right-4 z-[60] w-[calc(100vw-2rem)] max-w-[440px]">
       <div class="bg-base-200 border border-base-content/20 rounded-lg shadow-xl overflow-hidden">
         <div class="flex items-center justify-between px-3 py-2 bg-base-300 border-b border-base-content/10">
           <div class="flex items-center gap-2">
@@ -28,10 +28,10 @@
           <template v-else>
             <div class="text-base-content/60 mb-2">Updated: {{ new Date(snapshot.timestamp).toLocaleTimeString() }}</div>
             <RtcTopologyMap class="mb-3" :topology="snapshot.topology" :nodes="snapshot.nodes" :edges="snapshot.edges" />
-            <div class="mb-3 rounded-lg border border-base-content/20 p-2">
+            <div v-if="snapshot.peerRoundTripTime != null" class="mb-3 rounded-lg border border-base-content/20 p-2">
               <span class="text-base-content/60">Peer RTT</span>
               <span class="ml-2 font-mono">
-                {{ snapshot.peerRoundTripTime != null ? `${Math.round(snapshot.peerRoundTripTime)} ms` : 'waiting for another participant' }}
+                {{ `${Math.round(snapshot.peerRoundTripTime)} ms` }}
               </span>
             </div>
             <div v-if="screenShareStats" class="mb-3 rounded-lg border border-primary/30 bg-primary/5 p-2">
@@ -131,9 +131,9 @@
                 <div>{{ t.pcStates.signalingState }}</div>
 
                 <template v-if="t.candidatePair">
-                  <div class="text-base-content/60">Client–SFU RTT</div>
+                  <div class="text-base-content/60">{{ t.kind.startsWith('p2p:') ? 'Peer RTT' : 'Client–SFU RTT' }}</div>
                   <div>{{ formatMs(t.candidatePair.currentRoundTripTime) }}</div>
-                  <template v-if="t.kind === 'send'">
+                  <template v-if="t.outboundAudio">
                     <div class="text-base-content/60">Bitrate (target/observed)</div>
                     <div>{{ formatBitrate(t.outboundAudio?.targetBitrate ?? t.candidatePair.availableOutgoingBitrate) }} / {{ formatBitrate((t.observedKbpsOut ?? 0) * 1000) }}</div>
                   </template>
@@ -204,17 +204,6 @@
                 </div>
               </div>
             </div>
-            <div class="mb-2">
-              <div class="text-base-content/60">Producer → User mappings</div>
-              <div class="text-xs bg-base-200 p-2 rounded max-h-24 overflow-auto">
-                <div v-if="mappings.length === 0" class="text-base-content/60">(no mappings)</div>
-                <div v-for="m in mappings" :key="m[0] || m.id" class="mb-1 text-[11px]">{{ m[0] }} → {{ m[1] }}</div>
-              </div>
-            </div>
-            <div>
-              <div class="text-base-content/60">Failed consumers</div>
-              <pre class="whitespace-pre-wrap text-[11px] bg-base-200 p-2 rounded max-h-20 overflow-auto">{{ JSON.stringify(failedList, null, 2) }}</pre>
-            </div>
           </div>
         </div>
       </div>
@@ -236,6 +225,7 @@ const lastError = ref('')
 const copied = ref(false)
 let intervalId = null
 let copiedResetTimer = null
+let pollInProgress = false
 const showDebug = ref(false)
 const sfu = computed(() => voiceStore.sfuComposable)
 const screenShareStats = computed(() => outboundVideoStats.value.find(stat => stat.source === 'screen') || null)
@@ -270,16 +260,16 @@ const unwrap = (v) => {
 }
 
 const sentJson = computed(() => {
-  try { const obj = unwrap(sfu.value?.lastSentClientRtpCapabilities) || unwrap(window?.sfuDebug?.lastSentClientRtpCapabilities); return JSON.stringify(obj || null, null, 2) } catch (_) { return 'null' }
+  try { return JSON.stringify(unwrap(sfu.value?.lastSentClientRtpCapabilities) || null, null, 2) } catch (_) { return 'null' }
 })
 const receivedJson = computed(() => {
-  try { const obj = unwrap(sfu.value?.lastReceivedConsumerParams) || unwrap(window?.sfuDebug?.lastReceivedConsumerParams); return JSON.stringify(obj || null, null, 2) } catch (_) { return 'null' }
+  try { return JSON.stringify(unwrap(sfu.value?.lastReceivedConsumerParams) || null, null, 2) } catch (_) { return 'null' }
 })
 
 const producersList = computed(() => {
   try {
     const active = sfu.value
-    const m = active?.producers?.value || active?.producers || window?.sfuDebug?.producers || []
+    const m = active?.producers?.value || active?.producers || []
     if (m && typeof m === 'object' && m instanceof Map) {
       return Array.from(m.entries()).map(([id, entry]) => ({ id, entry }))
     }
@@ -290,7 +280,7 @@ const producersList = computed(() => {
 const consumersList = computed(() => {
   try {
     const active = sfu.value
-    const m = active?.consumers?.value || active?.consumers || window?.sfuDebug?.consumers || []
+    const m = active?.consumers?.value || active?.consumers || []
     if (m && typeof m === 'object' && m instanceof Map) {
       return Array.from(m.entries()).map(([id, entry]) => ({ id, entry }))
     }
@@ -298,33 +288,18 @@ const consumersList = computed(() => {
   } catch (_) { return [] }
 })
 
-const mappings = computed(() => {
-  try {
-    const active = sfu.value
-    const po = active?.producerOwner?.value || active?.producerOwner || window?.sfuDebug?.producerOwner || []
-    if (po && po instanceof Map) return Array.from(po.entries())
-    return Array.isArray(po) ? po : Array.from(Object.entries(po || {}))
-  } catch (_) { return [] }
-})
-
-const failedList = computed(() => {
-  try { return window?.sfuDebug?.failedConsumeProducers || [] } catch (_) { return [] }
-})
-
 function refreshDebug() {
-
+  pollOnce()
 }
 
 async function copyDebug() {
   try {
   const prod = JSON.stringify(producersList.value, null, 2)
   const cons = JSON.stringify(consumersList.value, null, 2)
-  const map = JSON.stringify(mappings.value, null, 2)
-  const failed = JSON.stringify(failedList.value, null, 2)
   const rtcSnapshot = JSON.stringify(snapshot.value, null, 2)
   const outbound = JSON.stringify(outboundVideoStats.value, null, 2)
   const inbound = JSON.stringify(inboundVideoStats.value, null, 2)
-  const text = `RTC Snapshot:\n${rtcSnapshot}\n\nOutbound Video:\n${outbound}\n\nInbound Video:\n${inbound}\n\nSent RTP Capabilities:\n${sentJson.value}\n\nReceived Consumer Parameters:\n${receivedJson.value}\n\nProducers:\n${prod}\n\nConsumers:\n${cons}\n\nMappings:\n${map}\n\nFailed Consumers:\n${failed}`
+  const text = `RTC Snapshot:\n${rtcSnapshot}\n\nOutbound Video:\n${outbound}\n\nInbound Video:\n${inbound}\n\nSent RTP Capabilities:\n${sentJson.value}\n\nReceived Consumer Parameters:\n${receivedJson.value}\n\nProducers:\n${prod}\n\nConsumers:\n${cons}`
     await navigator.clipboard.writeText(text)
     copied.value = true
     if (copiedResetTimer) clearTimeout(copiedResetTimer)
@@ -339,8 +314,9 @@ const statusDotClass = computed(() => {
   if (!snapshot.value) return 'bg-base-content/30'
   if (snapshot.value.topology?.mode === 'p2p-direct' || snapshot.value.topology?.mode === 'p2p-mesh') return 'bg-success'
   if (!snapshot.value.transports?.length) return 'bg-base-content/30'
-  const anyFailed = snapshot.value.transports.some(t => t.pcStates.iceConnectionState !== 'connected')
-  return anyFailed ? 'bg-warning' : 'bg-success'
+  const states = snapshot.value.transports.map(transport => transport.pcStates.iceConnectionState)
+  if (states.some(state => ['failed', 'disconnected', 'closed'].includes(state))) return 'bg-warning'
+  return states.some(state => ['connected', 'completed'].includes(state)) ? 'bg-success' : 'bg-base-content/30'
 })
 
 function formatMs(v) {
@@ -408,6 +384,8 @@ function summarizeCand(c) {
 }
 
 async function pollOnce() {
+  if (pollInProgress) return
+  pollInProgress = true
   lastError.value = ''
   try {
     const sfu = voiceStore.sfuComposable
@@ -456,6 +434,8 @@ async function pollOnce() {
     lastError.value = e?.message || String(e)
     outboundVideoStats.value = []
     inboundVideoStats.value = []
+  } finally {
+    pollInProgress = false
   }
 }
 

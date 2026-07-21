@@ -4,14 +4,19 @@ import { MediaCaptureManager } from '~/shared/media-capture.js'
 import { MediasoupClientSession } from '~/shared/mediasoup-client-session.js'
 import { NativeP2pMesh } from '~/shared/native-p2p.js'
 import { RemoteMediaRegistry } from '~/shared/remote-media-registry.js'
+import { RemoteMediaHandoff } from '~/shared/remote-media-handoff.js'
 import { addressFamily, buildTopologyGraph } from '~/shared/rtc-topology.js'
+import { collectVideoRtpStats } from '~/shared/rtc-media-stats.js'
 import { shouldAcceptTopologyEvent, topologyEventKey } from '#shared/media-transition.js'
 import { useAuthStore } from '~/stores/auth'
 import { useSettingsStore } from '~/stores/settings'
 import { useVoiceStore } from '~/stores/voice'
 
 const connectionTimeoutMs = 10000
-const mediaHandoffTimeoutMs = 3000
+const mediaHandoffTimeoutMs = 8000
+const mediaReadinessPollMs = 200
+const signalingHeartbeatIntervalMs = 5000
+const signalingHeartbeatTimeoutMs = 15000
 
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig()
@@ -35,11 +40,7 @@ export function useHybridMediaSession() {
   const topologyGraph = ref(buildTopologyGraph({ mode: 'idle', participantIds: [] }))
   const producers = ref(new Map())
   const consumers = ref(new Map())
-  const lastSentClientRtpCapabilities = ref(null)
-  const lastReceivedConsumerParams = ref(null)
-  const stagedTracks = { p2p: new Map(), sfu: new Map() }
   const messageHandlers = new Map()
-  const messageQueue = []
   const localSources = new Map()
   let socket = null
   let channelId = null
@@ -50,16 +51,21 @@ export function useHybridMediaSession() {
   let activeProvider = null
   let intentionalClose = false
   let pingTimer = null
+  let heartbeatSequence = 0
+  let lastHeartbeatAckSequence = 0
+  let lastHeartbeatAckAt = 0
   let reconnectTimer = null
   let reconnectAttempt = 0
   let topologyWaiter = null
-  let statsTimer = null
   let sharedAudioMeter = null
   let topologyOperation = Promise.resolve()
   let pendingTopologyKey = null
   let appliedTopologyKey = null
   let highestQueuedEpoch = 0
   let lastP2pEdges = []
+  let latestTopologyKey = null
+  let reportedSfuFailureEpoch = null
+  const videoStatsSamples = new Map()
 
   const registry = new RemoteMediaRegistry({
     audioFeeds: remoteAudioFeeds,
@@ -76,6 +82,7 @@ export function useHybridMediaSession() {
     onSource: publishSource,
     onSourceEnded: removeSource
   })
+  const handoff = new RemoteMediaHandoff(registry)
 
   function send(message) {
     if (intentionalClose) return false
@@ -83,12 +90,7 @@ export function useHybridMediaSession() {
       socket.send(JSON.stringify(message))
       return true
     }
-    if (!intentionalClose) messageQueue.push(message)
     return false
-  }
-
-  function flushMessages() {
-    while (messageQueue.length && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(messageQueue.shift()))
   }
 
   function registerHandler(type, handler) {
@@ -131,12 +133,13 @@ export function useHybridMediaSession() {
         clearTimeout(timeout)
         connected.value = true
         reconnectAttempt = 0
-        flushMessages()
         sendSourceState()
         startKeepalive()
         resolve()
       }
-      candidate.onmessage = event => handleMessage(event.data)
+      candidate.onmessage = event => {
+        if (socket === candidate) handleMessage(event.data)
+      }
       candidate.onerror = () => {
         clearTimeout(timeout)
         if (!connected.value) reject(new Error('Media signaling connection failed'))
@@ -148,15 +151,19 @@ export function useHybridMediaSession() {
         connected.value = false
         stopKeepalive()
         if (!intentionalClose) {
-          messageQueue.splice(0)
           p2pMesh?.closeAll()
-          sfu?.closeMedia()
-          registry.clear()
-          stagedTracks.p2p.clear()
-          stagedTracks.sfu.clear()
+          p2pMesh = null
+          sfu?.close()
+          sfu = null
+          handoff.clear()
           activeProvider = null
           transportReady.value = false
           iceConnectedBoth.value = false
+          remoteProducersCount.value = 0
+          peerRoundTripTimes.value = {}
+          sfuRoundTripTime.value = null
+          participantSfuRoundTripTimes.value = {}
+          resetTopologySequencing()
           scheduleReconnect()
         }
       }
@@ -178,9 +185,37 @@ export function useHybridMediaSession() {
     })
   }
 
+  function resetTopologySequencing(reason = 'reconnecting') {
+    pendingTopologyKey = null
+    appliedTopologyKey = null
+    latestTopologyKey = null
+    highestQueuedEpoch = 0
+    topologyOperation = Promise.resolve()
+    topologyState.value = { mode: 'idle', epoch: 0, reason, peers: [], activatedAt: null }
+  }
+
   function startKeepalive() {
     stopKeepalive()
-    pingTimer = setInterval(() => send({ type: 'ping' }), 15000)
+    lastHeartbeatAckAt = Date.now()
+    lastHeartbeatAckSequence = heartbeatSequence
+    const heartbeat = () => {
+      if (Date.now() - lastHeartbeatAckAt >= signalingHeartbeatTimeoutMs) {
+        console.warn('[Media] signaling heartbeat acknowledgement timed out')
+        socket?.close(4000, 'Signaling heartbeat timed out')
+        return
+      }
+      heartbeatSequence += 1
+      send({
+        type: 'heartbeat',
+        data: {
+          sequence: heartbeatSequence,
+          topologyEpoch: topologyState.value.epoch,
+          sourceRevision: topologyState.value.sourceRevision || 0
+        }
+      })
+    }
+    heartbeat()
+    pingTimer = setInterval(heartbeat, signalingHeartbeatIntervalMs)
   }
 
   function stopKeepalive() {
@@ -222,8 +257,29 @@ export function useHybridMediaSession() {
   function setupHandlers() {
     if (messageHandlers.size) return
     registerHandler('connected', data => { localPeerId = String(data.peerId) })
+    registerHandler('heartbeat-ack', data => {
+      const sequence = Number(data.sequence)
+      if (!Number.isSafeInteger(sequence) || sequence <= lastHeartbeatAckSequence || sequence > heartbeatSequence) return
+      lastHeartbeatAckSequence = sequence
+      lastHeartbeatAckAt = Date.now()
+    })
+    registerHandler('heartbeat-nack', data => {
+      const sequence = Number(data.sequence)
+      if (!Number.isSafeInteger(sequence) || sequence <= lastHeartbeatAckSequence || sequence > heartbeatSequence) return
+      lastHeartbeatAckSequence = sequence
+      lastHeartbeatAckAt = Date.now()
+      if (data.topology) queueTopology(data.topology)
+    })
     registerHandler('topology-state', queueTopology)
-    registerHandler('p2p-signal', data => ensureP2p()?.receiveSignal(data))
+    registerHandler('p2p-signal', async data => {
+      const mesh = ensureP2p()
+      if (!mesh) return
+      try {
+        await mesh.receiveSignal(data)
+      } catch (signalError) {
+        mesh.fail('signaling-failed', signalError)
+      }
+    })
     registerHandler('currentlyInChannel', data => {
       lastInRoom.value = Array.isArray(data.inRoom) ? data.inRoom : []
       syncConnectedUsers(data.inRoom)
@@ -246,7 +302,7 @@ export function useHybridMediaSession() {
       }
     })
     registerHandler('server-shutdown', () => socket?.close())
-    for (const type of ['rtp-capabilities', 'transport-params', 'transport-connected', 'producer-id', 'consumer-params']) {
+    for (const type of ['rtp-capabilities', 'transport-params', 'transport-connected', 'producer-id', 'consumer-params', 'error']) {
       registerHandler(type, data => sfu?.handle(type, data))
     }
   }
@@ -272,12 +328,14 @@ export function useHybridMediaSession() {
     if (!shouldAcceptTopologyEvent(data, highestQueuedEpoch)) return topologyOperation
     highestQueuedEpoch = Math.max(highestQueuedEpoch, epoch)
     const key = topologyEventKey(data)
+    latestTopologyKey = key
     if (key === appliedTopologyKey || key === pendingTopologyKey) return topologyOperation
     pendingTopologyKey = key
     topologyOperation = topologyOperation
       .catch(() => {})
       .then(() => applyTopology(data))
       .then(() => { appliedTopologyKey = key })
+      .catch(topologyError => handleTopologyFailure(data, topologyError))
       .finally(() => {
         if (pendingTopologyKey === key) pendingTopologyKey = null
       })
@@ -292,7 +350,7 @@ export function useHybridMediaSession() {
       onRemoteTrack: entry => stageRemote(entry),
       onRemoteTrackEnded: removeRemote,
       onStateChange: (_, state) => {
-        if (state === 'failed' && topologyState.value.mode === 'sfu') failSession('The SFU media transport failed')
+        if (state === 'failed' && topologyState.value.mode === 'sfu') reportSfuFailure('media-transport-failed')
       }
     })
     return sfu
@@ -305,15 +363,27 @@ export function useHybridMediaSession() {
       mode: data.mode,
       epoch: Number(data.epoch),
       reason: data.reason || null,
-      target: data.target || null,
+      target: data.target || (data.mode === 'probing' ? 'p2p' : null),
       sourceRevision: Number(data.sourceRevision) || 0,
       peers: Array.isArray(data.peers) ? data.peers : [],
       activatedAt: data.activatedAt || Date.now(),
       displayMode: data.mode === 'probing' && previousProvider ? 'switching' : null
     }
     topologyWaiter?.()
+    if (data.mode === activeProvider) {
+      updateActiveTopology(data)
+      return
+    }
     if (data.mode === 'idle') {
       activeProvider = null
+      p2pMesh?.closeAll()
+      p2pMesh = null
+      sfu?.closeMedia()
+      handoff.clear()
+      remoteProducersCount.value = 0
+      peerRoundTripTimes.value = {}
+      sfuRoundTripTime.value = null
+      participantSfuRoundTripTimes.value = {}
       transportReady.value = true
       iceConnectedBoth.value = true
       refreshPublicMaps()
@@ -344,7 +414,49 @@ export function useHybridMediaSession() {
     if (data.mode === 'sfu') await activateSfu(data)
   }
 
+  function updateActiveTopology(data) {
+    if (data.mode === 'p2p') {
+      p2pMesh?.applyTopology({ ...data, localPeerId })
+      for (const entry of localSources.values()) p2pMesh?.publishSource(entry.source, entry.track, entry.stream)
+    } else if (data.mode === 'sfu') {
+      p2pMesh?.closeAll()
+      p2pMesh = null
+      handoff.retire('p2p')
+    }
+    transportReady.value = true
+    iceConnectedBoth.value = true
+    error.value = null
+    refreshPublicMaps()
+    refreshTopologyGraph()
+  }
+
+  function handleTopologyFailure(data, topologyError) {
+    if (topologyEventKey(data) !== latestTopologyKey) return
+    const reason = topologyError?.message || 'Topology operation failed'
+    if (data.mode === 'p2p' || data.target === 'p2p') {
+      send({ type: 'p2p-failed', data: { epoch: data.epoch, reason: `activation-failed-${reason}` } })
+      console.warn(`[Media] P2P topology operation failed: ${reason}`)
+      return
+    }
+    if (data.mode === 'sfu' || data.target === 'sfu') {
+      reportSfuFailure(`activation-failed-${reason}`)
+      return
+    }
+    failSession(reason)
+  }
+
+  function reportSfuFailure(reason) {
+    const epoch = topologyState.value.epoch
+    if (reportedSfuFailureEpoch === epoch) return
+    reportedSfuFailureEpoch = epoch
+    send({ type: 'sfu-failed', data: { epoch, reason } })
+    transportReady.value = false
+    iceConnectedBoth.value = false
+    console.warn(`[Media] SFU failure reported for topology epoch ${epoch}: ${reason}`)
+  }
+
   async function prepareTransition(data) {
+    let destinationSfu = null
     try {
       transportReady.value = true
       if (data.target === 'p2p') {
@@ -352,12 +464,13 @@ export function useHybridMediaSession() {
         if (!mesh) throw new Error('Native WebRTC is unavailable')
         mesh.applyTopology({ ...data, mode: 'p2p', localPeerId })
         for (const entry of localSources.values()) mesh.publishSource(entry.source, entry.track, entry.stream)
-        await waitForRemoteTracks('p2p')
+        await waitForRemoteTracks('p2p', data)
       } else if (data.target === 'sfu') {
-        const session = ensureSfu()
-        await session.initialize()
-        for (const entry of localSources.values()) await session.addSource(entry)
-        await waitForRemoteTracks('sfu')
+        destinationSfu = ensureSfu()
+        if (activeProvider === 'sfu') destinationSfu.closeMedia()
+        await destinationSfu.initialize()
+        for (const entry of localSources.values()) await destinationSfu.addSource(entry)
+        await waitForRemoteTracks('sfu', data)
       } else {
         throw new Error('The server requested an invalid media topology')
       }
@@ -365,9 +478,10 @@ export function useHybridMediaSession() {
       refreshPublicMaps()
       refreshTopologyGraph()
     } catch (transitionError) {
-      if (data.target === 'sfu') sfu?.closeMedia()
-      send({ type: 'topology-failed', data: { epoch: data.epoch, target: data.target, reason: transitionError.message } })
-      throw transitionError
+      if (destinationSfu && destinationSfu === sfu) destinationSfu.closeMedia()
+      if (topologyEventKey(data) !== latestTopologyKey) return
+      send({ type: 'topology-failed', data: { epoch: data.epoch, target: data.target, sourceRevision: data.sourceRevision, reason: transitionError.message } })
+      console.warn(`[Media] ${data.target?.toUpperCase() || 'Unknown'} handoff preparation failed: ${transitionError.message}`)
     }
   }
 
@@ -375,11 +489,12 @@ export function useHybridMediaSession() {
     const mesh = ensureP2p()
     mesh.applyTopology({ ...data, localPeerId })
     for (const entry of localSources.values()) mesh.publishSource(entry.source, entry.track, entry.stream)
-    await waitForRemoteTracks('p2p')
-    bindStaged('p2p')
-    registry.activateProvider('p2p')
+    await waitForRemoteTracks('p2p', data)
+    handoff.bind('p2p')
     activeProvider = 'p2p'
-    registry.clearProvider('sfu')
+    sfuRoundTripTime.value = null
+    participantSfuRoundTripTimes.value = {}
+    handoff.retire('sfu')
     sfu?.closeMedia()
     transportReady.value = true
     iceConnectedBoth.value = true
@@ -393,12 +508,13 @@ export function useHybridMediaSession() {
     const session = ensureSfu()
     await session.initialize()
     for (const entry of localSources.values()) await session.addSource(entry)
-    await waitForRemoteTracks('sfu')
-    bindStaged('sfu')
-    registry.activateProvider('sfu')
+    await waitForRemoteTracks('sfu', data)
+    handoff.bind('sfu')
     activeProvider = 'sfu'
-    registry.clearProvider('p2p')
-    for (const entry of localSources.values()) p2pMesh?.unpublishSource(entry.source)
+    reportedSfuFailureEpoch = null
+    handoff.retire('p2p')
+    p2pMesh?.closeAll()
+    p2pMesh = null
     transportReady.value = true
     iceConnectedBoth.value = true
     error.value = null
@@ -406,30 +522,36 @@ export function useHybridMediaSession() {
     refreshTopologyGraph()
   }
 
-  function waitForRemoteTracks(provider) {
+  function waitForRemoteTracks(provider, topology) {
     const startedAt = Date.now()
     return new Promise((resolve, reject) => {
       const poll = () => {
+        if (topologyEventKey(topology) !== latestTopologyKey) {
+          reject(new Error('Topology handoff was superseded'))
+          return
+        }
         const expected = topologyState.value.peers
           .filter(peer => String(peer.peerId) !== String(localPeerId))
           .reduce((count, peer) => count + (Array.isArray(peer.sources) ? peer.sources.length : 0), 0)
-        const tracksReady = stagedTracks[provider].size >= expected
-        const mediaReady = provider === 'p2p'
-          ? !!p2pMesh?.isMediaReady()
-          : false
+        const tracksReady = handoff.count(provider) >= expected
+        const mediaReady = provider === 'p2p' ? !!p2pMesh?.isMediaReady() : false
         const check = provider === 'sfu' && tracksReady
-          ? sfu?.mediaReady(expected).catch(() => false)
-          : Promise.resolve(mediaReady)
-        check.then((flowing) => {
+          ? sfu?.mediaReadiness(expected).catch(readinessError => ({ ready: false, error: readinessError.message }))
+          : Promise.resolve({ ready: mediaReady })
+        check.then((readiness) => {
+          const flowing = readiness?.ready === true
           if ((tracksReady && flowing) || (expected === 0 && localSources.size === 0)) {
             resolve()
             return
           }
           if (Date.now() - startedAt >= mediaHandoffTimeoutMs) {
-            reject(new Error(`${provider.toUpperCase()} media did not become ready for handoff`))
+            const detail = provider === 'sfu'
+              ? `tracks ${handoff.count(provider)}/${expected}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expected}`
+              : `tracks ${handoff.count(provider)}/${expected}, mesh ready ${flowing ? 'yes' : 'no'}`
+            reject(new Error(`${provider.toUpperCase()} media did not become ready for handoff (${detail})`))
             return
           }
-          setTimeout(poll, 50)
+          setTimeout(poll, mediaReadinessPollMs)
         })
       }
       poll()
@@ -437,17 +559,11 @@ export function useHybridMediaSession() {
   }
 
   function stageRemote(entry) {
-    stagedTracks[entry.provider].set(entry.key, entry)
-    if (activeProvider === entry.provider) registry.bind(entry)
-  }
-
-  function bindStaged(provider) {
-    for (const entry of stagedTracks[provider].values()) registry.bind(entry, { staged: true })
+    handoff.stage(entry, activeProvider)
   }
 
   function removeRemote(entry) {
-    stagedTracks[entry.provider]?.delete(entry.key)
-    registry.remove(entry.key)
+    handoff.remove(entry)
   }
 
   function publishSource(entry) {
@@ -460,7 +576,19 @@ export function useHybridMediaSession() {
       p2pMesh?.publishSource(entry.source, entry.track, entry.stream)
     }
     if (topologyState.value.mode === 'sfu' || topologyState.value.target === 'sfu') {
-      sfu?.addSource(entry).catch(sourceError => failSession(sourceError.message))
+      sfu?.addSource(entry).catch(sourceError => {
+        const reason = `source-${entry.source}-failed-${sourceError.message}`
+        if (topologyState.value.mode === 'sfu') reportSfuFailure(reason)
+        else send({
+          type: 'topology-failed',
+          data: {
+            epoch: topologyState.value.epoch,
+            target: 'sfu',
+            sourceRevision: topologyState.value.sourceRevision,
+            reason
+          }
+        })
+      })
     }
     if (entry.source === 'screen-audio') startSharedAudioMeter(entry.track)
     sendSourceState()
@@ -598,6 +726,10 @@ export function useHybridMediaSession() {
       participantIds: topologyState.value.peers.map(peer => peer.peerId),
       localPeerId,
       edgeDetails: details,
+      participantSfuEdges: Object.fromEntries(topologyState.value.peers.map(peer => [
+        String(peer.peerId),
+        { rtt: participantSfuRoundTripTimes.value[String(peer.userId)] ?? null }
+      ])),
       sfuEdge: candidatePair ? {
         rtt: candidatePair.currentRoundTripTime == null ? null : candidatePair.currentRoundTripTime * 1000,
         network: candidatePair.local?.protocol || candidatePair.remote?.protocol || null,
@@ -619,14 +751,20 @@ export function useHybridMediaSession() {
   }
 
   async function getWebRTCStatsSnapshot() {
-    const transports = sfu ? await sfu.stats() : []
-    const pair = transports.find(transport => transport.candidatePair)?.candidatePair || null
+    const transports = activeProvider === 'sfu'
+      ? await sfu?.stats() || []
+      : await p2pMesh?.stats() || []
+    const pair = activeProvider === 'sfu'
+      ? transports.find(transport => transport.candidatePair)?.candidatePair || null
+      : null
     sfuRoundTripTime.value = pair?.currentRoundTripTime == null ? null : pair.currentRoundTripTime * 1000
     if (sfuRoundTripTime.value != null) send({ type: 'client-sfu-rtt', data: { rttMs: sfuRoundTripTime.value } })
     refreshTopologyGraph(pair)
     return {
       timestamp: Date.now(),
-      peerRoundTripTime: Math.max(0, ...Object.values(peerRoundTripTimes.value)),
+      peerRoundTripTime: Object.keys(peerRoundTripTimes.value).length
+        ? Math.max(...Object.values(peerRoundTripTimes.value))
+        : null,
       transports,
       topology: topologyGraph.value.topology,
       nodes: topologyGraph.value.nodes,
@@ -635,17 +773,34 @@ export function useHybridMediaSession() {
   }
 
   async function getOutboundVideoStats() {
-    return [...localSources.values()].filter(entry => entry.track.kind === 'video').map(entry => {
+    const results = []
+    for (const entry of [...localSources.values()].filter(entry => entry.track.kind === 'video')) {
       const settings = entry.track.getSettings?.() || {}
-      return { source: entry.source, width: settings.width || null, height: settings.height || null, captureFps: settings.frameRate || null, fps: settings.frameRate || null }
-    })
+      const producer = sfu?.producers.get(entry.source)?.producer
+      const key = `outbound:${entry.source}`
+      const report = activeProvider === 'sfu' && producer
+        ? await producer.getStats().catch(() => null)
+        : p2pMesh ? await p2pMesh.getOutboundTrackStats(entry.source).catch(() => null) : null
+      const collected = report ? collectVideoRtpStats(report, 'outbound', settings, videoStatsSamples.get(key)) : null
+      if (collected?.sample) videoStatsSamples.set(key, collected.sample)
+      results.push({ source: entry.source, captureFps: settings.frameRate || null, ...(collected?.stats || { width: settings.width || null, height: settings.height || null, fps: settings.frameRate || null }) })
+    }
+    return results
   }
 
   async function getInboundVideoStats() {
-    return [...remoteVideoFeeds.value.values()].map(entry => {
+    const results = []
+    for (const entry of remoteVideoFeeds.value.values()) {
       const settings = entry.track.getSettings?.() || {}
-      return { consumerId: entry.key, width: settings.width || null, height: settings.height || null, fps: settings.frameRate || null }
-    })
+      const key = `inbound:${entry.key}`
+      const report = entry.consumer
+        ? await entry.consumer.getStats().catch(() => null)
+        : p2pMesh ? await p2pMesh.getInboundTrackStats(entry.peerId, entry.track).catch(() => null) : null
+      const collected = report ? collectVideoRtpStats(report, 'inbound', settings, videoStatsSamples.get(key)) : null
+      if (collected?.sample) videoStatsSamples.set(key, collected.sample)
+      results.push({ consumerId: entry.key, source: entry.source, ...(collected?.stats || { width: settings.width || null, height: settings.height || null, fps: settings.frameRate || null }) })
+    }
+    return results
   }
 
   function failSession(message) {
@@ -657,29 +812,14 @@ export function useHybridMediaSession() {
     return Promise.resolve(iceConnectedBoth.value)
   }
 
-  function waitForIceConnected(timeoutMs = 12000) {
-    const startedAt = Date.now()
-    return new Promise(resolve => {
-      const poll = () => {
-        if (iceConnectedBoth.value || Date.now() - startedAt >= timeoutMs) {
-          resolve(iceConnectedBoth.value)
-          return
-        }
-        setTimeout(poll, 50)
-      }
-      poll()
-    })
-  }
-
   function disconnect() {
+    videoStatsSamples.clear()
     intentionalClose = true
     channelId = null
     clearTimeout(reconnectTimer)
     reconnectTimer = null
     stopKeepalive()
     stopSharedAudioMeter()
-    if (statsTimer) clearInterval(statsTimer)
-    statsTimer = null
     socket?.close()
     socket = null
     capture.stopAll()
@@ -687,20 +827,16 @@ export function useHybridMediaSession() {
     p2pMesh = null
     sfu?.close()
     sfu = null
-    registry.clear()
-    messageQueue.splice(0)
-    stagedTracks.p2p.clear()
-    stagedTracks.sfu.clear()
+    handoff.clear()
     activeProvider = null
     connected.value = false
     transportReady.value = false
     iceConnectedBoth.value = false
-    topologyState.value = { mode: 'idle', epoch: 0, reason: 'disconnected', peers: [], activatedAt: null }
-    pendingTopologyKey = null
-    appliedTopologyKey = null
-    topologyOperation = Promise.resolve()
-    highestQueuedEpoch = 0
+    resetTopologySequencing('disconnected')
     lastP2pEdges = []
+    peerRoundTripTimes.value = {}
+    sfuRoundTripTime.value = null
+    participantSfuRoundTripTimes.value = {}
     refreshPublicMaps()
     refreshTopologyGraph()
   }
@@ -724,8 +860,9 @@ export function useHybridMediaSession() {
     lastInRoom,
     topologyState: readonly(topologyState),
     topologyGraph: readonly(topologyGraph),
-    lastSentClientRtpCapabilities: readonly(lastSentClientRtpCapabilities),
-    lastReceivedConsumerParams: readonly(lastReceivedConsumerParams),
+    activeProvider: computed(() => activeProvider),
+    lastSentClientRtpCapabilities: computed(() => sfu?.lastSentClientRtpCapabilities || null),
+    lastReceivedConsumerParams: computed(() => sfu?.lastReceivedConsumerParams || null),
     connect,
     disconnect,
     startAudioProduction,
@@ -743,7 +880,6 @@ export function useHybridMediaSession() {
     getWebRTCStatsSnapshot,
     getOutboundVideoStats,
     getInboundVideoStats,
-    areTransportsIceConnected,
-    waitForIceConnected
+    areTransportsIceConnected
   }
 }
