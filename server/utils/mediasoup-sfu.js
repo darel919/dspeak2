@@ -1,6 +1,6 @@
 import * as mediasoup from 'mediasoup'
 import { usePocketBaseAdmin } from './pocketbase'
-import { buildPublicIceCandidates } from './ice-candidates'
+import { buildPublicIceCandidates, buildWebRtcListenInfos } from './ice-candidates'
 
 const mediaCodecs = [
   {
@@ -21,11 +21,11 @@ function send(peer, type, data) {
   peer.send(JSON.stringify({ type, data }))
 }
 
-function publicTransportData(transport, config) {
+async function publicTransportData(transport, config) {
   return {
     id: transport.id,
     iceParameters: transport.iceParameters,
-    iceCandidates: buildPublicIceCandidates(transport.iceCandidates, config),
+    iceCandidates: await buildPublicIceCandidates(transport.iceCandidates, config),
     dtlsParameters: transport.dtlsParameters,
     sctpParameters: transport.sctpParameters
   }
@@ -40,17 +40,8 @@ async function createState(config) {
     logLevel: process.env.NODE_ENV === 'production' ? 'warn' : 'debug'
   })
 
-  const listenInfo = {
-    ip: config.listenIp,
-    port: config.rtcPort
-  }
-  if (config.announcedAddress) listenInfo.announcedAddress = config.announcedAddress
-
   const webRtcServer = await worker.createWebRtcServer({
-    listenInfos: [
-      { ...listenInfo, protocol: 'udp' },
-      { ...listenInfo, protocol: 'tcp' }
-    ]
+    listenInfos: buildWebRtcListenInfos(config)
   })
 
   const state = {
@@ -246,7 +237,7 @@ async function handleMessage(state, session, message) {
 
     case 'create-transport': {
       const transport = await createTransport(state, session)
-      send(session.peer, 'transport-params', publicTransportData(transport, state.config))
+      send(session.peer, 'transport-params', await publicTransportData(transport, state.config))
       return
     }
 
