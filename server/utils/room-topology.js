@@ -47,6 +47,14 @@ export function roomTopologyPayload(room) {
   }
 }
 
+export function roomHasVideoSources(room) {
+  return [...room.sessions.values()].some(session => session.sources?.has('camera') || session.sources?.has('screen'))
+}
+
+export function roomRequiresSingleEncodeSfu(room) {
+  return room.sessions.size > 2 && roomHasVideoSources(room)
+}
+
 export class RoomTopologyCoordinator {
   constructor({ broadcast, maxP2pParticipants = 4, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
     this.broadcast = broadcast
@@ -80,13 +88,16 @@ export class RoomTopologyCoordinator {
       room.topology.recovering = false
       return this.set(room, 'idle', 'waiting-for-peer')
     }
-    if (next === 'sfu') {
+    if (next === 'sfu' || roomRequiresSingleEncodeSfu(room)) {
       room.topology.recovering = false
       if (room.topology.mode === 'sfu') {
         this.clearTimers(room)
         return this.broadcast(room)
       }
-      return this.beginTransition(room, 'sfu', room.sessions.size === 1 ? 'establishing-sfu' : 'participant-limit')
+      const transitionReason = room.sessions.size === 1
+        ? 'establishing-sfu'
+        : roomRequiresSingleEncodeSfu(room) ? 'video-single-encode' : 'participant-limit'
+      return this.beginTransition(room, 'sfu', transitionReason)
     }
     if (room.topology.recovering) {
       this.set(room, 'sfu', reason || 'membership-changed-during-direct-recovery')
@@ -147,6 +158,16 @@ export class RoomTopologyCoordinator {
 
   sourcesChanged(room) {
     room.topology.sourceRevision += 1
+    if (roomRequiresSingleEncodeSfu(room)) {
+      room.topology.recovering = false
+      if (room.topology.mode === 'sfu') {
+        this.clearTimers(room)
+        this.broadcast(room)
+        return
+      }
+      this.beginTransition(room, 'sfu', 'video-single-encode')
+      return
+    }
     if (room.topology.mode === 'switching') {
       this.beginTransition(room, room.topology.target, 'media-sources-changed')
     } else if (room.topology.mode === 'probing') {
@@ -154,10 +175,15 @@ export class RoomTopologyCoordinator {
     } else {
       room.topology.transitionReadiness.clear()
       this.broadcast(room)
+      if (room.topology.mode === 'sfu') {
+        this.clearTimers(room)
+        this.scheduleDirectRecovery(room)
+      }
     }
   }
 
   p2pReady(room, peerId, qualifiedPeerIds, epoch) {
+    if (roomRequiresSingleEncodeSfu(room)) return false
     if (room.topology.mode !== 'probing' || Number(epoch) !== room.topology.epoch || !room.sessions.has(peerId)) return false
     const expected = new Set([...room.sessions.keys()].filter(candidate => candidate !== peerId))
     const qualified = new Set((Array.isArray(qualifiedPeerIds) ? qualifiedPeerIds : []).map(String).filter(candidate => expected.has(candidate)))
@@ -207,9 +233,9 @@ export class RoomTopologyCoordinator {
   }
 
   scheduleDirectRecovery(room) {
-    if (room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants) return
+    if (room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants || roomHasVideoSources(room)) return
     room.topology.recoveryTimer = this.setTimer(() => {
-      if (room.topology.mode !== 'sfu' || room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants) return
+      if (room.topology.mode !== 'sfu' || room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants || roomHasVideoSources(room)) return
       this.set(room, 'probing', 'checking-recovered-direct-path')
       room.topology.recovering = true
     }, DEFAULT_RECOVERY_DELAY_MS)

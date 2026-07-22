@@ -66,6 +66,12 @@ export class MediaCaptureManager {
       stream.getTracks().forEach(candidate => candidate.stop())
       throw new Error(`No ${source} video track is available`)
     }
+    try {
+      await track.applyConstraints(constraints)
+    } catch (error) {
+      stream.getTracks().forEach(candidate => candidate.stop())
+      throw error
+    }
     if (screen) track.contentHint = 'motion'
     const entry = this.register(source, stream, track)
     const screenAudio = screen ? stream.getAudioTracks()[0] : null

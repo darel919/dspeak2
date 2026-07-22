@@ -7,6 +7,15 @@ function deltaRate(current, previous, elapsedMs, multiplier = 1) {
   return (current - previous) * multiplier * 1000 / elapsedMs
 }
 
+export function calculateTransportBitrateBps(bytes, timestamp, previous = null) {
+  const currentBytes = finite(bytes)
+  const currentTimestamp = finite(timestamp)
+  const previousBytes = finite(previous?.bytes)
+  const previousTimestamp = finite(previous?.timestamp)
+  if (currentTimestamp == null || previousTimestamp == null) return null
+  return deltaRate(currentBytes, previousBytes, currentTimestamp - previousTimestamp, 8)
+}
+
 export function collectVideoRtpStats(report, direction, trackSettings = {}, previous = null) {
   const values = [...report.values()]
   const type = direction === 'outbound' ? 'outbound-rtp' : 'inbound-rtp'

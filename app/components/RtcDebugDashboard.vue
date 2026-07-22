@@ -46,7 +46,8 @@
           <div class="rtc-panel-heading"><div><h2>Connection health</h2><p>Last 60 seconds</p></div><span :class="['rtc-health', healthTone]">{{ healthLabel }}</span></div>
           <div class="rtc-chart-grid">
             <div><div class="rtc-chart-title"><strong>Round-trip time</strong><span>{{ formatMs(metrics.rttMs) }}</span></div><RtcMetricChart label="Round-trip time" unit="ms" :suggested-max="50" :samples="history.rtt" /></div>
-            <div><div class="rtc-chart-title"><strong>Available outgoing bitrate</strong><span>{{ formatBitrate(metrics.bitrate) }}</span></div><RtcMetricChart label="Outgoing bitrate" unit="bps" :samples="history.bitrate" /></div>
+            <div><div class="rtc-chart-title"><strong>Measured outgoing bitrate</strong><span>{{ formatBitrate(metrics.outgoingBitrate) }}</span></div><RtcMetricChart label="Measured outgoing bitrate" unit="bps" :samples="history.outgoingBitrate" /></div>
+            <div><div class="rtc-chart-title"><strong>Available outgoing capacity</strong><span>{{ formatBitrate(metrics.availableOutgoingBitrate) }}</span></div><RtcMetricChart label="Available outgoing capacity" unit="bps" :samples="history.availableOutgoingBitrate" /></div>
             <div><div class="rtc-chart-title"><strong>Available incoming bitrate</strong><span>{{ formatBitrate(metrics.incomingAvailableBitrate) }}</span></div><RtcMetricChart label="Available incoming bitrate" unit="bps" :samples="history.incomingAvailableBitrate" /></div>
             <div><div class="rtc-chart-title"><strong>Measured incoming bitrate</strong><span>{{ formatBitrate(metrics.incomingBitrate) }}</span></div><RtcMetricChart label="Measured incoming bitrate" unit="bps" :samples="history.incomingBitrate" /></div>
             <div><div class="rtc-chart-title"><strong>Jitter</strong><span>{{ formatMs(metrics.jitterMs) }}</span></div><RtcMetricChart label="Jitter" unit="ms" :suggested-max="30" :samples="history.jitter" /></div>
@@ -70,7 +71,7 @@
               <div><span>Bytes sent</span><strong>{{ formatBytes(transport.candidatePair?.bytesSent) }}</strong></div>
               <div><span>Bytes received</span><strong>{{ formatBytes(transport.candidatePair?.bytesReceived) }}</strong></div>
               <div><span>Round-trip time</span><strong>{{ formatSecondsMs(transport.candidatePair?.currentRoundTripTime) }}</strong></div>
-              <div><span>Outgoing bandwidth</span><strong>{{ formatBitrate(transport.candidatePair?.availableOutgoingBitrate) }}</strong></div>
+              <div><span>Available outgoing capacity</span><strong>{{ formatBitrate(transport.candidatePair?.availableOutgoingBitrate) }}</strong></div>
               <div><span>Available incoming bitrate</span><strong>{{ formatBitrate(transport.candidatePair?.availableIncomingBitrate) }}</strong></div>
               <div><span>Requests sent</span><strong>{{ formatNumber(transport.candidatePair?.requestsSent) }}</strong></div>
               <div><span>Responses received</span><strong>{{ formatNumber(transport.candidatePair?.responsesReceived) }}</strong></div>

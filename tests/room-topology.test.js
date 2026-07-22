@@ -75,6 +75,41 @@ test('two clients activate direct P2P only after complete qualification and hand
   assert.equal(room.topology.reason, 'recovered-direct-mesh')
 })
 
+test('two-device direct video keeps one resource-capped P2P sender', () => {
+  const { room, coordinator, timers } = harness(2)
+  reachP2p(room, coordinator, timers)
+  room.sessions.get('peer-1').sources.add('screen')
+
+  coordinator.sourcesChanged(room)
+
+  assert.equal(room.topology.mode, 'p2p')
+  assert.equal(room.topology.target, null)
+})
+
+test('multi-peer video uses SFU single-encode delivery', () => {
+  const { room, coordinator } = harness(3)
+  room.sessions.get('peer-1').sources.add('screen')
+  coordinator.reconcile(room, 'joined')
+
+  assert.equal(room.topology.mode, 'switching')
+  assert.equal(room.topology.target, 'sfu')
+  assert.equal(room.topology.reason, 'video-single-encode')
+})
+
+test('video blocks background direct recovery to avoid duplicate encoders', () => {
+  const { room, coordinator, timers } = harness(2)
+  room.sessions.get('peer-1').sources.add('camera')
+  coordinator.reconcile(room, 'joined')
+  acknowledgeAll(room, coordinator)
+
+  assert.equal(room.topology.mode, 'sfu')
+  assert.equal(timers.some(timer => timer.active && timer.delay === 10000), false)
+
+  room.sessions.get('peer-1').sources.delete('camera')
+  coordinator.sourcesChanged(room)
+  assert.equal(timers.some(timer => timer.active && timer.delay === 10000), true)
+})
+
 test('four clients require every directed mesh edge before activation', () => {
   const { room, coordinator, timers } = harness(4)
   coordinator.reconcile(room, 'joined')

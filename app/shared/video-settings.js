@@ -1,8 +1,8 @@
 export const VIDEO_FRAME_RATE_MIN = 25
 export const VIDEO_FRAME_RATE_MAX = 60
 export const VIDEO_FRAME_RATE_PRESETS = Object.freeze([25, 30, 50, 60])
-export const P2P_VIDEO_MAX_BITRATE = 16_000_000
-export const SFU_VIDEO_MAX_BITRATE = 8_000_000
+export const VIDEO_MAX_BITRATE = 6_000_000
+export const P2P_VIDEO_MAX_BITRATE = 4_000_000
 export const SFU_VIDEO_MAX_WIDTH = 1920
 export const SFU_VIDEO_MAX_HEIGHT = 1080
 export const SCREEN_SHARE_FPS_HEALTH_RATIO = 0.8
@@ -55,8 +55,8 @@ export function buildVideoConstraints(settings, { deviceId = null, display = fal
 export function buildVideoProduceOptions({ width, height, frameRate, screen = false } = {}) {
   const pixels = Math.max(1, Number(width) || 1280) * Math.max(1, Number(height) || 720)
   const fps = Math.min(VIDEO_FRAME_RATE_MAX, Math.max(VIDEO_FRAME_RATE_MIN, Number(frameRate) || 30))
-  const bitsPerPixel = screen ? 0.1 : 0.07
-  const maxBitrate = Math.min(SFU_VIDEO_MAX_BITRATE, Math.max(2_500_000, Math.round(pixels * fps * bitsPerPixel)))
+  const bitsPerPixel = screen ? 0.06 : 0.05
+  const maxBitrate = Math.min(VIDEO_MAX_BITRATE, Math.max(2_000_000, Math.round(pixels * fps * bitsPerPixel)))
   const scaleResolutionDownBy = Math.max(1, (Number(width) || 1280) / SFU_VIDEO_MAX_WIDTH, (Number(height) || 720) / SFU_VIDEO_MAX_HEIGHT)
 
   return {
@@ -64,13 +64,13 @@ export function buildVideoProduceOptions({ width, height, frameRate, screen = fa
       maxBitrate,
       maxFramerate: Math.round(fps),
       scaleResolutionDownBy,
-      networkPriority: 'high',
-      priority: 'high'
+      networkPriority: 'medium',
+      priority: 'medium'
     }],
     codecOptions: {
       videoGoogleStartBitrate: Math.max(1000, Math.round(maxBitrate * 0.7 / 1000))
     },
-    degradationPreference: 'maintain-framerate'
+    degradationPreference: 'balanced'
   }
 }
 
@@ -80,7 +80,7 @@ export function buildP2pVideoSenderOptions(options = {}) {
     ...settings,
     encodings: settings.encodings.map(encoding => ({
       ...encoding,
-      maxBitrate: P2P_VIDEO_MAX_BITRATE,
+      maxBitrate: Math.min(P2P_VIDEO_MAX_BITRATE, encoding.maxBitrate),
       scaleResolutionDownBy: 1
     }))
   }

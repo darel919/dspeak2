@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { useVoiceStore } from './voice'
 import { getRtcSignalMetrics } from '../shared/voice-transport'
+import { calculateTransportBitrateBps } from '../shared/rtc-media-stats'
 
 const HISTORY_LIMIT = 60
 
@@ -10,7 +11,8 @@ export const useRtcStatsStore = defineStore('rtc-stats', () => {
   const outbound = ref([])
   const inbound = ref([])
   const incomingBitrate = ref(null)
-  const history = reactive({ rtt: [], bitrate: [], incomingAvailableBitrate: [], incomingBitrate: [], jitter: [], loss: [] })
+  const outgoingBitrate = ref(null)
+  const history = reactive({ rtt: [], availableOutgoingBitrate: [], outgoingBitrate: [], incomingAvailableBitrate: [], incomingBitrate: [], jitter: [], loss: [] })
   const polling = ref(true)
   const lastError = ref('')
   let intervalId = null
@@ -22,15 +24,14 @@ export const useRtcStatsStore = defineStore('rtc-stats', () => {
     return values.length ? values.reduce((total, value) => total + value, 0) : null
   }
 
-  function measuredIncomingBitrate(pairs, timestamp, updatePrevious = false) {
+  function measuredTrafficBitrates(pairs, timestamp, updatePrevious = false) {
+    const bytesSent = sumFinite(pairs, 'bytesSent')
     const bytesReceived = sumFinite(pairs, 'bytesReceived')
     const previous = previousTrafficSample
-    const elapsedMs = previous ? timestamp - previous.timestamp : null
-    const bitrate = bytesReceived != null && previous?.bytesReceived != null && elapsedMs > 0 && bytesReceived >= previous.bytesReceived
-      ? (bytesReceived - previous.bytesReceived) * 8000 / elapsedMs
-      : null
-    if (updatePrevious) previousTrafficSample = { bytesReceived, timestamp }
-    return bitrate
+    const outgoing = calculateTransportBitrateBps(bytesSent, timestamp, previous && { bytes: previous.bytesSent, timestamp: previous.timestamp })
+    const incoming = calculateTransportBitrateBps(bytesReceived, timestamp, previous && { bytes: previous.bytesReceived, timestamp: previous.timestamp })
+    if (updatePrevious) previousTrafficSample = { bytesSent, bytesReceived, timestamp }
+    return { outgoing, incoming }
   }
 
   const metrics = computed(() => {
@@ -39,7 +40,8 @@ export const useRtcStatsStore = defineStore('rtc-stats', () => {
     return {
       ...result,
       lossPercent: result.loss == null ? null : result.loss * 100,
-      bitrate: sumFinite(pairs, 'availableOutgoingBitrate'),
+      availableOutgoingBitrate: sumFinite(pairs, 'availableOutgoingBitrate'),
+      outgoingBitrate: outgoingBitrate.value,
       incomingAvailableBitrate: sumFinite(pairs, 'availableIncomingBitrate'),
       incomingBitrate: incomingBitrate.value
     }
@@ -62,8 +64,10 @@ export const useRtcStatsStore = defineStore('rtc-stats', () => {
     outbound.value = []
     inbound.value = []
     incomingBitrate.value = null
+    outgoingBitrate.value = null
     history.rtt.splice(0)
-    history.bitrate.splice(0)
+    history.availableOutgoingBitrate.splice(0)
+    history.outgoingBitrate.splice(0)
     history.incomingAvailableBitrate.splice(0)
     history.incomingBitrate.splice(0)
     history.jitter.splice(0)
@@ -81,19 +85,21 @@ export const useRtcStatsStore = defineStore('rtc-stats', () => {
       const next = await session.getWebRTCStatsSnapshot()
       const nextMetrics = getRtcSignalMetrics(next?.transports)
       const pairs = next?.transports?.map(item => item.candidatePair).filter(Boolean) || []
-      const bitrate = sumFinite(pairs, 'availableOutgoingBitrate')
+      const availableOutgoingBitrate = sumFinite(pairs, 'availableOutgoingBitrate')
       const incomingAvailableBitrate = sumFinite(pairs, 'availableIncomingBitrate')
-      const measuredInboundBitrate = measuredIncomingBitrate(pairs, next.timestamp, true)
-      incomingBitrate.value = measuredInboundBitrate
+      const measured = measuredTrafficBitrates(pairs, next.timestamp, true)
+      outgoingBitrate.value = measured.outgoing
+      incomingBitrate.value = measured.incoming
       snapshot.value = next
       outbound.value = session.getOutboundVideoStats ? await session.getOutboundVideoStats() : []
       inbound.value = session.getInboundVideoStats ? await session.getInboundVideoStats() : []
       appendHistory(history.rtt, nextMetrics.rttMs, next.timestamp)
       appendHistory(history.jitter, nextMetrics.jitterMs, next.timestamp)
       appendHistory(history.loss, nextMetrics.loss == null ? null : nextMetrics.loss * 100, next.timestamp)
-      appendHistory(history.bitrate, bitrate, next.timestamp)
+      appendHistory(history.availableOutgoingBitrate, availableOutgoingBitrate, next.timestamp)
+      appendHistory(history.outgoingBitrate, measured.outgoing, next.timestamp)
       appendHistory(history.incomingAvailableBitrate, incomingAvailableBitrate, next.timestamp)
-      appendHistory(history.incomingBitrate, measuredInboundBitrate, next.timestamp)
+      appendHistory(history.incomingBitrate, measured.incoming, next.timestamp)
       lastError.value = ''
     } catch (error) {
       lastError.value = error?.message || 'RTC statistics could not be collected.'

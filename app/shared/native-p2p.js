@@ -297,6 +297,7 @@ export class NativeP2pMesh {
         applyP2pVideoCodecPreferences(pc)
         const offer = await pc.createOffer()
         await pc.setLocalDescription({ type: offer.type, sdp: applyOpusAudioProfile(offer.sdp) })
+        await this.configureStateSenders(state)
         this.signal(peerId, { description: pc.localDescription })
       } catch (error) {
         this.fail('negotiation-failed', error)
@@ -368,6 +369,7 @@ export class NativeP2pMesh {
       try {
         await pc.setRemoteDescription(signal.description)
         applyP2pVideoCodecPreferences(pc)
+        await this.configureStateSenders(state)
       } finally {
         state.settingRemoteAnswer = false
       }
@@ -376,6 +378,7 @@ export class NativeP2pMesh {
       if (signal.description.type === 'offer') {
         const answer = await pc.createAnswer()
         await pc.setLocalDescription({ type: answer.type, sdp: applyOpusAudioProfile(answer.sdp) })
+        await this.configureStateSenders(state)
         this.signal(state.peerId, { description: pc.localDescription })
       }
       return
@@ -542,6 +545,13 @@ export class NativeP2pMesh {
     const options = this.getSenderOptions?.(source, track)
     if (!options) return false
     return applyRtpSenderSettings(sender, options)
+  }
+
+  configureStateSenders(state) {
+    return Promise.all([...state.senders].map(([source, sender]) => {
+      const track = this.localSources.get(source)?.track || sender.track
+      return track ? this.configureSender(sender, source, track) : false
+    }))
   }
 
   reconfigureSource(source) {

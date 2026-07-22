@@ -116,15 +116,33 @@ priority. Changing the shared-audio or channel ceiling reapplies the effective
 limit to active audio senders.
 
 Video capture settings describe the requested source resolution and frame rate.
-SFU production is capped at 8 Mbps, 1920 by 1080, and 60 FPS, and asks the
-browser to maintain frame rate when congestion requires degradation. Native P2P
-uses a 16 Mbps ceiling at the requested capture resolution with the same
-maintain-frame-rate policy. Resolution may therefore fall below the requested
+Video production is capped at 6 Mbps, 1920 by 1080 on SFU, and 60 FPS. The
+resolution-and-frame-rate-derived bitrate policy uses balanced degradation so
+the browser can reduce frame rate or resolution before starving the sender.
+Resolution may therefore fall below the requested
 target when browser congestion control needs to protect cadence. Capture settings, sender encoding limits, available upload
 bandwidth, and encoder capacity remain independent constraints, so a requested
 frame rate is never reported as an achieved rate without outbound RTP evidence.
-Direct and Mesh video use a 16 Mbps sender ceiling and prefer H.264 when both
-browsers advertise it, retaining VP9 and VP8 as negotiated fallbacks.
+Rooms with three or more participants remain on SFU while any participant
+publishes camera or screen video. This keeps one video encoder and one upload per
+source instead of multiplying both by the number of peers in a mesh. An already
+direct two-device call may keep its single P2P video sender, capped at 4 Mbps,
+but SFU rooms do not probe P2P while video is active because preparation would
+temporarily duplicate the encoder. Direct video prefers H.264 when both browsers
+advertise it, retaining VP9 and VP8 as negotiated fallbacks. Sender parameters
+are reapplied after P2P negotiation so a browser cannot silently lose the
+configured ceiling during SDP changes.
+
+Mediasoup forwards RTP without decoding, resizing, or transcoding it. Multiple
+receiver qualities require sender-provided simulcast or SVC layers. Screen share
+uses one encoding because simulcast would add sender encoders and upload, while
+SVC is not enabled without runtime evidence that the negotiated codec and
+browser can encode it efficiently in hardware.
+
+RTC transport statistics distinguish measured traffic from bandwidth estimates.
+Measured outgoing and incoming bitrate are calculated from candidate-pair byte
+deltas. Available outgoing and incoming capacity are browser congestion-control
+estimates and do not describe the amount of media currently being transmitted.
 
 Native P2P and SFU receivers request a zero-millisecond jitter-buffer target when
 the browser implements `RTCRtpReceiver.jitterBufferTarget`, asking for the
