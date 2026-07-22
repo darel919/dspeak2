@@ -61,4 +61,16 @@ test("soundboard triggers carry server-owned player attribution", async () => {
   assert.match(source, /triggeredBy: String\(userId\)/);
   assert.match(source, /clipTitle: clip\.title/);
   assert.match(source, /duration: Number\(clip\.duration\)/);
+  assert.match(source, /activityId: crypto\.randomUUID\(\)/);
+});
+
+test("soundboard activity follows actual audio completion", async () => {
+  const store = await readFile("app/stores/soundboard.js", "utf8");
+  const media = await readFile(
+    "app/composables/useHybridMediaSession.js",
+    "utf8",
+  );
+  assert.match(store, /await play\(data\.clipId, data\.roomId\)/);
+  assert.match(store, /voiceStore\.clearSoundboardActivity/);
+  assert.doesNotMatch(media, /voiceStore\.showSoundboardActivity/);
 });

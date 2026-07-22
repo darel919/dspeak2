@@ -421,6 +421,14 @@ export const useChannelsStore = defineStore("channels", () => {
     );
     if (!channel) return false;
     channel.inRoom = [...new Set(snapshot.inRoom.map(String))];
+    const participantStates = Array.isArray(snapshot.participantStates)
+      ? snapshot.participantStates
+      : [];
+    channel.participantStates = Object.fromEntries(
+      participantStates
+        .filter((state) => state?.userId)
+        .map((state) => [String(state.userId), { ...state }]),
+    );
     for (const profile of snapshot.profiles || []) {
       if (profile?.id)
         voiceProfiles.value.set(String(profile.id), {

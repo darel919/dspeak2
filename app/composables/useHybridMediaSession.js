@@ -411,11 +411,6 @@ export function useHybridMediaSession() {
     });
     registerHandler("server-shutdown", () => socket?.close());
     registerHandler("soundboard-triggered", (data) => {
-      voiceStore.showSoundboardActivity(data.triggeredBy, {
-        title: data.clipTitle,
-        icon: data.clipIcon,
-        duration: data.duration,
-      });
       if (typeof window !== "undefined")
         window.dispatchEvent(
           new CustomEvent("dspeak:soundboard-triggered", { detail: data }),

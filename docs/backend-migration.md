@@ -1,6 +1,6 @@
 # Backend migration
 
-DSpeak now owns the browser application, API, chat, presence, and mediasoup SFU
+dSpeak now owns the browser application, API, chat, presence, and mediasoup SFU
 in one Nuxt and Nitro process. This document records the production boundaries
 left by the previous multi-service deployment.
 
@@ -45,6 +45,6 @@ Use the Nitro Node server preset and a persistent process. Stateless serverless
 and edge deployments are incompatible with process-owned mediasoup workers,
 routers, transports, producers, consumers, and WebSockets.
 
-Run one DSpeak instance. Multiple instances require router piping plus a shared
+Run one dSpeak instance. Multiple instances require router piping plus a shared
 signaling and state backplane. The Nitro HTTP/WebSocket port and configured
 WebRTC TCP/UDP ports must be reachable from clients.

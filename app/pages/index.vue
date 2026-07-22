@@ -68,7 +68,7 @@
                     class="h-24 w-24 mx-auto"
                   />
                 </div>
-                <h2 class="text-2xl font-semibold mb-2">Welcome to DSpeak</h2>
+                <h2 class="text-2xl font-semibold mb-2">Welcome to dSpeak</h2>
                 <p class="text-base-content/60 mb-6">
                   Select a room from the rail to start collaborating with your
                   team.

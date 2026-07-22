@@ -24,8 +24,9 @@
             v-for="item in sections"
             :key="item.id"
             v-show="
-              item.id !== 'soundboard' ||
-              hasPermission('room.manage_soundboard')
+              (item.id !== 'soundboard' ||
+                hasPermission('room.manage_soundboard')) &&
+              (item.id !== 'audit' || canViewAudit)
             "
             class="metro-transition flex items-center gap-3 px-4 py-3 text-left"
             :class="
@@ -82,9 +83,10 @@
                   accept="image/jpeg,image/png,image/webp"
                   @change="headerImage = $event.target.files[0]"
                 />
-                <span class="text-xs text-base-content/60"
-                  >3:1 recommended, up to 5 MB</span
-                >
+                <span class="text-xs text-base-content/60">
+                  1920 × 192 px (10:1) recommended. Keep important content
+                  centered. JPEG, PNG, or WebP up to 5 MB.
+                </span>
               </label>
             </div>
             <fieldset>
@@ -101,7 +103,8 @@
                       : 'border-transparent'
                   "
                   :style="{ background: accentColor(accent), color: '#fff' }"
-                  @click="form.accent = accent"
+                  :disabled="savingAccent"
+                  @click="saveAccent(accent)"
                 >
                   {{ accent }}
                 </button>
@@ -219,7 +222,7 @@
                 <div
                   v-for="membership in memberships"
                   :key="membership.id"
-                  class="grid gap-4 py-5 lg:grid-cols-[minmax(180px,0.7fr)_minmax(0,1.6fr)_auto] lg:items-center"
+                  class="grid gap-4 py-5 lg:grid-cols-[minmax(180px,0.7fr)_minmax(0,1.6fr)] lg:items-start"
                 >
                   <div class="min-w-0">
                     <strong class="block truncate">{{
@@ -229,7 +232,7 @@
                   </div>
                   <div
                     v-if="membershipSystemRoles(membership).length"
-                    class="flex min-h-12 items-center gap-2"
+                    class="flex min-h-12 items-center gap-2 lg:justify-end"
                   >
                     <span
                       v-for="role in membershipSystemRoles(membership)"
@@ -244,107 +247,158 @@
                       <Icon name="lucide:lock-keyhole" class="size-3.5" />
                     </span>
                   </div>
-                  <div v-else class="flex min-w-0 flex-wrap gap-2">
-                    <button
-                      v-for="role in assignableRoles"
-                      :key="role.id"
-                      type="button"
-                      class="metro-transition inline-flex min-h-11 items-center gap-2 border px-3 py-2 text-sm font-medium"
-                      :class="
-                        membership.roleSelection.includes(String(role.id))
-                          ? 'border-primary bg-primary text-primary-content'
-                          : 'border-base-300 hover:border-primary hover:bg-base-200'
-                      "
-                      :disabled="
-                        !canManageMembership(membership) ||
-                        !canManageRoleChoice(role)
-                      "
-                      @click="toggleMembershipRole(membership, role.id)"
-                    >
-                      <span
-                        class="size-3"
-                        :style="{ background: accentColor(role.color) }"
-                      ></span>
-                      {{ role.name }}
-                      <Icon
-                        v-if="
+                  <div v-else class="min-w-0">
+                    <div class="flex min-w-0 flex-wrap gap-2">
+                      <button
+                        v-for="role in assignableRoles"
+                        :key="role.id"
+                        type="button"
+                        class="metro-transition inline-flex min-h-11 items-center gap-2 border px-3 py-2 text-sm font-medium"
+                        :class="
                           membership.roleSelection.includes(String(role.id))
+                            ? 'border-primary bg-primary text-primary-content'
+                            : 'border-base-300 hover:border-primary hover:bg-base-200'
                         "
-                        name="lucide:check"
-                        class="size-4"
-                      />
-                    </button>
+                        :disabled="
+                          !canManageMembership(membership) ||
+                          !canManageRoleChoice(role) ||
+                          membership.saving ||
+                          (membership.roleSelection.length === 1 &&
+                            membership.roleSelection.includes(String(role.id)))
+                        "
+                        @click="toggleMembershipRole(membership, role.id)"
+                      >
+                        <span
+                          class="size-3"
+                          :style="{ background: accentColor(role.color) }"
+                        ></span>
+                        {{ role.name }}
+                        <Icon
+                          v-if="
+                            membership.roleSelection.includes(String(role.id))
+                          "
+                          name="lucide:check"
+                          class="size-4"
+                        />
+                      </button>
+                    </div>
+                    <p
+                      v-if="membership.saving"
+                      class="mt-3 text-xs text-base-content/55"
+                    >
+                      Applying role…
+                    </p>
+                    <p
+                      v-else-if="membership.assignmentError"
+                      class="mt-3 text-xs text-error"
+                    >
+                      {{ membership.assignmentError }}
+                    </p>
+                    <p
+                      v-else-if="canManageMembership(membership)"
+                      class="mt-3 text-xs text-base-content/55"
+                    >
+                      Changes apply immediately. Every member must keep at least
+                      one role.
+                    </p>
+                    <span v-else class="mt-3 block text-xs text-base-content/45"
+                      >Locked</span
+                    >
                   </div>
-                  <button
-                    v-if="canManageMembership(membership)"
-                    type="button"
-                    class="btn btn-primary btn-sm"
-                    :disabled="
-                      !assignmentChanged(membership) || membership.saving
-                    "
-                    @click="saveAssignment(membership)"
-                  >
-                    {{ membership.saving ? "Saving…" : "Save" }}
-                  </button>
-                  <span
-                    v-else
-                    class="text-xs text-base-content/45 lg:text-right"
-                    >Locked</span
-                  >
                 </div>
               </div>
             </div>
             <form
               v-if="roleForm"
-              class="border border-base-300 p-5"
+              class="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4"
               @submit.prevent="saveRole"
+              @click.self="closeRoleForm"
             >
-              <h3 class="mb-4 text-xl font-light">
-                {{ roleForm.id ? "Edit role" : "Create role" }}
-              </h3>
-              <div class="grid gap-4 sm:grid-cols-2">
-                <input
-                  v-model="roleForm.name"
-                  class="input input-bordered w-full"
-                  placeholder="Role name"
-                  required
-                /><input
-                  v-model.number="roleForm.position"
-                  class="input input-bordered w-full"
-                  type="number"
-                  min="1"
-                  placeholder="Position"
-                />
-              </div>
-              <div class="mt-5 grid gap-2 sm:grid-cols-2">
-                <label
-                  v-for="permission in ROOM_PERMISSIONS"
-                  :key="permission"
-                  class="flex items-center gap-2 border border-base-300 p-3"
-                  ><input
-                    v-model="roleForm.permissions"
-                    type="checkbox"
-                    class="checkbox checkbox-primary"
-                    :value="permission"
-                  />{{ permission }}</label
-                >
-              </div>
-              <div class="mt-5 flex gap-2">
-                <button class="btn btn-primary">Save role</button
-                ><button
-                  type="button"
-                  class="btn btn-ghost"
-                  @click="roleForm = null"
-                >
-                  Cancel</button
-                ><button
-                  v-if="roleForm.id && !roleForm.system"
-                  type="button"
-                  class="btn btn-error ml-auto"
-                  @click="deleteRole"
-                >
-                  Delete
-                </button>
+              <div
+                class="my-auto w-full max-w-3xl border border-base-300 bg-base-100 p-5 shadow-2xl sm:p-7"
+                role="dialog"
+                aria-modal="true"
+                :aria-labelledby="roleFormTitleId"
+              >
+                <div class="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <h3 :id="roleFormTitleId" class="text-2xl font-light">
+                      {{
+                        roleForm.id ? `Edit ${roleForm.name}` : "Create role"
+                      }}
+                    </h3>
+                    <p class="text-sm text-base-content/60">
+                      Choose what members with this role can do.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-square btn-sm"
+                    aria-label="Close role editor"
+                    @click="closeRoleForm"
+                  >
+                    <Icon name="lucide:x" class="size-5" />
+                  </button>
+                </div>
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <label class="grid gap-2"
+                    ><span class="font-medium">Role name</span
+                    ><input
+                      v-model="roleForm.name"
+                      class="input input-bordered w-full"
+                      required /></label
+                  ><label class="grid gap-2"
+                    ><span class="font-medium">Hierarchy position</span
+                    ><input
+                      v-model.number="roleForm.position"
+                      class="input input-bordered w-full"
+                      type="number"
+                      min="1"
+                      required
+                  /></label>
+                </div>
+                <fieldset class="mt-6">
+                  <legend class="mb-3 font-medium">Permissions</legend>
+                  <div
+                    class="grid max-h-[45vh] gap-2 overflow-y-auto sm:grid-cols-2"
+                  >
+                    <label
+                      v-for="permission in permissionOptions"
+                      :key="permission.value"
+                      class="flex cursor-pointer items-start gap-3 border border-base-300 p-3 hover:bg-base-200"
+                      ><input
+                        v-model="roleForm.permissions"
+                        type="checkbox"
+                        class="checkbox checkbox-primary mt-0.5"
+                        :value="permission.value"
+                      /><span
+                        ><strong class="block">{{ permission.label }}</strong
+                        ><small class="text-base-content/55">{{
+                          permission.help
+                        }}</small></span
+                      ></label
+                    >
+                  </div>
+                </fieldset>
+                <div class="mt-6 flex flex-wrap gap-2">
+                  <button class="btn btn-primary" :disabled="savingRole">
+                    {{ savingRole ? "Saving…" : "Save role" }}</button
+                  ><button
+                    type="button"
+                    class="btn btn-ghost"
+                    @click="closeRoleForm"
+                  >
+                    Cancel</button
+                  ><button
+                    v-if="roleForm.id && !roleForm.system"
+                    type="button"
+                    class="btn btn-error sm:ml-auto"
+                    :disabled="savingRole"
+                    @click="deleteRole"
+                  >
+                    Delete role
+                  </button>
+                </div>
               </div>
             </form>
           </section>
@@ -352,6 +406,57 @@
             v-else-if="activeSection === 'soundboard'"
             :room-id="roomId"
           />
+          <section v-else-if="activeSection === 'audit'" class="space-y-6">
+            <div>
+              <h2 class="text-3xl font-light">Audit log</h2>
+              <p class="text-sm text-base-content/60">
+                Invite creation and invite-based joins for this room.
+              </p>
+            </div>
+            <div v-if="auditLoading" class="loading loading-spinner"></div>
+            <div
+              v-else-if="!auditEvents.length"
+              class="border-y border-base-300 py-6 text-base-content/60"
+            >
+              No invite activity yet.
+            </div>
+            <ol
+              v-else
+              class="divide-y divide-base-300 border-y border-base-300"
+            >
+              <li
+                v-for="entry in auditEvents"
+                :key="entry.id"
+                class="grid gap-1 py-4 sm:grid-cols-[1fr_auto]"
+              >
+                <span>
+                  <strong>{{ auditActor(entry) }}</strong>
+                  {{
+                    entry.action === "invite.created"
+                      ? "created an invite link"
+                      : `invited ${auditSubject(entry)} to the room`
+                  }}
+                </span>
+                <time
+                  class="text-sm text-base-content/55"
+                  :datetime="entry.occurredAt"
+                  >{{ formatAuditDate(entry.occurredAt) }}</time
+                >
+                <small
+                  v-if="
+                    entry.details?.inviteExpiresAt || entry.details?.expiresAt
+                  "
+                  class="text-base-content/55 sm:col-span-2"
+                  >Invite expires
+                  {{
+                    formatAuditDate(
+                      entry.details.inviteExpiresAt || entry.details.expiresAt,
+                    )
+                  }}</small
+                >
+              </li>
+            </ol>
+          </section>
         </main>
       </div>
     </div>
@@ -359,7 +464,7 @@
 </template>
 
 <script setup>
-import { ROOM_ACCENTS, ROOM_PERMISSIONS } from "~~/shared/room-policy.js";
+import { ROOM_ACCENTS } from "~~/shared/room-policy.js";
 import { useAuthStore } from "../../../stores/auth";
 import { useRoomsStore } from "../../../stores/rooms";
 import SoundboardAdmin from "../../../components/SoundboardAdmin.vue";
@@ -374,11 +479,16 @@ const roles = ref([]);
 const memberships = ref([]);
 const loading = ref(true);
 const saving = ref(false);
+const savingAccent = ref(false);
 const error = ref("");
 const activeSection = ref("branding");
 const picture = ref(null);
 const headerImage = ref(null);
 const roleForm = ref(null);
+const savingRole = ref(false);
+const auditEvents = ref([]);
+const auditLoading = ref(false);
+const roleFormTitleId = "room-role-form-title";
 const form = reactive({
   name: "",
   desc: "",
@@ -395,7 +505,60 @@ const sections = [
   { id: "roles", label: "Roles", icon: "lucide:shield-check" },
   { id: "attenuation", label: "Attenuation", icon: "lucide:audio-lines" },
   { id: "soundboard", label: "Soundboard", icon: "lucide:music-2" },
+  { id: "audit", label: "Audit log", icon: "lucide:scroll-text" },
 ];
+const canViewAudit = computed(
+  () =>
+    room.value?.isOwner ||
+    room.value?.permissions?.some((permission) =>
+      ["room.manage_invites", "room.manage_members"].includes(permission),
+    ),
+);
+const permissionOptions = [
+  [
+    "room.update_identity",
+    "Edit room identity",
+    "Change the room name, description, and images.",
+  ],
+  [
+    "room.update_theme",
+    "Edit room appearance",
+    "Change the room accent and visual theme.",
+  ],
+  [
+    "room.manage_invites",
+    "Manage invites",
+    "Create and revoke room invitations.",
+  ],
+  [
+    "room.manage_members",
+    "Manage members",
+    "Remove lower-ranked members from the room.",
+  ],
+  [
+    "room.manage_roles",
+    "Manage roles",
+    "Create, edit, and assign lower-ranked roles.",
+  ],
+  [
+    "room.manage_soundboard",
+    "Manage soundboard",
+    "Add, edit, and remove room soundboard clips.",
+  ],
+  ["channel.create", "Create channels", "Add new text and voice channels."],
+  ["channel.update", "Edit channels", "Change channel names and settings."],
+  ["channel.delete", "Delete channels", "Permanently remove channels."],
+  [
+    "channel.manage_media_policy",
+    "Manage media quality",
+    "Change channel audio and video limits.",
+  ],
+  [
+    "message.moderate",
+    "Moderate messages",
+    "Remove messages that need moderation.",
+  ],
+].map(([value, label, help]) => ({ value, label, help }));
 const assignableRoles = computed(() =>
   roles.value.filter((role) => !role.system),
 );
@@ -452,6 +615,7 @@ async function load() {
       roleSelection: (membership.roles || []).map(String),
       originalRoleSelection: (membership.roles || []).map(String),
       saving: false,
+      assignmentError: "",
     }));
   } catch (cause) {
     error.value = cause.message;
@@ -459,6 +623,34 @@ async function load() {
     loading.value = false;
   }
 }
+async function loadAudit() {
+  if (!canViewAudit.value || auditLoading.value) return;
+  auditLoading.value = true;
+  try {
+    auditEvents.value = await api(
+      `/room/audit?roomId=${encodeURIComponent(roomId.value)}`,
+    );
+  } catch (cause) {
+    error.value = cause.message;
+  } finally {
+    auditLoading.value = false;
+  }
+}
+function auditActor(entry) {
+  return entry.actor?.display_name || entry.actor?.username || "Unknown member";
+}
+function auditSubject(entry) {
+  return entry.subject?.display_name || entry.subject?.username || "a member";
+}
+function formatAuditDate(value) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+watch(activeSection, (section) => {
+  if (section === "audit") loadAudit();
+});
 
 async function saveBranding() {
   saving.value = true;
@@ -466,13 +658,31 @@ async function saveBranding() {
     await roomsStore.updateRoom(roomId.value, {
       name: form.name,
       desc: form.desc,
-      accent: form.accent,
       picture: picture.value,
       headerImage: headerImage.value,
     });
     await load();
   } finally {
     saving.value = false;
+  }
+}
+async function saveAccent(accent) {
+  if (savingAccent.value || form.accent === accent) return;
+  const previousAccent = form.accent;
+  form.accent = accent;
+  savingAccent.value = true;
+  roomsStore.applyRealtimeRoomUpdate({ id: roomId.value, accent });
+  try {
+    room.value = await roomsStore.updateRoom(roomId.value, { accent });
+  } catch (cause) {
+    form.accent = previousAccent;
+    roomsStore.applyRealtimeRoomUpdate({
+      id: roomId.value,
+      accent: previousAccent,
+    });
+    error.value = cause.message;
+  } finally {
+    savingAccent.value = false;
   }
 }
 async function saveAttenuation() {
@@ -491,6 +701,9 @@ function startRole() {
 }
 function editRole(role) {
   roleForm.value = { ...role, permissions: [...(role.permissions || [])] };
+}
+function closeRoleForm() {
+  if (!savingRole.value) roleForm.value = null;
 }
 function canEditRole(role) {
   return (
@@ -522,41 +735,19 @@ function membershipUserName(membership) {
   const user = membership.expand?.user;
   return user?.display_name || user?.name || user?.username || membership.user;
 }
-function toggleMembershipRole(membership, roleId) {
+async function toggleMembershipRole(membership, roleId) {
+  if (membership.saving) return;
   const id = String(roleId);
-  membership.roleSelection = membership.roleSelection.includes(id)
+  const previousSelection = [...membership.roleSelection];
+  const nextSelection = membership.roleSelection.includes(id)
     ? membership.roleSelection.filter((value) => value !== id)
     : [...membership.roleSelection, id];
-}
-function assignmentChanged(membership) {
-  const selected = [...membership.roleSelection].sort();
-  const original = [...membership.originalRoleSelection].sort();
-  return selected.join(",") !== original.join(",");
-}
-async function saveRole() {
-  const editing = Boolean(roleForm.value.id);
-  await api("/room/roles", {
-    method: editing ? "PUT" : "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      roomId: roomId.value,
-      roleId: roleForm.value.id,
-      ...roleForm.value,
-    }),
-  });
-  roleForm.value = null;
-  await load();
-}
-async function deleteRole() {
-  await api("/room/roles", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ roomId: roomId.value, roleId: roleForm.value.id }),
-  });
-  roleForm.value = null;
-  await load();
-}
-async function saveAssignment(membership) {
+  if (!nextSelection.length) {
+    membership.assignmentError = "A member must have at least one role.";
+    return;
+  }
+  membership.roleSelection = nextSelection;
+  membership.assignmentError = "";
   membership.saving = true;
   try {
     await api("/room/roles", {
@@ -566,12 +757,54 @@ async function saveAssignment(membership) {
         action: "assign",
         roomId: roomId.value,
         membershipId: membership.id,
-        roleIds: membership.roleSelection,
+        roleIds: nextSelection,
       }),
     });
-    await load();
+    membership.originalRoleSelection = [...nextSelection];
+    membership.expand = {
+      ...membership.expand,
+      roles: roles.value.filter((role) =>
+        nextSelection.includes(String(role.id)),
+      ),
+    };
+  } catch (cause) {
+    membership.roleSelection = previousSelection;
+    membership.assignmentError = cause.message;
   } finally {
     membership.saving = false;
+  }
+}
+async function saveRole() {
+  savingRole.value = true;
+  try {
+    const editing = Boolean(roleForm.value.id);
+    await api("/room/roles", {
+      method: editing ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        roomId: roomId.value,
+        roleId: roleForm.value.id,
+        ...roleForm.value,
+      }),
+    });
+    roleForm.value = null;
+    await load();
+  } finally {
+    savingRole.value = false;
+  }
+}
+async function deleteRole() {
+  savingRole.value = true;
+  try {
+    await api("/room/roles", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId: roomId.value, roleId: roleForm.value.id }),
+    });
+    roleForm.value = null;
+    await load();
+  } finally {
+    savingRole.value = false;
   }
 }
 onMounted(load);

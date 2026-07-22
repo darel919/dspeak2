@@ -56,3 +56,12 @@ export function publicDisplayName(user) {
     "Unknown user"
   );
 }
+
+export function profileIdentityLine(user, nickname) {
+  const displayName = publicDisplayName(user);
+  const personalNickname = normalizedText(nickname);
+
+  if (!personalNickname) return displayName;
+  if (personalNickname === normalizedText(displayName)) return displayName;
+  return `${personalNickname} AKA ${displayName}`;
+}

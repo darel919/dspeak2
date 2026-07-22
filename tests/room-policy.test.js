@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  canManageMember,
   canManageRole,
   getEffectivePermissions,
   normalizeAttenuation,
@@ -22,6 +23,15 @@ test("role hierarchy protects system and equal roles", () => {
   assert.equal(canManageRole(actor, { position: 100, system: false }), true);
   assert.equal(canManageRole(actor, { position: 500, system: false }), false);
   assert.equal(canManageRole(actor, { position: 1, system: true }), false);
+});
+
+test("member management requires permission and protects equal or system roles", () => {
+  const admin = [{ position: 750, permissions: ["room.manage_members"] }];
+  assert.equal(canManageMember(admin, [{ position: 100 }]), true);
+  assert.equal(canManageMember(admin, [{ position: 750 }]), false);
+  assert.equal(canManageMember([], [{ position: 100 }]), false);
+  assert.equal(canManageMember(admin, [{ position: 1, system: true }]), false);
+  assert.equal(canManageMember([], [{ position: 750 }], true), true);
 });
 
 test("room appearance and attenuation use safe defaults", () => {

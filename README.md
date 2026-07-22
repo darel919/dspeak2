@@ -1,11 +1,11 @@
-# DSpeak
+# dSpeak
 
-DSpeak is a self-hosted communication platform for text chat, presence, voice,
+dSpeak is a self-hosted communication platform for text chat, presence, voice,
 video, screen sharing, soundboards, and notifications. It runs as one long-lived
 Nuxt and Nitro application. PocketBase stores persistent data; native WebRTC and
 mediasoup carry realtime media.
 
-## What DSpeak provides
+## What dSpeak provides
 
 - Rooms with text, voice, camera, screen sharing, and shared audio
 - Room roles, branding, media policies, notifications, and member nicknames
@@ -18,7 +18,7 @@ mediasoup carry realtime media.
 
 ## Runtime architecture
 
-DSpeak is a Nuxt 4 monolith:
+dSpeak is a Nuxt 4 monolith:
 
 | Layer            | Responsibility                                                        |
 | ---------------- | --------------------------------------------------------------------- |
@@ -35,7 +35,7 @@ backplane and mediasoup router piping have been implemented.
 
 ## Media routing
 
-Every call starts on the SFU so participants have a reliable media path. DSpeak
+Every call starts on the SFU so participants have a reliable media path. dSpeak
 may then move the whole room to a verified direct route without restarting local
 capture.
 

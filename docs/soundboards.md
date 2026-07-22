@@ -31,7 +31,7 @@ JPEG, PNG, WebP, and GIF icons are scaled without distortion, padded to 64 by 64
 pixels, converted to ICO, and stored separately from their source images.
 
 Docker includes FFmpeg and ffprobe. Both executables must be available on `PATH`
-when DSpeak runs directly on a host.
+when dSpeak runs directly on a host.
 
 ## Authorization
 
@@ -73,7 +73,7 @@ visible only to members allowed to manage them.
 
 ## System sounds
 
-DSpeak provides built-in system-sound themes. The default theme reads connection
+dSpeak provides built-in system-sound themes. The default theme reads connection
 sounds from:
 
 - `public/sounds/default_connect.ogg`

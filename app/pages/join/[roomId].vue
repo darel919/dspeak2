@@ -12,6 +12,23 @@
         <p class="text-base-content/70">Please wait...</p>
       </div>
 
+      <div v-else-if="invite && !joinSuccess && !error" class="space-y-5">
+        <Icon name="lucide:mail-open" class="mx-auto size-16 text-primary" />
+        <h1 class="text-3xl font-light">
+          You are invited to {{ invite.room.name }}
+        </h1>
+        <p class="text-base-content/70">
+          <strong>{{
+            invite.invitedBy.display_name || invite.invitedBy.username
+          }}</strong>
+          invited you on {{ formatDate(invite.createdAt) }}.
+        </p>
+        <p class="text-sm text-base-content/55">
+          This invitation expires {{ formatDate(invite.expiresAt) }}.
+        </p>
+        <button class="btn btn-primary" @click="attemptJoin">Join room</button>
+      </div>
+
       <!-- Success state -->
       <div v-else-if="joinSuccess" class="space-y-4">
         <div class="text-success mb-4">
@@ -90,22 +107,45 @@ const router = useRouter();
 const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
 
-const roomId = computed(() => route.params.roomId);
+const inviteToken = computed(() => String(route.params.roomId || ""));
+const roomId = computed(() => invite.value?.room?.id || "");
 const loading = ref(true);
 const loadingMessage = ref("Initializing...");
 const joinSuccess = ref(false);
 const error = ref(null);
 const initialized = ref(false);
+const invite = ref(null);
 
 onMounted(async () => {
   console.debug("[JoinRoom] Component mounted - Route params:", route.params);
   console.debug("[JoinRoom] Room ID:", roomId.value);
   console.debug("[JoinRoom] Current URL:", window.location.href);
 
-  await checkAuthentication();
-  await attemptJoin();
+  await loadInvite();
   initialized.value = true;
 });
+
+async function loadInvite() {
+  loading.value = true;
+  try {
+    const config = useRuntimeConfig();
+    invite.value = await $fetch(`${config.public.apiPath}/room/invites`, {
+      query: { token: inviteToken.value },
+    });
+    await checkAuthentication();
+    if (!authStore.getUserData()?.id) {
+      loadingMessage.value = "Redirecting to login...";
+      localStorage.setItem("redirectAfterAuth", window.location.href);
+      await router.push("/auth");
+      return;
+    }
+  } catch (cause) {
+    error.value =
+      cause.data?.statusMessage || cause.message || "Invalid invite link";
+  } finally {
+    loading.value = false;
+  }
+}
 
 async function checkAuthentication() {
   console.debug("[JoinRoom] Checking authentication...");
@@ -160,7 +200,7 @@ async function attemptJoin() {
 
     console.debug("[JoinRoom] User authenticated, attempting to join room...");
     loadingMessage.value = "Joining room...";
-    const result = await roomsStore.joinRoom(roomId.value);
+    const result = await roomsStore.joinRoom(roomId.value, inviteToken.value);
     console.debug("[JoinRoom] Join successful:", result);
 
     joinSuccess.value = true;
@@ -187,6 +227,13 @@ function goToRoom() {
 
 function goToHome() {
   router.push("/");
+}
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 definePageMeta({

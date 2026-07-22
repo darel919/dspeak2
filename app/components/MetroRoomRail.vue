@@ -46,7 +46,7 @@
       <button
         class="btn btn-square btn-ghost size-12 min-h-12"
         title="Join room"
-        @click="goHome"
+        @click="joinRoomDialog?.open()"
       >
         <Icon name="lucide:link" class="size-5" />
       </button>
@@ -98,7 +98,7 @@
           type="button"
           class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-base-200"
           role="menuitem"
-          @click="copySelectedRoomInvite"
+          @click="createSelectedRoomInvite"
         >
           <Icon name="lucide:link" class="size-4" />Copy invite link
         </button>
@@ -123,6 +123,8 @@
         </button>
       </div>
     </Teleport>
+    <JoinRoomDialog ref="joinRoomDialog" />
+    <RoomInviteDialog ref="inviteDialog" />
   </aside>
 </template>
 
@@ -138,6 +140,8 @@ const config = useRuntimeConfig();
 const unreadCounts = useState("unread-counts", () => []);
 const activeRoomId = computed(() => String(route.params.roomId || ""));
 const contextRoom = ref(null);
+const inviteDialog = ref(null);
+const joinRoomDialog = ref(null);
 const contextMenuElement = ref(null);
 const contextMenuPosition = ref({ x: 0, y: 0 });
 const contextMenuStyle = computed(() => ({
@@ -155,10 +159,6 @@ function roomUnread(roomId) {
   return unreadCounts.value
     .filter((item) => String(item.roomId) === String(roomId))
     .reduce((total, item) => total + (Number(item.unreadCount) || 0), 0);
-}
-
-function goHome() {
-  navigateTo("/");
 }
 
 async function openRoomMenu(room, event) {
@@ -215,13 +215,10 @@ function openSelectedRoomSettings() {
   if (roomId) navigateTo(`/room/${roomId}/settings`);
 }
 
-async function copySelectedRoomInvite() {
-  const roomId = contextRoom.value?.id;
+function createSelectedRoomInvite() {
+  const room = contextRoom.value;
   closeRoomMenu();
-  if (roomId)
-    await navigator.clipboard.writeText(
-      `${window.location.origin}/join/${roomId}`,
-    );
+  if (room) inviteDialog.value?.open(room);
 }
 
 async function deleteSelectedRoom() {

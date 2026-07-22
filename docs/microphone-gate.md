@@ -31,12 +31,12 @@ A denied or unavailable microphone produces an inline error with a retry action.
 
 ## Active calls
 
-After 400 milliseconds without qualifying microphone activity, DSpeak suspends
+After 400 milliseconds without qualifying microphone activity, dSpeak suspends
 the sender but keeps capture and level analysis active. Speech can therefore
 reopen transmission without reacquiring the device.
 
-- On the SFU route, DSpeak locally pauses the mediasoup microphone producer.
-- On Direct and Mesh routes, DSpeak deactivates microphone RTP encoding for each
+- On the SFU route, dSpeak locally pauses the mediasoup microphone producer.
+- On Direct and Mesh routes, dSpeak deactivates microphone RTP encoding for each
   peer.
 
 Remote receiving preferences do not change when the local gate opens or closes.

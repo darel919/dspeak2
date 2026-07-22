@@ -48,13 +48,18 @@ export const useVoiceStore = defineStore("voice", () => {
   let mediaSessionError = null;
   const soundboardActivityTimers = new Map();
 
-  function clearSoundboardActivity(userId) {
+  function clearSoundboardActivity(userId, expectedActivity = null) {
     const normalizedUserId = String(userId);
+    const user = connectedUsers.value.get(normalizedUserId);
+    if (!user?.soundboardActivity) return;
+    if (
+      expectedActivity &&
+      user.soundboardActivity.activityId !== expectedActivity.activityId
+    )
+      return;
     const timer = soundboardActivityTimers.get(normalizedUserId);
     if (timer) clearTimeout(timer);
     soundboardActivityTimers.delete(normalizedUserId);
-    const user = connectedUsers.value.get(normalizedUserId);
-    if (!user?.soundboardActivity) return;
     connectedUsers.value.set(normalizedUserId, {
       ...user,
       soundboardActivity: null,
@@ -68,6 +73,9 @@ export const useVoiceStore = defineStore("voice", () => {
     if (!user || !activity?.title) return;
     clearSoundboardActivity(normalizedUserId);
     const visibleActivity = {
+      activityId: String(
+        activity.activityId || `${Date.now()}-${Math.random()}`,
+      ),
       title: String(activity.title),
       icon: String(activity.icon || "🔊"),
     };
@@ -85,6 +93,7 @@ export const useVoiceStore = defineStore("voice", () => {
           clearSoundboardActivity(normalizedUserId);
       }, durationMs + 500),
     );
+    return visibleActivity;
   }
 
   if (typeof window !== "undefined") {
@@ -888,6 +897,7 @@ export const useVoiceStore = defineStore("voice", () => {
     updateUserMuted,
     updateUserVoiceState,
     showSoundboardActivity,
+    clearSoundboardActivity,
     getConnectedUsersArray,
     getDisplayUsersArray,
     isUserConnected,

@@ -1,5 +1,5 @@
 <template>
-  <details class="dropdown dropdown-end">
+  <details class="dropdown dropdown-end relative z-30">
     <summary
       class="btn btn-square btn-ghost btn-sm relative"
       aria-label="Notifications"
@@ -12,7 +12,7 @@
       >
     </summary>
     <section
-      class="dropdown-content metro-pane mt-3 w-80 border border-base-300 shadow-xl"
+      class="dropdown-content metro-pane z-50 mt-3 w-80 border border-base-300 shadow-xl"
     >
       <header
         class="flex items-center justify-between border-b border-base-300 p-3"

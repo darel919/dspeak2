@@ -1,16 +1,25 @@
 <template>
   <div class="flex flex-col h-full bg-base-200">
-    <img
-      v-if="room?.headerImage"
-      :src="roomAssetUrl(room.headerImage)"
-      :alt="`${room.name} header`"
-      class="aspect-[3/1] w-full object-cover"
-    />
     <!-- Channel list header -->
-    <div class="p-4 border-base-300">
-      <div class="flex items-center justify-between">
-        <h3 class="font-semibold text-lg">{{ room?.name || "Channels" }}</h3>
-        <div class="dropdown dropdown-end">
+    <div class="border-base-300 p-4">
+      <div class="relative flex flex-col items-center gap-3">
+        <div
+          class="grid size-20 place-items-center overflow-hidden bg-base-300"
+        >
+          <img
+            v-if="room?.picture"
+            :src="roomAssetUrl(room.picture)"
+            :alt="`${room.name} avatar`"
+            class="size-full object-cover"
+          />
+          <span v-else class="text-2xl font-semibold text-base-content/70">{{
+            room?.name?.slice(0, 2).toUpperCase() || "#"
+          }}</span>
+        </div>
+        <h3 class="max-w-full truncate text-center text-lg font-semibold">
+          {{ room?.name || "Channels" }}
+        </h3>
+        <div class="dropdown dropdown-end absolute top-0 right-0">
           <button tabindex="0" class="btn btn-ghost btn-sm btn-circle">
             <Icon name="lucide:ellipsis-vertical" class="h-5 w-5" />
           </button>
@@ -31,7 +40,7 @@
             </li>
             <li>
               <a
-                @click="handleCopyInviteLink"
+                @click="inviteDialog?.open(room)"
                 class="cursor-pointer hover:bg-base-200"
                 >Copy Invite Link</a
               >
@@ -54,6 +63,7 @@
         </div>
       </div>
     </div>
+    <RoomInviteDialog ref="inviteDialog" />
 
     <!-- Channel categories -->
     <div class="flex-1 overflow-y-auto p-2 space-y-4">
@@ -70,7 +80,8 @@
             v-for="channel in textChannels"
             :key="channel.id"
             @click="selectChannel(channel)"
-            class="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-base-300 transition-colors"
+            @contextmenu.prevent.stop="openChannelMenu(channel, $event)"
+            class="group flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-base-300 transition-colors"
             :class="{
               'bg-primary text-primary-content':
                 selectedChannelId === channel.id,
@@ -123,6 +134,7 @@
             v-for="channel in voiceChannels"
             :key="channel.id"
             class="group rounded transition-colors"
+            @contextmenu.prevent.stop="openChannelMenu(channel, $event)"
             :class="{
               'bg-primary text-primary-content':
                 selectedChannelId === channel.id,
@@ -357,12 +369,61 @@
             <!-- Fallback vertical list when not connected but server has inRoom info -->
             <div v-else-if="channel.inRoom?.length" class="pl-8 pr-2 pb-2">
               <div class="flex flex-col gap-1 text-sm text-base-content/60">
-                <template v-for="uid in channel.inRoom" :key="uid">
+                <template
+                  v-for="u in getChannelParticipants(channel)"
+                  :key="u.id"
+                >
                   <div
-                    class="truncate"
-                    @contextmenu.prevent.stop="openParticipantMenu(uid, $event)"
+                    class="flex min-w-0 items-center gap-2"
+                    @contextmenu.prevent.stop="
+                      openParticipantMenu(u.id, $event)
+                    "
                   >
-                    {{ getUserName(uid) }}
+                    <div class="avatar placeholder shrink-0">
+                      <div
+                        class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
+                      >
+                        <img
+                          v-if="getUserAvatar(u.id)"
+                          :src="getUserAvatar(u.id)"
+                          :alt="`${getUserName(u.id)} avatar`"
+                          class="h-full w-full object-cover"
+                        />
+                        <span v-else>{{ getUserInitials(u.id) }}</span>
+                      </div>
+                    </div>
+                    <span class="min-w-0 flex-1 truncate">{{
+                      getUserName(u.id)
+                    }}</span>
+                    <div
+                      class="flex shrink-0 items-center gap-1 text-base-content/60"
+                      :aria-label="getParticipantMediaStatusLabel(u)"
+                    >
+                      <Icon
+                        v-if="u.deafened"
+                        name="lucide:headphone-off"
+                        class="h-4 w-4"
+                        title="Deafened"
+                      />
+                      <Icon
+                        v-else-if="u.muted"
+                        name="lucide:mic-off"
+                        class="h-4 w-4"
+                        title="Microphone off"
+                      />
+                      <Icon
+                        v-if="u.cameraEnabled"
+                        name="lucide:video"
+                        class="h-4 w-4 text-success"
+                        title="Camera on"
+                      />
+                      <Icon
+                        v-if="u.screenSharing"
+                        name="lucide:screen-share"
+                        class="h-4 w-4 text-success"
+                        title="Screen sharing"
+                      />
+                    </div>
                   </div>
                 </template>
               </div>
@@ -375,12 +436,53 @@
 
     <Teleport to="body">
       <div
+        v-if="contextChannel"
+        ref="channelMenuElement"
+        class="fixed z-[110] w-52 border border-base-300 bg-base-100 py-2 text-base-content shadow-2xl"
+        :style="channelMenuStyle"
+        role="menu"
+        :aria-label="`${contextChannel.name} channel actions`"
+        @pointerdown.stop
+        @contextmenu.prevent.stop
+      >
+        <div class="border-b border-base-300 px-4 pb-2 pt-1">
+          <strong class="block truncate text-sm">
+            {{
+              contextChannel.isMedia
+                ? contextChannel.name
+                : `#${contextChannel.name}`
+            }}
+          </strong>
+          <small class="text-base-content/55">
+            {{ contextChannel.isMedia ? "Voice channel" : "Text channel" }}
+          </small>
+        </div>
+        <button
+          v-if="canEditChannel(contextChannel)"
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-base-200"
+          role="menuitem"
+          @click="editContextChannel"
+        >
+          <Icon name="lucide:pencil" class="size-4" />Edit channel
+        </button>
+        <button
+          v-if="canDeleteChannel(contextChannel)"
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-error hover:bg-error/10"
+          role="menuitem"
+          @click="deleteContextChannel"
+        >
+          <Icon name="lucide:trash-2" class="size-4" />Delete channel
+        </button>
+      </div>
+      <div
         v-if="participantMenuUserId"
         ref="participantMenuElement"
         class="fixed z-[100] w-52 rounded-lg border border-base-300 bg-base-200 p-3 text-base-content shadow-xl"
         :style="participantMenuStyle"
         role="dialog"
-        :aria-label="`Volume control for ${getUserName(participantMenuUserId)}`"
+        :aria-label="`Voice channel controls for ${getUserName(participantMenuUserId)}`"
         @pointerdown.stop
         @contextmenu.prevent.stop
       >
@@ -404,38 +506,6 @@
           <span>0%</span>
           <span>200%</span>
         </div>
-        <div class="my-3 border-t border-base-300"></div>
-        <label class="block text-xs font-medium" for="channel-user-nickname">
-          Personal nickname
-        </label>
-        <input
-          id="channel-user-nickname"
-          v-model="participantNickname"
-          class="input input-bordered input-sm mt-2 w-full"
-          type="text"
-          maxlength="32"
-          placeholder="Use public username"
-          @keydown.enter.prevent="saveParticipantNickname"
-        />
-        <button
-          class="btn btn-primary btn-sm mt-2 w-full"
-          type="button"
-          :disabled="participantNicknameSaving"
-          @click="saveParticipantNickname"
-        >
-          <span
-            v-if="participantNicknameSaving"
-            class="loading loading-spinner loading-xs"
-          ></span>
-          {{ participantNickname.trim() ? "Save nickname" : "Clear nickname" }}
-        </button>
-        <p
-          v-if="participantNicknameError"
-          class="mt-2 text-xs text-error"
-          role="alert"
-        >
-          {{ participantNicknameError }}
-        </p>
       </div>
     </Teleport>
 
@@ -653,6 +723,22 @@ function getUserInitials(userId) {
     .toUpperCase()
     .slice(0, 2);
 }
+function getChannelParticipants(channel) {
+  return (channel.inRoom || []).map((userId) => ({
+    id: String(userId),
+    ...(channel.participantStates?.[String(userId)] || {}),
+  }));
+}
+function getParticipantMediaStatusLabel(user) {
+  const statuses = [];
+  if (user.deafened) statuses.push("deafened");
+  else if (user.muted) statuses.push("microphone off");
+  if (user.cameraEnabled) statuses.push("camera on");
+  if (user.screenSharing) statuses.push("screen sharing");
+  return statuses.length
+    ? `${getUserName(user.id)}: ${statuses.join(", ")}`
+    : `${getUserName(user.id)}: microphone on`;
+}
 function getUserMediaStatusLabel(userId) {
   const user = voiceStore.getUserById(userId);
   const statuses = [];
@@ -755,22 +841,7 @@ import {
   STANDARD_MICROPHONE_MAX_KBPS,
 } from "~~/shared/media-policy.js";
 
-import { useChatUtils } from "../composables/useChatUtils";
-import { useToast } from "../composables/useToast";
-const { copyToClipboard } = useChatUtils();
-const { success, error } = useToast();
-
-async function handleCopyInviteLink() {
-  if (!props.room || !props.room.id) return;
-  const baseUrl = window.location.origin;
-  const inviteLink = `${baseUrl}/join/${props.room.id}`;
-  const copied = await copyToClipboard(inviteLink);
-  if (copied) {
-    success("Link successfully copied to clipboard.");
-  } else {
-    error("Failed to copy invite link");
-  }
-}
+const inviteDialog = ref(null);
 
 const props = defineProps({
   room: {
@@ -790,21 +861,62 @@ const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const voiceStore = useVoiceStore();
 const identityStore = useIdentityStore();
+const contextChannel = ref(null);
+const channelMenuElement = ref(null);
+const channelMenuPosition = ref({ x: 0, y: 0 });
+const channelMenuStyle = computed(() => ({
+  left: `${channelMenuPosition.value.x}px`,
+  top: `${channelMenuPosition.value.y}px`,
+}));
 const participantMenuUserId = ref(null);
 const participantMenuElement = ref(null);
 const participantMenuPosition = ref({ x: 0, y: 0 });
-const participantNickname = ref("");
-const participantNicknameSaving = ref(false);
-const participantNicknameError = ref("");
 const participantMenuStyle = computed(() => ({
   left: `${participantMenuPosition.value.x}px`,
   top: `${participantMenuPosition.value.y}px`,
 }));
 
+async function openChannelMenu(channel, event) {
+  closeParticipantMenu();
+  contextChannel.value = channel;
+  channelMenuPosition.value = { x: event.clientX, y: event.clientY };
+  await nextTick();
+
+  if (!channelMenuElement.value) return;
+  const { width, height } = channelMenuElement.value.getBoundingClientRect();
+  channelMenuPosition.value = {
+    x: Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(event.clientX, window.innerWidth - width - VIEWPORT_PADDING_PX),
+    ),
+    y: Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(
+        event.clientY,
+        window.innerHeight - height - VIEWPORT_PADDING_PX,
+      ),
+    ),
+  };
+}
+
+function closeChannelMenu() {
+  contextChannel.value = null;
+}
+
+function editContextChannel() {
+  const channel = contextChannel.value;
+  closeChannelMenu();
+  if (channel) editChannel(channel);
+}
+
+function deleteContextChannel() {
+  const channel = contextChannel.value;
+  closeChannelMenu();
+  if (channel) deleteChannel(channel);
+}
+
 async function openParticipantMenu(userId, event) {
   participantMenuUserId.value = String(userId);
-  participantNickname.value = identityStore.nicknameFor(userId);
-  participantNicknameError.value = "";
   participantMenuPosition.value = { x: event.clientX, y: event.clientY };
   await nextTick();
 
@@ -833,23 +945,6 @@ function closeParticipantMenu() {
   participantMenuUserId.value = null;
 }
 
-async function saveParticipantNickname() {
-  if (!participantMenuUserId.value) return;
-  participantNicknameSaving.value = true;
-  participantNicknameError.value = "";
-  try {
-    participantNickname.value = await identityStore.saveNickname(
-      participantMenuUserId.value,
-      participantNickname.value,
-    );
-  } catch (error) {
-    participantNicknameError.value =
-      error?.data?.statusMessage || error?.message || "Could not save nickname";
-  } finally {
-    participantNicknameSaving.value = false;
-  }
-}
-
 function setParticipantVolume(event) {
   if (!participantMenuUserId.value) return;
   voiceStore.setUserVolume(
@@ -859,7 +954,10 @@ function setParticipantVolume(event) {
 }
 
 function onParticipantMenuKeydown(event) {
-  if (event.key === "Escape") closeParticipantMenu();
+  if (event.key === "Escape") {
+    closeChannelMenu();
+    closeParticipantMenu();
+  }
 }
 const showCreateChannel = ref(false);
 const showEditChannel = ref(false);
@@ -1076,17 +1174,23 @@ function goToRoomSettings() {
 
 onMounted(() => {
   loadChannels();
+  document.addEventListener("pointerdown", closeChannelMenu);
   document.addEventListener("pointerdown", closeParticipantMenu);
   document.addEventListener("keydown", onParticipantMenuKeydown);
   window.addEventListener("resize", closeParticipantMenu);
+  window.addEventListener("resize", closeChannelMenu);
   window.addEventListener("scroll", closeParticipantMenu, true);
+  window.addEventListener("scroll", closeChannelMenu, true);
 });
 onUnmounted(() => {
   channelsStore.disconnectVoicePresence();
+  document.removeEventListener("pointerdown", closeChannelMenu);
   document.removeEventListener("pointerdown", closeParticipantMenu);
   document.removeEventListener("keydown", onParticipantMenuKeydown);
   window.removeEventListener("resize", closeParticipantMenu);
+  window.removeEventListener("resize", closeChannelMenu);
   window.removeEventListener("scroll", closeParticipantMenu, true);
+  window.removeEventListener("scroll", closeChannelMenu, true);
 });
 watch(
   () => props.room.id,

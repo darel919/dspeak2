@@ -464,6 +464,68 @@ async function migrateSoundboardDurationLimit(pb) {
   });
 }
 
+async function migrateRoomInvites(pb) {
+  const users = await pb.collections.getOne("users");
+  const rooms = await pb.collections.getOne("dspeak_rooms");
+  const invites = await upsertCollection(pb, {
+    name: "dspeak_room_invites",
+    type: "base",
+    fields: [
+      field("room", "relation", {
+        required: true,
+        collectionId: rooms.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("created_by", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("created_at", "date", { required: true }),
+      field("expires_at", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_room_invites_room_created ON dspeak_room_invites (room, created_at)",
+      "CREATE INDEX idx_dspeak_room_invites_expiry ON dspeak_room_invites (expires_at)",
+    ],
+  });
+  await upsertCollection(pb, {
+    name: "dspeak_room_audit_log",
+    type: "base",
+    fields: [
+      field("room", "relation", {
+        required: true,
+        collectionId: rooms.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("action", "text", { required: true, max: 80 }),
+      field("actor", "relation", {
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("subject", "relation", {
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("invite", "relation", {
+        collectionId: invites.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("occurred_at", "date", { required: true }),
+      field("details", "json", { maxSize: 10000 }),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_room_audit_room_time ON dspeak_room_audit_log (room, occurred_at)",
+    ],
+  });
+}
+
 const migrations = Object.freeze([
   {
     name: "20260722_room_administration_v1",
@@ -497,6 +559,7 @@ const migrations = Object.freeze([
     name: "20260723_soundboard_duration_10s_v1",
     run: migrateSoundboardDurationLimit,
   },
+  { name: "20260723_room_invites_v1", run: migrateRoomInvites },
 ]);
 
 export async function runPocketBaseMigrations(pb, logger = console) {

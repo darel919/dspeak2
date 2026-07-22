@@ -14,7 +14,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   const error = ref("");
   const canManageRoom = ref(false);
   const currentRoomId = ref(null);
-  const players = new Set();
+  const players = new Map();
 
   function headers(extra = {}) {
     return { Authorization: authStore.getUserData()?.id || "", ...extra };
@@ -99,26 +99,32 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   }
 
   async function play(clipId, roomId) {
-    if (voiceStore.deafened) return;
+    if (voiceStore.deafened) return false;
     const response = await fetch(
       `${config.public.apiPath}/soundboard/media?id=${encodeURIComponent(clipId)}`,
       { headers: headers() },
     );
-    if (!response.ok) return;
+    if (!response.ok) return false;
     const url = URL.createObjectURL(await response.blob());
     const audio = new Audio(url);
     audio.volume = settingsStore.getSoundboardVolume(roomId) / 100;
     const output = settingsStore.outputDeviceId;
     if (output && typeof audio.setSinkId === "function")
       await audio.setSinkId(output).catch(() => {});
-    players.add(audio);
-    const cleanup = () => {
-      players.delete(audio);
-      URL.revokeObjectURL(url);
-    };
-    audio.addEventListener("ended", cleanup, { once: true });
-    audio.addEventListener("error", cleanup, { once: true });
-    await audio.play().catch(cleanup);
+    return new Promise((resolve) => {
+      let cleaned = false;
+      const cleanup = (played = true) => {
+        if (cleaned) return;
+        cleaned = true;
+        players.delete(audio);
+        URL.revokeObjectURL(url);
+        resolve(played);
+      };
+      players.set(audio, cleanup);
+      audio.addEventListener("ended", () => cleanup(true), { once: true });
+      audio.addEventListener("error", () => cleanup(false), { once: true });
+      audio.play().catch(() => cleanup(false));
+    });
   }
 
   async function protectedBlob(path) {
@@ -131,11 +137,11 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   }
 
   function stopAll() {
-    for (const audio of players) {
+    for (const [audio, cleanup] of players) {
       audio.pause();
       audio.src = "";
+      cleanup(false);
     }
-    players.clear();
   }
 
   watch(
@@ -146,7 +152,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     () => {
       const volume =
         settingsStore.getSoundboardVolume(currentRoomId.value) / 100;
-      for (const audio of players) audio.volume = volume;
+      for (const audio of players.keys()) audio.volume = volume;
     },
     { deep: true },
   );
@@ -155,7 +161,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     () => settingsStore.outputDeviceId,
     (output) => {
       if (!output) return;
-      for (const audio of players)
+      for (const audio of players.keys())
         if (typeof audio.setSinkId === "function")
           audio.setSinkId(output).catch(() => {});
     },
@@ -168,10 +174,17 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     },
   );
 
-  function onTriggered(event) {
+  async function onTriggered(event) {
     const data = event.detail || {};
-    if (String(data.roomId) === String(currentRoomId.value))
-      play(data.clipId, data.roomId);
+    if (String(data.roomId) !== String(currentRoomId.value)) return;
+    const activity = voiceStore.showSoundboardActivity(data.triggeredBy, {
+      activityId: data.activityId,
+      title: data.clipTitle,
+      icon: data.clipIcon,
+      duration: data.duration,
+    });
+    await play(data.clipId, data.roomId);
+    voiceStore.clearSoundboardActivity(data.triggeredBy, activity);
   }
 
   function onLibraryUpdated(event) {

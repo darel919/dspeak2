@@ -27,6 +27,9 @@ test("voice presence publishes channel snapshots to room observers", () => {
   assert.equal(messages.length, 1);
   assert.equal(messages[0].type, "voice-presence");
   assert.deepEqual(messages[0].data.inRoom, ["user-one"]);
+  assert.deepEqual(messages[0].data.participantStates, [
+    { userId: "user-one", muted: false },
+  ]);
   assert.equal(getVoicePresenceSnapshots(roomId)[0].channelId, "voice-one");
   unsubscribeFromVoicePresence(roomId, peer);
 });

@@ -5,6 +5,7 @@ import {
   validateMediaPolicy,
 } from "../../shared/media-policy.js";
 import {
+  canManageMember,
   normalizeAttenuation,
   normalizePermissions,
   normalizeRoomAccent,
@@ -19,7 +20,10 @@ import {
   broadcastToChannel,
   broadcastToUser,
 } from "./dspeak-realtime";
-import { updateActiveUserProfile } from "./mediasoup-sfu";
+import {
+  disconnectVoiceParticipant,
+  updateActiveUserProfile,
+} from "./mediasoup-sfu";
 import { pocketBaseError, usePocketBaseAdmin } from "./pocketbase";
 import {
   ensureRoomMembership,
@@ -31,6 +35,11 @@ import {
   seedRoomRoles,
 } from "./room-authorization";
 import { handleSoundboardApi } from "./soundboard-api";
+import {
+  decodeInvitePayload,
+  encodeInvitePayload,
+  validateInviteExpiry,
+} from "../../shared/room-invite.js";
 
 function requireUser(event) {
   const userId = getHeader(event, "authorization");
@@ -53,6 +62,12 @@ function structuredValue(value, fallback = {}) {
   } catch {
     return fallback;
   }
+}
+
+function sameInstant(left, right) {
+  return (
+    Number.isFinite(Date.parse(left)) && Date.parse(left) === Date.parse(right)
+  );
 }
 
 async function validateRoomImage(file, limit, label) {
@@ -136,12 +151,31 @@ async function parseBody(event) {
 }
 
 async function roomDetails(pb, room, userId = null) {
-  const channels = await pb.collection("dspeak_rooms_channels").getFullList({
-    filter: `room = '${room.id}'`,
-    expand: "owner",
-    sort: "created",
-  });
+  const [channels, memberships] = await Promise.all([
+    pb.collection("dspeak_rooms_channels").getFullList({
+      filter: `room = '${room.id}'`,
+      expand: "owner",
+      sort: "created",
+    }),
+    pb.collection("dspeak_room_memberships").getFullList({
+      filter: `room = '${room.id}'`,
+      expand: "roles",
+    }),
+  ]);
   const access = userId ? await presentRoomAccess(pb, room, userId) : null;
+  const rolesByUserId = new Map(
+    memberships.map((membership) => [
+      String(membership.user),
+      (membership.expand?.roles || []).map((role) => ({
+        id: role.id,
+        name: role.name,
+        color: role.color,
+        position: role.position,
+        system: Boolean(role.system),
+        isDefault: Boolean(role.is_default),
+      })),
+    ]),
+  );
   return {
     id: room.id,
     name: room.name,
@@ -153,7 +187,10 @@ async function roomDetails(pb, room, userId = null) {
     accent: normalizeRoomAccent(room.accent),
     attenuation: normalizeAttenuation(room.attenuation),
     owner: presentUser(room.expand?.owner),
-    members: (room.expand?.members || []).map((member) => presentUser(member)),
+    members: (room.expand?.members || []).map((member) => ({
+      ...presentUser(member),
+      roles: rolesByUserId.get(String(member.id)) || [],
+    })),
     channels: channels.map(presentChannel),
     roles: access?.roles || [],
     permissions: access?.permissions || [],
@@ -195,11 +232,28 @@ async function handleRoomRoles(event, pb, userId) {
       .getOne(requireValue(body.membershipId, "Membership ID is required"), {
         expand: "roles",
       });
+    if (String(membership.room) !== String(roomId))
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Membership must belong to this room",
+      });
     for (const role of membership.expand?.roles || [])
       await requireRoleManagement(pb, room, userId, role);
-    const roleIds = Array.isArray(body.roleIds) ? body.roleIds : [];
+    const roleIds = [
+      ...new Set((Array.isArray(body.roleIds) ? body.roleIds : []).map(String)),
+    ];
+    if (!roleIds.length)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "A room member must have at least one role",
+      });
     for (const roleId of roleIds) {
       const role = await pb.collection("dspeak_room_roles").getOne(roleId);
+      if (String(role.room) !== String(roomId))
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Assigned roles must belong to this room",
+        });
       await requireRoleManagement(pb, room, userId, role);
     }
     return pb
@@ -298,6 +352,39 @@ async function handleRooms(event, suffix) {
     return roomDetails(pb, room, requireUser(event));
   }
 
+  if (suffix === "invites" && method === "GET") {
+    const payload = decodeInvitePayload(String(query.token || ""));
+    if (!payload)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid invite link",
+      });
+    const invite = await pb
+      .collection("dspeak_room_invites")
+      .getOne(payload.id, { expand: "room,created_by" });
+    if (
+      String(invite.room) !== String(payload.roomId) ||
+      String(invite.created_by) !== String(payload.createdBy) ||
+      !sameInstant(invite.created_at, payload.createdAt) ||
+      !sameInstant(invite.expires_at, payload.expiresAt)
+    )
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid invite link",
+      });
+    if (Date.parse(invite.expires_at) <= Date.now())
+      throw createError({
+        statusCode: 410,
+        statusMessage: "This invite link has expired",
+      });
+    return {
+      room: { id: invite.expand.room.id, name: invite.expand.room.name },
+      invitedBy: presentPublicProfile(invite.expand.created_by),
+      createdAt: invite.created_at,
+      expiresAt: invite.expires_at,
+    };
+  }
+
   const userId = requireUser(event);
 
   if (!suffix && method === "GET") {
@@ -308,7 +395,160 @@ async function handleRooms(event, suffix) {
     return Promise.all(rooms.map((room) => roomDetails(pb, room, userId)));
   }
 
-  const body = await parseBody(event);
+  const body = method === "GET" ? {} : await parseBody(event);
+
+  if (suffix === "invites" && method === "POST") {
+    const room = await pb
+      .collection("dspeak_rooms")
+      .getOne(requireValue(body.roomId, "Room ID is required"));
+    await requireRoomPermission(pb, room, userId, "room.manage_invites");
+    const expirySeconds = validateInviteExpiry(body.expirySeconds);
+    if (!expirySeconds)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid invite expiry",
+      });
+    const createdAt = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + expirySeconds * 1000).toISOString();
+    const invite = await pb.collection("dspeak_room_invites").create({
+      room: room.id,
+      created_by: userId,
+      created_at: createdAt,
+      expires_at: expiresAt,
+    });
+    const payload = {
+      id: invite.id,
+      createdBy: String(userId),
+      createdAt,
+      expiresAt,
+      roomId: String(room.id),
+    };
+    await pb.collection("dspeak_room_audit_log").create({
+      room: room.id,
+      action: "invite.created",
+      actor: userId,
+      invite: invite.id,
+      occurred_at: createdAt,
+      details: { expiresAt },
+    });
+    setResponseStatus(event, 201);
+    return { token: encodeInvitePayload(payload), ...payload };
+  }
+
+  if (suffix === "audit" && method === "GET") {
+    const room = await pb
+      .collection("dspeak_rooms")
+      .getOne(requireValue(query.roomId, "Room ID is required"));
+    const access = await requireRoomMember(pb, room, userId);
+    if (
+      !access.isOwner &&
+      !access.permissions.some((permission) =>
+        ["room.manage_invites", "room.manage_members"].includes(permission),
+      )
+    )
+      throw createError({
+        statusCode: 403,
+        statusMessage: "Missing permission to view the audit log",
+      });
+    const records = await pb
+      .collection("dspeak_room_audit_log")
+      .getList(1, 100, {
+        filter: `room = '${room.id}'`,
+        sort: "-occurred_at",
+        expand: "actor,subject",
+      });
+    return records.items.map((record) => ({
+      id: record.id,
+      action: record.action,
+      occurredAt: record.occurred_at,
+      details: record.details || {},
+      actor: presentPublicProfile(record.expand?.actor),
+      subject: presentPublicProfile(record.expand?.subject),
+    }));
+  }
+
+  if (suffix === "kick" && method === "POST") {
+    const room = await pb
+      .collection("dspeak_rooms")
+      .getOne(requireValue(body.roomId, "Room ID is required."));
+    const targetUserId = String(
+      requireValue(body.targetUserId, "Target user ID is required."),
+    );
+    if (targetUserId === String(userId))
+      throw createError({
+        statusCode: 400,
+        statusMessage: "You cannot kick yourself.",
+      });
+    if (targetUserId === String(room.owner))
+      throw createError({
+        statusCode: 403,
+        statusMessage: "The room owner cannot be kicked.",
+      });
+    const access = await requireRoomPermission(
+      pb,
+      room,
+      userId,
+      "room.manage_members",
+    );
+    let targetMembership;
+    try {
+      targetMembership = await pb
+        .collection("dspeak_room_memberships")
+        .getFirstListItem(`room = '${room.id}' && user = '${targetUserId}'`, {
+          expand: "roles",
+        });
+    } catch (error) {
+      if (error?.status !== 404) throw error;
+    }
+    const isLegacyMember = (room.members || [])
+      .map(String)
+      .includes(targetUserId);
+    if (!targetMembership && !isLegacyMember)
+      throw createError({
+        statusCode: 404,
+        statusMessage: "This user is not a room member.",
+      });
+    if (
+      !canManageMember(
+        access.roles,
+        targetMembership?.expand?.roles || [],
+        access.isOwner,
+      )
+    )
+      throw createError({
+        statusCode: 403,
+        statusMessage: "You cannot kick a member at or above your role.",
+      });
+    await pb.collection("dspeak_rooms").update(room.id, {
+      members: (room.members || [])
+        .map(String)
+        .filter((memberId) => memberId !== targetUserId),
+    });
+    const channels = await pb
+      .collection("dspeak_rooms_channels")
+      .getFullList({ filter: `room = '${room.id}'` });
+    await Promise.all(
+      channels
+        .filter((channel) => channel.isMedia)
+        .map((channel) => disconnectVoiceParticipant(channel.id, targetUserId)),
+    );
+    await Promise.all(
+      channels
+        .filter((channel) =>
+          (channel.inRoom || []).map(String).includes(targetUserId),
+        )
+        .map((channel) =>
+          pb.collection("dspeak_rooms_channels").update(channel.id, {
+            inRoom: (channel.inRoom || [])
+              .map(String)
+              .filter((memberId) => memberId !== targetUserId),
+          }),
+        ),
+    );
+    await removeRoomMembership(pb, room.id, targetUserId);
+    await broadcastParticipantChange(pb, room.id);
+    return { message: "Member kicked successfully." };
+  }
 
   if (!suffix && method === "POST") {
     requireValue(body.name, "Name is required for creating new room.");
@@ -380,6 +620,11 @@ async function handleRooms(event, suffix) {
         structuredValue(body.attenuation),
       );
     const updated = await pb.collection("dspeak_rooms").update(room.id, update);
+    if (body.accent !== undefined)
+      broadcastGlobally({
+        type: "room_updated",
+        data: { id: updated.id, accent: normalizeRoomAccent(updated.accent) },
+      });
     return roomDetails(pb, updated, userId);
   }
 
@@ -417,11 +662,52 @@ async function handleRooms(event, suffix) {
       );
     const members = (room.members || []).map(String);
     if (suffix === "join") {
+      let joinedInvite = null;
+      const payload = decodeInvitePayload(String(body.inviteToken || ""));
+      if (!members.includes(String(userId))) {
+        if (!payload || String(payload.roomId) !== String(room.id))
+          throw createError({
+            statusCode: 403,
+            statusMessage: "A valid invite link is required",
+          });
+        const invite = await pb
+          .collection("dspeak_room_invites")
+          .getOne(payload.id);
+        if (
+          String(invite.room) !== String(room.id) ||
+          String(invite.created_by) !== String(payload.createdBy) ||
+          !sameInstant(invite.created_at, payload.createdAt) ||
+          !sameInstant(invite.expires_at, payload.expiresAt)
+        )
+          throw createError({
+            statusCode: 403,
+            statusMessage: "Invalid invite link",
+          });
+        if (Date.parse(invite.expires_at) <= Date.now())
+          throw createError({
+            statusCode: 410,
+            statusMessage: "This invite link has expired",
+          });
+        joinedInvite = invite;
+      }
       if (!members.includes(String(userId)))
         await pb
           .collection("dspeak_rooms")
           .update(room.id, { members: [...members, userId] });
       await ensureRoomMembership(pb, room, userId);
+      if (joinedInvite)
+        await pb.collection("dspeak_room_audit_log").create({
+          room: room.id,
+          action: "member.joined_via_invite",
+          actor: joinedInvite.created_by,
+          subject: userId,
+          invite: joinedInvite.id,
+          occurred_at: new Date().toISOString(),
+          details: {
+            inviteCreatedAt: joinedInvite.created_at,
+            inviteExpiresAt: joinedInvite.expires_at,
+          },
+        });
     } else {
       if (String(room.owner) === String(userId) && members.length === 1) {
         throw createError({
@@ -812,7 +1098,7 @@ async function handleNotifications(event, pb, userId, suffix) {
 }
 
 async function handleChat(event, suffix) {
-  if (!suffix && event.method === "GET") return "DSpeak Chat";
+  if (!suffix && event.method === "GET") return "dSpeak Chat";
   if (suffix === "socket" && event.method === "GET")
     throw createError({ statusCode: 426, statusMessage: "Upgrade Required" });
   const pb = await usePocketBaseAdmin();
@@ -1156,7 +1442,7 @@ export async function handleDspeakApi(event) {
   const suffix = rest.join("/");
 
   try {
-    if (!domain && event.method === "GET") return "DSpeak ready.";
+    if (!domain && event.method === "GET") return "dSpeak ready.";
     if (domain === "config" && event.method === "GET")
       return createIceServers();
     if (domain === "room") return await handleRooms(event, suffix);
@@ -1167,11 +1453,11 @@ export async function handleDspeakApi(event) {
       return await handleSoundboardApi(event, suffix);
     throw createError({
       statusCode: 404,
-      statusMessage: "DSpeak endpoint not found",
+      statusMessage: "dSpeak endpoint not found",
     });
   } catch (error) {
     if (error?.statusCode) throw error;
-    console.error("[DSpeak API]", error);
+    console.error("[dSpeak API]", error);
     throw createError({
       statusCode: error?.status || 500,
       statusMessage: error?.message || "Internal Server Error",

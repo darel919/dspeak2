@@ -1,5 +1,6 @@
 <script setup>
 import { useAuthStore } from "../stores/auth";
+import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
 import { useChannelsStore } from "../stores/channels";
 import { useSettingsStore } from "../stores/settings";
@@ -9,6 +10,7 @@ import { getConnectionQualityLabel } from "../shared/connection-quality";
 import { useChatUtils } from "../composables/useChatUtils";
 
 const authStore = useAuthStore();
+const roomsStore = useRoomsStore();
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
 const settingsStore = useSettingsStore();
@@ -31,6 +33,17 @@ const callMenuOpen = ref(false);
 const currentRoomId = computed(() =>
   route.path.startsWith("/room/") ? route.params.roomId : null,
 );
+const currentRoom = computed(() =>
+  currentRoomId.value ? roomsStore.getRoomById(currentRoomId.value) : null,
+);
+const roomBannerUrl = computed(() =>
+  roomAssetUrl(currentRoom.value?.headerImage),
+);
+const roomBannerStyle = computed(() => ({
+  backgroundImage: roomBannerUrl.value
+    ? `url(${JSON.stringify(roomBannerUrl.value)})`
+    : undefined,
+}));
 const currentVoiceChannel = computed(() =>
   voiceStore.currentChannelId
     ? channelsStore.getChannelById(voiceStore.currentChannelId)
@@ -114,6 +127,12 @@ function formatVideoQuality(stat) {
   const resolution = Math.min(stat.width, stat.height);
   const fps = stat.fps ? Math.round(stat.fps) : null;
   return `${resolution}p${fps ? `@${fps}fps` : ""}`;
+}
+
+function roomAssetUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//.test(path)) return path;
+  return `${config.public.apiPath.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
 }
 
 function formatElapsed(ms) {
@@ -208,11 +227,20 @@ onBeforeUnmount(() => {
     class="navbar navbar-surface fixed top-0 left-0 z-50 w-full gap-3 px-3 sm:px-4"
     style="height: var(--navbar-height)"
   >
-    <div class="flex min-w-0 items-center gap-3">
+    <div
+      v-if="roomBannerUrl"
+      class="room-banner pointer-events-none absolute inset-y-0 left-0 right-0 md:left-[72px]"
+      :style="roomBannerStyle"
+      aria-hidden="true"
+    >
+      <div class="room-banner-shade absolute inset-0"></div>
+    </div>
+
+    <div class="relative z-10 flex min-w-0 items-center gap-3">
       <NuxtLink
         to="/"
         class="shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-primary"
-        aria-label="DSpeak home"
+        aria-label="dSpeak home"
       >
         <img
           class="size-11 rounded-lg select-none pointer-events-none"
@@ -222,7 +250,7 @@ onBeforeUnmount(() => {
       </NuxtLink>
     </div>
 
-    <div class="ml-auto flex min-w-0 items-center gap-2">
+    <div class="relative z-10 ml-auto flex min-w-0 items-center gap-2">
       <NotificationCenter />
       <section
         v-if="profile && voiceStore.connected"
@@ -628,6 +656,24 @@ onBeforeUnmount(() => {
   padding: 0.3rem;
   box-shadow: 0 1px 8px
     color-mix(in oklab, var(--color-base-content) 7%, transparent);
+}
+
+.room-banner-shade {
+  background: linear-gradient(
+    90deg,
+    var(--navbar-surface),
+    color-mix(in oklab, var(--navbar-surface) 35%, transparent) 18%,
+    transparent 38%,
+    transparent 62%,
+    color-mix(in oklab, var(--navbar-surface) 45%, transparent) 82%,
+    var(--navbar-surface)
+  );
+}
+
+.room-banner {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 .call-channel {

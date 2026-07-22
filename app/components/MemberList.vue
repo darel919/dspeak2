@@ -13,14 +13,20 @@
       <div
         v-for="member in sortedMembers"
         :key="member.id"
-        class="flex items-center gap-3 group relative"
+        class="group relative flex cursor-pointer items-center gap-3 rounded-lg px-1 py-0.5 hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        role="button"
+        tabindex="0"
+        :aria-label="`View profile for ${memberDisplayName(member)}`"
         :style="
           getMemberPresenceStatus(member) === 'offline' &&
           member.id !== currentUser?.id
             ? 'opacity: 0.3'
             : ''
         "
-        @contextmenu.prevent="openVolumeMenu(member, $event)"
+        @click="openProfileCard(member, $event)"
+        @keydown.enter.prevent="openProfileCard(member, $event)"
+        @keydown.space.prevent="openProfileCard(member, $event)"
+        @contextmenu.prevent="openMemberMenu(member, $event)"
       >
         <div
           class="avatar relative flex items-center"
@@ -76,82 +82,336 @@
     </div>
     <Teleport to="body">
       <div
-        v-if="volumeMenuUser"
-        ref="volumeMenuElement"
-        class="fixed z-[100] w-48 rounded-lg border border-base-300 bg-base-200 p-3 text-base-content opacity-100 shadow-lg"
-        :style="volumeMenuStyle"
+        v-if="profileCardUser"
+        ref="profileCardElement"
+        class="fixed z-[100] w-72 overflow-hidden rounded-xl border border-base-300 bg-base-200 text-base-content shadow-2xl"
+        :style="profileCardStyle"
         role="dialog"
-        aria-label="User volume control"
+        :aria-label="`Profile for ${memberDisplayName(profileCardUser)}`"
+        @pointerdown.stop
+      >
+        <div class="h-16 bg-primary/20"></div>
+        <div class="px-4 pb-4">
+          <div class="-mt-8 mb-3 w-fit rounded-full bg-base-200 p-1">
+            <img
+              :src="
+                getAvatarUrl(identityStore.profileFor(profileCardUser).avatar)
+              "
+              :alt="memberDisplayName(profileCardUser)"
+              class="size-16 rounded-full object-cover"
+            />
+          </div>
+          <div class="text-lg font-bold">
+            {{ memberDisplayName(profileCardUser) }}
+          </div>
+          <div
+            v-if="profileOriginalName(profileCardUser)"
+            class="mt-0.5 text-xs font-medium text-base-content/50"
+          >
+            AKA {{ profileOriginalName(profileCardUser) }}
+          </div>
+          <div class="mt-4 border-t border-base-300 pt-3">
+            <div
+              class="mb-2 text-xs font-bold uppercase tracking-wide text-base-content/50"
+            >
+              Role
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="role in memberRoles(profileCardUser)"
+                :key="role.id || role.name"
+                class="badge badge-outline"
+              >
+                {{ role.name }}
+              </span>
+              <span
+                v-if="memberRoles(profileCardUser).length === 0"
+                class="text-sm"
+              >
+                Member
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        v-if="memberMenuUser"
+        ref="memberMenuElement"
+        class="fixed z-[101] w-60 overflow-hidden rounded-xl border border-base-300 bg-base-100 text-base-content shadow-2xl"
+        :style="memberMenuStyle"
+        role="dialog"
+        :aria-label="`Options for ${memberDisplayName(memberMenuUser)}`"
         @pointerdown.stop
         @contextmenu.prevent.stop
       >
-        <div class="mb-2 text-xs font-semibold">User Volume</div>
-        <input
-          type="range"
-          min="0"
-          max="2"
-          step="0.01"
-          :value="voiceStore.getUserVolume(volumeMenuUser.id)"
-          class="w-full"
-          :aria-label="`Volume for ${memberDisplayName(volumeMenuUser)}`"
-          @input="onVolumeChange(volumeMenuUser.id, $event)"
-        />
-        <div class="mt-1 flex justify-between text-xs">
-          <span>0%</span>
-          <span>200%</span>
+        <div class="flex items-center gap-3 border-b border-base-300 px-3 py-3">
+          <div class="avatar shrink-0">
+            <div class="size-9 overflow-hidden rounded-full bg-base-300">
+              <img
+                :src="
+                  getAvatarUrl(identityStore.profileFor(memberMenuUser).avatar)
+                "
+                :alt="memberDisplayName(memberMenuUser)"
+                class="size-full object-cover"
+              />
+            </div>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-sm font-semibold">
+              {{ memberDisplayName(memberMenuUser) }}
+            </div>
+            <div
+              class="mt-0.5 flex items-center gap-1.5 text-xs text-base-content/50"
+            >
+              <span
+                class="size-1.5 rounded-full"
+                :class="
+                  getMemberPresenceStatus(memberMenuUser) === 'offline'
+                    ? 'bg-base-content/30'
+                    : 'bg-success'
+                "
+              ></span>
+              {{ memberPresenceLabel(memberMenuUser) }}
+            </div>
+          </div>
         </div>
         <button
-          class="btn btn-xs btn-outline mt-2 w-full"
-          @click="closeVolumeMenu"
+          type="button"
+          class="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-base-200"
+          @click="openMenuUserProfile"
         >
-          Close
+          <Icon name="lucide:user-round" class="size-4 text-base-content/60" />
+          View profile
+          <Icon
+            name="lucide:chevron-right"
+            class="ml-auto size-4 text-base-content/35"
+          />
         </button>
+        <button
+          type="button"
+          class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm transition-colors hover:bg-base-200"
+          @click="openNicknameDialog"
+        >
+          <Icon name="lucide:tag" class="size-4 text-base-content/60" />
+          Edit nickname
+          <span
+            v-if="identityStore.nicknameFor(memberMenuUser.id)"
+            class="ml-auto max-w-24 truncate text-xs text-base-content/40"
+          >
+            {{ identityStore.nicknameFor(memberMenuUser.id) }}
+          </span>
+          <Icon
+            v-else
+            name="lucide:chevron-right"
+            class="ml-auto size-4 text-base-content/35"
+          />
+        </button>
+        <button
+          v-if="canKickMember(memberMenuUser)"
+          class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm text-error transition-colors hover:bg-error/10"
+          :disabled="kickSaving"
+          @click="kickMember"
+        >
+          <Icon name="lucide:user-round-x" class="size-4" />
+          {{ kickSaving ? "Kicking…" : "Kick from room" }}
+        </button>
+      </div>
+      <div
+        v-if="nicknameDialogUser"
+        class="fixed inset-0 z-[160] grid place-items-center bg-black/70 p-4"
+        @pointerdown.self="closeNicknameDialog"
+      >
+        <form
+          class="w-full max-w-md border border-base-300 bg-base-100 text-base-content shadow-2xl"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="`Edit nickname for ${memberDisplayName(nicknameDialogUser)}`"
+          @pointerdown.stop
+          @submit.prevent="saveMemberNickname"
+        >
+          <header
+            class="flex items-center justify-between border-b border-base-300 px-5 py-4"
+          >
+            <div>
+              <h2 class="text-lg font-semibold">Personal nickname</h2>
+              <p class="mt-0.5 text-sm text-base-content/50">
+                {{ memberDisplayName(nicknameDialogUser) }}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="grid size-9 place-items-center text-base-content/50 transition-colors hover:bg-base-200 hover:text-base-content"
+              aria-label="Close nickname dialog"
+              @click="closeNicknameDialog"
+            >
+              <Icon name="lucide:x" class="size-5" />
+            </button>
+          </header>
+          <div class="px-5 py-5">
+            <div
+              class="mb-4 border-l-4 border-info bg-info/10 px-3 py-2.5 text-sm text-base-content/70"
+            >
+              This nickname is private and only changes how this member appears
+              to you.
+            </div>
+            <label
+              for="member-nickname"
+              class="mb-2 block text-sm font-semibold"
+            >
+              Nickname
+            </label>
+            <input
+              id="member-nickname"
+              ref="nicknameDialogInput"
+              v-model="nicknameDraft"
+              type="text"
+              maxlength="32"
+              class="input input-bordered w-full"
+              placeholder="Enter a nickname"
+              autocomplete="off"
+            />
+            <p
+              v-if="nicknameError"
+              class="mt-2 text-sm text-error"
+              role="alert"
+            >
+              {{ nicknameError }}
+            </p>
+          </div>
+          <footer
+            class="flex justify-between gap-3 border-t border-base-300 bg-base-200/50 px-5 py-4"
+          >
+            <button
+              v-if="identityStore.nicknameFor(nicknameDialogUser.id)"
+              type="button"
+              class="btn btn-ghost text-error"
+              :disabled="nicknameSaving"
+              @click="clearMemberNickname"
+            >
+              Remove
+            </button>
+            <span v-else></span>
+            <div class="flex gap-3">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                :disabled="nicknameSaving"
+                @click="closeNicknameDialog"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="btn btn-primary min-w-24"
+                :disabled="nicknameSaving || !nicknameChanged"
+              >
+                {{ nicknameSaving ? "Saving…" : "Save" }}
+              </button>
+            </div>
+          </footer>
+        </form>
       </div>
     </Teleport>
   </div>
 </template>
 
 <script setup>
-import { useVoiceStore } from "../stores/voice";
+import { useRoomsStore } from "../stores/rooms";
+import { canManageMember } from "~~/shared/room-policy.js";
+import { publicDisplayName } from "~~/shared/user-profile.js";
 import { MEMBER_STATUS_ORDER, VIEWPORT_PADDING_PX } from "../const/ui";
-const voiceStore = useVoiceStore();
-const volumeMenuUser = ref(null);
-const volumeMenuElement = ref(null);
-const volumeMenuPosition = ref({ x: 0, y: 0 });
-const volumeMenuStyle = computed(() => ({
-  left: `${volumeMenuPosition.value.x}px`,
-  top: `${volumeMenuPosition.value.y}px`,
+const roomsStore = useRoomsStore();
+const memberMenuUser = ref(null);
+const memberMenuElement = ref(null);
+const memberMenuPosition = ref({ x: 0, y: 0 });
+const memberMenuStyle = computed(() => ({
+  left: `${memberMenuPosition.value.x}px`,
+  top: `${memberMenuPosition.value.y}px`,
 }));
+const profileCardUser = ref(null);
+const profileCardElement = ref(null);
+const profileCardPosition = ref({ x: 0, y: 0 });
+const profileCardStyle = computed(() => ({
+  left: `${profileCardPosition.value.x}px`,
+  top: `${profileCardPosition.value.y}px`,
+}));
+const nicknameDialogUser = ref(null);
+const nicknameDialogInput = ref(null);
+const nicknameDraft = ref("");
+const nicknameError = ref("");
+const nicknameSaving = ref(false);
+const kickSaving = ref(false);
 
-async function openVolumeMenu(member, event) {
-  volumeMenuUser.value = member;
-  volumeMenuPosition.value = { x: event.clientX, y: event.clientY };
+async function openMemberMenu(member, event) {
+  closeProfileCard();
+  memberMenuUser.value = member;
+  nicknameDraft.value = identityStore.nicknameFor(member.id);
+  nicknameError.value = "";
+  memberMenuPosition.value = { x: event.clientX, y: event.clientY };
   await nextTick();
-  keepVolumeMenuInViewport();
+  keepElementInViewport(memberMenuElement, memberMenuPosition);
 }
-function closeVolumeMenu() {
-  volumeMenuUser.value = null;
+function closeMemberMenu() {
+  memberMenuUser.value = null;
+  nicknameError.value = "";
 }
-function onVolumeChange(userId, event) {
-  voiceStore.setUserVolume(userId, Number(event.target.value));
+async function openProfileCard(member, event) {
+  closeMemberMenu();
+  profileCardUser.value = member;
+  const rect = event.currentTarget.getBoundingClientRect();
+  profileCardPosition.value = { x: rect.left - 296, y: rect.top };
+  await nextTick();
+  keepElementInViewport(profileCardElement, profileCardPosition);
 }
 
-function keepVolumeMenuInViewport() {
-  if (!volumeMenuElement.value) return;
+async function openMenuUserProfile() {
+  const member = memberMenuUser.value;
+  if (!member) return;
+  profileCardUser.value = member;
+  profileCardPosition.value = { ...memberMenuPosition.value };
+  closeMemberMenu();
+  await nextTick();
+  keepElementInViewport(profileCardElement, profileCardPosition);
+}
 
-  const { width, height } = volumeMenuElement.value.getBoundingClientRect();
-  volumeMenuPosition.value = {
+function closeProfileCard() {
+  profileCardUser.value = null;
+}
+
+async function openNicknameDialog() {
+  const member = memberMenuUser.value;
+  if (!member) return;
+  nicknameDialogUser.value = member;
+  nicknameDraft.value = identityStore.nicknameFor(member.id);
+  nicknameError.value = "";
+  closeMemberMenu();
+  await nextTick();
+  nicknameDialogInput.value?.focus();
+}
+
+function closeNicknameDialog() {
+  if (nicknameSaving.value) return;
+  nicknameDialogUser.value = null;
+  nicknameDraft.value = "";
+  nicknameError.value = "";
+}
+
+function keepElementInViewport(element, position) {
+  if (!element.value) return;
+
+  const { width, height } = element.value.getBoundingClientRect();
+  position.value = {
     x: Math.max(
       VIEWPORT_PADDING_PX,
       Math.min(
-        volumeMenuPosition.value.x,
+        position.value.x,
         window.innerWidth - width - VIEWPORT_PADDING_PX,
       ),
     ),
     y: Math.max(
       VIEWPORT_PADDING_PX,
       Math.min(
-        volumeMenuPosition.value.y,
+        position.value.y,
         window.innerHeight - height - VIEWPORT_PADDING_PX,
       ),
     ),
@@ -159,21 +419,97 @@ function keepVolumeMenuInViewport() {
 }
 
 function onDocumentKeydown(event) {
-  if (event.key === "Escape") closeVolumeMenu();
+  if (event.key === "Escape") closeOverlays();
+}
+
+function closeOverlays() {
+  closeMemberMenu();
+  closeProfileCard();
+  closeNicknameDialog();
+}
+
+async function saveMemberNickname() {
+  if (!nicknameDialogUser.value || nicknameSaving.value) return;
+  nicknameSaving.value = true;
+  nicknameError.value = "";
+  try {
+    await identityStore.saveNickname(
+      nicknameDialogUser.value.id,
+      nicknameDraft.value,
+    );
+    nicknameSaving.value = false;
+    closeNicknameDialog();
+  } catch (error) {
+    nicknameError.value =
+      error?.data?.statusMessage || error.message || "Could not save nickname";
+  } finally {
+    nicknameSaving.value = false;
+  }
+}
+
+async function clearMemberNickname() {
+  nicknameDraft.value = "";
+  await saveMemberNickname();
+}
+
+const nicknameChanged = computed(() => {
+  if (!nicknameDialogUser.value) return false;
+  return (
+    nicknameDraft.value.trim() !==
+    identityStore.nicknameFor(nicknameDialogUser.value.id)
+  );
+});
+
+function canKickMember(member) {
+  if (!member || String(member.id) === String(currentUser.value?.id))
+    return false;
+  if (isOwner(member)) return false;
+  return canManageMember(
+    props.room?.roles || [],
+    member.roles || [],
+    props.room?.isOwner,
+  );
+}
+
+async function kickMember() {
+  const member = memberMenuUser.value;
+  if (!canKickMember(member) || kickSaving.value) return;
+  if (
+    !window.confirm(
+      `Kick ${memberDisplayName(member)} from ${props.room?.name || "this room"}?`,
+    )
+  )
+    return;
+  kickSaving.value = true;
+  nicknameError.value = "";
+  try {
+    await $fetch(`${config.public.apiPath}/room/kick`, {
+      method: "POST",
+      headers: { Authorization: currentUser.value.id },
+      body: { roomId: props.roomId || props.room?.id, targetUserId: member.id },
+    });
+    closeMemberMenu();
+    await roomsStore.fetchRooms();
+  } catch (error) {
+    nicknameError.value =
+      error?.data?.statusMessage || error.message || "Could not kick member";
+  } finally {
+    kickSaving.value = false;
+  }
 }
 
 onMounted(() => {
-  document.addEventListener("pointerdown", closeVolumeMenu);
+  document.addEventListener("pointerdown", closeOverlays);
   document.addEventListener("keydown", onDocumentKeydown);
-  window.addEventListener("resize", closeVolumeMenu);
-  window.addEventListener("scroll", closeVolumeMenu, true);
+  window.addEventListener("resize", closeOverlays);
+  window.addEventListener("scroll", closeOverlays, true);
 });
 
 onUnmounted(() => {
-  document.removeEventListener("pointerdown", closeVolumeMenu);
+  document.removeEventListener("pointerdown", closeOverlays);
   document.removeEventListener("keydown", onDocumentKeydown);
-  window.removeEventListener("resize", closeVolumeMenu);
-  window.removeEventListener("scroll", closeVolumeMenu, true);
+  window.removeEventListener("resize", closeOverlays);
+  window.removeEventListener("scroll", closeOverlays, true);
 });
 import { useRuntimeConfig } from "#app";
 import { useChatStore } from "../stores/chat";
@@ -206,6 +542,22 @@ const identityStore = useIdentityStore();
 
 function memberDisplayName(member) {
   return identityStore.displayName(member);
+}
+
+function profileOriginalName(member) {
+  const profile = identityStore.profileFor(member);
+  const nickname = identityStore.nicknameFor(member?.id).trim();
+  const originalName = publicDisplayName(profile).trim();
+  return nickname && nickname !== originalName ? originalName : "";
+}
+
+function memberRoles(member) {
+  if (
+    isOwner(member) &&
+    !(member.roles || []).some((role) => role.name === "Owner")
+  )
+    return [{ id: "owner", name: "Owner" }, ...(member.roles || [])];
+  return member.roles || [];
 }
 
 const onlineUsers = computed(() => chatStore.onlineUsers || []);
@@ -266,5 +618,13 @@ function getMemberPresenceStatus(member) {
   }
 
   return "offline";
+}
+
+function memberPresenceLabel(member) {
+  return {
+    "in-room": "In this room",
+    online: "Online",
+    offline: "Offline",
+  }[getMemberPresenceStatus(member)];
 }
 </script>

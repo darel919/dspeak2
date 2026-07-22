@@ -56,6 +56,30 @@ All room and channel mutations pass through
 `server/utils/room-authorization.js`. Permissions from multiple roles combine.
 A member can manage only roles and members below their highest role. The Owner
 role is immutable, and only the owner may delete or transfer the room.
+The room settings interface edits roles in a modal with human-readable
+permission names. Member role buttons persist immediately, and the client and
+server both prevent removal of a member's final role. Accent changes also
+persist immediately and broadcast to connected clients as `room_updated`.
+Members with `room.manage_members` can kick lower-ranked members from the member
+list context menu. The server protects the owner, the acting member, and members
+at or above the actor's highest role, then removes room and active-channel
+membership before broadcasting the participant change.
+
+## Invite links and audit history
+
+Members with `room.manage_invites` create invite links from a Metro-style dialog
+and choose a fixed expiry from 30 minutes through 7 days. Other roles see an
+explicit permission-denied dialog. The URL path contains base64url-encoded JSON
+with the invite record ID, creator, creation time, expiry, and room ID.
+
+`dspeak_room_invites` is the server-side source of truth. Join and preview
+requests compare every encoded field with the stored record and reject malformed,
+modified, missing, or expired links. New room membership requires a valid invite.
+The join screen names the inviter and room before the member accepts.
+
+`dspeak_room_audit_log` records invite creation and successful invite-based
+joins. Room owners and roles with Manage invites or Manage members can view the
+latest 100 entries under Room settings → Audit log.
 
 ## Notifications
 
@@ -74,7 +98,7 @@ PocketBase notification record remains the source of truth.
 
 ## User identity
 
-`users.handle` is the unique DSpeak username. Handles are lowercase and contain
+`users.handle` is the unique dSpeak username. Handles are lowercase and contain
 only letters, numbers, and underscores. A case-insensitive unique index prevents
 duplicates. Migrated users may keep an empty handle until they edit their
 profile.

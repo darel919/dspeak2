@@ -39,8 +39,19 @@ export const useRoomsStore = defineStore("rooms", () => {
       body: body || JSON.stringify({ roomId, ...data }),
     });
     if (!response.ok) throw new Error("Failed to update room");
+    const updatedRoom = await response.json();
+    applyRealtimeRoomUpdate(updatedRoom);
     await fetchRooms();
-    return await response.json();
+    return updatedRoom;
+  }
+
+  function applyRealtimeRoomUpdate(update) {
+    if (!update?.id) return;
+    const index = rooms.value.findIndex(
+      (room) => String(room.id) === String(update.id),
+    );
+    if (index === -1) return;
+    rooms.value[index] = { ...rooms.value[index], ...update };
   }
 
   function getRoomById(id) {
@@ -172,7 +183,7 @@ export const useRoomsStore = defineStore("rooms", () => {
     return room.owner.id === userData.id;
   }
 
-  async function joinRoom(roomId) {
+  async function joinRoom(roomId, inviteToken = null) {
     loading.value = true;
     error.value = null;
 
@@ -219,7 +230,7 @@ export const useRoomsStore = defineStore("rooms", () => {
               Authorization: userData.id,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ roomId: trimmedRoomId }),
+            body: JSON.stringify({ roomId: trimmedRoomId, inviteToken }),
           });
           const retryable =
             response.status === 408 ||
@@ -353,5 +364,6 @@ export const useRoomsStore = defineStore("rooms", () => {
     createRoom,
     getRoomById,
     updateRoom,
+    applyRealtimeRoomUpdate,
   };
 });

@@ -1,6 +1,7 @@
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "../stores/auth";
 import { useIdentityStore } from "../stores/identity";
+import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
 
 export function usePresence(userId) {
@@ -12,6 +13,7 @@ export function usePresence(userId) {
   const config = useRuntimeConfig();
   const authStore = useAuthStore();
   const identityStore = useIdentityStore();
+  const roomsStore = useRoomsStore();
   const voiceStore = useVoiceStore();
 
   function receiveMessage(event) {
@@ -19,6 +21,10 @@ export function usePresence(userId) {
     try {
       message = JSON.parse(event.data);
     } catch {
+      return;
+    }
+    if (message?.type === "room_updated" && message.data?.id) {
+      roomsStore.applyRealtimeRoomUpdate(message.data);
       return;
     }
     if (message?.type !== "profile_updated" || !message.data?.id) return;

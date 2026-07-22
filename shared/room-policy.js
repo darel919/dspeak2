@@ -98,6 +98,19 @@ export function canManageRole(actorRoles, targetRole, isOwner = false) {
   );
 }
 
+export function canManageMember(actorRoles, targetRoles, isOwner = false) {
+  if ((targetRoles || []).some((role) => role.system)) return false;
+  if (
+    !isOwner &&
+    !getEffectivePermissions(actorRoles).includes("room.manage_members")
+  )
+    return false;
+  return (
+    isOwner ||
+    getHighestRolePosition(actorRoles) > getHighestRolePosition(targetRoles)
+  );
+}
+
 export function normalizeRoomAccent(value) {
   return ROOM_ACCENTS.includes(value) ? value : DEFAULT_ROOM_ACCENT;
 }

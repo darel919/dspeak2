@@ -297,6 +297,7 @@ async function trigger(pb, userId, body) {
       statusMessage: "Join this voice channel before using its soundboard",
     });
   await broadcastVoiceChannelEvent(channelId, "soundboard-triggered", {
+    activityId: crypto.randomUUID(),
     clipId: clip.id,
     clipTitle: clip.title,
     clipIcon: clip.icon || "🔊",

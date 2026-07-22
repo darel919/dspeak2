@@ -146,14 +146,14 @@
       <div class="modal-box">
         <h3 class="font-bold text-lg mb-4">Join Room</h3>
         <p class="text-base-content/70 mb-4">
-          Enter a room ID or paste a join link to join a room.
+          Paste an invite link to join a room.
         </p>
         <div class="form-control mb-4">
           <input
             v-model="joinInput"
             ref="joinInputRef"
             type="text"
-            placeholder="Room ID or invite link..."
+            placeholder="Invite link..."
             class="input input-bordered w-full"
             @keyup.enter="handleJoinSubmit"
           />
@@ -312,7 +312,7 @@ function closeCreateModal() {
   creatingRoom.value = false;
 }
 
-function extractRoomIdFromInput(input) {
+function extractInviteToken(input) {
   const trimmed = input.trim();
   const joinLinkMatch = trimmed.match(/\/join\/([^/?#]+)/);
   if (joinLinkMatch) {
@@ -326,14 +326,12 @@ async function handleJoinSubmit() {
   joiningRoom.value = true;
   joinError.value = null;
   try {
-    const roomId = extractRoomIdFromInput(joinInput.value);
-    if (!roomId) {
-      throw new Error("Invalid room ID or join link");
+    const inviteToken = extractInviteToken(joinInput.value);
+    if (!inviteToken) {
+      throw new Error("Invalid invite link");
     }
-    await roomsStore.joinRoom(roomId);
-    success("Successfully joined room!");
     closeJoinModal();
-    router.push(`/room/${roomId}`);
+    await router.push(`/join/${inviteToken}`);
   } catch (err) {
     joinError.value = err.message || "Failed to join room";
   } finally {

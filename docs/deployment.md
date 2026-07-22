@@ -1,11 +1,11 @@
 # Deployment runbook
 
-This runbook contains the network and platform details for deploying DSpeak with
+This runbook contains the network and platform details for deploying dSpeak with
 Docker Compose, Coolify, Zoraxy, direct IPv6, and Playit IPv4 fallback.
 
 ## Deployment model
 
-The supported production layout uses one long-running DSpeak container, one
+The supported production layout uses one long-running dSpeak container, one
 Playit agent for mediasoup IPv4 fallback, one IPv6 Coturn service, a certificate
 sidecar, and Cloudflare DDNS for the RTC hostname. HTTP and WebSockets may pass
 through Zoraxy. RTP and TURN traffic must reach their published ports directly.
@@ -40,7 +40,7 @@ if discovery returns an IPv4, private, link-local, or loopback address. Override
 `MEDIASOUP_ANNOUNCED_ADDRESS_URL` with an HTTPS endpoint that returns a plain-text
 address when necessary.
 
-When `MEDIASOUP_DIRECT_ADDRESS` is configured, DSpeak advertises the direct
+When `MEDIASOUP_DIRECT_ADDRESS` is configured, dSpeak advertises the direct
 candidate first and keeps the normal announced candidate as fallback. Setting it
 to `auto` discovers public IPv6; a failed direct discovery disables only that
 candidate. `MEDIASOUP_DIRECT_PORT` defaults to the local RTC port.
@@ -75,7 +75,7 @@ The Compose stack publishes:
 - `31100/tcp` to Nitro port `3000`
 - `40000/udp` for preferred RTP
 - `40000/tcp` for TCP fallback
-- a Playit agent in DSpeak's network namespace
+- a Playit agent in dSpeak's network namespace
 
 All mediasoup transports share one `WebRtcServer` and one UDP/TCP port.
 
@@ -98,7 +98,7 @@ host directly or through Playit.
 
 ## Playit IPv4 fallback
 
-The Playit agent shares DSpeak's container network namespace. Configure the
+The Playit agent shares dSpeak's container network namespace. Configure the
 tunnel's local server address as:
 
 ```text
@@ -117,7 +117,7 @@ MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
 MEDIASOUP_DIRECT_PORT=40000
 ```
 
-DSpeak rewrites the public candidate port while mediasoup continues listening on
+dSpeak rewrites the public candidate port while mediasoup continues listening on
 `40000`. Direct IPv6 has higher ICE priority; Playit remains available to
 IPv4-only clients or when direct connectivity fails.
 

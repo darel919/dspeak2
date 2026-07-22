@@ -362,7 +362,7 @@
           <li><a @click="showCreateModal = true">Create Room</a></li>
           <li>
             <a
-              @click="handleCopyInviteLink"
+              @click="inviteDialog?.open(selectedRoom)"
               :class="{ disabled: !selectedRoom }"
               >Copy Invite Link</a
             >
@@ -371,6 +371,7 @@
       </div>
     </div>
   </div>
+  <RoomInviteDialog ref="inviteDialog" />
 </template>
 
 <style scoped>
@@ -408,23 +409,10 @@
 </style>
 
 <script setup>
-import { useChatUtils } from "../composables/useChatUtils";
 import { MAX_VISIBLE_ROOMS } from "../const/ui";
 
 const config = useRuntimeConfig();
-const { copyToClipboard } = useChatUtils();
-
-async function handleCopyInviteLink() {
-  if (!selectedRoom.value) return;
-  const baseUrl = window.location.origin;
-  const inviteLink = `${baseUrl}/join/${selectedRoom.value.id}`;
-  const copied = await copyToClipboard(inviteLink);
-  if (copied) {
-    success("Invite link copied!");
-  } else {
-    error("Failed to copy invite link");
-  }
-}
+const inviteDialog = ref(null);
 
 function getRoomPictureUrl(room) {
   if (room.picture) {
@@ -535,7 +523,7 @@ function closeCreateModal() {
   creatingRoom.value = false;
 }
 
-function extractRoomIdFromInput(input) {
+function extractInviteToken(input) {
   const trimmed = input.trim();
   const joinLinkMatch = trimmed.match(/\/join\/([^/?#]+)/);
   if (joinLinkMatch) {
@@ -549,24 +537,12 @@ async function handleJoinSubmit() {
   joiningRoom.value = true;
   joinError.value = null;
   try {
-    const roomId = extractRoomIdFromInput(joinInput.value);
-    if (!roomId) {
-      throw new Error("Invalid room ID or join link");
+    const inviteToken = extractInviteToken(joinInput.value);
+    if (!inviteToken) {
+      throw new Error("Invalid invite link");
     }
-    await roomsStore.joinRoom(roomId);
-    success("Successfully joined room!");
     closeJoinModal();
-    try {
-      const channels = await useChannelsStore().fetchChannels(roomId);
-      const firstChannel = channels && channels.length > 0 ? channels[0] : null;
-      if (firstChannel) {
-        router.push(`/room/${roomId}/${firstChannel.id}`);
-      } else {
-        router.push(`/room/${roomId}`);
-      }
-    } catch {
-      router.push(`/room/${roomId}`);
-    }
+    await router.push(`/join/${inviteToken}`);
   } catch (err) {
     joinError.value = err.message || "Failed to join room";
   } finally {

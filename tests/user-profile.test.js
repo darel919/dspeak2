@@ -4,6 +4,7 @@ import {
   normalizeDisplayName,
   normalizeHandle,
   normalizeNickname,
+  profileIdentityLine,
   publicDisplayName,
 } from "../shared/user-profile.js";
 
@@ -33,4 +34,19 @@ test("public display names prefer the dSpeak override", () => {
     "dSpeak name",
   );
   assert.equal(publicDisplayName({ name: "Google name" }), "Google name");
+});
+
+test("profile identity lines show nicknames alongside original display names", () => {
+  const profile = {
+    display_name: "Alfito Yoga",
+    handle: "alfito_yoga",
+  };
+
+  assert.equal(profileIdentityLine(profile, "Al"), "Al AKA Alfito Yoga");
+  assert.equal(profileIdentityLine(profile, ""), "Alfito Yoga");
+  assert.equal(
+    profileIdentityLine({ display_name: "Alfito Yoga" }, "Al"),
+    "Al AKA Alfito Yoga",
+  );
+  assert.equal(profileIdentityLine(profile, "Alfito Yoga"), "Alfito Yoga");
 });

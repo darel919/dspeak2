@@ -892,6 +892,20 @@ export async function isActiveVoiceParticipant(channelId, userId) {
   );
 }
 
+export async function disconnectVoiceParticipant(channelId, userId) {
+  const state = await getState();
+  const room = state.rooms.get(String(channelId));
+  if (!room) return 0;
+  const sessions = [...room.sessions.values()].filter(
+    (session) => String(session.userId) === String(userId),
+  );
+  for (const session of sessions) {
+    closeSession(state, session);
+    session.peer.close(1008, "Removed from room");
+  }
+  return sessions.length;
+}
+
 export async function broadcastVoiceChannelEvent(channelId, type, data) {
   const state = await getState();
   const room = state.rooms.get(String(channelId));

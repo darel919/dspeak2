@@ -1,6 +1,6 @@
 # Hybrid media topology
 
-DSpeak uses authenticated server signaling with automatic native WebRTC P2P and
+dSpeak uses authenticated server signaling with automatic native WebRTC P2P and
 mediasoup SFU media routing. The topology coordinator is process-owned and uses
 monotonically increasing epochs so messages from an older membership or
 transition cannot change the current room.
@@ -152,7 +152,7 @@ selection. Web Audio gain provides independent volume control from 0% to 200%
 without modifying received WebRTC tracks.
 
 Provider handoffs reuse this graph and activate nodes only for the selected
-provider. DSpeak closes the graph and removes its output element after the
+provider. dSpeak closes the graph and removes its output element after the
 participant's final audio track closes. Voice-activity analysis branches from
 the same graph instead of opening another audio context.
 
