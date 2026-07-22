@@ -166,6 +166,11 @@ Cloudflare token, TURN shared secret, or generated credentials.
 The Compose service passes `DSPEAK_RTC_DOMAIN` to both containers because their
 certificate paths must resolve to the same hostname.
 
+Compose builds the pinned Coturn and Certbot base images with their supervisors
+included. The entrypoints do not depend on bind-mounted files from Coolify's
+temporary deployment checkout, so they remain available after the build helper
+and artifact directory are cleaned up.
+
 ## Dynamic RTC IPv6
 
 The Compose stack runs `favonia/cloudflare-ddns` in host-network mode. It reads
