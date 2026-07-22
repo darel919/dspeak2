@@ -1,5 +1,5 @@
 <template>
-  <div class="voice-channel h-full flex flex-col bg-base-200">
+  <div class="voice-channel relative h-full flex flex-col bg-base-200">
     <!-- Header -->
     <div class="flex items-center justify-between p-4 border-b border-base-300">
       <div class="flex items-center gap-2">
@@ -287,7 +287,7 @@
       v-if="
         voiceStore.connected && voiceStore.currentChannelId === props.channel.id
       "
-      class="border-t border-base-300 bg-base-300 p-4"
+      class="voice-controls absolute inset-x-4 bottom-4 z-40 rounded-2xl border border-base-content/15 bg-base-300/95 p-4 shadow-2xl backdrop-blur"
     >
       <div class="flex items-center justify-center gap-4">
         <!-- Microphone Control -->
@@ -682,12 +682,28 @@ onUnmounted(() => {});
 
 <style scoped>
 .voice-channel {
-  transition: all 0.2s ease;
+  isolation: isolate;
 }
 
-.voice-channel:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+.voice-controls {
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .voice-controls {
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+
+  .voice-channel:hover .voice-controls,
+  .voice-channel:focus-within .voice-controls {
+    pointer-events: auto;
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-pulse {

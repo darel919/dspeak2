@@ -20,6 +20,8 @@ const profile = computed(() => authStore.getUserData());
 const broadcastMode = computed(() => settingsStore.broadcastMode);
 const presenceStatus = inject("presenceStatus", ref(null));
 const rtcSummaryVisible = useState("rtc-summary-visible", () => false);
+const callMenu = ref(null);
+const callMenuOpen = ref(false);
 
 const currentRoomId = computed(() =>
   route.path.startsWith("/room/") ? route.params.roomId : null,
@@ -156,6 +158,22 @@ function barClass(level) {
   return signalLevel.value >= level ? "" : "opacity-25";
 }
 
+function closeCallMenu() {
+  callMenu.value?.removeAttribute("open");
+  callMenuOpen.value = false;
+}
+
+function syncCallMenuState(event) {
+  callMenuOpen.value = event.currentTarget.open;
+}
+
+function dismissCallMenu(event) {
+  if (event.type === "keydown" && event.key !== "Escape") return;
+  if (event.type === "pointerdown" && callMenu.value?.contains(event.target))
+    return;
+  closeCallMenu();
+}
+
 watch(
   () => voiceStore.connected,
   (connected) => {
@@ -168,8 +186,16 @@ watch(
 onMounted(() => {
   rtcStatsStore.start();
   startElapsedTimer();
+  document.addEventListener("pointerdown", dismissCallMenu);
+  document.addEventListener("keydown", dismissCallMenu);
+  window.addEventListener("blur", closeCallMenu);
 });
-onBeforeUnmount(stopElapsedTimer);
+onBeforeUnmount(() => {
+  stopElapsedTimer();
+  document.removeEventListener("pointerdown", dismissCallMenu);
+  document.removeEventListener("keydown", dismissCallMenu);
+  window.removeEventListener("blur", closeCallMenu);
+});
 </script>
 
 <template>
@@ -329,11 +355,16 @@ onBeforeUnmount(stopElapsedTimer);
           </button>
         </div>
 
-        <details class="dropdown dropdown-end">
+        <details
+          ref="callMenu"
+          class="dropdown dropdown-end"
+          @toggle="syncCallMenuState"
+        >
           <summary
             class="call-icon"
             aria-label="More call controls"
             title="More call controls"
+            :aria-expanded="callMenuOpen"
           >
             <Icon name="lucide:ellipsis" class="size-5" />
           </summary>
