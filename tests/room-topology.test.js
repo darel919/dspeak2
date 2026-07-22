@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRoomTopology, RoomTopologyCoordinator } from '../server/utils/room-topology.js'
+import { matchesPreparedActivation } from '../server/utils/media-transition.js'
 
 function harness(peerCount) {
   const broadcasts = []
@@ -37,6 +38,25 @@ function acknowledgeAll(room, coordinator) {
   const event = { epoch: room.topology.epoch, target: room.topology.target, sourceRevision: room.topology.sourceRevision }
   for (const peerId of room.sessions.keys()) coordinator.clientReady(room, peerId, event)
 }
+
+test('activation identifies the exact transition epoch accepted by every client', () => {
+  const { room, coordinator } = harness(2)
+  coordinator.reconcile(room, 'joined')
+  const preparedEpoch = room.topology.epoch
+  acknowledgeAll(room, coordinator)
+
+  assert.equal(room.topology.mode, 'sfu')
+  assert.equal(room.topology.preparedEpoch, preparedEpoch)
+  assert.equal(room.topology.epoch, preparedEpoch + 1)
+})
+
+test('client accepts only the activation produced by its verified transition', () => {
+  const prepared = { target: 'sfu', epoch: 7, sourceRevision: 3 }
+  assert.equal(matchesPreparedActivation(prepared, { preparedEpoch: 7, sourceRevision: 3 }, 'sfu'), true)
+  assert.equal(matchesPreparedActivation(prepared, { preparedEpoch: 6, sourceRevision: 3 }, 'sfu'), false)
+  assert.equal(matchesPreparedActivation(prepared, { preparedEpoch: 7, sourceRevision: 4 }, 'sfu'), false)
+  assert.equal(matchesPreparedActivation(prepared, { preparedEpoch: 7, sourceRevision: 3 }, 'p2p'), false)
+})
 
 function runActiveTimer(timers, delay) {
   const timer = timers.find(candidate => candidate.active && candidate.delay === delay)
@@ -86,35 +106,37 @@ test('two-device direct video keeps one resource-capped P2P sender', () => {
   assert.equal(room.topology.target, null)
 })
 
-test('multi-peer video uses SFU single-encode delivery', () => {
-  const { room, coordinator } = harness(3)
+test('multi-peer video follows the normal SFU-first P2P qualification path', () => {
+  const { room, coordinator, timers } = harness(3)
   room.sessions.get('peer-1').sources.add('screen')
   coordinator.reconcile(room, 'joined')
+  acknowledgeAll(room, coordinator)
 
-  assert.equal(room.topology.mode, 'switching')
-  assert.equal(room.topology.target, 'sfu')
-  assert.equal(room.topology.reason, 'video-single-encode')
+  assert.equal(room.topology.mode, 'sfu')
+  assert.equal(timers.some(timer => timer.active && timer.delay === 20000), true)
 })
 
-test('video blocks background direct recovery to avoid duplicate encoders', () => {
+test('video does not block background direct recovery', () => {
   const { room, coordinator, timers } = harness(2)
   room.sessions.get('peer-1').sources.add('camera')
   coordinator.reconcile(room, 'joined')
   acknowledgeAll(room, coordinator)
 
   assert.equal(room.topology.mode, 'sfu')
-  assert.equal(timers.some(timer => timer.active && timer.delay === 10000), false)
-
-  room.sessions.get('peer-1').sources.delete('camera')
-  coordinator.sourcesChanged(room)
   assert.equal(timers.some(timer => timer.active && timer.delay === 10000), true)
+
+  runActiveTimer(timers, 10000)
+  assert.equal(room.topology.mode, 'probing')
+  qualifyCompleteMesh(room, coordinator)
+  runActiveTimer(timers, 10000)
+  assert.equal(room.topology.target, 'p2p')
 })
 
 test('four clients require every directed mesh edge before activation', () => {
   const { room, coordinator, timers } = harness(4)
   coordinator.reconcile(room, 'joined')
   acknowledgeAll(room, coordinator)
-  runActiveTimer(timers, 10000)
+  runActiveTimer(timers, 30000)
   const peerIds = [...room.sessions.keys()]
   for (const peerId of peerIds.slice(0, 3)) {
     coordinator.p2pReady(room, peerId, peerIds.filter(candidate => candidate !== peerId), room.topology.epoch)
@@ -122,7 +144,7 @@ test('four clients require every directed mesh edge before activation', () => {
   assert.equal(room.topology.mode, 'probing')
   coordinator.p2pReady(room, peerIds[3], peerIds.slice(0, 3), room.topology.epoch)
   assert.equal(room.topology.mode, 'probing')
-  runActiveTimer(timers, 10000)
+  runActiveTimer(timers, 30000)
   assert.equal(room.topology.target, 'p2p')
 })
 
@@ -151,7 +173,7 @@ test('source changes invalidate partial direct qualification', () => {
   const { room, coordinator, timers } = harness(3)
   coordinator.reconcile(room, 'joined')
   acknowledgeAll(room, coordinator)
-  runActiveTimer(timers, 10000)
+  runActiveTimer(timers, 20000)
   const staleEpoch = room.topology.epoch
   const peerIds = [...room.sessions.keys()]
   coordinator.p2pReady(room, 'peer-1', ['peer-2', 'peer-3'], staleEpoch)
@@ -264,13 +286,13 @@ test('five-to-four membership recovery keeps SFU until a stable mesh qualifies',
 
   coordinator.reconcile(room, 'membership-changed')
   assert.equal(room.topology.mode, 'sfu')
-  runActiveTimer(timers, 10000)
+  runActiveTimer(timers, 30000)
   assert.equal(room.topology.mode, 'probing')
   assert.equal(room.topology.recovering, true)
   qualifyCompleteMesh(room, coordinator)
   assert.equal(room.topology.mode, 'probing')
 
-  const stabilityTimer = timers.find(timer => timer.active && timer.delay === 10000)
+  const stabilityTimer = timers.find(timer => timer.active && timer.delay === 30000)
   assert.ok(stabilityTimer)
   stabilityTimer.callback()
   assert.equal(room.topology.mode, 'switching')

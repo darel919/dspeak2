@@ -58,6 +58,10 @@ Every handoff uses a two-phase room consensus. The server broadcasts a switching
 epoch and source revision, each client stages and verifies the destination RTP,
 and activation occurs only after every current client acknowledges that exact
 revision. Membership or source changes invalidate earlier acknowledgements.
+The activation state carries the prepared transition epoch. A client binds that
+already-verified destination without running a second readiness window after
+room-wide commitment; an activation without matching lineage must verify media
+before it can replace the active provider.
 Failed SFU preparation is retried with a fresh epoch while the active route stays
 bound; an unverified destination is never reported as active.
 
@@ -125,16 +129,26 @@ minimum of 24 FPS. Resolution may therefore fall below the requested
 target when browser congestion control needs to protect cadence. Capture settings, sender encoding limits, available upload
 bandwidth, and encoder capacity remain independent constraints, so a requested
 frame rate is never reported as an achieved rate without outbound RTP evidence.
-Rooms with three or more participants remain on SFU while any participant
-publishes camera or screen video. This keeps one video encoder and one upload per
-source instead of multiplying both by the number of peers in a mesh. An already
-direct two-device call may keep its single P2P video sender, with a
-resolution-and-frame-rate-derived ceiling up to 8 Mbps,
-but SFU rooms do not probe P2P while video is active because preparation would
-temporarily duplicate the encoder. Direct video prefers H.264 when both browsers
-advertise it, retaining VP9 and VP8 as negotiated fallbacks. Sender parameters
-are reapplied after P2P negotiation so a browser cannot silently lose the
-configured ceiling during SDP changes.
+Camera and screen sources do not override topology selection. Rooms with two to
+four participants may qualify and transition from SFU to P2P while video remains
+active, using the same ICE, health, RTP-flow, stability, and all-client consensus
+requirements as audio-only rooms. During make-before-break preparation, the
+browser may temporarily encode the source for both routes. Once P2P activates,
+each source has one sender per remote peer and uses its
+resolution-and-frame-rate-derived ceiling up to 8 Mbps. Direct video prefers
+H.264 when both browsers advertise it, retaining VP9 and VP8 as negotiated
+fallbacks. Sender parameters are reapplied after P2P negotiation so a browser
+cannot silently lose the configured ceiling during SDP changes.
+
+Topology preference is weighted by mesh size. Two participants hold SFU for ten
+seconds and require ten seconds of stable Direct qualification. Three
+participants hold SFU for twenty seconds and require twenty seconds of stable
+full-mesh qualification. Four participants use thirty-second hold and stability
+windows. Every directed edge must remain healthy throughout. An active Direct
+route tolerates twenty seconds without health or RTP progress; three- and
+four-participant meshes reduce that tolerance to fifteen and ten seconds so one
+weak edge returns the room to SFU sooner. Mesh remains supported, while SFU
+becomes progressively preferred as aggregate edge risk grows.
 
 Mediasoup forwards RTP without decoding, resizing, or transcoding it. Multiple
 receiver qualities require sender-provided simulcast or SVC layers. Screen share

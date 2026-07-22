@@ -11,6 +11,7 @@ import {
   hasRequiredMediaFlow,
   isViableP2pPair,
   isP2pLivenessExpired,
+  p2pActiveLivenessTimeoutMs,
   p2pRemoteFeedKey,
   requiresP2pLiveness,
 } from '../app/shared/native-p2p.js'
@@ -197,6 +198,12 @@ test('active P2P liveness tolerates short stats and health stalls', () => {
   assert.equal(isP2pLivenessExpired(1000, 3999, 3000), false)
   assert.equal(isP2pLivenessExpired(1000, 4000, 3000), true)
   assert.equal(isP2pLivenessExpired(Number.NaN, 4000, 3000), false)
+})
+
+test('larger meshes return to SFU sooner when any edge loses liveness', () => {
+  assert.equal(p2pActiveLivenessTimeoutMs(1), 20000)
+  assert.equal(p2pActiveLivenessTimeoutMs(2), 15000)
+  assert.equal(p2pActiveLivenessTimeoutMs(3), 10000)
 })
 
 test('a qualified probe remains monitored until activation', () => {

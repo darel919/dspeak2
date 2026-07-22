@@ -10,6 +10,10 @@ export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 5000
 export const P2P_DISCONNECT_GRACE_MS = 8000
 export const P2P_ICE_RESTART_TIMEOUT_MS = 12000
 
+export function p2pActiveLivenessTimeoutMs(connectionCount) {
+  return Math.max(10000, P2P_ACTIVE_HEALTH_TIMEOUT_MS - Math.max(0, Number(connectionCount) - 1) * 5000)
+}
+
 export function isP2pLivenessExpired(lastProgressAt, now, timeoutMs) {
   return (
     Number.isFinite(lastProgressAt) &&
@@ -602,11 +606,11 @@ export class NativeP2pMesh {
           const healthTimeout =
             this.mode === 'probing'
               ? P2P_STABILITY_LIVENESS_TIMEOUT_MS
-              : P2P_ACTIVE_HEALTH_TIMEOUT_MS
+              : p2pActiveLivenessTimeoutMs(this.connections.size)
           const mediaTimeout =
             this.mode === 'probing'
               ? P2P_STABILITY_LIVENESS_TIMEOUT_MS
-              : P2P_ACTIVE_MEDIA_TIMEOUT_MS
+              : p2pActiveLivenessTimeoutMs(this.connections.size)
           if (state.channel?.readyState === 'open') {
             try {
               state.channel.send(

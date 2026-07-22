@@ -26,14 +26,15 @@ direct path proves healthy. The table describes the preferred steady state:
 | --- | --- |
 | 1 | mediasoup SFU |
 | 2 | Direct P2P |
-| 3–4 | Full P2P mesh |
+| 3–4 | SFU preferred; full P2P mesh after extended qualification |
 | 5+ or unhealthy mesh | mediasoup SFU |
 
 Every occupied call first establishes mediasoup SFU,
 attempting native IPv6 before the IPv4 fallback. For rooms with two through four
 devices, the server then probes a complete Direct or Mesh path in the background
-and switches only after a stable
-qualification window and all-client media consensus. Membership changes on an
+and switches only after a weighted stability window and all-client media
+consensus. Direct uses a short confidence window, while three- and four-device
+meshes use progressively longer SFU hold and qualification windows. Membership changes on an
 active P2P room return the room to SFU before qualifying the new mesh.
 
 Direct probes use STUN and may use TURN when direct ICE cannot connect. A P2P

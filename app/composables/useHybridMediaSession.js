@@ -9,7 +9,7 @@ import { addressFamily, buildTopologyGraph } from '~/shared/rtc-topology.js'
 import { collectOutboundAudioStats, collectVideoRtpStats } from '~/shared/rtc-media-stats.js'
 import { buildP2pVideoSenderOptions } from '~/shared/video-settings.js'
 import { buildVoiceProducerOptions, getAudioBitrateBps, mapPeerConnectionMetrics, mapPeerRoundTripTimes } from '~/shared/voice-transport.js'
-import { shouldAcceptTopologyEvent, topologyEventKey } from '~~/server/utils/media-transition.js'
+import { matchesPreparedActivation, shouldAcceptTopologyEvent, topologyEventKey } from '~~/server/utils/media-transition.js'
 import { useAuthStore } from '~/stores/auth'
 import { useChannelsStore } from '~/stores/channels'
 import { useSettingsStore } from '~/stores/settings'
@@ -72,6 +72,7 @@ export function useHybridMediaSession() {
   let lastP2pEdges = []
   let latestTopologyKey = null
   let reportedSfuFailureEpoch = null
+  let preparedTransition = null
   const videoStatsSamples = new Map()
 
   const registry = new RemoteMediaRegistry({
@@ -405,6 +406,7 @@ export function useHybridMediaSession() {
       reason: data.reason || null,
       target: data.target || (data.mode === 'probing' ? 'p2p' : null),
       sourceRevision: Number(data.sourceRevision) || 0,
+      preparedEpoch: Number.isInteger(Number(data.preparedEpoch)) ? Number(data.preparedEpoch) : null,
       peers: Array.isArray(data.peers) ? data.peers : [],
       activatedAt: data.activatedAt || Date.now(),
       displayMode: data.mode === 'probing' && previousProvider ? 'switching' : null
@@ -420,6 +422,7 @@ export function useHybridMediaSession() {
       p2pMesh = null
       sfu?.closeMedia()
       handoff.clear()
+      preparedTransition = null
       remoteProducersCount.value = 0
       peerRoundTripTimes.value = {}
       peerConnectionMetrics.value = {}
@@ -474,6 +477,7 @@ export function useHybridMediaSession() {
   function handleTopologyFailure(data, topologyError) {
     if (topologyEventKey(data) !== latestTopologyKey) return
     const reason = topologyError?.message || 'Topology operation failed'
+    preparedTransition = null
     if (data.mode === 'p2p' || data.target === 'p2p') {
       send({ type: 'p2p-failed', data: { epoch: data.epoch, reason: `activation-failed-${reason}` } })
       console.warn(`[Media] P2P topology operation failed: ${reason}`)
@@ -515,10 +519,16 @@ export function useHybridMediaSession() {
       } else {
         throw new Error('The server requested an invalid media topology')
       }
+      preparedTransition = {
+        target: data.target,
+        epoch: Number(data.epoch),
+        sourceRevision: Number(data.sourceRevision) || 0
+      }
       send({ type: 'topology-ready', data: { epoch: data.epoch, target: data.target, sourceRevision: data.sourceRevision } })
       refreshPublicMaps()
       refreshTopologyGraph()
     } catch (transitionError) {
+      preparedTransition = null
       if (destinationSfu && destinationSfu === sfu) destinationSfu.closeMedia()
       if (topologyEventKey(data) !== latestTopologyKey) return
       send({ type: 'topology-failed', data: { epoch: data.epoch, target: data.target, sourceRevision: data.sourceRevision, reason: transitionError.message } })
@@ -530,7 +540,7 @@ export function useHybridMediaSession() {
     const mesh = ensureP2p()
     mesh.applyTopology({ ...data, localPeerId })
     for (const entry of localSources.values()) mesh.publishSource(entry.source, entry.track, entry.stream)
-    await waitForRemoteTracks('p2p', data)
+    if (!matchesPreparedActivation(preparedTransition, data, 'p2p')) await waitForRemoteTracks('p2p', data)
     handoff.bind('p2p')
     setActiveProvider('p2p')
     sfuRoundTripTime.value = null
@@ -540,6 +550,7 @@ export function useHybridMediaSession() {
     transportReady.value = true
     iceConnectedBoth.value = true
     error.value = null
+    preparedTransition = null
     refreshPublicMaps()
     refreshTopologyGraph()
   }
@@ -549,7 +560,7 @@ export function useHybridMediaSession() {
     const session = ensureSfu()
     await session.initialize()
     for (const entry of localSources.values()) await session.addSource(entry)
-    await waitForRemoteTracks('sfu', data)
+    if (!matchesPreparedActivation(preparedTransition, data, 'sfu')) await waitForRemoteTracks('sfu', data)
     handoff.bind('sfu')
     setActiveProvider('sfu')
     reportedSfuFailureEpoch = null
@@ -559,6 +570,7 @@ export function useHybridMediaSession() {
     transportReady.value = true
     iceConnectedBoth.value = true
     error.value = null
+    preparedTransition = null
     refreshPublicMaps()
     refreshTopologyGraph()
   }

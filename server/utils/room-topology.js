@@ -1,6 +1,5 @@
-import { allClientsReady, hasCompleteMesh, membershipTopology } from './media-transition.js'
+import { allClientsReady, hasCompleteMesh, membershipTopology, p2pRoutingPolicy } from './media-transition.js'
 
-const DEFAULT_RECOVERY_DELAY_MS = 10000
 const DEFAULT_TRANSITION_TIMEOUT_MS = 15000
 const DEFAULT_SFU_RETRY_DELAY_MS = 1000
 
@@ -13,6 +12,7 @@ export function createRoomTopology() {
     readiness: new Map(),
     transitionReadiness: new Map(),
     sourceRevision: 0,
+    preparedEpoch: null,
     target: null,
     recovering: false,
     recoveryTimer: null,
@@ -39,20 +39,13 @@ export function roomTopologyPayload(room) {
     activatedAt: room.topology.activatedAt,
     target: room.topology.target,
     sourceRevision: room.topology.sourceRevision,
+    preparedEpoch: room.topology.preparedEpoch,
     peers: [...room.sessions.values()].map(session => ({
       peerId: session.peer.id,
       userId: session.userId,
       sources: [...session.sources]
     }))
   }
-}
-
-export function roomHasVideoSources(room) {
-  return [...room.sessions.values()].some(session => session.sources?.has('camera') || session.sources?.has('screen'))
-}
-
-export function roomRequiresSingleEncodeSfu(room) {
-  return room.sessions.size > 2 && roomHasVideoSources(room)
 }
 
 export class RoomTopologyCoordinator {
@@ -70,11 +63,12 @@ export class RoomTopologyCoordinator {
     }
   }
 
-  set(room, mode, reason, target = null) {
+  set(room, mode, reason, target = null, preparedEpoch = null) {
     this.clearTimers(room)
     room.topology.mode = mode
     room.topology.target = target
     room.topology.reason = reason
+    room.topology.preparedEpoch = preparedEpoch
     room.topology.epoch += 1
     room.topology.activatedAt = Date.now()
     room.topology.readiness.clear()
@@ -88,15 +82,13 @@ export class RoomTopologyCoordinator {
       room.topology.recovering = false
       return this.set(room, 'idle', 'waiting-for-peer')
     }
-    if (next === 'sfu' || roomRequiresSingleEncodeSfu(room)) {
+    if (next === 'sfu') {
       room.topology.recovering = false
       if (room.topology.mode === 'sfu') {
         this.clearTimers(room)
         return this.broadcast(room)
       }
-      const transitionReason = room.sessions.size === 1
-        ? 'establishing-sfu'
-        : roomRequiresSingleEncodeSfu(room) ? 'video-single-encode' : 'participant-limit'
+      const transitionReason = room.sessions.size === 1 ? 'establishing-sfu' : 'participant-limit'
       return this.beginTransition(room, 'sfu', transitionReason)
     }
     if (room.topology.recovering) {
@@ -132,7 +124,7 @@ export class RoomTopologyCoordinator {
     room.topology.transitionReadiness.set(peerId, room.topology.sourceRevision)
     if (!allClientsReady([...room.sessions.keys()], room.topology.transitionReadiness, room.topology.sourceRevision)) return true
     const activationReason = room.topology.reason || `all-clients-ready-${target}`
-    this.set(room, target, activationReason)
+    this.set(room, target, activationReason, null, Number(epoch))
     if (target === 'p2p') room.topology.recovering = false
     if (target === 'sfu') this.scheduleDirectRecovery(room)
     return true
@@ -158,16 +150,6 @@ export class RoomTopologyCoordinator {
 
   sourcesChanged(room) {
     room.topology.sourceRevision += 1
-    if (roomRequiresSingleEncodeSfu(room)) {
-      room.topology.recovering = false
-      if (room.topology.mode === 'sfu') {
-        this.clearTimers(room)
-        this.broadcast(room)
-        return
-      }
-      this.beginTransition(room, 'sfu', 'video-single-encode')
-      return
-    }
     if (room.topology.mode === 'switching') {
       this.beginTransition(room, room.topology.target, 'media-sources-changed')
     } else if (room.topology.mode === 'probing') {
@@ -183,7 +165,6 @@ export class RoomTopologyCoordinator {
   }
 
   p2pReady(room, peerId, qualifiedPeerIds, epoch) {
-    if (roomRequiresSingleEncodeSfu(room)) return false
     if (room.topology.mode !== 'probing' || Number(epoch) !== room.topology.epoch || !room.sessions.has(peerId)) return false
     const expected = new Set([...room.sessions.keys()].filter(candidate => candidate !== peerId))
     const qualified = new Set((Array.isArray(qualifiedPeerIds) ? qualifiedPeerIds : []).map(String).filter(candidate => expected.has(candidate)))
@@ -202,7 +183,7 @@ export class RoomTopologyCoordinator {
       if (room.topology.epoch !== qualificationEpoch || room.topology.mode !== 'probing') return
       if (!hasCompleteMesh([...room.sessions.keys()].sort(), room.topology.readiness)) return
       this.beginTransition(room, 'p2p', 'recovered-direct-mesh')
-    }, DEFAULT_RECOVERY_DELAY_MS)
+    }, p2pRoutingPolicy(room.sessions.size).stabilityDelayMs)
     return true
   }
 
@@ -233,11 +214,11 @@ export class RoomTopologyCoordinator {
   }
 
   scheduleDirectRecovery(room) {
-    if (room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants || roomHasVideoSources(room)) return
+    if (room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants) return
     room.topology.recoveryTimer = this.setTimer(() => {
-      if (room.topology.mode !== 'sfu' || room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants || roomHasVideoSources(room)) return
+      if (room.topology.mode !== 'sfu' || room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants) return
       this.set(room, 'probing', 'checking-recovered-direct-path')
       room.topology.recovering = true
-    }, DEFAULT_RECOVERY_DELAY_MS)
+    }, p2pRoutingPolicy(room.sessions.size).recoveryDelayMs)
   }
 }

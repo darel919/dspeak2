@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { allClientsReady, hasCompleteMesh, membershipTopology, shouldAcceptTopologyEvent, topologyEventKey } from '../server/utils/media-transition.js'
+import { allClientsReady, hasCompleteMesh, membershipTopology, p2pRoutingPolicy, shouldAcceptTopologyEvent, topologyEventKey } from '../server/utils/media-transition.js'
 import { allClientsReady as serverClientsReady, hasCompleteMesh as serverCompleteMesh, membershipTopology as serverMembershipTopology } from '../server/utils/media-transition.js'
 
 test('membership topology enforces the four-device mesh limit', () => {
@@ -9,6 +9,12 @@ test('membership topology enforces the four-device mesh limit', () => {
   assert.equal(membershipTopology(2), 'probing')
   assert.equal(membershipTopology(4), 'probing')
   assert.equal(membershipTopology(5), 'sfu')
+})
+
+test('P2P confidence decreases as the mesh gains participants', () => {
+  assert.deepEqual(p2pRoutingPolicy(2), { recoveryDelayMs: 10000, stabilityDelayMs: 10000 })
+  assert.deepEqual(p2pRoutingPolicy(3), { recoveryDelayMs: 20000, stabilityDelayMs: 20000 })
+  assert.deepEqual(p2pRoutingPolicy(4), { recoveryDelayMs: 30000, stabilityDelayMs: 30000 })
 })
 
 test('complete mesh requires every directed peer report', () => {
