@@ -1,12 +1,14 @@
 #!/bin/sh
 set -eu
 
-certificate="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/fullchain.pem"
-private_key="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/privkey.pem"
-
 log() {
   printf '%s [coturn] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1"
 }
+
+log "Container supervisor started"
+
+certificate="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/fullchain.pem"
+private_key="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/privkey.pem"
 
 trap 'exit 0' TERM INT
 

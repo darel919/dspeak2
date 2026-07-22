@@ -52,6 +52,8 @@ services:
   coturn:
     image: coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be
     network_mode: host
+    environment:
+      DSPEAK_RTC_DOMAIN: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}
     entrypoint: [/bin/sh, /usr/local/bin/run-coturn]
     command:
       - --log-file=stdout

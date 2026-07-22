@@ -163,6 +163,9 @@ issuance attempt, the Certbot error output, and the next retry or renewal time.
 TURN server, reloading renewed files, or exiting. Neither log includes the
 Cloudflare token, TURN shared secret, or generated credentials.
 
+The Compose service passes `DSPEAK_RTC_DOMAIN` to both containers because their
+certificate paths must resolve to the same hostname.
+
 ## Dynamic RTC IPv6
 
 The Compose stack runs `favonia/cloudflare-ddns` in host-network mode. It reads

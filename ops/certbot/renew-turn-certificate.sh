@@ -1,14 +1,17 @@
 #!/bin/sh
 set -eu
 
-credentials=/run/certbot/cloudflare.ini
-install -d -m 700 /run/certbot
-umask 077
-printf 'dns_cloudflare_api_token = %s\n' "$TURN_CLOUDFLARE_API_TOKEN" > "$credentials"
-
 log() {
   printf '%s [turn-certbot] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1"
 }
+
+log "Certificate manager started"
+
+credentials=/run/certbot/cloudflare.ini
+mkdir -p /run/certbot
+chmod 700 /run/certbot
+umask 077
+printf 'dns_cloudflare_api_token = %s\n' "$TURN_CLOUDFLARE_API_TOKEN" > "$credentials"
 
 issue_or_renew() {
   log "Requesting or renewing certificate for ${DSPEAK_RTC_DOMAIN}"
@@ -30,7 +33,6 @@ issue_or_renew() {
   fi
 }
 
-log "Certificate manager started"
 while true; do
   if issue_or_renew; then
     log "Next renewal check in 12 hours"
