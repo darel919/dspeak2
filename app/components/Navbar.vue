@@ -1,5 +1,4 @@
-
-<script setup lang="ts">
+<script setup>
 import { useAuthStore } from '../stores/auth'
 import { useVoiceStore } from '../stores/voice'
 import { useChannelsStore } from '../stores/channels'
@@ -7,55 +6,105 @@ import { useSettingsStore } from '../stores/settings'
 import { useRtcStatsStore } from '../stores/rtc-stats'
 import { isScreenShareFpsBelowTarget } from '../shared/video-settings'
 import { getConnectionQualityLabel } from '../shared/connection-quality'
-
 import RoomList from './RoomList.vue'
 
+const authStore = useAuthStore()
+const voiceStore = useVoiceStore()
+const channelsStore = useChannelsStore()
+const settingsStore = useSettingsStore()
+const rtcStatsStore = useRtcStatsStore()
+const route = useRoute()
+const router = useRouter()
 
-const authStore = useAuthStore();
-const voiceStore = useVoiceStore();
-const channelsStore = useChannelsStore();
-const settingsStore = useSettingsStore();
-const rtcStatsStore = useRtcStatsStore();
+const profile = computed(() => authStore.getUserData())
 const broadcastMode = computed(() => settingsStore.broadcastMode)
-function toggleBroadcastMode() {
-    settingsStore.setBroadcastMode(!settingsStore.broadcastMode)
-}
-const profile = computed(() => authStore.getUserData());
-const route = useRoute();
-const router = useRouter();
+const presenceStatus = inject('presenceStatus', ref(null))
+const rtcSummaryVisible = useState('rtc-summary-visible', () => false)
 
-const currentRoomId = computed(() => {
-    if (route.path.startsWith('/room/')) {
-        return route.params.roomId as string;
-    }
-    return null;
-});
-
-
-
-const presenceStatus = inject('presenceStatus', ref(null)) as Ref<string|null>
-
-
+const currentRoomId = computed(() => route.path.startsWith('/room/') ? route.params.roomId : null)
+const currentVoiceChannel = computed(() => voiceStore.currentChannelId
+    ? channelsStore.getChannelById(voiceStore.currentChannelId)
+    : null)
+const isDisconnected = computed(() => presenceStatus?.value === 'permanently-disconnected')
 const avatarStatusClass = computed(() => {
-    if (voiceStore.error && !voiceStore.connected) return 'avatar-offline ring-2 ring-error ring-offset-2';
-    if (!presenceStatus?.value) return ''
-    if (presenceStatus.value === 'connected') return 'avatar-online'
-    if (presenceStatus.value === 'permanently-disconnected') return 'avatar-offline'
-    return 'avatar-offline'
+    if (voiceStore.error && !voiceStore.connected) return 'avatar-offline'
+    if (presenceStatus?.value === 'connected') return 'avatar-online'
+    if (presenceStatus?.value) return 'avatar-offline'
+    return ''
+})
+const micUnavailable = computed(() => !voiceStore.connected || Boolean(
+    voiceStore.sfuComposable && !voiceStore.sfuComposable.transportReady
+))
+
+const lastRttMs = computed(() => rtcStatsStore.metrics.rttMs)
+const lastJitterMs = computed(() => rtcStatsStore.metrics.jitterMs)
+const lastLoss = computed(() => rtcStatsStore.metrics.loss)
+const signalLevel = computed(() => rtcStatsStore.metrics.connected ? rtcStatsStore.metrics.score : 0)
+const activeRouteLabel = computed(() => {
+    const mode = rtcStatsStore.snapshot?.topology?.mode
+    return mode === 'p2p-direct' ? 'P2P' : mode === 'p2p-mesh' ? 'Mesh' : mode === 'sfu-ipv4' ? 'SFU IPv4' : 'SFU'
+})
+const signalLabel = computed(() => getConnectionQualityLabel(signalLevel.value))
+const signalColorClass = computed(() => {
+    if (signalLevel.value >= 4) return 'bg-success'
+    if (signalLevel.value >= 2) return 'bg-warning'
+    if (signalLevel.value === 1) return 'bg-error'
+    return 'bg-base-content/40'
+})
+const signalTooltip = computed(() => {
+    const parts = [signalLabel.value]
+    if (lastRttMs.value != null) parts.push(`RTT ${Math.round(lastRttMs.value)} ms`)
+    if (lastJitterMs.value != null) parts.push(`Jitter ${Math.round(lastJitterMs.value)} ms`)
+    if (lastLoss.value != null) parts.push(`Loss ${(lastLoss.value * 100).toFixed(1)}%`)
+    return parts.join(' • ')
 })
 
-const isDisconnected = computed(() => {
-    return presenceStatus?.value === 'permanently-disconnected'
+const outboundVideoStats = computed(() => rtcStatsStore.outbound)
+const outboundVideoLabels = computed(() => outboundVideoStats.value
+    .map((stat) => ({ source: stat.source, text: formatVideoQuality(stat) }))
+    .filter((item) => item.text))
+const screenShareFpsLow = computed(() => {
+    const screen = outboundVideoStats.value.find((stat) => stat.source === 'screen')
+    return voiceStore.screenSharing && Boolean(screen) && isScreenShareFpsBelowTarget(screen.fps, screen.targetFps)
 })
 
+const elapsedText = ref('')
+let elapsedTimer = null
 
-const currentVoiceChannel = computed(() => {
-    if (!voiceStore.currentChannelId) return null
-    return channelsStore.getChannelById(voiceStore.currentChannelId) as any
-})
+function formatVideoQuality(stat) {
+    if (!stat?.width || !stat?.height) return ''
+    const resolution = Math.min(stat.width, stat.height)
+    const fps = stat.fps ? Math.round(stat.fps) : null
+    return `${resolution}p${fps ? `@${fps}fps` : ''}`
+}
 
-const connectedUsers = computed(() => voiceStore.getDisplayUsersArray())
+function formatElapsed(ms) {
+    if (ms <= 0 || !Number.isFinite(ms)) return ''
+    const totalSeconds = Math.floor(ms / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    const pad = (value) => value.toString().padStart(2, '0')
+    return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`
+}
 
+function updateElapsedTime() {
+    elapsedText.value = voiceStore.connected && voiceStore.connectedAt
+        ? formatElapsed(Date.now() - voiceStore.connectedAt)
+        : ''
+}
+
+function startElapsedTimer() {
+    if (elapsedTimer) return
+    updateElapsedTime()
+    elapsedTimer = setInterval(updateElapsedTime, 1000)
+}
+
+function stopElapsedTimer() {
+    if (elapsedTimer) clearInterval(elapsedTimer)
+    elapsedTimer = null
+    elapsedText.value = ''
+}
 
 function navigateToVoiceChannel() {
     if (voiceStore.currentChannelId && voiceStore.currentRoomId) {
@@ -63,352 +112,346 @@ function navigateToVoiceChannel() {
     }
 }
 
-function handleProfileClick(e: MouseEvent) {
-
-    if (voiceStore.connected) {
-
-        const avatarEl = document.querySelector('.avatar.select-none.relative .w-12.rounded-full');
-        if (avatarEl && avatarEl.contains(e.target as Node)) {
-            router.push('/settings');
-            return;
-        }
-
-        navigateToVoiceChannel();
-        return;
-    }
-
-    router.push('/settings');
+function toggleBroadcastMode() {
+    settingsStore.setBroadcastMode(!settingsStore.broadcastMode)
 }
 
-
-function openRtcDebug() { router.push('/rtc-debug') }
-const rtcSummaryVisible = useState<boolean>('rtc-summary-visible', () => false)
-function toggleRtcSummary() { rtcSummaryVisible.value = !rtcSummaryVisible.value }
-
-
-const lastRttMs = computed(() => rtcStatsStore.metrics.rttMs)
-const lastJitterMs = computed(() => rtcStatsStore.metrics.jitterMs)
-const lastLoss = computed(() => rtcStatsStore.metrics.loss)
-const activeRouteLabel = computed(() => {
-    const mode = rtcStatsStore.snapshot?.topology?.mode
-    return mode === 'p2p-direct' ? 'P2P' : mode === 'p2p-mesh' ? 'Mesh' : mode === 'sfu-ipv4' ? 'SFU IPv4' : 'SFU'
-})
-const signalLevel = computed(() => rtcStatsStore.metrics.connected ? rtcStatsStore.metrics.score : 0)
-const outboundVideoStats = computed(() => rtcStatsStore.outbound)
-const screenShareFpsLow = computed(() => {
-    const screen = outboundVideoStats.value.find((stat) => stat.source === 'screen')
-    return voiceStore.screenSharing && !!screen && isScreenShareFpsBelowTarget(screen.fps, screen.targetFps)
-})
-
-
-const elapsedText = ref('')
-let elapsedTimer: any = null
-
-function formatElapsed(ms: number) {
-    if (ms <= 0 || !isFinite(ms)) return ''
-    const totalSec = Math.floor(ms / 1000)
-    const h = Math.floor(totalSec / 3600)
-    const m = Math.floor((totalSec % 3600) / 60)
-    const s = totalSec % 60
-    const pad = (n: number) => n.toString().padStart(2, '0')
-    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
+function barClass(level) {
+    return signalLevel.value >= level ? '' : 'opacity-25'
 }
 
-function startElapsedTimer() {
-    if (elapsedTimer) return
-    const tick = () => {
-        if (voiceStore.connected && (voiceStore as any).connectedAt) {
-            const ms = Date.now() - (voiceStore as any).connectedAt
-            elapsedText.value = formatElapsed(ms)
-        } else {
-            elapsedText.value = ''
-        }
-    }
-    tick()
-    elapsedTimer = setInterval(tick, 1000)
-}
-
-watch(() => voiceStore.connected, (c) => {
-    if (c) startElapsedTimer()
-    else {
-        if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null }
-        elapsedText.value = ''
-    }
+watch(() => voiceStore.connected, (connected) => {
+    if (connected) startElapsedTimer()
+    else stopElapsedTimer()
 }, { immediate: true })
 
-function barClass(n: number) { return signalLevel.value >= n ? '' : 'opacity-25' }
-const barColorClass = computed(() => {
-    if (signalLevel.value >= 4) return 'bg-success'
-    if (signalLevel.value >= 2) return 'bg-warning'
-    if (signalLevel.value === 1) return 'bg-error'
-    return 'bg-base-content/40'
+onMounted(() => {
+    rtcStatsStore.start()
+    startElapsedTimer()
 })
-const signalTooltip = computed(() => {
-    const label = getConnectionQualityLabel(signalLevel.value)
-    const parts: string[] = [label]
-    if (lastRttMs.value != null) parts.push(`RTT ${Math.round(lastRttMs.value)} ms`)
-    if (lastJitterMs.value != null) parts.push(`Jitter ${Math.round(lastJitterMs.value)} ms`)
-    if (lastLoss.value != null) parts.push(`Loss ${(lastLoss.value*100).toFixed(1)}%`)
-    return parts.join(' • ')
-})
-
-function formatVideoQuality(stat: any) {
-    if (!stat?.width || !stat?.height) return ''
-    const resolution = Math.min(stat.width, stat.height)
-    const fps = stat.fps ? Math.round(stat.fps) : null
-    return `${resolution}p${fps ? `@${fps}fps` : ''}`
-}
-
-const outboundVideoLabels = computed(() => outboundVideoStats.value
-    .map((stat) => ({
-        source: stat.source,
-        text: formatVideoQuality(stat)
-    }))
-    .filter((item) => item.text))
-
-onMounted(() => { rtcStatsStore.start(); startElapsedTimer() })
-onBeforeUnmount(() => { if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null } })
+onBeforeUnmount(stopElapsedTimer)
 </script>
 
-
 <template>
-
-    <section class="navbar navbar-surface w-full flex justify-between py-2 px-4 fixed top-0 left-0 z-50" style="height: var(--navbar-height);">
-        <div class="flex items-center gap-4">
-            <NuxtLink to="/" class="">
-                <img class="w-13 rounded-sm select-none pointer-events-none" src="/assets/logo/logo_96.png"/>
+    <header class="navbar navbar-surface fixed top-0 left-0 z-50 w-full gap-3 px-3 sm:px-4" style="height: var(--navbar-height)">
+        <div class="flex min-w-0 items-center gap-3">
+            <NuxtLink to="/" class="shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-primary" aria-label="DSpeak home">
+                <img class="size-11 rounded-lg select-none pointer-events-none" src="/assets/logo/logo_96.png" alt="" />
             </NuxtLink>
-
-            <!-- Room Navigation -->
-            <div v-if="profile" class="hidden md:flex">
+            <div v-if="profile" class="hidden min-w-0 md:flex">
                 <RoomList :model-value="currentRoomId || undefined" />
             </div>
         </div>
 
-        <section v-if="profile" class="flex items-center gap-4 ml-4">
-            <!-- Settings Link intentionally removed to prevent redirect on voice channel error -->
+        <div class="ml-auto flex min-w-0 items-center gap-2">
+            <section v-if="profile && voiceStore.connected" class="call-dock" aria-label="Voice call controls">
+                <div class="call-channel">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    <span class="min-w-0 text-left">
+                        <button
+                            class="channel-link block max-w-full truncate text-sm font-semibold"
+                            type="button"
+                            title="Return to the active voice channel"
+                            @click="navigateToVoiceChannel"
+                        >
+                            {{ currentVoiceChannel?.name || 'Voice channel' }}
+                        </button>
+                        <span class="flex items-center gap-1.5 text-xs text-base-content/60">
+                            <button
+                                class="connection-summary-link inline-flex items-center gap-1"
+                                type="button"
+                                :title="`${signalTooltip} • Open connection statistics`"
+                                aria-label="Open connection statistics"
+                                @click="rtcSummaryVisible = true"
+                            >
+                                <span class="flex items-end gap-px" aria-hidden="true">
+                                    <span v-for="level in 4" :key="level" class="w-0.5 rounded-sm" :class="[barClass(level), signalColorClass]" :style="{ height: `${3 + level * 1.5}px` }"></span>
+                                </span>
+                                <span>{{ signalLabel }}</span>
+                            </button>
+                            <span v-if="elapsedText" aria-hidden="true">·</span>
+                            <span v-if="elapsedText" class="tabular-nums">{{ elapsedText }}</span>
+                        </span>
+                    </span>
+                </div>
 
-            <!-- Smart Profile/Voice Control -->
-            <div
-                @click="handleProfileClick"
-                class="flex items-center cursor-pointer group relative"
-                :class="[
-                    voiceStore.connected ? 'bg-success/20 border border-success/40 rounded-lg px-2 py-1' : '',
-                    (!voiceStore.connected && (voiceStore.connecting || voiceStore.error)) ? 'bg-warning/20 border border-warning/40 rounded-lg px-2 py-1' : ''
-                ]"
-                :title="voiceStore.connected
-                    ? `Connected to ${currentVoiceChannel?.name} • Click to go to voice channel`
-                    : (voiceStore.connecting
-                        ? 'Connecting…'
-                        : (voiceStore.error && !voiceStore.connected ? 'Call dropped or unavailable' : 'Your Account'))"
-            >
-                <!-- Voice Controls (when connected) -->
-                <div v-if="voiceStore.connected" class="flex items-center gap-2 mr-3">
-                    <!-- Elapsed call time -->
-                    <div class="text-sm text-current/70 select-none min-w-[3.5rem] text-right" v-if="elapsedText">
-                        {{ elapsedText }}
-                    </div>
-                    <!-- Live RTT and Loss Warning -->
-                    <div class="text-sm text-current/70 select-none">
-                        <span v-if="lastRttMs != null" title="WebRTC round-trip time on the active media route">{{ activeRouteLabel }} {{ Math.round(lastRttMs) }}ms</span>
-                    </div>
-                    <div
-                        v-for="quality in outboundVideoLabels"
-                        :key="quality.source"
-                        class="text-sm text-current/70 select-none whitespace-nowrap"
-                        :class="quality.source === 'screen' ? 'cursor-pointer hover:text-current' : ''"
-                        :title="quality.source === 'screen' ? 'Open screen-share debug information' : 'Camera send quality'"
-                        @click.stop="quality.source === 'screen' && openRtcDebug()"
-                    >
-                        <span v-if="outboundVideoLabels.length > 1">{{ quality.source === 'screen' ? 'Share' : 'Cam' }} </span>{{ quality.text }}
-                    </div>
-                    <button
-                        v-if="screenShareFpsLow"
-                        class="btn btn-ghost btn-xs btn-circle text-warning animate-pulse"
-                        title="Screen-share send FPS is below target — open debug information"
-                        aria-label="Screen-share send FPS is below target"
-                        @click.stop="openRtcDebug"
-                    >
-                        <Icon name="lucide:triangle-alert" class="size-4" />
-                    </button>
-                    <button
-                        v-if="voiceStore.screenSharing"
-                        class="btn btn-ghost btn-xs btn-circle"
-                        title="View screen-share debug information"
-                        @click.stop="openRtcDebug"
-                    >
-                        <Icon name="lucide:bug" class="size-4" />
-                    </button>
-                    <div v-if="lastLoss != null && lastLoss > 0.05" class="tooltip" :data-tip="`Packet loss ${(lastLoss * 100).toFixed(1)}%`">
-                        <span class="w-3 h-3 rounded-full bg-warning animate-pulse inline-block"></span>
-                    </div>
-                    <!-- Signal Strength (click to open connection summary) -->
-                    <button
-                        class="btn btn-ghost btn-xs px-2 h-6 min-h-0"
-                        :title="signalTooltip"
-                        @click.stop="toggleRtcSummary"
-                    >
-                        <div class="flex items-end gap-0.5">
-                            <span class="w-1.5 rounded-sm" :class="[barClass(1), barColorClass]" style="height:6px"></span>
-                            <span class="w-1.5 rounded-sm" :class="[barClass(2), barColorClass]" style="height:9px"></span>
-                            <span class="w-1.5 rounded-sm" :class="[barClass(3), barColorClass]" style="height:12px"></span>
-                            <span class="w-1.5 rounded-sm" :class="[barClass(4), barColorClass]" style="height:15px"></span>
-                            <span class="w-1.5 rounded-sm" :class="[barClass(5), barColorClass]" style="height:18px"></span>
-                        </div>
-                    </button>
+                <div class="call-divider hidden lg:block"></div>
 
-                    <!-- Camera Control -->
+                <div class="hidden items-center gap-1 lg:flex">
                     <button
-                        @click.stop="voiceStore.toggleCamera"
-                        :class="['btn btn-circle btn-xs', voiceStore.cameraEnabled ? 'btn-primary' : 'btn-outline']"
+                        class="call-icon"
+                        type="button"
+                        :class="voiceStore.cameraEnabled && 'call-icon-active'"
+                        :aria-pressed="voiceStore.cameraEnabled"
+                        :aria-label="voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'"
                         :title="voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'"
+                        @click="voiceStore.toggleCamera"
                     >
-                        <Icon name="lucide:camera" class="size-4" />
+                        <Icon :name="voiceStore.cameraEnabled ? 'lucide:video' : 'lucide:video-off'" class="size-4" />
                     </button>
-
-                    <!-- Screen Share Control -->
                     <button
-                        @click.stop="voiceStore.toggleScreenShare"
-                        :class="['btn btn-circle btn-xs', voiceStore.screenSharing ? 'btn-primary' : 'btn-outline']"
-                        :title="voiceStore.screenSharing ? 'Stop screen sharing' : 'Share screen'"
+                        class="call-icon"
+                        type="button"
+                        :class="voiceStore.screenSharing && 'call-icon-active'"
+                        :aria-pressed="voiceStore.screenSharing"
+                        :aria-label="voiceStore.screenSharing ? 'Stop sharing screen' : 'Share screen'"
+                        :title="voiceStore.screenSharing ? 'Stop sharing screen' : 'Share screen'"
+                        @click="voiceStore.toggleScreenShare"
                     >
                         <Icon name="lucide:monitor-up" class="size-4" />
                     </button>
+                </div>
 
+                <div class="call-divider hidden sm:block"></div>
+
+                <div class="flex items-center gap-1">
                     <button
-                        @click.stop="voiceStore.toggleSystemAudioShare"
-                        :class="['btn btn-circle btn-xs', voiceStore.systemAudioSharing ? 'btn-primary' : 'btn-outline']"
-                        :title="voiceStore.systemAudioSharing ? 'Stop sharing system audio' : 'Share system audio only'"
+                        class="call-icon"
+                        type="button"
+                        :class="voiceStore.micMuted && 'call-icon-danger'"
+                        :disabled="micUnavailable"
+                        :aria-pressed="voiceStore.micMuted"
+                        :aria-label="voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'"
+                        :title="voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'"
+                        @click="voiceStore.toggleMic"
                     >
-                        <Icon name="lucide:audio-lines" class="size-4" />
+                        <Icon :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'" class="size-4" />
                     </button>
-
-                    <div
-                        v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
-                        class="flex items-center gap-1"
-                        title="Shared audio volume — what others hear"
-                        @click.stop
-                    >
-                        <Icon name="lucide:volume-2" class="size-3" />
-                        <input
-                            class="range range-primary range-xs w-20"
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="1"
-                            :value="voiceStore.sharedAudioVolume"
-                            @input="voiceStore.setSharedAudioVolume($event.target.value)"
-                        />
-                        <span class="w-8 text-right text-[10px] tabular-nums">{{ voiceStore.sharedAudioVolume }}%</span>
-                        <progress
-                            :class="['progress h-2 w-24', voiceStore.sharedAudioStats.dbfs >= -12 ? 'progress-error' : 'progress-success']"
-                            max="1"
-                            :value="voiceStore.sharedAudioStats.level"
-                            :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"
-                        ></progress>
-                        <span class="w-12 text-right text-[10px] tabular-nums">{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }}k</span>
-                    </div>
-
-                    <!-- Broadcast Mode Toggle -->
                     <button
-                      @click.stop="toggleBroadcastMode"
-                      :class="['btn btn-xs', broadcastMode ? 'btn-warning' : 'btn-outline']"
-                      :title="broadcastMode ? 'Broadcast Mode ON: You only send audio' : 'Broadcast Mode OFF: You can hear others'"
-                      v-if="voiceStore.connected"
-                    >
-                      <Icon name="lucide:radio" v-if="broadcastMode" class="size-5" />
-                      <Icon name="lucide:radio" v-else class="size-5" />
-                    </button>
-                    <!-- Microphone Control -->
-                    <button
-                        @click.stop="voiceStore.toggleMic"
-                        :disabled="!voiceStore.connected || (!!voiceStore.sfuComposable && !(voiceStore.sfuComposable as any)?.transportReady)"
-                        :class="[
-                            'btn btn-circle btn-xs',
-                            voiceStore.micMuted ? 'btn-error' : 'btn-outline'
-                        ]"
-                        :title="voiceStore.micMuted ? 'Unmute Microphone' : 'Mute Microphone'"
-                    >
-                        <Icon name="lucide:mic" v-if="!voiceStore.micMuted" class="size-6 text-current" />
-
-                        <Icon name="lucide:mic-off" v-else class="size-6 text-white" />
-                    </button>
-
-                    <!-- Deafen Control -->
-                    <button
-                        @click.stop="voiceStore.toggleDeafen"
-                        :class="[
-                            'btn btn-circle btn-xs',
-                            voiceStore.deafened ? 'btn-error' : 'btn-outline btn-xs'
-                        ]"
+                        class="call-icon hidden sm:inline-flex"
+                        type="button"
+                        :class="voiceStore.deafened && 'call-icon-danger'"
+                        :aria-pressed="voiceStore.deafened"
+                        :aria-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
                         :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
+                        @click="voiceStore.toggleDeafen"
                     >
-                        <Icon name="lucide:volume-2" v-if="!voiceStore.deafened" class="w-3 h-3" />
-                        <Icon name="lucide:volume-x" v-else class="w-3 h-3" />
+                        <Icon :name="voiceStore.deafened ? 'lucide:volume-x' : 'lucide:headphones'" class="size-4" />
                     </button>
-
-                    <!-- Disconnect Button -->
                     <button
-                        @click.stop="voiceStore.leaveVoiceChannel"
-                        class="btn btn-error btn-xs btn-circle"
-                        title="Disconnect from voice"
+                        class="call-icon call-icon-danger"
+                        type="button"
+                        aria-label="Leave voice channel"
+                        title="Leave voice channel"
+                        @click="voiceStore.leaveVoiceChannel"
                     >
-                        <Icon name="lucide:x" class="w-3 h-3" />
+                        <Icon name="lucide:phone-off" class="size-4" />
                     </button>
                 </div>
 
-                <!-- Profile Info -->
-                <div class="flex-col items-end pr-4 hidden md:flex">
-                    <p class="text-xs font-bold group-hover:underline">
-                        {{ voiceStore.connected ? currentVoiceChannel?.name || 'Voice Channel' : profile?.name }}
-                    </p>
-                    <p class="text-xs" :class="voiceStore.connected ? 'text-success' : 'text-accent-1'">
-                        {{ voiceStore.connected ? `${connectedUsers.length} participant${connectedUsers.length !== 1 ? 's' : ''}` : profile?.email }}
-                    </p>
-                </div>
+                <details class="dropdown dropdown-end">
+                    <summary class="call-icon" aria-label="More call controls" title="More call controls">
+                        <Icon name="lucide:ellipsis" class="size-5" />
+                    </summary>
+                    <div class="dropdown-content call-menu z-10 mt-3 w-72">
+                        <p class="menu-heading">Media</p>
+                        <button class="menu-row lg:hidden" type="button" @click="voiceStore.toggleCamera">
+                            <Icon :name="voiceStore.cameraEnabled ? 'lucide:video-off' : 'lucide:video'" />
+                            <span>{{ voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on' }}</span>
+                        </button>
+                        <button class="menu-row lg:hidden" type="button" @click="voiceStore.toggleScreenShare">
+                            <Icon name="lucide:monitor-up" />
+                            <span>{{ voiceStore.screenSharing ? 'Stop screen sharing' : 'Share screen' }}</span>
+                        </button>
+                        <button class="menu-row sm:hidden" type="button" @click="voiceStore.toggleDeafen">
+                            <Icon :name="voiceStore.deafened ? 'lucide:volume-2' : 'lucide:volume-x'" />
+                            <span>{{ voiceStore.deafened ? 'Undeafen' : 'Deafen' }}</span>
+                        </button>
+                        <button class="menu-row" type="button" @click="voiceStore.toggleSystemAudioShare">
+                            <Icon name="lucide:audio-lines" />
+                            <span>{{ voiceStore.systemAudioSharing ? 'Stop system audio' : 'Share system audio only' }}</span>
+                        </button>
+                        <button class="menu-row" type="button" :class="broadcastMode && 'text-warning'" @click="toggleBroadcastMode">
+                            <Icon name="lucide:radio" />
+                            <span>Broadcast mode</span>
+                            <span class="ml-auto text-xs font-semibold">{{ broadcastMode ? 'On' : 'Off' }}</span>
+                        </button>
 
-                <!-- Avatar with Voice Indicator -->
-                <div class="avatar select-none relative" :class="avatarStatusClass">
-                    <div
-                        class="w-12 rounded-full transition-all duration-200"
-                        :class="{
-                          'ring-2 ring-success ring-offset-2 ring-offset-base-100': voiceStore.connected,
-                          'ring-2 ring-warning ring-offset-2 ring-offset-base-100': !voiceStore.connected && (voiceStore.connecting || voiceStore.error),
-                          'ring-2 ring-error ring-offset-2 ring-offset-base-100': voiceStore.error && !voiceStore.connected && !voiceStore.connecting
-                        }"
-                        @click.stop="router.push('/settings')"
-                        style="cursor:pointer"
-                    >
-                        <img :src="profile?.avatar" alt="User avatar" />
+                        <div v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing" class="audio-share-panel">
+                            <label for="shared-audio-volume" class="flex items-center justify-between text-xs font-medium">
+                                <span>Shared audio volume</span>
+                                <span>{{ voiceStore.sharedAudioVolume }}%</span>
+                            </label>
+                            <input
+                                id="shared-audio-volume"
+                                class="range range-primary range-xs mt-2 w-full"
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                :value="voiceStore.sharedAudioVolume"
+                                @input="voiceStore.setSharedAudioVolume($event.target.value)"
+                            />
+                            <div class="mt-2 flex items-center gap-2 text-xs text-base-content/60">
+                                <progress
+                                    class="progress h-1.5 flex-1"
+                                    :class="voiceStore.sharedAudioStats.dbfs >= -12 ? 'progress-error' : 'progress-success'"
+                                    max="1"
+                                    :value="voiceStore.sharedAudioStats.level"
+                                ></progress>
+                                <span>{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span>
+                            </div>
+                        </div>
+
+                        <div class="menu-separator"></div>
+                        <p class="menu-heading">Connection</p>
+                        <button class="menu-row" type="button" @click="rtcSummaryVisible = !rtcSummaryVisible">
+                            <span class="flex items-end gap-0.5" aria-hidden="true">
+                                <span v-for="level in 5" :key="level" class="w-1 rounded-sm" :class="[barClass(level), signalColorClass]" :style="{ height: `${5 + level * 2}px` }"></span>
+                            </span>
+                            <span>{{ signalLabel }}</span>
+                            <span v-if="lastRttMs != null" class="ml-auto text-xs text-base-content/60">{{ activeRouteLabel }} · {{ Math.round(lastRttMs) }} ms</span>
+                        </button>
+                        <button class="menu-row" type="button" @click="router.push('/rtc-debug')">
+                            <Icon :name="screenShareFpsLow ? 'lucide:triangle-alert' : 'lucide:activity'" :class="screenShareFpsLow && 'text-warning'" />
+                            <span>Connection details</span>
+                        </button>
+                        <div v-if="outboundVideoLabels.length" class="px-3 pb-2 text-xs text-base-content/60">
+                            <span v-for="(quality, index) in outboundVideoLabels" :key="quality.source">
+                                {{ index ? ' · ' : '' }}{{ quality.source === 'screen' ? 'Share' : 'Camera' }} {{ quality.text }}
+                            </span>
+                        </div>
                     </div>
-                    <!-- Voice Connection Indicator -->
-                    <div
-                        v-if="voiceStore.connected"
-                        class="absolute -bottom-1 -right-1 w-4 h-4 bg-success rounded-full flex items-center justify-center"
-                    >
-                        <Icon name="lucide:mic" class="w-2.5 h-2.5 text-white" />
-                    </div>
-                    <!-- Connecting / Dropped Indicator (Yellow) -->
-                    <div v-else-if="!voiceStore.connected && (voiceStore.connecting || voiceStore.error)" class="absolute -bottom-1 -right-1 w-4 h-4 bg-warning rounded-full animate-pulse"></div>
-                </div>
-        <!-- Voice Error Modal -->
+                </details>
+            </section>
+
+            <button
+                v-else-if="profile && (voiceStore.connecting || voiceStore.error)"
+                class="connection-warning"
+                type="button"
+                @click="voiceStore.error ? voiceStore.error = null : undefined"
+            >
+                <Icon name="lucide:triangle-alert" class="size-4" />
+                <span>{{ voiceStore.connecting ? 'Connecting…' : 'Call unavailable' }}</span>
+            </button>
+
+            <div v-if="isDisconnected" class="hidden items-center gap-2 text-xs font-semibold text-error xl:flex">
+                <Icon name="lucide:wifi-off" class="size-4" />
+                <span>Connection lost</span>
+            </div>
+
+            <NuxtLink v-if="profile" to="/settings" class="profile-button" aria-label="Open account settings">
+                <span class="hidden max-w-32 text-right md:block">
+                    <span class="block truncate text-sm font-semibold">{{ profile?.name }}</span>
+                    <span class="block truncate text-xs text-base-content/60">Account</span>
+                </span>
+                <span class="avatar relative select-none" :class="avatarStatusClass">
+                    <span class="size-10 overflow-hidden rounded-full ring-1 ring-base-content/15">
+                        <img :src="profile?.avatar" alt="" />
+                    </span>
+                    <span v-if="voiceStore.connected" class="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-success ring-2 ring-base-100">
+                        <Icon name="lucide:mic" class="size-2.5 text-success-content" />
+                    </span>
+                </span>
+            </NuxtLink>
+        </div>
+
         <div v-if="voiceStore.error && !voiceStore.connected" class="modal modal-open">
             <div class="modal-box text-base-content">
-                <h3 class="font-bold text-lg mb-4 text-error">Call Failed</h3>
-                <p class="text-base-content/70 mb-4">{{ voiceStore.error }}</p>
+                <h2 class="text-lg font-bold text-error">Call failed</h2>
+                <p class="mt-3 text-base-content/70">{{ voiceStore.error }}</p>
                 <div class="modal-action">
-                    <button class="btn btn-error" @click="voiceStore.error = null">Close</button>
+                    <button class="btn btn-error" type="button" @click="voiceStore.error = null">Close</button>
                 </div>
             </div>
-            <div class="modal-backdrop" @click="voiceStore.error = null"></div>
+            <button class="modal-backdrop" type="button" aria-label="Close call error" @click="voiceStore.error = null"></button>
         </div>
-            </div>
-
-            <div v-if="isDisconnected" class="ml-2 text-red-500 text-xs font-semibold">
-                Connection lost.<br> Please refresh the page.
-            </div>
-        </section>
-    </section>
-
-
+    </header>
 </template>
+
+<style scoped>
+.call-dock {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid color-mix(in oklab, var(--color-success) 40%, transparent);
+    border-radius: 0.875rem;
+    background: color-mix(in oklab, var(--color-success) 9%, var(--color-base-100));
+    padding: 0.3rem;
+    box-shadow: 0 1px 8px color-mix(in oklab, var(--color-base-content) 7%, transparent);
+}
+
+.call-channel {
+    display: flex;
+    min-width: 0;
+    max-width: 15rem;
+    align-items: center;
+    gap: 0.625rem;
+    border-radius: 0.625rem;
+    padding: 0.25rem 0.55rem;
+    transition: background-color 150ms ease;
+}
+
+.profile-button:hover, .profile-button:focus-visible {
+    background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+    outline: none;
+}
+
+.channel-link:hover, .channel-link:focus-visible, .connection-summary-link:hover, .connection-summary-link:focus-visible {
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+    outline: none;
+}
+
+.status-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--color-success);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-success) 15%, transparent);
+}
+
+.call-divider {
+    width: 1px;
+    height: 1.75rem;
+    background: color-mix(in oklab, var(--color-base-content) 14%, transparent);
+}
+
+.call-icon {
+    display: inline-flex;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: none;
+    cursor: pointer;
+    list-style: none;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.625rem;
+    color: color-mix(in oklab, var(--color-base-content) 78%, transparent);
+    transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.call-icon::-webkit-details-marker { display: none; }
+.call-icon:hover, .call-icon:focus-visible { background: color-mix(in oklab, var(--color-base-content) 10%, transparent); color: var(--color-base-content); outline: none; }
+.call-icon:active { transform: scale(0.94); }
+.call-icon:disabled { cursor: not-allowed; opacity: 0.4; }
+.call-icon-active { background: var(--color-primary); color: var(--color-primary-content); }
+.call-icon-danger { background: color-mix(in oklab, var(--color-error) 18%, transparent); color: var(--color-error); }
+.call-icon-danger:hover, .call-icon-danger:focus-visible { background: var(--color-error); color: var(--color-error-content); }
+
+.call-menu {
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--color-base-content) 14%, transparent);
+    border-radius: 0.875rem;
+    background: var(--color-base-100);
+    padding: 0.45rem;
+    color: var(--color-base-content);
+    box-shadow: 0 16px 40px color-mix(in oklab, black 25%, transparent);
+}
+
+.menu-heading { padding: 0.35rem 0.75rem; color: color-mix(in oklab, var(--color-base-content) 55%, transparent); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.menu-row { display: flex; width: 100%; align-items: center; gap: 0.75rem; border-radius: 0.6rem; padding: 0.6rem 0.75rem; text-align: left; font-size: 0.875rem; }
+.menu-row :deep(svg) { width: 1rem; height: 1rem; flex: none; }
+.menu-row:hover, .menu-row:focus-visible { background: color-mix(in oklab, var(--color-base-content) 8%, transparent); outline: none; }
+.menu-separator { height: 1px; margin: 0.4rem; background: color-mix(in oklab, var(--color-base-content) 12%, transparent); }
+.audio-share-panel { margin: 0.35rem; border-radius: 0.65rem; background: color-mix(in oklab, var(--color-base-content) 6%, transparent); padding: 0.75rem; }
+.profile-button { display: flex; flex: none; align-items: center; gap: 0.7rem; border-radius: 0.75rem; padding: 0.25rem; transition: background-color 150ms ease; }
+.connection-warning { display: flex; align-items: center; gap: 0.5rem; border: 1px solid color-mix(in oklab, var(--color-warning) 45%, transparent); border-radius: 0.7rem; background: color-mix(in oklab, var(--color-warning) 12%, transparent); padding: 0.55rem 0.75rem; color: var(--color-warning); font-size: 0.8rem; font-weight: 600; }
+
+@media (max-width: 639px) {
+    .call-channel { max-width: 8.5rem; }
+    .call-dock { gap: 0.2rem; }
+}
+</style>
