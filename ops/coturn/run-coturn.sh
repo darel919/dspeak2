@@ -22,7 +22,7 @@ while [ ! -s "$certificate" ] || [ ! -s "$private_key" ]; do
 done
 
 log "TLS certificate is ready; starting TURN server"
-/usr/bin/turnserver "$@" &
+/usr/bin/turnserver -n "$@" &
 turn_pid=$!
 
 terminate() {

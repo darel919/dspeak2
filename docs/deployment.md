@@ -178,6 +178,9 @@ included. The entrypoints do not depend on bind-mounted files from Coolify's
 temporary deployment checkout, so they remain available after the build helper
 and artifact directory are cleaned up.
 
+The Coturn supervisor starts `turnserver` with `-n` because all settings are
+provided explicitly by Compose rather than through a `turnserver.conf` file.
+
 ## Dynamic RTC IPv6
 
 The Compose stack runs `favonia/cloudflare-ddns` in host-network mode. It reads
