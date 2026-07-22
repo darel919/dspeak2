@@ -4,8 +4,12 @@ set -eu
 certificate="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/fullchain.pem"
 private_key="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/privkey.pem"
 
-test -s "$certificate"
-test -s "$private_key"
+trap 'exit 0' TERM INT
+
+while [ ! -s "$certificate" ] || [ ! -s "$private_key" ]; do
+  sleep 5 &
+  wait $! || true
+done
 
 /usr/bin/turnserver "$@" &
 turn_pid=$!

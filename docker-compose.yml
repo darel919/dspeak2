@@ -79,9 +79,6 @@ services:
     volumes:
       - turn-certificates:/etc/letsencrypt:ro
       - ./ops/coturn/run-coturn.sh:/usr/local/bin/run-coturn:ro
-    depends_on:
-      turn-certbot:
-        condition: service_healthy
     healthcheck:
       test: [CMD, turnutils_stunclient, -p, "${TURN_PORT:-3478}", "::1"]
       interval: 30s

@@ -145,13 +145,17 @@ TURN_CERT_DNS_PROPAGATION_SECONDS=30
 
 The token is written only to an in-memory private credentials file inside the
 certificate container. Certificates are stored in the `turn-certificates`
-volume. Compose waits for the first certificate before starting Coturn. The
-Coturn supervisor detects renewed certificate files and sends Coturn `SIGUSR2`
-so new TLS connections use them without restarting active allocations.
+volume. Coturn starts independently but its supervisor waits for the first
+certificate before launching the TURN server. This keeps certificate-provider
+failures from blocking the Nitro application deployment. The supervisor detects
+renewed certificate files and sends Coturn `SIGUSR2` so new TLS connections use
+them without restarting active allocations.
 
 The TURN hostname and certificate environment must be present before starting
 Compose. On the first deployment, Coturn remains pending while Certbot completes
-the DNS challenge; this avoids starting Coturn with missing TLS files.
+the DNS challenge and retries failed issuance; this avoids starting Coturn with
+missing TLS files without making TURN availability a prerequisite for deploying
+the application.
 
 ## Dynamic RTC IPv6
 
