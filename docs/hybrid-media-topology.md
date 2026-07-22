@@ -13,6 +13,9 @@ in the background. Direct probes use STUN only, trickle ICE, the WebRTC
 perfect-negotiation pattern, an unreliable health data channel, and the selected
 ICE candidate pair. TURN candidates are excluded. Every pair must connect
 directly within eight seconds or the room remains on mediasoup.
+When simultaneous offers collide, the polite peer explicitly rolls back its
+local offer and completes the remote answer before reapplying RTP sender
+parameters. Sender tuning cannot strand signaling in `have-remote-offer`.
 
 P2P health is checked every second. A twenty-second health or RTP liveness timeout,
 failed ICE restart, signaling failure, closed health channel, or a relay-selected

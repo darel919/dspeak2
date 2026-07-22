@@ -93,6 +93,64 @@ test('topology identity reconciles an early signaling connection', () => {
   assert.deepEqual(restaged.map(candidate => candidate.userId), ['user-2'])
 })
 
+test('polite glare rollback answers before sender reconfiguration can fail', async () => {
+  const operations = []
+  const signals = []
+  const failures = []
+  const pc = {
+    signalingState: 'have-local-offer',
+    remoteDescription: null,
+    localDescription: null,
+    async setLocalDescription(description) {
+      operations.push(`local:${description.type}`)
+      this.localDescription = description.type === 'rollback' ? null : description
+      this.signalingState = description.type === 'rollback' ? 'stable' : this.signalingState
+    },
+    async setRemoteDescription(description) {
+      operations.push(`remote:${description.type}`)
+      this.remoteDescription = description
+      this.signalingState = 'have-remote-offer'
+    },
+    async createAnswer() {
+      operations.push('create-answer')
+      return { type: 'answer', sdp: 'v=0\r\n' }
+    },
+    getTransceivers: () => []
+  }
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: signal => signals.push(signal),
+    onFailure: failure => failures.push(failure),
+    getSenderOptions: () => ({ encodings: [{}] })
+  })
+  mesh.mode = 'probing'
+  mesh.epoch = 4
+  mesh.connections.set('peer-2', {
+    peerId: 'peer-2',
+    polite: true,
+    makingOffer: true,
+    settingRemoteAnswer: false,
+    ignoreOffer: false,
+    pc,
+    candidates: [],
+    senders: new Map([['screen', {
+      getParameters: () => { throw new Error('sender rolled back') },
+      setParameters: async () => {}
+    }]])
+  })
+  mesh.localSources.set('screen', { track: { kind: 'video' } })
+
+  await mesh.receiveSignal({
+    fromPeerId: 'peer-2',
+    epoch: 4,
+    signal: { description: { type: 'offer', sdp: 'v=0\r\n' } }
+  })
+
+  assert.deepEqual(operations, ['local:rollback', 'remote:offer', 'create-answer', 'local:answer'])
+  assert.equal(signals.at(-1).signal.description.type, 'answer')
+  assert.equal(failures.at(-1).reason, 'sender-configuration-failed')
+})
+
 test('P2P SDP requests stereo low-latency Opus with loss protection', () => {
   const sdp = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=20;useinbandfec=0\r\n'
   const result = applyOpusAudioProfile(sdp)

@@ -301,8 +301,8 @@ export class NativeP2pMesh {
         applyP2pVideoCodecPreferences(pc)
         const offer = await pc.createOffer()
         await pc.setLocalDescription({ type: offer.type, sdp: applyOpusAudioProfile(offer.sdp) })
-        await this.configureStateSenders(state)
         this.signal(peerId, { description: pc.localDescription })
+        await this.configureStateSenders(state)
       } catch (error) {
         this.fail('negotiation-failed', error)
       } finally {
@@ -371,9 +371,15 @@ export class NativeP2pMesh {
       if (state.ignoreOffer) return
       state.settingRemoteAnswer = signal.description.type === 'answer'
       try {
-        await pc.setRemoteDescription(signal.description)
+        if (collision && state.polite) {
+          await Promise.all([
+            pc.setLocalDescription({ type: 'rollback' }),
+            pc.setRemoteDescription(signal.description)
+          ])
+        } else {
+          await pc.setRemoteDescription(signal.description)
+        }
         applyP2pVideoCodecPreferences(pc)
-        await this.configureStateSenders(state)
       } finally {
         state.settingRemoteAnswer = false
       }
@@ -382,9 +388,9 @@ export class NativeP2pMesh {
       if (signal.description.type === 'offer') {
         const answer = await pc.createAnswer()
         await pc.setLocalDescription({ type: answer.type, sdp: applyOpusAudioProfile(answer.sdp) })
-        await this.configureStateSenders(state)
         this.signal(state.peerId, { description: pc.localDescription })
       }
+      await this.configureStateSenders(state).catch((error) => this.fail('sender-configuration-failed', error))
       return
     }
     if (signal.candidate) {
