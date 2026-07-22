@@ -1,5 +1,5 @@
 import webpush from 'web-push'
-import { ICE_SERVERS } from '../const/ice-servers'
+import { createIceServers } from '../const/ice-servers'
 import { broadcastToChannel } from './dspeak-realtime'
 import { pocketBaseError, usePocketBaseAdmin } from './pocketbase'
 
@@ -406,7 +406,7 @@ export async function handleDspeakApi(event) {
 
   try {
     if (!domain && event.method === 'GET') return 'DSpeak ready.'
-    if (domain === 'config' && event.method === 'GET') return ICE_SERVERS
+    if (domain === 'config' && event.method === 'GET') return createIceServers()
     if (domain === 'room') return await handleRooms(event, suffix)
     if (domain === 'channel') return await handleChannels(event, suffix)
     if (domain === 'chat') return await handleChat(event, suffix)

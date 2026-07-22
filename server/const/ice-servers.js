@@ -1,37 +1,12 @@
-export const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' },
+import { createHmac } from 'node:crypto'
 
+const PUBLIC_STUN_SERVERS = [
   { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:openrelay.metered.ca:80' },
-  { urls: 'stun:stun.nextcloud.com:443' },
-  { urls: 'stun:relay.webwormhole.io:3478' },
-  { urls: 'stun:stun.stunprotocol.org:3478' },
-  { urls: 'stun:stunserver.stunprotocol.org:3478' },
-  { urls: 'stun:stun.sipgate.net:3478' },
-  { urls: 'stun:stun.iptel.org:3478' },
-  { urls: 'stun:stun.ekiga.net:3478' },
-  { urls: 'stun:stun.ideasip.com:3478' },
-  { urls: 'stun:stun.voip.blackberry.com:3478' },
-  { urls: 'stun:stun.voip.aebc.com:3478' },
-  { urls: 'stun:stun.voipbuster.com:3478' },
-  { urls: 'stun:stun.voipstunt.com:3478' },
-  { urls: 'stun:stun.voipzoom.com:3478' },
-  { urls: 'stun:stun.callwithus.com:3478' },
-  { urls: 'stun:stun.counterpath.com:3478' },
-  { urls: 'stun:stun.12connect.com:3478' },
-  { urls: 'stun:stun.3cx.com:3478' },
-  { urls: 'stun:stun.flashdance.cx:3478' },
-  { urls: 'stun:stun.rixtelecom.se:3478' },
-  { urls: 'stun:stun.sipnet.net:3478' },
-  { urls: 'stun:stun.sipnet.ru:3478' },
-  { urls: 'stun:stun.schlund.de:3478' },
-  { urls: 'stun:stun.t-online.de:3478' },
-  { urls: 'stun:stun.freeswitch.org:3478' },
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' }
+]
 
+const COMMUNITY_TURN_SERVERS = [
   {
     urls: [
       'turn:openrelay.metered.ca:80',
@@ -43,7 +18,6 @@ export const ICE_SERVERS = [
     username: 'openrelayproject',
     credential: 'openrelayproject'
   },
-
   {
     urls: [
       'turn:stun.evan-brass.net',
@@ -53,7 +27,6 @@ export const ICE_SERVERS = [
     username: 'guest',
     credential: 'password'
   },
-
   {
     urls: [
       'turn:freeturn.net:3478?transport=udp',
@@ -64,3 +37,47 @@ export const ICE_SERVERS = [
     credential: 'free'
   }
 ]
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+export function createTurnCredentials({ secret, ttlSeconds = 3600, now = Date.now() }) {
+  if (!secret) throw new Error('TURN_SHARED_SECRET is required to create TURN credentials')
+  const expiresAt = Math.floor(now / 1000) + positiveInteger(ttlSeconds, 3600)
+  const username = `${expiresAt}:dspeak`
+  return {
+    username,
+    credential: createHmac('sha1', secret).update(username).digest('base64'),
+    expiresAt
+  }
+}
+
+export function createIceServers(environment = process.env, now = Date.now()) {
+  const host = environment.DSPEAK_RTC_DOMAIN?.trim()
+  const secret = environment.TURN_SHARED_SECRET?.trim()
+  const servers = []
+
+  if (host && secret) {
+    const credentials = createTurnCredentials({
+      secret,
+      ttlSeconds: environment.TURN_CREDENTIAL_TTL_SECONDS,
+      now
+    })
+    servers.push({
+      urls: [
+        `stun:${host}:3478`,
+        `turn:${host}:3478?transport=udp`,
+        `turn:${host}:3478?transport=tcp`,
+        `turns:${host}:5349?transport=tcp`
+      ],
+      username: credentials.username,
+      credential: credentials.credential
+    })
+  }
+
+  return [...servers, ...PUBLIC_STUN_SERVERS, ...COMMUNITY_TURN_SERVERS]
+}
+
+export { COMMUNITY_TURN_SERVERS, PUBLIC_STUN_SERVERS }

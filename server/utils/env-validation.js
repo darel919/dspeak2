@@ -90,6 +90,19 @@ export async function validateRuntimeEnvironment() {
     ? readPort('MEDIASOUP_DIRECT_PORT', rtcPort)
     : rtcPort
 
+  const turnHost = process.env.DSPEAK_RTC_DOMAIN?.trim()
+  const turnSecret = process.env.TURN_SHARED_SECRET?.trim()
+  if (turnSecret && !turnHost) {
+    throw new Error('DSPEAK_RTC_DOMAIN is required when TURN_SHARED_SECRET is configured')
+  }
+  if (turnSecret) {
+    const credentialTtl = Number(process.env.TURN_CREDENTIAL_TTL_SECONDS || 3600)
+    if (!Number.isSafeInteger(credentialTtl) || credentialTtl < 300 || credentialTtl > 86400) {
+      throw new Error('TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 86400')
+    }
+    readPort('TURN_PORT', 3478)
+  }
+
   const listenIp = process.env.MEDIASOUP_LISTEN_IP?.trim() || '127.0.0.1'
   let announcedAddress = process.env.MEDIASOUP_ANNOUNCED_ADDRESS?.trim()
   if (announcedAddress?.toLowerCase() === 'auto') {

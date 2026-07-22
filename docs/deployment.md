@@ -95,6 +95,63 @@ DSpeak rewrites the public candidate port while mediasoup continues listening on
 `40000`. Direct IPv6 has higher ICE priority; Playit remains available to
 IPv4-only clients or when direct connectivity fails.
 
+Playit is used only for the fixed mediasoup port. Do not create a Playit tunnel
+for Coturn: TURN relay allocations require a public relay address that can send
+to arbitrary peers, which an application tunnel does not provide.
+
+## Self-hosted IPv6 STUN and TURN
+
+The Compose stack runs Coturn on the host network so its IPv6 relay candidates
+refer to the host directly. Configure a dedicated DNS-only AAAA hostname and a
+shared authentication secret:
+
+```dotenv
+DSPEAK_RTC_DOMAIN=rtc.dspeak.darelisme.my.id
+TURN_PORT=3478
+TURN_TLS_PORT=5349
+TURN_RELAY_MIN_PORT=49160
+TURN_RELAY_MAX_PORT=49259
+TURN_SHARED_SECRET=<long-random-secret>
+TURN_CREDENTIAL_TTL_SECONDS=3600
+```
+
+Generate the shared secret with `openssl rand -hex 32`. Nitro uses it only to
+create expiring Coturn REST credentials returned by `/dspeak/config`; the
+permanent secret is never sent to the browser. Coturn enforces per-user and
+total allocation quotas. Tune the defaults only after measuring relay usage:
+
+```dotenv
+TURN_USER_QUOTA=12
+TURN_TOTAL_QUOTA=1200
+TURN_MAX_BPS=25000000
+```
+
+The Cloudflare DDNS container updates `DSPEAK_RTC_DOMAIN`, which is shared by
+mediasoup and Coturn on different ports. The record must remain DNS-only. Coturn
+is IPv6-first; community TURN entries remain last in the ICE list for IPv4-only
+clients.
+
+### TURN TLS certificate
+
+The certificate sidecar obtains and renews a Let's Encrypt certificate using a
+Cloudflare DNS challenge. Create a second scoped token limited to Zone DNS Edit
+for the TURN zone:
+
+```dotenv
+TURN_CERT_EMAIL=operator@example.com
+TURN_CLOUDFLARE_API_TOKEN=<scoped-dns-token>
+TURN_CERT_DNS_PROPAGATION_SECONDS=30
+```
+
+The token is written only to an in-memory private credentials file inside the
+certificate container. Certificates are stored in the `turn-certificates`
+volume. After issuance or renewal, the sidecar sends Coturn `SIGUSR2` so new TLS
+connections use the renewed certificate without restarting active allocations.
+
+The TURN hostname and certificate environment must be present before starting
+Compose. Coturn can serve plain UDP/TCP while the first certificate is being
+issued; `turns:` becomes available after issuance succeeds.
+
 ## Dynamic RTC IPv6
 
 The Compose stack runs `favonia/cloudflare-ddns` in host-network mode. It reads
@@ -118,9 +175,10 @@ To use a plain-text external recognizer instead:
 DSPEAK_DDNS_IP6_PROVIDER=url:https://6.ident.me
 ```
 
-For IPv6-only Internet access, forward both UDP and TCP port `40000` to the
-Coolify host without changing the port. DNS and auto-discovery advertise an
-address; they cannot create the required packet-forwarding path.
+For IPv6 Internet access, allow mediasoup UDP/TCP `40000`, Coturn UDP/TCP `3478`,
+Coturn TCP `5349`, and the configured Coturn UDP relay range to the Coolify
+host. DNS and auto-discovery advertise an address; they cannot create the
+required packet-forwarding path.
 
 ## Ports and firewall
 
@@ -141,8 +199,9 @@ docker run --env-file .env \
   dspeak
 ```
 
-Allow the HTTP/WebSocket port and the configured WebRTC UDP/TCP port through the
-host firewall and deployment platform.
+Allow the HTTP/WebSocket port, mediasoup UDP/TCP port, TURN listener ports, and
+TURN UDP relay range through the host firewall and deployment platform. Do not
+forward the TURN ports through Playit or an HTTP reverse proxy.
 
 ## Production checks
 
@@ -150,6 +209,17 @@ host firewall and deployment platform.
 curl --fail https://<application-host>/health
 curl --fail https://<application-host>/metrics
 ```
+
+The health response reports `turn.selfHosted.configured` and
+`turn.selfHosted.available` independently from `turn.communityFallbacks`. The
+self-hosted availability check is a real IPv6 STUN Binding transaction cached
+for thirty seconds; a failed optional TURN probe does not mark the Nitro/SFU
+service unhealthy while community fallbacks remain configured.
+
+Validate authenticated relay allocations from an external IPv6 network with
+Coturn's `turnutils_uclient`, then force `iceTransportPolicy: "relay"` in a test
+browser session. Repeat from an IPv4-only network and confirm a community TURN
+candidate is selected instead of the IPv6-only hostname.
 
 Confirm direct IPv6 and Playit IPv4 separately from external networks. The RTC
 Statistics map must report the address family from the selected candidate rather

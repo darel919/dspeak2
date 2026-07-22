@@ -13,7 +13,7 @@ native WebRTC and mediasoup carry realtime media.
 - Automatic mediasoup SFU fallback for larger or unhealthy rooms
 - Stable SFU-first startup before optional Direct or Mesh upgrades
 - Seamless, all-client topology handoffs without restarting capture
-- IPv6-first SFU routing with an optional Playit IPv4 fallback
+- IPv6-first SFU routing with Playit IPv4 and authenticated TURN fallbacks
 - Animated RTC topology and transport diagnostics
 - Same-origin HTTP and WebSocket routes by default
 
@@ -36,8 +36,8 @@ and switches only after a stable
 qualification window and all-client media consensus. Membership changes on an
 active P2P room return the room to SFU before qualifying the new mesh.
 
-Direct probes use STUN without TURN. A P2P route activates only when every peer
-edge is connected, non-relayed, healthy, and carrying the required RTP. Topology
+Direct probes use STUN and may use TURN when direct ICE cannot connect. A P2P
+route activates only when every peer edge is connected, healthy, and carrying the required RTP. Topology
 changes use make-before-break staging and activate only after every current
 client confirms the same topology epoch and media-source revision.
 Qualified edges remain monitored throughout the stability window; losing health
@@ -148,9 +148,14 @@ Default host ports:
 | `31100/tcp` | Nitro HTTP and WebSockets |
 | `40000/udp` | Preferred mediasoup RTP |
 | `40000/tcp` | mediasoup TCP fallback |
+| `3478/udp` | IPv6 STUN and TURN |
+| `3478/tcp` | IPv6 TURN TCP |
+| `5349/tcp` | IPv6 TURN over TLS |
+| `49160–49259/udp` | IPv6 TURN relay allocations |
 
-The stack includes a Playit agent for IPv4 fallback and a Cloudflare DDNS
-updater for the direct RTC IPv6 hostname. See the [deployment runbook](docs/deployment.md)
+The stack includes a Playit agent for SFU IPv4 fallback, an IPv6 Coturn service,
+automatic TURN certificate renewal, and a Cloudflare DDNS updater for the direct
+RTC and TURN IPv6 hostnames. See the [deployment runbook](docs/deployment.md)
 for Coolify, Zoraxy, Playit, dynamic IPv6, DNS, firewall, and ICE configuration.
 
 ## Video and audio behavior

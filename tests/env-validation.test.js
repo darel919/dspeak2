@@ -62,3 +62,26 @@ test('keeps a DNS-only hostname override unchanged', async () => {
 
   assert.equal(config.announcedAddress, 'rtc.dspeak.example.com')
 })
+
+test('requires the shared RTC hostname when TURN is enabled', async () => {
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = 'rtc.dspeak.example.com'
+  delete process.env.DSPEAK_RTC_DOMAIN
+  process.env.TURN_SHARED_SECRET = 'test-secret'
+
+  await assert.rejects(
+    validateRuntimeEnvironment(),
+    /DSPEAK_RTC_DOMAIN is required when TURN_SHARED_SECRET is configured/
+  )
+})
+
+test('rejects unsafe TURN credential lifetimes', async () => {
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = 'rtc.dspeak.example.com'
+  process.env.DSPEAK_RTC_DOMAIN = 'rtc.dspeak.example.com'
+  process.env.TURN_SHARED_SECRET = 'test-secret'
+  process.env.TURN_CREDENTIAL_TTL_SECONDS = '60'
+
+  await assert.rejects(
+    validateRuntimeEnvironment(),
+    /TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 86400/
+  )
+})

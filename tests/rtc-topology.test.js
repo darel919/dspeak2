@@ -9,7 +9,7 @@ import {
 import {
   directIceServers,
   hasRequiredMediaFlow,
-  isDirectPair,
+  isViableP2pPair,
   isP2pLivenessExpired,
   p2pRemoteFeedKey,
   requiresP2pLiveness,
@@ -161,7 +161,7 @@ test('switching graph retains active SFU paths while probing P2P', () => {
   )
 })
 
-test('direct P2P configuration removes TURN URLs', () => {
+test('direct P2P configuration preserves authenticated TURN URLs', () => {
   assert.deepEqual(
     directIceServers([
       {
@@ -170,20 +170,26 @@ test('direct P2P configuration removes TURN URLs', () => {
       },
       { urls: 'turns:turn.example.com' },
     ]),
-    [{ urls: ['stun:stun.example.com'] }],
+    [
+      {
+        urls: ['stun:stun.example.com', 'turn:turn.example.com'],
+        username: 'secret',
+      },
+      { urls: 'turns:turn.example.com' },
+    ],
   )
 })
 
-test('direct pair rejects either relay candidate', () => {
+test('P2P pair accepts direct and relayed candidate paths', () => {
   const hostPair = {
     state: 'succeeded',
     local: { candidateType: 'host' },
     remote: { candidateType: 'host' },
   }
-  assert.equal(isDirectPair(hostPair), true)
+  assert.equal(isViableP2pPair(hostPair), true)
   assert.equal(
-    isDirectPair({ ...hostPair, remote: { candidateType: 'relay' } }),
-    false,
+    isViableP2pPair({ ...hostPair, remote: { candidateType: 'relay' } }),
+    true,
   )
 })
 

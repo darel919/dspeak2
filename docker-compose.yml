@@ -28,6 +28,11 @@ services:
       DSPEAK_API_URL: ${DSPEAK_API_URL:-}
       DSPEAK_WS_URL: ${DSPEAK_WS_URL:-}
       DSPEAK_SFU_URL: ${DSPEAK_SFU_URL:-}
+
+      DSPEAK_RTC_DOMAIN: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}
+      TURN_PORT: ${TURN_PORT:-3478}
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      TURN_CREDENTIAL_TTL_SECONDS: ${TURN_CREDENTIAL_TTL_SECONDS:-3600}
     ports:
       - "${DSPEAK_HTTP_PORT:-31100}:3000/tcp"
       - "${MEDIASOUP_RTC_PORT:-40000}:${MEDIASOUP_RTC_PORT:-40000}/udp"
@@ -42,6 +47,59 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
+
+  coturn:
+    image: coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be
+    network_mode: host
+    command:
+      - --log-file=stdout
+      - --listening-port=${TURN_PORT:-3478}
+      - --tls-listening-port=${TURN_TLS_PORT:-5349}
+      - --min-port=${TURN_RELAY_MIN_PORT:-49160}
+      - --max-port=${TURN_RELAY_MAX_PORT:-49259}
+      - --realm=${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}
+      - --server-name=${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SHARED_SECRET:?Generate a strong TURN shared secret}
+      - --cert=/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}/fullchain.pem
+      - --pkey=/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}/privkey.pem
+      - --fingerprint
+      - --stale-nonce=600
+      - --user-quota=${TURN_USER_QUOTA:-12}
+      - --total-quota=${TURN_TOTAL_QUOTA:-1200}
+      - --max-bps=${TURN_MAX_BPS:-25000000}
+      - --no-cli
+      - --no-loopback-peers
+      - --no-multicast-peers
+      - --no-tcp-relay
+      - --no-dtls
+      - --no-software-attribute
+    volumes:
+      - turn-certificates:/etc/letsencrypt:ro
+    healthcheck:
+      test: [CMD, turnutils_stunclient, -p, "${TURN_PORT:-3478}", "::1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  turn-certbot:
+    image: certbot/dns-cloudflare:v3.2.0@sha256:3c3eca6a6476d1fc2cd67de0ebc1e7b9b8c6775fcfaadb7098aad76e9cade5e3
+    pid: service:coturn
+    environment:
+      DSPEAK_RTC_DOMAIN: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}
+      TURN_CERT_EMAIL: ${TURN_CERT_EMAIL:?Set the email used for TURN certificate renewal}
+      TURN_CLOUDFLARE_API_TOKEN: ${TURN_CLOUDFLARE_API_TOKEN:?Create a scoped Cloudflare DNS token for TURN certificates}
+      TURN_CERT_DNS_PROPAGATION_SECONDS: ${TURN_CERT_DNS_PROPAGATION_SECONDS:-30}
+    entrypoint: [/bin/sh, /usr/local/bin/renew-turn-certificate]
+    volumes:
+      - turn-certificates:/etc/letsencrypt
+      - ./ops/certbot/renew-turn-certificate.sh:/usr/local/bin/renew-turn-certificate:ro
+    depends_on:
+      coturn:
+        condition: service_started
     restart: unless-stopped
 
   playit-agent:
@@ -69,3 +127,6 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+
+volumes:
+  turn-certificates:

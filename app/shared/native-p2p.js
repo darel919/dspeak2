@@ -71,12 +71,10 @@ export function applyP2pVideoCodecPreferences(pc) {
 }
 
 function directIceServers(servers) {
-  return (Array.isArray(servers) ? servers : []).flatMap((server) => {
-    const urls = (
-      Array.isArray(server.urls) ? server.urls : [server.urls]
-    ).filter((url) => /^stun:/i.test(String(url || '')))
-    return urls.length ? [{ urls }] : []
-  })
+  return (Array.isArray(servers) ? servers : []).map((server) => ({
+    ...server,
+    urls: Array.isArray(server.urls) ? [...server.urls] : server.urls
+  }))
 }
 
 async function selectedPairSnapshot(pc) {
@@ -170,14 +168,12 @@ async function mediaFlowSnapshot(pc) {
   }
 }
 
-function isDirectPair(pair) {
+function isViableP2pPair(pair) {
   return (
     !!pair &&
     pair.state === 'succeeded' &&
     !!pair.local?.candidateType &&
-    !!pair.remote?.candidateType &&
-    pair.local.candidateType !== 'relay' &&
-    pair.remote.candidateType !== 'relay'
+    !!pair.remote?.candidateType
   )
 }
 
@@ -648,7 +644,7 @@ export class NativeP2pMesh {
               )
             )
               this.fail('inbound-media-flow-stopped')
-            if (state.selectedPair && !isDirectPair(state.selectedPair))
+            if (state.selectedPair && !isViableP2pPair(state.selectedPair))
               this.fail('relay-candidate-selected')
           } catch (_) {
             state.selectedPair = null
@@ -708,7 +704,7 @@ export class NativeP2pMesh {
         state.channel?.readyState === 'open' &&
         state.healthReceived >= 3 &&
         state.mediaReady &&
-        isDirectPair(state.selectedPair),
+        isViableP2pPair(state.selectedPair),
     )
     if (qualified.length !== this.connections.size) return
     this.readyReported = true
@@ -844,7 +840,7 @@ export class NativeP2pMesh {
 export {
   directIceServers,
   hasRequiredMediaFlow,
-  isDirectPair,
+  isViableP2pPair,
   mediaFlowSnapshot,
   selectedPairSnapshot,
 }
