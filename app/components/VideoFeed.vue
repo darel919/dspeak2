@@ -1,12 +1,13 @@
 <template>
-  <figure
-    ref="feedElement"
-    class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden rounded-xl bg-black shadow-lg"
-    :class="[source === 'screen' ? 'cursor-zoom-in' : '', { 'fullscreen-feed-active': isFullscreen }]"
-    :data-feed-key="feedKey"
-    :title="source === 'screen' && !isFullscreen ? 'Double-click to view fullscreen' : undefined"
-    @dblclick.prevent="toggleFullscreen"
-  >
+  <Teleport to="body" :disabled="!isFullscreen">
+    <figure
+      ref="feedElement"
+      class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden rounded-xl bg-black shadow-lg"
+      :class="[source === 'screen' ? 'cursor-zoom-in' : '', { 'fullscreen-feed-active': isFullscreen }]"
+      :data-feed-key="feedKey"
+      :title="source === 'screen' && !isFullscreen ? 'Double-click to view fullscreen' : undefined"
+      @dblclick.prevent="toggleFullscreen"
+    >
     <video
       v-show="previewEnabled"
       ref="videoElement"
@@ -41,7 +42,8 @@
     >
       <Icon name="lucide:minimize-2" class="size-4" />
     </button>
-  </figure>
+    </figure>
+  </Teleport>
 </template>
 
 <script setup>
