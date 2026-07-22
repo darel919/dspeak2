@@ -6,6 +6,7 @@ export const MEDIA_POLICY_LIMITS = Object.freeze({
 });
 
 export function normalizeMediaPolicy(value = {}, legacyAudioBitrate = null) {
+  value = value && typeof value === "object" ? value : {};
   return {
     microphoneKbps: readPolicyNumber(
       value.microphoneKbps ?? legacyAudioBitrate,
@@ -29,6 +30,7 @@ export function normalizeMediaPolicy(value = {}, legacyAudioBitrate = null) {
 }
 
 export function validateMediaPolicy(value = {}) {
+  value = value && typeof value === "object" ? value : {};
   const errors = [];
   for (const [key, limits] of Object.entries(MEDIA_POLICY_LIMITS)) {
     const number = Number(value[key]);

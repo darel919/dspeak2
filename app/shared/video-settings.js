@@ -22,6 +22,7 @@ export const VIDEO_RESOLUTIONS = Object.freeze({
 });
 
 export function normalizeVideoSettings(value = {}) {
+  value = value && typeof value === "object" ? value : {};
   const resolution = Object.hasOwn(VIDEO_RESOLUTIONS, value.resolution)
     ? value.resolution
     : "original";

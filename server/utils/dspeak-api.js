@@ -503,8 +503,6 @@ async function handleChannels(event, suffix) {
     const update = {};
     if (body.name) update.name = body.name;
     if (body.desc !== undefined) update.desc = body.desc;
-    if (body.audio_bitrate && channel.isMedia)
-      update.audio_bitrate = body.audio_bitrate;
     if (body.mediaPolicy && channel.isMedia) {
       await requireRoomPermission(
         pb,

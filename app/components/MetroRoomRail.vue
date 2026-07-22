@@ -24,6 +24,7 @@
         :class="activeRoomId === room.id && 'metro-selected'"
         :aria-label="room.name"
         :title="room.name"
+        @contextmenu.prevent.stop="openRoomMenu(room, $event)"
       >
         <img
           v-if="room.picture"
@@ -61,17 +62,88 @@
         <Icon name="lucide:plus" class="size-5" />
       </NuxtLink>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="contextRoom"
+        ref="contextMenuElement"
+        class="fixed z-[120] w-56 border border-base-300 bg-base-100 py-2 text-base-content shadow-2xl"
+        :style="contextMenuStyle"
+        role="menu"
+        :aria-label="`${contextRoom.name} actions`"
+        @pointerdown.stop
+        @contextmenu.prevent.stop
+      >
+        <div class="border-b border-base-300 px-4 pb-2 pt-1">
+          <strong class="block truncate text-sm">{{ contextRoom.name }}</strong>
+          <small class="text-base-content/55">Room</small>
+        </div>
+        <button
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-base-200"
+          role="menuitem"
+          @click="openSelectedRoom"
+        >
+          <Icon name="lucide:arrow-right" class="size-4" />Open room
+        </button>
+        <button
+          v-if="canManageRoom(contextRoom)"
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-base-200"
+          role="menuitem"
+          @click="openSelectedRoomSettings"
+        >
+          <Icon name="lucide:settings" class="size-4" />Room settings
+        </button>
+        <button
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-base-200"
+          role="menuitem"
+          @click="copySelectedRoomInvite"
+        >
+          <Icon name="lucide:link" class="size-4" />Copy invite link
+        </button>
+        <div class="my-1 border-t border-base-300"></div>
+        <button
+          v-if="isRoomOwner(contextRoom)"
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-error hover:bg-error/10"
+          role="menuitem"
+          @click="deleteSelectedRoom"
+        >
+          <Icon name="lucide:trash-2" class="size-4" />Delete room
+        </button>
+        <button
+          v-else
+          type="button"
+          class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-warning hover:bg-warning/10"
+          role="menuitem"
+          @click="leaveSelectedRoom"
+        >
+          <Icon name="lucide:log-out" class="size-4" />Leave room
+        </button>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
+import { useAuthStore } from "../stores/auth";
+import { VIEWPORT_PADDING_PX } from "../const/ui";
 
 const roomsStore = useRoomsStore();
+const authStore = useAuthStore();
 const route = useRoute();
 const config = useRuntimeConfig();
 const unreadCounts = useState("unread-counts", () => []);
 const activeRoomId = computed(() => String(route.params.roomId || ""));
+const contextRoom = ref(null);
+const contextMenuElement = ref(null);
+const contextMenuPosition = ref({ x: 0, y: 0 });
+const contextMenuStyle = computed(() => ({
+  left: `${contextMenuPosition.value.x}px`,
+  top: `${contextMenuPosition.value.y}px`,
+}));
 
 function assetUrl(path) {
   if (!path) return "";
@@ -88,4 +160,109 @@ function roomUnread(roomId) {
 function goHome() {
   navigateTo("/");
 }
+
+async function openRoomMenu(room, event) {
+  contextRoom.value = room;
+  contextMenuPosition.value = { x: event.clientX, y: event.clientY };
+  await nextTick();
+  if (!contextMenuElement.value) return;
+  const { width, height } = contextMenuElement.value.getBoundingClientRect();
+  contextMenuPosition.value = {
+    x: Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(event.clientX, window.innerWidth - width - VIEWPORT_PADDING_PX),
+    ),
+    y: Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(
+        event.clientY,
+        window.innerHeight - height - VIEWPORT_PADDING_PX,
+      ),
+    ),
+  };
+}
+
+function closeRoomMenu() {
+  contextRoom.value = null;
+}
+
+function isRoomOwner(room) {
+  return (
+    String(room?.owner?.id || room?.owner) ===
+    String(authStore.getUserData()?.id)
+  );
+}
+
+function canManageRoom(room) {
+  return (
+    isRoomOwner(room) ||
+    (room?.permissions || []).some(
+      (permission) =>
+        permission.startsWith("room.") || permission.startsWith("channel."),
+    )
+  );
+}
+
+function openSelectedRoom() {
+  const roomId = contextRoom.value?.id;
+  closeRoomMenu();
+  if (roomId) navigateTo(`/room/${roomId}`);
+}
+
+function openSelectedRoomSettings() {
+  const roomId = contextRoom.value?.id;
+  closeRoomMenu();
+  if (roomId) navigateTo(`/room/${roomId}/settings`);
+}
+
+async function copySelectedRoomInvite() {
+  const roomId = contextRoom.value?.id;
+  closeRoomMenu();
+  if (roomId)
+    await navigator.clipboard.writeText(
+      `${window.location.origin}/join/${roomId}`,
+    );
+}
+
+async function deleteSelectedRoom() {
+  const room = contextRoom.value;
+  closeRoomMenu();
+  if (
+    !room ||
+    !confirm(`Delete the room "${room.name}"? This cannot be undone.`)
+  )
+    return;
+  await roomsStore.deleteRoom(room.id);
+  if (String(activeRoomId.value) === String(room.id)) navigateTo("/");
+}
+
+async function leaveSelectedRoom() {
+  const room = contextRoom.value;
+  closeRoomMenu();
+  if (!room || !confirm(`Leave the room "${room.name}"?`)) return;
+  await roomsStore.leaveRoom(room.id);
+  if (String(activeRoomId.value) === String(room.id)) navigateTo("/");
+}
+
+function handleRoomMenuDismiss(event) {
+  if (!contextMenuElement.value?.contains(event.target)) closeRoomMenu();
+}
+
+function handleRoomMenuKeydown(event) {
+  if (event.key === "Escape") closeRoomMenu();
+}
+
+onMounted(() => {
+  window.addEventListener("pointerdown", handleRoomMenuDismiss);
+  window.addEventListener("keydown", handleRoomMenuKeydown);
+  window.addEventListener("resize", closeRoomMenu);
+  window.addEventListener("scroll", closeRoomMenu, true);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointerdown", handleRoomMenuDismiss);
+  window.removeEventListener("keydown", handleRoomMenuKeydown);
+  window.removeEventListener("resize", closeRoomMenu);
+  window.removeEventListener("scroll", closeRoomMenu, true);
+});
 </script>

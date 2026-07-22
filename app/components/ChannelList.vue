@@ -96,7 +96,9 @@
                 tabindex="0"
                 class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-44"
               >
-                <li><a @click="editChannel(channel)">Edit Channel</a></li>
+                <li v-if="canEditChannel(channel)">
+                  <a @click="editChannel(channel)">Edit Channel</a>
+                </li>
                 <li v-if="canDeleteChannel(channel)">
                   <a @click="deleteChannel(channel)" class="text-error"
                     >Delete Channel</a
@@ -167,7 +169,9 @@
                     tabindex="0"
                     class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-44"
                   >
-                    <li><a @click="editChannel(channel)">Edit Channel</a></li>
+                    <li v-if="canEditChannel(channel)">
+                      <a @click="editChannel(channel)">Edit Channel</a>
+                    </li>
                     <li v-if="canDeleteChannel(channel)">
                       <a @click="deleteChannel(channel)" class="text-error"
                         >Delete Channel</a
@@ -429,45 +433,38 @@
               rows="3"
             ></textarea>
           </div>
-          <div v-if="editingChannel.isMedia">
-            <label class="label mb-2">
-              <span class="label-text">Audio Bitrate (kbps)</span>
-            </label>
-            <div class="w-full">
-              <input
-                type="range"
-                min="1"
-                max="5"
-                v-model.number="editingChannelBitrateLevel"
-                class="range w-full"
-                step="1"
-              />
-              <div class="flex justify-between px-2.5 mt-2 text-xs">
-                <span>|</span>
-                <span>|</span>
-                <span>|</span>
-                <span>|</span>
-                <span>|</span>
-              </div>
-              <div class="flex justify-between px-2.5 mt-2 text-xs">
-                <span>64</span>
-                <span>96</span>
-                <span>128</span>
-                <span>160</span>
-                <span>256</span>
-              </div>
+          <fieldset
+            v-if="
+              editingChannel.isMedia &&
+              hasPermission('channel.manage_media_policy')
+            "
+            class="border-t border-base-300 pt-4"
+          >
+            <legend class="pr-3 text-lg font-light">Media policy</legend>
+            <p class="mb-4 text-sm text-base-content/60">
+              Changes apply live to everyone connected to this voice channel.
+            </p>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label
+                v-for="field in channelPolicyFields"
+                :key="field.key"
+                class="grid min-w-0 gap-2"
+              >
+                <span class="text-sm font-medium">{{ field.label }}</span>
+                <input
+                  v-model.number="editingChannelPolicy[field.key]"
+                  type="number"
+                  class="input input-bordered w-full"
+                  :min="field.min"
+                  :max="field.max"
+                  required
+                />
+                <small class="text-base-content/50"
+                  >{{ field.min }}–{{ field.max }} kbps</small
+                >
+              </label>
             </div>
-            <div class="text-sm mt-2">
-              Selected: <strong>{{ editingChannelBitrateKbps }} kbps</strong>
-            </div>
-            <div
-              v-if="editingChannelBitrateLevel > 3"
-              class="text-sm text-error mt-2"
-            >
-              Using high bitrate audio might affect your experience if your
-              connection is unstable.
-            </div>
-          </div>
+          </fieldset>
           <div class="modal-action">
             <button type="button" class="btn" @click="closeEditModal">
               Cancel
@@ -476,87 +473,6 @@
           </div>
         </form>
       </div>
-    </div>
-
-    <div
-      v-if="showRoomSettings"
-      class="modal modal-open"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="room-settings-title"
-    >
-      <div
-        class="modal-box border border-base-300 bg-base-100 text-base-content shadow-2xl"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <h3 id="room-settings-title" class="text-lg font-bold">
-              Edit Room
-            </h3>
-            <p class="mt-1 text-sm text-base-content/70">
-              Update how this room appears to its members.
-            </p>
-          </div>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm btn-circle"
-            aria-label="Close room settings"
-            @click="closeRoomSettings"
-          >
-            <Icon name="lucide:x" class="size-5" />
-          </button>
-        </div>
-        <form class="mt-5 space-y-4" @submit.prevent="saveRoomSettings">
-          <label class="form-control w-full">
-            <span class="mb-2 text-sm font-semibold">Room name</span>
-            <input
-              v-model="roomSettingsName"
-              class="input input-bordered w-full"
-              maxlength="80"
-              required
-            />
-          </label>
-          <label class="form-control w-full">
-            <span class="mb-2 text-sm font-semibold">Description</span>
-            <textarea
-              v-model="roomSettingsDescription"
-              class="textarea textarea-bordered min-h-28 w-full"
-              maxlength="500"
-              placeholder="What is this room for?"
-            ></textarea>
-          </label>
-          <p v-if="roomSettingsError" class="text-sm text-error" role="alert">
-            {{ roomSettingsError }}
-          </p>
-          <div class="modal-action">
-            <button
-              type="button"
-              class="btn btn-ghost"
-              :disabled="roomSettingsSaving"
-              @click="closeRoomSettings"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              class="btn btn-primary"
-              :disabled="roomSettingsSaving || !roomSettingsName.trim()"
-            >
-              <span
-                v-if="roomSettingsSaving"
-                class="loading loading-spinner loading-sm"
-              ></span>
-              Save changes
-            </button>
-          </div>
-        </form>
-      </div>
-      <button
-        type="button"
-        class="modal-backdrop"
-        aria-label="Close room settings"
-        @click="closeRoomSettings"
-      ></button>
     </div>
   </div>
 </template>
@@ -651,6 +567,7 @@ import {
 } from "../shared/connection-quality";
 import { unref } from "vue";
 import { CHANNEL_BITRATE_LEVELS } from "../const/media";
+import { MEDIA_POLICY_LIMITS } from "~~/shared/media-policy.js";
 
 import { useChatUtils } from "../composables/useChatUtils";
 import { useToast } from "../composables/useToast";
@@ -689,10 +606,21 @@ const voiceStore = useVoiceStore();
 const showCreateChannel = ref(false);
 const showEditChannel = ref(false);
 const editingChannel = ref(null);
-const editingChannelBitrateLevel = ref(3);
-const editingChannelBitrateKbps = computed(() => {
-  return CHANNEL_BITRATE_LEVELS[editingChannelBitrateLevel.value] || 64;
-});
+const editingChannelPolicy = ref({});
+const originalEditingChannelPolicy = ref({});
+const channelPolicyFields = Object.entries(MEDIA_POLICY_LIMITS).map(
+  ([key, limits]) => ({
+    key,
+    label:
+      {
+        microphoneKbps: "Microphone",
+        cameraKbps: "Camera video",
+        screenKbps: "Screen share",
+        sharedAudioKbps: "Shared audio",
+      }[key] || key,
+    ...limits,
+  }),
+);
 const unreadCounts = ref([]);
 const newChannelName = ref("");
 const newChannelDesc = ref("");
@@ -710,6 +638,12 @@ const isRoomOwnerOrAdmin = computed(() => {
   if (!props.room || !props.room.owner) return false;
   return props.room.owner.id === currentUserId.value;
 });
+const runtimeConfig = useRuntimeConfig();
+function roomAssetUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//.test(path)) return path;
+  return `${runtimeConfig.public.apiPath.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+}
 function hasPermission(permission) {
   return (
     props.room?.owner?.id === currentUserId.value ||
@@ -797,23 +731,25 @@ async function handleCreateChannel() {
 
 async function editChannel(channel) {
   editingChannel.value = { ...channel };
-
-  const kbps = Number(channel.audio_bitrate) || 64;
-  const level = bitrateLevelToKbps.indexOf(kbps);
-  editingChannelBitrateLevel.value = level > 0 ? level : 1;
+  editingChannelPolicy.value = { ...(channel.mediaPolicy || {}) };
+  originalEditingChannelPolicy.value = { ...editingChannelPolicy.value };
   showEditChannel.value = true;
 }
 
 async function handleEditChannel() {
   try {
-    if (editingChannel.value)
-      editingChannel.value.audio_bitrate = Number(
-        editingChannelBitrateKbps.value,
-      );
-    await channelsStore.editChannel(
-      editingChannel.value.id,
-      editingChannel.value,
-    );
+    const update = {
+      name: editingChannel.value.name,
+      desc: editingChannel.value.desc,
+    };
+    if (
+      editingChannel.value.isMedia &&
+      hasPermission("channel.manage_media_policy") &&
+      JSON.stringify(editingChannelPolicy.value) !==
+        JSON.stringify(originalEditingChannelPolicy.value)
+    )
+      update.mediaPolicy = editingChannelPolicy.value;
+    await channelsStore.editChannel(editingChannel.value.id, update);
     closeEditModal();
   } catch (error) {
     console.error("Failed to edit channel:", error);
@@ -838,6 +774,14 @@ function canDeleteChannel(channel) {
   );
 }
 
+function canEditChannel(channel) {
+  return (
+    channel.owner?.id === currentUserId.value ||
+    props.room.owner?.id === currentUserId.value ||
+    hasPermission("channel.update")
+  );
+}
+
 function closeCreateModal() {
   showCreateChannel.value = false;
   newChannelName.value = "";
@@ -850,44 +794,13 @@ function closeCreateModal() {
 function closeEditModal() {
   showEditChannel.value = false;
   editingChannel.value = null;
+  editingChannelPolicy.value = {};
+  originalEditingChannelPolicy.value = {};
 }
-
-const showRoomSettings = ref(false);
-const roomSettingsName = ref("");
-const roomSettingsDescription = ref("");
-const roomSettingsSaving = ref(false);
-const roomSettingsError = ref("");
 
 function goToRoomSettings() {
   if (!props.room?.id) return;
-  roomSettingsName.value = props.room.name || "";
-  roomSettingsDescription.value = props.room.desc || "";
-  roomSettingsError.value = "";
-  showRoomSettings.value = true;
-}
-
-function closeRoomSettings() {
-  if (roomSettingsSaving.value) return;
-  showRoomSettings.value = false;
-  roomSettingsError.value = "";
-}
-
-async function saveRoomSettings() {
-  if (!props.room?.id || !roomSettingsName.value.trim()) return;
-  roomSettingsSaving.value = true;
-  roomSettingsError.value = "";
-  try {
-    await roomsStore.updateRoom(props.room.id, {
-      name: roomSettingsName.value.trim(),
-      desc: roomSettingsDescription.value.trim(),
-    });
-    showRoomSettings.value = false;
-  } catch (error) {
-    roomSettingsError.value =
-      error?.message || "Room settings could not be saved.";
-  } finally {
-    roomSettingsSaving.value = false;
-  }
+  navigateTo(`/room/${props.room.id}/settings`);
 }
 
 onMounted(() => {
@@ -908,7 +821,3 @@ watch(
   opacity: 1;
 }
 </style>
-const runtimeConfig = useRuntimeConfig(); function roomAssetUrl(path) { if
-(!path) return ""; if (/^https?:\/\//.test(path)) return path; return
-`${runtimeConfig.public.apiPath.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
-}
