@@ -7,8 +7,8 @@ log() {
 
 log "Container supervisor started"
 
-certificate="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/fullchain.pem"
-private_key="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}/privkey.pem"
+certificate=/etc/letsencrypt/runtime/fullchain.pem
+private_key=/etc/letsencrypt/runtime/privkey.pem
 
 trap 'exit 0' TERM INT
 

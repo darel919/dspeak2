@@ -166,6 +166,13 @@ Cloudflare token, TURN shared secret, or generated credentials.
 The Compose service passes `DSPEAK_RTC_DOMAIN` to both containers because their
 certificate paths must resolve to the same hostname.
 
+Certbot retains the canonical Let's Encrypt files with their default private
+permissions. After a successful issuance or renewal, it atomically publishes
+dereferenced certificate and key files under `/etc/letsencrypt/runtime` in the
+isolated shared volume. The non-root Coturn container mounts that volume
+read-only and reads only these runtime copies. The private key is not exposed as
+a host bind mount or included in either image.
+
 Compose builds the pinned Coturn and Certbot base images with their supervisors
 included. The entrypoints do not depend on bind-mounted files from Coolify's
 temporary deployment checkout, so they remain available after the build helper

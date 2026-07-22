@@ -24,6 +24,7 @@ issue_or_renew() {
     --agree-tos \
     --non-interactive \
     --keep-until-expiring; then
+    publish_certificate
     log "Certificate is ready for ${DSPEAK_RTC_DOMAIN}"
     return 0
   else
@@ -31,6 +32,19 @@ issue_or_renew() {
     log "Certificate request failed with exit code ${status}; retrying in 60 seconds"
     return "$status"
   fi
+}
+
+publish_certificate() {
+  source_directory="/etc/letsencrypt/live/${DSPEAK_RTC_DOMAIN}"
+  runtime_directory=/etc/letsencrypt/runtime
+  mkdir -p "$runtime_directory"
+  chmod 0755 "$runtime_directory"
+  cp -L "${source_directory}/fullchain.pem" "${runtime_directory}/fullchain.pem.next"
+  cp -L "${source_directory}/privkey.pem" "${runtime_directory}/privkey.pem.next"
+  chmod 0444 "${runtime_directory}/fullchain.pem.next" "${runtime_directory}/privkey.pem.next"
+  mv -f "${runtime_directory}/fullchain.pem.next" "${runtime_directory}/fullchain.pem"
+  mv -f "${runtime_directory}/privkey.pem.next" "${runtime_directory}/privkey.pem"
+  log "Published certificate files for the non-root TURN service"
 }
 
 while true; do
