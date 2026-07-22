@@ -148,18 +148,18 @@ import ChatInput from './ChatInput.vue'
 import MessageDetailsModal from './MessageDetailsModal.vue'
 import MemberList from '../MemberList.vue'
 import ChatErrorBanner from './ChatErrorBanner.vue'
+import { STORAGE_KEYS } from '../../const/storage'
 
-const MEMBER_LIST_KEY = 'chat_member_list_visible'
 const showMemberList = ref(true)
 
 onMounted(() => {
 
-  const saved = localStorage.getItem(MEMBER_LIST_KEY)
+  const saved = localStorage.getItem(STORAGE_KEYS.chatMemberListVisible)
   showMemberList.value = saved === null ? true : saved === 'true'
 })
 
 watch(showMemberList, (val) => {
-  localStorage.setItem(MEMBER_LIST_KEY, val ? 'true' : 'false')
+  localStorage.setItem(STORAGE_KEYS.chatMemberListVisible, val ? 'true' : 'false')
 })
 
 function toggleMemberList() {

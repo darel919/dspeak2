@@ -8,7 +8,7 @@
           <button tabindex="0" class="btn btn-ghost btn-sm btn-circle">
             <Icon name="lucide:ellipsis-vertical" class="h-5 w-5" />
           </button>
-          <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
+          <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52">
             <li><a @click="showCreateChannel = true">Create Channel</a></li>
             <li>
               <a @click="goToRoomSettings" class="cursor-pointer hover:bg-base-200">
@@ -55,7 +55,7 @@
               <button tabindex="0" class="btn btn-ghost btn-xs btn-circle opacity-0 group-hover:opacity-100">
                 <Icon name="lucide:ellipsis-vertical" class="h-3 w-3" />
               </button>
-              <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-44">
+              <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-44">
                 <li><a @click="editChannel(channel)">Edit Channel</a></li>
                 <li v-if="canDeleteChannel(channel)"><a @click="deleteChannel(channel)" class="text-error">Delete Channel</a></li>
               </div>
@@ -93,7 +93,7 @@
                   <button tabindex="0" class="btn btn-ghost btn-xs btn-circle opacity-0 group-hover:opacity-100" title="Channel options">
                     <Icon name="lucide:ellipsis-vertical" class="h-3 w-3" />
                   </button>
-                  <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-44">
+                  <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-44">
                     <li><a @click="editChannel(channel)">Edit Channel</a></li>
                     <li v-if="canDeleteChannel(channel)"><a @click="deleteChannel(channel)" class="text-error">Delete Channel</a></li>
                   </div>
@@ -328,6 +328,39 @@
         </form>
       </div>
     </div>
+
+    <div v-if="showRoomSettings" class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="room-settings-title">
+      <div class="modal-box border border-base-300 bg-base-100 text-base-content shadow-2xl">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 id="room-settings-title" class="text-lg font-bold">Edit Room</h3>
+            <p class="mt-1 text-sm text-base-content/70">Update how this room appears to its members.</p>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm btn-circle" aria-label="Close room settings" @click="closeRoomSettings">
+            <Icon name="lucide:x" class="size-5" />
+          </button>
+        </div>
+        <form class="mt-5 space-y-4" @submit.prevent="saveRoomSettings">
+          <label class="form-control w-full">
+            <span class="mb-2 text-sm font-semibold">Room name</span>
+            <input v-model="roomSettingsName" class="input input-bordered w-full" maxlength="80" required />
+          </label>
+          <label class="form-control w-full">
+            <span class="mb-2 text-sm font-semibold">Description</span>
+            <textarea v-model="roomSettingsDescription" class="textarea textarea-bordered min-h-28 w-full" maxlength="500" placeholder="What is this room for?"></textarea>
+          </label>
+          <p v-if="roomSettingsError" class="text-sm text-error" role="alert">{{ roomSettingsError }}</p>
+          <div class="modal-action">
+            <button type="button" class="btn btn-ghost" :disabled="roomSettingsSaving" @click="closeRoomSettings">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="roomSettingsSaving || !roomSettingsName.trim()">
+              <span v-if="roomSettingsSaving" class="loading loading-spinner loading-sm"></span>
+              Save changes
+            </button>
+          </div>
+        </form>
+      </div>
+      <button type="button" class="modal-backdrop" aria-label="Close room settings" @click="closeRoomSettings"></button>
+    </div>
   </div>
 </template>
 
@@ -397,6 +430,7 @@ import { useRoomsStore } from '../stores/rooms'
 import { useVoiceStore } from '../stores/voice'
 import { getConnectionQualityBars, getConnectionQualityColorClass, getConnectionQualityLabel } from '../shared/connection-quality'
 import { unref } from 'vue'
+import { CHANNEL_BITRATE_LEVELS } from '../const/media'
 
 import { useChatUtils } from '../composables/useChatUtils'
 import { useToast } from '../composables/useToast'
@@ -437,8 +471,7 @@ const showEditChannel = ref(false)
 const editingChannel = ref(null)
 const editingChannelBitrateLevel = ref(3)
 const editingChannelBitrateKbps = computed(() => {
-  const map = [0, 64, 96, 128, 160, 256]
-  return map[editingChannelBitrateLevel.value] || 64
+  return CHANNEL_BITRATE_LEVELS[editingChannelBitrateLevel.value] || 64
 })
 const unreadCounts = ref([])
 const newChannelName = ref('')
@@ -446,9 +479,8 @@ const newChannelDesc = ref('')
 const newChannelType = ref('text')
 const newChannelBitrate = ref(64)
 
-const bitrateLevelToKbps = [0, 64, 96, 128, 160, 256]
 const newChannelBitrateLevel = ref(3)
-const newChannelBitrateKbps = computed(() => bitrateLevelToKbps[newChannelBitrateLevel.value] || 64)
+const newChannelBitrateKbps = computed(() => CHANNEL_BITRATE_LEVELS[newChannelBitrateLevel.value] || 64)
 const textChannels = computed(() => channelsStore.getTextChannels())
 const voiceChannels = computed(() => channelsStore.getMediaChannels())
 const currentUserId = computed(() => authStore.getUserData()?.id)
@@ -573,9 +605,40 @@ function closeEditModal() {
   editingChannel.value = null
 }
 
+const showRoomSettings = ref(false)
+const roomSettingsName = ref('')
+const roomSettingsDescription = ref('')
+const roomSettingsSaving = ref(false)
+const roomSettingsError = ref('')
+
 function goToRoomSettings() {
-  if (props.room && props.room.id) {
-    navigateTo(`/room/${props.room.id}/settings`)
+  if (!props.room?.id) return
+  roomSettingsName.value = props.room.name || ''
+  roomSettingsDescription.value = props.room.desc || ''
+  roomSettingsError.value = ''
+  showRoomSettings.value = true
+}
+
+function closeRoomSettings() {
+  if (roomSettingsSaving.value) return
+  showRoomSettings.value = false
+  roomSettingsError.value = ''
+}
+
+async function saveRoomSettings() {
+  if (!props.room?.id || !roomSettingsName.value.trim()) return
+  roomSettingsSaving.value = true
+  roomSettingsError.value = ''
+  try {
+    await roomsStore.updateRoom(props.room.id, {
+      name: roomSettingsName.value.trim(),
+      desc: roomSettingsDescription.value.trim()
+    })
+    showRoomSettings.value = false
+  } catch (error) {
+    roomSettingsError.value = error?.message || 'Room settings could not be saved.'
+  } finally {
+    roomSettingsSaving.value = false
   }
 }
 

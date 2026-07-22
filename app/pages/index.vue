@@ -105,6 +105,7 @@ import ChatWindow from '../components/Chat/ChatWindow.vue'
 import ChannelList from '../components/ChannelList.vue'
 import MobileRoomSidebar from '../components/MobileRoomSidebar.vue'
 import MobileChannelList from '../components/MobileChannelList.vue'
+import { MOBILE_BREAKPOINT_PX } from '../const/ui'
 
 const roomsStore = useRoomsStore()
 const channelsStore = useChannelsStore()
@@ -126,7 +127,7 @@ const isMobile = ref(false)
 let resizeHandler = null
 if (typeof window !== 'undefined') {
     const checkMobile = () => {
-        isMobile.value = window.innerWidth < 768
+        isMobile.value = window.innerWidth < MOBILE_BREAKPOINT_PX
     }
     resizeHandler = checkMobile
     checkMobile()

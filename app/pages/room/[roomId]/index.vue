@@ -21,6 +21,7 @@
 import { useRoomsStore } from '../../../stores/rooms'
 import { useChannelsStore } from '../../../stores/channels'
 import MobileChannelList from '../../../components/MobileChannelList.vue'
+import { MOBILE_BREAKPOINT_PX } from '../../../const/ui'
 
 const roomsStore = useRoomsStore()
 const channelsStore = useChannelsStore()
@@ -37,7 +38,7 @@ let resizeHandler = null
 onMounted(() => {
   if (typeof window !== 'undefined') {
     const checkMobile = () => {
-      isMobile.value = window.innerWidth < 768
+      isMobile.value = window.innerWidth < MOBILE_BREAKPOINT_PX
     }
     resizeHandler = checkMobile
     checkMobile()

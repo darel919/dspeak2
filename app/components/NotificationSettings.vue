@@ -1,76 +1,23 @@
 <template>
-  <div class="form-control">
-    <label class="label cursor-pointer">
-      <span class="label-text">
-        <div class="flex items-center gap-2">
-          <Icon name="lucide:bell" class="h-5 w-5" />
-          <span>Browser Notifications</span>
-        </div>
+  <div class="overflow-hidden rounded-xl border border-base-300 bg-base-100 shadow-sm">
+    <label class="flex cursor-pointer items-center gap-4 p-5">
+      <span class="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Icon name="lucide:bell" class="size-5" /></span>
+      <span class="min-w-0 flex-1">
+        <strong class="block text-sm">Browser notifications</strong>
+        <small class="mt-1 block text-xs leading-5 text-base-content/60">Receive an alert when a new message arrives while dSpeak is in the background.</small>
       </span>
-      <input 
-        type="checkbox" 
-        class="toggle toggle-primary" 
-        :checked="isEnabled"
-        @change="handleToggle"
-        :disabled="!isSupported || loading"
-      />
+      <input type="checkbox" class="toggle toggle-primary shrink-0" :checked="isEnabled" :disabled="!isSupported || loading" @change="handleToggle" />
     </label>
-    
-    <div class="label">
-      <span class="label-text-alt text-base-content/60">
-        <span v-if="!isSupported" class="inline-flex items-center gap-1.5 text-warning">
-          <Icon name="lucide:triangle-alert" class="size-4" />
-          Notifications not supported in this browser
-        </span>
-        <span v-else-if="permission === 'denied'" class="inline-flex items-center gap-1.5 text-error">
-          <Icon name="lucide:bell-off" class="size-4" />
-          Notifications blocked. Enable in browser settings.
-        </span>
-        <span v-else-if="permission === 'granted' && isEnabled" class="text-success">
-          <span class="inline-flex items-center gap-1.5">
-            <Icon name="lucide:circle-check" class="size-4" />
-            You'll receive notifications for new messages
-          </span>
-          <span v-if="pushSub.isSupported.value && pushSub.isSubscribed.value" class="mt-1 flex items-center gap-1.5 text-xs">
-            <Icon name="lucide:smartphone" class="size-3.5" />
-            Push notifications: Active
-          </span>
-          <span v-else-if="pushSub.isSupported.value && !pushSub.isSubscribed.value" class="mt-1 flex items-center gap-1.5 text-xs text-warning">
-            <Icon name="lucide:smartphone" class="size-3.5" />
-            Push notifications: Not subscribed
-          </span>
-        </span>
-        <span v-else-if="permission === 'granted' && !isEnabled" class="inline-flex items-center gap-1.5 text-info">
-          <Icon name="lucide:bell-off" class="size-4" />
-          Notifications available but disabled
-        </span>
-        <span v-else-if="permission === 'default'" class="inline-flex items-center gap-1.5 text-info">
-          <Icon name="lucide:lightbulb" class="size-4" />
-          Click to enable notifications for new messages
-        </span>
-        <span v-else class="text-base-content/40">
-          Notifications disabled
-        </span>
-      </span>
+
+    <div class="flex flex-col gap-3 border-t border-base-300 bg-base-200/45 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <span v-if="!isSupported" class="inline-flex items-center gap-2 text-xs text-warning"><Icon name="lucide:triangle-alert" class="size-4" />Not supported by this browser</span>
+      <span v-else-if="permission === 'denied'" class="inline-flex items-center gap-2 text-xs text-error"><Icon name="lucide:bell-off" class="size-4" />Blocked in browser permissions</span>
+      <span v-else-if="permission === 'granted' && isEnabled" class="inline-flex items-center gap-2 text-xs text-success"><Icon name="lucide:circle-check" class="size-4" />{{ pushSub.isSubscribed.value ? 'Push notifications active' : 'Notifications enabled' }}</span>
+      <span v-else class="inline-flex items-center gap-2 text-xs text-base-content/60"><Icon name="lucide:bell-off" class="size-4" />Notifications are off</span>
+      <button v-if="permission === 'granted' && isEnabled" type="button" class="btn btn-ghost btn-sm" :disabled="testingNotification" @click="testNotification"><span v-if="testingNotification" class="loading loading-spinner loading-xs"></span>Send test</button>
     </div>
 
-    <div v-if="showPermissionWarning" class="alert alert-warning mt-2">
-      <Icon name="lucide:triangle-alert" class="stroke-current shrink-0 h-6 w-6" />
-      <span>
-        Notifications are blocked or not allowed. Please enable them in your browser settings to receive message alerts.
-      </span>
-    </div>
-
-    <!-- Test notification button -->
-    <div v-if="permission === 'granted' && isEnabled" class="mt-3">
-      <button 
-        @click="testNotification"
-        class="btn btn-sm btn-outline btn-info w-full"
-        :disabled="testingNotification"
-      >
-        {{ testingNotification ? 'Testing...' : 'Test Notification' }}
-      </button>
-    </div>
+    <div v-if="showPermissionWarning" class="m-4 flex gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning-content"><Icon name="lucide:triangle-alert" class="mt-0.5 size-4 shrink-0" /><span>Allow notifications in your browser's site settings, then try again.</span></div>
   </div>
 </template>
 

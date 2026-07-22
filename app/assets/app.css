@@ -15,7 +15,7 @@
 }
 
 :root {
-	--navbar-height: 4.5rem; /* 80px - adjust as needed */
+	--navbar-height: 4.5rem;
 	--navbar-surface: color-mix(in oklab, var(--color-base-100) 94%, var(--color-base-content));
 }
 
@@ -26,26 +26,28 @@
 	font-style: normal;
 	font-display: swap;
 }
-
-/* Custom font utility that works independently of Tailwind */
 .font-hero {
 	font-family: 'Caprasimo', cursive, sans-serif !important;
-    /* font-size: 2.5rem; */
 }
-
-
-/* Apply your color palette to the body and common elements */
 body {
 	background-color: var(--color-base-100);
 	color: var(--color-base-content);
+}
+
+[data-theme="light"] {
+	--color-base-content: oklch(22% 0.025 255);
+}
+
+[data-theme="light"] .text-base-content\/40,
+[data-theme="light"] .text-base-content\/50,
+[data-theme="light"] .text-base-content\/60 {
+	color: color-mix(in oklab, var(--color-base-content) 72%, transparent);
 }
 
 .navbar-surface {
 	background-color: var(--navbar-surface);
 	color: var(--color-base-content);
 }
-
-/* Custom utility classes for your color palette */
 .bg-hero { background-color: var(--color-hero); }
 .bg-dark { background-color: var(--color-bg-dark); }
 .bg-light { background-color: var(--color-bg-light); }
@@ -64,7 +66,6 @@ body {
 .text-accent-4 { color: var(--color-accent4); }
 .text-accent-5 { color: var(--color-accent5); }
 
-/* Layout utilities for proper viewport handling */
 .h-screen-minus-navbar {
 	height: calc(100dvh - var(--navbar-height));
 }

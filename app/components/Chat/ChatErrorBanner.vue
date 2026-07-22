@@ -55,6 +55,3 @@ function dismiss() {
 }
 </script>
 
-<style scoped>
-/* minimal styling handled by Tailwind / DaisyUI in parent */
-</style>

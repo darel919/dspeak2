@@ -7,6 +7,7 @@ import { useSettingsStore } from '../stores/settings'
 import { isScreenShareFpsBelowTarget } from '../shared/video-settings'
 import { getRtcSignalMetrics } from '../shared/voice-transport'
 import { getConnectionQualityLabel } from '../shared/connection-quality'
+import { SCREEN_FPS_WARNING_SAMPLES } from '../const/media'
 
 import RoomList from './RoomList.vue'
 
@@ -91,7 +92,6 @@ const outboundVideoStats = ref<any[]>([])
 let signalTimer: any = null
 let lowScreenFpsSamples = 0
 const screenShareFpsLow = ref(false)
-const SCREEN_FPS_WARNING_SAMPLES = 3
 
 
 const elapsedText = ref('')
@@ -245,7 +245,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                     </div>
                     <!-- Live RTT and Loss Warning -->
                     <div class="text-sm text-current/70 select-none">
-                        <span v-if="lastRttMs != null">{{ Math.round(lastRttMs) }}ms</span>
+                        <span v-if="lastRttMs != null" title="WebRTC round-trip time between this device and the SFU">SFU {{ Math.round(lastRttMs) }}ms</span>
                     </div>
                     <div
                         v-for="quality in outboundVideoLabels"

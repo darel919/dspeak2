@@ -77,6 +77,7 @@
 
 <script setup>
 import { useVoiceStore } from '../stores/voice'
+import { MEMBER_STATUS_ORDER, VIEWPORT_PADDING_PX } from '../const/ui'
 const voiceStore = useVoiceStore()
 const volumeMenuUser = ref(null)
 const volumeMenuElement = ref(null)
@@ -102,11 +103,10 @@ function onVolumeChange(userId, event) {
 function keepVolumeMenuInViewport() {
   if (!volumeMenuElement.value) return
 
-  const viewportPadding = 8
   const { width, height } = volumeMenuElement.value.getBoundingClientRect()
   volumeMenuPosition.value = {
-    x: Math.max(viewportPadding, Math.min(volumeMenuPosition.value.x, window.innerWidth - width - viewportPadding)),
-    y: Math.max(viewportPadding, Math.min(volumeMenuPosition.value.y, window.innerHeight - height - viewportPadding))
+    x: Math.max(VIEWPORT_PADDING_PX, Math.min(volumeMenuPosition.value.x, window.innerWidth - width - VIEWPORT_PADDING_PX)),
+    y: Math.max(VIEWPORT_PADDING_PX, Math.min(volumeMenuPosition.value.y, window.innerHeight - height - VIEWPORT_PADDING_PX))
   }
 }
 
@@ -175,9 +175,8 @@ const sortedMembers = computed(() => {
     const aStatus = getMemberPresenceStatus(a)
     const bStatus = getMemberPresenceStatus(b)
 
-    const statusOrder = { 'in-room': 0, 'online': 1, 'offline': 2 }
-    const aOrder = statusOrder[aStatus] || 2
-    const bOrder = statusOrder[bStatus] || 2
+    const aOrder = MEMBER_STATUS_ORDER[aStatus] ?? MEMBER_STATUS_ORDER.offline
+    const bOrder = MEMBER_STATUS_ORDER[bStatus] ?? MEMBER_STATUS_ORDER.offline
 
     if (aOrder !== bOrder) return aOrder - bOrder
 

@@ -297,7 +297,6 @@
   transition-duration: 300ms;
 }
 
-/* Ensure smooth width transitions */
 .w-16 {
   width: 4rem;
 }
@@ -306,12 +305,10 @@
   width: 18rem;
 }
 
-/* Custom hover effects for collapsed state */
 .group:hover .group-hover\:opacity-100 {
   opacity: 1;
 }
 
-/* Activity indicator pulse animation */
 @keyframes pulse-soft {
   0%, 100% {
     opacity: 1;
@@ -330,6 +327,7 @@
 <script setup>
 
 import { useChatUtils } from '../composables/useChatUtils'
+import { MAX_VISIBLE_ROOMS } from '../const/ui'
 
 const config = useRuntimeConfig()
 const { copyToClipboard } = useChatUtils()
@@ -366,8 +364,6 @@ const { success, error } = useToast()
 
 const isCollapsed = ref(true)
 const showContextMenu = ref(false)
-
-const MAX_VISIBLE_ROOMS = 5
 
 const selectedRoom = computed(() =>
   roomsStore.rooms.find(r => r.id === props.modelValue)

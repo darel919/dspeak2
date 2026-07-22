@@ -22,32 +22,16 @@
 
 <script setup>
 import { useToast } from '../composables/useToast'
+import { TOAST_CLASSES, TOAST_ICONS } from '../const/ui'
 
 const { toasts, removeToast } = useToast()
 
 function getToastClass(type) {
-  switch (type) {
-    case 'success':
-      return 'alert-success'
-    case 'error':
-      return 'alert-error'
-    case 'warning':
-      return 'alert-warning'
-    case 'info':
-    default:
-      return 'alert-info'
-  }
+  return TOAST_CLASSES[type] || TOAST_CLASSES.info
 }
 
 function getToastIcon(type) {
-  const icons = {
-    success: 'lucide:circle-check',
-    error: 'lucide:circle-x',
-    warning: 'lucide:triangle-alert',
-    info: 'lucide:info'
-  }
-
-  return icons[type] || icons.info
+  return TOAST_ICONS[type] || TOAST_ICONS.info
 }
 </script>
 

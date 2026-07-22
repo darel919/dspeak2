@@ -1,20 +1,7 @@
 import webpush from 'web-push'
+import { ICE_SERVERS } from '../const/ice-servers'
 import { broadcastToChannel } from './dspeak-realtime'
 import { pocketBaseError, usePocketBaseAdmin } from './pocketbase'
-
-const iceServers = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun.flashdance.cx:3478' },
-  {
-    urls: [
-      'turn:stun.evan-brass.net',
-      'turn:stun.evan-brass.net?transport=tcp',
-      'stun:stun.evan-brass.net'
-    ],
-    username: 'guest',
-    credential: 'password'
-  }
-]
 
 function requireUser(event) {
   const userId = getHeader(event, 'authorization')
@@ -419,7 +406,7 @@ export async function handleDspeakApi(event) {
 
   try {
     if (!domain && event.method === 'GET') return 'DSpeak ready.'
-    if (domain === 'config' && event.method === 'GET') return iceServers
+    if (domain === 'config' && event.method === 'GET') return ICE_SERVERS
     if (domain === 'room') return await handleRooms(event, suffix)
     if (domain === 'channel') return await handleChannels(event, suffix)
     if (domain === 'chat') return await handleChat(event, suffix)

@@ -1,4 +1,5 @@
- 
+import { STORAGE_KEYS } from '~/const/storage'
+
 class NotificationManager {
   constructor() {
     this.isSupported = false
@@ -17,7 +18,7 @@ class NotificationManager {
       this.permission = Notification.permission
       
       
-      const savedPreference = localStorage.getItem('notificationsEnabled')
+      const savedPreference = localStorage.getItem(STORAGE_KEYS.notificationsEnabled)
       if (savedPreference !== null) {
         this.isEnabled = JSON.parse(savedPreference) && Notification.permission === 'granted'
       } else {
@@ -43,7 +44,7 @@ class NotificationManager {
       this.isEnabled = result === 'granted'
       
       
-      localStorage.setItem('notificationsEnabled', JSON.stringify(this.isEnabled))
+      localStorage.setItem(STORAGE_KEYS.notificationsEnabled, JSON.stringify(this.isEnabled))
       
       return result === 'granted'
     } catch (error) {
@@ -144,7 +145,7 @@ class NotificationManager {
     this.isEnabled = enabled && this.permission === 'granted'
     
     
-    localStorage.setItem('notificationsEnabled', JSON.stringify(this.isEnabled))
+    localStorage.setItem(STORAGE_KEYS.notificationsEnabled, JSON.stringify(this.isEnabled))
     
     return this.isEnabled
   }

@@ -88,6 +88,7 @@ import ChatWindow from '../../../../components/Chat/ChatWindow.vue'
 import ChannelList from '../../../../components/ChannelList.vue'
 import MobileChannelList from '../../../../components/MobileChannelList.vue'
 import VoiceChannel from '../../../../components/VoiceChannel.vue'
+import { MOBILE_BREAKPOINT_PX } from '../../../../const/ui'
 
 const roomsStore = useRoomsStore()
 const channelsStore = useChannelsStore()
@@ -115,7 +116,7 @@ if (typeof window !== 'undefined') {
       clearTimeout(resizeTimeout)
     }
     resizeTimeout = setTimeout(() => {
-      const newIsMobile = window.innerWidth < 768
+      const newIsMobile = window.innerWidth < MOBILE_BREAKPOINT_PX
 
       if (isMobile.value !== newIsMobile) {
         isMobile.value = newIsMobile
@@ -186,7 +187,7 @@ watch(room, async (r) => {
       await channelsStore.fetchChannels(r.id)
 
       if (!selectedChannelId.value) {
-        const currentIsMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false
+        const currentIsMobile = typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT_PX : false
         if (!currentIsMobile) {
           const textChannels = channelsStore.getTextChannels()
           if (textChannels.length > 0) {

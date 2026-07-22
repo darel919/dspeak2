@@ -1,14 +1,9 @@
 import { defineStore } from 'pinia'
 import { normalizeVideoSettings } from '~/shared/video-settings'
+import { DEFAULT_AUDIO_SETTINGS, SYSTEM_AUDIO_BITRATE_OPTIONS } from '~/const/media'
 
 export const useSettingsStore = defineStore('settings', () => {
-  const defaultAudio = {
-    echoCancellation: false,
-    noiseSuppression: false,
-    autoGainControl: false
-  }
-
-  const audio = ref(loadPersisted('audioSettings', defaultAudio))
+  const audio = ref(loadPersisted('audioSettings', DEFAULT_AUDIO_SETTINGS))
   const micDeviceId = ref(loadPersisted('audioDeviceId', null))
   const outputDeviceId = ref(loadPersisted('audioOutputDeviceId', null))
   const cameraDeviceId = ref(loadPersisted('videoDeviceId', null))
@@ -56,9 +51,8 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function normalizeSystemAudioBitrate(value) {
-    const options = [64, 96, 128, 160, 256]
     const numeric = Number(value)
-    return options.includes(numeric) ? numeric : 128
+    return SYSTEM_AUDIO_BITRATE_OPTIONS.includes(numeric) ? numeric : 128
   }
 
   function setSystemAudioBitrate(value) {

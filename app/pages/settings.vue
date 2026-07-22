@@ -1,188 +1,79 @@
 <template>
-  <div class="min-h-screen-minus-navbar pt-20 px-6 max-w-6xl mx-auto">
-    <div class="grid grid-cols-12 gap-6">
-      <!-- Left Navigation -->
-      <aside class="col-span-12 md:col-span-3">
-        <div class="sticky top-[calc(var(--navbar-height)+1rem)]">
-          <div class="form-control mb-4">
-            <input type="text" placeholder="Search" class="input input-bordered input-sm" v-model="search" />
+  <div class="min-h-screen-minus-navbar bg-base-200/35 px-4 py-6 text-base-content sm:px-6 lg:py-8">
+    <div class="mx-auto flex max-w-6xl flex-col overflow-hidden rounded-2xl border border-base-300 bg-base-100 shadow-sm lg:min-h-[680px] lg:flex-row">
+      <aside class="border-b border-base-300 bg-base-200/55 px-4 py-4 lg:w-60 lg:shrink-0 lg:border-b-0 lg:border-r lg:px-4 lg:py-5">
+        <div class="flex items-center justify-between lg:block">
+          <div>
+            <div class="flex items-center gap-2 text-base font-bold"><Icon name="lucide:settings" class="size-4 text-primary" />Settings</div>
           </div>
-          <ul class="menu menu-compact bg-base-200 rounded-lg p-2">
-            <li><a href="#account" @click.prevent="scrollToSection('account')">My Account</a></li>
-            <li><a href="#voice" @click.prevent="scrollToSection('voice')">Voice & Video</a></li>
-            <li><a href="#notifications" @click.prevent="scrollToSection('notifications')">Notifications</a></li>
-          </ul>
+          <button type="button" class="btn btn-ghost btn-sm lg:hidden" @click="goBack"><Icon name="lucide:x" class="size-5" /></button>
         </div>
+        <nav class="mt-4 grid grid-cols-3 gap-1 lg:block lg:space-y-1" aria-label="Settings categories">
+          <button v-for="item in settingsNavigation" :key="item.id" type="button" class="flex min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition lg:w-full lg:justify-start" :class="activeSection === item.id ? 'bg-primary/12 text-primary' : 'text-base-content/65 hover:bg-base-300/70 hover:text-base-content'" @click="activeSection = item.id">
+            <Icon :name="item.icon" class="size-4 shrink-0" /><span class="truncate">{{ item.label }}</span>
+          </button>
+        </nav>
+        <button type="button" class="btn btn-ghost btn-sm mt-5 hidden w-full justify-start gap-2 lg:flex" @click="goBack"><Icon name="lucide:arrow-left" class="size-4" />Back</button>
       </aside>
 
-      <!-- Right Content -->
-      <section class="col-span-12 md:col-span-9 space-y-8">
-        <h1 class="text-2xl font-bold">Settings</h1>
+      <main class="min-w-0 flex-1 px-4 py-6 sm:px-7 lg:px-8 lg:py-7">
+        <div class="mx-auto max-w-3xl">
+          <header class="mb-6 border-b border-base-300 pb-5">
+            <h1 class="text-2xl font-bold tracking-tight">{{ activeSectionMeta.title }}</h1>
+            <p class="mt-1 text-sm text-base-content/60">{{ activeSectionMeta.description }}</p>
+          </header>
 
-        <!-- My Account -->
-        <div id="account" class="card bg-base-200 shadow-md" v-show="sectionVisible('account')">
-          <div class="card-body">
-            <h2 class="card-title mb-2">My Account</h2>
-            <div v-if="profile" class="flex items-center gap-4 mb-4">
-              <div class="avatar select-none pointer-events-none">
-                <div class="w-16 rounded-full">
-                  <img :src="profile.avatar" alt="User avatar" />
-                </div>
+          <section v-if="activeSection === 'account'" class="space-y-5">
+            <div class="settings-panel">
+              <div v-if="profile" class="flex items-center gap-4 p-5">
+                <div class="avatar shrink-0"><div class="w-14 rounded-full bg-base-200"><img :src="profile.avatar" alt="User avatar" /></div></div>
+                <div class="min-w-0 flex-1"><h2 class="truncate font-semibold">{{ profile.name }}</h2><p class="truncate text-sm text-base-content/60">{{ profile.email }}</p></div>
+                <span class="hidden items-center gap-1.5 text-xs text-success sm:flex"><span class="size-2 rounded-full bg-success"></span>Signed in</span>
               </div>
-              <div>
-                <p class="text-lg font-bold">{{ profile.name }}</p>
-                <p class="text-sm text-base-content/60">{{ profile.email }}</p>
+              <p v-else class="p-5 text-error">Profile information is unavailable.</p>
+            </div>
+            <div class="settings-panel flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div><h2 class="text-sm font-semibold">Log out</h2><p class="mt-1 text-xs text-base-content/60">End the current session on this device.</p></div>
+              <button type="button" class="btn btn-error btn-outline btn-sm" @click="handleLogout"><Icon name="lucide:log-out" class="size-4" />Log out</button>
+            </div>
+          </section>
+
+          <section v-else-if="activeSection === 'voice'" class="space-y-6">
+            <div class="settings-panel">
+              <div class="settings-panel-heading"><div><h2>Devices</h2><p>Choose what dSpeak uses for calls.</p></div><button type="button" class="btn btn-sm btn-ghost" :disabled="devicesLoading" @click="refreshDevices"><span v-if="devicesLoading" class="loading loading-spinner loading-xs"></span><Icon v-else name="lucide:refresh-cw" class="size-4" />Refresh</button></div>
+              <div class="divide-y divide-base-300">
+                <label class="settings-row"><span class="settings-row-label"><Icon name="lucide:mic" />Microphone</span><select v-model="selectedDeviceId" class="select select-bordered w-full max-w-md" :disabled="devicesLoading || !devices.length" @change="onDeviceChange"><option value="">System default</option><option v-for="d in devices" :key="d.deviceId" :value="d.deviceId">{{ d.label || 'Microphone' }}</option></select></label>
+                <label class="settings-row"><span class="settings-row-label"><Icon name="lucide:volume-2" />Speakers</span><select v-model="selectedOutputId" class="select select-bordered w-full max-w-md" :disabled="devicesLoading || !outputDevices.length || !canSetSinkId" @change="onOutputChange"><option value="">System default</option><option v-for="d in outputDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || 'Speaker' }}</option></select></label>
+                <label class="settings-row"><span class="settings-row-label"><Icon name="lucide:video" />Camera</span><select v-model="selectedCameraId" class="select select-bordered w-full max-w-md" :disabled="devicesLoading || !videoDevices.length" @change="onCameraDeviceChange"><option value="">System default</option><option v-for="d in videoDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || 'Camera' }}</option></select></label>
               </div>
+              <div v-if="devicesError || !canSetSinkId" class="border-t border-base-300 px-5 py-3 text-xs" :class="devicesError ? 'text-error' : 'text-base-content/60'">{{ devicesError || 'This browser does not support selecting a separate output device.' }}</div>
             </div>
-            <div v-else class="mb-4 text-error">No profile data available.</div>
-            <div class="card-actions">
-              <button class="btn btn-error" @click="handleLogout">Logout</button>
+
+            <div class="settings-panel">
+              <div class="settings-panel-heading"><div><h2>Voice processing</h2><p>Clean up your microphone before it is sent.</p></div><button type="button" class="btn btn-sm" :class="micTestActive ? 'btn-error' : 'btn-outline'" @click="toggleMicTest"><Icon :name="micTestActive ? 'lucide:square' : 'lucide:play'" class="size-4" />{{ micTestActive ? 'Stop test' : 'Test mic' }}</button></div>
+              <div class="divide-y divide-base-300">
+                <label v-for="option in audioProcessingOptions" :key="option.key" class="settings-toggle-row"><span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span><span class="flex items-center gap-3"><span v-if="!supported[option.key]" class="text-xs text-base-content/50">Unavailable</span><input type="checkbox" class="toggle toggle-primary" :checked="audio[option.key]" :disabled="!supported[option.key]" @change="onToggle(option.key, $event.target.checked)" /></span></label>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 border-t border-base-300 bg-base-200/50 px-5 py-4"><button type="button" class="btn btn-primary btn-sm" :disabled="applyBusy || !voiceStore.connected" @click="applyAudioSettings"><span v-if="applyBusy" class="loading loading-spinner loading-xs"></span>Apply to current call</button><span class="text-xs text-base-content/60">{{ voiceStore.connected ? 'Restarts your microphone with these settings.' : 'Join a voice channel to apply live.' }}</span><span v-if="micTestActive" class="badge badge-warning">Other audio is muted during the test</span><audio ref="micTestAudio" class="hidden" autoplay></audio></div>
             </div>
-          </div>
+
+            <div class="settings-panel">
+              <div class="settings-panel-heading"><div><h2>Video quality</h2><p>Set separate limits for camera and screen sharing.</p></div></div>
+              <div class="grid gap-4 p-5 md:grid-cols-2">
+                <div v-for="video in videoQualitySections" :key="video.id" class="rounded-xl border border-base-300 bg-base-200/45 p-4"><div class="mb-4 flex items-center gap-3"><span class="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary"><Icon :name="video.icon" class="size-5" /></span><h3 class="font-semibold">{{ video.label }}</h3></div><label class="form-control"><span class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60">Resolution</span><select class="select select-bordered w-full bg-base-100" :value="video.settings.resolution" @change="video.setResolution($event.target.value)"><option v-for="option in resolutionOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label class="form-control mt-4"><span class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60">Frame rate</span><select class="select select-bordered w-full bg-base-100" :value="video.settings.frameRate" @change="video.setFrameRate($event.target.value)"><option v-for="fps in frameRateOptions" :key="fps" :value="fps">{{ fps }} FPS</option></select></label></div>
+              </div>
+              <p class="border-t border-base-300 px-5 py-3 text-xs text-base-content/60">Resolution limits never upscale the source. Original preserves the source's full resolution.</p>
+            </div>
+
+            <div class="settings-panel">
+              <div class="settings-panel-heading"><div><h2>Shared audio</h2><p>Choose the preferred Opus quality ceiling for system audio.</p></div><span v-if="voiceStore.connected" class="badge badge-outline">Effective {{ voiceStore.effectiveSystemAudioBitrate }} kbps</span></div>
+              <label class="settings-row"><span><strong class="block text-sm">Maximum bitrate</strong><small class="mt-1 block text-xs text-base-content/60">The voice channel's own limit still takes priority.</small></span><select class="select select-bordered w-full max-w-xs" :value="systemAudioBitrate" @change="setSystemAudioBitrate($event.target.value)"><option v-for="kbps in systemAudioBitrateOptions" :key="kbps" :value="kbps">{{ kbps }} kbps{{ kbps === 256 ? ' · highest' : '' }}</option></select></label>
+            </div>
+          </section>
+
+          <section v-else><NotificationSettings /></section>
         </div>
-
-        <!-- Voice & Video -->
-        <div id="voice" class="card bg-base-200 shadow-md" v-show="sectionVisible('voice')">
-          <div class="card-body">
-            <h2 class="card-title mb-4">Voice & Video</h2>
-
-            <!-- Devices -->
-            <div class="mb-6">
-              <h3 class="font-semibold mb-2">Devices</h3>
-              <div class="flex items-center gap-3 mb-2">
-                <label class="w-40 text-sm">Input device</label>
-                <select class="select select-bordered select-sm flex-1" :disabled="devicesLoading || devices.length === 0" v-model="selectedDeviceId" @change="onDeviceChange">
-                  <option :value="''">System default</option>
-                  <option v-for="d in devices" :key="d.deviceId" :value="d.deviceId">{{ d.label || 'Microphone' }}</option>
-                </select>
-                <button class="btn btn-sm" @click="refreshDevices" :disabled="devicesLoading">
-                  <span v-if="devicesLoading" class="loading loading-spinner loading-xs mr-2"></span>
-                  Refresh
-                </button>
-              </div>
-              <div class="flex items-center gap-3">
-                <label class="w-40 text-sm">Output device</label>
-                <select class="select select-bordered select-sm flex-1" :disabled="devicesLoading || outputDevices.length === 0 || !canSetSinkId" v-model="selectedOutputId" @change="onOutputChange">
-                  <option :value="''">System default</option>
-                  <option v-for="d in outputDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || 'Speaker' }}</option>
-                </select>
-                <button class="btn btn-sm" @click="refreshDevices" :disabled="devicesLoading">
-                  <span v-if="devicesLoading" class="loading loading-spinner loading-xs mr-2"></span>
-                  Refresh
-                </button>
-              </div>
-              <div class="mt-2 flex items-center gap-3">
-                <label class="w-40 text-sm">Camera</label>
-                <select class="select select-bordered select-sm flex-1" :disabled="devicesLoading || videoDevices.length === 0" v-model="selectedCameraId" @change="onCameraDeviceChange">
-                  <option :value="''">System default</option>
-                  <option v-for="d in videoDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || 'Camera' }}</option>
-                </select>
-              </div>
-              <p v-if="!canSetSinkId" class="text-xs text-base-content/60 mt-1">Output device selection not supported by this browser.</p>
-              <p v-if="devicesError" class="text-xs text-error mt-1">{{ devicesError }}</p>
-            </div>
-
-            <div class="mb-6">
-              <h3 class="font-semibold mb-2">Video quality</h3>
-              <div class="grid gap-4 md:grid-cols-2">
-                <div class="rounded-lg border border-base-300 p-4">
-                  <h4 class="mb-3 font-medium">Camera</h4>
-                  <label class="mb-3 block text-sm">
-                    <span class="mb-1 block">Resolution</span>
-                    <select class="select select-bordered select-sm w-full" :value="cameraVideo.resolution" @change="setCameraResolution($event.target.value)">
-                      <option v-for="option in resolutionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                    </select>
-                  </label>
-                  <label class="block text-sm">
-                    <span class="mb-1 block">Frame rate</span>
-                    <select class="select select-bordered select-sm w-full" :value="cameraVideo.frameRate" @change="setCameraFrameRate($event.target.value)">
-                      <option v-for="fps in frameRateOptions" :key="fps" :value="fps">{{ fps }} FPS</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="rounded-lg border border-base-300 p-4">
-                  <h4 class="mb-3 font-medium">Screen share</h4>
-                  <label class="mb-3 block text-sm">
-                    <span class="mb-1 block">Resolution</span>
-                    <select class="select select-bordered select-sm w-full" :value="screenVideo.resolution" @change="setScreenResolution($event.target.value)">
-                      <option v-for="option in resolutionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                    </select>
-                  </label>
-                  <label class="block text-sm">
-                    <span class="mb-1 block">Frame rate</span>
-                    <select class="select select-bordered select-sm w-full" :value="screenVideo.frameRate" @change="setScreenFrameRate($event.target.value)">
-                      <option v-for="fps in frameRateOptions" :key="fps" :value="fps">{{ fps }} FPS</option>
-                    </select>
-                  </label>
-                </div>
-              </div>
-              <p class="mt-2 text-xs text-base-content/60">Original keeps the source's full resolution. Resolution limits never upscale the source.</p>
-            </div>
-
-            <div class="mb-6">
-              <h3 class="font-semibold mb-2">System audio quality</h3>
-              <div class="max-w-md rounded-lg border border-base-300 p-4">
-                <label class="block text-sm">
-                  <span class="mb-1 block">Maximum bitrate</span>
-                  <select class="select select-bordered select-sm w-full" :value="systemAudioBitrate" @change="setSystemAudioBitrate($event.target.value)">
-                    <option v-for="kbps in systemAudioBitrateOptions" :key="kbps" :value="kbps">
-                      {{ kbps }} kbps{{ kbps === 256 ? ' (highest channel quality)' : '' }}
-                    </option>
-                  </select>
-                </label>
-                <p class="mt-2 text-xs text-base-content/60">
-                  Sets the preferred Opus ceiling for screen and system audio. The channel limit always wins.
-                  <span v-if="voiceStore.connected" class="font-medium">Effective limit here: {{ voiceStore.effectiveSystemAudioBitrate }} kbps.</span>
-                  Actual bitrate varies with the audio content and network conditions.
-                </p>
-              </div>
-            </div>
-
-            <!-- Input Processing -->
-            <div>
-              <h3 class="font-semibold mb-2">Input Processing</h3>
-              <div class="space-y-3">
-                <label class="flex items-center gap-3">
-                  <input type="checkbox" class="toggle toggle-primary" :checked="audio.echoCancellation" :disabled="!supported.echoCancellation" @change="onToggle('echoCancellation', $event.target.checked)" />
-                  <span>Echo cancellation</span>
-                  <span v-if="!supported.echoCancellation" class="text-xs text-base-content/50">Not supported</span>
-                </label>
-                <label class="flex items-center gap-3">
-                  <input type="checkbox" class="toggle toggle-primary" :checked="audio.noiseSuppression" :disabled="!supported.noiseSuppression" @change="onToggle('noiseSuppression', $event.target.checked)" />
-                  <span>Noise suppression</span>
-                  <span v-if="!supported.noiseSuppression" class="text-xs text-base-content/50">Not supported</span>
-                </label>
-                <label class="flex items-center gap-3">
-                  <input type="checkbox" class="toggle toggle-primary" :checked="audio.autoGainControl" :disabled="!supported.autoGainControl" @change="onToggle('autoGainControl', $event.target.checked)" />
-                  <span>Auto gain control</span>
-                  <span v-if="!supported.autoGainControl" class="text-xs text-base-content/50">Not supported</span>
-                </label>
-                  <button class="btn btn-sm btn-secondary my-4" @click="toggleMicTest" :class="{ 'btn-error': micTestActive }">
-                    {{ micTestActive ? 'Stop Mic Test' : 'Mic Test' }}
-                  </button>
-                <div class="pt-2">
-                  <button class="btn btn-sm btn-primary" @click="applyAudioSettings" :disabled="applyBusy">
-                    <span v-if="applyBusy" class="loading loading-spinner loading-xs mr-2"></span>
-                    Apply audio settings
-                  </button>
-                  <span class="text-xs text-base-content/50 ml-3">Restarts your mic with new constraints</span>
-
-                  <span v-if="micTestActive" class="text-xs text-accent ml-2">Mic test active: all other audio is muted</span>
-                  <audio ref="micTestAudio" class="hidden" autoplay></audio>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Notifications -->
-        <div id="notifications" class="card bg-base-200 shadow-md" v-show="sectionVisible('notifications')">
-          <div class="card-body">
-            <h2 class="card-title mb-2">Notifications</h2>
-            <NotificationSettings />
-          </div>
-        </div>
-      </section>
+      </main>
     </div>
   </div>
 </template>
@@ -194,84 +85,61 @@ import { useSettingsStore } from '../stores/settings'
 import { useVoiceStore } from '../stores/voice'
 import { useRuntimeConfig } from '#app'
 import { useChatUtils } from '../composables/useChatUtils'
+import {
+  AUDIO_CONSTRAINT_KEYS,
+  SYSTEM_AUDIO_BITRATE_OPTIONS,
+  VIDEO_FRAME_RATE_OPTIONS,
+  VIDEO_RESOLUTION_OPTIONS,
+} from '../const/media'
 
 const authStore = useAuthStore()
 const voiceStore = useVoiceStore()
 const settingsStore = useSettingsStore()
 
 
-const search = ref('')
+const activeSection = ref('account')
+const router = useRouter()
+const settingsNavigation = [
+  { id: 'account', label: 'Account', icon: 'lucide:user-round' },
+  { id: 'voice', label: 'Voice & Video', icon: 'lucide:audio-lines' },
+  { id: 'notifications', label: 'Notifications', icon: 'lucide:bell' }
+]
+const sectionDetails = {
+  account: { title: 'My account', description: 'Your identity and current dSpeak session.' },
+  voice: { title: 'Voice & video', description: 'Configure capture devices, call processing, and media quality.' },
+  notifications: { title: 'Notifications', description: 'Choose how this browser alerts you about new activity.' }
+}
+const activeSectionMeta = computed(() => sectionDetails[activeSection.value])
+const audioProcessingOptions = [
+  { key: 'echoCancellation', label: 'Echo cancellation', description: 'Reduce feedback from your speakers.' },
+  { key: 'noiseSuppression', label: 'Noise suppression', description: 'Reduce steady background noise.' },
+  { key: 'autoGainControl', label: 'Automatic gain', description: 'Keep microphone loudness at a consistent level.' }
+]
 
-
-function sectionVisible(sectionKey) {
-  if (!search.value) return true
-  const q = search.value.toLowerCase()
-
-  if (sectionKey === 'account') {
-    return (
-      'my account' .includes(q) ||
-      (profile.value && (
-        (profile.value.name && profile.value.name.toLowerCase().includes(q)) ||
-        (profile.value.email && profile.value.email.toLowerCase().includes(q))
-      ))
-    )
-  }
-  if (sectionKey === 'voice') {
-    return (
-      'voice & video'.includes(q) ||
-      'input device'.includes(q) ||
-      'output device'.includes(q) ||
-      'echo cancellation'.includes(q) ||
-      'noise suppression'.includes(q) ||
-      'auto gain control'.includes(q)
-    )
-  }
-  if (sectionKey === 'notifications') {
-    return (
-      'notifications'.includes(q) ||
-      'browser notifications'.includes(q) ||
-      'test notification'.includes(q)
-    )
-  }
-  return true
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/')
 }
 
-function scrollToSection(sectionKey) {
-  const el = document.getElementById(sectionKey)
-  if (el) {
-
-    const navbar = document.querySelector('.navbar')
-    const navHeight = navbar ? navbar.offsetHeight : 64
-    const rect = el.getBoundingClientRect()
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop
-
-    window.scrollTo({
-      top: rect.top + scrollTop - navHeight - 16,
-      behavior: 'smooth'
-    })
-  }
-}
 
 const audio = computed(() => settingsStore.audio)
 const supported = computed(() => settingsStore.supported)
 const cameraVideo = computed(() => settingsStore.cameraVideo)
 const screenVideo = computed(() => settingsStore.screenVideo)
 const systemAudioBitrate = computed(() => settingsStore.systemAudioBitrate)
-const systemAudioBitrateOptions = [64, 96, 128, 160, 256]
-const resolutionOptions = [
-  { value: 'original', label: 'Original (full resolution)' },
-  { value: '720p', label: '720p' },
-  { value: '1080p', label: '1080p' },
-  { value: '1440p', label: '1440p' },
-  { value: '2160p', label: '2160p (4K)' }
-]
-const frameRateOptions = [25, 30, 50, 60]
+const systemAudioBitrateOptions = SYSTEM_AUDIO_BITRATE_OPTIONS
+const resolutionOptions = VIDEO_RESOLUTION_OPTIONS
+const frameRateOptions = VIDEO_FRAME_RATE_OPTIONS
 
 function setCameraResolution(resolution) { settingsStore.setCameraVideoSettings({ resolution }) }
 function setCameraFrameRate(frameRate) { settingsStore.setCameraVideoSettings({ frameRate: Number(frameRate) }) }
 function setScreenResolution(resolution) { settingsStore.setScreenVideoSettings({ resolution }) }
 function setScreenFrameRate(frameRate) { settingsStore.setScreenVideoSettings({ frameRate: Number(frameRate) }) }
 function setSystemAudioBitrate(bitrate) { voiceStore.setSystemAudioBitrate(Number(bitrate)) }
+const videoQualitySections = computed(() => [
+  { id: 'camera', label: 'Camera', icon: 'lucide:video', settings: cameraVideo.value, setResolution: setCameraResolution, setFrameRate: setCameraFrameRate },
+  { id: 'screen', label: 'Screen share', icon: 'lucide:monitor-up', settings: screenVideo.value, setResolution: setScreenResolution, setFrameRate: setScreenFrameRate }
+])
 
 const config = useRuntimeConfig()
 const { getAvatarUrl } = useChatUtils()
@@ -336,9 +204,8 @@ async function toggleMicTest() {
     if (settings.micDeviceId) constraints.deviceId = { exact: settings.micDeviceId }
   } catch (_) {}
 
-  const supportedKeys = ['echoCancellation', 'noiseSuppression', 'autoGainControl', 'deviceId']
   const sanitizedConstraints = {}
-  for (const key of supportedKeys) {
+  for (const key of AUDIO_CONSTRAINT_KEYS) {
     if (typeof constraints[key] !== 'undefined') {
       sanitizedConstraints[key] = constraints[key]
     }
@@ -441,3 +308,84 @@ function onOutputChange() {
   }
 }
 </script>
+
+<style scoped>
+.settings-panel {
+  overflow: hidden;
+  border: 1px solid var(--color-base-300);
+  border-radius: 0.75rem;
+  background: var(--color-base-100);
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--color-base-content) 8%, transparent);
+}
+
+.settings-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--color-base-300);
+}
+
+.settings-panel-heading h2 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.settings-panel-heading p {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+}
+
+.settings-row,
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+}
+
+.settings-row-label {
+  display: flex;
+  min-width: 9rem;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.settings-row-label :deep(svg) {
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-primary);
+}
+
+.settings-toggle-row strong,
+.settings-toggle-row small {
+  display: block;
+}
+
+.settings-toggle-row strong {
+  font-size: 0.875rem;
+}
+
+.settings-toggle-row small {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--color-base-content) 62%, transparent);
+}
+
+@media (max-width: 640px) {
+  .settings-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .settings-panel-heading {
+    align-items: flex-start;
+  }
+}
+</style>
