@@ -75,6 +75,7 @@
             class="mx-auto aspect-video max-h-full w-full overflow-hidden"
           >
             <VideoFeed
+              :feed-key="feed.key"
               :stream="feed.stream"
               :source="feed.source"
               :label="feed.label"

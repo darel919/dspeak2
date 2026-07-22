@@ -7,7 +7,7 @@ function harness() {
   const calls = []
   const registry = {
     bind: (entry, options) => calls.push(['bind', entry.key, options]),
-    remove: key => calls.push(['remove', key]),
+    remove: (key, owner) => calls.push(['remove', key, owner]),
     activateProvider: provider => calls.push(['activate', provider]),
     clearProvider: provider => calls.push(['retire', provider]),
     clear: () => calls.push(['clear'])
@@ -131,4 +131,33 @@ test('video registry keeps the rendered stream while its provider changes', () =
   assert.equal(videoFeeds.value.get('remote:user-1:screen').stream, stream)
   assert.equal(videoFeeds.value.get('remote:user-1:screen').provider, 'sfu')
   assert.deepEqual(tracks, [newTrack])
+})
+
+test('registry ignores a late retired-provider removal after replacement', () => {
+  const oldTrack = { id: 'p2p-track', kind: 'video' }
+  const newTrack = { id: 'sfu-track', kind: 'video' }
+  const tracks = [oldTrack]
+  const stream = {
+    getTracks: () => [...tracks],
+    removeTrack: track => tracks.splice(tracks.indexOf(track), 1),
+    addTrack: track => tracks.push(track)
+  }
+  const videoFeeds = { value: new Map() }
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {}
+  })
+  const key = 'remote:user-1:screen'
+  registry.bind({ key, provider: 'p2p', track: oldTrack, stream })
+  registry.bind({ key, provider: 'sfu', track: newTrack, stream: {} })
+
+  registry.remove(key, { provider: 'p2p', track: oldTrack })
+
+  assert.equal(videoFeeds.value.get(key).provider, 'sfu')
+  assert.equal(videoFeeds.value.get(key).track, newTrack)
 })

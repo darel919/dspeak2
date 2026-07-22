@@ -46,7 +46,7 @@ export class RemoteMediaHandoff {
     const current = tracks.get(key)
     if (entry.track && current?.track && current.track !== entry.track) return false
     tracks.delete(key)
-    if (this.activeProvider === entry.provider) this.registry.remove(key)
+    if (this.activeProvider === entry.provider) this.registry.remove(key, current)
     return true
   }
 

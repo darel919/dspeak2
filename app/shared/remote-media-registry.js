@@ -44,10 +44,13 @@ export class RemoteMediaRegistry {
     })
   }
 
-  remove(key) {
+  remove(key, owner = null) {
     const audio = this.audioFeeds.value.get(key)
     const video = this.videoFeeds.value.get(key)
     if (!audio && !video) return
+    const current = video || audio
+    if (owner?.provider && current.provider !== owner.provider) return
+    if (owner?.track && current.track !== owner.track) return
     this.audioFeeds.value.delete(key)
     this.videoFeeds.value.delete(key)
     this.audioFeeds.value = new Map(this.audioFeeds.value)

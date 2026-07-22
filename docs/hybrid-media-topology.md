@@ -46,6 +46,11 @@ The destination is considered ready only when every advertised participant and
 source identity is staged. Track replacement adds the destination track before
 removing the retired track, so activation cannot expose an empty stream or
 temporarily remove a fullscreen player.
+Late provider-close and track-ended events can remove a feed only when both the
+provider and track still own its registry entry. Browser fullscreen belongs to
+the persistent document root, while the selected logical feed is displayed as
+its overlay. A transient player teardown therefore cannot terminate fullscreen;
+the replacement component resumes the same participant/source feed identity.
 
 Every handoff uses a two-phase room consensus. The server broadcasts a switching
 epoch and source revision, each client stages and verifies the destination RTP,

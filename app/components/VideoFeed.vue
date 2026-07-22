@@ -2,7 +2,8 @@
   <figure
     ref="feedElement"
     class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden rounded-xl bg-black shadow-lg"
-    :class="source === 'screen' ? 'cursor-zoom-in fullscreen:cursor-default fullscreen:rounded-none' : ''"
+    :class="[source === 'screen' ? 'cursor-zoom-in' : '', { 'fullscreen-feed-active': isFullscreen }]"
+    :data-feed-key="feedKey"
     :title="source === 'screen' && !isFullscreen ? 'Double-click to view fullscreen' : undefined"
     @dblclick.prevent="toggleFullscreen"
   >
@@ -45,6 +46,7 @@
 
 <script setup>
 const props = defineProps({
+  feedKey: { type: String, required: true },
   stream: { type: Object, required: true },
   source: { type: String, required: true },
   label: { type: String, required: true },
@@ -64,7 +66,10 @@ function currentFullscreenElement() {
 }
 
 function syncFullscreenState() {
-  isFullscreen.value = currentFullscreenElement() === feedElement.value
+  const root = document.documentElement
+  const fullscreenRoot = currentFullscreenElement()
+  if (!fullscreenRoot && root.dataset.fullscreenFeedKey) delete root.dataset.fullscreenFeedKey
+  isFullscreen.value = fullscreenRoot === root && root.dataset.fullscreenFeedKey === props.feedKey
 }
 
 async function exitFullscreen() {
@@ -80,9 +85,13 @@ async function toggleFullscreen() {
       await exitFullscreen()
       return
     }
-    const request = feedElement.value.requestFullscreen || feedElement.value.webkitRequestFullscreen
-    if (request) await request.call(feedElement.value)
+    const root = document.documentElement
+    root.dataset.fullscreenFeedKey = props.feedKey
+    const request = root.requestFullscreen || root.webkitRequestFullscreen
+    if (request) await request.call(root)
+    syncFullscreenState()
   } catch (error) {
+    delete document.documentElement.dataset.fullscreenFeedKey
     console.warn('[VideoFeed] Could not enter fullscreen:', error)
   }
 }
@@ -101,6 +110,7 @@ function enablePreview() {
 
 onMounted(() => {
   attachStream()
+  syncFullscreenState()
   document.addEventListener('fullscreenchange', syncFullscreenState)
   document.addEventListener('webkitfullscreenchange', syncFullscreenState)
 })
@@ -114,8 +124,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.fullscreen-feed:fullscreen,
-.fullscreen-feed:-webkit-full-screen {
+.fullscreen-feed-active {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
   width: 100vw;
   height: 100vh;
   border-radius: 0;
