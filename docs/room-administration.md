@@ -28,13 +28,13 @@ It adds `media_policy` JSON to `dspeak_rooms_channels`. The object contains
 `hdAudio`, `microphoneKbps`, `cameraKbps`, `screenKbps`, `sharedAudioKbps`,
 `revision`, and `updatedAt`.
 
-| Source              | Supported policy                  |
-| ------------------- | --------------------------------- |
-| Standard microphone | Mono, 32–64 kbps; default 48 kbps |
-| HD microphone       | Stereo, 65–256 kbps               |
-| Camera              | 250–2000 kbps                     |
-| Screen video        | 2000–6000 kbps                    |
-| Shared audio        | Stereo, 64–256 kbps               |
+| Source              | Supported policy                                    |
+| ------------------- | --------------------------------------------------- |
+| Standard microphone | Mono, 32–96 kbps; default 48 kbps                   |
+| HD microphone       | Stereo, 64–256 kbps                                 |
+| Camera              | Low 250, Medium 750, High 1500, Maximum 2000 kbps   |
+| Screen video        | Low 2000, Medium 3000, High 4000, Maximum 6000 kbps |
+| Shared audio        | Stereo, 64–256 kbps                                 |
 
 Camera and screen frame rate still follow each user's selected target. The
 legacy `audio_bitrate` field remains during the compatibility period.

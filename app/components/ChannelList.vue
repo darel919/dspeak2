@@ -570,15 +570,15 @@
               <input
                 type="range"
                 min="32"
-                max="64"
+                max="96"
                 v-model.number="newChannelBitrate"
                 class="range w-full"
                 step="1"
               />
               <div class="flex justify-between px-2.5 mt-2 text-xs">
                 <span>32</span>
-                <span>48</span>
                 <span>64</span>
+                <span>96</span>
               </div>
             </div>
             <div class="text-sm mt-2">
@@ -603,7 +603,7 @@
 
     <!-- Edit Channel Modal -->
     <div v-if="showEditChannel" class="modal modal-open">
-      <div class="modal-box">
+      <div class="modal-box max-w-3xl">
         <h3 class="font-bold text-lg">Edit Channel</h3>
         <form @submit.prevent="handleEditChannel" class="space-y-4 mt-4">
           <div>
@@ -650,35 +650,97 @@
                   >HD microphone audio</span
                 >
                 <small class="text-base-content/60">
-                  Stereo microphone audio above 64 kbps. Off by default.
+                  Stereo microphone audio from 64–256 kbps. Off by default.
                 </small>
               </span>
             </label>
-            <div class="grid gap-5 sm:grid-cols-2">
-              <label
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div
                 v-for="field in channelPolicyFields"
                 :key="field.key"
-                class="grid min-w-0 gap-2"
+                class="rounded-box border border-base-300 bg-base-200/40 p-4"
               >
-                <span class="text-sm font-medium">{{ field.label }}</span>
-                <div class="flex items-center gap-3">
-                  <input
-                    v-model.number="editingChannelPolicy[field.key]"
-                    type="range"
-                    class="range range-primary min-w-0 flex-1"
-                    :min="field.min"
-                    :max="field.max"
-                    :step="field.step"
-                    required
-                  />
-                  <output class="w-20 text-right text-sm tabular-nums">
-                    {{ editingChannelPolicy[field.key] }} kbps
-                  </output>
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <label
+                    :id="`channel-policy-${field.key}-label`"
+                    :for="
+                      field.control === 'slider'
+                        ? `channel-policy-${field.key}`
+                        : undefined
+                    "
+                    class="text-sm font-medium"
+                  >
+                    {{ field.label }}
+                  </label>
+                  <label
+                    v-if="field.control === 'slider'"
+                    class="input input-sm w-28 gap-1 px-2"
+                  >
+                    <input
+                      v-model.number="editingChannelPolicy[field.key]"
+                      type="number"
+                      class="min-w-0 text-right tabular-nums"
+                      :aria-label="`${field.label} bitrate in kilobits per second`"
+                      :min="field.min"
+                      :max="field.max"
+                      :step="field.step"
+                      required
+                      @change="normalizeChannelPolicyValue(field)"
+                    />
+                    <span class="text-xs text-base-content/60">kbps</span>
+                  </label>
                 </div>
-                <small class="text-base-content/50"
-                  >{{ field.min }}–{{ field.max }} kbps</small
+                <template v-if="field.control === 'slider'">
+                  <div class="flex min-h-12 items-center">
+                    <input
+                      :id="`channel-policy-${field.key}`"
+                      v-model.number="editingChannelPolicy[field.key]"
+                      type="range"
+                      class="range range-lg range-primary w-full"
+                      :min="field.min"
+                      :max="field.max"
+                      :step="field.step"
+                      required
+                    />
+                  </div>
+                  <div
+                    class="mt-1 flex justify-between text-xs tabular-nums text-base-content/50"
+                    aria-hidden="true"
+                  >
+                    <span>{{ field.min }} kbps</span>
+                    <span>{{ field.max }} kbps</span>
+                  </div>
+                </template>
+                <div
+                  v-else
+                  :id="`channel-policy-${field.key}`"
+                  class="grid grid-cols-2 gap-2"
+                  role="group"
+                  :aria-labelledby="`channel-policy-${field.key}-label`"
                 >
-              </label>
+                  <button
+                    v-for="option in field.options"
+                    :key="option.value"
+                    type="button"
+                    class="btn h-auto min-h-12 flex-col gap-0.5 py-2"
+                    :class="{
+                      'btn-primary':
+                        editingChannelPolicy[field.key] === option.value,
+                      'btn-outline':
+                        editingChannelPolicy[field.key] !== option.value,
+                    }"
+                    :aria-pressed="
+                      editingChannelPolicy[field.key] === option.value
+                    "
+                    @click="setChannelPolicyValue(field.key, option.value)"
+                  >
+                    <span>{{ option.label }}</span>
+                    <span class="text-xs font-normal opacity-70">
+                      {{ formatVideoPolicyBitrate(option.value) }}
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
           </fieldset>
           <div class="modal-action">
@@ -839,6 +901,7 @@ import {
   HD_MICROPHONE_MIN_KBPS,
   MEDIA_POLICY_LIMITS,
   STANDARD_MICROPHONE_MAX_KBPS,
+  VIDEO_POLICY_QUALITY_STEPS,
 } from "~~/shared/media-policy.js";
 
 const inviteDialog = ref(null);
@@ -980,6 +1043,8 @@ const channelPolicyFields = computed(() =>
         ? { min: HD_MICROPHONE_MIN_KBPS, max: limits.max }
         : { min: limits.min, max: STANDARD_MICROPHONE_MAX_KBPS }
       : {}),
+    control: VIDEO_POLICY_QUALITY_STEPS[key] ? "steps" : "slider",
+    options: VIDEO_POLICY_QUALITY_STEPS[key] || [],
     step: 1,
   })),
 );
@@ -994,6 +1059,22 @@ function applyHdAudioRange() {
         STANDARD_MICROPHONE_MAX_KBPS,
         Number(editingChannelPolicy.value.microphoneKbps) || 48,
       );
+}
+
+function normalizeChannelPolicyValue(field) {
+  const value = Number(editingChannelPolicy.value[field.key]);
+  editingChannelPolicy.value[field.key] = Math.min(
+    field.max,
+    Math.max(field.min, Number.isFinite(value) ? value : field.min),
+  );
+}
+
+function setChannelPolicyValue(key, value) {
+  editingChannelPolicy.value[key] = value;
+}
+
+function formatVideoPolicyBitrate(value) {
+  return `${Number(value) / 1000} Mbps`;
 }
 const unreadCounts = ref([]);
 const newChannelName = ref("");

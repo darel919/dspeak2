@@ -1,8 +1,10 @@
 <template>
+  <VitePwaManifest />
   <NuxtLayout>
     <NuxtLoadingIndicator />
     <NuxtPage />
     <GlobalVoiceStatus />
+    <PwaInstallPrompt />
   </NuxtLayout>
 </template>
 

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   normalizeMediaPolicy,
   validateMediaPolicy,
+  VIDEO_POLICY_QUALITY_STEPS,
 } from "../shared/media-policy.js";
 
 test("legacy channel audio bitrate populates microphone and shared audio", () => {
@@ -14,7 +15,7 @@ test("legacy channel audio bitrate populates microphone and shared audio", () =>
 
 test("legacy null media policy is normalized without breaking room responses", () => {
   assert.deepEqual(normalizeMediaPolicy(null, 96), {
-    hdAudio: true,
+    hdAudio: false,
     microphoneKbps: 96,
     cameraKbps: 1500,
     screenKbps: 4000,
@@ -56,11 +57,48 @@ test("standard and HD microphone modes enforce mono and stereo bitrate bands", (
   assert.equal(
     validateMediaPolicy({
       hdAudio: false,
-      microphoneKbps: 96,
+      microphoneKbps: 97,
       cameraKbps: 1500,
       screenKbps: 4000,
       sharedAudioKbps: 128,
     }).valid,
     false,
+  );
+  assert.equal(
+    validateMediaPolicy({
+      hdAudio: true,
+      microphoneKbps: 64,
+      cameraKbps: 1500,
+      screenKbps: 4000,
+      sharedAudioKbps: 128,
+    }).valid,
+    true,
+  );
+});
+
+test("video policy exposes ordered camera and screen quality steps", () => {
+  assert.deepEqual(
+    VIDEO_POLICY_QUALITY_STEPS.cameraKbps.map(({ label, value }) => [
+      label,
+      value,
+    ]),
+    [
+      ["Low", 250],
+      ["Medium", 750],
+      ["High", 1500],
+      ["Maximum", 2000],
+    ],
+  );
+  assert.deepEqual(
+    VIDEO_POLICY_QUALITY_STEPS.screenKbps.map(({ label, value }) => [
+      label,
+      value,
+    ]),
+    [
+      ["Low", 2000],
+      ["Medium", 3000],
+      ["High", 4000],
+      ["Maximum", 6000],
+    ],
   );
 });

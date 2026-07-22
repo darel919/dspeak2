@@ -53,6 +53,9 @@ export default defineNuxtConfig({
     srcDir: "../public",
     filename: "sw.js",
     registerType: "autoUpdate",
+    client: {
+      installPrompt: true,
+    },
 
     manifest: {
       name: "dSpeak",

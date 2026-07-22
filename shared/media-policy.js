@@ -5,15 +5,31 @@ export const MEDIA_POLICY_LIMITS = Object.freeze({
   sharedAudioKbps: Object.freeze({ min: 64, max: 256, default: 128 }),
 });
 
-export const STANDARD_MICROPHONE_MAX_KBPS = 64;
-export const HD_MICROPHONE_MIN_KBPS = 65;
+export const STANDARD_MICROPHONE_MAX_KBPS = 96;
+export const HD_MICROPHONE_MIN_KBPS = 64;
+
+export const VIDEO_POLICY_QUALITY_STEPS = Object.freeze({
+  cameraKbps: Object.freeze([
+    Object.freeze({ label: "Low", value: 250 }),
+    Object.freeze({ label: "Medium", value: 750 }),
+    Object.freeze({ label: "High", value: 1500 }),
+    Object.freeze({ label: "Maximum", value: 2000 }),
+  ]),
+  screenKbps: Object.freeze([
+    Object.freeze({ label: "Low", value: 2000 }),
+    Object.freeze({ label: "Medium", value: 3000 }),
+    Object.freeze({ label: "High", value: 4000 }),
+    Object.freeze({ label: "Maximum", value: 6000 }),
+  ]),
+});
 
 export function normalizeMediaPolicy(value = {}, legacyAudioBitrate = null) {
   value = value && typeof value === "object" ? value : {};
   const requestedMicrophone = value.microphoneKbps ?? legacyAudioBitrate;
   const hdAudio =
     value.hdAudio === true ||
-    (value.hdAudio == null && Number(requestedMicrophone) > 64);
+    (value.hdAudio == null &&
+      Number(requestedMicrophone) > STANDARD_MICROPHONE_MAX_KBPS);
   return {
     hdAudio,
     microphoneKbps: readPolicyNumber(
@@ -64,13 +80,13 @@ export function validateMediaPolicy(value = {}) {
     value.hdAudio === false &&
     microphone > STANDARD_MICROPHONE_MAX_KBPS
   )
-    errors.push("microphoneKbps must be at most 64 kbps without HD audio");
+    errors.push("microphoneKbps must be at most 96 kbps without HD audio");
   if (
     Number.isFinite(microphone) &&
     value.hdAudio === true &&
     microphone < HD_MICROPHONE_MIN_KBPS
   )
-    errors.push("microphoneKbps must be greater than 64 kbps with HD audio");
+    errors.push("microphoneKbps must be at least 64 kbps with HD audio");
   if (errors.length) return { valid: false, errors };
   return { valid: true, value: normalizeMediaPolicy(value) };
 }

@@ -136,8 +136,8 @@ internals export.
 ## Audio policy
 
 Audio policy is topology-neutral. Standard microphone audio uses 48 kHz mono
-Opus at 32–64 kbps and defaults to 48 kbps. HD microphone audio is opt-in and
-uses stereo Opus above 64 kbps up to 256 kbps. Shared audio remains stereo at
+Opus at 32–96 kbps and defaults to 48 kbps. HD microphone audio is opt-in and
+uses stereo Opus from 64 kbps up to 256 kbps. Shared audio remains stereo at
 64–256 kbps, with the user's shared-audio ceiling applied when it is lower.
 Native P2P and SFU use ten-millisecond packetization, in-band FEC, NACK,
 continuous transmission, and high sender priority. Changing a channel ceiling
