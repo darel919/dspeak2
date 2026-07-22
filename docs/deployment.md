@@ -157,6 +157,12 @@ the DNS challenge and retries failed issuance; this avoids starting Coturn with
 missing TLS files without making TURN availability a prerequisite for deploying
 the application.
 
+Both containers emit bounded lifecycle logs. `turn-certbot` reports each
+issuance attempt, the Certbot error output, and the next retry or renewal time.
+`coturn` reports whether it is waiting for the initial certificate, starting the
+TURN server, reloading renewed files, or exiting. Neither log includes the
+Cloudflare token, TURN shared secret, or generated credentials.
+
 ## Dynamic RTC IPv6
 
 The Compose stack runs `favonia/cloudflare-ddns` in host-network mode. It reads
