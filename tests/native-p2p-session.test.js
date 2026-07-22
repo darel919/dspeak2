@@ -72,6 +72,27 @@ test('P2P source restoration republishes the preserved remote receiver track', a
   assert.deepEqual(restored, [entry])
 })
 
+test('topology identity reconciles an early signaling connection', () => {
+  const restaged = []
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal() {},
+    onRemoteTrack: entry => restaged.push({ ...entry })
+  })
+  const entry = { source: 'screen', userId: 'peer-2', track: { readyState: 'live' } }
+  const state = {
+    peerId: 'peer-2',
+    userId: 'peer-2',
+    remoteTracks: new Map([['screen', entry]])
+  }
+  mesh.connections.set('peer-2', state)
+
+  assert.equal(mesh.ensureConnection('peer-2', 'user-2'), state)
+  assert.equal(state.userId, 'user-2')
+  assert.equal(entry.userId, 'user-2')
+  assert.deepEqual(restaged.map(candidate => candidate.userId), ['user-2'])
+})
+
 test('P2P SDP requests stereo low-latency Opus with loss protection', () => {
   const sdp = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=20;useinbandfec=0\r\n'
   const result = applyOpusAudioProfile(sdp)
@@ -108,6 +129,6 @@ test('P2P video sender preserves frame cadence and applies its bitrate policy', 
 test('P2P receiver requests a low-latency jitter buffer where supported', () => {
   const receiver = { jitterBufferTarget: null }
   assert.equal(setReceiverJitterBufferTarget(receiver), true)
-  assert.equal(receiver.jitterBufferTarget, 30)
+  assert.equal(receiver.jitterBufferTarget, 0)
   assert.equal(setReceiverJitterBufferTarget({}), false)
 })

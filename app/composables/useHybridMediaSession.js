@@ -6,7 +6,7 @@ import { NativeP2pMesh } from '~/shared/native-p2p.js'
 import { RemoteMediaRegistry } from '~/shared/remote-media-registry.js'
 import { RemoteMediaHandoff } from '~/shared/remote-media-handoff.js'
 import { addressFamily, buildTopologyGraph } from '~/shared/rtc-topology.js'
-import { collectVideoRtpStats } from '~/shared/rtc-media-stats.js'
+import { collectOutboundAudioStats, collectVideoRtpStats } from '~/shared/rtc-media-stats.js'
 import { buildP2pVideoSenderOptions } from '~/shared/video-settings.js'
 import { buildVoiceProducerOptions, getAudioBitrateBps, mapPeerConnectionMetrics, mapPeerRoundTripTimes } from '~/shared/voice-transport.js'
 import { shouldAcceptTopologyEvent, topologyEventKey } from '~~/server/utils/media-transition.js'
@@ -41,6 +41,7 @@ export function useHybridMediaSession() {
   const peerConnectionMetrics = ref({})
   const sfuRoundTripTime = ref(null)
   const participantSfuRoundTripTimes = ref({})
+  const activeProviderState = ref(null)
   const topologyState = ref({ mode: 'idle', epoch: 0, reason: 'waiting-for-peer', peers: [], activatedAt: null })
   const topologyGraph = ref(buildTopologyGraph({ mode: 'idle', participantIds: [] }))
   const producers = ref(new Map())
@@ -63,6 +64,7 @@ export function useHybridMediaSession() {
   let reconnectAttempt = 0
   let topologyWaiter = null
   let sharedAudioMeter = null
+  let sharedAudioStatsSample = null
   let topologyOperation = Promise.resolve()
   let pendingTopologyKey = null
   let appliedTopologyKey = null
@@ -88,6 +90,11 @@ export function useHybridMediaSession() {
     onSourceEnded: removeSource
   })
   const handoff = new RemoteMediaHandoff(registry)
+
+  function setActiveProvider(provider) {
+    activeProvider = provider
+    activeProviderState.value = provider
+  }
 
   function send(message) {
     if (intentionalClose) return false
@@ -161,7 +168,7 @@ export function useHybridMediaSession() {
           sfu?.close()
           sfu = null
           handoff.clear()
-          activeProvider = null
+          setActiveProvider(null)
           transportReady.value = false
           iceConnectedBoth.value = false
           remoteProducersCount.value = 0
@@ -406,7 +413,7 @@ export function useHybridMediaSession() {
       return
     }
     if (data.mode === 'idle') {
-      activeProvider = null
+      setActiveProvider(null)
       p2pMesh?.closeAll()
       p2pMesh = null
       sfu?.closeMedia()
@@ -523,7 +530,7 @@ export function useHybridMediaSession() {
     for (const entry of localSources.values()) mesh.publishSource(entry.source, entry.track, entry.stream)
     await waitForRemoteTracks('p2p', data)
     handoff.bind('p2p')
-    activeProvider = 'p2p'
+    setActiveProvider('p2p')
     sfuRoundTripTime.value = null
     participantSfuRoundTripTimes.value = {}
     handoff.retire('sfu')
@@ -542,7 +549,7 @@ export function useHybridMediaSession() {
     for (const entry of localSources.values()) await session.addSource(entry)
     await waitForRemoteTracks('sfu', data)
     handoff.bind('sfu')
-    activeProvider = 'sfu'
+    setActiveProvider('sfu')
     reportedSfuFailureEpoch = null
     handoff.retire('p2p')
     p2pMesh?.closeAll()
@@ -599,6 +606,7 @@ export function useHybridMediaSession() {
   }
 
   function publishSource(entry) {
+    if (entry.source === 'screen-audio') entry = createSharedAudioSource(entry)
     localSources.set(entry.source, entry)
     if (entry.source === 'camera' || entry.source === 'screen') {
       localVideoFeeds.value.set(entry.source, { source: entry.source, stream: entry.stream, producerId: `${activeProvider || 'local'}:${entry.track.id}` })
@@ -628,7 +636,8 @@ export function useHybridMediaSession() {
   }
 
   function removeSource(entry) {
-    if (localSources.get(entry.source)?.track !== entry.track) return
+    const publishedEntry = localSources.get(entry.source)
+    if (publishedEntry?.track !== entry.track && publishedEntry?.captureTrack !== entry.track) return
     localSources.delete(entry.source)
     p2pMesh?.unpublishSource(entry.source)
     sfu?.removeSource(entry.source)
@@ -679,7 +688,8 @@ export function useHybridMediaSession() {
   }
 
   function setSharedAudioVolume(value) {
-    settingsStore.sharedAudioVolume = Math.max(0, Math.min(1, Number(value)))
+    const normalized = Math.max(0, Math.min(100, Number(value))) / 100
+    if (sharedAudioMeter?.gain) sharedAudioMeter.gain.gain.setTargetAtTime(normalized, sharedAudioMeter.context.currentTime, 0.01)
   }
 
   function setSystemAudioBitrate(value) {
@@ -695,36 +705,63 @@ export function useHybridMediaSession() {
     ].filter(Boolean)))
   }
 
-  function startSharedAudioMeter(track) {
-    stopSharedAudioMeter()
+  function createSharedAudioSource(entry) {
     try {
       const AudioContextConstructor = window.AudioContext || window.webkitAudioContext
       if (!AudioContextConstructor) throw new Error('Web Audio is unavailable')
       const context = new AudioContextConstructor()
-      const source = context.createMediaStreamSource(new MediaStream([track]))
+      const source = context.createMediaStreamSource(new MediaStream([entry.track]))
+      const gain = context.createGain()
       const analyser = context.createAnalyser()
+      const destination = context.createMediaStreamDestination()
       analyser.fftSize = 512
-      source.connect(analyser)
-      const values = new Float32Array(analyser.fftSize)
-      const timer = setInterval(() => {
-        analyser.getFloatTimeDomainData(values)
-        const rms = Math.sqrt(values.reduce((sum, sample) => sum + sample * sample, 0) / values.length)
-        const dbfs = rms > 0 ? 20 * Math.log10(rms) : -60
-        sharedAudioStats.value = { kbps: Number(settingsStore.systemAudioBitrate) || 128, level: Math.min(100, rms * 400), dbfs: Math.max(-60, dbfs) }
-      }, 250)
-      sharedAudioMeter = { context, source, analyser, timer }
-    } catch (_) {
-      sharedAudioStats.value = { kbps: 0, level: 0, dbfs: -60 }
+      gain.gain.value = Math.max(0, Math.min(100, Number(settingsStore.sharedAudioVolume))) / 100
+      source.connect(gain)
+      gain.connect(analyser)
+      analyser.connect(destination)
+      const track = destination.stream.getAudioTracks()[0]
+      sharedAudioMeter = { context, source, gain, analyser, destination, timer: null, track }
+      return { ...entry, stream: new MediaStream([track]), track, captureTrack: entry.track }
+    } catch (error) {
+      console.warn(`[Media] Shared audio processing is unavailable: ${error?.message || error}`)
+      return entry
     }
+  }
+
+  function startSharedAudioMeter() {
+    if (!sharedAudioMeter) return
+    const values = new Float32Array(sharedAudioMeter.analyser.fftSize)
+    const sample = async () => {
+      if (!sharedAudioMeter) return
+      sharedAudioMeter.analyser.getFloatTimeDomainData(values)
+      const rms = Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length)
+      const dbfs = rms > 0 ? 20 * Math.log10(rms) : -60
+      const producer = sfu?.producers.get('screen-audio')?.producer
+      const report = activeProvider === 'sfu' && producer
+        ? await producer.getStats().catch(() => null)
+        : p2pMesh ? await p2pMesh.getOutboundTrackStats('screen-audio').catch(() => null) : null
+      const collected = collectOutboundAudioStats(report, sharedAudioStatsSample)
+      if (collected.sample) sharedAudioStatsSample = collected.sample
+      sharedAudioStats.value = {
+        kbps: collected.stats?.bitrateKbps ?? 0,
+        level: Math.max(0, Math.min(1, collected.stats?.audioLevel ?? rms * 4)),
+        dbfs: Math.max(-60, dbfs)
+      }
+    }
+    sample().catch(() => {})
+    sharedAudioMeter.timer = setInterval(() => sample().catch(() => {}), 500)
   }
 
   function stopSharedAudioMeter() {
     if (!sharedAudioMeter) return
     clearInterval(sharedAudioMeter.timer)
     sharedAudioMeter.source.disconnect()
+    sharedAudioMeter.gain.disconnect()
     sharedAudioMeter.analyser.disconnect()
+    sharedAudioMeter.track.stop()
     sharedAudioMeter.context.close().catch(() => {})
     sharedAudioMeter = null
+    sharedAudioStatsSample = null
     sharedAudioStats.value = { kbps: 0, level: 0, dbfs: -60 }
   }
 
@@ -884,7 +921,7 @@ export function useHybridMediaSession() {
     sfu?.close()
     sfu = null
     handoff.clear()
-    activeProvider = null
+    setActiveProvider(null)
     connected.value = false
     transportReady.value = false
     iceConnectedBoth.value = false
@@ -918,7 +955,7 @@ export function useHybridMediaSession() {
     lastInRoom,
     topologyState: readonly(topologyState),
     topologyGraph: readonly(topologyGraph),
-    activeProvider: computed(() => activeProvider),
+    activeProvider: readonly(activeProviderState),
     lastSentClientRtpCapabilities: computed(() => sfu?.lastSentClientRtpCapabilities || null),
     lastReceivedConsumerParams: computed(() => sfu?.lastReceivedConsumerParams || null),
     connect,

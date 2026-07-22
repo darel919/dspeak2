@@ -249,7 +249,18 @@ export class NativeP2pMesh {
   }
 
   ensureConnection(peerId, userId) {
-    if (this.connections.has(peerId)) return this.connections.get(peerId)
+    if (this.connections.has(peerId)) {
+      const state = this.connections.get(peerId)
+      const resolvedUserId = String(userId || peerId)
+      if (state.userId !== resolvedUserId) {
+        state.userId = resolvedUserId
+        for (const entry of state.remoteTracks.values()) {
+          entry.userId = resolvedUserId
+          this.onRemoteTrack(entry)
+        }
+      }
+      return state
+    }
     const pc = new RTCPeerConnection(this.configuration)
     const state = {
       peerId,

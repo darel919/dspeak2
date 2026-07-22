@@ -25,6 +25,9 @@ export class RemoteMediaHandoff {
     this.activeProvider = activeProvider || this.activeProvider
     const normalized = { ...entry, transportKey: entry.key, key: remoteMediaFeedKey(entry) }
     const tracks = this.provider(normalized.provider)
+    for (const [key, current] of tracks) {
+      if (current.transportKey === normalized.transportKey && key !== normalized.key) tracks.delete(key)
+    }
     tracks.set(normalized.key, normalized)
     if (activeProvider === normalized.provider) this.registry.bind(normalized)
   }

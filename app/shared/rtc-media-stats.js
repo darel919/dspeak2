@@ -86,6 +86,22 @@ export function collectVideoRtpStats(report, direction, trackSettings = {}, prev
   return { stats, sample: { timestamp, frameCounter, bytes, totalCodecTime } }
 }
 
+export function collectOutboundAudioStats(report, previous = null) {
+  const values = report ? [...report.values()] : []
+  const rtp = values.find(stat => stat.type === 'outbound-rtp' && !stat.isRemote && (stat.kind === 'audio' || stat.mediaType === 'audio'))
+  if (!rtp) return { stats: null, sample: previous }
+  const timestamp = finite(rtp.timestamp) ?? Date.now()
+  const bytes = finite(rtp.bytesSent)
+  const elapsedMs = previous?.timestamp == null ? null : timestamp - previous.timestamp
+  return {
+    stats: {
+      bitrateKbps: deltaRate(bytes, previous?.bytes, elapsedMs, 8 / 1000),
+      audioLevel: finite(rtp.audioLevel)
+    },
+    sample: { timestamp, bytes }
+  }
+}
+
 export async function collectPeerConnectionStats(pc, kind) {
   const report = await pc.getStats()
   const byId = new Map()

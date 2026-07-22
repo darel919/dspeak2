@@ -1,4 +1,4 @@
-export const MEDIA_JITTER_BUFFER_TARGET_MS = 30
+export const MEDIA_JITTER_BUFFER_TARGET_MS = 0
 
 export function setReceiverJitterBufferTarget(receiver) {
   if (!receiver || !('jitterBufferTarget' in receiver)) return false
