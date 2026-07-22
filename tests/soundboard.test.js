@@ -12,7 +12,7 @@ import {
 
 test("soundboard limits retain the room contract", () => {
   assert.equal(SOUNDBOARD_MAX_SOURCE_BYTES, 5 * 1024 * 1024);
-  assert.equal(SOUNDBOARD_MAX_DURATION_SECONDS, 5);
+  assert.equal(SOUNDBOARD_MAX_DURATION_SECONDS, 10);
   assert.equal(SOUNDBOARD_MAX_CLIPS_PER_ROOM, 50);
 });
 

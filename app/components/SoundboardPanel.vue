@@ -86,78 +86,11 @@
             <button
               type="button"
               class="btn btn-primary btn-sm"
-              @click="showUpload = !showUpload"
+              @click="showUpload = true"
             >
               <Icon name="lucide:plus" class="size-4" />Add sound
             </button>
           </div>
-
-          <form
-            v-if="showUpload"
-            class="mb-5 grid gap-3 rounded-xl border border-base-300 bg-base-100 p-4 sm:grid-cols-2"
-            @submit.prevent="upload"
-          >
-            <label class="grid gap-1 text-xs"
-              ><span>Sound name</span
-              ><input
-                v-model="title"
-                class="input input-bordered input-sm"
-                maxlength="48"
-                required
-            /></label>
-            <label class="grid gap-1 text-xs"
-              ><span>Sound file</span
-              ><input
-                ref="fileInput"
-                class="file-input file-input-bordered file-input-sm"
-                type="file"
-                accept="audio/*,video/mp4,video/webm,video/ogg"
-                required
-                @change="file = $event.target.files?.[0] || null"
-            /></label>
-            <label class="grid gap-1 text-xs"
-              ><span>Emoji</span
-              ><input
-                v-model="icon"
-                class="input input-bordered input-sm"
-                maxlength="16"
-                placeholder="Example: 🔔"
-            /></label>
-            <label class="grid gap-1 text-xs"
-              ><span>Or icon image</span
-              ><input
-                ref="iconInput"
-                class="file-input file-input-bordered file-input-sm"
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                @change="iconImage = $event.target.files?.[0] || null"
-            /></label>
-            <label class="grid gap-1 text-xs"
-              ><span>Category</span
-              ><input
-                v-model="uploadCategory"
-                class="input input-bordered input-sm"
-                maxlength="32"
-                placeholder="General"
-            /></label>
-            <div class="flex items-end justify-between gap-2">
-              <small class="text-base-content/60"
-                >Sound and image: 5 MB max. Sound: 5 seconds.</small
-              ><button
-                class="btn btn-primary btn-sm"
-                :disabled="store.uploading || !file"
-              >
-                <span
-                  v-if="store.uploading"
-                  class="loading loading-spinner loading-xs"
-                ></span
-                >Upload
-              </button>
-            </div>
-            <p v-if="uploadError" class="text-sm text-error sm:col-span-2">
-              {{ uploadError }}
-            </p>
-          </form>
 
           <div v-if="store.loading" class="py-10 text-center">
             <span class="loading loading-spinner"></span>
@@ -212,6 +145,191 @@
           </p>
         </div>
       </section>
+    </div>
+
+    <div
+      v-if="showUpload"
+      class="fixed inset-0 z-[130] grid place-items-center bg-black/60 p-4"
+      @pointerdown.self="cancelUpload"
+    >
+      <form
+        class="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-base-content/20 bg-base-200 shadow-2xl"
+        aria-labelledby="upload-sound-title"
+        @submit.prevent="upload"
+      >
+        <header
+          class="flex items-start justify-between gap-4 border-b border-base-300 px-5 py-4"
+        >
+          <div>
+            <h2 id="upload-sound-title" class="text-xl font-semibold">
+              Add a sound
+            </h2>
+            <p class="mt-1 text-sm text-base-content/60">
+              Upload a clip up to 10 seconds long.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn btn-square btn-sm btn-ghost"
+            aria-label="Close upload"
+            :disabled="store.uploading"
+            @click="cancelUpload"
+          >
+            <Icon name="lucide:x" class="size-5" />
+          </button>
+        </header>
+
+        <div class="space-y-5 overflow-y-auto p-5">
+          <section class="space-y-2">
+            <div class="flex items-baseline justify-between gap-3">
+              <label class="font-medium" for="sound-file">Sound file</label>
+              <span class="text-xs text-base-content/55">5 MB maximum</span>
+            </div>
+            <label
+              for="sound-file"
+              class="flex min-h-24 cursor-pointer items-center gap-4 rounded-xl border border-dashed border-base-content/30 bg-base-100 px-4 py-3 transition hover:border-primary hover:bg-primary/5"
+            >
+              <span
+                class="grid size-11 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"
+              >
+                <Icon
+                  :name="file ? 'lucide:file-audio' : 'lucide:upload'"
+                  class="size-5"
+                />
+              </span>
+              <span class="min-w-0 flex-1">
+                <strong class="block truncate text-sm">
+                  {{ file ? file.name : "Choose an audio or video file" }}
+                </strong>
+                <span class="mt-1 block text-xs text-base-content/55">
+                  {{
+                    file
+                      ? formatFileSize(file.size)
+                      : "MP3, WAV, OGG, MP4, or WebM"
+                  }}
+                </span>
+              </span>
+              <span class="btn btn-sm btn-outline">{{
+                file ? "Replace" : "Browse"
+              }}</span>
+            </label>
+            <input
+              id="sound-file"
+              ref="fileInput"
+              class="sr-only"
+              type="file"
+              accept="audio/*,video/mp4,video/webm,video/ogg"
+              required
+              @change="selectSoundFile"
+            />
+          </section>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="grid gap-1.5 text-sm">
+              <span class="font-medium">Sound name</span>
+              <input
+                v-model="title"
+                class="input input-bordered w-full"
+                maxlength="48"
+                placeholder="e.g. Air horn"
+                required
+              />
+            </label>
+            <label class="grid gap-1.5 text-sm">
+              <span class="font-medium"
+                >Category
+                <span class="font-normal text-base-content/50"
+                  >(optional)</span
+                ></span
+              >
+              <input
+                v-model="uploadCategory"
+                class="input input-bordered w-full"
+                maxlength="32"
+                placeholder="General"
+              />
+            </label>
+          </div>
+
+          <section class="space-y-2">
+            <div>
+              <h3 class="font-medium">Choose an icon</h3>
+              <p class="text-xs text-base-content/55">
+                Use an emoji or upload an image.
+              </p>
+            </div>
+            <div class="grid grid-cols-[88px_1fr] gap-3">
+              <label class="grid gap-1.5 text-sm">
+                <span class="sr-only">Emoji</span>
+                <input
+                  v-model="icon"
+                  class="input input-bordered w-full text-center text-xl"
+                  maxlength="16"
+                  placeholder="🔊"
+                  aria-label="Sound emoji"
+                  @input="selectEmoji"
+                />
+              </label>
+              <label
+                for="sound-icon-file"
+                class="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-base-300 bg-base-100 px-3 hover:border-primary"
+              >
+                <Icon
+                  name="lucide:image-plus"
+                  class="size-5 shrink-0 text-base-content/55"
+                />
+                <span class="min-w-0 flex-1 truncate text-sm">
+                  {{ iconImage ? iconImage.name : "Upload icon image" }}
+                </span>
+                <span class="text-xs text-primary">{{
+                  iconImage ? "Replace" : "Choose"
+                }}</span>
+              </label>
+              <input
+                id="sound-icon-file"
+                ref="iconInput"
+                class="sr-only"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                @change="selectIconImage"
+              />
+            </div>
+          </section>
+
+          <div
+            v-if="uploadError"
+            class="alert alert-error py-3 text-sm"
+            role="alert"
+          >
+            <Icon name="lucide:circle-alert" class="size-5 shrink-0" />
+            <span>{{ uploadError }}</span>
+          </div>
+        </div>
+
+        <footer
+          class="flex items-center justify-end gap-2 border-t border-base-300 bg-base-100 px-5 py-4"
+        >
+          <button
+            type="button"
+            class="btn btn-ghost"
+            :disabled="store.uploading"
+            @click="cancelUpload"
+          >
+            Cancel
+          </button>
+          <button
+            class="btn btn-primary min-w-32"
+            :disabled="store.uploading || !file || !title.trim()"
+          >
+            <span
+              v-if="store.uploading"
+              class="loading loading-spinner loading-sm"
+            ></span>
+            <Icon v-else name="lucide:upload" class="size-4" />
+            {{ store.uploading ? "Uploading…" : "Add sound" }}
+          </button>
+        </footer>
+      </form>
     </div>
 
     <div
@@ -346,6 +464,54 @@ function editClip(clip) {
   editingIconImage.value = null;
 }
 
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function selectSoundFile(event) {
+  file.value = event.target.files?.[0] || null;
+  uploadError.value = "";
+  if (!file.value || title.value.trim()) return;
+  title.value = file.value.name
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 48);
+}
+
+function selectIconImage(event) {
+  iconImage.value = event.target.files?.[0] || null;
+  if (iconImage.value) icon.value = "";
+  uploadError.value = "";
+}
+
+function selectEmoji() {
+  if (!icon.value.trim()) return;
+  iconImage.value = null;
+  if (iconInput.value) iconInput.value.value = "";
+  uploadError.value = "";
+}
+
+function resetUpload() {
+  title.value = "";
+  uploadCategory.value = "";
+  icon.value = "";
+  file.value = null;
+  iconImage.value = null;
+  uploadError.value = "";
+  if (fileInput.value) fileInput.value.value = "";
+  if (iconInput.value) iconInput.value.value = "";
+}
+
+function cancelUpload() {
+  if (store.uploading) return;
+  showUpload.value = false;
+  resetUpload();
+}
+
 async function saveEdit() {
   if (
     !editing.value.icon.trim() &&
@@ -388,13 +554,7 @@ async function upload() {
       icon: icon.value,
       ...(iconImage.value ? { iconImage: iconImage.value } : {}),
     });
-    title.value = "";
-    uploadCategory.value = "";
-    icon.value = "";
-    file.value = null;
-    iconImage.value = null;
-    if (fileInput.value) fileInput.value.value = "";
-    if (iconInput.value) iconInput.value.value = "";
+    resetUpload();
     showUpload.value = false;
   } catch (cause) {
     uploadError.value = cause.message;
@@ -404,6 +564,7 @@ async function upload() {
 function onKeydown(event) {
   if (event.key === "Escape") {
     if (editing.value) editing.value = null;
+    else if (showUpload.value) cancelUpload();
     else open.value = false;
   }
 }

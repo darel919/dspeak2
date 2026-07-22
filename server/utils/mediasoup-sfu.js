@@ -29,6 +29,7 @@ import {
   MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS,
 } from "./media-heartbeat";
 import { normalizeParticipantVoiceState } from "~~/shared/participant-voice-state.js";
+import { publishVoicePresence } from "./voice-presence";
 
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 
@@ -265,6 +266,14 @@ function broadcastChannelState(room) {
       producerSourceMap: snapshot.producerSourceMap,
     });
   }
+  if (room.backendRoomId) {
+    publishVoicePresence(room.backendRoomId, {
+      channelId: room.id,
+      inRoom: data.inRoom,
+      profiles: data.profiles,
+      participantStates: data.participantStates,
+    });
+  }
 }
 
 async function persistMediaPresence(room) {
@@ -329,9 +338,8 @@ function closeSession(state, session) {
   closeSessionMedia(state, session);
   session.room.sessions.delete(session.peer.id);
   state.sessions.delete(session.peer.id);
-
+  broadcastChannelState(session.room);
   if (!disposeRoomIfUnused(state, session.room)) {
-    broadcastChannelState(session.room);
     topologyCoordinator.reconcile(session.room, "membership-changed");
   }
 
@@ -718,6 +726,7 @@ export async function openSfuPeer(peer) {
 
   const state = await getState();
   const room = await acquireRoom(state, channelId);
+  room.backendRoomId = String(channel.room);
   try {
     const session = {
       peer,

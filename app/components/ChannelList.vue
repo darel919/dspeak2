@@ -626,12 +626,18 @@
 <script setup>
 function getUserName(userId) {
   const user =
-    voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId);
-  return identityStore.displayName(user || { id: userId });
+    voiceStore.getUserById(userId) ||
+    voiceStore.getUserProfile(userId) ||
+    channelsStore.getVoiceProfile(userId) ||
+    props.room?.members?.find((member) => String(member.id) === String(userId));
+  return identityStore.displayName(user || {});
 }
 function getUserAvatar(userId) {
   const user =
-    voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId);
+    voiceStore.getUserById(userId) ||
+    voiceStore.getUserProfile(userId) ||
+    channelsStore.getVoiceProfile(userId) ||
+    props.room?.members?.find((member) => String(member.id) === String(userId));
   const avatar = user?.avatar;
   if (!avatar) return null;
   if (/^(https?:)?\/\//i.test(avatar)) return avatar;
@@ -946,6 +952,7 @@ async function handleLeaveRoom() {
 async function loadChannels() {
   try {
     await channelsStore.fetchChannels(props.room.id);
+    channelsStore.connectVoicePresence(props.room.id);
     await loadUnreadCounts();
   } catch (error) {
     console.error("Failed to load channels:", error);
@@ -1075,6 +1082,7 @@ onMounted(() => {
   window.addEventListener("scroll", closeParticipantMenu, true);
 });
 onUnmounted(() => {
+  channelsStore.disconnectVoicePresence();
   document.removeEventListener("pointerdown", closeParticipantMenu);
   document.removeEventListener("keydown", onParticipantMenuKeydown);
   window.removeEventListener("resize", closeParticipantMenu);

@@ -19,7 +19,7 @@ Production limits are fixed:
 | ---------------- | -------------- |
 | Clips per room   | 50             |
 | Source upload    | 5 MB           |
-| Decoded duration | 5 seconds      |
+| Decoded duration | 10 seconds     |
 | Required artwork | Emoji or image |
 
 Nitro runs `ffprobe` and `ffmpeg` with argument arrays. It strips video and

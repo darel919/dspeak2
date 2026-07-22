@@ -40,3 +40,29 @@ test("PocketBase migrations add soundboard timestamps used for stable sorting", 
   assert.match(source, /field\("updated", "autodate"/);
   assert.match(source, /20260723_soundboard_timestamps_v1/);
 });
+
+test("PocketBase permits the first soundboard clip to use display order zero", () => {
+  const source = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /field\("display_order", "number", \{ min: 0 \}\)/);
+  assert.doesNotMatch(
+    source,
+    /field\("display_order", "number", \{ required: true, min: 0 \}\)/,
+  );
+  assert.match(source, /20260723_soundboard_display_order_v1/);
+});
+
+test("PocketBase permits soundboard clips up to ten seconds", () => {
+  const source = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /field\("duration", "number", \{ required: true, min: 0, max: 10 \}\)/,
+  );
+  assert.doesNotMatch(source, /duration.*max: 5/);
+  assert.match(source, /20260723_soundboard_duration_10s_v1/);
+});

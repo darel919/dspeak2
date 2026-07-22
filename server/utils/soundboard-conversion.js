@@ -126,7 +126,7 @@ async function convert(file) {
     if (duration > SOUNDBOARD_MAX_DURATION_SECONDS + 0.05)
       throw createError({
         statusCode: 422,
-        statusMessage: "Soundboard clips cannot exceed 5 seconds",
+        statusMessage: `Soundboard clips cannot exceed ${SOUNDBOARD_MAX_DURATION_SECONDS} seconds`,
       });
     await run(
       "ffmpeg",

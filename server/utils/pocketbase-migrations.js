@@ -395,8 +395,8 @@ async function migrateRoomSoundboards(pb) {
         maxSize: 512 * 1024,
         mimeTypes: ["audio/ogg"],
       }),
-      field("duration", "number", { required: true, min: 0, max: 5 }),
-      field("display_order", "number", { required: true, min: 0 }),
+      field("duration", "number", { required: true, min: 0, max: 10 }),
+      field("display_order", "number", { min: 0 }),
       field("enabled", "bool"),
     ],
     indexes: [
@@ -444,6 +444,26 @@ async function migrateSoundboardTimestamps(pb) {
   });
 }
 
+async function migrateSoundboardDisplayOrder(pb) {
+  const soundboards = await pb.collections.getOne("dspeak_room_soundboards");
+  await upsertCollection(pb, {
+    name: soundboards.name,
+    type: soundboards.type,
+    fields: [field("display_order", "number", { min: 0 })],
+    indexes: [],
+  });
+}
+
+async function migrateSoundboardDurationLimit(pb) {
+  const soundboards = await pb.collections.getOne("dspeak_room_soundboards");
+  await upsertCollection(pb, {
+    name: soundboards.name,
+    type: soundboards.type,
+    fields: [field("duration", "number", { required: true, min: 0, max: 10 })],
+    indexes: [],
+  });
+}
+
 const migrations = Object.freeze([
   {
     name: "20260722_room_administration_v1",
@@ -468,6 +488,14 @@ const migrations = Object.freeze([
   {
     name: "20260723_soundboard_timestamps_v1",
     run: migrateSoundboardTimestamps,
+  },
+  {
+    name: "20260723_soundboard_display_order_v1",
+    run: migrateSoundboardDisplayOrder,
+  },
+  {
+    name: "20260723_soundboard_duration_10s_v1",
+    run: migrateSoundboardDurationLimit,
   },
 ]);
 
