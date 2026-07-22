@@ -42,6 +42,10 @@ replace the track inside the existing rendered `MediaStream`, preserving the
 video element and browser fullscreen session while the transport changes.
 P2P source toggles reuse their existing RTP sender and receiver track, avoiding
 unbounded transceiver growth while explicitly restoring the remote feed.
+The destination is considered ready only when every advertised participant and
+source identity is staged. Track replacement adds the destination track before
+removing the retired track, so activation cannot expose an empty stream or
+temporarily remove a fullscreen player.
 
 Every handoff uses a two-phase room consensus. The server broadcasts a switching
 epoch and source revision, each client stages and verifies the destination RTP,

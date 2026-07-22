@@ -1,8 +1,8 @@
 export function replaceMediaStreamTrack(stream, track) {
+  if (!stream.getTracks().includes(track)) stream.addTrack(track)
   for (const currentTrack of stream.getTracks()) {
     if (currentTrack !== track) stream.removeTrack(currentTrack)
   }
-  if (!stream.getTracks().includes(track)) stream.addTrack(track)
   return stream
 }
 

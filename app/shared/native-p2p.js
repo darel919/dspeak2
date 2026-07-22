@@ -788,7 +788,7 @@ export class NativeP2pMesh {
   getOutboundTrackStats(source) {
     for (const state of this.connections.values()) {
       const sender = state.senders.get(source)
-      if (sender) return state.pc.getStats(sender)
+      if (sender?.getStats) return sender.getStats()
     }
     return Promise.resolve(null)
   }

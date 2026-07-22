@@ -21,6 +21,14 @@ export class RemoteMediaHandoff {
     return this.provider(provider).size
   }
 
+  hasExpectedFeeds(provider, peers, localPeerId) {
+    const tracks = this.provider(provider)
+    return peers
+      .filter(peer => String(peer.peerId) !== String(localPeerId))
+      .every(peer => (Array.isArray(peer.sources) ? peer.sources : [])
+        .every(source => tracks.has(remoteMediaFeedKey({ userId: peer.userId, peerId: peer.peerId, source }))))
+  }
+
   stage(entry, activeProvider) {
     this.activeProvider = activeProvider || this.activeProvider
     const normalized = { ...entry, transportKey: entry.key, key: remoteMediaFeedKey(entry) }

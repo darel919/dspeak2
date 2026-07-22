@@ -132,3 +132,14 @@ test('P2P receiver requests a low-latency jitter buffer where supported', () => 
   assert.equal(receiver.jitterBufferTarget, 0)
   assert.equal(setReceiverJitterBufferTarget({}), false)
 })
+
+test('P2P outbound source stats are read from its RTP sender', async () => {
+  const report = new Map([['audio', { type: 'outbound-rtp', bytesSent: 1000 }]])
+  const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} })
+  mesh.connections.set('peer-2', {
+    senders: new Map([['screen-audio', { getStats: async () => report }]])
+  })
+
+  assert.equal(await mesh.getOutboundTrackStats('screen-audio'), report)
+  assert.equal(await mesh.getOutboundTrackStats('missing'), null)
+})

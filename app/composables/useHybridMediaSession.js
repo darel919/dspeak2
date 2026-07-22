@@ -572,7 +572,7 @@ export function useHybridMediaSession() {
         const expected = topologyState.value.peers
           .filter(peer => String(peer.peerId) !== String(localPeerId))
           .reduce((count, peer) => count + (Array.isArray(peer.sources) ? peer.sources.length : 0), 0)
-        const tracksReady = handoff.count(provider) >= expected
+        const tracksReady = handoff.hasExpectedFeeds(provider, topologyState.value.peers, localPeerId)
         const mediaReady = provider === 'p2p' ? !!p2pMesh?.isMediaReady() : false
         const check = provider === 'sfu' && tracksReady
           ? sfu?.mediaReadiness(expected).catch(readinessError => ({ ready: false, error: readinessError.message }))

@@ -55,6 +55,21 @@ test('P2P and SFU replacements share one logical remote feed identity', () => {
   assert.deepEqual(new Set(boundKeys), new Set(['remote:user-1:camera']))
 })
 
+test('handoff readiness requires every expected logical source', () => {
+  const { handoff } = harness()
+  const peers = [
+    { peerId: 'local-peer', userId: 'local-user', sources: ['audio', 'screen'] },
+    { peerId: 'peer-1', userId: 'user-1', sources: ['audio', 'screen'] }
+  ]
+  handoff.stage({ provider: 'sfu', key: 'audio-producer', userId: 'user-1', source: 'audio', track: {} }, 'p2p')
+
+  assert.equal(handoff.hasExpectedFeeds('sfu', peers, 'local-peer'), false)
+
+  handoff.stage({ provider: 'sfu', key: 'screen-producer', userId: 'user-1', source: 'screen', track: {} }, 'p2p')
+
+  assert.equal(handoff.hasExpectedFeeds('sfu', peers, 'local-peer'), true)
+})
+
 test('resolved participant identity replaces a staged peer-ID alias', () => {
   const { handoff } = harness()
   const track = { id: 'screen-track' }
