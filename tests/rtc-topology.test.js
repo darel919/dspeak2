@@ -228,6 +228,18 @@ test("P2P signaling accepts explicit source removal and rejects unknown sources"
     validP2pSignal({ sourceRestored: { source: "unknown" } }),
     false,
   );
+  assert.equal(
+    validP2pSignal({
+      sourceReceiving: { source: "screen", receiving: false },
+    }),
+    true,
+  );
+  assert.equal(
+    validP2pSignal({
+      sourceReceiving: { source: "screen", receiving: "false" },
+    }),
+    false,
+  );
 });
 
 test("P2P media readiness requires every expected RTP direction to flow", async () => {

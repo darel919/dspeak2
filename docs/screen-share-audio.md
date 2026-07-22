@@ -12,3 +12,9 @@ For reliable loop prevention when the browser does not report `restrictOwnAudio:
 - Do not share system audio when voice isolation is more important than shared media sound.
 
 Microphone echo cancellation addresses acoustic speaker-to-microphone feedback. It does not remove a remote voice that is already present in a digital system-audio capture.
+
+## Viewer-controlled receiving
+
+Remote screen video and its paired screen-audio source start paused. Selecting **Start screen share** resumes both sources; selecting **Stop** pauses both again.
+
+On the SFU path, DSpeak pauses the mediasoup consumers so RTP is not sent to that viewer. On Direct and Mesh paths, the viewer signals the sharing peer to deactivate the corresponding RTP sender encodings. Disabling the rendered video element or its `MediaStreamTrack` alone is not treated as stopped receiving because that would continue consuming network bandwidth.

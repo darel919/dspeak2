@@ -61,6 +61,19 @@ function serializeError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function mediaUserProfile(user) {
+  const id = String(user.id);
+  return {
+    id,
+    name: user.name || user.username || "",
+    username: user.username || "",
+    display_name: user.name || user.username || "",
+    avatar: user.avatar
+      ? `auth/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
+      : null,
+  };
+}
+
 async function createState(config) {
   const worker = await mediasoup.createWorker({
     logLevel: process.env.NODE_ENV === "production" ? "warn" : "debug",
@@ -232,6 +245,7 @@ function broadcastChannelState(room) {
   const snapshot = producerSnapshot(room);
   const data = {
     inRoom: [...room.sessions.values()].map((session) => session.userId),
+    profiles: [...room.sessions.values()].map((session) => session.profile),
     ...snapshot,
   };
 
@@ -619,6 +633,17 @@ async function handleMessage(state, session, message) {
       return;
     }
 
+    case "pause-consumer": {
+      const consumer = session.consumers.get(data.consumerId);
+      if (!consumer) throw new Error("Consumer not found");
+      await consumer.pause();
+      send(session.peer, "consumer-paused", {
+        consumerId: consumer.id,
+        producerId: consumer.producerId,
+      });
+      return;
+    }
+
     default:
       throw new Error(`Unsupported message type: ${String(type)}`);
   }
@@ -646,6 +671,7 @@ export async function openSfuPeer(peer) {
     peer.close(1008, "Access denied to this room");
     return;
   }
+  const profile = mediaUserProfile(await pb.collection("users").getOne(userId));
 
   const state = await getState();
   const room = await acquireRoom(state, channelId);
@@ -653,6 +679,7 @@ export async function openSfuPeer(peer) {
     const session = {
       peer,
       userId,
+      profile,
       room,
       transports: new Map(),
       producers: new Map(),

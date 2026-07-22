@@ -124,6 +124,12 @@ export function useHybridMediaSession() {
         };
       return roomValue;
     },
+    onVideoReceivingChange: (entry, receiving) => {
+      if (entry.provider === "sfu")
+        sfu?.setRemoteReceiving(entry.userId, entry.source, receiving);
+      if (entry.provider === "p2p")
+        p2pMesh?.setRemoteReceiving(entry.peerId, entry.source, receiving);
+    },
   });
 
   const capture = new MediaCaptureManager({
@@ -360,6 +366,8 @@ export function useHybridMediaSession() {
     });
     registerHandler("currentlyInChannel", (data) => {
       lastInRoom.value = Array.isArray(data.inRoom) ? data.inRoom : [];
+      for (const profile of Array.isArray(data.profiles) ? data.profiles : [])
+        voiceStore.upsertUserProfile(profile);
       syncConnectedUsers(data.inRoom);
     });
     registerHandler("available-producers", (data) => {
@@ -512,6 +520,8 @@ export function useHybridMediaSession() {
 
   async function applyTopology(data) {
     if (Number(data.epoch) < topologyState.value.epoch) return;
+    for (const peer of Array.isArray(data.peers) ? data.peers : [])
+      if (peer.profile) voiceStore.upsertUserProfile(peer.profile);
     const previousProvider = activeProvider;
     topologyState.value = {
       mode: data.mode,

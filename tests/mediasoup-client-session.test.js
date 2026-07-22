@@ -98,3 +98,48 @@ test("closing SFU media explicitly retires consumers without waiting for tracken
   assert.equal(feedRetired, 1);
   assert.equal(client.consumers.size, 0);
 });
+
+test("remote screen video and audio consumers pause and resume together", () => {
+  const sent = [];
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+  });
+  const entries = ["screen", "screen-audio"].map((source, index) => ({
+    userId: "user-1",
+    source,
+    track: { enabled: true },
+    consumer: { id: `consumer-${index + 1}` },
+  }));
+  entries.forEach((entry) => client.consumers.set(entry.consumer.id, entry));
+
+  client.setRemoteReceiving("user-1", "screen", false);
+  assert.deepEqual(
+    sent.map((message) => message.type),
+    ["pause-consumer", "pause-consumer"],
+  );
+  assert.equal(
+    entries.every((entry) => entry.track.enabled === false),
+    true,
+  );
+
+  sent.length = 0;
+  client.setRemoteReceiving("user-1", "screen", true);
+  assert.deepEqual(
+    sent.map((message) => message.type),
+    ["resume-consumer", "resume-consumer"],
+  );
+  assert.equal(
+    entries.every((entry) => entry.track.enabled === true),
+    true,
+  );
+});
+
+test("new remote screen sources remain paused until explicitly watched", () => {
+  const client = session();
+
+  assert.equal(client.shouldReceive("user-1", "screen"), false);
+  assert.equal(client.shouldReceive("user-1", "screen-audio"), false);
+  assert.equal(client.shouldReceive("user-1", "camera"), true);
+  assert.equal(client.shouldReceive("user-1", "audio"), true);
+});

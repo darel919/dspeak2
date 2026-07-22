@@ -49,6 +49,7 @@ export function roomTopologyPayload(room) {
     peers: [...room.sessions.values()].map((session) => ({
       peerId: session.peer.id,
       userId: session.userId,
+      profile: session.profile || null,
       sources: [...session.sources],
     })),
   };

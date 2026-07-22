@@ -312,6 +312,7 @@ export class NativeP2pMesh {
       disconnectTimer: null,
       restarted: false,
       senders: new Map(),
+      sourceReceiving: new Map(),
       remoteTracks: new Map(),
       expectedRemoteSources: 0,
       mediaReady: false,
@@ -393,6 +394,15 @@ export class NativeP2pMesh {
       const source = String(signal.sourceRestored.source || "");
       const entry = state.remoteTracks.get(source);
       if (entry?.track.readyState === "live") this.onRemoteTrack(entry);
+      return;
+    }
+    if (signal.sourceReceiving) {
+      const source = String(signal.sourceReceiving.source || "");
+      await this.setSenderReceiving(
+        state,
+        source,
+        signal.sourceReceiving.receiving,
+      );
       return;
     }
     if (signal.description) {
@@ -567,12 +577,44 @@ export class NativeP2pMesh {
       this.attachSource(state, source, { track, stream });
   }
 
+  setRemoteReceiving(peerId, source, receiving) {
+    const pairedSources =
+      source === "screen" || source === "screen-audio"
+        ? ["screen", "screen-audio"]
+        : [source];
+    for (const pairedSource of pairedSources)
+      this.signal(String(peerId), {
+        sourceReceiving: {
+          source: pairedSource,
+          receiving: Boolean(receiving),
+        },
+      });
+  }
+
+  async setSenderReceiving(state, source, receiving) {
+    state.sourceReceiving.set(source, Boolean(receiving));
+    const sender = state.senders.get(source);
+    if (!sender?.getParameters || !sender?.setParameters) return;
+    const parameters = sender.getParameters();
+    if (!parameters.encodings?.length) parameters.encodings = [{}];
+    for (const encoding of parameters.encodings)
+      encoding.active = Boolean(receiving);
+    await sender.setParameters(parameters);
+  }
+
   attachSource(state, source, entry) {
     const existing = state.senders.get(source);
     if (existing) {
       existing
         .replaceTrack(entry.track)
         .then(() => this.configureSender(existing, source, entry.track))
+        .then(() =>
+          this.setSenderReceiving(
+            state,
+            source,
+            state.sourceReceiving.get(source) ?? true,
+          ),
+        )
         .catch((error) => this.fail("track-replacement-failed", error));
       this.signal(state.peerId, { sourceRestored: { source } });
       return;
@@ -583,9 +625,15 @@ export class NativeP2pMesh {
     );
     applyP2pVideoCodecPreferences(state.pc);
     state.senders.set(source, sender);
-    this.configureSender(sender, source, entry.track).catch((error) =>
-      this.fail("sender-configuration-failed", error),
-    );
+    this.configureSender(sender, source, entry.track)
+      .then(() =>
+        this.setSenderReceiving(
+          state,
+          source,
+          state.sourceReceiving.get(source) ?? true,
+        ),
+      )
+      .catch((error) => this.fail("sender-configuration-failed", error));
     this.signal(state.peerId, { source: { trackId: entry.track.id, source } });
   }
 
@@ -599,7 +647,15 @@ export class NativeP2pMesh {
     return Promise.all(
       [...state.senders].map(([source, sender]) => {
         const track = this.localSources.get(source)?.track || sender.track;
-        return track ? this.configureSender(sender, source, track) : false;
+        return track
+          ? this.configureSender(sender, source, track).then(() =>
+              this.setSenderReceiving(
+                state,
+                source,
+                state.sourceReceiving.get(source) ?? true,
+              ),
+            )
+          : false;
       }),
     );
   }

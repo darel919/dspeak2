@@ -138,6 +138,16 @@
               ]"
               @contextmenu.prevent="openVolumeMenu(user)"
             >
+              <button
+                v-if="!isLocalUser(user)"
+                class="btn btn-ghost btn-square btn-sm absolute right-2 top-2 z-10"
+                type="button"
+                :aria-label="`Adjust volume for ${getUserDisplayName(user)}`"
+                :title="`Adjust volume for ${getUserDisplayName(user)}`"
+                @click.stop="openVolumeMenu(user, $event.currentTarget)"
+              >
+                <Icon name="lucide:volume-2" class="size-4" />
+              </button>
               <!-- User Avatar -->
               <div class="avatar" :class="videoFeeds.length ? 'mb-1' : 'mb-4'">
                 <div
@@ -220,52 +230,6 @@
                   <span class="text-sm">Muted</span>
                 </div>
               </div>
-              <!-- Volume Control Context Menu -->
-              <div
-                v-if="volumeMenuUser && volumeMenuUser.id === user.id"
-                class="absolute top-2 right-2 bg-base-200 border border-base-300 rounded-lg shadow-lg p-3 z-50 w-48"
-              >
-                <div class="text-xs font-semibold mb-1">Voice</div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  :value="voiceStore.getTrackVolume(user.id, 'audio')"
-                  @input="onTrackVolumeChange(user.id, 'audio', $event)"
-                  class="w-full"
-                />
-                <div class="flex justify-between text-xs mt-1">
-                  <span>0%</span>
-                  <span>100%</span>
-                </div>
-                <template v-if="hasAudioSource(user.id, 'screen-audio')">
-                  <div class="mt-3 text-xs font-semibold mb-1">
-                    Screen share
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    :value="voiceStore.getTrackVolume(user.id, 'screen-audio')"
-                    @input="
-                      onTrackVolumeChange(user.id, 'screen-audio', $event)
-                    "
-                    class="w-full"
-                  />
-                  <div class="flex justify-between text-xs mt-1">
-                    <span>0%</span>
-                    <span>100%</span>
-                  </div>
-                </template>
-                <button
-                  class="btn btn-xs btn-outline w-full mt-2"
-                  @click="closeVolumeMenu"
-                >
-                  Close
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -286,6 +250,121 @@
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="volumeMenuUser"
+        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+        role="presentation"
+        @pointerdown.self="closeVolumeMenu"
+      >
+        <section
+          ref="volumeDialog"
+          class="w-full max-w-md border border-base-content/20 bg-base-200 text-base-content shadow-2xl"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="participant-volume-title"
+          tabindex="-1"
+        >
+          <header
+            class="flex items-center justify-between gap-4 border-b border-base-content/15 px-5 py-4"
+          >
+            <div class="min-w-0">
+              <p
+                class="text-xs font-semibold uppercase tracking-wider text-base-content/55"
+              >
+                Playback volume
+              </p>
+              <h4
+                id="participant-volume-title"
+                class="truncate text-lg font-bold"
+              >
+                {{ getUserDisplayName(volumeMenuUser) }}
+              </h4>
+            </div>
+            <button
+              class="btn btn-ghost btn-square btn-sm shrink-0"
+              type="button"
+              aria-label="Close volume settings"
+              @click="closeVolumeMenu"
+            >
+              <Icon name="lucide:x" class="size-5" />
+            </button>
+          </header>
+
+          <div class="space-y-6 p-5">
+            <div>
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <label
+                  class="flex items-center gap-2 font-semibold"
+                  for="participant-voice-volume"
+                >
+                  <Icon name="lucide:mic" class="size-4 text-primary" />
+                  Voice
+                </label>
+                <output class="text-sm font-semibold tabular-nums">
+                  {{ trackVolumePercent(volumeMenuUser.id, "audio") }}%
+                </output>
+              </div>
+              <input
+                id="participant-voice-volume"
+                class="range range-primary w-full"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                :value="voiceStore.getTrackVolume(volumeMenuUser.id, 'audio')"
+                @input="onTrackVolumeChange(volumeMenuUser.id, 'audio', $event)"
+              />
+              <div
+                class="mt-2 flex justify-between text-xs text-base-content/55"
+              >
+                <span>Muted</span>
+                <span>100%</span>
+              </div>
+            </div>
+
+            <div v-if="hasAudioSource(volumeMenuUser.id, 'screen-audio')">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <label
+                  class="flex items-center gap-2 font-semibold"
+                  for="participant-screen-volume"
+                >
+                  <Icon
+                    name="lucide:monitor-up"
+                    class="size-4 text-secondary"
+                  />
+                  Screen share
+                </label>
+                <output class="text-sm font-semibold tabular-nums">
+                  {{ trackVolumePercent(volumeMenuUser.id, "screen-audio") }}%
+                </output>
+              </div>
+              <input
+                id="participant-screen-volume"
+                class="range range-secondary w-full"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                :value="
+                  voiceStore.getTrackVolume(volumeMenuUser.id, 'screen-audio')
+                "
+                @input="
+                  onTrackVolumeChange(volumeMenuUser.id, 'screen-audio', $event)
+                "
+              />
+              <div
+                class="mt-2 flex justify-between text-xs text-base-content/55"
+              >
+                <span>Muted</span>
+                <span>100%</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </Teleport>
 
     <!-- Voice Controls at Bottom (Discord-style) -->
     <div
@@ -578,12 +657,19 @@ async function toggleSystemAudioShare() {
   }
 }
 const volumeMenuUser = ref(null);
-function openVolumeMenu(user) {
-  console.debug("[VoiceChannel] Opening volume menu for user:", user);
+const volumeDialog = ref(null);
+let volumeMenuTrigger = null;
+
+async function openVolumeMenu(user, trigger = null) {
+  if (isLocalUser(user)) return;
+  volumeMenuTrigger = trigger instanceof HTMLElement ? trigger : null;
   volumeMenuUser.value = user;
+  await nextTick();
+  volumeDialog.value?.focus();
 }
 function closeVolumeMenu() {
   volumeMenuUser.value = null;
+  nextTick(() => volumeMenuTrigger?.focus());
 }
 function onTrackVolumeChange(userId, source, event) {
   voiceStore.setTrackVolume(userId, source, Number(event.target.value));
@@ -594,6 +680,14 @@ function hasAudioSource(userId, source) {
     ([, feed]) =>
       String(feed.userId) === String(userId) && feed.source === source,
   );
+}
+
+function trackVolumePercent(userId, source) {
+  return Math.round(voiceStore.getTrackVolume(userId, source) * 100);
+}
+
+function onVolumeDialogKeydown(event) {
+  if (event.key === "Escape" && volumeMenuUser.value) closeVolumeMenu();
 }
 
 const currentConnectedChannelName = computed(() => {
@@ -699,7 +793,10 @@ async function leaveChannel() {
   }
 }
 
-onUnmounted(() => {});
+onMounted(() => document.addEventListener("keydown", onVolumeDialogKeydown));
+onUnmounted(() =>
+  document.removeEventListener("keydown", onVolumeDialogKeydown),
+);
 </script>
 
 <style scoped>

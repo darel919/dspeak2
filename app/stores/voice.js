@@ -166,13 +166,14 @@ export const useVoiceStore = defineStore("voice", () => {
 
   function upsertUserProfile(profile) {
     if (!profile || !profile.id) return;
-    const prev = userDirectory.value.get(profile.id) || {};
-    const merged = { ...prev, ...profile };
-    userDirectory.value.set(profile.id, merged);
+    const userId = String(profile.id);
+    const prev = userDirectory.value.get(userId) || {};
+    const merged = { ...prev, ...profile, id: userId };
+    userDirectory.value.set(userId, merged);
 
-    const cu = connectedUsers.value.get(profile.id);
+    const cu = connectedUsers.value.get(userId);
     if (cu) {
-      connectedUsers.value.set(profile.id, { ...cu, ...merged });
+      connectedUsers.value.set(userId, { ...cu, ...merged });
       connectedUsers.value = new Map(connectedUsers.value);
     }
   }
@@ -182,11 +183,12 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   function addConnectedUser(userId, userInfo) {
-    const cached = userDirectory.value.get(userId) || {};
-    connectedUsers.value.set(userId, {
-      id: userId,
+    const normalizedUserId = String(userId);
+    const cached = userDirectory.value.get(normalizedUserId) || {};
+    connectedUsers.value.set(normalizedUserId, {
       ...cached,
       ...userInfo,
+      id: normalizedUserId,
       speaking: false,
       muted: false,
     });
@@ -194,18 +196,18 @@ export const useVoiceStore = defineStore("voice", () => {
     connectedUsers.value = new Map(connectedUsers.value);
 
     if (
-      typeof userVolumes.value[userId] === "undefined" &&
+      typeof userVolumes.value[normalizedUserId] === "undefined" &&
       typeof window !== "undefined"
     ) {
-      const el = document.getElementById(`audio-${userId}`);
+      const el = document.getElementById(`audio-${normalizedUserId}`);
       if (el && typeof el.volume === "number") {
-        userVolumes.value[userId] = el.volume;
+        userVolumes.value[normalizedUserId] = el.volume;
       }
     }
   }
 
   function removeConnectedUser(userId) {
-    connectedUsers.value.delete(userId);
+    connectedUsers.value.delete(String(userId));
     connectedUsers.value = new Map(connectedUsers.value);
   }
   function setUserVolume(userId, volume) {
@@ -250,7 +252,8 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   function updateUserSpeaking(userId, speaking) {
-    let user = connectedUsers.value.get(userId);
+    const normalizedUserId = String(userId);
+    let user = connectedUsers.value.get(normalizedUserId);
     if (!user) {
       try {
         const auth =
@@ -258,21 +261,22 @@ export const useVoiceStore = defineStore("voice", () => {
             ? useAuthStore().getUserData()
             : null;
         if (auth && String(auth.id) === String(userId)) {
-          addConnectedUser(userId, { id: userId });
-          user = connectedUsers.value.get(userId);
+          addConnectedUser(normalizedUserId, { id: normalizedUserId });
+          user = connectedUsers.value.get(normalizedUserId);
         }
       } catch (_) {}
     }
     if (!user) return;
 
-    connectedUsers.value.set(userId, { ...user, speaking });
+    connectedUsers.value.set(normalizedUserId, { ...user, speaking });
     connectedUsers.value = new Map(connectedUsers.value);
   }
 
   function updateUserMuted(userId, muted) {
-    const user = connectedUsers.value.get(userId);
+    const normalizedUserId = String(userId);
+    const user = connectedUsers.value.get(normalizedUserId);
     if (user) {
-      connectedUsers.value.set(userId, {
+      connectedUsers.value.set(normalizedUserId, {
         ...user,
         muted,
         ...(muted ? { speaking: false } : {}),
@@ -703,11 +707,11 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   function isUserConnected(userId) {
-    return connectedUsers.value.has(userId);
+    return connectedUsers.value.has(String(userId));
   }
 
   function getUserById(userId) {
-    return connectedUsers.value.get(userId);
+    return connectedUsers.value.get(String(userId));
   }
 
   async function applyOutputDevice() {
@@ -723,7 +727,7 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
   function getUserProfile(userId) {
-    return userDirectory.value.get(userId);
+    return userDirectory.value.get(String(userId));
   }
 
   if (typeof window !== "undefined") {

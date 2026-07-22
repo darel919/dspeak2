@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createRoomTopology,
   RoomTopologyCoordinator,
+  roomTopologyPayload,
 } from "../server/utils/room-topology.js";
 import { matchesPreparedActivation } from "../server/utils/media-transition.js";
 
@@ -23,6 +24,7 @@ function harness(peerCount) {
     sessions.set(id, {
       peer: { id },
       userId: `user-${index}`,
+      profile: { id: `user-${index}`, display_name: `User ${index}` },
       sources: new Set(["audio"]),
     });
   }
@@ -40,6 +42,14 @@ function harness(peerCount) {
   });
   return { room, coordinator, broadcasts, timers };
 }
+
+test("topology membership carries the authenticated participant profile", () => {
+  const { room } = harness(1);
+  assert.deepEqual(roomTopologyPayload(room).peers[0].profile, {
+    id: "user-1",
+    display_name: "User 1",
+  });
+});
 
 function qualifyCompleteMesh(room, coordinator) {
   const peerIds = [...room.sessions.keys()];

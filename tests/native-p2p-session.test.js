@@ -8,6 +8,47 @@ import {
 } from "../app/shared/native-p2p.js";
 import { setReceiverJitterBufferTarget } from "../app/shared/receiver-settings.js";
 
+test("P2P receiving preferences disable the remote sender encoding", async () => {
+  const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} });
+  const parameters = { encodings: [{}] };
+  const state = {
+    sourceReceiving: new Map(),
+    senders: new Map([
+      [
+        "screen",
+        {
+          getParameters: () => parameters,
+          setParameters: async () => {},
+        },
+      ],
+    ]),
+  };
+
+  await mesh.setSenderReceiving(state, "screen", false);
+
+  assert.equal(state.sourceReceiving.get("screen"), false);
+  assert.equal(parameters.encodings[0].active, false);
+});
+
+test("P2P screen receiving signals video and shared audio together", () => {
+  const signals = [];
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: (signal) => signals.push(signal),
+  });
+  mesh.epoch = 7;
+
+  mesh.setRemoteReceiving("peer-2", "screen", false);
+
+  assert.deepEqual(
+    signals.map((message) => message.signal.sourceReceiving),
+    [
+      { source: "screen", receiving: false },
+      { source: "screen-audio", receiving: false },
+    ],
+  );
+});
+
 test("P2P source toggles reuse their sender instead of accumulating transceivers", async () => {
   const signals = [];
   const replacements = [];

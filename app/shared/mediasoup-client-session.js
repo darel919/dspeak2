@@ -62,6 +62,7 @@ export class MediasoupClientSession {
     this.closed = false;
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
+    this.remoteReceiving = new Map();
   }
 
   async initialize() {
@@ -378,7 +379,41 @@ export class MediasoupClientSession {
     consumer.on("transportclose", close);
     consumer.on("trackended", close);
     this.onRemoteTrack?.(entry);
-    this.send({ type: "resume-consumer", data: { consumerId: consumer.id } });
+    if (this.shouldReceive(data.userId, entry.source))
+      this.setConsumerReceiving(entry, true);
+  }
+
+  shouldReceive(userId, source) {
+    const key = `${String(userId)}:${String(source)}`;
+    if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
+    return source !== "screen" && source !== "screen-audio";
+  }
+
+  setRemoteReceiving(userId, source, receiving) {
+    const pairedSources =
+      source === "screen" || source === "screen-audio"
+        ? ["screen", "screen-audio"]
+        : [source];
+    for (const pairedSource of pairedSources) {
+      this.remoteReceiving.set(
+        `${String(userId)}:${String(pairedSource)}`,
+        Boolean(receiving),
+      );
+      for (const entry of this.consumers.values())
+        if (
+          String(entry.userId) === String(userId) &&
+          entry.source === pairedSource
+        )
+          this.setConsumerReceiving(entry, receiving);
+    }
+  }
+
+  setConsumerReceiving(entry, receiving) {
+    entry.track.enabled = Boolean(receiving);
+    this.send({
+      type: receiving ? "resume-consumer" : "pause-consumer",
+      data: { consumerId: entry.consumer.id },
+    });
   }
 
   closeConsumerByProducer(producerId) {
@@ -510,6 +545,7 @@ export class MediasoupClientSession {
     }
     this.producers.clear();
     this.consumers.clear();
+    this.remoteReceiving.clear();
     this.sendTransport?.close();
     this.recvTransport?.close();
     this.sendTransport = null;

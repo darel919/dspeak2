@@ -66,6 +66,14 @@ test("voice controls resize the stage instead of covering participant tiles", as
   assert.doesNotMatch(source, /class="voice-controls absolute/);
 });
 
+test("participant volume controls render outside the scrolling participant strip", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /<Teleport to="body">/);
+  assert.match(source, /aria-modal="true"/);
+  assert.match(source, /Adjust volume for/);
+  assert.doesNotMatch(source, /absolute top-2 right-2 bg-base-200/);
+});
+
 test("room administration uses explicit responsive form layouts", async () => {
   const source = await readFile("app/pages/room/[roomId]/settings.vue", "utf8");
   assert.doesNotMatch(source, /class="form-control/);

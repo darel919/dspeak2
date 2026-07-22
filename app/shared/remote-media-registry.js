@@ -16,6 +16,7 @@ export class RemoteMediaRegistry {
     isBroadcastMode,
     onSpeaking,
     getAttenuation,
+    onVideoReceivingChange,
   }) {
     this.audioFeeds = audioFeeds;
     this.videoFeeds = videoFeeds;
@@ -25,6 +26,7 @@ export class RemoteMediaRegistry {
     this.isBroadcastMode = isBroadcastMode;
     this.onSpeaking = onSpeaking;
     this.getAttenuation = getAttenuation;
+    this.onVideoReceivingChange = onVideoReceivingChange;
     this.voiceDetectors = new Map();
     this.speakingUsers = new Set();
     this.volumeTimers = new Map();
@@ -41,6 +43,8 @@ export class RemoteMediaRegistry {
       entry.track.enabled = receiving;
       this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
       this.videoFeeds.value = new Map(this.videoFeeds.value);
+      if (entry.source === "screen")
+        this.onVideoReceivingChange?.(entry, receiving);
       return;
     }
     this.remove(entry.key);
@@ -59,6 +63,7 @@ export class RemoteMediaRegistry {
       receiving: Boolean(receiving),
     });
     this.videoFeeds.value = new Map(this.videoFeeds.value);
+    this.onVideoReceivingChange?.(entry, Boolean(receiving));
     return true;
   }
 
