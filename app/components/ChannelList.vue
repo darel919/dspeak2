@@ -1,5 +1,11 @@
 <template>
   <div class="flex flex-col h-full bg-base-200">
+    <img
+      v-if="room?.headerImage"
+      :src="roomAssetUrl(room.headerImage)"
+      :alt="`${room.name} header`"
+      class="aspect-[3/1] w-full object-cover"
+    />
     <!-- Channel list header -->
     <div class="p-4 border-base-300">
       <div class="flex items-center justify-between">
@@ -12,7 +18,9 @@
             tabindex="0"
             class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52"
           >
-            <li><a @click="showCreateChannel = true">Create Channel</a></li>
+            <li v-if="hasPermission('channel.create')">
+              <a @click="showCreateChannel = true">Create Channel</a>
+            </li>
             <li>
               <a
                 @click="goToRoomSettings"
@@ -702,6 +710,12 @@ const isRoomOwnerOrAdmin = computed(() => {
   if (!props.room || !props.room.owner) return false;
   return props.room.owner.id === currentUserId.value;
 });
+function hasPermission(permission) {
+  return (
+    props.room?.owner?.id === currentUserId.value ||
+    props.room?.permissions?.includes(permission)
+  );
+}
 async function handleDeleteRoom() {
   if (!props.room || !props.room.id) return;
   if (
@@ -743,6 +757,7 @@ async function loadUnreadCounts() {
   try {
     const counts = await channelsStore.getUnreadCounts();
     unreadCounts.value = counts;
+    useState("unread-counts", () => []).value = counts;
   } catch (error) {
     console.error("Failed to load unread counts:", error);
   }
@@ -818,7 +833,8 @@ async function deleteChannel(channel) {
 function canDeleteChannel(channel) {
   return (
     channel.owner?.id === currentUserId.value ||
-    props.room.owner?.id === currentUserId.value
+    props.room.owner?.id === currentUserId.value ||
+    hasPermission("channel.delete")
   );
 }
 
@@ -892,3 +908,7 @@ watch(
   opacity: 1;
 }
 </style>
+const runtimeConfig = useRuntimeConfig(); function roomAssetUrl(path) { if
+(!path) return ""; if (/^https?:\/\//.test(path)) return path; return
+`${runtimeConfig.public.apiPath.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+}

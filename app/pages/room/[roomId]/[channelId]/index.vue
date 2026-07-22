@@ -5,7 +5,7 @@
         <!-- Desktop Layout -->
         <div v-show="!isMobile" class="flex min-h-0 w-full overflow-hidden">
           <!-- Channel List Sidebar -->
-          <div class="w-64 border-base-300">
+          <div class="w-[280px] shrink-0 border-r border-base-300">
             <ChannelList
               v-if="room"
               :room="room"
@@ -182,9 +182,6 @@ watch(
   room,
   async (r) => {
     if (r && r.name) {
-      if (import.meta.client) {
-        document.title = `${r.name} - dSpeak`;
-      }
       try {
         await channelsStore.fetchChannels(r.id);
 
@@ -206,10 +203,6 @@ watch(
         }
       } catch (error) {
         console.error("Failed to fetch channels:", error);
-      }
-    } else {
-      if (import.meta.client) {
-        document.title = "dSpeak";
       }
     }
   },

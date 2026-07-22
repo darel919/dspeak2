@@ -137,6 +137,7 @@ export const useChannelsStore = defineStore("channels", () => {
           name: channelData.name?.trim(),
           desc: channelData.desc,
           audio_bitrate: channelData.audio_bitrate,
+          mediaPolicy: channelData.mediaPolicy,
         }),
       });
 
@@ -405,6 +406,20 @@ export const useChannelsStore = defineStore("channels", () => {
     error.value = null;
   }
 
+  function applyRealtimePolicy(channelId, mediaPolicy) {
+    const channel = channels.value.find((item) => item.id === channelId);
+    if (!channel || !mediaPolicy) return false;
+    if (
+      Number(channel.mediaPolicy?.revision || 0) >=
+      Number(mediaPolicy.revision || 0)
+    )
+      return false;
+    channel.mediaPolicy = mediaPolicy;
+    channel.audio_bitrate = mediaPolicy.microphoneKbps;
+    channels.value = [...channels.value];
+    return true;
+  }
+
   return {
     channels: readonly(channels),
     loading: readonly(loading),
@@ -422,5 +437,6 @@ export const useChannelsStore = defineStore("channels", () => {
     getTextChannels,
     getMediaChannels,
     clearChannels,
+    applyRealtimePolicy,
   };
 });

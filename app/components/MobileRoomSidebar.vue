@@ -98,22 +98,22 @@
         <div class="text-base-content/50 mb-4">
           <Icon name="lucide:message-circle" class="h-16 w-16 mx-auto mb-4" />
         </div>
-        <h3 class="font-medium mb-2">No servers found</h3>
+        <h3 class="font-medium mb-2">No rooms found</h3>
         <p class="text-sm text-base-content/60 mb-4">
-          Join or create a server to get started
+          Join or create a room to get started
         </p>
         <div class="space-y-2">
           <button
             @click="showJoinModal = true"
             class="btn btn-sm btn-primary w-full"
           >
-            Join Server
+            Join Room
           </button>
           <button
             @click="showCreateModal = true"
             class="btn btn-sm btn-outline w-full"
           >
-            Create Server
+            Create Room
           </button>
         </div>
       </div>
@@ -125,7 +125,7 @@
         <button
           @click="showJoinModal = true"
           class="btn btn-sm btn-ghost flex-1"
-          title="Join Server"
+          title="Join room"
         >
           <Icon name="lucide:link" class="h-4 w-4" />
           Join
@@ -133,7 +133,7 @@
         <button
           @click="showCreateModal = true"
           class="btn btn-sm btn-ghost flex-1"
-          title="Create Server"
+          title="Create room"
         >
           <Icon name="lucide:plus" class="h-4 w-4" />
           Create
@@ -144,16 +144,16 @@
     <!-- Join Room Modal -->
     <div v-if="showJoinModal" class="modal modal-open">
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Join Server</h3>
+        <h3 class="font-bold text-lg mb-4">Join Room</h3>
         <p class="text-base-content/70 mb-4">
-          Enter a server ID or paste a join link to join a server.
+          Enter a room ID or paste a join link to join a room.
         </p>
         <div class="form-control mb-4">
           <input
             v-model="joinInput"
             ref="joinInputRef"
             type="text"
-            placeholder="Server ID or invite link..."
+            placeholder="Room ID or invite link..."
             class="input input-bordered w-full"
             @keyup.enter="handleJoinSubmit"
           />
@@ -179,7 +179,7 @@
             :disabled="!joinInput.trim() || joiningRoom"
             :class="{ loading: joiningRoom }"
           >
-            {{ joiningRoom ? "Joining..." : "Join Server" }}
+            {{ joiningRoom ? "Joining..." : "Join Room" }}
           </button>
         </div>
       </div>
@@ -189,18 +189,18 @@
     <!-- Create Room Modal -->
     <div v-if="showCreateModal" class="modal modal-open">
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Create Server</h3>
+        <h3 class="font-bold text-lg mb-4">Create Room</h3>
         <div class="form-control mb-4">
           <label class="label">
             <span class="label-text"
-              >Server Name <span class="text-error">*</span></span
+              >Room Name <span class="text-error">*</span></span
             >
           </label>
           <input
             v-model="createName"
             ref="createNameRef"
             type="text"
-            placeholder="Enter server name..."
+            placeholder="Enter room name..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
           />
@@ -238,7 +238,7 @@
             :disabled="!createName.trim() || creatingRoom"
             :class="{ loading: creatingRoom }"
           >
-            {{ creatingRoom ? "Creating..." : "Create Server" }}
+            {{ creatingRoom ? "Creating..." : "Create Room" }}
           </button>
         </div>
       </div>
@@ -328,14 +328,14 @@ async function handleJoinSubmit() {
   try {
     const roomId = extractRoomIdFromInput(joinInput.value);
     if (!roomId) {
-      throw new Error("Invalid server ID or join link");
+      throw new Error("Invalid room ID or join link");
     }
     await roomsStore.joinRoom(roomId);
-    success("Successfully joined server!");
+    success("Successfully joined room!");
     closeJoinModal();
     router.push(`/room/${roomId}`);
   } catch (err) {
-    joinError.value = err.message || "Failed to join server";
+    joinError.value = err.message || "Failed to join room";
   } finally {
     joiningRoom.value = false;
   }
@@ -350,7 +350,7 @@ async function handleCreateSubmit() {
       createName.value,
       createDesc.value,
     );
-    success("Server created successfully!");
+    success("Room created successfully!");
     closeCreateModal();
     if (room && room.id) {
       router.push(`/room/${room.id}`);
@@ -360,7 +360,7 @@ async function handleCreateSubmit() {
     if (msg.includes("409") && msg.includes("already exists")) {
       createError.value = "Pick another name, this name is already taken";
     } else {
-      createError.value = msg || "Failed to create server";
+      createError.value = msg || "Failed to create room";
     }
   } finally {
     creatingRoom.value = false;

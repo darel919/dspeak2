@@ -2,27 +2,47 @@
   <Teleport to="body" :disabled="!isFullscreen">
     <figure
       ref="feedElement"
-      class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden rounded-xl bg-black shadow-lg"
+      class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden bg-black shadow-lg"
       :class="[
-        source === 'screen' ? 'cursor-zoom-in' : '',
+        receiving ? 'cursor-zoom-in' : '',
         { 'fullscreen-feed-active': isFullscreen },
       ]"
       :data-feed-key="feedKey"
       :title="
-        source === 'screen' && !isFullscreen
+        receiving && !isFullscreen
           ? 'Double-click to view fullscreen'
           : undefined
       "
       @dblclick.prevent="toggleFullscreen"
+      @touchend="handleTouchEnd"
     >
       <video
-        v-show="previewEnabled"
+        v-show="previewEnabled && receiving"
         ref="videoElement"
         autoplay
         playsinline
         :muted="muted"
         class="block h-full w-full object-contain"
       />
+      <div
+        v-if="source === 'screen' && !receiving"
+        class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
+      >
+        <Icon name="lucide:monitor-play" class="size-10 text-primary" />
+        <div>
+          <div class="font-medium">{{ label }} is sharing a screen</div>
+          <div class="mt-1 text-sm text-base-content/60">
+            Start it only when you want to receive the video.
+          </div>
+        </div>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          @click="$emit('start-receiving')"
+        >
+          Start screen share
+        </button>
+      </div>
       <div
         v-if="localScreenPreviewPaused"
         class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
@@ -43,12 +63,12 @@
         </button>
       </div>
       <figcaption
-        class="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white"
+        class="absolute bottom-2 left-2 bg-black/70 px-2 py-1 text-xs text-white"
       >
         {{ label }} · {{ source === "screen" ? "Screen" : "Camera" }}
       </figcaption>
       <button
-        v-if="source === 'screen' && isFullscreen"
+        v-if="isFullscreen"
         type="button"
         class="btn btn-circle btn-sm absolute right-3 top-3 border-white/30 bg-black/70 text-white hover:bg-black/90"
         title="Exit fullscreen"
@@ -57,6 +77,23 @@
       >
         <Icon name="lucide:minimize-2" class="size-4" />
       </button>
+      <button
+        v-if="source === 'screen' && receiving && !isFullscreen"
+        type="button"
+        class="btn btn-sm absolute right-3 top-3 bg-black/70 text-white hover:bg-black/90"
+        @click.stop="$emit('stop-receiving')"
+      >
+        <Icon name="lucide:monitor-off" class="size-4" />
+        Stop
+      </button>
+      <video
+        v-if="isFullscreen && ownCameraStream && feedKey !== ownCameraFeedKey"
+        ref="ownCameraElement"
+        autoplay
+        playsinline
+        muted
+        class="absolute bottom-4 right-4 z-10 aspect-video w-28 border-2 border-white bg-black object-cover shadow-xl sm:w-48 md:w-64"
+      />
     </figure>
   </Teleport>
 </template>
@@ -69,12 +106,18 @@ const props = defineProps({
   label: { type: String, required: true },
   muted: { type: Boolean, default: false },
   local: { type: Boolean, default: false },
+  receiving: { type: Boolean, default: true },
+  ownCameraStream: { type: Object, default: null },
+  ownCameraFeedKey: { type: String, default: null },
 });
+defineEmits(["start-receiving", "stop-receiving"]);
 
 const videoElement = ref(null);
 const feedElement = ref(null);
+const ownCameraElement = ref(null);
 const isFullscreen = ref(false);
 const previewEnabled = ref(!(props.local && props.source === "screen"));
+let lastTouchAt = 0;
 const localScreenPreviewPaused = computed(
   () => props.local && props.source === "screen" && !previewEnabled.value,
 );
@@ -100,7 +143,7 @@ async function exitFullscreen() {
 }
 
 async function toggleFullscreen() {
-  if (props.source !== "screen" || !feedElement.value) return;
+  if (!props.receiving || !feedElement.value) return;
   try {
     if (isFullscreen.value) {
       await exitFullscreen();
@@ -117,6 +160,17 @@ async function toggleFullscreen() {
   }
 }
 
+function handleTouchEnd(event) {
+  const now = Date.now();
+  if (now - lastTouchAt <= 320) {
+    event.preventDefault();
+    toggleFullscreen();
+    lastTouchAt = 0;
+    return;
+  }
+  lastTouchAt = now;
+}
+
 function attachStream() {
   if (
     previewEnabled.value &&
@@ -125,6 +179,13 @@ function attachStream() {
   ) {
     videoElement.value.srcObject = props.stream;
     videoElement.value.play?.().catch(() => {});
+  }
+  if (
+    ownCameraElement.value &&
+    ownCameraElement.value.srcObject !== props.ownCameraStream
+  ) {
+    ownCameraElement.value.srcObject = props.ownCameraStream;
+    ownCameraElement.value.play?.().catch(() => {});
   }
 }
 
@@ -140,11 +201,17 @@ onMounted(() => {
   document.addEventListener("webkitfullscreenchange", syncFullscreenState);
 });
 watch(() => props.stream, attachStream);
+watch(
+  () => props.ownCameraStream,
+  () => nextTick(attachStream),
+);
+watch(isFullscreen, () => nextTick(attachStream));
 
 onBeforeUnmount(() => {
   document.removeEventListener("fullscreenchange", syncFullscreenState);
   document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
   if (videoElement.value) videoElement.value.srcObject = null;
+  if (ownCameraElement.value) ownCameraElement.value.srcObject = null;
 });
 </script>
 

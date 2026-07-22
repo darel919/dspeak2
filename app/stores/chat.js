@@ -3,6 +3,8 @@ import BackgroundWorker from "../utils/BackgroundWorker";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import { useRoomsStore } from "./rooms";
+import { useChannelsStore } from "./channels";
+import { useNotificationsStore } from "./notifications";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
@@ -439,6 +441,16 @@ export const useChatStore = defineStore("chat", () => {
         case "participant_change":
           console.debug("[ChatStore] Participant change detected:", data);
           await handleParticipantChange();
+          break;
+        case "notification_created":
+        case "notifications_read":
+          useNotificationsStore().receiveRealtime(data);
+          break;
+        case "channel_policy_updated":
+          useChannelsStore().applyRealtimePolicy(
+            data.data.channelId,
+            data.data.mediaPolicy,
+          );
           break;
         default:
           console.debug("[ChatStore] Unknown message type:", data.type, data);

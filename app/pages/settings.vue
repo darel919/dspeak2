@@ -3,7 +3,7 @@
     class="min-h-screen-minus-navbar bg-base-200/35 px-4 py-6 text-base-content sm:px-6 lg:py-8"
   >
     <div
-      class="mx-auto flex max-w-6xl flex-col overflow-hidden rounded-2xl border border-base-300 bg-base-100 shadow-sm lg:min-h-[680px] lg:flex-row"
+      class="mx-auto flex max-w-6xl flex-col overflow-hidden border border-base-300 bg-base-100 shadow-sm lg:min-h-[680px] lg:flex-row"
     >
       <aside
         class="border-b border-base-300 bg-base-200/55 px-4 py-4 lg:w-60 lg:shrink-0 lg:border-b-0 lg:border-r lg:px-4 lg:py-5"
@@ -26,7 +26,7 @@
           </button>
         </div>
         <nav
-          class="mt-4 grid grid-cols-3 gap-1 lg:block lg:space-y-1"
+          class="mt-4 grid grid-cols-2 gap-1 sm:grid-cols-4 lg:block lg:space-y-1"
           aria-label="Settings categories"
         >
           <button
@@ -395,7 +395,61 @@
             </div>
           </section>
 
-          <section v-else><NotificationSettings /></section>
+          <section v-else-if="activeSection === 'appearance'" class="space-y-6">
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>Surface mode</h2>
+                  <p>Choose how Metro surfaces adapt to your display.</p>
+                </div>
+              </div>
+              <div class="grid gap-2 p-5 sm:grid-cols-3">
+                <button
+                  v-for="mode in ['system', 'light', 'dark']"
+                  :key="mode"
+                  class="btn capitalize"
+                  :class="
+                    settingsStore.appearance.surfaceMode === mode
+                      ? 'btn-primary'
+                      : 'btn-outline'
+                  "
+                  @click="settingsStore.setAppearance({ surfaceMode: mode })"
+                >
+                  {{ mode }}
+                </button>
+              </div>
+            </div>
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>Personal accent</h2>
+                  <p>
+                    Rooms temporarily replace this color with their own accent.
+                  </p>
+                </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2 p-5 sm:grid-cols-6">
+                <button
+                  v-for="accent in ROOM_ACCENTS"
+                  :key="accent"
+                  class="h-20 border-4 text-xs capitalize text-white"
+                  :class="
+                    settingsStore.appearance.accent === accent
+                      ? 'border-base-content'
+                      : 'border-transparent'
+                  "
+                  :style="{ background: accentColor(accent) }"
+                  @click="settingsStore.setAppearance({ accent })"
+                >
+                  {{ accent }}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section v-else-if="activeSection === 'notifications'">
+            <NotificationSettings />
+          </section>
         </div>
       </main>
     </div>
@@ -415,6 +469,7 @@ import {
   VIDEO_FRAME_RATE_OPTIONS,
   VIDEO_RESOLUTION_OPTIONS,
 } from "../const/media";
+import { ROOM_ACCENTS } from "~~/shared/room-policy.js";
 
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
@@ -425,6 +480,7 @@ const router = useRouter();
 const settingsNavigation = [
   { id: "account", label: "Account", icon: "lucide:user-round" },
   { id: "voice", label: "Voice & Video", icon: "lucide:audio-lines" },
+  { id: "appearance", label: "Appearance", icon: "lucide:palette" },
   { id: "notifications", label: "Notifications", icon: "lucide:bell" },
 ];
 const sectionDetails = {
@@ -436,6 +492,10 @@ const sectionDetails = {
     title: "Voice & video",
     description:
       "Configure capture devices, call processing, and media quality.",
+  },
+  appearance: {
+    title: "Appearance",
+    description: "Choose your Metro surface and personal accent.",
   },
   notifications: {
     title: "Notifications",
@@ -474,6 +534,17 @@ const systemAudioBitrate = computed(() => settingsStore.systemAudioBitrate);
 const systemAudioBitrateOptions = SYSTEM_AUDIO_BITRATE_OPTIONS;
 const resolutionOptions = VIDEO_RESOLUTION_OPTIONS;
 const frameRateOptions = VIDEO_FRAME_RATE_OPTIONS;
+
+function accentColor(value) {
+  return {
+    cobalt: "#0050ef",
+    cyan: "#00aba9",
+    violet: "#6a00ff",
+    magenta: "#d80073",
+    orange: "#e3a21a",
+    lime: "#60a917",
+  }[value];
+}
 
 function setCameraResolution(resolution) {
   settingsStore.setCameraVideoSettings({ resolution });
@@ -705,85 +776,3 @@ function onOutputChange() {
   }
 }
 </script>
-
-<style scoped>
-.settings-panel {
-  overflow: hidden;
-  border: 1px solid var(--color-base-300);
-  border-radius: 0.75rem;
-  background: var(--color-base-100);
-  box-shadow: 0 1px 2px
-    color-mix(in oklab, var(--color-base-content) 8%, transparent);
-}
-
-.settings-panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1.25rem;
-  border-bottom: 1px solid var(--color-base-300);
-}
-
-.settings-panel-heading h2 {
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.settings-panel-heading p {
-  margin-top: 0.2rem;
-  font-size: 0.8rem;
-  color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
-}
-
-.settings-row,
-.settings-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1.25rem;
-  padding: 1rem 1.25rem;
-}
-
-.settings-row-label {
-  display: flex;
-  min-width: 9rem;
-  align-items: center;
-  gap: 0.65rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.settings-row-label :deep(svg) {
-  width: 1rem;
-  height: 1rem;
-  color: var(--color-primary);
-}
-
-.settings-toggle-row strong,
-.settings-toggle-row small {
-  display: block;
-}
-
-.settings-toggle-row strong {
-  font-size: 0.875rem;
-}
-
-.settings-toggle-row small {
-  margin-top: 0.2rem;
-  font-size: 0.75rem;
-  color: color-mix(in oklab, var(--color-base-content) 62%, transparent);
-}
-
-@media (max-width: 640px) {
-  .settings-row {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 0.65rem;
-  }
-
-  .settings-panel-heading {
-    align-items: flex-start;
-  }
-}
-</style>

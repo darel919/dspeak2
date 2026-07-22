@@ -10,9 +10,9 @@
 
       <div v-if="message" class="space-y-4">
         <!-- Read Status -->
-        <div class="card bg-base-200">
-          <div class="card-body">
-            <h4 class="card-title text-sm">Read Status</h4>
+        <section class="border border-base-300 bg-base-200">
+          <div class="p-4">
+            <h4 class="text-sm font-semibold">Read Status</h4>
             <div class="space-y-2">
               <div class="flex items-center gap-2 mb-2">
                 <span class="text-sm text-base-content/60">Total reads:</span>
@@ -61,12 +61,12 @@
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
         <!-- Timestamps -->
-        <div class="card bg-base-200">
-          <div class="card-body">
-            <h4 class="card-title text-sm">Timestamps</h4>
+        <section class="border border-base-300 bg-base-200">
+          <div class="p-4">
+            <h4 class="text-sm font-semibold">Timestamps</h4>
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">
                 <span class="text-base-content/60">Created:</span>
@@ -81,12 +81,12 @@
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
         <!-- Message ID -->
-        <div class="card bg-base-200">
-          <div class="card-body">
-            <h4 class="card-title text-sm">Technical Details</h4>
+        <section class="border border-base-300 bg-base-200">
+          <div class="p-4">
+            <h4 class="text-sm font-semibold">Technical Details</h4>
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">
                 <span class="text-base-content/60">Message ID:</span>
@@ -102,7 +102,7 @@
               </div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
       <div class="modal-action">

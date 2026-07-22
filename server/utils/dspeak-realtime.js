@@ -1,8 +1,33 @@
 const stateKey = Symbol.for("dspeak.realtime");
 
 function getState() {
-  if (!globalThis[stateKey]) globalThis[stateKey] = { channels: new Map() };
+  if (!globalThis[stateKey])
+    globalThis[stateKey] = { channels: new Map(), users: new Map() };
   return globalThis[stateKey];
+}
+
+export function addUserSubscriber(userId, peer) {
+  const state = getState();
+  if (!state.users.has(userId)) state.users.set(userId, new Set());
+  state.users.get(userId).add(peer);
+}
+
+export function removeUserSubscriber(userId, peer) {
+  const subscribers = getState().users.get(userId);
+  if (!subscribers) return;
+  subscribers.delete(peer);
+  if (!subscribers.size) getState().users.delete(userId);
+}
+
+export function broadcastToUser(userId, message) {
+  const payload = JSON.stringify(message);
+  for (const peer of getState().users.get(String(userId)) || []) {
+    try {
+      peer.send(payload);
+    } catch {
+      removeUserSubscriber(String(userId), peer);
+    }
+  }
 }
 
 export function addChannelSubscriber(channelId, peer) {

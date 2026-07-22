@@ -2,8 +2,7 @@
 @plugin "daisyui" {
   themes:
     light --default,
-    dark --prefersdark,
-    synthwave;
+    dark --prefersdark;
 }
 
 @theme {
@@ -24,6 +23,100 @@
     var(--color-base-100) 94%,
     var(--color-base-content)
   );
+}
+
+:root,
+[data-accent="cobalt"] {
+  --metro-accent: #0050ef;
+  --metro-accent-content: #ffffff;
+}
+[data-accent="cyan"] {
+  --metro-accent: #00aba9;
+  --metro-accent-content: #ffffff;
+}
+[data-accent="violet"] {
+  --metro-accent: #6a00ff;
+  --metro-accent-content: #ffffff;
+}
+[data-accent="magenta"] {
+  --metro-accent: #d80073;
+  --metro-accent-content: #ffffff;
+}
+[data-accent="orange"] {
+  --metro-accent: #e3a21a;
+  --metro-accent-content: #111111;
+}
+[data-accent="lime"] {
+  --metro-accent: #60a917;
+  --metro-accent-content: #ffffff;
+}
+
+.authenticated-shell,
+.authenticated-shell *,
+.metro-standalone,
+.metro-standalone *,
+.metro-pane,
+.metro-pane *,
+.modal,
+.modal *,
+.toast,
+.toast * {
+  border-radius: 0 !important;
+}
+
+.authenticated-shell {
+  --color-primary: var(--metro-accent);
+  --color-primary-content: var(--metro-accent-content);
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+.metro-standalone {
+  --color-primary: var(--metro-accent);
+  --color-primary-content: var(--metro-accent-content);
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+.authenticated-shell .card,
+.authenticated-shell .modal-box,
+.authenticated-shell .dropdown-content {
+  border-color: var(--color-base-300);
+  box-shadow: none;
+}
+
+.authenticated-shell .btn {
+  font-weight: 600;
+}
+
+.authenticated-shell .input,
+.authenticated-shell .textarea,
+.authenticated-shell .select,
+.authenticated-shell .file-input {
+  background-color: var(--color-base-100);
+}
+
+.metro-title {
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-weight: 300;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+
+.metro-pane {
+  border-color: color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  background: var(--color-base-100);
+}
+
+.metro-selected {
+  background: var(--metro-accent);
+  color: var(--metro-accent-content);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .metro-transition {
+    transition-duration: 180ms;
+    transition-property: background-color, color, transform, opacity;
+    transition-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1);
+  }
 }
 
 @font-face {
@@ -112,4 +205,120 @@ body {
 .min-h-screen-minus-navbar {
   min-height: calc(100vh - var(--navbar-height));
   min-height: calc(100dvh - var(--navbar-height));
+}
+
+.settings-panel {
+  overflow: hidden;
+  border: 1px solid var(--color-base-300);
+  background: var(--color-base-100);
+  box-shadow: 0 1px 2px
+    color-mix(in oklab, var(--color-base-content) 8%, transparent);
+}
+
+.settings-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--color-base-300);
+}
+
+.settings-panel-heading h2 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.settings-panel-heading p {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+}
+
+.settings-row,
+.settings-toggle-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+}
+
+.settings-row + .settings-row,
+.settings-row + .settings-toggle-row,
+.settings-toggle-row + .settings-toggle-row {
+  border-top: 1px solid var(--color-base-300);
+}
+
+.settings-row > span:first-child,
+.settings-toggle-row > span:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.settings-row strong,
+.settings-row small,
+.settings-toggle-row strong,
+.settings-toggle-row small {
+  display: block;
+}
+
+.settings-row strong,
+.settings-toggle-row strong {
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.settings-row small,
+.settings-toggle-row small {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: color-mix(in oklab, var(--color-base-content) 62%, transparent);
+}
+
+.settings-row > select,
+.settings-row > input[type="range"] {
+  width: min(100%, 26rem);
+  flex: 0 1 26rem;
+}
+
+.settings-toggle-row > input[type="checkbox"],
+.settings-toggle-row > span:last-child {
+  flex: 0 0 auto;
+}
+
+.settings-row-label {
+  display: flex;
+  min-width: 9rem;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.settings-row-label svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-primary);
+}
+
+@media (max-width: 640px) {
+  .settings-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .settings-row > select,
+  .settings-row > input[type="range"] {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .settings-panel-heading {
+    align-items: flex-start;
+  }
 }

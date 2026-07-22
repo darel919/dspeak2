@@ -100,6 +100,11 @@
               :label="feed.label"
               :muted="feed.local"
               :local="feed.local"
+              :receiving="feed.receiving !== false"
+              :own-camera-stream="ownCameraFeed?.stream || null"
+              :own-camera-feed-key="ownCameraFeed?.key || null"
+              @start-receiving="setScreenReceiving(feed, true)"
+              @stop-receiving="setScreenReceiving(feed, false)"
             />
           </div>
         </div>
@@ -531,6 +536,16 @@ const videoFeeds = computed(() => {
     (a, b) => Number(b.source === "screen") - Number(a.source === "screen"),
   );
 });
+const ownCameraFeed = computed(
+  () =>
+    videoFeeds.value.find((feed) => feed.local && feed.source === "camera") ||
+    null,
+);
+
+function setScreenReceiving(feed, receiving) {
+  if (feed.local || feed.source !== "screen") return;
+  voiceStore.setRemoteScreenReceiving(feed.key, receiving);
+}
 
 async function toggleCamera() {
   try {

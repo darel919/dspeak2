@@ -16,13 +16,27 @@ export const useRoomsStore = defineStore("rooms", () => {
     const apiPath = config.public.apiPath;
     if (!userData || !userData.id) throw new Error("User not authenticated");
     if (!apiPath) throw new Error("API path is not defined");
+    const hasFile =
+      data.picture instanceof File || data.headerImage instanceof File;
+    const body = hasFile ? new FormData() : null;
+    if (body) {
+      body.set("roomId", roomId);
+      for (const [key, value] of Object.entries(data)) {
+        if (value instanceof File) body.set(key, value);
+        else if (value !== undefined)
+          body.set(
+            key,
+            typeof value === "object" ? JSON.stringify(value) : value,
+          );
+      }
+    }
     const response = await fetch(`${apiPath}/room/`, {
       method: "PUT",
       headers: {
         Authorization: userData.id,
-        "Content-Type": "application/json",
+        ...(!hasFile ? { "Content-Type": "application/json" } : {}),
       },
-      body: JSON.stringify({ roomId, ...data }),
+      body: body || JSON.stringify({ roomId, ...data }),
     });
     if (!response.ok) throw new Error("Failed to update room");
     await fetchRooms();

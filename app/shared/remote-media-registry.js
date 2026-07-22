@@ -15,6 +15,7 @@ export class RemoteMediaRegistry {
     isDeafened,
     isBroadcastMode,
     onSpeaking,
+    getAttenuation,
   }) {
     this.audioFeeds = audioFeeds;
     this.videoFeeds = videoFeeds;
@@ -23,7 +24,10 @@ export class RemoteMediaRegistry {
     this.isDeafened = isDeafened;
     this.isBroadcastMode = isBroadcastMode;
     this.onSpeaking = onSpeaking;
+    this.getAttenuation = getAttenuation;
     this.voiceDetectors = new Map();
+    this.speakingUsers = new Set();
+    this.volumeTimers = new Map();
   }
 
   bind(entry, { staged = false } = {}) {
@@ -32,7 +36,10 @@ export class RemoteMediaRegistry {
       const stream =
         current?.stream || entry.stream || new MediaStream([entry.track]);
       if (current?.stream) replaceMediaStreamTrack(stream, entry.track);
-      this.videoFeeds.value.set(entry.key, { ...entry, stream });
+      const receiving =
+        entry.source === "screen" ? (current?.receiving ?? false) : true;
+      entry.track.enabled = receiving;
+      this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
       this.videoFeeds.value = new Map(this.videoFeeds.value);
       return;
     }
@@ -41,6 +48,18 @@ export class RemoteMediaRegistry {
     this.audioFeeds.value = new Map(this.audioFeeds.value);
     this.createAudioElement(entry, staged);
     if (entry.source === "audio") this.startVoiceDetection(entry);
+  }
+
+  setVideoReceiving(key, receiving) {
+    const entry = this.videoFeeds.value.get(key);
+    if (!entry || entry.source !== "screen") return false;
+    entry.track.enabled = Boolean(receiving);
+    this.videoFeeds.value.set(key, {
+      ...entry,
+      receiving: Boolean(receiving),
+    });
+    this.videoFeeds.value = new Map(this.videoFeeds.value);
+    return true;
   }
 
   activateProvider(provider) {
@@ -83,6 +102,9 @@ export class RemoteMediaRegistry {
       ...this.videoFeeds.value.keys(),
     ]);
     for (const key of keys) this.remove(key);
+    for (const timer of this.volumeTimers.values()) clearInterval(timer);
+    this.volumeTimers.clear();
+    this.speakingUsers.clear();
   }
 
   createAudioElement(entry, staged) {
@@ -97,7 +119,10 @@ export class RemoteMediaRegistry {
     audio.controls = false;
     audio.playsInline = true;
     audio.srcObject = entry.stream || new MediaStream([entry.track]);
-    audio.volume = this.getVolume(entry.userId, entry.source);
+    audio.volume = this.attenuatedVolume(
+      audio,
+      this.getVolume(entry.userId, entry.source),
+    );
     audio.muted = staged || this.isDeafened() || this.isBroadcastMode();
     const sinkId = this.getOutputDevice();
     if (sinkId && typeof audio.setSinkId === "function")
@@ -142,7 +167,51 @@ export class RemoteMediaRegistry {
         audio.dataset.userId === String(userId) &&
         (!source || audio.dataset.source === source)
       )
-        audio.volume = volume;
+        this.setAudioVolume(audio, this.attenuatedVolume(audio, volume));
+    }
+  }
+
+  attenuatedVolume(audio, baseVolume) {
+    if (!this.speakingUsers.size) return baseVolume;
+    if (!["screen-audio", "system-audio"].includes(audio.dataset.source))
+      return baseVolume;
+    const attenuation = this.getAttenuation?.() || { enabled: false };
+    if (!attenuation.enabled) return baseVolume;
+    return baseVolume * (1 - attenuation.reductionPercent / 100);
+  }
+
+  setAudioVolume(audio, target) {
+    const existing = this.volumeTimers.get(audio.id);
+    if (existing) clearInterval(existing);
+    const attenuation = this.getAttenuation?.() || {};
+    const duration =
+      target < audio.volume
+        ? Number(attenuation.attackMs) || 120
+        : Number(attenuation.releaseMs) || 650;
+    const start = audio.volume;
+    const startedAt = performance.now();
+    const timer = setInterval(() => {
+      const progress = Math.min(1, (performance.now() - startedAt) / duration);
+      audio.volume = Math.min(
+        1,
+        Math.max(0, start + (target - start) * progress),
+      );
+      if (progress >= 1) {
+        clearInterval(timer);
+        this.volumeTimers.delete(audio.id);
+      }
+    }, 20);
+    this.volumeTimers.set(audio.id, timer);
+  }
+
+  applyAttenuation() {
+    const elements =
+      document
+        .getElementById("webrtc-audio-global")
+        ?.querySelectorAll("audio") || [];
+    for (const audio of elements) {
+      const base = this.getVolume(audio.dataset.userId, audio.dataset.source);
+      this.setAudioVolume(audio, this.attenuatedVolume(audio, base));
     }
   }
 
@@ -182,11 +251,15 @@ export class RemoteMediaRegistry {
           quietSamples = 0;
           if (!speaking) {
             speaking = true;
+            this.speakingUsers.add(String(entry.userId));
             this.onSpeaking(entry.userId, true);
+            this.applyAttenuation();
           }
         } else if (speaking && ++quietSamples >= 6) {
           speaking = false;
+          this.speakingUsers.delete(String(entry.userId));
           this.onSpeaking(entry.userId, false);
+          this.applyAttenuation();
         }
       }, 80);
       this.voiceDetectors.set(entry.key, {
@@ -209,6 +282,8 @@ export class RemoteMediaRegistry {
     detector.analyser.disconnect();
     detector.context.close().catch(() => {});
     this.onSpeaking(detector.userId, false);
+    this.speakingUsers.delete(String(detector.userId));
+    this.applyAttenuation();
     this.voiceDetectors.delete(key);
   }
 }

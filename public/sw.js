@@ -117,7 +117,7 @@ self.addEventListener("notificationclick", (event) => {
   let targetUrl = "/";
 
   if (data.roomId && data.channelId) {
-    targetUrl = `/room/${data.roomId}?channel=${data.channelId}`;
+    targetUrl = `/room/${data.roomId}/${data.channelId}`;
   } else if (data.roomId) {
     targetUrl = `/room/${data.roomId}`;
   }

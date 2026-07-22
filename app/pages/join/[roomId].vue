@@ -1,80 +1,76 @@
 <template>
   <div
-    class="min-h-screen-minus-navbar flex items-center justify-center bg-base-100"
+    class="metro-standalone flex min-h-screen items-center justify-center bg-base-200 px-6 py-12"
   >
-    <div class="max-w-md w-full mx-4">
-      <div class="card bg-base-100 shadow-xl border border-base-200">
-        <div class="card-body text-center">
-          <!-- Loading state -->
-          <div v-if="loading" class="space-y-4">
-            <div class="loading loading-spinner loading-lg mx-auto"></div>
-            <h2 class="card-title justify-center">{{ loadingMessage }}</h2>
-            <p class="text-base-content/70">Please wait...</p>
-          </div>
+    <div
+      class="w-full max-w-2xl border-t-4 border-primary bg-base-100 p-8 text-center sm:p-12"
+    >
+      <!-- Loading state -->
+      <div v-if="loading" class="space-y-4">
+        <div class="loading loading-spinner loading-lg mx-auto"></div>
+        <h1 class="text-3xl font-light">{{ loadingMessage }}</h1>
+        <p class="text-base-content/70">Please wait...</p>
+      </div>
 
-          <!-- Success state -->
-          <div v-else-if="joinSuccess" class="space-y-4">
-            <div class="text-success mb-4">
-              <Icon name="lucide:circle-check" class="h-16 w-16 mx-auto" />
-            </div>
-            <h2 class="card-title justify-center">Successfully Joined Room!</h2>
-            <p class="text-base-content/70">
-              You have been added to the room. You can now start chatting with
-              other members.
-            </p>
-            <div class="card-actions justify-center mt-6">
-              <button @click="goToRoom" class="btn btn-primary">
-                <Icon name="lucide:message-circle" class="h-5 w-5" />
-                Go to Room
-              </button>
-              <button @click="goToHome" class="btn btn-ghost">
-                <Icon name="lucide:house" class="h-5 w-5" />
-                Home
-              </button>
-            </div>
-          </div>
+      <!-- Success state -->
+      <div v-else-if="joinSuccess" class="space-y-4">
+        <div class="text-success mb-4">
+          <Icon name="lucide:circle-check" class="h-16 w-16 mx-auto" />
+        </div>
+        <h1 class="text-3xl font-light">Room joined</h1>
+        <p class="text-base-content/70">
+          You have been added to the room. You can now start chatting with other
+          members.
+        </p>
+        <div class="mt-6 flex flex-wrap justify-center gap-2">
+          <button @click="goToRoom" class="btn btn-primary">
+            <Icon name="lucide:message-circle" class="h-5 w-5" />
+            Go to Room
+          </button>
+          <button @click="goToHome" class="btn btn-ghost">
+            <Icon name="lucide:house" class="h-5 w-5" />
+            Home
+          </button>
+        </div>
+      </div>
 
-          <!-- Error state -->
-          <div v-else-if="error" class="space-y-4">
-            <div class="text-error mb-4">
-              <Icon name="lucide:triangle-alert" class="h-16 w-16 mx-auto" />
-            </div>
-            <h2 class="card-title justify-center text-error">
-              Unable to Join Room
-            </h2>
-            <p class="text-base-content/70">{{ error }}</p>
-            <div class="card-actions justify-center mt-6">
-              <button @click="retryJoin" class="btn btn-primary">
-                <Icon name="lucide:refresh-cw" class="h-5 w-5" />
-                Try Again
-              </button>
-              <button @click="goToHome" class="btn btn-ghost">
-                <Icon name="lucide:house" class="h-5 w-5" />
-                Home
-              </button>
-            </div>
-          </div>
+      <!-- Error state -->
+      <div v-else-if="error" class="space-y-4">
+        <div class="text-error mb-4">
+          <Icon name="lucide:triangle-alert" class="h-16 w-16 mx-auto" />
+        </div>
+        <h1 class="text-3xl font-light text-error">Unable to Join Room</h1>
+        <p class="text-base-content/70">{{ error }}</p>
+        <div class="mt-6 flex flex-wrap justify-center gap-2">
+          <button @click="retryJoin" class="btn btn-primary">
+            <Icon name="lucide:refresh-cw" class="h-5 w-5" />
+            Try Again
+          </button>
+          <button @click="goToHome" class="btn btn-ghost">
+            <Icon name="lucide:house" class="h-5 w-5" />
+            Home
+          </button>
+        </div>
+      </div>
 
-          <!-- Invalid room ID state -->
-          <div
-            v-else-if="initialized && !loading && !joinSuccess && !error"
-            class="space-y-4"
-          >
-            <div class="text-warning mb-4">
-              <Icon name="lucide:triangle-alert" class="h-16 w-16 mx-auto" />
-            </div>
-            <h2 class="card-title justify-center">Invalid Join Link</h2>
-            <p class="text-base-content/70">
-              The room ID in this link is not valid. Please check the link and
-              try again.
-            </p>
-            <div class="card-actions justify-center mt-6">
-              <button @click="goToHome" class="btn btn-primary">
-                <Icon name="lucide:house" class="h-5 w-5" />
-                Go to Home
-              </button>
-            </div>
-          </div>
+      <!-- Invalid room ID state -->
+      <div
+        v-else-if="initialized && !loading && !joinSuccess && !error"
+        class="space-y-4"
+      >
+        <div class="text-warning mb-4">
+          <Icon name="lucide:triangle-alert" class="h-16 w-16 mx-auto" />
+        </div>
+        <h1 class="text-3xl font-light">Invalid join link</h1>
+        <p class="text-base-content/70">
+          The room ID in this link is not valid. Please check the link and try
+          again.
+        </p>
+        <div class="mt-6 flex flex-wrap justify-center gap-2">
+          <button @click="goToHome" class="btn btn-primary">
+            <Icon name="lucide:house" class="h-5 w-5" />
+            Go to Home
+          </button>
         </div>
       </div>
     </div>

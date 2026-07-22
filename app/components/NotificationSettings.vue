@@ -1,178 +1,205 @@
 <template>
-  <div
-    class="overflow-hidden rounded-xl border border-base-300 bg-base-100 shadow-sm"
-  >
-    <label class="flex cursor-pointer items-center gap-4 p-5">
-      <span
-        class="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"
-        ><Icon name="lucide:bell" class="size-5"
-      /></span>
-      <span class="min-w-0 flex-1">
-        <strong class="block text-sm">Browser notifications</strong>
-        <small class="mt-1 block text-xs leading-5 text-base-content/60"
-          >Receive an alert when a new message arrives while dSpeak is in the
-          background.</small
+  <div class="space-y-6">
+    <section class="settings-panel">
+      <div class="settings-panel-heading">
+        <div>
+          <h2>Message notifications</h2>
+          <p>Your account defaults apply unless a room overrides them.</p>
+        </div>
+      </div>
+      <label class="settings-row"
+        ><span
+          ><strong>Default mode</strong
+          ><small
+            >Choose which room messages create inbox notifications.</small
+          ></span
+        ><select
+          v-model="draft.mode"
+          class="select select-bordered"
+          @change="save"
         >
-      </span>
-      <input
-        type="checkbox"
-        class="toggle toggle-primary shrink-0"
-        :checked="isEnabled"
-        :disabled="!isSupported || loading"
-        @change="handleToggle"
-      />
-    </label>
+          <option value="all">All messages</option>
+          <option value="mentions">Mentions only</option>
+          <option value="muted">Muted</option>
+        </select></label
+      >
+      <label class="settings-toggle-row"
+        ><span
+          ><strong>Notification sound</strong
+          ><small
+            >Play a sound for eligible foreground notifications.</small
+          ></span
+        ><input
+          v-model="draft.sound"
+          type="checkbox"
+          class="toggle toggle-primary"
+          @change="save"
+      /></label>
+      <label class="settings-toggle-row"
+        ><span
+          ><strong>Message previews</strong
+          ><small
+            >Include message text in the inbox and push notification.</small
+          ></span
+        ><input
+          v-model="draft.previews"
+          type="checkbox"
+          class="toggle toggle-primary"
+          @change="save"
+      /></label>
+    </section>
 
-    <div
-      class="flex flex-col gap-3 border-t border-base-300 bg-base-200/45 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <span
-        v-if="!isSupported"
-        class="inline-flex items-center gap-2 text-xs text-warning"
-        ><Icon name="lucide:triangle-alert" class="size-4" />Not supported by
-        this browser</span
+    <section class="settings-panel">
+      <div class="settings-panel-heading">
+        <div>
+          <h2>Background push</h2>
+          <p>Push is optional; the dSpeak inbox remains the source of truth.</p>
+        </div>
+        <span class="text-xs" :class="statusClass">{{ statusLabel }}</span>
+      </div>
+      <div class="flex flex-wrap gap-2 p-5">
+        <button
+          v-if="!store.isSubscribed"
+          class="btn btn-primary"
+          :disabled="store.loading || !store.pushSupported"
+          @click="enablePush"
+        >
+          Enable push
+        </button>
+        <button
+          v-else
+          class="btn btn-error"
+          :disabled="store.loading"
+          @click="disablePush"
+        >
+          Disable push
+        </button>
+        <button
+          class="btn btn-outline"
+          :disabled="store.permission !== 'granted'"
+          @click="testPush"
+        >
+          Send test
+        </button>
+      </div>
+      <p
+        v-if="store.permission === 'denied'"
+        class="border-t border-base-300 p-4 text-sm text-error"
       >
-      <span
-        v-else-if="permission === 'denied'"
-        class="inline-flex items-center gap-2 text-xs text-error"
-        ><Icon name="lucide:bell-off" class="size-4" />Blocked in browser
-        permissions</span
-      >
-      <span
-        v-else-if="permission === 'granted' && isEnabled"
-        class="inline-flex items-center gap-2 text-xs text-success"
-        ><Icon name="lucide:circle-check" class="size-4" />{{
-          pushSub.isSubscribed.value
-            ? "Push notifications active"
-            : "Notifications enabled"
-        }}</span
-      >
-      <span
-        v-else
-        class="inline-flex items-center gap-2 text-xs text-base-content/60"
-        ><Icon name="lucide:bell-off" class="size-4" />Notifications are
-        off</span
-      >
-      <button
-        v-if="permission === 'granted' && isEnabled"
-        type="button"
-        class="btn btn-ghost btn-sm"
-        :disabled="testingNotification"
-        @click="testNotification"
-      >
-        <span
-          v-if="testingNotification"
-          class="loading loading-spinner loading-xs"
-        ></span
-        >Send test
-      </button>
-    </div>
+        Notifications are blocked in this browser’s site settings.
+      </p>
+    </section>
 
-    <div
-      v-if="showPermissionWarning"
-      class="m-4 flex gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning-content"
-    >
-      <Icon name="lucide:triangle-alert" class="mt-0.5 size-4 shrink-0" /><span
-        >Allow notifications in your browser's site settings, then try
-        again.</span
+    <section class="settings-panel">
+      <div class="settings-panel-heading">
+        <div>
+          <h2>Stream attenuation override</h2>
+          <p>
+            Choose whether room defaults reduce shared stream audio while people
+            speak.
+          </p>
+        </div>
+      </div>
+      <label class="settings-row"
+        ><span><strong>Behavior</strong></span
+        ><select
+          v-model="attenuation.mode"
+          class="select select-bordered"
+          @change="saveAttenuation"
+        >
+          <option value="room">Use room default</option>
+          <option value="enabled">Always enabled</option>
+          <option value="disabled">Always disabled</option>
+        </select></label
       >
-    </div>
+      <label v-if="attenuation.mode === 'enabled'" class="settings-row"
+        ><span
+          ><strong>Reduction</strong
+          ><small>{{ attenuation.reductionPercent }}%</small></span
+        ><input
+          v-model.number="attenuation.reductionPercent"
+          type="range"
+          min="0"
+          max="100"
+          class="range range-primary max-w-xs"
+          @change="saveAttenuation"
+      /></label>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { useNotifications } from "../composables/useNotifications";
-import { usePushSubscription } from "../composables/usePushSubscription";
+import { useNotificationsStore } from "../stores/notifications";
+import { useSettingsStore } from "../stores/settings";
 import { useToast } from "../composables/useToast";
 
-const { isSupported, permission, isEnabled, setEnabled, showNotification } =
-  useNotifications();
-const pushSub = usePushSubscription();
-const { success, error, info } = useToast();
-const loading = ref(false);
-const testingNotification = ref(false);
-const showPermissionWarning = ref(permission.value === "denied");
+const store = useNotificationsStore();
+const settingsStore = useSettingsStore();
+const toast = useToast();
+const draft = reactive({ mode: "all", sound: true, previews: true });
+const attenuation = reactive({ ...settingsStore.streamAttenuation });
+const statusLabel = computed(() =>
+  store.isSubscribed
+    ? "Push active"
+    : store.permission === "denied"
+      ? "Blocked"
+      : "Push off",
+);
+const statusClass = computed(() =>
+  store.isSubscribed
+    ? "text-success"
+    : store.permission === "denied"
+      ? "text-error"
+      : "text-base-content/60",
+);
 
-async function testNotification() {
-  testingNotification.value = true;
+watch(
+  () => store.preferences,
+  (value) => Object.assign(draft, value),
+  { immediate: true, deep: true },
+);
+
+async function save() {
   try {
-    const notification = showNotification("Test Notification", {
-      body: "This is a test notification from dSpeak!",
-      icon: "/favicon-32x32.png",
-    });
-
-    if (notification) {
-      success("Test notification sent!");
-      notification.onclick = () => {
-        console.debug("Test notification clicked");
-        notification.close();
-      };
-    } else {
-      error("Failed to show test notification");
-    }
-  } catch (err) {
-    console.error("Error showing test notification:", err);
-    error("Error showing test notification");
-  } finally {
-    testingNotification.value = false;
+    await store.savePreferences(draft);
+    toast.success("Notification settings saved");
+  } catch (cause) {
+    toast.error(cause.message);
   }
 }
-
-async function handleToggle(event) {
-  const enabled = event.target.checked;
-  loading.value = true;
-
+async function enablePush() {
   try {
-    const result = await setEnabled(enabled);
-
-    if (enabled && result) {
-      success("Notifications enabled! You'll receive alerts for new messages.");
-      if (pushSub.isSupported.value && !pushSub.isSubscribed.value) {
-        try {
-          await pushSub.subscribe();
-          console.debug("Push subscription created");
-        } catch (pushErr) {
-          console.warn("Failed to create push subscription:", pushErr);
-        }
-      }
-
-      setTimeout(() => {
-        if (isEnabled.value) {
-          const testNotification = new Notification("dSpeak Notifications", {
-            body: "Notifications are now enabled! You'll receive alerts for new messages.",
-            icon: "/favicon-32x32.png",
-          });
-          setTimeout(() => testNotification.close(), 3000);
-        }
-      }, 500);
-    } else if (enabled && !result) {
-      if (permission.value === "denied") {
-        error(
-          "Notifications are blocked. Please enable them in your browser settings.",
-        );
-        showPermissionWarning.value = true;
-      } else {
-        error("Failed to enable notifications. Please try again.");
-      }
-      event.target.checked = false;
-    } else {
-      info("Notifications disabled.");
-
-      if (pushSub.isSubscribed.value) {
-        try {
-          await pushSub.unsubscribe();
-          console.debug("Push subscription removed");
-        } catch (pushErr) {
-          console.warn("Failed to remove push subscription:", pushErr);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("Error toggling notifications:", err);
-    error("Failed to update notification settings.");
-    event.target.checked = isEnabled.value;
-  } finally {
-    loading.value = false;
+    await store.subscribe();
+    draft.push = true;
+    await store.savePreferences(draft);
+    toast.success("Push notifications enabled");
+  } catch (cause) {
+    toast.error(cause.message);
+  }
+}
+async function disablePush() {
+  try {
+    await store.unsubscribe();
+    draft.push = false;
+    await store.savePreferences(draft);
+    toast.info("Push notifications disabled");
+  } catch (cause) {
+    toast.error(cause.message);
+  }
+}
+function testPush() {
+  const notification = store.showNotification("dSpeak notification test", {
+    body: "Your notification settings are working.",
+    icon: "/favicon-32x32.png",
+  });
+  if (!notification) toast.error("The browser did not show the notification");
+}
+async function saveAttenuation() {
+  settingsStore.setStreamAttenuation(attenuation);
+  try {
+    await store.savePreferences({ attenuationOverride: attenuation });
+  } catch (cause) {
+    toast.error(cause.message);
   }
 }
 </script>

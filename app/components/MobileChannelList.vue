@@ -7,7 +7,7 @@
           <Icon name="lucide:chevron-left" class="h-5 w-5" />
         </button>
         <div>
-          <h2 class="text-lg font-semibold">{{ room?.name || "Server" }}</h2>
+          <h2 class="text-lg font-semibold">{{ room?.name || "Room" }}</h2>
           <p class="text-sm text-base-content/60">
             {{ room?.members?.length || 0 }} members
           </p>
@@ -134,7 +134,7 @@
         </div>
         <h3 class="font-medium mb-2">No channels found</h3>
         <p class="text-sm text-base-content/60">
-          This server doesn't have any channels yet
+          This room doesn't have any channels yet
         </p>
       </div>
 

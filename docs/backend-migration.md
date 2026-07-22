@@ -19,6 +19,11 @@ The PocketBase collection contract remains unchanged: `dspeak_rooms`,
 `dspeak_rooms_channels`, `dspeak_messages`, `dspeak_webpush`,
 `dspeak_webpush_global`, `dspeak_users_state`, and `users`.
 
+The room administration extension adds RBAC, branding, media-policy, and
+notification collections. Apply the schema and compatibility migration in
+[Room administration contract](room-administration.md) before enabling those
+administration surfaces in production.
+
 ## Migrated from `dspeak2-sfu-master`
 
 The `/socket` handler now performs channel and membership validation itself,

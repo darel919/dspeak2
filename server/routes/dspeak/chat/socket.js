@@ -1,7 +1,9 @@
 import {
   addChannelSubscriber,
+  addUserSubscriber,
   broadcastToChannel,
   removeChannelSubscriber,
+  removeUserSubscriber,
 } from "../../../utils/dspeak-realtime";
 import { usePocketBaseAdmin } from "../../../utils/pocketbase";
 
@@ -35,6 +37,7 @@ export default defineWebSocketHandler({
         isMedia: Boolean(channel.isMedia),
       });
       addChannelSubscriber(channelId, peer);
+      addUserSubscriber(String(userId), peer);
 
       if (!channel.isMedia) {
         const current = (channel.inRoom || []).map(String);
@@ -123,6 +126,7 @@ export default defineWebSocketHandler({
       console.error("[Chat WebSocket] close cleanup failed", error);
     } finally {
       removeChannelSubscriber(session.channelId, peer);
+      removeUserSubscriber(String(session.userId), peer);
     }
   },
 });

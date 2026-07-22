@@ -1,8 +1,11 @@
 import { validateRuntimeEnvironment } from "../utils/env-validation";
 import { closeSfu, initializeSfu } from "../utils/mediasoup-sfu";
+import { usePocketBaseAdmin } from "../utils/pocketbase";
+import { runPocketBaseMigrations } from "../utils/pocketbase-migrations";
 
 export default defineNitroPlugin(async (nitroApp) => {
   const config = await validateRuntimeEnvironment();
+  await runPocketBaseMigrations(await usePocketBaseAdmin());
   const state = await initializeSfu(config);
 
   console.debug(

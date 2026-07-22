@@ -4,6 +4,8 @@ import {
   DEFAULT_AUDIO_SETTINGS,
   SYSTEM_AUDIO_BITRATE_OPTIONS,
 } from "~/const/media";
+import { STORAGE_KEYS } from "~/const/storage";
+import { normalizeAppearance } from "~/shared/appearance";
 
 export const useSettingsStore = defineStore("settings", () => {
   const audio = ref(loadPersisted("audioSettings", DEFAULT_AUDIO_SETTINGS));
@@ -22,6 +24,15 @@ export const useSettingsStore = defineStore("settings", () => {
   );
   const systemAudioBitrate = ref(
     normalizeSystemAudioBitrate(loadPersisted("systemAudioBitrate", 128)),
+  );
+  const appearance = ref(
+    normalizeAppearance(loadPersisted(STORAGE_KEYS.appearance, {})),
+  );
+  const streamAttenuation = ref(
+    loadPersisted(STORAGE_KEYS.streamAttenuation, {
+      mode: "room",
+      reductionPercent: 65,
+    }),
   );
 
   const supported = computed(() => {
@@ -75,6 +86,25 @@ export const useSettingsStore = defineStore("settings", () => {
   function setSystemAudioBitrate(value) {
     systemAudioBitrate.value = normalizeSystemAudioBitrate(value);
     persist("systemAudioBitrate", systemAudioBitrate.value);
+  }
+
+  function setAppearance(value) {
+    appearance.value = normalizeAppearance({ ...appearance.value, ...value });
+    persist(STORAGE_KEYS.appearance, appearance.value);
+  }
+
+  function setStreamAttenuation(value) {
+    const mode = ["room", "enabled", "disabled"].includes(value?.mode)
+      ? value.mode
+      : streamAttenuation.value.mode;
+    const reduction = Number(value?.reductionPercent);
+    streamAttenuation.value = {
+      mode,
+      reductionPercent: Number.isFinite(reduction)
+        ? Math.min(100, Math.max(0, Math.round(reduction)))
+        : streamAttenuation.value.reductionPercent,
+    };
+    persist(STORAGE_KEYS.streamAttenuation, streamAttenuation.value);
   }
 
   function setMicDeviceId(id) {
@@ -161,6 +191,8 @@ export const useSettingsStore = defineStore("settings", () => {
     broadcastMode,
     sharedAudioVolume,
     systemAudioBitrate,
+    appearance,
+    streamAttenuation,
     setAudioSetting,
     setMicDeviceId,
     setOutputDeviceId,
@@ -170,5 +202,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setBroadcastMode,
     setSharedAudioVolume,
     setSystemAudioBitrate,
+    setAppearance,
+    setStreamAttenuation,
   };
 });

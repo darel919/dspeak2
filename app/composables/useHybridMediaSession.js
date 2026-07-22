@@ -25,6 +25,7 @@ import {
 import { useAuthStore } from "~/stores/auth";
 import { useChannelsStore } from "~/stores/channels";
 import { useSettingsStore } from "~/stores/settings";
+import { useRoomsStore } from "~/stores/rooms";
 import { useVoiceStore } from "~/stores/voice";
 
 const connectionTimeoutMs = 10000;
@@ -38,6 +39,7 @@ export function useHybridMediaSession() {
   const authStore = useAuthStore();
   const channelsStore = useChannelsStore();
   const settingsStore = useSettingsStore();
+  const roomsStore = useRoomsStore();
   const voiceStore = useVoiceStore();
   const connected = ref(false);
   const error = ref(null);
@@ -104,6 +106,24 @@ export function useHybridMediaSession() {
     isBroadcastMode: () => settingsStore.broadcastMode,
     onSpeaking: (userId, speaking) =>
       voiceStore.updateUserSpeaking(userId, speaking),
+    getAttenuation: () => {
+      const room = roomsStore.getRoomById(voiceStore.currentRoomId);
+      const roomValue = room?.attenuation || {
+        enabled: true,
+        reductionPercent: 65,
+        attackMs: 120,
+        releaseMs: 650,
+      };
+      const override = settingsStore.streamAttenuation;
+      if (override.mode === "disabled") return { ...roomValue, enabled: false };
+      if (override.mode === "enabled")
+        return {
+          ...roomValue,
+          enabled: true,
+          reductionPercent: override.reductionPercent,
+        };
+      return roomValue;
+    },
   });
 
   const capture = new MediaCaptureManager({
@@ -400,13 +420,20 @@ export function useHybridMediaSession() {
           return { encodings: options.encodings, dtx: "disabled" };
         }
         const settings = track.getSettings?.() || {};
-        return buildP2pVideoSenderOptions({
+        const options = buildP2pVideoSenderOptions({
           width: settings.width,
           height: settings.height,
           frameRate: getRequestedVideoSettings(source).frameRate,
           qualityPriority: getRequestedVideoSettings(source).qualityPriority,
           screen: source === "screen",
         });
+        const ceiling = getRequestedVideoSettings(source).maxBitrate;
+        if (ceiling && options.encodings?.[0])
+          options.encodings[0].maxBitrate = Math.min(
+            options.encodings[0].maxBitrate || ceiling,
+            ceiling,
+          );
+        return options;
       },
     });
     return p2pMesh;
@@ -453,15 +480,29 @@ export function useHybridMediaSession() {
   }
 
   function getRequestedVideoSettings(source) {
-    return source === "screen"
-      ? settingsStore.screenVideo
-      : settingsStore.cameraVideo;
+    const base =
+      source === "screen"
+        ? settingsStore.screenVideo
+        : settingsStore.cameraVideo;
+    const policy = voiceStore.currentChannelId
+      ? channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
+      : null;
+    return {
+      ...base,
+      maxBitrate:
+        Number(source === "screen" ? policy?.screenKbps : policy?.cameraKbps) *
+          1000 || null,
+    };
   }
 
   function getEffectiveAudioBitrate(source) {
-    const channelBitrate = voiceStore.currentChannelId
-      ? channelsStore.getChannelById(voiceStore.currentChannelId)?.audio_bitrate
+    const channel = voiceStore.currentChannelId
+      ? channelsStore.getChannelById(voiceStore.currentChannelId)
       : null;
+    const channelBitrate =
+      source === "screen-audio"
+        ? channel?.mediaPolicy?.sharedAudioKbps || channel?.audio_bitrate
+        : channel?.mediaPolicy?.microphoneKbps || channel?.audio_bitrate;
     return getAudioBitrateBps(
       source,
       channelBitrate,
@@ -747,6 +788,10 @@ export function useHybridMediaSession() {
     handoff.remove(entry);
   }
 
+  function setRemoteScreenReceiving(feedKey, receiving) {
+    return registry.setVideoReceiving(feedKey, receiving);
+  }
+
   function publishSource(entry) {
     if (entry.source === "screen-audio") entry = createSharedAudioSource(entry);
     localSources.set(entry.source, entry);
@@ -876,6 +921,39 @@ export function useHybridMediaSession() {
       ),
     );
   }
+
+  function refreshMediaPolicy() {
+    const sources = [...localSources.values()].map((entry) => entry.source);
+    return Promise.all(
+      sources.flatMap((source) => {
+        const entry = localSources.get(source);
+        if (entry?.track.kind === "audio")
+          return [
+            p2pMesh?.reconfigureSource(source),
+            sfu?.updateAudioBitrate(source, getEffectiveAudioBitrate(source)),
+          ].filter(Boolean);
+        return [
+          p2pMesh?.reconfigureSource(source),
+          sfu?.updateVideoBitrate(
+            source,
+            getRequestedVideoSettings(source).maxBitrate,
+          ),
+        ].filter(Boolean);
+      }),
+    );
+  }
+
+  watch(
+    () =>
+      channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
+        ?.revision,
+    () => {
+      if (connected.value)
+        refreshMediaPolicy().catch((policyError) => {
+          error.value = `Media policy could not be fully applied: ${policyError.message}`;
+        });
+    },
+  );
 
   function createSharedAudioSource(entry) {
     try {
@@ -1272,6 +1350,7 @@ export function useHybridMediaSession() {
     stopVideoProduction,
     startSystemAudioProduction,
     stopSystemAudioProduction,
+    setRemoteScreenReceiving,
     setSharedAudioVolume,
     setSystemAudioBitrate,
     applyOutputDeviceToAll: () => registry.applyOutputDevice(),

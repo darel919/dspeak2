@@ -37,6 +37,9 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    externals: {
+      inline: [resolve("shared")],
+    },
     experimental: {
       websocket: true,
     },

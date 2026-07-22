@@ -136,7 +136,7 @@
     <transition name="fade">
       <div
         v-if="showMemberList"
-        class="hidden md:flex flex-col w-64 min-w-[16rem] max-w-xs border-l border-base-300 bg-base-100 h-full relative"
+        class="hidden md:flex flex-col w-[260px] min-w-[260px] border-l border-base-300 bg-base-100 h-full relative"
       >
         <button
           class="absolute top-2 right-2 btn btn-xs btn-circle btn-ghost z-10"

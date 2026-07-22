@@ -302,6 +302,17 @@ export class MediasoupClientSession {
     return true;
   }
 
+  async updateVideoBitrate(source, maxBitrate) {
+    const entry = this.producers.get(source);
+    if (!entry || entry.track?.kind !== "video") return false;
+    const bitrate = Number(maxBitrate);
+    if (!Number.isFinite(bitrate) || bitrate <= 0) return false;
+    await entry.producer.setRtpEncodingParameters({
+      maxBitrate: Math.floor(bitrate),
+    });
+    return true;
+  }
+
   requestConsumer(producerId) {
     if (
       !producerId ||

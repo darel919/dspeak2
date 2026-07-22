@@ -1,7 +1,25 @@
 import webpush from "web-push";
 import { createIceServers } from "../const/ice-servers";
-import { broadcastToChannel } from "./dspeak-realtime";
+import {
+  normalizeMediaPolicy,
+  validateMediaPolicy,
+} from "../../shared/media-policy.js";
+import {
+  normalizeAttenuation,
+  normalizePermissions,
+  normalizeRoomAccent,
+} from "../../shared/room-policy.js";
+import { broadcastToChannel, broadcastToUser } from "./dspeak-realtime";
 import { pocketBaseError, usePocketBaseAdmin } from "./pocketbase";
+import {
+  ensureRoomMembership,
+  presentRoomAccess,
+  removeRoomMembership,
+  requireRoleManagement,
+  requireRoomMember,
+  requireRoomPermission,
+  seedRoomRoles,
+} from "./room-authorization";
 
 function requireUser(event) {
   const userId = getHeader(event, "authorization");
@@ -15,16 +33,45 @@ function requireValue(value, message) {
   return value;
 }
 
-function ensureMember(room, userId) {
-  if (
-    !Array.isArray(room.members) ||
-    !room.members.map(String).includes(String(userId))
-  ) {
-    throw createError({
-      statusCode: 403,
-      statusMessage: "Access denied to this room",
-    });
+function structuredValue(value, fallback = {}) {
+  if (value && typeof value === "object") return value;
+  if (typeof value !== "string") return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch {
+    return fallback;
   }
+}
+
+async function validateRoomImage(file, limit, label) {
+  if (!(file instanceof File) || !file.size) return;
+  if (file.size > limit)
+    throw createError({
+      statusCode: 413,
+      statusMessage: `${label} exceeds the upload limit`,
+    });
+  const allowed = ["image/jpeg", "image/png", "image/webp"];
+  if (!allowed.includes(file.type))
+    throw createError({
+      statusCode: 415,
+      statusMessage: `${label} must be JPEG, PNG, or WebP`,
+    });
+  const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  const png = bytes.slice(0, 8).join(",") === "137,80,78,71,13,10,26,10";
+  const webp =
+    String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+    String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+  if (!jpeg && !png && !webp)
+    throw createError({
+      statusCode: 415,
+      statusMessage: `${label} is invalid`,
+    });
+}
+
+async function ensureMember(pb, room, userId) {
+  return requireRoomMember(pb, room, userId);
 }
 
 function avatarPath(user, authPrefix = false) {
@@ -38,12 +85,17 @@ function presentUser(user, authPrefix = false) {
 }
 
 function presentChannel(channel) {
+  const mediaPolicy = normalizeMediaPolicy(
+    channel.media_policy,
+    channel.audio_bitrate,
+  );
   return {
     id: channel.id,
     name: channel.name,
     desc: channel.desc,
     isMedia: channel.isMedia,
     audio_bitrate: channel.audio_bitrate,
+    mediaPolicy,
     inRoom: channel.inRoom || [],
     created: channel.created,
     updated: channel.updated,
@@ -61,12 +113,13 @@ async function parseBody(event) {
   return (await readBody(event)) || {};
 }
 
-async function roomDetails(pb, room) {
+async function roomDetails(pb, room, userId = null) {
   const channels = await pb.collection("dspeak_rooms_channels").getFullList({
     filter: `room = '${room.id}'`,
     expand: "owner",
     sort: "created",
   });
+  const access = userId ? await presentRoomAccess(pb, room, userId) : null;
   return {
     id: room.id,
     name: room.name,
@@ -74,9 +127,15 @@ async function roomDetails(pb, room) {
     created: room.created,
     updated: room.updated,
     picture: room.picture ? `room/profile?id=${room.id}` : null,
+    headerImage: room.header_image ? `room/header?id=${room.id}` : null,
+    accent: normalizeRoomAccent(room.accent),
+    attenuation: normalizeAttenuation(room.attenuation),
     owner: presentUser(room.expand?.owner),
     members: (room.expand?.members || []).map((member) => presentUser(member)),
     channels: channels.map(presentChannel),
+    roles: access?.roles || [],
+    permissions: access?.permissions || [],
+    isOwner: access?.isOwner || false,
   };
 }
 
@@ -88,17 +147,111 @@ async function broadcastParticipantChange(pb, roomId) {
     broadcastToChannel(channel.id, { type: "participant_change" });
 }
 
+async function handleRoomRoles(event, pb, userId) {
+  const method = event.method;
+  const body = method === "GET" ? {} : await parseBody(event);
+  const roomId = requireValue(
+    getQuery(event).roomId || body.roomId,
+    "Room ID is required",
+  );
+  const room = await pb.collection("dspeak_rooms").getOne(roomId);
+  await requireRoomMember(pb, room, userId);
+  if (method === "GET") {
+    const roles = await pb.collection("dspeak_room_roles").getFullList({
+      filter: `room = '${roomId}'`,
+      sort: "-position",
+    });
+    const memberships = await pb
+      .collection("dspeak_room_memberships")
+      .getFullList({ filter: `room = '${roomId}'`, expand: "user,roles" });
+    return { roles, memberships };
+  }
+  if (method === "POST" && body.action === "assign") {
+    await requireRoleManagement(pb, room, userId, null);
+    const membership = await pb
+      .collection("dspeak_room_memberships")
+      .getOne(requireValue(body.membershipId, "Membership ID is required"), {
+        expand: "roles",
+      });
+    for (const role of membership.expand?.roles || [])
+      await requireRoleManagement(pb, room, userId, role);
+    const roleIds = Array.isArray(body.roleIds) ? body.roleIds : [];
+    for (const roleId of roleIds) {
+      const role = await pb.collection("dspeak_room_roles").getOne(roleId);
+      await requireRoleManagement(pb, room, userId, role);
+    }
+    return pb
+      .collection("dspeak_room_memberships")
+      .update(membership.id, { roles: roleIds });
+  }
+  if (method === "POST") {
+    const access = await requireRoleManagement(pb, room, userId, null);
+    const position = Math.max(1, Math.floor(Number(body.position) || 1));
+    if (!access.isOwner && position >= access.highestPosition)
+      throw createError({
+        statusCode: 403,
+        statusMessage: "New roles must be below your highest role",
+      });
+    setResponseStatus(event, 201);
+    return pb.collection("dspeak_room_roles").create({
+      room: roomId,
+      name: requireValue(body.name, "Role name is required"),
+      color: normalizeRoomAccent(body.color),
+      position,
+      permissions: normalizePermissions(body.permissions),
+      system: false,
+      is_default: Boolean(body.isDefault),
+    });
+  }
+  const role = await pb
+    .collection("dspeak_room_roles")
+    .getOne(requireValue(body.roleId, "Role ID is required"));
+  const access = await requireRoleManagement(pb, room, userId, role);
+  if (method === "PUT") {
+    const position = Math.max(
+      1,
+      Math.floor(Number(body.position) || role.position),
+    );
+    if (!access.isOwner && position >= access.highestPosition)
+      throw createError({
+        statusCode: 403,
+        statusMessage: "Roles must remain below your highest role",
+      });
+    return pb.collection("dspeak_room_roles").update(role.id, {
+      name: body.name || role.name,
+      color: normalizeRoomAccent(body.color || role.color),
+      position,
+      permissions:
+        body.permissions === undefined
+          ? role.permissions
+          : normalizePermissions(body.permissions),
+      is_default:
+        body.isDefault === undefined
+          ? role.is_default
+          : Boolean(body.isDefault),
+    });
+  }
+  if (method === "DELETE") {
+    await pb.collection("dspeak_room_roles").delete(role.id);
+    return { success: true };
+  }
+  throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
+}
+
 async function handleRooms(event, suffix) {
   const pb = await usePocketBaseAdmin();
   const method = event.method;
   const query = getQuery(event);
 
-  if (suffix === "profile" && method === "GET") {
+  if (suffix === "roles") return handleRoomRoles(event, pb, requireUser(event));
+
+  if ((suffix === "profile" || suffix === "header") && method === "GET") {
     const id = requireValue(query.id, "Room ID is required");
     const room = await pb.collection("dspeak_rooms").getOne(id);
-    if (!room.picture)
+    const field = suffix === "header" ? "header_image" : "picture";
+    if (!room[field])
       throw createError({ statusCode: 404, statusMessage: "Image not found" });
-    const response = await fetch(pb.files.getURL(room, room.picture));
+    const response = await fetch(pb.files.getURL(room, room[field]));
     if (!response.ok)
       throw createError({
         statusCode: response.status,
@@ -119,7 +272,8 @@ async function handleRooms(event, suffix) {
       .getOne(requireValue(query.id, "Room ID is required"), {
         expand: "owner,members",
       });
-    return roomDetails(pb, room);
+    await requireRoomMember(pb, room, requireUser(event));
+    return roomDetails(pb, room, requireUser(event));
   }
 
   const userId = requireUser(event);
@@ -129,23 +283,31 @@ async function handleRooms(event, suffix) {
       filter: `owner = '${userId}' || members ~ '${userId}'`,
       expand: "owner,members",
     });
-    return Promise.all(rooms.map((room) => roomDetails(pb, room)));
+    return Promise.all(rooms.map((room) => roomDetails(pb, room, userId)));
   }
 
   const body = await parseBody(event);
 
   if (!suffix && method === "POST") {
     requireValue(body.name, "Name is required for creating new room.");
+    await validateRoomImage(body.picture, 2 * 1024 * 1024, "Room picture");
+    await validateRoomImage(body.headerImage, 5 * 1024 * 1024, "Room header");
     const room = await pb.collection("dspeak_rooms").create({
       name: body.name,
       desc: body.desc || "",
       owner: userId,
       members: [userId],
       channels: [],
+      accent: normalizeRoomAccent(body.accent),
+      attenuation: normalizeAttenuation(structuredValue(body.attenuation)),
       ...(body.picture instanceof File && body.picture.size
         ? { picture: body.picture }
         : {}),
+      ...(body.headerImage instanceof File && body.headerImage.size
+        ? { header_image: body.headerImage }
+        : {}),
     });
+    await seedRoomRoles(pb, room, userId);
     const general = await pb.collection("dspeak_rooms_channels").create({
       name: "general",
       desc: "General chat channel",
@@ -168,24 +330,35 @@ async function handleRooms(event, suffix) {
       .collection("dspeak_rooms")
       .update(room.id, { channels: [general.id, voice.id] });
     setResponseStatus(event, 201);
-    return room;
+    return roomDetails(pb, room, userId);
   }
 
   if (!suffix && method === "PUT") {
     const room = await pb
       .collection("dspeak_rooms")
       .getOne(requireValue(body.roomId, "Room ID is required to edit a room."));
-    if (String(room.owner) !== String(userId))
-      throw createError({
-        statusCode: 403,
-        statusMessage: "Only the owner can edit this room.",
-      });
+    const identityUpdate = body.name || body.desc !== undefined || body.picture;
+    if (identityUpdate)
+      await requireRoomPermission(pb, room, userId, "room.update_identity");
+    if (body.accent !== undefined || body.attenuation !== undefined)
+      await requireRoomPermission(pb, room, userId, "room.update_theme");
     const update = {};
+    await validateRoomImage(body.picture, 2 * 1024 * 1024, "Room picture");
+    await validateRoomImage(body.headerImage, 5 * 1024 * 1024, "Room header");
     if (body.name) update.name = body.name;
     if (body.desc !== undefined) update.desc = body.desc;
     if (body.picture instanceof File && body.picture.size)
       update.picture = body.picture;
-    return pb.collection("dspeak_rooms").update(room.id, update);
+    if (body.headerImage instanceof File && body.headerImage.size)
+      update.header_image = body.headerImage;
+    if (body.accent !== undefined)
+      update.accent = normalizeRoomAccent(body.accent);
+    if (body.attenuation !== undefined)
+      update.attenuation = normalizeAttenuation(
+        structuredValue(body.attenuation),
+      );
+    const updated = await pb.collection("dspeak_rooms").update(room.id, update);
+    return roomDetails(pb, updated, userId);
   }
 
   if (!suffix && method === "DELETE") {
@@ -226,6 +399,7 @@ async function handleRooms(event, suffix) {
         await pb
           .collection("dspeak_rooms")
           .update(room.id, { members: [...members, userId] });
+      await ensureRoomMembership(pb, room, userId);
     } else {
       if (String(room.owner) === String(userId) && members.length === 1) {
         throw createError({
@@ -237,6 +411,7 @@ async function handleRooms(event, suffix) {
       await pb.collection("dspeak_rooms").update(room.id, {
         members: members.filter((id) => id !== String(userId)),
       });
+      await removeRoomMembership(pb, room.id, userId);
     }
     await broadcastParticipantChange(pb, room.id);
     return {
@@ -262,7 +437,8 @@ async function handleChannels(event, suffix) {
       .getOne(requireValue(query.id, "Channel ID is required"), {
         expand: "owner",
       });
-    ensureMember(
+    await ensureMember(
+      pb,
       await pb.collection("dspeak_rooms").getOne(channel.room),
       userId,
     );
@@ -271,7 +447,11 @@ async function handleChannels(event, suffix) {
 
   if (!suffix && method === "GET") {
     const roomId = requireValue(query.roomId, "Room ID is required");
-    ensureMember(await pb.collection("dspeak_rooms").getOne(roomId), userId);
+    await ensureMember(
+      pb,
+      await pb.collection("dspeak_rooms").getOne(roomId),
+      userId,
+    );
     const channels = await pb.collection("dspeak_rooms_channels").getFullList({
       filter: `room = '${roomId}'`,
       expand: "owner",
@@ -291,16 +471,17 @@ async function handleChannels(event, suffix) {
       body.name,
       "Room ID and name are required for creating new channel",
     );
-    ensureMember(
-      await pb.collection("dspeak_rooms").getOne(body.roomId),
-      userId,
-    );
+    const room = await pb.collection("dspeak_rooms").getOne(body.roomId);
+    await requireRoomPermission(pb, room, userId, "channel.create");
     setResponseStatus(event, 201);
     return pb.collection("dspeak_rooms_channels").create({
       name: body.name,
       desc: body.desc || "",
       isMedia: Boolean(body.isMedia),
       audio_bitrate: body.isMedia ? body.audio_bitrate || 64 : null,
+      media_policy: body.isMedia
+        ? normalizeMediaPolicy(body.mediaPolicy, body.audio_bitrate || 64)
+        : null,
       inRoom: [],
       owner: userId,
       room: body.roomId,
@@ -317,26 +498,44 @@ async function handleChannels(event, suffix) {
         ),
       );
     const room = await pb.collection("dspeak_rooms").getOne(channel.room);
-    ensureMember(room, userId);
-    if (
-      String(channel.owner) !== String(userId) &&
-      String(room.owner) !== String(userId)
-    ) {
-      throw createError({
-        statusCode: 403,
-        statusMessage:
-          "Only the channel owner or room owner can edit this channel",
-      });
-    }
+    if (String(channel.owner) !== String(userId))
+      await requireRoomPermission(pb, room, userId, "channel.update");
     const update = {};
     if (body.name) update.name = body.name;
     if (body.desc !== undefined) update.desc = body.desc;
     if (body.audio_bitrate && channel.isMedia)
       update.audio_bitrate = body.audio_bitrate;
+    if (body.mediaPolicy && channel.isMedia) {
+      await requireRoomPermission(
+        pb,
+        room,
+        userId,
+        "channel.manage_media_policy",
+      );
+      const validation = validateMediaPolicy(body.mediaPolicy);
+      if (!validation.valid)
+        throw createError({
+          statusCode: 400,
+          statusMessage: validation.errors.join("; "),
+        });
+      update.media_policy = {
+        ...validation.value,
+        revision:
+          normalizeMediaPolicy(channel.media_policy, channel.audio_bitrate)
+            .revision + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      update.audio_bitrate = update.media_policy.microphoneKbps;
+    }
     const result = await pb
       .collection("dspeak_rooms_channels")
       .update(channel.id, update);
     broadcastToChannel(channel.id, { type: "channel_updated", data: result });
+    if (update.media_policy)
+      broadcastToChannel(channel.id, {
+        type: "channel_policy_updated",
+        data: { channelId: channel.id, mediaPolicy: update.media_policy },
+      });
     return result;
   }
 
@@ -350,17 +549,8 @@ async function handleChannels(event, suffix) {
         ),
       );
     const room = await pb.collection("dspeak_rooms").getOne(channel.room);
-    ensureMember(room, userId);
-    if (
-      String(channel.owner) !== String(userId) &&
-      String(room.owner) !== String(userId)
-    ) {
-      throw createError({
-        statusCode: 403,
-        statusMessage:
-          "Only the channel owner or room owner can delete this channel",
-      });
-    }
+    if (String(channel.owner) !== String(userId))
+      await requireRoomPermission(pb, room, userId, "channel.delete");
     const channels = await pb
       .collection("dspeak_rooms_channels")
       .getFullList({ filter: `room = '${channel.room}'` });
@@ -386,7 +576,8 @@ async function handleChannels(event, suffix) {
           `Channel ID is required to ${suffix} a channel`,
         ),
       );
-    ensureMember(
+    await ensureMember(
+      pb,
       await pb.collection("dspeak_rooms").getOne(channel.room),
       userId,
     );
@@ -460,12 +651,160 @@ async function sendPush(pb, room, channel, message, userId) {
   );
 }
 
+async function createMessageNotifications(
+  pb,
+  room,
+  channel,
+  message,
+  senderId,
+) {
+  const recipients = (room.members || [])
+    .map(String)
+    .filter((id) => id !== String(senderId));
+  for (const recipient of recipients) {
+    try {
+      const notification = await pb.collection("dspeak_notifications").create({
+        recipient,
+        type: "message",
+        actor: senderId,
+        room: room.id,
+        channel: channel.id,
+        message: message.id,
+        title: `#${channel.name} · ${room.name}`,
+        body: message.content,
+        read_at: null,
+      });
+      broadcastToUser(recipient, {
+        type: "notification_created",
+        data: notification,
+      });
+    } catch (error) {
+      if (error?.status !== 404 && error?.response?.status !== 404) throw error;
+    }
+  }
+}
+
+async function handleNotifications(event, pb, userId, suffix) {
+  const body = event.method === "GET" ? {} : await parseBody(event);
+  if (suffix === "notifications" && event.method === "GET") {
+    const items = await pb.collection("dspeak_notifications").getList(1, 100, {
+      filter: `recipient = '${userId}'`,
+      sort: "-created",
+      expand: "actor,room,channel,message",
+    });
+    return items;
+  }
+  if (suffix === "notifications/read" && event.method === "POST") {
+    const ids = Array.isArray(body.ids) ? body.ids : [];
+    const records = ids.length
+      ? await pb.collection("dspeak_notifications").getFullList({
+          filter: ids.map((id) => `id = '${id}'`).join(" || "),
+        })
+      : await pb.collection("dspeak_notifications").getFullList({
+          filter: `recipient = '${userId}' && read_at = null`,
+        });
+    const readAt = new Date().toISOString();
+    for (const record of records) {
+      if (String(record.recipient) !== String(userId)) continue;
+      await pb.collection("dspeak_notifications").update(record.id, {
+        read_at: readAt,
+      });
+    }
+    broadcastToUser(String(userId), {
+      type: "notifications_read",
+      data: { ids },
+    });
+    return { success: true, readAt };
+  }
+  if (suffix === "notification-preferences") {
+    const existing = await pb
+      .collection("dspeak_notification_preferences")
+      .getFullList({ filter: `user = '${userId}'` });
+    if (event.method === "GET")
+      return (
+        existing[0] || {
+          mode: "all",
+          push: false,
+          sound: true,
+          previews: true,
+          attenuation_override: { mode: "room", reductionPercent: 65 },
+        }
+      );
+    if (event.method === "PUT") {
+      const data = {
+        user: userId,
+        mode: ["all", "mentions", "muted"].includes(body.mode)
+          ? body.mode
+          : "all",
+        push: Boolean(body.push),
+        sound: body.sound !== false,
+        previews: body.previews !== false,
+        attenuation_override: body.attenuationOverride || {
+          mode: "room",
+          reductionPercent: 65,
+        },
+      };
+      return existing[0]
+        ? pb
+            .collection("dspeak_notification_preferences")
+            .update(existing[0].id, data)
+        : pb.collection("dspeak_notification_preferences").create(data);
+    }
+  }
+  if (suffix === "room-notification-preferences") {
+    const roomId = requireValue(
+      getQuery(event).roomId || body.roomId,
+      "Room ID is required",
+    );
+    await requireRoomMember(
+      pb,
+      await pb.collection("dspeak_rooms").getOne(roomId),
+      userId,
+    );
+    const existing = await pb
+      .collection("dspeak_room_notification_preferences")
+      .getFullList({ filter: `user = '${userId}' && room = '${roomId}'` });
+    if (event.method === "GET")
+      return (
+        existing[0] || { room: roomId, mode: "all", push: null, sound: null }
+      );
+    if (event.method === "PUT") {
+      const data = {
+        user: userId,
+        room: roomId,
+        mode: ["all", "mentions", "muted"].includes(body.mode)
+          ? body.mode
+          : "all",
+        push: body.push === null ? null : Boolean(body.push),
+        sound: body.sound === null ? null : Boolean(body.sound),
+      };
+      return existing[0]
+        ? pb
+            .collection("dspeak_room_notification_preferences")
+            .update(existing[0].id, data)
+        : pb.collection("dspeak_room_notification_preferences").create(data);
+    }
+  }
+  throw createError({
+    statusCode: 404,
+    statusMessage: "Notification endpoint not found",
+  });
+}
+
 async function handleChat(event, suffix) {
   if (!suffix && event.method === "GET") return "DSpeak Chat";
   if (suffix === "socket" && event.method === "GET")
     throw createError({ statusCode: 426, statusMessage: "Upgrade Required" });
   const pb = await usePocketBaseAdmin();
   const userId = requireUser(event);
+
+  if (
+    suffix === "notifications" ||
+    suffix === "notifications/read" ||
+    suffix === "notification-preferences" ||
+    suffix === "room-notification-preferences"
+  )
+    return handleNotifications(event, pb, userId, suffix);
 
   if (suffix === "unread" && event.method === "GET") {
     const rooms = await pb
@@ -501,7 +840,8 @@ async function handleChat(event, suffix) {
     const channel = await pb
       .collection("dspeak_rooms_channels")
       .getOne(channelId);
-    ensureMember(
+    await ensureMember(
+      pb,
       await pb.collection("dspeak_rooms").getOne(channel.room),
       userId,
     );
@@ -530,7 +870,7 @@ async function handleChat(event, suffix) {
       .collection("dspeak_rooms_channels")
       .getOne(body.channelId);
     const room = await pb.collection("dspeak_rooms").getOne(channel.room);
-    ensureMember(room, userId);
+    await ensureMember(pb, room, userId);
     if (channel.isMedia)
       throw createError({
         statusCode: 400,
@@ -554,6 +894,9 @@ async function handleChat(event, suffix) {
       read_by: message.read_by || [],
     };
     broadcastToChannel(channel.id, { type: "new_message", data: result });
+    createMessageNotifications(pb, room, channel, message, userId).catch(
+      (error) => console.error("[Notifications]", error),
+    );
     sendPush(pb, room, channel, message, userId).catch((error) =>
       console.error("[Push]", error),
     );
@@ -577,7 +920,8 @@ async function handleChat(event, suffix) {
         const channel = await pb
           .collection("dspeak_rooms_channels")
           .getOne(message.room_channel);
-        ensureMember(
+        await ensureMember(
+          pb,
           await pb.collection("dspeak_rooms").getOne(channel.room),
           userId,
         );

@@ -2,7 +2,7 @@
   <Teleport to="body">
     <aside
       v-if="visible && voiceStore.connected && route.path !== '/rtc-debug'"
-      class="fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] max-w-sm rounded-2xl border border-base-content/15 bg-base-200 p-4 shadow-2xl"
+      class="fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] max-w-sm border border-base-content/15 bg-base-200 p-4 shadow-2xl"
     >
       <div class="flex items-center justify-between">
         <div>
@@ -64,7 +64,7 @@
       </div>
 
       <div
-        class="mt-3 flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-xs font-medium text-success"
+        class="mt-3 flex items-center gap-2 bg-success/10 px-3 py-2 text-xs font-medium text-success"
       >
         <Icon name="lucide:lock-keyhole" /> Media transport encrypted
       </div>

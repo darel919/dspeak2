@@ -20,7 +20,10 @@
         <!-- Desktop Layout -->
         <div v-if="!isMobile" class="flex min-h-0 w-full overflow-hidden">
           <!-- Channel List Sidebar (desktop only) -->
-          <div v-if="selectedRoom" class="w-64 border-base-300">
+          <div
+            v-if="selectedRoom"
+            class="w-[280px] shrink-0 border-r border-base-300"
+          >
             <ChannelList
               :room="selectedRoom"
               :selected-channel-id="selectedChannelId"
@@ -67,8 +70,8 @@
                 </div>
                 <h2 class="text-2xl font-semibold mb-2">Welcome to DSpeak</h2>
                 <p class="text-base-content/60 mb-6">
-                  Select a server from the navbar to start collaborating with
-                  your team.
+                  Select a room from the rail to start collaborating with your
+                  team.
                 </p>
                 <div
                   class="flex flex-col items-center gap-2 text-sm text-base-content/50"

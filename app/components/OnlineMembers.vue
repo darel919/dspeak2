@@ -1,7 +1,7 @@
 <template>
-  <div class="card bg-base-100 shadow-lg">
-    <div class="card-body">
-      <h2 class="card-title text-lg flex items-center gap-2">
+  <section class="border border-base-300 bg-base-100">
+    <div class="p-5">
+      <h2 class="flex items-center gap-2 text-lg font-light">
         <Icon name="lucide:users" class="h-5 w-5 text-success" />
         Online Members
       </h2>
@@ -43,7 +43,7 @@
         {{ onlineMembers.length }} of {{ totalMembers }} members online
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup>

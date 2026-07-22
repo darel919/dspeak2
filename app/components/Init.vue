@@ -112,7 +112,6 @@ onMounted(async () => {
       await checkAuth();
       if (authChecked.value) {
         startupStatus.value = "Preparing your workspace…";
-        await requestNotificationPermissionAutomatically();
       }
     } else {
       authChecked.value = true;
@@ -194,32 +193,6 @@ watch(
     }
   },
 );
-
-async function requestNotificationPermissionAutomatically() {
-  try {
-    const notificationManager = (await import("../utils/notificationManager"))
-      .default;
-
-    console.debug("[Init] Notification manager state:", {
-      supported: notificationManager.isSupported,
-      permission: notificationManager.permission,
-      enabled: notificationManager.isEnabled,
-    });
-
-    if (
-      notificationManager.isSupported &&
-      notificationManager.permission === "default"
-    ) {
-      console.debug("[Init] Requesting notification permission automatically");
-      await notificationManager.requestPermission();
-    }
-  } catch (error) {
-    console.error(
-      "Error requesting notification permission automatically:",
-      error,
-    );
-  }
-}
 
 async function checkAuth() {
   if (route.path === "/auth") {

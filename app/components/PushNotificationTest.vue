@@ -1,7 +1,7 @@
 <template>
-  <div class="card bg-base-100 shadow-xl">
-    <div class="card-body">
-      <h2 class="card-title">Push Notification Test</h2>
+  <section class="border border-base-300 bg-base-100">
+    <div class="p-6">
+      <h2 class="text-2xl font-light">Push Notification Test</h2>
 
       <!-- Status Display -->
       <div class="grid grid-cols-2 gap-4 mb-4">
@@ -93,7 +93,7 @@
         class="loading loading-spinner loading-md self-center"
       ></div>
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup>

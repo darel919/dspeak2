@@ -1,23 +1,42 @@
 <template>
-  <div class="min-h-screen-minus-navbar max-w-lg mx-auto pt-20 px-6">
-    <h1 class="text-2xl font-bold mb-6">Your Account</h1>
-    <section class="mb-8">
-      <h2 class="text-lg font-semibold mb-3">Profile</h2>
-      <div v-if="profile" class="flex items-center gap-4 mb-6">
-        <div class="avatar avatar-online select-none pointer-events-none">
-          <div class="w-16 rounded-full">
-            <img :src="profile.avatar" alt="User avatar" />
-          </div>
+  <section class="min-h-screen-minus-navbar bg-base-100 px-6 py-12 lg:px-14">
+    <div class="mx-auto max-w-5xl">
+      <p
+        class="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-primary"
+      >
+        dSpeak
+      </p>
+      <h1 class="metro-title">Account</h1>
+      <div class="mt-10 grid border-y border-base-300 lg:grid-cols-[16rem_1fr]">
+        <div class="bg-base-200/45 p-6">
+          <h2 class="text-2xl font-light">Profile</h2>
+          <p class="mt-2 text-sm leading-6 text-base-content/60">
+            Your identity across every room.
+          </p>
         </div>
-        <div>
-          <p class="text-lg font-bold">{{ profile.name }}</p>
-          <p class="text-sm text-base-content/60">{{ profile.email }}</p>
+        <div
+          v-if="profile"
+          class="flex flex-col gap-6 p-6 sm:flex-row sm:items-center"
+        >
+          <div class="avatar avatar-online select-none pointer-events-none">
+            <div class="w-20">
+              <img :src="profile.avatar" alt="User avatar" />
+            </div>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-2xl font-light">{{ profile.name }}</p>
+            <p class="text-sm text-base-content/60">{{ profile.email }}</p>
+          </div>
+          <button class="btn btn-error btn-outline" @click="handleLogout">
+            <Icon name="lucide:log-out" class="size-4" />Log out
+          </button>
+        </div>
+        <div v-else class="border-l-4 border-error p-6 text-error">
+          No profile data available.
         </div>
       </div>
-      <div v-else class="mb-6 text-error">No profile data available.</div>
-      <button class="btn btn-error w-full" @click="handleLogout">Logout</button>
-    </section>
-  </div>
+    </div>
+  </section>
 </template>
 
 <script setup>

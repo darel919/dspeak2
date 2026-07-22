@@ -292,3 +292,31 @@ test("registry ignores a late retired-provider removal after replacement", () =>
   assert.equal(videoFeeds.value.get(key).provider, "sfu");
   assert.equal(videoFeeds.value.get(key).track, newTrack);
 });
+
+test("remote screen video requires an explicit receiving choice", () => {
+  const track = { id: "screen-track", kind: "video", enabled: true };
+  const stream = {
+    getTracks: () => [track],
+    removeTrack: () => {},
+    addTrack: () => {},
+  };
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+  });
+  const key = "remote:user-1:screen";
+
+  registry.bind({ key, provider: "sfu", source: "screen", track, stream });
+  assert.equal(track.enabled, false);
+  assert.equal(videoFeeds.value.get(key).receiving, false);
+
+  assert.equal(registry.setVideoReceiving(key, true), true);
+  assert.equal(track.enabled, true);
+  assert.equal(videoFeeds.value.get(key).receiving, true);
+});

@@ -7,7 +7,6 @@
 </template>
 
 <script setup>
-onMounted(() => {
-  document.title = "dSpeak";
-});
+useAppearance();
+useContextualTitle();
 </script>

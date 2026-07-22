@@ -1,34 +1,54 @@
 <template>
-  <div class="min-h-screen-minus-navbar container p-8">
-    <h1 class="text-2xl font-bold mb-6">Room Details</h1>
-    <div v-if="room">
-      <div class="mb-4">
-        <h2 class="text-lg font-semibold">Room: {{ room.name }}</h2>
-        <p class="text-base-content/70">ID: {{ room.id }}</p>
-      </div>
-      <div class="mb-6">
-        <h3 class="text-md font-semibold mb-2">Members</h3>
-        <ul class="list-disc pl-6">
-          <li v-for="member in room.members" :key="member.id">
-            <span>{{ member.name }}</span>
-            <span
-              v-if="room.owner && member.id === room.owner.id"
-              class="ml-2 text-xs text-primary"
-              >(Owner)</span
+  <section class="min-h-screen-minus-navbar bg-base-100 px-6 py-12 lg:px-14">
+    <div class="mx-auto max-w-5xl">
+      <p
+        class="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-primary"
+      >
+        Room
+      </p>
+      <h1 class="metro-title">{{ room?.name || "Room details" }}</h1>
+      <div
+        v-if="room"
+        class="mt-10 grid border-y border-base-300 lg:grid-cols-[16rem_1fr]"
+      >
+        <div class="bg-base-200/45 p-6">
+          <h2 class="text-xl font-light">Identity</h2>
+          <p class="mt-2 break-all text-xs text-base-content/55">
+            {{ room.id }}
+          </p>
+        </div>
+        <div class="p-6">
+          <h2 class="mb-4 text-2xl font-light">Members</h2>
+          <ul class="divide-y divide-base-300 border-y border-base-300">
+            <li
+              v-for="member in room.members"
+              :key="member.id"
+              class="flex items-center justify-between py-3"
             >
-          </li>
-        </ul>
+              <span class="font-medium">{{ member.name }}</span>
+              <span
+                v-if="room.owner && member.id === room.owner.id"
+                class="bg-primary px-2 py-1 text-xs text-primary-content"
+                >Owner</span
+              >
+            </li>
+          </ul>
+          <button
+            v-if="isOwner"
+            class="btn btn-error mt-8"
+            @click="deleteRoom"
+            :disabled="deleting"
+          >
+            {{ deleting ? "Deleting..." : "Delete Room" }}
+          </button>
+        </div>
       </div>
-      <div v-if="isOwner" class="mt-8">
-        <button class="btn btn-error" @click="deleteRoom" :disabled="deleting">
-          {{ deleting ? "Deleting..." : "Delete Room" }}
-        </button>
+      <div v-else class="mt-10 flex items-center gap-3" role="status">
+        <span class="loading loading-spinner loading-sm"></span>Loading room
+        details…
       </div>
     </div>
-    <div v-else>
-      <p>Loading room details...</p>
-    </div>
-  </div>
+  </section>
 </template>
 
 <script setup>

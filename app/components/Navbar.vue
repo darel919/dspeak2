@@ -6,7 +6,6 @@ import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
 import { getConnectionQualityLabel } from "../shared/connection-quality";
-import RoomList from "./RoomList.vue";
 
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
@@ -215,12 +214,10 @@ onBeforeUnmount(() => {
           alt=""
         />
       </NuxtLink>
-      <div v-if="profile" class="hidden min-w-0 md:flex">
-        <RoomList :model-value="currentRoomId || undefined" />
-      </div>
     </div>
 
     <div class="ml-auto flex min-w-0 items-center gap-2">
+      <NotificationCenter />
       <section
         v-if="profile && voiceStore.connected"
         class="call-dock"

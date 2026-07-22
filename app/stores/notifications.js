@@ -13,6 +13,13 @@ export const useNotificationsStore = defineStore("notifications", () => {
   const isSubscribed = ref(false);
   const loading = ref(false);
   const error = ref(null);
+  const inbox = ref([]);
+  const preferences = ref({
+    mode: "all",
+    push: false,
+    sound: true,
+    previews: true,
+  });
   const config = useRuntimeConfig();
   let initialization = null;
 
@@ -39,10 +46,76 @@ export const useNotificationsStore = defineStore("notifications", () => {
         notificationManager.init();
         syncNotificationState();
         await getExistingSubscription();
+        await Promise.allSettled([fetchInbox(), fetchPreferences()]);
       })();
     }
     await initialization;
   }
+
+  async function authenticatedFetch(path, options = {}) {
+    const userData = useAuthStore().getUserData();
+    if (!userData?.id) throw new Error("User not authenticated");
+    const response = await fetch(`${config.public.apiPath}/chat/${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: userData.id,
+        ...options.headers,
+      },
+    });
+    if (!response.ok)
+      throw new Error(`Notification request failed: ${response.status}`);
+    return response.json();
+  }
+
+  async function fetchInbox() {
+    const result = await authenticatedFetch("notifications");
+    inbox.value = Array.isArray(result?.items) ? result.items : [];
+    return inbox.value;
+  }
+
+  async function markRead(ids = []) {
+    await authenticatedFetch("notifications/read", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+    const selected = new Set(ids);
+    const readAt = new Date().toISOString();
+    inbox.value = inbox.value.map((item) =>
+      !ids.length || selected.has(item.id)
+        ? { ...item, read_at: readAt }
+        : item,
+    );
+  }
+
+  async function fetchPreferences() {
+    preferences.value = await authenticatedFetch("notification-preferences");
+    return preferences.value;
+  }
+
+  async function savePreferences(value) {
+    preferences.value = await authenticatedFetch("notification-preferences", {
+      method: "PUT",
+      body: JSON.stringify({ ...preferences.value, ...value }),
+    });
+    return preferences.value;
+  }
+
+  function receiveRealtime(message) {
+    if (message?.type === "notification_created" && message.data)
+      inbox.value = [message.data, ...inbox.value];
+    if (message?.type === "notifications_read") {
+      const ids = new Set(message.data?.ids || []);
+      const readAt = new Date().toISOString();
+      inbox.value = inbox.value.map((item) =>
+        !ids.size || ids.has(item.id) ? { ...item, read_at: readAt } : item,
+      );
+    }
+  }
+
+  const unreadCount = computed(
+    () => inbox.value.filter((item) => !item.read_at).length,
+  );
 
   async function requestPermission() {
     const result = await notificationManager.requestPermission();
@@ -206,6 +279,9 @@ export const useNotificationsStore = defineStore("notifications", () => {
     isSubscribed,
     loading,
     error,
+    inbox,
+    preferences,
+    unreadCount,
     initialize,
     requestPermission,
     setEnabled,
@@ -216,5 +292,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
     unsubscribe,
     updateSubscription,
     getExistingSubscription,
+    fetchInbox,
+    markRead,
+    fetchPreferences,
+    savePreferences,
+    receiveRealtime,
   };
 });

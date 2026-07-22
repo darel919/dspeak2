@@ -15,6 +15,8 @@ native WebRTC and mediasoup carry realtime media.
 - Seamless, all-client topology handoffs without restarting capture
 - IPv6-first SFU routing with Playit IPv4 and authenticated TURN fallbacks
 - Animated RTC topology and transport diagnostics
+- Metro room branding, custom room roles, and live media policies
+- Persistent notification inbox with optional Web Push delivery
 - Same-origin HTTP and WebSocket routes by default
 
 ## Media routing
@@ -89,6 +91,10 @@ health checks, failover, recovery, and implementation ownership.
 DSpeak requires a long-running process because WebSockets and mediasoup
 resources are process-owned. Stateless serverless and edge runtimes are not
 supported.
+
+At startup, Nitro applies pending PocketBase schema and data migrations before
+starting mediasoup. Migration failure stops startup so the application never
+runs against a partially upgraded contract.
 
 ## Quick start
 
@@ -233,3 +239,4 @@ account-service contract change.
 - [Deployment runbook](docs/deployment.md)
 - [Hybrid media topology](docs/hybrid-media-topology.md)
 - [Backend migration](docs/backend-migration.md)
+- [Room administration](docs/room-administration.md)
