@@ -1,20 +1,36 @@
-# Screen-share audio and voice-loop prevention
+# Screen-share audio
 
-DSpeak requests `restrictOwnAudio` for every display-audio capture. Supporting browsers use it to remove audio produced by the DSpeak tab from the captured audio track. Remote voices continue playing for the sharing participant because local playback suppression remains disabled.
+DSpeak can send screen video and its captured audio as separate media sources.
+Browser and operating-system support determines which audio a screen share can
+capture.
 
-This browser constraint is a best-effort capability. A browser may ignore it, and it cannot reliably isolate DSpeak audio when an operating-system-level mix has already combined all speaker output into one capture source.
+## Preventing voice loops
 
-For reliable loop prevention when the browser does not report `restrictOwnAudio: true` in the captured audio track settings:
+DSpeak requests the browser's `restrictOwnAudio` capture constraint. When the
+browser supports it, audio produced by the DSpeak tab is removed from the shared
+audio track while remote voices continue to play locally.
 
-- Share a browser tab rather than an entire screen and enable tab audio.
-- Use headphones so remote voices do not enter the microphone acoustically.
-- Route DSpeak playback to a different physical output device from the device included in system-audio capture.
-- Do not share system audio when voice isolation is more important than shared media sound.
+This constraint is best effort. A browser may ignore it, and it cannot separate
+DSpeak from an operating-system mix that already combines all speaker output.
+When the captured track does not report `restrictOwnAudio: true`:
 
-Microphone echo cancellation addresses acoustic speaker-to-microphone feedback. It does not remove a remote voice that is already present in a digital system-audio capture.
+- share one browser tab and enable tab audio instead of sharing the full screen;
+- use headphones to prevent acoustic microphone feedback;
+- send DSpeak playback to an output device that is not part of system capture;
+- disable shared audio when voice isolation matters more than media sound.
+
+Microphone echo cancellation only addresses sound traveling from speakers back
+into the microphone. It cannot remove a remote voice already present in a
+digital screen-audio track.
 
 ## Viewer-controlled receiving
 
-Remote screen video and its paired screen-audio source start paused. Selecting **Start screen share** resumes both sources; selecting **Stop** pauses both again.
+Remote screen video and its paired audio begin paused. **Start screen share**
+resumes both sources for that viewer; **Stop** pauses both again.
 
-On the SFU path, DSpeak pauses the mediasoup consumers so RTP is not sent to that viewer. On Direct and Mesh paths, the viewer signals the sharing peer to deactivate the corresponding RTP sender encodings. Disabling the rendered video element or its `MediaStreamTrack` alone is not treated as stopped receiving because that would continue consuming network bandwidth.
+- On the SFU route, DSpeak pauses or resumes the viewer's mediasoup consumers.
+- On Direct and Mesh routes, the viewer asks the sender to deactivate or
+  reactivate the matching RTP encodings.
+
+Merely disabling the rendered video element or track is insufficient because it
+would continue consuming network bandwidth.

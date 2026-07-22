@@ -5,6 +5,8 @@ mediasoup SFU media routing. The topology coordinator is process-owned and uses
 monotonically increasing epochs so messages from an older membership or
 transition cannot change the current room.
 
+## Route selection
+
 Rooms with one device establish mediasoup and remain on it. Rooms with two or more
 devices also establish mediasoup first. Native IPv6 SFU candidates are explicitly
 prioritized over the Playit-routed IPv4 candidate. After SFU is active, rooms
@@ -16,6 +18,8 @@ directly within eight seconds or the room remains on mediasoup.
 When simultaneous offers collide, the polite peer explicitly rolls back its
 local offer and completes the remote answer before reapplying RTP sender
 parameters. Sender tuning cannot strand signaling in `have-remote-offer`.
+
+## Health and recovery
 
 P2P health is checked every second. A twenty-second health or RTP liveness timeout,
 failed ICE restart, signaling failure, closed health channel, or a relay-selected
@@ -36,6 +40,8 @@ it does not pass through mediasoup media transports or use PocketBase polling.
 Room creation is single-flight. Simultaneous first joins share one mediasoup
 router, and an in-flight join reserves that room until its session is registered
 so a concurrent final departure cannot dispose the router prematurely.
+
+## Capture and handoff ownership
 
 Capture and transport ownership are separate. Microphone, camera, screen video,
 and screen audio tracks are reused across topology changes. The destination path
@@ -86,6 +92,8 @@ Remote playback identity is based on participant and media source, rather than a
 temporary producer or track ID. The same camera therefore replaces its prior
 Direct, Mesh, or SFU representation instead of creating duplicate tiles.
 
+## Implementation ownership
+
 The client media implementation is divided by ownership: `MediaCaptureManager`
 owns browser capture, `NativeP2pMesh` owns direct peer connections,
 `MediasoupClientSession` owns SFU transports, and `RemoteMediaRegistry` owns
@@ -95,6 +103,8 @@ keeps its public contract topology-neutral. Server-side room transitions live in
 `RoomTopologyCoordinator`, separate from mediasoup signaling operations, so
 epochs, consensus, timeouts, recovery, and stale-event rejection can be tested
 without a live media worker.
+
+## RTC diagnostics
 
 The `/rtc-debug` RTC Statistics dashboard reports
 Direct P2P, Mesh P2P, SFU, or SFU IPv4 only from coordinator state and selected
@@ -123,15 +133,35 @@ placing a named attachment on the system clipboard, so the report captures the
 equivalent browser-accessible `getStats()` evidence directly without requiring an
 internals export.
 
-Audio policy is topology-neutral. Microphone and shared-audio senders use the
-voice channel bitrate ceiling, with the user's shared-audio ceiling applied when
-it is lower. Both native P2P and SFU request 48 kHz stereo Opus, ten-millisecond
-packetization, in-band FEC, NACK, continuous transmission, and high sender
-priority. Changing the shared-audio or channel ceiling reapplies the effective
-limit to active audio senders.
+## Audio policy
+
+Audio policy is topology-neutral. Standard microphone audio uses 48 kHz mono
+Opus at 32–64 kbps and defaults to 48 kbps. HD microphone audio is opt-in and
+uses stereo Opus above 64 kbps up to 256 kbps. Shared audio remains stereo at
+64–256 kbps, with the user's shared-audio ceiling applied when it is lower.
+Native P2P and SFU use ten-millisecond packetization, in-band FEC, NACK,
+continuous transmission, and high sender priority. Changing a channel ceiling
+reapplies the effective limit to active audio senders.
+
+### Remote participant playback
+
+Each remote participant owns one browser `AudioContext`. Voice and shared-audio
+tracks enter separate gain nodes and are mixed into a participant-specific
+`MediaStreamAudioDestinationNode`. A hidden output element owns output-device
+selection. Web Audio gain provides independent volume control from 0% to 200%
+without modifying received WebRTC tracks.
+
+Provider handoffs reuse this graph and activate nodes only for the selected
+provider. DSpeak closes the graph and removes its output element after the
+participant's final audio track closes. Voice-activity analysis branches from
+the same graph instead of opening another audio context.
+
+## Video policy
 
 Video capture settings describe the requested source resolution and frame rate.
-Video production is capped at 4.5 Mbps, 1920 by 1080 on SFU, and 60 FPS. Each
+Channel policy caps camera production at 2 Mbps and screen production between 2
+and 6 Mbps. Capture and sender cadence continue to follow the user's selected
+target FPS, up to 60 FPS. SFU output remains capped at 1920 by 1080. Each
 camera and screen source has a persistent quality priority. The default
 frame-rate priority uses `maintain-framerate`, allowing resolution to fall while
 keeping cadence as close to the selected target as possible. Resolution priority
@@ -151,6 +181,8 @@ H.264 when both browsers advertise it, retaining VP9 and VP8 as negotiated
 fallbacks. Sender parameters are reapplied after P2P negotiation so a browser
 cannot silently lose the configured ceiling during SDP changes.
 
+## Topology timing
+
 Topology preference is weighted by mesh size. Two participants hold SFU for ten
 seconds and require ten seconds of stable Direct qualification. Three
 participants hold SFU for twenty seconds and require twenty seconds of stable
@@ -160,6 +192,8 @@ route tolerates twenty seconds without health or RTP progress; three- and
 four-participant meshes reduce that tolerance to fifteen and ten seconds so one
 weak edge returns the room to SFU sooner. Mesh remains supported, while SFU
 becomes progressively preferred as aggregate edge risk grows.
+
+## SFU capacity and codec behavior
 
 Mediasoup forwards RTP without decoding, resizing, or transcoding it. Multiple
 receiver qualities require sender-provided simulcast or SVC layers. Screen share
@@ -184,6 +218,8 @@ one browser statistics collection per peer edge and polling tick. This keeps the
 250-millisecond readiness probe responsive without repeatedly traversing the
 same full `RTCStatsReport`; normal dashboard statistics remain independently
 sampled at their lower display cadence.
+
+## Latency and participant quality
 
 Native P2P and SFU receivers request a zero-millisecond jitter-buffer target when
 the browser implements `RTCRtpReceiver.jitterBufferTarget`, asking for the

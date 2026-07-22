@@ -27,6 +27,11 @@ import { useChannelsStore } from "~/stores/channels";
 import { useSettingsStore } from "~/stores/settings";
 import { useRoomsStore } from "~/stores/rooms";
 import { useVoiceStore } from "~/stores/voice";
+import {
+  automaticGateThreshold,
+  microphoneLevelDb,
+  updateNoiseFloor,
+} from "~/shared/microphone-gate.js";
 
 const connectionTimeoutMs = 10000;
 const mediaHandoffTimeoutMs = 8000;
@@ -85,6 +90,8 @@ export function useHybridMediaSession() {
   let reconnectTimer = null;
   let reconnectAttempt = 0;
   let topologyWaiter = null;
+  let localVoiceDetector = null;
+  let microphoneTransmissionEnabled = true;
   let sharedAudioMeter = null;
   let sharedAudioStatsSample = null;
   let topologyOperation = Promise.resolve();
@@ -134,6 +141,7 @@ export function useHybridMediaSession() {
 
   const capture = new MediaCaptureManager({
     getSettings: () => settingsStore,
+    getAudioStereo,
     onSource: publishSource,
     onSourceEnded: removeSource,
   });
@@ -195,6 +203,7 @@ export function useHybridMediaSession() {
         connected.value = true;
         reconnectAttempt = 0;
         sendSourceState();
+        sendParticipantVoiceState();
         startKeepalive();
         resolve();
       };
@@ -369,6 +378,14 @@ export function useHybridMediaSession() {
       for (const profile of Array.isArray(data.profiles) ? data.profiles : [])
         voiceStore.upsertUserProfile(profile);
       syncConnectedUsers(data.inRoom);
+      for (const participantState of Array.isArray(data.participantStates)
+        ? data.participantStates
+        : []) {
+        voiceStore.updateUserVoiceState(
+          participantState.userId,
+          participantState,
+        );
+      }
     });
     registerHandler("available-producers", (data) => {
       remoteProducersCount.value = (data.producers || []).filter(
@@ -393,6 +410,25 @@ export function useHybridMediaSession() {
       }
     });
     registerHandler("server-shutdown", () => socket?.close());
+    registerHandler("soundboard-triggered", (data) => {
+      voiceStore.showSoundboardActivity(data.triggeredBy, {
+        title: data.clipTitle,
+        icon: data.clipIcon,
+        duration: data.duration,
+      });
+      if (typeof window !== "undefined")
+        window.dispatchEvent(
+          new CustomEvent("dspeak:soundboard-triggered", { detail: data }),
+        );
+    });
+    registerHandler("soundboard-library-updated", (data) => {
+      if (typeof window !== "undefined")
+        window.dispatchEvent(
+          new CustomEvent("dspeak:soundboard-library-updated", {
+            detail: data,
+          }),
+        );
+    });
     for (const type of [
       "rtp-capabilities",
       "transport-params",
@@ -419,11 +455,13 @@ export function useHybridMediaSession() {
         removeRemote({ ...entry, provider: "p2p" }),
       onFailure: (failure) => send({ type: "p2p-failed", data: failure }),
       onSnapshot: updateP2pStats,
+      getAudioStereo,
       getSenderOptions: (source, track) => {
         if (track.kind === "audio") {
           const options = buildVoiceProducerOptions(
             track,
             getEffectiveAudioBitrate(source),
+            getAudioStereo(source),
           );
           return { encodings: options.encodings, dtx: "disabled" };
         }
@@ -482,6 +520,7 @@ export function useHybridMediaSession() {
           reportSfuFailure("media-transport-failed");
       },
       getAudioBitrate: getEffectiveAudioBitrate,
+      getAudioStereo,
       getVideoSettings: getRequestedVideoSettings,
     });
     return sfu;
@@ -516,6 +555,27 @@ export function useHybridMediaSession() {
       channelBitrate,
       settingsStore.systemAudioBitrate,
     );
+  }
+
+  function getAudioStereo(source) {
+    if (source === "screen-audio") return true;
+    if (!voiceStore.currentChannelId) return false;
+    return (
+      channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
+        ?.hdAudio === true
+    );
+  }
+
+  function microphoneGateEnabled() {
+    return settingsStore.microphoneGate.enabled && !getAudioStereo("audio");
+  }
+
+  function setMicrophoneTransmission(enabled) {
+    const next = Boolean(enabled) || !microphoneGateEnabled();
+    if (next === microphoneTransmissionEnabled) return;
+    microphoneTransmissionEnabled = next;
+    p2pMesh?.setSourceTransmission("audio", next).catch(() => {});
+    sfu?.setSourceTransmission("audio", next).catch(() => {});
   }
 
   async function applyTopology(data) {
@@ -805,6 +865,7 @@ export function useHybridMediaSession() {
   function publishSource(entry) {
     if (entry.source === "screen-audio") entry = createSharedAudioSource(entry);
     localSources.set(entry.source, entry);
+    if (entry.source === "audio") startLocalVoiceDetection(entry);
     if (entry.source === "camera" || entry.source === "screen") {
       localVideoFeeds.value.set(entry.source, {
         source: entry.source,
@@ -839,6 +900,9 @@ export function useHybridMediaSession() {
           });
       });
     }
+    if (entry.source === "audio" && !microphoneTransmissionEnabled) {
+      queueMicrotask(() => setMicrophoneTransmission(false));
+    }
     if (entry.source === "screen-audio") startSharedAudioMeter(entry.track);
     sendSourceState();
     refreshPublicMaps();
@@ -852,6 +916,7 @@ export function useHybridMediaSession() {
     )
       return;
     localSources.delete(entry.source);
+    if (entry.source === "audio") stopLocalVoiceDetection();
     p2pMesh?.unpublishSource(entry.source);
     sfu?.removeSource(entry.source);
     localVideoFeeds.value.delete(entry.source);
@@ -865,6 +930,16 @@ export function useHybridMediaSession() {
     send({
       type: "media-sources",
       data: { sources: [...localSources.keys()] },
+    });
+  }
+
+  function sendParticipantVoiceState() {
+    return send({
+      type: "participant-voice-state",
+      data: {
+        muted: voiceStore.micMuted,
+        deafened: voiceStore.deafened,
+      },
     });
   }
 
@@ -901,6 +976,70 @@ export function useHybridMediaSession() {
       on() {},
       close: () => capture.stop(entry.source),
     };
+  }
+
+  function startLocalVoiceDetection(entry) {
+    stopLocalVoiceDetection();
+    const userId = authStore.getUserData()?.id;
+    if (!userId) return;
+    try {
+      const AudioContextConstructor =
+        window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
+      const context = new AudioContextConstructor();
+      const source = context.createMediaStreamSource(
+        new MediaStream([entry.track]),
+      );
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
+      let speaking = false;
+      let quietSamples = 0;
+      let noiseFloorDb = -60;
+      const timer = setInterval(() => {
+        analyser.getFloatTimeDomainData(samples);
+        const levelDb = microphoneLevelDb(samples);
+        const gate = settingsStore.microphoneGate;
+        const thresholdDb = gate.automatic
+          ? automaticGateThreshold(noiseFloorDb)
+          : gate.thresholdDb;
+        const active = levelDb >= thresholdDb;
+        noiseFloorDb = updateNoiseFloor(noiseFloorDb, levelDb, speaking);
+        if (active) {
+          quietSamples = 0;
+          if (!speaking) {
+            speaking = true;
+            voiceStore.updateUserSpeaking(userId, true);
+          }
+          setMicrophoneTransmission(true);
+        } else if (speaking && ++quietSamples >= 10) {
+          speaking = false;
+          voiceStore.updateUserSpeaking(userId, false);
+          setMicrophoneTransmission(false);
+        } else if (!speaking) {
+          setMicrophoneTransmission(false);
+        }
+      }, 40);
+      localVoiceDetector = { analyser, context, source, timer, userId };
+      context.resume().catch(() => {});
+    } catch (detectionError) {
+      voiceStore.updateUserSpeaking(userId, false);
+      console.warn(
+        `[Media] Local voice detection is unavailable: ${detectionError?.message || detectionError}`,
+      );
+    }
+  }
+
+  function stopLocalVoiceDetection() {
+    if (!localVoiceDetector) return;
+    clearInterval(localVoiceDetector.timer);
+    localVoiceDetector.source.disconnect();
+    localVoiceDetector.analyser.disconnect();
+    localVoiceDetector.context.close().catch(() => {});
+    voiceStore.updateUserSpeaking(localVoiceDetector.userId, false);
+    localVoiceDetector = null;
+    setMicrophoneTransmission(true);
   }
 
   function setSharedAudioVolume(value) {
@@ -1302,6 +1441,7 @@ export function useHybridMediaSession() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
     stopKeepalive();
+    stopLocalVoiceDetection();
     stopSharedAudioMeter();
     socket?.close();
     socket = null;
@@ -1363,6 +1503,7 @@ export function useHybridMediaSession() {
     setRemoteScreenReceiving,
     setSharedAudioVolume,
     setSystemAudioBitrate,
+    sendParticipantVoiceState,
     applyOutputDeviceToAll: () => registry.applyOutputDevice(),
     applyVolumeForUser: (userId, volume) =>
       registry.applyVolume(userId, null, volume),

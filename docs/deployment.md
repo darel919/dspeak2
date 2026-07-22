@@ -3,6 +3,23 @@
 This runbook contains the network and platform details for deploying DSpeak with
 Docker Compose, Coolify, Zoraxy, direct IPv6, and Playit IPv4 fallback.
 
+## Deployment model
+
+The supported production layout uses one long-running DSpeak container, one
+Playit agent for mediasoup IPv4 fallback, one IPv6 Coturn service, a certificate
+sidecar, and Cloudflare DDNS for the RTC hostname. HTTP and WebSockets may pass
+through Zoraxy. RTP and TURN traffic must reach their published ports directly.
+
+Prepare these values before deployment:
+
+- PocketBase and authentication-service credentials
+- a DNS-only RTC hostname
+- a scoped Cloudflare token for RTC AAAA updates
+- a separate scoped Cloudflare token for the TURN certificate challenge
+- a Playit Docker-agent secret
+- a random Coturn shared secret
+- firewall access for every port listed in this runbook
+
 ## Production media environment
 
 ```dotenv
@@ -61,6 +78,8 @@ The Compose stack publishes:
 - a Playit agent in DSpeak's network namespace
 
 All mediasoup transports share one `WebRtcServer` and one UDP/TCP port.
+
+### Coolify setup
 
 In Coolify, select the Docker Compose build pack and `/docker-compose.yml`. Add
 all required `.env.example` values in the Environment Variables page. Create a
@@ -221,6 +240,14 @@ required packet-forwarding path.
 
 ## Ports and firewall
 
+| Traffic                   | Default port                | Required path                       |
+| ------------------------- | --------------------------- | ----------------------------------- |
+| Nitro HTTP and WebSockets | `31100/tcp` on the host     | Reverse proxy or direct host access |
+| mediasoup RTP             | `40000/udp` and `40000/tcp` | Direct IPv6 or Playit IPv4          |
+| TURN and STUN             | `3478/udp` and `3478/tcp`   | Direct to host                      |
+| TURN over TLS             | `5349/tcp`                  | Direct to host                      |
+| TURN relay media          | `49160–49259/udp`           | Direct to host                      |
+
 The HTTP host port can be changed with:
 
 ```dotenv
@@ -244,6 +271,10 @@ forward the TURN ports through Playit or an HTTP reverse proxy.
 
 ## Production checks
 
+Complete every check below before treating the deployment as production-ready.
+
+### Application health
+
 ```bash
 curl --fail https://<application-host>/health
 curl --fail https://<application-host>/metrics
@@ -255,10 +286,14 @@ self-hosted availability check is a real IPv6 STUN Binding transaction cached
 for thirty seconds; a failed optional TURN probe does not mark the Nitro/SFU
 service unhealthy while community fallbacks remain configured.
 
+### Relay checks
+
 Validate authenticated relay allocations from an external IPv6 network with
 Coturn's `turnutils_uclient`, then force `iceTransportPolicy: "relay"` in a test
 browser session. Repeat from an IPv4-only network and confirm a community TURN
 candidate is selected instead of the IPv6-only hostname.
+
+### Direct media checks
 
 Confirm direct IPv6 and Playit IPv4 separately from external networks. The RTC
 Statistics map must report the address family from the selected candidate rather

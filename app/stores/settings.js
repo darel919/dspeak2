@@ -6,9 +6,18 @@ import {
 } from "~/const/media";
 import { STORAGE_KEYS } from "~/const/storage";
 import { normalizeAppearance } from "~/shared/appearance";
+import {
+  DEFAULT_MICROPHONE_GATE,
+  normalizeMicrophoneGate,
+} from "~/shared/microphone-gate";
 
 export const useSettingsStore = defineStore("settings", () => {
   const audio = ref(loadPersisted("audioSettings", DEFAULT_AUDIO_SETTINGS));
+  const microphoneGate = ref(
+    normalizeMicrophoneGate(
+      loadPersisted("microphoneGateSettings", DEFAULT_MICROPHONE_GATE),
+    ),
+  );
   const micDeviceId = ref(loadPersisted("audioDeviceId", null));
   const outputDeviceId = ref(loadPersisted("audioOutputDeviceId", null));
   const cameraDeviceId = ref(loadPersisted("videoDeviceId", null));
@@ -34,6 +43,70 @@ export const useSettingsStore = defineStore("settings", () => {
       reductionPercent: 65,
     }),
   );
+  const soundboardVolume = ref(
+    normalizePercent(loadPersisted(STORAGE_KEYS.soundboardVolume, 100)),
+  );
+  const soundboardRoomVolumes = ref(
+    loadPersisted(STORAGE_KEYS.soundboardRoomVolumes, {}),
+  );
+  const systemSoundTheme = ref(
+    normalizeSystemSoundTheme(
+      loadPersisted(STORAGE_KEYS.systemSoundTheme, "default"),
+    ),
+  );
+  const systemSoundVolume = ref(
+    normalizePercent(loadPersisted(STORAGE_KEYS.systemSoundVolume, 70)),
+  );
+  const systemSoundsMuted = ref(
+    Boolean(loadPersisted(STORAGE_KEYS.systemSoundsMuted, false)),
+  );
+
+  function normalizePercent(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+      ? Math.min(100, Math.max(0, Math.round(numeric)))
+      : 100;
+  }
+
+  function setSoundboardVolume(value) {
+    soundboardVolume.value = normalizePercent(value);
+    persist(STORAGE_KEYS.soundboardVolume, soundboardVolume.value);
+  }
+
+  function setRoomSoundboardVolume(roomId, value) {
+    const next = { ...soundboardRoomVolumes.value };
+    if (value === null || value === undefined || value === "")
+      delete next[roomId];
+    else next[roomId] = normalizePercent(value);
+    soundboardRoomVolumes.value = next;
+    persist(STORAGE_KEYS.soundboardRoomVolumes, next);
+  }
+
+  function getSoundboardVolume(roomId) {
+    const override = soundboardRoomVolumes.value[String(roomId)];
+    return Number.isFinite(Number(override))
+      ? Number(override)
+      : soundboardVolume.value;
+  }
+
+  function setSystemSoundTheme(value) {
+    systemSoundTheme.value = normalizeSystemSoundTheme(value);
+    persist(STORAGE_KEYS.systemSoundTheme, systemSoundTheme.value);
+  }
+
+  function normalizeSystemSoundTheme(value) {
+    return value === "default" ? value : "default";
+  }
+
+  function setSystemSoundVolume(value) {
+    systemSoundVolume.value = normalizePercent(value);
+    persist(STORAGE_KEYS.systemSoundVolume, systemSoundVolume.value);
+  }
+
+  function setSystemSoundsMuted(value) {
+    systemSoundsMuted.value = Boolean(value);
+    persist(STORAGE_KEYS.systemSoundsMuted, systemSoundsMuted.value);
+  }
 
   const supported = computed(() => {
     if (
@@ -59,6 +132,14 @@ export const useSettingsStore = defineStore("settings", () => {
     if (!(key in audio.value)) return;
     audio.value = { ...audio.value, [key]: !!value };
     persist("audioSettings", audio.value);
+  }
+
+  function setMicrophoneGate(value) {
+    microphoneGate.value = normalizeMicrophoneGate({
+      ...microphoneGate.value,
+      ...value,
+    });
+    persist("microphoneGateSettings", microphoneGate.value);
   }
 
   function setBroadcastMode(val) {
@@ -182,6 +263,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
   return {
     audio,
+    microphoneGate,
     supported,
     micDeviceId,
     outputDeviceId,
@@ -193,7 +275,13 @@ export const useSettingsStore = defineStore("settings", () => {
     systemAudioBitrate,
     appearance,
     streamAttenuation,
+    soundboardVolume,
+    soundboardRoomVolumes,
+    systemSoundTheme,
+    systemSoundVolume,
+    systemSoundsMuted,
     setAudioSetting,
+    setMicrophoneGate,
     setMicDeviceId,
     setOutputDeviceId,
     setCameraDeviceId,
@@ -204,5 +292,11 @@ export const useSettingsStore = defineStore("settings", () => {
     setSystemAudioBitrate,
     setAppearance,
     setStreamAttenuation,
+    setSoundboardVolume,
+    setRoomSoundboardVolume,
+    getSoundboardVolume,
+    setSystemSoundTheme,
+    setSystemSoundVolume,
+    setSystemSoundsMuted,
   };
 });

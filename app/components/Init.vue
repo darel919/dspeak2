@@ -49,6 +49,7 @@
 <script setup>
 import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
+import { useIdentityStore } from "../stores/identity";
 import { useNotifications } from "../composables/useNotifications";
 import NotificationWarning from "./NotificationWarning.vue";
 import { usePresence } from "../composables/usePresence.js";
@@ -56,6 +57,7 @@ import startupLogo from "../assets/logo/logo_96.png";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
+const identityStore = useIdentityStore();
 const router = useRouter();
 const route = useRoute();
 const authChecked = ref(false);
@@ -180,6 +182,7 @@ watch(
     if (userData && !isAuthPage.value && !isBootstrapping.value) {
       console.debug("[Init] User authenticated, fetching rooms");
       await roomsStore.fetchRooms();
+      await identityStore.loadNicknames();
       sendUserIdToServiceWorker();
     }
   },
@@ -207,6 +210,7 @@ async function checkAuth() {
     if (isValid) {
       startupStatus.value = "Loading your rooms…";
       await roomsStore.fetchRooms();
+      await identityStore.loadNicknames();
       authChecked.value = true;
       return;
     }

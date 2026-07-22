@@ -196,11 +196,80 @@
                   :key="u.id || u"
                 >
                   <div
-                    class="flex items-center gap-2 text-sm text-base-content/70"
+                    class="flex min-w-0 items-center gap-2 text-sm text-base-content/70"
+                    @contextmenu.prevent.stop="
+                      openParticipantMenu(u.id || u, $event)
+                    "
                   >
-                    <span class="min-w-0 flex-1 truncate">{{
-                      getUserName(u.id || u)
-                    }}</span>
+                    <div
+                      class="avatar placeholder shrink-0"
+                      :class="u.speaking ? 'avatar-online' : ''"
+                    >
+                      <div
+                        class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
+                      >
+                        <img
+                          v-if="getUserAvatar(u.id || u)"
+                          :src="getUserAvatar(u.id || u)"
+                          :alt="`${getUserName(u.id || u)} avatar`"
+                          class="h-full w-full object-cover"
+                        />
+                        <span v-else>{{ getUserInitials(u.id || u) }}</span>
+                      </div>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div
+                        class="truncate transition-colors duration-150"
+                        :class="
+                          u.speaking
+                            ? 'font-medium text-base-content'
+                            : 'text-base-content/45'
+                        "
+                      >
+                        {{ getUserName(u.id || u) }}
+                      </div>
+                      <div
+                        v-if="u.soundboardActivity"
+                        class="flex min-w-0 items-center gap-1 text-xs font-medium text-primary"
+                        role="status"
+                      >
+                        <span aria-hidden="true">{{
+                          u.soundboardActivity.icon
+                        }}</span>
+                        <span class="truncate"
+                          >Playing {{ u.soundboardActivity.title }}</span
+                        >
+                      </div>
+                    </div>
+                    <div
+                      class="flex shrink-0 items-center gap-1 text-base-content/60"
+                      :aria-label="getUserMediaStatusLabel(u.id || u)"
+                    >
+                      <Icon
+                        v-if="u.deafened"
+                        name="lucide:headphone-off"
+                        class="h-4 w-4"
+                        title="Deafened"
+                      />
+                      <Icon
+                        v-else-if="u.muted"
+                        name="lucide:mic-off"
+                        class="h-4 w-4"
+                        title="Microphone off"
+                      />
+                      <Icon
+                        v-if="u.cameraEnabled"
+                        name="lucide:video"
+                        class="h-4 w-4 text-success"
+                        title="Camera on"
+                      />
+                      <Icon
+                        v-if="u.screenSharing"
+                        name="lucide:screen-share"
+                        class="h-4 w-4 text-success"
+                        title="Screen sharing"
+                      />
+                    </div>
                     <div class="dropdown dropdown-end shrink-0" @click.stop>
                       <button
                         tabindex="0"
@@ -289,7 +358,12 @@
             <div v-else-if="channel.inRoom?.length" class="pl-8 pr-2 pb-2">
               <div class="flex flex-col gap-1 text-sm text-base-content/60">
                 <template v-for="uid in channel.inRoom" :key="uid">
-                  <div class="truncate">{{ getUserName(uid) }}</div>
+                  <div
+                    class="truncate"
+                    @contextmenu.prevent.stop="openParticipantMenu(uid, $event)"
+                  >
+                    {{ getUserName(uid) }}
+                  </div>
                 </template>
               </div>
             </div>
@@ -298,6 +372,72 @@
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="participantMenuUserId"
+        ref="participantMenuElement"
+        class="fixed z-[100] w-52 rounded-lg border border-base-300 bg-base-200 p-3 text-base-content shadow-xl"
+        :style="participantMenuStyle"
+        role="dialog"
+        :aria-label="`Volume control for ${getUserName(participantMenuUserId)}`"
+        @pointerdown.stop
+        @contextmenu.prevent.stop
+      >
+        <div class="truncate text-sm font-semibold">
+          {{ getUserName(participantMenuUserId) }}
+        </div>
+        <label class="mt-3 block text-xs font-medium" for="channel-user-volume">
+          User volume
+        </label>
+        <input
+          id="channel-user-volume"
+          class="range range-primary mt-2 w-full"
+          type="range"
+          min="0"
+          max="2"
+          step="0.01"
+          :value="voiceStore.getUserVolume(participantMenuUserId)"
+          @input="setParticipantVolume"
+        />
+        <div class="mt-1 flex justify-between text-xs text-base-content/60">
+          <span>0%</span>
+          <span>200%</span>
+        </div>
+        <div class="my-3 border-t border-base-300"></div>
+        <label class="block text-xs font-medium" for="channel-user-nickname">
+          Personal nickname
+        </label>
+        <input
+          id="channel-user-nickname"
+          v-model="participantNickname"
+          class="input input-bordered input-sm mt-2 w-full"
+          type="text"
+          maxlength="32"
+          placeholder="Use public username"
+          @keydown.enter.prevent="saveParticipantNickname"
+        />
+        <button
+          class="btn btn-primary btn-sm mt-2 w-full"
+          type="button"
+          :disabled="participantNicknameSaving"
+          @click="saveParticipantNickname"
+        >
+          <span
+            v-if="participantNicknameSaving"
+            class="loading loading-spinner loading-xs"
+          ></span>
+          {{ participantNickname.trim() ? "Save nickname" : "Clear nickname" }}
+        </button>
+        <p
+          v-if="participantNicknameError"
+          class="mt-2 text-xs text-error"
+          role="alert"
+        >
+          {{ participantNicknameError }}
+        </p>
+      </div>
+    </Teleport>
 
     <!-- Create Channel Modal -->
     <div v-if="showCreateChannel" class="modal modal-open">
@@ -359,36 +499,20 @@
             <div class="w-full">
               <input
                 type="range"
-                min="1"
-                max="5"
-                v-model.number="newChannelBitrateLevel"
+                min="32"
+                max="64"
+                v-model.number="newChannelBitrate"
                 class="range w-full"
                 step="1"
               />
               <div class="flex justify-between px-2.5 mt-2 text-xs">
-                <span>|</span>
-                <span>|</span>
-                <span>|</span>
-                <span>|</span>
-                <span>|</span>
-              </div>
-              <div class="flex justify-between px-2.5 mt-2 text-xs">
+                <span>32</span>
+                <span>48</span>
                 <span>64</span>
-                <span>96</span>
-                <span>128</span>
-                <span>160</span>
-                <span>256</span>
               </div>
             </div>
             <div class="text-sm mt-2">
-              Selected: <strong>{{ newChannelBitrateKbps }} kbps</strong>
-            </div>
-            <div
-              v-if="newChannelBitrateLevel > 3"
-              class="text-sm text-error mt-2"
-            >
-              Using high bitrate audio might affect your experience if your
-              connection is unstable.
+              Selected: <strong>{{ newChannelBitrate }} kbps mono</strong>
             </div>
           </div>
           <div class="modal-action">
@@ -444,21 +568,43 @@
             <p class="mb-4 text-sm text-base-content/60">
               Changes apply live to everyone connected to this voice channel.
             </p>
-            <div class="grid gap-4 sm:grid-cols-2">
+            <label class="mb-4 flex cursor-pointer items-start gap-3">
+              <input
+                v-model="editingChannelPolicy.hdAudio"
+                type="checkbox"
+                class="toggle toggle-primary mt-0.5"
+                @change="applyHdAudioRange"
+              />
+              <span>
+                <span class="block text-sm font-medium"
+                  >HD microphone audio</span
+                >
+                <small class="text-base-content/60">
+                  Stereo microphone audio above 64 kbps. Off by default.
+                </small>
+              </span>
+            </label>
+            <div class="grid gap-5 sm:grid-cols-2">
               <label
                 v-for="field in channelPolicyFields"
                 :key="field.key"
                 class="grid min-w-0 gap-2"
               >
                 <span class="text-sm font-medium">{{ field.label }}</span>
-                <input
-                  v-model.number="editingChannelPolicy[field.key]"
-                  type="number"
-                  class="input input-bordered w-full"
-                  :min="field.min"
-                  :max="field.max"
-                  required
-                />
+                <div class="flex items-center gap-3">
+                  <input
+                    v-model.number="editingChannelPolicy[field.key]"
+                    type="range"
+                    class="range range-primary min-w-0 flex-1"
+                    :min="field.min"
+                    :max="field.max"
+                    :step="field.step"
+                    required
+                  />
+                  <output class="w-20 text-right text-sm tabular-nums">
+                    {{ editingChannelPolicy[field.key] }} kbps
+                  </output>
+                </div>
                 <small class="text-base-content/50"
                   >{{ field.min }}–{{ field.max }} kbps</small
                 >
@@ -481,7 +627,36 @@
 function getUserName(userId) {
   const user =
     voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId);
-  return user?.display_name || user?.name || user?.username || userId;
+  return identityStore.displayName(user || { id: userId });
+}
+function getUserAvatar(userId) {
+  const user =
+    voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId);
+  const avatar = user?.avatar;
+  if (!avatar) return null;
+  if (/^(https?:)?\/\//i.test(avatar)) return avatar;
+  const base = runtimeConfig.public.baseApiPath.replace(/\/$/, "");
+  return `${base}/${String(avatar).replace(/^\/+/, "")}`;
+}
+function getUserInitials(userId) {
+  return getUserName(userId)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+function getUserMediaStatusLabel(userId) {
+  const user = voiceStore.getUserById(userId);
+  const statuses = [];
+  if (user?.deafened) statuses.push("deafened");
+  else if (user?.muted) statuses.push("microphone off");
+  if (user?.cameraEnabled) statuses.push("camera on");
+  if (user?.screenSharing) statuses.push("screen sharing");
+  return statuses.length
+    ? `${getUserName(userId)}: ${statuses.join(", ")}`
+    : `${getUserName(userId)}: microphone on`;
 }
 const isP2pActive = computed(
   () => unref(unref(voiceStore.sfuComposable)?.activeProvider) === "p2p",
@@ -560,14 +735,19 @@ import { useChannelsStore } from "../stores/channels";
 import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
+import { useIdentityStore } from "../stores/identity";
 import {
   getConnectionQualityBars,
   getConnectionQualityColorClass,
   getConnectionQualityLabel,
 } from "../shared/connection-quality";
 import { unref } from "vue";
-import { CHANNEL_BITRATE_LEVELS } from "../const/media";
-import { MEDIA_POLICY_LIMITS } from "~~/shared/media-policy.js";
+import { VIEWPORT_PADDING_PX } from "../const/ui";
+import {
+  HD_MICROPHONE_MIN_KBPS,
+  MEDIA_POLICY_LIMITS,
+  STANDARD_MICROPHONE_MAX_KBPS,
+} from "~~/shared/media-policy.js";
 
 import { useChatUtils } from "../composables/useChatUtils";
 import { useToast } from "../composables/useToast";
@@ -603,13 +783,85 @@ const channelsStore = useChannelsStore();
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const voiceStore = useVoiceStore();
+const identityStore = useIdentityStore();
+const participantMenuUserId = ref(null);
+const participantMenuElement = ref(null);
+const participantMenuPosition = ref({ x: 0, y: 0 });
+const participantNickname = ref("");
+const participantNicknameSaving = ref(false);
+const participantNicknameError = ref("");
+const participantMenuStyle = computed(() => ({
+  left: `${participantMenuPosition.value.x}px`,
+  top: `${participantMenuPosition.value.y}px`,
+}));
+
+async function openParticipantMenu(userId, event) {
+  participantMenuUserId.value = String(userId);
+  participantNickname.value = identityStore.nicknameFor(userId);
+  participantNicknameError.value = "";
+  participantMenuPosition.value = { x: event.clientX, y: event.clientY };
+  await nextTick();
+
+  if (!participantMenuElement.value) return;
+  const { width, height } =
+    participantMenuElement.value.getBoundingClientRect();
+  participantMenuPosition.value = {
+    x: Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(
+        participantMenuPosition.value.x,
+        window.innerWidth - width - VIEWPORT_PADDING_PX,
+      ),
+    ),
+    y: Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(
+        participantMenuPosition.value.y,
+        window.innerHeight - height - VIEWPORT_PADDING_PX,
+      ),
+    ),
+  };
+}
+
+function closeParticipantMenu() {
+  participantMenuUserId.value = null;
+}
+
+async function saveParticipantNickname() {
+  if (!participantMenuUserId.value) return;
+  participantNicknameSaving.value = true;
+  participantNicknameError.value = "";
+  try {
+    participantNickname.value = await identityStore.saveNickname(
+      participantMenuUserId.value,
+      participantNickname.value,
+    );
+  } catch (error) {
+    participantNicknameError.value =
+      error?.data?.statusMessage || error?.message || "Could not save nickname";
+  } finally {
+    participantNicknameSaving.value = false;
+  }
+}
+
+function setParticipantVolume(event) {
+  if (!participantMenuUserId.value) return;
+  voiceStore.setUserVolume(
+    participantMenuUserId.value,
+    Number(event.target.value),
+  );
+}
+
+function onParticipantMenuKeydown(event) {
+  if (event.key === "Escape") closeParticipantMenu();
+}
 const showCreateChannel = ref(false);
 const showEditChannel = ref(false);
 const editingChannel = ref(null);
 const editingChannelPolicy = ref({});
 const originalEditingChannelPolicy = ref({});
-const channelPolicyFields = Object.entries(MEDIA_POLICY_LIMITS).map(
-  ([key, limits]) => ({
+const channelPolicyFields = computed(() =>
+  Object.entries(MEDIA_POLICY_LIMITS).map(([key, limits]) => ({
     key,
     label:
       {
@@ -619,18 +871,31 @@ const channelPolicyFields = Object.entries(MEDIA_POLICY_LIMITS).map(
         sharedAudioKbps: "Shared audio",
       }[key] || key,
     ...limits,
-  }),
+    ...(key === "microphoneKbps"
+      ? editingChannelPolicy.value.hdAudio
+        ? { min: HD_MICROPHONE_MIN_KBPS, max: limits.max }
+        : { min: limits.min, max: STANDARD_MICROPHONE_MAX_KBPS }
+      : {}),
+    step: 1,
+  })),
 );
+
+function applyHdAudioRange() {
+  editingChannelPolicy.value.microphoneKbps = editingChannelPolicy.value.hdAudio
+    ? Math.max(
+        HD_MICROPHONE_MIN_KBPS,
+        Number(editingChannelPolicy.value.microphoneKbps) || 96,
+      )
+    : Math.min(
+        STANDARD_MICROPHONE_MAX_KBPS,
+        Number(editingChannelPolicy.value.microphoneKbps) || 48,
+      );
+}
 const unreadCounts = ref([]);
 const newChannelName = ref("");
 const newChannelDesc = ref("");
 const newChannelType = ref("text");
-const newChannelBitrate = ref(64);
-
-const newChannelBitrateLevel = ref(3);
-const newChannelBitrateKbps = computed(
-  () => CHANNEL_BITRATE_LEVELS[newChannelBitrateLevel.value] || 64,
-);
+const newChannelBitrate = ref(48);
 const textChannels = computed(() => channelsStore.getTextChannels());
 const voiceChannels = computed(() => channelsStore.getMediaChannels());
 const currentUserId = computed(() => authStore.getUserData()?.id);
@@ -718,7 +983,7 @@ async function handleCreateChannel() {
 
       audio_bitrate:
         newChannelType.value === "voice"
-          ? Number(newChannelBitrateKbps.value)
+          ? Number(newChannelBitrate.value)
           : null,
     };
 
@@ -787,8 +1052,7 @@ function closeCreateModal() {
   newChannelName.value = "";
   newChannelDesc.value = "";
   newChannelType.value = "text";
-  newChannelBitrate.value = 64;
-  newChannelBitrateLevel.value = 3;
+  newChannelBitrate.value = 48;
 }
 
 function closeEditModal() {
@@ -805,6 +1069,16 @@ function goToRoomSettings() {
 
 onMounted(() => {
   loadChannels();
+  document.addEventListener("pointerdown", closeParticipantMenu);
+  document.addEventListener("keydown", onParticipantMenuKeydown);
+  window.addEventListener("resize", closeParticipantMenu);
+  window.addEventListener("scroll", closeParticipantMenu, true);
+});
+onUnmounted(() => {
+  document.removeEventListener("pointerdown", closeParticipantMenu);
+  document.removeEventListener("keydown", onParticipantMenuKeydown);
+  window.removeEventListener("resize", closeParticipantMenu);
+  window.removeEventListener("scroll", closeParticipantMenu, true);
 });
 watch(
   () => props.room.id,

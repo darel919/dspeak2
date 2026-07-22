@@ -1,4 +1,8 @@
 import { usePocketBaseAdmin } from "../../utils/pocketbase";
+import {
+  addGlobalSubscriber,
+  removeGlobalSubscriber,
+} from "../../utils/dspeak-realtime";
 
 const users = new Map();
 
@@ -7,6 +11,7 @@ export default defineWebSocketHandler({
     const userId = new URL(peer.request.url).searchParams.get("userId");
     if (!userId) return peer.close(1008, "User ID is required");
     users.set(peer.id, userId);
+    addGlobalSubscriber(peer);
     try {
       const pb = await usePocketBaseAdmin();
       await pb.collection("users").update(userId, { online: true });
@@ -17,6 +22,7 @@ export default defineWebSocketHandler({
   },
 
   async close(peer) {
+    removeGlobalSubscriber(peer);
     const userId = users.get(peer.id);
     users.delete(peer.id);
     if (!userId) return;

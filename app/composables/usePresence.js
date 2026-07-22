@@ -1,4 +1,7 @@
 import { useRuntimeConfig } from "#app";
+import { useAuthStore } from "../stores/auth";
+import { useIdentityStore } from "../stores/identity";
+import { useVoiceStore } from "../stores/voice";
 
 export function usePresence(userId) {
   const status = ref("disconnected");
@@ -7,6 +10,25 @@ export function usePresence(userId) {
   let retryTimer = null;
   let pingInterval = null;
   const config = useRuntimeConfig();
+  const authStore = useAuthStore();
+  const identityStore = useIdentityStore();
+  const voiceStore = useVoiceStore();
+
+  function receiveMessage(event) {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (message?.type !== "profile_updated" || !message.data?.id) return;
+    const profile = message.data;
+    identityStore.upsertPublicProfile(profile);
+    voiceStore.upsertUserProfile(profile);
+    if (String(authStore.getUserData()?.id) === String(profile.id)) {
+      authStore.updateUserData(profile);
+    }
+  }
 
   function connect(id) {
     if (!import.meta.client || !id) {
@@ -18,6 +40,7 @@ export function usePresence(userId) {
     const wsUrl = `${base}/presence?userId=${encodeURIComponent(id)}`;
     console.debug("[usePresence] Connecting to:", wsUrl);
     ws = new WebSocket(wsUrl);
+    ws.onmessage = receiveMessage;
     ws.onopen = () => {
       console.debug("[usePresence] Connected successfully");
       status.value = "connected";

@@ -37,7 +37,7 @@ export function p2pRemoteFeedKey(peerId, source) {
   return `p2p:${String(peerId)}:${String(source || "media")}`;
 }
 
-export function applyOpusAudioProfile(sdp) {
+export function applyOpusAudioProfile(sdp, stereo = true) {
   if (!sdp) return sdp;
   return String(sdp)
     .split(/(?=m=)/)
@@ -47,8 +47,8 @@ export function applyOpusAudioProfile(sdp) {
       if (!match) return section;
       const payloadType = match[1];
       const required = {
-        stereo: "1",
-        "sprop-stereo": "1",
+        stereo: stereo ? "1" : "0",
+        "sprop-stereo": stereo ? "1" : "0",
         useinbandfec: "1",
         usedtx: "0",
         minptime: "10",
@@ -220,6 +220,7 @@ export class NativeP2pMesh {
     onFailure,
     onSnapshot,
     getSenderOptions,
+    getAudioStereo,
   }) {
     this.configuration = {
       iceServers: directIceServers(iceServers),
@@ -233,6 +234,7 @@ export class NativeP2pMesh {
     this.onFailure = onFailure;
     this.onSnapshot = onSnapshot;
     this.getSenderOptions = getSenderOptions;
+    this.getAudioStereo = getAudioStereo;
     this.connections = new Map();
     this.localSources = new Map();
     this.remoteSources = new Map();
@@ -333,7 +335,7 @@ export class NativeP2pMesh {
         const offer = await pc.createOffer();
         await pc.setLocalDescription({
           type: offer.type,
-          sdp: applyOpusAudioProfile(offer.sdp),
+          sdp: applyOpusAudioProfile(offer.sdp, this.usesStereoAudio()),
         });
         this.signal(peerId, { description: pc.localDescription });
         await this.configureStateSenders(state);
@@ -432,7 +434,7 @@ export class NativeP2pMesh {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription({
           type: answer.type,
-          sdp: applyOpusAudioProfile(answer.sdp),
+          sdp: applyOpusAudioProfile(answer.sdp, this.usesStereoAudio()),
         });
         this.signal(state.peerId, { description: pc.localDescription });
       }
@@ -577,6 +579,27 @@ export class NativeP2pMesh {
       this.attachSource(state, source, { track, stream });
   }
 
+  async setSourceTransmission(source, enabled) {
+    this.sourceTransmission ||= new Map();
+    this.sourceTransmission.set(source, Boolean(enabled));
+    await Promise.all(
+      [...this.connections.values()].map((state) => {
+        const receiving = state.sourceReceiving.get(source) ?? true;
+        return this.setSenderActive(
+          state.senders.get(source),
+          receiving && Boolean(enabled),
+        );
+      }),
+    );
+  }
+
+  usesStereoAudio() {
+    return [...this.localSources].some(
+      ([source, entry]) =>
+        entry.track?.kind === "audio" && this.getAudioStereo?.(source),
+    );
+  }
+
   setRemoteReceiving(peerId, source, receiving) {
     const pairedSources =
       source === "screen" || source === "screen-audio"
@@ -593,12 +616,18 @@ export class NativeP2pMesh {
 
   async setSenderReceiving(state, source, receiving) {
     state.sourceReceiving.set(source, Boolean(receiving));
-    const sender = state.senders.get(source);
+    return this.setSenderActive(
+      state.senders.get(source),
+      Boolean(receiving) && (this.sourceTransmission?.get(source) ?? true),
+    );
+  }
+
+  async setSenderActive(sender, active) {
     if (!sender?.getParameters || !sender?.setParameters) return;
     const parameters = sender.getParameters();
     if (!parameters.encodings?.length) parameters.encodings = [{}];
     for (const encoding of parameters.encodings)
-      encoding.active = Boolean(receiving);
+      encoding.active = Boolean(active);
     await sender.setParameters(parameters);
   }
 
@@ -612,7 +641,8 @@ export class NativeP2pMesh {
           this.setSenderReceiving(
             state,
             source,
-            state.sourceReceiving.get(source) ?? true,
+            (state.sourceReceiving.get(source) ?? true) &&
+              (this.sourceTransmission?.get(source) ?? true),
           ),
         )
         .catch((error) => this.fail("track-replacement-failed", error));
@@ -630,7 +660,8 @@ export class NativeP2pMesh {
         this.setSenderReceiving(
           state,
           source,
-          state.sourceReceiving.get(source) ?? true,
+          (state.sourceReceiving.get(source) ?? true) &&
+            (this.sourceTransmission?.get(source) ?? true),
         ),
       )
       .catch((error) => this.fail("sender-configuration-failed", error));

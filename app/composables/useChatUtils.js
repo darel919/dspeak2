@@ -99,6 +99,10 @@ export const useChatUtils = () => {
 
     if (avatarPath.startsWith("http")) return avatarPath;
 
+    if (avatarPath.startsWith("auth/")) return `${apiPath}/${avatarPath}`;
+    if (avatarPath.startsWith("assets/"))
+      return `${apiPath}/auth/${avatarPath}`;
+
     return `${apiPath}/files/${avatarPath}`;
   }
 

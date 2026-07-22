@@ -36,8 +36,8 @@
             style="overflow: visible; margin-bottom: 4px"
           >
             <img
-              :src="getAvatarUrl(member.avatar)"
-              :alt="member.name"
+              :src="getAvatarUrl(identityStore.profileFor(member).avatar)"
+              :alt="memberDisplayName(member)"
               class="block rounded-full"
             />
             <!-- Status dot at right bottom -->
@@ -67,7 +67,7 @@
         </div>
         <!-- Name and owner icon -->
         <div class="flex items-center gap-1 text-base-content font-medium">
-          <span class="text-sm font-bold">{{ member.name }}</span>
+          <span class="text-sm font-bold">{{ memberDisplayName(member) }}</span>
           <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
             <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
           </span>
@@ -89,16 +89,16 @@
         <input
           type="range"
           min="0"
-          max="1"
+          max="2"
           step="0.01"
           :value="voiceStore.getUserVolume(volumeMenuUser.id)"
           class="w-full"
-          :aria-label="`Volume for ${volumeMenuUser.name}`"
+          :aria-label="`Volume for ${memberDisplayName(volumeMenuUser)}`"
           @input="onVolumeChange(volumeMenuUser.id, $event)"
         />
         <div class="mt-1 flex justify-between text-xs">
           <span>0%</span>
-          <span>100%</span>
+          <span>200%</span>
         </div>
         <button
           class="btn btn-xs btn-outline mt-2 w-full"
@@ -178,6 +178,7 @@ onUnmounted(() => {
 import { useRuntimeConfig } from "#app";
 import { useChatStore } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
+import { useIdentityStore } from "../stores/identity";
 
 const props = defineProps({
   members: {
@@ -201,6 +202,11 @@ const props = defineProps({
 const config = useRuntimeConfig();
 const chatStore = useChatStore();
 const authStore = useAuthStore();
+const identityStore = useIdentityStore();
+
+function memberDisplayName(member) {
+  return identityStore.displayName(member);
+}
 
 const onlineUsers = computed(() => chatStore.onlineUsers || []);
 const currentUser = computed(() => authStore.getUserData());

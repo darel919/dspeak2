@@ -9,4 +9,5 @@
 <script setup>
 useAppearance();
 useContextualTitle();
+useCallWakeLock();
 </script>

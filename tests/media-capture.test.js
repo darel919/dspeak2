@@ -14,12 +14,18 @@ test("microphone constraints preserve processing preferences and selected device
     {
       echoCancellation: false,
       noiseSuppression: true,
-      autoGainControl: false,
-      channelCount: { ideal: 2 },
+      autoGainControl: true,
+      channelCount: { ideal: 1 },
       sampleRate: { ideal: 48000 },
       deviceId: { exact: "microphone-1" },
     },
   );
+});
+
+test("HD microphone capture requests stereo", () => {
+  const constraints = audioConstraints({}, true);
+  assert.deepEqual(constraints.channelCount, { ideal: 2 });
+  assert.equal(constraints.autoGainControl, true);
 });
 
 test("shared audio disables destructive speech processing", () => {

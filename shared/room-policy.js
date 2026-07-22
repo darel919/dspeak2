@@ -4,6 +4,7 @@ export const ROOM_PERMISSIONS = Object.freeze([
   "room.manage_invites",
   "room.manage_members",
   "room.manage_roles",
+  "room.manage_soundboard",
   "channel.create",
   "channel.update",
   "channel.delete",

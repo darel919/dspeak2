@@ -21,12 +21,17 @@
         >
           <div class="avatar avatar-online">
             <div class="w-10 rounded-full">
-              <img :src="getAvatarUrl(member.avatar)" :alt="member.name" />
+              <img
+                :src="getAvatarUrl(identityStore.profileFor(member).avatar)"
+                :alt="identityStore.displayName(member)"
+              />
             </div>
           </div>
 
           <div class="flex-1">
-            <p class="font-medium text-sm">{{ member.name }}</p>
+            <p class="font-medium text-sm">
+              {{ identityStore.displayName(member) }}
+            </p>
             <p class="text-xs text-base-content/60">{{ member.email }}</p>
           </div>
 
@@ -48,6 +53,7 @@
 
 <script setup>
 import { useRuntimeConfig } from "#app";
+import { useIdentityStore } from "../stores/identity";
 
 const props = defineProps({
   onlineMembers: {
@@ -61,6 +67,7 @@ const props = defineProps({
 });
 
 const config = useRuntimeConfig();
+const identityStore = useIdentityStore();
 
 function getAvatarUrl(avatarPath) {
   if (!avatarPath) return "/favicon-32x32.png";

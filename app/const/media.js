@@ -8,7 +8,7 @@ export const AUDIO_CONSTRAINT_KEYS = Object.freeze([
 export const DEFAULT_AUDIO_SETTINGS = Object.freeze({
   echoCancellation: false,
   noiseSuppression: false,
-  autoGainControl: false,
+  autoGainControl: true,
 });
 
 export const SYSTEM_AUDIO_BITRATE_OPTIONS = Object.freeze([

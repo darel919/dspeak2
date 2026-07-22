@@ -1,11 +1,10 @@
 import { buildVideoConstraints } from "./video-settings.js";
+import { DEFAULT_AUDIO_SETTINGS } from "../const/media.js";
 
-function audioConstraints(settings) {
+export function audioConstraints(settings, stereo = false) {
   const processing = {
-    echoCancellation: false,
-    noiseSuppression: false,
-    autoGainControl: false,
-    channelCount: { ideal: 2 },
+    ...DEFAULT_AUDIO_SETTINGS,
+    channelCount: { ideal: stereo ? 2 : 1 },
     sampleRate: { ideal: 48000 },
     ...(settings.audio || {}),
   };
@@ -27,8 +26,9 @@ function sharedAudioConstraints() {
 }
 
 export class MediaCaptureManager {
-  constructor({ getSettings, onSource, onSourceEnded }) {
+  constructor({ getSettings, getAudioStereo, onSource, onSourceEnded }) {
     this.getSettings = getSettings;
+    this.getAudioStereo = getAudioStereo;
     this.onSource = onSource;
     this.onSourceEnded = onSourceEnded;
     this.sources = new Map();
@@ -41,12 +41,15 @@ export class MediaCaptureManager {
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints(settings),
+        audio: audioConstraints(settings, this.getAudioStereo?.("audio")),
       });
     } catch (error) {
       if (!settings.micDeviceId) throw error;
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints({ ...settings, micDeviceId: null }),
+        audio: audioConstraints(
+          { ...settings, micDeviceId: null },
+          this.getAudioStereo?.("audio"),
+        ),
       });
     }
     return this.register("audio", stream, stream.getAudioTracks()[0]);
@@ -161,4 +164,4 @@ export class MediaCaptureManager {
   }
 }
 
-export { audioConstraints, sharedAudioConstraints };
+export { sharedAudioConstraints };

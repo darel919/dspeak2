@@ -1,16 +1,33 @@
 export const MEDIA_POLICY_LIMITS = Object.freeze({
-  microphoneKbps: Object.freeze({ min: 16, max: 510, default: 64 }),
-  cameraKbps: Object.freeze({ min: 250, max: 12000, default: 4500 }),
-  screenKbps: Object.freeze({ min: 500, max: 20000, default: 8000 }),
-  sharedAudioKbps: Object.freeze({ min: 16, max: 510, default: 128 }),
+  microphoneKbps: Object.freeze({ min: 32, max: 256, default: 48 }),
+  cameraKbps: Object.freeze({ min: 250, max: 2000, default: 1500 }),
+  screenKbps: Object.freeze({ min: 2000, max: 6000, default: 4000 }),
+  sharedAudioKbps: Object.freeze({ min: 64, max: 256, default: 128 }),
 });
+
+export const STANDARD_MICROPHONE_MAX_KBPS = 64;
+export const HD_MICROPHONE_MIN_KBPS = 65;
 
 export function normalizeMediaPolicy(value = {}, legacyAudioBitrate = null) {
   value = value && typeof value === "object" ? value : {};
+  const requestedMicrophone = value.microphoneKbps ?? legacyAudioBitrate;
+  const hdAudio =
+    value.hdAudio === true ||
+    (value.hdAudio == null && Number(requestedMicrophone) > 64);
   return {
+    hdAudio,
     microphoneKbps: readPolicyNumber(
-      value.microphoneKbps ?? legacyAudioBitrate,
-      MEDIA_POLICY_LIMITS.microphoneKbps,
+      requestedMicrophone,
+      hdAudio
+        ? {
+            ...MEDIA_POLICY_LIMITS.microphoneKbps,
+            min: HD_MICROPHONE_MIN_KBPS,
+            default: 96,
+          }
+        : {
+            ...MEDIA_POLICY_LIMITS.microphoneKbps,
+            max: STANDARD_MICROPHONE_MAX_KBPS,
+          },
     ),
     cameraKbps: readPolicyNumber(
       value.cameraKbps,
@@ -32,6 +49,8 @@ export function normalizeMediaPolicy(value = {}, legacyAudioBitrate = null) {
 export function validateMediaPolicy(value = {}) {
   value = value && typeof value === "object" ? value : {};
   const errors = [];
+  if (typeof value.hdAudio !== "boolean")
+    errors.push("hdAudio must be a boolean");
   for (const [key, limits] of Object.entries(MEDIA_POLICY_LIMITS)) {
     const number = Number(value[key]);
     if (!Number.isFinite(number) || number < limits.min || number > limits.max)
@@ -39,6 +58,19 @@ export function validateMediaPolicy(value = {}) {
         `${key} must be between ${limits.min} and ${limits.max} kbps`,
       );
   }
+  const microphone = Number(value.microphoneKbps);
+  if (
+    Number.isFinite(microphone) &&
+    value.hdAudio === false &&
+    microphone > STANDARD_MICROPHONE_MAX_KBPS
+  )
+    errors.push("microphoneKbps must be at most 64 kbps without HD audio");
+  if (
+    Number.isFinite(microphone) &&
+    value.hdAudio === true &&
+    microphone < HD_MICROPHONE_MIN_KBPS
+  )
+    errors.push("microphoneKbps must be greater than 64 kbps with HD audio");
   if (errors.length) return { valid: false, errors };
   return { valid: true, value: normalizeMediaPolicy(value) };
 }

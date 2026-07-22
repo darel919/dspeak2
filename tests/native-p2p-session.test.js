@@ -30,6 +30,30 @@ test("P2P receiving preferences disable the remote sender encoding", async () =>
   assert.equal(parameters.encodings[0].active, false);
 });
 
+test("local microphone gating preserves the remote receiving preference", async () => {
+  const parameters = { encodings: [{}] };
+  const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} });
+  const state = {
+    sourceReceiving: new Map([["audio", false]]),
+    senders: new Map([
+      [
+        "audio",
+        {
+          getParameters: () => parameters,
+          setParameters: async () => {},
+        },
+      ],
+    ]),
+  };
+  mesh.connections.set("peer-2", state);
+
+  await mesh.setSourceTransmission("audio", false);
+  await mesh.setSourceTransmission("audio", true);
+
+  assert.equal(state.sourceReceiving.get("audio"), false);
+  assert.equal(parameters.encodings[0].active, false);
+});
+
 test("P2P screen receiving signals video and shared audio together", () => {
   const signals = [];
   const mesh = new NativeP2pMesh({

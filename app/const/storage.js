@@ -3,4 +3,9 @@ export const STORAGE_KEYS = Object.freeze({
   notificationsEnabled: "notificationsEnabled",
   appearance: "dspeak_appearance",
   streamAttenuation: "dspeak_stream_attenuation",
+  soundboardVolume: "dspeak_soundboard_volume",
+  soundboardRoomVolumes: "dspeak_soundboard_room_volumes",
+  systemSoundTheme: "dspeak_system_sound_theme",
+  systemSoundVolume: "dspeak_system_sound_volume",
+  systemSoundsMuted: "dspeak_system_sounds_muted",
 });

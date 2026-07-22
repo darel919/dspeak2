@@ -37,6 +37,7 @@ export class MediasoupClientSession {
     onStateChange,
     getAudioBitrate,
     getVideoSettings,
+    getAudioStereo,
   }) {
     this.send = send;
     this.iceServers = iceServers;
@@ -45,6 +46,7 @@ export class MediasoupClientSession {
     this.onStateChange = onStateChange;
     this.getAudioBitrate = getAudioBitrate;
     this.getVideoSettings = getVideoSettings;
+    this.getAudioStereo = getAudioStereo;
     this.device = null;
     this.sendTransport = null;
     this.recvTransport = null;
@@ -232,6 +234,16 @@ export class MediasoupClientSession {
     return Promise.resolve(null);
   }
 
+  async setSourceTransmission(source, enabled) {
+    this.sourceTransmission ||= new Map();
+    this.sourceTransmission.set(source, Boolean(enabled));
+    const entry = this.producers.get(source);
+    if (!entry) return false;
+    if (enabled && entry.producer.paused) entry.producer.resume();
+    if (!enabled && !entry.producer.paused) entry.producer.pause();
+    return true;
+  }
+
   async publish(entry) {
     if (!this.sendTransport || this.producers.has(entry.source))
       return this.producers.get(entry.source) || null;
@@ -244,6 +256,7 @@ export class MediasoupClientSession {
             ...buildVoiceProducerOptions(
               track,
               this.getAudioBitrate?.(entry.source),
+              this.getAudioStereo?.(entry.source),
             ),
             stopTracks: false,
             appData: { source: entry.source },
@@ -268,6 +281,7 @@ export class MediasoupClientSession {
       throw error;
     }
     this.producers.set(entry.source, { producer, track, source: entry.source });
+    if (this.sourceTransmission?.get(entry.source) === false) producer.pause();
     producer.on("transportclose", () => {
       if (this.producers.get(entry.source)?.producer !== producer) return;
       this.producers.delete(entry.source);

@@ -68,41 +68,195 @@
           </header>
 
           <section v-if="activeSection === 'account'" class="space-y-5">
-            <div class="settings-panel">
-              <div v-if="profile" class="flex items-center gap-4 p-5">
+            <div
+              v-if="profile"
+              class="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/14 via-base-100 to-base-100 p-5 shadow-sm sm:p-6"
+            >
+              <div
+                class="pointer-events-none absolute -right-12 -top-16 size-44 rounded-full bg-primary/10 blur-3xl"
+              ></div>
+              <div class="relative flex items-center gap-4 sm:gap-5">
                 <div class="avatar shrink-0">
-                  <div class="w-14 rounded-full bg-base-200">
-                    <img :src="profile.avatar" alt="User avatar" />
+                  <div
+                    class="w-16 rounded-2xl bg-base-200 ring-2 ring-base-100 shadow-md sm:w-20"
+                  >
+                    <img :src="profileAvatarPreview" alt="User avatar" />
                   </div>
                 </div>
                 <div class="min-w-0 flex-1">
-                  <h2 class="truncate font-semibold">{{ profile.name }}</h2>
+                  <div class="mb-1 flex flex-wrap items-center gap-2">
+                    <h2 class="truncate text-lg font-bold sm:text-xl">
+                      {{ profileDisplayName || profile.name }}
+                    </h2>
+                    <span
+                      class="inline-flex items-center gap-1.5 rounded-full bg-success/12 px-2.5 py-1 text-xs font-semibold text-success"
+                    >
+                      <span class="size-1.5 rounded-full bg-success"></span>
+                      Signed in
+                    </span>
+                  </div>
                   <p class="truncate text-sm text-base-content/60">
                     {{ profile.email }}
                   </p>
+                  <p
+                    v-if="profileHandle"
+                    class="mt-1 truncate text-xs font-medium text-primary"
+                  >
+                    @{{ profileHandle }}
+                  </p>
                 </div>
-                <span
-                  class="hidden items-center gap-1.5 text-xs text-success sm:flex"
-                  ><span class="size-2 rounded-full bg-success"></span>Signed
-                  in</span
-                >
               </div>
-              <p v-else class="p-5 text-error">
-                Profile information is unavailable.
-              </p>
             </div>
+            <div v-else class="settings-panel">
+              <p class="p-5 text-error">Profile information is unavailable.</p>
+            </div>
+            <form
+              class="overflow-hidden rounded-2xl border border-base-300 bg-base-100 shadow-sm"
+              @submit.prevent="saveProfile"
+            >
+              <div
+                class="flex items-start gap-3 border-b border-base-300 bg-base-200/35 px-5 py-4 sm:px-6"
+              >
+                <span
+                  class="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/12 text-primary"
+                >
+                  <Icon name="lucide:user-round-pen" class="size-4" />
+                </span>
+                <div>
+                  <h2 class="font-semibold">Public profile</h2>
+                  <p class="mt-0.5 text-sm leading-5 text-base-content/60">
+                    Your unique username identifies your account. Your display
+                    name and picture appear across dSpeak.
+                  </p>
+                </div>
+              </div>
+              <div class="p-5 sm:p-6">
+                <div class="grid gap-6 sm:grid-cols-[9rem_minmax(0,1fr)]">
+                  <div>
+                    <span class="mb-2 block text-sm font-semibold"
+                      >Profile picture</span
+                    >
+                    <button
+                      type="button"
+                      class="group relative block overflow-hidden rounded-2xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      aria-label="Choose a new profile picture"
+                      @click="openAvatarPicker"
+                    >
+                      <img
+                        :src="profileAvatarPreview"
+                        alt="Current profile picture"
+                        class="size-28 object-cover sm:size-32"
+                      />
+                      <span
+                        class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-neutral/75 px-2 py-2 text-xs font-semibold text-neutral-content backdrop-blur-sm transition group-hover:bg-neutral/90"
+                      >
+                        <Icon name="lucide:camera" class="size-3.5" /> Change
+                      </span>
+                    </button>
+                    <input
+                      ref="avatarInput"
+                      class="sr-only"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      @change="selectProfileAvatar"
+                    />
+                    <p class="mt-2 text-xs leading-4 text-base-content/50">
+                      JPG, PNG or WebP. Max 5 MB.
+                    </p>
+                  </div>
+                  <div class="grid content-start gap-5">
+                    <label class="grid gap-2">
+                      <span class="text-sm font-semibold">Display name</span>
+                      <input
+                        v-model="profileDisplayName"
+                        class="input input-bordered w-full bg-base-100 focus:outline-primary"
+                        type="text"
+                        minlength="2"
+                        maxlength="32"
+                        autocomplete="nickname"
+                        required
+                      />
+                      <span class="text-xs text-base-content/50">
+                        This is how people will see you in rooms.
+                      </span>
+                    </label>
+                    <label class="grid gap-2">
+                      <span class="text-sm font-semibold">Username</span>
+                      <div
+                        class="input input-bordered flex w-full items-center gap-2 bg-base-100 focus-within:outline-2 focus-within:outline-primary"
+                      >
+                        <span class="font-semibold text-base-content/35"
+                          >@</span
+                        >
+                        <input
+                          v-model="profileHandle"
+                          class="min-w-0 grow outline-none"
+                          type="text"
+                          minlength="3"
+                          maxlength="32"
+                          pattern="[a-z0-9_]+"
+                          autocomplete="username"
+                          required
+                        />
+                      </div>
+                      <span class="text-xs text-base-content/50">
+                        Lowercase letters, numbers and underscores only.
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div
+                class="flex flex-col gap-3 border-t border-base-300 bg-base-200/25 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+              >
+                <p
+                  v-if="profileMessage"
+                  class="flex items-center gap-2 text-sm"
+                  :class="profileError ? 'text-error' : 'text-success'"
+                  role="status"
+                >
+                  <Icon
+                    :name="
+                      profileError
+                        ? 'lucide:circle-alert'
+                        : 'lucide:circle-check'
+                    "
+                    class="size-4"
+                  />
+                  {{ profileMessage }}
+                </p>
+                <span
+                  v-else
+                  class="hidden text-xs text-base-content/45 sm:block"
+                >
+                  Changes apply across every room.
+                </span>
+                <button
+                  class="btn btn-primary sm:min-w-36"
+                  type="submit"
+                  :disabled="profileSaving"
+                >
+                  <span
+                    v-if="profileSaving"
+                    class="loading loading-spinner loading-xs"
+                  ></span>
+                  <Icon v-else name="lucide:save" class="size-4" />
+                  {{ profileSaving ? "Saving…" : "Save changes" }}
+                </button>
+              </div>
+            </form>
             <div
-              class="settings-panel flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"
+              class="flex flex-col gap-4 rounded-2xl border border-error/20 bg-error/5 p-5 sm:flex-row sm:items-center sm:justify-between"
             >
               <div>
-                <h2 class="text-sm font-semibold">Log out</h2>
-                <p class="mt-1 text-xs text-base-content/60">
+                <h2 class="text-sm font-semibold">Sign out of dSpeak</h2>
+                <p class="mt-1 text-xs text-base-content/55">
                   End the current session on this device.
                 </p>
               </div>
               <button
                 type="button"
-                class="btn btn-error btn-outline btn-sm"
+                class="btn btn-error btn-outline"
                 @click="handleLogout"
               >
                 <Icon name="lucide:log-out" class="size-4" />Log out
@@ -135,7 +289,7 @@
                 </button>
               </div>
               <div class="divide-y divide-base-300">
-                <label class="settings-row"
+                <label id="microphone-settings" class="settings-row scroll-mt-6"
                   ><span class="settings-row-label"
                     ><Icon name="lucide:mic" />Microphone</span
                   ><select
@@ -175,7 +329,7 @@
                     </option>
                   </select></label
                 >
-                <label class="settings-row"
+                <label id="camera-settings" class="settings-row scroll-mt-6"
                   ><span class="settings-row-label"
                     ><Icon name="lucide:video" />Camera</span
                   ><select
@@ -211,21 +365,125 @@
               <div class="settings-panel-heading">
                 <div>
                   <h2>Voice processing</h2>
-                  <p>Clean up your microphone before it is sent.</p>
+                  <p>
+                    Speak normally to check when your microphone gate opens.
+                  </p>
                 </div>
                 <button
+                  v-if="microphonePreviewError"
                   type="button"
-                  class="btn btn-sm"
-                  :class="micTestActive ? 'btn-error' : 'btn-outline'"
-                  @click="toggleMicTest"
+                  class="btn btn-sm btn-outline"
+                  @click="startMicrophonePreview"
                 >
-                  <Icon
-                    :name="micTestActive ? 'lucide:square' : 'lucide:play'"
-                    class="size-4"
-                  />{{ micTestActive ? "Stop test" : "Test mic" }}
+                  <Icon name="lucide:refresh-cw" class="size-4" />Try again
                 </button>
               </div>
+              <div class="border-t border-base-300 px-5 py-5">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <span class="flex items-center gap-2 text-sm font-semibold">
+                    <span
+                      class="size-2.5 rounded-full"
+                      :class="microphonePreviewStatusClass"
+                    ></span>
+                    {{ microphonePreviewStatus }}
+                  </span>
+                  <span class="text-xs tabular-nums text-base-content/60">
+                    {{ Math.round(microphoneLevelDbValue) }} dBFS
+                    <template v-if="effectiveGateEnabled">
+                      · opens at {{ Math.round(effectiveGateThresholdDb) }} dBFS
+                    </template>
+                  </span>
+                </div>
+                <div
+                  class="relative h-3 overflow-hidden rounded-full bg-base-300"
+                  role="meter"
+                  aria-label="Live microphone input level"
+                  aria-valuemin="-60"
+                  aria-valuemax="0"
+                  :aria-valuenow="Math.round(microphoneLevelDbValue)"
+                >
+                  <div
+                    class="h-full rounded-full transition-[width,background-color] duration-75"
+                    :class="microphoneGateOpen ? 'bg-success' : 'bg-warning/70'"
+                    :style="{ width: `${microphoneLevelPercent}%` }"
+                  ></div>
+                  <span
+                    v-if="effectiveGateEnabled"
+                    class="absolute inset-y-0 w-0.5 bg-base-content shadow-sm"
+                    :style="{ left: `${microphoneThresholdPercent}%` }"
+                  ></span>
+                </div>
+                <p
+                  v-if="microphonePreviewError"
+                  class="mt-3 text-xs text-error"
+                  role="alert"
+                >
+                  {{ microphonePreviewError }}
+                </p>
+                <p v-else class="mt-3 text-xs text-base-content/55">
+                  The marker is the opening point. Audio below it stays closed.
+                  This preview is not played through your speakers.
+                </p>
+              </div>
               <div class="divide-y divide-base-300">
+                <label class="settings-toggle-row"
+                  ><span
+                    ><strong>Microphone gate</strong
+                    ><small
+                      >Stops sending microphone audio while you are not
+                      speaking.</small
+                    ></span
+                  ><span class="flex items-center gap-3"
+                    ><span
+                      v-if="hdAudioEnabled"
+                      class="text-xs text-base-content/50"
+                      >Off for HD audio</span
+                    ><input
+                      type="checkbox"
+                      class="toggle toggle-primary"
+                      :checked="microphoneGate.enabled && !hdAudioEnabled"
+                      :disabled="hdAudioEnabled"
+                      @change="
+                        setMicrophoneGateEnabled($event.target.checked)
+                      " /></span
+                ></label>
+                <label
+                  v-if="microphoneGate.enabled && !hdAudioEnabled"
+                  class="settings-toggle-row"
+                  ><span
+                    ><strong>Automatic gate</strong
+                    ><small
+                      >Adapts the opening level to your room's background
+                      noise.</small
+                    ></span
+                  ><input
+                    type="checkbox"
+                    class="toggle toggle-primary"
+                    :checked="microphoneGate.automatic"
+                    @change="setAutomaticGate($event.target.checked)"
+                /></label>
+                <label
+                  v-if="
+                    microphoneGate.enabled &&
+                    !microphoneGate.automatic &&
+                    !hdAudioEnabled
+                  "
+                  class="settings-row"
+                  ><span class="settings-row-label"
+                    ><Icon name="lucide:audio-waveform" />Gate threshold
+                    <small
+                      >Lower values open for quieter sounds. Current:
+                      {{ microphoneGate.thresholdDb }} dB</small
+                    ></span
+                  ><input
+                    class="range range-primary w-full max-w-md"
+                    type="range"
+                    min="-60"
+                    max="-20"
+                    step="1"
+                    :value="microphoneGate.thresholdDb"
+                    @input="setGateThreshold($event.target.value)"
+                /></label>
                 <label
                   v-for="option in audioProcessingOptions"
                   :key="option.key"
@@ -266,10 +524,7 @@
                   voiceStore.connected
                     ? "Restarts your microphone with these settings."
                     : "Join a voice channel to apply live."
-                }}</span
-                ><span v-if="micTestActive" class="badge badge-warning"
-                  >Other audio is muted during the test</span
-                ><audio ref="micTestAudio" class="hidden" autoplay></audio>
+                }}</span>
               </div>
             </div>
 
@@ -357,6 +612,98 @@
                 Resolution limits never upscale the source. Original preserves
                 the source's full resolution.
               </p>
+            </div>
+
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>Soundboard playback</h2>
+                  <p>Set the default volume used across rooms.</p>
+                </div>
+                <span class="badge badge-outline"
+                  >{{ settingsStore.soundboardVolume }}%</span
+                >
+              </div>
+              <label class="settings-row"
+                ><span
+                  ><strong class="block text-sm">Global volume</strong
+                  ><small
+                    >Rooms can override this from their soundboard.</small
+                  ></span
+                ><input
+                  class="range range-primary w-full max-w-xs"
+                  type="range"
+                  min="0"
+                  max="100"
+                  :value="settingsStore.soundboardVolume"
+                  @input="
+                    settingsStore.setSoundboardVolume($event.target.value)
+                  "
+              /></label>
+            </div>
+
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>System sound theme</h2>
+                  <p>dSpeak sounds for voice and screen-sharing events.</p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline"
+                  @click="previewSystemSound"
+                >
+                  Preview
+                </button>
+              </div>
+              <div class="divide-y divide-base-300">
+                <label class="settings-row"
+                  ><span><strong class="block text-sm">Theme</strong></span
+                  ><select
+                    class="select select-bordered w-full max-w-xs capitalize"
+                    :value="settingsStore.systemSoundTheme"
+                    @change="
+                      settingsStore.setSystemSoundTheme($event.target.value)
+                    "
+                  >
+                    <option
+                      v-for="theme in systemSoundThemes"
+                      :key="theme"
+                      :value="theme"
+                    >
+                      {{ theme }}
+                    </option>
+                  </select></label
+                >
+                <label class="settings-row"
+                  ><span
+                    ><strong class="block text-sm">Volume</strong
+                    ><small>{{ settingsStore.systemSoundVolume }}%</small></span
+                  ><input
+                    class="range range-secondary w-full max-w-xs"
+                    type="range"
+                    min="0"
+                    max="100"
+                    :value="settingsStore.systemSoundVolume"
+                    @input="
+                      settingsStore.setSystemSoundVolume($event.target.value)
+                    "
+                /></label>
+                <label class="settings-toggle-row"
+                  ><span
+                    ><strong>Mute system sounds</strong
+                    ><small
+                      >Does not mute soundboards or voice audio.</small
+                    ></span
+                  ><input
+                    type="checkbox"
+                    class="toggle toggle-primary"
+                    :checked="settingsStore.systemSoundsMuted"
+                    @change="
+                      settingsStore.setSystemSoundsMuted($event.target.checked)
+                    "
+                /></label>
+              </div>
             </div>
 
             <div class="settings-panel">
@@ -464,18 +811,29 @@ import { useVoiceStore } from "../stores/voice";
 import { useRuntimeConfig } from "#app";
 import { useChatUtils } from "../composables/useChatUtils";
 import {
-  AUDIO_CONSTRAINT_KEYS,
   SYSTEM_AUDIO_BITRATE_OPTIONS,
   VIDEO_FRAME_RATE_OPTIONS,
   VIDEO_RESOLUTION_OPTIONS,
 } from "../const/media";
+import { audioConstraints } from "../shared/media-capture.js";
+import {
+  automaticGateThreshold,
+  microphoneLevelDb,
+  updateNoiseFloor,
+} from "../shared/microphone-gate.js";
 import { ROOM_ACCENTS } from "~~/shared/room-policy.js";
+import {
+  availableSystemSoundThemes,
+  playSystemSound,
+} from "../shared/system-sounds.js";
 
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
 const settingsStore = useSettingsStore();
+const channelsStore = useChannelsStore();
 
 const activeSection = ref("account");
+const route = useRoute();
 const router = useRouter();
 const settingsNavigation = [
   { id: "account", label: "Account", icon: "lucide:user-round" },
@@ -503,6 +861,29 @@ const sectionDetails = {
   },
 };
 const activeSectionMeta = computed(() => sectionDetails[activeSection.value]);
+
+watch(
+  () => route.query.section,
+  (section) => {
+    if (settingsNavigation.some((item) => item.id === section)) {
+      activeSection.value = section;
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [activeSection.value, route.hash],
+  async ([, hash]) => {
+    if (!hash || !import.meta.client) return;
+    await nextTick();
+    document.getElementById(hash.slice(1))?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  },
+  { immediate: true },
+);
 const audioProcessingOptions = [
   {
     key: "echoCancellation",
@@ -527,6 +908,14 @@ function goBack() {
 }
 
 const audio = computed(() => settingsStore.audio);
+const microphoneGate = computed(() => settingsStore.microphoneGate);
+const hdAudioEnabled = computed(
+  () =>
+    voiceStore.connected &&
+    voiceStore.currentChannelId &&
+    channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
+      ?.hdAudio === true,
+);
 const supported = computed(() => settingsStore.supported);
 const cameraVideo = computed(() => settingsStore.cameraVideo);
 const screenVideo = computed(() => settingsStore.screenVideo);
@@ -534,6 +923,11 @@ const systemAudioBitrate = computed(() => settingsStore.systemAudioBitrate);
 const systemAudioBitrateOptions = SYSTEM_AUDIO_BITRATE_OPTIONS;
 const resolutionOptions = VIDEO_RESOLUTION_OPTIONS;
 const frameRateOptions = VIDEO_FRAME_RATE_OPTIONS;
+const systemSoundThemes = availableSystemSoundThemes();
+
+function previewSystemSound() {
+  playSystemSound("voice-join", settingsStore);
+}
 
 function accentColor(value) {
   return {
@@ -599,6 +993,86 @@ const profile = computed(() => {
     avatar: getAvatarUrl(user.avatar, config.public.baseApiPath),
   };
 });
+const profileDisplayName = ref("");
+const profileHandle = ref("");
+const profileAvatar = ref(null);
+const profileAvatarObjectUrl = ref("");
+const avatarInput = ref(null);
+const profileSaving = ref(false);
+const profileMessage = ref("");
+const profileError = ref(false);
+const profileAvatarPreview = computed(
+  () => profileAvatarObjectUrl.value || profile.value?.avatar || "",
+);
+
+watch(
+  () => authStore.getUserData(),
+  (user) => {
+    profileHandle.value = user?.handle || "";
+    profileDisplayName.value =
+      user?.display_name || user?.name || user?.username || "";
+  },
+  { immediate: true },
+);
+
+function selectProfileAvatar(event) {
+  if (profileAvatarObjectUrl.value) {
+    URL.revokeObjectURL(profileAvatarObjectUrl.value);
+  }
+  profileAvatar.value = event.target.files?.[0] || null;
+  profileAvatarObjectUrl.value = profileAvatar.value
+    ? URL.createObjectURL(profileAvatar.value)
+    : "";
+  profileMessage.value = "";
+}
+
+function openAvatarPicker() {
+  avatarInput.value?.click();
+}
+
+function clearAvatarSelection() {
+  if (profileAvatarObjectUrl.value) {
+    URL.revokeObjectURL(profileAvatarObjectUrl.value);
+  }
+  profileAvatarObjectUrl.value = "";
+  profileAvatar.value = null;
+  if (avatarInput.value) avatarInput.value.value = "";
+}
+
+async function saveProfile() {
+  const userId = authStore.getUserData()?.id;
+  if (!userId) return;
+  profileSaving.value = true;
+  profileMessage.value = "";
+  profileError.value = false;
+  try {
+    const form = new FormData();
+    form.set("handle", profileHandle.value);
+    form.set("displayName", profileDisplayName.value);
+    if (profileAvatar.value)
+      form.set("avatar", profileAvatar.value, profileAvatar.value.name);
+    const updated = await $fetch(`${config.public.apiPath}/profile`, {
+      method: "PATCH",
+      headers: { Authorization: userId },
+      body: form,
+    });
+    authStore.updateUserData(updated);
+    voiceStore.upsertUserProfile(updated);
+    clearAvatarSelection();
+    profileMessage.value = "Profile updated.";
+  } catch (error) {
+    profileError.value = true;
+    profileMessage.value =
+      error?.data?.statusMessage ||
+      error?.message ||
+      "Could not update profile";
+  } finally {
+    profileSaving.value = false;
+  }
+}
+
+onBeforeUnmount(clearAvatarSelection);
+onBeforeUnmount(stopMicrophonePreview);
 
 async function handleLogout() {
   authStore.clearAuth();
@@ -608,12 +1082,22 @@ async function handleLogout() {
 
 function onToggle(key, checked) {
   settingsStore.setAudioSetting(key, checked);
+  restartMicrophonePreview();
+}
+
+function setMicrophoneGateEnabled(enabled) {
+  settingsStore.setMicrophoneGate({ enabled });
+}
+
+function setAutomaticGate(automatic) {
+  settingsStore.setMicrophoneGate({ automatic });
+}
+
+function setGateThreshold(thresholdDb) {
+  settingsStore.setMicrophoneGate({ thresholdDb: Number(thresholdDb) });
 }
 
 const applyBusy = ref(false);
-const micTestActive = ref(false);
-let micTestStream = null;
-const micTestAudio = ref(null);
 async function applyAudioSettings() {
   console.debug("[Settings] Apply audio settings button pressed");
   console.debug(
@@ -641,72 +1125,128 @@ async function applyAudioSettings() {
   }
 }
 
-async function toggleMicTest() {
-  if (micTestActive.value) {
-    stopMicTest();
-    return;
-  }
+const microphoneLevelDbValue = ref(-60);
+const effectiveGateThresholdDb = ref(-48);
+const microphonePreviewLoading = ref(false);
+const microphonePreviewReady = ref(false);
+const microphonePreviewError = ref("");
+let microphonePreviewStream = null;
+let microphonePreviewContext = null;
+let microphonePreviewSource = null;
+let microphonePreviewAnalyser = null;
+let microphonePreviewTimer = null;
+let microphonePreviewGeneration = 0;
 
-  if (voiceStore.sfuComposable && voiceStore.connected) {
-    voiceStore.sfuComposable.applyOutputDeviceToAll("none");
+const effectiveGateEnabled = computed(
+  () => microphoneGate.value.enabled && !hdAudioEnabled.value,
+);
+const microphoneGateOpen = computed(
+  () =>
+    !effectiveGateEnabled.value ||
+    microphoneLevelDbValue.value >= effectiveGateThresholdDb.value,
+);
+const microphoneLevelPercent = computed(() =>
+  Math.max(0, Math.min(100, ((microphoneLevelDbValue.value + 60) / 60) * 100)),
+);
+const microphoneThresholdPercent = computed(() =>
+  Math.max(
+    0,
+    Math.min(100, ((effectiveGateThresholdDb.value + 60) / 60) * 100),
+  ),
+);
+const microphonePreviewStatus = computed(() => {
+  if (microphonePreviewError.value) return "Microphone unavailable";
+  if (microphonePreviewLoading.value) return "Starting microphone…";
+  if (!microphonePreviewReady.value) return "Microphone preview stopped";
+  if (!effectiveGateEnabled.value) return "Gate bypassed";
+  return microphoneGateOpen.value ? "Gate open" : "Gate closed";
+});
+const microphonePreviewStatusClass = computed(() => {
+  if (microphonePreviewError.value) return "bg-error";
+  if (microphonePreviewLoading.value) return "bg-warning animate-pulse";
+  if (!microphonePreviewReady.value) return "bg-base-content/30";
+  if (!effectiveGateEnabled.value) return "bg-info";
+  return microphoneGateOpen.value ? "bg-success" : "bg-warning";
+});
 
-    voiceStore.sfuComposable.stopAudioProduction();
-  }
-
-  let constraints = {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-  };
+async function startMicrophonePreview() {
+  const generation = ++microphonePreviewGeneration;
+  stopMicrophonePreviewResources();
+  microphonePreviewLoading.value = true;
+  microphonePreviewError.value = "";
   try {
-    const { useSettingsStore } = await import("../stores/settings");
-    const settings = useSettingsStore();
-    constraints = { ...constraints, ...settings.audio };
-    if (settings.micDeviceId)
-      constraints.deviceId = { exact: settings.micDeviceId };
-  } catch (_) {}
-
-  const sanitizedConstraints = {};
-  for (const key of AUDIO_CONSTRAINT_KEYS) {
-    if (typeof constraints[key] !== "undefined") {
-      sanitizedConstraints[key] = constraints[key];
-    }
-  }
-  try {
-    micTestStream = await navigator.mediaDevices.getUserMedia({
-      audio: sanitizedConstraints,
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: audioConstraints(settingsStore, hdAudioEnabled.value),
     });
-    const audioEl = micTestAudio.value;
-    if (audioEl) {
-      audioEl.srcObject = micTestStream;
-      audioEl.classList.remove("hidden");
-      audioEl.muted = false;
-      audioEl.volume = 1.0;
-      audioEl.play();
+    if (generation !== microphonePreviewGeneration) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
     }
-    micTestActive.value = true;
-  } catch (e) {
-    alert("Failed to start mic test: " + (e && e.message ? e.message : e));
-    micTestActive.value = false;
+    microphonePreviewStream = stream;
+    const AudioContextConstructor =
+      window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextConstructor)
+      throw new Error("Audio levels are unavailable");
+    microphonePreviewContext = new AudioContextConstructor();
+    microphonePreviewSource =
+      microphonePreviewContext.createMediaStreamSource(stream);
+    microphonePreviewAnalyser = microphonePreviewContext.createAnalyser();
+    microphonePreviewAnalyser.fftSize = 256;
+    microphonePreviewSource.connect(microphonePreviewAnalyser);
+    const samples = new Float32Array(microphonePreviewAnalyser.fftSize);
+    let noiseFloorDb = -60;
+    microphonePreviewTimer = setInterval(() => {
+      microphonePreviewAnalyser.getFloatTimeDomainData(samples);
+      const levelDb = microphoneLevelDb(samples);
+      const thresholdDb = microphoneGate.value.automatic
+        ? automaticGateThreshold(noiseFloorDb)
+        : microphoneGate.value.thresholdDb;
+      microphoneLevelDbValue.value = Math.max(-60, levelDb);
+      effectiveGateThresholdDb.value = thresholdDb;
+      noiseFloorDb = updateNoiseFloor(
+        noiseFloorDb,
+        levelDb,
+        levelDb >= thresholdDb,
+      );
+    }, 40);
+    await microphonePreviewContext.resume();
+    microphonePreviewReady.value = true;
+  } catch (error) {
+    if (generation !== microphonePreviewGeneration) return;
+    stopMicrophonePreviewResources();
+    microphonePreviewError.value =
+      error?.name === "NotAllowedError"
+        ? "Microphone permission is required to show the live gate meter."
+        : error?.message || "Could not start the microphone preview.";
+  } finally {
+    if (generation === microphonePreviewGeneration)
+      microphonePreviewLoading.value = false;
   }
 }
 
-function stopMicTest() {
-  if (voiceStore.sfuComposable && voiceStore.connected) {
-    voiceStore.sfuComposable.applyOutputDeviceToAll();
+function stopMicrophonePreviewResources() {
+  if (microphonePreviewTimer) clearInterval(microphonePreviewTimer);
+  microphonePreviewTimer = null;
+  microphonePreviewSource?.disconnect();
+  microphonePreviewAnalyser?.disconnect();
+  microphonePreviewStream?.getTracks().forEach((track) => track.stop());
+  microphonePreviewContext?.close().catch(() => {});
+  microphonePreviewStream = null;
+  microphonePreviewContext = null;
+  microphonePreviewSource = null;
+  microphonePreviewAnalyser = null;
+  microphonePreviewReady.value = false;
+  microphoneLevelDbValue.value = -60;
+}
 
-    voiceStore.sfuComposable.startAudioProduction();
-  }
-  if (micTestStream) {
-    micTestStream.getTracks().forEach((track) => track.stop());
-    micTestStream = null;
-  }
-  const audioEl = micTestAudio.value;
-  if (audioEl) {
-    audioEl.srcObject = null;
-    audioEl.classList.add("hidden");
-  }
-  micTestActive.value = false;
+function stopMicrophonePreview() {
+  microphonePreviewGeneration += 1;
+  stopMicrophonePreviewResources();
+  microphonePreviewLoading.value = false;
+}
+
+function restartMicrophonePreview() {
+  if (activeSection.value === "voice") startMicrophonePreview();
 }
 
 const devices = ref([]);
@@ -716,12 +1256,20 @@ const devicesLoading = ref(false);
 const devicesError = ref("");
 const selectedDeviceId = ref("");
 
-onMounted(() => {
+onMounted(async () => {
   selectedDeviceId.value = settingsStore.micDeviceId || "";
   selectedOutputId.value = settingsStore.outputDeviceId || "";
   selectedCameraId.value = settingsStore.cameraDeviceId || "";
-  refreshDevices();
+  if (activeSection.value === "voice") await startMicrophonePreview();
+  await refreshDevices();
 });
+
+watch(activeSection, (section) => {
+  if (section === "voice") startMicrophonePreview();
+  else stopMicrophonePreview();
+});
+
+watch(hdAudioEnabled, restartMicrophonePreview);
 
 async function refreshDevices() {
   devicesLoading.value = true;
@@ -737,10 +1285,15 @@ async function refreshDevices() {
       (d) => d.label,
     );
     if (!labelsKnown) {
+      let permissionStream = null;
       try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
+        permissionStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
       } catch (_) {
         /* ignore */
+      } finally {
+        permissionStream?.getTracks().forEach((track) => track.stop());
       }
     }
     const list = await navigator.mediaDevices.enumerateDevices();
@@ -757,6 +1310,7 @@ async function refreshDevices() {
 function onDeviceChange() {
   const id = selectedDeviceId.value || null;
   settingsStore.setMicDeviceId(id);
+  restartMicrophonePreview();
 }
 
 const canSetSinkId =

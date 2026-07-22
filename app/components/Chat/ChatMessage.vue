@@ -12,14 +12,16 @@
     >
       <div class="w-10 rounded-full">
         <img
-          :src="getAvatarUrl(message.sender.avatar)"
-          :alt="message.sender.name"
+          :src="getAvatarUrl(identityStore.profileFor(message.sender).avatar)"
+          :alt="identityStore.displayName(message.sender)"
         />
       </div>
     </div>
 
     <div class="chat-header flex items-center">
-      <span v-if="!isOwnMessage">{{ message.sender.name }}</span>
+      <span v-if="!isOwnMessage">{{
+        identityStore.displayName(message.sender)
+      }}</span>
       <time class="text-xs opacity-50 ml-1 pb-1">{{
         formatChatDisplayTime(message.created)
       }}</time>
@@ -102,6 +104,7 @@ const hasBeenReadByOthers = computed(() => {
 });
 
 import { useAuthStore } from "../../stores/auth";
+import { useIdentityStore } from "../../stores/identity";
 import { useChatStore } from "../../stores/chat";
 import { useRuntimeConfig } from "#app";
 import MessageActions from "./MessageActions.vue";
@@ -123,6 +126,7 @@ const props = defineProps({
 const emit = defineEmits(["message-read", "show-details"]);
 
 const authStore = useAuthStore();
+const identityStore = useIdentityStore();
 const chatStore = useChatStore();
 const config = useRuntimeConfig();
 const showActions = ref(false);

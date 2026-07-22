@@ -26,7 +26,7 @@
                     ? 'ring-2 ring-success'
                     : 'border-base-100',
               ]"
-              :title="u.display_name || u.name || u.username || u.id"
+              :title="identityStore.displayName(u)"
             >
               <img
                 v-if="u.avatar"
@@ -34,7 +34,8 @@
                 class="w-full h-full object-cover"
               />
               <span v-else class="select-none">{{
-                (u.display_name || u.name || u.username || u.id)
+                identityStore
+                  .displayName(u)
                   .split(" ")
                   .map((s) => s[0])
                   .join("")
@@ -49,21 +50,23 @@
         }}</span>
       </div>
 
-      <button
-        @click="voiceStore.toggleMic"
-        :class="[
-          'btn btn-xs btn-circle',
-          voiceStore.micMuted ? 'btn-error' : 'btn-outline',
-        ]"
-        :title="voiceStore.micMuted ? 'Unmute' : 'Mute'"
-      >
-        <Icon
-          name="lucide:mic"
-          v-if="!voiceStore.micMuted"
-          class="w-3 h-3 text-current"
-        />
-        <Icon name="lucide:mic-off" v-else class="w-3 h-3 text-white" />
-      </button>
+      <MediaSettingsContextMenu kind="microphone">
+        <button
+          @click="voiceStore.toggleMic"
+          :class="[
+            'btn btn-xs btn-circle',
+            voiceStore.micMuted ? 'btn-error' : 'btn-outline',
+          ]"
+          :title="voiceStore.micMuted ? 'Unmute' : 'Mute'"
+        >
+          <Icon
+            name="lucide:mic"
+            v-if="!voiceStore.micMuted"
+            class="w-3 h-3 text-current"
+          />
+          <Icon name="lucide:mic-off" v-else class="w-3 h-3 text-white" />
+        </button>
+      </MediaSettingsContextMenu>
 
       <button
         @click="voiceStore.leaveVoiceChannel"
@@ -78,6 +81,8 @@
 
 <script setup>
 import { useVoiceStore } from "~/stores/voice";
+import { useIdentityStore } from "~/stores/identity";
 
 const voiceStore = useVoiceStore();
+const identityStore = useIdentityStore();
 </script>

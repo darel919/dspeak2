@@ -210,16 +210,27 @@ export const useRoomsStore = defineStore("rooms", () => {
         throw new Error("API path is not defined");
       }
 
-      const response = await fetch(`${apiPath}/room/join`, {
-        method: "POST",
-        headers: {
-          Authorization: userData.id,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          roomId: trimmedRoomId,
-        }),
-      });
+      let response;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          response = await fetch(`${apiPath}/room/join`, {
+            method: "POST",
+            headers: {
+              Authorization: userData.id,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ roomId: trimmedRoomId }),
+          });
+          const retryable =
+            response.status === 408 ||
+            response.status === 429 ||
+            response.status >= 500;
+          if (!retryable || attempt === 2) break;
+        } catch (fetchError) {
+          if (attempt === 2) throw fetchError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** attempt));
+      }
 
       if (!response.ok) {
         const errorText = await response.text();

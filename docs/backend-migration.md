@@ -1,48 +1,50 @@
-# DSpeak monolith migration
+# Backend migration
 
-`dspeak2` now owns the DSpeak application, API, realtime chat, presence, and
-mediasoup SFU in one Nuxt/Nitro process.
+DSpeak now owns the browser application, API, chat, presence, and mediasoup SFU
+in one Nuxt and Nitro process. This document records the production boundaries
+left by the previous multi-service deployment.
 
-## Migrated from `dws-backend`
+## API migration from `dws-backend`
 
-| Previous surface                     | Nitro surface                                     |
-| ------------------------------------ | ------------------------------------------------- |
-| `/dspeak/room/*`                     | `server/utils/dspeak-api.js`                      |
-| `/dspeak/channel/*`                  | `server/utils/dspeak-api.js`                      |
-| `/dspeak/chat/*`                     | `server/utils/dspeak-api.js`                      |
-| `/dspeak/chat/socket`                | `server/routes/dspeak/chat/socket.js`             |
-| `/dspeak/presence`                   | `server/routes/dspeak/presence.js`                |
-| SFU/backend interop presence updates | Direct calls from `server/utils/mediasoup-sfu.js` |
-| PocketBase admin client              | `server/utils/pocketbase.js`                      |
+| Previous responsibility      | Current owner                         |
+| ---------------------------- | ------------------------------------- |
+| Room, channel, and chat APIs | `server/utils/dspeak-api.js`          |
+| Realtime chat                | `server/routes/dspeak/chat/socket.js` |
+| Presence                     | `server/routes/dspeak/presence.js`    |
+| Media presence updates       | `server/utils/mediasoup-sfu.js`       |
+| Privileged PocketBase access | `server/utils/pocketbase.js`          |
 
-The PocketBase collection contract remains unchanged: `dspeak_rooms`,
-`dspeak_rooms_channels`, `dspeak_messages`, `dspeak_webpush`,
-`dspeak_webpush_global`, `dspeak_users_state`, and `users`.
+The original PocketBase collections remain supported:
 
-The room administration extension adds RBAC, branding, media-policy, and
-notification collections. Apply the schema and compatibility migration in
-[Room administration contract](room-administration.md) before enabling those
-administration surfaces in production.
+- `dspeak_rooms`
+- `dspeak_rooms_channels`
+- `dspeak_messages`
+- `dspeak_webpush`
+- `dspeak_webpush_global`
+- `dspeak_users_state`
+- `users`
 
-## Migrated from `dspeak2-sfu-master`
+Room administration adds roles, memberships, branding, media policy,
+notifications, identities, and soundboards. Nitro applies these migrations at
+startup. See [Room administration contract](room-administration.md).
 
-The `/socket` handler now performs channel and membership validation itself,
-stores media presence directly in PocketBase, exposes producer-to-user maps,
-creates mediasoup transports and consumers, handles keepalive messages, cleans
-all media resources on disconnect, and exports Prometheus-compatible gauges at
-`/metrics`.
+## SFU migration from `dspeak2-sfu-master`
 
-The old `/dspeak/interop` WebSocket is intentionally removed. Its purpose was
-communication between two separate services; the equivalent operations are
-now in-process and do not require a reconnecting control socket.
+The `/socket` endpoint now owns media signaling. It validates channel access and
+membership, updates media presence, creates mediasoup transports and consumers,
+maintains producer ownership, handles keepalive messages, and releases media
+resources on disconnect. `/metrics` exposes bounded Prometheus-compatible SFU
+gauges.
 
-## Runtime model
+The former `/dspeak/interop` WebSocket no longer exists. It connected two
+separate services; the equivalent operations are now in-process calls.
 
-This backend requires the Nitro Node server preset and a long-lived process.
-It is not compatible with stateless serverless or edge deployment because the
-mediasoup worker, routers, transports, producers, consumers, and WebSockets are
-process-owned state.
+## Production runtime
 
-Use one application instance unless router piping and a distributed signaling
-backplane are introduced. The configured WebRTC UDP/TCP range and the Nitro
-HTTP/WebSocket port must be reachable from clients.
+Use the Nitro Node server preset and a persistent process. Stateless serverless
+and edge deployments are incompatible with process-owned mediasoup workers,
+routers, transports, producers, consumers, and WebSockets.
+
+Run one DSpeak instance. Multiple instances require router piping plus a shared
+signaling and state backplane. The Nitro HTTP/WebSocket port and configured
+WebRTC TCP/UDP ports must be reachable from clients.

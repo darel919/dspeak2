@@ -28,6 +28,7 @@ import {
   isValidMediaSignalHeartbeat,
   MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS,
 } from "./media-heartbeat";
+import { normalizeParticipantVoiceState } from "~~/shared/participant-voice-state.js";
 
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 
@@ -65,9 +66,9 @@ function mediaUserProfile(user) {
   const id = String(user.id);
   return {
     id,
-    name: user.name || user.username || "",
+    name: user.display_name || user.name || user.username || "",
     username: user.username || "",
-    display_name: user.name || user.username || "",
+    display_name: user.display_name || user.name || user.username || "",
     avatar: user.avatar
       ? `auth/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
       : null,
@@ -246,6 +247,13 @@ function broadcastChannelState(room) {
   const data = {
     inRoom: [...room.sessions.values()].map((session) => session.userId),
     profiles: [...room.sessions.values()].map((session) => session.profile),
+    participantStates: [...room.sessions.values()].map((session) => ({
+      userId: session.userId,
+      muted: session.muted,
+      deafened: session.deafened,
+      cameraEnabled: session.sources.has("camera"),
+      screenSharing: session.sources.has("screen"),
+    })),
     ...snapshot,
   };
 
@@ -271,20 +279,37 @@ async function persistMediaPresence(room) {
     .update(room.id, { inRoom: userIds });
 }
 
-async function createMediaUserState(userId, channelId) {
+async function createMediaUserState(session) {
   const pb = await usePocketBaseAdmin();
   const existing = await pb.collection("dspeak_users_state").getFullList({
-    filter: `user = '${userId}' && connected = '${channelId}'`,
+    filter: `user = '${session.userId}'`,
   });
-  if (!existing.length) {
+  const state = {
+    connected: session.room.id,
+    muted: session.muted,
+    deafened: session.deafened,
+    audioBroadcasting: false,
+    videoSharing: false,
+    screenSharing: false,
+  };
+  if (existing.length)
+    await pb.collection("dspeak_users_state").update(existing[0].id, state);
+  else
     await pb.collection("dspeak_users_state").create({
-      user: userId,
-      connected: channelId,
-      muted: false,
-      deafened: false,
-      audioBroadcasting: false,
-      videoSharing: false,
-      screenSharing: false,
+      user: session.userId,
+      ...state,
+    });
+}
+
+async function persistParticipantVoiceState(session) {
+  const pb = await usePocketBaseAdmin();
+  const existing = await pb.collection("dspeak_users_state").getFullList({
+    filter: `user = '${session.userId}' && connected = '${session.room.id}'`,
+  });
+  for (const record of existing) {
+    await pb.collection("dspeak_users_state").update(record.id, {
+      muted: session.muted,
+      deafened: session.deafened,
     });
   }
 }
@@ -421,7 +446,25 @@ async function handleMessage(state, session, message) {
       const next = [...sources].sort().join(",");
       if (previous === next) return;
       session.sources = new Set(sources);
+      broadcastChannelState(session.room);
       topologyCoordinator.sourcesChanged(session.room);
+      return;
+    }
+
+    case "participant-voice-state": {
+      const voiceState = normalizeParticipantVoiceState(data);
+      if (!voiceState) return;
+      if (
+        session.muted === voiceState.muted &&
+        session.deafened === voiceState.deafened
+      )
+        return;
+      session.muted = voiceState.muted;
+      session.deafened = voiceState.deafened;
+      broadcastChannelState(session.room);
+      persistParticipantVoiceState(session).catch((error) =>
+        console.error("[SFU] failed to persist participant voice state", error),
+      );
       return;
     }
 
@@ -685,6 +728,8 @@ export async function openSfuPeer(peer) {
       producers: new Map(),
       consumers: new Map(),
       sources: new Set(),
+      muted: true,
+      deafened: false,
       rtpCapabilities: null,
       queue: Promise.resolve(),
       closed: false,
@@ -698,7 +743,7 @@ export async function openSfuPeer(peer) {
     topologyCoordinator.reconcile(room, "membership-changed");
     const presenceResults = await Promise.allSettled([
       persistMediaPresence(room),
-      createMediaUserState(userId, channelId),
+      createMediaUserState(session),
     ]);
     for (const result of presenceResults) {
       if (result.status === "rejected")
@@ -827,4 +872,44 @@ export async function getSfuMetrics() {
     switchingRooms,
     idleRooms,
   };
+}
+
+export async function isActiveVoiceParticipant(channelId, userId) {
+  const state = await getState();
+  const room = state.rooms.get(String(channelId));
+  if (!room) return false;
+  return [...room.sessions.values()].some(
+    (session) => String(session.userId) === String(userId),
+  );
+}
+
+export async function broadcastVoiceChannelEvent(channelId, type, data) {
+  const state = await getState();
+  const room = state.rooms.get(String(channelId));
+  if (!room) return 0;
+  let delivered = 0;
+  for (const session of room.sessions.values()) {
+    try {
+      send(session.peer, type, data);
+      delivered += 1;
+    } catch (_) {}
+  }
+  return delivered;
+}
+
+export async function updateActiveUserProfile(profile) {
+  if (!profile?.id) return 0;
+  const state = await getState();
+  const changedRooms = new Set();
+  let updatedSessions = 0;
+  for (const session of state.sessions.values()) {
+    if (String(session.userId) !== String(profile.id)) continue;
+    session.profile = { ...session.profile, ...profile };
+    changedRooms.add(session.room);
+    updatedSessions += 1;
+  }
+  for (const room of changedRooms) {
+    broadcastChannelState(room);
+  }
+  return updatedSessions;
 }

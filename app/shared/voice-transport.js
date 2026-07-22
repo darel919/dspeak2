@@ -3,7 +3,7 @@ import {
   getConnectionQualityLabel,
 } from "./connection-quality.js";
 
-export function buildVoiceProducerOptions(track, maxBitrate) {
+export function buildVoiceProducerOptions(track, maxBitrate, stereo = false) {
   const bitrate = Number(maxBitrate);
   return {
     track,
@@ -20,7 +20,7 @@ export function buildVoiceProducerOptions(track, maxBitrate) {
       opusDtx: false,
       opusFec: true,
       opusNack: true,
-      opusStereo: true,
+      opusStereo: stereo,
       opusPtime: 10,
     },
   };

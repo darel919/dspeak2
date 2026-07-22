@@ -99,6 +99,10 @@
 </template>
 
 <script setup>
+import { useSettingsStore } from "~/stores/settings";
+import { playSystemSound } from "~/shared/system-sounds.js";
+
+const settingsStore = useSettingsStore();
 const props = defineProps({
   feedKey: { type: String, required: true },
   stream: { type: Object, required: true },
@@ -118,6 +122,7 @@ const ownCameraElement = ref(null);
 const isFullscreen = ref(false);
 const previewEnabled = ref(!(props.local && props.source === "screen"));
 let lastTouchAt = 0;
+let fullscreenStateInitialized = false;
 const localScreenPreviewPaused = computed(
   () => props.local && props.source === "screen" && !previewEnabled.value,
 );
@@ -132,8 +137,19 @@ function syncFullscreenState() {
   const fullscreenRoot = currentFullscreenElement();
   if (!fullscreenRoot && root.dataset.fullscreenFeedKey)
     delete root.dataset.fullscreenFeedKey;
-  isFullscreen.value =
+  const nextFullscreen =
     fullscreenRoot === root && root.dataset.fullscreenFeedKey === props.feedKey;
+  if (
+    fullscreenStateInitialized &&
+    props.source === "screen" &&
+    nextFullscreen !== isFullscreen.value
+  )
+    playSystemSound(
+      nextFullscreen ? "screen-enter" : "screen-exit",
+      settingsStore,
+    );
+  isFullscreen.value = nextFullscreen;
+  fullscreenStateInitialized = true;
 }
 
 async function exitFullscreen() {

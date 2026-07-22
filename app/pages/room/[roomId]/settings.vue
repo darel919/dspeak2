@@ -23,6 +23,10 @@
           <button
             v-for="item in sections"
             :key="item.id"
+            v-show="
+              item.id !== 'soundboard' ||
+              hasPermission('room.manage_soundboard')
+            "
             class="metro-transition flex items-center gap-3 px-4 py-3 text-left"
             :class="
               activeSection === item.id ? 'metro-selected' : 'hover:bg-base-200'
@@ -344,6 +348,10 @@
               </div>
             </form>
           </section>
+          <SoundboardAdmin
+            v-else-if="activeSection === 'soundboard'"
+            :room-id="roomId"
+          />
         </main>
       </div>
     </div>
@@ -354,6 +362,7 @@
 import { ROOM_ACCENTS, ROOM_PERMISSIONS } from "~~/shared/room-policy.js";
 import { useAuthStore } from "../../../stores/auth";
 import { useRoomsStore } from "../../../stores/rooms";
+import SoundboardAdmin from "../../../components/SoundboardAdmin.vue";
 
 const route = useRoute();
 const config = useRuntimeConfig();
@@ -385,6 +394,7 @@ const sections = [
   { id: "branding", label: "Identity", icon: "lucide:image" },
   { id: "roles", label: "Roles", icon: "lucide:shield-check" },
   { id: "attenuation", label: "Attenuation", icon: "lucide:audio-lines" },
+  { id: "soundboard", label: "Soundboard", icon: "lucide:music-2" },
 ];
 const assignableRoles = computed(() =>
   roles.value.filter((role) => !role.system),

@@ -3,7 +3,7 @@ FROM oven/bun:1-debian AS build
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./
@@ -25,6 +25,9 @@ ENV MEDIASOUP_LISTEN_IP=0.0.0.0
 ENV MEDIASOUP_ANNOUNCED_ADDRESS=auto
 
 WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/.output ./.output
 
 EXPOSE 3000/tcp

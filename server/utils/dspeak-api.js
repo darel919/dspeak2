@@ -9,7 +9,17 @@ import {
   normalizePermissions,
   normalizeRoomAccent,
 } from "../../shared/room-policy.js";
-import { broadcastToChannel, broadcastToUser } from "./dspeak-realtime";
+import {
+  normalizeDisplayName,
+  normalizeHandle,
+  normalizeNickname,
+} from "../../shared/user-profile.js";
+import {
+  broadcastGlobally,
+  broadcastToChannel,
+  broadcastToUser,
+} from "./dspeak-realtime";
+import { updateActiveUserProfile } from "./mediasoup-sfu";
 import { pocketBaseError, usePocketBaseAdmin } from "./pocketbase";
 import {
   ensureRoomMembership,
@@ -20,6 +30,7 @@ import {
   requireRoomPermission,
   seedRoomRoles,
 } from "./room-authorization";
+import { handleSoundboardApi } from "./soundboard-api";
 
 function requireUser(event) {
   const userId = getHeader(event, "authorization");
@@ -82,6 +93,17 @@ function avatarPath(user, authPrefix = false) {
 function presentUser(user, authPrefix = false) {
   if (!user) return null;
   return { ...user, avatar: avatarPath(user, authPrefix) };
+}
+
+function presentPublicProfile(user) {
+  return {
+    id: String(user.id),
+    name: user.display_name || user.name || user.username || "",
+    display_name: user.display_name || user.name || user.username || "",
+    username: user.username || "",
+    handle: user.handle || "",
+    avatar: avatarPath(user, true),
+  };
 }
 
 function presentChannel(channel) {
@@ -1017,6 +1039,114 @@ async function handleChat(event, suffix) {
   });
 }
 
+async function handleProfile(event, suffix) {
+  const userId = requireUser(event);
+  const pb = await usePocketBaseAdmin();
+
+  if (!suffix && event.method === "GET") {
+    return presentUser(await pb.collection("users").getOne(userId), true);
+  }
+
+  if (!suffix && event.method === "PATCH") {
+    const body = await parseBody(event);
+    const update = new FormData();
+    if (Object.hasOwn(body, "displayName")) {
+      try {
+        update.set("display_name", normalizeDisplayName(body.displayName));
+      } catch (error) {
+        throw createError({ statusCode: 400, statusMessage: error.message });
+      }
+    }
+    if (Object.hasOwn(body, "handle")) {
+      try {
+        update.set("handle", normalizeHandle(body.handle));
+      } catch (error) {
+        throw createError({ statusCode: 400, statusMessage: error.message });
+      }
+    }
+    if (body.avatar instanceof File && body.avatar.size) {
+      await validateRoomImage(body.avatar, 5 * 1024 * 1024, "Profile picture");
+      update.set("avatar", body.avatar, body.avatar.name);
+    }
+    if (body.removeAvatar === "true" || body.removeAvatar === true)
+      update.set("avatar", "");
+    if (![...update.keys()].length)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "No profile changes provided",
+      });
+    try {
+      const updatedUser = await pb.collection("users").update(userId, update);
+      const profile = presentUser(updatedUser, true);
+      const publicProfile = presentPublicProfile(updatedUser);
+      await updateActiveUserProfile(publicProfile);
+      broadcastGlobally({ type: "profile_updated", data: publicProfile });
+      return profile;
+    } catch (error) {
+      const handleError = error?.response?.data?.handle;
+      if (handleError?.code === "validation_not_unique")
+        throw createError({
+          statusCode: 409,
+          statusMessage: "Username is already taken",
+        });
+      throw error;
+    }
+  }
+
+  if (suffix === "nicknames" && event.method === "GET") {
+    const records = await pb.collection("dspeak_user_nicknames").getFullList({
+      filter: pb.filter("owner = {:owner}", { owner: userId }),
+      fields: "target,nickname",
+    });
+    return {
+      nicknames: Object.fromEntries(
+        records.map((record) => [String(record.target), record.nickname]),
+      ),
+    };
+  }
+
+  if (suffix === "nickname" && event.method === "PUT") {
+    const body = await parseBody(event);
+    const targetUserId = requireValue(
+      String(body.targetUserId || "").trim(),
+      "Target user is required",
+    );
+    await pb.collection("users").getOne(targetUserId, { fields: "id" });
+    let nickname;
+    try {
+      nickname = normalizeNickname(body.nickname);
+    } catch (error) {
+      throw createError({ statusCode: 400, statusMessage: error.message });
+    }
+    const existing = await pb.collection("dspeak_user_nicknames").getFullList({
+      filter: pb.filter("owner = {:owner} && target = {:target}", {
+        owner: userId,
+        target: targetUserId,
+      }),
+    });
+    if (!nickname) {
+      if (existing[0])
+        await pb.collection("dspeak_user_nicknames").delete(existing[0].id);
+      return { targetUserId, nickname: "" };
+    }
+    const record = existing[0]
+      ? await pb.collection("dspeak_user_nicknames").update(existing[0].id, {
+          nickname,
+        })
+      : await pb.collection("dspeak_user_nicknames").create({
+          owner: userId,
+          target: targetUserId,
+          nickname,
+        });
+    return { targetUserId, nickname: record.nickname };
+  }
+
+  throw createError({
+    statusCode: 404,
+    statusMessage: "Profile endpoint not found",
+  });
+}
+
 export async function handleDspeakApi(event) {
   const path = String(getRouterParam(event, "path") || "").replace(
     /^\/+|\/+$/g,
@@ -1032,6 +1162,9 @@ export async function handleDspeakApi(event) {
     if (domain === "room") return await handleRooms(event, suffix);
     if (domain === "channel") return await handleChannels(event, suffix);
     if (domain === "chat") return await handleChat(event, suffix);
+    if (domain === "profile") return await handleProfile(event, suffix);
+    if (domain === "soundboard")
+      return await handleSoundboardApi(event, suffix);
     throw createError({
       statusCode: 404,
       statusMessage: "DSpeak endpoint not found",

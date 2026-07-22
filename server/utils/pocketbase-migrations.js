@@ -322,10 +322,152 @@ async function migrateRoomAdministration(pb) {
   }
 }
 
+async function migrateUserProfiles(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: users.name,
+    type: users.type,
+    fields: [field("display_name", "text", { max: 32 })],
+    indexes: [],
+  });
+  await upsertCollection(pb, {
+    name: "dspeak_user_nicknames",
+    type: "base",
+    fields: [
+      field("owner", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("target", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("nickname", "text", { required: true, max: 32 }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_user_nicknames_owner_target ON dspeak_user_nicknames (owner, target)",
+      "CREATE INDEX idx_dspeak_user_nicknames_owner ON dspeak_user_nicknames (owner)",
+    ],
+  });
+}
+
+async function migrateUniqueUserHandles(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: users.name,
+    type: users.type,
+    fields: [field("handle", "text", { max: 32 })],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_users_handle_unique ON users (handle COLLATE NOCASE) WHERE handle != ''",
+    ],
+  });
+}
+
+async function migrateRoomSoundboards(pb) {
+  const users = await pb.collections.getOne("users");
+  const rooms = await pb.collections.getOne("dspeak_rooms");
+  await upsertCollection(pb, {
+    name: "dspeak_room_soundboards",
+    type: "base",
+    fields: [
+      field("room", "relation", {
+        required: true,
+        collectionId: rooms.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("uploader", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("title", "text", { required: true, max: 48 }),
+      field("category", "text", { required: true, max: 32 }),
+      field("icon", "text", { max: 16 }),
+      field("media", "file", {
+        required: true,
+        maxSelect: 1,
+        maxSize: 512 * 1024,
+        mimeTypes: ["audio/ogg"],
+      }),
+      field("duration", "number", { required: true, min: 0, max: 5 }),
+      field("display_order", "number", { required: true, min: 0 }),
+      field("enabled", "bool"),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_soundboards_room_order ON dspeak_room_soundboards (room, display_order)",
+      "CREATE INDEX idx_dspeak_soundboards_room_enabled ON dspeak_room_soundboards (room, enabled)",
+    ],
+  });
+  const roles = await pb.collection("dspeak_room_roles").getFullList({
+    filter: "name = 'Owner' || name = 'Admin'",
+  });
+  for (const role of roles) {
+    const permissions = [
+      ...new Set([...(role.permissions || []), "room.manage_soundboard"]),
+    ];
+    await pb.collection("dspeak_room_roles").update(role.id, { permissions });
+  }
+}
+
+async function migrateSoundboardIcons(pb) {
+  const soundboards = await pb.collections.getOne("dspeak_room_soundboards");
+  await upsertCollection(pb, {
+    name: soundboards.name,
+    type: soundboards.type,
+    fields: [
+      field("icon_image", "file", {
+        maxSelect: 1,
+        maxSize: 256 * 1024,
+        mimeTypes: ["image/x-icon", "image/vnd.microsoft.icon"],
+      }),
+    ],
+    indexes: [],
+  });
+}
+
+async function migrateSoundboardTimestamps(pb) {
+  const soundboards = await pb.collections.getOne("dspeak_room_soundboards");
+  await upsertCollection(pb, {
+    name: soundboards.name,
+    type: soundboards.type,
+    fields: [
+      field("created", "autodate", { onCreate: true, onUpdate: false }),
+      field("updated", "autodate", { onCreate: true, onUpdate: true }),
+    ],
+    indexes: [],
+  });
+}
+
 const migrations = Object.freeze([
   {
     name: "20260722_room_administration_v1",
     run: migrateRoomAdministration,
+  },
+  {
+    name: "20260723_user_profiles_v1",
+    run: migrateUserProfiles,
+  },
+  {
+    name: "20260723_unique_user_handles_v1",
+    run: migrateUniqueUserHandles,
+  },
+  {
+    name: "20260723_room_soundboards_v1",
+    run: migrateRoomSoundboards,
+  },
+  {
+    name: "20260723_soundboard_icons_v1",
+    run: migrateSoundboardIcons,
+  },
+  {
+    name: "20260723_soundboard_timestamps_v1",
+    run: migrateSoundboardTimestamps,
   },
 ]);
 

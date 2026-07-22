@@ -1,65 +1,114 @@
 # Room administration contract
 
-The Metro room administration release adds room branding, custom roles,
-versioned media policies, persistent notifications, and stream attenuation. The
-Nitro API remains backward-compatible with the legacy `members` relation while
-the new membership collections are being populated.
+Room administration covers branding, roles, memberships, channel media policy,
+notifications, user identity, stream attenuation, and room soundboards. Nitro
+keeps the legacy room-member relation compatible while the newer membership
+collections are populated.
 
-## PocketBase migration runner
+## Migration behavior
 
-The Nitro startup plugin authenticates as the configured PocketBase superuser
-and runs pending migrations before mediasoup starts. Applied migration names are
-stored in `dspeak_migrations`. A failed migration aborts application startup;
-restarting safely retries the idempotent collection and backfill operations.
+During startup, Nitro authenticates to PocketBase as the configured administrator
+and runs pending migrations before mediasoup starts. Completed migration names
+are stored in `dspeak_migrations`.
 
-The runner automatically applies the following schema:
+Migrations are idempotent. If one fails, application startup stops; restarting
+retries the incomplete collection or backfill operation.
 
-Add `header_image` (single image file, 5 MB), `accent` (cobalt, cyan, violet,
-magenta, orange, or lime), and `attenuation` (JSON) to `dspeak_rooms`.
+## Room and channel fields
 
-Add `media_policy` as JSON to `dspeak_rooms_channels`. Its keys are
-`microphoneKbps`, `cameraKbps`, `screenKbps`, `sharedAudioKbps`, `revision`, and
-`updatedAt`. Keep `audio_bitrate` during the compatibility period.
+The migration adds these fields to `dspeak_rooms`:
 
-Create `dspeak_room_roles` with `room` (relation), `name` (text), `color`
-(select), `position` (number), `permissions` (JSON), `system` (bool), and
-`is_default` (bool). Add an index on `(room, position)`.
+| Field          | Contract                                                   |
+| -------------- | ---------------------------------------------------------- |
+| `header_image` | One image, up to 5 MB                                      |
+| `accent`       | `cobalt`, `cyan`, `violet`, `magenta`, `orange`, or `lime` |
+| `attenuation`  | JSON attenuation policy                                    |
 
-Create `dspeak_room_memberships` with `room` (relation), `user` (relation),
-`roles` (multi-relation to `dspeak_room_roles`), and `joined_at` (date). Add a
-unique index on `(room, user)` and an index on `user`.
+It adds `media_policy` JSON to `dspeak_rooms_channels`. The object contains
+`hdAudio`, `microphoneKbps`, `cameraKbps`, `screenKbps`, `sharedAudioKbps`,
+`revision`, and `updatedAt`.
 
-Create `dspeak_notifications` with `recipient`, `actor`, `room`, `channel`, and
-`message` relations; `type`, `title`, and `body` text fields; and nullable
-`read_at`. Add indexes on `(recipient, read_at, created)` and
-`(recipient, room, channel)`.
+| Source              | Supported policy                  |
+| ------------------- | --------------------------------- |
+| Standard microphone | Mono, 32–64 kbps; default 48 kbps |
+| HD microphone       | Stereo, 65–256 kbps               |
+| Camera              | 250–2000 kbps                     |
+| Screen video        | 2000–6000 kbps                    |
+| Shared audio        | Stereo, 64–256 kbps               |
 
-Create `dspeak_notification_preferences` with unique `user`, `mode` select
-(`all`, `mentions`, `muted`), `push`, `sound`, and `previews` booleans, plus
-`attenuation_override` JSON. Create `dspeak_room_notification_preferences` with
-`user`, `room`, `mode`, and nullable push and sound overrides, uniquely indexed
-on `(user, room)`.
+Camera and screen frame rate still follow each user's selected target. The
+legacy `audio_bitrate` field remains during the compatibility period.
 
-For every existing room, create Owner, Admin, Moderator, and Member roles. Create
-one membership per current member. Assign Owner to the room owner and Member to
-every other member. Keep the legacy `members` relation until every deployed
-client and maintenance task uses memberships.
+## Roles and memberships
 
-## Authorization and realtime behavior
+`dspeak_room_roles` stores the room, role name, color, position, permissions,
+system status, and default status. `(room, position)` is indexed.
 
-All room and channel mutations call `server/utils/room-authorization.js`.
-Multiple roles combine permissions. A member may manage only roles and members
-below their highest role. Owner is immutable and alone may delete or transfer
-the room.
+`dspeak_room_memberships` stores the room, user, assigned roles, and join date.
+Each `(room, user)` pair is unique, and `user` is indexed.
 
-Changing a media policy persists a new revision, emits
-`channel_policy_updated`, and reconfigures active RTP senders without replacing
-tracks. Reconnecting clients receive the latest policy in the channel response.
+Existing rooms receive Owner, Admin, Moderator, and Member roles. The room owner
+receives Owner; all other existing members receive Member. The legacy `members`
+relation remains until every deployed client and maintenance task uses the new
+membership records.
 
-Message creation writes recipient notification records and emits
-`notification_created` to active user sockets. Web Push is optional; the
-notification collection is the durable inbox.
+All room and channel mutations pass through
+`server/utils/room-authorization.js`. Permissions from multiple roles combine.
+A member can manage only roles and members below their highest role. The Owner
+role is immutable, and only the owner may delete or transfer the room.
 
-Attenuation is applied by the remote-media registry only to `screen-audio` and
+## Notifications
+
+`dspeak_notifications` stores recipient, actor, room, channel, message, type,
+title, body, and nullable `read_at`. It indexes `(recipient, read_at, created)`
+and `(recipient, room, channel)`.
+
+`dspeak_notification_preferences` stores one record per user with delivery mode,
+push, sound, previews, and attenuation override. Room-level preferences store
+the user, room, mode, and nullable push and sound overrides; `(user, room)` is
+unique.
+
+Creating a message writes durable notification records and emits
+`notification_created` to connected user sockets. Web Push is optional; the
+PocketBase notification record remains the source of truth.
+
+## User identity
+
+`users.handle` is the unique DSpeak username. Handles are lowercase and contain
+only letters, numbers, and underscores. A case-insensitive unique index prevents
+duplicates. Migrated users may keep an empty handle until they edit their
+profile.
+
+`users.display_name` is a non-unique public name. It takes precedence over the
+identity-provider name without changing the provider-backed name or email.
+
+`PATCH /dspeak/profile` updates the handle, display name, or avatar. Duplicate
+handles return HTTP 409. Avatars accept JPEG, PNG, or WebP files up to 5 MB.
+
+`dspeak_user_nicknames` stores one private nickname per `(owner, target)` pair.
+`GET /dspeak/profile/nicknames` returns nicknames only to their owner.
+`PUT /dspeak/profile/nickname` creates, changes, or clears one. A nickname never
+changes the target user's public profile; it is applied locally in chat, member,
+and voice displays.
+
+## Media policy and attenuation
+
+A media-policy update persists a new revision, emits `channel_policy_updated`,
+and reapplies sender limits without replacing tracks. Reconnecting clients
+receive the latest policy in the channel response.
+
+The remote-media registry applies attenuation only to `screen-audio` and
 `system-audio`. Speech changes shared-stream volume over the configured attack
-and release durations and cleanup follows the owning media entry.
+and release periods. Cleanup follows the media entry that owns the playback
+resource.
+
+## Soundboards
+
+`dspeak_room_soundboards` stores protected clips, uploader ownership, display
+metadata, duration, order, and enabled state. Owner and Admin roles receive
+`room.manage_soundboard`. Members may upload and trigger enabled clips;
+uploaders may manage their own clips; holders of the room permission may manage
+the complete library.
+
+See [Room soundboards and system sounds](soundboards.md) for file conversion,
+authorization, playback, and limits.

@@ -6,6 +6,7 @@ import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
 import { getConnectionQualityLabel } from "../shared/connection-quality";
+import { useChatUtils } from "../composables/useChatUtils";
 
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
@@ -14,8 +15,13 @@ const settingsStore = useSettingsStore();
 const rtcStatsStore = useRtcStatsStore();
 const route = useRoute();
 const router = useRouter();
+const config = useRuntimeConfig();
+const { getAvatarUrl } = useChatUtils();
 
 const profile = computed(() => authStore.getUserData());
+const profileAvatar = computed(() =>
+  getAvatarUrl(profile.value?.avatar, config.public.baseApiPath),
+);
 const broadcastMode = computed(() => settingsStore.broadcastMode);
 const presenceStatus = inject("presenceStatus", ref(null));
 const rtcSummaryVisible = useState("rtc-summary-visible", () => false);
@@ -266,26 +272,28 @@ onBeforeUnmount(() => {
         <div class="call-divider hidden lg:block"></div>
 
         <div class="hidden items-center gap-1 lg:flex">
-          <button
-            class="call-icon"
-            type="button"
-            :class="voiceStore.cameraEnabled && 'call-icon-active'"
-            :aria-pressed="voiceStore.cameraEnabled"
-            :aria-label="
-              voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
-            "
-            :title="
-              voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
-            "
-            @click="voiceStore.toggleCamera"
-          >
-            <Icon
-              :name="
-                voiceStore.cameraEnabled ? 'lucide:video' : 'lucide:video-off'
+          <MediaSettingsContextMenu kind="camera">
+            <button
+              class="call-icon"
+              type="button"
+              :class="voiceStore.cameraEnabled && 'call-icon-active'"
+              :aria-pressed="voiceStore.cameraEnabled"
+              :aria-label="
+                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
               "
-              class="size-4"
-            />
-          </button>
+              :title="
+                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
+              "
+              @click="voiceStore.toggleCamera"
+            >
+              <Icon
+                :name="
+                  voiceStore.cameraEnabled ? 'lucide:video' : 'lucide:video-off'
+                "
+                class="size-4"
+              />
+            </button>
+          </MediaSettingsContextMenu>
           <button
             class="call-icon"
             type="button"
@@ -306,25 +314,27 @@ onBeforeUnmount(() => {
         <div class="call-divider hidden sm:block"></div>
 
         <div class="flex items-center gap-1">
-          <button
-            class="call-icon"
-            type="button"
-            :class="voiceStore.micMuted && 'call-icon-danger'"
-            :disabled="micUnavailable"
-            :aria-pressed="voiceStore.micMuted"
-            :aria-label="
-              voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
-            "
-            :title="
-              voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
-            "
-            @click="voiceStore.toggleMic"
-          >
-            <Icon
-              :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'"
-              class="size-4"
-            />
-          </button>
+          <MediaSettingsContextMenu kind="microphone">
+            <button
+              class="call-icon"
+              type="button"
+              :class="voiceStore.micMuted && 'call-icon-danger'"
+              :disabled="micUnavailable"
+              :aria-pressed="voiceStore.micMuted"
+              :aria-label="
+                voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
+              "
+              :title="
+                voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
+              "
+              @click="voiceStore.toggleMic"
+            >
+              <Icon
+                :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'"
+                class="size-4"
+              />
+            </button>
+          </MediaSettingsContextMenu>
           <button
             class="call-icon hidden sm:inline-flex"
             type="button"
@@ -563,7 +573,7 @@ onBeforeUnmount(() => {
           <span
             class="size-10 overflow-hidden rounded-full ring-1 ring-base-content/15"
           >
-            <img :src="profile?.avatar" alt="" />
+            <img :src="profileAvatar" alt="" />
           </span>
           <span
             v-if="voiceStore.connected"

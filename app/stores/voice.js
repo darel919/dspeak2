@@ -3,6 +3,8 @@ import { useAuthStore } from "./auth";
 import { useRoomsStore } from "./rooms";
 import { useSettingsStore } from "./settings";
 import { useChannelsStore } from "./channels";
+import { reconcileOwnedError } from "~/shared/owned-error.js";
+import { playSystemSound } from "~/shared/system-sounds.js";
 
 export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
@@ -43,6 +45,47 @@ export const useVoiceStore = defineStore("voice", () => {
 
   let stopIceWatcher = null;
   let joinGeneration = 0;
+  let mediaSessionError = null;
+  const soundboardActivityTimers = new Map();
+
+  function clearSoundboardActivity(userId) {
+    const normalizedUserId = String(userId);
+    const timer = soundboardActivityTimers.get(normalizedUserId);
+    if (timer) clearTimeout(timer);
+    soundboardActivityTimers.delete(normalizedUserId);
+    const user = connectedUsers.value.get(normalizedUserId);
+    if (!user?.soundboardActivity) return;
+    connectedUsers.value.set(normalizedUserId, {
+      ...user,
+      soundboardActivity: null,
+    });
+    connectedUsers.value = new Map(connectedUsers.value);
+  }
+
+  function showSoundboardActivity(userId, activity) {
+    const normalizedUserId = String(userId);
+    const user = connectedUsers.value.get(normalizedUserId);
+    if (!user || !activity?.title) return;
+    clearSoundboardActivity(normalizedUserId);
+    const visibleActivity = {
+      title: String(activity.title),
+      icon: String(activity.icon || "🔊"),
+    };
+    connectedUsers.value.set(normalizedUserId, {
+      ...user,
+      soundboardActivity: visibleActivity,
+    });
+    connectedUsers.value = new Map(connectedUsers.value);
+    const durationMs = Math.max(500, Number(activity.duration) * 1000 || 0);
+    soundboardActivityTimers.set(
+      normalizedUserId,
+      setTimeout(() => {
+        const current = connectedUsers.value.get(normalizedUserId);
+        if (current?.soundboardActivity === visibleActivity)
+          clearSoundboardActivity(normalizedUserId);
+      }, durationMs + 500),
+    );
+  }
 
   if (typeof window !== "undefined") {
     try {
@@ -118,7 +161,13 @@ export const useVoiceStore = defineStore("voice", () => {
   watch(
     () => sfuComposable.value?.error,
     (sessionError) => {
-      if (sessionError) error.value = String(sessionError);
+      const reconciled = reconcileOwnedError(
+        error.value,
+        mediaSessionError,
+        sessionError,
+      );
+      error.value = reconciled.error;
+      mediaSessionError = reconciled.ownedError;
     },
   );
 
@@ -135,6 +184,7 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   async function leaveVoiceChannel(cancelPendingJoin = true) {
+    const wasConnected = connected.value;
     if (cancelPendingJoin) joinGeneration += 1;
     const session = sfuComposable.value;
     try {
@@ -152,6 +202,9 @@ export const useVoiceStore = defineStore("voice", () => {
       }
       setCurrentChannel(null);
       currentRoomId.value = null;
+      for (const timer of soundboardActivityTimers.values())
+        clearTimeout(timer);
+      soundboardActivityTimers.clear();
       connectedUsers.value.clear();
       connecting.value = false;
       connected.value = false;
@@ -161,6 +214,7 @@ export const useVoiceStore = defineStore("voice", () => {
       cameraEnabled.value = false;
       screenSharing.value = false;
       systemAudioSharing.value = false;
+      if (wasConnected) playSystemSound("voice-leave", settingsStore);
     }
   }
 
@@ -191,6 +245,10 @@ export const useVoiceStore = defineStore("voice", () => {
       id: normalizedUserId,
       speaking: false,
       muted: false,
+      deafened: false,
+      cameraEnabled: false,
+      screenSharing: false,
+      soundboardActivity: null,
     });
 
     connectedUsers.value = new Map(connectedUsers.value);
@@ -207,20 +265,16 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   function removeConnectedUser(userId) {
+    clearSoundboardActivity(userId);
     connectedUsers.value.delete(String(userId));
     connectedUsers.value = new Map(connectedUsers.value);
   }
   function setUserVolume(userId, volume) {
-    const v = Math.max(0, Math.min(1, Number(volume)));
+    const v = Math.max(0, Math.min(2, Number(volume)));
     userVolumes.value[userId] = v;
 
     if (typeof window !== "undefined") {
       try {
-        const audio = document.getElementById(`audio-${userId}`);
-        if (audio) {
-          audio.volume = v;
-        }
-
         if (
           sfuComposable.value &&
           typeof sfuComposable.value.applyVolumeForUser === "function"
@@ -239,7 +293,7 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   function setTrackVolume(userId, source, volume) {
-    const v = Math.max(0, Math.min(1, Number(volume)));
+    const v = Math.max(0, Math.min(2, Number(volume)));
     trackVolumes.value[`${userId}:${source}`] = v;
     if (source === "audio") userVolumes.value[userId] = v;
     sfuComposable.value?.applyVolumeForTrack?.(userId, source, v);
@@ -283,6 +337,26 @@ export const useVoiceStore = defineStore("voice", () => {
       });
       connectedUsers.value = new Map(connectedUsers.value);
     }
+  }
+
+  function updateUserVoiceState(userId, state) {
+    const normalizedUserId = String(userId || "");
+    const user = connectedUsers.value.get(normalizedUserId);
+    if (
+      !user ||
+      typeof state?.muted !== "boolean" ||
+      typeof state?.deafened !== "boolean"
+    )
+      return;
+    connectedUsers.value.set(normalizedUserId, {
+      ...user,
+      muted: state.muted,
+      deafened: state.deafened,
+      cameraEnabled: state.cameraEnabled === true,
+      screenSharing: state.screenSharing === true,
+      ...(state.muted ? { speaking: false } : {}),
+    });
+    connectedUsers.value = new Map(connectedUsers.value);
   }
 
   async function ensureMicrophonePermission() {
@@ -468,6 +542,7 @@ export const useVoiceStore = defineStore("voice", () => {
 
       connected.value = true;
       connectedAt.value = Date.now();
+      playSystemSound("voice-join", settingsStore);
     } catch (err) {
       await disposeFailedSession(session);
       if (err?.code === "VOICE_JOIN_CANCELLED") return;
@@ -507,6 +582,7 @@ export const useVoiceStore = defineStore("voice", () => {
         try {
           await sfuComposable.value.startAudioProduction();
           micMuted.value = false;
+          sfuComposable.value.sendParticipantVoiceState?.();
         } catch (err) {
           micMuted.value = true;
           throw err;
@@ -520,6 +596,7 @@ export const useVoiceStore = defineStore("voice", () => {
           /* noop */
         }
         micMuted.value = true;
+        sfuComposable.value.sendParticipantVoiceState?.();
       }
     } catch (err) {
       console.error("[VoiceStore] Error toggling microphone:", err);
@@ -532,7 +609,7 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
-  function toggleDeafen() {
+  async function toggleDeafen() {
     if (!connected.value) {
       console.warn("[VoiceStore] Cannot toggle deafen: not connected");
       return;
@@ -540,8 +617,9 @@ export const useVoiceStore = defineStore("voice", () => {
 
     deafened.value = !deafened.value;
     if (deafened.value && !micMuted.value) {
-      toggleMic();
+      await toggleMic();
     }
+    sfuComposable.value?.sendParticipantVoiceState?.();
 
     if (typeof window !== "undefined") {
       const container = document.getElementById("webrtc-audio-global");
@@ -581,6 +659,7 @@ export const useVoiceStore = defineStore("voice", () => {
         const producer =
           await sfuComposable.value.startVideoProduction("screen");
         screenSharing.value = true;
+        playSystemSound("screen-start", settingsStore);
         const handleScreenShareEnded = () => {
           screenSharing.value = false;
         };
@@ -745,7 +824,7 @@ export const useVoiceStore = defineStore("voice", () => {
               room.members.forEach((m) =>
                 upsertUserProfile({
                   id: m.id,
-                  display_name: m.name || m.email || m.id,
+                  display_name: m.display_name || m.name || m.email || m.id,
                   username: m.name || m.email || m.id,
                   name: m.name,
                   email: m.email,
@@ -757,7 +836,10 @@ export const useVoiceStore = defineStore("voice", () => {
               upsertUserProfile({
                 id: room.owner.id,
                 display_name:
-                  room.owner.name || room.owner.email || room.owner.id,
+                  room.owner.display_name ||
+                  room.owner.name ||
+                  room.owner.email ||
+                  room.owner.id,
                 username: room.owner.name || room.owner.email || room.owner.id,
                 name: room.owner.name,
                 email: room.owner.email,
@@ -804,6 +886,8 @@ export const useVoiceStore = defineStore("voice", () => {
     removeConnectedUser,
     updateUserSpeaking,
     updateUserMuted,
+    updateUserVoiceState,
+    showSoundboardActivity,
     getConnectedUsersArray,
     getDisplayUsersArray,
     isUserConnected,

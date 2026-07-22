@@ -14,7 +14,7 @@ import {
 
 test("voice producer favors low latency without dropping packet-loss protection", () => {
   const track = { id: "microphone" };
-  const options = buildVoiceProducerOptions(track, 128000);
+  const options = buildVoiceProducerOptions(track, 128000, true);
 
   assert.equal(options.track, track);
   assert.deepEqual(options.encodings, [
@@ -31,6 +31,13 @@ test("voice producer favors low latency without dropping packet-loss protection"
     opusStereo: true,
     opusPtime: 10,
   });
+});
+
+test("standard microphone production uses mono Opus", () => {
+  assert.equal(
+    buildVoiceProducerOptions({}, 48000).codecOptions.opusStereo,
+    false,
+  );
 });
 
 test("audio bitrate follows the channel ceiling on both microphone and shared audio", () => {

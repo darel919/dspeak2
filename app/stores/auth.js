@@ -5,6 +5,11 @@ export const useAuthStore = defineStore("auths", () => {
   const user = ref(null);
   const token = ref(null);
   const config = useRuntimeConfig();
+  const verificationRequests = new Map();
+
+  function wait(delay) {
+    return new Promise((resolve) => setTimeout(resolve, delay));
+  }
 
   function writeStorage(key, value) {
     if (!import.meta.client) return;
@@ -67,27 +72,53 @@ export const useAuthStore = defineStore("auths", () => {
   function setToken(val) {
     token.value = val;
   }
-  async function verifyToken(val) {
-    try {
-      const authPath = config.public.authPath;
-      if (!authPath) {
-        throw new Error("Auth path is not defined");
-      }
-      const verifyUrl = `${authPath}/verify?at=${encodeURIComponent(val)}`;
-      const res = await fetch(verifyUrl);
-      if (!res.ok) {
+  async function runTokenVerification(val) {
+    const authPath = config.public.authPath;
+    if (!authPath) throw new Error("Auth path is not defined");
+    const verifyUrl = `${authPath}/verify?at=${encodeURIComponent(val)}`;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await fetch(verifyUrl);
+        if (res.ok) {
+          setUser(await res.json());
+          return true;
+        }
+
         await res.text();
-        throw new Error(`Invalid token: ${res.status}`);
+        const retryable =
+          res.status === 408 || res.status === 429 || res.status >= 500;
+        if (!retryable || attempt === 2) return false;
+      } catch (error) {
+        if (attempt === 2) {
+          console.warn(
+            "[Auth] Token verification could not reach the server:",
+            error,
+          );
+          return false;
+        }
       }
-      const data = await res.json();
-      setUser(data);
-      return true;
-    } catch (error) {
+      await wait(300 * 2 ** attempt);
+    }
+    return false;
+  }
+
+  async function verifyToken(val) {
+    if (!val) return false;
+    if (!verificationRequests.has(val)) {
+      const request = runTokenVerification(val).finally(() => {
+        verificationRequests.delete(val);
+      });
+      verificationRequests.set(val, request);
+    }
+
+    const valid = await verificationRequests.get(val);
+    if (!valid) {
       setToken(null);
       setUser(null);
       removeStorage("token");
-      return false;
     }
+    return valid;
   }
   function saveToken(val) {
     setToken(val);
@@ -120,6 +151,18 @@ export const useAuthStore = defineStore("auths", () => {
   function getUserData() {
     return user.value?.user?.user_metadata || null;
   }
+  function updateUserData(update) {
+    if (!user.value?.user || !update) return;
+    const userMetadata = {
+      ...(user.value.user.user_metadata || {}),
+      ...update,
+    };
+    user.value = {
+      ...user.value,
+      user: { ...user.value.user, user_metadata: userMetadata },
+    };
+    writeStorage("userData", JSON.stringify(userMetadata));
+  }
   return {
     user,
     token,
@@ -129,5 +172,6 @@ export const useAuthStore = defineStore("auths", () => {
     saveToken,
     clearAuth,
     getUserData,
+    updateUserData,
   };
 });

@@ -226,8 +226,15 @@
                   v-if="user.muted"
                   class="flex items-center gap-1 text-error"
                 >
-                  <Icon name="lucide:mic" class="size-6" />
+                  <Icon name="lucide:mic-off" class="size-6" />
                   <span class="text-sm">Muted</span>
+                </div>
+                <div
+                  v-if="user.deafened"
+                  class="flex items-center gap-1 text-error"
+                >
+                  <Icon name="lucide:volume-x" class="size-6" />
+                  <span class="text-sm">Deafened</span>
                 </div>
               </div>
             </div>
@@ -250,6 +257,14 @@
         </div>
       </div>
     </div>
+
+    <SoundboardPanel
+      v-if="
+        voiceStore.connected && voiceStore.currentChannelId === props.channel.id
+      "
+      :room-id="String(channel.room)"
+      :channel-id="String(channel.id)"
+    />
 
     <Teleport to="body">
       <div
@@ -311,7 +326,7 @@
                 class="range range-primary w-full"
                 type="range"
                 min="0"
-                max="1"
+                max="2"
                 step="0.01"
                 :value="voiceStore.getTrackVolume(volumeMenuUser.id, 'audio')"
                 @input="onTrackVolumeChange(volumeMenuUser.id, 'audio', $event)"
@@ -320,7 +335,7 @@
                 class="mt-2 flex justify-between text-xs text-base-content/55"
               >
                 <span>Muted</span>
-                <span>100%</span>
+                <span>200%</span>
               </div>
             </div>
 
@@ -345,7 +360,7 @@
                 class="range range-secondary w-full"
                 type="range"
                 min="0"
-                max="1"
+                max="2"
                 step="0.01"
                 :value="
                   voiceStore.getTrackVolume(volumeMenuUser.id, 'screen-audio')
@@ -358,7 +373,7 @@
                 class="mt-2 flex justify-between text-xs text-base-content/55"
               >
                 <span>Muted</span>
-                <span>100%</span>
+                <span>200%</span>
               </div>
             </div>
           </div>
@@ -378,31 +393,33 @@
       >
         <div class="flex items-center justify-center gap-4 p-4 pb-0">
           <!-- Microphone Control -->
-          <div class="flex flex-col items-center">
-            <button
-              @click="voiceStore.toggleMic"
-              :disabled="
-                !voiceStore.connected ||
-                (voiceStore.sfuComposable &&
-                  !voiceStore.sfuComposable.transportReady)
-              "
-              :class="[
-                'btn btn-circle btn-lg',
-                voiceStore.micMuted ? 'btn-error' : 'btn-outline',
-              ]"
-              :title="getButtonTitle()"
-            >
-              <Icon
-                name="lucide:mic"
-                v-if="!voiceStore.micMuted"
-                class="w-6 h-6 text-current"
-              />
-              <Icon name="lucide:mic-off" v-else class="w-6 h-6 text-white" />
-            </button>
-            <!-- <span class="text-xs mt-1 text-center">
+          <MediaSettingsContextMenu kind="microphone">
+            <div class="flex flex-col items-center">
+              <button
+                @click="voiceStore.toggleMic"
+                :disabled="
+                  !voiceStore.connected ||
+                  (voiceStore.sfuComposable &&
+                    !voiceStore.sfuComposable.transportReady)
+                "
+                :class="[
+                  'btn btn-circle btn-lg',
+                  voiceStore.micMuted ? 'btn-error' : 'btn-outline',
+                ]"
+                :title="getButtonTitle()"
+              >
+                <Icon
+                  name="lucide:mic"
+                  v-if="!voiceStore.micMuted"
+                  class="w-6 h-6 text-current"
+                />
+                <Icon name="lucide:mic-off" v-else class="w-6 h-6 text-white" />
+              </button>
+              <!-- <span class="text-xs mt-1 text-center">
             {{ voiceStore.micMuted ? 'Muted' : 'Mic' }}
           </span> -->
-          </div>
+            </div>
+          </MediaSettingsContextMenu>
 
           <!-- Deafen Control -->
           <div class="flex flex-col items-center">
@@ -426,14 +443,16 @@
           </span> -->
           </div>
 
-          <button
-            class="btn btn-circle btn-lg"
-            :class="voiceStore.cameraEnabled ? 'btn-primary' : 'btn-outline'"
-            title="Toggle camera"
-            @click="toggleCamera"
-          >
-            <Icon name="lucide:camera" class="size-5" />
-          </button>
+          <MediaSettingsContextMenu kind="camera">
+            <button
+              class="btn btn-circle btn-lg"
+              :class="voiceStore.cameraEnabled ? 'btn-primary' : 'btn-outline'"
+              title="Toggle camera"
+              @click="toggleCamera"
+            >
+              <Icon name="lucide:camera" class="size-5" />
+            </button>
+          </MediaSettingsContextMenu>
 
           <button
             class="btn btn-circle btn-lg"
@@ -568,6 +587,7 @@
 <script setup>
 import { useVoiceStore } from "~/stores/voice";
 import { useAuthStore } from "~/stores/auth";
+import { useIdentityStore } from "~/stores/identity";
 
 const props = defineProps({
   channel: {
@@ -578,26 +598,13 @@ const props = defineProps({
 
 const voiceStore = useVoiceStore();
 const authStore = useAuthStore();
+const identityStore = useIdentityStore();
 const channelsStore = useChannelsStore();
 const router = useRouter();
 const config = useRuntimeConfig();
 
 const connectedUsers = computed(() => {
-  const display = voiceStore.getDisplayUsersArray();
-
-  if (typeof window !== "undefined") {
-    const container = document.getElementById("webrtc-audio-global");
-    if (container) {
-      const audioElements = Array.from(container.querySelectorAll("audio")).map(
-        (el) => ({
-          id: el.id,
-          dataUserId: el.getAttribute("data-user-id"),
-          volume: el.volume,
-        }),
-      );
-    }
-  }
-  return display;
+  return voiceStore.getDisplayUsersArray();
 });
 const videoFeeds = computed(() => {
   const sfu = voiceStore.sfuComposable;
@@ -719,13 +726,7 @@ function getUserDisplayName(user) {
   } catch (_) {
     /* noop */
   }
-  return (
-    merged.display_name ||
-    merged.name ||
-    merged.username ||
-    merged.email ||
-    `User ${merged.id}`
-  );
+  return identityStore.displayName(merged);
 }
 
 function getUserAvatar(user) {

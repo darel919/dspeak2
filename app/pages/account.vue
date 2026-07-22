@@ -24,7 +24,9 @@
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <p class="truncate text-2xl font-light">{{ profile.name }}</p>
+            <p class="truncate text-2xl font-light">
+              {{ profile.display_name || profile.name }}
+            </p>
             <p class="text-sm text-base-content/60">{{ profile.email }}</p>
           </div>
           <button class="btn btn-error btn-outline" @click="handleLogout">
