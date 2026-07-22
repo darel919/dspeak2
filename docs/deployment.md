@@ -180,6 +180,9 @@ and artifact directory are cleaned up.
 
 The Coturn supervisor starts `turnserver` with `-n` because all settings are
 provided explicitly by Compose rather than through a `turnserver.conf` file.
+The pinned Coturn 4.6.3 command uses only flags supported by that release;
+loopback peer rejection relies on Coturn's built-in address validation rather
+than the newer `--no-loopback-peers` option.
 
 ## Dynamic RTC IPv6
 
