@@ -1,8 +1,8 @@
 export function useNotifications() {
-  const store = useNotificationsStore()
-  const { notificationSupported, permission, isEnabled } = storeToRefs(store)
+  const store = useNotificationsStore();
+  const { notificationSupported, permission, isEnabled } = storeToRefs(store);
 
-  if (import.meta.client) onMounted(() => store.initialize())
+  if (import.meta.client) onMounted(() => store.initialize());
 
   return {
     isSupported: readonly(notificationSupported),
@@ -13,5 +13,5 @@ export function useNotifications() {
     showMessageNotification: store.showMessageNotification,
     shouldShowNotification: store.shouldShowNotification,
     setEnabled: store.setEnabled,
-  }
+  };
 }

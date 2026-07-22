@@ -3,15 +3,14 @@
     <!-- Header with back button -->
     <div class="p-4 border-base-300">
       <div class="flex items-center gap-3">
-        <button 
-          @click="$emit('back')"
-          class="btn btn-ghost btn-sm btn-circle"
-        >
+        <button @click="$emit('back')" class="btn btn-ghost btn-sm btn-circle">
           <Icon name="lucide:chevron-left" class="h-5 w-5" />
         </button>
         <div>
-          <h2 class="text-lg font-semibold">{{ room?.name || 'Server' }}</h2>
-          <p class="text-sm text-base-content/60">{{ room?.members?.length || 0 }} members</p>
+          <h2 class="text-lg font-semibold">{{ room?.name || "Server" }}</h2>
+          <p class="text-sm text-base-content/60">
+            {{ room?.members?.length || 0 }} members
+          </p>
         </div>
       </div>
     </div>
@@ -20,7 +19,9 @@
     <div class="flex-1 overflow-y-auto p-4 space-y-4">
       <!-- Text Channels -->
       <div v-if="textChannels.length > 0">
-        <h3 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide mb-2 px-2">
+        <h3
+          class="text-sm font-semibold text-base-content/70 uppercase tracking-wide mb-2 px-2"
+        >
           Text Channels
         </h3>
         <div class="space-y-1">
@@ -30,9 +31,9 @@
             @click="selectChannel(channel)"
             class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200"
             :class="[
-              selectedChannelId === channel.id 
-                ? 'bg-primary text-primary-content' 
-                : 'hover:bg-base-300 text-base-content'
+              selectedChannelId === channel.id
+                ? 'bg-primary text-primary-content'
+                : 'hover:bg-base-300 text-base-content',
             ]"
           >
             <!-- Channel Icon -->
@@ -43,13 +44,13 @@
             <!-- Channel Info -->
             <div class="flex-1 text-left overflow-hidden">
               <div class="font-medium">{{ channel.name }}</div>
-              <div 
-                v-if="channel.desc" 
+              <div
+                v-if="channel.desc"
                 class="text-sm opacity-70 truncate"
                 :class="[
-                  selectedChannelId === channel.id 
-                    ? 'text-primary-content' 
-                    : 'text-base-content'
+                  selectedChannelId === channel.id
+                    ? 'text-primary-content'
+                    : 'text-base-content',
                 ]"
               >
                 {{ channel.desc }}
@@ -58,7 +59,10 @@
 
             <!-- Unread indicator or online count -->
             <div class="flex-shrink-0">
-              <div v-if="channel.inRoom?.length" class="badge badge-ghost badge-sm">
+              <div
+                v-if="channel.inRoom?.length"
+                class="badge badge-ghost badge-sm"
+              >
                 {{ channel.inRoom.length }}
               </div>
             </div>
@@ -68,7 +72,9 @@
 
       <!-- Voice Channels -->
       <div v-if="voiceChannels.length > 0">
-        <h3 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide mb-2 px-2">
+        <h3
+          class="text-sm font-semibold text-base-content/70 uppercase tracking-wide mb-2 px-2"
+        >
           Voice Channels
         </h3>
         <div class="space-y-1">
@@ -78,9 +84,9 @@
             @click="selectChannel(channel)"
             class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200"
             :class="[
-              selectedChannelId === channel.id 
-                ? 'bg-primary text-primary-content' 
-                : 'hover:bg-base-300 text-base-content'
+              selectedChannelId === channel.id
+                ? 'bg-primary text-primary-content'
+                : 'hover:bg-base-300 text-base-content',
             ]"
           >
             <!-- Channel Icon -->
@@ -91,13 +97,13 @@
             <!-- Channel Info -->
             <div class="flex-1 text-left overflow-hidden">
               <div class="font-medium">{{ channel.name }}</div>
-              <div 
-                v-if="channel.desc" 
+              <div
+                v-if="channel.desc"
                 class="text-sm opacity-70 truncate"
                 :class="[
-                  selectedChannelId === channel.id 
-                    ? 'text-primary-content' 
-                    : 'text-base-content'
+                  selectedChannelId === channel.id
+                    ? 'text-primary-content'
+                    : 'text-base-content',
                 ]"
               >
                 {{ channel.desc }}
@@ -106,7 +112,10 @@
 
             <!-- Voice channel specific indicators -->
             <div class="flex-shrink-0">
-              <div v-if="channel.inRoom?.length" class="badge badge-success badge-sm">
+              <div
+                v-if="channel.inRoom?.length"
+                class="badge badge-success badge-sm"
+              >
                 <Icon name="lucide:volume-2" class="size-3" />
                 {{ channel.inRoom.length }}
               </div>
@@ -116,12 +125,17 @@
       </div>
 
       <!-- No Channels State -->
-      <div v-if="textChannels.length === 0 && voiceChannels.length === 0" class="flex flex-col items-center justify-center h-64 text-center">
+      <div
+        v-if="textChannels.length === 0 && voiceChannels.length === 0"
+        class="flex flex-col items-center justify-center h-64 text-center"
+      >
         <div class="text-base-content/50 mb-4">
           <Icon name="lucide:message-square" class="h-16 w-16 mx-auto mb-4" />
         </div>
         <h3 class="font-medium mb-2">No channels found</h3>
-        <p class="text-sm text-base-content/60">This server doesn't have any channels yet</p>
+        <p class="text-sm text-base-content/60">
+          This server doesn't have any channels yet
+        </p>
       </div>
 
       <!-- Loading State -->
@@ -141,25 +155,25 @@
 </template>
 
 <script setup>
-import { useChannelsStore } from '../stores/channels'
+import { useChannelsStore } from "../stores/channels";
 
 const props = defineProps({
   room: Object,
   selectedChannelId: String,
-  loading: Boolean
-})
+  loading: Boolean,
+});
 
-const emit = defineEmits(['channel-selected', 'back'])
+const emit = defineEmits(["channel-selected", "back"]);
 
-const channelsStore = useChannelsStore()
+const channelsStore = useChannelsStore();
 
-const textChannels = computed(() => channelsStore.getTextChannels())
-const voiceChannels = computed(() => channelsStore.getMediaChannels())
+const textChannels = computed(() => channelsStore.getTextChannels());
+const voiceChannels = computed(() => channelsStore.getMediaChannels());
 
 function selectChannel(channel) {
-  emit('channel-selected', channel)
+  emit("channel-selected", channel);
   if (props.room && channel && channel.id) {
-    navigateTo(`/room/${props.room.id}/${channel.id}`)
+    navigateTo(`/room/${props.room.id}/${channel.id}`);
   }
 }
 </script>

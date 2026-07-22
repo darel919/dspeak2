@@ -1,45 +1,45 @@
-import * as mediasoup from 'mediasoup'
-import { usePocketBaseAdmin } from './pocketbase'
+import * as mediasoup from "mediasoup";
+import { usePocketBaseAdmin } from "./pocketbase";
 import {
   buildPublicIceCandidates,
   buildWebRtcListenInfos,
-} from './ice-candidates'
-import { mediaCodecs } from './mediasoup-codecs'
+} from "./ice-candidates";
+import { mediaCodecs } from "./mediasoup-codecs";
 import {
   assertTransportDirection,
   buildConsumerOptions,
   buildWebRtcTransportOptions,
   calculateSfuClientOutgoingBitrate,
-} from './mediasoup-transport'
+} from "./mediasoup-transport";
 import {
   createRoomTopology,
   ensureRoomTopology,
   RoomTopologyCoordinator,
   roomTopologyPayload,
-} from './room-topology'
+} from "./room-topology";
 import {
   acquireSharedRoom,
   isRoomUnused,
   releaseRoomReservation,
-} from './room-lifecycle'
-import { validP2pSignal } from './p2p-signal'
+} from "./room-lifecycle";
+import { validP2pSignal } from "./p2p-signal";
 import {
   isMediaSignalHeartbeatExpired,
   isValidMediaSignalHeartbeat,
   MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS,
-} from './media-heartbeat'
+} from "./media-heartbeat";
 
-const stateKey = Symbol.for('dspeak.mediasoup.sfu')
+const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 
 function send(peer, type, data) {
   try {
-    peer.send(JSON.stringify({ type, data }))
-    return true
+    peer.send(JSON.stringify({ type, data }));
+    return true;
   } catch (error) {
     console.warn(
-      `[SFU] failed to send ${type} to peer ${peer?.id || 'unknown'}: ${serializeError(error)}`,
-    )
-    return false
+      `[SFU] failed to send ${type} to peer ${peer?.id || "unknown"}: ${serializeError(error)}`,
+    );
+    return false;
   }
 }
 
@@ -54,26 +54,26 @@ async function publicTransportData(transport, config) {
     ),
     dtlsParameters: transport.dtlsParameters,
     sctpParameters: transport.sctpParameters,
-  }
+  };
 }
 
 function serializeError(error) {
-  return error instanceof Error ? error.message : String(error)
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function createState(config) {
   const worker = await mediasoup.createWorker({
-    logLevel: process.env.NODE_ENV === 'production' ? 'warn' : 'debug',
-  })
+    logLevel: process.env.NODE_ENV === "production" ? "warn" : "debug",
+  });
 
-  let webRtcServer
+  let webRtcServer;
   try {
     webRtcServer = await worker.createWebRtcServer({
       listenInfos: buildWebRtcListenInfos(config),
-    })
+    });
   } catch (error) {
-    worker.close()
-    throw error
+    worker.close();
+    throw error;
   }
 
   const state = {
@@ -85,43 +85,44 @@ async function createState(config) {
     config,
     heartbeatTimer: null,
     bandwidthRebalance: Promise.resolve(),
-  }
+  };
 
   state.heartbeatTimer = setInterval(() => {
-    const now = Date.now()
+    const now = Date.now();
     for (const session of [...state.sessions.values()]) {
-      if (!isMediaSignalHeartbeatExpired(session.lastHeartbeatAt, now)) continue
+      if (!isMediaSignalHeartbeatExpired(session.lastHeartbeatAt, now))
+        continue;
       console.warn(
         `[SFU] removing peer ${session.peer.id}: signaling heartbeat timed out`,
-      )
-      closeSession(state, session)
+      );
+      closeSession(state, session);
       try {
-        session.peer.close(4000, 'Signaling heartbeat timed out')
+        session.peer.close(4000, "Signaling heartbeat timed out");
       } catch (_) {}
     }
-  }, MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS)
-  state.heartbeatTimer.unref?.()
+  }, MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS);
+  state.heartbeatTimer.unref?.();
 
-  worker.on('died', (error) => {
-    console.error('[SFU] mediasoup worker died', error)
+  worker.on("died", (error) => {
+    console.error("[SFU] mediasoup worker died", error);
     for (const session of state.sessions.values()) {
-      send(session.peer, 'server-shutdown', { reason: 'media worker stopped' })
+      send(session.peer, "server-shutdown", { reason: "media worker stopped" });
       try {
-        session.peer.close(1011, 'Media worker stopped')
+        session.peer.close(1011, "Media worker stopped");
       } catch (_) {}
     }
-    state.sessions.clear()
-    state.rooms.clear()
-    state.roomCreations.clear()
-    clearInterval(state.heartbeatTimer)
-    delete globalThis[stateKey]
-  })
+    state.sessions.clear();
+    state.rooms.clear();
+    state.roomCreations.clear();
+    clearInterval(state.heartbeatTimer);
+    delete globalThis[stateKey];
+  });
 
-  return state
+  return state;
 }
 
 async function getState(resolvedConfig) {
-  const runtimeConfig = useRuntimeConfig().mediasoup
+  const runtimeConfig = useRuntimeConfig().mediasoup;
   const config = resolvedConfig || {
     listenIp: process.env.MEDIASOUP_LISTEN_IP || runtimeConfig.listenIp,
     announcedAddress:
@@ -139,32 +140,40 @@ async function getState(resolvedConfig) {
         runtimeConfig.directPort ||
         runtimeConfig.rtcPort,
     ),
-    maxClientOutgoingBitrate: Number(process.env.MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE || runtimeConfig.maxClientOutgoingBitrate || 4_500_000),
-    maxServerOutgoingBitrate: Number(process.env.MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE || runtimeConfig.maxServerOutgoingBitrate || 40_000_000),
-  }
+    maxClientOutgoingBitrate: Number(
+      process.env.MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE ||
+        runtimeConfig.maxClientOutgoingBitrate ||
+        4_500_000,
+    ),
+    maxServerOutgoingBitrate: Number(
+      process.env.MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE ||
+        runtimeConfig.maxServerOutgoingBitrate ||
+        40_000_000,
+    ),
+  };
   if (!globalThis[stateKey]) {
     globalThis[stateKey] = createState(config).catch((error) => {
-      delete globalThis[stateKey]
-      throw error
-    })
+      delete globalThis[stateKey];
+      throw error;
+    });
   }
-  return globalThis[stateKey]
+  return globalThis[stateKey];
 }
 
 export async function initializeSfu(config) {
-  return getState(config)
+  return getState(config);
 }
 
 export async function closeSfu() {
-  const statePromise = globalThis[stateKey]
-  if (!statePromise) return
+  const statePromise = globalThis[stateKey];
+  if (!statePromise) return;
 
-  const state = await statePromise
+  const state = await statePromise;
   for (const session of [...state.sessions.values()])
-    closeSession(state, session)
-  clearInterval(state.heartbeatTimer)
-  state.worker.close()
-  delete globalThis[stateKey]
+    closeSession(state, session);
+  clearInterval(state.heartbeatTimer);
+  state.worker.close();
+  delete globalThis[stateKey];
 }
 
 async function acquireRoom(state, channelId) {
@@ -179,81 +188,82 @@ async function acquireRoom(state, channelId) {
       topology: createRoomTopology(),
       pendingJoins: 0,
     }),
-  })
-  ensureRoomTopology(room.topology)
-  return room
+  });
+  ensureRoomTopology(room.topology);
+  return room;
 }
 
 function disposeRoomIfUnused(state, room) {
-  if (!isRoomUnused(room) || state.rooms.get(room.id) !== room) return false
-  topologyCoordinator.clearTimers(room)
-  room.router.close()
-  state.rooms.delete(room.id)
-  return true
+  if (!isRoomUnused(room) || state.rooms.get(room.id) !== room) return false;
+  topologyCoordinator.clearTimers(room);
+  room.router.close();
+  state.rooms.delete(room.id);
+  return true;
 }
 
 function broadcastTopology(room) {
-  const data = roomTopologyPayload(room)
+  const data = roomTopologyPayload(room);
   for (const session of room.sessions.values())
-    send(session.peer, 'topology-state', data)
+    send(session.peer, "topology-state", data);
 }
 
 const topologyCoordinator = new RoomTopologyCoordinator({
   broadcast: broadcastTopology,
-})
+});
 
 function producerSnapshot(room) {
-  const producers = []
-  const producerUserMap = {}
-  const producerSourceMap = {}
+  const producers = [];
+  const producerUserMap = {};
+  const producerSourceMap = {};
 
   for (const session of room.sessions.values()) {
     for (const producer of session.producers.values()) {
-      producers.push(producer.id)
-      producerUserMap[producer.id] = session.userId
-      producerSourceMap[producer.id] = producer.appData?.source || producer.kind
+      producers.push(producer.id);
+      producerUserMap[producer.id] = session.userId;
+      producerSourceMap[producer.id] =
+        producer.appData?.source || producer.kind;
     }
   }
 
-  return { producers, producerUserMap, producerSourceMap }
+  return { producers, producerUserMap, producerSourceMap };
 }
 
 function broadcastChannelState(room) {
-  const snapshot = producerSnapshot(room)
+  const snapshot = producerSnapshot(room);
   const data = {
     inRoom: [...room.sessions.values()].map((session) => session.userId),
     ...snapshot,
-  }
+  };
 
   for (const session of room.sessions.values()) {
-    send(session.peer, 'currentlyInChannel', data)
-    send(session.peer, 'available-producers', {
+    send(session.peer, "currentlyInChannel", data);
+    send(session.peer, "available-producers", {
       producers: snapshot.producers,
       producerUserMap: snapshot.producerUserMap,
       producerSourceMap: snapshot.producerSourceMap,
-    })
+    });
   }
 }
 
 async function persistMediaPresence(room) {
-  const pb = await usePocketBaseAdmin()
+  const pb = await usePocketBaseAdmin();
   const userIds = [
     ...new Set(
       [...room.sessions.values()].map((session) => String(session.userId)),
     ),
-  ]
+  ];
   await pb
-    .collection('dspeak_rooms_channels')
-    .update(room.id, { inRoom: userIds })
+    .collection("dspeak_rooms_channels")
+    .update(room.id, { inRoom: userIds });
 }
 
 async function createMediaUserState(userId, channelId) {
-  const pb = await usePocketBaseAdmin()
-  const existing = await pb.collection('dspeak_users_state').getFullList({
+  const pb = await usePocketBaseAdmin();
+  const existing = await pb.collection("dspeak_users_state").getFullList({
     filter: `user = '${userId}' && connected = '${channelId}'`,
-  })
+  });
   if (!existing.length) {
-    await pb.collection('dspeak_users_state').create({
+    await pb.collection("dspeak_users_state").create({
       user: userId,
       connected: channelId,
       muted: false,
@@ -261,231 +271,241 @@ async function createMediaUserState(userId, channelId) {
       audioBroadcasting: false,
       videoSharing: false,
       screenSharing: false,
-    })
+    });
   }
 }
 
 async function removeMediaUserState(userId, channelId) {
-  const pb = await usePocketBaseAdmin()
-  const existing = await pb.collection('dspeak_users_state').getFullList({
+  const pb = await usePocketBaseAdmin();
+  const existing = await pb.collection("dspeak_users_state").getFullList({
     filter: `user = '${userId}' && connected = '${channelId}'`,
-  })
+  });
   for (const record of existing)
-    await pb.collection('dspeak_users_state').delete(record.id)
+    await pb.collection("dspeak_users_state").delete(record.id);
 }
 
 function closeSession(state, session) {
-  if (!session || session.closed) return
-  session.closed = true
-  closeSessionMedia(state, session)
-  session.room.sessions.delete(session.peer.id)
-  state.sessions.delete(session.peer.id)
+  if (!session || session.closed) return;
+  session.closed = true;
+  closeSessionMedia(state, session);
+  session.room.sessions.delete(session.peer.id);
+  state.sessions.delete(session.peer.id);
 
   if (!disposeRoomIfUnused(state, session.room)) {
-    broadcastChannelState(session.room)
-    topologyCoordinator.reconcile(session.room, 'membership-changed')
+    broadcastChannelState(session.room);
+    topologyCoordinator.reconcile(session.room, "membership-changed");
   }
 
   persistMediaPresence(session.room).catch((error) =>
-    console.error('[SFU] failed to persist presence', error),
-  )
+    console.error("[SFU] failed to persist presence", error),
+  );
   const userStillConnected = [...session.room.sessions.values()].some(
     (candidate) => String(candidate.userId) === String(session.userId),
-  )
+  );
   if (!userStillConnected) {
     removeMediaUserState(session.userId, session.room.id).catch((error) =>
-      console.error('[SFU] failed to remove user state', error),
-    )
+      console.error("[SFU] failed to remove user state", error),
+    );
   }
 }
 
 function closeSessionMedia(state, session) {
-  for (const producer of session.producers.values()) producer.close()
-  for (const consumer of session.consumers.values()) consumer.close()
-  for (const transport of session.transports.values()) transport.close()
-  session.producers.clear()
-  session.consumers.clear()
-  session.transports.clear()
-  session.rtpCapabilities = null
-  queueSfuBandwidthRebalance(state)
+  for (const producer of session.producers.values()) producer.close();
+  for (const consumer of session.consumers.values()) consumer.close();
+  for (const transport of session.transports.values()) transport.close();
+  session.producers.clear();
+  session.consumers.clear();
+  session.transports.clear();
+  session.rtpCapabilities = null;
+  queueSfuBandwidthRebalance(state);
 }
 
 function receiveTransports(state) {
-  return [...state.sessions.values()].flatMap(session => [...session.transports.values()])
-    .filter(transport => !transport.closed && transport.appData?.direction === 'recv')
+  return [...state.sessions.values()]
+    .flatMap((session) => [...session.transports.values()])
+    .filter(
+      (transport) =>
+        !transport.closed && transport.appData?.direction === "recv",
+    );
 }
 
 function queueSfuBandwidthRebalance(state) {
-  state.bandwidthRebalance = state.bandwidthRebalance.catch(() => {}).then(async () => {
-    const transports = receiveTransports(state)
-    if (!transports.length) return
-    const bitrate = calculateSfuClientOutgoingBitrate(
-      transports.length,
-      state.config.maxClientOutgoingBitrate,
-      state.config.maxServerOutgoingBitrate
-    )
-    await Promise.all(transports.map(transport => transport.setMaxOutgoingBitrate(bitrate)))
-  })
-  state.bandwidthRebalance.catch(error => console.error('[SFU] failed to rebalance outgoing bandwidth', error))
-  return state.bandwidthRebalance
+  state.bandwidthRebalance = state.bandwidthRebalance
+    .catch(() => {})
+    .then(async () => {
+      const transports = receiveTransports(state);
+      if (!transports.length) return;
+      const bitrate = calculateSfuClientOutgoingBitrate(
+        transports.length,
+        state.config.maxClientOutgoingBitrate,
+        state.config.maxServerOutgoingBitrate,
+      );
+      await Promise.all(
+        transports.map((transport) => transport.setMaxOutgoingBitrate(bitrate)),
+      );
+    });
+  state.bandwidthRebalance.catch((error) =>
+    console.error("[SFU] failed to rebalance outgoing bandwidth", error),
+  );
+  return state.bandwidthRebalance;
 }
 
 async function createTransport(state, session, direction) {
   const transport = await session.room.router.createWebRtcTransport(
     buildWebRtcTransportOptions(state.webRtcServer, session.peer.id, direction),
-  )
+  );
 
-  session.transports.set(transport.id, transport)
+  session.transports.set(transport.id, transport);
   const removeTransport = () => {
-    session.transports.delete(transport.id)
-    queueSfuBandwidthRebalance(state)
-  }
-  transport.on('routerclose', removeTransport)
-  transport.on('listenserverclose', removeTransport)
-  if (direction === 'recv') await queueSfuBandwidthRebalance(state)
-  return transport
+    session.transports.delete(transport.id);
+    queueSfuBandwidthRebalance(state);
+  };
+  transport.on("routerclose", removeTransport);
+  transport.on("listenserverclose", removeTransport);
+  if (direction === "recv") await queueSfuBandwidthRebalance(state);
+  return transport;
 }
 
 async function handleMessage(state, session, message) {
-  const { type, data = {} } = message || {}
+  const { type, data = {} } = message || {};
 
   switch (type) {
-    case 'ping':
-      send(session.peer, 'pong', { timestamp: Date.now() })
-      return
+    case "ping":
+      send(session.peer, "pong", { timestamp: Date.now() });
+      return;
 
-    case 'heartbeat': {
-      if (!isValidMediaSignalHeartbeat(data)) return
-      const sequence = Number(data.sequence)
-      const topology = roomTopologyPayload(session.room)
+    case "heartbeat": {
+      if (!isValidMediaSignalHeartbeat(data)) return;
+      const sequence = Number(data.sequence);
+      const topology = roomTopologyPayload(session.room);
       const topologyMismatch =
         Number(data.topologyEpoch) !== session.room.topology.epoch ||
-        Number(data.sourceRevision) !== session.room.topology.sourceRevision
+        Number(data.sourceRevision) !== session.room.topology.sourceRevision;
       if (topologyMismatch) {
-        send(session.peer, 'heartbeat-nack', {
+        send(session.peer, "heartbeat-nack", {
           sequence,
           serverTime: Date.now(),
           topology,
-        })
+        });
       } else {
-        send(session.peer, 'heartbeat-ack', {
+        send(session.peer, "heartbeat-ack", {
           sequence,
           serverTime: Date.now(),
           topologyEpoch: session.room.topology.epoch,
           sourceRevision: session.room.topology.sourceRevision,
-        })
+        });
       }
-      return
+      return;
     }
 
-    case 'media-sources': {
-      const allowed = new Set(['audio', 'camera', 'screen', 'screen-audio'])
+    case "media-sources": {
+      const allowed = new Set(["audio", "camera", "screen", "screen-audio"]);
       const sources = Array.isArray(data.sources)
         ? data.sources.map(String).filter((source) => allowed.has(source))
-        : []
-      const previous = [...session.sources].sort().join(',')
-      const next = [...sources].sort().join(',')
-      if (previous === next) return
-      session.sources = new Set(sources)
-      topologyCoordinator.sourcesChanged(session.room)
-      return
+        : [];
+      const previous = [...session.sources].sort().join(",");
+      const next = [...sources].sort().join(",");
+      if (previous === next) return;
+      session.sources = new Set(sources);
+      topologyCoordinator.sourcesChanged(session.room);
+      return;
     }
 
-    case 'p2p-signal': {
-      const targetPeerId = String(data.targetPeerId || '')
-      const target = session.room.sessions.get(targetPeerId)
-      if (!target || target === session) return
-      if (Number(data.epoch) !== session.room.topology.epoch) return
-      const signal = data.signal
-      if (!validP2pSignal(signal)) return
-      send(target.peer, 'p2p-signal', {
+    case "p2p-signal": {
+      const targetPeerId = String(data.targetPeerId || "");
+      const target = session.room.sessions.get(targetPeerId);
+      if (!target || target === session) return;
+      if (Number(data.epoch) !== session.room.topology.epoch) return;
+      const signal = data.signal;
+      if (!validP2pSignal(signal)) return;
+      send(target.peer, "p2p-signal", {
         fromPeerId: session.peer.id,
         epoch: session.room.topology.epoch,
         signal,
-      })
-      return
+      });
+      return;
     }
 
-    case 'p2p-ready': {
+    case "p2p-ready": {
       topologyCoordinator.p2pReady(
         session.room,
         session.peer.id,
         data.qualifiedPeerIds,
         data.epoch,
-      )
-      return
+      );
+      return;
     }
 
-    case 'topology-ready': {
-      topologyCoordinator.clientReady(session.room, session.peer.id, data)
-      return
+    case "topology-ready": {
+      topologyCoordinator.clientReady(session.room, session.peer.id, data);
+      return;
     }
 
-    case 'topology-failed': {
-      topologyCoordinator.clientFailed(session.room, data)
-      return
+    case "topology-failed": {
+      topologyCoordinator.clientFailed(session.room, data);
+      return;
     }
 
-    case 'p2p-failed': {
-      topologyCoordinator.p2pFailed(session.room, data.reason, data.epoch)
-      return
+    case "p2p-failed": {
+      topologyCoordinator.p2pFailed(session.room, data.reason, data.epoch);
+      return;
     }
 
-    case 'sfu-failed': {
-      topologyCoordinator.sfuFailed(session.room, data.reason, data.epoch)
-      return
+    case "sfu-failed": {
+      topologyCoordinator.sfuFailed(session.room, data.reason, data.epoch);
+      return;
     }
 
-    case 'client-sfu-rtt': {
-      const rttMs = Number(data.rttMs)
-      if (!Number.isFinite(rttMs) || rttMs < 0 || rttMs > 60000) return
+    case "client-sfu-rtt": {
+      const rttMs = Number(data.rttMs);
+      if (!Number.isFinite(rttMs) || rttMs < 0 || rttMs > 60000) return;
       for (const candidate of session.room.sessions.values()) {
-        send(candidate.peer, 'participant-sfu-rtt', {
+        send(candidate.peer, "participant-sfu-rtt", {
           userId: session.userId,
           rttMs,
-        })
+        });
       }
-      return
+      return;
     }
 
-    case 'get-rtp-capabilities':
+    case "get-rtp-capabilities":
       send(
         session.peer,
-        'rtp-capabilities',
+        "rtp-capabilities",
         session.room.router.rtpCapabilities,
-      )
-      return
+      );
+      return;
 
-    case 'client-rtp-capabilities':
-      session.rtpCapabilities = data.rtpCapabilities
-      send(session.peer, 'rtp-capabilities-ack', { accepted: true })
-      return
+    case "client-rtp-capabilities":
+      session.rtpCapabilities = data.rtpCapabilities;
+      send(session.peer, "rtp-capabilities-ack", { accepted: true });
+      return;
 
-    case 'create-transport': {
-      const direction = String(data.type || '')
-      if (direction !== 'send' && direction !== 'recv')
-        throw new Error('Transport direction must be send or recv')
-      const transport = await createTransport(state, session, direction)
+    case "create-transport": {
+      const direction = String(data.type || "");
+      if (direction !== "send" && direction !== "recv")
+        throw new Error("Transport direction must be send or recv");
+      const transport = await createTransport(state, session, direction);
       send(
         session.peer,
-        'transport-params',
+        "transport-params",
         await publicTransportData(transport, state.config),
-      )
-      return
+      );
+      return;
     }
 
-    case 'connect-transport': {
-      const transport = session.transports.get(data.transportId)
-      if (!transport) throw new Error('Transport not found')
-      await transport.connect({ dtlsParameters: data.dtlsParameters })
-      send(session.peer, 'transport-connected', { transportId: transport.id })
-      return
+    case "connect-transport": {
+      const transport = session.transports.get(data.transportId);
+      if (!transport) throw new Error("Transport not found");
+      await transport.connect({ dtlsParameters: data.dtlsParameters });
+      send(session.peer, "transport-connected", { transportId: transport.id });
+      return;
     }
 
-    case 'produce': {
-      const transport = session.transports.get(data.transportId)
-      if (!transport) throw new Error('Transport not found')
-      assertTransportDirection(transport, 'send', 'Producing')
+    case "produce": {
+      const transport = session.transports.get(data.transportId);
+      if (!transport) throw new Error("Transport not found");
+      assertTransportDirection(transport, "send", "Producing");
 
       const producer = await transport.produce({
         kind: data.kind,
@@ -494,46 +514,49 @@ async function handleMessage(state, session, message) {
           userId: session.userId,
           source: data.appData?.source || data.kind,
         },
-      })
-      session.producers.set(producer.id, producer)
+      });
+      session.producers.set(producer.id, producer);
 
-      producer.on('transportclose', () => session.producers.delete(producer.id))
-      producer.on('close', () => session.producers.delete(producer.id))
+      producer.on("transportclose", () =>
+        session.producers.delete(producer.id),
+      );
+      producer.on("close", () => session.producers.delete(producer.id));
 
-      send(session.peer, 'producer-id', { id: producer.id })
+      send(session.peer, "producer-id", { id: producer.id });
       for (const other of session.room.sessions.values()) {
         if (other !== session) {
-          send(other.peer, 'new-producer', {
+          send(other.peer, "new-producer", {
             producerId: producer.id,
             userId: session.userId,
             source: producer.appData.source,
-          })
+          });
         }
       }
-      broadcastChannelState(session.room)
-      return
+      broadcastChannelState(session.room);
+      return;
     }
 
-    case 'close-producer': {
-      const producer = session.producers.get(data.producerId)
-      if (!producer) return
-      session.producers.delete(producer.id)
-      producer.close()
-      broadcastChannelState(session.room)
-      return
+    case "close-producer": {
+      const producer = session.producers.get(data.producerId);
+      if (!producer) return;
+      session.producers.delete(producer.id);
+      producer.close();
+      broadcastChannelState(session.room);
+      return;
     }
 
-    case 'close-media':
-      closeSessionMedia(state, session)
-      broadcastChannelState(session.room)
-      return
+    case "close-media":
+      closeSessionMedia(state, session);
+      broadcastChannelState(session.room);
+      return;
 
-    case 'consume': {
-      const transport = session.transports.get(data.transportId)
-      if (!transport) throw new Error('Transport not found')
-      assertTransportDirection(transport, 'recv', 'Consuming')
-      const capabilities = data.rtpCapabilities || session.rtpCapabilities
-      if (!capabilities) throw new Error('Client RTP capabilities are required')
+    case "consume": {
+      const transport = session.transports.get(data.transportId);
+      if (!transport) throw new Error("Transport not found");
+      assertTransportDirection(transport, "recv", "Consuming");
+      const capabilities = data.rtpCapabilities || session.rtpCapabilities;
+      if (!capabilities)
+        throw new Error("Client RTP capabilities are required");
       if (
         !session.room.router.canConsume({
           producerId: data.producerId,
@@ -541,35 +564,37 @@ async function handleMessage(state, session, message) {
         })
       ) {
         throw new Error(
-          'Cannot consume this producer with the supplied RTP capabilities',
-        )
+          "Cannot consume this producer with the supplied RTP capabilities",
+        );
       }
       if (
         [...session.consumers.values()].some(
           (consumer) => consumer.producerId === data.producerId,
         )
       ) {
-        throw new Error('Producer is already consumed by this peer')
+        throw new Error("Producer is already consumed by this peer");
       }
 
       const owner = [...session.room.sessions.values()].find((candidate) =>
         candidate.producers.has(data.producerId),
-      )
-      if (!owner) throw new Error('Producer not found in this channel')
+      );
+      if (!owner) throw new Error("Producer not found in this channel");
       if (owner === session)
-        throw new Error('A peer cannot consume its own producer')
+        throw new Error("A peer cannot consume its own producer");
 
       const consumer = await transport.consume(
         buildConsumerOptions(data.producerId, capabilities, owner.userId),
-      )
-      session.consumers.set(consumer.id, consumer)
-      consumer.on('transportclose', () => session.consumers.delete(consumer.id))
-      consumer.on('producerclose', () => {
-        session.consumers.delete(consumer.id)
-        send(session.peer, 'producer-closed', { producerId: data.producerId })
-      })
+      );
+      session.consumers.set(consumer.id, consumer);
+      consumer.on("transportclose", () =>
+        session.consumers.delete(consumer.id),
+      );
+      consumer.on("producerclose", () => {
+        session.consumers.delete(consumer.id);
+        send(session.peer, "producer-closed", { producerId: data.producerId });
+      });
 
-      send(session.peer, 'consumer-params', {
+      send(session.peer, "consumer-params", {
         id: consumer.id,
         producerId: data.producerId,
         kind: consumer.kind,
@@ -579,49 +604,51 @@ async function handleMessage(state, session, message) {
           owner.producers.get(data.producerId)?.appData?.source ||
           consumer.kind,
         producerPaused: consumer.producerPaused,
-      })
-      return
+      });
+      return;
     }
 
-    case 'resume-consumer': {
-      const consumer = session.consumers.get(data.consumerId)
-      if (!consumer) throw new Error('Consumer not found')
-      await consumer.resume()
-      send(session.peer, 'consumer-resumed', {
+    case "resume-consumer": {
+      const consumer = session.consumers.get(data.consumerId);
+      if (!consumer) throw new Error("Consumer not found");
+      await consumer.resume();
+      send(session.peer, "consumer-resumed", {
         consumerId: consumer.id,
         producerId: consumer.producerId,
-      })
-      return
+      });
+      return;
     }
 
     default:
-      throw new Error(`Unsupported message type: ${String(type)}`)
+      throw new Error(`Unsupported message type: ${String(type)}`);
   }
 }
 
 export async function openSfuPeer(peer) {
-  const url = new URL(peer.request.url)
-  const userId = url.searchParams.get('auth')
-  const channelId = url.searchParams.get('channelId')
+  const url = new URL(peer.request.url);
+  const userId = url.searchParams.get("auth");
+  const channelId = url.searchParams.get("channelId");
   if (!userId || !channelId) {
-    peer.close(1008, 'auth and channelId are required')
-    return
+    peer.close(1008, "auth and channelId are required");
+    return;
   }
 
-  const pb = await usePocketBaseAdmin()
-  const channel = await pb.collection('dspeak_rooms_channels').getOne(channelId)
+  const pb = await usePocketBaseAdmin();
+  const channel = await pb
+    .collection("dspeak_rooms_channels")
+    .getOne(channelId);
   if (!channel.isMedia) {
-    peer.close(1008, 'Channel is not a media channel')
-    return
+    peer.close(1008, "Channel is not a media channel");
+    return;
   }
-  const backendRoom = await pb.collection('dspeak_rooms').getOne(channel.room)
+  const backendRoom = await pb.collection("dspeak_rooms").getOne(channel.room);
   if (!(backendRoom.members || []).map(String).includes(String(userId))) {
-    peer.close(1008, 'Access denied to this room')
-    return
+    peer.close(1008, "Access denied to this room");
+    return;
   }
 
-  const state = await getState()
-  const room = await acquireRoom(state, channelId)
+  const state = await getState();
+  const room = await acquireRoom(state, channelId);
   try {
     const session = {
       peer,
@@ -635,130 +662,130 @@ export async function openSfuPeer(peer) {
       queue: Promise.resolve(),
       closed: false,
       lastHeartbeatAt: Date.now(),
-    }
+    };
 
-    state.sessions.set(peer.id, session)
-    room.sessions.set(peer.id, session)
-    send(peer, 'connected', { userId, channelId, peerId: peer.id })
-    broadcastChannelState(room)
-    topologyCoordinator.reconcile(room, 'membership-changed')
+    state.sessions.set(peer.id, session);
+    room.sessions.set(peer.id, session);
+    send(peer, "connected", { userId, channelId, peerId: peer.id });
+    broadcastChannelState(room);
+    topologyCoordinator.reconcile(room, "membership-changed");
     const presenceResults = await Promise.allSettled([
       persistMediaPresence(room),
       createMediaUserState(userId, channelId),
-    ])
+    ]);
     for (const result of presenceResults) {
-      if (result.status === 'rejected')
+      if (result.status === "rejected")
         console.error(
-          '[SFU] failed to persist opened media session',
+          "[SFU] failed to persist opened media session",
           result.reason,
-        )
+        );
     }
     if (session.closed) {
       await persistMediaPresence(room).catch((error) =>
         console.error(
-          '[SFU] failed to repair presence after concurrent close',
+          "[SFU] failed to repair presence after concurrent close",
           error,
         ),
-      )
+      );
       const userStillConnected = [...room.sessions.values()].some(
         (candidate) => String(candidate.userId) === String(userId),
-      )
+      );
       if (!userStillConnected) {
         await removeMediaUserState(userId, channelId).catch((error) =>
           console.error(
-            '[SFU] failed to repair user state after concurrent close',
+            "[SFU] failed to repair user state after concurrent close",
             error,
           ),
-        )
+        );
       }
     }
   } finally {
-    releaseRoomReservation(room)
-    disposeRoomIfUnused(state, room)
+    releaseRoomReservation(room);
+    disposeRoomIfUnused(state, room);
   }
 }
 
 export async function handleSfuPeerMessage(peer, rawMessage) {
-  const state = await getState()
-  const session = state.sessions.get(peer.id)
-  if (!session) return
+  const state = await getState();
+  const session = state.sessions.get(peer.id);
+  if (!session) return;
 
-  let message = null
+  let message = null;
   try {
-    const payload = rawMessage.text()
-    if (typeof payload !== 'string' || payload.length > 600000)
-      throw new Error('Invalid signaling payload')
-    message = JSON.parse(payload)
+    const payload = rawMessage.text();
+    if (typeof payload !== "string" || payload.length > 600000)
+      throw new Error("Invalid signaling payload");
+    message = JSON.parse(payload);
   } catch (error) {
-    reportSignalingError(peer, message, error)
-    return
+    reportSignalingError(peer, message, error);
+    return;
   }
 
   if (
-    message?.type === 'heartbeat' &&
+    message?.type === "heartbeat" &&
     isValidMediaSignalHeartbeat(message.data)
   ) {
-    session.lastHeartbeatAt = Date.now()
+    session.lastHeartbeatAt = Date.now();
     await handleMessage(state, session, message).catch((error) =>
       reportSignalingError(peer, message, error),
-    )
-    return
+    );
+    return;
   }
 
   session.queue = session.queue
     .then(async () => {
-      if (session.closed) return
-      await handleMessage(state, session, message)
+      if (session.closed) return;
+      await handleMessage(state, session, message);
     })
-    .catch((error) => reportSignalingError(peer, message, error))
-  await session.queue
+    .catch((error) => reportSignalingError(peer, message, error));
+  await session.queue;
 }
 
 function reportSignalingError(peer, message, error) {
-  console.error('[SFU] signaling error', error)
-  send(peer, 'error', {
+  console.error("[SFU] signaling error", error);
+  send(peer, "error", {
     message: serializeError(error),
     fatal: false,
     requestType: message?.type || null,
     transportId: message?.data?.transportId || null,
     producerId: message?.data?.producerId || null,
-  })
+  });
 }
 
 export async function closeSfuPeer(peer) {
-  const statePromise = globalThis[stateKey]
-  if (!statePromise) return
-  const state = await statePromise.catch(() => null)
-  if (!state) return
-  const session = state.sessions.get(peer.id)
-  if (!session) return
+  const statePromise = globalThis[stateKey];
+  if (!statePromise) return;
+  const state = await statePromise.catch(() => null);
+  if (!state) return;
+  const session = state.sessions.get(peer.id);
+  if (!session) return;
   session.queue = session.queue
     .catch(() => {})
-    .then(() => closeSession(state, session))
-  await session.queue
+    .then(() => closeSession(state, session));
+  await session.queue;
 }
 
 export async function getSfuMetrics() {
-  const state = await getState()
-  let transports = 0
-  let producers = 0
-  let consumers = 0
-  let p2pRooms = 0
-  let sfuRooms = 0
-  let probingRooms = 0
-  let switchingRooms = 0
-  let idleRooms = 0
+  const state = await getState();
+  let transports = 0;
+  let producers = 0;
+  let consumers = 0;
+  let p2pRooms = 0;
+  let sfuRooms = 0;
+  let probingRooms = 0;
+  let switchingRooms = 0;
+  let idleRooms = 0;
   for (const room of state.rooms.values()) {
-    if (room.topology.mode === 'p2p') p2pRooms += 1
-    if (room.topology.mode === 'sfu') sfuRooms += 1
-    if (room.topology.mode === 'probing') probingRooms += 1
-    if (room.topology.mode === 'switching') switchingRooms += 1
-    if (room.topology.mode === 'idle') idleRooms += 1
+    if (room.topology.mode === "p2p") p2pRooms += 1;
+    if (room.topology.mode === "sfu") sfuRooms += 1;
+    if (room.topology.mode === "probing") probingRooms += 1;
+    if (room.topology.mode === "switching") switchingRooms += 1;
+    if (room.topology.mode === "idle") idleRooms += 1;
   }
   for (const session of state.sessions.values()) {
-    transports += session.transports.size
-    producers += session.producers.size
-    consumers += session.consumers.size
+    transports += session.transports.size;
+    producers += session.producers.size;
+    consumers += session.consumers.size;
   }
   return {
     workerPid: state.worker.pid,
@@ -772,5 +799,5 @@ export async function getSfuMetrics() {
     probingRooms,
     switchingRooms,
     idleRooms,
-  }
+  };
 }

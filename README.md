@@ -22,12 +22,12 @@ native WebRTC and mediasoup carry realtime media.
 DSpeak establishes the most reliable route first, then upgrades when a complete
 direct path proves healthy. The table describes the preferred steady state:
 
-| Participants | Route |
-| --- | --- |
-| 1 | mediasoup SFU |
-| 2 | Direct P2P |
-| 3–4 | SFU preferred; full P2P mesh after extended qualification |
-| 5+ or unhealthy mesh | mediasoup SFU |
+| Participants         | Route                                                     |
+| -------------------- | --------------------------------------------------------- |
+| 1                    | mediasoup SFU                                             |
+| 2                    | Direct P2P                                                |
+| 3–4                  | SFU preferred; full P2P mesh after extended qualification |
+| 5+ or unhealthy mesh | mediasoup SFU                                             |
 
 Every occupied call first establishes mediasoup SFU,
 attempting native IPv6 before the IPv4 fallback. For rooms with two through four
@@ -146,14 +146,14 @@ docker compose up --build -d
 
 Default host ports:
 
-| Port | Purpose |
-| --- | --- |
-| `31100/tcp` | Nitro HTTP and WebSockets |
-| `40000/udp` | Preferred mediasoup RTP |
-| `40000/tcp` | mediasoup TCP fallback |
-| `3478/udp` | IPv6 STUN and TURN |
-| `3478/tcp` | IPv6 TURN TCP |
-| `5349/tcp` | IPv6 TURN over TLS |
+| Port              | Purpose                     |
+| ----------------- | --------------------------- |
+| `31100/tcp`       | Nitro HTTP and WebSockets   |
+| `40000/udp`       | Preferred mediasoup RTP     |
+| `40000/tcp`       | mediasoup TCP fallback      |
+| `3478/udp`        | IPv6 STUN and TURN          |
+| `3478/tcp`        | IPv6 TURN TCP               |
+| `5349/tcp`        | IPv6 TURN over TLS          |
 | `49160–49259/udp` | IPv6 TURN relay allocations |
 
 The stack includes a Playit agent for SFU IPv4 fallback, an IPv6 Coturn service,
@@ -178,27 +178,27 @@ for Coolify, Zoraxy, Playit, dynamic IPv6, DNS, firewall, and ICE configuration.
 
 ## Service endpoints
 
-| Path | Purpose |
-| --- | --- |
-| `/dspeak/room/*` | Room management |
-| `/dspeak/channel/*` | Text and media channels |
-| `/dspeak/chat/*` | Messages, read state, and push subscriptions |
-| `/dspeak/chat/socket` | Realtime chat WebSocket |
-| `/dspeak/presence` | Presence WebSocket |
-| `/socket` | Media signaling WebSocket |
-| `/health` | Application health |
-| `/metrics` | Prometheus-compatible media metrics |
+| Path                  | Purpose                                      |
+| --------------------- | -------------------------------------------- |
+| `/dspeak/room/*`      | Room management                              |
+| `/dspeak/channel/*`   | Text and media channels                      |
+| `/dspeak/chat/*`      | Messages, read state, and push subscriptions |
+| `/dspeak/chat/socket` | Realtime chat WebSocket                      |
+| `/dspeak/presence`    | Presence WebSocket                           |
+| `/socket`             | Media signaling WebSocket                    |
+| `/health`             | Application health                           |
+| `/metrics`            | Prometheus-compatible media metrics          |
 
 ## Project structure
 
-| Directory | Responsibility |
-| --- | --- |
-| `app/` | Nuxt UI, stores, capture, playback, and WebRTC clients |
-| `server/routes/` | Nitro HTTP and WebSocket routes |
-| `server/utils/` | PocketBase, mediasoup, ICE, and topology coordination |
-| `shared/` | Runtime-neutral topology policy |
-| `tests/` | Node unit and policy tests |
-| `docs/` | Deployment, topology, and migration details |
+| Directory        | Responsibility                                         |
+| ---------------- | ------------------------------------------------------ |
+| `app/`           | Nuxt UI, stores, capture, playback, and WebRTC clients |
+| `server/routes/` | Nitro HTTP and WebSocket routes                        |
+| `server/utils/`  | PocketBase, mediasoup, ICE, and topology coordination  |
+| `shared/`        | Runtime-neutral topology policy                        |
+| `tests/`         | Node unit and policy tests                             |
+| `docs/`          | Deployment, topology, and migration details            |
 
 ## Verification
 

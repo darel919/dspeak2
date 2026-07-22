@@ -1,76 +1,115 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: light --default, dark --prefersdark, synthwave;
+  themes:
+    light --default,
+    dark --prefersdark,
+    synthwave;
 }
 
 @theme {
-	--color-hero: #e9b151;
-	--color-bg-dark: #161f30;
-	--color-bg-light: #f7f1e5;
-	--color-accent1: #769899;
-	--color-accent2: #e9b151;
-	--color-accent3: #f7f1e5;
-	--color-accent4: #24475e;
-	--color-accent5: #161f30;
+  --color-hero: #e9b151;
+  --color-bg-dark: #161f30;
+  --color-bg-light: #f7f1e5;
+  --color-accent1: #769899;
+  --color-accent2: #e9b151;
+  --color-accent3: #f7f1e5;
+  --color-accent4: #24475e;
+  --color-accent5: #161f30;
 }
 
 :root {
-	--navbar-height: 4.5rem;
-	--navbar-surface: color-mix(in oklab, var(--color-base-100) 94%, var(--color-base-content));
+  --navbar-height: 4.5rem;
+  --navbar-surface: color-mix(
+    in oklab,
+    var(--color-base-100) 94%,
+    var(--color-base-content)
+  );
 }
 
 @font-face {
-	font-family: 'Caprasimo';
-	src: url('/font/Caprasimo-Regular.woff') format('woff');
-	font-weight: normal;
-	font-style: normal;
-	font-display: swap;
+  font-family: "Caprasimo";
+  src: url("/font/Caprasimo-Regular.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
 }
 .font-hero {
-	font-family: 'Caprasimo', cursive, sans-serif !important;
+  font-family: "Caprasimo", cursive, sans-serif !important;
 }
 body {
-	background-color: var(--color-base-100);
-	color: var(--color-base-content);
+  background-color: var(--color-base-100);
+  color: var(--color-base-content);
 }
 
 [data-theme="light"] {
-	--color-base-content: oklch(22% 0.025 255);
+  --color-base-content: oklch(22% 0.025 255);
 }
 
 [data-theme="light"] .text-base-content\/40,
 [data-theme="light"] .text-base-content\/50,
 [data-theme="light"] .text-base-content\/60 {
-	color: color-mix(in oklab, var(--color-base-content) 72%, transparent);
+  color: color-mix(in oklab, var(--color-base-content) 72%, transparent);
 }
 
 .navbar-surface {
-	background-color: var(--navbar-surface);
-	color: var(--color-base-content);
+  background-color: var(--navbar-surface);
+  color: var(--color-base-content);
 }
-.bg-hero { background-color: var(--color-hero); }
-.bg-dark { background-color: var(--color-bg-dark); }
-.bg-light { background-color: var(--color-bg-light); }
-.bg-accent-1 { background-color: var(--color-accent1); }
-.bg-accent-2 { background-color: var(--color-accent2); }
-.bg-accent-3 { background-color: var(--color-accent3); }
-.bg-accent-4 { background-color: var(--color-accent4); }
-.bg-accent-5 { background-color: var(--color-accent5); }
+.bg-hero {
+  background-color: var(--color-hero);
+}
+.bg-dark {
+  background-color: var(--color-bg-dark);
+}
+.bg-light {
+  background-color: var(--color-bg-light);
+}
+.bg-accent-1 {
+  background-color: var(--color-accent1);
+}
+.bg-accent-2 {
+  background-color: var(--color-accent2);
+}
+.bg-accent-3 {
+  background-color: var(--color-accent3);
+}
+.bg-accent-4 {
+  background-color: var(--color-accent4);
+}
+.bg-accent-5 {
+  background-color: var(--color-accent5);
+}
 
-.text-hero { color: var(--color-hero); }
-.text-dark { color: var(--color-bg-dark); }
-.text-light { color: var(--color-bg-light); }
-.text-accent-1 { color: var(--color-accent1); }
-.text-accent-2 { color: var(--color-accent2); }
-.text-accent-3 { color: var(--color-accent3); }
-.text-accent-4 { color: var(--color-accent4); }
-.text-accent-5 { color: var(--color-accent5); }
+.text-hero {
+  color: var(--color-hero);
+}
+.text-dark {
+  color: var(--color-bg-dark);
+}
+.text-light {
+  color: var(--color-bg-light);
+}
+.text-accent-1 {
+  color: var(--color-accent1);
+}
+.text-accent-2 {
+  color: var(--color-accent2);
+}
+.text-accent-3 {
+  color: var(--color-accent3);
+}
+.text-accent-4 {
+  color: var(--color-accent4);
+}
+.text-accent-5 {
+  color: var(--color-accent5);
+}
 
 .h-screen-minus-navbar {
-	height: calc(100dvh - var(--navbar-height));
+  height: calc(100dvh - var(--navbar-height));
 }
 
 .min-h-screen-minus-navbar {
-	min-height: calc(100vh - var(--navbar-height));
-	min-height: calc(100dvh - var(--navbar-height));
+  min-height: calc(100vh - var(--navbar-height));
+  min-height: calc(100dvh - var(--navbar-height));
 }

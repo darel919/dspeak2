@@ -3,5 +3,5 @@
 </template>
 
 <script setup>
-useHead({ title: 'RTC Debug · dSpeak' })
+useHead({ title: "RTC Debug · dSpeak" });
 </script>

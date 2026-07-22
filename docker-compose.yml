@@ -102,7 +102,11 @@ services:
     volumes:
       - turn-certificates:/etc/letsencrypt
     healthcheck:
-      test: [CMD-SHELL, "test -s /etc/letsencrypt/runtime/fullchain.pem && test -s /etc/letsencrypt/runtime/privkey.pem"]
+      test:
+        [
+          CMD-SHELL,
+          "test -s /etc/letsencrypt/runtime/fullchain.pem && test -s /etc/letsencrypt/runtime/privkey.pem",
+        ]
       interval: 10s
       timeout: 5s
       retries: 30

@@ -1,6 +1,6 @@
 export function useToast() {
-  const store = useToastStore()
-  const { toasts } = storeToRefs(store)
+  const store = useToastStore();
+  const { toasts } = storeToRefs(store);
   return {
     toasts: readonly(toasts),
     addToast: store.addToast,
@@ -9,5 +9,5 @@ export function useToast() {
     error: store.error,
     warning: store.warning,
     info: store.info,
-  }
+  };
 }

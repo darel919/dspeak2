@@ -23,7 +23,10 @@
       <!-- Error State -->
       <div v-else-if="roomsStore.error" class="p-4">
         <div class="alert alert-error alert-sm">
-          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
+          <Icon
+            name="lucide:circle-x"
+            class="stroke-current shrink-0 h-6 w-6"
+          />
           <span class="text-xs">{{ roomsStore.error }}</span>
         </div>
       </div>
@@ -38,13 +41,17 @@
           :class="[
             selectedRoomId === room.id
               ? 'bg-primary text-primary-content'
-              : 'hover:bg-base-300 text-base-content'
+              : 'hover:bg-base-300 text-base-content',
           ]"
         >
           <!-- Room Avatar -->
           <div class="avatar placeholder">
             <template v-if="getRoomPictureUrl(room)">
-              <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover" :alt="room.name" />
+              <img
+                :src="getRoomPictureUrl(room)"
+                class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover"
+                :alt="room.name"
+              />
             </template>
             <template v-else>
               <div
@@ -52,7 +59,7 @@
                 :class="[
                   selectedRoomId === room.id
                     ? 'bg-primary-content text-primary'
-                    : 'bg-neutral text-neutral-content'
+                    : 'bg-neutral text-neutral-content',
                 ]"
               >
                 <span>{{ room.name.charAt(0).toUpperCase() }}</span>
@@ -68,7 +75,7 @@
               :class="[
                 selectedRoomId === room.id
                   ? 'text-primary-content'
-                  : 'text-base-content'
+                  : 'text-base-content',
               ]"
             >
               {{ room.desc || `${room.members?.length || 0} members` }}
@@ -76,22 +83,36 @@
           </div>
 
           <!-- Activity indicator -->
-          <div v-if="hasActivity(room)" class="w-3 h-3 bg-accent rounded-full"></div>
+          <div
+            v-if="hasActivity(room)"
+            class="w-3 h-3 bg-accent rounded-full"
+          ></div>
         </button>
       </div>
 
       <!-- Empty State -->
-      <div v-else class="flex flex-col items-center justify-center h-64 text-center p-4">
+      <div
+        v-else
+        class="flex flex-col items-center justify-center h-64 text-center p-4"
+      >
         <div class="text-base-content/50 mb-4">
           <Icon name="lucide:message-circle" class="h-16 w-16 mx-auto mb-4" />
         </div>
         <h3 class="font-medium mb-2">No servers found</h3>
-        <p class="text-sm text-base-content/60 mb-4">Join or create a server to get started</p>
+        <p class="text-sm text-base-content/60 mb-4">
+          Join or create a server to get started
+        </p>
         <div class="space-y-2">
-          <button @click="showJoinModal = true" class="btn btn-sm btn-primary w-full">
+          <button
+            @click="showJoinModal = true"
+            class="btn btn-sm btn-primary w-full"
+          >
             Join Server
           </button>
-          <button @click="showCreateModal = true" class="btn btn-sm btn-outline w-full">
+          <button
+            @click="showCreateModal = true"
+            class="btn btn-sm btn-outline w-full"
+          >
             Create Server
           </button>
         </div>
@@ -124,7 +145,9 @@
     <div v-if="showJoinModal" class="modal modal-open">
       <div class="modal-box">
         <h3 class="font-bold text-lg mb-4">Join Server</h3>
-        <p class="text-base-content/70 mb-4">Enter a server ID or paste a join link to join a server.</p>
+        <p class="text-base-content/70 mb-4">
+          Enter a server ID or paste a join link to join a server.
+        </p>
         <div class="form-control mb-4">
           <input
             v-model="joinInput"
@@ -136,7 +159,10 @@
           />
         </div>
         <div v-if="joinError" class="alert alert-error alert-sm mb-4">
-          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
+          <Icon
+            name="lucide:circle-x"
+            class="stroke-current shrink-0 h-6 w-6"
+          />
           <span>{{ joinError }}</span>
         </div>
         <div class="modal-action">
@@ -151,9 +177,9 @@
             class="btn btn-primary"
             @click="handleJoinSubmit"
             :disabled="!joinInput.trim() || joiningRoom"
-            :class="{ 'loading': joiningRoom }"
+            :class="{ loading: joiningRoom }"
           >
-            {{ joiningRoom ? 'Joining...' : 'Join Server' }}
+            {{ joiningRoom ? "Joining..." : "Join Server" }}
           </button>
         </div>
       </div>
@@ -166,7 +192,9 @@
         <h3 class="font-bold text-lg mb-4">Create Server</h3>
         <div class="form-control mb-4">
           <label class="label">
-            <span class="label-text">Server Name <span class="text-error">*</span></span>
+            <span class="label-text"
+              >Server Name <span class="text-error">*</span></span
+            >
           </label>
           <input
             v-model="createName"
@@ -190,7 +218,10 @@
           />
         </div>
         <div v-if="createError" class="alert alert-error alert-sm mb-4">
-          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
+          <Icon
+            name="lucide:circle-x"
+            class="stroke-current shrink-0 h-6 w-6"
+          />
           <span>{{ createError }}</span>
         </div>
         <div class="modal-action">
@@ -205,9 +236,9 @@
             class="btn btn-primary"
             @click="handleCreateSubmit"
             :disabled="!createName.trim() || creatingRoom"
-            :class="{ 'loading': creatingRoom }"
+            :class="{ loading: creatingRoom }"
           >
-            {{ creatingRoom ? 'Creating...' : 'Create Server' }}
+            {{ creatingRoom ? "Creating..." : "Create Server" }}
           </button>
         </div>
       </div>
@@ -217,134 +248,137 @@
 </template>
 
 <script setup>
-import { useRoomsStore } from '../stores/rooms'
-import { useToast } from '../composables/useToast'
-const config = useRuntimeConfig()
+import { useRoomsStore } from "../stores/rooms";
+import { useToast } from "../composables/useToast";
+const config = useRuntimeConfig();
 
 const props = defineProps({
-  selectedRoomId: String
-})
+  selectedRoomId: String,
+});
 
-const emit = defineEmits(['room-selected'])
+const emit = defineEmits(["room-selected"]);
 
-const roomsStore = useRoomsStore()
-const router = useRouter()
-const { success, error } = useToast()
+const roomsStore = useRoomsStore();
+const router = useRouter();
+const { success, error } = useToast();
 
-const showJoinModal = ref(false)
-const joinInput = ref('')
-const joinError = ref(null)
-const joiningRoom = ref(false)
+const showJoinModal = ref(false);
+const joinInput = ref("");
+const joinError = ref(null);
+const joiningRoom = ref(false);
 
-const showCreateModal = ref(false)
-const createName = ref('')
-const createDesc = ref('')
-const createError = ref(null)
-const creatingRoom = ref(false)
+const showCreateModal = ref(false);
+const createName = ref("");
+const createDesc = ref("");
+const createError = ref(null);
+const creatingRoom = ref(false);
 
-const joinInputRef = ref(null)
-const createNameRef = ref(null)
+const joinInputRef = ref(null);
+const createNameRef = ref(null);
 
 function getRoomPictureUrl(room) {
   if (room.picture) {
-    return `${config.public.apiPath.replace(/\/$/, '')}/${room.picture.replace(/^\//, '')}`
+    return `${config.public.apiPath.replace(/\/$/, "")}/${room.picture.replace(/^\//, "")}`;
   }
-  return null
+  return null;
 }
 
-
 async function selectRoom(room) {
-  emit('room-selected', room)
-  router.push(`/room/${room.id}`)
+  emit("room-selected", room);
+  router.push(`/room/${room.id}`);
 }
 
 function hasActivity(room) {
+  if (!room.members || !Array.isArray(room.members)) return false;
 
-  if (!room.members || !Array.isArray(room.members)) return false
-
-  const currentUserId = roomsStore?.$state?.authUserId || null
-  return room.members.some(member => member.id !== currentUserId && member.online === true)
+  const currentUserId = roomsStore?.$state?.authUserId || null;
+  return room.members.some(
+    (member) => member.id !== currentUserId && member.online === true,
+  );
 }
 
 function closeJoinModal() {
-  showJoinModal.value = false
-  joinInput.value = ''
-  joinError.value = null
-  joiningRoom.value = false
+  showJoinModal.value = false;
+  joinInput.value = "";
+  joinError.value = null;
+  joiningRoom.value = false;
 }
 
 function closeCreateModal() {
-  showCreateModal.value = false
-  createName.value = ''
-  createDesc.value = ''
-  createError.value = null
-  creatingRoom.value = false
+  showCreateModal.value = false;
+  createName.value = "";
+  createDesc.value = "";
+  createError.value = null;
+  creatingRoom.value = false;
 }
 
 function extractRoomIdFromInput(input) {
-  const trimmed = input.trim()
-  const joinLinkMatch = trimmed.match(/\/join\/([^/?#]+)/)
+  const trimmed = input.trim();
+  const joinLinkMatch = trimmed.match(/\/join\/([^/?#]+)/);
   if (joinLinkMatch) {
-    return joinLinkMatch[1]
+    return joinLinkMatch[1];
   }
-  return trimmed
+  return trimmed;
 }
 
 async function handleJoinSubmit() {
-  if (!joinInput.value.trim()) return
-  joiningRoom.value = true
-  joinError.value = null
+  if (!joinInput.value.trim()) return;
+  joiningRoom.value = true;
+  joinError.value = null;
   try {
-    const roomId = extractRoomIdFromInput(joinInput.value)
+    const roomId = extractRoomIdFromInput(joinInput.value);
     if (!roomId) {
-      throw new Error('Invalid server ID or join link')
+      throw new Error("Invalid server ID or join link");
     }
-    await roomsStore.joinRoom(roomId)
-    success('Successfully joined server!')
-    closeJoinModal()
-    router.push(`/room/${roomId}`)
+    await roomsStore.joinRoom(roomId);
+    success("Successfully joined server!");
+    closeJoinModal();
+    router.push(`/room/${roomId}`);
   } catch (err) {
-    joinError.value = err.message || 'Failed to join server'
+    joinError.value = err.message || "Failed to join server";
   } finally {
-    joiningRoom.value = false
+    joiningRoom.value = false;
   }
 }
 
 async function handleCreateSubmit() {
-  if (!createName.value.trim()) return
-  creatingRoom.value = true
-  createError.value = null
+  if (!createName.value.trim()) return;
+  creatingRoom.value = true;
+  createError.value = null;
   try {
-    const room = await roomsStore.createRoom(createName.value, createDesc.value)
-    success('Server created successfully!')
-    closeCreateModal()
+    const room = await roomsStore.createRoom(
+      createName.value,
+      createDesc.value,
+    );
+    success("Server created successfully!");
+    closeCreateModal();
     if (room && room.id) {
-      router.push(`/room/${room.id}`)
+      router.push(`/room/${room.id}`);
     }
   } catch (err) {
-    const msg = typeof err?.message === 'string' ? err.message : ''
-    if (msg.includes('409') && msg.includes('already exists')) {
-      createError.value = 'Pick another name, this name is already taken'
+    const msg = typeof err?.message === "string" ? err.message : "";
+    if (msg.includes("409") && msg.includes("already exists")) {
+      createError.value = "Pick another name, this name is already taken";
     } else {
-      createError.value = msg || 'Failed to create server'
+      createError.value = msg || "Failed to create server";
     }
   } finally {
-    creatingRoom.value = false
+    creatingRoom.value = false;
   }
 }
 watch(showJoinModal, (newValue) => {
   if (newValue) {
     nextTick(() => {
-      joinInputRef.value?.focus()
-    }, 100)
+      joinInputRef.value?.focus();
+    }, 100);
   }
-})
+});
 
 watch(showCreateModal, (newValue) => {
   if (newValue) {
     nextTick(() => {
-      createNameRef.value?.focus()
-    }, 100)
+      createNameRef.value?.focus();
+    }, 100);
   }
-})
+});
 </script>

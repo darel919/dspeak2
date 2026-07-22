@@ -4,7 +4,10 @@
       <Icon name="lucide:ellipsis-vertical" class="h-4 w-4" />
     </label>
 
-    <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
+    <ul
+      tabindex="0"
+      class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52"
+    >
       <!-- <li v-if="!isOwnMessage">
         <button @click="handleMarkAsRead" :disabled="isRead">
           <Icon name="lucide:check" class="h-4 w-4" />
@@ -39,61 +42,58 @@
 </template>
 
 <script setup>
-import { useChatStore } from '../../stores/chat'
-import { useAuthStore } from '../../stores/auth'
+import { useChatStore } from "../../stores/chat";
+import { useAuthStore } from "../../stores/auth";
 
 const props = defineProps({
   message: {
     type: Object,
-    required: true
-  }
-})
+    required: true,
+  },
+});
 
-const emit = defineEmits(['mark-read', 'show-details'])
+const emit = defineEmits(["mark-read", "show-details"]);
 
-const chatStore = useChatStore()
-const authStore = useAuthStore()
+const chatStore = useChatStore();
+const authStore = useAuthStore();
 
 const isOwnMessage = computed(() => {
-  const userData = authStore.getUserData()
-  return userData && props.message.sender.id === userData.id
-})
+  const userData = authStore.getUserData();
+  return userData && props.message.sender.id === userData.id;
+});
 
 const isRead = computed(() => {
-  const userData = authStore.getUserData()
-  if (!userData) return false
+  const userData = authStore.getUserData();
+  if (!userData) return false;
 
-  return props.message.read_by && props.message.read_by.includes(userData.id)
-})
+  return props.message.read_by && props.message.read_by.includes(userData.id);
+});
 
 async function handleMarkAsRead() {
   if (isRead.value || isOwnMessage.value) return;
   try {
-
     await chatStore.markMessageAsRead(props.message.id);
-    emit('mark-read', props.message.id);
+    emit("mark-read", props.message.id);
   } catch (error) {
-    console.error('Failed to mark message as read:', error);
+    console.error("Failed to mark message as read:", error);
   }
 }
 
 async function handleCopyMessage() {
   try {
-    await navigator.clipboard.writeText(props.message.content)
+    await navigator.clipboard.writeText(props.message.content);
 
-    console.debug('Message copied to clipboard')
+    console.debug("Message copied to clipboard");
   } catch (error) {
-    console.error('Failed to copy message:', error)
+    console.error("Failed to copy message:", error);
   }
 }
 
 function handleReportMessage() {
-
-  console.debug('Report message:', props.message.id)
-
+  console.debug("Report message:", props.message.id);
 }
 
 function handleViewDetails() {
-  emit('show-details', props.message)
+  emit("show-details", props.message);
 }
 </script>

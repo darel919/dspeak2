@@ -21,30 +21,30 @@
 </template>
 
 <script setup>
-import { useAuthStore } from '../stores/auth'
+import { useAuthStore } from "../stores/auth";
 
-const authStore = useAuthStore()
-const router = useRouter()
+const authStore = useAuthStore();
+const router = useRouter();
 
-import { useRuntimeConfig } from '#app'
-const config = useRuntimeConfig()
-import { useChatUtils } from '../composables/useChatUtils'
-const { getAvatarUrl } = useChatUtils()
+import { useRuntimeConfig } from "#app";
+const config = useRuntimeConfig();
+import { useChatUtils } from "../composables/useChatUtils";
+const { getAvatarUrl } = useChatUtils();
 
 const profile = computed(() => {
-  const user = authStore.getUserData()
-  if (!user) return null
+  const user = authStore.getUserData();
+  if (!user) return null;
 
   return {
     ...user,
-    avatar: getAvatarUrl(user.avatar, config.public.baseApiPath)
-  }
-})
+    avatar: getAvatarUrl(user.avatar, config.public.baseApiPath),
+  };
+});
 
 async function handleLogout() {
-  authStore.clearAuth()
+  authStore.clearAuth();
 
-  await nextTick()
-  router.push('/')
+  await nextTick();
+  router.push("/");
 }
 </script>

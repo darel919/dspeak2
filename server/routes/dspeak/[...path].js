@@ -1,3 +1,3 @@
-import { handleDspeakApi } from '../../utils/dspeak-api'
+import { handleDspeakApi } from "../../utils/dspeak-api";
 
-export default defineEventHandler(handleDspeakApi)
+export default defineEventHandler(handleDspeakApi);

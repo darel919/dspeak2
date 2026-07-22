@@ -1,8 +1,5 @@
- 
- 
-
-const DB_NAME = 'chat-bg-worker';
-const STORE_NAME = 'messageQueue';
+const DB_NAME = "chat-bg-worker";
+const STORE_NAME = "messageQueue";
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -10,7 +7,10 @@ function openDB() {
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+        db.createObjectStore(STORE_NAME, {
+          keyPath: "id",
+          autoIncrement: true,
+        });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -20,14 +20,14 @@ function openDB() {
 
 async function addMessage(message) {
   const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const tx = db.transaction(STORE_NAME, "readwrite");
   tx.objectStore(STORE_NAME).add(message);
   return tx.complete;
 }
 
 async function getAllMessages() {
   const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readonly');
+  const tx = db.transaction(STORE_NAME, "readonly");
   const store = tx.objectStore(STORE_NAME);
   return new Promise((resolve, reject) => {
     const req = store.getAll();
@@ -38,7 +38,7 @@ async function getAllMessages() {
 
 async function deleteMessage(id) {
   const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const tx = db.transaction(STORE_NAME, "readwrite");
   tx.objectStore(STORE_NAME).delete(id);
   return tx.complete;
 }

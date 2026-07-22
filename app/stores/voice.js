@@ -1,229 +1,229 @@
-import { defineStore } from 'pinia'
-import { useAuthStore } from './auth'
-import { useRoomsStore } from './rooms'
-import { useSettingsStore } from './settings'
-import { useChannelsStore } from './channels'
+import { defineStore } from "pinia";
+import { useAuthStore } from "./auth";
+import { useRoomsStore } from "./rooms";
+import { useSettingsStore } from "./settings";
+import { useChannelsStore } from "./channels";
 
-export const useVoiceStore = defineStore('voice', () => {
-  const currentChannelId = ref(null)
-  const currentRoomId = ref(null)
-  const connectedUsers = ref(new Map())
+export const useVoiceStore = defineStore("voice", () => {
+  const currentChannelId = ref(null);
+  const currentRoomId = ref(null);
+  const connectedUsers = ref(new Map());
 
-  const userVolumes = ref({})
-  const trackVolumes = ref({})
+  const userVolumes = ref({});
+  const trackVolumes = ref({});
 
-  const userDirectory = ref(new Map())
-  const micMuted = ref(true)
-  const deafened = ref(false)
-  const connecting = ref(false)
-  const connected = ref(false)
-  const error = ref(null)
-  const connectedAt = ref(null)
-  const cameraEnabled = ref(false)
-  const screenSharing = ref(false)
-  const systemAudioSharing = ref(false)
-  const settingsStore = useSettingsStore()
-  const channelsStore = useChannelsStore()
-  const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume)
+  const userDirectory = ref(new Map());
+  const micMuted = ref(true);
+  const deafened = ref(false);
+  const connecting = ref(false);
+  const connected = ref(false);
+  const error = ref(null);
+  const connectedAt = ref(null);
+  const cameraEnabled = ref(false);
+  const screenSharing = ref(false);
+  const systemAudioSharing = ref(false);
+  const settingsStore = useSettingsStore();
+  const channelsStore = useChannelsStore();
+  const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
   const sharedAudioStats = computed(
     () =>
       sfuComposable.value?.sharedAudioStats || { kbps: 0, level: 0, dbfs: -60 },
-  )
+  );
   const effectiveSystemAudioBitrate = computed(() => {
-    const requested = Number(settingsStore.systemAudioBitrate) || 128
+    const requested = Number(settingsStore.systemAudioBitrate) || 128;
     const channelLimit = Number(
       channelsStore.getChannelById(currentChannelId.value)?.audio_bitrate,
-    )
+    );
     return Number.isFinite(channelLimit) && channelLimit > 0
       ? Math.min(requested, channelLimit)
-      : requested
-  })
+      : requested;
+  });
 
-  const sfuComposable = ref(null)
+  const sfuComposable = ref(null);
 
-  let stopIceWatcher = null
-  let joinGeneration = 0
+  let stopIceWatcher = null;
+  let joinGeneration = 0;
 
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     try {
-      const persistedMic = localStorage.getItem('voice.micMuted')
-      if (persistedMic !== null) micMuted.value = persistedMic === 'true'
+      const persistedMic = localStorage.getItem("voice.micMuted");
+      if (persistedMic !== null) micMuted.value = persistedMic === "true";
 
-      const persistedVolumes = localStorage.getItem('voice.userVolumes')
+      const persistedVolumes = localStorage.getItem("voice.userVolumes");
       if (persistedVolumes) {
         try {
-          const parsed = JSON.parse(persistedVolumes)
-          if (parsed && typeof parsed === 'object') {
-            Object.assign(userVolumes.value, parsed)
+          const parsed = JSON.parse(persistedVolumes);
+          if (parsed && typeof parsed === "object") {
+            Object.assign(userVolumes.value, parsed);
           }
         } catch (_) {
           /* ignore */
         }
       }
-      const persistedTrackVolumes = localStorage.getItem('voice.trackVolumes')
+      const persistedTrackVolumes = localStorage.getItem("voice.trackVolumes");
       if (persistedTrackVolumes)
-        Object.assign(trackVolumes.value, JSON.parse(persistedTrackVolumes))
+        Object.assign(trackVolumes.value, JSON.parse(persistedTrackVolumes));
     } catch (_) {
       /* noop */
     }
   }
 
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     watch(
       micMuted,
       (v) => {
         try {
-          localStorage.setItem('voice.micMuted', String(!!v))
+          localStorage.setItem("voice.micMuted", String(!!v));
         } catch (_) {
           /* noop */
         }
       },
       { immediate: true },
-    )
+    );
     watch(
       deafened,
       (v) => {
         try {
-          localStorage.setItem('voice.deafened', String(!!v))
+          localStorage.setItem("voice.deafened", String(!!v));
         } catch (_) {
           /* noop */
         }
       },
       { immediate: true },
-    )
+    );
     watch(
       userVolumes,
       (vols) => {
         try {
-          localStorage.setItem('voice.userVolumes', JSON.stringify(vols))
+          localStorage.setItem("voice.userVolumes", JSON.stringify(vols));
         } catch (_) {
           /* noop */
         }
       },
       { deep: true, immediate: true },
-    )
+    );
     watch(
       trackVolumes,
       (vols) => {
         try {
-          localStorage.setItem('voice.trackVolumes', JSON.stringify(vols))
+          localStorage.setItem("voice.trackVolumes", JSON.stringify(vols));
         } catch (_) {
           /* noop */
         }
       },
       { deep: true, immediate: true },
-    )
+    );
   }
 
   watch(
     () => sfuComposable.value?.error,
     (sessionError) => {
-      if (sessionError) error.value = String(sessionError)
+      if (sessionError) error.value = String(sessionError);
     },
-  )
+  );
 
   watch(
     () => settingsStore.outputDeviceId,
     () => sfuComposable.value?.applyOutputDeviceToAll?.(),
-  )
+  );
 
   function setCurrentChannel(channelId) {
-    currentChannelId.value = channelId
-    const channel = channelId ? channelsStore.getChannelById(channelId) : null
+    currentChannelId.value = channelId;
+    const channel = channelId ? channelsStore.getChannelById(channelId) : null;
     currentRoomId.value =
-      channel?.room || channel?.room_id || channel?.roomId || null
+      channel?.room || channel?.room_id || channel?.roomId || null;
   }
 
   async function leaveVoiceChannel(cancelPendingJoin = true) {
-    if (cancelPendingJoin) joinGeneration += 1
-    const session = sfuComposable.value
+    if (cancelPendingJoin) joinGeneration += 1;
+    const session = sfuComposable.value;
     try {
-      await session?.disconnect?.()
+      await session?.disconnect?.();
     } catch (err) {
-      console.warn('[VoiceStore] Failed to close voice media cleanly:', err)
+      console.warn("[VoiceStore] Failed to close voice media cleanly:", err);
     } finally {
       if (stopIceWatcher) {
         try {
-          stopIceWatcher()
+          stopIceWatcher();
         } catch (_) {
           /* noop */
         }
-        stopIceWatcher = null
+        stopIceWatcher = null;
       }
-      setCurrentChannel(null)
-      currentRoomId.value = null
-      connectedUsers.value.clear()
-      connecting.value = false
-      connected.value = false
-      connectedAt.value = null
-      error.value = null
-      if (sfuComposable.value === session) sfuComposable.value = null
-      cameraEnabled.value = false
-      screenSharing.value = false
-      systemAudioSharing.value = false
+      setCurrentChannel(null);
+      currentRoomId.value = null;
+      connectedUsers.value.clear();
+      connecting.value = false;
+      connected.value = false;
+      connectedAt.value = null;
+      error.value = null;
+      if (sfuComposable.value === session) sfuComposable.value = null;
+      cameraEnabled.value = false;
+      screenSharing.value = false;
+      systemAudioSharing.value = false;
     }
   }
 
   function upsertUserProfile(profile) {
-    if (!profile || !profile.id) return
-    const prev = userDirectory.value.get(profile.id) || {}
-    const merged = { ...prev, ...profile }
-    userDirectory.value.set(profile.id, merged)
+    if (!profile || !profile.id) return;
+    const prev = userDirectory.value.get(profile.id) || {};
+    const merged = { ...prev, ...profile };
+    userDirectory.value.set(profile.id, merged);
 
-    const cu = connectedUsers.value.get(profile.id)
+    const cu = connectedUsers.value.get(profile.id);
     if (cu) {
-      connectedUsers.value.set(profile.id, { ...cu, ...merged })
-      connectedUsers.value = new Map(connectedUsers.value)
+      connectedUsers.value.set(profile.id, { ...cu, ...merged });
+      connectedUsers.value = new Map(connectedUsers.value);
     }
   }
 
   function isInVoiceChannel() {
-    return !!currentChannelId.value && !!connected.value
+    return !!currentChannelId.value && !!connected.value;
   }
 
   function addConnectedUser(userId, userInfo) {
-    const cached = userDirectory.value.get(userId) || {}
+    const cached = userDirectory.value.get(userId) || {};
     connectedUsers.value.set(userId, {
       id: userId,
       ...cached,
       ...userInfo,
       speaking: false,
       muted: false,
-    })
+    });
 
-    connectedUsers.value = new Map(connectedUsers.value)
+    connectedUsers.value = new Map(connectedUsers.value);
 
     if (
-      typeof userVolumes.value[userId] === 'undefined' &&
-      typeof window !== 'undefined'
+      typeof userVolumes.value[userId] === "undefined" &&
+      typeof window !== "undefined"
     ) {
-      const el = document.getElementById(`audio-${userId}`)
-      if (el && typeof el.volume === 'number') {
-        userVolumes.value[userId] = el.volume
+      const el = document.getElementById(`audio-${userId}`);
+      if (el && typeof el.volume === "number") {
+        userVolumes.value[userId] = el.volume;
       }
     }
   }
 
   function removeConnectedUser(userId) {
-    connectedUsers.value.delete(userId)
-    connectedUsers.value = new Map(connectedUsers.value)
+    connectedUsers.value.delete(userId);
+    connectedUsers.value = new Map(connectedUsers.value);
   }
   function setUserVolume(userId, volume) {
-    const v = Math.max(0, Math.min(1, Number(volume)))
-    userVolumes.value[userId] = v
+    const v = Math.max(0, Math.min(1, Number(volume)));
+    userVolumes.value[userId] = v;
 
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       try {
-        const audio = document.getElementById(`audio-${userId}`)
+        const audio = document.getElementById(`audio-${userId}`);
         if (audio) {
-          audio.volume = v
+          audio.volume = v;
         }
 
         if (
           sfuComposable.value &&
-          typeof sfuComposable.value.applyVolumeForUser === 'function'
+          typeof sfuComposable.value.applyVolumeForUser === "function"
         ) {
-          sfuComposable.value.applyVolumeForUser(userId, v)
+          sfuComposable.value.applyVolumeForUser(userId, v);
         }
       } catch (_) {
         /* noop */
@@ -231,152 +231,154 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
   function getUserVolume(userId) {
-    return typeof userVolumes.value[userId] !== 'undefined'
+    return typeof userVolumes.value[userId] !== "undefined"
       ? userVolumes.value[userId]
-      : 1.0
+      : 1.0;
   }
 
   function setTrackVolume(userId, source, volume) {
-    const v = Math.max(0, Math.min(1, Number(volume)))
-    trackVolumes.value[`${userId}:${source}`] = v
-    if (source === 'audio') userVolumes.value[userId] = v
-    sfuComposable.value?.applyVolumeForTrack?.(userId, source, v)
+    const v = Math.max(0, Math.min(1, Number(volume)));
+    trackVolumes.value[`${userId}:${source}`] = v;
+    if (source === "audio") userVolumes.value[userId] = v;
+    sfuComposable.value?.applyVolumeForTrack?.(userId, source, v);
   }
 
   function getTrackVolume(userId, source) {
-    const value = trackVolumes.value[`${userId}:${source}`]
-    if (typeof value !== 'undefined') return value
-    return source === 'audio' ? getUserVolume(userId) : 1.0
+    const value = trackVolumes.value[`${userId}:${source}`];
+    if (typeof value !== "undefined") return value;
+    return source === "audio" ? getUserVolume(userId) : 1.0;
   }
 
   function updateUserSpeaking(userId, speaking) {
-    let user = connectedUsers.value.get(userId)
+    let user = connectedUsers.value.get(userId);
     if (!user) {
       try {
         const auth =
           useAuthStore && useAuthStore().getUserData
             ? useAuthStore().getUserData()
-            : null
+            : null;
         if (auth && String(auth.id) === String(userId)) {
-          addConnectedUser(userId, { id: userId })
-          user = connectedUsers.value.get(userId)
+          addConnectedUser(userId, { id: userId });
+          user = connectedUsers.value.get(userId);
         }
       } catch (_) {}
     }
-    if (!user) return
+    if (!user) return;
 
-    connectedUsers.value.set(userId, { ...user, speaking })
-    connectedUsers.value = new Map(connectedUsers.value)
+    connectedUsers.value.set(userId, { ...user, speaking });
+    connectedUsers.value = new Map(connectedUsers.value);
   }
 
   function updateUserMuted(userId, muted) {
-    const user = connectedUsers.value.get(userId)
+    const user = connectedUsers.value.get(userId);
     if (user) {
       connectedUsers.value.set(userId, {
         ...user,
         muted,
         ...(muted ? { speaking: false } : {}),
-      })
-      connectedUsers.value = new Map(connectedUsers.value)
+      });
+      connectedUsers.value = new Map(connectedUsers.value);
     }
   }
 
   async function ensureMicrophonePermission() {
     if (
-      typeof navigator === 'undefined' ||
+      typeof navigator === "undefined" ||
       !navigator.mediaDevices?.getUserMedia
     ) {
-      throw new Error('Microphone access is not supported by this browser')
+      throw new Error("Microphone access is not supported by this browser");
     }
 
     if (navigator.permissions?.query) {
       try {
-        const status = await navigator.permissions.query({ name: 'microphone' })
-        if (status.state === 'granted') return
-        if (status.state === 'denied') {
-          throw new Error('Microphone permission is required to join the room')
+        const status = await navigator.permissions.query({
+          name: "microphone",
+        });
+        if (status.state === "granted") return;
+        if (status.state === "denied") {
+          throw new Error("Microphone permission is required to join the room");
         }
       } catch (err) {
         if (
-          err?.message === 'Microphone permission is required to join the room'
+          err?.message === "Microphone permission is required to join the room"
         ) {
-          throw err
+          throw err;
         }
       }
     }
 
-    let permissionStream
+    let permissionStream;
     try {
       permissionStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-      })
+      });
     } catch (err) {
       if (
-        err?.name === 'NotAllowedError' ||
-        err?.name === 'PermissionDeniedError'
+        err?.name === "NotAllowedError" ||
+        err?.name === "PermissionDeniedError"
       ) {
-        throw new Error('Microphone permission is required to join the room')
+        throw new Error("Microphone permission is required to join the room");
       }
-      throw new Error(err?.message || 'Unable to access the microphone')
+      throw new Error(err?.message || "Unable to access the microphone");
     } finally {
-      permissionStream?.getTracks().forEach((track) => track.stop())
+      permissionStream?.getTracks().forEach((track) => track.stop());
     }
   }
 
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   function restorePersistedMicState() {
-    if (typeof window === 'undefined') return
+    if (typeof window === "undefined") return;
     try {
-      const persisted = localStorage.getItem('voice.micMuted')
-      if (persisted !== null) micMuted.value = persisted === 'true'
+      const persisted = localStorage.getItem("voice.micMuted");
+      if (persisted !== null) micMuted.value = persisted === "true";
     } catch (_) {
       /* localStorage may be unavailable */
     }
   }
 
   async function waitForJoinReady(session, isBroadcast, timeoutMs = 45000) {
-    const deadline = Date.now() + timeoutMs
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (sfuComposable.value !== session)
-        throw new Error('Voice connection was replaced')
-      if (session.error) throw new Error(session.error)
+        throw new Error("Voice connection was replaced");
+      if (session.error) throw new Error(session.error);
 
-      const remoteCount = session.remoteProducersCount ?? -1
-      const roomUsers = session.lastInRoom ?? []
+      const remoteCount = session.remoteProducersCount ?? -1;
+      const roomUsers = session.lastInRoom ?? [];
       const alone =
-        remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1
+        remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1;
       if (alone || (await session.areTransportsIceConnected?.(isBroadcast)))
-        return
-      await delay(100)
+        return;
+      await delay(100);
     }
-    throw new Error('Call Failed: Connection timed out')
+    throw new Error("Call Failed: Connection timed out");
   }
 
   async function disposeFailedSession(session) {
     try {
-      await session?.disconnect?.()
+      await session?.disconnect?.();
     } catch (disposeError) {
       console.warn(
-        '[VoiceStore] Failed to clean up an unsuccessful session:',
+        "[VoiceStore] Failed to clean up an unsuccessful session:",
         disposeError,
-      )
+      );
     }
-    if (sfuComposable.value !== session) return
+    if (sfuComposable.value !== session) return;
     if (stopIceWatcher) {
       try {
-        stopIceWatcher()
+        stopIceWatcher();
       } catch (_) {
         /* already stopped */
       }
-      stopIceWatcher = null
+      stopIceWatcher = null;
     }
-    sfuComposable.value = null
-    setCurrentChannel(null)
-    currentRoomId.value = null
-    connectedUsers.value.clear()
-    connected.value = false
-    connectedAt.value = null
+    sfuComposable.value = null;
+    setCurrentChannel(null);
+    currentRoomId.value = null;
+    connectedUsers.value.clear();
+    connected.value = false;
+    connectedAt.value = null;
   }
 
   async function joinVoiceChannel(channelId) {
@@ -385,259 +387,261 @@ export const useVoiceStore = defineStore('voice', () => {
       connected.value &&
       !connecting.value
     ) {
-      return
+      return;
     }
 
     if (connecting.value) {
-      return
+      return;
     }
 
-    let session = null
-    const generation = ++joinGeneration
+    let session = null;
+    const generation = ++joinGeneration;
     const ensureCurrentJoin = () => {
       if (generation !== joinGeneration) {
-        const cancelled = new Error('Voice connection was cancelled')
-        cancelled.code = 'VOICE_JOIN_CANCELLED'
-        throw cancelled
+        const cancelled = new Error("Voice connection was cancelled");
+        cancelled.code = "VOICE_JOIN_CANCELLED";
+        throw cancelled;
       }
-    }
+    };
     try {
-      connecting.value = true
-      error.value = null
-      await ensureMicrophonePermission()
-      ensureCurrentJoin()
+      connecting.value = true;
+      error.value = null;
+      await ensureMicrophonePermission();
+      ensureCurrentJoin();
 
       if (connected.value && currentChannelId.value !== channelId) {
-        await leaveVoiceChannel(false)
-        connecting.value = true
-        ensureCurrentJoin()
+        await leaveVoiceChannel(false);
+        connecting.value = true;
+        ensureCurrentJoin();
       }
 
-      const { useMediasoupSfu } = await import('~/composables/useMediasoupSfu')
-      ensureCurrentJoin()
-      sfuComposable.value = useMediasoupSfu()
-      session = sfuComposable.value
+      const { useMediasoupSfu } = await import("~/composables/useMediasoupSfu");
+      ensureCurrentJoin();
+      sfuComposable.value = useMediasoupSfu();
+      session = sfuComposable.value;
 
       if (stopIceWatcher) {
         try {
-          stopIceWatcher()
+          stopIceWatcher();
         } catch (_) {
           /* noop */
         }
-        stopIceWatcher = null
+        stopIceWatcher = null;
       }
       stopIceWatcher = watch(
         () => sfuComposable.value?.iceConnectedBoth,
         (value) => {
-          connected.value = !!value
+          connected.value = !!value;
         },
-      )
+      );
 
-      await session.connect(channelId)
-      ensureCurrentJoin()
-      setCurrentChannel(channelId)
-      restorePersistedMicState()
+      await session.connect(channelId);
+      ensureCurrentJoin();
+      setCurrentChannel(channelId);
+      restorePersistedMicState();
 
       while (!session.transportReady) {
-        if (session.error) throw new Error(session.error)
-        await delay(50)
+        if (session.error) throw new Error(session.error);
+        await delay(50);
       }
-      await delay(200)
-      await waitForJoinReady(session, settingsStore.broadcastMode)
-      ensureCurrentJoin()
+      await delay(200);
+      await waitForJoinReady(session, settingsStore.broadcastMode);
+      ensureCurrentJoin();
 
       if (!micMuted.value) {
         try {
-          await session.startAudioProduction()
+          await session.startAudioProduction();
         } catch (_) {
-          micMuted.value = true
+          micMuted.value = true;
         }
       } else {
         try {
-          await session.stopAudioProduction?.()
+          await session.stopAudioProduction?.();
         } catch (_) {
           /* already stopped */
         }
       }
 
-      connected.value = true
-      connectedAt.value = Date.now()
+      connected.value = true;
+      connectedAt.value = Date.now();
     } catch (err) {
-      await disposeFailedSession(session)
-      if (err?.code === 'VOICE_JOIN_CANCELLED') return
-      console.error('[VoiceStore] Failed to join voice channel:', err)
-      error.value = err?.message || String(err)
-      if (typeof window !== 'undefined') {
-        const { useToast } = await import('~/composables/useToast')
-        const { error: showError } = useToast()
-        showError(`Failed to connect to voice: ${error.value}`)
+      await disposeFailedSession(session);
+      if (err?.code === "VOICE_JOIN_CANCELLED") return;
+      console.error("[VoiceStore] Failed to join voice channel:", err);
+      error.value = err?.message || String(err);
+      if (typeof window !== "undefined") {
+        const { useToast } = await import("~/composables/useToast");
+        const { error: showError } = useToast();
+        showError(`Failed to connect to voice: ${error.value}`);
       }
-      throw err
+      throw err;
     } finally {
-      if (generation === joinGeneration) connecting.value = false
+      if (generation === joinGeneration) connecting.value = false;
     }
   }
 
   async function toggleMic() {
     if (!sfuComposable.value) {
-      console.warn('[VoiceStore] Cannot toggle mic: SFU not initialized')
-      return
+      console.warn("[VoiceStore] Cannot toggle mic: SFU not initialized");
+      return;
     }
 
     try {
       if (micMuted.value) {
-        const start = Date.now()
-        const waitMs = 5000
+        const start = Date.now();
+        const waitMs = 5000;
         while (
           !sfuComposable.value.transportReady &&
           Date.now() - start < waitMs
         ) {
-          await new Promise((res) => setTimeout(res, 50))
+          await new Promise((res) => setTimeout(res, 50));
         }
         if (!sfuComposable.value.transportReady) {
-          throw new Error('Voice transport not ready')
+          throw new Error("Voice transport not ready");
         }
 
         try {
-          await sfuComposable.value.startAudioProduction()
-          micMuted.value = false
+          await sfuComposable.value.startAudioProduction();
+          micMuted.value = false;
         } catch (err) {
-          micMuted.value = true
-          throw err
+          micMuted.value = true;
+          throw err;
         }
       } else {
         try {
           if (sfuComposable.value.stopAudioProduction) {
-            await sfuComposable.value.stopAudioProduction()
+            await sfuComposable.value.stopAudioProduction();
           }
         } catch (_) {
           /* noop */
         }
-        micMuted.value = true
+        micMuted.value = true;
       }
     } catch (err) {
-      console.error('[VoiceStore] Error toggling microphone:', err)
-      error.value = err?.message || String(err)
-      if (typeof window !== 'undefined') {
-        const { useToast } = await import('~/composables/useToast')
-        const { error: showError } = useToast()
-        showError(`Microphone error: ${error.value}`)
+      console.error("[VoiceStore] Error toggling microphone:", err);
+      error.value = err?.message || String(err);
+      if (typeof window !== "undefined") {
+        const { useToast } = await import("~/composables/useToast");
+        const { error: showError } = useToast();
+        showError(`Microphone error: ${error.value}`);
       }
     }
   }
 
   function toggleDeafen() {
     if (!connected.value) {
-      console.warn('[VoiceStore] Cannot toggle deafen: not connected')
-      return
+      console.warn("[VoiceStore] Cannot toggle deafen: not connected");
+      return;
     }
 
-    deafened.value = !deafened.value
+    deafened.value = !deafened.value;
     if (deafened.value && !micMuted.value) {
-      toggleMic()
+      toggleMic();
     }
 
-    if (typeof window !== 'undefined') {
-      const container = document.getElementById('webrtc-audio-global')
+    if (typeof window !== "undefined") {
+      const container = document.getElementById("webrtc-audio-global");
       if (container) {
-        const audios = container.querySelectorAll('audio')
+        const audios = container.querySelectorAll("audio");
         audios.forEach((audio) => {
-          audio.muted = deafened.value
-        })
+          audio.muted = deafened.value;
+        });
       }
     }
   }
 
   async function toggleCamera() {
-    if (!connected.value || !sfuComposable.value) return
+    if (!connected.value || !sfuComposable.value) return;
     try {
       if (cameraEnabled.value) {
-        sfuComposable.value.stopVideoProduction('camera')
-        cameraEnabled.value = false
+        sfuComposable.value.stopVideoProduction("camera");
+        cameraEnabled.value = false;
       } else {
-        await sfuComposable.value.startVideoProduction('camera')
-        cameraEnabled.value = true
+        await sfuComposable.value.startVideoProduction("camera");
+        cameraEnabled.value = true;
       }
-      error.value = null
+      error.value = null;
     } catch (err) {
-      error.value = err?.message || 'Unable to access the camera'
-      throw err
+      error.value = err?.message || "Unable to access the camera";
+      throw err;
     }
   }
 
   async function toggleScreenShare() {
-    if (!connected.value || !sfuComposable.value) return
+    if (!connected.value || !sfuComposable.value) return;
     try {
       if (screenSharing.value) {
-        sfuComposable.value.stopVideoProduction('screen')
-        screenSharing.value = false
+        sfuComposable.value.stopVideoProduction("screen");
+        screenSharing.value = false;
       } else {
         const producer =
-          await sfuComposable.value.startVideoProduction('screen')
-        screenSharing.value = true
+          await sfuComposable.value.startVideoProduction("screen");
+        screenSharing.value = true;
         const handleScreenShareEnded = () => {
-          screenSharing.value = false
-        }
-        producer?.track?.addEventListener?.('ended', handleScreenShareEnded, {
+          screenSharing.value = false;
+        };
+        producer?.track?.addEventListener?.("ended", handleScreenShareEnded, {
           once: true,
-        })
-        producer?.on?.('trackended', handleScreenShareEnded)
+        });
+        producer?.on?.("trackended", handleScreenShareEnded);
       }
-      error.value = null
+      error.value = null;
     } catch (err) {
-      if (err?.name !== 'NotAllowedError')
-        error.value = err?.message || 'Unable to share the screen'
-      screenSharing.value = false
-      throw err
+      if (err?.name !== "NotAllowedError")
+        error.value = err?.message || "Unable to share the screen";
+      screenSharing.value = false;
+      throw err;
     }
   }
 
   async function toggleSystemAudioShare() {
-    if (!connected.value || !sfuComposable.value) return
+    if (!connected.value || !sfuComposable.value) return;
     try {
       if (systemAudioSharing.value) {
-        sfuComposable.value.stopSystemAudioProduction()
-        systemAudioSharing.value = false
+        sfuComposable.value.stopSystemAudioProduction();
+        systemAudioSharing.value = false;
       } else {
         const confirmed =
-          typeof window === 'undefined' ||
+          typeof window === "undefined" ||
           window.confirm(
-            'Share system audio only?\n\n' +
-              'Your browser will show its regular screen-sharing dialog because that is how it gives access to system audio.\n\n' +
-              '1. Choose “Entire Screen” in the browser dialog.\n' +
-              '2. Make sure “Share audio” is enabled.\n\n' +
-              'Your screen video will not be shared—only the audio will be sent.',
-          )
-        if (!confirmed) return
-        const producer = await sfuComposable.value.startSystemAudioProduction()
-        systemAudioSharing.value = true
+            "Share system audio only?\n\n" +
+              "Your browser will show its regular screen-sharing dialog because that is how it gives access to system audio.\n\n" +
+              "1. Choose “Entire Screen” in the browser dialog.\n" +
+              "2. Make sure “Share audio” is enabled.\n\n" +
+              "Your screen video will not be shared—only the audio will be sent.",
+          );
+        if (!confirmed) return;
+        const producer = await sfuComposable.value.startSystemAudioProduction();
+        systemAudioSharing.value = true;
         const handleEnded = () => {
-          systemAudioSharing.value = false
-        }
-        producer?.track?.addEventListener?.('ended', handleEnded, {
+          systemAudioSharing.value = false;
+        };
+        producer?.track?.addEventListener?.("ended", handleEnded, {
           once: true,
-        })
-        producer?.on?.('trackended', handleEnded)
+        });
+        producer?.on?.("trackended", handleEnded);
       }
-      error.value = null
+      error.value = null;
     } catch (err) {
-      if (err?.name !== 'NotAllowedError')
-        error.value = err?.message || 'Unable to share system audio'
-      systemAudioSharing.value = false
-      throw err
+      if (err?.name !== "NotAllowedError")
+        error.value = err?.message || "Unable to share system audio";
+      systemAudioSharing.value = false;
+      throw err;
     }
   }
 
   function setSharedAudioVolume(value) {
-    settingsStore.setSharedAudioVolume(value)
-    sfuComposable.value?.setSharedAudioVolume?.(settingsStore.sharedAudioVolume)
+    settingsStore.setSharedAudioVolume(value);
+    sfuComposable.value?.setSharedAudioVolume?.(
+      settingsStore.sharedAudioVolume,
+    );
   }
 
   async function setSystemAudioBitrate(value) {
-    settingsStore.setSystemAudioBitrate(value)
+    settingsStore.setSystemAudioBitrate(value);
     await sfuComposable.value?.setSystemAudioBitrate?.(
       settingsStore.systemAudioBitrate,
-    )
+    );
   }
 
   watch(
@@ -646,86 +650,86 @@ export const useVoiceStore = defineStore('voice', () => {
       if (connected.value)
         sfuComposable.value
           ?.setSystemAudioBitrate?.(settingsStore.systemAudioBitrate)
-          .catch(() => {})
+          .catch(() => {});
     },
-  )
+  );
 
   function getConnectedUsersArray() {
-    return Array.from(connectedUsers.value.values())
+    return Array.from(connectedUsers.value.values());
   }
 
   function getDisplayUsersArray() {
-    const users = Array.from(connectedUsers.value.values())
+    const users = Array.from(connectedUsers.value.values());
     const isUuidV4 = (id) =>
-      typeof id === 'string' &&
+      typeof id === "string" &&
       /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(
         id,
-      )
-    const knownIds = new Set(Array.from(userDirectory.value.keys()))
-    const liveAudioIds = new Set()
+      );
+    const knownIds = new Set(Array.from(userDirectory.value.keys()));
+    const liveAudioIds = new Set();
 
-    if (typeof window !== 'undefined') {
-      const container = document.getElementById('webrtc-audio-global')
+    if (typeof window !== "undefined") {
+      const container = document.getElementById("webrtc-audio-global");
       if (container) {
-        container.querySelectorAll('audio').forEach((el) => {
-          const uid = el.getAttribute('data-user-id')
-          if (uid) liveAudioIds.add(uid)
-        })
+        container.querySelectorAll("audio").forEach((el) => {
+          const uid = el.getAttribute("data-user-id");
+          if (uid) liveAudioIds.add(uid);
+        });
       }
     }
 
-    const result = []
-    const seen = new Set()
+    const result = [];
+    const seen = new Set();
     for (const u of users) {
-      const id = String(u.id)
-      const inDirectory = knownIds.has(id)
-      const hasAudio = liveAudioIds.has(id)
-      const notUuid = !isUuidV4(id)
-      const include = inDirectory || hasAudio || notUuid
+      const id = String(u.id);
+      const inDirectory = knownIds.has(id);
+      const hasAudio = liveAudioIds.has(id);
+      const notUuid = !isUuidV4(id);
+      const include = inDirectory || hasAudio || notUuid;
 
       if (include && !seen.has(id)) {
-        seen.add(id)
-        result.push(u)
+        seen.add(id);
+        result.push(u);
       }
     }
 
-    return result
+    return result;
   }
 
   function isUserConnected(userId) {
-    return connectedUsers.value.has(userId)
+    return connectedUsers.value.has(userId);
   }
 
   function getUserById(userId) {
-    return connectedUsers.value.get(userId)
+    return connectedUsers.value.get(userId);
   }
 
   async function applyOutputDevice() {
     if (
       sfuComposable.value &&
-      typeof sfuComposable.value.applyOutputDeviceToAll === 'function'
+      typeof sfuComposable.value.applyOutputDeviceToAll === "function"
     ) {
       try {
-        await sfuComposable.value.applyOutputDeviceToAll()
+        await sfuComposable.value.applyOutputDeviceToAll();
       } catch (_) {
         /* noop */
       }
     }
   }
   function getUserProfile(userId) {
-    return userDirectory.value.get(userId)
+    return userDirectory.value.get(userId);
   }
 
-  if (typeof window !== 'undefined') {
-    const roomsStore = useRoomsStore()
+  if (typeof window !== "undefined") {
+    const roomsStore = useRoomsStore();
     watch(
       [() => roomsStore.rooms, currentRoomId],
       ([rooms]) => {
         try {
-          if (!currentRoomId.value) return
+          if (!currentRoomId.value) return;
           const room = Array.isArray(rooms)
             ? rooms.find((r) => r.id === currentRoomId.value)
-            : null
+            : null;
           if (room) {
             if (Array.isArray(room.members)) {
               room.members.forEach((m) =>
@@ -737,7 +741,7 @@ export const useVoiceStore = defineStore('voice', () => {
                   email: m.email,
                   avatar: m.avatar,
                 }),
-              )
+              );
             }
             if (room.owner && room.owner.id) {
               upsertUserProfile({
@@ -748,7 +752,7 @@ export const useVoiceStore = defineStore('voice', () => {
                 name: room.owner.name,
                 email: room.owner.email,
                 avatar: room.owner.avatar,
-              })
+              });
             }
           }
         } catch (_) {
@@ -756,7 +760,7 @@ export const useVoiceStore = defineStore('voice', () => {
         }
       },
       { immediate: true, deep: true },
-    )
+    );
   }
 
   return {
@@ -803,5 +807,5 @@ export const useVoiceStore = defineStore('voice', () => {
     userVolumes: readonly(userVolumes),
     trackVolumes: readonly(trackVolumes),
     applyOutputDevice,
-  }
-})
+  };
+});

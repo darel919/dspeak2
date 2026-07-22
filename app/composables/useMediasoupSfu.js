@@ -1,5 +1,5 @@
-import { useHybridMediaSession } from './useHybridMediaSession.js'
+import { useHybridMediaSession } from "./useHybridMediaSession.js";
 
 export function useMediasoupSfu() {
-  return useHybridMediaSession()
+  return useHybridMediaSession();
 }

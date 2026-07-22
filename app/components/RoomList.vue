@@ -3,7 +3,11 @@
     <!-- Rooms Dropdown/Horizontal List -->
     <div class="flex items-center transition-all duration-300 ease-in-out">
       <!-- Collapsed State: Dropdown -->
-  <div v-if="isCollapsed" class="dropdown dropdown-right" style="z-index:1000;">
+      <div
+        v-if="isCollapsed"
+        class="dropdown dropdown-right"
+        style="z-index: 1000"
+      >
         <button
           tabindex="0"
           class="btn btn-ghost btn-sm flex items-center gap-2"
@@ -12,7 +16,10 @@
           <span class="text-sm font-medium">Rooms</span>
           <Icon name="lucide:chevron-down" class="w-4 h-4" />
         </button>
-        <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-80 max-h-96 overflow-y-auto">
+        <div
+          tabindex="0"
+          class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-80 max-h-96 overflow-y-auto"
+        >
           <!-- Loading State -->
           <div v-if="roomsStore.loading" class="p-2">
             <div class="space-y-2">
@@ -30,7 +37,10 @@
           <!-- Error State -->
           <div v-else-if="roomsStore.error" class="p-2">
             <div class="alert alert-error alert-sm">
-              <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-4 w-4" />
+              <Icon
+                name="lucide:circle-x"
+                class="stroke-current shrink-0 h-4 w-4"
+              />
               <span class="text-xs">{{ roomsStore.error }}</span>
             </div>
           </div>
@@ -40,22 +50,33 @@
               <a
                 @click="navigateToRoom(room)"
                 class="flex items-center gap-3 p-2"
-                :class="{ 'active': modelValue === room.id }"
+                :class="{ active: modelValue === room.id }"
               >
                 <div class="avatar placeholder">
                   <template v-if="getRoomPictureUrl(room)">
-                    <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover" :alt="room.name" />
+                    <img
+                      :src="getRoomPictureUrl(room)"
+                      class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover"
+                      :alt="room.name"
+                    />
                   </template>
                   <template v-else>
-                    <div class="w-12 h-12 rounded-full bg-primary text-primary-content text-sm flex items-center justify-center">
+                    <div
+                      class="w-12 h-12 rounded-full bg-primary text-primary-content text-sm flex items-center justify-center"
+                    >
                       <span>{{ room.name.charAt(0).toUpperCase() }}</span>
                     </div>
                   </template>
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center justify-between">
-                    <span class="text-sm font-medium truncate">{{ room.name }}</span>
-                    <div v-if="hasActivity(room)" class="w-2 h-2 bg-accent rounded-full"></div>
+                    <span class="text-sm font-medium truncate">{{
+                      room.name
+                    }}</span>
+                    <div
+                      v-if="hasActivity(room)"
+                      class="w-2 h-2 bg-accent rounded-full"
+                    ></div>
                   </div>
                   <p class="text-xs text-base-content/60 truncate">
                     {{ room.desc || `${room.members.length} members` }}
@@ -64,16 +85,34 @@
               </a>
             </li>
             <div class="divider my-1"></div>
-            <li><a @click="showJoinModal = true" class="text-sm"><Icon name="lucide:link" class="w-4 h-4" />Join Room</a></li>
-            <li><a @click="showCreateModal = true" class="text-sm"><Icon name="lucide:plus" class="w-4 h-4" />Create Room</a></li>
+            <li>
+              <a @click="showJoinModal = true" class="text-sm"
+                ><Icon name="lucide:link" class="w-4 h-4" />Join Room</a
+              >
+            </li>
+            <li>
+              <a @click="showCreateModal = true" class="text-sm"
+                ><Icon name="lucide:plus" class="w-4 h-4" />Create Room</a
+              >
+            </li>
           </div>
           <!-- Empty State -->
           <div v-else class="p-4 text-center">
             <div class="text-base-content/50 text-sm">
               <p>No rooms found</p>
               <div class="mt-2 space-y-1">
-                <button @click="showJoinModal = true" class="btn btn-xs btn-ghost">Join Room</button>
-                <button @click="showCreateModal = true" class="btn btn-xs btn-ghost">Create Room</button>
+                <button
+                  @click="showJoinModal = true"
+                  class="btn btn-xs btn-ghost"
+                >
+                  Join Room
+                </button>
+                <button
+                  @click="showCreateModal = true"
+                  class="btn btn-xs btn-ghost"
+                >
+                  Create Room
+                </button>
               </div>
             </div>
           </div>
@@ -86,7 +125,11 @@
           :key="room.id"
           @click="navigateToRoom(room)"
           class="relative group"
-          :class="modelValue === room.id ? 'opacity-100' : 'opacity-60 hover:opacity-100'"
+          :class="
+            modelValue === room.id
+              ? 'opacity-100'
+              : 'opacity-60 hover:opacity-100'
+          "
           :title="room.name"
         >
           <div class="avatar placeholder">
@@ -94,49 +137,72 @@
               <img
                 :src="getRoomPictureUrl(room)"
                 class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover transition-all"
-                :class="modelValue === room.id
-                  ? 'ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
-                  : 'ring-1 ring-base-content/30 group-hover:ring-base-content/60'"
+                :class="
+                  modelValue === room.id
+                    ? 'ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
+                    : 'ring-1 ring-base-content/30 group-hover:ring-base-content/60'
+                "
                 :alt="room.name"
               />
             </template>
             <template v-else>
               <div
                 class="w-12 h-12 rounded-full text-xs font-semibold transition-all flex items-center justify-center"
-                :class="modelValue === room.id
-                  ? 'bg-primary text-primary-content ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
-                  : 'bg-base-200 text-base-content ring-1 ring-base-content/30 group-hover:ring-base-content/60 hover:bg-primary hover:text-primary-content'"
+                :class="
+                  modelValue === room.id
+                    ? 'bg-primary text-primary-content ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
+                    : 'bg-base-200 text-base-content ring-1 ring-base-content/30 group-hover:ring-base-content/60 hover:bg-primary hover:text-primary-content'
+                "
               >
                 <span>{{ room.name.charAt(0).toUpperCase() }}</span>
               </div>
             </template>
           </div>
-          <div v-if="hasActivity(room)" class="absolute -top-1 -right-1 w-3 h-3 bg-accent rounded-full"></div>
+          <div
+            v-if="hasActivity(room)"
+            class="absolute -top-1 -right-1 w-3 h-3 bg-accent rounded-full"
+          ></div>
         </button>
         <!-- More Rooms Dropdown (if there are too many) -->
-        <div v-if="hiddenRooms.length > 0" class="dropdown dropdown-end" style="z-index:1000;">
+        <div
+          v-if="hiddenRooms.length > 0"
+          class="dropdown dropdown-end"
+          style="z-index: 1000"
+        >
           <button tabindex="0" class="btn btn-ghost btn-xs btn-circle">
             <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
           </button>
-          <div tabindex="0" class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-64">
+          <div
+            tabindex="0"
+            class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-64"
+          >
             <li v-for="room in hiddenRooms" :key="room.id">
               <a
                 @click="navigateToRoom(room)"
                 class="flex items-center gap-2 text-sm"
-                :class="{ 'active': modelValue === room.id }"
+                :class="{ active: modelValue === room.id }"
               >
                 <div class="avatar placeholder">
                   <template v-if="getRoomPictureUrl(room)">
-                    <img :src="getRoomPictureUrl(room)" class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover" :alt="room.name" />
+                    <img
+                      :src="getRoomPictureUrl(room)"
+                      class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover"
+                      :alt="room.name"
+                    />
                   </template>
                   <template v-else>
-                    <div class="w-6 h-6 rounded-full bg-primary text-primary-content text-xs flex items-center justify-center">
+                    <div
+                      class="w-6 h-6 rounded-full bg-primary text-primary-content text-xs flex items-center justify-center"
+                    >
                       <span>{{ room.name.charAt(0).toUpperCase() }}</span>
                     </div>
                   </template>
                 </div>
                 <span class="truncate">{{ room.name }}</span>
-                <div v-if="hasActivity(room)" class="w-2 h-2 bg-accent rounded-full ml-auto"></div>
+                <div
+                  v-if="hasActivity(room)"
+                  class="w-2 h-2 bg-accent rounded-full ml-auto"
+                ></div>
               </a>
             </li>
           </div>
@@ -174,7 +240,9 @@
     <div v-if="showJoinModal" class="modal modal-open">
       <div class="modal-box">
         <h3 class="font-bold text-lg mb-4">Join Room</h3>
-        <p class="text-base-content/70 mb-4">Enter a room ID or paste a join link to join a room.</p>
+        <p class="text-base-content/70 mb-4">
+          Enter a room ID or paste a join link to join a room.
+        </p>
         <div class="form-control">
           <label class="label">
             <span class="label-text">Room ID or Join Link</span>
@@ -189,7 +257,10 @@
           />
         </div>
         <div v-if="joinError" class="alert alert-error mt-4">
-          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
+          <Icon
+            name="lucide:circle-x"
+            class="stroke-current shrink-0 h-6 w-6"
+          />
           <span>{{ joinError }}</span>
         </div>
         <div class="modal-action">
@@ -204,9 +275,9 @@
             class="btn btn-primary"
             @click="handleJoinSubmit"
             :disabled="!joinInput.trim() || joiningRoom"
-            :class="{ 'loading': joiningRoom }"
+            :class="{ loading: joiningRoom }"
           >
-            {{ joiningRoom ? 'Joining...' : 'Join Room' }}
+            {{ joiningRoom ? "Joining..." : "Join Room" }}
           </button>
         </div>
       </div>
@@ -219,7 +290,9 @@
         <h3 class="font-bold text-lg mb-4">Create Room</h3>
         <div class="form-control mb-4">
           <label class="label">
-            <span class="label-text">Room Name <span class="text-error">*</span></span>
+            <span class="label-text"
+              >Room Name <span class="text-error">*</span></span
+            >
           </label>
           <input
             v-model="createName"
@@ -243,7 +316,10 @@
           />
         </div>
         <div v-if="createError" class="alert alert-error mb-4">
-          <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
+          <Icon
+            name="lucide:circle-x"
+            class="stroke-current shrink-0 h-6 w-6"
+          />
           <span>{{ createError }}</span>
         </div>
         <div class="modal-action">
@@ -258,9 +334,9 @@
             class="btn btn-primary"
             @click="handleCreateSubmit"
             :disabled="!createName.trim() || creatingRoom"
-            :class="{ 'loading': creatingRoom }"
+            :class="{ loading: creatingRoom }"
           >
-            {{ creatingRoom ? 'Creating...' : 'Create Room' }}
+            {{ creatingRoom ? "Creating..." : "Create Room" }}
           </button>
         </div>
       </div>
@@ -278,12 +354,19 @@
         >
           <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
         </button>
-        <div tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52">
-            <li><a @click="showJoinModal = true">Join Room</a></li>
-            <li><a @click="showCreateModal = true">Create Room</a></li>
-            <li>
-              <a @click="handleCopyInviteLink" :class="{ 'disabled': !selectedRoom }">Copy Invite Link</a>
-            </li>
+        <div
+          tabindex="0"
+          class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52"
+        >
+          <li><a @click="showJoinModal = true">Join Room</a></li>
+          <li><a @click="showCreateModal = true">Create Room</a></li>
+          <li>
+            <a
+              @click="handleCopyInviteLink"
+              :class="{ disabled: !selectedRoom }"
+              >Copy Invite Link</a
+            >
+          </li>
         </div>
       </div>
     </div>
@@ -310,7 +393,8 @@
 }
 
 @keyframes pulse-soft {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -323,226 +407,229 @@
 }
 </style>
 
-
 <script setup>
+import { useChatUtils } from "../composables/useChatUtils";
+import { MAX_VISIBLE_ROOMS } from "../const/ui";
 
-import { useChatUtils } from '../composables/useChatUtils'
-import { MAX_VISIBLE_ROOMS } from '../const/ui'
-
-const config = useRuntimeConfig()
-const { copyToClipboard } = useChatUtils()
+const config = useRuntimeConfig();
+const { copyToClipboard } = useChatUtils();
 
 async function handleCopyInviteLink() {
-  if (!selectedRoom.value) return
-  const baseUrl = window.location.origin
-  const inviteLink = `${baseUrl}/join/${selectedRoom.value.id}`
-  const copied = await copyToClipboard(inviteLink)
+  if (!selectedRoom.value) return;
+  const baseUrl = window.location.origin;
+  const inviteLink = `${baseUrl}/join/${selectedRoom.value.id}`;
+  const copied = await copyToClipboard(inviteLink);
   if (copied) {
-    success('Invite link copied!')
+    success("Invite link copied!");
   } else {
-    error('Failed to copy invite link')
+    error("Failed to copy invite link");
   }
 }
 
 function getRoomPictureUrl(room) {
   if (room.picture) {
-
-    return `${config.public.apiPath.replace(/\/$/, '')}/${room.picture.replace(/^\//, '')}`
+    return `${config.public.apiPath.replace(/\/$/, "")}/${room.picture.replace(/^\//, "")}`;
   }
-  return null
+  return null;
 }
 
 const props = defineProps({
-  modelValue: [String, Number]
-})
-const emit = defineEmits(['update:modelValue'])
+  modelValue: [String, Number],
+});
+const emit = defineEmits(["update:modelValue"]);
 
-const roomsStore = useRoomsStore()
-const authStore = useAuthStore()
-const router = useRouter()
-const { success, error } = useToast()
+const roomsStore = useRoomsStore();
+const authStore = useAuthStore();
+const router = useRouter();
+const { success, error } = useToast();
 
-const isCollapsed = ref(true)
-const showContextMenu = ref(false)
+const isCollapsed = ref(true);
+const showContextMenu = ref(false);
 
 const selectedRoom = computed(() =>
-  roomsStore.rooms.find(r => r.id === props.modelValue)
-)
+  roomsStore.rooms.find((r) => r.id === props.modelValue),
+);
 
 const visibleRooms = computed(() =>
-  roomsStore.rooms.slice(0, MAX_VISIBLE_ROOMS)
-)
+  roomsStore.rooms.slice(0, MAX_VISIBLE_ROOMS),
+);
 
 const hiddenRooms = computed(() =>
   roomsStore.rooms.length > MAX_VISIBLE_ROOMS
     ? roomsStore.rooms.slice(MAX_VISIBLE_ROOMS)
-    : []
-)
+    : [],
+);
 
-const showJoinModal = ref(false)
-const joinInput = ref('')
-const joinError = ref(null)
-const joiningRoom = ref(false)
+const showJoinModal = ref(false);
+const joinInput = ref("");
+const joinError = ref(null);
+const joiningRoom = ref(false);
 
-const showCreateModal = ref(false)
-const createName = ref('')
-const createDesc = ref('')
-const createError = ref(null)
-const creatingRoom = ref(false)
+const showCreateModal = ref(false);
+const createName = ref("");
+const createDesc = ref("");
+const createError = ref(null);
+const creatingRoom = ref(false);
 
-const joinInputRef = ref(null)
-const createNameRef = ref(null)
+const joinInputRef = ref(null);
+const createNameRef = ref(null);
 
 function toggleCollapse() {
-  isCollapsed.value = !isCollapsed.value
+  isCollapsed.value = !isCollapsed.value;
 
-  localStorage.setItem('roomListCollapsed', isCollapsed.value.toString())
+  localStorage.setItem("roomListCollapsed", isCollapsed.value.toString());
 }
 
 onMounted(() => {
-  const stored = localStorage.getItem('roomListCollapsed')
+  const stored = localStorage.getItem("roomListCollapsed");
   if (stored !== null) {
-    isCollapsed.value = stored === 'true'
+    isCollapsed.value = stored === "true";
   } else {
-
-    isCollapsed.value = true
+    isCollapsed.value = true;
   }
-})
+});
 
 function hasActivity(room) {
-
-  if (!room.members || !Array.isArray(room.members)) return false
-  const currentUserId = getCurrentUserId()
-  return room.members.some(member => member.id !== currentUserId && member.online === true)
+  if (!room.members || !Array.isArray(room.members)) return false;
+  const currentUserId = getCurrentUserId();
+  return room.members.some(
+    (member) => member.id !== currentUserId && member.online === true,
+  );
 }
 
 function getCurrentUserId() {
-  const userData = authStore.getUserData()
-  return userData?.id || null
+  const userData = authStore.getUserData();
+  return userData?.id || null;
 }
 
 watch(showJoinModal, (val) => {
   if (val) {
     nextTick(() => {
-      joinInputRef.value?.focus()
-    })
+      joinInputRef.value?.focus();
+    });
   }
-})
+});
 
 watch(showCreateModal, (val) => {
   if (val) {
     nextTick(() => {
       setTimeout(() => {
-        createNameRef.value?.focus()
-      }, 100)
-    })
+        createNameRef.value?.focus();
+      }, 100);
+    });
   }
-})
+});
 
 function closeJoinModal() {
-    showJoinModal.value = false
-    joinInput.value = ''
-    joinError.value = null
-    joiningRoom.value = false
+  showJoinModal.value = false;
+  joinInput.value = "";
+  joinError.value = null;
+  joiningRoom.value = false;
 }
 
 function closeCreateModal() {
-    showCreateModal.value = false
-    createName.value = ''
-    createDesc.value = ''
-    createError.value = null
-    creatingRoom.value = false
+  showCreateModal.value = false;
+  createName.value = "";
+  createDesc.value = "";
+  createError.value = null;
+  creatingRoom.value = false;
 }
 
 function extractRoomIdFromInput(input) {
-    const trimmed = input.trim()
-    const joinLinkMatch = trimmed.match(/\/join\/([^/?#]+)/)
-    if (joinLinkMatch) {
-        return joinLinkMatch[1]
-    }
-    return trimmed
+  const trimmed = input.trim();
+  const joinLinkMatch = trimmed.match(/\/join\/([^/?#]+)/);
+  if (joinLinkMatch) {
+    return joinLinkMatch[1];
+  }
+  return trimmed;
 }
 
 async function handleJoinSubmit() {
-    if (!joinInput.value.trim()) return
-    joiningRoom.value = true
-    joinError.value = null
-    try {
-        const roomId = extractRoomIdFromInput(joinInput.value)
-        if (!roomId) {
-            throw new Error('Invalid room ID or join link')
-        }
-        await roomsStore.joinRoom(roomId)
-        success('Successfully joined room!')
-        closeJoinModal()
-        try {
-          const channels = await useChannelsStore().fetchChannels(roomId)
-          const firstChannel = channels && channels.length > 0 ? channels[0] : null
-          if (firstChannel) {
-            router.push(`/room/${roomId}/${firstChannel.id}`)
-          } else {
-            router.push(`/room/${roomId}`)
-          }
-        } catch {
-          router.push(`/room/${roomId}`)
-        }
-    } catch (err) {
-        joinError.value = err.message || 'Failed to join room'
-    } finally {
-        joiningRoom.value = false
+  if (!joinInput.value.trim()) return;
+  joiningRoom.value = true;
+  joinError.value = null;
+  try {
+    const roomId = extractRoomIdFromInput(joinInput.value);
+    if (!roomId) {
+      throw new Error("Invalid room ID or join link");
     }
+    await roomsStore.joinRoom(roomId);
+    success("Successfully joined room!");
+    closeJoinModal();
+    try {
+      const channels = await useChannelsStore().fetchChannels(roomId);
+      const firstChannel = channels && channels.length > 0 ? channels[0] : null;
+      if (firstChannel) {
+        router.push(`/room/${roomId}/${firstChannel.id}`);
+      } else {
+        router.push(`/room/${roomId}`);
+      }
+    } catch {
+      router.push(`/room/${roomId}`);
+    }
+  } catch (err) {
+    joinError.value = err.message || "Failed to join room";
+  } finally {
+    joiningRoom.value = false;
+  }
 }
 
 async function handleCreateSubmit() {
-    if (!createName.value.trim()) return
-    creatingRoom.value = true
-    createError.value = null
-    try {
-        const room = await roomsStore.createRoom(createName.value, createDesc.value)
-        success('Room created successfully!')
-        closeCreateModal()
-        if (room && room.id) {
-            try {
-              const channels = await useChannelsStore().fetchChannels(room.id)
-              const firstChannel = channels && channels.length > 0 ? channels[0] : null
-              if (firstChannel) {
-                router.push(`/room/${room.id}/${firstChannel.id}`)
-              } else {
-                router.push(`/room/${room.id}`)
-              }
-            } catch {
-              router.push(`/room/${room.id}`)
-            }
-        }
-    } catch (err) {
-        const msg = typeof err?.message === 'string' ? err.message : ''
-        if (msg.includes('409') && msg.includes('already exists')) {
-          createError.value = 'Pick another name, this name is already taken'
+  if (!createName.value.trim()) return;
+  creatingRoom.value = true;
+  createError.value = null;
+  try {
+    const room = await roomsStore.createRoom(
+      createName.value,
+      createDesc.value,
+    );
+    success("Room created successfully!");
+    closeCreateModal();
+    if (room && room.id) {
+      try {
+        const channels = await useChannelsStore().fetchChannels(room.id);
+        const firstChannel =
+          channels && channels.length > 0 ? channels[0] : null;
+        if (firstChannel) {
+          router.push(`/room/${room.id}/${firstChannel.id}`);
         } else {
-          createError.value = msg || 'Failed to create room'
+          router.push(`/room/${room.id}`);
         }
-    } finally {
-        creatingRoom.value = false
+      } catch {
+        router.push(`/room/${room.id}`);
+      }
     }
+  } catch (err) {
+    const msg = typeof err?.message === "string" ? err.message : "";
+    if (msg.includes("409") && msg.includes("already exists")) {
+      createError.value = "Pick another name, this name is already taken";
+    } else {
+      createError.value = msg || "Failed to create room";
+    }
+  } finally {
+    creatingRoom.value = false;
+  }
 }
 
 function refreshRooms() {
-  roomsStore.fetchRooms?.()
+  roomsStore.fetchRooms?.();
 }
 
 async function navigateToRoom(r) {
   if (props.modelValue !== r.id) {
-    emit('update:modelValue', r.id)
+    emit("update:modelValue", r.id);
     try {
-      const channels = await roomsStore.rooms.find(room => room.id === r.id) ? await useChannelsStore().fetchChannels(r.id) : [];
+      const channels = (await roomsStore.rooms.find((room) => room.id === r.id))
+        ? await useChannelsStore().fetchChannels(r.id)
+        : [];
       const firstChannel = channels && channels.length > 0 ? channels[0] : null;
       if (firstChannel) {
-        router.push(`/room/${r.id}/${firstChannel.id}`)
+        router.push(`/room/${r.id}/${firstChannel.id}`);
       } else {
-        router.push(`/room/${r.id}`)
+        router.push(`/room/${r.id}`);
       }
     } catch {
-      router.push(`/room/${r.id}`)
+      router.push(`/room/${r.id}`);
     }
   }
 }

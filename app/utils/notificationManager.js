@@ -1,165 +1,183 @@
-import { STORAGE_KEYS } from '~/const/storage'
+import { STORAGE_KEYS } from "~/const/storage";
 
 class NotificationManager {
   constructor() {
-    this.isSupported = false
-    this.permission = 'default'
-    this.isEnabled = false
-    this.initialized = false
-    
-    this.init()
+    this.isSupported = false;
+    this.permission = "default";
+    this.isEnabled = false;
+    this.initialized = false;
+
+    this.init();
   }
-  
+
   init() {
-    if (typeof window === 'undefined') return
-    
-    this.isSupported = 'Notification' in window
+    if (typeof window === "undefined") return;
+
+    this.isSupported = "Notification" in window;
     if (this.isSupported) {
-      this.permission = Notification.permission
-      
-      
-      const savedPreference = localStorage.getItem(STORAGE_KEYS.notificationsEnabled)
+      this.permission = Notification.permission;
+
+      const savedPreference = localStorage.getItem(
+        STORAGE_KEYS.notificationsEnabled,
+      );
       if (savedPreference !== null) {
-        this.isEnabled = JSON.parse(savedPreference) && Notification.permission === 'granted'
+        this.isEnabled =
+          JSON.parse(savedPreference) && Notification.permission === "granted";
       } else {
-        this.isEnabled = Notification.permission === 'granted'
+        this.isEnabled = Notification.permission === "granted";
       }
     }
-    
-    this.initialized = true
+
+    this.initialized = true;
   }
-  
+
   async requestPermission() {
     if (!this.isSupported) {
-      throw new Error('Notifications are not supported in this browser')
+      throw new Error("Notifications are not supported in this browser");
     }
 
-    if (this.permission === 'granted') {
-      return true
+    if (this.permission === "granted") {
+      return true;
     }
 
     try {
-      const result = await Notification.requestPermission()
-      this.permission = result
-      this.isEnabled = result === 'granted'
-      
-      
-      localStorage.setItem(STORAGE_KEYS.notificationsEnabled, JSON.stringify(this.isEnabled))
-      
-      return result === 'granted'
+      const result = await Notification.requestPermission();
+      this.permission = result;
+      this.isEnabled = result === "granted";
+
+      localStorage.setItem(
+        STORAGE_KEYS.notificationsEnabled,
+        JSON.stringify(this.isEnabled),
+      );
+
+      return result === "granted";
     } catch (error) {
-      console.error('Error requesting notification permission:', error)
-      return false
+      console.error("Error requesting notification permission:", error);
+      return false;
     }
   }
-  
+
   showNotification(title, options = {}) {
     if (!this.isEnabled || !this.isSupported) {
-      return null
+      return null;
     }
 
     try {
       const notification = new Notification(title, {
-        icon: '/favicon-32x32.png',
-        badge: '/favicon-16x16.png',
-        ...options
-      })
+        icon: "/favicon-32x32.png",
+        badge: "/favicon-16x16.png",
+        ...options,
+      });
 
       setTimeout(() => {
-        notification.close()
-      }, 5000)
+        notification.close();
+      }, 5000);
 
-      return notification
+      return notification;
     } catch (error) {
-      console.error('[NotificationManager] Error showing notification:', error)
-      return null
+      console.error("[NotificationManager] Error showing notification:", error);
+      return null;
     }
   }
-  
+
   showMessageNotification(message, roomName) {
     try {
-      const userDataRaw = localStorage.getItem('userData')
+      const userDataRaw = localStorage.getItem("userData");
       if (userDataRaw) {
-        const userData = JSON.parse(userDataRaw)
-        const senderId = (message.sender && typeof message.sender === 'object') ? message.sender.id : message.sender
+        const userData = JSON.parse(userDataRaw);
+        const senderId =
+          message.sender && typeof message.sender === "object"
+            ? message.sender.id
+            : message.sender;
         if (userData && userData.id && senderId && senderId === userData.id) {
-          return null
+          return null;
         }
       }
     } catch (e) {
-      
-      console.warn('[NotificationManager] Could not check user id for notification:', e)
+      console.warn(
+        "[NotificationManager] Could not check user id for notification:",
+        e,
+      );
     }
 
     if (!this.isEnabled) {
-      return null
+      return null;
     }
 
-    const title = roomName ? `New message in ${roomName}` : 'New message'
-    const body = `${message.sender.name}: ${message.content}`
+    const title = roomName ? `New message in ${roomName}` : "New message";
+    const body = `${message.sender.name}: ${message.content}`;
 
-    this.playNotificationSound()
+    this.playNotificationSound();
 
     return this.showNotification(title, {
-      body: body.length > 100 ? body.substring(0, 97) + '...' : body,
+      body: body.length > 100 ? body.substring(0, 97) + "..." : body,
       tag: `message-${message.id}`,
       data: {
         messageId: message.id,
         roomId: message.roomId || null,
-        senderId: message.sender.id
+        senderId: message.sender.id,
       },
-      requireInteraction: false
-    })
+      requireInteraction: false,
+    });
   }
-  
+
   playNotificationSound() {
     try {
-      if (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined') {
-        const audioContext = new (AudioContext || webkitAudioContext)()
-        const oscillator = audioContext.createOscillator()
-        const gainNode = audioContext.createGain()
-        
-        oscillator.connect(gainNode)
-        gainNode.connect(audioContext.destination)
-        
-        oscillator.frequency.setValueAtTime(800, audioContext.currentTime)
-        oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1)
-        
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
-        
-        oscillator.start(audioContext.currentTime)
-        oscillator.stop(audioContext.currentTime + 0.2)
+      if (
+        typeof AudioContext !== "undefined" ||
+        typeof webkitAudioContext !== "undefined"
+      ) {
+        const audioContext = new (AudioContext || webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+        oscillator.frequency.setValueAtTime(
+          600,
+          audioContext.currentTime + 0.1,
+        );
+
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(
+          0.01,
+          audioContext.currentTime + 0.2,
+        );
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.2);
       }
     } catch (error) {
-      console.error('[NotificationManager] Error playing notification sound:', error)
+      console.error(
+        "[NotificationManager] Error playing notification sound:",
+        error,
+      );
     }
   }
-  
+
   async setEnabled(enabled) {
-    if (enabled && this.permission !== 'granted') {
-      const granted = await this.requestPermission()
-      if (!granted) return false
+    if (enabled && this.permission !== "granted") {
+      const granted = await this.requestPermission();
+      if (!granted) return false;
     }
-    
-    this.isEnabled = enabled && this.permission === 'granted'
-    
-    
-    localStorage.setItem(STORAGE_KEYS.notificationsEnabled, JSON.stringify(this.isEnabled))
-    
-    return this.isEnabled
+
+    this.isEnabled = enabled && this.permission === "granted";
+
+    localStorage.setItem(
+      STORAGE_KEYS.notificationsEnabled,
+      JSON.stringify(this.isEnabled),
+    );
+
+    return this.isEnabled;
   }
-  
+
   shouldShowNotification() {
-    
-    return true
-    
-    
-    
+    return true;
   }
 }
 
- 
-const notificationManager = new NotificationManager()
+const notificationManager = new NotificationManager();
 
-export default notificationManager
+export default notificationManager;

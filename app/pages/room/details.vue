@@ -11,13 +11,17 @@
         <ul class="list-disc pl-6">
           <li v-for="member in room.members" :key="member.id">
             <span>{{ member.name }}</span>
-            <span v-if="room.owner && member.id === room.owner.id" class="ml-2 text-xs text-primary">(Owner)</span>
+            <span
+              v-if="room.owner && member.id === room.owner.id"
+              class="ml-2 text-xs text-primary"
+              >(Owner)</span
+            >
           </li>
         </ul>
       </div>
       <div v-if="isOwner" class="mt-8">
         <button class="btn btn-error" @click="deleteRoom" :disabled="deleting">
-          {{ deleting ? 'Deleting...' : 'Delete Room' }}
+          {{ deleting ? "Deleting..." : "Delete Room" }}
         </button>
       </div>
     </div>
@@ -28,43 +32,44 @@
 </template>
 
 <script setup>
-import { useRoomsStore } from '../../stores/rooms'
-import { useAuthStore } from '../../stores/auth'
-import { useToast } from '../../composables/useToast'
+import { useRoomsStore } from "../../stores/rooms";
+import { useAuthStore } from "../../stores/auth";
+import { useToast } from "../../composables/useToast";
 
-const route = useRoute()
-const router = useRouter()
-const roomsStore = useRoomsStore()
-const authStore = useAuthStore()
-const { success, error } = useToast()
+const route = useRoute();
+const router = useRouter();
+const roomsStore = useRoomsStore();
+const authStore = useAuthStore();
+const { success, error } = useToast();
 
-const room = ref(null)
-const deleting = ref(false)
+const room = ref(null);
+const deleting = ref(false);
 
 const isOwner = computed(() => {
-  if (!room.value || !room.value.owner || !authStore.getUserData()) return false
-  return room.value.owner.id === authStore.getUserData().id
-})
+  if (!room.value || !room.value.owner || !authStore.getUserData())
+    return false;
+  return room.value.owner.id === authStore.getUserData().id;
+});
 
 async function fetchRoomDetails() {
-  const roomId = route.query.roomId
-  if (!roomId) return
-  room.value = await roomsStore.getRoomDetails(roomId)
+  const roomId = route.query.roomId;
+  if (!roomId) return;
+  room.value = await roomsStore.getRoomDetails(roomId);
 }
 
 async function deleteRoom() {
-  if (!room.value) return
-  deleting.value = true
+  if (!room.value) return;
+  deleting.value = true;
   try {
-    await roomsStore.deleteRoom(room.value.id)
-    success('Room deleted successfully')
-    router.push('/')
+    await roomsStore.deleteRoom(room.value.id);
+    success("Room deleted successfully");
+    router.push("/");
   } catch (err) {
-    error('Failed to delete room')
+    error("Failed to delete room");
   } finally {
-    deleting.value = false
+    deleting.value = false;
   }
 }
 
-onMounted(fetchRoomDetails)
+onMounted(fetchRoomDetails);
 </script>

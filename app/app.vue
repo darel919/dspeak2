@@ -1,13 +1,13 @@
 <template>
   <NuxtLayout>
-    <NuxtLoadingIndicator/>
-    <NuxtPage/>
+    <NuxtLoadingIndicator />
+    <NuxtPage />
     <GlobalVoiceStatus />
   </NuxtLayout>
 </template>
 
 <script setup>
 onMounted(() => {
-  document.title = "dSpeak"
-})
+  document.title = "dSpeak";
+});
 </script>

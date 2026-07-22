@@ -1,12 +1,14 @@
 {
   "name": "dspeak",
-  "version": "2.3.0-alpha4",
+  "version": "2.3.1-alpha5",
   "author": "darelisme",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "start": "node --env-file=.env .output/server/index.mjs",
@@ -20,7 +22,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@vite-pwa/nuxt": "1.0.4",
     "daisyui": "^5.7.0",
-    "mediasoup": "^3.21.2",
+    "mediasoup": "^3.22.0",
     "mediasoup-client": "^3.21.0",
     "nuxt": "^4.5.0",
     "pinia": "^3.0.4",
@@ -32,5 +34,8 @@
   },
   "trustedDependencies": [
     "mediasoup"
-  ]
+  ],
+  "devDependencies": {
+    "prettier": "3.9.6"
+  }
 }

@@ -16,25 +16,49 @@
             <div class="space-y-2">
               <div class="flex items-center gap-2 mb-2">
                 <span class="text-sm text-base-content/60">Total reads:</span>
-                <div class="badge badge-primary text-base">{{ message.read_by ? message.read_by.length : 0 }}</div>
+                <div class="badge badge-primary text-base">
+                  {{ message.read_by ? message.read_by.length : 0 }}
+                </div>
               </div>
-              <div v-if="message.read_by && message.read_by.length > 0" class="mt-2">
+              <div
+                v-if="message.read_by && message.read_by.length > 0"
+                class="mt-2"
+              >
                 <div class="grid grid-cols-1 gap-2">
-                  <div v-for="user in message.read_by" :key="user.id || user" class="flex items-center gap-3 p-2 rounded bg-base-300">
+                  <div
+                    v-for="user in message.read_by"
+                    :key="user.id || user"
+                    class="flex items-center gap-3 p-2 rounded bg-base-300"
+                  >
                     <div v-if="user.avatar" class="avatar">
                       <div class="w-8 h-8 rounded-full">
-                        <img :src="getAvatarUrl(user.avatar)" :alt="user.name || user.email || user.id" />
+                        <img
+                          :src="getAvatarUrl(user.avatar)"
+                          :alt="user.name || user.email || user.id"
+                        />
                       </div>
                     </div>
                     <div>
-                      <span class="font-medium text-sm">{{ user.name || user.email || user.id }}</span>
-                      <span v-if="user.email" class="text-xs text-base-content/60 ml-2">{{ user.email }}</span>
-                      <span v-else-if="typeof user === 'string'" class="text-xs text-base-content/60 ml-2">ID: {{ user }}</span>
+                      <span class="font-medium text-sm">{{
+                        user.name || user.email || user.id
+                      }}</span>
+                      <span
+                        v-if="user.email"
+                        class="text-xs text-base-content/60 ml-2"
+                        >{{ user.email }}</span
+                      >
+                      <span
+                        v-else-if="typeof user === 'string'"
+                        class="text-xs text-base-content/60 ml-2"
+                        >ID: {{ user }}</span
+                      >
                     </div>
                   </div>
                 </div>
               </div>
-              <div v-else class="text-xs text-base-content/50">No one has read this message yet.</div>
+              <div v-else class="text-xs text-base-content/50">
+                No one has read this message yet.
+              </div>
             </div>
           </div>
         </div>
@@ -48,7 +72,10 @@
                 <span class="text-base-content/60">Created:</span>
                 <span>{{ formatFullDate(message.created) }}</span>
               </div>
-              <div v-if="message.updated !== message.created" class="flex justify-between">
+              <div
+                v-if="message.updated !== message.created"
+                class="flex justify-between"
+              >
                 <span class="text-base-content/60">Updated:</span>
                 <span>{{ formatFullDate(message.updated) }}</span>
               </div>
@@ -63,11 +90,15 @@
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">
                 <span class="text-base-content/60">Message ID:</span>
-                <code class="text-xs bg-base-300 px-2 py-1 rounded">{{ message.id }}</code>
+                <code class="text-xs bg-base-300 px-2 py-1 rounded">{{
+                  message.id
+                }}</code>
               </div>
               <div class="flex justify-between">
                 <span class="text-base-content/60">Room:</span>
-                <code class="text-xs bg-base-300 px-2 py-1 rounded">{{ message.room }}</code>
+                <code class="text-xs bg-base-300 px-2 py-1 rounded">{{
+                  message.room
+                }}</code>
               </div>
             </div>
           </div>
@@ -79,57 +110,60 @@
           <Icon name="lucide:copy" class="h-4 w-4" />
           Copy Details
         </button>
-        <button @click="$emit('close')" class="btn btn-primary btn-sm">Close</button>
+        <button @click="$emit('close')" class="btn btn-primary btn-sm">
+          Close
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { useRuntimeConfig } from '#app'
+import { useRuntimeConfig } from "#app";
 
 const props = defineProps({
   show: {
     type: Boolean,
-    default: false
+    default: false,
   },
   message: {
     type: Object,
-    default: null
-  }
-})
+    default: null,
+  },
+});
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(["close"]);
 
-const config = useRuntimeConfig()
+const config = useRuntimeConfig();
 
 function formatFullDate(dateString) {
-  const date = new Date(dateString)
-  return date.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    timeZoneName: 'short'
-  })
+  const date = new Date(dateString);
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
 }
 
 function getAvatarUrl(avatarPath) {
-  if (!avatarPath) return '/favicon-32x32.png'
-  
-  if (avatarPath.startsWith('http')) return avatarPath
-  
-  const baseApiPath = config.public.baseApiPath
-  if (avatarPath.startsWith('auth/')) return `${baseApiPath}/${avatarPath}`
-  if (avatarPath.startsWith('assets/')) return `${baseApiPath}/auth/${avatarPath}`
-  return `${config.public.apiPath}/files/${avatarPath}`
+  if (!avatarPath) return "/favicon-32x32.png";
+
+  if (avatarPath.startsWith("http")) return avatarPath;
+
+  const baseApiPath = config.public.baseApiPath;
+  if (avatarPath.startsWith("auth/")) return `${baseApiPath}/${avatarPath}`;
+  if (avatarPath.startsWith("assets/"))
+    return `${baseApiPath}/auth/${avatarPath}`;
+  return `${config.public.apiPath}/files/${avatarPath}`;
 }
 
 async function copyDetails() {
-  if (!props.message) return
-  
+  if (!props.message) return;
+
   const details = {
     id: props.message.id,
     content: props.message.content,
@@ -137,14 +171,14 @@ async function copyDetails() {
     created: props.message.created,
     updated: props.message.updated,
     room: props.message.room,
-    read_by: props.message.read_by
-  }
-  
+    read_by: props.message.read_by,
+  };
+
   try {
-    await navigator.clipboard.writeText(JSON.stringify(details, null, 2))
-    console.debug('Message details copied to clipboard')
+    await navigator.clipboard.writeText(JSON.stringify(details, null, 2));
+    console.debug("Message details copied to clipboard");
   } catch (error) {
-    console.error('Failed to copy details:', error)
+    console.error("Failed to copy details:", error);
   }
 }
 </script>

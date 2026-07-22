@@ -1,6 +1,7 @@
 export function usePushSubscription() {
-  const store = useNotificationsStore()
-  const { pushSupported, subscription, isSubscribed, loading, error } = storeToRefs(store)
+  const store = useNotificationsStore();
+  const { pushSupported, subscription, isSubscribed, loading, error } =
+    storeToRefs(store);
 
   return {
     isSupported: readonly(pushSupported),
@@ -12,5 +13,5 @@ export function usePushSubscription() {
     unsubscribe: store.unsubscribe,
     updateSubscription: store.updateSubscription,
     getExistingSubscription: store.getExistingSubscription,
-  }
+  };
 }

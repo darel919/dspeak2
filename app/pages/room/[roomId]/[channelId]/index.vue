@@ -17,7 +17,10 @@
           <!-- Main Content Area -->
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
             <!-- Voice Channel -->
-            <div v-if="selectedChannel && selectedChannel.isMedia" class="min-h-0 flex-1 overflow-hidden p-4">
+            <div
+              v-if="selectedChannel && selectedChannel.isMedia"
+              class="min-h-0 flex-1 overflow-hidden p-4"
+            >
               <VoiceChannel
                 :key="`voice-${selectedChannel.id}`"
                 :channel="selectedChannel"
@@ -34,8 +37,12 @@
             />
             <div v-else class="flex-1 flex items-center justify-center">
               <div class="text-center">
-                <h3 class="text-lg font-semibold mb-2">Welcome to {{ room?.name }}</h3>
-                <p class="text-base-content/60">Select a channel to start chatting</p>
+                <h3 class="text-lg font-semibold mb-2">
+                  Welcome to {{ room?.name }}
+                </h3>
+                <p class="text-base-content/60">
+                  Select a channel to start chatting
+                </p>
               </div>
             </div>
           </div>
@@ -81,149 +88,150 @@
 </template>
 
 <script setup>
-import { useRoomsStore } from '../../../../stores/rooms'
-import { useChannelsStore } from '../../../../stores/channels'
-import { useVoiceStore } from '../../../../stores/voice'
-import ChatWindow from '../../../../components/Chat/ChatWindow.vue'
-import ChannelList from '../../../../components/ChannelList.vue'
-import MobileChannelList from '../../../../components/MobileChannelList.vue'
-import VoiceChannel from '../../../../components/VoiceChannel.vue'
-import { MOBILE_BREAKPOINT_PX } from '../../../../const/ui'
+import { useRoomsStore } from "../../../../stores/rooms";
+import { useChannelsStore } from "../../../../stores/channels";
+import { useVoiceStore } from "../../../../stores/voice";
+import ChatWindow from "../../../../components/Chat/ChatWindow.vue";
+import ChannelList from "../../../../components/ChannelList.vue";
+import MobileChannelList from "../../../../components/MobileChannelList.vue";
+import VoiceChannel from "../../../../components/VoiceChannel.vue";
+import { MOBILE_BREAKPOINT_PX } from "../../../../const/ui";
 
-const roomsStore = useRoomsStore()
-const channelsStore = useChannelsStore()
-const voiceStore = useVoiceStore()
-const route = useRoute()
-const router = useRouter()
+const roomsStore = useRoomsStore();
+const channelsStore = useChannelsStore();
+const voiceStore = useVoiceStore();
+const route = useRoute();
+const router = useRouter();
 
-const roomId = computed(() => route.params.roomId)
-const channelId = computed(() => route.params.channelId)
-const room = computed(() => roomsStore.rooms.find(r => r.id === roomId.value))
-const selectedChannelId = ref(channelId.value || null)
+const roomId = computed(() => route.params.roomId);
+const channelId = computed(() => route.params.channelId);
+const room = computed(() =>
+  roomsStore.rooms.find((r) => r.id === roomId.value),
+);
+const selectedChannelId = ref(channelId.value || null);
 const selectedChannel = computed(() =>
-  channelsStore.getChannelById(selectedChannelId.value)
-)
+  channelsStore.getChannelById(selectedChannelId.value),
+);
 
+const isMobile = ref(false);
+let resizeHandler = null;
+let resizeTimeout = null;
 
-const isMobile = ref(false)
-let resizeHandler = null
-let resizeTimeout = null
-
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   const checkMobile = () => {
-
     if (resizeTimeout) {
-      clearTimeout(resizeTimeout)
+      clearTimeout(resizeTimeout);
     }
     resizeTimeout = setTimeout(() => {
-      const newIsMobile = window.innerWidth < MOBILE_BREAKPOINT_PX
+      const newIsMobile = window.innerWidth < MOBILE_BREAKPOINT_PX;
 
       if (isMobile.value !== newIsMobile) {
-        isMobile.value = newIsMobile
+        isMobile.value = newIsMobile;
       }
-    }, 150)
-  }
+    }, 150);
+  };
 
-  resizeHandler = checkMobile
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
+  resizeHandler = checkMobile;
+  checkMobile();
+  window.addEventListener("resize", checkMobile);
 }
 
-
 onUnmounted(() => {
-  if (typeof window !== 'undefined' && resizeHandler) {
-    window.removeEventListener('resize', resizeHandler)
+  if (typeof window !== "undefined" && resizeHandler) {
+    window.removeEventListener("resize", resizeHandler);
   }
 
   if (resizeTimeout) {
-    clearTimeout(resizeTimeout)
+    clearTimeout(resizeTimeout);
   }
 
-
-
-
-  const chatStore = useChatStore()
+  const chatStore = useChatStore();
   if (chatStore && chatStore.disconnectFromChannel) {
-    chatStore.disconnectFromChannel(true)
+    chatStore.disconnectFromChannel(true);
   }
-})
+});
 
 async function onChannelSelected(channel) {
-  selectedChannelId.value = channel.id
+  selectedChannelId.value = channel.id;
   router.replace({
-    name: 'room-roomId-channelId',
-    params: { roomId: roomId.value, channelId: channel.id }
-  })
-
+    name: "room-roomId-channelId",
+    params: { roomId: roomId.value, channelId: channel.id },
+  });
 
   if (channel.isMedia) {
     try {
-      await voiceStore.joinVoiceChannel(channel.id)
+      await voiceStore.joinVoiceChannel(channel.id);
     } catch (error) {
-      console.error('Failed to auto-join voice channel:', error)
+      console.error("Failed to auto-join voice channel:", error);
     }
   }
-
-
 }
 
 function onBackFromChat() {
   if (isMobile.value) {
-    selectedChannelId.value = null
-    router.replace({ name: 'room-roomId', params: { roomId: roomId.value } })
+    selectedChannelId.value = null;
+    router.replace({ name: "room-roomId", params: { roomId: roomId.value } });
   }
 }
 
 function onBackToHome() {
-  router.push('/')
+  router.push("/");
 }
 
-watch(room, async (r) => {
-  if (r && r.name) {
-    if (import.meta.client) {
-      document.title = `${r.name} - dSpeak`
-    }
-    try {
-      await channelsStore.fetchChannels(r.id)
+watch(
+  room,
+  async (r) => {
+    if (r && r.name) {
+      if (import.meta.client) {
+        document.title = `${r.name} - dSpeak`;
+      }
+      try {
+        await channelsStore.fetchChannels(r.id);
 
-      if (!selectedChannelId.value) {
-        const currentIsMobile = typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT_PX : false
-        if (!currentIsMobile) {
-          const textChannels = channelsStore.getTextChannels()
-          if (textChannels.length > 0) {
-            selectedChannelId.value = textChannels[0].id
-            router.replace({
-              name: 'room-roomId-channelId',
-              params: { roomId: roomId.value, channelId: textChannels[0].id }
-            })
+        if (!selectedChannelId.value) {
+          const currentIsMobile =
+            typeof window !== "undefined"
+              ? window.innerWidth < MOBILE_BREAKPOINT_PX
+              : false;
+          if (!currentIsMobile) {
+            const textChannels = channelsStore.getTextChannels();
+            if (textChannels.length > 0) {
+              selectedChannelId.value = textChannels[0].id;
+              router.replace({
+                name: "room-roomId-channelId",
+                params: { roomId: roomId.value, channelId: textChannels[0].id },
+              });
+            }
           }
         }
-      }
-    } catch (error) {
-      console.error('Failed to fetch channels:', error)
-    }
-  } else {
-    if (import.meta.client) {
-      document.title = 'dSpeak'
-    }
-  }
-}, { immediate: true })
-
-watch(() => route.params.channelId, async (newChannelId) => {
-  if (newChannelId && newChannelId !== selectedChannelId.value) {
-    selectedChannelId.value = newChannelId
-
-
-    const channel = channelsStore.getChannelById(newChannelId)
-    if (channel && channel.isMedia) {
-      try {
-        await voiceStore.joinVoiceChannel(channel.id)
       } catch (error) {
-        console.error('Failed to auto-join voice channel via URL:', error)
+        console.error("Failed to fetch channels:", error);
+      }
+    } else {
+      if (import.meta.client) {
+        document.title = "dSpeak";
       }
     }
+  },
+  { immediate: true },
+);
 
+watch(
+  () => route.params.channelId,
+  async (newChannelId) => {
+    if (newChannelId && newChannelId !== selectedChannelId.value) {
+      selectedChannelId.value = newChannelId;
 
-  }
-}, { immediate: true })
+      const channel = channelsStore.getChannelById(newChannelId);
+      if (channel && channel.isMedia) {
+        try {
+          await voiceStore.joinVoiceChannel(channel.id);
+        } catch (error) {
+          console.error("Failed to auto-join voice channel via URL:", error);
+        }
+      }
+    }
+  },
+  { immediate: true },
+);
 </script>

@@ -1,423 +1,426 @@
 import { defineStore } from "pinia";
-import { useRuntimeConfig } from '#app';
-import { useAuthStore } from './auth';
+import { useRuntimeConfig } from "#app";
+import { useAuthStore } from "./auth";
 
-export const useChannelsStore = defineStore('channels', () => {
-    const channels = ref([]);
-    const loading = ref(false);
-    const error = ref(null);
-    const currentChannelId = ref(null);
-    const config = useRuntimeConfig();
+export const useChannelsStore = defineStore("channels", () => {
+  const channels = ref([]);
+  const loading = ref(false);
+  const error = ref(null);
+  const currentChannelId = ref(null);
+  const config = useRuntimeConfig();
 
-    
-    async function fetchChannels(roomId) {
-        if (!roomId) {
-            throw new Error('Room ID is required');
-        }
-
-        loading.value = true;
-        error.value = null;
-
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
-
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/channel/?roomId=${roomId}`, {
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch channels: ${response.status}`);
-            }
-
-            const data = await response.json();
-            channels.value = Array.isArray(data) ? data : [];
-            console.debug('[ChannelsStore] Fetched channels:', channels.value);
-            
-            return channels.value;
-        } catch (err) {
-            error.value = err.message;
-            console.error('[ChannelsStore] Error fetching channels:', err);
-            throw err;
-        } finally {
-            loading.value = false;
-        }
+  async function fetchChannels(roomId) {
+    if (!roomId) {
+      throw new Error("Room ID is required");
     }
 
-    
-    async function createChannel(roomId, channelData) {
-        if (!roomId) {
-            throw new Error('Room ID is required');
-        }
+    loading.value = true;
+    error.value = null;
 
-        if (!channelData.name || !channelData.name.trim()) {
-            throw new Error('Channel name is required');
-        }
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
 
-        loading.value = true;
-        error.value = null;
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
 
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/channel/?roomId=${roomId}`, {
+        headers: {
+          Authorization: userData.id,
+          "Content-Type": "application/json",
+        },
+      });
 
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/channel/`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    roomId,
-                    name: channelData.name.trim(),
-                    desc: channelData.desc || '',
-                    isMedia: channelData.isMedia || false,
-                    audio_bitrate: channelData.audio_bitrate || null
-                })
-            });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch channels: ${response.status}`);
+      }
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to create channel: ${response.status} ${errorText}`);
-            }
+      const data = await response.json();
+      channels.value = Array.isArray(data) ? data : [];
+      console.debug("[ChannelsStore] Fetched channels:", channels.value);
 
-            const newChannel = await response.json();
-            console.debug('[ChannelsStore] Created channel:', newChannel);
-            
-            
-            await fetchChannels(roomId);
-            
-            return newChannel;
-        } catch (err) {
-            error.value = err.message;
-            console.error('[ChannelsStore] Error creating channel:', err);
-            throw err;
-        } finally {
-            loading.value = false;
-        }
+      return channels.value;
+    } catch (err) {
+      error.value = err.message;
+      console.error("[ChannelsStore] Error fetching channels:", err);
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function createChannel(roomId, channelData) {
+    if (!roomId) {
+      throw new Error("Room ID is required");
     }
 
-    
-    async function editChannel(channelId, channelData) {
-        if (!channelId) {
-            throw new Error('Channel ID is required');
-        }
-
-        loading.value = true;
-        error.value = null;
-
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
-
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/channel/`, {
-                method: 'PUT',
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    channelId,
-                    name: channelData.name?.trim(),
-                    desc: channelData.desc,
-                    audio_bitrate: channelData.audio_bitrate
-                })
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to edit channel: ${response.status} ${errorText}`);
-            }
-
-            console.debug('[ChannelsStore] Edited channel:', channelId);
-            
-            
-            const channelIndex = channels.value.findIndex(c => c.id === channelId);
-            if (channelIndex !== -1) {
-                channels.value[channelIndex] = { ...channels.value[channelIndex], ...channelData };
-            }
-            
-            return true;
-        } catch (err) {
-            error.value = err.message;
-            console.error('[ChannelsStore] Error editing channel:', err);
-            throw err;
-        } finally {
-            loading.value = false;
-        }
+    if (!channelData.name || !channelData.name.trim()) {
+      throw new Error("Channel name is required");
     }
 
-    
-    async function deleteChannel(channelId) {
-        if (!channelId) {
-            throw new Error('Channel ID is required');
-        }
+    loading.value = true;
+    error.value = null;
 
-        loading.value = true;
-        error.value = null;
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
 
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
 
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/channel/`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    channelId
-                })
-            });
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/channel/`, {
+        method: "POST",
+        headers: {
+          Authorization: userData.id,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          roomId,
+          name: channelData.name.trim(),
+          desc: channelData.desc || "",
+          isMedia: channelData.isMedia || false,
+          audio_bitrate: channelData.audio_bitrate || null,
+        }),
+      });
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to delete channel: ${response.status} ${errorText}`);
-            }
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to create channel: ${response.status} ${errorText}`,
+        );
+      }
 
-            console.debug('[ChannelsStore] Deleted channel:', channelId);
-            
-            
-            channels.value = channels.value.filter(c => c.id !== channelId);
-            
-            
-            if (currentChannelId.value === channelId) {
-                currentChannelId.value = null;
-            }
-            
-            return true;
-        } catch (err) {
-            error.value = err.message;
-            console.error('[ChannelsStore] Error deleting channel:', err);
-            throw err;
-        } finally {
-            loading.value = false;
-        }
+      const newChannel = await response.json();
+      console.debug("[ChannelsStore] Created channel:", newChannel);
+
+      await fetchChannels(roomId);
+
+      return newChannel;
+    } catch (err) {
+      error.value = err.message;
+      console.error("[ChannelsStore] Error creating channel:", err);
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function editChannel(channelId, channelData) {
+    if (!channelId) {
+      throw new Error("Channel ID is required");
     }
 
-    
-    async function joinChannel(channelId) {
-        if (!channelId) {
-            throw new Error('Channel ID is required');
-        }
+    loading.value = true;
+    error.value = null;
 
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
 
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/channel/join`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    channelId
-                })
-            });
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to join channel: ${response.status} ${errorText}`);
-            }
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/channel/`, {
+        method: "PUT",
+        headers: {
+          Authorization: userData.id,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channelId,
+          name: channelData.name?.trim(),
+          desc: channelData.desc,
+          audio_bitrate: channelData.audio_bitrate,
+        }),
+      });
 
-            console.debug('[ChannelsStore] Joined channel:', channelId);
-            
-            
-            const channelIndex = channels.value.findIndex(c => c.id === channelId);
-            if (channelIndex !== -1) {
-                const channel = channels.value[channelIndex];
-                if (!channel.inRoom.includes(userData.id)) {
-                    channel.inRoom.push(userData.id);
-                }
-            }
-            
-            return true;
-        } catch (err) {
-            console.error('[ChannelsStore] Error joining channel:', err);
-            throw err;
-        }
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to edit channel: ${response.status} ${errorText}`,
+        );
+      }
+
+      console.debug("[ChannelsStore] Edited channel:", channelId);
+
+      const channelIndex = channels.value.findIndex((c) => c.id === channelId);
+      if (channelIndex !== -1) {
+        channels.value[channelIndex] = {
+          ...channels.value[channelIndex],
+          ...channelData,
+        };
+      }
+
+      return true;
+    } catch (err) {
+      error.value = err.message;
+      console.error("[ChannelsStore] Error editing channel:", err);
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function deleteChannel(channelId) {
+    if (!channelId) {
+      throw new Error("Channel ID is required");
     }
 
-    
-    async function leaveChannel(channelId) {
-        if (!channelId) {
-            throw new Error('Channel ID is required');
-        }
+    loading.value = true;
+    error.value = null;
 
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
 
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/channel/leave`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    channelId
-                })
-            });
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to leave channel: ${response.status} ${errorText}`);
-            }
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/channel/`, {
+        method: "DELETE",
+        headers: {
+          Authorization: userData.id,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channelId,
+        }),
+      });
 
-            console.debug('[ChannelsStore] Left channel:', channelId);
-            
-            
-            const channelIndex = channels.value.findIndex(c => c.id === channelId);
-            if (channelIndex !== -1) {
-                const channel = channels.value[channelIndex];
-                channel.inRoom = channel.inRoom.filter(userId => userId !== userData.id);
-            }
-            
-            return true;
-        } catch (err) {
-            console.error('[ChannelsStore] Error leaving channel:', err);
-            throw err;
-        }
-    }
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to delete channel: ${response.status} ${errorText}`,
+        );
+      }
 
-    
-    async function getChannelDetails(channelId) {
-        if (!channelId) {
-            throw new Error('Channel ID is required');
-        }
+      console.debug("[ChannelsStore] Deleted channel:", channelId);
 
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
+      channels.value = channels.value.filter((c) => c.id !== channelId);
 
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/channel/details?id=${channelId}`, {
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch channel details: ${response.status}`);
-            }
-
-            const channelDetails = await response.json();
-            console.debug('[ChannelsStore] Fetched channel details:', channelDetails);
-            
-            return channelDetails;
-        } catch (err) {
-            console.error('[ChannelsStore] Error fetching channel details:', err);
-            throw err;
-        }
-    }
-
-    
-    async function getUnreadCounts() {
-        try {
-            const authStore = useAuthStore();
-            const userData = authStore.getUserData();
-            
-            if (!userData || !userData.id) {
-                throw new Error('User not authenticated');
-            }
-
-            const apiPath = config.public.apiPath;
-            const response = await fetch(`${apiPath}/chat/unread`, {
-                headers: {
-                    'Authorization': userData.id,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch unread counts: ${response.status}`);
-            }
-
-            const unreadCounts = await response.json();
-            console.debug('[ChannelsStore] Fetched unread counts:', unreadCounts);
-            
-            return unreadCounts;
-        } catch (err) {
-            console.error('[ChannelsStore] Error fetching unread counts:', err);
-            throw err;
-        }
-    }
-
-    
-    function getChannelById(channelId) {
-        return channels.value.find(c => c.id === channelId);
-    }
-
-    function getTextChannels() {
-        return channels.value.filter(c => !c.isMedia);
-    }
-
-    function getMediaChannels() {
-        return channels.value.filter(c => c.isMedia);
-    }
-
-    function clearChannels() {
-        channels.value = [];
+      if (currentChannelId.value === channelId) {
         currentChannelId.value = null;
-        error.value = null;
+      }
+
+      return true;
+    } catch (err) {
+      error.value = err.message;
+      console.error("[ChannelsStore] Error deleting channel:", err);
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function joinChannel(channelId) {
+    if (!channelId) {
+      throw new Error("Channel ID is required");
     }
 
-    return {
-        channels: readonly(channels),
-        loading: readonly(loading),
-        error: readonly(error),
-        currentChannelId,
-        fetchChannels,
-        createChannel,
-        editChannel,
-        deleteChannel,
-        joinChannel,
-        leaveChannel,
-        getChannelDetails,
-        getUnreadCounts,
-        getChannelById,
-        getTextChannels,
-        getMediaChannels,
-        clearChannels
-    };
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
+
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
+
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/channel/join`, {
+        method: "POST",
+        headers: {
+          Authorization: userData.id,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channelId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to join channel: ${response.status} ${errorText}`,
+        );
+      }
+
+      console.debug("[ChannelsStore] Joined channel:", channelId);
+
+      const channelIndex = channels.value.findIndex((c) => c.id === channelId);
+      if (channelIndex !== -1) {
+        const channel = channels.value[channelIndex];
+        if (!channel.inRoom.includes(userData.id)) {
+          channel.inRoom.push(userData.id);
+        }
+      }
+
+      return true;
+    } catch (err) {
+      console.error("[ChannelsStore] Error joining channel:", err);
+      throw err;
+    }
+  }
+
+  async function leaveChannel(channelId) {
+    if (!channelId) {
+      throw new Error("Channel ID is required");
+    }
+
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
+
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
+
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/channel/leave`, {
+        method: "POST",
+        headers: {
+          Authorization: userData.id,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channelId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to leave channel: ${response.status} ${errorText}`,
+        );
+      }
+
+      console.debug("[ChannelsStore] Left channel:", channelId);
+
+      const channelIndex = channels.value.findIndex((c) => c.id === channelId);
+      if (channelIndex !== -1) {
+        const channel = channels.value[channelIndex];
+        channel.inRoom = channel.inRoom.filter(
+          (userId) => userId !== userData.id,
+        );
+      }
+
+      return true;
+    } catch (err) {
+      console.error("[ChannelsStore] Error leaving channel:", err);
+      throw err;
+    }
+  }
+
+  async function getChannelDetails(channelId) {
+    if (!channelId) {
+      throw new Error("Channel ID is required");
+    }
+
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
+
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
+
+      const apiPath = config.public.apiPath;
+      const response = await fetch(
+        `${apiPath}/channel/details?id=${channelId}`,
+        {
+          headers: {
+            Authorization: userData.id,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch channel details: ${response.status}`);
+      }
+
+      const channelDetails = await response.json();
+      console.debug("[ChannelsStore] Fetched channel details:", channelDetails);
+
+      return channelDetails;
+    } catch (err) {
+      console.error("[ChannelsStore] Error fetching channel details:", err);
+      throw err;
+    }
+  }
+
+  async function getUnreadCounts() {
+    try {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
+
+      if (!userData || !userData.id) {
+        throw new Error("User not authenticated");
+      }
+
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/chat/unread`, {
+        headers: {
+          Authorization: userData.id,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch unread counts: ${response.status}`);
+      }
+
+      const unreadCounts = await response.json();
+      console.debug("[ChannelsStore] Fetched unread counts:", unreadCounts);
+
+      return unreadCounts;
+    } catch (err) {
+      console.error("[ChannelsStore] Error fetching unread counts:", err);
+      throw err;
+    }
+  }
+
+  function getChannelById(channelId) {
+    return channels.value.find((c) => c.id === channelId);
+  }
+
+  function getTextChannels() {
+    return channels.value.filter((c) => !c.isMedia);
+  }
+
+  function getMediaChannels() {
+    return channels.value.filter((c) => c.isMedia);
+  }
+
+  function clearChannels() {
+    channels.value = [];
+    currentChannelId.value = null;
+    error.value = null;
+  }
+
+  return {
+    channels: readonly(channels),
+    loading: readonly(loading),
+    error: readonly(error),
+    currentChannelId,
+    fetchChannels,
+    createChannel,
+    editChannel,
+    deleteChannel,
+    joinChannel,
+    leaveChannel,
+    getChannelDetails,
+    getUnreadCounts,
+    getChannelById,
+    getTextChannels,
+    getMediaChannels,
+    clearChannels,
+  };
 });

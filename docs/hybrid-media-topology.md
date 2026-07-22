@@ -115,6 +115,14 @@ collectors as SFU transports. Codec, frame, packet, jitter, bitrate, candidate,
 and audio-buffer fields are displayed whenever the browser reports them;
 unsupported fields remain explicitly marked as unreported.
 
+Copy report takes a fresh sample and copies a self-contained text diagnostic with
+the current topology, summarized media measurements, sixty-second metric history,
+browser environment, and raw statistics for every active peer connection. Browser
+security prevents the application from reading `brave://webrtc-internals` or
+placing a named attachment on the system clipboard, so the report captures the
+equivalent browser-accessible `getStats()` evidence directly without requiring an
+internals export.
+
 Audio policy is topology-neutral. Microphone and shared-audio senders use the
 voice channel bitrate ceiling, with the user's shared-audio ceiling applied when
 it is lower. Both native P2P and SFU request 48 kHz stereo Opus, ten-millisecond
@@ -171,6 +179,12 @@ Measured outgoing and incoming bitrate are calculated from candidate-pair byte
 deltas. Available outgoing and incoming capacity are browser congestion-control
 estimates and do not describe the amount of media currently being transmitted.
 
+During direct qualification, candidate-pair selection and RTP-flow checks share
+one browser statistics collection per peer edge and polling tick. This keeps the
+250-millisecond readiness probe responsive without repeatedly traversing the
+same full `RTCStatsReport`; normal dashboard statistics remain independently
+sampled at their lower display cadence.
+
 Native P2P and SFU receivers request a zero-millisecond jitter-buffer target when
 the browser implements `RTCRtpReceiver.jitterBufferTarget`, asking for the
 shortest playout delay the browser can safely provide. This is a latency
@@ -201,17 +215,17 @@ browser left connected and verify that audio/video continues, each remote source
 has exactly one tile or audio element, and every client reports the same epoch,
 mode, participant count, and reason:
 
-| Sequence | Expected result |
-| --- | --- |
-| 1 → 2 clients | Idle → SFU IPv6 → probe → Direct P2P |
-| 2 → 3 → 4 clients | Direct → SFU IPv6 → complete P2P mesh with every peer edge |
-| 4 → 5 clients | Mesh → staged SFU → SFU on every client |
-| 5 → 4 clients | SFU remains active while a complete mesh is probed and staged |
-| Direct/mesh ICE failure | Old route remains until every client has live SFU RTP |
-| SFU direct recovery failure | Existing SFU remains active without a redundant SFU rebuild |
-| SFU IPv6 unavailable | SFU selects the advertised IPv4 candidate without changing media ownership |
-| Camera/screen start or stop during switching | New source revision invalidates old acknowledgements; no stale tile remains |
-| Signaling server restart | Clients discard old epochs, reconnect, and republish current capture sources once |
+| Sequence                                     | Expected result                                                                   |
+| -------------------------------------------- | --------------------------------------------------------------------------------- |
+| 1 → 2 clients                                | Idle → SFU IPv6 → probe → Direct P2P                                              |
+| 2 → 3 → 4 clients                            | Direct → SFU IPv6 → complete P2P mesh with every peer edge                        |
+| 4 → 5 clients                                | Mesh → staged SFU → SFU on every client                                           |
+| 5 → 4 clients                                | SFU remains active while a complete mesh is probed and staged                     |
+| Direct/mesh ICE failure                      | Old route remains until every client has live SFU RTP                             |
+| SFU direct recovery failure                  | Existing SFU remains active without a redundant SFU rebuild                       |
+| SFU IPv6 unavailable                         | SFU selects the advertised IPv4 candidate without changing media ownership        |
+| Camera/screen start or stop during switching | New source revision invalidates old acknowledgements; no stale tile remains       |
+| Signaling server restart                     | Clients discard old epochs, reconnect, and republish current capture sources once |
 
 The automated tests cover the coordinator decisions and stale-event behavior.
 This matrix remains necessary because browser ICE timing, hardware capture, and

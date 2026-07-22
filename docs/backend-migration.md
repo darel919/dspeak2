@@ -5,15 +5,15 @@ mediasoup SFU in one Nuxt/Nitro process.
 
 ## Migrated from `dws-backend`
 
-| Previous surface | Nitro surface |
-| --- | --- |
-| `/dspeak/room/*` | `server/utils/dspeak-api.js` |
-| `/dspeak/channel/*` | `server/utils/dspeak-api.js` |
-| `/dspeak/chat/*` | `server/utils/dspeak-api.js` |
-| `/dspeak/chat/socket` | `server/routes/dspeak/chat/socket.js` |
-| `/dspeak/presence` | `server/routes/dspeak/presence.js` |
+| Previous surface                     | Nitro surface                                     |
+| ------------------------------------ | ------------------------------------------------- |
+| `/dspeak/room/*`                     | `server/utils/dspeak-api.js`                      |
+| `/dspeak/channel/*`                  | `server/utils/dspeak-api.js`                      |
+| `/dspeak/chat/*`                     | `server/utils/dspeak-api.js`                      |
+| `/dspeak/chat/socket`                | `server/routes/dspeak/chat/socket.js`             |
+| `/dspeak/presence`                   | `server/routes/dspeak/presence.js`                |
 | SFU/backend interop presence updates | Direct calls from `server/utils/mediasoup-sfu.js` |
-| PocketBase admin client | `server/utils/pocketbase.js` |
+| PocketBase admin client              | `server/utils/pocketbase.js`                      |
 
 The PocketBase collection contract remains unchanged: `dspeak_rooms`,
 `dspeak_rooms_channels`, `dspeak_messages`, `dspeak_webpush`,

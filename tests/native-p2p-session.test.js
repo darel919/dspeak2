@@ -1,203 +1,305 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
-import { applyOpusAudioProfile, NativeP2pMesh } from '../app/shared/native-p2p.js'
-import { setReceiverJitterBufferTarget } from '../app/shared/receiver-settings.js'
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  applyOpusAudioProfile,
+  mediaFlowSnapshot,
+  NativeP2pMesh,
+  selectedPairSnapshot,
+} from "../app/shared/native-p2p.js";
+import { setReceiverJitterBufferTarget } from "../app/shared/receiver-settings.js";
 
-test('P2P source toggles reuse their sender instead of accumulating transceivers', async () => {
-  const signals = []
-  const replacements = []
+test("P2P source toggles reuse their sender instead of accumulating transceivers", async () => {
+  const signals = [];
+  const replacements = [];
   const sender = {
     replaceTrack(track) {
-      replacements.push(track)
-      return Promise.resolve()
+      replacements.push(track);
+      return Promise.resolve();
     },
-  }
+  };
   const mesh = new NativeP2pMesh({
     iceServers: [],
     sendSignal: (signal) => signals.push(signal),
-  })
+  });
   const connection = {
-    peerId: 'peer-2',
-    senders: new Map([['camera', sender]]),
+    peerId: "peer-2",
+    senders: new Map([["camera", sender]]),
     pc: {
       addTrack: () => {
-        throw new Error('must reuse existing sender')
+        throw new Error("must reuse existing sender");
       },
     },
-  }
-  mesh.connections.set(connection.peerId, connection)
-  mesh.localSources.set('camera', { track: { id: 'old' }, stream: {} })
+  };
+  mesh.connections.set(connection.peerId, connection);
+  mesh.localSources.set("camera", { track: { id: "old" }, stream: {} });
 
-  mesh.unpublishSource('camera')
-  const replacement = { id: 'new' }
-  mesh.publishSource('camera', replacement, {})
-  await Promise.resolve()
+  mesh.unpublishSource("camera");
+  const replacement = { id: "new" };
+  mesh.publishSource("camera", replacement, {});
+  await Promise.resolve();
 
-  assert.equal(connection.senders.get('camera'), sender)
-  assert.deepEqual(replacements, [null, replacement])
+  assert.equal(connection.senders.get("camera"), sender);
+  assert.deepEqual(replacements, [null, replacement]);
   assert.deepEqual(signals, [
     {
-      targetPeerId: 'peer-2',
+      targetPeerId: "peer-2",
       epoch: 0,
-      signal: { sourceRemoved: { source: 'camera' } },
+      signal: { sourceRemoved: { source: "camera" } },
     },
     {
-      targetPeerId: 'peer-2',
+      targetPeerId: "peer-2",
       epoch: 0,
-      signal: { sourceRestored: { source: 'camera' } },
+      signal: { sourceRestored: { source: "camera" } },
     },
-  ])
-})
+  ]);
+});
 
-test('P2P source restoration republishes the preserved remote receiver track', async () => {
-  const restored = []
+test("P2P source restoration republishes the preserved remote receiver track", async () => {
+  const restored = [];
   const mesh = new NativeP2pMesh({
     iceServers: [],
     sendSignal() {},
     onRemoteTrack: (entry) => restored.push(entry),
-  })
-  const entry = { source: 'camera', track: { readyState: 'live' } }
-  mesh.connections.set('peer-2', {
-    peerId: 'peer-2',
-    userId: 'user-2',
-    remoteTracks: new Map([['camera', entry]]),
-  })
+  });
+  const entry = { source: "camera", track: { readyState: "live" } };
+  mesh.connections.set("peer-2", {
+    peerId: "peer-2",
+    userId: "user-2",
+    remoteTracks: new Map([["camera", entry]]),
+  });
 
   await mesh.receiveSignal({
-    fromPeerId: 'peer-2',
+    fromPeerId: "peer-2",
     epoch: 0,
-    signal: { sourceRestored: { source: 'camera' } },
-  })
+    signal: { sourceRestored: { source: "camera" } },
+  });
 
-  assert.deepEqual(restored, [entry])
-})
+  assert.deepEqual(restored, [entry]);
+});
 
-test('topology identity reconciles an early signaling connection', () => {
-  const restaged = []
+test("topology identity reconciles an early signaling connection", () => {
+  const restaged = [];
   const mesh = new NativeP2pMesh({
     iceServers: [],
     sendSignal() {},
-    onRemoteTrack: entry => restaged.push({ ...entry })
-  })
-  const entry = { source: 'screen', userId: 'peer-2', track: { readyState: 'live' } }
+    onRemoteTrack: (entry) => restaged.push({ ...entry }),
+  });
+  const entry = {
+    source: "screen",
+    userId: "peer-2",
+    track: { readyState: "live" },
+  };
   const state = {
-    peerId: 'peer-2',
-    userId: 'peer-2',
-    remoteTracks: new Map([['screen', entry]])
-  }
-  mesh.connections.set('peer-2', state)
+    peerId: "peer-2",
+    userId: "peer-2",
+    remoteTracks: new Map([["screen", entry]]),
+  };
+  mesh.connections.set("peer-2", state);
 
-  assert.equal(mesh.ensureConnection('peer-2', 'user-2'), state)
-  assert.equal(state.userId, 'user-2')
-  assert.equal(entry.userId, 'user-2')
-  assert.deepEqual(restaged.map(candidate => candidate.userId), ['user-2'])
-})
+  assert.equal(mesh.ensureConnection("peer-2", "user-2"), state);
+  assert.equal(state.userId, "user-2");
+  assert.equal(entry.userId, "user-2");
+  assert.deepEqual(
+    restaged.map((candidate) => candidate.userId),
+    ["user-2"],
+  );
+});
 
-test('polite glare rollback answers before sender reconfiguration can fail', async () => {
-  const operations = []
-  const signals = []
-  const failures = []
+test("polite glare rollback answers before sender reconfiguration can fail", async () => {
+  const operations = [];
+  const signals = [];
+  const failures = [];
   const pc = {
-    signalingState: 'have-local-offer',
+    signalingState: "have-local-offer",
     remoteDescription: null,
     localDescription: null,
     async setLocalDescription(description) {
-      operations.push(`local:${description.type}`)
-      this.localDescription = description.type === 'rollback' ? null : description
-      this.signalingState = description.type === 'rollback' ? 'stable' : this.signalingState
+      operations.push(`local:${description.type}`);
+      this.localDescription =
+        description.type === "rollback" ? null : description;
+      this.signalingState =
+        description.type === "rollback" ? "stable" : this.signalingState;
     },
     async setRemoteDescription(description) {
-      operations.push(`remote:${description.type}`)
-      this.remoteDescription = description
-      this.signalingState = 'have-remote-offer'
+      operations.push(`remote:${description.type}`);
+      this.remoteDescription = description;
+      this.signalingState = "have-remote-offer";
     },
     async createAnswer() {
-      operations.push('create-answer')
-      return { type: 'answer', sdp: 'v=0\r\n' }
+      operations.push("create-answer");
+      return { type: "answer", sdp: "v=0\r\n" };
     },
-    getTransceivers: () => []
-  }
+    getTransceivers: () => [],
+  };
   const mesh = new NativeP2pMesh({
     iceServers: [],
-    sendSignal: signal => signals.push(signal),
-    onFailure: failure => failures.push(failure),
-    getSenderOptions: () => ({ encodings: [{}] })
-  })
-  mesh.mode = 'probing'
-  mesh.epoch = 4
-  mesh.connections.set('peer-2', {
-    peerId: 'peer-2',
+    sendSignal: (signal) => signals.push(signal),
+    onFailure: (failure) => failures.push(failure),
+    getSenderOptions: () => ({ encodings: [{}] }),
+  });
+  mesh.mode = "probing";
+  mesh.epoch = 4;
+  mesh.connections.set("peer-2", {
+    peerId: "peer-2",
     polite: true,
     makingOffer: true,
     settingRemoteAnswer: false,
     ignoreOffer: false,
     pc,
     candidates: [],
-    senders: new Map([['screen', {
-      getParameters: () => { throw new Error('sender rolled back') },
-      setParameters: async () => {}
-    }]])
-  })
-  mesh.localSources.set('screen', { track: { kind: 'video' } })
+    senders: new Map([
+      [
+        "screen",
+        {
+          getParameters: () => {
+            throw new Error("sender rolled back");
+          },
+          setParameters: async () => {},
+        },
+      ],
+    ]),
+  });
+  mesh.localSources.set("screen", { track: { kind: "video" } });
 
   await mesh.receiveSignal({
-    fromPeerId: 'peer-2',
+    fromPeerId: "peer-2",
     epoch: 4,
-    signal: { description: { type: 'offer', sdp: 'v=0\r\n' } }
-  })
+    signal: { description: { type: "offer", sdp: "v=0\r\n" } },
+  });
 
-  assert.deepEqual(operations, ['local:rollback', 'remote:offer', 'create-answer', 'local:answer'])
-  assert.equal(signals.at(-1).signal.description.type, 'answer')
-  assert.equal(failures.at(-1).reason, 'sender-configuration-failed')
-})
+  assert.deepEqual(operations, [
+    "local:rollback",
+    "remote:offer",
+    "create-answer",
+    "local:answer",
+  ]);
+  assert.equal(signals.at(-1).signal.description.type, "answer");
+  assert.equal(failures.at(-1).reason, "sender-configuration-failed");
+});
 
-test('P2P SDP requests stereo low-latency Opus with loss protection', () => {
-  const sdp = 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=20;useinbandfec=0\r\n'
-  const result = applyOpusAudioProfile(sdp)
-  assert.match(result, /a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1;usedtx=0/)
-  assert.match(result, /a=ptime:10/)
-})
+test("P2P SDP requests stereo low-latency Opus with loss protection", () => {
+  const sdp =
+    "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=20;useinbandfec=0\r\n";
+  const result = applyOpusAudioProfile(sdp);
+  assert.match(
+    result,
+    /a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1;usedtx=0/,
+  );
+  assert.match(result, /a=ptime:10/);
+});
 
-test('P2P video sender preserves frame cadence and applies its bitrate policy', async () => {
-  let applied = null
+test("P2P video sender preserves frame cadence and applies its bitrate policy", async () => {
+  let applied = null;
   const sender = {
-    getParameters: () => ({ encodings: [{}], transactionId: 'one' }),
-    setParameters: async parameters => { applied = parameters }
-  }
+    getParameters: () => ({ encodings: [{}], transactionId: "one" }),
+    setParameters: async (parameters) => {
+      applied = parameters;
+    },
+  };
   const mesh = new NativeP2pMesh({
     iceServers: [],
     sendSignal() {},
     getSenderOptions: () => ({
-      encodings: [{ maxBitrate: 12_000_000, maxFramerate: 60, priority: 'high', networkPriority: 'high' }],
-      degradationPreference: 'maintain-framerate'
-    })
-  })
+      encodings: [
+        {
+          maxBitrate: 12_000_000,
+          maxFramerate: 60,
+          priority: "high",
+          networkPriority: "high",
+        },
+      ],
+      degradationPreference: "maintain-framerate",
+    }),
+  });
 
-  await mesh.configureSender(sender, 'screen', { kind: 'video' })
+  await mesh.configureSender(sender, "screen", { kind: "video" });
 
-  assert.equal(applied.degradationPreference, 'maintain-framerate')
+  assert.equal(applied.degradationPreference, "maintain-framerate");
   assert.deepEqual(applied.encodings[0], {
     maxBitrate: 12_000_000,
     maxFramerate: 60,
-    priority: 'high',
-    networkPriority: 'high'
-  })
-})
+    priority: "high",
+    networkPriority: "high",
+  });
+});
 
-test('P2P receiver requests a low-latency jitter buffer where supported', () => {
-  const receiver = { jitterBufferTarget: null }
-  assert.equal(setReceiverJitterBufferTarget(receiver), true)
-  assert.equal(receiver.jitterBufferTarget, 0)
-  assert.equal(setReceiverJitterBufferTarget({}), false)
-})
+test("P2P receiver requests a low-latency jitter buffer where supported", () => {
+  const receiver = { jitterBufferTarget: null };
+  assert.equal(setReceiverJitterBufferTarget(receiver), true);
+  assert.equal(receiver.jitterBufferTarget, 0);
+  assert.equal(setReceiverJitterBufferTarget({}), false);
+});
 
-test('P2P outbound source stats are read from its RTP sender', async () => {
-  const report = new Map([['audio', { type: 'outbound-rtp', bytesSent: 1000 }]])
-  const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} })
-  mesh.connections.set('peer-2', {
-    senders: new Map([['screen-audio', { getStats: async () => report }]])
-  })
+test("P2P outbound source stats are read from its RTP sender", async () => {
+  const report = new Map([
+    ["audio", { type: "outbound-rtp", bytesSent: 1000 }],
+  ]);
+  const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} });
+  mesh.connections.set("peer-2", {
+    senders: new Map([["screen-audio", { getStats: async () => report }]]),
+  });
 
-  assert.equal(await mesh.getOutboundTrackStats('screen-audio'), report)
-  assert.equal(await mesh.getOutboundTrackStats('missing'), null)
-})
+  assert.equal(await mesh.getOutboundTrackStats("screen-audio"), report);
+  assert.equal(await mesh.getOutboundTrackStats("missing"), null);
+});
+
+test("P2P health collectors can share one browser statistics report", async () => {
+  let reads = 0;
+  const report = new Map([
+    [
+      "transport",
+      { id: "transport", type: "transport", selectedCandidatePairId: "pair" },
+    ],
+    [
+      "pair",
+      {
+        id: "pair",
+        type: "candidate-pair",
+        state: "succeeded",
+        nominated: true,
+        localCandidateId: "local",
+        remoteCandidateId: "remote",
+      },
+    ],
+    [
+      "local",
+      {
+        id: "local",
+        type: "local-candidate",
+        candidateType: "host",
+        protocol: "udp",
+      },
+    ],
+    [
+      "remote",
+      {
+        id: "remote",
+        type: "remote-candidate",
+        candidateType: "srflx",
+        protocol: "udp",
+      },
+    ],
+    ["outbound", { id: "outbound", type: "outbound-rtp", bytesSent: 1200 }],
+    ["inbound", { id: "inbound", type: "inbound-rtp", bytesReceived: 900 }],
+  ]);
+  const pc = {
+    async getStats() {
+      reads += 1;
+      return report;
+    },
+  };
+
+  const sharedReport = await pc.getStats();
+  const pair = await selectedPairSnapshot(pc, sharedReport);
+  const flow = await mediaFlowSnapshot(pc, sharedReport);
+
+  assert.equal(reads, 1);
+  assert.equal(pair.local.candidateType, "host");
+  assert.equal(pair.remote.candidateType, "srflx");
+  assert.deepEqual(flow, {
+    outboundCount: 1,
+    inboundCount: 1,
+    outboundBytes: 1200,
+    inboundBytes: 900,
+  });
+});

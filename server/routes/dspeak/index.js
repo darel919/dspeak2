@@ -1,1 +1,1 @@
-export default defineEventHandler(() => 'DSpeak ready.')
+export default defineEventHandler(() => "DSpeak ready.");
