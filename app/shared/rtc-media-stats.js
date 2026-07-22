@@ -45,7 +45,16 @@ export function collectVideoRtpStats(report, direction, trackSettings = {}, prev
         bytesSent: bytes,
         pliCount: finite(rtp.pliCount),
         firCount: finite(rtp.firCount),
-        nackCount: finite(rtp.nackCount)
+        nackCount: finite(rtp.nackCount),
+        ssrc: finite(rtp.ssrc),
+        framesSent: finite(rtp.framesSent),
+        keyFramesEncoded: finite(rtp.keyFramesEncoded),
+        totalEncodeTime: totalCodecTime,
+        totalPacketSendDelay: finite(rtp.totalPacketSendDelay),
+        retransmittedPacketsSent: finite(rtp.retransmittedPacketsSent),
+        retransmittedBytesSent: finite(rtp.retransmittedBytesSent),
+        qpSum: finite(rtp.qpSum),
+        qualityLimitationDurations: rtp.qualityLimitationDurations || null
       }
     : {
         ...common,
@@ -65,7 +74,13 @@ export function collectVideoRtpStats(report, direction, trackSettings = {}, prev
         totalFreezesDuration: finite(rtp.totalFreezesDuration),
         pliCount: finite(rtp.pliCount),
         firCount: finite(rtp.firCount),
-        nackCount: finite(rtp.nackCount)
+        nackCount: finite(rtp.nackCount),
+        ssrc: finite(rtp.ssrc),
+        keyFramesDecoded: finite(rtp.keyFramesDecoded),
+        totalDecodeTime: totalCodecTime,
+        totalInterFrameDelay: finite(rtp.totalInterFrameDelay),
+        jitterBufferDelay: finite(rtp.jitterBufferDelay),
+        jitterBufferEmittedCount: finite(rtp.jitterBufferEmittedCount)
       }
 
   return { stats, sample: { timestamp, frameCounter, bytes, totalCodecTime } }
@@ -140,6 +155,11 @@ export async function collectPeerConnectionStats(pc, kind) {
     candidatePair: pair ? {
       currentRoundTripTime: pair.currentRoundTripTime ?? null,
       availableOutgoingBitrate: pair.availableOutgoingBitrate ?? null,
+      availableIncomingBitrate: pair.availableIncomingBitrate ?? null,
+      totalRoundTripTime: pair.totalRoundTripTime ?? null,
+      responsesReceived: pair.responsesReceived ?? null,
+      requestsSent: pair.requestsSent ?? null,
+      consentRequestsSent: pair.consentRequestsSent ?? null,
       bytesSent: pair.bytesSent ?? null,
       bytesReceived: pair.bytesReceived ?? null,
       packetsSent: pair.packetsSent ?? null,

@@ -791,6 +791,10 @@ export function useHybridMediaSession() {
   }
 
   async function getWebRTCStatsSnapshot() {
+    if (activeProvider === 'p2p' && p2pMesh) {
+      const edges = await p2pMesh.getSnapshot().catch(() => null)
+      if (edges) updateP2pStats(edges)
+    }
     const transports = activeProvider === 'sfu'
       ? await sfu?.stats() || []
       : await p2pMesh?.stats() || []

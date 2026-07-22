@@ -89,6 +89,10 @@ function toggleRtcSummary() { rtcSummaryVisible.value = !rtcSummaryVisible.value
 const lastRttMs = computed(() => rtcStatsStore.metrics.rttMs)
 const lastJitterMs = computed(() => rtcStatsStore.metrics.jitterMs)
 const lastLoss = computed(() => rtcStatsStore.metrics.loss)
+const activeRouteLabel = computed(() => {
+    const mode = rtcStatsStore.snapshot?.topology?.mode
+    return mode === 'p2p-direct' ? 'P2P' : mode === 'p2p-mesh' ? 'Mesh' : mode === 'sfu-ipv4' ? 'SFU IPv4' : 'SFU'
+})
 const signalLevel = computed(() => rtcStatsStore.metrics.connected ? rtcStatsStore.metrics.score : 0)
 const outboundVideoStats = computed(() => rtcStatsStore.outbound)
 const screenShareFpsLow = computed(() => {
@@ -206,7 +210,7 @@ onBeforeUnmount(() => { if (elapsedTimer) { clearInterval(elapsedTimer); elapsed
                     </div>
                     <!-- Live RTT and Loss Warning -->
                     <div class="text-sm text-current/70 select-none">
-                        <span v-if="lastRttMs != null" title="WebRTC round-trip time between this device and the SFU">SFU {{ Math.round(lastRttMs) }}ms</span>
+                        <span v-if="lastRttMs != null" title="WebRTC round-trip time on the active media route">{{ activeRouteLabel }} {{ Math.round(lastRttMs) }}ms</span>
                     </div>
                     <div
                         v-for="quality in outboundVideoLabels"

@@ -47,6 +47,8 @@
           <div class="rtc-chart-grid">
             <div><div class="rtc-chart-title"><strong>Round-trip time</strong><span>{{ formatMs(metrics.rttMs) }}</span></div><RtcMetricChart label="Round-trip time" unit="ms" :suggested-max="50" :samples="history.rtt" /></div>
             <div><div class="rtc-chart-title"><strong>Available outgoing bitrate</strong><span>{{ formatBitrate(metrics.bitrate) }}</span></div><RtcMetricChart label="Outgoing bitrate" unit="bps" :samples="history.bitrate" /></div>
+            <div><div class="rtc-chart-title"><strong>Available incoming bitrate</strong><span>{{ formatBitrate(metrics.incomingAvailableBitrate) }}</span></div><RtcMetricChart label="Available incoming bitrate" unit="bps" :samples="history.incomingAvailableBitrate" /></div>
+            <div><div class="rtc-chart-title"><strong>Measured incoming bitrate</strong><span>{{ formatBitrate(metrics.incomingBitrate) }}</span></div><RtcMetricChart label="Measured incoming bitrate" unit="bps" :samples="history.incomingBitrate" /></div>
             <div><div class="rtc-chart-title"><strong>Jitter</strong><span>{{ formatMs(metrics.jitterMs) }}</span></div><RtcMetricChart label="Jitter" unit="ms" :suggested-max="30" :samples="history.jitter" /></div>
             <div><div class="rtc-chart-title"><strong>Packet loss</strong><span>{{ formatPercent(metrics.lossPercent) }}</span></div><RtcMetricChart label="Packet loss" unit="%" :suggested-max="10" :samples="history.loss" /></div>
           </div>
@@ -67,6 +69,16 @@
               <div><span>Packets received</span><strong>{{ formatNumber(transport.candidatePair?.packetsReceived) }}</strong></div>
               <div><span>Bytes sent</span><strong>{{ formatBytes(transport.candidatePair?.bytesSent) }}</strong></div>
               <div><span>Bytes received</span><strong>{{ formatBytes(transport.candidatePair?.bytesReceived) }}</strong></div>
+              <div><span>Round-trip time</span><strong>{{ formatSecondsMs(transport.candidatePair?.currentRoundTripTime) }}</strong></div>
+              <div><span>Outgoing bandwidth</span><strong>{{ formatBitrate(transport.candidatePair?.availableOutgoingBitrate) }}</strong></div>
+              <div><span>Available incoming bitrate</span><strong>{{ formatBitrate(transport.candidatePair?.availableIncomingBitrate) }}</strong></div>
+              <div><span>Requests sent</span><strong>{{ formatNumber(transport.candidatePair?.requestsSent) }}</strong></div>
+              <div><span>Responses received</span><strong>{{ formatNumber(transport.candidatePair?.responsesReceived) }}</strong></div>
+              <div><span>Consent requests</span><strong>{{ formatNumber(transport.candidatePair?.consentRequestsSent) }}</strong></div>
+            </div>
+            <div v-if="transport.outboundAudio || transport.inboundAudio" class="rtc-audio-grid">
+              <div v-if="transport.outboundAudio"><h3>Outbound audio</h3><div class="rtc-detail-grid"><div><span>Packets sent</span><strong>{{ formatNumber(transport.outboundAudio.packetsSent) }}</strong></div><div><span>Bytes sent</span><strong>{{ formatBytes(transport.outboundAudio.bytesSent) }}</strong></div><div><span>Target bitrate</span><strong>{{ formatBitrate(transport.outboundAudio.targetBitrate) }}</strong></div></div></div>
+              <div v-if="transport.inboundAudio"><h3>Inbound audio</h3><div class="rtc-detail-grid"><div><span>Packets received</span><strong>{{ formatNumber(transport.inboundAudio.packetsReceived) }}</strong></div><div><span>Packets lost</span><strong>{{ formatNumber(transport.inboundAudio.packetsLost) }}</strong></div><div><span>Jitter</span><strong>{{ formatSecondsMs(transport.inboundAudio.jitter) }}</strong></div><div><span>Jitter buffer</span><strong>{{ formatMs(transport.inboundAudio.averageJitterBufferDelayMs) }}</strong></div><div><span>Target buffer</span><strong>{{ formatMs(transport.inboundAudio.averageJitterBufferTargetDelayMs) }}</strong></div><div><span>Bytes received</span><strong>{{ formatBytes(transport.inboundAudio.bytesReceived) }}</strong></div></div></div>
             </div>
           </div>
         </section>
@@ -83,6 +95,15 @@
                 <div><span>Packets</span><strong>{{ formatNumber(stream.packetsSent ?? stream.packetsReceived) }}</strong></div>
                 <div><span>Bytes</span><strong>{{ formatBytes(stream.bytesSent ?? stream.bytesReceived) }}</strong></div>
                 <div><span>Quality limit</span><strong>{{ stream.qualityLimitationReason || 'none' }}</strong></div>
+                <div><span>SSRC</span><strong>{{ formatNumber(stream.ssrc) }}</strong></div>
+                <div><span>{{ section === 'outbound' ? 'Frames encoded' : 'Frames decoded' }}</span><strong>{{ formatNumber(stream.framesEncoded ?? stream.framesDecoded) }}</strong></div>
+                <div><span>Frames dropped</span><strong>{{ formatNumber(stream.framesDropped) }}</strong></div>
+                <div><span>Key frames</span><strong>{{ formatNumber(stream.keyFramesEncoded ?? stream.keyFramesDecoded) }}</strong></div>
+                <div><span>NACK / PLI / FIR</span><strong>{{ formatCounts(stream) }}</strong></div>
+                <div><span>{{ section === 'outbound' ? 'Encode time' : 'Decode time' }}</span><strong>{{ formatMs(stream.frameTimeMs ?? stream.decodeTimeMs) }}</strong></div>
+                <div><span>Implementation</span><strong>{{ stream.encoderImplementation || stream.decoderImplementation || '—' }}</strong></div>
+                <div><span>Power efficient</span><strong>{{ formatBoolean(stream.powerEfficientEncoder ?? stream.powerEfficientDecoder) }}</strong></div>
+                <div v-if="section === 'inbound'"><span>Freezes</span><strong>{{ formatNumber(stream.freezeCount) }}</strong></div>
               </div>
             </article>
           </div>
@@ -144,6 +165,9 @@ function formatRoute(value) {
   return ({ 'p2p-direct': 'Direct P2P', 'p2p-mesh': 'Mesh P2P', sfu: 'SFU', 'sfu-ipv4': 'SFU IPv4' })[value] || value || 'Unknown'
 }
 function formatMs(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))} ms` : '—' }
+function formatSecondsMs(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 1000)} ms` : '—' }
+function formatBoolean(value) { return typeof value === 'boolean' ? (value ? 'Yes' : 'No') : '—' }
+function formatCounts(stream) { return [stream.nackCount, stream.pliCount, stream.firCount].map(value => Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—').join(' / ') }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : '—' }
 function formatFps(value) { return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} fps` : '—' }
 function formatBitrate(value) {
@@ -227,6 +251,7 @@ onBeforeUnmount(() => {
 .rtc-transport, .rtc-stream { padding: 1.1rem 0; border-bottom: 1px solid var(--rtc-line); }.rtc-transport:last-child, .rtc-stream:last-child { border-bottom: 0; }
 .rtc-transport-title { margin-bottom: 1rem; text-transform: capitalize; }.rtc-transport-title span { color: var(--rtc-muted); font-size: .75rem; text-transform: none; }
 .rtc-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.rtc-audio-grid { display: grid; gap: 1rem; padding-top: 1rem; }.rtc-audio-grid h3 { margin-bottom: .6rem; font-size: .8rem; font-weight: 700; }
 .rtc-detail-grid > div { min-width: 0; padding: .8rem; border-radius: .5rem; background: var(--rtc-raised); }
 .rtc-detail-grid span, .rtc-detail-grid strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.rtc-detail-grid span { margin-bottom: .35rem; color: var(--rtc-muted); font-size: .68rem; }.rtc-detail-grid strong { font-size: .8rem; font-weight: 600; }
 .rtc-alert { display: flex; gap: .5rem; padding: .8rem 1rem; margin-bottom: .8rem; border: 1px solid color-mix(in oklab, var(--color-warning) 35%, transparent); border-radius: .6rem; color: var(--color-warning); background: color-mix(in oklab, var(--color-warning) 9%, transparent); font-size: .8rem; }

@@ -130,11 +130,11 @@
                             <span class="text-base-content/60">Connection quality</span>
                             <span class="font-medium">{{ getUserConnectionQualityLabel(u.id || u) }}</span>
                           </div>
-                          <div class="flex items-center justify-between gap-3">
+                          <div v-if="!isP2pActive" class="flex items-center justify-between gap-3">
                             <span class="text-base-content/60">SFU RTT</span>
                             <span class="font-mono tabular-nums">{{ formatRtt(getUserSfuRtt(u.id || u)) }}</span>
                           </div>
-                          <div class="flex items-center justify-between gap-3">
+                          <div v-if="isP2pActive" class="flex items-center justify-between gap-3">
                             <span class="text-base-content/60">Peer RTT</span>
                             <span class="font-mono tabular-nums">{{ formatPeerRtt(u.id || u) }}</span>
                           </div>
@@ -369,6 +369,7 @@ function getUserName(userId) {
   const user = voiceStore.getUserById(userId) || voiceStore.getUserProfile(userId)
   return user?.display_name || user?.name || user?.username || userId
 }
+const isP2pActive = computed(() => unref(unref(voiceStore.sfuComposable)?.activeProvider) === 'p2p')
 function getUserSfuRtt(userId) {
   const sfu = unref(voiceStore.sfuComposable)
   if (!sfu) return null

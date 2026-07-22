@@ -21,6 +21,7 @@ function sharedAudioConstraints() {
     autoGainControl: false,
     channelCount: { ideal: 2 },
     sampleRate: { ideal: 48000 },
+    restrictOwnAudio: true,
     suppressLocalAudioPlayback: false
   }
 }
