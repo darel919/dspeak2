@@ -78,11 +78,19 @@ keeps its public contract topology-neutral. Server-side room transitions live in
 epochs, consensus, timeouts, recovery, and stale-event rejection can be tested
 without a live media worker.
 
-The RTC Statistics panel contains the diagnostic topology map. It reports
+The `/rtc-debug` RTC Statistics dashboard reports
 Direct P2P, Mesh P2P, SFU, or SFU IPv4 only from coordinator state and selected
 candidate statistics. During switching, active paths remain solid while pending
 paths are dashed until consensus activates them. The normal voice UI does not
 expose or depend on the active topology.
+
+`app/stores/rtc-stats.js` is the single owner of browser RTC statistics polling,
+the current snapshot, video stream measurements, and the bounded sixty-sample
+history. The navbar, global connection summary, and `/rtc-debug` dashboard only
+render that shared state. This prevents multiple mounted displays from issuing
+overlapping `getStats()` calls or presenting different samples. The global
+summary intentionally exposes only route health, ping, packet loss, and a Debug
+action that opens the full dashboard.
 
 Direct and Mesh connections use the same detailed peer-connection and RTP
 collectors as SFU transports. Codec, frame, packet, jitter, bitrate, candidate,

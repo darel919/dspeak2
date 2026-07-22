@@ -1,254 +1,82 @@
 <template>
   <Teleport to="body">
-    <div
-      v-if="voiceStore.connected"
-      class="fixed bottom-4 left-4 z-50 bg-base-300 border border-base-content/20 rounded-lg shadow-lg p-3 min-w-[280px]"
-    >
-      <!-- Header -->
-      <div class="flex items-center justify-between mb-2">
-        <div class="flex items-center gap-2">
-          <Icon name="lucide:mic" class="w-4 h-4 text-success" />
-          <span class="text-sm font-medium">Voice Connected</span>
-          <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div>
+    <aside v-if="visible && voiceStore.connected && route.path !== '/rtc-debug'" class="fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] max-w-sm rounded-2xl border border-base-content/15 bg-base-200 p-4 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="flex items-center gap-2 font-semibold text-primary"><Icon name="lucide:wifi" /> Connection</div>
+          <div class="mt-1 text-xs text-base-content/55">{{ channelName }} · {{ participantLabel }}</div>
         </div>
         <div class="flex items-center gap-2">
-          <!-- Signal Strength Indicator (click to open WebRTC Stats) -->
-          <button
-            v-if="voiceStore.connected"
-            @click="openStats"
-            class="btn btn-ghost btn-xs px-2 h-6 min-h-0"
-            :title="signalTooltip"
-          >
-            <div class="flex items-end gap-0.5">
-              <span
-                class="w-1.5 rounded-sm"
-                :class="[barClass(1), barColorClass]"
-                style="height: 6px"
-              ></span>
-              <span
-                class="w-1.5 rounded-sm"
-                :class="[barClass(2), barColorClass]"
-                style="height: 9px"
-              ></span>
-              <span
-                class="w-1.5 rounded-sm"
-                :class="[barClass(3), barColorClass]"
-                style="height: 12px"
-              ></span>
-              <span
-                class="w-1.5 rounded-sm"
-                :class="[barClass(4), barColorClass]"
-                style="height: 15px"
-              ></span>
-            </div>
-          </button>
-
-
-        <button
-          @click="voiceStore.leaveVoiceChannel"
-          class="btn btn-ghost btn-xs btn-circle"
-          title="Disconnect"
-        >
-          <Icon name="lucide:x" class="w-3 h-3" />
-        </button>
+          <span :class="['badge badge-sm', healthBadge]">{{ healthLabel }}</span>
+          <button class="btn btn-ghost btn-xs btn-circle" title="Close connection summary" aria-label="Close connection summary" @click="visible = false"><Icon name="lucide:x" /></button>
         </div>
       </div>
 
-      <!-- Channel Info -->
-      <div class="text-xs text-base-content/60 mb-3">
-        {{ currentChannelName }} • {{ connectedUsers.length }} participant{{ connectedUsers.length !== 1 ? 's' : '' }}
-      </div>
-      <!-- Mini Network Status -->
-      <div v-if="voiceStore.connected" class="text-[11px] text-base-content/50 mb-2">
-        <span class="mr-2">Net:</span>
-        <span class="mr-2">RTT {{ lastRttMs != null ? Math.round(lastRttMs) + 'ms' : '-' }}</span>
-        <span class="mr-2">Jitter {{ lastJitterMs != null ? Math.round(lastJitterMs) + 'ms' : '-' }}</span>
-        <span>Loss {{ lastLoss != null ? (lastLoss*100).toFixed(1) + '%' : '-' }}</span>
+      <div class="mt-3 border-t border-base-content/10 pt-3">
+        <div class="mb-1 flex items-center justify-between text-xs"><strong>Round-trip latency</strong><span class="text-base-content/55">milliseconds</span></div>
+        <RtcMetricChart label="Round-trip latency" unit="ms" :suggested-max="50" :samples="rtcStats.history.rtt" />
       </div>
 
-      <!-- Connected Users (Mini List) -->
-      <div v-if="connectedUsers.length > 0" class="space-y-1 mb-3 max-h-24 overflow-y-auto">
-        <div
-          v-for="user in connectedUsers.slice(0, 4)"
-          :key="user.id"
-          class="flex items-center gap-2 text-xs"
-        >
-          <div class="avatar placeholder">
-            <div class="w-5 h-5 rounded-full bg-neutral text-neutral-content text-xs">
-              {{ getUserInitials(user) }}
-            </div>
-          </div>
-          <span class="truncate flex-1">{{ getUserDisplayName(user) }}</span>
-
-          <!-- Speaking Indicator -->
-          <div v-if="user.speaking" class="w-1.5 h-1.5 bg-success rounded-full animate-pulse"></div>
-
-          <!-- Muted Indicator -->
-          <Icon name="lucide:mic-off" v-if="user.muted" class="w-3 h-3 text-error" />
-        </div>
-
-        <div v-if="connectedUsers.length > 4" class="text-xs text-base-content/40 text-center">
-          +{{ connectedUsers.length - 4 }} more...
-        </div>
+      <div class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        <span class="text-base-content/55">Route</span><strong>{{ routeLabel }}</strong>
+        <span class="text-base-content/55">Average ping</span><strong>{{ averagePing }}</strong>
+        <span class="text-base-content/55">Last ping</span><strong>{{ lastPing }}</strong>
+        <span class="text-base-content/55">Packet loss</span><strong>{{ packetLoss }}</strong>
       </div>
 
-      <!-- Voice Controls -->
-      <div class="flex items-center justify-center gap-2">
-        <!-- Microphone Control -->
-        <button
-          @click="voiceStore.toggleMic"
-          :disabled="!voiceStore.connected || (voiceStore.sfuComposable && !voiceStore.sfuComposable.transportReady)"
-          :class="[
-            'btn btn-circle btn-sm',
-            voiceStore.micMuted ? 'btn-error' : 'btn-outline'
-          ]"
-          :title="getMicButtonTitle()"
-        >
-          <Icon name="lucide:mic" v-if="!voiceStore.micMuted" class="w-4 h-4 text-current" />
-          <Icon name="lucide:mic-off" v-else class="w-4 h-4 text-white" />
-        </button>
+      <p class="mt-3 text-xs leading-relaxed text-base-content/55">
+        Audio may be delayed above 250 ms or sound robotic when packet loss exceeds 10%.
+      </p>
 
-        <!-- Deafen Control -->
-        <button
-          @click="voiceStore.toggleDeafen"
-          :class="[
-            'btn btn-circle btn-sm',
-            voiceStore.deafened ? 'btn-error' : 'btn-outline'
-          ]"
-          :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
-        >
-          <Icon name="lucide:volume-2" v-if="!voiceStore.deafened" class="w-4 h-4" />
-          <Icon name="lucide:volume-x" v-else class="w-4 h-4" />
-        </button>
-
-        <!-- Settings/Options -->
-        <button
-          @click="navigateToVoiceChannel"
-          class="btn btn-ghost btn-sm btn-circle"
-          title="Go to voice channel"
-        >
-          <Icon name="lucide:circle-arrow-right" class="w-4 h-4" />
-        </button>
+      <div class="mt-3 border-t border-base-content/10 pt-3">
+        <button class="btn btn-neutral btn-sm w-full" @click="openDebug"><Icon name="lucide:bug" /> Debug</button>
       </div>
 
-      <!-- Connection Status -->
-      <div class="text-center mt-2">
-        <div v-if="!voiceStore.sfuComposable?.transportReady" class="flex items-center justify-center gap-1 text-warning">
-          <span class="loading loading-spinner loading-xs"></span>
-          <span class="text-xs">Setting up...</span>
-        </div>
-        <div v-else class="flex items-center justify-center gap-1 text-success">
-          <div class="w-1.5 h-1.5 bg-success rounded-full"></div>
-          <span class="text-xs">Ready</span>
-        </div>
+      <div class="mt-3 flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-xs font-medium text-success">
+        <Icon name="lucide:lock-keyhole" /> Media transport encrypted
       </div>
-    </div>
-
-  <!-- Audio elements are managed in a global hidden container to persist across navigation -->
+    </aside>
   </Teleport>
 </template>
 
 <script setup>
-import { getRtcSignalMetrics } from '../shared/voice-transport'
 import { useVoiceStore } from '~/stores/voice'
 import { useChannelsStore } from '~/stores/channels'
+import { useRtcStatsStore } from '~/stores/rtc-stats'
 
 const voiceStore = useVoiceStore()
 const channelsStore = useChannelsStore()
+const rtcStats = useRtcStatsStore()
 const router = useRouter()
+const route = useRoute()
+const visible = useState('rtc-summary-visible', () => false)
 
-const connectedUsers = computed(() => voiceStore.getDisplayUsersArray())
-
-const currentChannelName = computed(() => {
-  if (!voiceStore.currentChannelId) return 'Voice Channel'
-  const channel = channelsStore.getChannelById(voiceStore.currentChannelId)
-  return channel?.name || 'Voice Channel'
+const channelName = computed(() => channelsStore.getChannelById(voiceStore.currentChannelId)?.name || 'Voice channel')
+const participantLabel = computed(() => {
+  const count = voiceStore.getDisplayUsersArray().length
+  return `${count} participant${count === 1 ? '' : 's'}`
+})
+const healthLabel = computed(() => rtcStats.metrics.connected ? rtcStats.metrics.label : 'Connecting')
+const healthBadge = computed(() => rtcStats.metrics.score >= 4 ? 'badge-success' : rtcStats.metrics.score >= 2 ? 'badge-warning' : 'badge-error')
+const routeLabel = computed(() => ({ 'p2p-direct': 'Direct P2P', 'p2p-mesh': 'Mesh P2P', sfu: 'SFU', 'sfu-ipv4': 'SFU IPv4' })[rtcStats.snapshot?.topology?.mode] || 'Connecting')
+const lastPing = computed(() => formatMs(rtcStats.metrics.rttMs))
+const packetLoss = computed(() => Number.isFinite(rtcStats.metrics.lossPercent) ? `${rtcStats.metrics.lossPercent.toFixed(1)}%` : '—')
+const averagePing = computed(() => {
+  const samples = rtcStats.history.rtt.map(sample => sample.value).filter(Number.isFinite)
+  return formatMs(samples.length ? samples.reduce((total, value) => total + value, 0) / samples.length : null)
 })
 
-function getUserDisplayName(user) {
-  try {
-    const me = useAuthStore && useAuthStore().getUserData ? useAuthStore().getUserData() : null
-    if (me && me.id && String(me.id) === String(user.id)) return 'You'
-  } catch (_) { /* noop */ }
-  return user.display_name || user.username || user.name || user.email || `User ${user.id}`
+function formatMs(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))} ms` : '—' }
+function openDebug() {
+  visible.value = false
+  router.push('/rtc-debug')
 }
 
-function getUserInitials(user) {
-  const name = getUserDisplayName(user)
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-}
-
-function getMicButtonTitle() {
-  if (!voiceStore.connected) return 'Not connected'
-  if (voiceStore.sfuComposable && !voiceStore.sfuComposable.transportReady) return 'Setting up connection...'
-  return voiceStore.micMuted ? 'Unmute Microphone' : 'Mute Microphone'
-}
-
-function navigateToVoiceChannel() {
-  if (voiceStore.currentChannelId && voiceStore.currentRoomId) {
-    router.push(`/room/${voiceStore.currentRoomId}/${voiceStore.currentChannelId}`)
-  }
-}
-
-
-const statsVisible = useState('webrtc-stats-visible', () => false)
-function openStats() { statsVisible.value = true }
-
-
-const signalLevel = ref(0)
-const signalLabel = ref('Disconnected')
-const lastRttMs = ref(null)
-const lastJitterMs = ref(null)
-const lastLoss = ref(null)
-let statTimer = null
-
-function barClass(n) {
-  return signalLevel.value >= n ? '' : 'opacity-25'
-}
-const barColorClass = computed(() => {
-  if (signalLevel.value >= 4) return 'bg-success'
-  if (signalLevel.value === 3) return 'bg-success'
-  if (signalLevel.value === 2) return 'bg-warning'
-  if (signalLevel.value === 1) return 'bg-error'
-  return 'bg-base-content/40'
+onMounted(rtcStats.start)
+watch(() => voiceStore.connected, connected => {
+  if (!connected) visible.value = false
 })
-const signalTooltip = computed(() => {
-  const parts = [signalLabel.value]
-  if (lastRttMs.value != null) parts.push(`RTT ${Math.round(lastRttMs.value)} ms`)
-  if (lastJitterMs.value != null) parts.push(`Jitter ${Math.round(lastJitterMs.value)} ms`)
-  if (lastLoss.value != null) parts.push(`Loss ${(lastLoss.value*100).toFixed(1)}%`)
-  return parts.join(' • ')
-})
-
-async function pollSignal() {
-  try {
-    const sfu = voiceStore.sfuComposable
-    if (!voiceStore.connected || !sfu || !sfu.getWebRTCStatsSnapshot) {
-      signalLevel.value = 0
-      signalLabel.value = 'Disconnected'
-      return
-    }
-    const snap = await sfu.getWebRTCStatsSnapshot()
-    const metrics = getRtcSignalMetrics(snap?.transports)
-    if (!metrics.connected) {
-      signalLevel.value = 1
-      signalLabel.value = 'Connecting'
-      return
-    }
-    lastRttMs.value = metrics.rttMs
-    lastJitterMs.value = metrics.jitterMs
-    lastLoss.value = metrics.loss
-    signalLevel.value = metrics.score
-    signalLabel.value = metrics.label
-  } catch (_) {
-
-  }
-}
-
-onMounted(() => {
-  statTimer = setInterval(pollSignal, 1000)
-})
-onBeforeUnmount(() => {
-  if (statTimer) { clearInterval(statTimer); statTimer = null }
+watch(() => route.path, () => {
+  visible.value = false
 })
 </script>

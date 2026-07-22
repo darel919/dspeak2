@@ -7,7 +7,7 @@
       </div>
       <span class="badge badge-sm shrink-0 whitespace-nowrap" :class="badgeClass">{{ topology.label }}</span>
     </div>
-    <svg viewBox="0 0 320 190" class="h-auto w-full" role="img" :aria-label="summary">
+    <svg viewBox="0 0 320 190" class="mx-auto h-auto w-full max-h-[20rem]" role="img" :aria-label="summary">
       <line v-for="edge in renderedEdges" :key="edge.key" :x1="edge.from.x" :y1="edge.from.y" :x2="edge.to.x" :y2="edge.to.y" class="topology-edge" :class="[`edge-${edge.state}`, edge.state === 'active' ? 'edge-flowing' : '']" />
       <g v-for="node in renderedNodes" :key="node.id" class="cursor-pointer outline-none" role="button" tabindex="0" :aria-label="nodeLabel(node)" @click="selectNode(node.id)" @keydown.enter.prevent="selectNode(node.id)" @keydown.space.prevent="selectNode(node.id)">
         <circle :cx="node.x" :cy="node.y" r="21" class="node-ring" :class="[`node-${node.health}`, node.role === 'local' ? 'node-local' : '']" />

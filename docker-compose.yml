@@ -52,6 +52,7 @@ services:
   coturn:
     image: coturn/coturn:4.6.3-alpine@sha256:e2bca2f79a4269d7240de5872ab60a9305013ad37296d2acf14f9510874346be
     network_mode: host
+    entrypoint: [/bin/sh, /usr/local/bin/run-coturn]
     command:
       - --log-file=stdout
       - --listening-port=${TURN_PORT:-3478}
@@ -77,6 +78,10 @@ services:
       - --no-software-attribute
     volumes:
       - turn-certificates:/etc/letsencrypt:ro
+      - ./ops/coturn/run-coturn.sh:/usr/local/bin/run-coturn:ro
+    depends_on:
+      turn-certbot:
+        condition: service_healthy
     healthcheck:
       test: [CMD, turnutils_stunclient, -p, "${TURN_PORT:-3478}", "::1"]
       interval: 30s
@@ -87,7 +92,6 @@ services:
 
   turn-certbot:
     image: certbot/dns-cloudflare:v3.2.0@sha256:3c3eca6a6476d1fc2cd67de0ebc1e7b9b8c6775fcfaadb7098aad76e9cade5e3
-    pid: service:coturn
     environment:
       DSPEAK_RTC_DOMAIN: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.darelisme.my.id}
       TURN_CERT_EMAIL: ${TURN_CERT_EMAIL:?Set the email used for TURN certificate renewal}
@@ -97,9 +101,12 @@ services:
     volumes:
       - turn-certificates:/etc/letsencrypt
       - ./ops/certbot/renew-turn-certificate.sh:/usr/local/bin/renew-turn-certificate:ro
-    depends_on:
-      coturn:
-        condition: service_started
+    healthcheck:
+      test: [CMD-SHELL, "test -s /etc/letsencrypt/live/$${DSPEAK_RTC_DOMAIN}/fullchain.pem && test -s /etc/letsencrypt/live/$${DSPEAK_RTC_DOMAIN}/privkey.pem"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
     restart: unless-stopped
 
   playit-agent:

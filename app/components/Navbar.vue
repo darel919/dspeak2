@@ -4,10 +4,9 @@ import { useAuthStore } from '../stores/auth'
 import { useVoiceStore } from '../stores/voice'
 import { useChannelsStore } from '../stores/channels'
 import { useSettingsStore } from '../stores/settings'
+import { useRtcStatsStore } from '../stores/rtc-stats'
 import { isScreenShareFpsBelowTarget } from '../shared/video-settings'
-import { getRtcSignalMetrics } from '../shared/voice-transport'
 import { getConnectionQualityLabel } from '../shared/connection-quality'
-import { SCREEN_FPS_WARNING_SAMPLES } from '../const/media'
 
 import RoomList from './RoomList.vue'
 
@@ -16,6 +15,7 @@ const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
 const settingsStore = useSettingsStore();
+const rtcStatsStore = useRtcStatsStore();
 const broadcastMode = computed(() => settingsStore.broadcastMode)
 function toggleBroadcastMode() {
     settingsStore.setBroadcastMode(!settingsStore.broadcastMode)
@@ -81,17 +81,20 @@ function handleProfileClick(e: MouseEvent) {
 }
 
 
-const statsVisible = useState<boolean>('webrtc-stats-visible', () => false)
+function openRtcDebug() { router.push('/rtc-debug') }
+const rtcSummaryVisible = useState<boolean>('rtc-summary-visible', () => false)
+function toggleRtcSummary() { rtcSummaryVisible.value = !rtcSummaryVisible.value }
 
 
-const lastRttMs = ref<number|null>(null)
-const lastJitterMs = ref<number|null>(null)
-const lastLoss = ref<number|null>(null)
-const signalLevel = ref(0)
-const outboundVideoStats = ref<any[]>([])
-let signalTimer: any = null
-let lowScreenFpsSamples = 0
-const screenShareFpsLow = ref(false)
+const lastRttMs = computed(() => rtcStatsStore.metrics.rttMs)
+const lastJitterMs = computed(() => rtcStatsStore.metrics.jitterMs)
+const lastLoss = computed(() => rtcStatsStore.metrics.loss)
+const signalLevel = computed(() => rtcStatsStore.metrics.connected ? rtcStatsStore.metrics.score : 0)
+const outboundVideoStats = computed(() => rtcStatsStore.outbound)
+const screenShareFpsLow = computed(() => {
+    const screen = outboundVideoStats.value.find((stat) => stat.source === 'screen')
+    return voiceStore.screenSharing && !!screen && isScreenShareFpsBelowTarget(screen.fps, screen.targetFps)
+})
 
 
 const elapsedText = ref('')
@@ -152,17 +155,6 @@ function formatVideoQuality(stat: any) {
     return `${resolution}p${fps ? `@${fps}fps` : ''}`
 }
 
-function monitorScreenShareFps(stats: any[]) {
-    const screen = stats.find((stat) => stat.source === 'screen')
-    if (!voiceStore.screenSharing || !screen || !isScreenShareFpsBelowTarget(screen.fps, screen.targetFps)) {
-        lowScreenFpsSamples = 0
-        screenShareFpsLow.value = false
-        return
-    }
-    lowScreenFpsSamples += 1
-    screenShareFpsLow.value = lowScreenFpsSamples >= SCREEN_FPS_WARNING_SAMPLES
-}
-
 const outboundVideoLabels = computed(() => outboundVideoStats.value
     .map((stat) => ({
         source: stat.source,
@@ -170,39 +162,8 @@ const outboundVideoLabels = computed(() => outboundVideoStats.value
     }))
     .filter((item) => item.text))
 
-async function pollSignal() {
-    try {
-
-        const sfu: any = (voiceStore as any).sfuComposable
-        if (!voiceStore.connected || !sfu || !sfu.getWebRTCStatsSnapshot) {
-            signalLevel.value = 0
-            outboundVideoStats.value = []
-            lowScreenFpsSamples = 0
-            screenShareFpsLow.value = false
-            return
-        }
-        if (sfu.ensureAudioElements) sfu.ensureAudioElements()
-        const snap = await sfu.getWebRTCStatsSnapshot()
-        outboundVideoStats.value = sfu.getOutboundVideoStats ? await sfu.getOutboundVideoStats() : []
-        monitorScreenShareFps(outboundVideoStats.value)
-        const metrics = getRtcSignalMetrics(snap?.transports)
-        if (!metrics.connected) {
-            signalLevel.value = 0
-            return
-        }
-        lastRttMs.value = metrics.rttMs
-        lastJitterMs.value = metrics.jitterMs
-        lastLoss.value = metrics.loss
-        signalLevel.value = metrics.score
-    } catch {
-        outboundVideoStats.value = []
-        lowScreenFpsSamples = 0
-        screenShareFpsLow.value = false
-    }
-}
-
-onMounted(() => { signalTimer = setInterval(pollSignal, 1000); startElapsedTimer() })
-onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTimer = null } })
+onMounted(() => { rtcStatsStore.start(); startElapsedTimer() })
+onBeforeUnmount(() => { if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null } })
 </script>
 
 
@@ -253,7 +214,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         class="text-sm text-current/70 select-none whitespace-nowrap"
                         :class="quality.source === 'screen' ? 'cursor-pointer hover:text-current' : ''"
                         :title="quality.source === 'screen' ? 'Open screen-share debug information' : 'Camera send quality'"
-                        @click.stop="quality.source === 'screen' && (statsVisible = true)"
+                        @click.stop="quality.source === 'screen' && openRtcDebug()"
                     >
                         <span v-if="outboundVideoLabels.length > 1">{{ quality.source === 'screen' ? 'Share' : 'Cam' }} </span>{{ quality.text }}
                     </div>
@@ -262,7 +223,7 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         class="btn btn-ghost btn-xs btn-circle text-warning animate-pulse"
                         title="Screen-share send FPS is below target — open debug information"
                         aria-label="Screen-share send FPS is below target"
-                        @click.stop="statsVisible = true"
+                        @click.stop="openRtcDebug"
                     >
                         <Icon name="lucide:triangle-alert" class="size-4" />
                     </button>
@@ -270,18 +231,18 @@ onBeforeUnmount(() => { if (signalTimer) { clearInterval(signalTimer); signalTim
                         v-if="voiceStore.screenSharing"
                         class="btn btn-ghost btn-xs btn-circle"
                         title="View screen-share debug information"
-                        @click.stop="statsVisible = true"
+                        @click.stop="openRtcDebug"
                     >
                         <Icon name="lucide:bug" class="size-4" />
                     </button>
                     <div v-if="lastLoss != null && lastLoss > 0.05" class="tooltip" :data-tip="`Packet loss ${(lastLoss * 100).toFixed(1)}%`">
                         <span class="w-3 h-3 rounded-full bg-warning animate-pulse inline-block"></span>
                     </div>
-                    <!-- Signal Strength (click to open WebRTC Stats) -->
+                    <!-- Signal Strength (click to open connection summary) -->
                     <button
                         class="btn btn-ghost btn-xs px-2 h-6 min-h-0"
                         :title="signalTooltip"
-                        @click.stop="statsVisible = true"
+                        @click.stop="toggleRtcSummary"
                     >
                         <div class="flex items-end gap-0.5">
                             <span class="w-1.5 rounded-sm" :class="[barClass(1), barColorClass]" style="height:6px"></span>

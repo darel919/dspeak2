@@ -145,12 +145,13 @@ TURN_CERT_DNS_PROPAGATION_SECONDS=30
 
 The token is written only to an in-memory private credentials file inside the
 certificate container. Certificates are stored in the `turn-certificates`
-volume. After issuance or renewal, the sidecar sends Coturn `SIGUSR2` so new TLS
-connections use the renewed certificate without restarting active allocations.
+volume. Compose waits for the first certificate before starting Coturn. The
+Coturn supervisor detects renewed certificate files and sends Coturn `SIGUSR2`
+so new TLS connections use them without restarting active allocations.
 
 The TURN hostname and certificate environment must be present before starting
-Compose. Coturn can serve plain UDP/TCP while the first certificate is being
-issued; `turns:` becomes available after issuance succeeds.
+Compose. On the first deployment, Coturn remains pending while Certbot completes
+the DNS challenge; this avoids starting Coturn with missing TLS files.
 
 ## Dynamic RTC IPv6
 

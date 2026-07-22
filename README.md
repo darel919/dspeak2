@@ -55,7 +55,7 @@ across providers, preventing a topology change or producer replacement from
 leaving duplicate remote tiles. Source changes on the active route are applied
 in place rather than starting another handoff.
 
-The RTC Statistics panel shows the active route as Direct, Mesh, SFU, or SFU
+The `/rtc-debug` RTC Statistics dashboard shows the active route as Direct, Mesh, SFU, or SFU
 IPv4. During a handoff, it displays the active and pending routes together.
 If direct media falls back, the topology reason retains the concrete trigger,
 such as an ICE failure, health timeout, stopped media flow, or signaling error.
