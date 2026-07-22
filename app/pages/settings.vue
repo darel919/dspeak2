@@ -60,7 +60,13 @@
             <div class="settings-panel">
               <div class="settings-panel-heading"><div><h2>Video quality</h2><p>Set separate limits for camera and screen sharing.</p></div></div>
               <div class="grid gap-4 p-5 md:grid-cols-2">
-                <div v-for="video in videoQualitySections" :key="video.id" class="rounded-xl border border-base-300 bg-base-200/45 p-4"><div class="mb-4 flex items-center gap-3"><span class="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary"><Icon :name="video.icon" class="size-5" /></span><h3 class="font-semibold">{{ video.label }}</h3></div><label class="form-control"><span class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60">Resolution</span><select class="select select-bordered w-full bg-base-100" :value="video.settings.resolution" @change="video.setResolution($event.target.value)"><option v-for="option in resolutionOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label class="form-control mt-4"><span class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60">Frame rate</span><select class="select select-bordered w-full bg-base-100" :value="video.settings.frameRate" @change="video.setFrameRate($event.target.value)"><option v-for="fps in frameRateOptions" :key="fps" :value="fps">{{ fps }} FPS</option></select></label></div>
+                <div v-for="video in videoQualitySections" :key="video.id" class="rounded-xl border border-base-300 bg-base-200/45 p-4">
+                  <div class="mb-4 flex items-center gap-3"><span class="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary"><Icon :name="video.icon" class="size-5" /></span><h3 class="font-semibold">{{ video.label }}</h3></div>
+                  <label class="form-control"><span class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60">Resolution</span><select class="select select-bordered w-full bg-base-100" :value="video.settings.resolution" @change="video.setResolution($event.target.value)"><option v-for="option in resolutionOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+                  <label class="form-control mt-4"><span class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60">Frame rate</span><select class="select select-bordered w-full bg-base-100" :value="video.settings.frameRate" @change="video.setFrameRate($event.target.value)"><option v-for="fps in frameRateOptions" :key="fps" :value="fps">{{ fps }} FPS</option></select></label>
+                  <label class="form-control mt-4"><span class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60">Quality priority</span><select class="select select-bordered w-full bg-base-100" :value="video.settings.qualityPriority" @change="video.setQualityPriority($event.target.value)"><option value="framerate">Prioritize maximum FPS</option><option value="resolution">Prioritize resolution</option></select></label>
+                  <p class="mt-2 text-xs text-base-content/60">{{ video.settings.qualityPriority === 'resolution' ? 'Preserves resolution and may reduce cadence, never below 24 FPS.' : 'Keeps cadence as close to the selected FPS as possible.' }}</p>
+                </div>
               </div>
               <p class="border-t border-base-300 px-5 py-3 text-xs text-base-content/60">Resolution limits never upscale the source. Original preserves the source's full resolution.</p>
             </div>
@@ -133,12 +139,14 @@ const frameRateOptions = VIDEO_FRAME_RATE_OPTIONS
 
 function setCameraResolution(resolution) { settingsStore.setCameraVideoSettings({ resolution }) }
 function setCameraFrameRate(frameRate) { settingsStore.setCameraVideoSettings({ frameRate: Number(frameRate) }) }
+function setCameraQualityPriority(qualityPriority) { settingsStore.setCameraVideoSettings({ qualityPriority }) }
 function setScreenResolution(resolution) { settingsStore.setScreenVideoSettings({ resolution }) }
 function setScreenFrameRate(frameRate) { settingsStore.setScreenVideoSettings({ frameRate: Number(frameRate) }) }
+function setScreenQualityPriority(qualityPriority) { settingsStore.setScreenVideoSettings({ qualityPriority }) }
 function setSystemAudioBitrate(bitrate) { voiceStore.setSystemAudioBitrate(Number(bitrate)) }
 const videoQualitySections = computed(() => [
-  { id: 'camera', label: 'Camera', icon: 'lucide:video', settings: cameraVideo.value, setResolution: setCameraResolution, setFrameRate: setCameraFrameRate },
-  { id: 'screen', label: 'Screen share', icon: 'lucide:monitor-up', settings: screenVideo.value, setResolution: setScreenResolution, setFrameRate: setScreenFrameRate }
+  { id: 'camera', label: 'Camera', icon: 'lucide:video', settings: cameraVideo.value, setResolution: setCameraResolution, setFrameRate: setCameraFrameRate, setQualityPriority: setCameraQualityPriority },
+  { id: 'screen', label: 'Screen share', icon: 'lucide:monitor-up', settings: screenVideo.value, setResolution: setScreenResolution, setFrameRate: setScreenFrameRate, setQualityPriority: setScreenQualityPriority }
 ])
 
 const config = useRuntimeConfig()

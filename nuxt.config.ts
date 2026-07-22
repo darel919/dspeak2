@@ -93,7 +93,9 @@ export default defineNuxtConfig({
       rtcPort: Number(process.env.MEDIASOUP_RTC_PORT || 40000),
       announcedPort: Number(process.env.MEDIASOUP_ANNOUNCED_PORT || process.env.MEDIASOUP_RTC_PORT || 40000),
       directAddress: process.env.MEDIASOUP_DIRECT_ADDRESS || '',
-      directPort: Number(process.env.MEDIASOUP_DIRECT_PORT || process.env.MEDIASOUP_RTC_PORT || 40000)
+      directPort: Number(process.env.MEDIASOUP_DIRECT_PORT || process.env.MEDIASOUP_RTC_PORT || 40000),
+      maxClientOutgoingBitrate: Number(process.env.MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE || 4500000),
+      maxServerOutgoingBitrate: Number(process.env.MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE || 40000000)
     },
     public: {
       authPath: process.env.AUTH_PATH,

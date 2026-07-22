@@ -13,6 +13,8 @@ MEDIASOUP_RTC_PORT=40000
 MEDIASOUP_ANNOUNCED_PORT=40000
 MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
 MEDIASOUP_DIRECT_PORT=40000
+MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE=4500000
+MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE=40000000
 ```
 
 `MEDIASOUP_ANNOUNCED_ADDRESS` must be reachable by browsers. The `auto` value
@@ -35,6 +37,11 @@ MEDIASOUP_ANNOUNCED_ADDRESS=rtc.dspeak.example.com
 
 The RTC hostname must not use the Cloudflare proxy because it does not forward
 mediasoup RTP. The HTTPS application hostname may remain proxied.
+
+The SFU applies the client ceiling to every receive transport and divides the
+global server ceiling across all active receive transports whenever the fair
+share is lower. Set the global ceiling below the host's measured upload capacity
+to leave headroom for transport overhead and non-RTP traffic.
 
 Optional route overrides should normally remain empty in the monolith:
 

@@ -66,8 +66,11 @@ export class MediaCaptureManager {
       stream.getTracks().forEach(candidate => candidate.stop())
       throw new Error(`No ${source} video track is available`)
     }
+    const trackConstraints = screen
+      ? buildVideoConstraints(settings.screenVideo, { display: false })
+      : constraints
     try {
-      await track.applyConstraints(constraints)
+      await track.applyConstraints(trackConstraints)
     } catch (error) {
       stream.getTracks().forEach(candidate => candidate.stop())
       throw error

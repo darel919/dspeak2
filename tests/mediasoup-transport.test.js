@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { assertTransportDirection, buildConsumerOptions, buildWebRtcTransportOptions, WEBRTC_INITIAL_OUTGOING_BITRATE } from '../server/utils/mediasoup-transport.js'
+import { assertTransportDirection, buildConsumerOptions, buildWebRtcTransportOptions, calculateSfuClientOutgoingBitrate, WEBRTC_INITIAL_OUTGOING_BITRATE } from '../server/utils/mediasoup-transport.js'
 
 test('send transport stays lean and prefers UDP with TCP fallback', () => {
   const webRtcServer = { id: 'server' }
@@ -20,6 +20,13 @@ test('receive transport starts bandwidth estimation conservatively', () => {
 
   assert.equal(options.initialAvailableOutgoingBitrate, 1_000_000)
   assert.deepEqual(options.appData, { peerId: 'peer-1', direction: 'recv' })
+})
+
+test('SFU outgoing allocation respects both per-client and global limits', () => {
+  assert.equal(calculateSfuClientOutgoingBitrate(1), 4_500_000)
+  assert.equal(calculateSfuClientOutgoingBitrate(8), 4_500_000)
+  assert.equal(calculateSfuClientOutgoingBitrate(9), 4_444_444)
+  assert.equal(calculateSfuClientOutgoingBitrate(20), 2_000_000)
 })
 
 test('transport direction must be explicit', () => {

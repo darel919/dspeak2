@@ -35,6 +35,16 @@ test('auto-discovers a globally routable IPv6 address', async () => {
   assert.equal(config.announcedAddress, '2404:c0:ba03:9eb::10')
   assert.equal(config.rtcPort, 40000)
   assert.equal(config.announcedPort, 45678)
+  assert.equal(config.maxClientOutgoingBitrate, 4_500_000)
+  assert.equal(config.maxServerOutgoingBitrate, 40_000_000)
+})
+
+test('rejects an SFU per-client limit above the global server budget', async () => {
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = 'rtc.dspeak.example.com'
+  process.env.MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE = '41000000'
+  process.env.MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE = '40000000'
+
+  await assert.rejects(validateRuntimeEnvironment(), /cannot exceed/)
 })
 
 test('rejects IPv4 returned by automatic discovery', async () => {

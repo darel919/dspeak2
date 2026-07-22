@@ -26,13 +26,14 @@ function waitFor(map, key, timeoutMs, label) {
 }
 
 export class MediasoupClientSession {
-  constructor({ send, iceServers, onRemoteTrack, onRemoteTrackEnded, onStateChange, getAudioBitrate }) {
+  constructor({ send, iceServers, onRemoteTrack, onRemoteTrackEnded, onStateChange, getAudioBitrate, getVideoSettings }) {
     this.send = send
     this.iceServers = iceServers
     this.onRemoteTrack = onRemoteTrack
     this.onRemoteTrackEnded = onRemoteTrackEnded
     this.onStateChange = onStateChange
     this.getAudioBitrate = getAudioBitrate
+    this.getVideoSettings = getVideoSettings
     this.device = null
     this.sendTransport = null
     this.recvTransport = null
@@ -181,6 +182,7 @@ export class MediasoupClientSession {
     if (!this.sendTransport || this.producers.has(entry.source)) return this.producers.get(entry.source) || null
     const track = entry.track.clone()
     const settings = track.getSettings?.() || {}
+    const requestedVideo = this.getVideoSettings?.(entry.source) || {}
     const options = track.kind === 'audio'
       ? { ...buildVoiceProducerOptions(track, this.getAudioBitrate?.(entry.source)), stopTracks: false, appData: { source: entry.source } }
       : {
@@ -191,6 +193,7 @@ export class MediasoupClientSession {
             width: settings.width,
             height: settings.height,
             frameRate: settings.frameRate,
+            qualityPriority: requestedVideo.qualityPriority,
             screen: entry.source === 'screen'
           })
         }

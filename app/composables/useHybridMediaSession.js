@@ -342,6 +342,7 @@ export function useHybridMediaSession() {
           width: settings.width,
           height: settings.height,
           frameRate: getRequestedVideoSettings(source).frameRate,
+          qualityPriority: getRequestedVideoSettings(source).qualityPriority,
           screen: source === 'screen'
         })
       }
@@ -378,7 +379,8 @@ export function useHybridMediaSession() {
       onStateChange: (_, state) => {
         if (state === 'failed' && topologyState.value.mode === 'sfu') reportSfuFailure('media-transport-failed')
       },
-      getAudioBitrate: getEffectiveAudioBitrate
+      getAudioBitrate: getEffectiveAudioBitrate,
+      getVideoSettings: getRequestedVideoSettings
     })
     return sfu
   }

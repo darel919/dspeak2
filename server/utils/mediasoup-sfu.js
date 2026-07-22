@@ -9,6 +9,7 @@ import {
   assertTransportDirection,
   buildConsumerOptions,
   buildWebRtcTransportOptions,
+  calculateSfuClientOutgoingBitrate,
 } from './mediasoup-transport'
 import {
   createRoomTopology,
@@ -83,6 +84,7 @@ async function createState(config) {
     sessions: new Map(),
     config,
     heartbeatTimer: null,
+    bandwidthRebalance: Promise.resolve(),
   }
 
   state.heartbeatTimer = setInterval(() => {
@@ -137,6 +139,8 @@ async function getState(resolvedConfig) {
         runtimeConfig.directPort ||
         runtimeConfig.rtcPort,
     ),
+    maxClientOutgoingBitrate: Number(process.env.MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE || runtimeConfig.maxClientOutgoingBitrate || 4_500_000),
+    maxServerOutgoingBitrate: Number(process.env.MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE || runtimeConfig.maxServerOutgoingBitrate || 40_000_000),
   }
   if (!globalThis[stateKey]) {
     globalThis[stateKey] = createState(config).catch((error) => {
@@ -273,7 +277,7 @@ async function removeMediaUserState(userId, channelId) {
 function closeSession(state, session) {
   if (!session || session.closed) return
   session.closed = true
-  closeSessionMedia(session)
+  closeSessionMedia(state, session)
   session.room.sessions.delete(session.peer.id)
   state.sessions.delete(session.peer.id)
 
@@ -295,7 +299,7 @@ function closeSession(state, session) {
   }
 }
 
-function closeSessionMedia(session) {
+function closeSessionMedia(state, session) {
   for (const producer of session.producers.values()) producer.close()
   for (const consumer of session.consumers.values()) consumer.close()
   for (const transport of session.transports.values()) transport.close()
@@ -303,6 +307,27 @@ function closeSessionMedia(session) {
   session.consumers.clear()
   session.transports.clear()
   session.rtpCapabilities = null
+  queueSfuBandwidthRebalance(state)
+}
+
+function receiveTransports(state) {
+  return [...state.sessions.values()].flatMap(session => [...session.transports.values()])
+    .filter(transport => !transport.closed && transport.appData?.direction === 'recv')
+}
+
+function queueSfuBandwidthRebalance(state) {
+  state.bandwidthRebalance = state.bandwidthRebalance.catch(() => {}).then(async () => {
+    const transports = receiveTransports(state)
+    if (!transports.length) return
+    const bitrate = calculateSfuClientOutgoingBitrate(
+      transports.length,
+      state.config.maxClientOutgoingBitrate,
+      state.config.maxServerOutgoingBitrate
+    )
+    await Promise.all(transports.map(transport => transport.setMaxOutgoingBitrate(bitrate)))
+  })
+  state.bandwidthRebalance.catch(error => console.error('[SFU] failed to rebalance outgoing bandwidth', error))
+  return state.bandwidthRebalance
 }
 
 async function createTransport(state, session, direction) {
@@ -311,10 +336,13 @@ async function createTransport(state, session, direction) {
   )
 
   session.transports.set(transport.id, transport)
-  transport.on('routerclose', () => session.transports.delete(transport.id))
-  transport.on('listenserverclose', () =>
-    session.transports.delete(transport.id),
-  )
+  const removeTransport = () => {
+    session.transports.delete(transport.id)
+    queueSfuBandwidthRebalance(state)
+  }
+  transport.on('routerclose', removeTransport)
+  transport.on('listenserverclose', removeTransport)
+  if (direction === 'recv') await queueSfuBandwidthRebalance(state)
   return transport
 }
 
@@ -496,7 +524,7 @@ async function handleMessage(state, session, message) {
     }
 
     case 'close-media':
-      closeSessionMedia(session)
+      closeSessionMedia(state, session)
       broadcastChannelState(session.room)
       return
 

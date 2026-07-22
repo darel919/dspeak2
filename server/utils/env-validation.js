@@ -19,6 +19,14 @@ function readPort(name, fallback) {
   return value
 }
 
+function readBitrate(name, fallback) {
+  const value = Number(process.env[name] || fallback)
+  if (!Number.isSafeInteger(value) || value < 30_000) {
+    throw new Error(`${name} must be an integer of at least 30000 bps`)
+  }
+  return value
+}
+
 const defaultAddressDiscoveryUrl = 'https://api6.ipify.org'
 
 function isPublicIpv6(value) {
@@ -89,6 +97,11 @@ export async function validateRuntimeEnvironment() {
   const directPort = process.env.MEDIASOUP_DIRECT_PORT?.trim()
     ? readPort('MEDIASOUP_DIRECT_PORT', rtcPort)
     : rtcPort
+  const maxClientOutgoingBitrate = readBitrate('MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE', 4_500_000)
+  const maxServerOutgoingBitrate = readBitrate('MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE', 40_000_000)
+  if (maxClientOutgoingBitrate > maxServerOutgoingBitrate) {
+    throw new Error('MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE cannot exceed MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE')
+  }
 
   const turnHost = process.env.DSPEAK_RTC_DOMAIN?.trim()
   const turnSecret = process.env.TURN_SHARED_SECRET?.trim()
@@ -131,6 +144,8 @@ export async function validateRuntimeEnvironment() {
     rtcPort,
     announcedPort,
     directAddress,
-    directPort
+    directPort,
+    maxClientOutgoingBitrate,
+    maxServerOutgoingBitrate
   }
 }

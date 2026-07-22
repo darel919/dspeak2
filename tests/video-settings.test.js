@@ -20,7 +20,8 @@ import {
   selectPowerEfficientVideoCodec,
   updateVideoAdaptationState,
   VIDEO_FRAME_RATE_MAX,
-  VIDEO_FRAME_RATE_MIN
+  VIDEO_FRAME_RATE_MIN,
+  VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN
 } from '../app/shared/video-settings.js'
 
 test('video frame rate is normalized to the nearest supported preset', () => {
@@ -28,6 +29,9 @@ test('video frame rate is normalized to the nearest supported preset', () => {
   assert.equal(normalizeVideoSettings({ frameRate: 120 }).frameRate, VIDEO_FRAME_RATE_MAX)
   assert.equal(normalizeVideoSettings({ frameRate: 48 }).frameRate, 50)
   assert.equal(normalizeVideoSettings({ frameRate: 29 }).frameRate, 30)
+  assert.equal(normalizeVideoSettings({}).qualityPriority, 'framerate')
+  assert.equal(normalizeVideoSettings({ qualityPriority: 'resolution' }).qualityPriority, 'resolution')
+  assert.equal(normalizeVideoSettings({ qualityPriority: 'unknown' }).qualityPriority, 'framerate')
 })
 
 test('original resolution does not add width or height limits', () => {
@@ -59,28 +63,33 @@ test('display capture does not use constraints forbidden by getDisplayMedia', ()
   assert.equal(constraints.deviceId, undefined)
 })
 
-test('SFU screen-share production is capped at 6 Mbps, 1080p, and 60 FPS', () => {
+test('resolution priority permits capture cadence down to 24 FPS', () => {
+  const constraints = buildVideoConstraints({ resolution: '1080p', frameRate: 60, qualityPriority: 'resolution' })
+  assert.deepEqual(constraints.frameRate, { min: VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN, ideal: 60, max: 60 })
+})
+
+test('SFU screen-share production is capped at 4.5 Mbps, 1080p, and 60 FPS', () => {
   const options = buildVideoProduceOptions({ width: 1920, height: 1080, frameRate: 60, screen: true })
   assert.equal(options.encodings[0].maxFramerate, 60)
-  assert.equal(options.encodings[0].maxBitrate, 6_000_000)
+  assert.equal(options.encodings[0].maxBitrate, 4_500_000)
   assert.equal(options.encodings[0].scaleResolutionDownBy, 1)
-  assert.equal(options.encodings[0].networkPriority, 'medium')
-  assert.equal(options.encodings[0].priority, 'medium')
-  assert.equal(options.codecOptions.videoGoogleStartBitrate, 4200)
-  assert.equal(options.degradationPreference, 'balanced')
+  assert.equal(options.encodings[0].networkPriority, 'high')
+  assert.equal(options.encodings[0].priority, 'high')
+  assert.equal(options.codecOptions.videoGoogleStartBitrate, 3150)
+  assert.equal(options.degradationPreference, 'maintain-framerate')
 })
 
 test('P2P video uses the resolution and frame-rate bitrate ceiling at full capture resolution', () => {
   const options = buildP2pVideoSenderOptions({ width: 1920, height: 1080, frameRate: 60, screen: true })
-  assert.equal(options.encodings[0].maxBitrate, 4_000_000)
+  assert.equal(options.encodings[0].maxBitrate, 8_000_000)
   assert.equal(options.encodings[0].maxFramerate, 60)
   assert.equal(options.encodings[0].scaleResolutionDownBy, 1)
-  assert.equal(options.degradationPreference, 'balanced')
+  assert.equal(options.degradationPreference, 'maintain-framerate')
 })
 
 test('P2P screen-share bitrate falls with the configured frame rate', () => {
   const options = buildP2pVideoSenderOptions({ width: 1920, height: 1080, frameRate: 25, screen: true })
-  assert.equal(options.encodings[0].maxBitrate, 3_110_400)
+  assert.equal(options.encodings[0].maxBitrate, 3_369_600)
 })
 
 test('P2P codec negotiation prefers H264 while retaining browser auxiliary codecs', () => {
@@ -101,10 +110,17 @@ test('P2P codec negotiation prefers H264 while retaining browser auxiliary codec
 test('video production bitrate remains bounded for low and very large sources', () => {
   assert.equal(buildVideoProduceOptions({ width: 320, height: 240, frameRate: 25 }).encodings[0].maxBitrate, 2_000_000)
   const large = buildVideoProduceOptions({ width: 7680, height: 4320, frameRate: 60, screen: true })
-  assert.equal(large.encodings[0].maxBitrate, 6_000_000)
+  assert.equal(large.encodings[0].maxBitrate, 4_500_000)
   assert.equal(large.encodings[0].maxFramerate, 60)
   assert.equal(large.encodings[0].scaleResolutionDownBy, 4)
-  assert.equal(large.degradationPreference, 'balanced')
+  assert.equal(large.degradationPreference, 'maintain-framerate')
+})
+
+test('resolution priority preserves pixels while keeping high network priority', () => {
+  const options = buildVideoProduceOptions({ width: 1920, height: 1080, frameRate: 60, screen: true, qualityPriority: 'resolution' })
+  assert.equal(options.degradationPreference, 'maintain-resolution')
+  assert.equal(options.encodings[0].priority, 'high')
+  assert.equal(options.encodings[0].networkPriority, 'high')
 })
 
 test('video adaptation trades resolution for frame cadence after sustained low FPS', () => {

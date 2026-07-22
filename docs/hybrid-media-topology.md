@@ -116,17 +116,20 @@ priority. Changing the shared-audio or channel ceiling reapplies the effective
 limit to active audio senders.
 
 Video capture settings describe the requested source resolution and frame rate.
-Video production is capped at 6 Mbps, 1920 by 1080 on SFU, and 60 FPS. The
-resolution-and-frame-rate-derived bitrate policy uses balanced degradation so
-the browser can reduce frame rate or resolution before starving the sender.
-Resolution may therefore fall below the requested
+Video production is capped at 4.5 Mbps, 1920 by 1080 on SFU, and 60 FPS. Each
+camera and screen source has a persistent quality priority. The default
+frame-rate priority uses `maintain-framerate`, allowing resolution to fall while
+keeping cadence as close to the selected target as possible. Resolution priority
+uses `maintain-resolution`; its capture cadence may fall but is constrained to a
+minimum of 24 FPS. Resolution may therefore fall below the requested
 target when browser congestion control needs to protect cadence. Capture settings, sender encoding limits, available upload
 bandwidth, and encoder capacity remain independent constraints, so a requested
 frame rate is never reported as an achieved rate without outbound RTP evidence.
 Rooms with three or more participants remain on SFU while any participant
 publishes camera or screen video. This keeps one video encoder and one upload per
 source instead of multiplying both by the number of peers in a mesh. An already
-direct two-device call may keep its single P2P video sender, capped at 4 Mbps,
+direct two-device call may keep its single P2P video sender, with a
+resolution-and-frame-rate-derived ceiling up to 8 Mbps,
 but SFU rooms do not probe P2P while video is active because preparation would
 temporarily duplicate the encoder. Direct video prefers H.264 when both browsers
 advertise it, retaining VP9 and VP8 as negotiated fallbacks. Sender parameters
@@ -138,6 +141,13 @@ receiver qualities require sender-provided simulcast or SVC layers. Screen share
 uses one encoding because simulcast would add sender encoders and upload, while
 SVC is not enabled without runtime evidence that the negotiated codec and
 browser can encode it efficiently in hardware.
+
+SFU receive transports share a global server egress budget. Each client is
+capped at 4.5 Mbps, and the per-client ceiling becomes `40 Mbps / active receive
+transports` when that value is lower. The defaults are configured with
+`MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE=4500000` and
+`MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE=40000000`. These limits cover all RTP
+sent through each receive transport, including audio and retransmissions.
 
 RTC transport statistics distinguish measured traffic from bandwidth estimates.
 Measured outgoing and incoming bitrate are calculated from candidate-pair byte
