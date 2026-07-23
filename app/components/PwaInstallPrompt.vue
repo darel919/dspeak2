@@ -1,6 +1,6 @@
 <template>
   <aside
-    v-if="pwa?.showInstallPrompt"
+    v-if="showInstallPrompt"
     class="fixed right-4 bottom-4 left-4 z-[60] mx-auto max-w-md rounded-2xl border border-base-content/15 bg-base-100 p-4 text-base-content shadow-2xl sm:left-auto"
     role="dialog"
     aria-labelledby="pwa-install-title"
@@ -44,20 +44,45 @@
 </template>
 
 <script setup>
-const { $pwa: pwa } = useNuxtApp();
 const installing = ref(false);
+const showInstallPrompt = ref(false);
+let deferredPrompt = null;
+
+function handleInstallPrompt(event) {
+  event.preventDefault();
+  deferredPrompt = event;
+  showInstallPrompt.value = true;
+}
+
+function handleInstalled() {
+  deferredPrompt = null;
+  showInstallPrompt.value = false;
+}
 
 async function install() {
-  if (!pwa || installing.value) return;
+  if (!deferredPrompt || installing.value) return;
   installing.value = true;
   try {
-    await pwa.install();
+    await deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    handleInstalled();
   } finally {
     installing.value = false;
   }
 }
 
 function dismiss() {
-  pwa?.cancelInstall();
+  deferredPrompt = null;
+  showInstallPrompt.value = false;
 }
+
+onMounted(() => {
+  window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+  window.addEventListener("appinstalled", handleInstalled);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+  window.removeEventListener("appinstalled", handleInstalled);
+});
 </script>

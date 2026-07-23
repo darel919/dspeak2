@@ -22,6 +22,10 @@ const settings = await readFile(
   new URL("../app/pages/settings.vue", import.meta.url),
   "utf8",
 );
+const installPrompt = await readFile(
+  new URL("../app/components/PwaInstallPrompt.vue", import.meta.url),
+  "utf8",
+);
 
 test("service worker updates remain waiting for explicit user activation", () => {
   assert.match(nuxtConfig, /registerType: "prompt"/);
@@ -32,10 +36,6 @@ test("service worker updates remain waiting for explicit user activation", () =>
   assert.match(updatePrompt, /window\.location\.reload/);
   assert.match(updatePrompt, /registration\.waiting\.state === "installed"/);
   assert.match(updatePrompt, /updateAvailable\.value = false/);
-  assert.doesNotMatch(
-    updatePrompt,
-    /function handleControllerChange\(\)[\s\S]*?updateAvailable\.value = true/,
-  );
 });
 
 test("each deployment receives an isolated precache", () => {
@@ -64,23 +64,36 @@ test("service worker source and registration consistently use modules", () => {
   assert.match(serviceWorkerRegistration, /type: "module"/);
   assert.match(serviceWorkerRegistration, /updateViaCache: "none"/);
   assert.match(serviceWorkerRegistration, /"\/dev-sw\.js\?dev-sw"/);
-  assert.match(serviceWorkerRegistration, /useRuntimeConfig\(\)\.app\.buildId/);
-  assert.match(
-    serviceWorkerRegistration,
-    /`\/sw\.js\?build=\$\{encodeURIComponent\(buildId\)\}`/,
-  );
+  assert.match(serviceWorkerRegistration, /: "\/sw\.js"/);
+  assert.doesNotMatch(serviceWorkerRegistration, /sw\.js\?build=/);
   assert.match(serviceWorkerRegistration, /let registrationRequest = null/);
   assert.match(updatePrompt, /registerServiceWorker/);
   assert.match(updatePrompt, /if \(import\.meta\.dev/);
 });
 
 test("service worker responses cannot be reused across deployments", () => {
-  assert.match(
-    nuxtConfig,
-    /"Cache-Control": "no-cache, no-store, must-revalidate"/,
-  );
+  assert.match(nuxtConfig, /"Cache-Control": "no-cache"/);
   assert.match(nuxtConfig, /"CDN-Cache-Control": "no-store"/);
   assert.match(nuxtConfig, /"Cloudflare-CDN-Cache-Control": "no-store"/);
+});
+
+test("only the application-owned service worker registrar is enabled", () => {
+  assert.match(nuxtConfig, /registerPlugin: false/);
+  assert.match(
+    serviceWorkerRegistration,
+    /navigator\.serviceWorker\.getRegistrations\(\)/,
+  );
+  assert.match(serviceWorkerRegistration, /registration\.unregister\(\)/);
+  assert.doesNotMatch(installPrompt, /\$pwa/);
+  assert.match(installPrompt, /beforeinstallprompt/);
+});
+
+test("tabs already controlled by an activated update require one reload", () => {
+  assert.match(updatePrompt, /reloadRequired\.value = true/);
+  assert.match(
+    updatePrompt,
+    /if \(reloadRequired\.value\) \{\s*window\.location\.reload\(\)/,
+  );
 });
 
 test("settings displays the package application version", () => {

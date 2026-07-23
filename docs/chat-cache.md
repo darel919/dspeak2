@@ -46,10 +46,16 @@ The notice is visible only while an installed worker is actually waiting.
 Activation clears it, and the page reloads only after the browser confirms that
 the selected worker controls the page. A controller change without a waiting
 worker clears stale notice state instead of reporting another update.
-Registration includes the Nuxt build identifier in the worker URL, and the
-worker response disables browser and shared-CDN storage. Each deployment
-therefore checks one immutable worker URL instead of alternating between stale
-edge responses from different deployments.
+Registration keeps the stable `/sw.js` URL required by the service-worker
+update algorithm. The browser compares that script byte for byte with the
+installed worker, bypasses its HTTP cache during update checks, and the worker
+response requires revalidation while disabling shared-CDN storage.
+The application registration module is the only service-worker registrar. The
+PWA module registrar stays disabled so an unversioned registration cannot race
+the application registration. Startup also removes legacy dSpeak registrations
+found under an obsolete scope. When another tab activates an accepted update,
+remaining tabs show a reload notice without attempting to activate the same
+worker again.
 
 Interrupted and invalid transactions receive one clean reopen-and-retry before
 the failure reaches a consumer. IndexedDB errors are normalized and sent to the

@@ -35,6 +35,7 @@ import { registerServiceWorker } from "../shared/service-worker-registration.js"
 
 const updateAvailable = ref(false);
 const refreshing = ref(false);
+const reloadRequired = ref(false);
 let registration = null;
 let updateInterval = null;
 let installingWorker = null;
@@ -42,11 +43,13 @@ let reloadFallback = null;
 let activationWorker = null;
 
 function syncUpdateAvailable() {
-  updateAvailable.value = Boolean(
-    navigator.serviceWorker.controller &&
-    registration?.waiting &&
-    registration.waiting.state === "installed",
-  );
+  updateAvailable.value =
+    reloadRequired.value ||
+    Boolean(
+      navigator.serviceWorker.controller &&
+      registration?.waiting &&
+      registration.waiting.state === "installed",
+    );
 }
 
 function observeInstallingWorker(worker) {
@@ -80,11 +83,13 @@ function handleUpdateFound() {
 }
 
 function handleControllerChange() {
-  updateAvailable.value = false;
   if (refreshing.value && activationWorker) {
     if (reloadFallback) window.clearTimeout(reloadFallback);
     window.location.reload();
+    return;
   }
+  reloadRequired.value = true;
+  updateAvailable.value = true;
 }
 
 function handleVisibilityChange() {
@@ -93,6 +98,10 @@ function handleVisibilityChange() {
 
 async function activateUpdate() {
   if (refreshing.value) return;
+  if (reloadRequired.value) {
+    window.location.reload();
+    return;
+  }
   inspectRegistration();
 
   activationWorker = registration?.waiting || null;

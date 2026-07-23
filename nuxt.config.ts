@@ -33,7 +33,7 @@ export default defineNuxtConfig({
   routeRules: {
     "/sw.js": {
       headers: {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Cache-Control": "no-cache",
         "CDN-Cache-Control": "no-store",
         "Cloudflare-CDN-Cache-Control": "no-store",
       },
@@ -71,7 +71,7 @@ export default defineNuxtConfig({
       rollupFormat: "es",
     },
     client: {
-      installPrompt: true,
+      registerPlugin: false,
     },
 
     manifest: {
