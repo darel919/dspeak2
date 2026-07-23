@@ -1,5 +1,8 @@
 <template>
-  <div v-if="shouldShowWarning" class="alert alert-error mx-4 mt-4 shadow-lg">
+  <div
+    v-if="shouldShowWarning"
+    class="metro-status alert alert-error mx-4 mt-4"
+  >
     <div class="flex items-center">
       <Icon name="lucide:circle-x" class="stroke-current shrink-0 h-6 w-6" />
       <div class="flex-1">

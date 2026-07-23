@@ -1,14 +1,14 @@
 <template>
   <aside
     v-if="showInstallPrompt"
-    class="fixed right-4 bottom-4 left-4 z-[60] mx-auto max-w-md rounded-2xl border border-base-content/15 bg-base-100 p-4 text-base-content shadow-2xl sm:left-auto"
+    class="metro-flyout fixed right-4 bottom-4 left-4 z-[60] mx-auto max-w-md border-t-4 border-t-primary p-4 sm:left-auto"
     role="dialog"
     aria-labelledby="pwa-install-title"
     aria-describedby="pwa-install-description"
   >
     <div class="flex items-start gap-3">
       <div
-        class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-content"
+        class="flex size-11 shrink-0 items-center justify-center bg-primary text-primary-content"
         aria-hidden="true"
       >
         <Icon name="lucide:download" class="size-5" />

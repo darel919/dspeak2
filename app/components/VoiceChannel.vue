@@ -36,7 +36,7 @@
       v-if="
         voiceStore.connected && voiceStore.currentChannelId !== props.channel.id
       "
-      class="bg-info/10 border border-info/20 rounded-lg p-4 mb-4"
+      class="metro-status m-4 border-info bg-info/10 text-info"
     >
       <div class="flex items-center gap-3">
         <Icon name="lucide:info" class="w-5 h-5 text-info" />
@@ -123,11 +123,9 @@
             <div
               v-for="user in connectedUsers"
               :key="user.id"
-              class="relative flex flex-col items-center justify-center bg-base-100 shadow-sm border border-base-300 transition-all duration-500"
+              class="metro-transition relative flex flex-col items-center justify-center border border-base-300 bg-base-100"
               :class="[
-                videoFeeds.length
-                  ? 'min-w-24 rounded-lg px-3 py-2'
-                  : 'min-h-[200px] rounded-lg p-6',
+                videoFeeds.length ? 'min-w-24 px-3 py-2' : 'min-h-[200px] p-6',
                 user.speaking ? 'ring-2 ring-success' : '',
               ]"
               @contextmenu.prevent="openVolumeMenu(user)"
@@ -148,13 +146,13 @@
                   :src="userAvatarSource(user)"
                   :name="getUserDisplayName(user)"
                   :base-api-path="config.public.baseApiPath"
-                  class="rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content font-bold ring-2 transition-all duration-150"
+                  class="metro-transition rounded-full bg-primary text-primary-content font-bold ring-2"
                   :class="[
                     videoFeeds.length
                       ? 'h-10 w-10 text-sm'
                       : 'h-20 w-20 text-2xl',
                     user.speaking
-                      ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]'
+                      ? 'ring-success ring-offset-2 ring-offset-base-100'
                       : 'ring-base-300',
                   ]"
                 />
@@ -253,7 +251,7 @@
     <Teleport to="body">
       <div
         v-if="volumeMenuUser"
-        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
         role="presentation"
         @pointerdown.self="closeVolumeMenu"
       >
@@ -373,7 +371,7 @@
       class="voice-controls-shell"
     >
       <div
-        class="voice-controls z-40 min-h-0 overflow-hidden rounded-2xl border border-base-content/15 bg-base-300/95 shadow-2xl backdrop-blur"
+        class="voice-controls z-40 min-h-0 overflow-hidden border border-base-content/20 bg-base-300"
       >
         <div class="flex items-center justify-center gap-4 p-4 pb-0">
           <!-- Microphone Control -->
@@ -387,7 +385,7 @@
                     !voiceStore.sfuComposable.transportReady)
                 "
                 :class="[
-                  'btn btn-circle btn-lg',
+                  'btn btn-square btn-lg',
                   voiceStore.micMuted ? 'btn-error' : 'btn-outline',
                 ]"
                 :title="getButtonTitle()"
@@ -410,7 +408,7 @@
             <button
               @click="voiceStore.toggleDeafen"
               :class="[
-                'btn btn-circle btn-lg',
+                'btn btn-square btn-lg',
                 voiceStore.deafened ? 'btn-error' : 'btn-outline',
               ]"
               :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
@@ -429,7 +427,7 @@
 
           <MediaSettingsContextMenu kind="camera">
             <button
-              class="btn btn-circle btn-lg"
+              class="btn btn-square btn-lg"
               :class="voiceStore.cameraEnabled ? 'btn-primary' : 'btn-outline'"
               title="Toggle camera"
               @click="toggleCamera"
@@ -439,7 +437,7 @@
           </MediaSettingsContextMenu>
 
           <button
-            class="btn btn-circle btn-lg"
+            class="btn btn-square btn-lg"
             :class="voiceStore.screenSharing ? 'btn-primary' : 'btn-outline'"
             title="Toggle screen sharing"
             @click="toggleScreenShare"
@@ -448,7 +446,7 @@
           </button>
 
           <button
-            class="btn btn-circle btn-lg"
+            class="btn btn-square btn-lg"
             :class="
               voiceStore.systemAudioSharing ? 'btn-primary' : 'btn-outline'
             "

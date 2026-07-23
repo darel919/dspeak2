@@ -2,7 +2,7 @@
   <Teleport to="body">
     <aside
       v-if="visible && voiceStore.connected && route.path !== '/rtc-debug'"
-      class="fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] max-w-sm border border-base-content/15 bg-base-200 p-4 shadow-2xl"
+      class="metro-flyout fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] max-w-sm border-l-4 border-l-success bg-base-200 p-4"
     >
       <div class="flex items-center justify-between">
         <div>

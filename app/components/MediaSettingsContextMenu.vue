@@ -7,7 +7,7 @@
     <div
       v-if="visible"
       ref="menuElement"
-      class="fixed z-[1200] min-w-52 rounded-xl border border-base-300 bg-base-100 p-1.5 text-base-content shadow-2xl"
+      class="metro-flyout fixed z-[1200] min-w-52 p-1.5"
       :style="menuStyle"
       role="menu"
       :aria-label="`${label} options`"
@@ -15,7 +15,7 @@
       @contextmenu.prevent.stop
     >
       <NuxtLink
-        class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium hover:bg-base-200 focus-visible:bg-base-200 focus-visible:outline-none"
+        class="metro-transition flex min-h-11 items-center gap-3 px-3 py-2.5 text-sm font-medium hover:bg-base-200 focus-visible:bg-base-200 focus-visible:outline-none"
         :to="settingsLink"
         role="menuitem"
         @click="closeMenu"

@@ -11,14 +11,62 @@ test("authenticated shell owns fixed navigation and page content", async () => {
 
 test("Metro geometry covers shell, overlays, and standalone utility flows", async () => {
   const css = await readFile("app/assets/app.css", "utf8");
-  for (const boundary of [
-    ".authenticated-shell *",
-    ".metro-standalone *",
-    ".metro-pane *",
-    ".modal *",
-    ".toast *",
+  assert.match(css, /:where\(\s*\.alert,\s*\.btn,\s*\.card,/);
+  assert.match(css, /\.metro-pane,\s*\.metro-flyout,\s*\.metro-status/);
+  assert.doesNotMatch(css, /\.authenticated-shell,\s*\.authenticated-shell \*/);
+  assert.doesNotMatch(css, /\.modal,\s*\.modal \*/);
+});
+
+test("Metro foundations include shared layout, state, motion, and contrast primitives", async () => {
+  const css = await readFile("app/assets/app.css", "utf8");
+  for (const primitive of [
+    ".metro-page",
+    ".metro-section",
+    ".metro-toolbar",
+    ".metro-flyout",
+    ".metro-status",
+    ".metro-skeleton",
+    "@media (prefers-reduced-motion: reduce)",
+    "@media (forced-colors: active)",
   ])
-    assert.equal(css.includes(boundary), true, `${boundary} must stay square`);
+    assert.equal(css.includes(primitive), true, `${primitive} must be defined`);
+  assert.match(css, /--metro-control-size: 2\.75rem/);
+  assert.match(css, /outline: 2px solid var\(--metro-accent\)/);
+});
+
+test("primary settings, startup, and media surfaces avoid ornamental chrome", async () => {
+  const files = [
+    "app/pages/settings.vue",
+    "app/components/Init.vue",
+    "app/components/VoiceChannel.vue",
+    "app/components/SoundboardPanel.vue",
+    "app/components/SoundboardUploadDialog.vue",
+  ];
+  const source = (
+    await Promise.all(files.map((file) => readFile(file, "utf8")))
+  ).join("\n");
+  assert.doesNotMatch(source, /bg-gradient/);
+  assert.doesNotMatch(source, /backdrop-blur/);
+  assert.doesNotMatch(source, /transition-all/);
+  assert.doesNotMatch(source, /btn-circle/);
+});
+
+test("Metro implementation checklist records shipped and browser-only gates", async () => {
+  const checklist = await readFile(
+    "docs/metro-design-implementation-checklist.md",
+    "utf8",
+  );
+  assert.match(checklist, /## Foundation/);
+  assert.match(checklist, /## Application shell and navigation/);
+  assert.match(
+    checklist,
+    /## Responsive, accessibility, and internationalization/,
+  );
+  assert.match(checklist, /- \[ \] Verify complete keyboard-only navigation/);
+  assert.match(
+    checklist,
+    /- \[ \] Complete authenticated multi-browser visual review/,
+  );
 });
 
 test("authenticated page copy consistently calls shared spaces rooms", async () => {
@@ -47,8 +95,25 @@ test("channel editor owns the complete live media policy", async () => {
   assert.match(source, /editingChannelPolicy\[field\.key\]/);
   assert.match(source, /type="range"/);
   assert.match(source, /editingChannelPolicy\.hdAudio/);
+  assert.match(source, /aria-labelledby="edit-channel-title"/);
+  assert.match(source, /max-h-\[min\(92dvh,56rem\)\]/);
+  assert.match(source, /max-w-2xl/);
+  assert.match(source, /min-h-0 flex-1 overflow-y-auto/);
+  assert.match(source, /Save channel/);
+  assert.doesNotMatch(source, /rounded-box border border-base-300 bg-base-200/);
   assert.doesNotMatch(roomSettings, /Channel media policies/);
   assert.doesNotMatch(api, /body\.audio_bitrate && channel\.isMedia/);
+});
+
+test("channel creation and editing use bounded Metro command layouts", async () => {
+  const source = await readFile("app/components/ChannelList.vue", "utf8");
+  assert.match(source, /aria-labelledby="create-channel-title"/);
+  assert.match(source, /Create a channel/);
+  assert.match(source, /Create channel/);
+  assert.match(source, /flex flex-col-reverse gap-2 border-t/);
+  assert.match(source, /grid grid-cols-2 border-l border-t/);
+  assert.doesNotMatch(source, />Create Channel</);
+  assert.doesNotMatch(source, />Save Changes</);
 });
 
 test("room settings opens the full administration route", async () => {

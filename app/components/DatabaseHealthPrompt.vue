@@ -7,7 +7,7 @@
       aria-label="Local storage problem"
     >
       <div
-        class="alert shadow-xl"
+        class="metro-status metro-flyout bg-base-100"
         :class="issue.severity === 'fatal' ? 'alert-error' : 'alert-warning'"
       >
         <Icon :name="issueIcon" class="h-6 w-6 shrink-0" />

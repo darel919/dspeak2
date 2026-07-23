@@ -1,12 +1,16 @@
 <template>
   <div class="dropdown dropdown-end">
-    <label tabindex="0" class="btn btn-ghost btn-xs btn-circle">
+    <label
+      tabindex="0"
+      class="btn btn-square btn-ghost btn-xs"
+      aria-label="Message actions"
+    >
       <Icon name="lucide:ellipsis-vertical" class="h-4 w-4" />
     </label>
 
     <ul
       tabindex="0"
-      class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52"
+      class="dropdown-content z-[1] menu w-52 border border-base-300 bg-base-100 p-2 shadow-xl"
     >
       <!-- <li v-if="!isOwnMessage">
         <button @click="handleMarkAsRead" :disabled="isRead">

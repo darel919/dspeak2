@@ -5,7 +5,7 @@
     @pointerdown.self="cancel"
   >
     <form
-      class="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-base-content/20 bg-base-200 shadow-2xl"
+      class="metro-flyout flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden bg-base-200"
       aria-labelledby="upload-sound-title"
       @submit.prevent="upload"
     >
@@ -39,10 +39,10 @@
           </div>
           <label
             for="sound-file"
-            class="flex min-h-24 cursor-pointer items-center gap-4 rounded-xl border border-dashed border-base-content/30 bg-base-100 px-4 py-3 transition hover:border-primary hover:bg-primary/5"
+            class="metro-transition flex min-h-24 cursor-pointer items-center gap-4 border border-dashed border-base-content/30 bg-base-100 px-4 py-3 hover:border-primary hover:bg-primary/5"
           >
             <span
-              class="grid size-11 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"
+              class="grid size-11 shrink-0 place-items-center bg-primary/10 text-primary"
             >
               <Icon
                 :name="file ? 'lucide:file-audio' : 'lucide:upload'"
@@ -124,7 +124,7 @@
             </label>
             <label
               for="sound-icon-file"
-              class="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-base-300 bg-base-100 px-3 hover:border-primary"
+              class="metro-transition flex min-w-0 cursor-pointer items-center gap-3 border border-base-300 bg-base-100 px-3 hover:border-primary"
             >
               <Icon
                 name="lucide:image-plus"
