@@ -6,6 +6,7 @@ import { useChannelsStore } from "./channels";
 import { useNotificationsStore } from "./notifications";
 import {
   cacheChannelMessages,
+  dequeueMessage,
   enqueueMessage,
   getCachedChannelMessages,
   IdbOperationError,
@@ -13,6 +14,9 @@ import {
 import { addReader, hasReader, mergeReaders } from "../shared/read-receipts";
 import {
   chatApiErrorMessage,
+  mergeServerMessagesWithPending,
+  pendingMessageClientId,
+  removeMessageAliases,
   reconcileIncomingMessage,
   reconcileSentMessage,
 } from "../shared/chat-messages";
@@ -109,10 +113,10 @@ export const useChatStore = defineStore("chat", () => {
           : Array.isArray(data)
             ? data
             : [];
-        const pendingMessages = (
-          channelMessages.get(normalizedChannelId) || []
-        ).filter((message) => message.status === "pending");
-        const preparedMessages = [...serverMessages, ...pendingMessages];
+        const preparedMessages = mergeServerMessagesWithPending(
+          serverMessages,
+          channelMessages.get(normalizedChannelId) || [],
+        );
         channelMessages.set(normalizedChannelId, preparedMessages);
         channelPreparedAt.set(normalizedChannelId, Date.now());
         cacheChannelMessages(
@@ -728,11 +732,11 @@ export const useChatStore = defineStore("chat", () => {
       } else {
         nextMessages = [];
       }
-      const pendingMessages = (
+      nextMessages = mergeServerMessagesWithPending(
+        nextMessages,
         channelMessages.get(channelId) ||
-        (currentChannelId.value === channelId ? messages.value : [])
-      ).filter((message) => message.status === "pending");
-      nextMessages = [...nextMessages, ...pendingMessages];
+          (currentChannelId.value === channelId ? messages.value : []),
+      );
       channelMessages.set(channelId, nextMessages);
       channelPreparedAt.set(String(channelId), Date.now());
       messages.value = nextMessages;
@@ -1062,6 +1066,11 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   async function deleteMessage(messageId) {
+    const targetMessage = messages.value.find(
+      (message) => message.id === messageId,
+    );
+    const clientId = targetMessage?.client_id || "";
+    const isPending = targetMessage?.status === "pending";
     const response = await fetch(
       `${config.public.apiPath}/chat/message/delete`,
       {
@@ -1071,8 +1080,25 @@ export const useChatStore = defineStore("chat", () => {
         body: JSON.stringify({ messageId }),
       },
     );
-    if (!response.ok) throw await chatResponseError(response);
-    removeMessage(messageId);
+    if (!response.ok) {
+      if (response.status === 404 && isPending) {
+        const pendingClientId = pendingMessageClientId(targetMessage);
+        if (pendingClientId) {
+          try {
+            await dequeueMessage(pendingClientId);
+          } catch (queueError) {
+            console.warn(
+              "[ChatStore] Unable to remove stale message from delivery queue:",
+              queueError,
+            );
+          }
+        }
+        removeMessage(messageId, pendingClientId);
+        return;
+      }
+      throw await chatResponseError(response);
+    }
+    removeMessage(messageId, clientId);
   }
 
   async function fetchMessageHistory(messageId) {
@@ -1084,13 +1110,20 @@ export const useChatStore = defineStore("chat", () => {
     return response.json();
   }
 
-  function removeMessage(messageId) {
-    const messageIndex = messages.value.findIndex(
-      (msg) => msg.id === messageId,
+  function removeMessage(messageId, clientId = "") {
+    removeMessageAliases(messages.value, messageId, clientId);
+    const userId = useAuthStore().getUserData()?.id;
+    const channelId = currentChannelId.value;
+    if (!userId || !channelId) return;
+    channelMessages.set(channelId, messages.value);
+    cacheChannelMessages(userId, channelId, messages.value).catch(
+      (cacheError) => {
+        console.warn(
+          "[ChatStore] Unable to persist deleted message cache:",
+          cacheError,
+        );
+      },
     );
-    if (messageIndex !== -1) {
-      messages.value.splice(messageIndex, 1);
-    }
   }
 
   function updateTypingStatus(userId, isTyping) {

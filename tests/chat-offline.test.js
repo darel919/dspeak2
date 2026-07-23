@@ -34,6 +34,12 @@ test("offline messages remain writable and queue for reconnection", () => {
   assert.match(chatStore, /pendingMessage\.status = "failed"/);
 });
 
+test("orphaned pending messages are removed locally after server deletion", () => {
+  assert.match(chatStore, /response\.status === 404 && isPending/);
+  assert.match(chatStore, /await dequeueMessage\(pendingClientId\)/);
+  assert.match(chatStore, /removeMessage\(messageId, pendingClientId\)/);
+});
+
 test("connectivity recovery reconnects chat and flushes the queue", () => {
   assert.match(chatStore, /addEventListener\("online", handleBrowserOnline\)/);
   assert.match(chatStore, /connectToChannel\([\s\S]*true,/);

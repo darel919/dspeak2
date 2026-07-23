@@ -4,8 +4,11 @@ import {
   chatApiErrorMessage,
   hasDistinctUpdatedTimestamp,
   isValidMessageTimestamp,
+  mergeServerMessagesWithPending,
   messageChannelId,
   isPendingDuplicate,
+  pendingMessageClientId,
+  removeMessageAliases,
   reconcileIncomingMessage,
   reconcileSentMessage,
 } from "../app/shared/chat-messages.js";
@@ -76,6 +79,69 @@ test("edited server content does not reveal a pending duplicate", () => {
   };
 
   assert.equal(isPendingDuplicate(pending, [pending, edited]), true);
+});
+
+test("channel hydration drops a pending alias already persisted by the server", () => {
+  const serverMessage = {
+    id: "message-1",
+    client_id: "client-1",
+    content: "saved",
+  };
+  const pending = {
+    id: "pending_client-1",
+    client_id: "client-1",
+    content: "saved",
+    status: "pending",
+  };
+
+  assert.deepEqual(mergeServerMessagesWithPending([serverMessage], [pending]), [
+    serverMessage,
+  ]);
+});
+
+test("unsend removes a persisted message and its pending alias", () => {
+  const messages = [
+    {
+      id: "message-1",
+      client_id: "client-1",
+      content: "saved",
+    },
+    {
+      id: "pending_client-1",
+      client_id: "client-1",
+      content: "saved",
+      status: "pending",
+    },
+  ];
+
+  removeMessageAliases(messages, "message-1");
+
+  assert.deepEqual(messages, []);
+});
+
+test("unsend response removes an alias after realtime deletion won the race", () => {
+  const messages = [
+    {
+      id: "pending_client-1",
+      client_id: "client-1",
+      content: "saved",
+      status: "pending",
+    },
+  ];
+
+  removeMessageAliases(messages, "message-1", "client-1");
+
+  assert.deepEqual(messages, []);
+});
+
+test("orphaned pending messages retain the queue ID needed for local cleanup", () => {
+  assert.equal(
+    pendingMessageClientId({
+      id: "pending_client-1",
+      status: "pending",
+    }),
+    "client-1",
+  );
 });
 
 test("message detail helpers reject absent timestamps and use channel IDs", () => {
