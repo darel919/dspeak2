@@ -27,9 +27,15 @@ test("service worker updates remain waiting for explicit user activation", () =>
   assert.match(nuxtConfig, /registerType: "prompt"/);
   assert.doesNotMatch(serviceWorker, /\.then\(\(\) => self\.skipWaiting/);
   assert.match(serviceWorker, /event\.data\.type === "SKIP_WAITING"/);
-  assert.match(updatePrompt, /registration\.waiting\.postMessage/);
+  assert.match(updatePrompt, /activationWorker\.postMessage/);
   assert.match(updatePrompt, /controllerchange/);
   assert.match(updatePrompt, /window\.location\.reload/);
+  assert.match(updatePrompt, /registration\.waiting\.state === "installed"/);
+  assert.match(updatePrompt, /updateAvailable\.value = false/);
+  assert.doesNotMatch(
+    updatePrompt,
+    /function handleControllerChange\(\)[\s\S]*?updateAvailable\.value = true/,
+  );
 });
 
 test("each deployment receives an isolated precache", () => {

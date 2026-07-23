@@ -42,9 +42,10 @@ An updated service worker remains in the waiting state while an older client is
 open. The application checks for updates at startup, when a tab becomes visible,
 when connectivity returns, and once per hour. A persistent refresh notice lets
 the user activate the waiting worker and reload as one controlled operation.
-This prevents an old application bundle from continuing behind a newly
-activated service worker. Other open tabs detect the controller change and show
-the same refresh notice.
+The notice is visible only while an installed worker is actually waiting.
+Activation clears it, and the page reloads only after the browser confirms that
+the selected worker controls the page. A controller change without a waiting
+worker clears stale notice state instead of reporting another update.
 
 Interrupted and invalid transactions receive one clean reopen-and-retry before
 the failure reaches a consumer. IndexedDB errors are normalized and sent to the

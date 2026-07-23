@@ -39,26 +39,30 @@ let registration = null;
 let updateInterval = null;
 let installingWorker = null;
 let reloadFallback = null;
-let hasController = false;
+let activationWorker = null;
 
-function markUpdateAvailable() {
-  if (navigator.serviceWorker.controller) {
-    updateAvailable.value = true;
-  }
+function syncUpdateAvailable() {
+  updateAvailable.value = Boolean(
+    navigator.serviceWorker.controller &&
+    registration?.waiting &&
+    registration.waiting.state === "installed",
+  );
 }
 
 function observeInstallingWorker(worker) {
   if (!worker || worker === installingWorker) return;
   installingWorker = worker;
   worker.addEventListener("statechange", () => {
-    if (worker.state === "installed") markUpdateAvailable();
+    if (worker.state === "installed" || worker.state === "redundant") {
+      syncUpdateAvailable();
+    }
   });
 }
 
 function inspectRegistration() {
   if (!registration) return;
-  if (registration.waiting) markUpdateAvailable();
   observeInstallingWorker(registration.installing);
+  syncUpdateAvailable();
 }
 
 async function checkForUpdate() {
@@ -76,15 +80,11 @@ function handleUpdateFound() {
 }
 
 function handleControllerChange() {
-  if (!hasController) {
-    hasController = true;
-    return;
-  }
-  if (refreshing.value) {
+  updateAvailable.value = false;
+  if (refreshing.value && activationWorker) {
+    if (reloadFallback) window.clearTimeout(reloadFallback);
     window.location.reload();
-    return;
   }
-  updateAvailable.value = true;
 }
 
 function handleVisibilityChange() {
@@ -93,20 +93,33 @@ function handleVisibilityChange() {
 
 async function activateUpdate() {
   if (refreshing.value) return;
-  refreshing.value = true;
+  inspectRegistration();
 
-  if (registration?.waiting) {
-    registration.waiting.postMessage({ type: "SKIP_WAITING" });
-    reloadFallback = window.setTimeout(() => window.location.reload(), 5000);
+  activationWorker = registration?.waiting || null;
+  if (!activationWorker) {
+    updateAvailable.value = false;
+    await checkForUpdate();
     return;
   }
 
-  window.location.reload();
+  refreshing.value = true;
+  activationWorker.postMessage({ type: "SKIP_WAITING" });
+  reloadFallback = window.setTimeout(() => {
+    if (
+      activationWorker.state === "activated" ||
+      registration?.active === activationWorker
+    ) {
+      window.location.reload();
+      return;
+    }
+    refreshing.value = false;
+    activationWorker = null;
+    inspectRegistration();
+  }, 5000);
 }
 
 onMounted(async () => {
   if (import.meta.dev || !("serviceWorker" in navigator)) return;
-  hasController = Boolean(navigator.serviceWorker.controller);
 
   try {
     registration = await registerServiceWorker();
