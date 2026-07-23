@@ -1,9 +1,13 @@
 <template>
-  <div class="h-full bg-base-200 flex flex-col">
+  <div class="flex h-full flex-col bg-base-200">
     <!-- Header with back button -->
-    <div class="p-4 border-base-300">
+    <div class="border-b border-base-300 p-4">
       <div class="flex items-center gap-3">
-        <button @click="$emit('back')" class="btn btn-ghost btn-sm btn-circle">
+        <button
+          class="btn btn-square btn-ghost min-h-11 min-w-11"
+          aria-label="Back to rooms"
+          @click="$emit('back')"
+        >
           <Icon name="lucide:chevron-left" class="h-5 w-5" />
         </button>
         <div>
@@ -16,25 +20,23 @@
     </div>
 
     <!-- Channels List -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+    <div class="flex-1 space-y-6 overflow-y-auto p-4">
       <!-- Text Channels -->
       <div v-if="textChannels.length > 0">
-        <h3
-          class="text-sm font-semibold text-base-content/70 uppercase tracking-wide mb-2 px-2"
-        >
-          Text Channels
+        <h3 class="mb-2 px-2 text-sm font-semibold text-base-content/70">
+          Text channels
         </h3>
         <div class="space-y-1">
           <button
             v-for="channel in textChannels"
             :key="channel.id"
-            @click="selectChannel(channel)"
-            class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200"
+            class="metro-transition flex min-h-11 w-full items-center gap-3 p-3"
             :class="[
               selectedChannelId === channel.id
                 ? 'bg-primary text-primary-content'
                 : 'hover:bg-base-300 text-base-content',
             ]"
+            @click="selectChannel(channel)"
           >
             <!-- Channel Icon -->
             <div class="flex-shrink-0">
@@ -72,22 +74,20 @@
 
       <!-- Voice Channels -->
       <div v-if="voiceChannels.length > 0">
-        <h3
-          class="text-sm font-semibold text-base-content/70 uppercase tracking-wide mb-2 px-2"
-        >
-          Voice Channels
+        <h3 class="mb-2 px-2 text-sm font-semibold text-base-content/70">
+          Voice channels
         </h3>
         <div class="space-y-1">
           <button
             v-for="channel in voiceChannels"
             :key="channel.id"
-            @click="selectChannel(channel)"
-            class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200"
+            class="metro-transition flex min-h-11 w-full items-center gap-3 p-3"
             :class="[
               selectedChannelId === channel.id
                 ? 'bg-primary text-primary-content'
                 : 'hover:bg-base-300 text-base-content',
             ]"
+            @click="selectChannel(channel)"
           >
             <!-- Channel Icon -->
             <div class="flex-shrink-0">
@@ -127,14 +127,14 @@
       <!-- No Channels State -->
       <div
         v-if="textChannels.length === 0 && voiceChannels.length === 0"
-        class="flex flex-col items-center justify-center h-64 text-center"
+        class="flex h-64 flex-col items-start justify-center border-l-4 border-base-300 pl-6 text-left"
       >
         <div class="text-base-content/50 mb-4">
           <Icon name="lucide:message-square" class="h-16 w-16 mx-auto mb-4" />
         </div>
         <h3 class="font-medium mb-2">No channels found</h3>
         <p class="text-sm text-base-content/60">
-          This room doesn't have any channels yet
+          This room doesn't have any channels yet.
         </p>
       </div>
 
@@ -142,10 +142,10 @@
       <div v-if="loading" class="space-y-3">
         <div v-for="i in 4" :key="i" class="animate-pulse">
           <div class="flex items-center gap-3 p-3">
-            <div class="w-5 h-5 bg-base-300 rounded"></div>
+            <div class="metro-skeleton h-5 w-5"></div>
             <div class="flex-1">
-              <div class="h-4 bg-base-300 rounded w-3/4 mb-1"></div>
-              <div class="h-3 bg-base-300 rounded w-1/2"></div>
+              <div class="metro-skeleton mb-1 h-4 w-3/4"></div>
+              <div class="metro-skeleton h-3 w-1/2"></div>
             </div>
           </div>
         </div>

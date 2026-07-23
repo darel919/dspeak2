@@ -6,7 +6,7 @@
       aria-live="assertive"
       aria-label="Application update available"
     >
-      <div class="alert alert-info shadow-xl">
+      <div class="metro-status metro-flyout border-info bg-base-100 text-info">
         <Icon name="lucide:refresh-cw" class="h-6 w-6 shrink-0" />
         <div class="min-w-0 flex-1">
           <h2 class="font-semibold">A new dSpeak version is available</h2>

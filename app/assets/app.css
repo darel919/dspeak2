@@ -18,6 +18,27 @@
 
 :root {
   --navbar-height: 4.5rem;
+  --metro-space-1: 0.25rem;
+  --metro-space-2: 0.5rem;
+  --metro-space-3: 0.75rem;
+  --metro-space-4: 1rem;
+  --metro-space-6: 1.5rem;
+  --metro-space-8: 2rem;
+  --metro-space-12: 3rem;
+  --metro-space-16: 4rem;
+  --metro-control-size: 2.75rem;
+  --metro-border: color-mix(
+    in oklab,
+    var(--color-base-content) 18%,
+    transparent
+  );
+  --metro-muted: color-mix(
+    in oklab,
+    var(--color-base-content) 68%,
+    transparent
+  );
+  --metro-overlay-shadow: 0 12px 32px
+    color-mix(in oklab, #000000 24%, transparent);
   --navbar-surface: color-mix(
     in oklab,
     var(--color-base-100) 94%,
@@ -51,16 +72,24 @@
   --metro-accent-content: #ffffff;
 }
 
-.authenticated-shell,
-.authenticated-shell *,
-.metro-standalone,
-.metro-standalone *,
+:where(.authenticated-shell, .metro-standalone, .modal, .toast)
+  :where(
+    .alert,
+    .btn,
+    .card,
+    .dropdown-content,
+    .file-input,
+    .input,
+    .menu,
+    .modal-box,
+    .select,
+    .tab,
+    .textarea
+  ),
 .metro-pane,
-.metro-pane *,
-.modal,
-.modal *,
-.toast,
-.toast * {
+.metro-flyout,
+.metro-status,
+.settings-panel {
   border-radius: 0 !important;
 }
 
@@ -76,15 +105,74 @@
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
+html {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  min-width: 20rem;
+  line-height: 1.4;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+:where(.authenticated-shell, .metro-standalone, .modal, .toast)
+  :where(
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+  outline: 2px solid var(--metro-accent);
+  outline-offset: 2px;
+}
+
+.authenticated-shell :where(.card, .modal-box, .dropdown-content),
+.metro-standalone :where(.card, .modal-box, .dropdown-content),
+.modal-box,
+.toast {
+  border-color: var(--metro-border);
+}
+
 .authenticated-shell .card,
-.authenticated-shell .modal-box,
-.authenticated-shell .dropdown-content {
-  border-color: var(--color-base-300);
+.metro-standalone .card {
   box-shadow: none;
 }
 
-.authenticated-shell .btn {
+.authenticated-shell :where(.modal-box, .dropdown-content),
+.metro-standalone :where(.modal-box, .dropdown-content),
+.modal-box {
+  box-shadow: var(--metro-overlay-shadow);
+}
+
+.authenticated-shell .btn,
+.metro-standalone .btn,
+.modal .btn {
+  min-height: var(--metro-control-size);
   font-weight: 600;
+  transition-duration: 180ms;
+  transition-property:
+    background-color, border-color, color, opacity, transform;
+  transition-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+.authenticated-shell .btn:active:not(:disabled),
+.metro-standalone .btn:active:not(:disabled),
+.modal .btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.authenticated-shell :where(.btn, .input, .textarea, .select, .file-input),
+.metro-standalone :where(.btn, .input, .textarea, .select, .file-input),
+.modal :where(.btn, .input, .textarea, .select, .file-input) {
+  border-radius: 0;
 }
 
 .authenticated-shell .input,
@@ -92,6 +180,69 @@
 .authenticated-shell .select,
 .authenticated-shell .file-input {
   background-color: var(--color-base-100);
+}
+
+.metro-page {
+  min-height: calc(100dvh - var(--navbar-height));
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+.metro-page-content {
+  width: min(100%, 72rem);
+  margin-inline: auto;
+}
+
+.metro-section {
+  padding-block: var(--metro-space-6);
+}
+
+.metro-section + .metro-section {
+  border-top: 1px solid var(--metro-border);
+}
+
+.metro-section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.metro-description {
+  max-width: 60ch;
+  color: var(--metro-muted);
+  line-height: 1.5;
+}
+
+.metro-toolbar {
+  display: flex;
+  min-height: var(--metro-control-size);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--metro-space-2);
+}
+
+.metro-flyout {
+  border: 1px solid var(--metro-border);
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  box-shadow: var(--metro-overlay-shadow);
+}
+
+.metro-status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--metro-space-3);
+  border-inline-start: 4px solid currentColor;
+  padding: var(--metro-space-3) var(--metro-space-4);
+}
+
+.metro-skeleton {
+  background: color-mix(
+    in oklab,
+    var(--color-base-content) 12%,
+    var(--color-base-100)
+  );
 }
 
 .metro-title {
@@ -102,7 +253,7 @@
 }
 
 .metro-pane {
-  border-color: color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  border-color: var(--metro-border);
   background: var(--color-base-100);
 }
 
@@ -126,6 +277,41 @@
     transition:
       height 240ms cubic-bezier(0.1, 0.9, 0.2, 1),
       min-height 240ms cubic-bezier(0.1, 0.9, 0.2, 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metro-transition,
+  .authenticated-shell *,
+  .metro-standalone *,
+  .modal *,
+  .toast * {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .metro-selected,
+  .btn-primary,
+  [aria-current="page"],
+  [aria-selected="true"] {
+    border: 2px solid Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  :where(button, a, input, select, textarea):focus-visible {
+    outline-color: Highlight;
+  }
+
+  .metro-pane,
+  .metro-flyout,
+  .modal-box,
+  .settings-panel {
+    border-color: CanvasText;
   }
 }
 
@@ -221,8 +407,7 @@ body {
   overflow: hidden;
   border: 1px solid var(--color-base-300);
   background: var(--color-base-100);
-  box-shadow: 0 1px 2px
-    color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  box-shadow: none;
 }
 
 .settings-panel-heading {

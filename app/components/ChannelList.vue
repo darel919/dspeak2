@@ -25,38 +25,38 @@
           </button>
           <div
             tabindex="0"
-            class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52"
+            class="dropdown-content z-[1] menu w-52 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
           >
             <li v-if="hasPermission('channel.create')">
-              <a @click="showCreateChannel = true">Create Channel</a>
+              <a @click="showCreateChannel = true">Create channel</a>
             </li>
             <li>
               <a
                 @click="goToRoomSettings"
                 class="cursor-pointer hover:bg-base-200"
               >
-                Room Settings
+                Room settings
               </a>
             </li>
             <li>
               <a
                 @click="inviteDialog?.open(room)"
                 class="cursor-pointer hover:bg-base-200"
-                >Copy Invite Link</a
+                >Copy invite link</a
               >
             </li>
             <li v-if="isRoomOwnerOrAdmin">
               <a
                 @click="handleDeleteRoom"
                 class="text-error cursor-pointer hover:bg-error/20"
-                >Delete Room</a
+                >Delete room</a
               >
             </li>
             <li v-else>
               <a
                 @click="handleLeaveRoom"
                 class="text-warning cursor-pointer hover:bg-warning/20"
-                >Leave Room</a
+                >Leave room</a
               >
             </li>
           </div>
@@ -73,7 +73,7 @@
           class="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-base-content/60 uppercase"
         >
           <Icon name="lucide:message-square" class="h-3 w-3" />
-          Text Channels
+          Text channels
         </div>
         <div class="space-y-1">
           <div
@@ -81,7 +81,7 @@
             :key="channel.id"
             @click="selectChannel(channel)"
             @contextmenu.prevent.stop="openChannelMenu(channel, $event)"
-            class="group flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-base-300 transition-colors"
+            class="metro-transition group flex cursor-pointer items-center gap-2 px-2 py-1 hover:bg-base-300"
             :class="{
               'bg-primary text-primary-content':
                 selectedChannelId === channel.id,
@@ -105,14 +105,14 @@
               </button>
               <div
                 tabindex="0"
-                class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-44"
+                class="dropdown-content z-[1] menu w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
               >
                 <li v-if="canEditChannel(channel)">
-                  <a @click="editChannel(channel)">Edit Channel</a>
+                  <a @click="editChannel(channel)">Edit channel</a>
                 </li>
                 <li v-if="canDeleteChannel(channel)">
                   <a @click="deleteChannel(channel)" class="text-error"
-                    >Delete Channel</a
+                    >Delete channel</a
                   >
                 </li>
               </div>
@@ -127,13 +127,13 @@
           class="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-base-content/60 uppercase"
         >
           <Icon name="lucide:mic" class="h-3 w-3" />
-          Voice Channels
+          Voice channels
         </div>
         <div class="space-y-1">
           <div
             v-for="channel in voiceChannels"
             :key="channel.id"
-            class="group rounded transition-colors"
+            class="metro-transition group"
             @contextmenu.prevent.stop="openChannelMenu(channel, $event)"
             :class="{
               'bg-primary text-primary-content':
@@ -179,14 +179,14 @@
                   </button>
                   <div
                     tabindex="0"
-                    class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-44"
+                    class="dropdown-content z-[1] menu w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
                   >
                     <li v-if="canEditChannel(channel)">
-                      <a @click="editChannel(channel)">Edit Channel</a>
+                      <a @click="editChannel(channel)">Edit channel</a>
                     </li>
                     <li v-if="canDeleteChannel(channel)">
                       <a @click="deleteChannel(channel)" class="text-error"
-                        >Delete Channel</a
+                        >Delete channel</a
                       >
                     </li>
                   </div>
@@ -281,14 +281,14 @@
                       <button
                         tabindex="0"
                         type="button"
-                        class="flex h-6 items-end gap-0.5 rounded px-1 py-1 transition-colors hover:bg-base-content/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        class="metro-transition flex h-7 items-end gap-0.5 px-1 py-1 hover:bg-base-content/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                         :aria-label="getConnectionQualityAriaLabel(u.id || u)"
                         :title="getConnectionQualityTitle(u.id || u)"
                       >
                         <span
                           v-for="bar in 5"
                           :key="bar"
-                          class="w-0.5 rounded-full bg-current transition-opacity"
+                          class="w-0.5 bg-current transition-opacity"
                           :class="
                             bar <= getUserConnectionQuality(u.id || u)
                               ? `${getConnectionQualityColorClass(getUserConnectionQuality(u.id || u))} opacity-100`
@@ -299,7 +299,7 @@
                       </button>
                       <div
                         tabindex="0"
-                        class="dropdown-content z-[20] mt-1 w-56 rounded-box border border-base-300 bg-base-100 p-3 text-base-content shadow-xl"
+                        class="dropdown-content z-[20] mt-1 w-56 border border-base-300 bg-base-100 p-3 text-base-content shadow-xl"
                       >
                         <div class="truncate text-sm font-semibold">
                           {{ getUserName(u.id || u) }}
@@ -469,7 +469,7 @@
       <div
         v-if="participantMenuUserId"
         ref="participantMenuElement"
-        class="fixed z-[100] w-52 rounded-lg border border-base-300 bg-base-200 p-3 text-base-content shadow-xl"
+        class="metro-flyout fixed z-[100] w-52 bg-base-200 p-3"
         :style="participantMenuStyle"
         role="dialog"
         :aria-label="`Voice channel controls for ${getUserName(participantMenuUserId)}`"
@@ -503,7 +503,7 @@
             v-for="channel in participantMoveTargets"
             :key="channel.id"
             type="button"
-            class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-300"
+            class="metro-transition flex min-h-11 w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-base-300"
             @click="moderateParticipant(channel.id)"
           >
             <Icon name="lucide:move-right" class="size-4" />
@@ -511,7 +511,7 @@
           </button>
           <button
             type="button"
-            class="mt-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-error hover:bg-error/10"
+            class="metro-transition mt-1 flex min-h-11 w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-error hover:bg-error/10"
             @click="moderateParticipant(null)"
           >
             <Icon name="lucide:phone-off" class="size-4" />
@@ -522,83 +522,135 @@
     </Teleport>
 
     <!-- Create Channel Modal -->
-    <div v-if="showCreateChannel" class="modal modal-open">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg">Create Channel</h3>
-        <form @submit.prevent="handleCreateChannel" class="space-y-4 mt-4">
+    <div
+      v-if="showCreateChannel"
+      class="modal modal-open px-3 py-4 sm:px-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-channel-title"
+    >
+      <section
+        class="modal-box flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
+      >
+        <header
+          class="flex items-start justify-between gap-6 border-b border-base-300 px-5 py-5 sm:px-7"
+        >
           <div>
-            <label class="label">
-              <span class="label-text">Channel Name</span>
-            </label>
-            <input
-              v-model="newChannelName"
-              type="text"
-              placeholder="channel-name"
-              class="input input-bordered w-full"
-              required
-            />
+            <p class="mb-1 text-sm font-semibold text-primary">New channel</p>
+            <h2 id="create-channel-title" class="text-3xl font-light">
+              Create a channel
+            </h2>
           </div>
-          <div>
-            <label class="label">
-              <span class="label-text">Description (optional)</span>
-            </label>
-            <textarea
-              v-model="newChannelDesc"
-              placeholder="Describe what this channel is for..."
-              class="textarea textarea-bordered w-full"
-              rows="3"
-            ></textarea>
-          </div>
-          <div>
-            <label class="label">
-              <span class="label-text">Channel Type</span>
-            </label>
-            <div class="form-control">
-              <label class="label cursor-pointer">
-                <span class="label-text">Text Channel</span>
-                <input
-                  v-model="newChannelType"
-                  type="radio"
-                  value="text"
-                  class="radio"
-                />
-              </label>
-              <label class="label cursor-pointer">
-                <span class="label-text">Voice Channel</span>
-                <input
-                  v-model="newChannelType"
-                  type="radio"
-                  value="voice"
-                  class="radio"
-                />
-              </label>
-            </div>
-          </div>
-          <div v-if="newChannelType === 'voice'">
-            <label class="label">
-              <span class="label-text">Audio Bitrate (kbps)</span>
-            </label>
-            <div class="w-full">
+          <button
+            type="button"
+            class="btn btn-square btn-ghost shrink-0"
+            aria-label="Close channel creator"
+            @click="closeCreateModal"
+          >
+            <Icon name="lucide:x" class="size-5" />
+          </button>
+        </header>
+
+        <form
+          class="flex min-h-0 flex-1 flex-col"
+          @submit.prevent="handleCreateChannel"
+        >
+          <div
+            class="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-6 sm:px-7"
+          >
+            <label class="grid gap-2">
+              <span class="text-sm font-semibold">Channel name</span>
               <input
+                v-model="newChannelName"
+                type="text"
+                placeholder="channel-name"
+                class="input input-bordered w-full"
+                required
+              />
+            </label>
+
+            <label class="grid gap-2">
+              <span class="text-sm font-semibold">Description</span>
+              <textarea
+                v-model="newChannelDesc"
+                placeholder="What will people use this channel for?"
+                class="textarea textarea-bordered min-h-24 w-full"
+                rows="3"
+              ></textarea>
+              <small class="text-base-content/60">Optional</small>
+            </label>
+
+            <fieldset>
+              <legend class="text-sm font-semibold">Channel type</legend>
+              <div
+                class="mt-2 grid grid-cols-2 border-l border-t border-base-300"
+              >
+                <label
+                  class="metro-transition flex min-h-20 cursor-pointer items-center gap-3 border-b border-r border-base-300 p-3 hover:bg-base-200"
+                  :class="newChannelType === 'text' && 'bg-primary/10'"
+                >
+                  <input
+                    v-model="newChannelType"
+                    type="radio"
+                    value="text"
+                    class="radio radio-primary"
+                  />
+                  <span>
+                    <strong class="block">Text</strong>
+                    <small class="text-base-content/60">Messages</small>
+                  </span>
+                </label>
+                <label
+                  class="metro-transition flex min-h-20 cursor-pointer items-center gap-3 border-b border-r border-base-300 p-3 hover:bg-base-200"
+                  :class="newChannelType === 'voice' && 'bg-primary/10'"
+                >
+                  <input
+                    v-model="newChannelType"
+                    type="radio"
+                    value="voice"
+                    class="radio radio-primary"
+                  />
+                  <span>
+                    <strong class="block">Voice</strong>
+                    <small class="text-base-content/60">Audio and video</small>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+
+            <label v-if="newChannelType === 'voice'" class="grid gap-3">
+              <span class="flex items-center justify-between gap-4">
+                <span class="text-sm font-semibold">Microphone bitrate</span>
+                <output class="text-sm tabular-nums"
+                  >{{ newChannelBitrate }} kbps</output
+                >
+              </span>
+              <input
+                v-model.number="newChannelBitrate"
                 type="range"
                 min="32"
                 max="96"
-                v-model.number="newChannelBitrate"
-                class="range w-full"
+                class="range range-primary w-full"
                 step="1"
               />
-              <div class="flex justify-between px-2.5 mt-2 text-xs">
-                <span>32</span>
-                <span>64</span>
-                <span>96</span>
-              </div>
-            </div>
-            <div class="text-sm mt-2">
-              Selected: <strong>{{ newChannelBitrate }} kbps mono</strong>
-            </div>
+              <span
+                class="flex justify-between text-xs tabular-nums text-base-content/60"
+                aria-hidden="true"
+              >
+                <span>32 kbps</span>
+                <span>96 kbps</span>
+              </span>
+            </label>
           </div>
-          <div class="modal-action">
-            <button type="button" class="btn" @click="closeCreateModal">
+
+          <footer
+            class="flex flex-col-reverse gap-2 border-t border-base-300 px-5 py-4 sm:flex-row sm:justify-end sm:px-7"
+          >
+            <button
+              type="button"
+              class="btn btn-ghost"
+              @click="closeCreateModal"
+            >
               Cancel
             </button>
             <button
@@ -606,163 +658,208 @@
               class="btn btn-primary"
               :disabled="!newChannelName.trim()"
             >
-              Create Channel
+              Create channel
             </button>
-          </div>
+          </footer>
         </form>
-      </div>
+      </section>
     </div>
 
-    <!-- Edit Channel Modal -->
-    <div v-if="showEditChannel" class="modal modal-open">
-      <div class="modal-box max-w-3xl">
-        <h3 class="font-bold text-lg">Edit Channel</h3>
-        <form @submit.prevent="handleEditChannel" class="space-y-4 mt-4">
+    <div
+      v-if="showEditChannel"
+      class="modal modal-open px-3 py-4 sm:px-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-channel-title"
+    >
+      <section
+        class="modal-box flex max-h-[min(92dvh,56rem)] w-full max-w-2xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
+      >
+        <header
+          class="flex shrink-0 items-start justify-between gap-6 border-b border-base-300 px-5 py-5 sm:px-7"
+        >
           <div>
-            <label class="label">
-              <span class="label-text">Channel Name</span>
-            </label>
-            <input
-              v-model="editingChannel.name"
-              type="text"
-              class="input input-bordered w-full"
-              required
-            />
-          </div>
-          <div>
-            <label class="label">
-              <span class="label-text">Description</span>
-            </label>
-            <textarea
-              v-model="editingChannel.desc"
-              class="textarea textarea-bordered w-full"
-              rows="3"
-            ></textarea>
-          </div>
-          <fieldset
-            v-if="
-              editingChannel.isMedia &&
-              hasPermission('channel.manage_media_policy')
-            "
-            class="border-t border-base-300 pt-4"
-          >
-            <legend class="pr-3 text-lg font-light">Media policy</legend>
-            <p class="mb-4 text-sm text-base-content/60">
-              Changes apply live to everyone connected to this voice channel.
+            <p class="mb-1 text-sm font-semibold text-primary">
+              Channel settings
             </p>
-            <label class="mb-4 flex cursor-pointer items-start gap-3">
-              <input
-                v-model="editingChannelPolicy.hdAudio"
-                type="checkbox"
-                class="toggle toggle-primary mt-0.5"
-                @change="applyHdAudioRange"
-              />
-              <span>
-                <span class="block text-sm font-medium"
-                  >HD microphone audio</span
-                >
-                <small class="text-base-content/60">
-                  Stereo microphone audio from 64–256 kbps. Off by default.
-                </small>
-              </span>
-            </label>
-            <div class="grid gap-4 sm:grid-cols-2">
-              <div
-                v-for="field in channelPolicyFields"
-                :key="field.key"
-                class="rounded-box border border-base-300 bg-base-200/40 p-4"
-              >
-                <div class="mb-3 flex items-center justify-between gap-3">
-                  <label
-                    :id="`channel-policy-${field.key}-label`"
-                    :for="
-                      field.control === 'slider'
-                        ? `channel-policy-${field.key}`
-                        : undefined
-                    "
-                    class="text-sm font-medium"
-                  >
-                    {{ field.label }}
-                  </label>
-                  <label
-                    v-if="field.control === 'slider'"
-                    class="input input-sm w-28 gap-1 px-2"
-                  >
-                    <input
-                      v-model.number="editingChannelPolicy[field.key]"
-                      type="number"
-                      class="min-w-0 text-right tabular-nums"
-                      :aria-label="`${field.label} bitrate in kilobits per second`"
-                      :min="field.min"
-                      :max="field.max"
-                      :step="field.step"
-                      required
-                      @change="normalizeChannelPolicyValue(field)"
-                    />
-                    <span class="text-xs text-base-content/60">kbps</span>
-                  </label>
-                </div>
-                <template v-if="field.control === 'slider'">
-                  <div class="flex min-h-12 items-center">
-                    <input
-                      :id="`channel-policy-${field.key}`"
-                      v-model.number="editingChannelPolicy[field.key]"
-                      type="range"
-                      class="range range-lg range-primary w-full"
-                      :min="field.min"
-                      :max="field.max"
-                      :step="field.step"
-                      required
-                    />
-                  </div>
-                  <div
-                    class="mt-1 flex justify-between text-xs tabular-nums text-base-content/50"
-                    aria-hidden="true"
-                  >
-                    <span>{{ field.min }} kbps</span>
-                    <span>{{ field.max }} kbps</span>
-                  </div>
-                </template>
-                <div
-                  v-else
-                  :id="`channel-policy-${field.key}`"
-                  class="grid grid-cols-2 gap-2"
-                  role="group"
-                  :aria-labelledby="`channel-policy-${field.key}-label`"
-                >
-                  <button
-                    v-for="option in field.options"
-                    :key="option.value"
-                    type="button"
-                    class="btn h-auto min-h-12 flex-col gap-0.5 py-2"
-                    :class="{
-                      'btn-primary':
-                        editingChannelPolicy[field.key] === option.value,
-                      'btn-outline':
-                        editingChannelPolicy[field.key] !== option.value,
-                    }"
-                    :aria-pressed="
-                      editingChannelPolicy[field.key] === option.value
-                    "
-                    @click="setChannelPolicyValue(field.key, option.value)"
-                  >
-                    <span>{{ option.label }}</span>
-                    <span class="text-xs font-normal opacity-70">
-                      {{ formatVideoPolicyBitrate(option.value) }}
-                    </span>
-                  </button>
-                </div>
+            <h2 id="edit-channel-title" class="text-3xl font-light">
+              Edit {{ editingChannel.name }}
+            </h2>
+          </div>
+          <button
+            type="button"
+            class="btn btn-square btn-ghost shrink-0"
+            aria-label="Close channel settings"
+            @click="closeEditModal"
+          >
+            <Icon name="lucide:x" class="size-5" />
+          </button>
+        </header>
+
+        <form
+          class="flex min-h-0 flex-1 flex-col"
+          @submit.prevent="handleEditChannel"
+        >
+          <div class="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7">
+            <section aria-labelledby="channel-details-title">
+              <h3 id="channel-details-title" class="text-xl font-semibold">
+                Details
+              </h3>
+              <div class="mt-5 grid gap-5">
+                <label class="grid gap-2">
+                  <span class="text-sm font-semibold">Channel name</span>
+                  <input
+                    v-model="editingChannel.name"
+                    type="text"
+                    class="input input-bordered w-full"
+                    required
+                  />
+                </label>
+                <label class="grid gap-2">
+                  <span class="text-sm font-semibold">Description</span>
+                  <textarea
+                    v-model="editingChannel.desc"
+                    class="textarea textarea-bordered min-h-24 w-full"
+                    rows="3"
+                  ></textarea>
+                </label>
               </div>
-            </div>
-          </fieldset>
-          <div class="modal-action">
-            <button type="button" class="btn" @click="closeEditModal">
+            </section>
+
+            <fieldset
+              v-if="
+                editingChannel.isMedia &&
+                hasPermission('channel.manage_media_policy')
+              "
+              class="mt-8 border-t border-base-300 pt-7"
+            >
+              <legend class="sr-only">Media policy</legend>
+              <h3 class="text-xl font-semibold">Media policy</h3>
+              <p class="mt-1 max-w-xl text-sm leading-6 text-base-content/65">
+                These limits apply live to everyone connected to this voice
+                channel.
+              </p>
+
+              <label
+                class="metro-transition mt-5 flex min-h-16 cursor-pointer items-center justify-between gap-5 border-y border-base-300 py-3"
+              >
+                <span>
+                  <span class="block font-semibold">HD microphone audio</span>
+                  <small class="mt-1 block text-base-content/65">
+                    Use stereo microphone audio between 64 and 256 kbps.
+                  </small>
+                </span>
+                <input
+                  v-model="editingChannelPolicy.hdAudio"
+                  type="checkbox"
+                  class="toggle toggle-primary shrink-0"
+                  @change="applyHdAudioRange"
+                />
+              </label>
+
+              <div class="divide-y divide-base-300">
+                <section
+                  v-for="field in channelPolicyFields"
+                  :key="field.key"
+                  class="grid gap-4 py-6 md:grid-cols-[9rem_minmax(0,1fr)] md:gap-6"
+                >
+                  <div>
+                    <h4
+                      :id="`channel-policy-${field.key}-label`"
+                      class="font-semibold"
+                    >
+                      {{ field.label }}
+                    </h4>
+                    <p class="mt-1 text-xs leading-5 text-base-content/60">
+                      {{
+                        field.control === "slider"
+                          ? "Set the maximum audio bitrate."
+                          : "Choose the maximum video quality."
+                      }}
+                    </p>
+                  </div>
+
+                  <div v-if="field.control === 'slider'">
+                    <div class="flex items-center gap-4">
+                      <input
+                        :id="`channel-policy-${field.key}`"
+                        v-model.number="editingChannelPolicy[field.key]"
+                        type="range"
+                        class="range range-primary flex-1"
+                        :min="field.min"
+                        :max="field.max"
+                        :step="field.step"
+                        required
+                      />
+                      <label
+                        class="input input-bordered flex w-28 shrink-0 items-center gap-1 px-2"
+                      >
+                        <input
+                          v-model.number="editingChannelPolicy[field.key]"
+                          type="number"
+                          class="min-w-0 text-right tabular-nums"
+                          :aria-label="`${field.label} bitrate in kilobits per second`"
+                          :min="field.min"
+                          :max="field.max"
+                          :step="field.step"
+                          required
+                          @change="normalizeChannelPolicyValue(field)"
+                        />
+                        <span class="text-xs text-base-content/60">kbps</span>
+                      </label>
+                    </div>
+                    <div
+                      class="mt-2 flex justify-between text-xs tabular-nums text-base-content/55"
+                      aria-hidden="true"
+                    >
+                      <span>{{ field.min }} kbps</span>
+                      <span>{{ field.max }} kbps</span>
+                    </div>
+                  </div>
+
+                  <div
+                    v-else
+                    :id="`channel-policy-${field.key}`"
+                    class="grid grid-cols-2 border-l border-t border-base-300 sm:grid-cols-4"
+                    role="group"
+                    :aria-labelledby="`channel-policy-${field.key}-label`"
+                  >
+                    <button
+                      v-for="option in field.options"
+                      :key="option.value"
+                      type="button"
+                      class="metro-transition min-h-16 border-b border-r border-base-300 px-2 py-2 text-left hover:bg-base-200"
+                      :class="
+                        editingChannelPolicy[field.key] === option.value
+                          ? 'bg-primary text-primary-content'
+                          : 'bg-base-100'
+                      "
+                      :aria-pressed="
+                        editingChannelPolicy[field.key] === option.value
+                      "
+                      @click="setChannelPolicyValue(field.key, option.value)"
+                    >
+                      <strong class="block text-sm">{{ option.label }}</strong>
+                      <span class="mt-1 block text-xs opacity-75">
+                        {{ formatVideoPolicyBitrate(option.value) }}
+                      </span>
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </fieldset>
+          </div>
+
+          <footer
+            class="flex shrink-0 flex-col-reverse gap-2 border-t border-base-300 bg-base-100 px-5 py-4 sm:flex-row sm:justify-end sm:px-7"
+          >
+            <button type="button" class="btn btn-ghost" @click="closeEditModal">
               Cancel
             </button>
-            <button type="submit" class="btn btn-primary">Save Changes</button>
-          </div>
+            <button type="submit" class="btn btn-primary">Save channel</button>
+          </footer>
         </form>
-      </div>
+      </section>
     </div>
   </div>
 </template>

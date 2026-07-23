@@ -14,7 +14,7 @@
     >
       <section
         ref="dialog"
-        class="absolute bottom-5 left-1/2 flex max-h-[min(760px,calc(100vh-2.5rem))] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-2xl border border-base-content/20 bg-base-200 shadow-2xl"
+        class="metro-flyout absolute bottom-5 left-1/2 flex max-h-[min(760px,calc(100vh-2.5rem))] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 flex-col overflow-hidden bg-base-200"
         role="dialog"
         aria-modal="true"
         aria-labelledby="soundboard-title"
@@ -109,7 +109,7 @@
                 <div
                   v-for="clip in group.clips"
                   :key="clip.id"
-                  class="group relative flex min-w-0 items-center rounded-lg bg-base-300 hover:bg-base-content/15"
+                  class="metro-transition group relative flex min-w-0 items-center bg-base-300 hover:bg-base-content/15"
                 >
                   <button
                     type="button"
@@ -159,7 +159,7 @@
       @pointerdown.self="editing = null"
     >
       <form
-        class="w-full max-w-md space-y-4 rounded-xl border border-base-content/20 bg-base-200 p-5 shadow-2xl"
+        class="metro-flyout w-full max-w-md space-y-4 bg-base-200 p-5"
         @submit.prevent="saveEdit"
       >
         <h2 class="text-xl font-semibold">Manage sound</h2>

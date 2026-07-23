@@ -1,9 +1,7 @@
 <template>
-  <div
-    class="min-h-screen-minus-navbar bg-base-200/35 px-4 py-6 text-base-content sm:px-6 lg:py-8"
-  >
+  <div class="metro-page text-base-content">
     <div
-      class="mx-auto flex max-w-6xl flex-col overflow-hidden border border-base-300 bg-base-100 shadow-sm lg:min-h-[680px] lg:flex-row"
+      class="mx-auto flex max-w-6xl flex-col overflow-hidden border border-base-300 bg-base-100 lg:min-h-[680px] lg:flex-row"
     >
       <aside
         class="border-b border-base-300 bg-base-200/55 px-4 py-4 lg:w-60 lg:shrink-0 lg:border-b-0 lg:border-r lg:px-4 lg:py-5"
@@ -33,7 +31,7 @@
             v-for="item in settingsNavigation"
             :key="item.id"
             type="button"
-            class="flex min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition lg:w-full lg:justify-start"
+            class="metro-transition flex min-h-11 min-w-0 items-center justify-center gap-2 px-3 py-2 text-sm font-medium lg:w-full lg:justify-start"
             :class="
               activeSection === item.id
                 ? 'bg-primary/12 text-primary'
@@ -59,7 +57,7 @@
       <main class="min-w-0 flex-1 px-4 py-6 sm:px-7 lg:px-8 lg:py-7">
         <div class="mx-auto max-w-3xl">
           <header class="mb-6 border-b border-base-300 pb-5">
-            <h1 class="text-2xl font-bold tracking-tight">
+            <h1 class="metro-title text-3xl">
               {{ activeSectionMeta.title }}
             </h1>
             <p class="mt-1 text-sm text-base-content/60">
@@ -70,16 +68,11 @@
           <section v-if="activeSection === 'account'" class="space-y-5">
             <div
               v-if="profile"
-              class="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/14 via-base-100 to-base-100 p-5 shadow-sm sm:p-6"
+              class="border-l-4 border-primary bg-base-100 p-5 sm:p-6"
             >
-              <div
-                class="pointer-events-none absolute -right-12 -top-16 size-44 rounded-full bg-primary/10 blur-3xl"
-              ></div>
-              <div class="relative flex items-center gap-4 sm:gap-5">
+              <div class="flex items-center gap-4 sm:gap-5">
                 <div class="avatar shrink-0">
-                  <div
-                    class="w-16 rounded-2xl bg-base-200 ring-2 ring-base-100 shadow-md sm:w-20"
-                  >
+                  <div class="w-16 bg-base-200 ring-2 ring-base-100 sm:w-20">
                     <img :src="profileAvatarPreview" alt="User avatar" />
                   </div>
                 </div>
@@ -89,7 +82,7 @@
                       {{ profileDisplayName || profile.name }}
                     </h2>
                     <span
-                      class="inline-flex items-center gap-1.5 rounded-full bg-success/12 px-2.5 py-1 text-xs font-semibold text-success"
+                      class="inline-flex items-center gap-1.5 bg-success/12 px-2.5 py-1 text-xs font-semibold text-success"
                     >
                       <span class="size-1.5 rounded-full bg-success"></span>
                       Signed in
@@ -111,14 +104,14 @@
               <p class="p-5 text-error">Profile information is unavailable.</p>
             </div>
             <form
-              class="overflow-hidden rounded-2xl border border-base-300 bg-base-100 shadow-sm"
+              class="overflow-hidden border border-base-300 bg-base-100"
               @submit.prevent="saveProfile"
             >
               <div
                 class="flex items-start gap-3 border-b border-base-300 bg-base-200/35 px-5 py-4 sm:px-6"
               >
                 <span
-                  class="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/12 text-primary"
+                  class="grid size-9 shrink-0 place-items-center bg-primary/12 text-primary"
                 >
                   <Icon name="lucide:user-round-pen" class="size-4" />
                 </span>
@@ -138,7 +131,7 @@
                     >
                     <button
                       type="button"
-                      class="group relative block overflow-hidden rounded-2xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      class="group relative block overflow-hidden text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                       aria-label="Choose a new profile picture"
                       @click="openAvatarPicker"
                     >
@@ -148,7 +141,7 @@
                         class="size-28 object-cover sm:size-32"
                       />
                       <span
-                        class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-neutral/75 px-2 py-2 text-xs font-semibold text-neutral-content backdrop-blur-sm transition group-hover:bg-neutral/90"
+                        class="metro-transition absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-neutral/85 px-2 py-2 text-xs font-semibold text-neutral-content group-hover:bg-neutral"
                       >
                         <Icon name="lucide:camera" class="size-3.5" /> Change
                       </span>
@@ -246,7 +239,7 @@
               </div>
             </form>
             <div
-              class="flex flex-col gap-4 rounded-2xl border border-error/20 bg-error/5 p-5 sm:flex-row sm:items-center sm:justify-between"
+              class="metro-status flex-col border-error bg-error/5 sm:flex-row sm:items-center sm:justify-between"
             >
               <div>
                 <h2 class="text-sm font-semibold">Sign out of dSpeak</h2>
@@ -535,22 +528,24 @@
                   <p>Set separate limits for camera and screen sharing.</p>
                 </div>
               </div>
-              <div class="grid gap-4 p-5 md:grid-cols-2">
+              <div
+                class="grid divide-y divide-base-300 md:grid-cols-2 md:divide-x md:divide-y-0"
+              >
                 <div
                   v-for="video in videoQualitySections"
                   :key="video.id"
-                  class="rounded-xl border border-base-300 bg-base-200/45 p-4"
+                  class="p-5"
                 >
                   <div class="mb-4 flex items-center gap-3">
                     <span
-                      class="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary"
+                      class="grid size-9 place-items-center bg-primary/10 text-primary"
                       ><Icon :name="video.icon" class="size-5"
                     /></span>
                     <h3 class="font-semibold">{{ video.label }}</h3>
                   </div>
                   <label class="form-control"
                     ><span
-                      class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60"
+                      class="mb-1.5 text-xs font-semibold text-base-content/65"
                       >Resolution</span
                     ><select
                       class="select select-bordered w-full bg-base-100"
@@ -568,7 +563,7 @@
                   >
                   <label class="form-control mt-4"
                     ><span
-                      class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60"
+                      class="mb-1.5 text-xs font-semibold text-base-content/65"
                       >Frame rate</span
                     ><select
                       class="select select-bordered w-full bg-base-100"

@@ -17,7 +17,7 @@
       <div
         v-for="member in sortedMembers"
         :key="member.id"
-        class="group relative flex cursor-pointer items-center gap-3 rounded-lg px-1 py-0.5 hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        class="metro-transition group relative flex min-h-11 cursor-pointer items-center gap-3 px-2 py-1 hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         role="button"
         tabindex="0"
         :aria-label="`View profile for ${memberDisplayName(member)}`"
@@ -88,7 +88,7 @@
       <div
         v-if="profileCardUser"
         ref="profileCardElement"
-        class="fixed z-[100] w-72 overflow-hidden rounded-xl border border-base-300 bg-base-200 text-base-content shadow-2xl"
+        class="metro-flyout fixed z-[100] w-72 overflow-hidden bg-base-200"
         :style="profileCardStyle"
         role="dialog"
         :aria-label="`Profile for ${memberDisplayName(profileCardUser)}`"
@@ -141,7 +141,7 @@
       <div
         v-if="memberMenuUser"
         ref="memberMenuElement"
-        class="fixed z-[101] w-60 overflow-hidden rounded-xl border border-base-300 bg-base-100 text-base-content shadow-2xl"
+        class="metro-flyout fixed z-[101] w-60 overflow-hidden"
         :style="memberMenuStyle"
         role="dialog"
         :aria-label="`Options for ${memberDisplayName(memberMenuUser)}`"

@@ -250,11 +250,11 @@ onBeforeUnmount(() => {
     <div class="relative z-10 flex min-w-0 items-center gap-3">
       <NuxtLink
         to="/"
-        class="shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-primary"
+        class="shrink-0 focus-visible:outline-2 focus-visible:outline-primary"
         aria-label="dSpeak home"
       >
         <img
-          class="size-11 rounded-lg select-none pointer-events-none"
+          class="pointer-events-none size-11 select-none"
           src="/assets/logo/logo_96.png"
           alt=""
         />
@@ -641,11 +641,8 @@ onBeforeUnmount(() => {
   gap: 0.375rem;
   border: 1px solid
     color-mix(in oklab, var(--color-base-content) 14%, transparent);
-  border-radius: 0.875rem;
   background: var(--color-base-100);
   padding: 0.3rem;
-  box-shadow: 0 1px 8px
-    color-mix(in oklab, var(--color-base-content) 7%, transparent);
 }
 
 .call-dock-connected {
@@ -697,7 +694,6 @@ onBeforeUnmount(() => {
   max-width: 15rem;
   align-items: center;
   gap: 0.625rem;
-  border-radius: 0.625rem;
   padding: 0.25rem 0.55rem;
   transition: background-color 150ms ease;
 }
@@ -742,7 +738,6 @@ onBeforeUnmount(() => {
   list-style: none;
   align-items: center;
   justify-content: center;
-  border-radius: 0.625rem;
   color: color-mix(in oklab, var(--color-base-content) 78%, transparent);
   transition:
     background-color 150ms ease,
@@ -784,7 +779,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid
     color-mix(in oklab, var(--color-base-content) 14%, transparent);
-  border-radius: 0.875rem;
   background: var(--color-base-100);
   padding: 0.45rem;
   color: var(--color-base-content);

@@ -2,39 +2,26 @@
   <div>
     <div
       v-if="!startupComplete && !isAuthPage"
-      class="relative flex min-h-screen items-center justify-center overflow-hidden bg-base-100 px-6 py-12"
+      class="metro-standalone flex min-h-screen items-center bg-base-100 px-6 py-12 sm:px-12"
     >
-      <div
-        class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_color-mix(in_oklab,var(--color-hero)_18%,transparent),_transparent_55%)]"
-      ></div>
-      <div class="relative text-center">
-        <img
-          :src="startupLogo"
-          alt=""
-          class="mx-auto mb-6 size-24 drop-shadow-lg"
-        />
-        <p
-          class="mb-2 text-sm font-semibold uppercase tracking-[0.3em] text-hero"
-        >
-          dSpeak
-        </p>
-        <h1 class="font-hero text-4xl sm:text-5xl">Welcome to dSpeak</h1>
-        <p
-          class="mx-auto mt-4 max-w-md text-base text-base-content/60 sm:text-lg"
-        >
+      <div class="w-full max-w-3xl border-l-8 border-hero pl-6 sm:pl-10">
+        <img :src="startupLogo" alt="" class="mb-8 size-24" />
+        <p class="mb-3 text-sm font-semibold tracking-wide text-hero">dSpeak</p>
+        <h1 class="metro-title">Welcome to dSpeak</h1>
+        <p class="mt-5 max-w-md text-base text-base-content/70 sm:text-lg">
           Your space for conversations that feel close, wherever you are.
         </p>
-      </div>
-      <div
-        class="absolute inset-x-6 bottom-8 flex items-center justify-center gap-3 text-sm text-base-content/60"
-        role="status"
-        aria-live="polite"
-      >
-        <span
-          class="loading loading-spinner loading-sm text-hero"
-          aria-hidden="true"
-        ></span>
-        <span>{{ startupStatus }}</span>
+        <div
+          class="mt-10 flex items-center gap-3 text-sm text-base-content/70"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            class="loading loading-spinner loading-sm text-hero"
+            aria-hidden="true"
+          ></span>
+          <span>{{ startupStatus }}</span>
+        </div>
       </div>
     </div>
     <div v-show="startupComplete || isAuthPage">

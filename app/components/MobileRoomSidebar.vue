@@ -11,10 +11,10 @@
       <div v-if="roomsStore.loading" class="space-y-3">
         <div v-for="i in 5" :key="i" class="animate-pulse">
           <div class="flex items-center gap-3 p-3">
-            <div class="w-12 h-12 bg-base-300 rounded-full"></div>
+            <div class="metro-skeleton h-12 w-12"></div>
             <div class="flex-1">
-              <div class="h-4 bg-base-300 rounded w-3/4 mb-2"></div>
-              <div class="h-3 bg-base-300 rounded w-1/2"></div>
+              <div class="metro-skeleton mb-2 h-4 w-3/4"></div>
+              <div class="metro-skeleton h-3 w-1/2"></div>
             </div>
           </div>
         </div>
@@ -36,13 +36,13 @@
         <button
           v-for="room in roomsStore.rooms"
           :key="room.id"
-          @click="selectRoom(room)"
-          class="w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200"
+          class="metro-transition flex min-h-14 w-full items-center gap-3 p-3"
           :class="[
             selectedRoomId === room.id
               ? 'bg-primary text-primary-content'
               : 'hover:bg-base-300 text-base-content',
           ]"
+          @click="selectRoom(room)"
         >
           <!-- Room Avatar -->
           <div class="avatar placeholder">
