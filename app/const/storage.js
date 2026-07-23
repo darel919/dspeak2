@@ -8,4 +8,6 @@ export const STORAGE_KEYS = Object.freeze({
   systemSoundTheme: "dspeak_system_sound_theme",
   systemSoundVolume: "dspeak_system_sound_volume",
   systemSoundsMuted: "dspeak_system_sounds_muted",
+  voiceDeafened: "voice.deafened",
+  voiceMicMuted: "voice.micMuted",
 });

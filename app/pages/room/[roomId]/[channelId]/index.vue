@@ -1,85 +1,58 @@
 <template>
   <section class="h-screen-minus-navbar overflow-hidden bg-base-100">
-    <div class="h-full min-h-0 overflow-hidden">
-      <div class="h-full flex">
-        <!-- Desktop Layout -->
-        <div v-show="!isMobile" class="flex min-h-0 w-full overflow-hidden">
-          <!-- Channel List Sidebar -->
-          <div class="w-[280px] shrink-0 border-r border-base-300">
-            <ChannelList
-              v-if="room"
-              :room="room"
-              :selected-channel-id="selectedChannelId"
-              @channel-selected="onChannelSelected"
-            />
-          </div>
+    <div class="flex h-full min-h-0 overflow-hidden">
+      <div class="hidden w-[280px] shrink-0 border-r border-base-300 md:block">
+        <ChannelList
+          v-if="room"
+          :room="room"
+          :selected-channel-id="selectedChannelId"
+          @channel-selected="onChannelSelected"
+        />
+      </div>
 
-          <!-- Main Content Area -->
-          <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <!-- Voice Channel -->
-            <div
-              v-if="selectedChannel && selectedChannel.isMedia"
-              class="min-h-0 flex-1 overflow-hidden p-4"
-            >
-              <VoiceChannel
-                :key="`voice-${selectedChannel.id}`"
-                :channel="selectedChannel"
-              />
-            </div>
-            <!-- Text Channel -->
-            <ChatWindow
-              v-else-if="selectedChannel && selectedChannel.id"
-              :channel-id="selectedChannel.id"
-              :channel="selectedChannel"
-              :room="room"
-              :show-back-button="false"
-              class="flex-1"
-            />
-            <div v-else class="flex-1 flex items-center justify-center">
-              <div class="text-center">
-                <h3 class="text-lg font-semibold mb-2">
-                  Welcome to {{ room?.name }}
-                </h3>
-                <p class="text-base-content/60">
-                  Select a channel to start chatting
-                </p>
-              </div>
-            </div>
-          </div>
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          v-if="selectedChannel?.isMedia"
+          class="min-h-0 flex-1 overflow-hidden p-4"
+        >
+          <VoiceChannel
+            :key="`voice-${selectedChannel.id}`"
+            :channel="selectedChannel"
+            class="h-full"
+          />
         </div>
 
-        <!-- Mobile Layout -->
-        <div v-show="isMobile" class="min-h-0 w-full overflow-hidden">
-          <!-- Mobile: Full-screen content when channel is selected -->
-          <div v-if="selectedChannel && selectedChannel.id" class="h-full">
-            <!-- Voice Channel -->
-            <VoiceChannel
-              v-if="selectedChannel.isMedia"
-              :key="`voice-mobile-${selectedChannel.id}`"
-              :channel="selectedChannel"
-              class="h-full p-4"
-            />
-            <!-- Text Channel -->
-            <ChatWindow
-              v-else
-              class="h-full"
-              :channel-id="selectedChannel.id"
-              :channel="selectedChannel"
-              :room="room"
-              :show-back-button="true"
-              @back="onBackFromChat"
-            />
-          </div>
+        <ChatWindow
+          v-else-if="selectedChannel?.id"
+          :channel-id="selectedChannel.id"
+          :channel="selectedChannel"
+          :room="room"
+          :show-back-button="true"
+          class="flex-1"
+          @back="onBackFromChat"
+        />
 
-          <!-- Mobile: Show channel list when room is selected but no channel -->
-          <div v-else class="h-full">
-            <MobileChannelList
-              :room="room"
-              :selected-channel-id="selectedChannelId"
-              :loading="channelsStore.loading"
-              @channel-selected="onChannelSelected"
-              @back="onBackToHome"
-            />
+        <MobileChannelList
+          v-else
+          class="h-full md:hidden"
+          :room="room"
+          :selected-channel-id="selectedChannelId"
+          :loading="channelsStore.loading"
+          @channel-selected="onChannelSelected"
+          @back="onBackToHome"
+        />
+
+        <div
+          v-if="!selectedChannel"
+          class="hidden flex-1 items-center justify-center md:flex"
+        >
+          <div class="text-center">
+            <h3 class="mb-2 text-lg font-semibold">
+              Welcome to {{ room?.name }}
+            </h3>
+            <p class="text-base-content/60">
+              Select a channel to start chatting
+            </p>
           </div>
         </div>
       </div>
@@ -100,59 +73,39 @@ import { MOBILE_BREAKPOINT_PX } from "../../../../const/ui";
 const roomsStore = useRoomsStore();
 const channelsStore = useChannelsStore();
 const voiceStore = useVoiceStore();
+const chatStore = useChatStore();
 const route = useRoute();
 const router = useRouter();
 
+definePageMeta({
+  key: "room-channel",
+});
+
 const roomId = computed(() => route.params.roomId);
 const channelId = computed(() => route.params.channelId);
-const ownedChatChannelId = String(route.params.channelId || "");
+let ownedChatChannelId = String(route.params.channelId || "");
 const room = computed(() =>
   roomsStore.rooms.find((r) => r.id === roomId.value),
 );
 const selectedChannelId = ref(channelId.value || null);
 const selectedChannel = computed(() =>
-  channelsStore.getChannelById(selectedChannelId.value),
+  channelsStore.getRoomChannelById(roomId.value, selectedChannelId.value),
 );
-
-const isMobile = ref(false);
-let resizeHandler = null;
-let resizeTimeout = null;
-
-if (typeof window !== "undefined") {
-  const checkMobile = () => {
-    if (resizeTimeout) {
-      clearTimeout(resizeTimeout);
-    }
-    resizeTimeout = setTimeout(() => {
-      const newIsMobile = window.innerWidth < MOBILE_BREAKPOINT_PX;
-
-      if (isMobile.value !== newIsMobile) {
-        isMobile.value = newIsMobile;
-      }
-    }, 150);
-  };
-
-  resizeHandler = checkMobile;
-  checkMobile();
-  window.addEventListener("resize", checkMobile);
-}
+let channelSelectionGeneration = 0;
 
 onUnmounted(() => {
-  if (typeof window !== "undefined" && resizeHandler) {
-    window.removeEventListener("resize", resizeHandler);
-  }
-
-  if (resizeTimeout) {
-    clearTimeout(resizeTimeout);
-  }
-
-  const chatStore = useChatStore();
   if (chatStore && chatStore.disconnectFromChannel) {
     chatStore.disconnectFromChannel(true, false, true, ownedChatChannelId);
   }
 });
 
 async function onChannelSelected(channel) {
+  const generation = ++channelSelectionGeneration;
+  if (!channel.isMedia) {
+    await chatStore.prepareChannel(channel.id);
+  }
+  if (generation !== channelSelectionGeneration) return;
+  ownedChatChannelId = String(channel.id);
   selectedChannelId.value = channel.id;
   router.replace({
     name: "room-roomId-channelId",
@@ -169,10 +122,8 @@ async function onChannelSelected(channel) {
 }
 
 function onBackFromChat() {
-  if (isMobile.value) {
-    selectedChannelId.value = null;
-    router.replace({ name: "room-roomId", params: { roomId: roomId.value } });
-  }
+  selectedChannelId.value = null;
+  router.replace({ name: "room-roomId", params: { roomId: roomId.value } });
 }
 
 function onBackToHome() {
@@ -185,6 +136,18 @@ watch(
     if (r && r.name) {
       try {
         await channelsStore.fetchChannels(r.id);
+        chatStore.prepareChannels(
+          channelsStore.getTextChannels().map((channel) => channel.id),
+          2,
+        );
+
+        if (selectedChannel.value?.isMedia) {
+          try {
+            await voiceStore.joinVoiceChannel(selectedChannel.value.id);
+          } catch (error) {
+            console.error("Failed to restore voice channel from URL:", error);
+          }
+        }
 
         if (!selectedChannelId.value) {
           const currentIsMobile =
@@ -214,6 +177,7 @@ watch(
   () => route.params.channelId,
   async (newChannelId) => {
     if (newChannelId && newChannelId !== selectedChannelId.value) {
+      ownedChatChannelId = String(newChannelId);
       selectedChannelId.value = newChannelId;
 
       const channel = channelsStore.getChannelById(newChannelId);

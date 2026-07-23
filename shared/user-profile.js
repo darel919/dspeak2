@@ -48,13 +48,22 @@ export function normalizeNickname(value) {
 
 export function publicDisplayName(user) {
   return (
+    user?.handle ||
+    user?.username ||
     user?.display_name ||
     user?.name ||
-    user?.username ||
     user?.email ||
     user?.id ||
     "Unknown user"
   );
+}
+
+export function publicFullName(user) {
+  const primaryName = normalizedText(publicDisplayName(user));
+  const fullName = normalizedText(
+    user?.display_name || user?.provider_name || user?.name,
+  );
+  return fullName && fullName !== primaryName ? fullName : "";
 }
 
 export function profileIdentityLine(user, nickname) {

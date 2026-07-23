@@ -6,6 +6,7 @@ import {
   unsubscribeFromVoicePresence,
 } from "../../utils/voice-presence";
 import { authenticateWebSocketRequest } from "../../utils/authentication";
+import { publicDisplayName } from "../../../shared/user-profile";
 
 const sessions = new Map();
 
@@ -48,11 +49,10 @@ export default defineWebSocketHandler({
           String(profile.id),
           {
             id: String(profile.id),
-            name:
-              profile.display_name || profile.name || profile.username || "",
-            display_name:
-              profile.display_name || profile.name || profile.username || "",
+            name: publicDisplayName(profile),
+            display_name: profile.display_name || "",
             username: profile.username || "",
+            handle: profile.handle || "",
             avatar: profile.avatar
               ? `auth/assets/avatar?userId=${encodeURIComponent(profile.id)}&fileName=${encodeURIComponent(profile.avatar)}`
               : null,

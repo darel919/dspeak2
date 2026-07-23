@@ -64,7 +64,47 @@
         :style="roomTooltipStyle"
         role="tooltip"
       >
-        {{ tooltipRoom.name }}
+        <strong class="block truncate">{{ tooltipRoom.name }}</strong>
+        <div
+          v-if="tooltipVoiceChannels.length"
+          class="mt-2 grid gap-2 border-t border-base-300 pt-2"
+        >
+          <div
+            v-for="channel in tooltipVoiceChannels"
+            :key="channel.id"
+            class="flex min-w-0 items-center gap-2"
+          >
+            <Icon
+              name="lucide:volume-2"
+              class="size-4 shrink-0 text-base-content/60"
+              aria-hidden="true"
+            />
+            <span class="sr-only">{{ channel.name }}:</span>
+            <div class="flex min-w-0 -space-x-1.5">
+              <div
+                v-for="participant in channel.participants"
+                :key="participant.id"
+                class="avatar placeholder"
+                :title="participant.name"
+              >
+                <div
+                  class="size-7 overflow-hidden rounded-full border-2 border-base-100 bg-base-300 text-[9px] text-base-content"
+                >
+                  <img
+                    v-if="participant.avatar"
+                    :src="participant.avatar"
+                    :alt="participant.name"
+                    class="size-full object-cover"
+                  />
+                  <span v-else>{{ participant.initials }}</span>
+                </div>
+              </div>
+            </div>
+            <span class="sr-only">
+              {{ channel.participants.map(({ name }) => name).join(", ") }}
+            </span>
+          </div>
+        </div>
       </div>
     </Teleport>
     <div
@@ -158,12 +198,16 @@
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
 import { useAuthStore } from "../stores/auth";
+import { useChannelsStore } from "../stores/channels";
 import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
+import { publicDisplayName } from "../../shared/user-profile";
 import { VIEWPORT_PADDING_PX } from "../const/ui";
 
 const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
-const { openingRoomId, openRoom } = usePreparedRoomNavigation();
+const channelsStore = useChannelsStore();
+const { openingRoomId, openRoom, prefetchRoom, prefetchRooms } =
+  usePreparedRoomNavigation();
 const route = useRoute();
 const config = useRuntimeConfig();
 const unreadCounts = useState("unread-counts", () => []);
@@ -179,6 +223,20 @@ const contextMenuStyle = computed(() => ({
   left: `${contextMenuPosition.value.x}px`,
   top: `${contextMenuPosition.value.y}px`,
 }));
+const tooltipRoomChannels = computed(() =>
+  channelsStore.getRoomChannels(tooltipRoom.value?.id),
+);
+const tooltipVoiceChannels = computed(() =>
+  tooltipRoomChannels.value
+    .filter((channel) => channel.isMedia && channel.inRoom?.length)
+    .map((channel) => ({
+      id: channel.id,
+      name: channel.name,
+      participants: channel.inRoom.map((userId) =>
+        roomVoiceParticipant(tooltipRoom.value, userId),
+      ),
+    })),
+);
 
 function assetUrl(path) {
   if (!path) return "";
@@ -186,10 +244,34 @@ function assetUrl(path) {
   return `${config.public.apiPath.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
 }
 
+function profileAssetUrl(path) {
+  if (!path) return null;
+  if (/^(https?:)?\/\//i.test(path)) return path;
+  return `${config.public.baseApiPath.replace(/\/$/, "")}/${String(path).replace(/^\/+/, "")}`;
+}
+
 function roomUnread(roomId) {
   return unreadCounts.value
     .filter((item) => String(item.roomId) === String(roomId))
     .reduce((total, item) => total + (Number(item.unreadCount) || 0), 0);
+}
+
+function roomVoiceParticipant(room, userId) {
+  const profile = channelsStore.getVoiceProfile(userId) ||
+    room?.members?.find((member) => String(member.id) === String(userId)) ||
+    (String(room?.owner?.id) === String(userId) ? room.owner : null) || {
+      id: String(userId),
+    };
+  const name = publicDisplayName(profile);
+  const avatar = profileAssetUrl(profile.avatar);
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+  return { id: String(userId), name, avatar, initials };
 }
 
 async function openRoomMenu(room, event) {
@@ -234,7 +316,7 @@ function canManageRoom(room) {
   );
 }
 
-function showRoomTooltip(room, event) {
+async function showRoomTooltip(room, event) {
   const bounds = event.currentTarget.getBoundingClientRect();
   tooltipRoom.value = room;
   roomTooltipStyle.value = {
@@ -242,7 +324,17 @@ function showRoomTooltip(room, event) {
     top: `${bounds.top + bounds.height / 2}px`,
     transform: "translateY(-50%)",
   };
+  prefetchRoom(room, { allChannels: true });
 }
+
+watch(
+  () => roomsStore.rooms,
+  (rooms) => {
+    prefetchRooms(rooms);
+    channelsStore.syncVoicePresenceRooms(rooms.map((room) => room.id));
+  },
+  { immediate: true },
+);
 
 function hideRoomTooltip() {
   tooltipRoom.value = null;
@@ -302,6 +394,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  channelsStore.syncVoicePresenceRooms([]);
   window.removeEventListener("pointerdown", handleRoomMenuDismiss);
   window.removeEventListener("keydown", handleRoomMenuKeydown);
   window.removeEventListener("resize", closeRoomMenu);

@@ -14,6 +14,7 @@ import {
   normalizeDisplayName,
   normalizeHandle,
   normalizeNickname,
+  publicDisplayName,
 } from "../../shared/user-profile.js";
 import {
   broadcastGlobally,
@@ -114,10 +115,12 @@ function presentUser(user, authPrefix = false) {
 }
 
 function presentPublicProfile(user) {
+  const publicName = publicDisplayName(user);
   return {
     id: String(user.id),
-    name: user.display_name || user.name || user.username || "",
-    display_name: user.display_name || user.name || user.username || "",
+    name: publicName,
+    display_name: user.display_name || "",
+    provider_name: user.name || "",
     username: user.username || "",
     handle: user.handle || "",
     avatar: avatarPath(user, true),

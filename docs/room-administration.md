@@ -110,8 +110,12 @@ only letters, numbers, and underscores. A case-insensitive unique index prevents
 duplicates. Migrated users may keep an empty handle until they edit their
 profile.
 
-`users.display_name` is a non-unique public name. It takes precedence over the
-identity-provider name without changing the provider-backed name or email.
+Public identity displays prefer `users.handle`, followed by the provider
+username when a migrated account has no handle. `users.display_name`, the
+identity-provider name, email, and user ID are progressively used only when no
+username is available. Compact member surfaces show only the preferred public
+identity. A member's expanded profile card also shows the display name, or the
+identity-provider full name when no display name is available.
 
 `PATCH /dspeak/profile` updates the handle, display name, or avatar. Duplicate
 handles return HTTP 409. Avatars accept JPEG, PNG, or WebP files up to 5 MB.

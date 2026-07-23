@@ -4,6 +4,7 @@ import {
   notificationBody,
   resolveNotificationPreference,
 } from "../../shared/notification-policy.js";
+import { publicDisplayName } from "../../shared/user-profile.js";
 import { isDeviceViewingChannel } from "./dspeak-realtime.js";
 import { usePocketBaseAdmin } from "./pocketbase.js";
 
@@ -135,11 +136,7 @@ export async function persistMessageNotifications({
     userSubscriptions.push(subscription);
     subscriptionsByUser.set(String(subscription.user), userSubscriptions);
   }
-  const senderName =
-    message.expand?.sender?.display_name ||
-    message.expand?.sender?.name ||
-    message.expand?.sender?.id ||
-    "Someone";
+  const senderName = publicDisplayName(message.expand?.sender);
   let notificationCount = 0;
   let jobCount = 0;
 

@@ -37,6 +37,127 @@ export const useChatStore = defineStore("chat", () => {
   let readFlushPromise = null;
   const pendingReadIds = new Set();
   const channelMessages = new Map();
+  const pendingChannelPreparations = new Map();
+  const channelPreparedAt = new Map();
+  const PREPARED_CHANNEL_MAX_AGE_MS = 15000;
+
+  function isChannelPrepared(channelId) {
+    const preparedAt = channelPreparedAt.get(String(channelId || ""));
+    return (
+      Number.isFinite(preparedAt) &&
+      Date.now() - preparedAt < PREPARED_CHANNEL_MAX_AGE_MS
+    );
+  }
+
+  async function prepareChannel(channelId) {
+    const normalizedChannelId = String(channelId || "");
+    if (!normalizedChannelId) return false;
+    if (isChannelPrepared(normalizedChannelId)) return true;
+    if (pendingChannelPreparations.has(normalizedChannelId)) {
+      return pendingChannelPreparations.get(normalizedChannelId);
+    }
+
+    const preparation = (async () => {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
+      if (!userData?.id) return false;
+
+      try {
+        const cached = await getCachedChannelMessages(
+          userData.id,
+          normalizedChannelId,
+        );
+        if (cached && Array.isArray(cached.messages)) {
+          channelMessages.set(normalizedChannelId, cached.messages);
+        }
+      } catch (cacheError) {
+        console.warn(
+          "[ChatStore] Unable to prepare cached channel messages:",
+          cacheError,
+        );
+      }
+
+      if (!navigator.onLine) {
+        if (!channelMessages.has(normalizedChannelId)) {
+          channelMessages.set(normalizedChannelId, []);
+        }
+        channelPreparedAt.set(normalizedChannelId, Date.now());
+        return true;
+      }
+
+      try {
+        const apiPath = config.public.apiPath;
+        const response = await fetch(
+          `${apiPath}/chat/messages?channelId=${encodeURIComponent(normalizedChannelId)}`,
+          {
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+        if (!response.ok) return false;
+
+        const data = await response.json();
+        const serverMessages = Array.isArray(data.messages)
+          ? data.messages
+          : Array.isArray(data)
+            ? data
+            : [];
+        const pendingMessages = (
+          channelMessages.get(normalizedChannelId) || []
+        ).filter((message) => message.status === "pending");
+        const preparedMessages = [...serverMessages, ...pendingMessages];
+        channelMessages.set(normalizedChannelId, preparedMessages);
+        channelPreparedAt.set(normalizedChannelId, Date.now());
+        cacheChannelMessages(
+          userData.id,
+          normalizedChannelId,
+          preparedMessages,
+        ).catch((cacheError) => {
+          console.warn(
+            "[ChatStore] Unable to persist prepared channel messages:",
+            cacheError,
+          );
+        });
+        return true;
+      } catch (preparationError) {
+        if (!channelMessages.has(normalizedChannelId)) return false;
+        debugLog(
+          "[ChatStore] Using cached messages after preparation failed:",
+          preparationError,
+        );
+        return true;
+      }
+    })();
+
+    pendingChannelPreparations.set(normalizedChannelId, preparation);
+    try {
+      return await preparation;
+    } finally {
+      if (pendingChannelPreparations.get(normalizedChannelId) === preparation) {
+        pendingChannelPreparations.delete(normalizedChannelId);
+      }
+    }
+  }
+
+  async function prepareChannels(channelIds, concurrency = 2) {
+    const pendingIds = [...new Set(channelIds.map(String))].filter(
+      (channelId) => channelId && !isChannelPrepared(channelId),
+    );
+    let nextIndex = 0;
+    const workerCount = Math.min(Math.max(1, concurrency), pendingIds.length);
+
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        while (nextIndex < pendingIds.length) {
+          const channelId = pendingIds[nextIndex];
+          nextIndex += 1;
+          await prepareChannel(channelId);
+        }
+      }),
+    );
+  }
 
   function handleServiceWorkerMessage(event) {
     if (event.data.type === "BACKGROUND_SYNC_SUCCESS") {
@@ -190,6 +311,16 @@ export const useChatStore = defineStore("chat", () => {
       onlineUsers.value = [];
       typingUsers.value = [];
 
+      if (pendingChannelPreparations.has(String(channelId))) {
+        await pendingChannelPreparations.get(String(channelId));
+        if (
+          generation !== connectionGeneration ||
+          currentChannelId.value !== channelId
+        ) {
+          return;
+        }
+      }
+
       const memoryMessages = channelMessages.get(channelId);
       if (memoryMessages) {
         messages.value = memoryMessages;
@@ -227,7 +358,9 @@ export const useChatStore = defineStore("chat", () => {
       }
 
       offline.value = false;
-      await fetchMessages(channelId, generation);
+      if (!isChannelPrepared(channelId)) {
+        await fetchMessages(channelId, generation);
+      }
       if (
         generation !== connectionGeneration ||
         currentChannelId.value !== channelId
@@ -602,6 +735,7 @@ export const useChatStore = defineStore("chat", () => {
       ).filter((message) => message.status === "pending");
       nextMessages = [...nextMessages, ...pendingMessages];
       channelMessages.set(channelId, nextMessages);
+      channelPreparedAt.set(String(channelId), Date.now());
       messages.value = nextMessages;
       cacheChannelMessages(userData.id, channelId, nextMessages).catch(
         (cacheError) => {
@@ -1082,6 +1216,8 @@ export const useChatStore = defineStore("chat", () => {
     currentRoomId,
     onlineUsers,
     typingUsers,
+    prepareChannel,
+    prepareChannels,
     connectToChannel,
     disconnectFromChannel,
     fetchMessages,

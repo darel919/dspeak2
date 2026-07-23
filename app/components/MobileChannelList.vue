@@ -172,8 +172,5 @@ const voiceChannels = computed(() => channelsStore.getMediaChannels());
 
 function selectChannel(channel) {
   emit("channel-selected", channel);
-  if (props.room && channel && channel.id) {
-    navigateTo(`/room/${props.room.id}/${channel.id}`);
-  }
 }
 </script>

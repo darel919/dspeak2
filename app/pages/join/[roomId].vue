@@ -18,9 +18,7 @@
           You are invited to {{ invite.room.name }}
         </h1>
         <p class="text-base-content/70">
-          <strong>{{
-            invite.invitedBy.display_name || invite.invitedBy.username
-          }}</strong>
+          <strong>{{ publicDisplayName(invite.invitedBy) }}</strong>
           invited you on {{ formatDate(invite.createdAt) }}.
         </p>
         <p class="text-sm text-base-content/55">
@@ -98,6 +96,7 @@
 </template>
 
 <script setup>
+import { publicDisplayName } from "~~/shared/user-profile.js";
 import { useRoomsStore } from "../../stores/rooms";
 import { useAuthStore } from "../../stores/auth";
 import ToastContainer from "../../components/ToastContainer.vue";

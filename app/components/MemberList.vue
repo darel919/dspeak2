@@ -109,10 +109,10 @@
             {{ memberDisplayName(profileCardUser) }}
           </div>
           <div
-            v-if="profileOriginalName(profileCardUser)"
-            class="mt-0.5 text-xs font-medium text-base-content/50"
+            v-if="profileFullName(profileCardUser)"
+            class="mt-1 text-xs font-medium text-base-content/50"
           >
-            AKA {{ profileOriginalName(profileCardUser) }}
+            {{ profileFullName(profileCardUser) }}
           </div>
           <div class="mt-4 border-t border-base-300 pt-3">
             <div
@@ -322,7 +322,7 @@
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
 import { canManageMember } from "~~/shared/room-policy.js";
-import { publicDisplayName } from "~~/shared/user-profile.js";
+import { publicFullName } from "~~/shared/user-profile.js";
 import { MEMBER_STATUS_ORDER, VIEWPORT_PADDING_PX } from "../const/ui";
 const roomsStore = useRoomsStore();
 const memberMenuUser = ref(null);
@@ -548,11 +548,8 @@ function memberDisplayName(member) {
   return identityStore.displayName(member);
 }
 
-function profileOriginalName(member) {
-  const profile = identityStore.profileFor(member);
-  const nickname = identityStore.nicknameFor(member?.id).trim();
-  const originalName = publicDisplayName(profile).trim();
-  return nickname && nickname !== originalName ? originalName : "";
+function profileFullName(member) {
+  return publicFullName(identityStore.profileFor(member));
 }
 
 function memberRoles(member) {

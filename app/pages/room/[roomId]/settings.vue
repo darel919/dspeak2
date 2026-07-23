@@ -464,6 +464,7 @@
 </template>
 
 <script setup>
+import { publicDisplayName } from "~~/shared/user-profile.js";
 import { ROOM_ACCENTS } from "~~/shared/room-policy.js";
 import { useAuthStore } from "../../../stores/auth";
 import { useRoomsStore } from "../../../stores/rooms";
@@ -643,10 +644,10 @@ async function loadAudit() {
   }
 }
 function auditActor(entry) {
-  return entry.actor?.display_name || entry.actor?.username || "Unknown member";
+  return publicDisplayName(entry.actor);
 }
 function auditSubject(entry) {
-  return entry.subject?.display_name || entry.subject?.username || "a member";
+  return publicDisplayName(entry.subject);
 }
 function formatAuditDate(value) {
   return new Intl.DateTimeFormat(undefined, {
@@ -739,7 +740,7 @@ function canManageMembership(membership) {
 }
 function membershipUserName(membership) {
   const user = membership.expand?.user;
-  return user?.display_name || user?.name || user?.username || membership.user;
+  return user ? publicDisplayName(user) : membership.user;
 }
 async function toggleMembershipRole(membership, roleId) {
   if (membership.saving) return;

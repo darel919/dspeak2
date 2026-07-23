@@ -70,6 +70,18 @@ test("room branding places the banner in navigation and the avatar above the roo
   assert.match(navbar, /background-position: center/);
   assert.match(navbar, /background-repeat: no-repeat/);
   assert.match(navbar, /background-size: cover/);
+  assert.match(navbar, /<Transition name="room-banner">/);
+  assert.match(navbar, /\.room-navbar \{/);
+  assert.match(navbar, /\.room-banner-enter-active/);
+  assert.match(layout, /class="authenticated-shell"/);
+  assert.match(
+    await readFile("app/assets/app.css", "utf8"),
+    /\.authenticated-shell > main \{/,
+  );
+  assert.match(
+    await readFile("app/assets/app.css", "utf8"),
+    /\.authenticated-shell \.h-screen-minus-navbar \{/,
+  );
   assert.match(channels, /v-if="room\?\.picture"/);
   assert.match(channels, /:alt="`\$\{room\.name\} avatar`"/);
   assert.doesNotMatch(channels, /room\?\.headerImage/);
@@ -120,6 +132,24 @@ test("voice channel indicators show participant avatars and media status", async
   assert.match(source, /channel\.participantStates/);
   assert.match(server, /cameraEnabled: session\.sources\.has\("camera"\)/);
   assert.match(server, /screenSharing: session\.sources\.has\("screen"\)/);
+});
+
+test("room rail tooltips preview connected voice participants", async () => {
+  const rail = await readFile("app/components/MetroRoomRail.vue", "utf8");
+  const channels = await readFile("app/stores/channels.js", "utf8");
+  assert.match(rail, /tooltipVoiceChannels/);
+  assert.match(rail, /channel\.participants/);
+  assert.match(rail, /participant\.avatar/);
+  assert.match(rail, /participant\.name/);
+  assert.match(rail, /lucide:volume-2/);
+  assert.match(rail, /channelsStore\.syncVoicePresenceRooms/);
+  assert.match(channels, /function getRoomChannels\(roomId\)/);
+  assert.match(channels, /const voicePresenceConnections = new Map\(\)/);
+  assert.match(
+    channels,
+    /applyVoicePresence\(payload\.data, normalizedRoomId\)/,
+  );
+  assert.match(channels, /function syncVoicePresenceRooms\(roomIds\)/);
 });
 
 test("voice channel participant rows own a channel-specific context menu", async () => {
@@ -199,17 +229,12 @@ test("member list exposes profile cards and persistent personal nickname control
   const source = await readFile("app/components/MemberList.vue", "utf8");
   const api = await readFile("server/utils/dspeak-api.js", "utf8");
   assert.match(source, /memberDisplayName\(profileCardUser\)/);
-  assert.match(source, /AKA \{\{ profileOriginalName\(profileCardUser\) \}\}/);
-  assert.match(
-    source,
-    /class="mt-0\.5 text-xs font-medium text-base-content\/50"/,
-  );
-  assert.match(source, /publicDisplayName\(profile\)\.trim\(\)/);
+  assert.match(source, /profileFullName\(profileCardUser\)/);
+  assert.match(source, /publicFullName\(identityStore\.profileFor\(member\)\)/);
   assert.match(source, /memberRoles\(profileCardUser\)/);
   assert.match(source, /Personal nickname/);
   assert.match(source, /identityStore\.saveNickname/);
   assert.match(source, /identityStore\.displayName\(member\)/);
-  assert.match(source, /identityStore\.nicknameFor\(member\?\.id\)\.trim\(\)/);
   assert.match(source, /@click="openNicknameDialog"/);
   assert.match(source, /v-if="nicknameDialogUser"/);
   assert.match(source, /aria-modal="true"/);
@@ -265,8 +290,17 @@ test("room switching prepares the destination before one direct navigation", asy
     "utf8",
   );
   const channels = await readFile("app/stores/channels.js", "utf8");
+  const chat = await readFile("app/stores/chat.js", "utf8");
+  const channelPage = await readFile(
+    "app/pages/room/[roomId]/[channelId]/index.vue",
+    "utf8",
+  );
   assert.match(rail, /@click\.prevent="openRoom\(room\)"/);
   assert.match(navigation, /activate: false/);
+  assert.match(
+    navigation,
+    /await chatStore\.prepareChannel\(destination\.id\)/,
+  );
   assert.match(
     navigation,
     /channelsStore\.activateRoomChannels\(roomId, channels\)/,
@@ -274,7 +308,44 @@ test("room switching prepares the destination before one direct navigation", asy
   assert.match(navigation, /`\/room\/\$\{roomId\}\/\$\{destination\.id\}`/);
   assert.match(mobileRooms, /await openRoom\(room\)/);
   assert.match(channels, /pendingRoomRequests/);
-  assert.match(channels, /roomChannels/);
+  assert.match(channels, /const roomChannels = reactive\(new Map\(\)\)/);
+  assert.match(channels, /function getRoomChannelById\(roomId, channelId\)/);
+  assert.match(chat, /pendingChannelPreparations/);
+  assert.match(chat, /async function prepareChannel\(channelId\)/);
+  assert.match(chat, /async function prepareChannels\(channelIds/);
+  assert.match(chat, /PREPARED_CHANNEL_MAX_AGE_MS/);
+  assert.match(channelPage, /await chatStore\.prepareChannel\(channel\.id\)/);
+  assert.match(rail, /prefetchRoom\(room, \{ allChannels: true \}\)/);
+  assert.match(rail, /prefetchRooms\(rooms\)/);
+  assert.match(navigation, /connection\?\.saveData/);
+  assert.match(navigation, /\["slow-2g", "2g"\]/);
+  assert.equal((channelPage.match(/<ChatWindow/g) || []).length, 1);
+  assert.doesNotMatch(channelPage, /v-show="!?isMobile"/);
+  assert.match(channelPage, /channelSelectionGeneration/);
+  assert.match(channelPage, /key: "room-channel"/);
+  assert.match(channelPage, /ownedChatChannelId = String\(newChannelId\)/);
+  assert.match(
+    channelPage,
+    /channelsStore\.getRoomChannelById\(roomId\.value, selectedChannelId\.value\)/,
+  );
+  assert.match(
+    channelPage,
+    /await voiceStore\.joinVoiceChannel\(selectedChannel\.value\.id\)/,
+  );
+
+  const channelList = await readFile("app/components/ChannelList.vue", "utf8");
+  const mobileChannelList = await readFile(
+    "app/components/MobileChannelList.vue",
+    "utf8",
+  );
+  assert.doesNotMatch(
+    channelList,
+    /navigateTo\(`\/room\/\$\{props\.room\.id\}\/\$\{channel\.id\}`\)/,
+  );
+  assert.doesNotMatch(
+    mobileChannelList,
+    /navigateTo\(`\/room\/\$\{props\.room\.id\}\/\$\{channel\.id\}`\)/,
+  );
 });
 
 test("app blocks the browser context menu by default", async () => {

@@ -159,5 +159,6 @@ hardware capture, firewall rules, or public IPv4 and IPv6 reachability.
 - [Chat cache and room switching](docs/chat-cache.md)
 - [Room soundboards and system sounds](docs/soundboards.md)
 - [Microphone gate](docs/microphone-gate.md)
+- [Voice controls](docs/voice-controls.md)
 - [Screen-share audio](docs/screen-share-audio.md)
 - [Backend migration](docs/backend-migration.md)

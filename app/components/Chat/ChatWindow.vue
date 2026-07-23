@@ -9,7 +9,7 @@
             <button
               v-if="showBackButton"
               @click="$emit('back')"
-              class="btn btn-ghost btn-sm btn-circle"
+              class="btn btn-ghost btn-sm btn-circle md:hidden"
             >
               <Icon name="lucide:chevron-left" class="h-5 w-5" />
             </button>

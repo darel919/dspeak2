@@ -10,14 +10,9 @@ export const useChannelsStore = defineStore("channels", () => {
   const currentChannelId = ref(null);
   const voiceProfiles = ref(new Map());
   const loadedRoomId = ref(null);
-  const roomChannels = new Map();
+  const roomChannels = reactive(new Map());
   const pendingRoomRequests = new Map();
-  let voicePresenceSocket = null;
-  let voicePresenceRoomId = null;
-  let voicePresenceReconnectTimer = null;
-  let voicePresenceReconnectAttempt = 0;
-  let voicePresenceHeartbeatTimer = null;
-  let voicePresenceIntentionalClose = false;
+  const voicePresenceConnections = new Map();
   const config = useRuntimeConfig();
 
   async function fetchChannels(roomId, options = {}) {
@@ -54,6 +49,20 @@ export const useChannelsStore = defineStore("channels", () => {
   function activateRoomChannels(roomId, nextChannels) {
     channels.value = nextChannels;
     loadedRoomId.value = String(roomId);
+  }
+
+  function getRoomChannelById(roomId, channelId) {
+    const roomChannelList = roomChannels.get(String(roomId || ""));
+    if (!roomChannelList) return null;
+    return (
+      roomChannelList.find(
+        (channel) => String(channel.id) === String(channelId || ""),
+      ) || null
+    );
+  }
+
+  function getRoomChannels(roomId) {
+    return roomChannels.get(String(roomId || "")) || [];
   }
 
   async function fetchChannelsFromServer(roomId) {
@@ -483,9 +492,12 @@ export const useChannelsStore = defineStore("channels", () => {
     error.value = null;
   }
 
-  function applyVoicePresence(snapshot) {
+  function applyVoicePresence(snapshot, roomId = null) {
     if (!snapshot?.channelId || !Array.isArray(snapshot.inRoom)) return false;
-    const channel = channels.value.find(
+    const roomChannelList = roomId
+      ? roomChannels.get(String(roomId)) || []
+      : channels.value;
+    const channel = roomChannelList.find(
       (item) => String(item.id) === String(snapshot.channelId),
     );
     if (!channel) return false;
@@ -507,38 +519,37 @@ export const useChannelsStore = defineStore("channels", () => {
         });
     }
     voiceProfiles.value = new Map(voiceProfiles.value);
-    channels.value = [...channels.value];
+    if (
+      String(loadedRoomId.value || "") === String(roomId || "") ||
+      channels.value.includes(channel)
+    )
+      channels.value = [...channels.value];
     return true;
   }
 
-  function disconnectVoicePresence() {
-    voicePresenceIntentionalClose = true;
-    if (voicePresenceReconnectTimer) clearTimeout(voicePresenceReconnectTimer);
-    if (voicePresenceHeartbeatTimer) clearInterval(voicePresenceHeartbeatTimer);
-    voicePresenceReconnectTimer = null;
-    voicePresenceHeartbeatTimer = null;
-    const socket = voicePresenceSocket;
-    voicePresenceSocket = null;
-    voicePresenceRoomId = null;
-    voicePresenceReconnectAttempt = 0;
-    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000);
+  function disconnectVoicePresence(roomId = null) {
+    const roomIds = roomId
+      ? [String(roomId)]
+      : [...voicePresenceConnections.keys()];
+    for (const normalizedRoomId of roomIds) {
+      const connection = voicePresenceConnections.get(normalizedRoomId);
+      if (!connection) continue;
+      connection.intentionalClose = true;
+      if (connection.reconnectTimer) clearTimeout(connection.reconnectTimer);
+      if (connection.heartbeatTimer) clearInterval(connection.heartbeatTimer);
+      voicePresenceConnections.delete(normalizedRoomId);
+      if (connection.socket && connection.socket.readyState < WebSocket.CLOSING)
+        connection.socket.close(1000);
+    }
   }
 
   function connectVoicePresence(roomId) {
     if (!import.meta.client || !roomId) return;
     const normalizedRoomId = String(roomId);
-    if (
-      voicePresenceRoomId === normalizedRoomId &&
-      voicePresenceSocket &&
-      voicePresenceSocket.readyState <= WebSocket.OPEN
-    )
-      return;
-    if (voicePresenceRoomId && voicePresenceRoomId !== normalizedRoomId)
-      disconnectVoicePresence();
+    const existing = voicePresenceConnections.get(normalizedRoomId);
+    if (existing?.socket?.readyState <= WebSocket.OPEN) return;
     const userId = useAuthStore().getUserData()?.id;
     if (!userId) return;
-    voicePresenceIntentionalClose = false;
-    voicePresenceRoomId = normalizedRoomId;
     const base = config.public.apiPath
       .replace(/^http/, "ws")
       .replace(/\/$/, "");
@@ -548,40 +559,61 @@ export const useChannelsStore = defineStore("channels", () => {
     const socket = new WebSocket(
       `${absoluteBase}/voice-presence?roomId=${encodeURIComponent(normalizedRoomId)}`,
     );
-    voicePresenceSocket = socket;
+    const connection = existing || {
+      socket: null,
+      reconnectTimer: null,
+      reconnectAttempt: 0,
+      heartbeatTimer: null,
+      intentionalClose: false,
+    };
+    connection.socket = socket;
+    connection.intentionalClose = false;
+    voicePresenceConnections.set(normalizedRoomId, connection);
     socket.addEventListener("open", () => {
-      if (voicePresenceSocket !== socket) return;
-      voicePresenceReconnectAttempt = 0;
-      voicePresenceHeartbeatTimer = setInterval(() => {
+      if (connection.socket !== socket) return;
+      connection.reconnectAttempt = 0;
+      connection.heartbeatTimer = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN)
           socket.send(JSON.stringify({ type: "ping" }));
       }, 20000);
     });
     socket.addEventListener("message", (event) => {
-      if (voicePresenceSocket !== socket) return;
+      if (connection.socket !== socket) return;
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === "voice-presence") applyVoicePresence(payload.data);
+        if (payload.type === "voice-presence")
+          applyVoicePresence(payload.data, normalizedRoomId);
         if (payload.type === "voice-presence-snapshot")
           for (const snapshot of payload.data?.channels || [])
-            applyVoicePresence(snapshot);
+            applyVoicePresence(snapshot, normalizedRoomId);
       } catch (error) {
         console.warn("[ChannelsStore] Invalid voice presence update", error);
       }
     });
     socket.addEventListener("close", () => {
-      if (voicePresenceSocket !== socket) return;
-      voicePresenceSocket = null;
-      if (voicePresenceHeartbeatTimer)
-        clearInterval(voicePresenceHeartbeatTimer);
-      voicePresenceHeartbeatTimer = null;
-      if (voicePresenceIntentionalClose) return;
-      const delay = Math.min(15000, 500 * 2 ** voicePresenceReconnectAttempt++);
-      voicePresenceReconnectTimer = setTimeout(
+      if (connection.socket !== socket) return;
+      connection.socket = null;
+      if (connection.heartbeatTimer) clearInterval(connection.heartbeatTimer);
+      connection.heartbeatTimer = null;
+      if (connection.intentionalClose) return;
+      const delay = Math.min(15000, 500 * 2 ** connection.reconnectAttempt++);
+      connection.reconnectTimer = setTimeout(
         () => connectVoicePresence(normalizedRoomId),
         delay + Math.floor(Math.random() * 250),
       );
     });
+  }
+
+  function syncVoicePresenceRooms(roomIds) {
+    if (!import.meta.client) return;
+    const desiredRoomIds = new Set(
+      (Array.isArray(roomIds) ? roomIds : [])
+        .filter(Boolean)
+        .map((roomId) => String(roomId)),
+    );
+    for (const roomId of voicePresenceConnections.keys())
+      if (!desiredRoomIds.has(roomId)) disconnectVoicePresence(roomId);
+    for (const roomId of desiredRoomIds) connectVoicePresence(roomId);
   }
 
   function getVoiceProfile(userId) {
@@ -610,6 +642,8 @@ export const useChannelsStore = defineStore("channels", () => {
     loadedRoomId,
     fetchChannels,
     activateRoomChannels,
+    getRoomChannelById,
+    getRoomChannels,
     createChannel,
     editChannel,
     deleteChannel,
@@ -625,6 +659,7 @@ export const useChannelsStore = defineStore("channels", () => {
     applyRealtimePolicy,
     connectVoicePresence,
     disconnectVoicePresence,
+    syncVoicePresenceRooms,
     getVoiceProfile,
   };
 });

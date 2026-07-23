@@ -23,6 +23,7 @@ import {
   releaseRoomReservation,
 } from "./room-lifecycle";
 import { validP2pSignal } from "./p2p-signal";
+import { publicDisplayName } from "../../shared/user-profile.js";
 import {
   isMediaSignalHeartbeatExpired,
   isValidMediaSignalHeartbeat,
@@ -68,9 +69,10 @@ function mediaUserProfile(user) {
   const id = String(user.id);
   return {
     id,
-    name: user.display_name || user.name || user.username || "",
+    name: publicDisplayName(user),
     username: user.username || "",
-    display_name: user.display_name || user.name || user.username || "",
+    handle: user.handle || "",
+    display_name: user.display_name || "",
     avatar: user.avatar
       ? `auth/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
       : null,

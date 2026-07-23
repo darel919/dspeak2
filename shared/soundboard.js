@@ -38,11 +38,7 @@ export function presentSoundboardClip(record, apiPath = "/dspeak") {
     uploader: record.expand?.uploader
       ? {
           id: record.expand.uploader.id,
-          name:
-            record.expand.uploader.display_name ||
-            record.expand.uploader.name ||
-            record.expand.uploader.username ||
-            "Room member",
+          name: publicDisplayName(record.expand.uploader),
         }
       : null,
     title: record.title,
@@ -60,3 +56,4 @@ export function presentSoundboardClip(record, apiPath = "/dspeak") {
     updated: record.updated,
   };
 }
+import { publicDisplayName } from "./user-profile.js";

@@ -6,6 +6,7 @@ import {
   normalizeNickname,
   profileIdentityLine,
   publicDisplayName,
+  publicFullName,
 } from "../shared/user-profile.js";
 
 test("public profile names are normalized and bounded", () => {
@@ -28,12 +29,55 @@ test("personal nicknames can be cleared and remain bounded", () => {
   assert.throws(() => normalizeNickname("x".repeat(33)), /32 characters/);
 });
 
-test("public display names prefer the dSpeak override", () => {
+test("public display names prefer the dSpeak username", () => {
   assert.equal(
-    publicDisplayName({ display_name: "dSpeak name", name: "Google name" }),
+    publicDisplayName({
+      handle: "dspeak_user",
+      username: "provider_user",
+      display_name: "dSpeak name",
+      name: "Google name",
+    }),
+    "dspeak_user",
+  );
+  assert.equal(
+    publicDisplayName({
+      username: "provider_user",
+      display_name: "dSpeak name",
+    }),
+    "provider_user",
+  );
+  assert.equal(
+    publicDisplayName({ display_name: "dSpeak name" }),
     "dSpeak name",
   );
   assert.equal(publicDisplayName({ name: "Google name" }), "Google name");
+});
+
+test("public profiles expose one distinct full name", () => {
+  assert.equal(
+    publicFullName({
+      handle: "darelisme",
+      username: "darelisme",
+      display_name: "Darrell C",
+      provider_name: "Darrell Cristanto",
+      name: "darelisme",
+    }),
+    "Darrell C",
+  );
+  assert.equal(
+    publicFullName({
+      handle: "darelisme",
+      provider_name: "Darrell Cristanto",
+    }),
+    "Darrell Cristanto",
+  );
+  assert.equal(
+    publicFullName({
+      handle: "darelisme",
+      display_name: "darelisme",
+    }),
+    "",
+  );
 });
 
 test("profile identity lines show nicknames alongside original display names", () => {
@@ -42,11 +86,14 @@ test("profile identity lines show nicknames alongside original display names", (
     handle: "alfito_yoga",
   };
 
-  assert.equal(profileIdentityLine(profile, "Al"), "Al AKA Alfito Yoga");
-  assert.equal(profileIdentityLine(profile, ""), "Alfito Yoga");
+  assert.equal(profileIdentityLine(profile, "Al"), "Al AKA alfito_yoga");
+  assert.equal(profileIdentityLine(profile, ""), "alfito_yoga");
   assert.equal(
     profileIdentityLine({ display_name: "Alfito Yoga" }, "Al"),
     "Al AKA Alfito Yoga",
   );
-  assert.equal(profileIdentityLine(profile, "Alfito Yoga"), "Alfito Yoga");
+  assert.equal(
+    profileIdentityLine(profile, "Alfito Yoga"),
+    "Alfito Yoga AKA alfito_yoga",
+  );
 });

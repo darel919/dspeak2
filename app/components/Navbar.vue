@@ -62,9 +62,11 @@ const avatarStatusClass = computed(() => {
 });
 const micUnavailable = computed(
   () =>
-    !voiceStore.connected ||
+    voiceStore.connecting ||
     Boolean(
-      voiceStore.sfuComposable && !voiceStore.sfuComposable.transportReady,
+      voiceStore.connected &&
+      voiceStore.sfuComposable &&
+      !voiceStore.sfuComposable.transportReady,
     ),
 );
 
@@ -226,17 +228,19 @@ onBeforeUnmount(() => {
 
 <template>
   <header
-    class="navbar navbar-surface fixed top-0 left-0 z-50 w-full gap-3 px-3 sm:px-4"
+    class="navbar navbar-surface room-navbar fixed top-0 left-0 z-50 w-full gap-3 px-3 sm:px-4"
     style="height: var(--navbar-height)"
   >
-    <div
-      v-if="roomBannerUrl"
-      class="room-banner pointer-events-none absolute inset-y-0 left-0 right-0 md:left-[72px]"
-      :style="roomBannerStyle"
-      aria-hidden="true"
-    >
-      <div class="room-banner-shade absolute inset-0"></div>
-    </div>
+    <Transition name="room-banner">
+      <div
+        v-if="roomBannerUrl"
+        class="room-banner pointer-events-none absolute inset-y-0 left-0 right-0 md:left-[72px]"
+        :style="roomBannerStyle"
+        aria-hidden="true"
+      >
+        <div class="room-banner-shade absolute inset-0"></div>
+      </div>
+    </Transition>
 
     <div class="relative z-10 flex min-w-0 items-center gap-3">
       <NuxtLink
@@ -255,11 +259,12 @@ onBeforeUnmount(() => {
     <div class="relative z-10 ml-auto flex min-w-0 items-center gap-2">
       <NotificationCenter />
       <section
-        v-if="profile && voiceStore.connected"
+        v-if="profile"
         class="call-dock"
+        :class="voiceStore.connected && 'call-dock-connected'"
         aria-label="Voice call controls"
       >
-        <div class="call-channel">
+        <div v-if="voiceStore.connected" class="call-channel">
           <span class="status-dot" aria-hidden="true"></span>
           <span class="min-w-0 text-left">
             <button
@@ -299,9 +304,15 @@ onBeforeUnmount(() => {
           </span>
         </div>
 
-        <div class="call-divider hidden lg:block"></div>
+        <div
+          v-if="voiceStore.connected"
+          class="call-divider hidden lg:block"
+        ></div>
 
-        <div class="hidden items-center gap-1 lg:flex">
+        <div
+          v-if="voiceStore.connected"
+          class="hidden items-center gap-1 lg:flex"
+        >
           <MediaSettingsContextMenu kind="camera">
             <button
               class="call-icon"
@@ -341,7 +352,10 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="call-divider hidden sm:block"></div>
+        <div
+          v-if="voiceStore.connected"
+          class="call-divider hidden sm:block"
+        ></div>
 
         <div class="flex items-center gap-1">
           <MediaSettingsContextMenu kind="microphone">
@@ -366,9 +380,10 @@ onBeforeUnmount(() => {
             </button>
           </MediaSettingsContextMenu>
           <button
-            class="call-icon hidden sm:inline-flex"
+            class="call-icon"
             type="button"
             :class="voiceStore.deafened && 'call-icon-danger'"
+            :disabled="voiceStore.connecting"
             :aria-pressed="voiceStore.deafened"
             :aria-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
             :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
@@ -382,6 +397,7 @@ onBeforeUnmount(() => {
             />
           </button>
           <button
+            v-if="voiceStore.connected"
             class="call-icon call-icon-danger"
             type="button"
             aria-label="Leave voice channel"
@@ -393,6 +409,7 @@ onBeforeUnmount(() => {
         </div>
 
         <details
+          v-if="voiceStore.connected"
           ref="callMenu"
           class="dropdown dropdown-end"
           @toggle="syncCallMenuState"
@@ -565,10 +582,7 @@ onBeforeUnmount(() => {
         </details>
       </section>
 
-      <div
-        v-else-if="profile && voiceStore.connecting"
-        class="connection-warning"
-      >
+      <div v-if="profile && voiceStore.connecting" class="connection-warning">
         <span class="loading loading-spinner loading-xs"></span>
         <span>Connecting…</span>
       </div>
@@ -619,16 +633,22 @@ onBeforeUnmount(() => {
   min-width: 0;
   align-items: center;
   gap: 0.375rem;
-  border: 1px solid color-mix(in oklab, var(--color-success) 40%, transparent);
+  border: 1px solid
+    color-mix(in oklab, var(--color-base-content) 14%, transparent);
   border-radius: 0.875rem;
+  background: var(--color-base-100);
+  padding: 0.3rem;
+  box-shadow: 0 1px 8px
+    color-mix(in oklab, var(--color-base-content) 7%, transparent);
+}
+
+.call-dock-connected {
+  border-color: color-mix(in oklab, var(--color-success) 40%, transparent);
   background: color-mix(
     in oklab,
     var(--color-success) 9%,
     var(--color-base-100)
   );
-  padding: 0.3rem;
-  box-shadow: 0 1px 8px
-    color-mix(in oklab, var(--color-base-content) 7%, transparent);
 }
 
 .room-banner-shade {
@@ -647,6 +667,22 @@ onBeforeUnmount(() => {
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .room-navbar {
+    transition: height 240ms cubic-bezier(0.1, 0.9, 0.2, 1);
+  }
+
+  .room-banner-enter-active,
+  .room-banner-leave-active {
+    transition: opacity 240ms cubic-bezier(0.1, 0.9, 0.2, 1);
+  }
+
+  .room-banner-enter-from,
+  .room-banner-leave-to {
+    opacity: 0;
+  }
 }
 
 .call-channel {

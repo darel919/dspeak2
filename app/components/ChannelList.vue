@@ -1187,7 +1187,6 @@ async function handleLeaveRoom() {
 async function loadChannels() {
   try {
     await channelsStore.fetchChannels(props.room.id);
-    channelsStore.connectVoicePresence(props.room.id);
     await loadUnreadCounts();
   } catch (error) {
     console.error("Failed to load channels:", error);
@@ -1211,9 +1210,6 @@ function getUnreadCount(channelId) {
 
 function selectChannel(channel) {
   emit("channel-selected", channel);
-  if (props.room && channel && channel.id) {
-    navigateTo(`/room/${props.room.id}/${channel.id}`);
-  }
 }
 
 async function handleCreateChannel() {
@@ -1320,7 +1316,6 @@ onMounted(() => {
   window.addEventListener("scroll", closeChannelMenu, true);
 });
 onUnmounted(() => {
-  channelsStore.disconnectVoicePresence();
   document.removeEventListener("pointerdown", closeChannelMenu);
   document.removeEventListener("pointerdown", closeParticipantMenu);
   document.removeEventListener("keydown", onParticipantMenuKeydown);

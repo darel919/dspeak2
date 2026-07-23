@@ -1,4 +1,4 @@
-import { defineStore } from "pinia";
+import { defineStore, skipHydrate } from "pinia";
 import { useAuthStore } from "./auth";
 import { useRoomsStore } from "./rooms";
 import { useSettingsStore } from "./settings";
@@ -6,18 +6,20 @@ import { useChannelsStore } from "./channels";
 import { reconcileOwnedError } from "~/shared/owned-error.js";
 import { playSystemSound } from "~/shared/system-sounds.js";
 import { isFatalClientError } from "~/shared/fatal-client-error.js";
+import { STORAGE_KEYS } from "~/const/storage.js";
+import { resolveVoicePreferences } from "~/shared/voice-preferences.js";
 
 export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
   const currentRoomId = ref(null);
   const connectedUsers = ref(new Map());
 
-  const userVolumes = ref({});
-  const trackVolumes = ref({});
+  const userVolumes = skipHydrate(ref({}));
+  const trackVolumes = skipHydrate(ref({}));
 
   const userDirectory = ref(new Map());
-  const micMuted = ref(true);
-  const deafened = ref(false);
+  const micMuted = skipHydrate(ref(true));
+  const deafened = skipHydrate(ref(false));
   const connecting = ref(false);
   const connected = ref(false);
   const error = ref(null);
@@ -99,8 +101,18 @@ export const useVoiceStore = defineStore("voice", () => {
 
   if (typeof window !== "undefined") {
     try {
-      const persistedMic = localStorage.getItem("voice.micMuted");
-      if (persistedMic !== null) micMuted.value = persistedMic === "true";
+      const persistedMic = localStorage.getItem(STORAGE_KEYS.voiceMicMuted);
+      const persistedDeafen = localStorage.getItem(STORAGE_KEYS.voiceDeafened);
+      const preferences = resolveVoicePreferences(
+        persistedMic,
+        persistedDeafen,
+        {
+          micMuted: micMuted.value,
+          deafened: deafened.value,
+        },
+      );
+      micMuted.value = preferences.micMuted;
+      deafened.value = preferences.deafened;
 
       const persistedVolumes = localStorage.getItem("voice.userVolumes");
       if (persistedVolumes) {
@@ -126,7 +138,7 @@ export const useVoiceStore = defineStore("voice", () => {
       micMuted,
       (v) => {
         try {
-          localStorage.setItem("voice.micMuted", String(!!v));
+          localStorage.setItem(STORAGE_KEYS.voiceMicMuted, String(!!v));
         } catch (_) {
           /* noop */
         }
@@ -137,7 +149,7 @@ export const useVoiceStore = defineStore("voice", () => {
       deafened,
       (v) => {
         try {
-          localStorage.setItem("voice.deafened", String(!!v));
+          localStorage.setItem(STORAGE_KEYS.voiceDeafened, String(!!v));
         } catch (_) {
           /* noop */
         }
@@ -410,11 +422,21 @@ export const useVoiceStore = defineStore("voice", () => {
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  function restorePersistedMicState() {
+  function restorePersistedVoiceState() {
     if (typeof window === "undefined") return;
     try {
-      const persisted = localStorage.getItem("voice.micMuted");
-      if (persisted !== null) micMuted.value = persisted === "true";
+      const persistedMic = localStorage.getItem(STORAGE_KEYS.voiceMicMuted);
+      const persistedDeafen = localStorage.getItem(STORAGE_KEYS.voiceDeafened);
+      const preferences = resolveVoicePreferences(
+        persistedMic,
+        persistedDeafen,
+        {
+          micMuted: micMuted.value,
+          deafened: deafened.value,
+        },
+      );
+      micMuted.value = preferences.micMuted;
+      deafened.value = preferences.deafened;
     } catch (_) {
       /* localStorage may be unavailable */
     }
@@ -521,7 +543,7 @@ export const useVoiceStore = defineStore("voice", () => {
       await session.connect(channelId);
       ensureCurrentJoin();
       setCurrentChannel(channelId);
-      restorePersistedMicState();
+      restorePersistedVoiceState();
 
       while (!session.transportReady) {
         if (session.error) throw new Error(session.error);
@@ -547,6 +569,7 @@ export const useVoiceStore = defineStore("voice", () => {
 
       connected.value = true;
       connectedAt.value = Date.now();
+      session.sendParticipantVoiceState?.();
       playSystemSound("voice-join", settingsStore);
     } catch (err) {
       await disposeFailedSession(session);
@@ -569,8 +592,9 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   async function toggleMic() {
-    if (!sfuComposable.value) {
-      console.warn("[VoiceStore] Cannot toggle mic: SFU not initialized");
+    if (!connected.value) {
+      micMuted.value = !micMuted.value;
+      if (!micMuted.value) deafened.value = false;
       return;
     }
 
@@ -591,6 +615,7 @@ export const useVoiceStore = defineStore("voice", () => {
         try {
           await sfuComposable.value.startAudioProduction();
           micMuted.value = false;
+          deafened.value = false;
           sfuComposable.value.sendParticipantVoiceState?.();
         } catch (err) {
           micMuted.value = true;
@@ -620,7 +645,8 @@ export const useVoiceStore = defineStore("voice", () => {
 
   async function toggleDeafen() {
     if (!connected.value) {
-      console.warn("[VoiceStore] Cannot toggle deafen: not connected");
+      deafened.value = !deafened.value;
+      if (deafened.value) micMuted.value = true;
       return;
     }
 

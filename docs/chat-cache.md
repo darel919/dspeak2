@@ -79,8 +79,23 @@ which have never been loaded return a small intentional offline document rather
 than the browser's generic network failure page.
 
 Desktop room selection resolves the destination channel before changing the
-route. The existing room remains rendered while that request is pending, then
-the router performs one navigation directly to the destination channel. Channel
-requests are deduplicated per room and the current channel collection is not
-cleared while another room loads, preventing an intermediate blank room route
-or empty channel frame.
+route. After startup, room channels and text history are warmed silently with
+bounded concurrency. Pointer focus or hover prioritizes that room. Navigation
+commits only after the destination snapshot is ready, so the current chat
+remains intact rather than exposing an intermediate loading frame. A recently
+prepared snapshot suppresses the duplicate foreground refresh when the channel
+connects. Channel and preparation requests are deduplicated, and the current
+channel collection is not cleared while another room loads. Opening a room also
+warms its remaining text channels in the background so later channel changes
+can paint from memory immediately.
+
+The channel route renders one responsive chat tree. Desktop and mobile controls
+use CSS breakpoints around the same `ChatWindow` instance; they are not parallel
+`v-show` trees with duplicate lifecycle hooks. Channel-list components emit one
+selection event and the route page is the sole navigation owner, preventing
+back-to-back navigations and connection initialization. The dynamic channel
+page has one stable Nuxt page key, so changing room or channel parameters
+updates the existing page instance instead of remounting its entire chat tree.
+Selected-channel lookup reads the destination room's cached collection rather
+than the mutable globally active collection. Preparing another room therefore
+cannot temporarily make the currently rendered channel disappear.
