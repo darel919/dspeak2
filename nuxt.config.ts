@@ -30,6 +30,16 @@ export default defineNuxtConfig({
   css: ["~/assets/app.css"],
   modules: ["@pinia/nuxt", "@vite-pwa/nuxt", "@nuxt/icon"],
 
+  routeRules: {
+    "/sw.js": {
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+      },
+    },
+  },
+
   icon: {
     provider: "server",
     serverBundle: {

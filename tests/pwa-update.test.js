@@ -64,9 +64,23 @@ test("service worker source and registration consistently use modules", () => {
   assert.match(serviceWorkerRegistration, /type: "module"/);
   assert.match(serviceWorkerRegistration, /updateViaCache: "none"/);
   assert.match(serviceWorkerRegistration, /"\/dev-sw\.js\?dev-sw"/);
+  assert.match(serviceWorkerRegistration, /useRuntimeConfig\(\)\.app\.buildId/);
+  assert.match(
+    serviceWorkerRegistration,
+    /`\/sw\.js\?build=\$\{encodeURIComponent\(buildId\)\}`/,
+  );
   assert.match(serviceWorkerRegistration, /let registrationRequest = null/);
   assert.match(updatePrompt, /registerServiceWorker/);
   assert.match(updatePrompt, /if \(import\.meta\.dev/);
+});
+
+test("service worker responses cannot be reused across deployments", () => {
+  assert.match(
+    nuxtConfig,
+    /"Cache-Control": "no-cache, no-store, must-revalidate"/,
+  );
+  assert.match(nuxtConfig, /"CDN-Cache-Control": "no-store"/);
+  assert.match(nuxtConfig, /"Cloudflare-CDN-Cache-Control": "no-store"/);
 });
 
 test("settings displays the package application version", () => {

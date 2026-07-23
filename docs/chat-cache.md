@@ -46,6 +46,10 @@ The notice is visible only while an installed worker is actually waiting.
 Activation clears it, and the page reloads only after the browser confirms that
 the selected worker controls the page. A controller change without a waiting
 worker clears stale notice state instead of reporting another update.
+Registration includes the Nuxt build identifier in the worker URL, and the
+worker response disables browser and shared-CDN storage. Each deployment
+therefore checks one immutable worker URL instead of alternating between stale
+edge responses from different deployments.
 
 Interrupted and invalid transactions receive one clean reopen-and-retry before
 the failure reaches a consumer. IndexedDB errors are normalized and sent to the
