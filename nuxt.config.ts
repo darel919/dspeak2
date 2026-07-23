@@ -38,6 +38,7 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    sourceMap: false,
     externals: {
       inline: [resolve("shared")],
     },

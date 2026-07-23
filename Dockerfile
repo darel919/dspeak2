@@ -2,6 +2,8 @@ FROM mwader/static-ffmpeg:8.1.1 AS ffmpeg
 
 FROM oven/bun:1-debian AS build
 
+ENV NODE_OPTIONS=--max-old-space-size=768
+
 WORKDIR /app
 
 RUN apt-get update \

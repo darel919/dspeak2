@@ -92,6 +92,11 @@ all required `.env.example` values in the Environment Variables page. Create a
 Docker agent in Playit and set its secret as `PLAYIT_SECRET_KEY`; Compose refuses
 to deploy without it.
 
+Production source maps are disabled and the Docker build caps V8's old-space
+heap at 768 MiB to keep Nitro's final server-bundling phase within the memory
+available to the deployment host. Runtime stack traces still identify generated
+server chunks, while local development retains its normal source mapping.
+
 When Zoraxy owns HTTP routing, do not add a Coolify domain or another port
 mapping. Forward the application hostname to:
 
