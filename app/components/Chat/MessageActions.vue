@@ -21,6 +21,24 @@
           Copy message
         </button>
       </li>
+      <li v-if="canEdit">
+        <button @click="$emit('edit', message)">
+          <Icon name="lucide:pencil" class="h-4 w-4" />
+          Edit message
+        </button>
+      </li>
+      <li v-if="canViewHistory && message.edited_at">
+        <button @click="$emit('history', message)">
+          <Icon name="lucide:history" class="h-4 w-4" />
+          Revision history
+        </button>
+      </li>
+      <li v-if="canDelete">
+        <button class="text-error" @click="$emit('delete', message)">
+          <Icon name="lucide:trash-2" class="h-4 w-4" />
+          {{ isOwnMessage ? "Unsend" : "Delete message" }}
+        </button>
+      </li>
 
       <!-- <li>
         <button @click="handleReportMessage">
@@ -45,15 +63,35 @@
 import { debugLog } from "../../shared/debug";
 import { useChatStore } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
+import {
+  canDeleteMessage,
+  canEditMessage,
+  canViewMessageHistory,
+} from "~~/shared/message-policy.js";
 
 const props = defineProps({
   message: {
     type: Object,
     required: true,
   },
+  permissions: {
+    type: Array,
+    default: () => [],
+  },
+  isRoomOwner: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(["mark-read", "show-details", "report"]);
+const emit = defineEmits([
+  "mark-read",
+  "show-details",
+  "report",
+  "edit",
+  "delete",
+  "history",
+]);
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
@@ -62,6 +100,20 @@ const isOwnMessage = computed(() => {
   const userData = authStore.getUserData();
   return userData && props.message.sender.id === userData.id;
 });
+const canEdit = computed(() =>
+  canEditMessage(props.message, authStore.getUserData()?.id),
+);
+const canDelete = computed(() =>
+  canDeleteMessage(
+    props.message,
+    authStore.getUserData()?.id,
+    props.permissions,
+    props.isRoomOwner,
+  ),
+);
+const canViewHistory = computed(() =>
+  canViewMessageHistory(props.permissions, props.isRoomOwner),
+);
 
 const isRead = computed(() => {
   const userData = authStore.getUserData();

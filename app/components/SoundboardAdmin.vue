@@ -1,10 +1,19 @@
 <template>
   <section class="space-y-6">
-    <div>
-      <h2 class="text-3xl font-light">Soundboard</h2>
-      <p class="mt-1 text-sm text-base-content/60">
-        Manage room clips, metadata, order, and availability.
-      </p>
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h2 class="text-3xl font-light">Soundboard</h2>
+        <p class="mt-1 text-sm text-base-content/60">
+          Manage room clips, metadata, order, and availability.
+        </p>
+      </div>
+      <button
+        type="button"
+        class="btn btn-primary btn-sm"
+        @click="showUpload = true"
+      >
+        <Icon name="lucide:plus" class="size-4" />Add sound
+      </button>
     </div>
     <div v-if="store.loading" class="loading loading-spinner"></div>
     <div v-else-if="store.error" class="alert alert-error">
@@ -89,6 +98,13 @@
     >
       This room has no soundboard clips.
     </p>
+    <Teleport to="body">
+      <SoundboardUploadDialog
+        :open="showUpload"
+        :room-id="roomId"
+        @close="showUpload = false"
+      />
+    </Teleport>
   </section>
 </template>
 
@@ -98,6 +114,7 @@ import { useSoundboardStore } from "~/stores/soundboard";
 const props = defineProps({ roomId: { type: String, required: true } });
 const store = useSoundboardStore();
 const drafts = ref([]);
+const showUpload = ref(false);
 watch(
   () => store.clips,
   (clips) => (drafts.value = clips.map((clip) => ({ ...clip }))),

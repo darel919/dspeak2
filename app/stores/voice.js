@@ -6,6 +6,7 @@ import { useChannelsStore } from "./channels";
 import { reconcileOwnedError } from "~/shared/owned-error.js";
 import { playSystemSound } from "~/shared/system-sounds.js";
 import { isFatalClientError } from "~/shared/fatal-client-error.js";
+import { voiceJoinErrorMessage } from "~/shared/voice-errors.js";
 import { STORAGE_KEYS } from "~/const/storage.js";
 import { resolveVoicePreferences } from "~/shared/voice-preferences.js";
 
@@ -579,11 +580,11 @@ export const useVoiceStore = defineStore("voice", () => {
         useFatalClientError().report(err);
         return;
       }
-      error.value = err?.message || String(err);
+      error.value = voiceJoinErrorMessage(err);
       if (typeof window !== "undefined") {
         const { useToast } = await import("~/composables/useToast");
         const { error: showError } = useToast();
-        showError(`Failed to connect to voice: ${error.value}`);
+        showError(error.value);
       }
       throw err;
     } finally {

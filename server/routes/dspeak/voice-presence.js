@@ -54,7 +54,7 @@ export default defineWebSocketHandler({
             username: profile.username || "",
             handle: profile.handle || "",
             avatar: profile.avatar
-              ? `auth/assets/avatar?userId=${encodeURIComponent(profile.id)}&fileName=${encodeURIComponent(profile.avatar)}`
+              ? `/dspeak/assets/avatar?userId=${encodeURIComponent(profile.id)}&fileName=${encodeURIComponent(profile.avatar)}`
               : null,
           },
         ]),

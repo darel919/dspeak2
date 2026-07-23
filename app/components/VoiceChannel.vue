@@ -144,25 +144,11 @@
               </button>
               <!-- User Avatar -->
               <div class="avatar" :class="videoFeeds.length ? 'mb-1' : 'mb-4'">
-                <div
-                  v-if="getUserAvatar(user)"
-                  class="rounded-full overflow-hidden ring-2 transition-all duration-150"
-                  :class="[
-                    videoFeeds.length ? 'h-10 w-10' : 'h-20 w-20',
-                    user.speaking
-                      ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]'
-                      : 'ring-base-300',
-                  ]"
-                >
-                  <img
-                    :src="getUserAvatar(user)"
-                    class="w-full h-full object-cover"
-                    alt="avatar"
-                  />
-                </div>
-                <div
-                  v-else
-                  class="rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content flex items-center justify-center font-bold ring-2 transition-all duration-150"
+                <ProfileAvatar
+                  :src="userAvatarSource(user)"
+                  :name="getUserDisplayName(user)"
+                  :base-api-path="config.public.baseApiPath"
+                  class="rounded-full bg-gradient-to-br from-primary to-secondary text-primary-content font-bold ring-2 transition-all duration-150"
                   :class="[
                     videoFeeds.length
                       ? 'h-10 w-10 text-sm'
@@ -171,9 +157,7 @@
                       ? 'ring-success ring-offset-2 ring-offset-base-100 shadow-[0_0_0_6px_rgba(34,197,94,0.15)]'
                       : 'ring-base-300',
                   ]"
-                >
-                  {{ getUserInitials(user) }}
-                </div>
+                />
               </div>
               <!-- User Name -->
               <h4
@@ -220,15 +204,21 @@
                   v-if="user.muted"
                   class="flex items-center gap-1 text-error"
                 >
-                  <Icon name="lucide:mic-off" class="size-6" />
-                  <span class="text-sm">Muted</span>
+                  <Icon
+                    name="lucide:mic-off"
+                    class="size-6"
+                    title="Microphone off"
+                  />
                 </div>
                 <div
                   v-if="user.deafened"
                   class="flex items-center gap-1 text-error"
                 >
-                  <Icon name="lucide:volume-x" class="size-6" />
-                  <span class="text-sm">Deafened</span>
+                  <Icon
+                    name="lucide:volume-x"
+                    class="size-6"
+                    title="Deafened"
+                  />
                 </div>
               </div>
             </div>
@@ -697,16 +687,6 @@ const currentConnectedChannelName = computed(() => {
   return channel?.name || "Unknown Channel";
 });
 
-function getUserInitials(user) {
-  const name = getUserDisplayName(user);
-  return name
-    .split(" ")
-    .map((word) => word.charAt(0))
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
 function getUserDisplayName(user) {
   const profile =
     voiceStore.getUserProfile && user?.id
@@ -723,21 +703,21 @@ function getUserDisplayName(user) {
   return identityStore.displayName(merged);
 }
 
-function getUserAvatar(user) {
+function userAvatarSource(user) {
+  const currentUser = authStore.getUserData?.();
+  if (
+    currentUser?.id &&
+    user?.id &&
+    String(currentUser.id) === String(user.id)
+  ) {
+    return currentUser.avatar || "";
+  }
   const profile =
     voiceStore.getUserProfile && user?.id
       ? voiceStore.getUserProfile(user.id)
       : null;
   const merged = { ...profile, ...user };
-  const avatar = merged.avatar;
-  if (!avatar) return null;
-
-  if (typeof avatar === "string" && /^(https?:)?\/\//i.test(avatar))
-    return avatar;
-  const base = (config?.public?.baseApiPath || "").replace(/\/$/, "");
-  const clean = String(avatar).replace(/^\/+/, "");
-  const path = clean.startsWith("auth/") ? clean : `auth/${clean}`;
-  return `${base}/${path}`;
+  return merged.avatar || "";
 }
 
 function getButtonTitle() {

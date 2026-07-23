@@ -69,7 +69,9 @@ overrides. Playback uses the selected output device when the browser supports
 released after playback or voice-surface teardown.
 
 The voice soundboard supports search and category grouping. Disabled clips are
-visible only to members allowed to manage them.
+visible only to members allowed to manage them. Room soundboard managers can
+upload clips from either the voice soundboard or the room-administration
+Soundboard section.
 
 ## System sounds
 

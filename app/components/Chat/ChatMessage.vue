@@ -40,8 +40,13 @@
         >
           <MessageActions
             :message="message"
+            :permissions="permissions"
+            :is-room-owner="isRoomOwner"
             @mark-read="handleMarkRead"
             @show-details="handleShowDetails"
+            @edit="$emit('edit', $event)"
+            @delete="$emit('delete', $event)"
+            @history="$emit('history', $event)"
           />
         </div>
       </div>
@@ -54,6 +59,14 @@
       style="white-space: pre-wrap; word-break: break-word"
     >
       {{ message.content }}
+      <span
+        v-if="message.edited_at"
+        class="ml-1 inline-flex align-middle opacity-60"
+        title="Edited"
+        aria-label="Edited"
+      >
+        <Icon name="lucide:pencil" class="size-3" />
+      </span>
     </div>
     <div v-else class="chat-bubble chat-bubble-secondary opacity-50 italic">
       [Unsupported message type]
@@ -117,9 +130,23 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  permissions: {
+    type: Array,
+    default: () => [],
+  },
+  isRoomOwner: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(["message-read", "show-details"]);
+const emit = defineEmits([
+  "message-read",
+  "show-details",
+  "edit",
+  "delete",
+  "history",
+]);
 
 const authStore = useAuthStore();
 const identityStore = useIdentityStore();

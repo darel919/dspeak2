@@ -74,7 +74,7 @@ function mediaUserProfile(user) {
     handle: user.handle || "",
     display_name: user.display_name || "",
     avatar: user.avatar
-      ? `auth/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
+      ? `/dspeak/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
       : null,
   };
 }

@@ -643,6 +643,42 @@ async function migrateMessageIdempotency(pb) {
   });
 }
 
+async function migrateMessageRevisions(pb) {
+  const users = await pb.collections.getOne("users");
+  const messages = await pb.collections.getOne("dspeak_messages");
+  await upsertCollection(pb, {
+    name: messages.name,
+    type: messages.type,
+    fields: [field("edited_at", "date")],
+    indexes: [],
+  });
+  await upsertCollection(pb, {
+    name: "dspeak_message_revisions",
+    type: "base",
+    fields: [
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("editor", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("content", "text", { required: true, max: 4000 }),
+      field("revision", "number", { required: true, min: 1 }),
+      field("edited_at", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_message_revision_number ON dspeak_message_revisions (message, revision)",
+      "CREATE INDEX idx_dspeak_message_revision_time ON dspeak_message_revisions (message, edited_at)",
+    ],
+  });
+}
+
 async function migrateSoundboardTimestamps(pb) {
   const soundboards = await pb.collections.getOne("dspeak_room_soundboards");
   await upsertCollection(pb, {
@@ -787,6 +823,10 @@ const migrations = Object.freeze([
   {
     name: "20260723_message_idempotency_v1",
     run: migrateMessageIdempotency,
+  },
+  {
+    name: "20260723_message_revisions_v1",
+    run: migrateMessageRevisions,
   },
   {
     name: "20260723_push_job_retention_v1",

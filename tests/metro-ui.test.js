@@ -60,6 +60,19 @@ test("room settings opens the full administration route", async () => {
   assert.doesNotMatch(source, /showRoomSettings/);
 });
 
+test("soundboard managers can upload from room administration", async () => {
+  const admin = await readFile("app/components/SoundboardAdmin.vue", "utf8");
+  const panel = await readFile("app/components/SoundboardPanel.vue", "utf8");
+  const uploader = await readFile(
+    "app/components/SoundboardUploadDialog.vue",
+    "utf8",
+  );
+  assert.match(admin, /Add sound/);
+  assert.match(admin, /<SoundboardUploadDialog/);
+  assert.match(panel, /<SoundboardUploadDialog/);
+  assert.match(uploader, /await store\.upload\(props\.roomId/);
+});
+
 test("room branding places the banner in navigation and the avatar above the room name", async () => {
   const layout = await readFile("app/layouts/default.vue", "utf8");
   const navbar = await readFile("app/components/Navbar.vue", "utf8");

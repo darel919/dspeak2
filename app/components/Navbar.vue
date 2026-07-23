@@ -54,6 +54,11 @@ const currentVoiceChannel = computed(() =>
 const isDisconnected = computed(
   () => presenceStatus?.value === "permanently-disconnected",
 );
+const connectionWarning = computed(() => {
+  if (chatStore.offline) return "Offline";
+  if (isDisconnected.value || chatStore.error) return "Connection issue";
+  return "";
+});
 const avatarStatusClass = computed(() => {
   if (voiceStore.error && !voiceStore.connected) return "avatar-offline";
   if (presenceStatus?.value === "connected") return "avatar-online";
@@ -257,6 +262,15 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="relative z-10 ml-auto flex min-w-0 items-center gap-2">
+      <div
+        v-if="connectionWarning"
+        class="flex items-center gap-2 text-xs font-semibold text-warning"
+        role="status"
+      >
+        <Icon name="lucide:wifi-off" class="size-4" />
+        <span class="hidden sm:inline">{{ connectionWarning }}</span>
+      </div>
+
       <NotificationCenter />
       <section
         v-if="profile"
@@ -585,14 +599,6 @@ onBeforeUnmount(() => {
       <div v-if="profile && voiceStore.connecting" class="connection-warning">
         <span class="loading loading-spinner loading-xs"></span>
         <span>Connecting…</span>
-      </div>
-
-      <div
-        v-if="isDisconnected || chatStore.offline"
-        class="hidden items-center gap-2 text-xs font-semibold text-warning xl:flex"
-      >
-        <Icon name="lucide:wifi-off" class="size-4" />
-        <span>{{ chatStore.offline ? "Offline" : "Connection lost" }}</span>
       </div>
 
       <NuxtLink

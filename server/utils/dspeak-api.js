@@ -51,6 +51,11 @@ import {
   validateInviteExpiry,
 } from "../../shared/room-invite.js";
 import { enforceRateLimit } from "./rate-limit.js";
+import {
+  canDeleteMessage,
+  canViewMessageHistory,
+  isMessageOwner,
+} from "../../shared/message-policy.js";
 
 function requireValue(value, message) {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
@@ -106,7 +111,7 @@ async function ensureMember(pb, room, userId) {
 
 function avatarPath(user, authPrefix = false) {
   if (!user?.id || !user?.avatar) return null;
-  return `${authPrefix ? "auth/" : ""}assets/avatar?userId=${user.id}&fileName=${user.avatar}`;
+  return `${authPrefix ? "auth/" : ""}assets/avatar?userId=${encodeURIComponent(user.id)}&fileName=${encodeURIComponent(user.avatar)}`;
 }
 
 function presentUser(user, authPrefix = false) {
@@ -776,7 +781,7 @@ async function handleChannels(event, suffix) {
     return channels.map(presentChannel);
   }
 
-  const body = await parseBody(event);
+  const body = event.method === "GET" ? {} : await parseBody(event);
 
   if (suffix === "moderate-voice" && method === "POST") {
     const sourceChannel = await pb
@@ -1190,11 +1195,13 @@ async function handleChat(event, suffix) {
       sender: presentUser(message.expand?.sender, true),
       created: message.created,
       updated: message.updated,
+      edited_at: message.edited_at || null,
+      client_id: message.client_id || null,
       read_by: (message.expand?.read_by || []).map((user) => presentUser(user)),
     }));
   }
 
-  const body = await parseBody(event);
+  const body = event.method === "GET" ? {} : await parseBody(event);
 
   if (suffix === "message" && event.method === "POST") {
     enforceRateLimit(event, "chat-message", userId, 120, 60 * 1000);
@@ -1265,6 +1272,9 @@ async function handleChat(event, suffix) {
       room_channel: message.room_channel,
       sender: presentUser(message.expand?.sender, true),
       created: message.created,
+      updated: message.updated,
+      edited_at: message.edited_at || null,
+      client_id: message.client_id || null,
       read_by: message.read_by || [],
     };
     if (wasCreated)
@@ -1285,6 +1295,120 @@ async function handleChat(event, suffix) {
     }
     setResponseStatus(event, 201);
     return result;
+  }
+
+  if (["message/edit", "message/delete", "message/history"].includes(suffix)) {
+    const messageId = requireValue(
+      body.messageId || getQuery(event).messageId,
+      "Message ID is required",
+    );
+    const message = await pb
+      .collection("dspeak_messages")
+      .getOne(messageId, { expand: "sender" });
+    const channel = await pb
+      .collection("dspeak_rooms_channels")
+      .getOne(message.room_channel);
+    const room = await pb.collection("dspeak_rooms").getOne(channel.room);
+    const access = await requireRoomMember(pb, room, userId);
+
+    if (suffix === "message/history" && event.method === "GET") {
+      if (!canViewMessageHistory(access.permissions, access.isOwner))
+        throw createError({
+          statusCode: 403,
+          statusMessage: "Missing permission to view message revision history",
+        });
+      const revisions = await pb
+        .collection("dspeak_message_revisions")
+        .getFullList({
+          filter: `message = '${message.id}'`,
+          sort: "revision",
+          expand: "editor",
+        });
+      return revisions.map((revision) => ({
+        id: revision.id,
+        revision: revision.revision,
+        content: revision.content,
+        edited_at: revision.edited_at,
+        editor: presentUser(revision.expand?.editor),
+      }));
+    }
+
+    if (suffix === "message/edit" && event.method === "PATCH") {
+      if (!isMessageOwner(message, userId))
+        throw createError({
+          statusCode: 403,
+          statusMessage: "You can only edit your own messages",
+        });
+      const content = requireValue(body.content, "Message content is required");
+      if (typeof content !== "string" || content.length > 4000)
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Message content must be at most 4000 characters",
+        });
+      const nextContent = content.trim();
+      requireValue(nextContent, "Message content is required");
+      if (nextContent === message.content)
+        throw createError({
+          statusCode: 409,
+          statusMessage: "The message content has not changed",
+        });
+      const existing = await pb
+        .collection("dspeak_message_revisions")
+        .getFullList({
+          filter: `message = '${message.id}'`,
+          sort: "-revision",
+          perPage: 1,
+        });
+      const nextRevision = existing.length
+        ? Number(existing[0].revision) + 1
+        : 2;
+      const editedAt = new Date().toISOString();
+      if (!existing.length)
+        await pb.collection("dspeak_message_revisions").create({
+          message: message.id,
+          editor: message.sender,
+          content: message.content,
+          revision: 1,
+          edited_at: message.created,
+        });
+      await pb.collection("dspeak_message_revisions").create({
+        message: message.id,
+        editor: userId,
+        content: nextContent,
+        revision: nextRevision,
+        edited_at: editedAt,
+      });
+      const updated = await pb
+        .collection("dspeak_messages")
+        .update(message.id, {
+          content: nextContent,
+          edited_at: editedAt,
+        });
+      const result = {
+        id: updated.id,
+        content: updated.content,
+        updated: updated.updated,
+        edited_at: updated.edited_at,
+      };
+      broadcastToChannel(channel.id, { type: "message_updated", data: result });
+      return result;
+    }
+
+    if (suffix === "message/delete" && event.method === "DELETE") {
+      if (
+        !canDeleteMessage(message, userId, access.permissions, access.isOwner)
+      )
+        throw createError({
+          statusCode: 403,
+          statusMessage: "Missing permission to delete this message",
+        });
+      await pb.collection("dspeak_messages").delete(message.id);
+      broadcastToChannel(channel.id, {
+        type: "message_deleted",
+        data: { id: message.id },
+      });
+      return { id: message.id, deleted: true };
+    }
   }
 
   if (suffix === "read" && event.method === "POST") {
@@ -1583,6 +1707,47 @@ async function handleProfile(event, suffix) {
   });
 }
 
+async function handleAssets(event, suffix) {
+  if (suffix !== "avatar" || event.method !== "GET")
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Asset endpoint not found",
+    });
+
+  await requireAuthenticatedUser(event);
+  const query = getQuery(event);
+  const userId = requireValue(query.userId, "User ID is required");
+  const requestedFileName = requireValue(
+    query.fileName,
+    "Avatar filename is required",
+  );
+  const pb = await usePocketBaseAdmin();
+  const user = await pb.collection("users").getOne(userId, {
+    fields: "id,avatar",
+  });
+
+  if (!user.avatar || user.avatar !== requestedFileName)
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Avatar not found",
+    });
+
+  const response = await fetch(pb.files.getURL(user, user.avatar));
+  if (!response.ok)
+    throw createError({
+      statusCode: response.status,
+      statusMessage: "Failed to load avatar",
+    });
+
+  setHeader(event, "Cache-Control", "private, max-age=604800, immutable");
+  setHeader(
+    event,
+    "Content-Type",
+    response.headers.get("content-type") || "image/jpeg",
+  );
+  return sendWebResponse(event, response);
+}
+
 export async function handleDspeakApi(event) {
   const path = String(getRouterParam(event, "path") || "").replace(
     /^\/+|\/+$/g,
@@ -1611,6 +1776,7 @@ export async function handleDspeakApi(event) {
     if (domain === "channel") return await handleChannels(event, suffix);
     if (domain === "chat") return await handleChat(event, suffix);
     if (domain === "profile") return await handleProfile(event, suffix);
+    if (domain === "assets") return await handleAssets(event, suffix);
     if (domain === "soundboard")
       return await handleSoundboardApi(event, suffix);
     throw createError({

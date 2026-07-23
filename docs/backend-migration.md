@@ -29,6 +29,14 @@ Production authentication, delivery, and offline idempotency add:
 - `dspeak_sessions`
 - `dspeak_push_subscriptions`
 - `dspeak_push_jobs`
+- `dspeak_message_revisions`
+
+Message edits use append-only revisions. The original content is revision one,
+every accepted edit creates the next revision, and `dspeak_messages.edited_at`
+drives the public edited indicator independently from read-receipt updates.
+Message authors may edit or unsend their own persisted messages. Room owners and
+roles with `message.moderate` may delete other members' messages and inspect
+revision history.
 
 `dspeak_webpush_global` is a migration source only. Startup copies usable legacy
 subscriptions into the device-scoped collection; new subscription writes never

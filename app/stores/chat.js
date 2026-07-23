@@ -11,6 +11,11 @@ import {
   IdbOperationError,
 } from "../utils/idb";
 import { addReader, hasReader, mergeReaders } from "../shared/read-receipts";
+import {
+  chatApiErrorMessage,
+  reconcileIncomingMessage,
+  reconcileSentMessage,
+} from "../shared/chat-messages";
 import { debugLog } from "../shared/debug";
 
 export const useChatStore = defineStore("chat", () => {
@@ -509,7 +514,7 @@ export const useChatStore = defineStore("chat", () => {
           return;
         }
         console.error("[ChatStore] WebSocket error:", socketError);
-        error.value = "WebSocket connection failed";
+        error.value = "Unable to connect to real-time chat";
       };
 
       if (typeof window !== "undefined") {
@@ -592,18 +597,12 @@ export const useChatStore = defineStore("chat", () => {
         case "connected":
           break;
         case "new_message":
-          const existingMessage = messages.value.find(
-            (msg) => msg.id === data.data.id,
-          );
-          if (existingMessage) {
-            break;
-          }
-          messages.value.push(data.data);
-          handleNewMessageNotification(data.data);
+          if (reconcileIncomingMessage(messages.value, data.data).inserted)
+            handleNewMessageNotification(data.data);
           break;
         case "message_updated":
           debugLog("[ChatStore] Message updated:", data.data);
-          updateMessageReadBy(data.data.id, data.data.read_by);
+          updateMessage(data.data);
           break;
         case "message_deleted":
           debugLog("[ChatStore] Message deleted:", data.data);
@@ -804,6 +803,7 @@ export const useChatStore = defineStore("chat", () => {
 
       const clientMessageId = crypto.randomUUID();
       const pendingId = `pending_${clientMessageId}`;
+      const created = new Date().toISOString();
       pendingMessage = {
         id: pendingId,
         content,
@@ -813,8 +813,10 @@ export const useChatStore = defineStore("chat", () => {
           name: userData.name || "You",
           email: userData.email,
         },
-        created: new Date().toISOString(),
+        created,
+        updated: created,
         read_by: [userData.id],
+        client_id: clientMessageId,
         status: "pending",
       };
 
@@ -864,12 +866,7 @@ export const useChatStore = defineStore("chat", () => {
 
         const message = await response.json();
 
-        const pendingIndex = messages.value.findIndex(
-          (msg) => msg.id === pendingMessage.id,
-        );
-        if (pendingIndex !== -1) {
-          messages.value.splice(pendingIndex, 1);
-        }
+        reconcileSentMessage(messages.value, pendingMessage.id, message);
 
         return message;
       } catch (fetchError) {
@@ -1035,6 +1032,56 @@ export const useChatStore = defineStore("chat", () => {
         readBy,
       );
     }
+  }
+
+  function updateMessage(update) {
+    const message = messages.value.find((item) => item.id === update.id);
+    if (!message) return;
+    const readBy = update.read_by;
+    Object.assign(message, update);
+    if (readBy) message.read_by = mergeReaders(message.read_by, readBy);
+  }
+
+  async function chatResponseError(response) {
+    return new Error(
+      chatApiErrorMessage(await response.text(), response.status),
+    );
+  }
+
+  async function editMessage(messageId, content) {
+    const response = await fetch(`${config.public.apiPath}/chat/message/edit`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId, content }),
+    });
+    if (!response.ok) throw await chatResponseError(response);
+    const result = await response.json();
+    updateMessage(result);
+    return result;
+  }
+
+  async function deleteMessage(messageId) {
+    const response = await fetch(
+      `${config.public.apiPath}/chat/message/delete`,
+      {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      },
+    );
+    if (!response.ok) throw await chatResponseError(response);
+    removeMessage(messageId);
+  }
+
+  async function fetchMessageHistory(messageId) {
+    const response = await fetch(
+      `${config.public.apiPath}/chat/message/history?messageId=${encodeURIComponent(messageId)}`,
+      { credentials: "include" },
+    );
+    if (!response.ok) throw await chatResponseError(response);
+    return response.json();
   }
 
   function removeMessage(messageId) {
@@ -1222,6 +1269,9 @@ export const useChatStore = defineStore("chat", () => {
     disconnectFromChannel,
     fetchMessages,
     sendMessage,
+    editMessage,
+    deleteMessage,
+    fetchMessageHistory,
     markMessageAsRead,
     sendTypingIndicator,
     sendPing,

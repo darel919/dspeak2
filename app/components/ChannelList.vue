@@ -217,17 +217,12 @@
                       class="avatar placeholder shrink-0"
                       :class="u.speaking ? 'avatar-online' : ''"
                     >
-                      <div
+                      <ProfileAvatar
                         class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
-                      >
-                        <img
-                          v-if="getUserAvatar(u.id || u)"
-                          :src="getUserAvatar(u.id || u)"
-                          :alt="`${getUserName(u.id || u)} avatar`"
-                          class="h-full w-full object-cover"
-                        />
-                        <span v-else>{{ getUserInitials(u.id || u) }}</span>
-                      </div>
+                        :src="getUserAvatar(u.id || u)"
+                        :name="getUserName(u.id || u)"
+                        :base-api-path="runtimeConfig.public.baseApiPath"
+                      />
                     </div>
                     <div class="min-w-0 flex-1">
                       <div
@@ -264,7 +259,7 @@
                         title="Deafened"
                       />
                       <Icon
-                        v-else-if="u.muted"
+                        v-if="u.muted"
                         name="lucide:mic-off"
                         class="h-4 w-4"
                         title="Microphone off"
@@ -380,17 +375,12 @@
                     "
                   >
                     <div class="avatar placeholder shrink-0">
-                      <div
+                      <ProfileAvatar
                         class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
-                      >
-                        <img
-                          v-if="getUserAvatar(u.id)"
-                          :src="getUserAvatar(u.id)"
-                          :alt="`${getUserName(u.id)} avatar`"
-                          class="h-full w-full object-cover"
-                        />
-                        <span v-else>{{ getUserInitials(u.id) }}</span>
-                      </div>
+                        :src="getUserAvatar(u.id)"
+                        :name="getUserName(u.id)"
+                        :base-api-path="runtimeConfig.public.baseApiPath"
+                      />
                     </div>
                     <span class="min-w-0 flex-1 truncate">{{
                       getUserName(u.id)
@@ -406,7 +396,7 @@
                         title="Deafened"
                       />
                       <Icon
-                        v-else-if="u.muted"
+                        v-if="u.muted"
                         name="lucide:mic-off"
                         class="h-4 w-4"
                         title="Microphone off"
@@ -787,16 +777,20 @@ function getUserName(userId) {
   return identityStore.displayName(user || {});
 }
 function getUserAvatar(userId) {
+  const currentUser = authStore.getUserData?.();
+  if (
+    currentUser?.id &&
+    String(currentUser.id) === String(userId?.id || userId)
+  ) {
+    return currentUser.avatar || null;
+  }
   const user =
     voiceStore.getUserById(userId) ||
     voiceStore.getUserProfile(userId) ||
     channelsStore.getVoiceProfile(userId) ||
     props.room?.members?.find((member) => String(member.id) === String(userId));
   const avatar = user?.avatar;
-  if (!avatar) return null;
-  if (/^(https?:)?\/\//i.test(avatar)) return avatar;
-  const base = runtimeConfig.public.baseApiPath.replace(/\/$/, "");
-  return `${base}/${String(avatar).replace(/^\/+/, "")}`;
+  return avatar || null;
 }
 function getUserInitials(userId) {
   return getUserName(userId)

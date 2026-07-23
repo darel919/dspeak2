@@ -73,7 +73,7 @@
                 <span>{{ formatFullDate(message.created) }}</span>
               </div>
               <div
-                v-if="message.updated !== message.created"
+                v-if="hasDistinctUpdatedTimestamp(message)"
                 class="flex justify-between"
               >
                 <span class="text-base-content/60">Updated:</span>
@@ -97,7 +97,7 @@
               <div class="flex justify-between">
                 <span class="text-base-content/60">Room:</span>
                 <code class="text-xs bg-base-300 px-2 py-1 rounded">{{
-                  message.room
+                  messageChannelId(message)
                 }}</code>
               </div>
             </div>
@@ -120,6 +120,11 @@
 
 <script setup>
 import { debugLog } from "../../shared/debug";
+import {
+  hasDistinctUpdatedTimestamp,
+  isValidMessageTimestamp,
+  messageChannelId,
+} from "../../shared/chat-messages";
 import { useRuntimeConfig } from "#app";
 
 const props = defineProps({
@@ -138,6 +143,7 @@ const emit = defineEmits(["close"]);
 const config = useRuntimeConfig();
 
 function formatFullDate(dateString) {
+  if (!isValidMessageTimestamp(dateString)) return "Unavailable";
   const date = new Date(dateString);
   return date.toLocaleString("en-US", {
     year: "numeric",

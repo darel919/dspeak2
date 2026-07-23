@@ -58,11 +58,6 @@
         class="flex-1 overflow-y-auto p-4 space-y-4"
         @scroll="handleScroll"
       >
-        <ChatErrorBanner
-          :channel-id="props.channelId"
-          :channel-name="props.channel?.name"
-          :room-id="props.room?.id"
-        />
         <OfflineBanner />
 
         <!-- Loading indicator -->
@@ -110,7 +105,12 @@
             :key="message.id"
             :message="message"
             :room-members="room?.members || []"
+            :permissions="room?.permissions || []"
+            :is-room-owner="Boolean(room?.isOwner)"
             @show-details="handleShowDetails"
+            @edit="openEditMessage"
+            @delete="openDeleteMessage"
+            @history="openMessageHistory"
           />
         </div>
 
@@ -139,6 +139,108 @@
         :message="selectedMessage"
         @close="closeDetailsModal"
       />
+
+      <div v-if="editingMessage" class="modal modal-open">
+        <div class="modal-box">
+          <h3 class="text-lg font-bold">Edit message</h3>
+          <textarea
+            v-model="editContent"
+            class="textarea textarea-bordered mt-4 h-32 w-full"
+            maxlength="4000"
+            aria-label="Message content"
+          ></textarea>
+          <p v-if="actionError" class="mt-2 text-sm text-error" role="alert">
+            {{ actionError }}
+          </p>
+          <div class="modal-action">
+            <button
+              class="btn btn-ghost"
+              :disabled="actionPending"
+              @click="closeAction"
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-primary"
+              :disabled="actionPending || !editContent.trim()"
+              @click="saveMessageEdit"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="deletingMessage" class="modal modal-open">
+        <div class="modal-box">
+          <h3 class="text-lg font-bold">
+            {{
+              deletingMessage.sender?.id === currentUserId
+                ? "Unsend message?"
+                : "Delete message?"
+            }}
+          </h3>
+          <p class="mt-3">
+            This removes the message for everyone and cannot be undone.
+          </p>
+          <p v-if="actionError" class="mt-2 text-sm text-error" role="alert">
+            {{ actionError }}
+          </p>
+          <div class="modal-action">
+            <button
+              class="btn btn-ghost"
+              :disabled="actionPending"
+              @click="closeAction"
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-error"
+              :disabled="actionPending"
+              @click="confirmDeleteMessage"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="historyMessage" class="modal modal-open">
+        <div class="modal-box max-w-2xl">
+          <h3 class="text-lg font-bold">Revision history</h3>
+          <div v-if="historyLoading" class="mt-4 flex justify-center">
+            <span class="loading loading-spinner"></span>
+          </div>
+          <p v-else-if="actionError" class="mt-4 text-error" role="alert">
+            {{ actionError }}
+          </p>
+          <ol v-else class="mt-4 space-y-3">
+            <li
+              v-for="revision in messageHistory"
+              :key="revision.id"
+              class="border border-base-300 bg-base-200 p-3"
+            >
+              <div class="flex justify-between gap-4 text-xs opacity-70">
+                <span>Revision {{ revision.revision }}</span>
+                <time>{{ formatHistoryTime(revision.edited_at) }}</time>
+              </div>
+              <p class="mt-2 whitespace-pre-wrap break-words">
+                {{ revision.content }}
+              </p>
+              <p class="mt-2 text-xs opacity-70">
+                {{
+                  revision.editor?.name ||
+                  revision.editor?.email ||
+                  "Unknown editor"
+                }}
+              </p>
+            </li>
+          </ol>
+          <div class="modal-action">
+            <button class="btn btn-primary" @click="closeAction">Close</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- MemberList Sidebar -->
@@ -181,9 +283,9 @@ import ChatMessage from "./ChatMessage.vue";
 import ChatInput from "./ChatInput.vue";
 import MessageDetailsModal from "./MessageDetailsModal.vue";
 import MemberList from "../MemberList.vue";
-import ChatErrorBanner from "./ChatErrorBanner.vue";
 import OfflineBanner from "./OfflineBanner.vue";
 import { STORAGE_KEYS } from "../../const/storage";
+import { isPendingDuplicate } from "../../shared/chat-messages";
 
 const showMemberList = ref(true);
 
@@ -231,26 +333,20 @@ const showScrollButton = ref(false);
 const isNearBottom = ref(true);
 const showDetailsModal = ref(false);
 const selectedMessage = ref(null);
+const editingMessage = ref(null);
+const deletingMessage = ref(null);
+const historyMessage = ref(null);
+const editContent = ref("");
+const messageHistory = ref([]);
+const actionPending = ref(false);
+const historyLoading = ref(false);
+const actionError = ref("");
 const authStore = useAuthStore();
 const currentUserId = computed(() => authStore.getUserData()?.id);
 
 const messages = computed(() => {
   const all = chatStore.messages;
-  const sentIds = new Set(
-    all.filter((m) => m.status !== "pending").map((m) => m.id),
-  );
-
-  return all.filter((msg, idx, arr) => {
-    if (msg.status !== "pending") return true;
-
-    return !arr.some(
-      (other) =>
-        other.status !== "pending" &&
-        other.sender?.id === msg.sender?.id &&
-        other.content === msg.content &&
-        Math.abs(new Date(other.created) - new Date(msg.created)) < 15000,
-    );
-  });
+  return all.filter((message) => !isPendingDuplicate(message, all));
 });
 const loading = computed(() => chatStore.loading);
 const error = computed(() => chatStore.error);
@@ -344,6 +440,74 @@ function handleShowDetails(message) {
 function closeDetailsModal() {
   showDetailsModal.value = false;
   selectedMessage.value = null;
+}
+
+function openEditMessage(message) {
+  closeAction();
+  editingMessage.value = message;
+  editContent.value = message.content;
+}
+
+function openDeleteMessage(message) {
+  closeAction();
+  deletingMessage.value = message;
+}
+
+async function openMessageHistory(message) {
+  closeAction();
+  historyMessage.value = message;
+  historyLoading.value = true;
+  try {
+    messageHistory.value = await chatStore.fetchMessageHistory(message.id);
+  } catch (cause) {
+    actionError.value = cause.message;
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function saveMessageEdit() {
+  if (!editingMessage.value || actionPending.value) return;
+  actionPending.value = true;
+  actionError.value = "";
+  try {
+    await chatStore.editMessage(editingMessage.value.id, editContent.value);
+    closeAction();
+  } catch (cause) {
+    actionError.value = cause.message;
+  } finally {
+    actionPending.value = false;
+  }
+}
+
+async function confirmDeleteMessage() {
+  if (!deletingMessage.value || actionPending.value) return;
+  actionPending.value = true;
+  actionError.value = "";
+  try {
+    await chatStore.deleteMessage(deletingMessage.value.id);
+    closeAction();
+  } catch (cause) {
+    actionError.value = cause.message;
+  } finally {
+    actionPending.value = false;
+  }
+}
+
+function closeAction() {
+  editingMessage.value = null;
+  deletingMessage.value = null;
+  historyMessage.value = null;
+  editContent.value = "";
+  messageHistory.value = [];
+  actionError.value = "";
+}
+
+function formatHistoryTime(value) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString()
+    : "Unavailable";
 }
 
 function handleMessageClick(message) {}
