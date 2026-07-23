@@ -11,6 +11,7 @@ import {
   IdbOperationError,
 } from "../utils/idb";
 import { addReader, hasReader, mergeReaders } from "../shared/read-receipts";
+import { debugLog } from "../shared/debug";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
@@ -116,15 +117,21 @@ export const useChatStore = defineStore("chat", () => {
     }
     if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
       setTimeout(() => {
-        navigator.serviceWorker.ready.then((reg) => {
-          if (reg.sync) {
-            reg.sync.register("chat-sync");
-          }
-        });
+        requestBackgroundSync();
         navigator.serviceWorker.controller?.postMessage({
           type: "FORCE_SYNC",
         });
       }, 500);
+    }
+  }
+
+  async function requestBackgroundSync() {
+    if (!("serviceWorker" in navigator) || !("SyncManager" in window)) return;
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.sync.register("chat-sync");
+    } catch (syncError) {
+      debugLog("[ChatStore] Background Sync unavailable:", syncError);
     }
   }
 
@@ -145,7 +152,7 @@ export const useChatStore = defineStore("chat", () => {
       currentChannelId.value === channelId &&
       connected.value
     ) {
-      console.debug(
+      debugLog(
         "[ChatStore] Already connected to channel, skipping reconnect:",
         channelId,
       );
@@ -153,7 +160,7 @@ export const useChatStore = defineStore("chat", () => {
     }
 
     if (connecting.value && currentChannelId.value === channelId) {
-      console.debug(
+      debugLog(
         "[ChatStore] Connect already in progress for channel, skipping:",
         channelId,
       );
@@ -246,7 +253,7 @@ export const useChatStore = defineStore("chat", () => {
         connecting.value = false;
         connected.value = true;
         intentionalDisconnect.value = false;
-        console.debug(`[ChatStore] Connected to channel ${channelId}`);
+        debugLog(`[ChatStore] Connected to channel ${channelId}`);
 
         if (reconnectTimer) {
           clearTimeout(reconnectTimer);
@@ -287,12 +294,12 @@ export const useChatStore = defineStore("chat", () => {
           return;
         }
         try {
-          console.debug("[ChatStore] WebSocket connection closed", {
+          debugLog("[ChatStore] WebSocket connection closed", {
             code: event?.code,
             reason: event?.reason,
           });
         } catch (e) {
-          console.debug("[ChatStore] WebSocket connection closed");
+          debugLog("[ChatStore] WebSocket connection closed");
         }
 
         recentCloses.push(Date.now());
@@ -343,13 +350,13 @@ export const useChatStore = defineStore("chat", () => {
 
           const jitter = 0.8 + Math.random() * 0.4;
           const delay = Math.round(baseDelay * jitter);
-          console.debug(
+          debugLog(
             `[ChatStore] Scheduling reconnect in ${delay}ms (attempt ${backoffAttempts})`,
           );
           reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
             if (!connected.value && currentChannelId.value) {
-              console.debug("[ChatStore] Attempting to reconnect...");
+              debugLog("[ChatStore] Attempting to reconnect...");
               connectToChannel(
                 currentChannelId.value,
                 currentChannelName.value,
@@ -380,7 +387,7 @@ export const useChatStore = defineStore("chat", () => {
             usePushSubscription();
           if (isSupported.value && !isSubscribed.value) {
             await updateSubscription();
-            console.debug("[ChatStore] Push subscription updated (global)");
+            debugLog("[ChatStore] Push subscription updated (global)");
           }
         } catch (err) {
           console.warn("[ChatStore] Failed to update push subscription:", err);
@@ -462,48 +469,42 @@ export const useChatStore = defineStore("chat", () => {
           handleNewMessageNotification(data.data);
           break;
         case "message_updated":
-          console.debug("[ChatStore] Message updated:", data.data);
+          debugLog("[ChatStore] Message updated:", data.data);
           updateMessageReadBy(data.data.id, data.data.read_by);
           break;
         case "message_deleted":
-          console.debug("[ChatStore] Message deleted:", data.data);
+          debugLog("[ChatStore] Message deleted:", data.data);
           removeMessage(data.data.id);
           break;
         case "channel_updated":
-          console.debug("[ChatStore] Channel updated:", data.data);
+          debugLog("[ChatStore] Channel updated:", data.data);
           break;
         case "channel_deleted":
-          console.debug("[ChatStore] Channel deleted:", data.data);
+          debugLog("[ChatStore] Channel deleted:", data.data);
           disconnectFromChannel(true);
           break;
         case "user_typing":
-          console.debug("[ChatStore] User typing status:", data.data);
+          debugLog("[ChatStore] User typing status:", data.data);
           updateTypingStatus(data.data.userId, data.data.isTyping);
           break;
         case "pong":
           break;
         case "currentlyInChannel":
         case "currentlyInRoom":
-          console.debug(
-            "[ChatStore] Received online users update:",
-            data.inRoom,
-          );
+          debugLog("[ChatStore] Received online users update:", data.inRoom);
           if (Array.isArray(data.inRoom)) {
             onlineUsers.value = data.inRoom.map((u) =>
               typeof u === "string" ? { id: u } : u,
             );
-            console.debug(
-              "[ChatStore] Updated onlineUsers:",
-              onlineUsers.value,
-            );
+            debugLog("[ChatStore] Updated onlineUsers:", onlineUsers.value);
           }
           break;
         case "user_joined":
         case "user_left":
-          console.debug("[ChatStore] User presence change:", data.type, data);
+          debugLog("[ChatStore] User presence change:", data.type, data);
           break;
         case "participant_change":
-          console.debug("[ChatStore] Participant change detected:", data);
+          debugLog("[ChatStore] Participant change detected:", data);
           await handleParticipantChange();
           break;
         case "notification_created":
@@ -517,7 +518,7 @@ export const useChatStore = defineStore("chat", () => {
           );
           break;
         default:
-          console.debug("[ChatStore] Unknown message type:", data.type);
+          debugLog("[ChatStore] Unknown message type:", data.type);
       }
     } catch (err) {
       console.error(
@@ -530,7 +531,7 @@ export const useChatStore = defineStore("chat", () => {
 
   async function handleParticipantChange() {
     try {
-      console.debug(
+      debugLog(
         "[ChatStore] Handling participant change - refreshing room data",
       );
 
@@ -538,11 +539,9 @@ export const useChatStore = defineStore("chat", () => {
         const roomsStore = useRoomsStore();
 
         await roomsStore.fetchRooms();
-        console.debug(
-          "[ChatStore] Room data refreshed after participant change",
-        );
+        debugLog("[ChatStore] Room data refreshed after participant change");
       } else {
-        console.debug("[ChatStore] No current room ID, skipping room refresh");
+        debugLog("[ChatStore] No current room ID, skipping room refresh");
       }
     } catch (error) {
       console.error("[ChatStore] Error handling participant change:", error);
@@ -705,11 +704,7 @@ export const useChatStore = defineStore("chat", () => {
           pendingId: pendingMessage.id,
         };
         await enqueueMessage(queuedMessage);
-        if ("serviceWorker" in navigator && "SyncManager" in window) {
-          navigator.serviceWorker.ready.then((reg) => {
-            reg.sync.register("chat-sync");
-          });
-        }
+        requestBackgroundSync();
         return { status: "queued-offline", id: queuedMessage.id };
       }
 
@@ -752,11 +747,7 @@ export const useChatStore = defineStore("chat", () => {
           pendingId: pendingMessage.id,
         };
         await enqueueMessage(queuedMessage);
-        if ("serviceWorker" in navigator && "SyncManager" in window) {
-          navigator.serviceWorker.ready.then((reg) => {
-            reg.sync.register("chat-sync");
-          });
-        }
+        requestBackgroundSync();
         return { status: "queued-error", error: fetchError.message };
       }
     } catch (err) {
@@ -875,7 +866,7 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function sendTypingIndicator(isTyping) {
-    console.debug("[ChatStore] Sending typing indicator:", {
+    debugLog("[ChatStore] Sending typing indicator:", {
       isTyping,
       connected: connected.value,
     });
@@ -886,7 +877,7 @@ export const useChatStore = defineStore("chat", () => {
       };
       ws.value.send(JSON.stringify(message));
     } else {
-      console.debug("[ChatStore] Cannot send typing indicator - not connected");
+      debugLog("[ChatStore] Cannot send typing indicator - not connected");
     }
   }
 
@@ -925,31 +916,31 @@ export const useChatStore = defineStore("chat", () => {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
 
-    console.debug("[ChatStore] Typing status update:", {
+    debugLog("[ChatStore] Typing status update:", {
       userId,
       isTyping,
       currentUser: userData?.id,
     });
 
     if (userData && userId === userData.id) {
-      console.debug("[ChatStore] Ignoring typing status for current user");
+      debugLog("[ChatStore] Ignoring typing status for current user");
       return;
     }
 
     if (isTyping) {
       if (!typingUsers.value.includes(userId)) {
-        console.debug("[ChatStore] Adding user to typing list:", userId);
+        debugLog("[ChatStore] Adding user to typing list:", userId);
         typingUsers.value.push(userId);
       }
     } else {
       const index = typingUsers.value.indexOf(userId);
       if (index !== -1) {
-        console.debug("[ChatStore] Removing user from typing list:", userId);
+        debugLog("[ChatStore] Removing user from typing list:", userId);
         typingUsers.value.splice(index, 1);
       }
     }
 
-    console.debug("[ChatStore] Current typing users:", typingUsers.value);
+    debugLog("[ChatStore] Current typing users:", typingUsers.value);
   }
 
   function clearChat() {
@@ -966,12 +957,12 @@ export const useChatStore = defineStore("chat", () => {
       const userData = authStore.getUserData();
 
       if (userData && message.sender.id === userData.id) {
-        console.debug("[ChatStore] Skipping notification for own message");
+        debugLog("[ChatStore] Skipping notification for own message");
         return;
       }
 
-      console.debug("[ChatStore] Checking notification conditions...");
-      console.debug(
+      debugLog("[ChatStore] Checking notification conditions...");
+      debugLog(
         "[ChatStore] Page visibility - hidden:",
         document.hidden,
         "focused:",
@@ -981,17 +972,17 @@ export const useChatStore = defineStore("chat", () => {
       const notificationManager = (await import("../utils/notificationManager"))
         .default;
 
-      console.debug("[ChatStore] Notification settings:");
-      console.debug("  - Supported:", notificationManager.isSupported);
-      console.debug("  - Enabled:", notificationManager.isEnabled);
-      console.debug("  - Permission:", notificationManager.permission);
-      console.debug(
+      debugLog("[ChatStore] Notification settings:");
+      debugLog("  - Supported:", notificationManager.isSupported);
+      debugLog("  - Enabled:", notificationManager.isEnabled);
+      debugLog("  - Permission:", notificationManager.permission);
+      debugLog(
         "  - Should show:",
         notificationManager.shouldShowNotification(),
       );
 
       if (notificationManager.isSupported && notificationManager.isEnabled) {
-        console.debug(
+        debugLog(
           "[ChatStore] Attempting to show notification for message:",
           message,
         );
@@ -1002,17 +993,17 @@ export const useChatStore = defineStore("chat", () => {
         );
 
         if (notification) {
-          console.debug("[ChatStore] Notification created successfully");
+          debugLog("[ChatStore] Notification created successfully");
           notification.onclick = () => {
-            console.debug("[ChatStore] Notification clicked - focusing window");
+            debugLog("[ChatStore] Notification clicked - focusing window");
             window.focus();
             notification.close();
           };
         } else {
-          console.debug("[ChatStore] Notification creation returned null");
+          debugLog("[ChatStore] Notification creation returned null");
         }
       } else {
-        console.debug(
+        debugLog(
           "[ChatStore] Notification conditions not met - supported:",
           notificationManager.isSupported,
           "enabled:",

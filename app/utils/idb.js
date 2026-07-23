@@ -127,7 +127,11 @@ export function classifyIdbError(error, context = {}) {
     };
   }
 
-  if (name === "DataError" || name === "ConstraintError") {
+  if (
+    name === "DataError" ||
+    name === "DataCloneError" ||
+    name === "ConstraintError"
+  ) {
     return {
       ...issue,
       code: "invalid-data",
@@ -137,6 +141,24 @@ export function classifyIdbError(error, context = {}) {
   }
 
   return issue;
+}
+
+function storageSnapshot(value) {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined)
+      throw new DOMException(
+        "Local record is not JSON-compatible",
+        "DataCloneError",
+      );
+    return JSON.parse(serialized);
+  } catch (error) {
+    if (error?.name === "DataCloneError") throw error;
+    throw new DOMException(
+      error?.message || "Local record could not be cloned",
+      "DataCloneError",
+    );
+  }
 }
 
 function serializedIssue(issue) {
@@ -188,6 +210,23 @@ export function reportIdbHealth(issue) {
 
 export function getLastIdbHealthIssue() {
   return lastHealthIssue;
+}
+
+function reportRecoveredDatabase(database) {
+  if (
+    !lastHealthIssue ||
+    lastHealthIssue.recovered ||
+    lastHealthIssue.database !== database
+  ) {
+    return;
+  }
+  reportIdbHealth({
+    ...lastHealthIssue,
+    severity: "info",
+    message: "Local browser storage recovered automatically.",
+    recovered: true,
+    timestamp: Date.now(),
+  });
 }
 
 function requestPromise(request) {
@@ -308,6 +347,8 @@ async function runTransaction(databaseId, storeName, mode, operation, handler) {
           recovered: true,
           timestamp: Date.now(),
         });
+      } else {
+        reportRecoveredDatabase(definition.name);
       }
       return result;
     } catch (error) {
@@ -339,7 +380,7 @@ export async function putRecord(databaseId, storeName, value) {
     storeName,
     "readwrite",
     "put",
-    async (store, toPromise) => toPromise(store.put(value)),
+    async (store, toPromise) => toPromise(store.put(storageSnapshot(value))),
   );
 }
 
@@ -472,6 +513,24 @@ export async function resetLocalDatabases() {
     timestamp: Date.now(),
     recovered: true,
   });
+}
+
+export async function probeLocalDatabases() {
+  for (const [databaseId, definition] of Object.entries(DATABASES)) {
+    let database = null;
+    try {
+      database = await openDatabase(databaseId);
+      for (const storeName of Object.keys(definition.stores)) {
+        const transaction = database.transaction(storeName, "readonly");
+        const completed = transactionPromise(transaction);
+        await requestPromise(transaction.objectStore(storeName).count());
+        await completed;
+      }
+    } finally {
+      database?.close();
+    }
+  }
+  return true;
 }
 
 export async function getBrowserStorageEstimate() {

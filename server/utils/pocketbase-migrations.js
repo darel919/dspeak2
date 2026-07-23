@@ -567,7 +567,7 @@ async function migratePushDelivery(pb) {
         maxSelect: 1,
         values: ["pending", "sending", "delivered", "failed", "expired"],
       }),
-      field("attempts", "number", { required: true, min: 0, max: 20 }),
+      field("attempts", "number", { min: 0, max: 20 }),
       field("next_attempt_at", "date", { required: true }),
       field("locked_until", "date"),
       field("expires_at", "date", { required: true }),
@@ -593,6 +593,16 @@ async function migratePushJobRetention(pb) {
     indexes: [
       "CREATE INDEX idx_dspeak_push_jobs_finished ON dspeak_push_jobs (finished_at)",
     ],
+  });
+}
+
+async function migratePushJobZeroAttempts(pb) {
+  const jobs = await pb.collections.getOne("dspeak_push_jobs");
+  await upsertCollection(pb, {
+    name: jobs.name,
+    type: jobs.type,
+    fields: [field("attempts", "number", { min: 0, max: 20 })],
+    indexes: [],
   });
 }
 
@@ -781,6 +791,10 @@ const migrations = Object.freeze([
   {
     name: "20260723_push_job_retention_v1",
     run: migratePushJobRetention,
+  },
+  {
+    name: "20260723_push_job_zero_attempts_v1",
+    run: migratePushJobZeroAttempts,
   },
 ]);
 

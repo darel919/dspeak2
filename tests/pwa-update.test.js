@@ -33,6 +33,9 @@ test("service worker updates remain waiting for explicit user activation", () =>
 });
 
 test("each deployment receives an isolated precache", () => {
+  assert.match(serviceWorker, /new Map\(/);
+  assert.match(serviceWorker, /new URL\(url, self\.location\.origin\)\.href/);
+  assert.doesNotMatch(nuxtConfig, /woff2,webmanifest/);
   assert.match(serviceWorker, /PRECACHE_SIGNATURE/);
   assert.match(serviceWorker, /const PRECACHE_NAME = `dspeak-precache-\$\{/);
   assert.match(serviceWorker, /name\.startsWith\("dspeak-precache-"\)/);

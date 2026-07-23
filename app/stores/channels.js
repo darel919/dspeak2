@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { debugLog } from "../shared/debug";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 
@@ -81,7 +82,7 @@ export const useChannelsStore = defineStore("channels", () => {
       const data = await response.json();
       const nextChannels = Array.isArray(data) ? data : [];
       roomChannels.set(String(roomId), nextChannels);
-      console.debug("[ChannelsStore] Fetched channels:", nextChannels);
+      debugLog("[ChannelsStore] Fetched channels:", nextChannels);
 
       return nextChannels;
     } catch (err) {
@@ -136,7 +137,7 @@ export const useChannelsStore = defineStore("channels", () => {
       }
 
       const newChannel = await response.json();
-      console.debug("[ChannelsStore] Created channel:", newChannel);
+      debugLog("[ChannelsStore] Created channel:", newChannel);
 
       await fetchChannels(roomId, { force: true });
 
@@ -188,7 +189,7 @@ export const useChannelsStore = defineStore("channels", () => {
         );
       }
 
-      console.debug("[ChannelsStore] Edited channel:", channelId);
+      debugLog("[ChannelsStore] Edited channel:", channelId);
 
       const channelIndex = channels.value.findIndex((c) => c.id === channelId);
       if (channelIndex !== -1) {
@@ -245,7 +246,7 @@ export const useChannelsStore = defineStore("channels", () => {
         );
       }
 
-      console.debug("[ChannelsStore] Deleted channel:", channelId);
+      debugLog("[ChannelsStore] Deleted channel:", channelId);
 
       channels.value = channels.value.filter((c) => c.id !== channelId);
       if (loadedRoomId.value)
@@ -296,7 +297,7 @@ export const useChannelsStore = defineStore("channels", () => {
         );
       }
 
-      console.debug("[ChannelsStore] Joined channel:", channelId);
+      debugLog("[ChannelsStore] Joined channel:", channelId);
 
       const channelIndex = channels.value.findIndex((c) => c.id === channelId);
       if (channelIndex !== -1) {
@@ -344,7 +345,7 @@ export const useChannelsStore = defineStore("channels", () => {
         );
       }
 
-      console.debug("[ChannelsStore] Left channel:", channelId);
+      debugLog("[ChannelsStore] Left channel:", channelId);
 
       const channelIndex = channels.value.findIndex((c) => c.id === channelId);
       if (channelIndex !== -1) {
@@ -422,7 +423,7 @@ export const useChannelsStore = defineStore("channels", () => {
       }
 
       const channelDetails = await response.json();
-      console.debug("[ChannelsStore] Fetched channel details:", channelDetails);
+      debugLog("[ChannelsStore] Fetched channel details:", channelDetails);
 
       return channelDetails;
     } catch (err) {
@@ -452,7 +453,7 @@ export const useChannelsStore = defineStore("channels", () => {
       }
 
       const unreadCounts = await response.json();
-      console.debug("[ChannelsStore] Fetched unread counts:", unreadCounts);
+      debugLog("[ChannelsStore] Fetched unread counts:", unreadCounts);
 
       return unreadCounts;
     } catch (err) {

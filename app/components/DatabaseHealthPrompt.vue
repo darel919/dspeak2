@@ -17,6 +17,9 @@
           <p v-if="storageSummary" class="mt-1 text-xs opacity-70">
             {{ storageSummary }}
           </p>
+          <p v-if="diagnosticSummary" class="mt-1 text-xs opacity-60">
+            {{ diagnosticSummary }}
+          </p>
           <p v-if="resetConfirmation" class="mt-2 text-xs font-semibold">
             Resetting removes saved rooms, cached messages, and messages waiting
             to send from this browser.
@@ -62,6 +65,7 @@ import {
   getBrowserStorageEstimate,
   getLastIdbHealthIssue,
   HEALTH_EVENT,
+  probeLocalDatabases,
   resetLocalDatabases,
 } from "../utils/idb";
 
@@ -69,6 +73,7 @@ const issue = ref(null);
 const storageEstimate = ref(null);
 const resetConfirmation = ref(false);
 const working = ref(false);
+let issueGeneration = 0;
 
 const issueIcon = computed(() =>
   issue.value?.severity === "fatal" ? "lucide:database-zap" : "lucide:database",
@@ -77,8 +82,14 @@ const issueIcon = computed(() =>
 const issueTitle = computed(() => {
   if (issue.value?.code === "quota-exceeded") return "Browser storage is full";
   if (issue.value?.code === "blocked") return "Local data is busy";
+  if (issue.value?.code === "transaction-interrupted")
+    return "Local data was interrupted";
+  if (issue.value?.code === "invalid-data")
+    return "Local data could not be saved";
+  if (issue.value?.code === "unavailable")
+    return "Local storage is unavailable";
   if (issue.value?.severity === "fatal") return "Local data needs repair";
-  return "Local storage is unavailable";
+  return "Local data operation failed";
 });
 
 const issueDescription = computed(() => {
@@ -88,10 +99,26 @@ const issueDescription = computed(() => {
   if (issue.value?.code === "blocked") {
     return "Close other dSpeak tabs, then refresh this page to retry safely.";
   }
+  if (issue.value?.code === "transaction-interrupted") {
+    return "A temporary browser database operation failed. dSpeak is checking whether local data has already recovered.";
+  }
+  if (issue.value?.code === "invalid-data") {
+    return "dSpeak rejected an invalid local record. Online messaging can continue, but this item was not cached.";
+  }
+  if (issue.value?.code === "unavailable") {
+    return "This browser did not provide IndexedDB. dSpeak will continue online where possible.";
+  }
   if (issue.value?.severity === "fatal") {
     return "Refresh to retry. If the problem returns, reset only dSpeak’s local browser data.";
   }
   return "dSpeak will continue online where possible. Refresh to try local storage again.";
+});
+
+const diagnosticSummary = computed(() => {
+  if (!issue.value) return "";
+  return [issue.value.errorName, issue.value.database, issue.value.operation]
+    .filter(Boolean)
+    .join(" · ");
 });
 
 const storageSummary = computed(() => {
@@ -115,6 +142,7 @@ function formatBytes(value) {
 
 async function receiveIssue(nextIssue) {
   if (!nextIssue || nextIssue.source !== "indexeddb") return;
+  const generation = ++issueGeneration;
   if (nextIssue.recovered) {
     if (
       issue.value?.database === nextIssue.database &&
@@ -123,6 +151,16 @@ async function receiveIssue(nextIssue) {
       issue.value = null;
     }
     return;
+  }
+  if (nextIssue.severity !== "fatal") {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await probeLocalDatabases();
+      if (generation === issueGeneration) issue.value = null;
+      return;
+    } catch {
+      if (generation !== issueGeneration) return;
+    }
   }
   issue.value = nextIssue;
   resetConfirmation.value = false;

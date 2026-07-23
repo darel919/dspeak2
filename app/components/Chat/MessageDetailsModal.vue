@@ -119,6 +119,7 @@
 </template>
 
 <script setup>
+import { debugLog } from "../../shared/debug";
 import { useRuntimeConfig } from "#app";
 
 const props = defineProps({
@@ -176,7 +177,7 @@ async function copyDetails() {
 
   try {
     await navigator.clipboard.writeText(JSON.stringify(details, null, 2));
-    console.debug("Message details copied to clipboard");
+    debugLog("Message details copied to clipboard");
   } catch (error) {
     console.error("Failed to copy details:", error);
   }

@@ -40,6 +40,19 @@ test("connectivity recovery reconnects chat and flushes the queue", () => {
   assert.match(chatStore, /type: "FORCE_SYNC"/);
 });
 
+test("denied Background Sync registration is handled", () => {
+  assert.match(chatStore, /async function requestBackgroundSync/);
+  assert.match(chatStore, /await registration\.sync\.register\("chat-sync"\)/);
+  assert.match(
+    chatStore,
+    /debugLog\("\[ChatStore\] Background Sync unavailable:", syncError\)/,
+  );
+  assert.doesNotMatch(
+    chatStore,
+    /navigator\.serviceWorker\.ready\.then\(\(reg\)/,
+  );
+});
+
 test("obsolete room teardown cannot disconnect the destination channel", () => {
   assert.match(
     chatStore,

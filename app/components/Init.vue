@@ -54,6 +54,7 @@ import { useNotifications } from "../composables/useNotifications";
 import NotificationWarning from "./NotificationWarning.vue";
 import { usePresence } from "../composables/usePresence.js";
 import startupLogo from "../assets/logo/logo_96.png";
+import { debugLog } from "../shared/debug";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
@@ -110,7 +111,7 @@ watch(
   () => authStore.getUserData(),
   async (userData) => {
     if (userData && !isAuthPage.value && !isBootstrapping.value) {
-      console.debug("[Init] User authenticated, fetching rooms");
+      debugLog("[Init] User authenticated, fetching rooms");
       await roomsStore.fetchRooms();
       await identityStore.loadNicknames();
     }

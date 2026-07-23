@@ -13,6 +13,39 @@ export function audioConstraints(settings, stereo = false) {
     : processing;
 }
 
+export function canFallbackToDefaultMicrophone(error, selectedDeviceId) {
+  if (!selectedDeviceId) return false;
+  return ![
+    "NotAllowedError",
+    "PermissionDeniedError",
+    "SecurityError",
+  ].includes(error?.name);
+}
+
+export async function captureMicrophone({
+  mediaDevices = navigator.mediaDevices,
+  settings,
+  stereo = false,
+  onFallback,
+}) {
+  try {
+    return await mediaDevices.getUserMedia({
+      audio: audioConstraints(settings, stereo),
+    });
+  } catch (error) {
+    if (!canFallbackToDefaultMicrophone(error, settings.micDeviceId))
+      throw error;
+    const stream = await mediaDevices.getUserMedia({
+      audio: audioConstraints({ ...settings, micDeviceId: null }, stereo),
+    });
+    await onFallback?.({
+      failedDeviceId: settings.micDeviceId,
+      error,
+    });
+    return stream;
+  }
+}
+
 function sharedAudioConstraints() {
   return {
     echoCancellation: false,
@@ -26,9 +59,16 @@ function sharedAudioConstraints() {
 }
 
 export class MediaCaptureManager {
-  constructor({ getSettings, getAudioStereo, onSource, onSourceEnded }) {
+  constructor({
+    getSettings,
+    getAudioStereo,
+    onMicrophoneFallback,
+    onSource,
+    onSourceEnded,
+  }) {
     this.getSettings = getSettings;
     this.getAudioStereo = getAudioStereo;
+    this.onMicrophoneFallback = onMicrophoneFallback;
     this.onSource = onSource;
     this.onSourceEnded = onSourceEnded;
     this.sources = new Map();
@@ -38,20 +78,11 @@ export class MediaCaptureManager {
     const existing = this.sources.get("audio");
     if (existing) return existing;
     const settings = this.getSettings();
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints(settings, this.getAudioStereo?.("audio")),
-      });
-    } catch (error) {
-      if (!settings.micDeviceId) throw error;
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints(
-          { ...settings, micDeviceId: null },
-          this.getAudioStereo?.("audio"),
-        ),
-      });
-    }
+    const stream = await captureMicrophone({
+      settings,
+      stereo: this.getAudioStereo?.("audio"),
+      onFallback: this.onMicrophoneFallback,
+    });
     return this.register("audio", stream, stream.getAudioTracks()[0]);
   }
 
@@ -134,7 +165,7 @@ export class MediaCaptureManager {
       () => {
         if (this.sources.get(source)?.track !== track) return;
         this.sources.delete(source);
-        this.onSourceEnded?.(entry);
+        this.onSourceEnded?.(entry, { unexpected: true });
       },
       { once: true },
     );

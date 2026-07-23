@@ -15,6 +15,7 @@ import {
   HEALTH_EVENT,
   IdbOperationError,
   putRecord,
+  probeLocalDatabases,
   reportIdbHealth,
   resetLocalDatabases,
 } from "../app/utils/idb.js";
@@ -51,6 +52,23 @@ test("central database API preserves every existing cache contract", async () =>
   assert.deepEqual(await getQueuedMessages(), []);
 });
 
+test("reactive-style proxy records are converted to storage-safe snapshots", async () => {
+  const message = new Proxy(
+    {
+      id: "proxied-message",
+      sender: new Proxy({ id: "proxied-user" }, {}),
+    },
+    {},
+  );
+  const messages = new Proxy([message], {});
+
+  await cacheChannelMessages("proxy-user", "proxy-channel", messages);
+  assert.deepEqual(
+    (await getCachedChannelMessages("proxy-user", "proxy-channel")).messages,
+    [{ id: "proxied-message", sender: { id: "proxied-user" } }],
+  );
+});
+
 test("recoverable database failures retry once without losing the operation", async () => {
   const workingFactory = globalThis.indexedDB;
   let opens = 0;
@@ -80,6 +98,32 @@ test("recoverable database failures retry once without losing the operation", as
   }
 });
 
+test("a later successful operation clears a previously reported interruption", async () => {
+  const workingFactory = globalThis.indexedDB;
+  globalThis.indexedDB = {
+    open() {
+      const request = {};
+      queueMicrotask(() => {
+        request.error = new DOMException("Interrupted", "InvalidStateError");
+        request.onerror();
+      });
+      return request;
+    },
+    deleteDatabase: workingFactory.deleteDatabase.bind(workingFactory),
+  };
+  await assert.rejects(cacheRooms("recovery-user", []), IdbOperationError);
+  assert.equal(getLastIdbHealthIssue().recovered, false);
+
+  globalThis.indexedDB = workingFactory;
+  try {
+    await cacheRooms("recovery-user", [{ id: "after-recovery" }]);
+    assert.equal(getLastIdbHealthIssue().recovered, true);
+    assert.equal(await probeLocalDatabases(), true);
+  } finally {
+    globalThis.indexedDB = workingFactory;
+  }
+});
+
 test("database errors distinguish repairable, capacity, and fatal states", () => {
   const interrupted = classifyIdbError(
     new DOMException("Interrupted", "AbortError"),
@@ -100,6 +144,10 @@ test("database errors distinguish repairable, capacity, and fatal states", () =>
   assert.equal(quota.severity, "warning");
   assert.equal(damaged.severity, "fatal");
   assert.equal(damaged.canReset, true);
+  assert.equal(
+    classifyIdbError(new DOMException("Proxy", "DataCloneError")).code,
+    "invalid-data",
+  );
 });
 
 test("invalid writes reject through the centralized error contract", async () => {
@@ -177,6 +225,8 @@ test("the repair UI requires confirmation before deleting local data", async () 
   assert.match(prompt, /Confirm reset/);
   assert.match(prompt, /if \(!resetConfirmation\.value\)/);
   assert.match(prompt, /await resetLocalDatabases\(\)/);
+  assert.match(prompt, /await probeLocalDatabases\(\)/);
+  assert.match(prompt, /diagnosticSummary/);
 });
 
 test("page and service-worker failures reach the main application", async () => {

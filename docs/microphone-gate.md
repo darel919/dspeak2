@@ -33,6 +33,10 @@ The preview never plays through the user's speakers and does not interrupt an
 active call. It restarts after an input-device or capture-processing change and
 releases its track and audio graph when the user leaves the settings section.
 A denied or unavailable microphone produces an inline error with a retry action.
+If a saved microphone disappears or fails, dSpeak retries once with the browser
+system default. A successful fallback clears the stale saved device selection
+and updates the selector. Device connection changes refresh the list
+automatically.
 
 ## Active calls
 
@@ -45,3 +49,5 @@ reopen transmission without reacquiring the device.
   peer.
 
 Remote receiving preferences do not change when the local gate opens or closes.
+If an active microphone track ends unexpectedly, dSpeak clears the selected
+device and attempts to restore capture once with the system default.

@@ -56,6 +56,7 @@
 </template>
 
 <script setup>
+import { debugLog } from "../../shared/debug";
 import { useChatStore } from "../../stores/chat";
 
 const props = defineProps({
@@ -109,7 +110,7 @@ async function handleSendMessage() {
     .sendMessage(props.channelId, content)
     .then((result) => {
       if (result.status && result.status.includes("queued")) {
-        console.debug("Message queued for background sync");
+        debugLog("Message queued for background sync");
       }
       emit("message-sent");
     })

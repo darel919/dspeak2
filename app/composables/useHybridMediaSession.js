@@ -143,6 +143,7 @@ export function useHybridMediaSession() {
   const capture = new MediaCaptureManager({
     getSettings: () => settingsStore,
     getAudioStereo,
+    onMicrophoneFallback: () => settingsStore.setMicDeviceId(null),
     onSource: publishSource,
     onSourceEnded: removeSource,
   });
@@ -910,7 +911,7 @@ export function useHybridMediaSession() {
     refreshPublicMaps();
   }
 
-  function removeSource(entry) {
+  function removeSource(entry, { unexpected = false } = {}) {
     const publishedEntry = localSources.get(entry.source);
     if (
       publishedEntry?.track !== entry.track &&
@@ -926,6 +927,18 @@ export function useHybridMediaSession() {
     if (entry.source === "screen-audio") stopSharedAudioMeter();
     sendSourceState();
     refreshPublicMaps();
+    if (
+      unexpected &&
+      entry.source === "audio" &&
+      connected.value &&
+      !intentionalClose
+    ) {
+      settingsStore.setMicDeviceId(null);
+      startAudioProduction().catch((captureError) => {
+        error.value =
+          captureError?.message || "Unable to restore microphone capture";
+      });
+    }
   }
 
   function sendSourceState() {

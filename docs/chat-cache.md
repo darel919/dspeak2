@@ -24,6 +24,10 @@ boundary preserves the installed `dspeak-cache`, `dspeak-chat`, and
 native transaction to finish. The service worker flushes the queue after
 Background Sync or an explicit online retry.
 
+The boundary converts Vue reactive room and message state into plain
+JSON-compatible snapshots before writing. Browser IndexedDB therefore never
+receives reactive proxies that cannot be structured-cloned.
+
 Queued messages never contain an access token. Same-origin session cookies
 authenticate delivery, and a stable client message ID makes every retry
 idempotent. The queue is also retried when connectivity returns and when a new

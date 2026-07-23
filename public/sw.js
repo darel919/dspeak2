@@ -1,8 +1,17 @@
 import { dequeueMessage, getQueuedMessages } from "../app/utils/idb.js";
 
-const PRECACHE_ENTRIES = self.__WB_MANIFEST || [];
-const PRECACHE_URLS = PRECACHE_ENTRIES.map((entry) =>
-  typeof entry === "string" ? entry : entry.url,
+const PRECACHE_ENTRIES = [
+  ...new Map(
+    (self.__WB_MANIFEST || []).map((entry) => {
+      const url = typeof entry === "string" ? entry : entry.url;
+      return [new URL(url, self.location.origin).href, entry];
+    }),
+  ).values(),
+];
+const PRECACHE_URLS = PRECACHE_ENTRIES.map(
+  (entry) =>
+    new URL(typeof entry === "string" ? entry : entry.url, self.location.origin)
+      .href,
 );
 const PRECACHE_SIGNATURE = PRECACHE_ENTRIES.map((entry) =>
   typeof entry === "string"
@@ -129,7 +138,6 @@ self.addEventListener("push", (event) => {
 });
 
 self.addEventListener("notificationclick", (event) => {
-  console.debug("[SW] Notification clicked:", event);
   event.notification.close();
 
   if (event.action === "dismiss") {
@@ -162,7 +170,6 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 self.addEventListener("sync", (event) => {
-  console.debug("[SW] Sync event triggered:", event.tag);
   if (event.tag === "chat-sync") {
     event.waitUntil(flushChatQueue());
   }
@@ -172,10 +179,8 @@ self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") {
     event.waitUntil(self.skipWaiting());
   } else if (event.data && event.data.type === "FORCE_SYNC") {
-    console.debug("[SW] Force sync requested");
     event.waitUntil(flushChatQueue());
   } else if (event.data && event.data.type === "PING") {
-    console.debug("[SW] Ping received, sending pong");
     event.source.postMessage({
       type: "PONG",
       originalTimestamp: event.data.timestamp,

@@ -75,3 +75,16 @@ test("PocketBase grants voice moderation to existing room admins", () => {
   assert.match(source, /20260723_voice_moderation_permission_v1/);
   assert.match(source, /"channel\.moderate_voice"/);
 });
+
+test("PocketBase permits a new push job to start with zero attempts", () => {
+  const source = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /field\("attempts", "number", \{ min: 0, max: 20 \}\)/);
+  assert.doesNotMatch(
+    source,
+    /field\("attempts", "number", \{ required: true, min: 0, max: 20 \}\)/,
+  );
+  assert.match(source, /20260723_push_job_zero_attempts_v1/);
+});

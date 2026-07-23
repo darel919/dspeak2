@@ -3,6 +3,7 @@ import { useAuthStore } from "../stores/auth";
 import { useIdentityStore } from "../stores/identity";
 import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
+import { debugLog } from "../shared/debug";
 
 export function usePresence(userId) {
   const status = ref("disconnected");
@@ -40,18 +41,18 @@ export function usePresence(userId) {
 
   function connect(id) {
     if (!import.meta.client || !id) {
-      console.debug("[usePresence] No userId provided for connection");
+      debugLog("[usePresence] No userId provided for connection");
       return;
     }
     intentionallyDisconnected = false;
     const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
     const base = config.public.websocketPath || `${origin}/dspeak`;
     const wsUrl = `${base}/presence`;
-    console.debug("[usePresence] Connecting to:", wsUrl);
+    debugLog("[usePresence] Connecting to:", wsUrl);
     ws = new WebSocket(wsUrl);
     ws.onmessage = receiveMessage;
     ws.onopen = () => {
-      console.debug("[usePresence] Connected successfully");
+      debugLog("[usePresence] Connected successfully");
       status.value = "connected";
       retryCount = 0;
       clearTimeout(retryTimer);
@@ -64,10 +65,7 @@ export function usePresence(userId) {
       }, 30000);
     };
     ws.onclose = () => {
-      console.debug(
-        "[usePresence] Connection closed, retry count:",
-        retryCount,
-      );
+      debugLog("[usePresence] Connection closed, retry count:", retryCount);
       status.value = "disconnected";
       if (pingInterval) {
         clearInterval(pingInterval);
@@ -81,7 +79,7 @@ export function usePresence(userId) {
       }
     };
     ws.onerror = (error) => {
-      console.debug("[usePresence] WebSocket error:", error);
+      debugLog("[usePresence] WebSocket error:", error);
       ws.close();
     };
   }
@@ -99,18 +97,18 @@ export function usePresence(userId) {
   }
 
   if (isRef(userId)) {
-    console.debug("[usePresence] Setting up watcher for reactive userId");
+    debugLog("[usePresence] Setting up watcher for reactive userId");
     stopUserWatcher = watch(
       userId,
       (id, oldId) => {
-        console.debug("[usePresence] userId changed from", oldId, "to", id);
+        debugLog("[usePresence] userId changed from", oldId, "to", id);
         disconnect();
         if (id) connect(id);
       },
       { immediate: true },
     );
   } else {
-    console.debug("[usePresence] Static userId provided:", userId);
+    debugLog("[usePresence] Static userId provided:", userId);
     if (userId) connect(userId);
   }
 

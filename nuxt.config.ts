@@ -57,7 +57,7 @@ export default defineNuxtConfig({
     registerType: "prompt",
     injectRegister: false,
     injectManifest: {
-      globPatterns: ["**/*.{js,css,json,png,svg,ico,woff,woff2,webmanifest}"],
+      globPatterns: ["**/*.{js,css,json,png,svg,ico,woff,woff2}"],
       rollupFormat: "es",
     },
     client: {

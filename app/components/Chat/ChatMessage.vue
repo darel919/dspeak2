@@ -60,9 +60,7 @@
     </div>
 
     <div
-      v-if="
-        isPending || isFailed || (isOwnMessage ? hasBeenReadByOthers : isRead)
-      "
+      v-if="isOwnMessage && (isPending || isFailed || hasBeenReadByOthers)"
       class="chat-footer opacity-50"
     >
       <div class="flex items-center gap-1 text-xs">
@@ -152,15 +150,6 @@ const hasBeenReadByOthers = computed(() => {
   );
 });
 
-const isRead = computed(() => {
-  const userData = authStore.getUserData();
-  return (
-    !!userData &&
-    !isOwnMessage.value &&
-    hasReader(props.message.read_by, userData.id)
-  );
-});
-
 const shouldAutoMarkAsRead = computed(() => {
   const userData = authStore.getUserData();
   if (!userData || isOwnMessage.value) return false;
@@ -214,27 +203,22 @@ function getStatusText() {
   if (isFailed.value) {
     return "Not saved — copy this message before resetting local data";
   }
-  const userData = authStore.getUserData();
-  if (!userData) return "Sent";
   const readBy = readerIds(props.message.read_by);
-  const isOwn = isOwnMessage.value;
-  if (isOwn) {
-    const others = readBy.filter((id) => id && id !== props.message.sender.id);
-    const totalOthers = props.roomMembers.filter(
-      (m) => m.id !== props.message.sender.id,
-    ).length;
-    if (others.length === 0) return "";
-    if (totalOthers > 0 && others.length === totalOthers) return `Read by all`;
-    return `Read by ${others.length}`;
-  } else {
-    if (
-      readBy.includes(String(userData.id)) &&
-      userData.id !== props.message.sender.id
-    ) {
-      return "Read";
-    }
-    return "";
+  const senderId = String(props.message.sender.id);
+  const others = readBy.filter((id) => id && id !== senderId);
+  const otherMemberIds = new Set(
+    props.roomMembers
+      .map((member) => String(member.id))
+      .filter((id) => id !== senderId),
+  );
+  if (others.length === 0) return "";
+  if (
+    otherMemberIds.size > 0 &&
+    [...otherMemberIds].every((id) => others.includes(id))
+  ) {
+    return "Read by all";
   }
+  return `Read by ${others.length}`;
 }
 
 function getAvatarUrl(avatarPath) {

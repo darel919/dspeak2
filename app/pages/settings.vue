@@ -821,7 +821,8 @@ import {
   VIDEO_FRAME_RATE_OPTIONS,
   VIDEO_RESOLUTION_OPTIONS,
 } from "../const/media";
-import { audioConstraints } from "../shared/media-capture.js";
+import { captureMicrophone } from "../shared/media-capture.js";
+import { debugLog } from "../shared/debug";
 import {
   automaticGateThreshold,
   createNoiseFloorEstimator,
@@ -1107,8 +1108,8 @@ function setGateThreshold(thresholdDb) {
 
 const applyBusy = ref(false);
 async function applyAudioSettings() {
-  console.debug("[Settings] Apply audio settings button pressed");
-  console.debug(
+  debugLog("[Settings] Apply audio settings button pressed");
+  debugLog(
     "[Settings] voiceStore.connected:",
     voiceStore.connected,
     "voiceStore.sfuComposable:",
@@ -1184,8 +1185,10 @@ async function startMicrophonePreview() {
   microphonePreviewLoading.value = true;
   microphonePreviewError.value = "";
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: audioConstraints(settingsStore, hdAudioEnabled.value),
+    const stream = await captureMicrophone({
+      settings: settingsStore,
+      stereo: hdAudioEnabled.value,
+      onFallback: () => resetMicrophoneSelection(),
     });
     if (generation !== microphonePreviewGeneration) {
       stream.getTracks().forEach((track) => track.stop());
@@ -1261,6 +1264,11 @@ const devicesLoading = ref(false);
 const devicesError = ref("");
 const selectedDeviceId = ref("");
 
+function resetMicrophoneSelection() {
+  selectedDeviceId.value = "";
+  settingsStore.setMicDeviceId(null);
+}
+
 onMounted(async () => {
   selectedDeviceId.value = settingsStore.micDeviceId || "";
   selectedOutputId.value = settingsStore.outputDeviceId || "";
@@ -1305,6 +1313,15 @@ async function refreshDevices() {
     devices.value = list.filter((d) => d.kind === "audioinput");
     outputDevices.value = list.filter((d) => d.kind === "audiooutput");
     videoDevices.value = list.filter((d) => d.kind === "videoinput");
+    if (
+      selectedDeviceId.value &&
+      !devices.value.some(
+        (device) => device.deviceId === selectedDeviceId.value,
+      )
+    ) {
+      resetMicrophoneSelection();
+      restartMicrophonePreview();
+    }
   } catch (e) {
     devicesError.value = "Failed to enumerate devices.";
   } finally {
@@ -1317,6 +1334,24 @@ function onDeviceChange() {
   settingsStore.setMicDeviceId(id);
   restartMicrophonePreview();
 }
+
+function handleMediaDevicesChanged() {
+  refreshDevices();
+}
+
+onMounted(() => {
+  navigator.mediaDevices?.addEventListener?.(
+    "devicechange",
+    handleMediaDevicesChanged,
+  );
+});
+
+onBeforeUnmount(() => {
+  navigator.mediaDevices?.removeEventListener?.(
+    "devicechange",
+    handleMediaDevicesChanged,
+  );
+});
 
 const canSetSinkId =
   typeof document !== "undefined" &&

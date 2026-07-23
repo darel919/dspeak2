@@ -42,6 +42,7 @@
 </template>
 
 <script setup>
+import { debugLog } from "../../shared/debug";
 import { useChatStore } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
 
@@ -83,7 +84,7 @@ async function handleCopyMessage() {
   try {
     await navigator.clipboard.writeText(props.message.content);
 
-    console.debug("Message copied to clipboard");
+    debugLog("Message copied to clipboard");
   } catch (error) {
     console.error("Failed to copy message:", error);
   }

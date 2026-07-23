@@ -53,3 +53,16 @@ test("the server bounds read batches and aggregates unread counts in one query",
   assert.match(api, /const channelById = new Map/);
   assert.match(api, /fields: "room_channel,read_by"/);
 });
+
+test("read receipt status is only rendered for the message sender", async () => {
+  const chatMessage = await readFile(
+    new URL("../app/components/Chat/ChatMessage.vue", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    chatMessage,
+    /isOwnMessage && \(isPending \|\| isFailed \|\| hasBeenReadByOthers\)/,
+  );
+  assert.doesNotMatch(chatMessage, /const isRead = computed/);
+  assert.doesNotMatch(chatMessage, /return "Read";/);
+});
