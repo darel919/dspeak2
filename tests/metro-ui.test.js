@@ -234,6 +234,14 @@ test("room rail owns a permission-aware context menu", async () => {
   assert.match(source, /leaveSelectedRoom/);
 });
 
+test("room rail shows room names with an app-rendered tooltip", async () => {
+  const source = await readFile("app/components/MetroRoomRail.vue", "utf8");
+  assert.match(source, /@pointerenter="showRoomTooltip\(room, \$event\)"/);
+  assert.match(source, /role="tooltip"/);
+  assert.match(source, /\{\{ tooltipRoom\.name \}\}/);
+  assert.doesNotMatch(source, /:title="room\.name"/);
+});
+
 test("room rail join action opens the join dialog", async () => {
   const rail = await readFile("app/components/MetroRoomRail.vue", "utf8");
   const dialog = await readFile("app/components/JoinRoomDialog.vue", "utf8");
@@ -244,6 +252,29 @@ test("room rail join action opens the join dialog", async () => {
     dialog,
     /router\.push\(`\/join\/\$\{encodeURIComponent\(inviteToken\)\}`\)/,
   );
+});
+
+test("room switching prepares the destination before one direct navigation", async () => {
+  const rail = await readFile("app/components/MetroRoomRail.vue", "utf8");
+  const navigation = await readFile(
+    "app/composables/usePreparedRoomNavigation.js",
+    "utf8",
+  );
+  const mobileRooms = await readFile(
+    "app/components/MobileRoomSidebar.vue",
+    "utf8",
+  );
+  const channels = await readFile("app/stores/channels.js", "utf8");
+  assert.match(rail, /@click\.prevent="openRoom\(room\)"/);
+  assert.match(navigation, /activate: false/);
+  assert.match(
+    navigation,
+    /channelsStore\.activateRoomChannels\(roomId, channels\)/,
+  );
+  assert.match(navigation, /`\/room\/\$\{roomId\}\/\$\{destination\.id\}`/);
+  assert.match(mobileRooms, /await openRoom\(room\)/);
+  assert.match(channels, /pendingRoomRequests/);
+  assert.match(channels, /roomChannels/);
 });
 
 test("app blocks the browser context menu by default", async () => {

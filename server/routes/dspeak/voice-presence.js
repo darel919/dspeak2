@@ -5,6 +5,7 @@ import {
   subscribeToVoicePresence,
   unsubscribeFromVoicePresence,
 } from "../../utils/voice-presence";
+import { authenticateWebSocketRequest } from "../../utils/authentication";
 
 const sessions = new Map();
 
@@ -16,12 +17,13 @@ export default defineWebSocketHandler({
   async open(peer) {
     try {
       const url = new URL(peer.request.url);
-      const userId = url.searchParams.get("userId");
       const roomId = url.searchParams.get("roomId");
-      if (!userId || !roomId) {
-        peer.close(1008, "userId and roomId are required");
+      const authentication = await authenticateWebSocketRequest(peer.request);
+      if (!authentication || !roomId) {
+        peer.close(1008, "Authentication and roomId are required");
         return;
       }
+      const { userId } = authentication;
 
       const pb = await usePocketBaseAdmin();
       const room = await pb.collection("dspeak_rooms").getOne(roomId);

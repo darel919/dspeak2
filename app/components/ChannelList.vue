@@ -506,6 +506,28 @@
           <span>0%</span>
           <span>200%</span>
         </div>
+        <template v-if="canModerateVoiceParticipant">
+          <div class="my-3 border-t border-base-300"></div>
+          <p class="mb-1 text-xs font-medium text-base-content/60">Move to</p>
+          <button
+            v-for="channel in participantMoveTargets"
+            :key="channel.id"
+            type="button"
+            class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-300"
+            @click="moderateParticipant(channel.id)"
+          >
+            <Icon name="lucide:move-right" class="size-4" />
+            <span class="truncate">{{ channel.name }}</span>
+          </button>
+          <button
+            type="button"
+            class="mt-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-error hover:bg-error/10"
+            @click="moderateParticipant(null)"
+          >
+            <Icon name="lucide:phone-off" class="size-4" />
+            Disconnect from voice
+          </button>
+        </template>
       </div>
     </Teleport>
 
@@ -938,6 +960,24 @@ const participantMenuStyle = computed(() => ({
   left: `${participantMenuPosition.value.x}px`,
   top: `${participantMenuPosition.value.y}px`,
 }));
+const participantSourceChannel = computed(() =>
+  voiceChannels.value.find((channel) =>
+    (channel.inRoom || [])
+      .map(String)
+      .includes(String(participantMenuUserId.value)),
+  ),
+);
+const canModerateVoiceParticipant = computed(
+  () =>
+    Boolean(participantMenuUserId.value) &&
+    String(participantMenuUserId.value) !== String(currentUserId.value) &&
+    hasPermission("channel.moderate_voice"),
+);
+const participantMoveTargets = computed(() =>
+  voiceChannels.value.filter(
+    (channel) => channel.id !== participantSourceChannel.value?.id,
+  ),
+);
 
 async function openChannelMenu(channel, event) {
   closeParticipantMenu();
@@ -1014,6 +1054,22 @@ function setParticipantVolume(event) {
     participantMenuUserId.value,
     Number(event.target.value),
   );
+}
+
+async function moderateParticipant(targetChannelId) {
+  const sourceChannelId = participantSourceChannel.value?.id;
+  const targetUserId = participantMenuUserId.value;
+  if (!sourceChannelId || !targetUserId) return;
+  closeParticipantMenu();
+  try {
+    await channelsStore.moderateVoiceParticipant(
+      sourceChannelId,
+      targetUserId,
+      targetChannelId,
+    );
+  } catch (error) {
+    console.error("[ChannelList] Failed to moderate voice participant", error);
+  }
 }
 
 function onParticipantMenuKeydown(event) {

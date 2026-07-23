@@ -17,12 +17,14 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   const players = new Map();
 
   function headers(extra = {}) {
-    return { Authorization: authStore.getUserData()?.id || "", ...extra };
+    if (!authStore.getUserData()?.id) throw new Error("User not authenticated");
+    return extra;
   }
 
   async function request(path, options = {}) {
     const response = await fetch(`${config.public.apiPath}/soundboard${path}`, {
       ...options,
+      credentials: "include",
       headers: headers(options.headers),
     });
     if (!response.ok) {
@@ -30,7 +32,9 @@ export const useSoundboardStore = defineStore("soundboard", () => {
       let payload = null;
       try {
         payload = JSON.parse(text);
-      } catch (_) {}
+      } catch {
+        payload = null;
+      }
       throw new Error(
         payload?.statusMessage ||
           payload?.message ||
@@ -102,7 +106,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     if (voiceStore.deafened) return false;
     const response = await fetch(
       `${config.public.apiPath}/soundboard/media?id=${encodeURIComponent(clipId)}`,
-      { headers: headers() },
+      { credentials: "include", headers: headers() },
     );
     if (!response.ok) return false;
     const url = URL.createObjectURL(await response.blob());

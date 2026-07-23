@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   canManageMember,
   canManageRole,
+  canModerateVoiceMember,
   getEffectivePermissions,
   normalizeAttenuation,
   normalizeRoomAccent,
@@ -32,6 +33,17 @@ test("member management requires permission and protects equal or system roles",
   assert.equal(canManageMember([], [{ position: 100 }]), false);
   assert.equal(canManageMember(admin, [{ position: 1, system: true }]), false);
   assert.equal(canManageMember([], [{ position: 750 }], true), true);
+});
+
+test("voice moderation requires its permission and protects role hierarchy", () => {
+  const admin = [{ position: 750, permissions: ["channel.moderate_voice"] }];
+  assert.equal(canModerateVoiceMember(admin, [{ position: 100 }]), true);
+  assert.equal(canModerateVoiceMember(admin, [{ position: 750 }]), false);
+  assert.equal(canModerateVoiceMember([], [{ position: 100 }]), false);
+  assert.equal(
+    canModerateVoiceMember(admin, [{ position: 1, system: true }]),
+    false,
+  );
 });
 
 test("room appearance and attenuation use safe defaults", () => {

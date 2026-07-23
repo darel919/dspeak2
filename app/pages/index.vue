@@ -237,16 +237,7 @@ function onBackToRoomList() {
 }
 
 const isAuthenticated = computed(() => {
-  if (!import.meta.client) return false;
-
-  let token = null;
-  try {
-    token = localStorage.getItem("token");
-  } catch (error) {
-    console.warn("[Home] Could not read saved token:", error);
-  }
-  const userData = authStore.getUserData();
-  return !!token && userData;
+  return Boolean(authStore.getUserData());
 });
 
 watch(

@@ -3,6 +3,7 @@ import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
 import { useChannelsStore } from "../stores/channels";
+import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
@@ -12,6 +13,7 @@ import { useChatUtils } from "../composables/useChatUtils";
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const voiceStore = useVoiceStore();
+const chatStore = useChatStore();
 const channelsStore = useChannelsStore();
 const settingsStore = useSettingsStore();
 const rtcStatsStore = useRtcStatsStore();
@@ -563,24 +565,20 @@ onBeforeUnmount(() => {
         </details>
       </section>
 
-      <button
-        v-else-if="profile && (voiceStore.connecting || voiceStore.error)"
+      <div
+        v-else-if="profile && voiceStore.connecting"
         class="connection-warning"
-        type="button"
-        @click="voiceStore.error ? (voiceStore.error = null) : undefined"
       >
-        <Icon name="lucide:triangle-alert" class="size-4" />
-        <span>{{
-          voiceStore.connecting ? "Connecting…" : "Call unavailable"
-        }}</span>
-      </button>
+        <span class="loading loading-spinner loading-xs"></span>
+        <span>Connecting…</span>
+      </div>
 
       <div
-        v-if="isDisconnected"
-        class="hidden items-center gap-2 text-xs font-semibold text-error xl:flex"
+        v-if="isDisconnected || chatStore.offline"
+        class="hidden items-center gap-2 text-xs font-semibold text-warning xl:flex"
       >
         <Icon name="lucide:wifi-off" class="size-4" />
-        <span>Connection lost</span>
+        <span>{{ chatStore.offline ? "Offline" : "Connection lost" }}</span>
       </div>
 
       <NuxtLink
@@ -611,31 +609,6 @@ onBeforeUnmount(() => {
           </span>
         </span>
       </NuxtLink>
-    </div>
-
-    <div
-      v-if="voiceStore.error && !voiceStore.connected"
-      class="modal modal-open"
-    >
-      <div class="modal-box text-base-content">
-        <h2 class="text-lg font-bold text-error">Call failed</h2>
-        <p class="mt-3 text-base-content/70">{{ voiceStore.error }}</p>
-        <div class="modal-action">
-          <button
-            class="btn btn-error"
-            type="button"
-            @click="voiceStore.error = null"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-      <button
-        class="modal-backdrop"
-        type="button"
-        aria-label="Close call error"
-        @click="voiceStore.error = null"
-      ></button>
     </div>
   </header>
 </template>

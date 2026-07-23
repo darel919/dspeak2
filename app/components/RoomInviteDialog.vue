@@ -132,7 +132,6 @@ async function createInvite() {
     const response = await fetch(`${config.public.apiPath}/room/invites`, {
       method: "POST",
       headers: {
-        Authorization: authStore.getUserData().id,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

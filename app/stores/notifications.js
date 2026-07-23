@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { STORAGE_KEYS } from "~/const/storage";
 import notificationManager from "~/utils/notificationManager";
+import { deviceHeaders, getDeviceId } from "~/shared/device-identity";
 import { useAuthStore } from "./auth";
 
 export const useNotificationsStore = defineStore("notifications", () => {
@@ -57,9 +58,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
     if (!userData?.id) throw new Error("User not authenticated");
     const response = await fetch(`${config.public.apiPath}/chat/${path}`, {
       ...options,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        Authorization: userData.id,
+        ...deviceHeaders(),
         ...options.headers,
       },
     });
@@ -104,6 +106,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
   function receiveRealtime(message) {
     if (message?.type === "notification_created" && message.data)
       inbox.value = [message.data, ...inbox.value];
+    if (message?.type === "notifications_changed") fetchInbox().catch(() => {});
     if (message?.type === "notifications_read") {
       const ids = new Set(message.data?.ids || []);
       const readAt = new Date().toISOString();
@@ -155,14 +158,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     if (!checkPushSupport()) return null;
     try {
       const registration = await navigator.serviceWorker.ready;
-      let existing = await registration.pushManager.getSubscription();
-      if (
-        existing?.endpoint &&
-        !existing.endpoint.includes(location.hostname)
-      ) {
-        await existing.unsubscribe();
-        existing = null;
-      }
+      const existing = await registration.pushManager.getSubscription();
       subscription.value = existing;
       isSubscribed.value = Boolean(existing);
       return existing;
@@ -198,9 +194,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
         `${config.public.apiPath}/chat/subscribe/global`,
         {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            Authorization: userData.id,
+            ...deviceHeaders(),
           },
           body: JSON.stringify({ subscription: pushSubscription.toJSON() }),
         },
@@ -231,9 +228,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
         `${config.public.apiPath}/chat/subscribe/global`,
         {
           method: "DELETE",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            Authorization: userData.id,
+            ...deviceHeaders(),
           },
           body: JSON.stringify({ subscription: subscription.value.toJSON() }),
         },
@@ -261,6 +259,23 @@ export const useNotificationsStore = defineStore("notifications", () => {
     if (!checkPushSupport() || Notification.permission !== "granted")
       return null;
     return subscribe();
+  }
+
+  async function sendPushTest() {
+    if (!isSubscribed.value) throw new Error("Push is not enabled");
+    const userData = useAuthStore().getUserData();
+    if (!userData?.id) throw new Error("User not authenticated");
+    const response = await fetch(`${config.public.apiPath}/chat/push/test`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...deviceHeaders(),
+      },
+      body: JSON.stringify({ deviceId: getDeviceId() }),
+    });
+    if (!response.ok) throw new Error(`Push test failed: ${response.status}`);
+    return response.json();
   }
 
   watch(permission, (value) => {
@@ -291,6 +306,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     subscribe,
     unsubscribe,
     updateSubscription,
+    sendPushTest,
     getExistingSubscription,
     fetchInbox,
     markRead,

@@ -431,6 +431,208 @@ async function migrateSoundboardIcons(pb) {
   });
 }
 
+async function migrateVoiceModerationPermission(pb) {
+  const roles = await pb.collection("dspeak_room_roles").getFullList({
+    filter: "name = 'Owner' || name = 'Admin'",
+  });
+  for (const role of roles) {
+    const permissions = [
+      ...new Set([...(role.permissions || []), "channel.moderate_voice"]),
+    ];
+    await pb.collection("dspeak_room_roles").update(role.id, { permissions });
+  }
+}
+
+async function migratePushDelivery(pb) {
+  const users = await pb.collections.getOne("users");
+  const messages = await pb.collections.getOne("dspeak_messages");
+  const notifications = await pb.collections.getOne("dspeak_notifications");
+  const notificationRecords = await pb
+    .collection("dspeak_notifications")
+    .getFullList({
+      fields: "id,recipient,message,type",
+    });
+  const notificationKeys = new Set();
+  for (const notification of notificationRecords) {
+    if (!notification.message) continue;
+    const key = [
+      notification.recipient,
+      notification.message,
+      notification.type,
+    ].join(":");
+    if (notificationKeys.has(key)) {
+      await pb.collection("dspeak_notifications").delete(notification.id);
+      continue;
+    }
+    notificationKeys.add(key);
+  }
+  await upsertCollection(pb, {
+    name: notifications.name,
+    type: notifications.type,
+    fields: [],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_notifications_message_recipient ON dspeak_notifications (recipient, message, type) WHERE message != ''",
+    ],
+  });
+  const subscriptions = await upsertCollection(pb, {
+    name: "dspeak_push_subscriptions",
+    type: "base",
+    fields: [
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("device_id", "text", { required: true, max: 128 }),
+      field("endpoint", "text", { required: true, max: 4096 }),
+      field("p256dh", "text", { required: true, max: 512 }),
+      field("auth", "text", { required: true, max: 512 }),
+      field("disabled", "bool"),
+      field("failure_count", "number", { min: 0 }),
+      field("last_success_at", "date"),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_push_subscriptions_endpoint ON dspeak_push_subscriptions (endpoint)",
+      "CREATE INDEX idx_dspeak_push_subscriptions_user_device ON dspeak_push_subscriptions (user, device_id)",
+    ],
+  });
+  const legacyCollection = await findCollection(pb, "dspeak_webpush_global");
+  if (legacyCollection) {
+    const migratedSubscriptions = await pb
+      .collection("dspeak_webpush_global")
+      .getFullList();
+    for (const subscription of migratedSubscriptions) {
+      const endpoint = subscription.endpoint || subscription.keys?.endpoint;
+      const p256dh = subscription.p256dh || subscription.keys?.p256dh;
+      const auth = subscription.auth || subscription.keys?.auth;
+      if (!endpoint || !p256dh || !auth) continue;
+      const existing = await pb
+        .collection("dspeak_push_subscriptions")
+        .getFullList({
+          filter: pb.filter("endpoint = {:endpoint}", { endpoint }),
+        });
+      if (existing.length) continue;
+      await pb.collection("dspeak_push_subscriptions").create({
+        user: subscription.user,
+        device_id: `legacy-${subscription.id}`,
+        endpoint,
+        p256dh,
+        auth,
+        disabled: false,
+        failure_count: 0,
+      });
+      const preference = await pb
+        .collection("dspeak_notification_preferences")
+        .getFullList({
+          filter: pb.filter("user = {:user}", { user: subscription.user }),
+        });
+      if (!preference.length)
+        await pb.collection("dspeak_notification_preferences").create({
+          user: subscription.user,
+          mode: "all",
+          push: true,
+          sound: true,
+          previews: true,
+          attenuation_override: { mode: "room", reductionPercent: 65 },
+        });
+    }
+  }
+  await upsertCollection(pb, {
+    name: "dspeak_push_jobs",
+    type: "base",
+    fields: [
+      field("recipient", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("subscription", "relation", {
+        required: true,
+        collectionId: subscriptions.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("dedupe_key", "text", { required: true, max: 240 }),
+      field("payload", "json", { required: true, maxSize: 20000 }),
+      field("status", "select", {
+        required: true,
+        maxSelect: 1,
+        values: ["pending", "sending", "delivered", "failed", "expired"],
+      }),
+      field("attempts", "number", { required: true, min: 0, max: 20 }),
+      field("next_attempt_at", "date", { required: true }),
+      field("locked_until", "date"),
+      field("expires_at", "date", { required: true }),
+      field("last_error", "text", { max: 500 }),
+      field("delivered_at", "date"),
+      field("finished_at", "date"),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_push_jobs_dedupe ON dspeak_push_jobs (dedupe_key)",
+      "CREATE INDEX idx_dspeak_push_jobs_dispatch ON dspeak_push_jobs (status, next_attempt_at)",
+      "CREATE INDEX idx_dspeak_push_jobs_expiry ON dspeak_push_jobs (expires_at)",
+      "CREATE INDEX idx_dspeak_push_jobs_finished ON dspeak_push_jobs (finished_at)",
+    ],
+  });
+}
+
+async function migratePushJobRetention(pb) {
+  const jobs = await pb.collections.getOne("dspeak_push_jobs");
+  await upsertCollection(pb, {
+    name: jobs.name,
+    type: jobs.type,
+    fields: [field("finished_at", "date")],
+    indexes: [
+      "CREATE INDEX idx_dspeak_push_jobs_finished ON dspeak_push_jobs (finished_at)",
+    ],
+  });
+}
+
+async function migrateAuthenticatedSessions(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: "dspeak_sessions",
+    type: "base",
+    fields: [
+      field("token_hash", "text", { required: true, max: 64 }),
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("device_id", "text", { required: true, max: 128 }),
+      field("expires_at", "date", { required: true }),
+      field("last_seen_at", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_sessions_token ON dspeak_sessions (token_hash)",
+      "CREATE INDEX idx_dspeak_sessions_expiry ON dspeak_sessions (expires_at)",
+      "CREATE INDEX idx_dspeak_sessions_user_device ON dspeak_sessions (user, device_id)",
+    ],
+  });
+}
+
+async function migrateMessageIdempotency(pb) {
+  const messages = await pb.collections.getOne("dspeak_messages");
+  await upsertCollection(pb, {
+    name: messages.name,
+    type: messages.type,
+    fields: [field("client_id", "text", { max: 80 })],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_messages_sender_client ON dspeak_messages (sender, client_id) WHERE client_id != ''",
+    ],
+  });
+}
+
 async function migrateSoundboardTimestamps(pb) {
   const soundboards = await pb.collections.getOne("dspeak_room_soundboards");
   await upsertCollection(pb, {
@@ -560,6 +762,26 @@ const migrations = Object.freeze([
     run: migrateSoundboardDurationLimit,
   },
   { name: "20260723_room_invites_v1", run: migrateRoomInvites },
+  {
+    name: "20260723_voice_moderation_permission_v1",
+    run: migrateVoiceModerationPermission,
+  },
+  {
+    name: "20260723_push_delivery_v1",
+    run: migratePushDelivery,
+  },
+  {
+    name: "20260723_authenticated_sessions_v1",
+    run: migrateAuthenticatedSessions,
+  },
+  {
+    name: "20260723_message_idempotency_v1",
+    run: migrateMessageIdempotency,
+  },
+  {
+    name: "20260723_push_job_retention_v1",
+    run: migratePushJobRetention,
+  },
 ]);
 
 export async function runPocketBaseMigrations(pb, logger = console) {

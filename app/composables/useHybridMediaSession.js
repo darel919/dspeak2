@@ -29,6 +29,7 @@ import { useRoomsStore } from "~/stores/rooms";
 import { useVoiceStore } from "~/stores/voice";
 import {
   automaticGateThreshold,
+  createNoiseFloorEstimator,
   microphoneLevelDb,
   updateNoiseFloor,
 } from "~/shared/microphone-gate.js";
@@ -189,7 +190,7 @@ export function useHybridMediaSession() {
     if (!channelId) return Promise.reject(new Error("Channel ID is required"));
     const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
     const base = runtimeConfig.public.sfuPath || `${origin}/socket`;
-    const url = `${base}?auth=${encodeURIComponent(userId)}&channelId=${encodeURIComponent(channelId)}`;
+    const url = `${base}?channelId=${encodeURIComponent(channelId)}`;
     return new Promise((resolve, reject) => {
       const candidate = new WebSocket(url);
       socket = candidate;
@@ -410,6 +411,12 @@ export function useHybridMediaSession() {
       }
     });
     registerHandler("server-shutdown", () => socket?.close());
+    registerHandler("voice-moderation", (data) => {
+      if (typeof window !== "undefined")
+        window.dispatchEvent(
+          new CustomEvent("dspeak:voice-moderation", { detail: data }),
+        );
+    });
     registerHandler("soundboard-triggered", (data) => {
       if (typeof window !== "undefined")
         window.dispatchEvent(
@@ -991,16 +998,16 @@ export function useHybridMediaSession() {
       const samples = new Float32Array(analyser.fftSize);
       let speaking = false;
       let quietSamples = 0;
-      let noiseFloorDb = -60;
+      const noiseFloorEstimator = createNoiseFloorEstimator();
       const timer = setInterval(() => {
         analyser.getFloatTimeDomainData(samples);
         const levelDb = microphoneLevelDb(samples);
         const gate = settingsStore.microphoneGate;
         const thresholdDb = gate.automatic
-          ? automaticGateThreshold(noiseFloorDb)
+          ? automaticGateThreshold(noiseFloorEstimator.noiseFloorDb)
           : gate.thresholdDb;
         const active = levelDb >= thresholdDb;
-        noiseFloorDb = updateNoiseFloor(noiseFloorDb, levelDb, speaking);
+        updateNoiseFloor(noiseFloorEstimator, levelDb, active);
         if (active) {
           quietSamples = 0;
           if (!speaking) {

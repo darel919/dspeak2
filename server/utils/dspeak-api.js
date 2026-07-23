@@ -1,4 +1,3 @@
-import webpush from "web-push";
 import { createIceServers } from "../const/ice-servers";
 import {
   normalizeMediaPolicy,
@@ -6,6 +5,7 @@ import {
 } from "../../shared/media-policy.js";
 import {
   canManageMember,
+  canModerateVoiceMember,
   normalizeAttenuation,
   normalizePermissions,
   normalizeRoomAccent,
@@ -20,8 +20,17 @@ import {
   broadcastToChannel,
   broadcastToUser,
 } from "./dspeak-realtime";
+import { persistMessageNotifications, sendPushTest } from "./push-delivery";
+import {
+  createAuthenticatedSession,
+  requireAuthenticatedUser,
+  restoreAuthenticatedSession,
+  revokeAuthenticatedSession,
+} from "./authentication";
 import {
   disconnectVoiceParticipant,
+  isActiveVoiceParticipant,
+  moderateVoiceParticipant,
   updateActiveUserProfile,
 } from "./mediasoup-sfu";
 import { pocketBaseError, usePocketBaseAdmin } from "./pocketbase";
@@ -40,13 +49,7 @@ import {
   encodeInvitePayload,
   validateInviteExpiry,
 } from "../../shared/room-invite.js";
-
-function requireUser(event) {
-  const userId = getHeader(event, "authorization");
-  if (!userId)
-    throw createError({ statusCode: 403, statusMessage: "Not Authorized" });
-  return userId;
-}
+import { enforceRateLimit } from "./rate-limit.js";
 
 function requireValue(value, message) {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
@@ -319,7 +322,8 @@ async function handleRooms(event, suffix) {
   const method = event.method;
   const query = getQuery(event);
 
-  if (suffix === "roles") return handleRoomRoles(event, pb, requireUser(event));
+  if (suffix === "roles")
+    return handleRoomRoles(event, pb, await requireAuthenticatedUser(event));
 
   if ((suffix === "profile" || suffix === "header") && method === "GET") {
     const id = requireValue(query.id, "Room ID is required");
@@ -348,8 +352,9 @@ async function handleRooms(event, suffix) {
       .getOne(requireValue(query.id, "Room ID is required"), {
         expand: "owner,members",
       });
-    await requireRoomMember(pb, room, requireUser(event));
-    return roomDetails(pb, room, requireUser(event));
+    const userId = await requireAuthenticatedUser(event);
+    await requireRoomMember(pb, room, userId);
+    return roomDetails(pb, room, userId);
   }
 
   if (suffix === "invites" && method === "GET") {
@@ -385,7 +390,7 @@ async function handleRooms(event, suffix) {
     };
   }
 
-  const userId = requireUser(event);
+  const userId = await requireAuthenticatedUser(event);
 
   if (!suffix && method === "GET") {
     const rooms = await pb.collection("dspeak_rooms").getFullList({
@@ -735,7 +740,7 @@ async function handleRooms(event, suffix) {
 
 async function handleChannels(event, suffix) {
   const pb = await usePocketBaseAdmin();
-  const userId = requireUser(event);
+  const userId = await requireAuthenticatedUser(event);
   const method = event.method;
   const query = getQuery(event);
 
@@ -769,6 +774,102 @@ async function handleChannels(event, suffix) {
   }
 
   const body = await parseBody(event);
+
+  if (suffix === "moderate-voice" && method === "POST") {
+    const sourceChannel = await pb
+      .collection("dspeak_rooms_channels")
+      .getOne(
+        requireValue(body.channelId, "Source voice channel ID is required"),
+      );
+    if (!sourceChannel.isMedia)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "The source channel must be a voice channel",
+      });
+    const room = await pb.collection("dspeak_rooms").getOne(sourceChannel.room);
+    const access = await requireRoomPermission(
+      pb,
+      room,
+      userId,
+      "channel.moderate_voice",
+    );
+    const targetUserId = String(
+      requireValue(body.targetUserId, "Target user ID is required"),
+    );
+    if (targetUserId === String(userId))
+      throw createError({
+        statusCode: 400,
+        statusMessage: "You cannot moderate your own voice connection",
+      });
+    if (targetUserId === String(room.owner))
+      throw createError({
+        statusCode: 403,
+        statusMessage: "The room owner cannot be voice moderated",
+      });
+    let targetMembership;
+    try {
+      targetMembership = await pb
+        .collection("dspeak_room_memberships")
+        .getFirstListItem(`room = '${room.id}' && user = '${targetUserId}'`, {
+          expand: "roles",
+        });
+    } catch (error) {
+      if (error?.status !== 404) throw error;
+    }
+    if (
+      !canModerateVoiceMember(
+        access.roles,
+        targetMembership?.expand?.roles || [],
+        access.isOwner,
+      )
+    )
+      throw createError({
+        statusCode: 403,
+        statusMessage:
+          "You cannot moderate a member at or above your role position",
+      });
+    if (!(await isActiveVoiceParticipant(sourceChannel.id, targetUserId)))
+      throw createError({
+        statusCode: 409,
+        statusMessage: "The user is no longer connected to this voice channel",
+      });
+    let targetChannelId = null;
+    if (body.targetChannelId) {
+      const targetChannel = await pb
+        .collection("dspeak_rooms_channels")
+        .getOne(String(body.targetChannelId));
+      if (
+        !targetChannel.isMedia ||
+        String(targetChannel.room) !== String(room.id)
+      )
+        throw createError({
+          statusCode: 400,
+          statusMessage:
+            "The destination must be another voice channel in this room",
+        });
+      if (String(targetChannel.id) === String(sourceChannel.id))
+        throw createError({
+          statusCode: 400,
+          statusMessage: "The user is already connected to that voice channel",
+        });
+      targetChannelId = String(targetChannel.id);
+    }
+    const affected = await moderateVoiceParticipant(
+      sourceChannel.id,
+      targetUserId,
+      targetChannelId,
+    );
+    if (!affected)
+      throw createError({
+        statusCode: 409,
+        statusMessage: "The user's voice connection already ended",
+      });
+    return {
+      action: targetChannelId ? "move" : "disconnect",
+      targetUserId,
+      targetChannelId,
+    };
+  }
 
   if (!suffix && method === "POST") {
     requireValue(
@@ -907,89 +1008,6 @@ async function handleChannels(event, suffix) {
   });
 }
 
-function configureWebPush() {
-  const publicKey =
-    process.env.VAPID_PUBKEY || useRuntimeConfig().pocketbase.vapidPublicKey;
-  const privateKey =
-    process.env.VAPID_PRIVKEY || useRuntimeConfig().pocketbase.vapidPrivateKey;
-  if (publicKey && privateKey)
-    webpush.setVapidDetails(
-      "mailto:darrell.cristanto@gmail.com",
-      publicKey,
-      privateKey,
-    );
-  return Boolean(publicKey && privateKey);
-}
-
-async function sendPush(pb, room, channel, message, userId) {
-  if (!configureWebPush()) return;
-  const members = (room.members || []).map(String);
-  if (!members.length) return;
-  const subscriptions = await pb
-    .collection("dspeak_webpush_global")
-    .getFullList({
-      filter: members.map((id) => `user = '${id}'`).join(" || "),
-    });
-  const payload = JSON.stringify({
-    title: `New message in ${room.name} - ${channel.name}`,
-    body: `${message.expand?.sender?.name || message.expand?.sender?.id || "Someone"}: ${message.content}`,
-    data: { roomId: room.id, channelId: channel.id, senderId: userId },
-  });
-  await Promise.allSettled(
-    subscriptions.map(async (subscription) => {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: subscription.keys.endpoint,
-            keys: {
-              p256dh: subscription.keys.p256dh,
-              auth: subscription.keys.auth,
-            },
-          },
-          payload,
-        );
-      } catch (error) {
-        if (error?.statusCode === 404 || error?.statusCode === 410) {
-          await pb.collection("dspeak_webpush_global").delete(subscription.id);
-        }
-      }
-    }),
-  );
-}
-
-async function createMessageNotifications(
-  pb,
-  room,
-  channel,
-  message,
-  senderId,
-) {
-  const recipients = (room.members || [])
-    .map(String)
-    .filter((id) => id !== String(senderId));
-  for (const recipient of recipients) {
-    try {
-      const notification = await pb.collection("dspeak_notifications").create({
-        recipient,
-        type: "message",
-        actor: senderId,
-        room: room.id,
-        channel: channel.id,
-        message: message.id,
-        title: `#${channel.name} · ${room.name}`,
-        body: message.content,
-        read_at: null,
-      });
-      broadcastToUser(recipient, {
-        type: "notification_created",
-        data: notification,
-      });
-    } catch (error) {
-      if (error?.status !== 404 && error?.response?.status !== 404) throw error;
-    }
-  }
-}
-
 async function handleNotifications(event, pb, userId, suffix) {
   const body = event.method === "GET" ? {} : await parseBody(event);
   if (suffix === "notifications" && event.method === "GET") {
@@ -1102,7 +1120,7 @@ async function handleChat(event, suffix) {
   if (suffix === "socket" && event.method === "GET")
     throw createError({ statusCode: 426, statusMessage: "Upgrade Required" });
   const pb = await usePocketBaseAdmin();
-  const userId = requireUser(event);
+  const userId = await requireAuthenticatedUser(event);
 
   if (
     suffix === "notifications" ||
@@ -1120,22 +1138,28 @@ async function handleChat(event, suffix) {
     const channels = await pb.collection("dspeak_rooms_channels").getFullList({
       filter: rooms.map((room) => `room = '${room.id}'`).join(" || "),
     });
-    return Promise.all(
-      channels.map(async (channel) => {
-        const messages = await pb.collection("dspeak_messages").getFullList({
-          filter: `room_channel = '${channel.id}'`,
-          fields: "id,read_by",
-        });
-        return {
+    if (!channels.length) return [];
+    const channelById = new Map(
+      channels.map((channel) => [
+        String(channel.id),
+        {
           channelId: channel.id,
           roomId: channel.room,
-          unreadCount: messages.filter(
-            (message) =>
-              !(message.read_by || []).map(String).includes(String(userId)),
-          ).length,
-        };
-      }),
+          unreadCount: 0,
+        },
+      ]),
     );
+    const messages = await pb.collection("dspeak_messages").getFullList({
+      filter: `(${channels
+        .map((channel) => `room_channel = '${channel.id}'`)
+        .join(" || ")}) && read_by !~ '${userId}'`,
+      fields: "room_channel,read_by",
+    });
+    for (const message of messages) {
+      const count = channelById.get(String(message.room_channel));
+      if (count) count.unreadCount += 1;
+    }
+    return [...channelById.values()];
   }
 
   if (suffix === "messages" && event.method === "GET") {
@@ -1170,8 +1194,25 @@ async function handleChat(event, suffix) {
   const body = await parseBody(event);
 
   if (suffix === "message" && event.method === "POST") {
+    enforceRateLimit(event, "chat-message", userId, 120, 60 * 1000);
     requireValue(body.channelId, "Channel ID and content are required");
     requireValue(body.content, "Channel ID and content are required");
+    if (typeof body.content !== "string" || body.content.length > 4000)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Message content must be at most 4000 characters",
+      });
+    if (String(body.ownerId || "") !== String(userId))
+      throw createError({
+        statusCode: 409,
+        statusMessage: "Queued message belongs to another account",
+      });
+    const clientId = String(body.clientMessageId || "");
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(clientId))
+      throw createError({
+        statusCode: 400,
+        statusMessage: "A valid client message ID is required",
+      });
     const channel = await pb
       .collection("dspeak_rooms_channels")
       .getOne(body.channelId);
@@ -1182,12 +1223,36 @@ async function handleChat(event, suffix) {
         statusCode: 400,
         statusMessage: "Cannot send text messages to a media channel",
       });
-    const created = await pb.collection("dspeak_messages").create({
-      content: body.content,
-      room_channel: channel.id,
-      sender: userId,
-      read_by: [userId],
-    });
+    let created;
+    let wasCreated = false;
+    try {
+      created = await pb.collection("dspeak_messages").getFirstListItem(
+        pb.filter("sender = {:sender} && client_id = {:client}", {
+          sender: userId,
+          client: clientId,
+        }),
+      );
+    } catch (error) {
+      if (error?.status !== 404 && error?.response?.status !== 404) throw error;
+      try {
+        created = await pb.collection("dspeak_messages").create({
+          content: body.content,
+          room_channel: channel.id,
+          sender: userId,
+          read_by: [userId],
+          client_id: clientId,
+        });
+        wasCreated = true;
+      } catch (createError) {
+        if (createError?.status !== 400) throw createError;
+        created = await pb.collection("dspeak_messages").getFirstListItem(
+          pb.filter("sender = {:sender} && client_id = {:client}", {
+            sender: userId,
+            client: clientId,
+          }),
+        );
+      }
+    }
     const message = await pb
       .collection("dspeak_messages")
       .getOne(created.id, { expand: "sender" });
@@ -1199,24 +1264,46 @@ async function handleChat(event, suffix) {
       created: message.created,
       read_by: message.read_by || [],
     };
-    broadcastToChannel(channel.id, { type: "new_message", data: result });
-    createMessageNotifications(pb, room, channel, message, userId).catch(
-      (error) => console.error("[Notifications]", error),
-    );
-    sendPush(pb, room, channel, message, userId).catch((error) =>
-      console.error("[Push]", error),
-    );
+    if (wasCreated)
+      broadcastToChannel(channel.id, { type: "new_message", data: result });
+    const delivery = await persistMessageNotifications({
+      pb,
+      room,
+      channel,
+      message,
+      senderId: userId,
+    });
+    if (delivery.notifications) {
+      for (const recipient of (room.members || [])
+        .map(String)
+        .filter((id) => id !== String(userId))) {
+        broadcastToUser(recipient, { type: "notifications_changed" });
+      }
+    }
     setResponseStatus(event, 201);
     return result;
   }
 
   if (suffix === "read" && event.method === "POST") {
-    const ids = Array.isArray(body.messageIds)
+    const submittedIds = Array.isArray(body.messageIds)
       ? body.messageIds
       : body.messageId
         ? [body.messageId]
         : [];
+    const ids = [
+      ...new Set(
+        submittedIds
+          .filter((messageId) => typeof messageId === "string")
+          .map((messageId) => messageId.trim())
+          .filter(Boolean),
+      ),
+    ];
     requireValue(ids.length, "At least one message ID is required");
+    if (ids.length > 200)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "A maximum of 200 message IDs is allowed",
+      });
     const results = [];
     for (const messageId of ids) {
       try {
@@ -1255,9 +1342,19 @@ async function handleChat(event, suffix) {
   }
 
   if (suffix === "subscribe/global") {
+    enforceRateLimit(event, "push-subscription", userId, 30, 60 * 60 * 1000);
+    const deviceId = requireValue(
+      getHeader(event, "x-dspeak-device"),
+      "Device ID is required",
+    );
     const existing = await pb
-      .collection("dspeak_webpush_global")
-      .getFullList({ filter: `user = '${userId}'` });
+      .collection("dspeak_push_subscriptions")
+      .getFullList({
+        filter: pb.filter("user = {:user} && device_id = {:device}", {
+          user: userId,
+          device: deviceId,
+        }),
+      });
     if (event.method === "GET")
       return {
         hasSubscription: existing.length > 0,
@@ -1270,41 +1367,91 @@ async function handleChat(event, suffix) {
           : null,
       };
     if (event.method === "DELETE") {
-      for (const subscription of existing)
-        await pb.collection("dspeak_webpush_global").delete(subscription.id);
-      return { success: true, message: "Global subscription deleted" };
+      const endpoint = requireValue(
+        body.subscription?.endpoint,
+        "Subscription endpoint is required",
+      );
+      const matching = existing.filter(
+        (subscription) => subscription.endpoint === endpoint,
+      );
+      for (const subscription of matching)
+        await pb
+          .collection("dspeak_push_subscriptions")
+          .delete(subscription.id);
+      return { success: true, message: "Device subscription deleted" };
     }
     if (event.method === "POST") {
       const subscription = requireValue(
         body.subscription,
         "Subscription is required",
       );
+      const endpoint = requireValue(
+        subscription.endpoint,
+        "Subscription endpoint is required",
+      );
+      if (
+        endpoint.length > 4096 ||
+        String(subscription.keys?.p256dh || "").length > 512 ||
+        String(subscription.keys?.auth || "").length > 512
+      )
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Subscription data is too large",
+        });
+      const endpointUrl = new URL(endpoint);
+      if (endpointUrl.protocol !== "https:")
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Subscription endpoint must use HTTPS",
+        });
       const data = {
-        keys: {
-          endpoint: subscription.endpoint,
-          p256dh: subscription.keys.p256dh,
-          auth: subscription.keys.auth,
-        },
+        user: userId,
+        device_id: deviceId,
+        endpoint,
+        p256dh: requireValue(subscription.keys?.p256dh, "p256dh is required"),
+        auth: requireValue(subscription.keys?.auth, "auth is required"),
+        disabled: false,
+        failure_count: 0,
       };
-      if (existing[0])
+      const byEndpoint = await pb
+        .collection("dspeak_push_subscriptions")
+        .getFullList({
+          filter: pb.filter("endpoint = {:endpoint}", { endpoint }),
+        });
+      if (byEndpoint[0] && String(byEndpoint[0].user) !== String(userId))
+        throw createError({
+          statusCode: 409,
+          statusMessage: "Subscription belongs to another account",
+        });
+      const record = byEndpoint[0] || existing[0];
+      if (record)
         await pb
-          .collection("dspeak_webpush_global")
-          .update(existing[0].id, data);
-      else
-        await pb
-          .collection("dspeak_webpush_global")
-          .create({ user: userId, ...data });
+          .collection("dspeak_push_subscriptions")
+          .update(record.id, data);
+      else await pb.collection("dspeak_push_subscriptions").create(data);
       setResponseStatus(event, 201);
-      return { success: true, message: "Global subscription updated" };
+      return { success: true, message: "Device subscription updated" };
     }
+  }
+
+  if (suffix === "push/test" && event.method === "POST") {
+    enforceRateLimit(event, "push-test", userId, 5, 60 * 60 * 1000);
+    const deviceId = requireValue(
+      getHeader(event, "x-dspeak-device"),
+      "Device ID is required",
+    );
+    return sendPushTest(pb, userId, deviceId);
   }
 
   if (suffix === "subscribe" && event.method === "POST") {
     requireValue(body.roomId, "Room ID and subscription are required");
     requireValue(body.subscription, "Room ID and subscription are required");
-    const existing = await pb
-      .collection("dspeak_webpush")
-      .getFullList({ filter: `room = '${body.roomId}' && user = '${userId}'` });
+    const existing = await pb.collection("dspeak_webpush").getFullList({
+      filter: pb.filter("room = {:room} && user = {:user}", {
+        room: body.roomId,
+        user: userId,
+      }),
+    });
     if (!existing.length)
       await pb.collection("dspeak_webpush").create({
         room: body.roomId,
@@ -1326,7 +1473,7 @@ async function handleChat(event, suffix) {
 }
 
 async function handleProfile(event, suffix) {
-  const userId = requireUser(event);
+  const userId = await requireAuthenticatedUser(event);
   const pb = await usePocketBaseAdmin();
 
   if (!suffix && event.method === "GET") {
@@ -1443,6 +1590,18 @@ export async function handleDspeakApi(event) {
 
   try {
     if (!domain && event.method === "GET") return "dSpeak ready.";
+    if (domain === "session" && event.method === "POST") {
+      const body = await parseBody(event);
+      return await createAuthenticatedSession(
+        event,
+        body.accessToken,
+        getHeader(event, "x-dspeak-device") || body.deviceId,
+      );
+    }
+    if (domain === "session" && event.method === "GET")
+      return await restoreAuthenticatedSession(event);
+    if (domain === "session" && event.method === "DELETE")
+      return await revokeAuthenticatedSession(event);
     if (domain === "config" && event.method === "GET")
       return createIceServers();
     if (domain === "room") return await handleRooms(event, suffix);

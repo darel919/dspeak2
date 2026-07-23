@@ -5,7 +5,11 @@
         <textarea
           v-model="messageText"
           ref="chatTextarea"
-          placeholder="Type a message..."
+          :placeholder="
+            chatStore.offline
+              ? 'Write a message to send when you’re back online…'
+              : 'Type a message…'
+          "
           class="textarea textarea-bordered w-full resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[2.5rem] max-h-[6.5rem] overflow-y-auto"
           @input="handleTextareaInput"
           @focus="handleFocus"
@@ -46,20 +50,6 @@
         <span>
           {{ getTypingText() }}
         </span>
-      </div>
-    </div>
-
-    <!-- Connection status -->
-    <div v-if="!connected" class="mt-2 text-xs text-warning">
-      <div class="flex items-center gap-2">
-        <Icon name="lucide:ban" class="h-3 w-3" />
-        <span>We're offline</span>
-        <button
-          @click="triggerSync"
-          class="btn btn-xs btn-outline btn-warning ml-2"
-        >
-          Sync Now
-        </button>
       </div>
     </div>
   </div>
@@ -195,11 +185,6 @@ function getTypingText() {
   } else {
     return `${count} people are typing...`;
   }
-}
-
-function triggerSync() {
-  console.debug("[ChatInput] Manual sync triggered");
-  chatStore.triggerManualSync();
 }
 
 onUnmounted(() => {

@@ -1,7 +1,11 @@
 <template>
   <div class="bg-base-100 h-full flex flex-col p-4">
     <div class="text-base-content/60 text-sm mb-2">
-      Online — {{ onlineMembersCount }}
+      {{
+        chatStore.offline
+          ? `Members — ${members.length}`
+          : `Online — ${onlineMembersCount}`
+      }}
     </div>
     <div
       v-if="!members || members.length === 0"
@@ -485,7 +489,7 @@ async function kickMember() {
   try {
     await $fetch(`${config.public.apiPath}/room/kick`, {
       method: "POST",
-      headers: { Authorization: currentUser.value.id },
+      credentials: "include",
       body: { roomId: props.roomId || props.room?.id, targetUserId: member.id },
     });
     closeMemberMenu();
@@ -609,6 +613,8 @@ function isOwner(member) {
 }
 
 function getMemberPresenceStatus(member) {
+  if (chatStore.offline) return "unknown";
+
   if (onlineUsers.value.some((user) => user.id === member.id)) {
     return "in-room";
   }
@@ -625,6 +631,7 @@ function memberPresenceLabel(member) {
     "in-room": "In this room",
     online: "Online",
     offline: "Offline",
+    unknown: "Status unavailable while offline",
   }[getMemberPresenceStatus(member)];
 }
 </script>

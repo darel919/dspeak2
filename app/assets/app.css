@@ -121,7 +121,7 @@
 
 @font-face {
   font-family: "Caprasimo";
-  src: url("/font/Caprasimo-Regular.woff") format("woff");
+  src: url("../../public/font/Caprasimo-Regular.woff") format("woff");
   font-weight: normal;
   font-style: normal;
   font-display: swap;

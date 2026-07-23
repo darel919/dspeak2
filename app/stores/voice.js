@@ -5,6 +5,7 @@ import { useSettingsStore } from "./settings";
 import { useChannelsStore } from "./channels";
 import { reconcileOwnedError } from "~/shared/owned-error.js";
 import { playSystemSound } from "~/shared/system-sounds.js";
+import { isFatalClientError } from "~/shared/fatal-client-error.js";
 
 export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
@@ -318,16 +319,11 @@ export const useVoiceStore = defineStore("voice", () => {
     const normalizedUserId = String(userId);
     let user = connectedUsers.value.get(normalizedUserId);
     if (!user) {
-      try {
-        const auth =
-          useAuthStore && useAuthStore().getUserData
-            ? useAuthStore().getUserData()
-            : null;
-        if (auth && String(auth.id) === String(userId)) {
-          addConnectedUser(normalizedUserId, { id: normalizedUserId });
-          user = connectedUsers.value.get(normalizedUserId);
-        }
-      } catch (_) {}
+      const auth = useAuthStore().getUserData();
+      if (auth && String(auth.id) === String(userId)) {
+        addConnectedUser(normalizedUserId, { id: normalizedUserId });
+        user = connectedUsers.value.get(normalizedUserId);
+      }
     }
     if (!user) return;
 
@@ -556,6 +552,10 @@ export const useVoiceStore = defineStore("voice", () => {
       await disposeFailedSession(session);
       if (err?.code === "VOICE_JOIN_CANCELLED") return;
       console.error("[VoiceStore] Failed to join voice channel:", err);
+      if (isFatalClientError(err)) {
+        useFatalClientError().report(err);
+        return;
+      }
       error.value = err?.message || String(err);
       if (typeof window !== "undefined") {
         const { useToast } = await import("~/composables/useToast");
@@ -865,22 +865,22 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   return {
-    currentChannelId: readonly(currentChannelId),
-    currentRoomId: readonly(currentRoomId),
-    connectedUsers: readonly(connectedUsers),
-    micMuted: readonly(micMuted),
-    deafened: readonly(deafened),
-    connecting: readonly(connecting),
-    connected: readonly(connected),
+    currentChannelId,
+    currentRoomId,
+    connectedUsers,
+    micMuted,
+    deafened,
+    connecting,
+    connected,
     error,
-    connectedAt: readonly(connectedAt),
-    cameraEnabled: readonly(cameraEnabled),
-    screenSharing: readonly(screenSharing),
-    systemAudioSharing: readonly(systemAudioSharing),
+    connectedAt,
+    cameraEnabled,
+    screenSharing,
+    systemAudioSharing,
     sharedAudioVolume,
     sharedAudioStats,
     effectiveSystemAudioBitrate,
-    sfuComposable: readonly(sfuComposable),
+    sfuComposable,
     joinVoiceChannel,
     leaveVoiceChannel,
     toggleMic,
@@ -909,8 +909,8 @@ export const useVoiceStore = defineStore("voice", () => {
     getUserVolume,
     setTrackVolume,
     getTrackVolume,
-    userVolumes: readonly(userVolumes),
-    trackVolumes: readonly(trackVolumes),
+    userVolumes,
+    trackVolumes,
     applyOutputDevice,
   };
 });

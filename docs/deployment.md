@@ -60,13 +60,19 @@ global server ceiling across all active receive transports whenever the fair
 share is lower. Set the global ceiling below the host's measured upload capacity
 to leave headroom for transport overhead and non-RTP traffic.
 
-Optional route overrides should normally remain empty in the monolith:
+Protected API and WebSocket routes are always same-origin. This is required by
+the HttpOnly session cookie and is the supported monolith deployment boundary.
+
+Configure Web Push with a stable key pair and monitored contact:
 
 ```dotenv
-DSPEAK_API_URL=
-DSPEAK_WS_URL=
-DSPEAK_SFU_URL=
+VAPID_PUBLIC_KEY=<public-key>
+VAPID_PRIVKEY=<private-key>
+VAPID_SUBJECT=mailto:operator@example.com
 ```
+
+See [Production readiness](production-readiness.md) for migration, monitoring,
+restart, and deployed-device notification checks.
 
 ## Docker Compose and Coolify
 

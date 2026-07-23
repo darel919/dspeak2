@@ -15,7 +15,8 @@ export const useIdentityStore = defineStore("identity", () => {
     if (!userId) throw new Error("You must be signed in");
     return $fetch(`${config.public.apiPath}/profile${path}`, {
       ...options,
-      headers: { Authorization: userId, ...options.headers },
+      credentials: "include",
+      headers: { ...options.headers },
     });
   }
 
@@ -69,8 +70,8 @@ export const useIdentityStore = defineStore("identity", () => {
   }
 
   return {
-    nicknames: readonly(nicknames),
-    loadedForUserId: readonly(loadedForUserId),
+    nicknames,
+    loadedForUserId,
     loadNicknames,
     saveNickname,
     nicknameFor,

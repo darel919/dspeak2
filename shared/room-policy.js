@@ -9,6 +9,7 @@ export const ROOM_PERMISSIONS = Object.freeze([
   "channel.update",
   "channel.delete",
   "channel.manage_media_policy",
+  "channel.moderate_voice",
   "message.moderate",
 ]);
 
@@ -103,6 +104,23 @@ export function canManageMember(actorRoles, targetRoles, isOwner = false) {
   if (
     !isOwner &&
     !getEffectivePermissions(actorRoles).includes("room.manage_members")
+  )
+    return false;
+  return (
+    isOwner ||
+    getHighestRolePosition(actorRoles) > getHighestRolePosition(targetRoles)
+  );
+}
+
+export function canModerateVoiceMember(
+  actorRoles,
+  targetRoles,
+  isOwner = false,
+) {
+  if ((targetRoles || []).some((role) => role.system)) return false;
+  if (
+    !isOwner &&
+    !getEffectivePermissions(actorRoles).includes("channel.moderate_voice")
   )
     return false;
   return (

@@ -24,6 +24,16 @@ The original PocketBase collections remain supported:
 - `dspeak_users_state`
 - `users`
 
+Production authentication, delivery, and offline idempotency add:
+
+- `dspeak_sessions`
+- `dspeak_push_subscriptions`
+- `dspeak_push_jobs`
+
+`dspeak_webpush_global` is a migration source only. Startup copies usable legacy
+subscriptions into the device-scoped collection; new subscription writes never
+use the legacy collection.
+
 Room administration adds roles, memberships, branding, media policy,
 notifications, identities, and soundboards. Nitro applies these migrations at
 startup. See [Room administration contract](room-administration.md).

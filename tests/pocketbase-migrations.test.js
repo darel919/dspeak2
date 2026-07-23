@@ -66,3 +66,12 @@ test("PocketBase permits soundboard clips up to ten seconds", () => {
   assert.doesNotMatch(source, /duration.*max: 5/);
   assert.match(source, /20260723_soundboard_duration_10s_v1/);
 });
+
+test("PocketBase grants voice moderation to existing room admins", () => {
+  const source = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /20260723_voice_moderation_permission_v1/);
+  assert.match(source, /"channel\.moderate_voice"/);
+});

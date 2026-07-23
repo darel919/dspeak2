@@ -63,14 +63,21 @@
           :channel-name="props.channel?.name"
           :room-id="props.room?.id"
         />
+        <OfflineBanner />
 
         <!-- Loading indicator -->
-        <div v-if="loading" class="flex justify-center py-8">
+        <div
+          v-if="loading && messages.length === 0"
+          class="flex justify-center py-8"
+        >
           <div class="loading loading-spinner loading-lg"></div>
         </div>
 
         <!-- Error message -->
-        <div v-else-if="error" class="alert alert-error">
+        <div
+          v-else-if="error && !offline && messages.length === 0"
+          class="alert alert-error"
+        >
           <Icon
             name="lucide:circle-x"
             class="stroke-current shrink-0 h-6 w-6"
@@ -85,7 +92,10 @@
         </div>
 
         <!-- Empty state -->
-        <div v-else-if="messages.length === 0" class="text-center py-12">
+        <div
+          v-else-if="messages.length === 0 && !offline"
+          class="text-center py-12"
+        >
           <div class="text-base-content/50 mb-4">
             <Icon name="lucide:message-circle" class="h-16 w-16 mx-auto mb-4" />
             <p class="text-lg">No messages yet</p>
@@ -100,7 +110,6 @@
             :key="message.id"
             :message="message"
             :room-members="room?.members || []"
-            @message-read="handleMessageRead"
             @show-details="handleShowDetails"
           />
         </div>
@@ -173,6 +182,7 @@ import ChatInput from "./ChatInput.vue";
 import MessageDetailsModal from "./MessageDetailsModal.vue";
 import MemberList from "../MemberList.vue";
 import ChatErrorBanner from "./ChatErrorBanner.vue";
+import OfflineBanner from "./OfflineBanner.vue";
 import { STORAGE_KEYS } from "../../const/storage";
 
 const showMemberList = ref(true);
@@ -245,6 +255,7 @@ const messages = computed(() => {
 const loading = computed(() => chatStore.loading);
 const error = computed(() => chatStore.error);
 const connected = computed(() => chatStore.connected);
+const offline = computed(() => chatStore.offline);
 const typingUsers = computed(() => chatStore.typingUsers);
 const onlineUsers = computed(() => chatStore.onlineUsers);
 
@@ -323,10 +334,6 @@ function handleMessageSent() {
   nextTick(() => {
     scrollToBottom();
   });
-}
-
-function handleMessageRead(messageId) {
-  console.debug("Message marked as read:", messageId);
 }
 
 function handleShowDetails(message) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   automaticGateThreshold,
+  createNoiseFloorEstimator,
   microphoneLevelDb,
   normalizeMicrophoneGate,
   updateNoiseFloor,
@@ -29,8 +30,49 @@ test("microphone level and automatic threshold use dBFS", () => {
   assert.equal(automaticGateThreshold(-35), -32);
 });
 
-test("noise floor only follows quiet samples", () => {
-  assert.equal(updateNoiseFloor(-60, -30, false), -60);
-  assert.equal(updateNoiseFloor(-60, -70, true), -60);
-  assert.ok(updateNoiseFloor(-60, -70, false) < -60);
+test("noise floor bootstraps from unprocessed room noise", () => {
+  const estimator = createNoiseFloorEstimator();
+  for (let index = 0; index < 150; index += 1) {
+    const thresholdDb = automaticGateThreshold(estimator.noiseFloorDb);
+    updateNoiseFloor(estimator, -42, -42 >= thresholdDb);
+  }
+  assert.ok(estimator.noiseFloorDb > -43);
+  assert.ok(automaticGateThreshold(estimator.noiseFloorDb) > -33);
+});
+
+test("noise floor ignores intermittent speech", () => {
+  const estimator = createNoiseFloorEstimator();
+  for (let index = 0; index < 125; index += 1) {
+    const levelDb = index % 5 === 0 ? -24 : -52;
+    updateNoiseFloor(
+      estimator,
+      levelDb,
+      levelDb >= automaticGateThreshold(estimator.noiseFloorDb),
+    );
+  }
+  assert.ok(estimator.noiseFloorDb < -51);
+});
+
+test("noise floor follows a quieter room quickly", () => {
+  const estimator = createNoiseFloorEstimator();
+  for (let index = 0; index < 125; index += 1) {
+    updateNoiseFloor(estimator, -42, false);
+  }
+  for (let index = 0; index < 125; index += 1) {
+    updateNoiseFloor(estimator, -58, false);
+  }
+  assert.ok(estimator.noiseFloorDb < -57);
+});
+
+test("noise floor does not rise during continuous speech", () => {
+  const estimator = createNoiseFloorEstimator();
+  for (let index = 0; index < 125; index += 1) {
+    updateNoiseFloor(estimator, -52, false);
+  }
+  const noiseFloorBeforeSpeech = estimator.noiseFloorDb;
+  for (let index = 0; index < 250; index += 1) {
+    const speechLevelDb = -30 + (index % 7);
+    updateNoiseFloor(estimator, speechLevelDb, true);
+  }
+  assert.equal(estimator.noiseFloorDb, noiseFloorBeforeSpeech);
 });

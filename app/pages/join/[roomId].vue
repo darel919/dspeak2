@@ -117,10 +117,6 @@ const initialized = ref(false);
 const invite = ref(null);
 
 onMounted(async () => {
-  console.debug("[JoinRoom] Component mounted - Route params:", route.params);
-  console.debug("[JoinRoom] Room ID:", roomId.value);
-  console.debug("[JoinRoom] Current URL:", window.location.href);
-
   await loadInvite();
   initialized.value = true;
 });
@@ -148,26 +144,14 @@ async function loadInvite() {
 }
 
 async function checkAuthentication() {
-  console.debug("[JoinRoom] Checking authentication...");
-  const savedToken = localStorage.getItem("token");
-  console.debug("[JoinRoom] Saved token:", savedToken ? "exists" : "not found");
-
-  if (savedToken) {
-    console.debug("[JoinRoom] Verifying token...");
-    const isValid = await authStore.verifyToken(savedToken);
-    console.debug("[JoinRoom] Token validation result:", isValid);
-    if (!isValid) {
-      console.debug("[JoinRoom] Token invalid, clearing auth");
-      authStore.clearAuth();
-    }
-  }
+  if (authStore.getUserData()?.id) return true;
+  const restored = await authStore.restoreSession();
+  if (!restored) authStore.clearAuth(false);
+  return restored;
 }
 
 async function attemptJoin() {
-  console.debug("[JoinRoom] Starting join attempt for roomId:", roomId.value);
-
   if (!roomId.value || !roomId.value.trim()) {
-    console.error("[JoinRoom] Invalid room ID:", roomId.value);
     error.value = "Invalid room ID in the link";
     loading.value = false;
     return;
@@ -179,29 +163,21 @@ async function attemptJoin() {
   joinSuccess.value = false;
 
   try {
-    console.debug("[JoinRoom] Checking user authentication...");
     const userData = authStore.getUserData();
-    console.debug("[JoinRoom] User data:", userData);
 
     if (!userData || !userData.id) {
-      console.debug(
-        "[JoinRoom] User not authenticated, redirecting to auth page",
-      );
       loadingMessage.value = "Redirecting to login...";
 
       const currentUrl = window.location.href;
       localStorage.setItem("redirectAfterAuth", currentUrl);
-      console.debug("[JoinRoom] Saved redirect URL:", currentUrl);
       setTimeout(() => {
         router.push("/auth");
       }, 1500);
       return;
     }
 
-    console.debug("[JoinRoom] User authenticated, attempting to join room...");
     loadingMessage.value = "Joining room...";
-    const result = await roomsStore.joinRoom(roomId.value, inviteToken.value);
-    console.debug("[JoinRoom] Join successful:", result);
+    await roomsStore.joinRoom(roomId.value, inviteToken.value);
 
     joinSuccess.value = true;
     loadingMessage.value = "";

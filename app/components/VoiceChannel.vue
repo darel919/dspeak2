@@ -31,12 +31,6 @@
       </div>
     </div>
 
-    <!-- Connection Error -->
-    <div v-if="voiceStore.error" class="alert alert-error m-4">
-      <Icon name="lucide:circle-x" class="w-6 h-6 stroke-current shrink-0" />
-      <span>{{ voiceStore.error }}</span>
-    </div>
-
     <!-- Connection Info Banner -->
     <div
       v-if="

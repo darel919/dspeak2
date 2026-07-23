@@ -18,6 +18,7 @@ import {
   convertSoundboardIcon,
   convertSoundboardSource,
 } from "./soundboard-conversion.js";
+import { requireAuthenticatedUser } from "./authentication.js";
 
 const uploadLocks = new Map();
 
@@ -28,13 +29,6 @@ function withRoomUploadLock(roomId, operation) {
   return result.finally(() => {
     if (uploadLocks.get(roomId) === result) uploadLocks.delete(roomId);
   });
-}
-
-function requireUser(event) {
-  const userId = getHeader(event, "authorization");
-  if (!userId)
-    throw createError({ statusCode: 403, statusMessage: "Not Authorized" });
-  return userId;
 }
 
 async function context(pb, roomId, userId, permission = null) {
@@ -311,7 +305,7 @@ async function trigger(pb, userId, body) {
 
 export async function handleSoundboardApi(event, suffix = "") {
   const pb = await usePocketBaseAdmin();
-  const userId = requireUser(event);
+  const userId = await requireAuthenticatedUser(event);
   const method = event.method;
   const query = getQuery(event);
   if (!suffix && method === "GET")

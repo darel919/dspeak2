@@ -1,13 +1,12 @@
 import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
-import { cacheRooms, getCachedRooms } from "~/utils/roomsCache";
-
-const rooms = ref([]);
-const loading = ref(false);
-const error = ref(null);
+import { cacheRooms, getCachedRooms, isIdbAvailable } from "~/utils/idb";
 
 export const useRoomsStore = defineStore("rooms", () => {
+  const rooms = ref([]);
+  const loading = ref(false);
+  const error = ref(null);
   const config = useRuntimeConfig();
 
   async function updateRoom(roomId, data) {
@@ -32,8 +31,8 @@ export const useRoomsStore = defineStore("rooms", () => {
     }
     const response = await fetch(`${apiPath}/room/`, {
       method: "PUT",
+      credentials: "include",
       headers: {
-        Authorization: userData.id,
         ...(!hasFile ? { "Content-Type": "application/json" } : {}),
       },
       body: body || JSON.stringify({ roomId, ...data }),
@@ -73,8 +72,8 @@ export const useRoomsStore = defineStore("rooms", () => {
       body.desc = desc.trim();
     const response = await fetch(`${apiPath}/room/`, {
       method: "POST",
+      credentials: "include",
       headers: {
-        Authorization: userData.id,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
@@ -105,8 +104,8 @@ export const useRoomsStore = defineStore("rooms", () => {
         throw new Error("API path is not defined");
       }
       const response = await fetch(`${apiPath}/room`, {
+        credentials: "include",
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
       });
@@ -116,7 +115,7 @@ export const useRoomsStore = defineStore("rooms", () => {
       }
       const data = await response.json();
       rooms.value = data;
-      if (import.meta.client && window.indexedDB) {
+      if (import.meta.client && isIdbAvailable()) {
         cacheRooms(userData.id, data).catch((cacheError) => {
           console.warn("[RoomsStore] Failed to cache rooms:", cacheError);
         });
@@ -126,7 +125,7 @@ export const useRoomsStore = defineStore("rooms", () => {
       error.value = err.message;
       console.error("[RoomsStore] Error fetching rooms:", err);
 
-      if (import.meta.client && window.indexedDB) {
+      if (import.meta.client && isIdbAvailable()) {
         try {
           const authStore = useAuthStore();
           const userData = authStore.getUserData();
@@ -152,8 +151,8 @@ export const useRoomsStore = defineStore("rooms", () => {
     if (!userData || !userData.id) throw new Error("User not authenticated");
     if (!apiPath) throw new Error("API path is not defined");
     const response = await fetch(`${apiPath}/room/details?id=${roomId}`, {
+      credentials: "include",
       headers: {
-        Authorization: userData.id,
         "Content-Type": "application/json",
       },
     });
@@ -169,8 +168,8 @@ export const useRoomsStore = defineStore("rooms", () => {
     if (!apiPath) throw new Error("API path is not defined");
     const response = await fetch(`${apiPath}/room/`, {
       method: "DELETE",
+      credentials: "include",
       headers: {
-        Authorization: userData.id,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ roomId: roomId }),
@@ -211,7 +210,12 @@ export const useRoomsStore = defineStore("rooms", () => {
               await import("../composables/usePushSubscription");
             const { updateSubscription } = usePushSubscription();
             await updateSubscription();
-          } catch (err) {}
+          } catch (pushError) {
+            console.warn(
+              "[RoomsStore] Push subscription refresh failed",
+              pushError,
+            );
+          }
         }
         return existingRoom;
       }
@@ -226,8 +230,8 @@ export const useRoomsStore = defineStore("rooms", () => {
         try {
           response = await fetch(`${apiPath}/room/join`, {
             method: "POST",
+            credentials: "include",
             headers: {
-              Authorization: userData.id,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ roomId: trimmedRoomId, inviteToken }),
@@ -277,7 +281,12 @@ export const useRoomsStore = defineStore("rooms", () => {
             await import("../composables/usePushSubscription");
           const { updateSubscription } = usePushSubscription();
           await updateSubscription();
-        } catch (err) {}
+        } catch (pushError) {
+          console.warn(
+            "[RoomsStore] Push subscription refresh failed",
+            pushError,
+          );
+        }
       }
 
       return data;
@@ -304,8 +313,8 @@ export const useRoomsStore = defineStore("rooms", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/room/leave`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ roomId: trimmedRoomId }),
@@ -331,7 +340,12 @@ export const useRoomsStore = defineStore("rooms", () => {
             await import("../composables/usePushSubscription");
           const { unsubscribe } = usePushSubscription();
           await unsubscribe(trimmedRoomId);
-        } catch (err) {}
+        } catch (pushError) {
+          console.warn(
+            "[RoomsStore] Push subscription cleanup failed",
+            pushError,
+          );
+        }
       }
 
       await fetchRooms();

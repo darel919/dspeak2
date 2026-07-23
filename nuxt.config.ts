@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import packageMetadata from "./package.json" with { type: "json" };
 
 function copyMediasoupWorker(nitro) {
   if (nitro.options.dev) return;
@@ -52,15 +53,23 @@ export default defineNuxtConfig({
     strategies: "injectManifest",
     srcDir: "../public",
     filename: "sw.js",
-    registerType: "autoUpdate",
+    registerType: "prompt",
+    injectRegister: false,
+    injectManifest: {
+      globPatterns: ["**/*.{js,css,json,png,svg,ico,woff,woff2,webmanifest}"],
+      rollupFormat: "es",
+    },
     client: {
       installPrompt: true,
     },
 
     manifest: {
+      id: "/",
       name: "dSpeak",
       short_name: "dSpeak",
       description: "DWS communication app.",
+      start_url: "/",
+      scope: "/",
       theme_color: "#4A90E2",
       background_color: "#FFFFFF",
       display: "standalone",
@@ -80,6 +89,7 @@ export default defineNuxtConfig({
     },
     devOptions: {
       enabled: true,
+      type: "module",
     },
   },
 
@@ -88,7 +98,8 @@ export default defineNuxtConfig({
       url: process.env.POCKETBASE_URL || "",
       adminEmail: process.env.PBASE_ADMIN_EMAIL || "",
       adminPassword: process.env.PBASE_ADMIN_PASSWORD || "",
-      vapidPublicKey: process.env.VAPID_PUBKEY || "",
+      vapidPublicKey:
+        process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY || "",
       vapidPrivateKey: process.env.VAPID_PRIVKEY || "",
     },
     mediasoup: {
@@ -115,11 +126,13 @@ export default defineNuxtConfig({
     },
     public: {
       authPath: process.env.AUTH_PATH,
-      websocketPath: process.env.DSPEAK_WS_URL || "",
+      websocketPath: "",
       baseApiPath: process.env.AUTH_PATH?.replace(/\/auth\/?$/, "") || "",
-      sfuPath: process.env.DSPEAK_SFU_URL || "",
-      apiPath: process.env.DSPEAK_API_URL || "/dspeak",
-      VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
+      sfuPath: "",
+      apiPath: "/dspeak",
+      appVersion: packageMetadata.version,
+      VAPID_PUBLIC_KEY:
+        process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,
     },
   },
 });

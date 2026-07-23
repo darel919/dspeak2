@@ -10,6 +10,8 @@ export function usePresence(userId) {
   let retryCount = 0;
   let retryTimer = null;
   let pingInterval = null;
+  let stopUserWatcher = null;
+  let intentionallyDisconnected = false;
   const config = useRuntimeConfig();
   const authStore = useAuthStore();
   const identityStore = useIdentityStore();
@@ -41,9 +43,10 @@ export function usePresence(userId) {
       console.debug("[usePresence] No userId provided for connection");
       return;
     }
+    intentionallyDisconnected = false;
     const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
     const base = config.public.websocketPath || `${origin}/dspeak`;
-    const wsUrl = `${base}/presence?userId=${encodeURIComponent(id)}`;
+    const wsUrl = `${base}/presence`;
     console.debug("[usePresence] Connecting to:", wsUrl);
     ws = new WebSocket(wsUrl);
     ws.onmessage = receiveMessage;
@@ -70,7 +73,7 @@ export function usePresence(userId) {
         clearInterval(pingInterval);
         pingInterval = null;
       }
-      if (retryCount < 10) {
+      if (!intentionallyDisconnected && retryCount < 10) {
         retryCount++;
         retryTimer = setTimeout(() => connect(id), 2000);
       } else {
@@ -83,19 +86,21 @@ export function usePresence(userId) {
     };
   }
   function disconnect() {
+    intentionallyDisconnected = true;
+    clearTimeout(retryTimer);
+    retryTimer = null;
     if (ws) ws.close();
     if (pingInterval) {
       clearInterval(pingInterval);
       pingInterval = null;
     }
-    clearTimeout(retryTimer);
     ws = null;
     retryCount = 0;
   }
 
   if (isRef(userId)) {
     console.debug("[usePresence] Setting up watcher for reactive userId");
-    watch(
+    stopUserWatcher = watch(
       userId,
       (id, oldId) => {
         console.debug("[usePresence] userId changed from", oldId, "to", id);
@@ -108,6 +113,11 @@ export function usePresence(userId) {
     console.debug("[usePresence] Static userId provided:", userId);
     if (userId) connect(userId);
   }
+
+  onScopeDispose(() => {
+    stopUserWatcher?.();
+    disconnect();
+  });
 
   return {
     status,

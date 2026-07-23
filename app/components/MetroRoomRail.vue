@@ -15,7 +15,10 @@
         class="size-10 object-cover"
       />
     </NuxtLink>
-    <nav class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2">
+    <nav
+      class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2"
+      @scroll="hideRoomTooltip"
+    >
       <NuxtLink
         v-for="room in roomsStore.rooms"
         :key="room.id"
@@ -23,7 +26,16 @@
         class="metro-transition relative mx-2 grid aspect-square place-items-center overflow-hidden bg-base-200 text-sm font-semibold hover:bg-base-300"
         :class="activeRoomId === room.id && 'metro-selected'"
         :aria-label="room.name"
-        :title="room.name"
+        :aria-busy="openingRoomId === String(room.id)"
+        :aria-describedby="
+          tooltipRoom?.id === room.id ? 'room-rail-tooltip' : undefined
+        "
+        @pointerenter="showRoomTooltip(room, $event)"
+        @pointerleave="hideRoomTooltip"
+        @focus="showRoomTooltip(room, $event)"
+        @blur="hideRoomTooltip"
+        @click.capture="hideRoomTooltip"
+        @click.prevent="openRoom(room)"
         @contextmenu.prevent.stop="openRoomMenu(room, $event)"
       >
         <img
@@ -34,12 +46,27 @@
         />
         <span v-else>{{ room.name?.slice(0, 2).toUpperCase() }}</span>
         <span
+          v-if="openingRoomId === String(room.id)"
+          class="loading loading-spinner loading-sm absolute"
+        ></span>
+        <span
           v-if="roomUnread(room.id)"
           class="absolute right-0 bottom-0 min-w-5 bg-error px-1 text-center text-[10px] text-error-content"
           >{{ roomUnread(room.id) }}</span
         >
       </NuxtLink>
     </nav>
+    <Teleport to="body">
+      <div
+        v-if="tooltipRoom"
+        id="room-rail-tooltip"
+        class="pointer-events-none fixed z-[120] max-w-72 border border-base-300 bg-base-100 px-3 py-2 text-sm font-semibold text-base-content shadow-xl"
+        :style="roomTooltipStyle"
+        role="tooltip"
+      >
+        {{ tooltipRoom.name }}
+      </div>
+    </Teleport>
     <div
       class="grid w-full justify-items-center gap-1 border-t border-base-300 px-2 py-2"
     >
@@ -131,15 +158,19 @@
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
 import { useAuthStore } from "../stores/auth";
+import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
 import { VIEWPORT_PADDING_PX } from "../const/ui";
 
 const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
+const { openingRoomId, openRoom } = usePreparedRoomNavigation();
 const route = useRoute();
 const config = useRuntimeConfig();
 const unreadCounts = useState("unread-counts", () => []);
 const activeRoomId = computed(() => String(route.params.roomId || ""));
 const contextRoom = ref(null);
+const tooltipRoom = ref(null);
+const roomTooltipStyle = ref({});
 const inviteDialog = ref(null);
 const joinRoomDialog = ref(null);
 const contextMenuElement = ref(null);
@@ -203,10 +234,24 @@ function canManageRoom(room) {
   );
 }
 
+function showRoomTooltip(room, event) {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  tooltipRoom.value = room;
+  roomTooltipStyle.value = {
+    left: `${bounds.right + 8}px`,
+    top: `${bounds.top + bounds.height / 2}px`,
+    transform: "translateY(-50%)",
+  };
+}
+
+function hideRoomTooltip() {
+  tooltipRoom.value = null;
+}
+
 function openSelectedRoom() {
-  const roomId = contextRoom.value?.id;
+  const room = contextRoom.value;
   closeRoomMenu();
-  if (roomId) navigateTo(`/room/${roomId}`);
+  if (room) openRoom(room);
 }
 
 function openSelectedRoomSettings() {

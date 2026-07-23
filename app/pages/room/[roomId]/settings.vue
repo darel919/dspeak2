@@ -554,6 +554,11 @@ const permissionOptions = [
     "Change channel audio and video limits.",
   ],
   [
+    "channel.moderate_voice",
+    "Moderate voice",
+    "Move or disconnect lower-ranked voice participants.",
+  ],
+  [
     "message.moderate",
     "Moderate messages",
     "Remove messages that need moderation.",
@@ -590,7 +595,8 @@ function hasPermission(permission) {
 async function api(path, options = {}) {
   const response = await fetch(`${config.public.apiPath}${path}`, {
     ...options,
-    headers: { Authorization: authStore.getUserData().id, ...options.headers },
+    credentials: "include",
+    headers: { ...options.headers },
   });
   if (!response.ok) throw new Error(await response.text());
   return response.json();

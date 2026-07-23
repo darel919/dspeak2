@@ -115,8 +115,9 @@ instance until the runbook's external connectivity checks pass.
 | `/dspeak/chat/*`       | Messages, read state, and push subscriptions   |
 | `/dspeak/soundboard/*` | Protected room soundboard operations and media |
 
-Optional `DSPEAK_API_URL`, `DSPEAK_WS_URL`, and `DSPEAK_SFU_URL` overrides exist
-for split routing. Leave them empty for the supported same-origin monolith.
+Protected application APIs and WebSockets are same-origin so the server-owned
+HttpOnly session is used consistently. Follow the
+[production readiness gate](docs/production-readiness.md) before release.
 
 ## Verification
 
@@ -155,6 +156,7 @@ hardware capture, firewall rules, or public IPv4 and IPv6 reachability.
 - [Deployment runbook](docs/deployment.md)
 - [Hybrid media topology](docs/hybrid-media-topology.md)
 - [Room administration contract](docs/room-administration.md)
+- [Chat cache and room switching](docs/chat-cache.md)
 - [Room soundboards and system sounds](docs/soundboards.md)
 - [Microphone gate](docs/microphone-gate.md)
 - [Screen-share audio](docs/screen-share-audio.md)

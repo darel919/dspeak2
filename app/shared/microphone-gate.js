@@ -26,7 +26,41 @@ export function automaticGateThreshold(noiseFloorDb) {
   return Math.min(-32, Math.max(-58, noiseFloorDb + 12));
 }
 
-export function updateNoiseFloor(currentDb, levelDb, gateOpen) {
-  if (gateOpen || levelDb > currentDb + 8) return currentDb;
-  return currentDb * 0.94 + levelDb * 0.06;
+export function createNoiseFloorEstimator() {
+  return {
+    samples: [],
+    openGateSamples: [],
+    noiseFloorDb: -60,
+  };
+}
+
+export function updateNoiseFloor(estimator, levelDb, gateOpen) {
+  if (gateOpen) {
+    estimator.openGateSamples.push(levelDb);
+    if (estimator.openGateSamples.length > 75) {
+      estimator.openGateSamples.shift();
+    }
+
+    const openGateRange =
+      Math.max(...estimator.openGateSamples) -
+      Math.min(...estimator.openGateSamples);
+    if (estimator.openGateSamples.length < 75 || openGateRange > 2) {
+      return estimator.noiseFloorDb;
+    }
+  } else {
+    estimator.openGateSamples.length = 0;
+  }
+
+  estimator.samples.push(levelDb);
+  if (estimator.samples.length > 125) estimator.samples.shift();
+
+  const sortedSamples = [...estimator.samples].sort(
+    (left, right) => left - right,
+  );
+  const percentileIndex = Math.floor((sortedSamples.length - 1) * 0.2);
+  const candidateDb = sortedSamples[percentileIndex];
+  const adjustment = candidateDb > estimator.noiseFloorDb ? 0.08 : 0.2;
+  estimator.noiseFloorDb += (candidateDb - estimator.noiseFloorDb) * adjustment;
+
+  return estimator.noiseFloorDb;
 }

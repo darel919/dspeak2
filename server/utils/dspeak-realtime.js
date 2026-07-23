@@ -6,8 +6,41 @@ function getState() {
       channels: new Map(),
       users: new Map(),
       global: new Set(),
+      deviceChannels: new Map(),
     };
   return globalThis[stateKey];
+}
+
+function deviceChannelKey(userId, deviceId) {
+  return `${String(userId)}:${String(deviceId)}`;
+}
+
+export function setDeviceViewingChannel(
+  userId,
+  deviceId,
+  channelId,
+  active = true,
+) {
+  if (!userId || !deviceId || !channelId) return;
+  const state = getState();
+  const key = deviceChannelKey(userId, deviceId);
+  const channels = state.deviceChannels.get(key) || new Map();
+  const normalizedChannelId = String(channelId);
+  const count = channels.get(normalizedChannelId) || 0;
+  if (active) channels.set(normalizedChannelId, count + 1);
+  else if (count > 1) channels.set(normalizedChannelId, count - 1);
+  else channels.delete(normalizedChannelId);
+  if (channels.size) state.deviceChannels.set(key, channels);
+  else state.deviceChannels.delete(key);
+}
+
+export function isDeviceViewingChannel(userId, deviceId, channelId) {
+  if (!userId || !deviceId || !channelId) return false;
+  return (
+    getState()
+      .deviceChannels.get(deviceChannelKey(userId, deviceId))
+      ?.has(String(channelId)) === true
+  );
 }
 
 export function addGlobalSubscriber(peer) {

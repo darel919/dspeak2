@@ -52,7 +52,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["mark-read", "show-details"]);
+const emit = defineEmits(["mark-read", "show-details", "report"]);
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
@@ -90,7 +90,7 @@ async function handleCopyMessage() {
 }
 
 function handleReportMessage() {
-  console.debug("Report message:", props.message.id);
+  emit("report", props.message.id);
 }
 
 function handleViewDetails() {

@@ -1,11 +1,11 @@
 import { watch } from "vue";
+import { registerServiceWorker } from "../shared/service-worker-registration.js";
 
 export default defineNuxtPlugin(async (nuxtApp) => {
   if (!("serviceWorker" in navigator)) return;
 
   try {
-    const registration = await navigator.serviceWorker.getRegistration();
-    if (!registration) await navigator.serviceWorker.register("/sw.js");
+    await registerServiceWorker();
 
     const { useAuthStore } = await import("../stores/auth");
     const authStore = useAuthStore();

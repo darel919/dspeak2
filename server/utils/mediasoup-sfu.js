@@ -30,6 +30,7 @@ import {
 } from "./media-heartbeat";
 import { normalizeParticipantVoiceState } from "~~/shared/participant-voice-state.js";
 import { publishVoicePresence } from "./voice-presence";
+import { authenticateWebSocketRequest } from "./authentication";
 
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 
@@ -113,7 +114,9 @@ async function createState(config) {
       closeSession(state, session);
       try {
         session.peer.close(4000, "Signaling heartbeat timed out");
-      } catch (_) {}
+      } catch (error) {
+        console.warn("[SFU] failed to close timed-out peer", error);
+      }
     }
   }, MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS);
   state.heartbeatTimer.unref?.();
@@ -124,7 +127,12 @@ async function createState(config) {
       send(session.peer, "server-shutdown", { reason: "media worker stopped" });
       try {
         session.peer.close(1011, "Media worker stopped");
-      } catch (_) {}
+      } catch (closeError) {
+        console.warn(
+          "[SFU] failed to close peer after worker death",
+          closeError,
+        );
+      }
     }
     state.sessions.clear();
     state.rooms.clear();
@@ -702,12 +710,13 @@ async function handleMessage(state, session, message) {
 
 export async function openSfuPeer(peer) {
   const url = new URL(peer.request.url);
-  const userId = url.searchParams.get("auth");
   const channelId = url.searchParams.get("channelId");
-  if (!userId || !channelId) {
-    peer.close(1008, "auth and channelId are required");
+  const authentication = await authenticateWebSocketRequest(peer.request);
+  if (!authentication || !channelId) {
+    peer.close(1008, "Authentication and channelId are required");
     return;
   }
+  const { userId } = authentication;
 
   const pb = await usePocketBaseAdmin();
   const channel = await pb
@@ -906,16 +915,40 @@ export async function disconnectVoiceParticipant(channelId, userId) {
   return sessions.length;
 }
 
+export async function moderateVoiceParticipant(
+  channelId,
+  userId,
+  targetChannelId = null,
+) {
+  const state = await getState();
+  const room = state.rooms.get(String(channelId));
+  if (!room) return 0;
+  const sessions = [...room.sessions.values()].filter(
+    (session) => String(session.userId) === String(userId),
+  );
+  for (const session of sessions) {
+    send(session.peer, "voice-moderation", {
+      action: targetChannelId ? "move" : "disconnect",
+      targetChannelId: targetChannelId ? String(targetChannelId) : null,
+    });
+    closeSession(state, session);
+    session.peer.close(
+      1008,
+      targetChannelId
+        ? "Moved by a room administrator"
+        : "Disconnected by a room administrator",
+    );
+  }
+  return sessions.length;
+}
+
 export async function broadcastVoiceChannelEvent(channelId, type, data) {
   const state = await getState();
   const room = state.rooms.get(String(channelId));
   if (!room) return 0;
   let delivered = 0;
   for (const session of room.sessions.values()) {
-    try {
-      send(session.peer, type, data);
-      delivered += 1;
-    } catch (_) {}
+    if (send(session.peer, type, data)) delivered += 1;
   }
   return delivered;
 }

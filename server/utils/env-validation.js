@@ -5,8 +5,6 @@ const requiredVariables = [
   "POCKETBASE_URL",
   "PBASE_ADMIN_EMAIL",
   "PBASE_ADMIN_PASSWORD",
-  "VAPID_PUBLIC_KEY",
-  "VAPID_PUBKEY",
   "VAPID_PRIVKEY",
 ];
 
@@ -82,6 +80,12 @@ export async function validateRuntimeEnvironment() {
   const missing = requiredVariables.filter(
     (name) => !process.env[name]?.trim(),
   );
+  if (
+    !process.env.VAPID_PUBLIC_KEY?.trim() &&
+    !process.env.VAPID_PUBKEY?.trim()
+  ) {
+    missing.push("VAPID_PUBLIC_KEY");
+  }
   if (missing.length) {
     throw new Error(
       `Missing required environment variables: ${missing.join(", ")}`,

@@ -1,9 +1,11 @@
 import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
+import { deviceHeaders, getDeviceId } from "../shared/device-identity";
+import { useRoomsStore } from "./rooms";
+import { useChatStore } from "./chat";
 
 export const useAuthStore = defineStore("auths", () => {
   const user = ref(null);
-  const token = ref(null);
   const config = useRuntimeConfig();
   const verificationRequests = new Map();
 
@@ -37,51 +39,30 @@ export const useAuthStore = defineStore("auths", () => {
       removeStorage("userData");
     }
     if (
-      typeof window !== "undefined" &&
-      navigator.serviceWorker &&
-      val &&
-      val.user &&
-      val.user.user_metadata &&
-      val.user.user_metadata.id
+      import.meta.client &&
+      val?.user?.user_metadata?.id &&
+      navigator.serviceWorker?.controller
     ) {
-      const userId = val.user.user_metadata.id;
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({
-          type: "SET_USER_ID",
-          userId,
-        });
-      }
-      if (navigator.serviceWorker.getRegistrations) {
-        navigator.serviceWorker.getRegistrations().then((regs) => {
-          regs.forEach((reg) => {
-            if (reg.active) {
-              reg.active.postMessage({ type: "SET_USER_ID", userId });
-            }
-          });
-        });
-      }
-      if (navigator.serviceWorker.ready) {
-        navigator.serviceWorker.ready.then((reg) => {
-          if (reg.active) {
-            reg.active.postMessage({ type: "SET_USER_ID", userId });
-          }
-        });
-      }
+      navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
     }
   }
-  function setToken(val) {
-    token.value = val;
-  }
   async function runTokenVerification(val) {
-    const authPath = config.public.authPath;
-    if (!authPath) throw new Error("Auth path is not defined");
-    const verifyUrl = `${authPath}/verify?at=${encodeURIComponent(val)}`;
+    const sessionUrl = `${config.public.apiPath}/session`;
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        const res = await fetch(verifyUrl);
+        const res = await fetch(sessionUrl, {
+          method: "POST",
+          credentials: "include",
+          headers: deviceHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            accessToken: val,
+            deviceId: getDeviceId(),
+          }),
+        });
         if (res.ok) {
           setUser(await res.json());
+          removeStorage("token");
           return true;
         }
 
@@ -114,39 +95,37 @@ export const useAuthStore = defineStore("auths", () => {
 
     const valid = await verificationRequests.get(val);
     if (!valid) {
-      setToken(null);
       setUser(null);
       removeStorage("token");
     }
     return valid;
   }
-  function saveToken(val) {
-    setToken(val);
-    writeStorage("token", val);
+  async function restoreSession() {
+    try {
+      const response = await fetch(`${config.public.apiPath}/session`, {
+        credentials: "include",
+        headers: deviceHeaders(),
+      });
+      if (!response.ok) return false;
+      setUser(await response.json());
+      return true;
+    } catch {
+      return false;
+    }
   }
-  function clearAuth() {
-    setToken(null);
+  function clearAuth(revoke = true) {
+    if (revoke && import.meta.client) {
+      fetch(`${config.public.apiPath}/session`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: deviceHeaders(),
+      }).catch(() => {});
+    }
     setUser(null);
     removeStorage("token");
     removeStorage("userData");
-    Promise.all([
-      import("./rooms.js")
-        .then(({ useRoomsStore }) => {
-          const roomsStore = useRoomsStore();
-          if (roomsStore) {
-            roomsStore.clearRooms();
-          }
-        })
-        .catch(() => {}),
-      import("./chat.js")
-        .then(({ useChatStore }) => {
-          const chatStore = useChatStore();
-          if (chatStore) {
-            chatStore.clearChat();
-          }
-        })
-        .catch(() => {}),
-    ]);
+    useRoomsStore().clearRooms();
+    useChatStore().clearChat();
   }
   function getUserData() {
     return user.value?.user?.user_metadata || null;
@@ -165,11 +144,9 @@ export const useAuthStore = defineStore("auths", () => {
   }
   return {
     user,
-    token,
     setUser,
-    setToken,
     verifyToken,
-    saveToken,
+    restoreSession,
     clearAuth,
     getUserData,
     updateUserData,

@@ -105,6 +105,7 @@ const router = useRouter();
 
 const roomId = computed(() => route.params.roomId);
 const channelId = computed(() => route.params.channelId);
+const ownedChatChannelId = String(route.params.channelId || "");
 const room = computed(() =>
   roomsStore.rooms.find((r) => r.id === roomId.value),
 );
@@ -147,7 +148,7 @@ onUnmounted(() => {
 
   const chatStore = useChatStore();
   if (chatStore && chatStore.disconnectFromChannel) {
-    chatStore.disconnectFromChannel(true);
+    chatStore.disconnectFromChannel(true, false, true, ownedChatChannelId);
   }
 });
 

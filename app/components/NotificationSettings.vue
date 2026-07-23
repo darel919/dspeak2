@@ -187,12 +187,13 @@ async function disablePush() {
     toast.error(cause.message);
   }
 }
-function testPush() {
-  const notification = store.showNotification("dSpeak notification test", {
-    body: "Your notification settings are working.",
-    icon: "/favicon-32x32.png",
-  });
-  if (!notification) toast.error("The browser did not show the notification");
+async function testPush() {
+  try {
+    await store.sendPushTest();
+    toast.success("Push test sent. It should arrive through your browser.");
+  } catch (cause) {
+    toast.error(cause.message);
+  }
 }
 async function saveAttenuation() {
   settingsStore.setStreamAttenuation(attenuation);

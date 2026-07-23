@@ -4,8 +4,10 @@ import {
   broadcastToChannel,
   removeChannelSubscriber,
   removeUserSubscriber,
+  setDeviceViewingChannel,
 } from "../../../utils/dspeak-realtime";
 import { usePocketBaseAdmin } from "../../../utils/pocketbase";
+import { authenticateWebSocketRequest } from "../../../utils/authentication";
 
 const sessions = new Map();
 
@@ -18,9 +20,10 @@ export default defineWebSocketHandler({
     try {
       const url = new URL(peer.request.url);
       const channelId = url.searchParams.get("channelId");
-      const userId = url.searchParams.get("auth");
-      if (!channelId || !userId)
-        return peer.close(1008, "User ID and channel ID are required");
+      const authentication = await authenticateWebSocketRequest(peer.request);
+      if (!channelId || !authentication)
+        return peer.close(1008, "Authentication and channel ID are required");
+      const { userId, deviceId } = authentication;
 
       const pb = await usePocketBaseAdmin();
       const channel = await pb
@@ -33,11 +36,13 @@ export default defineWebSocketHandler({
 
       sessions.set(peer.id, {
         userId,
+        deviceId,
         channelId,
         isMedia: Boolean(channel.isMedia),
       });
       addChannelSubscriber(channelId, peer);
       addUserSubscriber(String(userId), peer);
+      setDeviceViewingChannel(userId, deviceId, channelId);
 
       if (!channel.isMedia) {
         const current = (channel.inRoom || []).map(String);
@@ -125,6 +130,12 @@ export default defineWebSocketHandler({
     } catch (error) {
       console.error("[Chat WebSocket] close cleanup failed", error);
     } finally {
+      setDeviceViewingChannel(
+        session.userId,
+        session.deviceId,
+        session.channelId,
+        false,
+      );
       removeChannelSubscriber(session.channelId, peer);
       removeUserSubscriber(String(session.userId), peer);
     }

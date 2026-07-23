@@ -1,10 +1,16 @@
 import { defineStore } from "pinia";
-import BackgroundWorker from "../utils/BackgroundWorker";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import { useRoomsStore } from "./rooms";
 import { useChannelsStore } from "./channels";
 import { useNotificationsStore } from "./notifications";
+import {
+  cacheChannelMessages,
+  enqueueMessage,
+  getCachedChannelMessages,
+  IdbOperationError,
+} from "../utils/idb";
+import { addReader, hasReader, mergeReaders } from "../shared/read-receipts";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
@@ -19,121 +25,112 @@ export const useChatStore = defineStore("chat", () => {
   const currentRoomId = ref(null);
   const onlineUsers = ref([]);
   const typingUsers = ref([]);
+  const offline = ref(import.meta.client ? !navigator.onLine : false);
   const config = useRuntimeConfig();
-  let reconnectInterval = null;
   let reconnectTimer = null;
   let backoffAttempts = 0;
-  let lastConnectRequest = 0;
-  const CONNECT_DEBOUNCE_MS = 200;
   let pingInterval = null;
-  let suppressClearState = false;
+  let connectionGeneration = 0;
+  let activeFetchController = null;
+  let readFlushTimer = null;
+  let readFlushPromise = null;
+  const pendingReadIds = new Set();
+  const channelMessages = new Map();
 
-  if (process.client && "serviceWorker" in navigator) {
-    console.debug("[ChatStore] Service Worker supported");
-
-    navigator.serviceWorker.getRegistration().then((reg) => {
-      if (reg) {
-        console.debug("[ChatStore] Service Worker registered:", reg);
-        console.debug("[ChatStore] SW active:", !!reg.active);
-        console.debug(
-          "[ChatStore] SW controller:",
-          !!navigator.serviceWorker.controller,
-        );
-      } else {
-        console.debug("[ChatStore] No Service Worker registration found");
-      }
-    });
-
-    navigator.serviceWorker.addEventListener("message", (event) => {
-      console.debug("[ChatStore] Received SW message:", event.data);
-      if (event.data.type === "BACKGROUND_SYNC_SUCCESS") {
-        handleBackgroundSyncSuccess(event.data.pendingId);
-      }
-    });
-
-    const sendConfigToSW = () => {
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({
-          type: "SET_API_CONFIG",
-          config: {
-            apiPath: config.public.apiPath,
-          },
-        });
-        console.debug(
-          "[ChatStore] Sent API config to SW:",
-          config.public.apiPath,
-        );
-      } else {
-        console.debug("[ChatStore] No SW controller available");
-      }
-    };
-
-    if (navigator.serviceWorker.controller) {
-      sendConfigToSW();
+  function handleServiceWorkerMessage(event) {
+    if (event.data.type === "BACKGROUND_SYNC_SUCCESS") {
+      handleBackgroundSyncSuccess(event.data.pendingId);
     }
+    if (event.data.type === "BACKGROUND_SYNC_FAILURE") {
+      handleBackgroundSyncFailure(event.data.pendingId, event.data.status);
+    }
+  }
 
-    navigator.serviceWorker.ready.then((reg) => {
-      console.debug("[ChatStore] Service Worker ready:", reg);
-      if (reg.active) {
-        reg.active.postMessage({
-          type: "SET_API_CONFIG",
-          config: {
-            apiPath: config.public.apiPath,
-          },
-        });
-        console.debug(
-          "[ChatStore] Sent API config to SW (ready):",
-          config.public.apiPath,
-        );
-      }
-    });
+  function handleServiceWorkerControllerChange() {
+    navigator.serviceWorker.controller?.postMessage({ type: "FORCE_SYNC" });
+  }
 
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      console.debug("[ChatStore] SW controller changed, sending config");
-      sendConfigToSW();
-    });
+  if (process.client) {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener(
+        "message",
+        handleServiceWorkerMessage,
+      );
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        handleServiceWorkerControllerChange,
+      );
+    }
+    window.addEventListener("online", handleBrowserOnline);
+    window.addEventListener("offline", handleBrowserOffline);
+  }
 
-    window.addEventListener("online", () => {
-      console.debug("[ChatStore] Came back online, triggering background sync");
-      if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
-        sendConfigToSW();
+  function closeActiveSocket() {
+    if (!ws.value) return;
+    const socket = ws.value;
+    ws.value = null;
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+    try {
+      socket.close();
+    } catch (socketError) {
+      console.warn("[ChatStore] Unable to close chat socket:", socketError);
+    }
+  }
 
-        setTimeout(() => {
-          console.debug("[ChatStore] Attempting sync via multiple methods...");
+  function handleBrowserOffline() {
+    offline.value = true;
+    error.value = null;
+    connected.value = false;
+    connecting.value = false;
+    onlineUsers.value = [];
+    typingUsers.value = [];
+    if (activeFetchController) {
+      activeFetchController.abort();
+      activeFetchController = null;
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      pingInterval = null;
+    }
+    closeActiveSocket();
+  }
 
-          navigator.serviceWorker.ready.then((reg) => {
-            if (reg.sync) {
-              console.debug("[ChatStore] Using Background Sync API");
-              reg.sync.register("chat-sync");
-            }
-          });
-
-          if (navigator.serviceWorker.controller) {
-            console.debug("[ChatStore] Sending FORCE_SYNC message");
-            navigator.serviceWorker.controller.postMessage({
-              type: "FORCE_SYNC",
-            });
+  function handleBrowserOnline() {
+    offline.value = false;
+    error.value = null;
+    flushPendingReads();
+    if (currentChannelId.value) {
+      connectToChannel(
+        currentChannelId.value,
+        currentChannelName.value,
+        currentRoomId.value,
+        true,
+      );
+    }
+    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+      setTimeout(() => {
+        navigator.serviceWorker.ready.then((reg) => {
+          if (reg.sync) {
+            reg.sync.register("chat-sync");
           }
-        }, 500);
-      }
-    });
+        });
+        navigator.serviceWorker.controller?.postMessage({
+          type: "FORCE_SYNC",
+        });
+      }, 500);
+    }
   }
 
   function triggerManualSync() {
-    console.debug("[ChatStore] Manual sync triggered");
     if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: "SET_API_CONFIG",
-        config: {
-          apiPath: config.public.apiPath,
-        },
-      });
-
-      setTimeout(() => {
-        navigator.serviceWorker.controller.postMessage({
-          type: "FORCE_SYNC",
-        });
-      }, 100);
+      navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
     }
   }
 
@@ -163,20 +160,12 @@ export const useChatStore = defineStore("chat", () => {
       return;
     }
 
-    try {
-      const now = Date.now();
-      const elapsed = now - lastConnectRequest;
-      lastConnectRequest = now;
-      if (elapsed < CONNECT_DEBOUNCE_MS) {
-        await new Promise((r) => setTimeout(r, CONNECT_DEBOUNCE_MS - elapsed));
-      }
-    } catch (e) {}
-
+    const generation = isReconnect
+      ? connectionGeneration
+      : connectionGeneration + 1;
     if (!isReconnect) {
-      suppressClearState = false;
-      disconnectFromChannel(true);
-    } else {
-      suppressClearState = true;
+      connectionGeneration = generation;
+      disconnectFromChannel(true, true, false);
     }
 
     connecting.value = true;
@@ -190,14 +179,70 @@ export const useChatStore = defineStore("chat", () => {
       currentChannelId.value = channelId;
       currentChannelName.value = channelName;
       currentRoomId.value = roomId;
-      await fetchMessages(channelId);
+      error.value = null;
+      onlineUsers.value = [];
+      typingUsers.value = [];
+
+      const memoryMessages = channelMessages.get(channelId);
+      if (memoryMessages) {
+        messages.value = memoryMessages;
+        loading.value = false;
+      } else {
+        messages.value = [];
+        loading.value = true;
+        try {
+          const cached = await getCachedChannelMessages(userData.id, channelId);
+          if (
+            generation !== connectionGeneration ||
+            currentChannelId.value !== channelId
+          ) {
+            return;
+          }
+          if (cached && Array.isArray(cached.messages)) {
+            channelMessages.set(channelId, cached.messages);
+            messages.value = cached.messages;
+            loading.value = false;
+          }
+        } catch (cacheError) {
+          console.warn(
+            "[ChatStore] Unable to hydrate message cache:",
+            cacheError,
+          );
+        }
+      }
+
+      if (!navigator.onLine) {
+        offline.value = true;
+        channelMessages.set(channelId, messages.value);
+        loading.value = false;
+        connecting.value = false;
+        return;
+      }
+
+      offline.value = false;
+      await fetchMessages(channelId, generation);
+      if (
+        generation !== connectionGeneration ||
+        currentChannelId.value !== channelId
+      ) {
+        return;
+      }
 
       const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
       const websocketPath = config.public.websocketPath || `${origin}/dspeak`;
-      const wsUrl = `${websocketPath}/chat/socket?channelId=${channelId}&auth=${encodeURIComponent(userData.id)}`;
-      ws.value = new WebSocket(wsUrl);
+      const wsUrl = `${websocketPath}/chat/socket?channelId=${encodeURIComponent(channelId)}`;
+      const socket = new WebSocket(wsUrl);
+      ws.value = socket;
 
-      ws.value.onopen = () => {
+      socket.onopen = () => {
+        if (
+          socket !== ws.value ||
+          generation !== connectionGeneration ||
+          currentChannelId.value !== channelId
+        ) {
+          socket.close();
+          return;
+        }
         connecting.value = false;
         connected.value = true;
         intentionalDisconnect.value = false;
@@ -209,25 +254,38 @@ export const useChatStore = defineStore("chat", () => {
         }
         backoffAttempts = 0;
 
-        suppressClearState = false;
-
         if (pingInterval) clearInterval(pingInterval);
         pingInterval = setInterval(() => {
           sendPing();
         }, 30000);
+      };
 
-        if (currentChannelId.value) {
-          fetchMessages(currentChannelId.value);
+      socket.onmessage = (event) => {
+        if (
+          socket === ws.value &&
+          generation === connectionGeneration &&
+          currentChannelId.value === channelId
+        ) {
+          handleWebSocketMessage(event);
         }
       };
 
-      ws.value.onmessage = handleWebSocketMessage;
-
       const recentCloses = [];
 
-      ws.value.onclose = (event) => {
+      socket.onclose = (event) => {
+        if (
+          socket !== ws.value ||
+          generation !== connectionGeneration ||
+          currentChannelId.value !== channelId
+        ) {
+          return;
+        }
         connecting.value = false;
         connected.value = false;
+        if (!navigator.onLine) {
+          handleBrowserOffline();
+          return;
+        }
         try {
           console.debug("[ChatStore] WebSocket connection closed", {
             code: event?.code,
@@ -303,9 +361,14 @@ export const useChatStore = defineStore("chat", () => {
         }
       };
 
-      ws.value.onerror = (error) => {
+      socket.onerror = (socketError) => {
+        if (socket !== ws.value || generation !== connectionGeneration) return;
         connecting.value = false;
-        console.error("[ChatStore] WebSocket error:", error);
+        if (!navigator.onLine) {
+          handleBrowserOffline();
+          return;
+        }
+        console.error("[ChatStore] WebSocket error:", socketError);
         error.value = "WebSocket connection failed";
       };
 
@@ -325,54 +388,61 @@ export const useChatStore = defineStore("chat", () => {
       }
     } catch (err) {
       connecting.value = false;
-      error.value = err.message;
-      console.error("[ChatStore] Error connecting to channel:", err);
+      if (!navigator.onLine) {
+        handleBrowserOffline();
+      } else {
+        error.value = err.message;
+        console.error("[ChatStore] Error connecting to channel:", err);
+      }
     }
   }
 
-  function disconnectFromChannel(intentional = false) {
-    try {
-      const err = new Error("disconnectFromChannel called");
-      console.debug(
-        "[ChatStore] disconnectFromChannel invoked - stack:",
-        err.stack,
-      );
-    } catch (e) {
-      console.debug("[ChatStore] disconnectFromChannel invoked");
+  function disconnectFromChannel(
+    intentional = false,
+    preserveMessages = false,
+    invalidateGeneration = true,
+    expectedChannelId = null,
+  ) {
+    if (
+      expectedChannelId &&
+      currentChannelId.value &&
+      currentChannelId.value !== expectedChannelId
+    ) {
+      return false;
     }
 
+    if (invalidateGeneration) connectionGeneration += 1;
     intentionalDisconnect.value = !!intentional;
 
     if (ws.value) {
       try {
-        ws.value.close();
+        closeActiveSocket();
       } catch (e) {
         console.warn("[ChatStore] Error closing WebSocket cleanly:", e);
       }
-      ws.value = null;
     }
     if (pingInterval) {
       clearInterval(pingInterval);
       pingInterval = null;
     }
-    if (reconnectInterval) {
-      clearInterval(reconnectInterval);
-      reconnectInterval = null;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (activeFetchController) {
+      activeFetchController.abort();
+      activeFetchController = null;
     }
 
-    if (suppressClearState) {
-      console.debug("[ChatStore] Disconnected from channel (state preserved)");
-      return;
-    }
-
+    connecting.value = false;
     connected.value = false;
     currentChannelId.value = null;
     currentChannelName.value = null;
     currentRoomId.value = null;
-    messages.value = [];
+    if (!preserveMessages) messages.value = [];
     onlineUsers.value = [];
     typingUsers.value = [];
-    console.debug("[ChatStore] Disconnected from channel and cleared state");
+    return true;
   }
 
   async function handleWebSocketMessage(event) {
@@ -380,18 +450,12 @@ export const useChatStore = defineStore("chat", () => {
       const data = JSON.parse(event.data);
       switch (data.type) {
         case "connected":
-          console.debug("[ChatStore] Connection confirmed:", data.data);
           break;
         case "new_message":
-          console.debug("[ChatStore] New message received:", data.data);
           const existingMessage = messages.value.find(
             (msg) => msg.id === data.data.id,
           );
           if (existingMessage) {
-            console.debug(
-              "[ChatStore] Duplicate message detected, skipping:",
-              data.data.id,
-            );
             break;
           }
           messages.value.push(data.data);
@@ -453,7 +517,7 @@ export const useChatStore = defineStore("chat", () => {
           );
           break;
         default:
-          console.debug("[ChatStore] Unknown message type:", data.type, data);
+          console.debug("[ChatStore] Unknown message type:", data.type);
       }
     } catch (err) {
       console.error(
@@ -485,9 +549,14 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
-  async function fetchMessages(channelId) {
-    loading.value = true;
+  async function fetchMessages(channelId, generation = connectionGeneration) {
+    const hasVisibleMessages =
+      currentChannelId.value === channelId && messages.value.length > 0;
+    loading.value = !hasVisibleMessages;
     error.value = null;
+    if (activeFetchController) activeFetchController.abort();
+    const controller = new AbortController();
+    activeFetchController = controller;
 
     try {
       const authStore = useAuthStore();
@@ -501,10 +570,11 @@ export const useChatStore = defineStore("chat", () => {
       const response = await fetch(
         `${apiPath}/chat/messages?channelId=${channelId}`,
         {
+          credentials: "include",
           headers: {
-            Authorization: userData.id,
             "Content-Type": "application/json",
           },
+          signal: controller.signal,
         },
       );
 
@@ -513,15 +583,35 @@ export const useChatStore = defineStore("chat", () => {
       }
 
       const data = await response.json();
-      console.debug("[ChatStore] API messages response:", data);
-      if (Array.isArray(data.messages)) {
-        messages.value = data.messages;
-      } else if (Array.isArray(data)) {
-        messages.value = data;
-      } else {
-        messages.value = [];
+      if (
+        generation !== connectionGeneration ||
+        currentChannelId.value !== channelId
+      ) {
+        return;
       }
-      console.debug("[ChatStore] Assigned messages:", messages.value);
+      let nextMessages;
+      if (Array.isArray(data.messages)) {
+        nextMessages = data.messages;
+      } else if (Array.isArray(data)) {
+        nextMessages = data;
+      } else {
+        nextMessages = [];
+      }
+      const pendingMessages = (
+        channelMessages.get(channelId) ||
+        (currentChannelId.value === channelId ? messages.value : [])
+      ).filter((message) => message.status === "pending");
+      nextMessages = [...nextMessages, ...pendingMessages];
+      channelMessages.set(channelId, nextMessages);
+      messages.value = nextMessages;
+      cacheChannelMessages(userData.id, channelId, nextMessages).catch(
+        (cacheError) => {
+          console.warn(
+            "[ChatStore] Unable to persist message cache:",
+            cacheError,
+          );
+        },
+      );
 
       try {
         const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
@@ -548,14 +638,30 @@ export const useChatStore = defineStore("chat", () => {
         console.warn("[ChatStore] Failed to reconcile local unread IDs:", e);
       }
     } catch (err) {
-      error.value = err.message;
-      console.error("[ChatStore] Error fetching messages:", err);
+      if (!navigator.onLine) {
+        handleBrowserOffline();
+      } else if (
+        err.name !== "AbortError" &&
+        generation === connectionGeneration
+      ) {
+        error.value = err.message;
+        console.error("[ChatStore] Error fetching messages:", err);
+      }
     } finally {
-      loading.value = false;
+      if (activeFetchController === controller) {
+        activeFetchController = null;
+      }
+      if (
+        generation === connectionGeneration &&
+        currentChannelId.value === channelId
+      ) {
+        loading.value = false;
+      }
     }
   }
 
   async function sendMessage(channelId, content) {
+    let pendingMessage = null;
     try {
       const authStore = useAuthStore();
       const userData = authStore.getUserData();
@@ -563,8 +669,10 @@ export const useChatStore = defineStore("chat", () => {
         throw new Error("User not authenticated");
       }
 
-      const pendingMessage = {
-        id: `pending_${Date.now()}`,
+      const clientMessageId = crypto.randomUUID();
+      const pendingId = `pending_${clientMessageId}`;
+      pendingMessage = {
+        id: pendingId,
         content,
         room_channel: channelId,
         sender: {
@@ -578,26 +686,27 @@ export const useChatStore = defineStore("chat", () => {
       };
 
       messages.value.push(pendingMessage);
+      channelMessages.set(channelId, messages.value);
+      cacheChannelMessages(userData.id, channelId, messages.value).catch(
+        (cacheError) => {
+          console.warn(
+            "[ChatStore] Unable to persist pending message:",
+            cacheError,
+          );
+        },
+      );
 
       if (!navigator.onLine) {
         const queuedMessage = {
-          id: Date.now(),
+          id: clientMessageId,
           channelId,
           content,
-          sender: userData.id,
+          ownerId: userData.id,
           pendingId: pendingMessage.id,
         };
-        await BackgroundWorker.enqueueMessage(queuedMessage);
+        await enqueueMessage(queuedMessage);
         if ("serviceWorker" in navigator && "SyncManager" in window) {
           navigator.serviceWorker.ready.then((reg) => {
-            if (reg.active) {
-              reg.active.postMessage({
-                type: "SET_API_CONFIG",
-                config: {
-                  apiPath: config.public.apiPath,
-                },
-              });
-            }
             reg.sync.register("chat-sync");
           });
         }
@@ -608,13 +717,15 @@ export const useChatStore = defineStore("chat", () => {
         const apiPath = config.public.apiPath;
         const response = await fetch(`${apiPath}/chat/message`, {
           method: "POST",
+          credentials: "include",
           headers: {
-            Authorization: userData.id,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             channelId,
             content,
+            clientMessageId,
+            ownerId: userData.id,
           }),
         });
 
@@ -634,13 +745,13 @@ export const useChatStore = defineStore("chat", () => {
         return message;
       } catch (fetchError) {
         const queuedMessage = {
-          id: Date.now(),
+          id: clientMessageId,
           channelId,
           content,
-          sender: userData.id,
+          ownerId: userData.id,
           pendingId: pendingMessage.id,
         };
-        await BackgroundWorker.enqueueMessage(queuedMessage);
+        await enqueueMessage(queuedMessage);
         if ("serviceWorker" in navigator && "SyncManager" in window) {
           navigator.serviceWorker.ready.then((reg) => {
             reg.sync.register("chat-sync");
@@ -649,80 +760,119 @@ export const useChatStore = defineStore("chat", () => {
         return { status: "queued-error", error: fetchError.message };
       }
     } catch (err) {
-      error.value = err.message;
+      if (pendingMessage && err instanceof IdbOperationError) {
+        pendingMessage.status = "failed";
+        pendingMessage.error = err.message;
+      } else {
+        error.value = err.message;
+      }
       console.error("[ChatStore] Error sending message:", err);
       throw err;
     }
   }
 
-  async function markMessageAsRead(messageId) {
+  function markMessageAsRead(messageId) {
+    const userData = useAuthStore().getUserData();
+    if (!userData?.id) return;
+    const message = messages.value.find((item) => item.id === messageId);
+    if (!message || message.sender?.id === userData.id) return;
+    if (hasReader(message.read_by, userData.id)) return;
+
+    message.read_by = addReader(message.read_by, userData);
+    pendingReadIds.add(messageId);
+    persistPendingReadIds(userData.id);
+    scheduleReadFlush();
+  }
+
+  function readStorageKey(userId) {
+    return `dspeak2_unread_message_ids_${userId}`;
+  }
+
+  function hydratePendingReadIds(userId) {
     try {
-      const authStore = useAuthStore();
-      const userData = authStore.getUserData();
-      if (!userData || !userData.id) {
-        throw new Error("User not authenticated");
+      const stored = JSON.parse(
+        localStorage.getItem(readStorageKey(userId)) || "[]",
+      );
+      if (Array.isArray(stored)) {
+        for (const messageId of stored) pendingReadIds.add(messageId);
       }
-
-      const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
-      let unreadIds = [];
-      try {
-        unreadIds = JSON.parse(localStorage.getItem(storageKey)) || [];
-      } catch (e) {
-        unreadIds = [];
-      }
-
-      if (!unreadIds.includes(messageId)) {
-        unreadIds.push(messageId);
-        localStorage.setItem(storageKey, JSON.stringify(unreadIds));
-      }
-    } catch (err) {
-      error.value = err.message;
-      console.error("[ChatStore] Error batching message as read:", err);
-      throw err;
+    } catch (storageError) {
+      console.warn(
+        "[ChatStore] Unable to restore pending read state:",
+        storageError,
+      );
     }
   }
 
-  function startReadBatchSync() {
-    setInterval(async () => {
-      try {
-        const authStore = useAuthStore();
-        const userData = authStore.getUserData();
-        if (!userData || !userData.id) return;
-        const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
-        let unreadIds = [];
-        try {
-          unreadIds = JSON.parse(localStorage.getItem(storageKey)) || [];
-        } catch (e) {
-          unreadIds = [];
-        }
-        if (unreadIds.length === 0) return;
-
-        const apiPath = config.public.apiPath;
-        const response = await fetch(`${apiPath}/chat/read`, {
-          method: "POST",
-          headers: {
-            Authorization: userData.id,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messageIds: unreadIds,
-          }),
-        });
-        if (response.ok) {
-          localStorage.setItem(storageKey, JSON.stringify([]));
-        } else {
-          console.warn(
-            "[ChatStore] Failed to batch mark messages as read:",
-            response.status,
-          );
-        }
-      } catch (err) {
-        console.error("[ChatStore] Error in batch read sync:", err);
-      }
-    }, 5000);
+  function persistPendingReadIds(userId) {
+    try {
+      localStorage.setItem(
+        readStorageKey(userId),
+        JSON.stringify([...pendingReadIds]),
+      );
+    } catch (storageError) {
+      console.warn(
+        "[ChatStore] Unable to persist pending read state:",
+        storageError,
+      );
+    }
   }
 
-  startReadBatchSync();
+  function scheduleReadFlush() {
+    if (readFlushTimer || readFlushPromise || !navigator.onLine) return;
+    readFlushTimer = setTimeout(() => {
+      readFlushTimer = null;
+      flushPendingReads();
+    }, 400);
+  }
+
+  async function flushPendingReads() {
+    if (readFlushPromise) return readFlushPromise;
+    const userData = useAuthStore().getUserData();
+    if (!userData?.id || !navigator.onLine) return;
+    hydratePendingReadIds(userData.id);
+    const messageIds = [...pendingReadIds].slice(0, 200);
+    if (messageIds.length === 0) return;
+
+    readFlushPromise = (async () => {
+      const response = await fetch(`${config.public.apiPath}/chat/read`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ messageIds }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to update read state: ${response.status}`);
+      }
+      const payload = await response.json();
+      for (const result of payload.results || []) {
+        if (
+          result.status === "marked_as_read" ||
+          result.status === "already_read"
+        ) {
+          pendingReadIds.delete(result.messageId);
+        }
+      }
+      persistPendingReadIds(userData.id);
+      useChannelsStore().fetchUnreadCounts();
+    })()
+      .catch((readError) => {
+        console.error("[ChatStore] Unable to update read state:", readError);
+      })
+      .finally(() => {
+        readFlushPromise = null;
+        if (
+          [...pendingReadIds].some(
+            (messageId) => !messageIds.includes(messageId),
+          )
+        ) {
+          scheduleReadFlush();
+        }
+      });
+    return readFlushPromise;
+  }
 
   function sendTypingIndicator(isTyping) {
     console.debug("[ChatStore] Sending typing indicator:", {
@@ -734,7 +884,6 @@ export const useChatStore = defineStore("chat", () => {
         type: "typing",
         isTyping,
       };
-      console.debug("[ChatStore] Sending typing message:", message);
       ws.value.send(JSON.stringify(message));
     } else {
       console.debug("[ChatStore] Cannot send typing indicator - not connected");
@@ -756,7 +905,10 @@ export const useChatStore = defineStore("chat", () => {
       (msg) => msg.id === messageId,
     );
     if (messageIndex !== -1) {
-      messages.value[messageIndex].read_by = readBy;
+      messages.value[messageIndex].read_by = mergeReaders(
+        messages.value[messageIndex].read_by,
+        readBy,
+      );
     }
   }
 
@@ -873,19 +1025,67 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function handleBackgroundSyncSuccess(pendingId) {
-    const pendingIndex = messages.value.findIndex(
-      (msg) => msg.id === pendingId,
-    );
-    if (pendingIndex !== -1) {
-      messages.value.splice(pendingIndex, 1);
+    const authStore = useAuthStore();
+    const userId = authStore.getUserData()?.id;
+    for (const [channelId, cachedMessages] of channelMessages) {
+      const nextMessages = cachedMessages.filter(
+        (message) => message.id !== pendingId,
+      );
+      if (nextMessages.length === cachedMessages.length) continue;
+      channelMessages.set(channelId, nextMessages);
+      if (currentChannelId.value === channelId) {
+        messages.value = nextMessages;
+      }
+      if (userId) {
+        cacheChannelMessages(userId, channelId, nextMessages).catch(
+          (cacheError) => {
+            console.warn(
+              "[ChatStore] Unable to reconcile synced message cache:",
+              cacheError,
+            );
+          },
+        );
+      }
     }
   }
+
+  function handleBackgroundSyncFailure(pendingId, status) {
+    for (const cachedMessages of channelMessages.values()) {
+      const pending = cachedMessages.find(
+        (message) => message.id === pendingId,
+      );
+      if (!pending) continue;
+      pending.status = "failed";
+      pending.error =
+        status === 403
+          ? "You no longer have access to this channel."
+          : "This queued message could not be sent.";
+    }
+  }
+
+  onScopeDispose(() => {
+    if (!process.client) return;
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.removeEventListener(
+        "message",
+        handleServiceWorkerMessage,
+      );
+      navigator.serviceWorker.removeEventListener(
+        "controllerchange",
+        handleServiceWorkerControllerChange,
+      );
+    }
+    window.removeEventListener("online", handleBrowserOnline);
+    window.removeEventListener("offline", handleBrowserOffline);
+    disconnectFromChannel();
+  });
 
   return {
     messages,
     loading,
     error,
     connected,
+    offline,
     currentChannelId,
     currentChannelName,
     currentRoomId,

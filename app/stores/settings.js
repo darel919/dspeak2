@@ -1,4 +1,4 @@
-import { defineStore } from "pinia";
+import { defineStore, skipHydrate } from "pinia";
 import { normalizeVideoSettings } from "~/shared/video-settings";
 import {
   DEFAULT_AUDIO_SETTINGS,
@@ -10,55 +10,66 @@ import {
   DEFAULT_MICROPHONE_GATE,
   normalizeMicrophoneGate,
 } from "~/shared/microphone-gate";
+import { useVoiceStore } from "~/stores/voice";
 
 export const useSettingsStore = defineStore("settings", () => {
-  const audio = ref(loadPersisted("audioSettings", DEFAULT_AUDIO_SETTINGS));
-  const microphoneGate = ref(
-    normalizeMicrophoneGate(
-      loadPersisted("microphoneGateSettings", DEFAULT_MICROPHONE_GATE),
+  const audio = skipHydrate(
+    ref(loadPersisted("audioSettings", DEFAULT_AUDIO_SETTINGS)),
+  );
+  const microphoneGate = skipHydrate(
+    ref(
+      normalizeMicrophoneGate(
+        loadPersisted("microphoneGateSettings", DEFAULT_MICROPHONE_GATE),
+      ),
     ),
   );
-  const micDeviceId = ref(loadPersisted("audioDeviceId", null));
-  const outputDeviceId = ref(loadPersisted("audioOutputDeviceId", null));
-  const cameraDeviceId = ref(loadPersisted("videoDeviceId", null));
-  const cameraVideo = ref(
-    normalizeVideoSettings(loadPersisted("cameraVideoSettings", {})),
+  const micDeviceId = skipHydrate(ref(loadPersisted("audioDeviceId", null)));
+  const outputDeviceId = skipHydrate(
+    ref(loadPersisted("audioOutputDeviceId", null)),
   );
-  const screenVideo = ref(
-    normalizeVideoSettings(loadPersisted("screenVideoSettings", {})),
+  const cameraDeviceId = skipHydrate(ref(loadPersisted("videoDeviceId", null)));
+  const cameraVideo = skipHydrate(
+    ref(normalizeVideoSettings(loadPersisted("cameraVideoSettings", {}))),
   );
-  const broadcastMode = ref(loadPersisted("broadcastMode", false));
-  const sharedAudioVolume = ref(
-    normalizeSharedAudioVolume(loadPersisted("sharedAudioVolume", 100)),
+  const screenVideo = skipHydrate(
+    ref(normalizeVideoSettings(loadPersisted("screenVideoSettings", {}))),
   );
-  const systemAudioBitrate = ref(
-    normalizeSystemAudioBitrate(loadPersisted("systemAudioBitrate", 128)),
+  const broadcastMode = skipHydrate(ref(loadPersisted("broadcastMode", false)));
+  const sharedAudioVolume = skipHydrate(
+    ref(normalizeSharedAudioVolume(loadPersisted("sharedAudioVolume", 100))),
   );
-  const appearance = ref(
-    normalizeAppearance(loadPersisted(STORAGE_KEYS.appearance, {})),
+  const systemAudioBitrate = skipHydrate(
+    ref(normalizeSystemAudioBitrate(loadPersisted("systemAudioBitrate", 128))),
   );
-  const streamAttenuation = ref(
-    loadPersisted(STORAGE_KEYS.streamAttenuation, {
-      mode: "room",
-      reductionPercent: 65,
-    }),
+  const appearance = skipHydrate(
+    ref(normalizeAppearance(loadPersisted(STORAGE_KEYS.appearance, {}))),
   );
-  const soundboardVolume = ref(
-    normalizePercent(loadPersisted(STORAGE_KEYS.soundboardVolume, 100)),
-  );
-  const soundboardRoomVolumes = ref(
-    loadPersisted(STORAGE_KEYS.soundboardRoomVolumes, {}),
-  );
-  const systemSoundTheme = ref(
-    normalizeSystemSoundTheme(
-      loadPersisted(STORAGE_KEYS.systemSoundTheme, "default"),
+  const streamAttenuation = skipHydrate(
+    ref(
+      loadPersisted(STORAGE_KEYS.streamAttenuation, {
+        mode: "room",
+        reductionPercent: 65,
+      }),
     ),
   );
-  const systemSoundVolume = ref(
-    normalizePercent(loadPersisted(STORAGE_KEYS.systemSoundVolume, 70)),
+  const soundboardVolume = skipHydrate(
+    ref(normalizePercent(loadPersisted(STORAGE_KEYS.soundboardVolume, 100))),
   );
-  const systemSoundsMuted = ref(
-    Boolean(loadPersisted(STORAGE_KEYS.systemSoundsMuted, false)),
+  const soundboardRoomVolumes = skipHydrate(
+    ref(loadPersisted(STORAGE_KEYS.soundboardRoomVolumes, {})),
+  );
+  const systemSoundTheme = skipHydrate(
+    ref(
+      normalizeSystemSoundTheme(
+        loadPersisted(STORAGE_KEYS.systemSoundTheme, "default"),
+      ),
+    ),
+  );
+  const systemSoundVolume = skipHydrate(
+    ref(normalizePercent(loadPersisted(STORAGE_KEYS.systemSoundVolume, 70))),
+  );
+  const systemSoundsMuted = skipHydrate(
+    ref(Boolean(loadPersisted(STORAGE_KEYS.systemSoundsMuted, false))),
   );
 
   function normalizePercent(value) {
@@ -198,14 +209,8 @@ export const useSettingsStore = defineStore("settings", () => {
     persist("audioOutputDeviceId", outputDeviceId.value);
 
     if (typeof window !== "undefined") {
-      import("~/stores/voice")
-        .then(({ useVoiceStore }) => {
-          const voiceStore = useVoiceStore();
-          if (voiceStore.applyOutputDevice) {
-            voiceStore.applyOutputDevice();
-          }
-        })
-        .catch(() => {});
+      const voiceStore = useVoiceStore();
+      voiceStore.applyOutputDevice?.();
     }
   }
 

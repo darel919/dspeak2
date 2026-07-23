@@ -250,6 +250,7 @@
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
 import { useToast } from "../composables/useToast";
+import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
 const config = useRuntimeConfig();
 
 const props = defineProps({
@@ -261,6 +262,7 @@ const emit = defineEmits(["room-selected"]);
 const roomsStore = useRoomsStore();
 const router = useRouter();
 const { success, error } = useToast();
+const { openRoom } = usePreparedRoomNavigation();
 
 const showJoinModal = ref(false);
 const joinInput = ref("");
@@ -285,7 +287,7 @@ function getRoomPictureUrl(room) {
 
 async function selectRoom(room) {
   emit("room-selected", room);
-  router.push(`/room/${room.id}`);
+  await openRoom(room);
 }
 
 function hasActivity(room) {
@@ -351,7 +353,7 @@ async function handleCreateSubmit() {
     success("Room created successfully!");
     closeCreateModal();
     if (room && room.id) {
-      router.push(`/room/${room.id}`);
+      await openRoom(room);
     }
   } catch (err) {
     const msg = typeof err?.message === "string" ? err.message : "";

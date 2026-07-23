@@ -1,6 +1,6 @@
 <template>
   <div
-    v-if="error"
+    v-if="error && !chatStore.offline"
     class="alert alert-warning flex items-center justify-between mb-2"
   >
     <div class="flex items-center gap-3">
@@ -38,18 +38,11 @@ async function retry() {
   chatStore.error = null;
 
   try {
-    const token = authStore.token;
-    if (token) {
-      const ok = await authStore.verifyToken(token);
-      if (!ok) {
-        console.warn(
-          "[ChatErrorBanner] Token verify failed, aborting reconnect",
-        );
-        return;
-      }
+    if (!authStore.getUserData()?.id && !(await authStore.restoreSession())) {
+      return;
     }
   } catch (e) {
-    console.warn("[ChatErrorBanner] Error verifying token before retry", e);
+    console.warn("[ChatErrorBanner] Session restore failed", e);
   }
 
   chatStore.connectToChannel(props.channelId, props.channelName, props.roomId);

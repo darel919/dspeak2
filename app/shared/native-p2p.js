@@ -992,10 +992,14 @@ export class NativeP2pMesh {
     state.remoteTracks.clear();
     try {
       state.channel?.close();
-    } catch (_) {}
+    } catch (error) {
+      console.warn("[NativeP2P] Data channel cleanup failed", error);
+    }
     try {
       state.pc.close();
-    } catch (_) {}
+    } catch (error) {
+      console.warn("[NativeP2P] Peer connection cleanup failed", error);
+    }
     this.connections.delete(peerId);
   }
 

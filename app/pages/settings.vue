@@ -797,6 +797,12 @@
           <section v-else-if="activeSection === 'notifications'">
             <NotificationSettings />
           </section>
+
+          <footer
+            class="mt-8 border-t border-base-300 pt-4 text-center text-xs text-base-content/45"
+          >
+            dSpeak v{{ appVersion }}
+          </footer>
         </div>
       </main>
     </div>
@@ -818,6 +824,7 @@ import {
 import { audioConstraints } from "../shared/media-capture.js";
 import {
   automaticGateThreshold,
+  createNoiseFloorEstimator,
   microphoneLevelDb,
   updateNoiseFloor,
 } from "../shared/microphone-gate.js";
@@ -983,6 +990,7 @@ const videoQualitySections = computed(() => [
 ]);
 
 const config = useRuntimeConfig();
+const appVersion = config.public.appVersion;
 const { getAvatarUrl } = useChatUtils();
 
 const profile = computed(() => {
@@ -1053,7 +1061,7 @@ async function saveProfile() {
       form.set("avatar", profileAvatar.value, profileAvatar.value.name);
     const updated = await $fetch(`${config.public.apiPath}/profile`, {
       method: "PATCH",
-      headers: { Authorization: userId },
+      credentials: "include",
       body: form,
     });
     authStore.updateUserData(updated);
@@ -1119,7 +1127,8 @@ async function applyAudioSettings() {
   try {
     voiceStore.sfuComposable.stopAudioProduction();
     await voiceStore.sfuComposable.startAudioProduction();
-  } catch (e) {
+  } catch (error) {
+    console.warn("[Settings] Unable to apply audio settings", error);
   } finally {
     applyBusy.value = false;
   }
@@ -1194,20 +1203,16 @@ async function startMicrophonePreview() {
     microphonePreviewAnalyser.fftSize = 256;
     microphonePreviewSource.connect(microphonePreviewAnalyser);
     const samples = new Float32Array(microphonePreviewAnalyser.fftSize);
-    let noiseFloorDb = -60;
+    const noiseFloorEstimator = createNoiseFloorEstimator();
     microphonePreviewTimer = setInterval(() => {
       microphonePreviewAnalyser.getFloatTimeDomainData(samples);
       const levelDb = microphoneLevelDb(samples);
       const thresholdDb = microphoneGate.value.automatic
-        ? automaticGateThreshold(noiseFloorDb)
+        ? automaticGateThreshold(noiseFloorEstimator.noiseFloorDb)
         : microphoneGate.value.thresholdDb;
       microphoneLevelDbValue.value = Math.max(-60, levelDb);
       effectiveGateThresholdDb.value = thresholdDb;
-      noiseFloorDb = updateNoiseFloor(
-        noiseFloorDb,
-        levelDb,
-        levelDb >= thresholdDb,
-      );
+      updateNoiseFloor(noiseFloorEstimator, levelDb, levelDb >= thresholdDb);
     }, 40);
     await microphonePreviewContext.resume();
     microphonePreviewReady.value = true;

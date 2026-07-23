@@ -8,6 +8,9 @@ export const useChannelsStore = defineStore("channels", () => {
   const error = ref(null);
   const currentChannelId = ref(null);
   const voiceProfiles = ref(new Map());
+  const loadedRoomId = ref(null);
+  const roomChannels = new Map();
+  const pendingRoomRequests = new Map();
   let voicePresenceSocket = null;
   let voicePresenceRoomId = null;
   let voicePresenceReconnectTimer = null;
@@ -16,11 +19,43 @@ export const useChannelsStore = defineStore("channels", () => {
   let voicePresenceIntentionalClose = false;
   const config = useRuntimeConfig();
 
-  async function fetchChannels(roomId) {
+  async function fetchChannels(roomId, options = {}) {
     if (!roomId) {
       throw new Error("Room ID is required");
     }
 
+    const normalizedRoomId = String(roomId);
+    const activate = options.activate !== false;
+    const force = options.force === true;
+    if (!force && roomChannels.has(normalizedRoomId)) {
+      const cachedChannels = roomChannels.get(normalizedRoomId);
+      if (activate) activateRoomChannels(normalizedRoomId, cachedChannels);
+      return cachedChannels;
+    }
+    if (pendingRoomRequests.has(normalizedRoomId)) {
+      const pendingChannels = await pendingRoomRequests.get(normalizedRoomId);
+      if (activate) activateRoomChannels(normalizedRoomId, pendingChannels);
+      return pendingChannels;
+    }
+
+    const request = fetchChannelsFromServer(normalizedRoomId);
+    pendingRoomRequests.set(normalizedRoomId, request);
+    try {
+      const nextChannels = await request;
+      if (activate) activateRoomChannels(normalizedRoomId, nextChannels);
+      return nextChannels;
+    } finally {
+      if (pendingRoomRequests.get(normalizedRoomId) === request)
+        pendingRoomRequests.delete(normalizedRoomId);
+    }
+  }
+
+  function activateRoomChannels(roomId, nextChannels) {
+    channels.value = nextChannels;
+    loadedRoomId.value = String(roomId);
+  }
+
+  async function fetchChannelsFromServer(roomId) {
     loading.value = true;
     error.value = null;
 
@@ -35,7 +70,6 @@ export const useChannelsStore = defineStore("channels", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/channel/?roomId=${roomId}`, {
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
       });
@@ -45,10 +79,11 @@ export const useChannelsStore = defineStore("channels", () => {
       }
 
       const data = await response.json();
-      channels.value = Array.isArray(data) ? data : [];
-      console.debug("[ChannelsStore] Fetched channels:", channels.value);
+      const nextChannels = Array.isArray(data) ? data : [];
+      roomChannels.set(String(roomId), nextChannels);
+      console.debug("[ChannelsStore] Fetched channels:", nextChannels);
 
-      return channels.value;
+      return nextChannels;
     } catch (err) {
       error.value = err.message;
       console.error("[ChannelsStore] Error fetching channels:", err);
@@ -82,7 +117,6 @@ export const useChannelsStore = defineStore("channels", () => {
       const response = await fetch(`${apiPath}/channel/`, {
         method: "POST",
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -104,7 +138,7 @@ export const useChannelsStore = defineStore("channels", () => {
       const newChannel = await response.json();
       console.debug("[ChannelsStore] Created channel:", newChannel);
 
-      await fetchChannels(roomId);
+      await fetchChannels(roomId, { force: true });
 
       return newChannel;
     } catch (err) {
@@ -136,7 +170,6 @@ export const useChannelsStore = defineStore("channels", () => {
       const response = await fetch(`${apiPath}/channel/`, {
         method: "PUT",
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -163,6 +196,9 @@ export const useChannelsStore = defineStore("channels", () => {
           ...channels.value[channelIndex],
           ...channelData,
         };
+        channels.value = [...channels.value];
+        if (loadedRoomId.value)
+          roomChannels.set(loadedRoomId.value, channels.value);
       }
 
       return true;
@@ -195,7 +231,6 @@ export const useChannelsStore = defineStore("channels", () => {
       const response = await fetch(`${apiPath}/channel/`, {
         method: "DELETE",
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -213,6 +248,8 @@ export const useChannelsStore = defineStore("channels", () => {
       console.debug("[ChannelsStore] Deleted channel:", channelId);
 
       channels.value = channels.value.filter((c) => c.id !== channelId);
+      if (loadedRoomId.value)
+        roomChannels.set(loadedRoomId.value, channels.value);
 
       if (currentChannelId.value === channelId) {
         currentChannelId.value = null;
@@ -245,7 +282,6 @@ export const useChannelsStore = defineStore("channels", () => {
       const response = await fetch(`${apiPath}/channel/join`, {
         method: "POST",
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -294,7 +330,6 @@ export const useChannelsStore = defineStore("channels", () => {
       const response = await fetch(`${apiPath}/channel/leave`, {
         method: "POST",
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -326,6 +361,39 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
+  async function moderateVoiceParticipant(
+    channelId,
+    targetUserId,
+    targetChannelId = null,
+  ) {
+    const authStore = useAuthStore();
+    const userData = authStore.getUserData();
+    if (!userData?.id) throw new Error("User not authenticated");
+    const response = await fetch(
+      `${config.public.apiPath}/channel/moderate-voice`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          channelId,
+          targetUserId,
+          targetChannelId,
+        }),
+      },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(
+        payload?.statusMessage ||
+          payload?.message ||
+          "Unable to moderate this voice participant",
+      );
+    }
+    return response.json();
+  }
+
   async function getChannelDetails(channelId) {
     if (!channelId) {
       throw new Error("Channel ID is required");
@@ -344,7 +412,6 @@ export const useChannelsStore = defineStore("channels", () => {
         `${apiPath}/channel/details?id=${channelId}`,
         {
           headers: {
-            Authorization: userData.id,
             "Content-Type": "application/json",
           },
         },
@@ -376,7 +443,6 @@ export const useChannelsStore = defineStore("channels", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/chat/unread`, {
         headers: {
-          Authorization: userData.id,
           "Content-Type": "application/json",
         },
       });
@@ -410,6 +476,8 @@ export const useChannelsStore = defineStore("channels", () => {
   function clearChannels() {
     disconnectVoicePresence();
     channels.value = [];
+    loadedRoomId.value = null;
+    roomChannels.clear();
     currentChannelId.value = null;
     error.value = null;
   }
@@ -477,7 +545,7 @@ export const useChannelsStore = defineStore("channels", () => {
       ? base
       : `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${base}`;
     const socket = new WebSocket(
-      `${absoluteBase}/voice-presence?roomId=${encodeURIComponent(normalizedRoomId)}&userId=${encodeURIComponent(userId)}`,
+      `${absoluteBase}/voice-presence?roomId=${encodeURIComponent(normalizedRoomId)}`,
     );
     voicePresenceSocket = socket;
     socket.addEventListener("open", () => {
@@ -534,16 +602,19 @@ export const useChannelsStore = defineStore("channels", () => {
   }
 
   return {
-    channels: readonly(channels),
-    loading: readonly(loading),
-    error: readonly(error),
+    channels,
+    loading,
+    error,
     currentChannelId,
+    loadedRoomId,
     fetchChannels,
+    activateRoomChannels,
     createChannel,
     editChannel,
     deleteChannel,
     joinChannel,
     leaveChannel,
+    moderateVoiceParticipant,
     getChannelDetails,
     getUnreadCounts,
     getChannelById,

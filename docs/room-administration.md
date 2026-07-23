@@ -65,6 +65,13 @@ list context menu. The server protects the owner, the acting member, and members
 at or above the actor's highest role, then removes room and active-channel
 membership before broadcasting the participant change.
 
+Members with `channel.moderate_voice` can move a currently connected,
+lower-ranked participant to another voice channel in the same room or disconnect
+that participant from voice. The SFU validates live presence and role hierarchy,
+closes the existing media session, and instructs the affected client to join the
+selected destination when moving. The room owner, the acting member, and members
+at or above the actor's highest role cannot be targeted.
+
 ## Invite links and audit history
 
 Members with `room.manage_invites` create invite links from a Metro-style dialog

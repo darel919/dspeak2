@@ -33,44 +33,43 @@ function removeStorage(key) {
   }
 }
 
+function internalRedirect(value) {
+  if (!value) return "/";
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 onMounted(async () => {
   const at = route.query.at;
 
   if (at) {
-    authStore.saveToken(at);
+    window.history.replaceState({}, "", "/auth");
     const valid = await authStore.verifyToken(at);
     if (valid) {
       await roomsStore.fetchRooms();
       const redirectUrl = readStorage("redirectAfterAuth");
       if (redirectUrl) {
         removeStorage("redirectAfterAuth");
-        window.location.href = redirectUrl;
+        await router.replace(internalRedirect(redirectUrl));
         return;
       }
       await router.replace("/");
       return;
     } else {
-      authStore.clearAuth();
+      authStore.clearAuth(false);
       await new Promise((resolve) => setTimeout(resolve, 10000));
     }
   }
 
-  const savedToken = readStorage("token");
-  if (savedToken && !at) {
-    const valid = await authStore.verifyToken(savedToken);
-    if (valid) {
-      await roomsStore.fetchRooms();
-      const redirectUrl = readStorage("redirectAfterAuth");
-      if (redirectUrl) {
-        removeStorage("redirectAfterAuth");
-        window.location.href = redirectUrl;
-        return;
-      }
-      router.replace("/");
-      return;
-    } else {
-      authStore.clearAuth();
-    }
+  if (!at && (await authStore.restoreSession())) {
+    await roomsStore.fetchRooms();
+    await router.replace("/");
+    return;
   }
 
   const rUrl = `${window.location.origin}/auth`;

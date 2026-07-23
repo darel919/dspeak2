@@ -60,7 +60,9 @@
     </div>
 
     <div
-      v-if="isPending || (isOwnMessage ? hasBeenReadByOthers : isRead)"
+      v-if="
+        isPending || isFailed || (isOwnMessage ? hasBeenReadByOthers : isRead)
+      "
       class="chat-footer opacity-50"
     >
       <div class="flex items-center gap-1 text-xs">
@@ -69,6 +71,9 @@
             name="lucide:refresh-cw"
             class="h-6 w-6 text-warning animate-spin"
           />
+        </template>
+        <template v-else-if="isFailed">
+          <Icon name="lucide:circle-alert" class="h-4 w-4 text-error" />
         </template>
         <template v-else>
           <span
@@ -95,20 +100,13 @@
 </template>
 
 <script setup>
-const hasBeenReadByOthers = computed(() => {
-  if (!isOwnMessage.value || !props.message.read_by) return false;
-  const readBy = Array.isArray(props.message.read_by)
-    ? [...new Set(props.message.read_by)]
-    : [];
-  return readBy.some((id) => id !== props.message.sender.id);
-});
-
 import { useAuthStore } from "../../stores/auth";
 import { useIdentityStore } from "../../stores/identity";
 import { useChatStore } from "../../stores/chat";
 import { useRuntimeConfig } from "#app";
 import MessageActions from "./MessageActions.vue";
 import { useChatUtils } from "../../composables/useChatUtils";
+import { hasReader, readerIds } from "../../shared/read-receipts";
 
 const { formatChatDisplayTime } = useChatUtils();
 
@@ -131,6 +129,8 @@ const chatStore = useChatStore();
 const config = useRuntimeConfig();
 const showActions = ref(false);
 const messageElement = ref(null);
+let visibilityObserver = null;
+let readVisibilityTimer = null;
 
 const isOwnMessage = computed(() => {
   const userData = authStore.getUserData();
@@ -141,23 +141,23 @@ const isPending = computed(() => {
   return props.message.status === "pending";
 });
 
-const showReadStatus = computed(() => {
-  return isOwnMessage.value && !isPending.value;
+const isFailed = computed(() => {
+  return props.message.status === "failed";
+});
+
+const hasBeenReadByOthers = computed(() => {
+  if (!isOwnMessage.value) return false;
+  return readerIds(props.message.read_by).some(
+    (id) => id !== String(props.message.sender.id),
+  );
 });
 
 const isRead = computed(() => {
   const userData = authStore.getUserData();
-  if (!userData || !props.message.read_by) return false;
-  const readBy = Array.isArray(props.message.read_by)
-    ? [...new Set(props.message.read_by)]
-    : [];
-  if (isOwnMessage.value) {
-    const others = readBy.filter((id) => id !== props.message.sender.id);
-    return others.length > 0;
-  }
-
   return (
-    readBy.includes(userData.id) && userData.id !== props.message.sender.id
+    !!userData &&
+    !isOwnMessage.value &&
+    hasReader(props.message.read_by, userData.id)
   );
 });
 
@@ -165,41 +165,38 @@ const shouldAutoMarkAsRead = computed(() => {
   const userData = authStore.getUserData();
   if (!userData || isOwnMessage.value) return false;
 
-  return !props.message.read_by || !props.message.read_by.includes(userData.id);
+  return !hasReader(props.message.read_by, userData.id);
 });
 
 onMounted(() => {
-  if (shouldAutoMarkAsRead.value && messageElement.value) {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && shouldAutoMarkAsRead.value) {
-            setTimeout(() => {
-              if (entry.isIntersecting && shouldAutoMarkAsRead.value) {
-                markAsRead();
-              }
-            }, 1000);
-          }
-        });
-      },
-      { threshold: 0.5 },
-    );
-
-    observer.observe(messageElement.value);
-
-    onUnmounted(() => {
-      observer.disconnect();
-    });
-  }
+  if (!messageElement.value) return;
+  visibilityObserver = new IntersectionObserver(handleVisibility, {
+    threshold: 0.5,
+  });
+  visibilityObserver.observe(messageElement.value);
 });
 
-async function markAsRead() {
-  try {
-    await chatStore.markMessageAsRead(props.message.id);
-    emit("message-read", props.message.id);
-  } catch (error) {
-    console.error("Failed to mark message as read:", error);
+onUnmounted(() => {
+  if (visibilityObserver) visibilityObserver.disconnect();
+  if (readVisibilityTimer) clearTimeout(readVisibilityTimer);
+});
+
+function handleVisibility(entries) {
+  const visible = entries.some((entry) => entry.isIntersecting);
+  if (!visible || !shouldAutoMarkAsRead.value) {
+    if (readVisibilityTimer) clearTimeout(readVisibilityTimer);
+    readVisibilityTimer = null;
+    return;
   }
+  if (readVisibilityTimer) return;
+  readVisibilityTimer = setTimeout(() => {
+    readVisibilityTimer = null;
+    if (shouldAutoMarkAsRead.value) markAsRead();
+  }, 1000);
+}
+
+function markAsRead() {
+  chatStore.markMessageAsRead(props.message.id);
 }
 
 function handleMarkRead(messageId) {
@@ -214,14 +211,12 @@ function getStatusText() {
   if (isPending.value) {
     return "Pending";
   }
+  if (isFailed.value) {
+    return "Not saved — copy this message before resetting local data";
+  }
   const userData = authStore.getUserData();
   if (!userData) return "Sent";
-  let readBy = Array.isArray(props.message.read_by)
-    ? props.message.read_by
-    : [];
-  readBy = readBy.map((entry) =>
-    typeof entry === "object" && entry !== null ? entry.id : entry,
-  );
+  const readBy = readerIds(props.message.read_by);
   const isOwn = isOwnMessage.value;
   if (isOwn) {
     const others = readBy.filter((id) => id && id !== props.message.sender.id);
@@ -233,7 +228,7 @@ function getStatusText() {
     return `Read by ${others.length}`;
   } else {
     if (
-      readBy.includes(userData.id) &&
+      readBy.includes(String(userData.id)) &&
       userData.id !== props.message.sender.id
     ) {
       return "Read";
