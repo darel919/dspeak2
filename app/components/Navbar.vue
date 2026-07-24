@@ -485,7 +485,7 @@ onBeforeUnmount(() => {
               type="button"
               @click="voiceStore.toggleSystemAudioShare"
             >
-              <Icon name="lucide:audio-lines" />
+              <Icon name="lucide:volume-2" />
               <span>{{
                 voiceStore.systemAudioSharing
                   ? "Stop system audio"

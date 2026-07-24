@@ -5,6 +5,7 @@ import { RemoteMediaRegistry } from "../app/shared/remote-media-registry.js";
 class FakeAudioContext {
   constructor() {
     this.currentTime = 0;
+    this.state = "suspended";
   }
 
   createMediaStreamDestination() {
@@ -12,6 +13,11 @@ class FakeAudioContext {
   }
 
   close() {
+    return Promise.resolve();
+  }
+
+  resume() {
+    this.state = "running";
     return Promise.resolve();
   }
 }
@@ -78,4 +84,17 @@ test("participant gain accepts a 200 percent target", () => {
   };
   registry.applyTrackGain(graph, track, false, 2);
   assert.deepEqual(values, [2]);
+});
+
+test("remote playback is unlocked before delayed tracks arrive", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { AudioContext: FakeAudioContext };
+
+  try {
+    const registry = createRegistry();
+    assert.equal(await registry.preparePlayback(), true);
+    assert.equal(registry.audioContext.state, "running");
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });

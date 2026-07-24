@@ -425,6 +425,8 @@ export const useVoiceStore = defineStore("voice", () => {
       ensureCurrentJoin();
       sfuComposable.value = useMediasoupSfu();
       session = sfuComposable.value;
+      await session.prepareAudioPlayback?.();
+      ensureCurrentJoin();
 
       if (stopIceWatcher) {
         try {
@@ -447,6 +449,10 @@ export const useVoiceStore = defineStore("voice", () => {
       setCurrentChannel(channelId);
       restorePersistedVoiceState();
 
+      if (micMuted.value) await session.stopAudioProduction?.();
+      else await session.startAudioProduction();
+      ensureCurrentJoin();
+
       await waitForVoiceTransportReady({
         getError: () => session.error,
         isCurrent: () =>
@@ -456,20 +462,7 @@ export const useVoiceStore = defineStore("voice", () => {
       await delay(200);
       await waitForJoinReady(session, settingsStore.broadcastMode);
       ensureCurrentJoin();
-
-      if (!micMuted.value) {
-        try {
-          await session.startAudioProduction();
-        } catch (_) {
-          micMuted.value = true;
-        }
-      } else {
-        try {
-          await session.stopAudioProduction?.();
-        } catch (_) {
-          /* already stopped */
-        }
-      }
+      await session.ensureAudioElements?.();
 
       connected.value = true;
       connectedAt.value = Date.now();

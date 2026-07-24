@@ -5,7 +5,9 @@ export function createHybridMediaDiagnostics({
   getRequestedVideoSettings,
   getSfu,
   localSources,
+  playbackState,
   peerRoundTripTimes,
+  remoteAudioFeeds,
   refreshTopologyGraph,
   remoteVideoFeeds,
   send,
@@ -47,6 +49,13 @@ export function createHybridMediaDiagnostics({
     refreshTopologyGraph(pair);
     return {
       timestamp: Date.now(),
+      media: {
+        localAudioTracks: [...localSources.values()].filter(
+          (entry) => entry.track.kind === "audio",
+        ).length,
+        remoteAudioTracks: remoteAudioFeeds.value.size,
+        playbackState: playbackState.value,
+      },
       peerRoundTripTime: Object.keys(peerRoundTripTimes.value).length
         ? Math.max(...Object.values(peerRoundTripTimes.value))
         : null,

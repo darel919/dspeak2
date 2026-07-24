@@ -178,6 +178,14 @@ export function useHybridMediaSession() {
     },
   });
 
+  function setRouteConnectionState(state) {
+    mediaConnectionState.value =
+      playbackState.value === "blocked" ||
+      playbackState.value === "output-blocked"
+        ? "playback-blocked"
+        : state;
+  }
+
   let sourceController;
   const capture = new MediaCaptureManager({
     getSettings: () => settingsStore,
@@ -480,13 +488,15 @@ export function useHybridMediaSession() {
           summary.receiveRequired &&
           summary.send === "connected" &&
           summary.recv === "connected";
-        mediaConnectionState.value = summary.ready
-          ? summary.sendRequired || summary.receiveRequired
-            ? "transport-connected"
-            : "ready-no-active-media"
-          : state === "disconnected"
-            ? "reconnecting"
-            : "transport-connecting";
+        setRouteConnectionState(
+          summary.ready
+            ? summary.sendRequired || summary.receiveRequired
+              ? "transport-connected"
+              : "ready-no-active-media"
+            : state === "disconnected"
+              ? "reconnecting"
+              : "transport-connecting",
+        );
       },
       getAudioBitrate: getEffectiveAudioBitrate,
       getAudioStereo,
@@ -659,11 +669,13 @@ export function useHybridMediaSession() {
           readiness.send === "connected" &&
           readiness.recv === "connected"
         : p2pMesh?.isMediaReady() === true;
-    mediaConnectionState.value = transportReady.value
-      ? iceConnectedBoth.value
-        ? "media-flowing"
-        : "ready-no-active-media"
-      : "transport-connecting";
+    setRouteConnectionState(
+      transportReady.value
+        ? iceConnectedBoth.value
+          ? "media-flowing"
+          : "ready-no-active-media"
+        : "transport-connecting",
+    );
     error.value = null;
     refreshPublicMaps();
     refreshTopologyGraph();
@@ -771,7 +783,7 @@ export function useHybridMediaSession() {
     sfu?.closeMedia();
     transportReady.value = true;
     iceConnectedBoth.value = true;
-    mediaConnectionState.value = "media-flowing";
+    setRouteConnectionState("media-flowing");
     error.value = null;
     preparedTransition = null;
     refreshPublicMaps();
@@ -799,9 +811,9 @@ export function useHybridMediaSession() {
       readiness.receiveRequired &&
       readiness.send === "connected" &&
       readiness.recv === "connected";
-    mediaConnectionState.value = iceConnectedBoth.value
-      ? "media-flowing"
-      : "ready-no-active-media";
+    setRouteConnectionState(
+      iceConnectedBoth.value ? "media-flowing" : "ready-no-active-media",
+    );
     error.value = null;
     preparedTransition = null;
     refreshPublicMaps();
@@ -912,8 +924,10 @@ export function useHybridMediaSession() {
     getRequestedVideoSettings,
     getSfu: () => sfu,
     localSources,
+    playbackState,
     peerRoundTripTimes,
     refreshTopologyGraph,
+    remoteAudioFeeds,
     remoteVideoFeeds,
     send,
     sfuRoundTripTime,
@@ -993,6 +1007,7 @@ export function useHybridMediaSession() {
     ),
     connect,
     disconnect,
+    prepareAudioPlayback: () => registry.preparePlayback(),
     startAudioProduction,
     stopAudioProduction,
     startVideoProduction,

@@ -6,7 +6,6 @@ import {
   NativeP2pMesh,
   selectedPairSnapshot,
 } from "../app/shared/native-p2p.js";
-import { setReceiverJitterBufferTarget } from "../app/shared/receiver-settings.js";
 
 test("P2P receiving preferences disable the remote sender encoding", async () => {
   const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} });
@@ -332,13 +331,6 @@ test("P2P video sender preserves frame cadence and applies its bitrate policy", 
     priority: "high",
     networkPriority: "high",
   });
-});
-
-test("P2P receiver requests a low-latency jitter buffer where supported", () => {
-  const receiver = { jitterBufferTarget: null };
-  assert.equal(setReceiverJitterBufferTarget(receiver), true);
-  assert.equal(receiver.jitterBufferTarget, 0);
-  assert.equal(setReceiverJitterBufferTarget({}), false);
 });
 
 test("P2P outbound source stats are read from its RTP sender", async () => {

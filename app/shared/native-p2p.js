@@ -5,7 +5,6 @@ import {
 } from "./rtc-media-stats.js";
 import { applyRtpSenderSettings } from "./rtp-sender-settings.js";
 import { sortP2pVideoCodecPreferences } from "./video-settings.js";
-import { setReceiverJitterBufferTarget } from "./receiver-settings.js";
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
 export const P2P_ACTIVE_MEDIA_TIMEOUT_MS = 20000;
@@ -543,7 +542,6 @@ export class NativeP2pMesh {
 
   handleTrack(state, event) {
     const track = event.track;
-    setReceiverJitterBufferTarget(event.receiver);
     const source =
       this.remoteSources.get(`${state.peerId}:${track.id}`) || track.kind;
     const key = p2pRemoteFeedKey(state.peerId, source);

@@ -463,7 +463,7 @@
             "
             @click="toggleSystemAudioShare"
           >
-            <Icon name="lucide:audio-lines" class="size-5" />
+            <Icon name="lucide:volume-2" class="size-5" />
           </button>
 
           <SoundboardPanel

@@ -181,6 +181,23 @@ export class RemoteMediaRegistry {
     return this.audioContext;
   }
 
+  async preparePlayback() {
+    try {
+      const context = this.getAudioContext();
+      await context.resume();
+      const ready = context.state === "running";
+      this.publishPlaybackState(
+        null,
+        ready ? "prepared" : "blocked",
+        ready ? null : new Error(`Audio context is ${context.state}`),
+      );
+      return ready;
+    } catch (error) {
+      this.publishPlaybackState(null, "blocked", error);
+      return false;
+    }
+  }
+
   audioContainer() {
     let container = document.getElementById("webrtc-audio-global");
     if (container) return container;

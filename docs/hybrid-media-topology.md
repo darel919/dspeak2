@@ -221,11 +221,10 @@ sampled at their lower display cadence.
 
 ## Latency and participant quality
 
-Native P2P and SFU receivers request a zero-millisecond jitter-buffer target when
-the browser implements `RTCRtpReceiver.jitterBufferTarget`, asking for the
-shortest playout delay the browser can safely provide. This is a latency
-preference, not a fixed buffer size; the browser may retain more media for
-network recovery or audio/video synchronization. Active direct routes allow twenty seconds for
+Native P2P and SFU receivers use the browser's adaptive jitter-buffer policy.
+dSpeak does not force the experimental `RTCRtpReceiver.jitterBufferTarget`
+because a zero target can cause received Opus packets to be discarded without
+being decoded or played in some Chromium-based browsers. Active direct routes allow twenty seconds for
 health or RTP progress and eight seconds for transient ICE disconnection before
 recovery begins, while hard ICE, DTLS, or peer-connection failures still fall
 back immediately.
