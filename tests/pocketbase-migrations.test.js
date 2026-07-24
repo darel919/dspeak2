@@ -20,6 +20,22 @@ test("PocketBase migration field merging is idempotent and preserves IDs", () =>
   assert.equal(first[2].name, "header_image");
 });
 
+test("PocketBase migration field merging preserves system field definitions", () => {
+  const username = {
+    id: "system-username",
+    name: "username",
+    type: "text",
+    required: false,
+    system: true,
+    max: 0,
+  };
+  const merged = mergeCollectionFields(
+    [username],
+    [{ name: "username", type: "text", system: false, max: 120 }],
+  );
+  assert.deepEqual(merged, [username]);
+});
+
 test("PocketBase migrations enforce case-insensitive unique user handles", () => {
   const source = readFileSync(
     new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
@@ -29,6 +45,14 @@ test("PocketBase migrations enforce case-insensitive unique user handles", () =>
     source,
     /CREATE UNIQUE INDEX idx_users_handle_unique ON users \(handle COLLATE NOCASE\) WHERE handle != ''/,
   );
+});
+
+test("PocketBase migrations do not index multi-value relation fields", () => {
+  const source = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /idx_dspeak_rooms_members/);
 });
 
 test("PocketBase migrations initialize and repair the complete database", () => {

@@ -46,6 +46,7 @@ export function mergeCollectionFields(current = [], additions = []) {
     const addition = additionsByName.get(item.name);
     if (!addition) return item;
     additionsByName.delete(item.name);
+    if (item.system) return item;
     const result = { ...item, ...addition };
     if (item.id) result.id = item.id;
     else delete result.id;
@@ -149,10 +150,7 @@ async function migrateFoundation(pb) {
         maxSelect: 999,
       }),
     ],
-    indexes: [
-      "CREATE INDEX idx_dspeak_rooms_owner ON dspeak_rooms (owner)",
-      "CREATE INDEX idx_dspeak_rooms_members ON dspeak_rooms (members)",
-    ],
+    indexes: ["CREATE INDEX idx_dspeak_rooms_owner ON dspeak_rooms (owner)"],
   });
 
   const channels = await upsertCollection(pb, {
