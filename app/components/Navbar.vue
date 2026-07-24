@@ -7,7 +7,10 @@ import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
-import { getActiveConnectionLabel } from "../shared/connection-quality";
+import {
+  getActiveConnectionLabel,
+  isConnectionPending,
+} from "../shared/connection-quality";
 import { useChatUtils } from "../composables/useChatUtils";
 
 const authStore = useAuthStore();
@@ -78,8 +81,16 @@ const micUnavailable = computed(
 const lastRttMs = computed(() => rtcStatsStore.metrics.rttMs);
 const lastJitterMs = computed(() => rtcStatsStore.metrics.jitterMs);
 const lastLoss = computed(() => rtcStatsStore.metrics.loss);
+const signalIsConnecting = computed(() =>
+  isConnectionPending(
+    voiceStore.sfuComposable?.mediaConnectionState,
+    voiceStore.connecting,
+  ),
+);
 const signalLevel = computed(() =>
-  rtcStatsStore.metrics.connected ? rtcStatsStore.metrics.score : 0,
+  !signalIsConnecting.value && rtcStatsStore.metrics.connected
+    ? rtcStatsStore.metrics.score
+    : 0,
 );
 const activeRouteLabel = computed(() => {
   const mode = rtcStatsStore.snapshot?.topology?.mode;
@@ -99,6 +110,7 @@ const signalLabel = computed(() =>
   ),
 );
 const signalColorClass = computed(() => {
+  if (signalIsConnecting.value) return "bg-warning";
   if (signalLevel.value >= 4) return "bg-success";
   if (signalLevel.value >= 2) return "bg-warning";
   if (signalLevel.value === 1) return "bg-error";
@@ -192,6 +204,7 @@ function toggleBroadcastMode() {
 }
 
 function barClass(level) {
+  if (signalIsConnecting.value) return "";
   return signalLevel.value >= level ? "" : "opacity-25";
 }
 
@@ -303,7 +316,11 @@ onBeforeUnmount(() => {
                 aria-label="Open connection statistics"
                 @click="rtcSummaryVisible = true"
               >
-                <span class="flex items-end gap-px" aria-hidden="true">
+                <span
+                  class="flex items-end gap-px"
+                  :class="{ 'connection-signal-pending': signalIsConnecting }"
+                  aria-hidden="true"
+                >
                   <span
                     v-for="level in 4"
                     :key="level"
@@ -552,7 +569,11 @@ onBeforeUnmount(() => {
               type="button"
               @click="rtcSummaryVisible = !rtcSummaryVisible"
             >
-              <span class="flex items-end gap-0.5" aria-hidden="true">
+              <span
+                class="flex items-end gap-0.5"
+                :class="{ 'connection-signal-pending': signalIsConnecting }"
+                aria-hidden="true"
+              >
                 <span
                   v-for="level in 5"
                   :key="level"
@@ -725,6 +746,29 @@ onBeforeUnmount(() => {
   background: var(--color-success);
   box-shadow: 0 0 0 4px
     color-mix(in oklab, var(--color-success) 15%, transparent);
+}
+
+.connection-signal-pending > span {
+  animation: connection-signal-alert 800ms steps(1, end) infinite;
+}
+
+@keyframes connection-signal-alert {
+  0%,
+  49% {
+    background-color: var(--color-warning);
+  }
+
+  50%,
+  100% {
+    background-color: var(--color-error);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-signal-pending > span {
+    animation: none;
+    background-color: var(--color-warning);
+  }
 }
 
 .call-divider {

@@ -260,11 +260,13 @@
           </section>
 
           <section v-else-if="activeSection === 'voice'" class="space-y-6">
-            <div class="settings-panel">
+            <div id="microphone-settings" class="settings-panel scroll-mt-6">
               <div class="settings-panel-heading">
                 <div>
-                  <h2>Devices</h2>
-                  <p>Choose what dSpeak uses for calls.</p>
+                  <h2>Microphone setup</h2>
+                  <p>
+                    Choose your microphone, check its level, and hear it back.
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -283,13 +285,15 @@
                   />Refresh
                 </button>
               </div>
-              <div class="divide-y divide-base-300">
-                <label id="microphone-settings" class="settings-row scroll-mt-6"
-                  ><span class="settings-row-label"
-                    ><Icon name="lucide:mic" />Microphone</span
-                  ><select
+              <div class="grid gap-5 border-t border-base-300 p-5 sm:p-6">
+                <label class="grid gap-2">
+                  <span class="flex items-center gap-2 text-sm font-semibold">
+                    <Icon name="lucide:mic" class="size-4 text-primary" />
+                    Input device
+                  </span>
+                  <select
                     v-model="selectedDeviceId"
-                    class="select select-bordered w-full max-w-md"
+                    class="select select-bordered w-full bg-base-100"
                     :disabled="devicesLoading || !devices.length"
                     @change="onDeviceChange"
                   >
@@ -301,68 +305,144 @@
                     >
                       {{ d.label || "Microphone" }}
                     </option>
-                  </select></label
+                  </select>
+                </label>
+
+                <div
+                  class="grid gap-4 border-l-4 border-primary bg-base-200/45 p-4 sm:p-5"
                 >
-                <label class="settings-row"
-                  ><span class="settings-row-label"
-                    ><Icon name="lucide:volume-2" />Speakers</span
-                  ><select
-                    v-model="selectedOutputId"
-                    class="select select-bordered w-full max-w-md"
-                    :disabled="
-                      devicesLoading || !outputDevices.length || !canSetSinkId
-                    "
-                    @change="onOutputChange"
+                  <div
+                    class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
                   >
-                    <option value="">System default</option>
-                    <option
-                      v-for="d in outputDevices"
-                      :key="d.deviceId"
-                      :value="d.deviceId"
+                    <div>
+                      <h3 class="font-semibold">Mic check</h3>
+                      <p
+                        class="mt-1 max-w-xl text-sm leading-5 text-base-content/60"
+                      >
+                        Record a short sample, then play it back through your
+                        selected speakers. Your sample stays on this device.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn min-w-36"
+                      :class="micCheckRecording ? 'btn-error' : 'btn-primary'"
+                      :disabled="
+                        microphonePreviewLoading ||
+                        (!microphonePreviewReady && !micCheckRecording)
+                      "
+                      @click="toggleMicCheck"
                     >
-                      {{ d.label || "Speaker" }}
-                    </option>
-                  </select></label
-                >
-                <label id="camera-settings" class="settings-row scroll-mt-6"
-                  ><span class="settings-row-label"
-                    ><Icon name="lucide:video" />Camera</span
-                  ><select
-                    v-model="selectedCameraId"
-                    class="select select-bordered w-full max-w-md"
-                    :disabled="devicesLoading || !videoDevices.length"
-                    @change="onCameraDeviceChange"
+                      <span
+                        v-if="microphonePreviewLoading"
+                        class="loading loading-spinner loading-xs"
+                      ></span>
+                      <Icon
+                        v-else
+                        :name="
+                          micCheckRecording
+                            ? 'lucide:square'
+                            : 'lucide:circle-dot'
+                        "
+                        class="size-4"
+                      />
+                      {{
+                        micCheckRecording
+                          ? `Stop · ${micCheckSeconds}s`
+                          : "Record mic check"
+                      }}
+                    </button>
+                  </div>
+
+                  <div>
+                    <div
+                      class="mb-2 flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <span
+                        class="flex items-center gap-2 text-sm font-semibold"
+                      >
+                        <span
+                          class="size-2.5 rounded-full"
+                          :class="microphonePreviewStatusClass"
+                        ></span>
+                        {{ microphonePreviewStatus }}
+                      </span>
+                      <span class="text-xs tabular-nums text-base-content/60">
+                        {{ Math.round(microphoneLevelDbValue) }} dBFS
+                        <template v-if="effectiveGateEnabled">
+                          · gate {{ Math.round(effectiveGateThresholdDb) }} dBFS
+                        </template>
+                      </span>
+                    </div>
+                    <div
+                      class="relative h-4 overflow-hidden bg-base-300"
+                      role="meter"
+                      aria-label="Live microphone input level"
+                      aria-valuemin="-60"
+                      aria-valuemax="0"
+                      :aria-valuenow="Math.round(microphoneLevelDbValue)"
+                    >
+                      <div
+                        class="h-full transition-[width,background-color] duration-75"
+                        :class="
+                          microphoneGateOpen ? 'bg-success' : 'bg-warning/70'
+                        "
+                        :style="{ width: `${microphoneLevelPercent}%` }"
+                      ></div>
+                      <span
+                        v-if="effectiveGateEnabled"
+                        class="absolute inset-y-0 w-0.5 bg-base-content"
+                        :style="{ left: `${microphoneThresholdPercent}%` }"
+                      ></span>
+                    </div>
+                  </div>
+
+                  <p
+                    v-if="microphonePreviewError || micCheckError"
+                    class="text-sm text-error"
+                    role="alert"
                   >
-                    <option value="">System default</option>
-                    <option
-                      v-for="d in videoDevices"
-                      :key="d.deviceId"
-                      :value="d.deviceId"
+                    {{ micCheckError || microphonePreviewError }}
+                  </p>
+                  <div
+                    v-if="micCheckUrl"
+                    class="flex flex-col gap-3 border-t border-base-300 pt-4 sm:flex-row sm:items-center"
+                  >
+                    <audio
+                      ref="micCheckAudio"
+                      class="h-10 min-w-0 flex-1"
+                      :src="micCheckUrl"
+                      controls
+                      @play="applyMicCheckOutput"
+                    ></audio>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-ghost"
+                      @click="clearMicCheck"
                     >
-                      {{ d.label || "Camera" }}
-                    </option>
-                  </select></label
-                >
+                      <Icon name="lucide:trash-2" class="size-4" />
+                      Discard
+                    </button>
+                  </div>
+                  <p v-else class="text-xs leading-5 text-base-content/55">
+                    The meter is live. The marker shows where the microphone
+                    gate opens.
+                  </p>
+                </div>
               </div>
               <div
-                v-if="devicesError || !canSetSinkId"
-                class="border-t border-base-300 px-5 py-3 text-xs"
-                :class="devicesError ? 'text-error' : 'text-base-content/60'"
+                v-if="devicesError"
+                class="border-t border-base-300 px-5 py-3 text-xs text-error"
               >
-                {{
-                  devicesError ||
-                  "This browser does not support selecting a separate output device."
-                }}
+                {{ devicesError }}
               </div>
             </div>
 
             <div class="settings-panel">
               <div class="settings-panel-heading">
                 <div>
-                  <h2>Voice processing</h2>
-                  <p>
-                    Speak normally to check when your microphone gate opens.
-                  </p>
+                  <h2>Microphone processing</h2>
+                  <p>Fine-tune what other people hear.</p>
                 </div>
                 <button
                   v-if="microphonePreviewError"
@@ -372,53 +452,6 @@
                 >
                   <Icon name="lucide:refresh-cw" class="size-4" />Try again
                 </button>
-              </div>
-              <div class="border-t border-base-300 px-5 py-5">
-                <div class="mb-3 flex items-center justify-between gap-3">
-                  <span class="flex items-center gap-2 text-sm font-semibold">
-                    <span
-                      class="size-2.5 rounded-full"
-                      :class="microphonePreviewStatusClass"
-                    ></span>
-                    {{ microphonePreviewStatus }}
-                  </span>
-                  <span class="text-xs tabular-nums text-base-content/60">
-                    {{ Math.round(microphoneLevelDbValue) }} dBFS
-                    <template v-if="effectiveGateEnabled">
-                      · opens at {{ Math.round(effectiveGateThresholdDb) }} dBFS
-                    </template>
-                  </span>
-                </div>
-                <div
-                  class="relative h-3 overflow-hidden rounded-full bg-base-300"
-                  role="meter"
-                  aria-label="Live microphone input level"
-                  aria-valuemin="-60"
-                  aria-valuemax="0"
-                  :aria-valuenow="Math.round(microphoneLevelDbValue)"
-                >
-                  <div
-                    class="h-full rounded-full transition-[width,background-color] duration-75"
-                    :class="microphoneGateOpen ? 'bg-success' : 'bg-warning/70'"
-                    :style="{ width: `${microphoneLevelPercent}%` }"
-                  ></div>
-                  <span
-                    v-if="effectiveGateEnabled"
-                    class="absolute inset-y-0 w-0.5 bg-base-content shadow-sm"
-                    :style="{ left: `${microphoneThresholdPercent}%` }"
-                  ></span>
-                </div>
-                <p
-                  v-if="microphonePreviewError"
-                  class="mt-3 text-xs text-error"
-                  role="alert"
-                >
-                  {{ microphonePreviewError }}
-                </p>
-                <p v-else class="mt-3 text-xs text-base-content/55">
-                  The marker is the opening point. Audio below it stays closed.
-                  This preview is not played through your speakers.
-                </p>
               </div>
               <div class="divide-y divide-base-300">
                 <label class="settings-toggle-row"
@@ -521,6 +554,64 @@
                     : "Join a voice channel to apply live."
                 }}</span>
               </div>
+            </div>
+
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>Other devices</h2>
+                  <p>Choose where calls play and which camera dSpeak uses.</p>
+                </div>
+              </div>
+              <div class="divide-y divide-base-300">
+                <label class="settings-row"
+                  ><span class="settings-row-label"
+                    ><Icon name="lucide:volume-2" />Speakers</span
+                  ><select
+                    v-model="selectedOutputId"
+                    class="select select-bordered w-full max-w-md"
+                    :disabled="
+                      devicesLoading || !outputDevices.length || !canSetSinkId
+                    "
+                    @change="onOutputChange"
+                  >
+                    <option value="">System default</option>
+                    <option
+                      v-for="d in outputDevices"
+                      :key="d.deviceId"
+                      :value="d.deviceId"
+                    >
+                      {{ d.label || "Speaker" }}
+                    </option>
+                  </select></label
+                >
+                <label id="camera-settings" class="settings-row scroll-mt-6"
+                  ><span class="settings-row-label"
+                    ><Icon name="lucide:video" />Camera</span
+                  ><select
+                    v-model="selectedCameraId"
+                    class="select select-bordered w-full max-w-md"
+                    :disabled="devicesLoading || !videoDevices.length"
+                    @change="onCameraDeviceChange"
+                  >
+                    <option value="">System default</option>
+                    <option
+                      v-for="d in videoDevices"
+                      :key="d.deviceId"
+                      :value="d.deviceId"
+                    >
+                      {{ d.label || "Camera" }}
+                    </option>
+                  </select></label
+                >
+              </div>
+              <p
+                v-if="!canSetSinkId"
+                class="border-t border-base-300 px-5 py-3 text-xs text-base-content/60"
+              >
+                This browser uses the system output and can’t select separate
+                speakers.
+              </p>
             </div>
 
             <div class="settings-panel">
@@ -677,7 +768,7 @@
                     ><strong class="block text-sm">Volume</strong
                     ><small>{{ settingsStore.systemSoundVolume }}%</small></span
                   ><input
-                    class="range range-secondary w-full max-w-xs"
+                    class="range range-primary w-full max-w-xs"
                     type="range"
                     min="0"
                     max="100"
@@ -1075,6 +1166,7 @@ async function saveProfile() {
 
 onBeforeUnmount(clearAvatarSelection);
 onBeforeUnmount(stopMicrophonePreview);
+onBeforeUnmount(clearMicCheck);
 
 async function handleLogout() {
   authStore.clearAuth();
@@ -1137,8 +1229,19 @@ let microphonePreviewStream = null;
 let microphonePreviewContext = null;
 let microphonePreviewSource = null;
 let microphonePreviewAnalyser = null;
+let microphonePreviewGate = null;
+let microphonePreviewDestination = null;
 let microphonePreviewTimer = null;
 let microphonePreviewGeneration = 0;
+const micCheckRecording = ref(false);
+const micCheckSeconds = ref(0);
+const micCheckUrl = ref("");
+const micCheckError = ref("");
+const micCheckAudio = ref(null);
+let micCheckRecorder = null;
+let micCheckChunks = [];
+let micCheckDurationTimer = null;
+let micCheckStopTimer = null;
 
 const effectiveGateEnabled = computed(
   () => microphoneGate.value.enabled && !hdAudioEnabled.value,
@@ -1198,6 +1301,11 @@ async function startMicrophonePreview() {
     microphonePreviewAnalyser = microphonePreviewContext.createAnalyser();
     microphonePreviewAnalyser.fftSize = 256;
     microphonePreviewSource.connect(microphonePreviewAnalyser);
+    microphonePreviewGate = microphonePreviewContext.createGain();
+    microphonePreviewDestination =
+      microphonePreviewContext.createMediaStreamDestination();
+    microphonePreviewSource.connect(microphonePreviewGate);
+    microphonePreviewGate.connect(microphonePreviewDestination);
     const samples = new Float32Array(microphonePreviewAnalyser.fftSize);
     const noiseFloorEstimator = createNoiseFloorEstimator();
     microphonePreviewTimer = setInterval(() => {
@@ -1209,6 +1317,11 @@ async function startMicrophonePreview() {
       microphoneLevelDbValue.value = Math.max(-60, levelDb);
       effectiveGateThresholdDb.value = thresholdDb;
       updateNoiseFloor(noiseFloorEstimator, levelDb, levelDb >= thresholdDb);
+      microphonePreviewGate.gain.setTargetAtTime(
+        !effectiveGateEnabled.value || levelDb >= thresholdDb ? 1 : 0,
+        microphonePreviewContext.currentTime,
+        0.01,
+      );
     }, 40);
     await microphonePreviewContext.resume();
     microphonePreviewReady.value = true;
@@ -1226,16 +1339,20 @@ async function startMicrophonePreview() {
 }
 
 function stopMicrophonePreviewResources() {
+  stopMicCheckRecorder(true);
   if (microphonePreviewTimer) clearInterval(microphonePreviewTimer);
   microphonePreviewTimer = null;
   microphonePreviewSource?.disconnect();
   microphonePreviewAnalyser?.disconnect();
+  microphonePreviewGate?.disconnect();
   microphonePreviewStream?.getTracks().forEach((track) => track.stop());
   microphonePreviewContext?.close().catch(() => {});
   microphonePreviewStream = null;
   microphonePreviewContext = null;
   microphonePreviewSource = null;
   microphonePreviewAnalyser = null;
+  microphonePreviewGate = null;
+  microphonePreviewDestination = null;
   microphonePreviewReady.value = false;
   microphoneLevelDbValue.value = -60;
 }
@@ -1247,7 +1364,102 @@ function stopMicrophonePreview() {
 }
 
 function restartMicrophonePreview() {
+  clearMicCheck();
   if (activeSection.value === "voice") startMicrophonePreview();
+}
+
+function stopMicCheckTimers() {
+  if (micCheckDurationTimer) clearInterval(micCheckDurationTimer);
+  if (micCheckStopTimer) clearTimeout(micCheckStopTimer);
+  micCheckDurationTimer = null;
+  micCheckStopTimer = null;
+}
+
+function stopMicCheckRecorder(discard = false) {
+  stopMicCheckTimers();
+  if (!micCheckRecorder) {
+    micCheckRecording.value = false;
+    return;
+  }
+  if (discard) {
+    micCheckRecorder.ondataavailable = null;
+    micCheckRecorder.onstop = null;
+  }
+  if (micCheckRecorder.state !== "inactive") micCheckRecorder.stop();
+  if (discard) micCheckChunks = [];
+  micCheckRecorder = null;
+  micCheckRecording.value = false;
+}
+
+function stopMicCheck() {
+  stopMicCheckRecorder();
+}
+
+function startMicCheck() {
+  micCheckError.value = "";
+  if (!microphonePreviewDestination || !microphonePreviewReady.value) {
+    micCheckError.value = "Wait for the microphone to become ready.";
+    return;
+  }
+  if (typeof MediaRecorder === "undefined") {
+    micCheckError.value =
+      "This browser does not support microphone recording checks.";
+    return;
+  }
+  clearMicCheck();
+  micCheckChunks = [];
+  micCheckRecorder = new MediaRecorder(microphonePreviewDestination.stream);
+  micCheckRecorder.ondataavailable = (event) => {
+    if (event.data.size) micCheckChunks.push(event.data);
+  };
+  micCheckRecorder.onstop = () => {
+    const type = micCheckRecorder?.mimeType || micCheckChunks[0]?.type;
+    const sample = new Blob(micCheckChunks, { type });
+    micCheckRecorder = null;
+    micCheckChunks = [];
+    micCheckRecording.value = false;
+    if (!sample.size) {
+      micCheckError.value = "No microphone audio was recorded. Try again.";
+      return;
+    }
+    micCheckUrl.value = URL.createObjectURL(sample);
+    nextTick(applyMicCheckOutput);
+  };
+  micCheckRecorder.start();
+  micCheckSeconds.value = 0;
+  micCheckRecording.value = true;
+  micCheckDurationTimer = setInterval(() => {
+    micCheckSeconds.value += 1;
+  }, 1000);
+  micCheckStopTimer = setTimeout(stopMicCheck, 10000);
+}
+
+function toggleMicCheck() {
+  if (micCheckRecording.value) stopMicCheck();
+  else startMicCheck();
+}
+
+function clearMicCheck() {
+  stopMicCheckRecorder(true);
+  if (micCheckAudio.value) {
+    micCheckAudio.value.pause();
+    micCheckAudio.value.removeAttribute("src");
+    micCheckAudio.value.load();
+  }
+  if (micCheckUrl.value) URL.revokeObjectURL(micCheckUrl.value);
+  micCheckUrl.value = "";
+  micCheckSeconds.value = 0;
+  micCheckError.value = "";
+}
+
+async function applyMicCheckOutput() {
+  const audioElement = micCheckAudio.value;
+  if (!audioElement?.setSinkId || !selectedOutputId.value) return;
+  try {
+    await audioElement.setSinkId(selectedOutputId.value);
+  } catch (error) {
+    micCheckError.value = "The mic check could not use the selected speakers.";
+  }
 }
 
 const devices = ref([]);
@@ -1357,6 +1569,7 @@ function onCameraDeviceChange() {
 function onOutputChange() {
   const id = selectedOutputId.value || null;
   settingsStore.setOutputDeviceId(id);
+  applyMicCheckOutput();
 
   if (voiceStore.sfuComposable && voiceStore.connected) {
     voiceStore.sfuComposable.applyOutputDeviceToAll();

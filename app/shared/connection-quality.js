@@ -27,6 +27,16 @@ export function getConnectionQualityLabel(bars) {
   return "Waiting for statistics";
 }
 
+export function isConnectionPending(mediaState, connecting = false) {
+  return (
+    connecting ||
+    mediaState === "reconnecting" ||
+    mediaState === "topology-probing" ||
+    mediaState === "transport-connecting" ||
+    mediaState === "signaling-connected"
+  );
+}
+
 export function getActiveConnectionLabel(
   bars,
   mediaState,

@@ -553,15 +553,7 @@ export const useVoiceStore = defineStore("voice", () => {
     }
     sfuComposable.value?.sendParticipantVoiceState?.();
 
-    if (typeof window !== "undefined") {
-      const container = document.getElementById("webrtc-audio-global");
-      if (container) {
-        const audios = container.querySelectorAll("audio");
-        audios.forEach((audio) => {
-          audio.muted = deafened.value;
-        });
-      }
-    }
+    sfuComposable.value?.ensureAudioElements?.();
   }
 
   async function toggleCamera() {

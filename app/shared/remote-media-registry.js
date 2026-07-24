@@ -77,8 +77,8 @@ export class RemoteMediaRegistry {
         track.active = track.entry.provider === provider;
         this.applyTrackGain(graph, track);
       }
-      graph.audio.muted = this.isDeafened() || this.isBroadcastMode();
-      if (!graph.audio.muted) this.resumeGraph(graph);
+      if (!this.isDeafened() && !this.isBroadcastMode())
+        this.resumeGraph(graph);
     }
   }
 
@@ -126,17 +126,23 @@ export class RemoteMediaRegistry {
 
   createAudioElement(entry, staged) {
     const graph = this.getOrCreateGraph(entry.userId);
-    const source = this.audioContext.createMediaStreamSource(
-      new MediaStream([entry.track]),
-    );
+    const audio = document.createElement("audio");
+    audio.id = `audio-${entry.key}`;
+    audio.dataset.userId = String(entry.userId);
+    audio.autoplay = true;
+    audio.controls = false;
+    audio.playsInline = true;
+    audio.srcObject = new MediaStream([entry.track]);
+    this.audioContainer().appendChild(audio);
+    const source = this.audioContext.createMediaElementSource(audio);
     const gain = this.audioContext.createGain();
-    const track = { active: !staged, entry, gain, source };
+    const track = { active: !staged, audio, entry, gain, source };
     source.connect(gain);
-    gain.connect(graph.destination);
+    gain.connect(graph.context.destination);
     graph.tracks.set(entry.key, track);
     this.applyTrackGain(graph, track, true);
-    graph.audio.muted = this.isDeafened() || this.isBroadcastMode();
-    if (!graph.audio.muted && !staged) this.resumeGraph(graph);
+    if (!this.isDeafened() && !this.isBroadcastMode() && !staged)
+      this.resumeGraph(graph);
   }
 
   getOrCreateGraph(userId) {
@@ -144,27 +150,8 @@ export class RemoteMediaRegistry {
     const existing = this.participantAudio.get(normalizedUserId);
     if (existing) return existing;
     const context = this.getAudioContext();
-    const destination = context.createMediaStreamDestination();
-    const audio = document.createElement("audio");
-    audio.id = `audio-user-${normalizedUserId}`;
-    audio.dataset.userId = normalizedUserId;
-    audio.autoplay = true;
-    audio.controls = false;
-    audio.playsInline = true;
-    audio.srcObject = destination.stream;
-    audio.volume = 1;
-    const sinkId = this.getOutputDevice();
-    if (sinkId && typeof audio.setSinkId === "function")
-      audio
-        .setSinkId(sinkId)
-        .catch((error) =>
-          this.recoverOutputDevice(audio, normalizedUserId, error),
-        );
-    this.audioContainer().appendChild(audio);
     const graph = {
-      audio,
       context,
-      destination,
       tracks: new Map(),
       userId: normalizedUserId,
     };
@@ -178,6 +165,13 @@ export class RemoteMediaRegistry {
       window.AudioContext || window.webkitAudioContext;
     if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
     this.audioContext = new AudioContextConstructor();
+    const sinkId = this.getOutputDevice();
+    if (sinkId && typeof this.audioContext.setSinkId === "function")
+      this.audioContext
+        .setSinkId(sinkId)
+        .catch((error) =>
+          this.recoverOutputDevice(this.audioContext, null, error),
+        );
     return this.audioContext;
   }
 
@@ -210,21 +204,23 @@ export class RemoteMediaRegistry {
 
   applyOutputDevice() {
     const sinkId = this.getOutputDevice();
-    const elements =
-      document
-        .getElementById("webrtc-audio-global")
-        ?.querySelectorAll("audio") || [];
-    return Promise.all(
-      [...elements].map((audio) =>
-        typeof audio.setSinkId === "function"
-          ? audio
-              .setSinkId(sinkId || "")
-              .catch((error) =>
-                this.recoverOutputDevice(audio, audio.dataset.userId, error),
-              )
-          : null,
-      ),
-    );
+    const context = this.audioContext;
+    if (!context || typeof context.setSinkId !== "function") {
+      if (sinkId)
+        this.publishPlaybackState(
+          null,
+          "output-failed",
+          new Error("Audio output selection is unavailable"),
+        );
+      return Promise.resolve(!sinkId);
+    }
+    return context
+      .setSinkId(sinkId || "")
+      .then(() => {
+        this.publishPlaybackState(null, sinkId ? "ready" : "default-output");
+        return true;
+      })
+      .catch((error) => this.recoverOutputDevice(context, null, error));
   }
 
   applyVolume(userId, source, volume) {
@@ -271,9 +267,11 @@ export class RemoteMediaRegistry {
   }
 
   async ensurePlayback() {
-    const attempts = [];
-    for (const graph of this.participantAudio.values())
-      if (!graph.audio.muted) attempts.push(this.resumeGraph(graph));
+    this.applyAttenuation();
+    if (this.isDeafened() || this.isBroadcastMode()) return true;
+    const attempts = [...this.participantAudio.values()].map((graph) =>
+      this.resumeGraph(graph),
+    );
     const results = await Promise.allSettled(attempts);
     return results.every(
       (result) => result.status === "fulfilled" && result.value === true,
@@ -283,7 +281,9 @@ export class RemoteMediaRegistry {
   async resumeGraph(graph) {
     try {
       await this.audioContext.resume();
-      if (graph.audio.paused) await graph.audio.play();
+      await Promise.all(
+        [...graph.tracks.values()].map((track) => track.audio.play()),
+      );
       this.publishPlaybackState(graph.userId, "ready");
       return true;
     } catch (error) {
@@ -292,11 +292,11 @@ export class RemoteMediaRegistry {
     }
   }
 
-  async recoverOutputDevice(audio, userId, error) {
+  async recoverOutputDevice(output, userId, error) {
     this.publishPlaybackState(userId, "output-failed", error);
-    if (typeof audio.setSinkId !== "function") return false;
+    if (typeof output.setSinkId !== "function") return false;
     try {
-      await audio.setSinkId("");
+      await output.setSinkId("");
       this.publishPlaybackState(userId, "default-output");
       return true;
     } catch (fallbackError) {
@@ -322,6 +322,9 @@ export class RemoteMediaRegistry {
     if (!graph || !track) return;
     track.source.disconnect();
     track.gain.disconnect();
+    track.audio.pause();
+    track.audio.srcObject = null;
+    track.audio.remove();
     graph.tracks.delete(entry.key);
     if (!graph.tracks.size) {
       this.closeGraph(graph);
@@ -330,10 +333,14 @@ export class RemoteMediaRegistry {
   }
 
   closeGraph(graph) {
-    graph.audio.pause();
-    graph.audio.srcObject = null;
-    graph.audio.remove();
-    graph.destination.disconnect();
+    for (const track of graph.tracks.values()) {
+      track.source.disconnect();
+      track.gain.disconnect();
+      track.audio.pause();
+      track.audio.srcObject = null;
+      track.audio.remove();
+    }
+    graph.tracks.clear();
   }
 
   startVoiceDetection(entry) {

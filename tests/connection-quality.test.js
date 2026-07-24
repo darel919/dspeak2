@@ -5,6 +5,7 @@ import {
   getConnectionQualityBars,
   getConnectionQualityColorClass,
   getConnectionQualityLabel,
+  isConnectionPending,
   normalizeConnectionMetricValue,
 } from "../app/shared/connection-quality.js";
 
@@ -72,6 +73,15 @@ test("active connection label follows transport state before statistics arrive",
     "Connection issue",
   );
   assert.equal(getActiveConnectionLabel(4, "media-flowing", true), "Very good");
+});
+
+test("connecting media states suppress healthy signal presentation", () => {
+  assert.equal(isConnectionPending("media-flowing", false), false);
+  assert.equal(isConnectionPending("transport-connecting", false), true);
+  assert.equal(isConnectionPending("topology-probing", false), true);
+  assert.equal(isConnectionPending("reconnecting", false), true);
+  assert.equal(isConnectionPending("signaling-connected", false), true);
+  assert.equal(isConnectionPending("media-flowing", true), true);
 });
 
 test("missing connection measurements remain unavailable instead of becoming zero", () => {

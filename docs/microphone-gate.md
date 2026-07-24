@@ -21,22 +21,30 @@ Echo cancellation, noise suppression, and automatic gain control remain
 separate capture settings. Noise suppression can stay enabled in an HD audio
 channel even though the gate is bypassed.
 
-## Settings preview
+## Microphone setup and mic check
 
-Opening **Voice & Video** starts a local microphone preview. The preview shows:
+Opening **Voice & Video** starts a local microphone level preview in the
+**Microphone setup** section. The preview shows:
 
 - current input level;
 - effective opening threshold; and
 - open or closed gate state.
 
-The preview never plays through the user's speakers and does not interrupt an
-active call. It restarts after an input-device or capture-processing change and
-releases its track and audio graph when the user leaves the settings section.
-A denied or unavailable microphone produces an inline error with a retry action.
-If a saved microphone disappears or fails, dSpeak retries once with the browser
-system default. A successful fallback clears the stale saved device selection
-and updates the selector. Device connection changes refresh the list
-automatically.
+The user can record a local sample of up to ten seconds and play it back through
+the selected output device. The sample includes the browser's selected echo
+cancellation, noise suppression, and gain processing. The local preview graph
+also applies the effective microphone gate to the recorded sample, so the
+listen-back reflects whether quiet input is removed. Recordings remain in
+browser memory, are replaced when a new check starts, and are released when the
+settings page closes.
+
+The preview does not interrupt an active call. It restarts after an input-device
+or capture-processing change and releases its track and audio graph when the
+user leaves the settings section. A denied or unavailable microphone produces
+an inline error with a retry action. If a saved microphone disappears or fails,
+dSpeak retries once with the browser system default. A successful fallback
+clears the stale saved device selection and updates the selector. Device
+connection changes refresh the list automatically.
 
 ## Active calls
 

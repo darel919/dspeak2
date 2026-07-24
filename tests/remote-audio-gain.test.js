@@ -5,11 +5,25 @@ import { RemoteMediaRegistry } from "../app/shared/remote-media-registry.js";
 class FakeAudioContext {
   constructor() {
     this.currentTime = 0;
+    this.destination = {};
     this.state = "suspended";
   }
 
-  createMediaStreamDestination() {
-    return { disconnect() {}, stream: {} };
+  createGain() {
+    return {
+      connect() {},
+      disconnect() {},
+      gain: {
+        value: 1,
+        cancelScheduledValues() {},
+        setValueAtTime() {},
+        linearRampToValueAtTime() {},
+      },
+    };
+  }
+
+  createMediaElementSource() {
+    return { connect() {}, disconnect() {} };
   }
 
   close() {
@@ -62,6 +76,70 @@ test("remote participants share one room Web Audio context", () => {
     assert.equal(first.context, second.context);
   } finally {
     globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test("remote audio is pulled directly into the Web Audio output", () => {
+  const originalDocument = globalThis.document;
+  const originalMediaStream = globalThis.MediaStream;
+  const originalWindow = globalThis.window;
+  const connections = [];
+  const context = new FakeAudioContext();
+  context.createMediaElementSource = () => ({
+    connect: (target) => connections.push(["source", target]),
+    disconnect() {},
+  });
+  context.createGain = () => {
+    const gain = {
+      connect: (target) => connections.push(["gain", target]),
+      disconnect() {},
+      gain: {
+        value: 1,
+        cancelScheduledValues() {},
+        setValueAtTime() {},
+        linearRampToValueAtTime() {},
+      },
+    };
+    return gain;
+  };
+  globalThis.window = {
+    AudioContext: class {
+      constructor() {
+        return context;
+      }
+    },
+  };
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+  };
+  const container = { appendChild() {} };
+  globalThis.document = {
+    body: { appendChild() {} },
+    createElement: () => ({
+      dataset: {},
+      pause() {},
+      play: () => Promise.resolve(),
+      remove() {},
+    }),
+    getElementById: () => container,
+  };
+
+  try {
+    const registry = createRegistry();
+    registry.bind({
+      key: "person-a:audio",
+      provider: "sfu",
+      source: "audio",
+      track: { kind: "audio" },
+      userId: "person-a",
+    });
+    assert.equal(connections[1][1], context.destination);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.MediaStream = originalMediaStream;
     globalThis.window = originalWindow;
   }
 });

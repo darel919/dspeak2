@@ -276,6 +276,22 @@ test("account settings update the public dSpeak profile", async () => {
   assert.match(presence, /upsertPublicProfile/);
 });
 
+test("settings volume sliders consistently use the active accent", async () => {
+  const source = await readFile("app/pages/settings.vue", "utf8");
+  assert.doesNotMatch(source, /range-secondary/);
+  assert.equal(source.match(/range range-primary/g)?.length, 3);
+});
+
+test("voice settings provide a local microphone listen-back check", async () => {
+  const source = await readFile("app/pages/settings.vue", "utf8");
+  assert.match(source, /Microphone setup/);
+  assert.match(source, /Record mic check/);
+  assert.match(source, /new MediaRecorder/);
+  assert.match(source, /createMediaStreamDestination/);
+  assert.match(source, /audioElement\.setSinkId/);
+  assert.match(source, /URL\.revokeObjectURL/);
+});
+
 test("room administration uses explicit responsive form layouts", async () => {
   const source = await readFile("app/pages/room/[roomId]/settings.vue", "utf8");
   assert.doesNotMatch(source, /class="form-control/);
