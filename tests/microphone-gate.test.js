@@ -27,7 +27,7 @@ test("microphone level and automatic threshold use dBFS", () => {
     Math.round(microphoneLevelDb(new Float32Array([0.1, -0.1]))),
     -20,
   );
-  assert.equal(automaticGateThreshold(-60), -44);
+  assert.equal(automaticGateThreshold(-60), -40);
   assert.equal(automaticGateThreshold(-35), -28);
 });
 

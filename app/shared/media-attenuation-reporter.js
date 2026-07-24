@@ -94,6 +94,7 @@ export function resolveMediaAttenuation(roomValue, override) {
   const attenuation = roomValue || {
     enabled: true,
     reductionPercent: 65,
+    sensitivity: "standard",
     attackMs: 120,
     releaseMs: 650,
   };

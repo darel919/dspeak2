@@ -134,10 +134,15 @@ receive the latest policy in the channel response.
 
 The room administration UI presents attenuation as **Speech priority**. Admins
 choose how loud shared audio remains while someone speaks and select Fast,
-Balanced, or Smooth volume changes. The saved room contract retains
-`reductionPercent`, `attackMs`, and `releaseMs` for backward compatibility.
+Balanced, or Smooth volume changes. Relaxed, Standard, and Responsive
+sensitivity presets control the sustained level and duration required to start
+ducking. The saved room contract retains `reductionPercent`, `sensitivity`,
+`attackMs`, and `releaseMs`.
 Changes save automatically; rapid slider changes are debounced and room updates
 are serialized so an older request cannot overwrite a newer choice.
+Smooth uses a 900 ms fade-down and 2.2 second recovery. Rooms saved with the
+earlier 250 ms and 1.2 second Smooth timing are normalized to the gentler
+timing.
 
 The remote-media registry applies the policy only to `screen-audio` and
 `system-audio`. Cleanup follows the media entry that owns the playback resource.

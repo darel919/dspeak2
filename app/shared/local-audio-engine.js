@@ -6,6 +6,7 @@ export function createLocalAudioEngine({
   createNoiseFloorEstimator,
   getActiveProvider,
   getAudioStereo,
+  getAttenuation,
   getEffectiveAudioBitrate,
   getP2pMesh,
   getRequestedVideoSettings,
@@ -51,6 +52,7 @@ export function createLocalAudioEngine({
       source.connect(analyser);
       const samples = new Float32Array(analyser.fftSize);
       let speaking = false;
+      let activeSamples = 0;
       let quietSamples = 0;
       const noiseFloorEstimator = createNoiseFloorEstimator();
       const timer = setInterval(() => {
@@ -60,19 +62,28 @@ export function createLocalAudioEngine({
         const thresholdDb = gate.automatic
           ? automaticGateThreshold(noiseFloorEstimator.noiseFloorDb)
           : gate.thresholdDb;
-        const active = levelDb >= thresholdDb;
+        const sensitivity = getAttenuation?.()?.sensitivity || "standard";
+        const sensitivityOffset =
+          sensitivity === "relaxed" ? 5 : sensitivity === "responsive" ? -3 : 0;
+        const requiredSamples =
+          sensitivity === "relaxed" ? 6 : sensitivity === "responsive" ? 2 : 3;
+        const active = levelDb >= thresholdDb + sensitivityOffset;
         updateNoiseFloor(noiseFloorEstimator, levelDb, active);
         if (active) {
           quietSamples = 0;
-          if (!speaking) {
+          activeSamples += 1;
+          if (!speaking && activeSamples >= requiredSamples) {
             speaking = true;
             voiceStore.updateUserSpeaking(userId, true);
             onSpeakingChange?.(userId, true);
           }
         } else if (speaking && ++quietSamples >= 10) {
+          activeSamples = 0;
           speaking = false;
           voiceStore.updateUserSpeaking(userId, false);
           onSpeakingChange?.(userId, false);
+        } else {
+          activeSamples = 0;
         }
       }, 40);
       localVoiceDetector = { analyser, context, source, timer, userId };
@@ -148,6 +159,8 @@ export function createLocalAudioEngine({
     const now = sharedAudioMeter.context.currentTime;
     const parameter = sharedAudioMeter.gain.gain;
     const target = sharedAudioBaseVolume * sharedAudioAttenuation;
+    if (sharedAudioMeter.gainTarget === target) return;
+    sharedAudioMeter.gainTarget = target;
     parameter.cancelScheduledValues(now);
     parameter.setValueAtTime(parameter.value, now);
     if (durationMs > 0)
@@ -223,6 +236,7 @@ export function createLocalAudioEngine({
         context,
         source,
         gain,
+        gainTarget: gain.gain.value,
         analyser,
         destination,
         timer: null,
@@ -232,6 +246,9 @@ export function createLocalAudioEngine({
       const ready = await ensureSharedAudioProcessing();
       if (!ready)
         throw new Error("Shared audio processing could not be started");
+      const rendering = await waitForSharedAudioRendering();
+      if (!rendering)
+        throw new Error("Shared audio processing did not begin rendering");
       return {
         ...entry,
         stream: new MediaStream([track]),
@@ -252,6 +269,24 @@ export function createLocalAudioEngine({
     if (sharedAudioMeter.context.state !== "running")
       await sharedAudioMeter.context.resume();
     return sharedAudioMeter.context.state === "running";
+  }
+
+  async function waitForSharedAudioRendering(timeoutMs = 500) {
+    if (!sharedAudioMeter) return false;
+    const context = sharedAudioMeter.context;
+    if (!Number.isFinite(Number(context.baseLatency))) return true;
+    const startedAt = performance.now();
+    const initialTime = context.currentTime;
+    const renderWindow = Math.max(0.02, Number(context.baseLatency) * 2);
+    while (
+      context.currentTime < initialTime + renderWindow &&
+      performance.now() - startedAt < timeoutMs
+    )
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    return (
+      context.state === "running" &&
+      context.currentTime >= initialTime + renderWindow
+    );
   }
 
   function startSharedAudioMeter() {

@@ -171,6 +171,40 @@
               v-if="form.attenuation.enabled"
               class="grid min-w-0 gap-3"
             >
+              <legend class="font-semibold">
+                How easily should speech trigger it?
+              </legend>
+              <p class="text-sm text-base-content/70">
+                Choose how much sustained voice activity is needed before shared
+                audio moves out of the way.
+              </p>
+              <div class="grid gap-2 sm:grid-cols-3">
+                <label
+                  v-for="preset in attenuationSensitivityPresets"
+                  :key="preset.id"
+                  :class="[
+                    'block min-h-24 cursor-pointer border p-4 transition-colors',
+                    form.attenuation.sensitivity === preset.id
+                      ? 'border-primary bg-primary text-primary-content'
+                      : 'border-base-300 hover:border-base-content/40',
+                  ]"
+                >
+                  <input
+                    v-model="form.attenuation.sensitivity"
+                    class="sr-only"
+                    type="radio"
+                    name="attenuation-sensitivity"
+                    :value="preset.id"
+                  />
+                  <strong class="block">{{ preset.label }}</strong>
+                  <small class="mt-1 block">{{ preset.description }}</small>
+                </label>
+              </div>
+            </fieldset>
+            <fieldset
+              v-if="form.attenuation.enabled"
+              class="grid min-w-0 gap-3"
+            >
               <legend class="font-semibold">How should volume change?</legend>
               <p class="text-sm text-base-content/70">
                 Choose whether shared audio moves out of the way quickly or
@@ -573,6 +607,7 @@ const form = reactive({
   attenuation: {
     enabled: true,
     reductionPercent: 65,
+    sensitivity: "standard",
     attackMs: 120,
     releaseMs: 650,
   },
@@ -609,9 +644,26 @@ const attenuationTimingPresets = [
   {
     id: "smooth",
     label: "Smooth",
-    description: "Uses gentle volume changes for music and films.",
-    attackMs: 250,
-    releaseMs: 1200,
+    description: "Fades shared audio gradually for music and films.",
+    attackMs: 900,
+    releaseMs: 2200,
+  },
+];
+const attenuationSensitivityPresets = [
+  {
+    id: "relaxed",
+    label: "Relaxed",
+    description: "Ignores more background noise and brief sounds.",
+  },
+  {
+    id: "standard",
+    label: "Standard",
+    description: "Responds naturally to normal conversation.",
+  },
+  {
+    id: "responsive",
+    label: "Responsive",
+    description: "Reacts quickly to quieter voices.",
   },
 ];
 const sharedAudioDuringSpeech = computed(() =>

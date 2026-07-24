@@ -541,12 +541,22 @@ export class MediasoupClientSession {
       receiving: false,
     };
     this.consumers.set(consumer.id, entry);
+    this.onStateChange?.(
+      "consumer",
+      this.transportStates.get("recv") || "new",
+      this.connectionState(),
+    );
     let closed = false;
     const close = () => {
       if (closed) return;
       closed = true;
       this.consumers.delete(consumer.id);
       this.onRemoteTrackEnded?.(entry);
+      this.onStateChange?.(
+        "consumer",
+        this.transportStates.get("recv") || "new",
+        this.connectionState(),
+      );
     };
     entry.close = close;
     consumer.on("transportclose", close);

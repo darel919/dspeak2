@@ -33,7 +33,7 @@ export function byteTimeDomainLevelDb(samples) {
 }
 
 export function automaticGateThreshold(noiseFloorDb) {
-  return Math.min(-28, Math.max(-56, noiseFloorDb + 16));
+  return Math.min(-28, Math.max(-52, noiseFloorDb + 20));
 }
 
 export function createNoiseFloorEstimator() {

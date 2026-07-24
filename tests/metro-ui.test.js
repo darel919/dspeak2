@@ -192,6 +192,13 @@ test("voice controls remain visible in a compact floating dock", async () => {
   assert.doesNotMatch(source, /voice-channel:hover \.voice-controls/);
 });
 
+test("audio-only system shares expose automatic listening controls", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /is sharing system audio/);
+  assert.match(source, /Stop listening/);
+  assert.match(source, /setRemoteSystemAudioReceiving/);
+});
+
 test("participant volume controls render outside the scrolling participant strip", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   assert.match(source, /<Teleport to="body">/);
@@ -306,9 +313,14 @@ test("room speech priority settings explain audio behavior without jargon", asyn
   assert.match(source, /Speech priority/);
   assert.match(source, /Shared audio during speech/);
   assert.match(source, /How should volume change\?/);
+  assert.match(source, /How easily should speech trigger it\?/);
+  assert.match(source, /Relaxed/);
+  assert.match(source, /Responsive/);
   assert.match(source, /Fast/);
   assert.match(source, /Balanced/);
   assert.match(source, /Smooth/);
+  assert.match(source, /attackMs: 900/);
+  assert.match(source, /releaseMs: 2200/);
   assert.match(source, /Changes save automatically/);
   assert.match(source, /queueAttenuationSave/);
   assert.doesNotMatch(source, />Attack \(ms\)</);

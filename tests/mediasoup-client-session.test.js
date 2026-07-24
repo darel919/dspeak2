@@ -425,6 +425,63 @@ test("closing SFU media explicitly retires consumers without waiting for tracken
   assert.equal(client.consumers.size, 0);
 });
 
+test("remote consumer lifecycle refreshes active media connection state", async () => {
+  const originalMediaStream = globalThis.MediaStream;
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+  };
+  const states = [];
+  const client = new MediasoupClientSession({
+    send() {},
+    iceServers: [],
+    onStateChange: (direction, state, summary) =>
+      states.push({ direction, state, summary }),
+  });
+  client.transportStates.set("recv", "connected");
+  let transportClose;
+  client.recvTransport = {
+    consume: async ({ id, producerId, kind, appData }) => ({
+      id,
+      producerId,
+      track: { kind },
+      on(event, handler) {
+        if (event === "transportclose") transportClose = handler;
+      },
+      close() {},
+      appData,
+    }),
+  };
+  client.setConsumerReceiving = async (entry, receiving) => {
+    entry.receiving = receiving;
+    return true;
+  };
+
+  try {
+    await client.createConsumer({
+      id: "consumer-1",
+      producerId: "producer-1",
+      kind: "audio",
+      source: "screen-audio",
+      userId: "user-1",
+      rtpParameters: {},
+    });
+
+    assert.equal(states[0].direction, "consumer");
+    assert.equal(states[0].state, "connected");
+    assert.equal(states[0].summary.receiveRequired, true);
+    assert.equal(states[0].summary.ready, true);
+
+    transportClose();
+    assert.equal(states[1].direction, "consumer");
+    assert.equal(states[1].summary.receiveRequired, false);
+    assert.equal(states[1].summary.ready, true);
+  } finally {
+    globalThis.MediaStream = originalMediaStream;
+  }
+});
+
 test("remote screen video and audio consumers pause and resume after acknowledgements", async () => {
   const sent = [];
   const client = new MediasoupClientSession({

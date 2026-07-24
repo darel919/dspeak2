@@ -51,6 +51,7 @@ test("room appearance and attenuation use safe defaults", () => {
   assert.deepEqual(normalizeAttenuation({ reductionPercent: 80 }), {
     enabled: true,
     reductionPercent: 80,
+    sensitivity: "standard",
     attackMs: 120,
     releaseMs: 650,
   });
@@ -60,7 +61,26 @@ test("legacy rooms with null attenuation receive safe defaults", () => {
   assert.deepEqual(normalizeAttenuation(null), {
     enabled: true,
     reductionPercent: 65,
+    sensitivity: "standard",
     attackMs: 120,
     releaseMs: 650,
   });
+});
+
+test("the earlier smooth timing normalizes to the gentler preset", () => {
+  assert.deepEqual(
+    normalizeAttenuation({
+      enabled: true,
+      reductionPercent: 70,
+      attackMs: 250,
+      releaseMs: 1200,
+    }),
+    {
+      enabled: true,
+      reductionPercent: 70,
+      sensitivity: "standard",
+      attackMs: 900,
+      releaseMs: 2200,
+    },
+  );
 });

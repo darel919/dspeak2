@@ -1,6 +1,6 @@
 import { byteTimeDomainLevelDb } from "./microphone-gate.js";
 
-const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -48;
+const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -42;
 
 export function replaceMediaStreamTrack(stream, track) {
   if (!stream.getTracks().includes(track)) stream.addTrack(track);
@@ -76,6 +76,16 @@ export class RemoteMediaRegistry {
       receiving: Boolean(receiving),
     });
     this.videoFeeds.value = new Map(this.videoFeeds.value);
+    this.onVideoReceivingChange?.(entry, Boolean(receiving));
+    return true;
+  }
+
+  setAudioReceiving(key, receiving) {
+    const entry = this.audioFeeds.value.get(key);
+    if (!entry || entry.source !== "screen-audio") return false;
+    entry.receiving = Boolean(receiving);
+    this.audioFeeds.value.set(key, { ...entry });
+    this.audioFeeds.value = new Map(this.audioFeeds.value);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     return true;
   }
@@ -291,6 +301,14 @@ export class RemoteMediaRegistry {
     const now = graph.context.currentTime;
     const elementTarget = Math.max(0, Math.min(1, target));
     const gainTarget = target > 1 ? target : 1;
+    if (
+      !immediate &&
+      track.volumeTarget === elementTarget &&
+      track.gainTarget === gainTarget
+    )
+      return;
+    track.volumeTarget = elementTarget;
+    track.gainTarget = gainTarget;
     clearInterval(track.volumeTimer);
     track.volumeTimer = null;
     track.gain.gain.cancelScheduledValues(now);
@@ -468,12 +486,14 @@ export class RemoteMediaRegistry {
       detectionSource.connect(analyser);
       const samples = new Uint8Array(analyser.fftSize);
       let speaking = false;
+      let activeSamples = 0;
       let quietSamples = 0;
       this.voiceDetectors.set(entry.key, {
         analyser,
         source: detectionSource,
         samples,
         speaking,
+        activeSamples,
         quietSamples,
         userId: entry.userId,
       });
@@ -490,19 +510,28 @@ export class RemoteMediaRegistry {
       for (const detector of this.voiceDetectors.values()) {
         detector.analyser.getByteTimeDomainData(detector.samples);
         const levelDb = byteTimeDomainLevelDb(detector.samples);
-        if (levelDb >= REMOTE_VOICE_ACTIVITY_THRESHOLD_DB) {
+        const sensitivity = this.getAttenuation?.()?.sensitivity || "standard";
+        const thresholdOffset =
+          sensitivity === "relaxed" ? 5 : sensitivity === "responsive" ? -3 : 0;
+        const requiredSamples =
+          sensitivity === "relaxed" ? 5 : sensitivity === "responsive" ? 1 : 2;
+        if (levelDb >= REMOTE_VOICE_ACTIVITY_THRESHOLD_DB + thresholdOffset) {
           detector.quietSamples = 0;
-          if (!detector.speaking) {
+          detector.activeSamples += 1;
+          if (!detector.speaking && detector.activeSamples >= requiredSamples) {
             detector.speaking = true;
             this.speakingUsers.add(String(detector.userId));
             this.onSpeaking(detector.userId, true);
             this.applyAttenuation();
           }
         } else if (detector.speaking && ++detector.quietSamples >= 6) {
+          detector.activeSamples = 0;
           detector.speaking = false;
           this.speakingUsers.delete(String(detector.userId));
           this.onSpeaking(detector.userId, false);
           this.applyAttenuation();
+        } else {
+          detector.activeSamples = 0;
         }
       }
     }, 80);

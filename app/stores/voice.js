@@ -590,6 +590,12 @@ export const useVoiceStore = defineStore("voice", () => {
     );
   }
 
+  function setRemoteSystemAudioReceiving(feedKey, receiving) {
+    return Boolean(
+      sfuComposable.value?.setRemoteSystemAudioReceiving?.(feedKey, receiving),
+    );
+  }
+
   async function toggleSystemAudioShare() {
     if (!connected.value || !sfuComposable.value) return;
     try {
@@ -739,6 +745,7 @@ export const useVoiceStore = defineStore("voice", () => {
     toggleCamera,
     toggleScreenShare,
     setRemoteScreenReceiving,
+    setRemoteSystemAudioReceiving,
     toggleSystemAudioShare,
     setSharedAudioVolume,
     setSystemAudioBitrate,

@@ -130,7 +130,6 @@ export function useHybridMediaSession() {
       roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
       settingsStore.streamAttenuation,
     );
-
   const registry = new RemoteMediaRegistry({
     audioFeeds: remoteAudioFeeds,
     videoFeeds: remoteVideoFeeds,
@@ -173,7 +172,6 @@ export function useHybridMediaSession() {
     },
     onEffectiveGain: (state) => attenuationReporter.report(state),
   });
-
   const attenuationReporter = createMediaAttenuationReporter({
     getLocalPeerId: () => localPeerId,
     getPeers: () => topologyState.value.peers,
@@ -585,6 +583,7 @@ export function useHybridMediaSession() {
     collectOutboundAudioStats,
     createNoiseFloorEstimator,
     getActiveProvider: () => activeProvider,
+    getAttenuation,
     getAudioStereo,
     getEffectiveAudioBitrate,
     getP2pMesh: () => p2pMesh,
@@ -599,7 +598,6 @@ export function useHybridMediaSession() {
     updateNoiseFloor,
     voiceStore,
   });
-
   watch(
     () => [
       settingsStore.streamAttenuation,
@@ -1081,6 +1079,8 @@ export function useHybridMediaSession() {
     stopSystemAudioProduction,
     setRemoteScreenReceiving: (feedKey, receiving) =>
       registry.setVideoReceiving(feedKey, receiving),
+    setRemoteSystemAudioReceiving: (key, on) =>
+      registry.setAudioReceiving(key, on),
     setSharedAudioVolume,
     setSystemAudioBitrate,
     sendParticipantVoiceState,

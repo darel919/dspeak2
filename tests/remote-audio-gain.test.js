@@ -201,6 +201,80 @@ test("attenuation is applied to the native media element volume", () => {
   assert.equal(track.audio.volume, 0);
 });
 
+test("unchanged attenuation does not restart an active volume fade", () => {
+  const registry = createRegistry({
+    getAttenuation: () => ({
+      enabled: true,
+      reductionPercent: 70,
+      attackMs: 900,
+      releaseMs: 2200,
+    }),
+    isAnyoneSpeaking: () => true,
+  });
+  const ramps = [];
+  const graph = { context: { currentTime: 5 } };
+  const track = {
+    active: true,
+    audio: { volume: 1 },
+    entry: { source: "screen-audio", userId: "person-a" },
+    gain: {
+      gain: {
+        value: 1,
+        cancelScheduledValues() {},
+        setValueAtTime() {},
+        linearRampToValueAtTime(value, time) {
+          ramps.push([value, time]);
+        },
+      },
+    },
+    volumeTimer: null,
+  };
+
+  registry.applyTrackGain(graph, track);
+  registry.applyTrackGain(graph, track);
+  clearInterval(track.volumeTimer);
+
+  assert.deepEqual(ramps, [[1, 5.9]]);
+});
+
+test("audio-only system sharing can stop and resume remote transmission", () => {
+  const changes = [];
+  const audioFeeds = {
+    value: new Map([
+      [
+        "remote:user:screen-audio",
+        {
+          key: "remote:user:screen-audio",
+          source: "screen-audio",
+          userId: "user",
+        },
+      ],
+    ]),
+  };
+  const registry = createRegistry({
+    audioFeeds,
+    onVideoReceivingChange: (entry, receiving) =>
+      changes.push([entry.source, receiving]),
+  });
+
+  assert.equal(
+    registry.setAudioReceiving("remote:user:screen-audio", false),
+    true,
+  );
+  assert.equal(
+    audioFeeds.value.get("remote:user:screen-audio").receiving,
+    false,
+  );
+  assert.equal(
+    registry.setAudioReceiving("remote:user:screen-audio", true),
+    true,
+  );
+  assert.deepEqual(changes, [
+    ["screen-audio", false],
+    ["screen-audio", true],
+  ]);
+});
+
 test("system audio respects stream attenuation while anyone speaks", () => {
   const registry = createRegistry({
     getAttenuation: () => ({

@@ -30,6 +30,42 @@
       </div>
     </header>
 
+    <div
+      v-if="remoteSystemAudioShares.length"
+      class="grid shrink-0 gap-px border-b border-base-content/15 bg-base-content/15"
+      aria-live="polite"
+    >
+      <div
+        v-for="share in remoteSystemAudioShares"
+        :key="share.key"
+        class="flex items-center justify-between gap-4 bg-base-200 px-4 py-3"
+      >
+        <div class="flex min-w-0 items-center gap-3">
+          <Icon
+            name="lucide:audio-lines"
+            class="size-5 shrink-0 text-primary"
+          />
+          <p class="truncate text-sm font-medium">
+            {{ share.label }} is sharing system audio
+          </p>
+        </div>
+        <button
+          class="btn btn-sm shrink-0"
+          :class="share.receiving === false ? 'btn-primary' : 'btn-ghost'"
+          type="button"
+          @click="setSystemAudioReceiving(share, share.receiving === false)"
+        >
+          <Icon
+            :name="
+              share.receiving === false ? 'lucide:volume-2' : 'lucide:volume-x'
+            "
+            class="size-4"
+          />
+          {{ share.receiving === false ? "Listen" : "Stop listening" }}
+        </button>
+      </div>
+    </div>
+
     <!-- Connection Info Banner -->
     <div
       v-if="
@@ -671,10 +707,36 @@ const ownCameraFeed = computed(
     videoFeeds.value.find((feed) => feed.local && feed.source === "camera") ||
     null,
 );
+const remoteSystemAudioShares = computed(() => {
+  const sfu = voiceStore.sfuComposable;
+  if (!sfu) return [];
+  const screenOwners = new Set(
+    Array.from(sfu.remoteVideoFeeds || [])
+      .filter(([, feed]) => feed.source === "screen")
+      .map(([, feed]) => String(feed.userId)),
+  );
+  return Array.from(sfu.remoteAudioFeeds || [])
+    .filter(
+      ([, feed]) =>
+        feed.source === "screen-audio" &&
+        !screenOwners.has(String(feed.userId)),
+    )
+    .map(([key, feed]) => ({
+      ...feed,
+      key,
+      label: getUserDisplayName(
+        voiceStore.getUserById(feed.userId) || { id: feed.userId },
+      ),
+    }));
+});
 
 function setScreenReceiving(feed, receiving) {
   if (feed.local || feed.source !== "screen") return;
   voiceStore.setRemoteScreenReceiving(feed.key, receiving);
+}
+
+function setSystemAudioReceiving(feed, receiving) {
+  voiceStore.setRemoteSystemAudioReceiving(feed.key, receiving);
 }
 
 async function toggleCamera() {

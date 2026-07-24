@@ -88,6 +88,70 @@ test("shared audio publishes the gain-processed destination track", async () => 
   }
 });
 
+test("shared audio waits for its processing clock before publication", async () => {
+  const originalMediaStream = globalThis.MediaStream;
+  const originalWindow = globalThis.window;
+  let clockReads = 0;
+  const destinationTrack = { id: "processed", kind: "audio" };
+  const context = {
+    baseLatency: 0.01,
+    get currentTime() {
+      clockReads += 1;
+      return clockReads * 0.01;
+    },
+    state: "running",
+    createAnalyser: () => ({
+      connect() {},
+      disconnect() {},
+      fftSize: 0,
+    }),
+    createGain: () => ({
+      connect() {},
+      disconnect() {},
+      gain: {
+        value: 1,
+        cancelScheduledValues() {},
+        setValueAtTime() {},
+      },
+    }),
+    createMediaStreamDestination: () => ({
+      stream: { getAudioTracks: () => [destinationTrack] },
+    }),
+    createMediaStreamSource: () => ({ connect() {}, disconnect() {} }),
+    resume: () => Promise.resolve(),
+  };
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+
+    getAudioTracks() {
+      return this.tracks;
+    }
+  };
+  globalThis.window = {
+    AudioContext: class {
+      constructor() {
+        return context;
+      }
+    },
+  };
+
+  try {
+    const captureTrack = { id: "capture", kind: "audio" };
+    const entry = await createEngine({ context }).createSharedAudioSource({
+      source: "screen-audio",
+      stream: new MediaStream([captureTrack]),
+      track: captureTrack,
+    });
+    assert.equal(entry.track, destinationTrack);
+    assert.ok(clockReads >= 4);
+  } finally {
+    globalThis.MediaStream = originalMediaStream;
+    globalThis.window = originalWindow;
+  }
+});
+
 test("zero shared volume immediately mutes gain and both transports", async () => {
   const values = [];
   const transmissions = [];

@@ -30,6 +30,11 @@ share**. Shared audio begins playing immediately so audio-only system shares do
 not wait for a video action that does not exist. After a paired screen has been
 started, **Stop** pauses both its video and audio.
 
+An audio-only share displays **[participant] is sharing system audio** to every
+listener. **Stop listening** pauses the SFU consumer or disables the matching
+P2P sender encoding instead of only muting local playback. **Listen** restores
+the transmission. Each new audio-only share starts in listening mode by default.
+
 - On the SFU route, dSpeak pauses or resumes the viewer's mediasoup consumers.
 - On Direct and Mesh routes, the viewer asks the sender to deactivate or
   reactivate the matching RTP encodings.
@@ -49,12 +54,20 @@ gain directly. Remote microphone playback also drives attenuation from its
 decoded waveform, so topology changes do not interrupt speech priority.
 Room policy saves are broadcast to connected room members immediately so every
 listener applies the same current reduction and timing values.
+Smooth mode fades down over 900 ms and restores over 2.2 seconds. Repeated VAD
+reports for an unchanged speaking state preserve the active fade instead of
+restarting or collapsing it.
+Sensitivity is independent of fade speed. Relaxed requires louder activity for
+longer, Standard suits normal conversation, and Responsive reacts to quieter
+voices with less confirmation time.
 
 The sender creates and resumes the shared-audio processing graph before
 publishing its destination track to P2P or SFU. Starting system audio therefore
 does not report success while the browser-owned processing context is still
-suspended. If processing cannot start, publication falls back to the original
-captured track so system audio remains available.
+suspended. Publication also waits for the browser audio clock to render the
+graph's first processing window; a context that merely reports `running` is not
+treated as ready. If processing cannot start or render, publication falls back
+to the original captured track so system audio remains available.
 
 Publication is transactional across the active and preparing transports.
 Starting a share fails visibly if either required provider rejects it, and any
