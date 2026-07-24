@@ -21,12 +21,6 @@
         role="button"
         tabindex="0"
         :aria-label="`View profile for ${memberDisplayName(member)}`"
-        :style="
-          getMemberPresenceStatus(member) === 'offline' &&
-          member.id !== currentUser?.id
-            ? 'opacity: 0.3'
-            : ''
-        "
         @click="openProfileCard(member, $event)"
         @keydown.enter.prevent="openProfileCard(member, $event)"
         @keydown.space.prevent="openProfileCard(member, $event)"
@@ -47,7 +41,7 @@
           >
             <img
               :src="getAvatarUrl(identityStore.profileFor(member).avatar)"
-              :alt="memberDisplayName(member)"
+              alt=""
               class="block rounded-full"
             />
             <!-- Status dot at right bottom -->
@@ -101,7 +95,7 @@
               :src="
                 getAvatarUrl(identityStore.profileFor(profileCardUser).avatar)
               "
-              :alt="memberDisplayName(profileCardUser)"
+              alt=""
               class="size-16 rounded-full object-cover"
             />
           </div>

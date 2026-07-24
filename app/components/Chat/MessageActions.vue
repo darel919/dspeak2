@@ -9,7 +9,6 @@
     </label>
 
     <ul
-      tabindex="0"
       class="dropdown-content z-[1] menu w-52 border border-base-300 bg-base-100 p-2 shadow-xl"
     >
       <!-- <li v-if="!isOwnMessage">

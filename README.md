@@ -83,6 +83,10 @@ PBASE_ADMIN_EMAIL=admin@example.com
 PBASE_ADMIN_PASSWORD=replace-this-value
 ```
 
+`AUTH_PATH` is server-only and must expose the DWS one-time handoff endpoints.
+`DSPEAK_PUBLIC_ORIGIN` must be the exact browser origin; the generated
+authentication callback is `<DSPEAK_PUBLIC_ORIGIN>/auth`.
+
 Nitro applies pending PocketBase migrations during startup. A migration failure
 stops the application so it cannot run against a partially updated schema.
 

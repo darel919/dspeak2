@@ -77,6 +77,7 @@
           <input
             class="range range-primary range-sm flex-1"
             type="range"
+            aria-label="Room soundboard volume"
             min="0"
             max="100"
             :value="roomVolume"

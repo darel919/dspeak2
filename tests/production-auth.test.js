@@ -38,6 +38,11 @@ const migrations = await readFile(
   new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
   "utf8",
 );
+const authPage = await readFile(
+  new URL("../app/pages/auth.vue", import.meta.url),
+  "utf8",
+);
+const dspeakApi = files[0];
 
 test("protected server paths resolve identity through authenticated sessions", () => {
   const combined = files.join("\n");
@@ -77,9 +82,18 @@ test("sessions rotate per device and are stored only as hashes", () => {
 });
 
 test("external authentication never puts access tokens in URLs", () => {
-  assert.match(authentication, /Authorization: `Bearer \$\{accessToken\}`/);
-  assert.match(authentication, /method: "POST"/);
-  assert.doesNotMatch(authentication, /verify\?at=/);
+  assert.doesNotMatch(authentication, /accessToken|verify\?at=/);
+  assert.doesNotMatch(dspeakApi, /body\.accessToken/);
+  assert.doesNotMatch(authPage, /route\.query\.at|searchParams\.set\(["']at/);
+  assert.match(authPage, /route\.query\.code/);
+  assert.match(authPage, /route\.query\.state/);
+  assert.match(authentication, /session-handoff-exchange/);
+});
+
+test("failed SSO callbacks stop with an actionable error instead of looping", () => {
+  assert.match(authPage, /Sign-in interrupted/);
+  assert.match(authPage, /Try sign-in again/);
+  assert.doesNotMatch(authPage, /setTimeout\(resolve,\s*10000\)/);
 });
 
 test("notification migration reconciles duplicates before uniqueness", () => {

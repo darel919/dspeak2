@@ -841,11 +841,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  border: 1px solid color-mix(in oklab, var(--color-warning) 45%, transparent);
+  border: 1px solid var(--color-warning);
   border-radius: 0.7rem;
-  background: color-mix(in oklab, var(--color-warning) 12%, transparent);
+  background: var(--color-warning);
   padding: 0.55rem 0.75rem;
-  color: var(--color-warning);
+  color: var(--color-warning-content);
   font-size: 0.8rem;
   font-weight: 600;
 }

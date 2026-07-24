@@ -25,7 +25,8 @@ import {
 } from "./dspeak-realtime";
 import { persistMessageNotifications, sendPushTest } from "./push-delivery";
 import {
-  createAuthenticatedSession,
+  createAuthenticationHandoff,
+  exchangeAuthenticationHandoff,
   requireAuthenticatedUser,
   restoreAuthenticatedSession,
   revokeAuthenticatedSession,
@@ -708,17 +709,28 @@ export async function handleDspeakApi(event) {
 
   try {
     if (!domain && event.method === "GET") return "dSpeak ready.";
-    if (domain === "session" && event.method === "POST") {
+    if (
+      domain === "session" &&
+      suffix === "handoff/start" &&
+      event.method === "POST"
+    )
+      return createAuthenticationHandoff(event);
+    if (
+      domain === "session" &&
+      suffix === "handoff/exchange" &&
+      event.method === "POST"
+    ) {
       const body = await parseBody(event);
-      return await createAuthenticatedSession(
+      return await exchangeAuthenticationHandoff(
         event,
-        body.accessToken,
+        body.code,
+        body.state,
         getHeader(event, "x-dspeak-device") || body.deviceId,
       );
     }
-    if (domain === "session" && event.method === "GET")
+    if (domain === "session" && !suffix && event.method === "GET")
       return await restoreAuthenticatedSession(event);
-    if (domain === "session" && event.method === "DELETE")
+    if (domain === "session" && !suffix && event.method === "DELETE")
       return await revokeAuthenticatedSession(event);
     if (domain === "config" && event.method === "GET")
       return createIceServers();

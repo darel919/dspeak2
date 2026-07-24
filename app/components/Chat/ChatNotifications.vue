@@ -19,6 +19,7 @@
       <button
         @click="removeNotification(notification.id)"
         class="btn btn-ghost btn-xs btn-circle"
+        :aria-label="`Dismiss ${notification.title}`"
       >
         <Icon name="lucide:x" class="h-4 w-4" />
       </button>

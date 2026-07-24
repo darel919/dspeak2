@@ -20,7 +20,7 @@
         >
           <div class="avatar avatar-online select-none pointer-events-none">
             <div class="w-20">
-              <img :src="profile.avatar" alt="User avatar" />
+              <img :src="profile.avatar" alt="" />
             </div>
           </div>
           <div class="min-w-0 flex-1">

@@ -22,7 +22,7 @@
       <span v-if="!isOwnMessage">{{
         identityStore.displayName(message.sender)
       }}</span>
-      <time class="text-xs opacity-50 ml-1 pb-1">{{
+      <time class="ml-1 pb-1 text-xs text-base-content/65">{{
         formatChatDisplayTime(message.created)
       }}</time>
       <!-- Message Actions: always render, but toggle visibility -->
@@ -61,20 +61,23 @@
       {{ message.content }}
       <span
         v-if="message.edited_at"
-        class="ml-1 inline-flex align-middle opacity-60"
+        class="ml-1 inline-flex align-middle text-base-content/65"
         title="Edited"
         aria-label="Edited"
       >
         <Icon name="lucide:pencil" class="size-3" />
       </span>
     </div>
-    <div v-else class="chat-bubble chat-bubble-secondary opacity-50 italic">
+    <div
+      v-else
+      class="chat-bubble chat-bubble-secondary border border-base-content/20 italic"
+    >
       [Unsupported message type]
     </div>
 
     <div
       v-if="isOwnMessage && (isPending || isFailed || hasBeenReadByOthers)"
-      class="chat-footer opacity-50"
+      class="chat-footer text-base-content/65"
     >
       <div class="flex items-center gap-1 text-xs">
         <template v-if="isPending">

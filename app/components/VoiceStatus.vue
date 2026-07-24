@@ -39,6 +39,7 @@
               <img
                 v-if="u.avatar"
                 :src="u.avatar"
+                :alt="identityStore.displayName(u)"
                 class="w-full h-full object-cover"
               />
               <span v-else class="select-none">{{

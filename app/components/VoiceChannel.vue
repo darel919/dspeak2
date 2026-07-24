@@ -15,7 +15,7 @@
       <div class="flex shrink-0 items-center gap-2" aria-live="polite">
         <div
           v-if="voiceStore.connecting && !voiceStore.connected"
-          class="flex items-center gap-2 text-sm text-info"
+          class="voice-connecting-status flex items-center gap-2 text-sm"
         >
           <span class="loading loading-spinner loading-sm"></span>
           <span class="hidden sm:inline">Connecting</span>
@@ -553,7 +553,7 @@
         <Icon name="lucide:phone-outgoing" class="size-9 text-primary" />
       </span>
       <p
-        class="mb-2 text-xs font-semibold uppercase tracking-widest text-primary"
+        class="mb-2 text-xs font-semibold uppercase tracking-widest text-white"
       >
         Voice channel
       </p>
@@ -567,7 +567,7 @@
       <button
         @click="joinThisChannel"
         :disabled="voiceStore.connecting"
-        class="btn btn-primary btn-lg"
+        class="btn btn-primary btn-lg disabled:opacity-100"
       >
         <Icon name="lucide:mic" class="size-6" />
 
@@ -795,6 +795,10 @@ onUnmounted(() =>
 <style scoped>
 .voice-channel {
   isolation: isolate;
+}
+
+.voice-connecting-status {
+  color: #63c7f2;
 }
 
 .voice-stage {

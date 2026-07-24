@@ -9,7 +9,7 @@
           <img
             v-if="room?.picture"
             :src="roomAssetUrl(room.picture)"
-            :alt="`${room.name} avatar`"
+            alt=""
             class="size-full object-cover"
           />
           <span v-else class="text-2xl font-semibold text-base-content/70">{{
@@ -20,46 +20,59 @@
           {{ room?.name || "Channels" }}
         </h3>
         <div class="dropdown dropdown-end absolute top-0 right-0">
-          <button tabindex="0" class="btn btn-ghost btn-sm btn-circle">
+          <button
+            ref="roomActionsButton"
+            tabindex="0"
+            class="btn btn-ghost btn-sm btn-circle"
+            aria-label="Room actions"
+          >
             <Icon name="lucide:ellipsis-vertical" class="h-5 w-5" />
           </button>
-          <div
-            tabindex="0"
+          <ul
             class="dropdown-content z-[1] menu w-52 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
           >
             <li v-if="hasPermission('channel.create')">
-              <a @click="showCreateChannel = true">Create channel</a>
+              <button type="button" @click="openCreateModal">
+                Create channel
+              </button>
             </li>
             <li>
-              <a
+              <button
+                type="button"
                 @click="goToRoomSettings"
                 class="cursor-pointer hover:bg-base-200"
               >
                 Room settings
-              </a>
+              </button>
             </li>
             <li>
-              <a
+              <button
+                type="button"
                 @click="inviteDialog?.open(room)"
                 class="cursor-pointer hover:bg-base-200"
-                >Copy invite link</a
               >
+                Copy invite link
+              </button>
             </li>
             <li v-if="isRoomOwnerOrAdmin">
-              <a
+              <button
+                type="button"
                 @click="handleDeleteRoom"
                 class="text-error cursor-pointer hover:bg-error/20"
-                >Delete room</a
               >
+                Delete room
+              </button>
             </li>
             <li v-else>
-              <a
+              <button
+                type="button"
                 @click="handleLeaveRoom"
                 class="text-warning cursor-pointer hover:bg-warning/20"
-                >Leave room</a
               >
+                Leave room
+              </button>
             </li>
-          </div>
+          </ul>
         </div>
       </div>
     </div>
@@ -79,7 +92,6 @@
           <div
             v-for="channel in textChannels"
             :key="channel.id"
-            @click="selectChannel(channel)"
             @contextmenu.prevent.stop="openChannelMenu(channel, $event)"
             class="metro-transition group flex cursor-pointer items-center gap-2 px-2 py-1 hover:bg-base-300"
             :class="{
@@ -87,35 +99,50 @@
                 selectedChannelId === channel.id,
             }"
           >
-            <span class="text-sm">#</span>
-            <span class="flex-1 text-sm truncate">{{ channel.name }}</span>
-            <div
-              v-if="getUnreadCount(channel.id)"
-              class="badge badge-primary badge-sm"
+            <button
+              type="button"
+              class="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left"
+              :aria-current="
+                selectedChannelId === channel.id ? 'page' : undefined
+              "
+              @click="selectChannel(channel)"
             >
-              {{ getUnreadCount(channel.id) }}
-            </div>
+              <span class="text-sm">#</span>
+              <span class="flex-1 truncate text-sm">{{ channel.name }}</span>
+              <span
+                v-if="getUnreadCount(channel.id)"
+                class="badge badge-primary badge-sm"
+              >
+                {{ getUnreadCount(channel.id) }}
+              </span>
+            </button>
             <!-- Channel actions dropdown -->
             <div class="dropdown dropdown-end" @click.stop>
               <button
                 tabindex="0"
-                class="btn btn-ghost btn-xs btn-circle opacity-0 group-hover:opacity-100"
+                class="btn btn-ghost btn-xs btn-circle"
+                :aria-label="`Actions for ${channel.name}`"
               >
                 <Icon name="lucide:ellipsis-vertical" class="h-3 w-3" />
               </button>
-              <div
-                tabindex="0"
+              <ul
                 class="dropdown-content z-[1] menu w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
               >
                 <li v-if="canEditChannel(channel)">
-                  <a @click="editChannel(channel)">Edit channel</a>
+                  <button type="button" @click="editChannel(channel)">
+                    Edit channel
+                  </button>
                 </li>
                 <li v-if="canDeleteChannel(channel)">
-                  <a @click="deleteChannel(channel)" class="text-error"
-                    >Delete channel</a
+                  <button
+                    type="button"
+                    class="text-error"
+                    @click="deleteChannel(channel)"
                   >
+                    Delete channel
+                  </button>
                 </li>
-              </div>
+              </ul>
             </div>
           </div>
         </div>
@@ -149,17 +176,19 @@
             ]"
           >
             <!-- Row (clickable) -->
-            <div
-              @click="selectChannel(channel)"
-              class="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-base-300"
-            >
-              <Icon name="lucide:volume-2" class="h-4 w-4" />
-
-              <span class="flex-1 text-sm truncate">{{
-                channel.name || "Voice Channel"
-              }}</span>
-
-              <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 px-2 py-1 hover:bg-base-300">
+              <button
+                type="button"
+                class="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+                :aria-current="
+                  selectedChannelId === channel.id ? 'page' : undefined
+                "
+                @click="selectChannel(channel)"
+              >
+                <Icon name="lucide:volume-2" class="h-4 w-4" />
+                <span class="flex-1 truncate text-sm">{{
+                  channel.name || "Voice Channel"
+                }}</span>
                 <div
                   v-if="
                     voiceStore.currentChannelId === channel.id &&
@@ -172,29 +201,36 @@
                     title="Connected to voice"
                   ></div>
                 </div>
+              </button>
 
+              <div class="flex items-center gap-2">
                 <!-- Options button (moved here from block end) -->
                 <div class="dropdown dropdown-end" @click.stop>
                   <button
                     tabindex="0"
-                    class="btn btn-ghost btn-xs btn-circle opacity-0 group-hover:opacity-100"
-                    title="Channel options"
+                    class="btn btn-ghost btn-xs btn-circle"
+                    :aria-label="`Actions for ${channel.name}`"
                   >
                     <Icon name="lucide:ellipsis-vertical" class="h-3 w-3" />
                   </button>
-                  <div
-                    tabindex="0"
+                  <ul
                     class="dropdown-content z-[1] menu w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
                   >
                     <li v-if="canEditChannel(channel)">
-                      <a @click="editChannel(channel)">Edit channel</a>
+                      <button type="button" @click="editChannel(channel)">
+                        Edit channel
+                      </button>
                     </li>
                     <li v-if="canDeleteChannel(channel)">
-                      <a @click="deleteChannel(channel)" class="text-error"
-                        >Delete channel</a
+                      <button
+                        type="button"
+                        class="text-error"
+                        @click="deleteChannel(channel)"
                       >
+                        Delete channel
+                      </button>
                     </li>
-                  </div>
+                  </ul>
                 </div>
               </div>
             </div>
@@ -303,7 +339,6 @@
                         ></span>
                       </button>
                       <div
-                        tabindex="0"
                         class="dropdown-content z-[20] mt-1 w-56 border border-base-300 bg-base-100 p-3 text-base-content shadow-xl"
                       >
                         <div class="truncate text-sm font-semibold">
@@ -529,10 +564,13 @@
     <!-- Create Channel Modal -->
     <div
       v-if="showCreateChannel"
+      ref="createModalElement"
       class="modal modal-open px-3 py-4 sm:px-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-channel-title"
+      @keydown.esc.prevent.stop="closeCreateModal"
+      @keydown.tab="trapModalFocus($event, createModalElement)"
     >
       <section
         class="modal-box flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
@@ -566,6 +604,7 @@
             <label class="grid gap-2">
               <span class="text-sm font-semibold">Channel name</span>
               <input
+                ref="createChannelNameInput"
                 v-model="newChannelName"
                 type="text"
                 placeholder="channel-name"
@@ -672,10 +711,13 @@
 
     <div
       v-if="showEditChannel"
+      ref="editModalElement"
       class="modal modal-open px-3 py-4 sm:px-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="edit-channel-title"
+      @keydown.esc.prevent.stop="closeEditModal"
+      @keydown.tab="trapModalFocus($event, editModalElement)"
     >
       <section
         class="modal-box flex max-h-[min(92dvh,56rem)] w-full max-w-2xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
@@ -714,6 +756,7 @@
                 <label class="grid gap-2">
                   <span class="text-sm font-semibold">Channel name</span>
                   <input
+                    ref="editChannelNameInput"
                     v-model="editingChannel.name"
                     type="text"
                     class="input input-bordered w-full"
@@ -791,6 +834,7 @@
                         v-model.number="editingChannelPolicy[field.key]"
                         type="range"
                         class="range range-primary flex-1"
+                        :aria-label="field.label"
                         :min="field.min"
                         :max="field.max"
                         :step="field.step"
@@ -1176,9 +1220,16 @@ function onParticipantMenuKeydown(event) {
 }
 const showCreateChannel = ref(false);
 const showEditChannel = ref(false);
+const roomActionsButton = ref(null);
+const createModalElement = ref(null);
+const createChannelNameInput = ref(null);
+const editModalElement = ref(null);
+const editChannelNameInput = ref(null);
 const editingChannel = ref(null);
 const editingChannelPolicy = ref({});
 const originalEditingChannelPolicy = ref({});
+let createReturnFocus = null;
+let editReturnFocus = null;
 const channelPolicyFields = computed(() =>
   Object.entries(MEDIA_POLICY_LIMITS).map(([key, limits]) => ({
     key,
@@ -1329,10 +1380,13 @@ async function handleCreateChannel() {
 }
 
 async function editChannel(channel) {
+  editReturnFocus = document.activeElement;
   editingChannel.value = { ...channel };
   editingChannelPolicy.value = { ...(channel.mediaPolicy || {}) };
   originalEditingChannelPolicy.value = { ...editingChannelPolicy.value };
   showEditChannel.value = true;
+  await nextTick();
+  editChannelNameInput.value?.focus();
 }
 
 async function handleEditChannel() {
@@ -1382,18 +1436,49 @@ function canEditChannel(channel) {
 }
 
 function closeCreateModal() {
+  const returnFocus = createReturnFocus;
   showCreateChannel.value = false;
   newChannelName.value = "";
   newChannelDesc.value = "";
   newChannelType.value = "text";
   newChannelBitrate.value = 48;
+  createReturnFocus = null;
+  nextTick(() => returnFocus?.isConnected && returnFocus.focus());
 }
 
 function closeEditModal() {
+  const returnFocus = editReturnFocus;
   showEditChannel.value = false;
   editingChannel.value = null;
   editingChannelPolicy.value = {};
   originalEditingChannelPolicy.value = {};
+  editReturnFocus = null;
+  nextTick(() => returnFocus?.isConnected && returnFocus.focus());
+}
+
+async function openCreateModal() {
+  createReturnFocus = roomActionsButton.value || document.activeElement;
+  showCreateChannel.value = true;
+  await nextTick();
+  createChannelNameInput.value?.focus();
+}
+
+function trapModalFocus(event, modal) {
+  const focusable = [
+    ...modal.querySelectorAll(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter((element) => !element.hidden && element.getClientRects().length);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function goToRoomSettings() {
@@ -1429,9 +1514,3 @@ watch(
   },
 );
 </script>
-
-<style scoped>
-.group:hover .group-hover\:opacity-100 {
-  opacity: 1;
-}
-</style>

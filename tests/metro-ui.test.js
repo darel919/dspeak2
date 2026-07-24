@@ -32,6 +32,10 @@ test("Metro foundations include shared layout, state, motion, and contrast primi
     assert.equal(css.includes(primitive), true, `${primitive} must be defined`);
   assert.match(css, /--metro-control-size: 2\.75rem/);
   assert.match(css, /outline: 2px solid var\(--metro-accent\)/);
+  assert.match(css, /\[data-theme="dark"\]/);
+  assert.match(css, /--color-base-100: #111214/);
+  assert.match(css, /--color-base-200: #17181c/);
+  assert.match(css, /--color-base-300: #24262b/);
 });
 
 test("primary settings, startup, and media surfaces avoid ornamental chrome", async () => {
@@ -71,6 +75,19 @@ test("authenticated page copy consistently calls shared spaces rooms", async () 
     source,
     /Join Server|Create Server|No servers|This server|Select a server/,
   );
+});
+
+test("home workspace uses a content-led Metro room composition", async () => {
+  const source = await readFile("app/pages/index.vue", "utf8");
+  assert.match(source, /class="home-workspace flex-1 overflow-y-auto"/);
+  assert.match(source, /class="border-l-8 border-primary/);
+  assert.match(source, /aria-labelledby="home-rooms-title"/);
+  assert.match(source, /v-for="room in roomsStore\.rooms"/);
+  assert.match(source, /class="home-room-tile metro-transition/);
+  assert.match(source, /v-if="roomsStore\.loading/);
+  assert.match(source, /v-else-if="roomsStore\.error/);
+  assert.doesNotMatch(source, /Welcome to dSpeak/);
+  assert.doesNotMatch(source, /text-center max-w-md/);
 });
 
 test("channel editor owns the complete live media policy", async () => {
@@ -150,7 +167,7 @@ test("room branding places the banner in navigation and the avatar above the roo
     /\.authenticated-shell \.h-screen-minus-navbar \{/,
   );
   assert.match(channels, /v-if="room\?\.picture"/);
-  assert.match(channels, /:alt="`\$\{room\.name\} avatar`"/);
+  assert.match(channels, /:src="roomAssetUrl\(room\.picture\)"\s+alt=""/);
   assert.doesNotMatch(channels, /room\?\.headerImage/);
 });
 

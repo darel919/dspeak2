@@ -10,6 +10,7 @@
               v-if="showBackButton"
               @click="$emit('back')"
               class="btn btn-ghost btn-sm btn-circle md:hidden"
+              aria-label="Back to channels"
             >
               <Icon name="lucide:chevron-left" class="h-5 w-5" />
             </button>
@@ -26,13 +27,15 @@
               <span v-else class="badge badge-info badge-sm rounded-xs"
                 >Text Channel</span
               >
-              <p
+              <h1
                 class="font-semibold text-md"
                 :title="channel?.desc || 'No description'"
               >
                 #{{ channel?.name || "Channel" }}
+              </h1>
+              <p class="text-sm text-base-content/65">
+                {{ room?.name || "Room" }}
               </p>
-              <p class="text-sm opacity-40">{{ room?.name || "Room" }}</p>
             </div>
           </div>
 
@@ -119,6 +122,7 @@
           <button
             @click="scrollToBottom"
             class="btn btn-circle btn-primary shadow-lg"
+            aria-label="Scroll to the latest message"
           >
             <Icon name="lucide:arrow-down" class="h-5 w-5" />
           </button>
@@ -140,9 +144,17 @@
         @close="closeDetailsModal"
       />
 
-      <div v-if="editingMessage" class="modal modal-open">
+      <div
+        v-if="editingMessage"
+        class="modal modal-open"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-message-title"
+      >
         <div class="modal-box">
-          <h3 class="text-lg font-bold">Edit message</h3>
+          <h3 id="edit-message-title" class="text-lg font-bold">
+            Edit message
+          </h3>
           <textarea
             v-model="editContent"
             class="textarea textarea-bordered mt-4 h-32 w-full"
@@ -171,9 +183,15 @@
         </div>
       </div>
 
-      <div v-if="deletingMessage" class="modal modal-open">
+      <div
+        v-if="deletingMessage"
+        class="modal modal-open"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-message-title"
+      >
         <div class="modal-box">
-          <h3 class="text-lg font-bold">
+          <h3 id="delete-message-title" class="text-lg font-bold">
             {{
               deletingMessage.sender?.id === currentUserId
                 ? "Unsend message?"
@@ -205,9 +223,17 @@
         </div>
       </div>
 
-      <div v-if="historyMessage" class="modal modal-open">
+      <div
+        v-if="historyMessage"
+        class="modal modal-open"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="message-history-title"
+      >
         <div class="modal-box max-w-2xl">
-          <h3 class="text-lg font-bold">Revision history</h3>
+          <h3 id="message-history-title" class="text-lg font-bold">
+            Revision history
+          </h3>
           <div v-if="historyLoading" class="mt-4 flex justify-center">
             <span class="loading loading-spinner"></span>
           </div>

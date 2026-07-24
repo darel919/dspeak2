@@ -17,7 +17,6 @@
           <Icon name="lucide:chevron-down" class="w-4 h-4" />
         </button>
         <div
-          tabindex="0"
           class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-80 max-h-96 overflow-y-auto"
         >
           <!-- Loading State -->
@@ -47,9 +46,10 @@
           <!-- Rooms List -->
           <div v-else-if="roomsStore.rooms.length > 0">
             <li v-for="room in roomsStore.rooms" :key="room.id">
-              <a
+              <button
+                type="button"
                 @click="navigateToRoom(room)"
-                class="flex items-center gap-3 p-2"
+                class="flex w-full items-center gap-3 p-2 text-left"
                 :class="{ active: modelValue === room.id }"
               >
                 <div class="avatar placeholder">
@@ -82,18 +82,26 @@
                     {{ room.desc || `${room.members.length} members` }}
                   </p>
                 </div>
-              </a>
+              </button>
             </li>
             <div class="divider my-1"></div>
             <li>
-              <a @click="showJoinModal = true" class="text-sm"
-                ><Icon name="lucide:link" class="w-4 h-4" />Join Room</a
+              <button
+                type="button"
+                class="text-sm"
+                @click="showJoinModal = true"
               >
+                <Icon name="lucide:link" class="w-4 h-4" />Join Room
+              </button>
             </li>
             <li>
-              <a @click="showCreateModal = true" class="text-sm"
-                ><Icon name="lucide:plus" class="w-4 h-4" />Create Room</a
+              <button
+                type="button"
+                class="text-sm"
+                @click="showCreateModal = true"
               >
+                <Icon name="lucide:plus" class="w-4 h-4" />Create Room
+              </button>
             </li>
           </div>
           <!-- Empty State -->
@@ -169,17 +177,21 @@
           class="dropdown dropdown-end"
           style="z-index: 1000"
         >
-          <button tabindex="0" class="btn btn-ghost btn-xs btn-circle">
+          <button
+            tabindex="0"
+            class="btn btn-ghost btn-xs btn-circle"
+            aria-label="More rooms"
+          >
             <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
           </button>
           <div
-            tabindex="0"
             class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-64"
           >
             <li v-for="room in hiddenRooms" :key="room.id">
-              <a
+              <button
+                type="button"
                 @click="navigateToRoom(room)"
-                class="flex items-center gap-2 text-sm"
+                class="flex w-full items-center gap-2 text-left text-sm"
                 :class="{ active: modelValue === room.id }"
               >
                 <div class="avatar placeholder">
@@ -203,7 +215,7 @@
                   v-if="hasActivity(room)"
                   class="w-2 h-2 bg-accent rounded-full ml-auto"
                 ></div>
-              </a>
+              </button>
             </li>
           </div>
         </div>
@@ -237,9 +249,15 @@
     </div>
 
     <!-- Join Room Modal -->
-    <div v-if="showJoinModal" class="modal modal-open">
+    <div
+      v-if="showJoinModal"
+      class="modal modal-open"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="join-room-title"
+    >
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Join Room</h3>
+        <h3 id="join-room-title" class="font-bold text-lg mb-4">Join Room</h3>
         <p class="text-base-content/70 mb-4">
           Enter a room ID or paste a join link to join a room.
         </p>
@@ -251,6 +269,7 @@
             v-model="joinInput"
             ref="joinInputRef"
             type="text"
+            aria-label="Room ID or join link"
             placeholder="Enter room ID or paste join link..."
             class="input input-bordered w-full"
             @keyup.enter="handleJoinSubmit"
@@ -285,9 +304,17 @@
     </div>
 
     <!-- Create Room Modal -->
-    <div v-if="showCreateModal" class="modal modal-open">
+    <div
+      v-if="showCreateModal"
+      class="modal modal-open"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-room-title"
+    >
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Create Room</h3>
+        <h3 id="create-room-title" class="font-bold text-lg mb-4">
+          Create Room
+        </h3>
         <div class="form-control mb-4">
           <label class="label">
             <span class="label-text"
@@ -298,6 +325,7 @@
             v-model="createName"
             ref="createNameRef"
             type="text"
+            aria-label="Room name"
             placeholder="Enter room name..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
@@ -310,6 +338,7 @@
           <input
             v-model="createDesc"
             type="text"
+            aria-label="Room description"
             placeholder="Optional description..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
@@ -355,17 +384,26 @@
           <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
         </button>
         <div
-          tabindex="0"
           class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52"
         >
-          <li><a @click="showJoinModal = true">Join Room</a></li>
-          <li><a @click="showCreateModal = true">Create Room</a></li>
           <li>
-            <a
+            <button type="button" @click="showJoinModal = true">
+              Join Room
+            </button>
+          </li>
+          <li>
+            <button type="button" @click="showCreateModal = true">
+              Create Room
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
               @click="inviteDialog?.open(selectedRoom)"
               :class="{ disabled: !selectedRoom }"
-              >Copy Invite Link</a
             >
+              Copy Invite Link
+            </button>
           </li>
         </div>
       </div>
