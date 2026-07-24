@@ -98,9 +98,11 @@ Before release:
    `bun run build`.
 3. Back up PocketBase and start the built server against the target migration
    environment.
-4. Confirm `/health` and authenticated `/metrics`, then restart the server with pending push
-   and offline-message work and confirm that processing resumes.
-5. Build and start the Docker Compose deployment and probe its public HTTP,
+4. Validate the enforced per-response nonce policy and browser flows in
+   [Content Security Policy](content-security-policy.md).
+5. Confirm `/health` and authenticated `/metrics`, then restart the server with
+   pending push and offline-message work and confirm that processing resumes.
+6. Build and start the Docker Compose deployment and probe its public HTTP,
    WebSocket, RTP, and TURN paths.
 
 ## Deployed device matrix

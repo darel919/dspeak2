@@ -9,6 +9,7 @@ const [
   signalingPolicy,
   rateLimit,
   security,
+  nuxtConfig,
   health,
   pushDelivery,
 ] = await Promise.all(
@@ -19,6 +20,7 @@ const [
     "../server/utils/media-signaling-policy.js",
     "../server/utils/rate-limit.js",
     "../server/middleware/security.js",
+    "../nuxt.config.ts",
     "../server/routes/health.js",
     "../server/utils/push-delivery.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
@@ -49,8 +51,11 @@ test("forwarded client addresses are trusted only when configured", () => {
   assert.match(rateLimit, /xForwardedFor: trustProxy/);
 });
 
-test("production CSP staging and cached health reads are explicit", () => {
-  assert.match(security, /Content-Security-Policy-Report-Only/);
+test("production CSP enforcement and cached health reads are explicit", () => {
+  assert.match(nuxtConfig, /nonce-\{\{nonce\}\}/);
+  assert.match(nuxtConfig, /"'strict-dynamic'"/);
+  assert.match(nuxtConfig, /contentSecurityPolicyReportOnly: false/);
+  assert.doesNotMatch(security, /Content-Security-Policy/);
   assert.match(health, /readTurnHealth/);
   assert.doesNotMatch(health, /probeSelfHostedTurn/);
   assert.match(health, /getPushMetrics/);

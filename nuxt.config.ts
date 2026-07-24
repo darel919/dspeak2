@@ -3,6 +3,8 @@ import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import packageMetadata from "./package.json" with { type: "json" };
 
+const isProduction = process.env.NODE_ENV === "production";
+
 function copyMediasoupWorker(nitro) {
   if (nitro.options.dev) return;
 
@@ -35,7 +37,79 @@ export default defineNuxtConfig({
   },
 
   css: ["~/assets/app.css"],
-  modules: ["@pinia/nuxt", "@vite-pwa/nuxt", "@nuxt/icon"],
+  modules: ["@pinia/nuxt", "@vite-pwa/nuxt", "@nuxt/icon", "nuxt-security"],
+
+  security: {
+    strict: false,
+    headers: {
+      crossOriginResourcePolicy: false,
+      crossOriginOpenerPolicy: false,
+      crossOriginEmbedderPolicy: false,
+      contentSecurityPolicy: isProduction
+        ? {
+            "default-src": ["'self'"],
+            "base-uri": ["'none'"],
+            "connect-src": ["'self'", "https:", "wss:"],
+            "font-src": ["'self'", "data:"],
+            "form-action": ["'self'"],
+            "frame-ancestors": ["'none'"],
+            "frame-src": ["'none'"],
+            "img-src": ["'self'", "data:", "blob:", "https:"],
+            "manifest-src": ["'self'"],
+            "media-src": ["'self'", "blob:"],
+            "object-src": ["'none'"],
+            "script-src": [
+              "'self'",
+              "'unsafe-inline'",
+              "'strict-dynamic'",
+              "'nonce-{{nonce}}'",
+              "'report-sample'",
+            ],
+            "script-src-attr": ["'none'"],
+            "style-src": ["'self'", "'unsafe-inline'", "'report-sample'"],
+            "style-src-attr": ["'unsafe-inline'"],
+            "worker-src": ["'self'", "blob:"],
+            "upgrade-insecure-requests": true,
+          }
+        : false,
+      originAgentCluster: "?1",
+      referrerPolicy: "strict-origin-when-cross-origin",
+      strictTransportSecurity: isProduction
+        ? {
+            maxAge: 31536000,
+            includeSubdomains: true,
+          }
+        : false,
+      xContentTypeOptions: "nosniff",
+      xDNSPrefetchControl: "off",
+      xDownloadOptions: "noopen",
+      xFrameOptions: "DENY",
+      xPermittedCrossDomainPolicies: "none",
+      xXSSProtection: "0",
+      permissionsPolicy: {
+        autoplay: ["self"],
+        camera: ["self"],
+        "display-capture": ["self"],
+        fullscreen: ["self"],
+        geolocation: [],
+        microphone: ["self"],
+        "screen-wake-lock": ["self"],
+      },
+    },
+    requestSizeLimiter: false,
+    rateLimiter: false,
+    xssValidator: false,
+    corsHandler: false,
+    allowedMethodsRestricter: false,
+    hidePoweredBy: true,
+    nonce: true,
+    ssg: false,
+    sri: true,
+    basicAuth: false,
+    csrf: false,
+    removeLoggers: false,
+    contentSecurityPolicyReportOnly: false,
+  },
 
   routeRules: {
     "/sw.js": {
