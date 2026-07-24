@@ -402,7 +402,7 @@ export function useHybridMediaSession() {
       ensureP2p,
       getHeartbeatSequence: () => heartbeatSequence,
       getLastHeartbeatAckSequence: () => lastHeartbeatAckSequence,
-      getSfu: () => sfu,
+      getSfu: ensureSfu,
       getSocket: () => socket,
       lastInRoom,
       participantSfuRoundTripTimes,
@@ -597,6 +597,8 @@ export function useHybridMediaSession() {
     getSfu: () => sfu,
     localSources,
     microphoneLevelDb,
+    onSpeakingChange: (userId, speaking) =>
+      registry.setExternalSpeaking(userId, speaking),
     settingsStore,
     sharedAudioStats,
     updateNoiseFloor,

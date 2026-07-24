@@ -38,3 +38,42 @@ test("media state synchronizes only after the authenticated server acknowledgeme
   assert.equal(localPeerId, "peer-1");
   assert.equal(synchronizations, 1);
 });
+
+test("producer snapshots are retained before SFU initialization", async () => {
+  const handlers = new Map();
+  const received = [];
+  let sessionRequests = 0;
+  const session = {
+    handle: (type, data) => received.push([type, data]),
+  };
+
+  setupMediaMessageHandlers({
+    ensureP2p: () => null,
+    getHeartbeatSequence: () => 0,
+    getLastHeartbeatAckSequence: () => 0,
+    getSfu: () => {
+      sessionRequests += 1;
+      return session;
+    },
+    getSocket: () => null,
+    lastInRoom: { value: [] },
+    participantSfuRoundTripTimes: { value: {} },
+    queueTopology: () => {},
+    registerHandler: (type, handler) => handlers.set(type, handler),
+    remoteProducersCount: { value: 0 },
+    setHeartbeatAck: () => {},
+    setLocalPeerId: () => {},
+    sfuProducerIds: () => [],
+    syncConnectedUsers: () => {},
+    voiceStore: {
+      updateUserVoiceState: () => {},
+      upsertUserProfile: () => {},
+    },
+  });
+
+  await handlers.get("available-producers")({ producers: ["producer-1"] });
+  assert.equal(sessionRequests, 1);
+  assert.deepEqual(received, [
+    ["available-producers", { producers: ["producer-1"] }],
+  ]);
+});

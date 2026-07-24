@@ -44,4 +44,6 @@ attenuation setting. While any room participant speaks, the remote playback
 gain follows the room reduction, attack, and release values unless the viewer
 has enabled or disabled attenuation with a personal override. Changes to the
 room policy, personal override, and speaking state apply to active shares
-without requiring a rejoin.
+without requiring a rejoin. Local microphone activity updates the playback
+gain directly. Remote microphone playback also drives attenuation from its
+decoded waveform, so topology changes do not interrupt speech priority.

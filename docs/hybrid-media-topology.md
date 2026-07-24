@@ -110,6 +110,10 @@ directional transport instead of allocating another mediasoup resource. A
 session can publish only one producer for each supported logical source:
 microphone audio, camera video, screen video, and screen audio. The server
 validates the source and RTP kind together before allocating the producer.
+Producer snapshots received before SFU transport initialization are retained by
+the client session and consumed after the receive transport is ready. This
+prevents an already-published microphone or shared-audio source from being
+missed when topology signaling and producer discovery arrive together.
 
 Initial and reconnected browser state is published after the server sends its
 authenticated `connected` acknowledgement. The raw WebSocket open event alone

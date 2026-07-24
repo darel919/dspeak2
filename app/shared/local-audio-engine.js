@@ -12,6 +12,7 @@ export function createLocalAudioEngine({
   getSfu,
   localSources,
   microphoneLevelDb,
+  onSpeakingChange,
   settingsStore,
   sharedAudioStats,
   updateNoiseFloor,
@@ -85,11 +86,13 @@ export function createLocalAudioEngine({
           if (!speaking) {
             speaking = true;
             voiceStore.updateUserSpeaking(userId, true);
+            onSpeakingChange?.(userId, true);
           }
           setMicrophoneTransmission(true);
         } else if (speaking && ++quietSamples >= 10) {
           speaking = false;
           voiceStore.updateUserSpeaking(userId, false);
+          onSpeakingChange?.(userId, false);
           setMicrophoneTransmission(false);
         } else if (!speaking) {
           setMicrophoneTransmission(false);
@@ -103,6 +106,7 @@ export function createLocalAudioEngine({
         );
     } catch (error) {
       voiceStore.updateUserSpeaking(userId, false);
+      onSpeakingChange?.(userId, false);
       console.warn(
         `[Media] Local voice detection is unavailable: ${error?.message || error}`,
       );
@@ -120,6 +124,7 @@ export function createLocalAudioEngine({
         console.warn("[Media] Local audio context close failed", error),
       );
     voiceStore.updateUserSpeaking(localVoiceDetector.userId, false);
+    onSpeakingChange?.(localVoiceDetector.userId, false);
     localVoiceDetector = null;
     setMicrophoneTransmission(true);
   }

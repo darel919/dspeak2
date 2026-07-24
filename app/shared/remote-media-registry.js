@@ -40,6 +40,7 @@ export class RemoteMediaRegistry {
     this.participantAudio = new Map();
     this.audioContext = null;
     this.voiceDetectionTimer = null;
+    this.externalSpeakingUsers = new Set();
   }
 
   bind(entry, { staged = false } = {}) {
@@ -88,6 +89,13 @@ export class RemoteMediaRegistry {
     }
   }
 
+  setExternalSpeaking(userId, speaking) {
+    const normalizedUserId = String(userId);
+    if (speaking) this.externalSpeakingUsers.add(normalizedUserId);
+    else this.externalSpeakingUsers.delete(normalizedUserId);
+    this.applyAttenuation();
+  }
+
   remove(key, owner = null) {
     const audio = this.audioFeeds.value.get(key);
     const video = this.videoFeeds.value.get(key);
@@ -121,6 +129,7 @@ export class RemoteMediaRegistry {
     for (const graph of this.participantAudio.values()) this.closeGraph(graph);
     this.participantAudio.clear();
     this.speakingUsers.clear();
+    this.externalSpeakingUsers.clear();
     this.stopVoiceDetectionScheduler();
     this.audioContext
       ?.close()
@@ -238,7 +247,11 @@ export class RemoteMediaRegistry {
   }
 
   attenuatedVolume(source, baseVolume) {
-    if (!this.speakingUsers.size && !this.isAnyoneSpeaking?.())
+    if (
+      !this.speakingUsers.size &&
+      !this.externalSpeakingUsers.size &&
+      !this.isAnyoneSpeaking?.()
+    )
       return baseVolume;
     if (!["screen-audio", "system-audio"].includes(source)) return baseVolume;
     const attenuation = this.getAttenuation?.() || { enabled: false };
@@ -289,7 +302,12 @@ export class RemoteMediaRegistry {
     try {
       await this.audioContext.resume();
       await Promise.all(
-        [...graph.tracks.values()].map((track) => track.audio.play()),
+        [...graph.tracks.values()].map((track) => {
+          const streamTrack = track.audio.srcObject?.getAudioTracks?.()[0];
+          if (streamTrack !== track.entry.track)
+            track.audio.srcObject = new MediaStream([track.entry.track]);
+          return track.audio.play();
+        }),
       );
       this.publishPlaybackState(graph.userId, "ready");
       return true;
@@ -357,14 +375,18 @@ export class RemoteMediaRegistry {
       const playbackTrack = graph?.tracks.get(entry.key);
       if (!graph || !playbackTrack)
         throw new Error("Audio graph is unavailable");
+      const detectionSource = this.audioContext.createMediaStreamSource(
+        new MediaStream([entry.track]),
+      );
       const analyser = this.audioContext.createAnalyser();
       analyser.fftSize = 256;
-      playbackTrack.source.connect(analyser);
+      detectionSource.connect(analyser);
       const samples = new Uint8Array(analyser.fftSize);
       let speaking = false;
       let quietSamples = 0;
       this.voiceDetectors.set(entry.key, {
         analyser,
+        source: detectionSource,
         samples,
         speaking,
         quietSamples,
@@ -409,6 +431,7 @@ export class RemoteMediaRegistry {
   stopVoiceDetection(key) {
     const detector = this.voiceDetectors.get(key);
     if (!detector) return;
+    detector.source.disconnect();
     detector.analyser.disconnect();
     this.onSpeaking(detector.userId, false);
     this.speakingUsers.delete(String(detector.userId));

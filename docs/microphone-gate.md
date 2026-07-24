@@ -7,14 +7,15 @@ screen share, shared audio, soundboards, and remote playback remain independent.
 ## Modes
 
 - **Automatic:** Measures the local noise floor and chooses an opening threshold.
-  This is the default when no preference has been saved. The estimator uses the
-  quietest portion of a rolling five-second input window, so it can bootstrap
-  from raw room noise and is not dependent on browser echo cancellation, noise
-  suppression, or automatic gain control. The opening level stays 16 dB above
-  the estimated floor, bounded between -56 dBFS and -28 dBFS, so moderate bumps
-  in room noise remain closed. While the gate is open, speech freezes upward
-  adjustment. A continuously open signal can establish the initial floor only
-  after remaining nearly level for three seconds.
+  This is used after a person explicitly enables the gate. New and reset
+  browsers leave the gate disabled so microphone transport is fail-open. The
+  estimator uses the quietest portion of a rolling five-second input window, so
+  it can bootstrap from raw room noise and is not dependent on browser echo
+  cancellation, noise suppression, or automatic gain control. The opening level
+  stays 16 dB above the estimated floor, bounded between -56 dBFS and -28 dBFS,
+  so moderate bumps in room noise remain closed. While the gate is open, speech
+  freezes upward adjustment. A continuously open signal can establish the
+  initial floor only after remaining nearly level for three seconds.
 - **Manual:** Uses a user-selected threshold from -60 dBFS to -20 dBFS.
 - **Bypassed:** HD audio channels always bypass the gate. The saved setting is
   retained and applies again when the user joins a standard audio channel.

@@ -1,13 +1,13 @@
 export const DEFAULT_MICROPHONE_GATE = Object.freeze({
-  enabled: true,
+  enabled: false,
   automatic: true,
   thresholdDb: -48,
 });
 
-export function normalizeMicrophoneGate(value = {}) {
+export function normalizeMicrophoneGate(value = DEFAULT_MICROPHONE_GATE) {
   const threshold = Number(value?.thresholdDb);
   return {
-    enabled: value?.enabled !== false,
+    enabled: value?.enabled ?? DEFAULT_MICROPHONE_GATE.enabled,
     automatic: value?.automatic !== false,
     thresholdDb: Number.isFinite(threshold)
       ? Math.min(-20, Math.max(-60, Math.round(threshold)))

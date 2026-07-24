@@ -9,9 +9,9 @@ import {
   updateNoiseFloor,
 } from "../app/shared/microphone-gate.js";
 
-test("microphone gate defaults to enabled automatic mode", () => {
+test("microphone gate defaults to fail-open automatic mode", () => {
   assert.deepEqual(normalizeMicrophoneGate(), {
-    enabled: true,
+    enabled: false,
     automatic: true,
     thresholdDb: -48,
   });

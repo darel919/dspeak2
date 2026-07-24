@@ -26,6 +26,10 @@ class FakeAudioContext {
     return { connect() {}, disconnect() {} };
   }
 
+  createMediaStreamSource() {
+    return { connect() {}, disconnect() {} };
+  }
+
   close() {
     return Promise.resolve();
   }
@@ -195,6 +199,65 @@ test("disabled stream attenuation preserves system audio volume", () => {
   });
 
   assert.equal(registry.attenuatedVolume("screen-audio", 1), 1);
+});
+
+test("local speaking transitions immediately apply stream attenuation", () => {
+  const registry = createRegistry({
+    getAttenuation: () => ({
+      enabled: true,
+      reductionPercent: 100,
+    }),
+  });
+
+  registry.setExternalSpeaking("local-user", true);
+  assert.equal(registry.attenuatedVolume("screen-audio", 1), 0);
+  registry.setExternalSpeaking("local-user", false);
+  assert.equal(registry.attenuatedVolume("screen-audio", 1), 1);
+});
+
+test("remote microphone VAD analyses the received track directly", () => {
+  const originalMediaStream = globalThis.MediaStream;
+  const receivedTracks = [];
+  const detectionSource = { connect() {}, disconnect() {} };
+  const registry = createRegistry();
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+  };
+  registry.audioContext = {
+    createAnalyser: () => ({
+      connect() {},
+      disconnect() {},
+      fftSize: 0,
+    }),
+    createMediaStreamSource: (stream) => {
+      receivedTracks.push(...stream.tracks);
+      return detectionSource;
+    },
+  };
+  registry.participantAudio.set("person-a", {
+    tracks: new Map([["person-a:audio", {}]]),
+  });
+
+  try {
+    const track = { kind: "audio" };
+    registry.startVoiceDetection({
+      key: "person-a:audio",
+      source: "audio",
+      track,
+      userId: "person-a",
+    });
+    assert.deepEqual(receivedTracks, [track]);
+    assert.equal(
+      registry.voiceDetectors.get("person-a:audio").source,
+      detectionSource,
+    );
+  } finally {
+    registry.participantAudio.clear();
+    registry.stopVoiceDetection("person-a:audio");
+    globalThis.MediaStream = originalMediaStream;
+  }
 });
 
 test("remote playback is unlocked before delayed tracks arrive", async () => {
