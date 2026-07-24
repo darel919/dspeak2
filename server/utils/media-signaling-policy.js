@@ -6,6 +6,7 @@ const supportedMessageTypes = new Set([
   "heartbeat",
   "media-sources",
   "participant-voice-state",
+  "attenuation-state",
   "p2p-signal",
   "p2p-ready",
   "topology-ready",
@@ -85,6 +86,15 @@ function validMessageData(type, data) {
     case "participant-voice-state":
       return (
         typeof data.muted === "boolean" && typeof data.deafened === "boolean"
+      );
+    case "attenuation-state":
+      return (
+        isIdentifier(data.targetPeerId) &&
+        data.source === "screen-audio" &&
+        typeof data.active === "boolean" &&
+        isFiniteNumber(data.effectivePercent) &&
+        Number(data.effectivePercent) >= 0 &&
+        Number(data.effectivePercent) <= 200
       );
     case "p2p-signal":
       return (

@@ -272,3 +272,38 @@ test("remote playback is unlocked before delayed tracks arrive", async () => {
     globalThis.window = originalWindow;
   }
 });
+
+test("a transient first playback failure schedules recovery", async () => {
+  const registry = createRegistry();
+  registry.audioContext = new FakeAudioContext();
+  let scheduled = null;
+  registry.scheduleGraphResume = (graph) => {
+    scheduled = graph;
+  };
+  const receivedTrack = { id: "shared-audio" };
+  const graph = {
+    context: registry.audioContext,
+    resumeAttempt: 0,
+    resumePromise: null,
+    resumeTimer: null,
+    tracks: new Map([
+      [
+        "remote:user:screen-audio",
+        {
+          audio: {
+            play: async () => {
+              throw new Error("media element is not ready");
+            },
+            srcObject: { getAudioTracks: () => [receivedTrack] },
+          },
+          entry: { track: receivedTrack },
+        },
+      ],
+    ]),
+    userId: "user",
+  };
+
+  assert.equal(await registry.resumeGraph(graph), false);
+  assert.equal(scheduled, graph);
+  assert.equal(graph.resumePromise, null);
+});

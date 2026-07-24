@@ -546,6 +546,44 @@ onBeforeUnmount(() => {
                 @input="voiceStore.setSharedAudioVolume($event.target.value)"
               />
               <div
+                class="mt-2 flex items-center gap-2 text-xs"
+                aria-live="polite"
+              >
+                <span class="font-medium">
+                  {{
+                    voiceStore.sharedAudioAttenuation.active
+                      ? "Speech priority active"
+                      : "Effective"
+                  }}
+                </span>
+                <progress
+                  class="progress progress-primary h-1.5 flex-1"
+                  max="100"
+                  :value="
+                    Math.round(
+                      (voiceStore.sharedAudioVolume *
+                        voiceStore.sharedAudioAttenuation.effectivePercent) /
+                        100,
+                    )
+                  "
+                ></progress>
+                <span class="tabular-nums">
+                  {{
+                    Math.round(
+                      (voiceStore.sharedAudioVolume *
+                        voiceStore.sharedAudioAttenuation.effectivePercent) /
+                        100,
+                    )
+                  }}%
+                </span>
+              </div>
+              <p class="mt-1 text-xs text-base-content/60">
+                {{ voiceStore.sharedAudioAttenuation.reportingListeners }}/{{
+                  voiceStore.sharedAudioAttenuation.expectedListeners
+                }}
+                listeners confirmed
+              </p>
+              <div
                 class="mt-2 flex items-center gap-2 text-xs text-base-content/60"
               >
                 <progress

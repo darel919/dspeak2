@@ -27,3 +27,10 @@ export const VIDEO_RESOLUTION_OPTIONS = Object.freeze([
   { value: "2160p", label: "2160p (4K)" },
 ]);
 export const SCREEN_FPS_WARNING_SAMPLES = 3;
+export const MEDIA_TIMING = Object.freeze({
+  connectionTimeoutMs: 10000,
+  handoffTimeoutMs: 8000,
+  heartbeatIntervalMs: 5000,
+  heartbeatTimeoutMs: 15000,
+  readinessPollMs: 200,
+});

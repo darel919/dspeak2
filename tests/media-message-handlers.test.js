@@ -77,3 +77,38 @@ test("producer snapshots are retained before SFU initialization", async () => {
     ["available-producers", { producers: ["producer-1"] }],
   ]);
 });
+
+test("listener attenuation acknowledgements reach the session owner", () => {
+  const handlers = new Map();
+  const reports = [];
+  setupMediaMessageHandlers({
+    ensureP2p: () => null,
+    getHeartbeatSequence: () => 0,
+    getLastHeartbeatAckSequence: () => 0,
+    getSfu: () => null,
+    getSocket: () => null,
+    lastInRoom: { value: [] },
+    onAttenuationState: (data) => reports.push(data),
+    participantSfuRoundTripTimes: { value: {} },
+    queueTopology: () => {},
+    registerHandler: (type, handler) => handlers.set(type, handler),
+    remoteProducersCount: { value: 0 },
+    setHeartbeatAck: () => {},
+    setLocalPeerId: () => {},
+    sfuProducerIds: () => [],
+    syncConnectedUsers: () => {},
+    voiceStore: {
+      updateUserVoiceState: () => {},
+      upsertUserProfile: () => {},
+    },
+  });
+
+  handlers.get("attenuation-state")({
+    active: true,
+    effectivePercent: 0,
+    fromPeerId: "listener-1",
+    source: "screen-audio",
+  });
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].fromPeerId, "listener-1");
+});

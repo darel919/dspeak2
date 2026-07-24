@@ -521,6 +521,41 @@
         <span class="w-10 text-right text-xs tabular-nums"
           >{{ voiceStore.sharedAudioVolume }}%</span
         >
+        <div class="flex min-w-56 flex-1 items-center gap-2" aria-live="polite">
+          <span class="whitespace-nowrap text-xs font-medium">
+            {{
+              voiceStore.sharedAudioAttenuation.active
+                ? "Speech priority active"
+                : "Effective volume"
+            }}
+          </span>
+          <progress
+            class="progress progress-primary h-2 min-w-20 flex-1"
+            max="100"
+            :value="
+              Math.round(
+                (voiceStore.sharedAudioVolume *
+                  voiceStore.sharedAudioAttenuation.effectivePercent) /
+                  100,
+              )
+            "
+          ></progress>
+          <span class="w-9 text-right text-xs tabular-nums">
+            {{
+              Math.round(
+                (voiceStore.sharedAudioVolume *
+                  voiceStore.sharedAudioAttenuation.effectivePercent) /
+                  100,
+              )
+            }}%
+          </span>
+          <span class="whitespace-nowrap text-xs text-base-content/60">
+            {{ voiceStore.sharedAudioAttenuation.reportingListeners }}/{{
+              voiceStore.sharedAudioAttenuation.expectedListeners
+            }}
+            listeners confirmed
+          </span>
+        </div>
         <div
           class="flex items-center gap-2"
           :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"

@@ -79,6 +79,49 @@ test("media signaling accepts the supported transport command schemas", () => {
     }),
   );
   assert.equal(consume.data.producerId, "producer-1");
+
+  const attenuation = parseSignalingMessage(
+    JSON.stringify({
+      type: "attenuation-state",
+      data: {
+        active: true,
+        effectivePercent: 0,
+        source: "screen-audio",
+        targetPeerId: "peer-2",
+      },
+    }),
+  );
+  assert.equal(attenuation.data.effectivePercent, 0);
+});
+
+test("media signaling rejects malformed attenuation reports", () => {
+  for (const data of [
+    {
+      active: "yes",
+      effectivePercent: 0,
+      source: "screen-audio",
+      targetPeerId: "peer-2",
+    },
+    {
+      active: true,
+      effectivePercent: 201,
+      source: "screen-audio",
+      targetPeerId: "peer-2",
+    },
+    {
+      active: true,
+      effectivePercent: 0,
+      source: "audio",
+      targetPeerId: "peer-2",
+    },
+  ])
+    assert.throws(
+      () =>
+        parseSignalingMessage(
+          JSON.stringify({ type: "attenuation-state", data }),
+        ),
+      /message data/,
+    );
 });
 
 test("media signaling token budget refills but remains bounded", () => {

@@ -11,6 +11,10 @@ import { createMediaTopologyView } from "~/shared/media-topology-view.js";
 import { setupMediaMessageHandlers } from "~/shared/media-message-handlers.js";
 import { createMediaSourceController } from "~/shared/media-source-controller.js";
 import {
+  createMediaAttenuationReporter,
+  summarizeMediaAttenuation,
+} from "~/shared/media-attenuation-reporter.js";
+import {
   waitForInitialMediaTopology,
   waitForMediaHandoff,
 } from "~/shared/media-handoff-readiness.js";
@@ -21,6 +25,7 @@ import {
 } from "~/shared/rtc-media-stats.js";
 import { hasUsableVoiceRoute } from "~/shared/voice-join-readiness.js";
 import { buildP2pVideoSenderOptions } from "~/shared/video-settings.js";
+import { MEDIA_TIMING } from "~/const/media.js";
 import {
   buildVoiceProducerOptions,
   getAudioBitrateBps,
@@ -44,12 +49,6 @@ import {
   updateNoiseFloor,
 } from "~/shared/microphone-gate.js";
 
-const connectionTimeoutMs = 10000;
-const mediaHandoffTimeoutMs = 8000;
-const mediaReadinessPollMs = 200;
-const signalingHeartbeatIntervalMs = 5000;
-const signalingHeartbeatTimeoutMs = 15000;
-
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig();
   const authStore = useAuthStore();
@@ -70,6 +69,7 @@ export function useHybridMediaSession() {
   const lastInRoom = ref([]);
   const remoteProducersCount = ref(0);
   const sharedAudioStats = ref({ kbps: 0, level: 0, dbfs: -60 });
+  const attenuationReports = ref(new Map());
   const peerRoundTripTimes = ref({});
   const peerConnectionMetrics = ref({});
   const sfuRoundTripTime = ref(null);
@@ -181,6 +181,23 @@ export function useHybridMediaSession() {
           : "transport-connecting";
       }
     },
+    onEffectiveGain: (state) => attenuationReporter.report(state),
+  });
+
+  const attenuationReporter = createMediaAttenuationReporter({
+    getLocalPeerId: () => localPeerId,
+    getPeers: () => topologyState.value.peers,
+    onReportsChange: (reports) => {
+      attenuationReports.value = reports;
+    },
+    send,
+  });
+  const sharedAudioAttenuation = computed(() => {
+    return summarizeMediaAttenuation(
+      attenuationReports.value,
+      topologyState.value.peers,
+      localPeerId,
+    );
   });
 
   watch(
@@ -264,7 +281,7 @@ export function useHybridMediaSession() {
       const timeout = setTimeout(() => {
         candidate.close();
         reject(new Error("Media signaling connection timed out"));
-      }, connectionTimeoutMs);
+      }, MEDIA_TIMING.connectionTimeoutMs);
       candidate.onopen = () => {
         if (socket !== candidate) return;
         clearTimeout(timeout);
@@ -314,7 +331,7 @@ export function useHybridMediaSession() {
       setWaiter: (waiter) => {
         topologyWaiter = waiter;
       },
-      timeoutMs: connectionTimeoutMs,
+      timeoutMs: MEDIA_TIMING.connectionTimeoutMs,
     });
   }
 
@@ -331,6 +348,7 @@ export function useHybridMediaSession() {
       peers: [],
       activatedAt: null,
     };
+    attenuationReporter.clear();
   }
 
   function startKeepalive() {
@@ -338,7 +356,7 @@ export function useHybridMediaSession() {
     lastHeartbeatAckAt = Date.now();
     lastHeartbeatAckSequence = heartbeatSequence;
     const heartbeat = () => {
-      if (Date.now() - lastHeartbeatAckAt >= signalingHeartbeatTimeoutMs) {
+      if (Date.now() - lastHeartbeatAckAt >= MEDIA_TIMING.heartbeatTimeoutMs) {
         console.warn("[Media] signaling heartbeat acknowledgement timed out");
         socket?.close(4000, "Signaling heartbeat timed out");
         return;
@@ -354,7 +372,7 @@ export function useHybridMediaSession() {
       });
     };
     heartbeat();
-    pingTimer = setInterval(heartbeat, signalingHeartbeatIntervalMs);
+    pingTimer = setInterval(heartbeat, MEDIA_TIMING.heartbeatIntervalMs);
   }
 
   function stopKeepalive() {
@@ -413,6 +431,7 @@ export function useHybridMediaSession() {
         sourceController.sendSourceState();
         sendParticipantVoiceState();
       },
+      onAttenuationState: attenuationReporter.receive,
       setHeartbeatAck: (sequence, acknowledgedAt) => {
         lastHeartbeatAckSequence = sequence;
         lastHeartbeatAckAt = acknowledgedAt;
@@ -623,6 +642,7 @@ export function useHybridMediaSession() {
       displayMode:
         data.mode === "probing" && previousProvider ? "switching" : null,
     };
+    attenuationReporter.prune();
     topologyWaiter?.();
     if (data.mode === activeProvider) {
       await updateActiveTopology(data);
@@ -867,9 +887,9 @@ export function useHybridMediaSession() {
       getSfu: () => sfu,
       handoff,
       localSources,
-      pollIntervalMs: mediaReadinessPollMs,
+      pollIntervalMs: MEDIA_TIMING.readinessPollMs,
       provider,
-      timeoutMs: mediaHandoffTimeoutMs,
+      timeoutMs: MEDIA_TIMING.handoffTimeoutMs,
       topology,
       topologyEventKey,
       topologyState,
@@ -927,6 +947,7 @@ export function useHybridMediaSession() {
     getSfu: () => sfu,
     localSources,
     localVideoFeeds,
+    onSharedAudioStopped: attenuationReporter.clear,
     producerFacade,
     refreshPublicMaps,
     reportSfuFailure,
@@ -989,6 +1010,7 @@ export function useHybridMediaSession() {
     stopKeepalive();
     stopLocalVoiceDetection();
     stopSharedAudioMeter();
+    attenuationReporter.clear();
     capture.stopDeviceMonitoring();
     socket?.close();
     socket = null;
@@ -1030,6 +1052,7 @@ export function useHybridMediaSession() {
     remoteVideoFeeds: readonly(remoteVideoFeeds),
     remoteAudioFeeds: readonly(remoteAudioFeeds),
     sharedAudioStats: readonly(sharedAudioStats),
+    sharedAudioAttenuation,
     peerRoundTripTimes: readonly(peerRoundTripTimes),
     peerConnectionMetrics: readonly(peerConnectionMetrics),
     sfuRoundTripTime: readonly(sfuRoundTripTime),

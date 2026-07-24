@@ -9,6 +9,7 @@ export function createMediaSourceController({
   getSfu,
   localSources,
   localVideoFeeds,
+  onSharedAudioStopped,
   producerFacade,
   refreshPublicMaps,
   reportSfuFailure,
@@ -121,7 +122,10 @@ export function createMediaSourceController({
     getSfu()?.removeSource(entry.source);
     localVideoFeeds.value.delete(entry.source);
     localVideoFeeds.value = new Map(localVideoFeeds.value);
-    if (entry.source === "screen-audio") stopSharedAudioMeter();
+    if (entry.source === "screen-audio") {
+      stopSharedAudioMeter();
+      onSharedAudioStopped?.();
+    }
     sendSourceState();
     refreshPublicMaps();
     if (

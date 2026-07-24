@@ -338,6 +338,7 @@ test("room accent changes persist and propagate immediately", async () => {
   assert.match(rooms, /applyRealtimeRoomUpdate/);
   assert.match(presence, /message\?\.type === "room_updated"/);
   assert.match(api, /type: "room_updated"/);
+  assert.match(api, /data\.attenuation = normalizeAttenuation/);
   assert.match(api, /A room member must have at least one role/);
   assert.match(api, /Assigned roles must belong to this room/);
 });

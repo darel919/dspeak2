@@ -47,6 +47,8 @@ room policy, personal override, and speaking state apply to active shares
 without requiring a rejoin. Local microphone activity updates the playback
 gain directly. Remote microphone playback also drives attenuation from its
 decoded waveform, so topology changes do not interrupt speech priority.
+Room policy saves are broadcast to connected room members immediately so every
+listener applies the same current reduction and timing values.
 
 The sender creates and resumes the shared-audio processing graph before
 publishing its destination track to P2P or SFU. Starting system audio therefore
@@ -59,3 +61,8 @@ Starting a share fails visibly if either required provider rejects it, and any
 partial publication is removed instead of leaving a silent source registered.
 If the processed destination track ends, the share follows the normal source
 teardown path instead of remaining as a zero-bitrate producer.
+
+Remote playback retries transient media-element startup failures with bounded
+backoff and retries again when the received track becomes unmuted. A browser
+readiness race on the first consumer therefore does not require the sharer to
+stop and restart system audio.

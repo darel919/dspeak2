@@ -25,6 +25,7 @@ import {
   releaseRoomReservation,
 } from "./room-lifecycle";
 import { validP2pSignal } from "./p2p-signal";
+import { relayMediaAttenuationState } from "./media-attenuation-state";
 import { publicDisplayName } from "../../shared/user-profile.js";
 import {
   isMediaSignalHeartbeatExpired,
@@ -47,9 +48,7 @@ import {
   removeMediaUserState,
 } from "./media-user-state.js";
 import { collectSfuMetrics } from "./mediasoup-metrics.js";
-
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
-
 function send(peer, type, data) {
   try {
     peer.send(JSON.stringify({ type, data }));
@@ -61,7 +60,6 @@ function send(peer, type, data) {
     return false;
   }
 }
-
 async function publicTransportData(transport, config) {
   return {
     id: transport.id,
@@ -75,7 +73,6 @@ async function publicTransportData(transport, config) {
     sctpParameters: transport.sctpParameters,
   };
 }
-
 function serializeError(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -483,6 +480,9 @@ async function handleMessage(state, session, message) {
       );
       return;
     }
+
+    case "attenuation-state":
+      return relayMediaAttenuationState(session, data, send);
 
     case "p2p-signal": {
       const targetPeerId = String(data.targetPeerId || "");

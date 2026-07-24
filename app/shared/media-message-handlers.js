@@ -15,6 +15,7 @@ export function setupMediaMessageHandlers({
   voiceStore,
   ensureP2p,
   onServerConnected,
+  onAttenuationState,
 }) {
   registerHandler("connected", (data) => {
     setLocalPeerId(String(data.peerId));
@@ -28,6 +29,7 @@ export function setupMediaMessageHandlers({
       queueTopology(data.topology);
   });
   registerHandler("topology-state", queueTopology);
+  registerHandler("attenuation-state", onAttenuationState);
   registerHandler("p2p-signal", async (data) => {
     const mesh = ensureP2p();
     if (!mesh) return;

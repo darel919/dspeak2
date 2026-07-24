@@ -23,6 +23,7 @@ export class RemoteMediaRegistry {
     getAttenuation,
     onVideoReceivingChange,
     onPlaybackState,
+    onEffectiveGain,
   }) {
     this.audioFeeds = audioFeeds;
     this.videoFeeds = videoFeeds;
@@ -35,6 +36,7 @@ export class RemoteMediaRegistry {
     this.getAttenuation = getAttenuation;
     this.onVideoReceivingChange = onVideoReceivingChange;
     this.onPlaybackState = onPlaybackState;
+    this.onEffectiveGain = onEffectiveGain;
     this.voiceDetectors = new Map();
     this.speakingUsers = new Set();
     this.participantAudio = new Map();
@@ -151,7 +153,16 @@ export class RemoteMediaRegistry {
     this.audioContainer().appendChild(audio);
     const source = this.audioContext.createMediaElementSource(audio);
     const gain = this.audioContext.createGain();
-    const track = { active: !staged, audio, entry, gain, source };
+    const handleUnmute = () => this.resumeGraph(graph);
+    entry.track.addEventListener?.("unmute", handleUnmute);
+    const track = {
+      active: !staged,
+      audio,
+      entry,
+      gain,
+      handleUnmute,
+      source,
+    };
     source.connect(gain);
     gain.connect(graph.context.destination);
     graph.tracks.set(entry.key, track);
@@ -169,6 +180,9 @@ export class RemoteMediaRegistry {
       context,
       tracks: new Map(),
       userId: normalizedUserId,
+      resumeAttempt: 0,
+      resumePromise: null,
+      resumeTimer: null,
     };
     this.participantAudio.set(normalizedUserId, graph);
     return graph;
@@ -278,6 +292,13 @@ export class RemoteMediaRegistry {
     track.gain.gain.setValueAtTime(track.gain.gain.value, now);
     if (immediate) track.gain.gain.setValueAtTime(target, now);
     else track.gain.gain.linearRampToValueAtTime(target, now + duration / 1000);
+    if (track.entry.source === "screen-audio")
+      this.onEffectiveGain?.({
+        active: target < baseVolume,
+        baseVolume,
+        effectiveVolume: target,
+        entry: track.entry,
+      });
   }
 
   applyAttenuation() {
@@ -299,6 +320,14 @@ export class RemoteMediaRegistry {
   }
 
   async resumeGraph(graph) {
+    if (graph.resumePromise) return graph.resumePromise;
+    graph.resumePromise = this.performGraphResume(graph).finally(() => {
+      graph.resumePromise = null;
+    });
+    return graph.resumePromise;
+  }
+
+  async performGraphResume(graph) {
     try {
       await this.audioContext.resume();
       await Promise.all(
@@ -309,12 +338,34 @@ export class RemoteMediaRegistry {
           return track.audio.play();
         }),
       );
+      graph.resumeAttempt = 0;
+      clearTimeout(graph.resumeTimer);
+      graph.resumeTimer = null;
       this.publishPlaybackState(graph.userId, "ready");
       return true;
     } catch (error) {
       this.publishPlaybackState(graph.userId, "blocked", error);
+      this.scheduleGraphResume(graph);
       return false;
     }
+  }
+
+  scheduleGraphResume(graph) {
+    if (
+      graph.resumeTimer ||
+      !graph.tracks.size ||
+      this.isDeafened() ||
+      this.isBroadcastMode()
+    )
+      return;
+    const delay = Math.min(4000, 250 * 2 ** graph.resumeAttempt);
+    graph.resumeAttempt = Math.min(graph.resumeAttempt + 1, 4);
+    graph.resumeTimer = setTimeout(() => {
+      graph.resumeTimer = null;
+      if (!graph.tracks.size) return;
+      this.resumeGraph(graph);
+    }, delay);
+    graph.resumeTimer?.unref?.();
   }
 
   async recoverOutputDevice(output, userId, error) {
@@ -347,6 +398,7 @@ export class RemoteMediaRegistry {
     if (!graph || !track) return;
     track.source.disconnect();
     track.gain.disconnect();
+    track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
     track.audio.pause();
     track.audio.srcObject = null;
     track.audio.remove();
@@ -358,9 +410,13 @@ export class RemoteMediaRegistry {
   }
 
   closeGraph(graph) {
+    clearTimeout(graph.resumeTimer);
+    graph.resumeTimer = null;
+    graph.resumePromise = null;
     for (const track of graph.tracks.values()) {
       track.source.disconnect();
       track.gain.disconnect();
+      track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
       track.audio.pause();
       track.audio.srcObject = null;
       track.audio.remove();

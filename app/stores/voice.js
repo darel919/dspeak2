@@ -37,6 +37,15 @@ export const useVoiceStore = defineStore("voice", () => {
     () =>
       sfuComposable.value?.sharedAudioStats || { kbps: 0, level: 0, dbfs: -60 },
   );
+  const sharedAudioAttenuation = computed(
+    () =>
+      sfuComposable.value?.sharedAudioAttenuation || {
+        active: false,
+        effectivePercent: 100,
+        expectedListeners: 0,
+        reportingListeners: 0,
+      },
+  );
   const effectiveSystemAudioBitrate = computed(() => {
     const requested = Number(settingsStore.systemAudioBitrate) || 128;
     const channelLimit = Number(
@@ -720,6 +729,7 @@ export const useVoiceStore = defineStore("voice", () => {
     systemAudioSharing,
     sharedAudioVolume,
     sharedAudioStats,
+    sharedAudioAttenuation,
     effectiveSystemAudioBitrate,
     sfuComposable,
     joinVoiceChannel,

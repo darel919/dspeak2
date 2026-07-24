@@ -465,11 +465,14 @@ export function createRoomsApiHandler(dependencies) {
       const updated = await pb
         .collection("dspeak_rooms")
         .update(room.id, update);
-      if (body.accent !== undefined)
-        broadcastGlobally({
-          type: "room_updated",
-          data: { id: updated.id, accent: normalizeRoomAccent(updated.accent) },
-        });
+      if (body.accent !== undefined || body.attenuation !== undefined) {
+        const data = { id: updated.id };
+        if (body.accent !== undefined)
+          data.accent = normalizeRoomAccent(updated.accent);
+        if (body.attenuation !== undefined)
+          data.attenuation = normalizeAttenuation(updated.attenuation);
+        broadcastGlobally({ type: "room_updated", data });
+      }
       return roomDetails(pb, updated, userId);
     }
 
