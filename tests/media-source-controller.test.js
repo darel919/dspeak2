@@ -69,6 +69,25 @@ test("failed SFU publication never advertises a local source", async () => {
   assert.equal(harness.failures.length, 1);
 });
 
+test("a missing active transport cannot report publication success", async () => {
+  const harness = controller();
+
+  await assert.rejects(
+    harness.instance.publishSource({
+      source: "audio",
+      stream: {},
+      track: { id: "microphone", readyState: "live" },
+    }),
+    /active SFU transport is unavailable/,
+  );
+
+  assert.equal(harness.localSources.size, 0);
+  assert.equal(
+    harness.sent.some((message) => message.type === "media-sources"),
+    false,
+  );
+});
+
 test("failed processed shared audio publication closes its processing graph", async () => {
   const harness = controller({
     getSfu: () => ({
@@ -129,4 +148,37 @@ test("failed processed shared audio publication closes its processing graph", as
 
   assert.equal(harness.closed, true);
   assert.equal(harness.localSources.size, 0);
+});
+
+test("new sources publish to the active and preparing transports", async () => {
+  const published = [];
+  const harness = controller({
+    getActiveProvider: () => "sfu",
+    getP2pMesh: () => ({
+      async publishSource(source) {
+        published.push(`p2p:${source}`);
+      },
+    }),
+    getSfu: () => ({
+      async addSource(entry) {
+        published.push(`sfu:${entry.source}`);
+      },
+    }),
+    topologyState: {
+      value: {
+        mode: "probing",
+        target: "p2p",
+        epoch: 2,
+        sourceRevision: 3,
+      },
+    },
+  });
+
+  await harness.instance.publishSource({
+    source: "screen-audio",
+    stream: {},
+    track: { id: "system-audio", readyState: "live" },
+  });
+
+  assert.deepEqual(published, ["p2p:screen-audio", "sfu:screen-audio"]);
 });

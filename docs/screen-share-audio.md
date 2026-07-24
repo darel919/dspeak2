@@ -59,6 +59,11 @@ captured track so system audio remains available.
 Publication is transactional across the active and preparing transports.
 Starting a share fails visibly if either required provider rejects it, and any
 partial publication is removed instead of leaving a silent source registered.
+The active transport and a handoff target receive a new source concurrently, so
+an SFU-to-P2P or P2P-to-SFU transition cannot strand the source on only the
+preparing route. P2P source identity is signaled before adding a track; this
+prevents the first shared-audio track from being mistaken for microphone audio
+when negotiation and `ontrack` complete quickly.
 If the processed destination track ends, the share follows the normal source
 teardown path instead of remaining as a zero-bitrate producer.
 

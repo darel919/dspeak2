@@ -27,21 +27,33 @@ export function createMediaSourceController({
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
     const previous = localSources.get(entry.source);
+    const activeProvider = getActiveProvider();
     const p2pRequired =
+      activeProvider === "p2p" ||
       topologyState.value.mode === "p2p" ||
       topologyState.value.mode === "probing" ||
       topologyState.value.target === "p2p";
     const sfuRequired =
+      activeProvider === "sfu" ||
       topologyState.value.mode === "sfu" ||
       topologyState.value.target === "sfu";
+    const p2pMesh = getP2pMesh();
+    const sfu = getSfu();
     try {
-      if (p2pRequired)
-        await getP2pMesh()?.publishSource(
-          entry.source,
-          entry.track,
-          entry.stream,
-        );
-      if (sfuRequired) await getSfu()?.addSource(entry);
+      if (p2pRequired && !p2pMesh)
+        throw new Error("The active P2P transport is unavailable");
+      if (sfuRequired && !sfu)
+        throw new Error("The active SFU transport is unavailable");
+      const publications = await Promise.allSettled([
+        p2pRequired
+          ? p2pMesh.publishSource(entry.source, entry.track, entry.stream)
+          : Promise.resolve(),
+        sfuRequired ? sfu.addSource(entry) : Promise.resolve(),
+      ]);
+      const rejected = publications.find(
+        (publication) => publication.status === "rejected",
+      );
+      if (rejected) throw rejected.reason;
       const captureTrack = entry.captureTrack || entry.track;
       if (
         captureTrack.readyState === "ended" ||

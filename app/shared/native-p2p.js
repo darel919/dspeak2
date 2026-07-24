@@ -669,6 +669,7 @@ export class NativeP2pMesh {
       this.signal(state.peerId, { sourceRestored: { source } });
       return existing;
     }
+    this.signal(state.peerId, { source: { trackId: entry.track.id, source } });
     const sender = state.pc.addTrack(
       entry.track,
       entry.stream || new MediaStream([entry.track]),
@@ -687,7 +688,6 @@ export class NativeP2pMesh {
       this.fail("sender-configuration-failed", error);
       throw error;
     }
-    this.signal(state.peerId, { source: { trackId: entry.track.id, source } });
     return sender;
   }
 

@@ -164,6 +164,33 @@ test("P2P source toggles reuse their sender instead of accumulating transceivers
   ]);
 });
 
+test("P2P identifies a new source before negotiation can deliver its track", async () => {
+  const operations = [];
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: ({ signal }) =>
+      operations.push(`signal:${signal.source?.source}`),
+  });
+  const state = {
+    peerId: "peer-2",
+    senders: new Map(),
+    sourceReceiving: new Map(),
+    pc: {
+      addTrack() {
+        operations.push("add-track");
+        return {};
+      },
+    },
+  };
+
+  await mesh.attachSource(state, "screen-audio", {
+    stream: {},
+    track: { id: "system-audio" },
+  });
+
+  assert.deepEqual(operations, ["signal:screen-audio", "add-track"]);
+});
+
 test("P2P source restoration republishes the preserved remote receiver track", async () => {
   const restored = [];
   const mesh = new NativeP2pMesh({
