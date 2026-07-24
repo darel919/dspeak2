@@ -106,7 +106,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
   function receiveRealtime(message) {
     if (message?.type === "notification_created" && message.data)
       inbox.value = [message.data, ...inbox.value];
-    if (message?.type === "notifications_changed") fetchInbox().catch(() => {});
+    if (message?.type === "notifications_changed")
+      fetchInbox().catch((cause) => {
+        error.value = cause.message;
+      });
     if (message?.type === "notifications_read") {
       const ids = new Set(message.data?.ids || []);
       const readAt = new Date().toISOString();

@@ -117,12 +117,12 @@ username is available. Compact member surfaces show only the preferred public
 identity. A member's expanded profile card also shows the display name, or the
 identity-provider full name when no display name is available.
 
-`PATCH /dspeak/profile` updates the handle, display name, or avatar. Duplicate
+`PATCH /api/profile` updates the handle, display name, or avatar. Duplicate
 handles return HTTP 409. Avatars accept JPEG, PNG, or WebP files up to 5 MB.
 
 `dspeak_user_nicknames` stores one private nickname per `(owner, target)` pair.
-`GET /dspeak/profile/nicknames` returns nicknames only to their owner.
-`PUT /dspeak/profile/nickname` creates, changes, or clears one. A nickname never
+`GET /api/profile/nicknames` returns nicknames only to their owner.
+`PUT /api/profile/nickname` creates, changes, or clears one. A nickname never
 changes the target user's public profile; it is applied locally in chat, member,
 and voice displays.
 

@@ -46,7 +46,7 @@ export function usePresence(userId) {
     }
     intentionallyDisconnected = false;
     const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-    const base = config.public.websocketPath || `${origin}/dspeak`;
+    const base = config.public.websocketPath || `${origin}/api`;
     const wsUrl = `${base}/presence`;
     debugLog("[usePresence] Connecting to:", wsUrl);
     ws = new WebSocket(wsUrl);

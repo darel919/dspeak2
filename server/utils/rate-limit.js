@@ -1,5 +1,7 @@
 const stateKey = Symbol.for("dspeak.rate-limit");
 const maximumEntries = 10_000;
+const pruneIntervalMs = 30_000;
+let nextPruneAt = 0;
 
 function getState() {
   if (!globalThis[stateKey]) globalThis[stateKey] = new Map();
@@ -15,12 +17,19 @@ function prune(state, now) {
   for (const key of [...state.keys()].slice(0, overflow)) state.delete(key);
 }
 
+export function resolveClientIp(event) {
+  const trustProxy = process.env.DSPEAK_TRUST_PROXY === "true";
+  return getRequestIP(event, { xForwardedFor: trustProxy }) || "unknown";
+}
+
 export function enforceRateLimit(event, scope, identity, limit, windowMs) {
   const state = getState();
   const now = Date.now();
-  prune(state, now);
-  const fallbackIdentity =
-    getRequestIP(event, { xForwardedFor: true }) || "unknown";
+  if (now >= nextPruneAt || state.size > maximumEntries) {
+    prune(state, now);
+    nextPruneAt = now + pruneIntervalMs;
+  }
+  const fallbackIdentity = resolveClientIp(event);
   const key = `${scope}:${identity || fallbackIdentity}`;
   let entry = state.get(key);
   if (!entry || entry.resetAt <= now) {

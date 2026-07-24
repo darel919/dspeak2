@@ -4,7 +4,15 @@
     class="flex items-center gap-2 px-3 py-1 bg-success/10 rounded-lg"
   >
     <Icon name="lucide:mic" class="w-4 h-4 text-success" />
-    <span class="text-sm text-success font-medium">Voice Connected</span>
+    <span class="text-sm text-success font-medium">{{ connectionLabel }}</span>
+    <button
+      v-if="playbackBlocked"
+      type="button"
+      class="btn btn-xs btn-warning"
+      @click="retryPlayback"
+    >
+      Enable audio
+    </button>
 
     <div class="flex items-center gap-2 ml-2">
       <!-- Live participants preview -->
@@ -85,4 +93,19 @@ import { useIdentityStore } from "~/stores/identity";
 
 const voiceStore = useVoiceStore();
 const identityStore = useIdentityStore();
+const connectionLabel = computed(() => {
+  const state = voiceStore.sfuComposable?.mediaConnectionState;
+  if (state === "media-flowing") return "Media flowing";
+  if (state === "ready-no-active-media") return "Ready, no active media";
+  if (state === "playback-blocked") return "Playback needs attention";
+  if (state === "reconnecting") return "Media reconnecting";
+  if (state === "transport-connecting") return "Transport connecting";
+  return "Voice session ready";
+});
+const playbackBlocked = computed(
+  () => voiceStore.sfuComposable?.mediaConnectionState === "playback-blocked",
+);
+async function retryPlayback() {
+  await voiceStore.sfuComposable?.ensureAudioElements?.();
+}
 </script>

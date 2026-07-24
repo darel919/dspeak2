@@ -5,6 +5,15 @@ import { MediasoupClientSession } from "~/shared/mediasoup-client-session.js";
 import { NativeP2pMesh } from "~/shared/native-p2p.js";
 import { RemoteMediaRegistry } from "~/shared/remote-media-registry.js";
 import { RemoteMediaHandoff } from "~/shared/remote-media-handoff.js";
+import { createHybridMediaDiagnostics } from "~/shared/hybrid-media-diagnostics.js";
+import { createLocalAudioEngine } from "~/shared/local-audio-engine.js";
+import { createMediaTopologyView } from "~/shared/media-topology-view.js";
+import { setupMediaMessageHandlers } from "~/shared/media-message-handlers.js";
+import { createMediaSourceController } from "~/shared/media-source-controller.js";
+import {
+  waitForInitialMediaTopology,
+  waitForMediaHandoff,
+} from "~/shared/media-handoff-readiness.js";
 import { addressFamily, buildTopologyGraph } from "~/shared/rtc-topology.js";
 import {
   collectOutboundAudioStats,
@@ -51,6 +60,8 @@ export function useHybridMediaSession() {
   const error = ref(null);
   const transportReady = ref(false);
   const iceConnectedBoth = ref(false);
+  const mediaConnectionState = ref("disconnected");
+  const playbackState = ref("idle");
   const localVideoFeeds = ref(new Map());
   const remoteVideoFeeds = ref(new Map());
   const remoteAudioFeeds = ref(new Map());
@@ -91,10 +102,6 @@ export function useHybridMediaSession() {
   let reconnectTimer = null;
   let reconnectAttempt = 0;
   let topologyWaiter = null;
-  let localVoiceDetector = null;
-  let microphoneTransmissionEnabled = true;
-  let sharedAudioMeter = null;
-  let sharedAudioStatsSample = null;
   let topologyOperation = Promise.resolve();
   let pendingTopologyKey = null;
   let appliedTopologyKey = null;
@@ -134,18 +141,40 @@ export function useHybridMediaSession() {
     },
     onVideoReceivingChange: (entry, receiving) => {
       if (entry.provider === "sfu")
-        sfu?.setRemoteReceiving(entry.userId, entry.source, receiving);
+        sfu
+          ?.setRemoteReceiving(entry.userId, entry.source, receiving)
+          .catch((receivingError) => {
+            error.value =
+              receivingError.message || "Remote media state change failed";
+          });
       if (entry.provider === "p2p")
         p2pMesh?.setRemoteReceiving(entry.peerId, entry.source, receiving);
     },
+    onPlaybackState: ({ state }) => {
+      playbackState.value = state;
+      if (state === "blocked" || state === "output-blocked") {
+        mediaConnectionState.value = "playback-blocked";
+        iceConnectedBoth.value = false;
+      } else if (
+        state === "ready" &&
+        mediaConnectionState.value === "playback-blocked"
+      ) {
+        const readiness = sfu?.connectionState();
+        mediaConnectionState.value = readiness?.ready
+          ? "media-flowing"
+          : "transport-connecting";
+      }
+    },
   });
 
+  let sourceController;
   const capture = new MediaCaptureManager({
     getSettings: () => settingsStore,
     getAudioStereo,
     onMicrophoneFallback: () => settingsStore.setMicDeviceId(null),
-    onSource: publishSource,
-    onSourceEnded: removeSource,
+    onSource: (entry) => sourceController.publishSource(entry),
+    onSourceEnded: (entry, options) =>
+      sourceController.removeSource(entry, options),
   });
   const handoff = new RemoteMediaHandoff(registry);
 
@@ -163,23 +192,17 @@ export function useHybridMediaSession() {
     return false;
   }
 
-  function registerHandler(type, handler) {
-    messageHandlers.set(type, handler);
-  }
-
-  async function fetchIceServers() {
-    const result = await $fetch(`${runtimeConfig.public.apiPath}/config`);
-    if (!Array.isArray(result))
-      throw new Error("The ICE server configuration is invalid");
-    iceServers = result;
-  }
-
   async function connect(nextChannelId) {
     if (connected.value && channelId === nextChannelId) return;
     intentionalClose = false;
     channelId = nextChannelId;
     error.value = null;
-    await fetchIceServers();
+    const nextIceServers = await $fetch(
+      `${runtimeConfig.public.apiPath}/config`,
+    );
+    if (!Array.isArray(nextIceServers))
+      throw new Error("The ICE server configuration is invalid");
+    iceServers = nextIceServers;
     setupHandlers();
     await openSocket();
     await waitForInitialTopology();
@@ -204,7 +227,7 @@ export function useHybridMediaSession() {
         clearTimeout(timeout);
         connected.value = true;
         reconnectAttempt = 0;
-        sendSourceState();
+        sourceController.sendSourceState();
         sendParticipantVoiceState();
         startKeepalive();
         resolve();
@@ -245,17 +268,12 @@ export function useHybridMediaSession() {
   }
 
   function waitForInitialTopology() {
-    if (topologyState.value.epoch > 0) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        topologyWaiter = null;
-        reject(new Error("Initial media topology timed out"));
-      }, connectionTimeoutMs);
-      topologyWaiter = () => {
-        clearTimeout(timeout);
-        topologyWaiter = null;
-        resolve();
-      };
+    return waitForInitialMediaTopology({
+      isReady: () => topologyState.value.epoch > 0,
+      setWaiter: (waiter) => {
+        topologyWaiter = waiter;
+      },
+      timeoutMs: connectionTimeoutMs,
     });
   }
 
@@ -323,7 +341,7 @@ export function useHybridMediaSession() {
   function handleMessage(raw) {
     let message;
     try {
-      if (typeof raw !== "string" || raw.length > 600000)
+      if (typeof raw !== "string" || raw.length > 96000)
         throw new Error("Invalid signaling payload");
       message = JSON.parse(raw);
     } catch (_) {
@@ -339,109 +357,28 @@ export function useHybridMediaSession() {
 
   function setupHandlers() {
     if (messageHandlers.size) return;
-    registerHandler("connected", (data) => {
-      localPeerId = String(data.peerId);
+    setupMediaMessageHandlers({
+      ensureP2p,
+      getHeartbeatSequence: () => heartbeatSequence,
+      getLastHeartbeatAckSequence: () => lastHeartbeatAckSequence,
+      getSfu: () => sfu,
+      getSocket: () => socket,
+      lastInRoom,
+      participantSfuRoundTripTimes,
+      queueTopology,
+      registerHandler: (type, handler) => messageHandlers.set(type, handler),
+      remoteProducersCount,
+      setHeartbeatAck: (sequence, acknowledgedAt) => {
+        lastHeartbeatAckSequence = sequence;
+        lastHeartbeatAckAt = acknowledgedAt;
+      },
+      setLocalPeerId: (peerId) => {
+        localPeerId = peerId;
+      },
+      sfuProducerIds,
+      syncConnectedUsers,
+      voiceStore,
     });
-    registerHandler("heartbeat-ack", (data) => {
-      const sequence = Number(data.sequence);
-      if (
-        !Number.isSafeInteger(sequence) ||
-        sequence <= lastHeartbeatAckSequence ||
-        sequence > heartbeatSequence
-      )
-        return;
-      lastHeartbeatAckSequence = sequence;
-      lastHeartbeatAckAt = Date.now();
-    });
-    registerHandler("heartbeat-nack", (data) => {
-      const sequence = Number(data.sequence);
-      if (
-        !Number.isSafeInteger(sequence) ||
-        sequence <= lastHeartbeatAckSequence ||
-        sequence > heartbeatSequence
-      )
-        return;
-      lastHeartbeatAckSequence = sequence;
-      lastHeartbeatAckAt = Date.now();
-      if (data.topology) queueTopology(data.topology);
-    });
-    registerHandler("topology-state", queueTopology);
-    registerHandler("p2p-signal", async (data) => {
-      const mesh = ensureP2p();
-      if (!mesh) return;
-      try {
-        await mesh.receiveSignal(data);
-      } catch (signalError) {
-        mesh.fail("signaling-failed", signalError);
-      }
-    });
-    registerHandler("currentlyInChannel", (data) => {
-      lastInRoom.value = Array.isArray(data.inRoom) ? data.inRoom : [];
-      for (const profile of Array.isArray(data.profiles) ? data.profiles : [])
-        voiceStore.upsertUserProfile(profile);
-      syncConnectedUsers(data.inRoom);
-      for (const participantState of Array.isArray(data.participantStates)
-        ? data.participantStates
-        : []) {
-        voiceStore.updateUserVoiceState(
-          participantState.userId,
-          participantState,
-        );
-      }
-    });
-    registerHandler("available-producers", (data) => {
-      remoteProducersCount.value = (data.producers || []).filter(
-        (id) => ![...sfuProducerIds()].includes(id),
-      ).length;
-      return sfu?.handle("available-producers", data);
-    });
-    registerHandler("new-producer", (data) => {
-      remoteProducersCount.value += 1;
-      return sfu?.handle("new-producer", data);
-    });
-    registerHandler("producer-closed", (data) => {
-      remoteProducersCount.value = Math.max(0, remoteProducersCount.value - 1);
-      return sfu?.handle("producer-closed", data);
-    });
-    registerHandler("participant-sfu-rtt", (data) => {
-      if (data.userId && Number.isFinite(Number(data.rttMs))) {
-        participantSfuRoundTripTimes.value = {
-          ...participantSfuRoundTripTimes.value,
-          [data.userId]: Number(data.rttMs),
-        };
-      }
-    });
-    registerHandler("server-shutdown", () => socket?.close());
-    registerHandler("voice-moderation", (data) => {
-      if (typeof window !== "undefined")
-        window.dispatchEvent(
-          new CustomEvent("dspeak:voice-moderation", { detail: data }),
-        );
-    });
-    registerHandler("soundboard-triggered", (data) => {
-      if (typeof window !== "undefined")
-        window.dispatchEvent(
-          new CustomEvent("dspeak:soundboard-triggered", { detail: data }),
-        );
-    });
-    registerHandler("soundboard-library-updated", (data) => {
-      if (typeof window !== "undefined")
-        window.dispatchEvent(
-          new CustomEvent("dspeak:soundboard-library-updated", {
-            detail: data,
-          }),
-        );
-    });
-    for (const type of [
-      "rtp-capabilities",
-      "transport-params",
-      "transport-connected",
-      "producer-id",
-      "consumer-params",
-      "error",
-    ]) {
-      registerHandler(type, (data) => sfu?.handle(type, data));
-    }
   }
 
   function ensureP2p() {
@@ -453,9 +390,10 @@ export function useHybridMediaSession() {
           send({ type: "p2p-ready", data: payload });
         else send({ type: "p2p-signal", data: payload });
       },
-      onRemoteTrack: (entry) => stageRemote({ ...entry, provider: "p2p" }),
+      onRemoteTrack: (entry) =>
+        handoff.stage({ ...entry, provider: "p2p" }, activeProvider),
       onRemoteTrackEnded: (entry) =>
-        removeRemote({ ...entry, provider: "p2p" }),
+        handoff.remove({ ...entry, provider: "p2p" }),
       onFailure: (failure) => send({ type: "p2p-failed", data: failure }),
       onSnapshot: updateP2pStats,
       getAudioStereo,
@@ -516,11 +454,28 @@ export function useHybridMediaSession() {
     sfu = new MediasoupClientSession({
       send,
       iceServers,
-      onRemoteTrack: (entry) => stageRemote(entry),
-      onRemoteTrackEnded: removeRemote,
-      onStateChange: (_, state) => {
-        if (state === "failed" && topologyState.value.mode === "sfu")
+      onRemoteTrack: (entry) => handoff.stage(entry, activeProvider),
+      onRemoteTrackEnded: (entry) => handoff.remove(entry),
+      onStateChange: (_, state, summary) => {
+        if (topologyState.value.mode !== "sfu") return;
+        if (state === "failed" || state === "closed") {
+          mediaConnectionState.value = "failed";
           reportSfuFailure("media-transport-failed");
+          return;
+        }
+        transportReady.value = summary.ready;
+        iceConnectedBoth.value =
+          summary.sendRequired &&
+          summary.receiveRequired &&
+          summary.send === "connected" &&
+          summary.recv === "connected";
+        mediaConnectionState.value = summary.ready
+          ? summary.sendRequired || summary.receiveRequired
+            ? "transport-connected"
+            : "ready-no-active-media"
+          : state === "disconnected"
+            ? "reconnecting"
+            : "transport-connecting";
       },
       getAudioBitrate: getEffectiveAudioBitrate,
       getAudioStereo,
@@ -569,17 +524,37 @@ export function useHybridMediaSession() {
     );
   }
 
-  function microphoneGateEnabled() {
-    return settingsStore.microphoneGate.enabled && !getAudioStereo("audio");
-  }
-
-  function setMicrophoneTransmission(enabled) {
-    const next = Boolean(enabled) || !microphoneGateEnabled();
-    if (next === microphoneTransmissionEnabled) return;
-    microphoneTransmissionEnabled = next;
-    p2pMesh?.setSourceTransmission("audio", next).catch(() => {});
-    sfu?.setSourceTransmission("audio", next).catch(() => {});
-  }
+  const {
+    createSharedAudioSource,
+    producerFacade,
+    refreshAudioSenderSettings,
+    refreshMediaPolicy,
+    setMicrophoneTransmission,
+    setSharedAudioVolume,
+    setSystemAudioBitrate,
+    startLocalVoiceDetection,
+    startSharedAudioMeter,
+    stopLocalVoiceDetection,
+    stopSharedAudioMeter,
+  } = createLocalAudioEngine({
+    authStore,
+    automaticGateThreshold,
+    capture,
+    collectOutboundAudioStats,
+    createNoiseFloorEstimator,
+    getActiveProvider: () => activeProvider,
+    getAudioStereo,
+    getEffectiveAudioBitrate,
+    getP2pMesh: () => p2pMesh,
+    getRequestedVideoSettings,
+    getSfu: () => sfu,
+    localSources,
+    microphoneLevelDb,
+    settingsStore,
+    sharedAudioStats,
+    updateNoiseFloor,
+    voiceStore,
+  });
 
   async function applyTopology(data) {
     if (Number(data.epoch) < topologyState.value.epoch) return;
@@ -618,7 +593,8 @@ export function useHybridMediaSession() {
       sfuRoundTripTime.value = null;
       participantSfuRoundTripTimes.value = {};
       transportReady.value = true;
-      iceConnectedBoth.value = true;
+      iceConnectedBoth.value = false;
+      mediaConnectionState.value = "ready-no-active-media";
       refreshPublicMaps();
       refreshTopologyGraph();
       return;
@@ -636,7 +612,8 @@ export function useHybridMediaSession() {
       for (const entry of localSources.values())
         mesh.publishSource(entry.source, entry.track, entry.stream);
       transportReady.value = true;
-      iceConnectedBoth.value = true;
+      iceConnectedBoth.value = false;
+      mediaConnectionState.value = "topology-probing";
       refreshTopologyGraph();
       return;
     }
@@ -661,8 +638,21 @@ export function useHybridMediaSession() {
       p2pMesh = null;
       handoff.retire("p2p");
     }
-    transportReady.value = true;
-    iceConnectedBoth.value = true;
+    const readiness =
+      data.mode === "sfu" ? sfu?.connectionState() : { ready: true };
+    transportReady.value = readiness?.ready === true;
+    iceConnectedBoth.value =
+      data.mode === "sfu"
+        ? readiness.sendRequired &&
+          readiness.receiveRequired &&
+          readiness.send === "connected" &&
+          readiness.recv === "connected"
+        : p2pMesh?.isMediaReady() === true;
+    mediaConnectionState.value = transportReady.value
+      ? iceConnectedBoth.value
+        ? "media-flowing"
+        : "ready-no-active-media"
+      : "transport-connecting";
     error.value = null;
     refreshPublicMaps();
     refreshTopologyGraph();
@@ -694,6 +684,7 @@ export function useHybridMediaSession() {
     send({ type: "sfu-failed", data: { epoch, reason } });
     transportReady.value = false;
     iceConnectedBoth.value = false;
+    mediaConnectionState.value = "failed";
     console.warn(
       `[Media] SFU failure reported for topology epoch ${epoch}: ${reason}`,
     );
@@ -769,6 +760,7 @@ export function useHybridMediaSession() {
     sfu?.closeMedia();
     transportReady.value = true;
     iceConnectedBoth.value = true;
+    mediaConnectionState.value = "media-flowing";
     error.value = null;
     preparedTransition = null;
     refreshPublicMaps();
@@ -777,6 +769,7 @@ export function useHybridMediaSession() {
 
   async function activateSfu(data) {
     transportReady.value = false;
+    mediaConnectionState.value = "transport-connecting";
     const session = ensureSfu();
     await session.initialize();
     for (const entry of localSources.values()) await session.addSource(entry);
@@ -789,7 +782,15 @@ export function useHybridMediaSession() {
     p2pMesh?.closeAll();
     p2pMesh = null;
     transportReady.value = true;
-    iceConnectedBoth.value = true;
+    const readiness = session.connectionState();
+    iceConnectedBoth.value =
+      readiness.sendRequired &&
+      readiness.receiveRequired &&
+      readiness.send === "connected" &&
+      readiness.recv === "connected";
+    mediaConnectionState.value = iceConnectedBoth.value
+      ? "media-flowing"
+      : "ready-no-active-media";
     error.value = null;
     preparedTransition = null;
     refreshPublicMaps();
@@ -797,314 +798,20 @@ export function useHybridMediaSession() {
   }
 
   function waitForRemoteTracks(provider, topology) {
-    const startedAt = Date.now();
-    return new Promise((resolve, reject) => {
-      const poll = () => {
-        if (topologyEventKey(topology) !== latestTopologyKey) {
-          reject(new Error("Topology handoff was superseded"));
-          return;
-        }
-        const expected = topologyState.value.peers
-          .filter((peer) => String(peer.peerId) !== String(localPeerId))
-          .reduce(
-            (count, peer) =>
-              count + (Array.isArray(peer.sources) ? peer.sources.length : 0),
-            0,
-          );
-        const tracksReady = handoff.hasExpectedFeeds(
-          provider,
-          topologyState.value.peers,
-          localPeerId,
-        );
-        const mediaReady =
-          provider === "p2p" ? !!p2pMesh?.isMediaReady() : false;
-        const check =
-          provider === "sfu" && tracksReady
-            ? sfu?.mediaReadiness(expected).catch((readinessError) => ({
-                ready: false,
-                error: readinessError.message,
-              }))
-            : Promise.resolve({ ready: mediaReady });
-        check.then((readiness) => {
-          const flowing = readiness?.ready === true;
-          if (
-            (tracksReady && flowing) ||
-            (expected === 0 && localSources.size === 0)
-          ) {
-            resolve();
-            return;
-          }
-          if (Date.now() - startedAt >= mediaHandoffTimeoutMs) {
-            const detail =
-              provider === "sfu"
-                ? `tracks ${handoff.count(provider)}/${expected}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expected}`
-                : `tracks ${handoff.count(provider)}/${expected}, mesh ready ${flowing ? "yes" : "no"}`;
-            reject(
-              new Error(
-                `${provider.toUpperCase()} media did not become ready for handoff (${detail})`,
-              ),
-            );
-            return;
-          }
-          setTimeout(poll, mediaReadinessPollMs);
-        });
-      };
-      poll();
+    return waitForMediaHandoff({
+      getLatestTopologyKey: () => latestTopologyKey,
+      getLocalPeerId: () => localPeerId,
+      getP2pMesh: () => p2pMesh,
+      getSfu: () => sfu,
+      handoff,
+      localSources,
+      pollIntervalMs: mediaReadinessPollMs,
+      provider,
+      timeoutMs: mediaHandoffTimeoutMs,
+      topology,
+      topologyEventKey,
+      topologyState,
     });
-  }
-
-  function stageRemote(entry) {
-    handoff.stage(entry, activeProvider);
-  }
-
-  function removeRemote(entry) {
-    handoff.remove(entry);
-  }
-
-  function setRemoteScreenReceiving(feedKey, receiving) {
-    return registry.setVideoReceiving(feedKey, receiving);
-  }
-
-  function publishSource(entry) {
-    if (entry.source === "screen-audio") entry = createSharedAudioSource(entry);
-    localSources.set(entry.source, entry);
-    if (entry.source === "audio") startLocalVoiceDetection(entry);
-    if (entry.source === "camera" || entry.source === "screen") {
-      localVideoFeeds.value.set(entry.source, {
-        source: entry.source,
-        stream: entry.stream,
-        producerId: `${activeProvider || "local"}:${entry.track.id}`,
-      });
-      localVideoFeeds.value = new Map(localVideoFeeds.value);
-    }
-    if (
-      topologyState.value.mode === "p2p" ||
-      topologyState.value.mode === "probing" ||
-      topologyState.value.target === "p2p"
-    ) {
-      p2pMesh?.publishSource(entry.source, entry.track, entry.stream);
-    }
-    if (
-      topologyState.value.mode === "sfu" ||
-      topologyState.value.target === "sfu"
-    ) {
-      sfu?.addSource(entry).catch((sourceError) => {
-        const reason = `source-${entry.source}-failed-${sourceError.message}`;
-        if (topologyState.value.mode === "sfu") reportSfuFailure(reason);
-        else
-          send({
-            type: "topology-failed",
-            data: {
-              epoch: topologyState.value.epoch,
-              target: "sfu",
-              sourceRevision: topologyState.value.sourceRevision,
-              reason,
-            },
-          });
-      });
-    }
-    if (entry.source === "audio" && !microphoneTransmissionEnabled) {
-      queueMicrotask(() => setMicrophoneTransmission(false));
-    }
-    if (entry.source === "screen-audio") startSharedAudioMeter(entry.track);
-    sendSourceState();
-    refreshPublicMaps();
-  }
-
-  function removeSource(entry, { unexpected = false } = {}) {
-    const publishedEntry = localSources.get(entry.source);
-    if (
-      publishedEntry?.track !== entry.track &&
-      publishedEntry?.captureTrack !== entry.track
-    )
-      return;
-    localSources.delete(entry.source);
-    if (entry.source === "audio") stopLocalVoiceDetection();
-    p2pMesh?.unpublishSource(entry.source);
-    sfu?.removeSource(entry.source);
-    localVideoFeeds.value.delete(entry.source);
-    localVideoFeeds.value = new Map(localVideoFeeds.value);
-    if (entry.source === "screen-audio") stopSharedAudioMeter();
-    sendSourceState();
-    refreshPublicMaps();
-    if (
-      unexpected &&
-      entry.source === "audio" &&
-      connected.value &&
-      !intentionalClose
-    ) {
-      settingsStore.setMicDeviceId(null);
-      startAudioProduction().catch((captureError) => {
-        error.value =
-          captureError?.message || "Unable to restore microphone capture";
-      });
-    }
-  }
-
-  function sendSourceState() {
-    send({
-      type: "media-sources",
-      data: { sources: [...localSources.keys()] },
-    });
-  }
-
-  function sendParticipantVoiceState() {
-    return send({
-      type: "participant-voice-state",
-      data: {
-        muted: voiceStore.micMuted,
-        deafened: voiceStore.deafened,
-      },
-    });
-  }
-
-  function startAudioProduction() {
-    return capture.startMicrophone().then((entry) => producerFacade(entry));
-  }
-
-  function stopAudioProduction() {
-    capture.stop("audio");
-  }
-
-  function startVideoProduction(source) {
-    return capture.startVideo(source).then((entry) => producerFacade(entry));
-  }
-
-  function stopVideoProduction(source) {
-    capture.stop(source);
-  }
-
-  function startSystemAudioProduction() {
-    return capture.startSystemAudio().then((entry) => producerFacade(entry));
-  }
-
-  function stopSystemAudioProduction() {
-    const entry = localSources.get("screen-audio");
-    if (entry?.ownerSource === "system-audio") capture.stop("screen-audio");
-  }
-
-  function producerFacade(entry) {
-    return {
-      id: `${activeProvider || "local"}:${entry.source}:${entry.track.id}`,
-      track: entry.track,
-      closed: entry.track.readyState !== "live",
-      on() {},
-      close: () => capture.stop(entry.source),
-    };
-  }
-
-  function startLocalVoiceDetection(entry) {
-    stopLocalVoiceDetection();
-    const userId = authStore.getUserData()?.id;
-    if (!userId) return;
-    try {
-      const AudioContextConstructor =
-        window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
-      const context = new AudioContextConstructor();
-      const source = context.createMediaStreamSource(
-        new MediaStream([entry.track]),
-      );
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      const samples = new Float32Array(analyser.fftSize);
-      let speaking = false;
-      let quietSamples = 0;
-      const noiseFloorEstimator = createNoiseFloorEstimator();
-      const timer = setInterval(() => {
-        analyser.getFloatTimeDomainData(samples);
-        const levelDb = microphoneLevelDb(samples);
-        const gate = settingsStore.microphoneGate;
-        const thresholdDb = gate.automatic
-          ? automaticGateThreshold(noiseFloorEstimator.noiseFloorDb)
-          : gate.thresholdDb;
-        const active = levelDb >= thresholdDb;
-        updateNoiseFloor(noiseFloorEstimator, levelDb, active);
-        if (active) {
-          quietSamples = 0;
-          if (!speaking) {
-            speaking = true;
-            voiceStore.updateUserSpeaking(userId, true);
-          }
-          setMicrophoneTransmission(true);
-        } else if (speaking && ++quietSamples >= 10) {
-          speaking = false;
-          voiceStore.updateUserSpeaking(userId, false);
-          setMicrophoneTransmission(false);
-        } else if (!speaking) {
-          setMicrophoneTransmission(false);
-        }
-      }, 40);
-      localVoiceDetector = { analyser, context, source, timer, userId };
-      context.resume().catch(() => {});
-    } catch (detectionError) {
-      voiceStore.updateUserSpeaking(userId, false);
-      console.warn(
-        `[Media] Local voice detection is unavailable: ${detectionError?.message || detectionError}`,
-      );
-    }
-  }
-
-  function stopLocalVoiceDetection() {
-    if (!localVoiceDetector) return;
-    clearInterval(localVoiceDetector.timer);
-    localVoiceDetector.source.disconnect();
-    localVoiceDetector.analyser.disconnect();
-    localVoiceDetector.context.close().catch(() => {});
-    voiceStore.updateUserSpeaking(localVoiceDetector.userId, false);
-    localVoiceDetector = null;
-    setMicrophoneTransmission(true);
-  }
-
-  function setSharedAudioVolume(value) {
-    const normalized = Math.max(0, Math.min(100, Number(value))) / 100;
-    if (sharedAudioMeter?.gain)
-      sharedAudioMeter.gain.gain.setTargetAtTime(
-        normalized,
-        sharedAudioMeter.context.currentTime,
-        0.01,
-      );
-  }
-
-  function setSystemAudioBitrate(value) {
-    settingsStore.systemAudioBitrate = Number(value);
-    return refreshAudioSenderSettings();
-  }
-
-  function refreshAudioSenderSettings() {
-    const sources = [...localSources.values()]
-      .filter((entry) => entry.track.kind === "audio")
-      .map((entry) => entry.source);
-    return Promise.all(
-      sources.flatMap((source) =>
-        [
-          p2pMesh?.reconfigureSource(source),
-          sfu?.updateAudioBitrate(source, getEffectiveAudioBitrate(source)),
-        ].filter(Boolean),
-      ),
-    );
-  }
-
-  function refreshMediaPolicy() {
-    const sources = [...localSources.values()].map((entry) => entry.source);
-    return Promise.all(
-      sources.flatMap((source) => {
-        const entry = localSources.get(source);
-        if (entry?.track.kind === "audio")
-          return [
-            p2pMesh?.reconfigureSource(source),
-            sfu?.updateAudioBitrate(source, getEffectiveAudioBitrate(source)),
-          ].filter(Boolean);
-        return [
-          p2pMesh?.reconfigureSource(source),
-          sfu?.updateVideoBitrate(
-            source,
-            getRequestedVideoSettings(source).maxBitrate,
-          ),
-        ].filter(Boolean);
-      }),
-    );
   }
 
   watch(
@@ -1119,334 +826,95 @@ export function useHybridMediaSession() {
     },
   );
 
-  function createSharedAudioSource(entry) {
-    try {
-      const AudioContextConstructor =
-        window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
-      const context = new AudioContextConstructor();
-      const source = context.createMediaStreamSource(
-        new MediaStream([entry.track]),
-      );
-      const gain = context.createGain();
-      const analyser = context.createAnalyser();
-      const destination = context.createMediaStreamDestination();
-      analyser.fftSize = 512;
-      gain.gain.value =
-        Math.max(0, Math.min(100, Number(settingsStore.sharedAudioVolume))) /
-        100;
-      source.connect(gain);
-      gain.connect(analyser);
-      analyser.connect(destination);
-      const track = destination.stream.getAudioTracks()[0];
-      sharedAudioMeter = {
-        context,
-        source,
-        gain,
-        analyser,
-        destination,
-        timer: null,
-        track,
-      };
-      return {
-        ...entry,
-        stream: new MediaStream([track]),
-        track,
-        captureTrack: entry.track,
-      };
-    } catch (error) {
-      console.warn(
-        `[Media] Shared audio processing is unavailable: ${error?.message || error}`,
-      );
-      return entry;
-    }
-  }
+  const {
+    refreshPublicMaps,
+    refreshTopologyGraph,
+    syncConnectedUsers,
+    updateP2pStats,
+  } = createMediaTopologyView({
+    activeProvider: () => activeProvider,
+    addressFamily,
+    buildTopologyGraph,
+    consumers,
+    getLocalPeerId: () => localPeerId,
+    getP2pEdges: () => lastP2pEdges,
+    getP2pMesh: () => p2pMesh,
+    getSfu: () => sfu,
+    mapPeerConnectionMetrics,
+    mapPeerRoundTripTimes,
+    participantSfuRoundTripTimes,
+    peerConnectionMetrics,
+    peerRoundTripTimes,
+    producers,
+    setP2pEdges: (edges) => {
+      lastP2pEdges = edges;
+    },
+    topologyGraph,
+    topologyState,
+    voiceStore,
+  });
 
-  function startSharedAudioMeter() {
-    if (!sharedAudioMeter) return;
-    const values = new Float32Array(sharedAudioMeter.analyser.fftSize);
-    const sample = async () => {
-      if (!sharedAudioMeter) return;
-      sharedAudioMeter.analyser.getFloatTimeDomainData(values);
-      const rms = Math.sqrt(
-        values.reduce((sum, value) => sum + value * value, 0) / values.length,
-      );
-      const dbfs = rms > 0 ? 20 * Math.log10(rms) : -60;
-      const producer = sfu?.producers.get("screen-audio")?.producer;
-      const report =
-        activeProvider === "sfu" && producer
-          ? await producer.getStats().catch(() => null)
-          : p2pMesh
-            ? await p2pMesh
-                .getOutboundTrackStats("screen-audio")
-                .catch(() => null)
-            : null;
-      const collected = collectOutboundAudioStats(
-        report,
-        sharedAudioStatsSample,
-      );
-      if (collected.sample) sharedAudioStatsSample = collected.sample;
-      sharedAudioStats.value = {
-        kbps: collected.stats?.bitrateKbps ?? 0,
-        level: Math.max(0, Math.min(1, collected.stats?.audioLevel ?? rms * 4)),
-        dbfs: Math.max(-60, dbfs),
-      };
-    };
-    sample().catch(() => {});
-    sharedAudioMeter.timer = setInterval(() => sample().catch(() => {}), 500);
-  }
+  sourceController = createMediaSourceController({
+    capture,
+    connected,
+    createSharedAudioSource,
+    error,
+    getActiveProvider: () => activeProvider,
+    getIntentionalClose: () => intentionalClose,
+    getP2pMesh: () => p2pMesh,
+    getSfu: () => sfu,
+    localSources,
+    localVideoFeeds,
+    producerFacade,
+    refreshPublicMaps,
+    reportSfuFailure,
+    send,
+    settingsStore,
+    setMicrophoneTransmission,
+    startLocalVoiceDetection,
+    startSharedAudioMeter,
+    stopLocalVoiceDetection,
+    stopSharedAudioMeter,
+    topologyState,
+    voiceStore,
+  });
+  const {
+    sendParticipantVoiceState,
+    startAudioProduction,
+    startSystemAudioProduction,
+    startVideoProduction,
+    stopAudioProduction,
+    stopSystemAudioProduction,
+    stopVideoProduction,
+  } = sourceController;
 
-  function stopSharedAudioMeter() {
-    if (!sharedAudioMeter) return;
-    clearInterval(sharedAudioMeter.timer);
-    sharedAudioMeter.source.disconnect();
-    sharedAudioMeter.gain.disconnect();
-    sharedAudioMeter.analyser.disconnect();
-    sharedAudioMeter.track.stop();
-    sharedAudioMeter.context.close().catch(() => {});
-    sharedAudioMeter = null;
-    sharedAudioStatsSample = null;
-    sharedAudioStats.value = { kbps: 0, level: 0, dbfs: -60 };
-  }
-
-  function syncConnectedUsers(userIds = []) {
-    const active = new Set(userIds.map(String));
-    for (const userId of active)
-      if (!voiceStore.isUserConnected(userId))
-        voiceStore.addConnectedUser(userId, { id: userId });
-    for (const user of voiceStore.getConnectedUsersArray())
-      if (!active.has(String(user.id))) voiceStore.removeConnectedUser(user.id);
-  }
-
-  function updateP2pStats(edges) {
-    lastP2pEdges = edges;
-    peerRoundTripTimes.value = mapPeerRoundTripTimes(
-      edges,
-      topologyState.value.peers,
-    );
-    peerConnectionMetrics.value = mapPeerConnectionMetrics(
-      edges,
-      topologyState.value.peers,
-    );
-    refreshTopologyGraph();
-  }
-
-  function refreshTopologyGraph(candidatePair = null) {
-    const details = {};
-    for (const connection of p2pMesh ? p2pMesh.connections.values() : []) {
-      const edge =
-        lastP2pEdges.find(
-          (candidate) => candidate.peerId === connection.peerId,
-        ) || {};
-      const key = [localPeerId, connection.peerId].sort().join(":");
-      details[key] = {
-        state:
-          edge.state ||
-          (connection.pc.connectionState === "connected"
-            ? "active"
-            : "probing"),
-        rtt: edge.rtt ?? null,
-        network: edge.network || null,
-        candidateType: edge.candidatePair?.local?.candidateType || null,
-        addressFamily: addressFamily(edge.candidatePair?.remote?.address),
-        bitrate: edge.bitrate ?? null,
-        packetLoss: edge.packetLoss ?? null,
-      };
-    }
-    topologyGraph.value = buildTopologyGraph({
-      mode: topologyState.value.displayMode || topologyState.value.mode,
-      currentMode: activeProvider,
-      target: topologyState.value.target,
-      epoch: topologyState.value.epoch,
-      reason: topologyState.value.reason,
-      activatedAt: topologyState.value.activatedAt,
-      participantIds: topologyState.value.peers.map((peer) => peer.peerId),
-      localPeerId,
-      edgeDetails: details,
-      participantSfuEdges: Object.fromEntries(
-        topologyState.value.peers.map((peer) => [
-          String(peer.peerId),
-          {
-            rtt:
-              participantSfuRoundTripTimes.value[String(peer.userId)] ?? null,
-          },
-        ]),
-      ),
-      sfuEdge: candidatePair
-        ? {
-            rtt:
-              candidatePair.currentRoundTripTime == null
-                ? null
-                : candidatePair.currentRoundTripTime * 1000,
-            network:
-              candidatePair.local?.protocol ||
-              candidatePair.remote?.protocol ||
-              null,
-            candidateType: candidatePair.local?.candidateType || null,
-            bitrate: candidatePair.availableOutgoingBitrate ?? null,
-            packetLoss: candidatePair.packetLoss ?? null,
-          }
-        : null,
-      candidatePair,
-    });
-  }
-
-  function refreshPublicMaps() {
-    producers.value = new Map(
-      sfu
-        ? [...sfu.producers].map(([source, entry]) => [
-            entry.producer.id,
-            entry,
-          ])
-        : [],
-    );
-    consumers.value = new Map(
-      sfu
-        ? [...sfu.consumers.values()].map((entry) => [
-            entry.producerId,
-            entry.consumer,
-          ])
-        : [],
-    );
-  }
-
-  function sfuProducerIds() {
-    return sfu
-      ? [...sfu.producers.values()].map((entry) => entry.producer.id)
-      : [];
-  }
-
-  async function getWebRTCStatsSnapshot() {
-    if (activeProvider === "p2p" && p2pMesh) {
-      const edges = await p2pMesh.getSnapshot().catch(() => null);
-      if (edges) updateP2pStats(edges);
-    }
-    const transports =
-      activeProvider === "sfu"
-        ? (await sfu?.stats()) || []
-        : (await p2pMesh?.stats()) || [];
-    const pair =
-      activeProvider === "sfu"
-        ? transports.find((transport) => transport.candidatePair)
-            ?.candidatePair || null
-        : null;
-    sfuRoundTripTime.value =
-      pair?.currentRoundTripTime == null
-        ? null
-        : pair.currentRoundTripTime * 1000;
-    if (sfuRoundTripTime.value != null)
-      send({ type: "client-sfu-rtt", data: { rttMs: sfuRoundTripTime.value } });
-    refreshTopologyGraph(pair);
-    return {
-      timestamp: Date.now(),
-      peerRoundTripTime: Object.keys(peerRoundTripTimes.value).length
-        ? Math.max(...Object.values(peerRoundTripTimes.value))
-        : null,
-      transports,
-      topology: topologyGraph.value.topology,
-      nodes: topologyGraph.value.nodes,
-      edges: topologyGraph.value.edges,
-    };
-  }
-
-  async function getOutboundVideoStats() {
-    const results = [];
-    for (const entry of [...localSources.values()].filter(
-      (entry) => entry.track.kind === "video",
-    )) {
-      const settings = entry.track.getSettings?.() || {};
-      const producer = sfu?.producers.get(entry.source)?.producer;
-      const key = `outbound:${entry.source}`;
-      const report =
-        activeProvider === "sfu" && producer
-          ? await producer.getStats().catch(() => null)
-          : p2pMesh
-            ? await p2pMesh
-                .getOutboundTrackStats(entry.source)
-                .catch(() => null)
-            : null;
-      const collected = report
-        ? collectVideoRtpStats(
-            report,
-            "outbound",
-            settings,
-            videoStatsSamples.get(key),
-          )
-        : null;
-      if (collected?.sample) videoStatsSamples.set(key, collected.sample);
-      const senderParameters =
-        activeProvider === "p2p"
-          ? p2pMesh?.getOutboundTrackParameters(entry.source)
-          : producer?.rtpParameters;
-      const encoding = senderParameters?.encodings?.[0] || null;
-      results.push({
-        source: entry.source,
-        targetFps: getRequestedVideoSettings(entry.source).frameRate,
-        captureFps: settings.frameRate || null,
-        configuredMaxBitrateKbps: Number.isFinite(Number(encoding?.maxBitrate))
-          ? Number(encoding.maxBitrate) / 1000
-          : null,
-        configuredMaxFramerate: Number.isFinite(Number(encoding?.maxFramerate))
-          ? Number(encoding.maxFramerate)
-          : null,
-        degradationPreference: senderParameters?.degradationPreference || null,
-        ...(collected?.stats || {
-          width: settings.width || null,
-          height: settings.height || null,
-          fps: settings.frameRate || null,
-        }),
-      });
-    }
-    return results;
-  }
-
-  async function getInboundVideoStats() {
-    const results = [];
-    for (const entry of remoteVideoFeeds.value.values()) {
-      const settings = entry.track.getSettings?.() || {};
-      const key = `inbound:${entry.key}`;
-      const report = entry.consumer
-        ? await entry.consumer.getStats().catch(() => null)
-        : p2pMesh
-          ? await p2pMesh
-              .getInboundTrackStats(entry.peerId, entry.track)
-              .catch(() => null)
-          : null;
-      const collected = report
-        ? collectVideoRtpStats(
-            report,
-            "inbound",
-            settings,
-            videoStatsSamples.get(key),
-          )
-        : null;
-      if (collected?.sample) videoStatsSamples.set(key, collected.sample);
-      results.push({
-        consumerId: entry.key,
-        source: entry.source,
-        ...(collected?.stats || {
-          width: settings.width || null,
-          height: settings.height || null,
-          fps: settings.frameRate || null,
-        }),
-      });
-    }
-    return results;
-  }
-
-  async function getWebRTCDiagnosticStats() {
-    return activeProvider === "sfu"
-      ? (await sfu?.diagnosticStats()) || []
-      : (await p2pMesh?.diagnosticStats()) || [];
-  }
+  const {
+    getInboundVideoStats,
+    getOutboundVideoStats,
+    getWebRTCDiagnosticStats,
+    getWebRTCStatsSnapshot,
+    sfuProducerIds,
+  } = createHybridMediaDiagnostics({
+    collectVideoRtpStats,
+    getActiveProvider: () => activeProvider,
+    getP2pMesh: () => p2pMesh,
+    getRequestedVideoSettings,
+    getSfu: () => sfu,
+    localSources,
+    peerRoundTripTimes,
+    refreshTopologyGraph,
+    remoteVideoFeeds,
+    send,
+    sfuRoundTripTime,
+    topologyGraph,
+    updateP2pStats,
+    videoStatsSamples,
+  });
 
   function failSession(message) {
     error.value = message;
     iceConnectedBoth.value = false;
-  }
-
-  function areTransportsIceConnected() {
-    return Promise.resolve(iceConnectedBoth.value);
+    mediaConnectionState.value = "failed";
   }
 
   function disconnect() {
@@ -1470,6 +938,8 @@ export function useHybridMediaSession() {
     connected.value = false;
     transportReady.value = false;
     iceConnectedBoth.value = false;
+    mediaConnectionState.value = "disconnected";
+    playbackState.value = "idle";
     resetTopologySequencing("disconnected");
     lastP2pEdges = [];
     peerRoundTripTimes.value = {};
@@ -1485,6 +955,8 @@ export function useHybridMediaSession() {
     error: readonly(error),
     transportReady: readonly(transportReady),
     iceConnectedBoth: readonly(iceConnectedBoth),
+    mediaConnectionState: readonly(mediaConnectionState),
+    playbackState: readonly(playbackState),
     isProducing: computed(() => localSources.size > 0),
     producers: readonly(producers),
     consumers: readonly(consumers),
@@ -1515,7 +987,8 @@ export function useHybridMediaSession() {
     stopVideoProduction,
     startSystemAudioProduction,
     stopSystemAudioProduction,
-    setRemoteScreenReceiving,
+    setRemoteScreenReceiving: (feedKey, receiving) =>
+      registry.setVideoReceiving(feedKey, receiving),
     setSharedAudioVolume,
     setSystemAudioBitrate,
     sendParticipantVoiceState,
@@ -1529,6 +1002,6 @@ export function useHybridMediaSession() {
     getOutboundVideoStats,
     getInboundVideoStats,
     getWebRTCDiagnosticStats,
-    areTransportsIceConnected,
+    areTransportsIceConnected: () => Promise.resolve(iceConnectedBoth.value),
   };
 }

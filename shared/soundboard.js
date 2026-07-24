@@ -30,7 +30,7 @@ export function canManageSoundboardClip(clip, userId, permissions = []) {
   );
 }
 
-export function presentSoundboardClip(record, apiPath = "/dspeak") {
+export function presentSoundboardClip(record, apiPath = "/api") {
   return {
     id: record.id,
     roomId: String(record.room),

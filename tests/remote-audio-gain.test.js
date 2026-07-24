@@ -28,7 +28,7 @@ function createRegistry() {
   });
 }
 
-test("remote participants own independent Web Audio contexts", () => {
+test("remote participants share one room Web Audio context", () => {
   const container = { appendChild() {}, querySelectorAll: () => [] };
   const originalDocument = globalThis.document;
   const originalWindow = globalThis.window;
@@ -53,7 +53,7 @@ test("remote participants own independent Web Audio contexts", () => {
     const same = registry.getOrCreateGraph("person-a");
     const second = registry.getOrCreateGraph("person-b");
     assert.equal(first, same);
-    assert.notEqual(first.context, second.context);
+    assert.equal(first.context, second.context);
   } finally {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;

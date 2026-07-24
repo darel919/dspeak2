@@ -112,9 +112,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     const url = URL.createObjectURL(await response.blob());
     const audio = new Audio(url);
     audio.volume = settingsStore.getSoundboardVolume(roomId) / 100;
-    const output = settingsStore.outputDeviceId;
-    if (output && typeof audio.setSinkId === "function")
-      await audio.setSinkId(output).catch(() => {});
+    await applyOutputDevice(audio, settingsStore.outputDeviceId);
     return new Promise((resolve) => {
       let cleaned = false;
       const cleanup = (played = true) => {
@@ -129,6 +127,23 @@ export const useSoundboardStore = defineStore("soundboard", () => {
       audio.addEventListener("error", () => cleanup(false), { once: true });
       audio.play().catch(() => cleanup(false));
     });
+  }
+
+  async function applyOutputDevice(audio, output) {
+    if (!output || typeof audio.setSinkId !== "function") return true;
+    try {
+      await audio.setSinkId(output);
+      return true;
+    } catch (cause) {
+      error.value = `The selected soundboard output is unavailable: ${cause.message}`;
+      try {
+        await audio.setSinkId("");
+      } catch (fallbackCause) {
+        error.value = `Soundboard output recovery failed: ${fallbackCause.message}`;
+        return false;
+      }
+      return false;
+    }
   }
 
   async function protectedBlob(path) {
@@ -163,11 +178,9 @@ export const useSoundboardStore = defineStore("soundboard", () => {
 
   watch(
     () => settingsStore.outputDeviceId,
-    (output) => {
-      if (!output) return;
+    async (output) => {
       for (const audio of players.keys())
-        if (typeof audio.setSinkId === "function")
-          audio.setSinkId(output).catch(() => {});
+        await applyOutputDevice(audio, output);
     },
   );
 

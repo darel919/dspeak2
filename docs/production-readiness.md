@@ -53,6 +53,7 @@ Production requires:
 
 - `POCKETBASE_URL`, `POCKETBASE_EMAIL`, and `POCKETBASE_PASSWORD`
 - `AUTH_PATH`
+- `DSPEAK_PUBLIC_ORIGIN` and `DSPEAK_METRICS_TOKEN`
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVKEY`, and `VAPID_SUBJECT`
 - the media, TURN, DNS, and firewall configuration in
   [Deployment](deployment.md)
@@ -69,8 +70,15 @@ deployment and verify the migration records after startup.
 
 ## Operational checks
 
-`/health` reports the oldest queued push delivery and configured subsystem
-health. `/metrics` exposes push deliveries, retries, failures, expiry, active
+The identity service contract accepts `POST <AUTH_PATH>/verify` with the access
+token in an `Authorization: Bearer` header. It must never accept or log the
+token as a query value. dSpeak rejects browser WebSocket and state-changing
+HTTP origins that do not match `DSPEAK_PUBLIC_ORIGIN`. Set the originless
+client overrides only for an explicitly reviewed non-browser integration.
+
+`/health` reports the oldest queued push delivery and cached subsystem health.
+`/metrics` requires `Authorization: Bearer <DSPEAK_METRICS_TOKEN>` and exposes
+push deliveries, retries, failures, expiry, active
 subscriptions, pending jobs, and oldest pending age. Alert when pending age
 continues growing or failures increase without deliveries.
 
@@ -81,7 +89,7 @@ Before release:
    `bun run build`.
 3. Back up PocketBase and start the built server against the target migration
    environment.
-4. Confirm `/health` and `/metrics`, then restart the server with pending push
+4. Confirm `/health` and authenticated `/metrics`, then restart the server with pending push
    and offline-message work and confirm that processing resumes.
 5. Build and start the Docker Compose deployment and probe its public HTTP,
    WebSocket, RTP, and TURN paths.

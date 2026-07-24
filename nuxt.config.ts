@@ -140,7 +140,7 @@ export default defineNuxtConfig({
       websocketPath: "",
       baseApiPath: process.env.AUTH_PATH?.replace(/\/auth\/?$/, "") || "",
       sfuPath: "",
-      apiPath: "/dspeak",
+      apiPath: "/api",
       appVersion: packageMetadata.version,
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,

@@ -9,6 +9,7 @@ import { isFatalClientError } from "~/shared/fatal-client-error.js";
 import { voiceJoinErrorMessage } from "~/shared/voice-errors.js";
 import { STORAGE_KEYS } from "~/const/storage.js";
 import { resolveVoicePreferences } from "~/shared/voice-preferences.js";
+import { createVoiceParticipantState } from "~/shared/voice-participant-state.js";
 
 export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
@@ -241,141 +242,35 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
-  function upsertUserProfile(profile) {
-    if (!profile || !profile.id) return;
-    const userId = String(profile.id);
-    const prev = userDirectory.value.get(userId) || {};
-    const merged = { ...prev, ...profile, id: userId };
-    userDirectory.value.set(userId, merged);
-
-    const cu = connectedUsers.value.get(userId);
-    if (cu) {
-      connectedUsers.value.set(userId, { ...cu, ...merged });
-      connectedUsers.value = new Map(connectedUsers.value);
-    }
-  }
-
   function isInVoiceChannel() {
     return !!currentChannelId.value && !!connected.value;
   }
 
-  function addConnectedUser(userId, userInfo) {
-    const normalizedUserId = String(userId);
-    const cached = userDirectory.value.get(normalizedUserId) || {};
-    connectedUsers.value.set(normalizedUserId, {
-      ...cached,
-      ...userInfo,
-      id: normalizedUserId,
-      speaking: false,
-      muted: false,
-      deafened: false,
-      cameraEnabled: false,
-      screenSharing: false,
-      soundboardActivity: null,
-    });
-
-    connectedUsers.value = new Map(connectedUsers.value);
-
-    if (
-      typeof userVolumes.value[normalizedUserId] === "undefined" &&
-      typeof window !== "undefined"
-    ) {
-      const el = document.getElementById(`audio-${normalizedUserId}`);
-      if (el && typeof el.volume === "number") {
-        userVolumes.value[normalizedUserId] = el.volume;
-      }
-    }
-  }
-
-  function removeConnectedUser(userId) {
-    clearSoundboardActivity(userId);
-    connectedUsers.value.delete(String(userId));
-    connectedUsers.value = new Map(connectedUsers.value);
-  }
-  function setUserVolume(userId, volume) {
-    const v = Math.max(0, Math.min(2, Number(volume)));
-    userVolumes.value[userId] = v;
-
-    if (typeof window !== "undefined") {
-      try {
-        if (
-          sfuComposable.value &&
-          typeof sfuComposable.value.applyVolumeForUser === "function"
-        ) {
-          sfuComposable.value.applyVolumeForUser(userId, v);
-        }
-      } catch (_) {
-        /* noop */
-      }
-    }
-  }
-  function getUserVolume(userId) {
-    return typeof userVolumes.value[userId] !== "undefined"
-      ? userVolumes.value[userId]
-      : 1.0;
-  }
-
-  function setTrackVolume(userId, source, volume) {
-    const v = Math.max(0, Math.min(2, Number(volume)));
-    trackVolumes.value[`${userId}:${source}`] = v;
-    if (source === "audio") userVolumes.value[userId] = v;
-    sfuComposable.value?.applyVolumeForTrack?.(userId, source, v);
-  }
-
-  function getTrackVolume(userId, source) {
-    const value = trackVolumes.value[`${userId}:${source}`];
-    if (typeof value !== "undefined") return value;
-    return source === "audio" ? getUserVolume(userId) : 1.0;
-  }
-
-  function updateUserSpeaking(userId, speaking) {
-    const normalizedUserId = String(userId);
-    let user = connectedUsers.value.get(normalizedUserId);
-    if (!user) {
-      const auth = useAuthStore().getUserData();
-      if (auth && String(auth.id) === String(userId)) {
-        addConnectedUser(normalizedUserId, { id: normalizedUserId });
-        user = connectedUsers.value.get(normalizedUserId);
-      }
-    }
-    if (!user) return;
-
-    connectedUsers.value.set(normalizedUserId, { ...user, speaking });
-    connectedUsers.value = new Map(connectedUsers.value);
-  }
-
-  function updateUserMuted(userId, muted) {
-    const normalizedUserId = String(userId);
-    const user = connectedUsers.value.get(normalizedUserId);
-    if (user) {
-      connectedUsers.value.set(normalizedUserId, {
-        ...user,
-        muted,
-        ...(muted ? { speaking: false } : {}),
-      });
-      connectedUsers.value = new Map(connectedUsers.value);
-    }
-  }
-
-  function updateUserVoiceState(userId, state) {
-    const normalizedUserId = String(userId || "");
-    const user = connectedUsers.value.get(normalizedUserId);
-    if (
-      !user ||
-      typeof state?.muted !== "boolean" ||
-      typeof state?.deafened !== "boolean"
-    )
-      return;
-    connectedUsers.value.set(normalizedUserId, {
-      ...user,
-      muted: state.muted,
-      deafened: state.deafened,
-      cameraEnabled: state.cameraEnabled === true,
-      screenSharing: state.screenSharing === true,
-      ...(state.muted ? { speaking: false } : {}),
-    });
-    connectedUsers.value = new Map(connectedUsers.value);
-  }
+  const {
+    addConnectedUser,
+    getConnectedUsersArray,
+    getDisplayUsersArray,
+    getTrackVolume,
+    getUserById,
+    getUserProfile,
+    getUserVolume,
+    isUserConnected,
+    removeConnectedUser,
+    setTrackVolume,
+    setUserVolume,
+    updateUserMuted,
+    updateUserSpeaking,
+    updateUserVoiceState,
+    upsertUserProfile,
+  } = createVoiceParticipantState({
+    clearSoundboardActivity,
+    connectedUsers,
+    getAuthenticatedUser: () => useAuthStore().getUserData(),
+    getMediaSession: () => sfuComposable.value,
+    trackVolumes,
+    userDirectory,
+    userVolumes,
+  });
 
   async function ensureMicrophonePermission() {
     if (
@@ -535,9 +430,10 @@ export const useVoiceStore = defineStore("voice", () => {
         stopIceWatcher = null;
       }
       stopIceWatcher = watch(
-        () => sfuComposable.value?.iceConnectedBoth,
+        () => sfuComposable.value?.mediaConnectionState,
         (value) => {
-          connected.value = !!value;
+          if (value === "failed" || value === "disconnected")
+            connected.value = false;
         },
       );
 
@@ -775,59 +671,12 @@ export const useVoiceStore = defineStore("voice", () => {
       if (connected.value)
         sfuComposable.value
           ?.setSystemAudioBitrate?.(settingsStore.systemAudioBitrate)
-          .catch(() => {});
+          .catch((cause) => {
+            error.value =
+              cause?.message || "Unable to apply the channel audio bitrate";
+          });
     },
   );
-
-  function getConnectedUsersArray() {
-    return Array.from(connectedUsers.value.values());
-  }
-
-  function getDisplayUsersArray() {
-    const users = Array.from(connectedUsers.value.values());
-    const isUuidV4 = (id) =>
-      typeof id === "string" &&
-      /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(
-        id,
-      );
-    const knownIds = new Set(Array.from(userDirectory.value.keys()));
-    const liveAudioIds = new Set();
-
-    if (typeof window !== "undefined") {
-      const container = document.getElementById("webrtc-audio-global");
-      if (container) {
-        container.querySelectorAll("audio").forEach((el) => {
-          const uid = el.getAttribute("data-user-id");
-          if (uid) liveAudioIds.add(uid);
-        });
-      }
-    }
-
-    const result = [];
-    const seen = new Set();
-    for (const u of users) {
-      const id = String(u.id);
-      const inDirectory = knownIds.has(id);
-      const hasAudio = liveAudioIds.has(id);
-      const notUuid = !isUuidV4(id);
-      const include = inDirectory || hasAudio || notUuid;
-
-      if (include && !seen.has(id)) {
-        seen.add(id);
-        result.push(u);
-      }
-    }
-
-    return result;
-  }
-
-  function isUserConnected(userId) {
-    return connectedUsers.value.has(String(userId));
-  }
-
-  function getUserById(userId) {
-    return connectedUsers.value.get(String(userId));
-  }
 
   async function applyOutputDevice() {
     if (
@@ -836,15 +685,14 @@ export const useVoiceStore = defineStore("voice", () => {
     ) {
       try {
         await sfuComposable.value.applyOutputDeviceToAll();
-      } catch (_) {
-        /* noop */
+        return { ok: true };
+      } catch (cause) {
+        error.value = cause?.message || "Unable to apply the audio output";
+        return { ok: false, error: error.value };
       }
     }
+    return { ok: true };
   }
-  function getUserProfile(userId) {
-    return userDirectory.value.get(String(userId));
-  }
-
   if (typeof window !== "undefined") {
     const roomsStore = useRoomsStore();
     watch(

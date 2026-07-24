@@ -6,9 +6,9 @@ const files = await Promise.all(
   [
     "../server/utils/dspeak-api.js",
     "../server/utils/soundboard-api.js",
-    "../server/routes/dspeak/chat/socket.js",
-    "../server/routes/dspeak/presence.js",
-    "../server/routes/dspeak/voice-presence.js",
+    "../server/routes/api/chat/socket.js",
+    "../server/routes/api/presence.js",
+    "../server/routes/api/voice-presence.js",
     "../server/utils/mediasoup-sfu.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
@@ -63,7 +63,7 @@ test("offline delivery uses cookie authentication and stable idempotency", () =>
 });
 
 test("protected browser routes stay on the cookie-owning origin", () => {
-  assert.match(runtimeConfig, /apiPath:\s*"\/dspeak"/);
+  assert.match(runtimeConfig, /apiPath:\s*"\/api"/);
   assert.match(runtimeConfig, /websocketPath:\s*""/);
   assert.match(runtimeConfig, /sfuPath:\s*""/);
   assert.doesNotMatch(runtimeConfig, /DSPEAK_(API|WS|SFU)_URL/);
@@ -74,6 +74,12 @@ test("sessions rotate per device and are stored only as hashes", () => {
   assert.match(authentication, /token_hash:\s*hashSessionToken\(rawToken\)/);
   assert.match(authentication, /user = \{:user\} && device_id = \{:device\}/);
   assert.doesNotMatch(authentication, /token:\s*rawToken/);
+});
+
+test("external authentication never puts access tokens in URLs", () => {
+  assert.match(authentication, /Authorization: `Bearer \$\{accessToken\}`/);
+  assert.match(authentication, /method: "POST"/);
+  assert.doesNotMatch(authentication, /verify\?at=/);
 });
 
 test("notification migration reconciles duplicates before uniqueness", () => {

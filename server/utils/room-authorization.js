@@ -6,6 +6,7 @@ import {
   getHighestRolePosition,
   normalizePermissions,
 } from "../../shared/room-policy.js";
+import { getBoundedList } from "./pocketbase-query.js";
 
 function isMissingCollection(error) {
   return error?.status === 404 || error?.response?.status === 404;
@@ -96,13 +97,16 @@ export async function seedRoomRoles(pb, room, ownerId) {
 
 export async function ensureRoomMembership(pb, room, userId) {
   try {
-    const existing = await pb
-      .collection("dspeak_room_memberships")
-      .getFullList({
+    const existing = await getBoundedList(
+      pb,
+      "dspeak_room_memberships",
+      {
         filter: `room = '${room.id}' && user = '${userId}'`,
-      });
+      },
+      2,
+    );
     if (existing.length) return existing[0];
-    const roles = await pb.collection("dspeak_room_roles").getFullList({
+    const roles = await getBoundedList(pb, "dspeak_room_roles", {
       filter: `room = '${room.id}' && is_default = true`,
     });
     return pb.collection("dspeak_room_memberships").create({
@@ -119,13 +123,19 @@ export async function ensureRoomMembership(pb, room, userId) {
 
 export async function removeRoomMembership(pb, roomId, userId) {
   try {
-    const memberships = await pb
-      .collection("dspeak_room_memberships")
-      .getFullList({
+    const memberships = await getBoundedList(
+      pb,
+      "dspeak_room_memberships",
+      {
         filter: `room = '${roomId}' && user = '${userId}'`,
-      });
-    for (const membership of memberships)
-      await pb.collection("dspeak_room_memberships").delete(membership.id);
+      },
+      2,
+    );
+    await Promise.all(
+      memberships.map((membership) =>
+        pb.collection("dspeak_room_memberships").delete(membership.id),
+      ),
+    );
   } catch (error) {
     if (!isMissingCollection(error)) throw error;
   }

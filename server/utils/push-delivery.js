@@ -7,6 +7,7 @@ import {
 import { publicDisplayName } from "../../shared/user-profile.js";
 import { isDeviceViewingChannel } from "./dspeak-realtime.js";
 import { usePocketBaseAdmin } from "./pocketbase.js";
+import { getBoundedList } from "./pocketbase-query.js";
 
 const dispatcherKey = Symbol.for("dspeak.push.dispatcher");
 const retryDelays = [5_000, 30_000, 120_000, 600_000, 1_800_000];
@@ -95,7 +96,7 @@ export async function persistMessageNotifications({
     .map(String)
     .filter((id) => id !== String(senderId));
   if (!recipientIds.length) return { notifications: 0, jobs: 0 };
-  const profiles = await pb.collection("users").getFullList({
+  const profiles = await getBoundedList(pb, "users", {
     filter: recipientIds
       .map((id) => pb.filter("id = {:id}", { id }))
       .join(" || "),
@@ -109,13 +110,13 @@ export async function persistMessageNotifications({
     .join(" || ");
   const [globalPreferences, roomPreferences, subscriptions] = await Promise.all(
     [
-      pb.collection("dspeak_notification_preferences").getFullList({
+      getBoundedList(pb, "dspeak_notification_preferences", {
         filter: recipientFilter,
       }),
-      pb.collection("dspeak_room_notification_preferences").getFullList({
+      getBoundedList(pb, "dspeak_room_notification_preferences", {
         filter: `room = ${JSON.stringify(room.id)} && (${recipientFilter})`,
       }),
-      pb.collection("dspeak_push_subscriptions").getFullList({
+      getBoundedList(pb, "dspeak_push_subscriptions", {
         filter: `disabled = false && (${recipientFilter})`,
       }),
     ],
@@ -353,12 +354,18 @@ async function pruneCompletedJobs(pb) {
   const state = getState();
   if (Date.now() - state.lastCleanupAt < cleanupInterval) return;
   const cutoff = new Date(Date.now() - completedJobRetention).toISOString();
-  const jobs = await pb.collection("dspeak_push_jobs").getFullList({
-    filter: pb.filter("finished_at <= {:cutoff}", { cutoff }),
-    fields: "id",
-  });
-  for (const job of jobs)
-    await pb.collection("dspeak_push_jobs").delete(job.id);
+  const jobs = await getBoundedList(
+    pb,
+    "dspeak_push_jobs",
+    {
+      filter: pb.filter("finished_at <= {:cutoff}", { cutoff }),
+      fields: "id",
+    },
+    100,
+  );
+  await Promise.all(
+    jobs.map((job) => pb.collection("dspeak_push_jobs").delete(job.id)),
+  );
   state.lastCleanupAt = Date.now();
 }
 

@@ -158,7 +158,7 @@ test("message detail helpers reject absent timestamps and use channel IDs", () =
 
 test("chat GET routes do not attempt to read a request body", () => {
   const api = readFileSync(
-    new URL("../server/utils/dspeak-api.js", import.meta.url),
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
     "utf8",
   );
   assert.match(

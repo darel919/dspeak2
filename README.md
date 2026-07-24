@@ -76,6 +76,8 @@ At minimum, configure the authentication service and PocketBase connection:
 
 ```dotenv
 AUTH_PATH=https://api.example.com/auth
+DSPEAK_PUBLIC_ORIGIN=https://app.example.com
+DSPEAK_METRICS_TOKEN=replace-with-a-long-random-secret
 POCKETBASE_URL=https://pocketbase.example.com
 PBASE_ADMIN_EMAIL=admin@example.com
 PBASE_ADMIN_PASSWORD=replace-this-value
@@ -103,17 +105,17 @@ instance until the runbook's external connectivity checks pass.
 
 ## Operational endpoints
 
-| Path                   | Purpose                                        |
-| ---------------------- | ---------------------------------------------- |
-| `/health`              | Application and configured TURN health         |
-| `/metrics`             | Prometheus-compatible media metrics            |
-| `/socket`              | Media signaling WebSocket                      |
-| `/dspeak/presence`     | Presence WebSocket                             |
-| `/dspeak/chat/socket`  | Realtime chat WebSocket                        |
-| `/dspeak/room/*`       | Room management                                |
-| `/dspeak/channel/*`    | Text and media channels                        |
-| `/dspeak/chat/*`       | Messages, read state, and push subscriptions   |
-| `/dspeak/soundboard/*` | Protected room soundboard operations and media |
+| Path                | Purpose                                        |
+| ------------------- | ---------------------------------------------- |
+| `/health`           | Application and configured TURN health         |
+| `/metrics`          | Bearer-protected Prometheus media metrics      |
+| `/socket`           | Media signaling WebSocket                      |
+| `/api/presence`     | Presence WebSocket                             |
+| `/api/chat/socket`  | Realtime chat WebSocket                        |
+| `/api/room/*`       | Room management                                |
+| `/api/channel/*`    | Text and media channels                        |
+| `/api/chat/*`       | Messages, read state, and push subscriptions   |
+| `/api/soundboard/*` | Protected room soundboard operations and media |
 
 Protected application APIs and WebSockets are same-origin so the server-owned
 HttpOnly session is used consistently. Follow the
@@ -134,7 +136,8 @@ After deployment, verify the production process and its public routes:
 
 ```bash
 curl --fail https://app.example.com/health
-curl --fail https://app.example.com/metrics
+curl --fail -H "Authorization: Bearer $DSPEAK_METRICS_TOKEN" \
+  https://app.example.com/metrics
 ```
 
 Media releases also require the real-browser and external-network checks in

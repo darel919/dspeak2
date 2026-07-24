@@ -1,9 +1,16 @@
-import { getSfuMetrics } from "../utils/mediasoup-sfu";
+import { getSfuMetricsSnapshot } from "../utils/mediasoup-sfu";
 import { getPushMetrics } from "../utils/push-delivery";
 
 export default defineEventHandler(async (event) => {
+  const configuredToken = process.env.DSPEAK_METRICS_TOKEN;
+  const suppliedToken = getHeader(event, "authorization");
+  if (!configuredToken || suppliedToken !== `Bearer ${configuredToken}`)
+    throw createError({
+      statusCode: 401,
+      statusMessage: "Metrics authentication required",
+    });
   const [metrics, push] = await Promise.all([
-    getSfuMetrics(),
+    getSfuMetricsSnapshot(),
     getPushMetrics(),
   ]);
   setHeader(event, "Content-Type", "text/plain; version=0.0.4; charset=utf-8");

@@ -472,7 +472,7 @@
               </div>
               <div v-else class="flex items-center gap-1 text-success">
                 <div class="w-2 h-2 bg-success rounded-full"></div>
-                <span class="text-xs">Connected</span>
+                <span class="text-xs">{{ mediaStateLabel }}</span>
               </div>
             </div>
             <span class="text-xs text-base-content/60"
@@ -587,6 +587,14 @@ const config = useRuntimeConfig();
 
 const connectedUsers = computed(() => {
   return voiceStore.getDisplayUsersArray();
+});
+const mediaStateLabel = computed(() => {
+  const state = voiceStore.sfuComposable?.mediaConnectionState;
+  if (state === "media-flowing") return "Media flowing";
+  if (state === "ready-no-active-media") return "Ready, no active media";
+  if (state === "playback-blocked") return "Playback blocked";
+  if (state === "reconnecting") return "Reconnecting";
+  return "Transport ready";
 });
 const videoFeeds = computed(() => {
   const sfu = voiceStore.sfuComposable;

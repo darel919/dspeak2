@@ -194,14 +194,22 @@ function attachStream() {
     videoElement.value.srcObject !== props.stream
   ) {
     videoElement.value.srcObject = props.stream;
-    videoElement.value.play?.().catch(() => {});
+    videoElement.value
+      .play?.()
+      .catch((error) =>
+        console.warn("[VideoFeed] Remote preview playback failed", error),
+      );
   }
   if (
     ownCameraElement.value &&
     ownCameraElement.value.srcObject !== props.ownCameraStream
   ) {
     ownCameraElement.value.srcObject = props.ownCameraStream;
-    ownCameraElement.value.play?.().catch(() => {});
+    ownCameraElement.value
+      .play?.()
+      .catch((error) =>
+        console.warn("[VideoFeed] Local preview playback failed", error),
+      );
   }
 }
 

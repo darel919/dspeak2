@@ -51,22 +51,11 @@ test("primary settings, startup, and media surfaces avoid ornamental chrome", as
   assert.doesNotMatch(source, /btn-circle/);
 });
 
-test("Metro implementation checklist records shipped and browser-only gates", async () => {
-  const checklist = await readFile(
-    "docs/metro-design-implementation-checklist.md",
-    "utf8",
-  );
-  assert.match(checklist, /## Foundation/);
-  assert.match(checklist, /## Application shell and navigation/);
-  assert.match(
-    checklist,
-    /## Responsive, accessibility, and internationalization/,
-  );
-  assert.match(checklist, /- \[ \] Verify complete keyboard-only navigation/);
-  assert.match(
-    checklist,
-    /- \[ \] Complete authenticated multi-browser visual review/,
-  );
+test("Metro implementation checks verify shipped source instead of a stale checklist", async () => {
+  const source = await readFile("app/assets/app.css", "utf8");
+  assert.match(source, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(source, /@media \(forced-colors: active\)/);
+  assert.match(source, /:focus-visible/);
 });
 
 test("authenticated page copy consistently calls shared spaces rooms", async () => {
@@ -90,7 +79,7 @@ test("channel editor owns the complete live media policy", async () => {
     "app/pages/room/[roomId]/settings.vue",
     "utf8",
   );
-  const api = await readFile("server/utils/dspeak-api.js", "utf8");
+  const api = await readFile("server/utils/dspeak-rooms-api.js", "utf8");
   assert.match(source, /channel\.manage_media_policy/);
   assert.match(source, /editingChannelPolicy\[field\.key\]/);
   assert.match(source, /type="range"/);
@@ -294,7 +283,7 @@ test("room accent changes persist and propagate immediately", async () => {
   const source = await readFile("app/pages/room/[roomId]/settings.vue", "utf8");
   const rooms = await readFile("app/stores/rooms.js", "utf8");
   const presence = await readFile("app/composables/usePresence.js", "utf8");
-  const api = await readFile("server/utils/dspeak-api.js", "utf8");
+  const api = await readFile("server/utils/dspeak-rooms-api.js", "utf8");
   assert.match(source, /@click="saveAccent\(accent\)"/);
   assert.match(rooms, /applyRealtimeRoomUpdate/);
   assert.match(presence, /message\?\.type === "room_updated"/);

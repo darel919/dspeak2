@@ -32,6 +32,19 @@ import {
 import { normalizeParticipantVoiceState } from "~~/shared/participant-voice-state.js";
 import { publishVoicePresence } from "./voice-presence";
 import { authenticateWebSocketRequest } from "./authentication";
+import {
+  consumeSignalingToken,
+  createSignalingBudget,
+  mediaSignalingLimits,
+  parseSignalingMessage,
+} from "./media-signaling-policy.js";
+import {
+  createMediaUserState,
+  persistMediaPresence,
+  persistParticipantVoiceState,
+  removeMediaUserState,
+} from "./media-user-state.js";
+import { collectSfuMetrics } from "./mediasoup-metrics.js";
 
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 
@@ -74,7 +87,7 @@ function mediaUserProfile(user) {
     handle: user.handle || "",
     display_name: user.display_name || "",
     avatar: user.avatar
-      ? `/dspeak/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
+      ? `/api/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
       : null,
   };
 }
@@ -286,62 +299,6 @@ function broadcastChannelState(room) {
   }
 }
 
-async function persistMediaPresence(room) {
-  const pb = await usePocketBaseAdmin();
-  const userIds = [
-    ...new Set(
-      [...room.sessions.values()].map((session) => String(session.userId)),
-    ),
-  ];
-  await pb
-    .collection("dspeak_rooms_channels")
-    .update(room.id, { inRoom: userIds });
-}
-
-async function createMediaUserState(session) {
-  const pb = await usePocketBaseAdmin();
-  const existing = await pb.collection("dspeak_users_state").getFullList({
-    filter: `user = '${session.userId}'`,
-  });
-  const state = {
-    connected: session.room.id,
-    muted: session.muted,
-    deafened: session.deafened,
-    audioBroadcasting: false,
-    videoSharing: false,
-    screenSharing: false,
-  };
-  if (existing.length)
-    await pb.collection("dspeak_users_state").update(existing[0].id, state);
-  else
-    await pb.collection("dspeak_users_state").create({
-      user: session.userId,
-      ...state,
-    });
-}
-
-async function persistParticipantVoiceState(session) {
-  const pb = await usePocketBaseAdmin();
-  const existing = await pb.collection("dspeak_users_state").getFullList({
-    filter: `user = '${session.userId}' && connected = '${session.room.id}'`,
-  });
-  for (const record of existing) {
-    await pb.collection("dspeak_users_state").update(record.id, {
-      muted: session.muted,
-      deafened: session.deafened,
-    });
-  }
-}
-
-async function removeMediaUserState(userId, channelId) {
-  const pb = await usePocketBaseAdmin();
-  const existing = await pb.collection("dspeak_users_state").getFullList({
-    filter: `user = '${userId}' && connected = '${channelId}'`,
-  });
-  for (const record of existing)
-    await pb.collection("dspeak_users_state").delete(record.id);
-}
-
 function closeSession(state, session) {
   if (!session || session.closed) return;
   session.closed = true;
@@ -419,6 +376,42 @@ async function createTransport(state, session, direction) {
   };
   transport.on("routerclose", removeTransport);
   transport.on("listenserverclose", removeTransport);
+  transport.on("icestatechange", (iceState) => {
+    console.info("[SFU] transport state", {
+      direction,
+      iceState,
+      dtlsState: transport.dtlsState,
+      selectedTuple: Boolean(transport.iceSelectedTuple),
+    });
+    send(session.peer, "transport-state", {
+      direction,
+      state: iceState,
+      selectedTuple: Boolean(transport.iceSelectedTuple),
+    });
+    if (iceState === "closed") removeTransport();
+  });
+  transport.on("iceselectedtuplechange", (tuple) => {
+    send(session.peer, "transport-state", {
+      direction,
+      state: transport.iceState,
+      selectedTuple: Boolean(tuple),
+    });
+  });
+  transport.on("dtlsstatechange", (dtlsState) => {
+    console.info("[SFU] transport state", {
+      direction,
+      iceState: transport.iceState,
+      dtlsState,
+      selectedTuple: Boolean(transport.iceSelectedTuple),
+    });
+    send(session.peer, "transport-state", {
+      direction,
+      state: dtlsState === "connected" ? transport.iceState : dtlsState,
+      dtlsState,
+      selectedTuple: Boolean(transport.iceSelectedTuple),
+    });
+    if (dtlsState === "closed") removeTransport();
+  });
   if (direction === "recv") await queueSfuBandwidthRebalance(state);
   return transport;
 }
@@ -573,7 +566,22 @@ async function handleMessage(state, session, message) {
       const transport = session.transports.get(data.transportId);
       if (!transport) throw new Error("Transport not found");
       await transport.connect({ dtlsParameters: data.dtlsParameters });
-      send(session.peer, "transport-connected", { transportId: transport.id });
+      send(session.peer, "transport-connected", {
+        requestId: data.requestId,
+        transportId: transport.id,
+      });
+      return;
+    }
+
+    case "restart-ice": {
+      const transport = session.transports.get(data.transportId);
+      if (!transport) throw new Error("Transport not found");
+      const iceParameters = await transport.restartIce();
+      send(session.peer, "ice-restarted", {
+        requestId: data.requestId,
+        transportId: transport.id,
+        iceParameters,
+      });
       return;
     }
 
@@ -597,7 +605,10 @@ async function handleMessage(state, session, message) {
       );
       producer.on("close", () => session.producers.delete(producer.id));
 
-      send(session.peer, "producer-id", { id: producer.id });
+      send(session.peer, "producer-id", {
+        requestId: data.requestId,
+        id: producer.id,
+      });
       for (const other of session.room.sessions.values()) {
         if (other !== session) {
           send(other.peer, "new-producer", {
@@ -670,6 +681,7 @@ async function handleMessage(state, session, message) {
       });
 
       send(session.peer, "consumer-params", {
+        requestId: data.requestId,
         id: consumer.id,
         producerId: data.producerId,
         kind: consumer.kind,
@@ -688,6 +700,8 @@ async function handleMessage(state, session, message) {
       if (!consumer) throw new Error("Consumer not found");
       await consumer.resume();
       send(session.peer, "consumer-resumed", {
+        requestId: data.requestId,
+        revision: data.revision,
         consumerId: consumer.id,
         producerId: consumer.producerId,
       });
@@ -699,6 +713,8 @@ async function handleMessage(state, session, message) {
       if (!consumer) throw new Error("Consumer not found");
       await consumer.pause();
       send(session.peer, "consumer-paused", {
+        requestId: data.requestId,
+        revision: data.revision,
         consumerId: consumer.id,
         producerId: consumer.producerId,
       });
@@ -752,6 +768,8 @@ export async function openSfuPeer(peer) {
       deafened: false,
       rtpCapabilities: null,
       queue: Promise.resolve(),
+      queueDepth: 0,
+      ...createSignalingBudget(),
       closed: false,
       lastHeartbeatAt: Date.now(),
     };
@@ -804,12 +822,12 @@ export async function handleSfuPeerMessage(peer, rawMessage) {
 
   let message = null;
   try {
-    const payload = rawMessage.text();
-    if (typeof payload !== "string" || payload.length > 600000)
-      throw new Error("Invalid signaling payload");
-    message = JSON.parse(payload);
+    message = parseSignalingMessage(rawMessage.text());
   } catch (error) {
+    session.protocolViolations += 1;
     reportSignalingError(peer, message, error);
+    if (session.protocolViolations >= 3)
+      peer.close(1008, "Signaling protocol violation");
     return;
   }
 
@@ -824,12 +842,28 @@ export async function handleSfuPeerMessage(peer, rawMessage) {
     return;
   }
 
+  if (!consumeSignalingToken(session)) {
+    session.protocolViolations += 1;
+    reportSignalingError(peer, message, new Error("Signaling rate exceeded"));
+    if (session.protocolViolations >= 3)
+      peer.close(1008, "Signaling rate exceeded");
+    return;
+  }
+  if (session.queueDepth >= mediaSignalingLimits.maximumQueuedSignals) {
+    peer.close(1008, "Signaling queue exceeded");
+    return;
+  }
+
+  session.queueDepth += 1;
   session.queue = session.queue
     .then(async () => {
       if (session.closed) return;
       await handleMessage(state, session, message);
     })
-    .catch((error) => reportSignalingError(peer, message, error));
+    .catch((error) => reportSignalingError(peer, message, error))
+    .finally(() => {
+      session.queueDepth = Math.max(0, session.queueDepth - 1);
+    });
   await session.queue;
 }
 
@@ -841,6 +875,7 @@ function reportSignalingError(peer, message, error) {
     requestType: message?.type || null,
     transportId: message?.data?.transportId || null,
     producerId: message?.data?.producerId || null,
+    requestId: message?.data?.requestId || null,
   });
 }
 
@@ -859,39 +894,21 @@ export async function closeSfuPeer(peer) {
 
 export async function getSfuMetrics() {
   const state = await getState();
-  let transports = 0;
-  let producers = 0;
-  let consumers = 0;
-  let p2pRooms = 0;
-  let sfuRooms = 0;
-  let probingRooms = 0;
-  let switchingRooms = 0;
-  let idleRooms = 0;
-  for (const room of state.rooms.values()) {
-    if (room.topology.mode === "p2p") p2pRooms += 1;
-    if (room.topology.mode === "sfu") sfuRooms += 1;
-    if (room.topology.mode === "probing") probingRooms += 1;
-    if (room.topology.mode === "switching") switchingRooms += 1;
-    if (room.topology.mode === "idle") idleRooms += 1;
-  }
-  for (const session of state.sessions.values()) {
-    transports += session.transports.size;
-    producers += session.producers.size;
-    consumers += session.consumers.size;
-  }
-  return {
-    workerPid: state.worker.pid,
-    rooms: state.rooms.size,
-    peers: state.sessions.size,
-    transports,
-    producers,
-    consumers,
-    p2pRooms,
-    sfuRooms,
-    probingRooms,
-    switchingRooms,
-    idleRooms,
-  };
+  return collectSfuMetrics(state);
+}
+
+export async function getSfuMetricsSnapshot() {
+  const statePromise = globalThis[stateKey];
+  if (!statePromise)
+    return collectSfuMetrics({
+      rooms: new Map(),
+      sessions: new Map(),
+      worker: null,
+    });
+  const state = await statePromise.catch(() => null);
+  return collectSfuMetrics(
+    state || { rooms: new Map(), sessions: new Map(), worker: null },
+  );
 }
 
 export async function isActiveVoiceParticipant(channelId, userId) {

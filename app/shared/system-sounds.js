@@ -27,8 +27,14 @@ function volume(settings) {
 async function playAsset(path, settings) {
   const audio = new Audio(path);
   audio.volume = volume(settings);
-  if (settings.outputDeviceId && typeof audio.setSinkId === "function")
-    await audio.setSinkId(settings.outputDeviceId).catch(() => {});
+  if (settings.outputDeviceId && typeof audio.setSinkId === "function") {
+    try {
+      await audio.setSinkId(settings.outputDeviceId);
+    } catch (error) {
+      console.warn("[SystemSound] Selected output is unavailable", error);
+      await audio.setSinkId("");
+    }
+  }
   activeAudio.add(audio);
   const cleanup = () => activeAudio.delete(audio);
   audio.addEventListener("ended", cleanup, { once: true });

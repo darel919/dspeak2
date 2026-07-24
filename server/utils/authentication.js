@@ -27,14 +27,15 @@ function metadataFromVerification(result) {
 async function verifyExternalAccessToken(accessToken) {
   const authPath = process.env.AUTH_PATH || useRuntimeConfig().public.authPath;
   if (!authPath) throw new Error("AUTH_PATH is not configured");
-  const response = await fetch(
-    `${authPath}/verify?at=${encodeURIComponent(accessToken)}`,
-    {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(5000),
-      cache: "no-store",
+  const response = await fetch(`${authPath}/verify`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
     },
-  );
+    signal: AbortSignal.timeout(5000),
+    cache: "no-store",
+  });
   if (!response.ok)
     throw createError({
       statusCode: 401,
@@ -100,15 +101,20 @@ export async function createAuthenticatedSession(event, accessToken, deviceId) {
   const { metadata, userId } = await verifyExternalAccessToken(accessToken);
   const pb = await usePocketBaseAdmin();
   await pb.collection("users").getOne(userId, { fields: "id" });
-  const existingSessions = await pb.collection("dspeak_sessions").getFullList({
-    filter: pb.filter("user = {:user} && device_id = {:device}", {
-      user: userId,
-      device: String(deviceId),
-    }),
-    fields: "id",
-  });
-  for (const session of existingSessions)
-    await pb.collection("dspeak_sessions").delete(session.id);
+  const existingSessions = await pb
+    .collection("dspeak_sessions")
+    .getList(1, 10, {
+      filter: pb.filter("user = {:user} && device_id = {:device}", {
+        user: userId,
+        device: String(deviceId),
+      }),
+      fields: "id",
+    });
+  await Promise.all(
+    existingSessions.items.map((session) =>
+      pb.collection("dspeak_sessions").delete(session.id),
+    ),
+  );
   const rawToken = randomBytes(32).toString("base64url");
   const now = new Date();
   await pb.collection("dspeak_sessions").create({
@@ -171,15 +177,22 @@ export async function revokeAuthenticatedSession(event) {
 
 export async function pruneExpiredSessions() {
   const pb = await usePocketBaseAdmin();
-  const sessions = await pb.collection("dspeak_sessions").getFullList({
-    filter: pb.filter("expires_at <= {:now}", {
-      now: new Date().toISOString(),
-    }),
-    fields: "id",
-  });
-  for (const session of sessions)
-    await pb.collection("dspeak_sessions").delete(session.id);
-  return sessions.length;
+  let deleted = 0;
+  while (true) {
+    const page = await pb.collection("dspeak_sessions").getList(1, 100, {
+      filter: pb.filter("expires_at <= {:now}", {
+        now: new Date().toISOString(),
+      }),
+      fields: "id",
+    });
+    if (!page.items.length) return deleted;
+    await Promise.all(
+      page.items.map((session) =>
+        pb.collection("dspeak_sessions").delete(session.id),
+      ),
+    );
+    deleted += page.items.length;
+  }
 }
 
 function cookieValue(request, name) {
@@ -202,6 +215,7 @@ function cookieValue(request, name) {
 }
 
 export async function authenticateWebSocketRequest(request) {
+  if (!isAllowedWebSocketOrigin(request)) return null;
   const session = await validateSession(
     await usePocketBaseAdmin(),
     cookieValue(request, SESSION_COOKIE),
@@ -211,4 +225,34 @@ export async function authenticateWebSocketRequest(request) {
     userId: String(session.user),
     deviceId: String(session.device_id),
   };
+}
+
+function requestHeader(request, name) {
+  return (
+    request.headers?.get?.(name) ||
+    request.headers?.[name] ||
+    request.headers?.getHeader?.(name) ||
+    ""
+  );
+}
+
+function isAllowedWebSocketOrigin(request) {
+  const origin = requestHeader(request, "origin");
+  if (!origin) return process.env.DSPEAK_ALLOW_ORIGINLESS_WEBSOCKETS === "true";
+  try {
+    const requestUrl = new URL(request.url);
+    const forwardedHost = requestHeader(request, "x-forwarded-host");
+    const forwardedProto = requestHeader(request, "x-forwarded-proto");
+    const host =
+      forwardedHost || requestHeader(request, "host") || requestUrl.host;
+    const protocol =
+      forwardedProto ||
+      (requestUrl.protocol === "wss:" ? "https:" : requestUrl.protocol);
+    const expectedOrigin =
+      process.env.DSPEAK_PUBLIC_ORIGIN ||
+      `${protocol.replace(/:$/, "")}://${host}`;
+    return new URL(origin).origin === new URL(expectedOrigin).origin;
+  } catch {
+    return false;
+  }
 }
