@@ -114,12 +114,16 @@ export async function validateRuntimeEnvironment() {
     throw new Error("AUTH_PATH must use https in production");
   if (process.env.DSPEAK_PUBLIC_ORIGIN) {
     const publicOrigin = new URL(process.env.DSPEAK_PUBLIC_ORIGIN);
+    const developmentLoopback =
+      process.env.NODE_ENV !== "production" &&
+      publicOrigin.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "::1"].includes(publicOrigin.hostname);
     if (
-      publicOrigin.protocol !== "https:" ||
+      (publicOrigin.protocol !== "https:" && !developmentLoopback) ||
       publicOrigin.origin !== process.env.DSPEAK_PUBLIC_ORIGIN
     )
       throw new Error(
-        "DSPEAK_PUBLIC_ORIGIN must be an HTTPS origin without a path",
+        "DSPEAK_PUBLIC_ORIGIN must be an HTTPS origin without a path; development may use an HTTP loopback origin",
       );
   }
 

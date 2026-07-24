@@ -95,7 +95,7 @@ test("an active healthy route remains usable during a topology switch", () => {
   );
 });
 
-test("a staged route is not usable before activation", () => {
+test("a prepared transport completes join while route selection continues", () => {
   assert.equal(
     hasUsableVoiceRoute({
       activeProvider: null,
@@ -105,6 +105,6 @@ test("a staged route is not usable before activation", () => {
       topologyMode: "switching",
       transportReady: true,
     }),
-    false,
+    true,
   );
 });

@@ -74,6 +74,23 @@ test("keeps a DNS-only hostname override unchanged", async () => {
   assert.equal(config.announcedAddress, "rtc.dspeak.example.com");
 });
 
+test("development accepts an exact HTTP loopback public origin", async () => {
+  process.env.NODE_ENV = "development";
+  process.env.DSPEAK_PUBLIC_ORIGIN = "http://localhost:3000";
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
+
+  await assert.doesNotReject(validateRuntimeEnvironment());
+});
+
+test("production rejects an HTTP loopback public origin", async () => {
+  process.env.NODE_ENV = "production";
+  process.env.DSPEAK_PUBLIC_ORIGIN = "http://localhost:3000";
+  process.env.DSPEAK_METRICS_TOKEN = "metrics-secret";
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
+
+  await assert.rejects(validateRuntimeEnvironment(), /must be an HTTPS origin/);
+});
+
 test("requires the shared RTC hostname when TURN is enabled", async () => {
   process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
   delete process.env.DSPEAK_RTC_DOMAIN;

@@ -162,6 +162,7 @@ export class RemoteMediaRegistry {
       gain,
       handleUnmute,
       source,
+      volumeTimer: null,
     };
     source.connect(gain);
     gain.connect(graph.context.destination);
@@ -288,10 +289,36 @@ export class RemoteMediaRegistry {
         ? Number(attenuation.attackMs) || 120
         : Number(attenuation.releaseMs) || 650;
     const now = graph.context.currentTime;
+    const elementTarget = Math.max(0, Math.min(1, target));
+    const gainTarget = target > 1 ? target : 1;
+    clearInterval(track.volumeTimer);
+    track.volumeTimer = null;
     track.gain.gain.cancelScheduledValues(now);
     track.gain.gain.setValueAtTime(track.gain.gain.value, now);
-    if (immediate) track.gain.gain.setValueAtTime(target, now);
-    else track.gain.gain.linearRampToValueAtTime(target, now + duration / 1000);
+    if (immediate) {
+      track.audio.volume = elementTarget;
+      track.gain.gain.setValueAtTime(gainTarget, now);
+    } else {
+      const initialVolume = track.audio.volume;
+      const startedAt = performance.now();
+      const updateVolume = () => {
+        const elapsed = performance.now() - startedAt;
+        const progress = duration > 0 ? Math.min(1, elapsed / duration) : 1;
+        track.audio.volume =
+          initialVolume + (elementTarget - initialVolume) * progress;
+        if (progress >= 1) {
+          clearInterval(track.volumeTimer);
+          track.volumeTimer = null;
+        }
+      };
+      updateVolume();
+      if (track.audio.volume !== elementTarget)
+        track.volumeTimer = setInterval(updateVolume, 20);
+      track.gain.gain.linearRampToValueAtTime(
+        gainTarget,
+        now + duration / 1000,
+      );
+    }
     if (track.entry.source === "screen-audio")
       this.onEffectiveGain?.({
         active: target < baseVolume,
@@ -396,6 +423,7 @@ export class RemoteMediaRegistry {
     const graph = this.participantAudio.get(String(entry.userId));
     const track = graph?.tracks.get(entry.key);
     if (!graph || !track) return;
+    clearInterval(track.volumeTimer);
     track.source.disconnect();
     track.gain.disconnect();
     track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
@@ -414,6 +442,7 @@ export class RemoteMediaRegistry {
     graph.resumeTimer = null;
     graph.resumePromise = null;
     for (const track of graph.tracks.values()) {
+      clearInterval(track.volumeTimer);
       track.source.disconnect();
       track.gain.disconnect();
       track.entry.track.removeEventListener?.("unmute", track.handleUnmute);

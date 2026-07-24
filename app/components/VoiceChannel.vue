@@ -96,7 +96,7 @@
               :stream="feed.stream"
               :source="feed.source"
               :label="feed.label"
-              :muted="feed.local"
+              :muted="true"
               :local="feed.local"
               :receiving="feed.receiving !== false"
               :own-camera-stream="ownCameraFeed?.stream || null"

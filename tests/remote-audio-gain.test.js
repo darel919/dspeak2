@@ -156,6 +156,7 @@ test("participant gain accepts a 200 percent target", () => {
   const graph = { context: { currentTime: 5 } };
   const track = {
     active: true,
+    audio: { volume: 1 },
     entry: { source: "audio", userId: "person-a" },
     gain: {
       gain: {
@@ -168,6 +169,36 @@ test("participant gain accepts a 200 percent target", () => {
   };
   registry.applyTrackGain(graph, track, false, 2);
   assert.deepEqual(values, [2]);
+});
+
+test("attenuation is applied to the native media element volume", () => {
+  const registry = createRegistry({
+    getAttenuation: () => ({
+      enabled: true,
+      reductionPercent: 100,
+      attackMs: 0,
+    }),
+    isAnyoneSpeaking: () => true,
+  });
+  const graph = { context: { currentTime: 5 } };
+  const track = {
+    active: true,
+    audio: { volume: 1 },
+    entry: { source: "screen-audio", userId: "person-a" },
+    gain: {
+      gain: {
+        value: 1,
+        cancelScheduledValues() {},
+        setValueAtTime() {},
+        linearRampToValueAtTime() {},
+      },
+    },
+    volumeTimer: null,
+  };
+
+  registry.applyTrackGain(graph, track, true);
+
+  assert.equal(track.audio.volume, 0);
 });
 
 test("system audio respects stream attenuation while anyone speaks", () => {
