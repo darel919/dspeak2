@@ -46,7 +46,7 @@ test("the read queue is deduplicated and retains failed batch entries", async ()
 
 test("the server bounds read batches and aggregates unread counts in one query", async () => {
   const api = await readFile(
-    new URL("../server/utils/dspeak-api.js", import.meta.url),
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
     "utf8",
   );
   assert.match(api, /ids\.length > 200/);

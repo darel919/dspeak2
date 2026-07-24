@@ -19,6 +19,7 @@ import {
   convertSoundboardSource,
 } from "./soundboard-conversion.js";
 import { requireAuthenticatedUser } from "./authentication.js";
+import { getBoundedList } from "./pocketbase-query.js";
 
 const uploadLocks = new Map();
 
@@ -72,7 +73,7 @@ async function listClips(pb, roomId, userId) {
   const room = await context(pb, roomId, userId);
   const access = await requireRoomMember(pb, room, userId);
   const canManageRoom = access.permissions.includes("room.manage_soundboard");
-  const records = await pb.collection("dspeak_room_soundboards").getFullList({
+  const records = await getBoundedList(pb, "dspeak_room_soundboards", {
     filter: pb.filter("room = {:room}", { room: roomId }),
     sort: "display_order,created",
     expand: "uploader",
@@ -101,12 +102,15 @@ async function uploadClip(event, pb, userId) {
       statusMessage: "Clip title is required",
     });
   return withRoomUploadLock(roomId, async () => {
-    const existing = await pb
-      .collection("dspeak_room_soundboards")
-      .getFullList({
+    const existing = await getBoundedList(
+      pb,
+      "dspeak_room_soundboards",
+      {
         filter: pb.filter("room = {:room}", { room: roomId }),
         fields: "id,display_order",
-      });
+      },
+      SOUNDBOARD_MAX_CLIPS_PER_ROOM,
+    );
     if (!metadata.icon && !(iconImage instanceof File && iconImage.size))
       throw createError({
         statusCode: 400,
@@ -152,7 +156,7 @@ async function uploadClip(event, pb, userId) {
 }
 
 async function broadcastLibraryUpdate(pb, roomId) {
-  const channels = await pb.collection("dspeak_rooms_channels").getFullList({
+  const channels = await getBoundedList(pb, "dspeak_rooms_channels", {
     filter: pb.filter("room = {:room} && isMedia = true", { room: roomId }),
     fields: "id",
   });

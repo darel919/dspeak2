@@ -38,6 +38,8 @@ export class MediasoupClientSession {
     getAudioBitrate,
     getVideoSettings,
     getAudioStereo,
+    requestTimeoutMs = 8000,
+    consumerControlTimeoutMs = 4000,
   }) {
     this.send = send;
     this.iceServers = iceServers;
@@ -47,6 +49,8 @@ export class MediasoupClientSession {
     this.getAudioBitrate = getAudioBitrate;
     this.getVideoSettings = getVideoSettings;
     this.getAudioStereo = getAudioStereo;
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.consumerControlTimeoutMs = consumerControlTimeoutMs;
     this.device = null;
     this.sendTransport = null;
     this.recvTransport = null;
@@ -54,7 +58,7 @@ export class MediasoupClientSession {
     this.producers = new Map();
     this.consumers = new Map();
     this.pending = new Map();
-    this.pendingProduce = [];
+    this.pendingProduce = new Map();
     this.pendingConsumers = new Set();
     this.requestedConsumers = new Set();
     this.readyPromise = null;
@@ -65,6 +69,14 @@ export class MediasoupClientSession {
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
     this.remoteReceiving = new Map();
+    this.transportStates = new Map([
+      ["send", "new"],
+      ["recv", "new"],
+    ]);
+    this.rtpSamples = new Map();
+    this.nextRequestSequence = 0;
+    this.recoveryAttempts = new Map();
+    this.recoveryTimers = new Map();
   }
 
   async initialize() {
@@ -112,15 +124,11 @@ export class MediasoupClientSession {
       return true;
     }
     if (type === "transport-connected") {
-      this.pending.get(`connect:${data.transportId}`)?.resolve();
+      this.pending.get(data.requestId)?.resolve();
       return true;
     }
     if (type === "producer-id") {
-      const request = this.pendingProduce.shift();
-      if (request) {
-        clearTimeout(request.timer);
-        request.resolve({ id: data.id });
-      }
+      this.pendingProduce.get(data.requestId)?.resolve({ id: data.id });
       return true;
     }
     if (type === "consumer-params") {
@@ -138,6 +146,20 @@ export class MediasoupClientSession {
     }
     if (type === "producer-closed") {
       this.closeConsumerByProducer(data.producerId);
+      return true;
+    }
+    if (type === "consumer-resumed" || type === "consumer-paused") {
+      this.pending.get(data.requestId)?.resolve(data);
+      const entry = this.consumers.get(data.consumerId);
+      if (entry) entry.receiving = type === "consumer-resumed";
+      return true;
+    }
+    if (type === "ice-restarted") {
+      this.pending.get(data.requestId)?.resolve(data.iceParameters);
+      return true;
+    }
+    if (type === "transport-state") {
+      this.handleServerTransportState(data);
       return true;
     }
     if (type === "error") {
@@ -169,31 +191,37 @@ export class MediasoupClientSession {
     this.sendTransport.on(
       "connect",
       ({ dtlsParameters }, callback, errback) => {
+        const requestId = this.requestId("connect");
         waitFor(
           this.pending,
-          `connect:${this.sendTransport.id}`,
-          8000,
+          requestId,
+          this.requestTimeoutMs,
           "SFU send transport connection",
         ).then(callback, errback);
         this.send({
           type: "connect-transport",
-          data: { transportId: this.sendTransport.id, dtlsParameters },
+          data: {
+            requestId,
+            transportId: this.sendTransport.id,
+            dtlsParameters,
+          },
         });
       },
     );
     this.sendTransport.on(
       "produce",
       ({ kind, rtpParameters, appData }, callback, errback) => {
-        const request = { resolve: callback, reject: errback, timer: null };
-        request.timer = setTimeout(() => {
-          const index = this.pendingProduce.indexOf(request);
-          if (index >= 0) this.pendingProduce.splice(index, 1);
-          errback(new Error("SFU produce timed out"));
-        }, 8000);
-        this.pendingProduce.push(request);
+        const requestId = this.requestId("produce");
+        waitFor(
+          this.pendingProduce,
+          requestId,
+          this.requestTimeoutMs,
+          "SFU produce",
+        ).then(callback, errback);
         this.send({
           type: "produce",
           data: {
+            requestId,
             transportId: this.sendTransport.id,
             kind,
             rtpParameters,
@@ -202,30 +230,125 @@ export class MediasoupClientSession {
         });
       },
     );
-    this.sendTransport.on("connectionstatechange", (state) =>
-      this.onStateChange?.("send", state),
-    );
+    this.sendTransport.on("connectionstatechange", (state) => {
+      this.transportStates.set("send", state);
+      this.onStateChange?.("send", state, this.connectionState());
+      this.handleTransportRecovery("send", state);
+    });
   }
 
   bindReceiveTransport() {
     this.recvTransport.on(
       "connect",
       ({ dtlsParameters }, callback, errback) => {
+        const requestId = this.requestId("connect");
         waitFor(
           this.pending,
-          `connect:${this.recvTransport.id}`,
-          8000,
+          requestId,
+          this.requestTimeoutMs,
           "SFU receive transport connection",
         ).then(callback, errback);
         this.send({
           type: "connect-transport",
-          data: { transportId: this.recvTransport.id, dtlsParameters },
+          data: {
+            requestId,
+            transportId: this.recvTransport.id,
+            dtlsParameters,
+          },
         });
       },
     );
-    this.recvTransport.on("connectionstatechange", (state) =>
-      this.onStateChange?.("recv", state),
+    this.recvTransport.on("connectionstatechange", (state) => {
+      this.transportStates.set("recv", state);
+      this.onStateChange?.("recv", state, this.connectionState());
+      this.handleTransportRecovery("recv", state);
+    });
+  }
+
+  requestId(operation) {
+    this.nextRequestSequence = (this.nextRequestSequence + 1) % 1_000_000_000;
+    return `${operation}-${this.nextRequestSequence}`;
+  }
+
+  connectionState() {
+    const sendRequired = this.sources.size > 0;
+    const receiveRequired =
+      this.consumers.size > 0 || this.requestedConsumers.size > 0;
+    const sendConnected =
+      !sendRequired || this.transportStates.get("send") === "connected";
+    const receiveConnected =
+      !receiveRequired || this.transportStates.get("recv") === "connected";
+    return {
+      ready: sendConnected && receiveConnected,
+      sendRequired,
+      receiveRequired,
+      send: this.transportStates.get("send") || "new",
+      recv: this.transportStates.get("recv") || "new",
+    };
+  }
+
+  handleServerTransportState(data) {
+    const direction = data?.direction;
+    if (direction !== "send" && direction !== "recv") return false;
+    const state = data.state === "completed" ? "connected" : data.state;
+    if (
+      ![
+        "new",
+        "connecting",
+        "connected",
+        "disconnected",
+        "failed",
+        "closed",
+      ].includes(state)
+    )
+      return false;
+    this.transportStates.set(direction, state);
+    const summary = this.connectionState();
+    this.onStateChange?.(direction, state, summary);
+    this.handleTransportRecovery(direction, state);
+    return true;
+  }
+
+  handleTransportRecovery(direction, state) {
+    clearTimeout(this.recoveryTimers.get(direction));
+    this.recoveryTimers.delete(direction);
+    if (state === "connected") {
+      this.recoveryAttempts.delete(direction);
+      return;
+    }
+    if (state !== "disconnected" && state !== "failed") return;
+    const delay = state === "disconnected" ? 3000 : 0;
+    const timer = setTimeout(() => {
+      this.recoveryTimers.delete(direction);
+      this.restartTransportIce(direction).catch(() =>
+        this.onStateChange?.(direction, "failed", this.connectionState()),
+      );
+    }, delay);
+    this.recoveryTimers.set(direction, timer);
+  }
+
+  async restartTransportIce(direction) {
+    const attempts = this.recoveryAttempts.get(direction) || 0;
+    if (attempts >= 1) throw new Error("SFU ICE recovery was exhausted");
+    const transport =
+      direction === "send" ? this.sendTransport : this.recvTransport;
+    if (!transport || transport.closed)
+      throw new Error("SFU transport is unavailable for ICE recovery");
+    this.recoveryAttempts.set(direction, attempts + 1);
+    const requestId = this.requestId("restart-ice");
+    const response = waitFor(
+      this.pending,
+      requestId,
+      this.requestTimeoutMs,
+      `SFU ${direction} ICE restart`,
     );
+    this.send({
+      type: "restart-ice",
+      data: { requestId, transportId: transport.id },
+    });
+    const iceParameters = await response;
+    await transport.restartIce({ iceParameters });
+    return true;
   }
 
   addSource(entry) {
@@ -352,6 +475,7 @@ export class MediasoupClientSession {
     this.send({
       type: "consume",
       data: {
+        requestId: this.requestId("consume"),
         transportId: this.recvTransport.id,
         producerId,
         rtpCapabilities: this.device.rtpCapabilities,
@@ -380,6 +504,7 @@ export class MediasoupClientSession {
       consumer,
       track: consumer.track,
       stream: new MediaStream([consumer.track]),
+      receiving: false,
     };
     this.consumers.set(consumer.id, entry);
     let closed = false;
@@ -394,7 +519,7 @@ export class MediasoupClientSession {
     consumer.on("trackended", close);
     this.onRemoteTrack?.(entry);
     if (this.shouldReceive(data.userId, entry.source))
-      this.setConsumerReceiving(entry, true);
+      await this.setConsumerReceiving(entry, true);
   }
 
   shouldReceive(userId, source) {
@@ -408,6 +533,7 @@ export class MediasoupClientSession {
       source === "screen" || source === "screen-audio"
         ? ["screen", "screen-audio"]
         : [source];
+    const operations = [];
     for (const pairedSource of pairedSources) {
       this.remoteReceiving.set(
         `${String(userId)}:${String(pairedSource)}`,
@@ -418,16 +544,46 @@ export class MediasoupClientSession {
           String(entry.userId) === String(userId) &&
           entry.source === pairedSource
         )
-          this.setConsumerReceiving(entry, receiving);
+          operations.push(this.setConsumerReceiving(entry, receiving));
     }
+    return Promise.all(operations);
   }
 
-  setConsumerReceiving(entry, receiving) {
-    entry.track.enabled = Boolean(receiving);
-    this.send({
-      type: receiving ? "resume-consumer" : "pause-consumer",
-      data: { consumerId: entry.consumer.id },
-    });
+  async setConsumerReceiving(entry, receiving) {
+    const desired = Boolean(receiving);
+    entry.desiredReceiving = desired;
+    entry.receivingRevision = (entry.receivingRevision || 0) + 1;
+    const revision = entry.receivingRevision;
+    const operation = desired ? "resume-consumer" : "pause-consumer";
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const requestId = this.requestId(operation);
+      const acknowledgement = waitFor(
+        this.pending,
+        requestId,
+        this.consumerControlTimeoutMs,
+        `SFU ${desired ? "consumer resume" : "consumer pause"}`,
+      );
+      this.send({
+        type: operation,
+        data: { consumerId: entry.consumer.id, requestId, revision },
+      });
+      try {
+        await acknowledgement;
+        if (entry.receivingRevision !== revision) return false;
+        entry.track.enabled = desired;
+        entry.receiving = desired;
+        return true;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (entry.receivingRevision === revision) {
+      entry.track.enabled = false;
+      entry.receiving = false;
+    }
+    this.onStateChange?.("consumer", "failed", this.connectionState());
+    throw lastError;
   }
 
   closeConsumerByProducer(producerId) {
@@ -442,19 +598,16 @@ export class MediasoupClientSession {
 
   handleServerError(data) {
     const error = new Error(data?.message || "SFU signaling request failed");
-    if (data?.requestType === "produce") {
-      const request = this.pendingProduce.shift();
-      if (request) {
-        clearTimeout(request.timer);
-        request.reject(error);
-      }
+    if (data?.requestId) {
+      this.pendingProduce.get(data.requestId)?.reject(error);
+      this.pending.get(data.requestId)?.reject(error);
     }
     if (data?.requestType === "consume" && data.producerId) {
       this.requestedConsumers.delete(data.producerId);
       this.pendingConsumers.delete(data.producerId);
     }
     if (data?.requestType === "connect-transport" && data.transportId) {
-      this.pending.get(`connect:${data.transportId}`)?.reject(error);
+      this.pending.get(data.requestId)?.reject(error);
     }
     if (
       [
@@ -506,22 +659,43 @@ export class MediasoupClientSession {
         inboundFlowing: 0,
       };
     }
+    const sampleFlow = (key, report, type, field) => {
+      if (!report) return false;
+      const stat = [...report.values()].find(
+        (candidate) => candidate.type === type,
+      );
+      if (!stat) return false;
+      const bytes = Number(stat[field]);
+      const timestamp = Number(stat.timestamp);
+      if (!Number.isFinite(bytes) || !Number.isFinite(timestamp)) return false;
+      const previous = this.rtpSamples.get(key);
+      this.rtpSamples.set(key, { bytes, timestamp });
+      if (
+        !previous ||
+        timestamp <= previous.timestamp ||
+        bytes < previous.bytes
+      )
+        return false;
+      return bytes > previous.bytes;
+    };
     const outboundChecks = [...this.producers.values()].map(async (entry) => {
       const report = await entry.producer.getStats().catch(() => null);
-      return (
-        !!report &&
-        [...report.values()].some(
-          (stat) => stat.type === "outbound-rtp" && Number(stat.bytesSent) > 0,
-        )
+      return sampleFlow(
+        `out:${entry.producer.id}`,
+        report,
+        "outbound-rtp",
+        "bytesSent",
       );
     });
     const inboundChecks = [...this.consumers.values()].map(async (entry) => {
       const report = await entry.consumer.getStats().catch(() => null);
       return (
-        !!report &&
-        [...report.values()].some(
-          (stat) =>
-            stat.type === "inbound-rtp" && Number(stat.bytesReceived) > 0,
+        entry.receiving === true &&
+        sampleFlow(
+          `in:${entry.consumer.id}`,
+          report,
+          "inbound-rtp",
+          "bytesReceived",
         )
       );
     });
@@ -533,6 +707,7 @@ export class MediasoupClientSession {
     const inboundFlowing = inboundResults.filter(Boolean).length;
     return {
       ready:
+        this.connectionState().ready &&
         outboundFlowing >= outboundExpected &&
         inboundFlowing >= inboundExpected,
       outboundExpected,
@@ -560,6 +735,12 @@ export class MediasoupClientSession {
     this.producers.clear();
     this.consumers.clear();
     this.remoteReceiving.clear();
+    this.rtpSamples.clear();
+    this.transportStates.set("send", "new");
+    this.transportStates.set("recv", "new");
+    for (const timer of this.recoveryTimers.values()) clearTimeout(timer);
+    this.recoveryTimers.clear();
+    this.recoveryAttempts.clear();
     this.sendTransport?.close();
     this.recvTransport?.close();
     this.sendTransport = null;
@@ -572,11 +753,9 @@ export class MediasoupClientSession {
     this.pending.clear();
     this.pendingConsumers.clear();
     this.requestedConsumers.clear();
-    for (const request of this.pendingProduce) {
-      clearTimeout(request.timer);
+    for (const request of this.pendingProduce.values())
       request.reject(closedError);
-    }
-    this.pendingProduce.splice(0);
+    this.pendingProduce.clear();
   }
 
   resetReadiness() {

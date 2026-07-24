@@ -13,7 +13,7 @@
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           v-if="selectedChannel?.isMedia"
-          class="min-h-0 flex-1 overflow-hidden p-4"
+          class="min-h-0 flex-1 overflow-hidden"
         >
           <VoiceChannel
             :key="`voice-${selectedChannel.id}`"

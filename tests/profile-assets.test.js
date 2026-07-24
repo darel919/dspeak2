@@ -36,10 +36,10 @@ test("profileAssetUrl preserves absolute and local paths", () => {
   );
   assert.equal(
     profileAssetUrl(
-      "/dspeak/assets/avatar?userId=one&fileName=face.jpg",
+      "/api/assets/avatar?userId=one&fileName=face.jpg",
       "https://api.example.com",
     ),
-    "/dspeak/assets/avatar?userId=one&fileName=face.jpg",
+    "/api/assets/avatar?userId=one&fileName=face.jpg",
   );
   assert.equal(profileAssetUrl("", "https://api.example.com"), null);
 });

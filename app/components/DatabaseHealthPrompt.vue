@@ -17,7 +17,7 @@
           <p v-if="storageSummary" class="mt-1 text-xs opacity-70">
             {{ storageSummary }}
           </p>
-          <p v-if="diagnosticSummary" class="mt-1 text-xs opacity-60">
+          <p v-if="diagnosticSummary" class="mt-1 text-xs text-base-content/65">
             {{ diagnosticSummary }}
           </p>
           <p v-if="resetConfirmation" class="mt-2 text-xs font-semibold">

@@ -33,6 +33,7 @@
         <button
           @click="showStatus = false"
           class="btn btn-sm btn-ghost btn-square"
+          aria-label="Dismiss push notification status"
         >
           <Icon name="lucide:x" class="h-4 w-4" />
         </button>

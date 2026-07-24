@@ -972,7 +972,9 @@ export class NativeP2pMesh {
   emitSnapshot() {
     this.getSnapshot()
       .then((snapshot) => this.onSnapshot?.(snapshot))
-      .catch(() => {});
+      .catch((error) =>
+        console.warn("[P2P] Diagnostic snapshot failed", error),
+      );
   }
 
   fail(reason, error) {

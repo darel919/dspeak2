@@ -40,7 +40,7 @@
       <g
         v-for="node in renderedNodes"
         :key="node.id"
-        class="cursor-pointer outline-none"
+        class="cursor-pointer"
         role="button"
         tabindex="0"
         :aria-label="nodeLabel(node)"

@@ -52,7 +52,7 @@ test("soundboard presentation exposes only the protected media route", () => {
     display_order: 2,
     enabled: true,
   });
-  assert.equal(clip.mediaUrl, "/dspeak/soundboard/media?id=clip-1");
+  assert.equal(clip.mediaUrl, "/api/soundboard/media?id=clip-1");
   assert.equal(JSON.stringify(clip).includes("private-file.ogg"), false);
 });
 

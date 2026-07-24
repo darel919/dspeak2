@@ -18,6 +18,7 @@
           <button
             type="button"
             class="btn btn-ghost btn-sm lg:hidden"
+            aria-label="Close settings"
             @click="goBack"
           >
             <Icon name="lucide:x" class="size-5" />
@@ -34,7 +35,7 @@
             class="metro-transition flex min-h-11 min-w-0 items-center justify-center gap-2 px-3 py-2 text-sm font-medium lg:w-full lg:justify-start"
             :class="
               activeSection === item.id
-                ? 'bg-primary/12 text-primary'
+                ? 'border-l-4 border-primary bg-primary/12 text-base-content'
                 : 'text-base-content/65 hover:bg-base-300/70 hover:text-base-content'
             "
             @click="activeSection = item.id"
@@ -73,7 +74,7 @@
               <div class="flex items-center gap-4 sm:gap-5">
                 <div class="avatar shrink-0">
                   <div class="w-16 bg-base-200 ring-2 ring-base-100 sm:w-20">
-                    <img :src="profileAvatarPreview" alt="User avatar" />
+                    <img :src="profileAvatarPreview" alt="" />
                   </div>
                 </div>
                 <div class="min-w-0 flex-1">
@@ -141,7 +142,7 @@
                         class="size-28 object-cover sm:size-32"
                       />
                       <span
-                        class="metro-transition absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-neutral/85 px-2 py-2 text-xs font-semibold text-neutral-content group-hover:bg-neutral"
+                        class="metro-transition absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-neutral px-2 py-2 text-xs font-semibold text-neutral-content"
                       >
                         <Icon name="lucide:camera" class="size-3.5" /> Change
                       </span>
@@ -150,6 +151,7 @@
                       ref="avatarInput"
                       class="sr-only"
                       type="file"
+                      aria-label="Choose profile picture"
                       accept="image/jpeg,image/png,image/webp"
                       @change="selectProfileAvatar"
                     />
@@ -824,7 +826,10 @@ import {
   microphoneLevelDb,
   updateNoiseFloor,
 } from "../shared/microphone-gate.js";
-import { ROOM_ACCENTS } from "~~/shared/room-policy.js";
+import {
+  ROOM_ACCENTS,
+  ROOM_ACCENT_LIGHT_COLORS,
+} from "~~/shared/room-policy.js";
 import {
   availableSystemSoundThemes,
   playSystemSound,
@@ -933,14 +938,7 @@ function previewSystemSound() {
 }
 
 function accentColor(value) {
-  return {
-    cobalt: "#0050ef",
-    cyan: "#00aba9",
-    violet: "#6a00ff",
-    magenta: "#d80073",
-    orange: "#e3a21a",
-    lime: "#60a917",
-  }[value];
+  return ROOM_ACCENT_LIGHT_COLORS[value];
 }
 
 function setCameraResolution(resolution) {

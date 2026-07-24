@@ -244,6 +244,34 @@ router and WebSocket ownership model. Multiple application instances require a
 shared signaling/state backplane and mediasoup router piping before they can
 coordinate the same media room.
 
+## SFU readiness and recovery
+
+SFU signaling readiness is separate from media readiness. Creating the send and
+receive transport objects does not mark the call connected. The client tracks
+each required direction through transport connectivity, production or
+consumption, acknowledged consumer state, fresh RTP byte deltas, and remote
+playback. A muted one-person room is reported as ready with no active media; it
+is not reported as two-way ICE connectivity.
+
+Every signaling operation that can overlap carries a bounded request ID.
+Producer responses can arrive out of order without changing source ownership.
+Consumer pause and resume requests carry a desired revision, wait for the
+matching acknowledgement, and retry once. RTP liveness requires positive
+counter movement over increasing RTC timestamps, so lifetime byte counters
+cannot keep a stalled route healthy.
+
+A transient SFU transport disconnection receives a three-second grace period.
+A failed direction requests one correlated mediasoup ICE restart. If recovery
+fails, the topology coordinator rebuilds the SFU session. Server transport logs
+contain only direction, ICE and DTLS state, and selected-tuple presence; they
+exclude peer identity, candidate addresses, SDP, fingerprints, and credentials.
+
+Remote participant audio shares one room AudioContext and one voice-activity
+scheduler. Output-device and autoplay failures publish playback state instead
+of being discarded. The interface offers an Enable audio action backed by a
+user gesture and falls back to the default output device when a selected device
+disappears.
+
 ## Release smoke matrix
 
 Before a production release, exercise these sequences with every participating

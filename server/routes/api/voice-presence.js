@@ -7,6 +7,7 @@ import {
 } from "../../utils/voice-presence";
 import { authenticateWebSocketRequest } from "../../utils/authentication";
 import { publicDisplayName } from "../../../shared/user-profile";
+import { getBoundedList } from "../../utils/pocketbase-query";
 
 const sessions = new Map();
 
@@ -29,18 +30,16 @@ export default defineWebSocketHandler({
       const pb = await usePocketBaseAdmin();
       const room = await pb.collection("dspeak_rooms").getOne(roomId);
       await requireRoomMember(pb, room, userId);
-      const channels = await pb
-        .collection("dspeak_rooms_channels")
-        .getFullList({
-          filter: `room = '${room.id}' && isMedia = true`,
-        });
+      const channels = await getBoundedList(pb, "dspeak_rooms_channels", {
+        filter: `room = '${room.id}' && isMedia = true`,
+      });
       const userIds = [
         ...new Set(
           channels.flatMap((channel) => channel.inRoom || []).map(String),
         ),
       ];
       const profiles = userIds.length
-        ? await pb.collection("users").getFullList({
+        ? await getBoundedList(pb, "users", {
             filter: userIds.map((id) => `id = '${id}'`).join(" || "),
           })
         : [];
@@ -54,7 +53,7 @@ export default defineWebSocketHandler({
             username: profile.username || "",
             handle: profile.handle || "",
             avatar: profile.avatar
-              ? `/dspeak/assets/avatar?userId=${encodeURIComponent(profile.id)}&fileName=${encodeURIComponent(profile.avatar)}`
+              ? `/api/assets/avatar?userId=${encodeURIComponent(profile.id)}&fileName=${encodeURIComponent(profile.avatar)}`
               : null,
           },
         ]),

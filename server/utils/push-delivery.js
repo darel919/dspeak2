@@ -7,6 +7,7 @@ import {
 import { publicDisplayName } from "../../shared/user-profile.js";
 import { isDeviceViewingChannel } from "./dspeak-realtime.js";
 import { usePocketBaseAdmin } from "./pocketbase.js";
+import { getBoundedList } from "./pocketbase-query.js";
 
 const dispatcherKey = Symbol.for("dspeak.push.dispatcher");
 const retryDelays = [5_000, 30_000, 120_000, 600_000, 1_800_000];
@@ -24,6 +25,13 @@ function getState() {
       running: false,
       configured: false,
       lastCleanupAt: 0,
+      metricsSnapshot: {
+        pending: 0,
+        activeSubscriptions: 0,
+        oldestPendingAt: null,
+        checkedAt: null,
+        available: false,
+      },
       metrics: {
         delivered: 0,
         failed: 0,
@@ -95,7 +103,7 @@ export async function persistMessageNotifications({
     .map(String)
     .filter((id) => id !== String(senderId));
   if (!recipientIds.length) return { notifications: 0, jobs: 0 };
-  const profiles = await pb.collection("users").getFullList({
+  const profiles = await getBoundedList(pb, "users", {
     filter: recipientIds
       .map((id) => pb.filter("id = {:id}", { id }))
       .join(" || "),
@@ -109,13 +117,13 @@ export async function persistMessageNotifications({
     .join(" || ");
   const [globalPreferences, roomPreferences, subscriptions] = await Promise.all(
     [
-      pb.collection("dspeak_notification_preferences").getFullList({
+      getBoundedList(pb, "dspeak_notification_preferences", {
         filter: recipientFilter,
       }),
-      pb.collection("dspeak_room_notification_preferences").getFullList({
+      getBoundedList(pb, "dspeak_room_notification_preferences", {
         filter: `room = ${JSON.stringify(room.id)} && (${recipientFilter})`,
       }),
-      pb.collection("dspeak_push_subscriptions").getFullList({
+      getBoundedList(pb, "dspeak_push_subscriptions", {
         filter: `disabled = false && (${recipientFilter})`,
       }),
     ],
@@ -353,12 +361,18 @@ async function pruneCompletedJobs(pb) {
   const state = getState();
   if (Date.now() - state.lastCleanupAt < cleanupInterval) return;
   const cutoff = new Date(Date.now() - completedJobRetention).toISOString();
-  const jobs = await pb.collection("dspeak_push_jobs").getFullList({
-    filter: pb.filter("finished_at <= {:cutoff}", { cutoff }),
-    fields: "id",
-  });
-  for (const job of jobs)
-    await pb.collection("dspeak_push_jobs").delete(job.id);
+  const jobs = await getBoundedList(
+    pb,
+    "dspeak_push_jobs",
+    {
+      filter: pb.filter("finished_at <= {:cutoff}", { cutoff }),
+      fields: "id",
+    },
+    100,
+  );
+  await Promise.all(
+    jobs.map((job) => pb.collection("dspeak_push_jobs").delete(job.id)),
+  );
   state.lastCleanupAt = Date.now();
 }
 
@@ -366,8 +380,9 @@ export async function dispatchPushJobs() {
   const state = getState();
   if (state.running || !configureWebPush()) return;
   state.running = true;
+  let pb = null;
   try {
-    const pb = await usePocketBaseAdmin();
+    pb = await usePocketBaseAdmin();
     await pruneCompletedJobs(pb).catch((error) =>
       console.error("[PushDispatcher] Retention cleanup failed", error),
     );
@@ -383,6 +398,16 @@ export async function dispatchPushJobs() {
       });
     for (const job of jobs.items) await deliverJob(pb, job);
   } finally {
+    if (pb) {
+      await refreshPushMetrics(pb).catch((error) => {
+        state.metricsSnapshot = {
+          ...state.metricsSnapshot,
+          checkedAt: new Date().toISOString(),
+          available: false,
+        };
+        console.error("[PushDispatcher] Metrics refresh failed", error);
+      });
+    }
     state.running = false;
   }
 }
@@ -436,8 +461,7 @@ export function stopPushDispatcher() {
   state.timer = null;
 }
 
-export async function getPushMetrics() {
-  const pb = await usePocketBaseAdmin();
+async function refreshPushMetrics(pb) {
   const now = new Date().toISOString();
   const [pending, subscriptions] = await Promise.all([
     pb.collection("dspeak_push_jobs").getList(1, 1, {
@@ -449,13 +473,31 @@ export async function getPushMetrics() {
     }),
   ]);
   const oldest = pending.items[0]?.next_attempt_at;
-  return {
-    ...getState().metrics,
+  getState().metricsSnapshot = {
     pending: pending.totalItems,
     activeSubscriptions: subscriptions.totalItems,
-    oldestPendingSeconds: oldest
-      ? Math.max(0, Math.floor((Date.now() - Date.parse(oldest)) / 1000))
-      : 0,
+    oldestPendingAt: oldest || null,
     checkedAt: now,
+    available: true,
+  };
+}
+
+export function getPushMetrics() {
+  const state = getState();
+  const snapshot = state.metricsSnapshot;
+  return {
+    ...state.metrics,
+    pending: snapshot.pending,
+    activeSubscriptions: snapshot.activeSubscriptions,
+    oldestPendingSeconds: snapshot.oldestPendingAt
+      ? Math.max(
+          0,
+          Math.floor(
+            (Date.now() - Date.parse(snapshot.oldestPendingAt)) / 1000,
+          ),
+        )
+      : 0,
+    checkedAt: snapshot.checkedAt,
+    available: snapshot.available,
   };
 }

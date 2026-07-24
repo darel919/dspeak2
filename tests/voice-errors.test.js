@@ -7,7 +7,7 @@ import {
 
 test("hides request paths and transport details from voice connection errors", () => {
   const error = new TypeError(
-    '[GET] "/dspeak/config": <no response> Failed to fetch',
+    '[GET] "/api/config": <no response> Failed to fetch',
   );
 
   assert.equal(voiceJoinErrorMessage(error), VOICE_CONNECTION_ERROR_MESSAGE);

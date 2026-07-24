@@ -153,7 +153,7 @@ TURN_CREDENTIAL_TTL_SECONDS=3600
 ```
 
 Generate the shared secret with `openssl rand -hex 32`. Nitro uses it only to
-create expiring Coturn REST credentials returned by `/dspeak/config`; the
+create expiring Coturn REST credentials returned by `/api/config`; the
 permanent secret is never sent to the browser. Coturn enforces per-user and
 total allocation quotas. Tune the defaults only after measuring relay usage:
 
@@ -288,13 +288,19 @@ Complete every check below before treating the deployment as production-ready.
 
 ```bash
 curl --fail https://<application-host>/health
-curl --fail https://<application-host>/metrics
+curl --fail \
+  -H "Authorization: Bearer ${DSPEAK_METRICS_TOKEN}" \
+  https://<application-host>/metrics
 ```
+
+The metrics token is required and remains server-side. Reading `/metrics`
+without it returns `401` and never starts the mediasoup worker.
 
 The health response reports `turn.selfHosted.configured` and
 `turn.selfHosted.available` independently from `turn.communityFallbacks`. The
-self-hosted availability check is a real IPv6 STUN Binding transaction cached
-for thirty seconds; a failed optional TURN probe does not mark the Nitro/SFU
+self-hosted availability check is a background IPv6 STUN Binding transaction
+cached for thirty seconds; health requests only read the cached result. A
+failed optional TURN probe does not mark the Nitro/SFU
 service unhealthy while community fallbacks remain configured.
 
 ### Relay checks

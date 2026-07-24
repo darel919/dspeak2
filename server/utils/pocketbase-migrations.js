@@ -626,7 +626,7 @@ async function migrateAuthenticatedSessions(pb) {
     indexes: [
       "CREATE UNIQUE INDEX idx_dspeak_sessions_token ON dspeak_sessions (token_hash)",
       "CREATE INDEX idx_dspeak_sessions_expiry ON dspeak_sessions (expires_at)",
-      "CREATE INDEX idx_dspeak_sessions_user_device ON dspeak_sessions (user, device_id)",
+      "CREATE UNIQUE INDEX idx_dspeak_sessions_user_device ON dspeak_sessions (user, device_id)",
     ],
   });
 }

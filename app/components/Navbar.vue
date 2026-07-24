@@ -7,7 +7,7 @@ import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
-import { getConnectionQualityLabel } from "../shared/connection-quality";
+import { getActiveConnectionLabel } from "../shared/connection-quality";
 import { useChatUtils } from "../composables/useChatUtils";
 
 const authStore = useAuthStore();
@@ -92,7 +92,11 @@ const activeRouteLabel = computed(() => {
         : "SFU";
 });
 const signalLabel = computed(() =>
-  getConnectionQualityLabel(signalLevel.value),
+  getActiveConnectionLabel(
+    signalLevel.value,
+    voiceStore.sfuComposable?.mediaConnectionState,
+    rtcStatsStore.metrics.connected,
+  ),
 );
 const signalColorClass = computed(() => {
   if (signalLevel.value >= 4) return "bg-success";
@@ -837,11 +841,11 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  border: 1px solid color-mix(in oklab, var(--color-warning) 45%, transparent);
+  border: 1px solid var(--color-warning);
   border-radius: 0.7rem;
-  background: color-mix(in oklab, var(--color-warning) 12%, transparent);
+  background: var(--color-warning);
   padding: 0.55rem 0.75rem;
-  color: var(--color-warning);
+  color: var(--color-warning-content);
   font-size: 0.8rem;
   font-weight: 600;
 }

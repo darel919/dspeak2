@@ -1,11 +1,16 @@
-import { getSfuMetrics } from "../utils/mediasoup-sfu";
+import { getSfuMetricsSnapshot } from "../utils/mediasoup-sfu";
 import { getPushMetrics } from "../utils/push-delivery";
 
 export default defineEventHandler(async (event) => {
-  const [metrics, push] = await Promise.all([
-    getSfuMetrics(),
-    getPushMetrics(),
-  ]);
+  const configuredToken = process.env.DSPEAK_METRICS_TOKEN;
+  const suppliedToken = getHeader(event, "authorization");
+  if (!configuredToken || suppliedToken !== `Bearer ${configuredToken}`)
+    throw createError({
+      statusCode: 401,
+      statusMessage: "Metrics authentication required",
+    });
+  const metrics = await getSfuMetricsSnapshot();
+  const push = getPushMetrics();
   setHeader(event, "Content-Type", "text/plain; version=0.0.4; charset=utf-8");
   return [
     "# HELP dspeak_sfu_rooms Active media rooms.",
@@ -34,6 +39,9 @@ export default defineEventHandler(async (event) => {
     "# HELP dspeak_push_jobs_pending Push jobs awaiting final delivery.",
     "# TYPE dspeak_push_jobs_pending gauge",
     `dspeak_push_jobs_pending ${push.pending}`,
+    "# HELP dspeak_push_metrics_available Whether the cached push snapshot is fresh.",
+    "# TYPE dspeak_push_metrics_available gauge",
+    `dspeak_push_metrics_available ${push.available ? 1 : 0}`,
     "# HELP dspeak_push_oldest_pending_seconds Age of the oldest pending push job.",
     "# TYPE dspeak_push_oldest_pending_seconds gauge",
     `dspeak_push_oldest_pending_seconds ${push.oldestPendingSeconds}`,

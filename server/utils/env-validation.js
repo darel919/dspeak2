@@ -77,7 +77,11 @@ async function discoverAnnouncedAddress() {
 }
 
 export async function validateRuntimeEnvironment() {
-  const missing = requiredVariables.filter(
+  const environmentRequiredVariables =
+    process.env.NODE_ENV === "production"
+      ? [...requiredVariables, "DSPEAK_PUBLIC_ORIGIN", "DSPEAK_METRICS_TOKEN"]
+      : requiredVariables;
+  const missing = environmentRequiredVariables.filter(
     (name) => !process.env[name]?.trim(),
   );
   if (
@@ -105,6 +109,18 @@ export async function validateRuntimeEnvironment() {
   }
   if (!["http:", "https:"].includes(authUrl.protocol)) {
     throw new Error("AUTH_PATH must use http or https");
+  }
+  if (process.env.NODE_ENV === "production" && authUrl.protocol !== "https:")
+    throw new Error("AUTH_PATH must use https in production");
+  if (process.env.DSPEAK_PUBLIC_ORIGIN) {
+    const publicOrigin = new URL(process.env.DSPEAK_PUBLIC_ORIGIN);
+    if (
+      publicOrigin.protocol !== "https:" ||
+      publicOrigin.origin !== process.env.DSPEAK_PUBLIC_ORIGIN
+    )
+      throw new Error(
+        "DSPEAK_PUBLIC_ORIGIN must be an HTTPS origin without a path",
+      );
   }
 
   const rtcPort = readPort("MEDIASOUP_RTC_PORT", 40000);

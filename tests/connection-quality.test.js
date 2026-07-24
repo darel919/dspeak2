@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  getActiveConnectionLabel,
   getConnectionQualityBars,
   getConnectionQualityColorClass,
   getConnectionQualityLabel,
+  normalizeConnectionMetricValue,
 } from "../app/shared/connection-quality.js";
 
 test("connection quality maps SFU RTT to five requested bar levels", () => {
@@ -30,6 +32,54 @@ test("connection quality handles unavailable data and labels every level", () =>
     "Very good",
     "Excellent",
   ]);
+});
+
+test("active connection label follows transport state before statistics arrive", () => {
+  assert.equal(
+    getActiveConnectionLabel(0, "transport-connecting", false),
+    "Transport connecting",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "reconnecting", false),
+    "Reconnecting",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "ready-no-active-media", false),
+    "Ready · no active media",
+  );
+  assert.equal(
+    getActiveConnectionLabel(1, "ready-no-active-media", false),
+    "Ready · no active media",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "topology-probing", false),
+    "Selecting media route",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "playback-blocked", false),
+    "Playback blocked",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "media-flowing", false),
+    "Media flowing",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "signaling-connected", false),
+    "Signaling connected",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "failed", false),
+    "Connection issue",
+  );
+  assert.equal(getActiveConnectionLabel(4, "media-flowing", true), "Very good");
+});
+
+test("missing connection measurements remain unavailable instead of becoming zero", () => {
+  assert.equal(normalizeConnectionMetricValue(null), null);
+  assert.equal(normalizeConnectionMetricValue(undefined), null);
+  assert.equal(normalizeConnectionMetricValue(""), null);
+  assert.equal(normalizeConnectionMetricValue("32"), 32);
+  assert.equal(normalizeConnectionMetricValue(0), 0);
 });
 
 test("connection quality applies packet-loss penalties to RTT bars", () => {

@@ -130,6 +130,29 @@ test("signal quality uses the healthy active direction when the send transport i
   });
 });
 
+test("solo idle transports remain unmeasured instead of reporting poor quality", () => {
+  const metrics = getRtcSignalMetrics([
+    {
+      kind: "send",
+      pcStates: { connectionState: "new", iceConnectionState: "new" },
+      candidatePair: null,
+    },
+    {
+      kind: "recv",
+      pcStates: { connectionState: "new", iceConnectionState: "new" },
+      candidatePair: null,
+    },
+  ]);
+  assert.deepEqual(metrics, {
+    connected: false,
+    rttMs: null,
+    jitterMs: null,
+    loss: null,
+    score: 0,
+    label: "Connecting",
+  });
+});
+
 test("receive-only packet loss is not attributed to the local sender", () => {
   const metrics = getRtcSignalMetrics([
     {

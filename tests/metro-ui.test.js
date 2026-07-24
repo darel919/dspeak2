@@ -4,7 +4,9 @@ import test from "node:test";
 
 test("authenticated shell owns fixed navigation and page content", async () => {
   const layout = await readFile("app/layouts/default.vue", "utf8");
-  assert.match(layout, /v-if="authenticated"\s+class="authenticated-shell"/);
+  assert.match(layout, /'authenticated-shell': authenticated/);
+  assert.match(layout, /<template v-if="authenticated">/);
+  assert.equal(layout.match(/<slot\s*\/>/g)?.length, 1);
   assert.match(layout, /<MetroRoomRail\s*\/>/);
   assert.match(layout, /<Navbar\s*\/>/);
 });
@@ -32,6 +34,10 @@ test("Metro foundations include shared layout, state, motion, and contrast primi
     assert.equal(css.includes(primitive), true, `${primitive} must be defined`);
   assert.match(css, /--metro-control-size: 2\.75rem/);
   assert.match(css, /outline: 2px solid var\(--metro-accent\)/);
+  assert.match(css, /\[data-theme="dark"\]/);
+  assert.match(css, /--color-base-100: #111214/);
+  assert.match(css, /--color-base-200: #17181c/);
+  assert.match(css, /--color-base-300: #24262b/);
 });
 
 test("primary settings, startup, and media surfaces avoid ornamental chrome", async () => {
@@ -51,22 +57,11 @@ test("primary settings, startup, and media surfaces avoid ornamental chrome", as
   assert.doesNotMatch(source, /btn-circle/);
 });
 
-test("Metro implementation checklist records shipped and browser-only gates", async () => {
-  const checklist = await readFile(
-    "docs/metro-design-implementation-checklist.md",
-    "utf8",
-  );
-  assert.match(checklist, /## Foundation/);
-  assert.match(checklist, /## Application shell and navigation/);
-  assert.match(
-    checklist,
-    /## Responsive, accessibility, and internationalization/,
-  );
-  assert.match(checklist, /- \[ \] Verify complete keyboard-only navigation/);
-  assert.match(
-    checklist,
-    /- \[ \] Complete authenticated multi-browser visual review/,
-  );
+test("Metro implementation checks verify shipped source instead of a stale checklist", async () => {
+  const source = await readFile("app/assets/app.css", "utf8");
+  assert.match(source, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(source, /@media \(forced-colors: active\)/);
+  assert.match(source, /:focus-visible/);
 });
 
 test("authenticated page copy consistently calls shared spaces rooms", async () => {
@@ -84,13 +79,26 @@ test("authenticated page copy consistently calls shared spaces rooms", async () 
   );
 });
 
+test("home workspace uses a content-led Metro room composition", async () => {
+  const source = await readFile("app/pages/index.vue", "utf8");
+  assert.match(source, /class="home-workspace flex-1 overflow-y-auto"/);
+  assert.match(source, /class="border-l-8 border-primary/);
+  assert.match(source, /aria-labelledby="home-rooms-title"/);
+  assert.match(source, /v-for="room in roomsStore\.rooms"/);
+  assert.match(source, /class="home-room-tile metro-transition/);
+  assert.match(source, /v-if="roomsStore\.loading/);
+  assert.match(source, /v-else-if="roomsStore\.error/);
+  assert.doesNotMatch(source, /Welcome to dSpeak/);
+  assert.doesNotMatch(source, /text-center max-w-md/);
+});
+
 test("channel editor owns the complete live media policy", async () => {
   const source = await readFile("app/components/ChannelList.vue", "utf8");
   const roomSettings = await readFile(
     "app/pages/room/[roomId]/settings.vue",
     "utf8",
   );
-  const api = await readFile("server/utils/dspeak-api.js", "utf8");
+  const api = await readFile("server/utils/dspeak-rooms-api.js", "utf8");
   assert.match(source, /channel\.manage_media_policy/);
   assert.match(source, /editingChannelPolicy\[field\.key\]/);
   assert.match(source, /type="range"/);
@@ -151,7 +159,7 @@ test("room branding places the banner in navigation and the avatar above the roo
   assert.match(navbar, /<Transition name="room-banner">/);
   assert.match(navbar, /\.room-navbar \{/);
   assert.match(navbar, /\.room-banner-enter-active/);
-  assert.match(layout, /class="authenticated-shell"/);
+  assert.match(layout, /'authenticated-shell': authenticated/);
   assert.match(
     await readFile("app/assets/app.css", "utf8"),
     /\.authenticated-shell > main \{/,
@@ -161,7 +169,7 @@ test("room branding places the banner in navigation and the avatar above the roo
     /\.authenticated-shell \.h-screen-minus-navbar \{/,
   );
   assert.match(channels, /v-if="room\?\.picture"/);
-  assert.match(channels, /:alt="`\$\{room\.name\} avatar`"/);
+  assert.match(channels, /:src="roomAssetUrl\(room\.picture\)"\s+alt=""/);
   assert.doesNotMatch(channels, /room\?\.headerImage/);
 });
 
@@ -176,12 +184,12 @@ test("notification dropdown renders above navbar call controls", async () => {
   assert.match(notifications, /dropdown-content metro-pane z-50/);
 });
 
-test("voice controls resize the stage instead of covering participant tiles", async () => {
+test("voice controls remain visible in a compact floating dock", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
-  assert.match(source, /class="voice-controls-shell"/);
-  assert.match(source, /grid-template-rows: 0fr/);
-  assert.match(source, /\.voice-channel:hover \.voice-controls-shell/);
-  assert.doesNotMatch(source, /class="voice-controls absolute/);
+  assert.match(source, /class="voice-command-dock/);
+  assert.match(source, /class="voice-dock-button/);
+  assert.match(source, /aria-label="Leave voice channel"/);
+  assert.doesNotMatch(source, /voice-channel:hover \.voice-controls/);
 });
 
 test("participant volume controls render outside the scrolling participant strip", async () => {
@@ -199,7 +207,7 @@ test("voice channel indicators show participant avatars and media status", async
   const server = await readFile("server/utils/mediasoup-sfu.js", "utf8");
   assert.match(source, /getUserAvatar\(u\.id \|\| u\)/);
   assert.match(source, /u\.speaking[\s\S]*font-medium text-base-content/);
-  assert.match(source, /text-base-content\/45/);
+  assert.match(source, /text-base-content\/70/);
   assert.match(source, /v-if="u\.soundboardActivity"/);
   assert.match(source, /Playing \{\{ u\.soundboardActivity\.title \}\}/);
   assert.match(source, /lucide:headphone-off/);
@@ -294,7 +302,7 @@ test("room accent changes persist and propagate immediately", async () => {
   const source = await readFile("app/pages/room/[roomId]/settings.vue", "utf8");
   const rooms = await readFile("app/stores/rooms.js", "utf8");
   const presence = await readFile("app/composables/usePresence.js", "utf8");
-  const api = await readFile("server/utils/dspeak-api.js", "utf8");
+  const api = await readFile("server/utils/dspeak-rooms-api.js", "utf8");
   assert.match(source, /@click="saveAccent\(accent\)"/);
   assert.match(rooms, /applyRealtimeRoomUpdate/);
   assert.match(presence, /message\?\.type === "room_updated"/);

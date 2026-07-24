@@ -378,7 +378,7 @@ export const useChatStore = defineStore("chat", () => {
       }
 
       const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-      const websocketPath = config.public.websocketPath || `${origin}/dspeak`;
+      const websocketPath = config.public.websocketPath || `${origin}/api`;
       const wsUrl = `${websocketPath}/chat/socket?channelId=${encodeURIComponent(channelId)}`;
       const socket = new WebSocket(wsUrl);
       ws.value = socket;

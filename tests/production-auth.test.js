@@ -6,9 +6,9 @@ const files = await Promise.all(
   [
     "../server/utils/dspeak-api.js",
     "../server/utils/soundboard-api.js",
-    "../server/routes/dspeak/chat/socket.js",
-    "../server/routes/dspeak/presence.js",
-    "../server/routes/dspeak/voice-presence.js",
+    "../server/routes/api/chat/socket.js",
+    "../server/routes/api/presence.js",
+    "../server/routes/api/voice-presence.js",
     "../server/utils/mediasoup-sfu.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
@@ -38,6 +38,15 @@ const migrations = await readFile(
   new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
   "utf8",
 );
+const authPage = await readFile(
+  new URL("../app/pages/auth.vue", import.meta.url),
+  "utf8",
+);
+const defaultLayout = await readFile(
+  new URL("../app/layouts/default.vue", import.meta.url),
+  "utf8",
+);
+const dspeakApi = files[0];
 
 test("protected server paths resolve identity through authenticated sessions", () => {
   const combined = files.join("\n");
@@ -63,7 +72,7 @@ test("offline delivery uses cookie authentication and stable idempotency", () =>
 });
 
 test("protected browser routes stay on the cookie-owning origin", () => {
-  assert.match(runtimeConfig, /apiPath:\s*"\/dspeak"/);
+  assert.match(runtimeConfig, /apiPath:\s*"\/api"/);
   assert.match(runtimeConfig, /websocketPath:\s*""/);
   assert.match(runtimeConfig, /sfuPath:\s*""/);
   assert.doesNotMatch(runtimeConfig, /DSPEAK_(API|WS|SFU)_URL/);
@@ -74,6 +83,27 @@ test("sessions rotate per device and are stored only as hashes", () => {
   assert.match(authentication, /token_hash:\s*hashSessionToken\(rawToken\)/);
   assert.match(authentication, /user = \{:user\} && device_id = \{:device\}/);
   assert.doesNotMatch(authentication, /token:\s*rawToken/);
+});
+
+test("external authentication never puts access tokens in URLs", () => {
+  assert.doesNotMatch(authentication, /accessToken|verify\?at=/);
+  assert.doesNotMatch(dspeakApi, /body\.accessToken/);
+  assert.doesNotMatch(authPage, /route\.query\.at|searchParams\.set\(["']at/);
+  assert.match(authPage, /route\.query\.code/);
+  assert.match(authPage, /route\.query\.state/);
+  assert.match(authentication, /session-handoff-exchange/);
+});
+
+test("failed SSO callbacks stop with an actionable error instead of looping", () => {
+  assert.match(authPage, /Sign-in interrupted/);
+  assert.match(authPage, /Try sign-in again/);
+  assert.doesNotMatch(authPage, /setTimeout\(resolve,\s*10000\)/);
+});
+
+test("authentication state changes do not remount and replay the callback", () => {
+  assert.equal(defaultLayout.match(/<slot\s*\/>/g)?.length, 1);
+  assert.match(authPage, /await router\.replace\("\/auth"\)/);
+  assert.doesNotMatch(authPage, /history\.replaceState/);
 });
 
 test("notification migration reconciles duplicates before uniqueness", () => {

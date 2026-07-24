@@ -17,6 +17,7 @@ export class RemoteMediaRegistry {
     onSpeaking,
     getAttenuation,
     onVideoReceivingChange,
+    onPlaybackState,
   }) {
     this.audioFeeds = audioFeeds;
     this.videoFeeds = videoFeeds;
@@ -27,9 +28,12 @@ export class RemoteMediaRegistry {
     this.onSpeaking = onSpeaking;
     this.getAttenuation = getAttenuation;
     this.onVideoReceivingChange = onVideoReceivingChange;
+    this.onPlaybackState = onPlaybackState;
     this.voiceDetectors = new Map();
     this.speakingUsers = new Set();
     this.participantAudio = new Map();
+    this.audioContext = null;
+    this.voiceDetectionTimer = null;
   }
 
   bind(entry, { staged = false } = {}) {
@@ -111,14 +115,21 @@ export class RemoteMediaRegistry {
     for (const graph of this.participantAudio.values()) this.closeGraph(graph);
     this.participantAudio.clear();
     this.speakingUsers.clear();
+    this.stopVoiceDetectionScheduler();
+    this.audioContext
+      ?.close()
+      .catch((error) =>
+        this.publishPlaybackState(null, "context-close-failed", error),
+      );
+    this.audioContext = null;
   }
 
   createAudioElement(entry, staged) {
     const graph = this.getOrCreateGraph(entry.userId);
-    const source = graph.context.createMediaStreamSource(
+    const source = this.audioContext.createMediaStreamSource(
       new MediaStream([entry.track]),
     );
-    const gain = graph.context.createGain();
+    const gain = this.audioContext.createGain();
     const track = { active: !staged, entry, gain, source };
     source.connect(gain);
     gain.connect(graph.destination);
@@ -132,10 +143,7 @@ export class RemoteMediaRegistry {
     const normalizedUserId = String(userId);
     const existing = this.participantAudio.get(normalizedUserId);
     if (existing) return existing;
-    const AudioContextConstructor =
-      window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
-    const context = new AudioContextConstructor();
+    const context = this.getAudioContext();
     const destination = context.createMediaStreamDestination();
     const audio = document.createElement("audio");
     audio.id = `audio-user-${normalizedUserId}`;
@@ -147,7 +155,11 @@ export class RemoteMediaRegistry {
     audio.volume = 1;
     const sinkId = this.getOutputDevice();
     if (sinkId && typeof audio.setSinkId === "function")
-      audio.setSinkId(sinkId).catch(() => {});
+      audio
+        .setSinkId(sinkId)
+        .catch((error) =>
+          this.recoverOutputDevice(audio, normalizedUserId, error),
+        );
     this.audioContainer().appendChild(audio);
     const graph = {
       audio,
@@ -158,6 +170,15 @@ export class RemoteMediaRegistry {
     };
     this.participantAudio.set(normalizedUserId, graph);
     return graph;
+  }
+
+  getAudioContext() {
+    if (this.audioContext) return this.audioContext;
+    const AudioContextConstructor =
+      window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
+    this.audioContext = new AudioContextConstructor();
+    return this.audioContext;
   }
 
   audioContainer() {
@@ -172,7 +193,6 @@ export class RemoteMediaRegistry {
 
   applyOutputDevice() {
     const sinkId = this.getOutputDevice();
-    if (!sinkId) return Promise.resolve();
     const elements =
       document
         .getElementById("webrtc-audio-global")
@@ -180,7 +200,11 @@ export class RemoteMediaRegistry {
     return Promise.all(
       [...elements].map((audio) =>
         typeof audio.setSinkId === "function"
-          ? audio.setSinkId(sinkId).catch(() => {})
+          ? audio
+              .setSinkId(sinkId || "")
+              .catch((error) =>
+                this.recoverOutputDevice(audio, audio.dataset.userId, error),
+              )
           : null,
       ),
     );
@@ -229,14 +253,50 @@ export class RemoteMediaRegistry {
         this.applyTrackGain(graph, track);
   }
 
-  ensurePlayback() {
+  async ensurePlayback() {
+    const attempts = [];
     for (const graph of this.participantAudio.values())
-      if (!graph.audio.muted) this.resumeGraph(graph);
+      if (!graph.audio.muted) attempts.push(this.resumeGraph(graph));
+    const results = await Promise.allSettled(attempts);
+    return results.every(
+      (result) => result.status === "fulfilled" && result.value === true,
+    );
   }
 
-  resumeGraph(graph) {
-    graph.context.resume().catch(() => {});
-    if (graph.audio.paused) graph.audio.play().catch(() => {});
+  async resumeGraph(graph) {
+    try {
+      await this.audioContext.resume();
+      if (graph.audio.paused) await graph.audio.play();
+      this.publishPlaybackState(graph.userId, "ready");
+      return true;
+    } catch (error) {
+      this.publishPlaybackState(graph.userId, "blocked", error);
+      return false;
+    }
+  }
+
+  async recoverOutputDevice(audio, userId, error) {
+    this.publishPlaybackState(userId, "output-failed", error);
+    if (typeof audio.setSinkId !== "function") return false;
+    try {
+      await audio.setSinkId("");
+      this.publishPlaybackState(userId, "default-output");
+      return true;
+    } catch (fallbackError) {
+      this.publishPlaybackState(userId, "output-blocked", fallbackError);
+      return false;
+    }
+  }
+
+  publishPlaybackState(userId, state, error = null) {
+    this.onPlaybackState?.({
+      userId: userId === null ? null : String(userId),
+      state,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : null,
+    });
   }
 
   removeAudioTrack(entry) {
@@ -257,7 +317,6 @@ export class RemoteMediaRegistry {
     graph.audio.srcObject = null;
     graph.audio.remove();
     graph.destination.disconnect();
-    graph.context.close().catch(() => {});
   }
 
   startVoiceDetection(entry) {
@@ -267,51 +326,66 @@ export class RemoteMediaRegistry {
       const playbackTrack = graph?.tracks.get(entry.key);
       if (!graph || !playbackTrack)
         throw new Error("Audio graph is unavailable");
-      const analyser = graph.context.createAnalyser();
+      const analyser = this.audioContext.createAnalyser();
       analyser.fftSize = 256;
       playbackTrack.source.connect(analyser);
       const samples = new Uint8Array(analyser.fftSize);
       let speaking = false;
       let quietSamples = 0;
-      const timer = setInterval(() => {
-        analyser.getByteTimeDomainData(samples);
-        const energy = Math.sqrt(
-          samples.reduce((sum, value) => sum + (value - 128) ** 2, 0) /
-            samples.length,
-        );
-        if (energy > 10) {
-          quietSamples = 0;
-          if (!speaking) {
-            speaking = true;
-            this.speakingUsers.add(String(entry.userId));
-            this.onSpeaking(entry.userId, true);
-            this.applyAttenuation();
-          }
-        } else if (speaking && ++quietSamples >= 6) {
-          speaking = false;
-          this.speakingUsers.delete(String(entry.userId));
-          this.onSpeaking(entry.userId, false);
-          this.applyAttenuation();
-        }
-      }, 80);
       this.voiceDetectors.set(entry.key, {
         analyser,
-        timer,
+        samples,
+        speaking,
+        quietSamples,
         userId: entry.userId,
       });
-    } catch (_) {
+      this.startVoiceDetectionScheduler();
+    } catch (error) {
+      this.publishPlaybackState(entry.userId, "analysis-unavailable", error);
       this.onSpeaking(entry.userId, false);
     }
+  }
+
+  startVoiceDetectionScheduler() {
+    if (this.voiceDetectionTimer) return;
+    this.voiceDetectionTimer = setInterval(() => {
+      for (const detector of this.voiceDetectors.values()) {
+        detector.analyser.getByteTimeDomainData(detector.samples);
+        const energy = Math.sqrt(
+          detector.samples.reduce((sum, value) => sum + (value - 128) ** 2, 0) /
+            detector.samples.length,
+        );
+        if (energy > 10) {
+          detector.quietSamples = 0;
+          if (!detector.speaking) {
+            detector.speaking = true;
+            this.speakingUsers.add(String(detector.userId));
+            this.onSpeaking(detector.userId, true);
+            this.applyAttenuation();
+          }
+        } else if (detector.speaking && ++detector.quietSamples >= 6) {
+          detector.speaking = false;
+          this.speakingUsers.delete(String(detector.userId));
+          this.onSpeaking(detector.userId, false);
+          this.applyAttenuation();
+        }
+      }
+    }, 80);
+  }
+
+  stopVoiceDetectionScheduler() {
+    clearInterval(this.voiceDetectionTimer);
+    this.voiceDetectionTimer = null;
   }
 
   stopVoiceDetection(key) {
     const detector = this.voiceDetectors.get(key);
     if (!detector) return;
-    clearInterval(detector.timer);
     detector.analyser.disconnect();
     this.onSpeaking(detector.userId, false);
     this.speakingUsers.delete(String(detector.userId));
     this.applyAttenuation();
     this.voiceDetectors.delete(key);
+    if (!this.voiceDetectors.size) this.stopVoiceDetectionScheduler();
   }
 }

@@ -22,6 +22,13 @@ export default defineNuxtConfig({
   ssr: true,
   compatibilityDate: "2025-07-15",
   devtools: { enabled: false },
+  app: {
+    head: {
+      htmlAttrs: {
+        lang: "en",
+      },
+    },
+  },
 
   vite: {
     plugins: [tailwindcss()],
@@ -140,7 +147,7 @@ export default defineNuxtConfig({
       websocketPath: "",
       baseApiPath: process.env.AUTH_PATH?.replace(/\/auth\/?$/, "") || "",
       sfuPath: "",
-      apiPath: "/dspeak",
+      apiPath: "/api",
       appVersion: packageMetadata.version,
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,

@@ -66,6 +66,7 @@
               <input
                 class="input input-bordered min-w-0 flex-1"
                 readonly
+                aria-label="Generated invite link"
                 :value="generatedLink"
               />
               <button type="button" class="btn btn-primary" @click="copyLink">

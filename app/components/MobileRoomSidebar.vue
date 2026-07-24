@@ -142,9 +142,17 @@
     </div>
 
     <!-- Join Room Modal -->
-    <div v-if="showJoinModal" class="modal modal-open">
+    <div
+      v-if="showJoinModal"
+      class="modal modal-open"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mobile-join-room-title"
+    >
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Join Room</h3>
+        <h3 id="mobile-join-room-title" class="font-bold text-lg mb-4">
+          Join Room
+        </h3>
         <p class="text-base-content/70 mb-4">
           Paste an invite link to join a room.
         </p>
@@ -153,6 +161,7 @@
             v-model="joinInput"
             ref="joinInputRef"
             type="text"
+            aria-label="Invite link"
             placeholder="Invite link..."
             class="input input-bordered w-full"
             @keyup.enter="handleJoinSubmit"
@@ -187,9 +196,17 @@
     </div>
 
     <!-- Create Room Modal -->
-    <div v-if="showCreateModal" class="modal modal-open">
+    <div
+      v-if="showCreateModal"
+      class="modal modal-open"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mobile-create-room-title"
+    >
       <div class="modal-box">
-        <h3 class="font-bold text-lg mb-4">Create Room</h3>
+        <h3 id="mobile-create-room-title" class="font-bold text-lg mb-4">
+          Create Room
+        </h3>
         <div class="form-control mb-4">
           <label class="label">
             <span class="label-text"
@@ -200,6 +217,7 @@
             v-model="createName"
             ref="createNameRef"
             type="text"
+            aria-label="Room name"
             placeholder="Enter room name..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"
@@ -212,6 +230,7 @@
           <input
             v-model="createDesc"
             type="text"
+            aria-label="Room description"
             placeholder="Optional description..."
             class="input input-bordered w-full"
             @keyup.enter="handleCreateSubmit"

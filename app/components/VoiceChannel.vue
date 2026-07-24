@@ -1,35 +1,34 @@
 <template>
-  <div class="voice-channel relative h-full flex flex-col bg-base-200">
-    <!-- Header -->
-    <div class="flex items-center justify-between p-4 border-b border-base-300">
-      <div class="flex items-center gap-2">
-        <Icon name="lucide:mic" class="w-5 h-5 text-success" />
-        <h3 class="font-semibold">{{ channel.name }}</h3>
+  <div class="voice-channel relative flex h-full flex-col bg-base-200">
+    <header
+      class="voice-channel-header flex min-h-12 shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-black px-4 text-white"
+    >
+      <div class="flex min-w-0 items-center gap-3">
+        <span class="grid size-8 shrink-0 place-items-center">
+          <Icon name="lucide:volume-2" class="size-5 text-primary" />
+        </span>
+        <div class="min-w-0">
+          <h1 class="truncate text-sm font-semibold">{{ channel.name }}</h1>
+        </div>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex shrink-0 items-center gap-2" aria-live="polite">
         <div
           v-if="voiceStore.connecting && !voiceStore.connected"
-          class="flex items-center gap-2 text-info"
+          class="voice-connecting-status flex items-center gap-2 text-sm"
         >
           <span class="loading loading-spinner loading-sm"></span>
-          <span class="text-sm">Connecting...</span>
+          <span class="hidden sm:inline">Connecting</span>
         </div>
-
-        <!-- <div v-else-if="voiceStore.connected" class="flex items-center gap-2 text-success">
-          <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div>
-          <span class="text-sm font-medium">Connected</span>
-        </div> -->
-
-        <!-- <button
-          v-if="voiceStore.connected"
-          @click="leaveChannel"
-          class="btn btn-sm btn-error"
+        <span
+          v-else-if="voiceStore.connected"
+          class="inline-flex items-center gap-2 text-sm text-success"
         >
-          Leave
-        </button> -->
+          <span class="size-2 bg-success"></span>
+          <span class="hidden sm:inline">Voice connected</span>
+        </span>
       </div>
-    </div>
+    </header>
 
     <!-- Connection Info Banner -->
     <div
@@ -67,25 +66,30 @@
       v-if="
         voiceStore.connected && voiceStore.currentChannelId === props.channel.id
       "
-      class="flex-1 flex min-h-0 flex-col overflow-hidden"
+      class="voice-stage flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       <!-- Video owns the available stage; the grid expands and reflows as feeds appear. -->
       <div
         v-if="videoFeeds.length"
-        class="flex min-h-0 flex-1 items-center justify-center p-4 md:p-6"
+        class="flex min-h-0 flex-1 items-center justify-center px-4 py-3 md:px-8 md:py-5"
       >
         <div
-          class="grid h-full max-h-full w-full content-center justify-center gap-4"
+          class="grid h-full min-h-0 w-full content-center justify-center gap-3"
           :class="
             videoFeeds.length === 1
-              ? 'grid-cols-1 max-w-6xl'
+              ? 'grid-cols-1 max-w-7xl'
               : 'grid-cols-1 md:grid-cols-2'
           "
         >
           <div
             v-for="feed in videoFeeds"
             :key="feed.key"
-            class="mx-auto aspect-video max-h-full w-full overflow-hidden"
+            class="mx-auto min-h-0 overflow-hidden bg-black"
+            :class="
+              videoFeeds.length === 1
+                ? 'aspect-video h-full w-auto max-w-full'
+                : 'aspect-video w-full'
+            "
           >
             <VideoFeed
               :feed-key="feed.key"
@@ -105,10 +109,11 @@
       </div>
       <!-- Participants Grid -->
       <div
+        v-if="!videoFeeds.length || showParticipants"
         :class="
           videoFeeds.length
-            ? 'shrink-0 border-t border-base-300 bg-base-200/70 px-4 py-3'
-            : 'flex-1 p-6'
+            ? 'shrink-0 px-4 pb-3'
+            : 'min-h-0 flex-1 overflow-y-auto p-4 md:p-6'
         "
       >
         <div v-if="connectedUsers.length > 0" class="h-full">
@@ -117,25 +122,28 @@
             :class="
               videoFeeds.length
                 ? 'flex max-w-full items-center justify-center gap-3 overflow-x-auto'
-                : 'grid h-full auto-rows-max grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+                : 'participant-grid grid h-full gap-3'
             "
           >
             <div
               v-for="user in connectedUsers"
               :key="user.id"
-              class="metro-transition relative flex flex-col items-center justify-center border border-base-300 bg-base-100"
+              class="participant-tile metro-transition group relative flex min-w-0 flex-col items-center justify-center overflow-hidden border border-white/10 bg-base-300"
               :class="[
-                videoFeeds.length ? 'min-w-24 px-3 py-2' : 'min-h-[200px] p-6',
-                user.speaking ? 'ring-2 ring-success' : '',
+                videoFeeds.length
+                  ? 'min-w-36 border-base-content/20 bg-base-300 px-3 py-3'
+                  : connectedUsers.length === 1
+                    ? 'participant-audio-tile h-full min-h-0 p-6'
+                    : 'participant-audio-tile min-h-48 p-6 md:min-h-56',
+                user.speaking ? 'participant-tile-speaking' : '',
               ]"
               @contextmenu.prevent="openVolumeMenu(user)"
             >
               <button
                 v-if="!isLocalUser(user)"
-                class="btn btn-ghost btn-square btn-sm absolute right-2 top-2 z-10"
+                class="btn btn-ghost btn-square btn-sm absolute right-2 top-2 z-10 opacity-70 hover:opacity-100 focus-visible:opacity-100"
                 type="button"
                 :aria-label="`Adjust volume for ${getUserDisplayName(user)}`"
-                :title="`Adjust volume for ${getUserDisplayName(user)}`"
                 @click.stop="openVolumeMenu(user, $event.currentTarget)"
               >
                 <Icon name="lucide:volume-2" class="size-4" />
@@ -149,8 +157,8 @@
                   class="metro-transition rounded-full bg-primary text-primary-content font-bold ring-2"
                   :class="[
                     videoFeeds.length
-                      ? 'h-10 w-10 text-sm'
-                      : 'h-20 w-20 text-2xl',
+                      ? 'h-14 w-14 text-sm'
+                      : 'h-24 w-24 text-2xl md:h-28 md:w-28',
                     user.speaking
                       ? 'ring-success ring-offset-2 ring-offset-base-100'
                       : 'ring-base-300',
@@ -162,8 +170,8 @@
                 class="font-semibold text-center"
                 :class="
                   videoFeeds.length
-                    ? 'max-w-24 truncate text-xs'
-                    : 'mb-2 text-lg'
+                    ? 'mt-2 max-w-32 truncate text-sm'
+                    : 'mt-4 max-w-full truncate text-lg'
                 "
               >
                 {{ getUserDisplayName(user) }}
@@ -204,8 +212,8 @@
                 >
                   <Icon
                     name="lucide:mic-off"
-                    class="size-6"
-                    title="Microphone off"
+                    class="size-5"
+                    aria-label="Microphone off"
                   />
                 </div>
                 <div
@@ -214,8 +222,8 @@
                 >
                   <Icon
                     name="lucide:volume-x"
-                    class="size-6"
-                    title="Deafened"
+                    class="size-5"
+                    aria-label="Deafened"
                   />
                 </div>
               </div>
@@ -239,14 +247,6 @@
         </div>
       </div>
     </div>
-
-    <SoundboardPanel
-      v-if="
-        voiceStore.connected && voiceStore.currentChannelId === props.channel.id
-      "
-      :room-id="String(channel.room)"
-      :channel-id="String(channel.id)"
-    />
 
     <Teleport to="body">
       <div
@@ -363,73 +363,67 @@
       </div>
     </Teleport>
 
-    <!-- Voice Controls at Bottom (Discord-style) -->
-    <div
+    <footer
       v-if="
         voiceStore.connected && voiceStore.currentChannelId === props.channel.id
       "
-      class="voice-controls-shell"
+      class="voice-command-bar shrink-0 border-t border-white/10 bg-black px-3 py-3 text-white"
     >
       <div
-        class="voice-controls z-40 min-h-0 overflow-hidden border border-base-content/20 bg-base-300"
+        class="voice-command-dock mx-auto flex w-fit max-w-full items-center gap-2"
       >
-        <div class="flex items-center justify-center gap-4 p-4 pb-0">
-          <!-- Microphone Control -->
+        <div class="flex min-w-0 items-center gap-2 overflow-x-auto">
           <MediaSettingsContextMenu kind="microphone">
-            <div class="flex flex-col items-center">
-              <button
-                @click="voiceStore.toggleMic"
-                :disabled="
-                  !voiceStore.connected ||
-                  (voiceStore.sfuComposable &&
-                    !voiceStore.sfuComposable.transportReady)
-                "
-                :class="[
-                  'btn btn-square btn-lg',
-                  voiceStore.micMuted ? 'btn-error' : 'btn-outline',
-                ]"
-                :title="getButtonTitle()"
-              >
-                <Icon
-                  name="lucide:mic"
-                  v-if="!voiceStore.micMuted"
-                  class="w-6 h-6 text-current"
-                />
-                <Icon name="lucide:mic-off" v-else class="w-6 h-6 text-white" />
-              </button>
-              <!-- <span class="text-xs mt-1 text-center">
-            {{ voiceStore.micMuted ? 'Muted' : 'Mic' }}
-          </span> -->
-            </div>
-          </MediaSettingsContextMenu>
-
-          <!-- Deafen Control -->
-          <div class="flex flex-col items-center">
             <button
-              @click="voiceStore.toggleDeafen"
+              @click="voiceStore.toggleMic"
+              :disabled="
+                !voiceStore.connected ||
+                (voiceStore.sfuComposable &&
+                  !voiceStore.sfuComposable.transportReady)
+              "
               :class="[
-                'btn btn-square btn-lg',
-                voiceStore.deafened ? 'btn-error' : 'btn-outline',
+                'voice-dock-button metro-transition',
+                voiceStore.micMuted ? 'voice-dock-button-danger' : '',
               ]"
-              :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
+              :aria-label="getButtonTitle()"
+              :data-label="voiceStore.micMuted ? 'Unmute' : 'Mute'"
             >
               <Icon
-                name="lucide:volume-2"
-                v-if="!voiceStore.deafened"
-                class="w-6 h-6"
+                :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'"
+                class="size-5"
               />
-              <Icon name="lucide:volume-x" v-else class="w-6 h-6" />
             </button>
-            <!-- <span class="text-xs mt-1 text-center">
-            {{ voiceStore.deafened ? 'Deafened' : 'Audio' }}
-          </span> -->
-          </div>
+          </MediaSettingsContextMenu>
+
+          <button
+            @click="voiceStore.toggleDeafen"
+            :class="[
+              'voice-dock-button metro-transition',
+              voiceStore.deafened ? 'voice-dock-button-danger' : '',
+            ]"
+            :aria-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
+            :data-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
+          >
+            <Icon
+              :name="
+                voiceStore.deafened ? 'lucide:volume-x' : 'lucide:headphones'
+              "
+              class="size-5"
+            />
+          </button>
 
           <MediaSettingsContextMenu kind="camera">
             <button
-              class="btn btn-square btn-lg"
-              :class="voiceStore.cameraEnabled ? 'btn-primary' : 'btn-outline'"
-              title="Toggle camera"
+              class="voice-dock-button metro-transition"
+              :class="
+                voiceStore.cameraEnabled ? 'voice-dock-button-active' : ''
+              "
+              :aria-label="
+                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
+              "
+              :data-label="
+                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
+              "
               @click="toggleCamera"
             >
               <Icon name="lucide:camera" class="size-5" />
@@ -437,118 +431,143 @@
           </MediaSettingsContextMenu>
 
           <button
-            class="btn btn-square btn-lg"
-            :class="voiceStore.screenSharing ? 'btn-primary' : 'btn-outline'"
-            title="Toggle screen sharing"
+            class="voice-dock-button metro-transition"
+            :class="voiceStore.screenSharing ? 'voice-dock-button-active' : ''"
+            :aria-label="
+              voiceStore.screenSharing
+                ? 'Stop sharing screen'
+                : 'Share your screen'
+            "
+            :data-label="
+              voiceStore.screenSharing ? 'Stop sharing' : 'Share screen'
+            "
             @click="toggleScreenShare"
           >
             <Icon name="lucide:monitor-up" class="size-5" />
           </button>
 
           <button
-            class="btn btn-square btn-lg"
+            class="voice-dock-button metro-transition"
             :class="
-              voiceStore.systemAudioSharing ? 'btn-primary' : 'btn-outline'
+              voiceStore.systemAudioSharing ? 'voice-dock-button-active' : ''
             "
-            :title="
+            :aria-label="
               voiceStore.systemAudioSharing
                 ? 'Stop sharing system audio'
                 : 'Share system audio only'
+            "
+            :data-label="
+              voiceStore.systemAudioSharing
+                ? 'Stop system audio'
+                : 'System audio'
             "
             @click="toggleSystemAudioShare"
           >
             <Icon name="lucide:audio-lines" class="size-5" />
           </button>
 
-          <!-- Connection Status -->
-          <div class="flex flex-col items-center ml-4">
-            <div class="flex items-center gap-2">
-              <div
-                v-if="!voiceStore.sfuComposable?.transportReady"
-                class="flex items-center gap-1 text-warning"
-              >
-                <span class="loading loading-spinner loading-xs"></span>
-                <span class="text-xs">Setting up...</span>
-              </div>
-              <div v-else class="flex items-center gap-1 text-success">
-                <div class="w-2 h-2 bg-success rounded-full"></div>
-                <span class="text-xs">Connected</span>
-              </div>
-            </div>
-            <span class="text-xs text-base-content/60"
-              >{{ connectedUsers.length }} participant{{
-                connectedUsers.length !== 1 ? "s" : ""
-              }}</span
-            >
-          </div>
-        </div>
-        <div
-          v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
-          class="mx-auto mt-3 flex max-w-2xl flex-wrap items-center justify-center gap-3 px-4"
-        >
-          <Icon name="lucide:volume-2" class="size-4 shrink-0" />
-          <label
-            for="shared-audio-volume"
-            class="whitespace-nowrap text-xs font-medium"
-            >Volume others hear</label
-          >
-          <input
-            id="shared-audio-volume"
-            class="range range-primary range-xs min-w-24 flex-1"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            :value="voiceStore.sharedAudioVolume"
-            @input="voiceStore.setSharedAudioVolume($event.target.value)"
+          <SoundboardPanel
+            :room-id="String(channel.room)"
+            :channel-id="String(channel.id)"
+            compact
           />
-          <span class="w-10 text-right text-xs tabular-nums"
-            >{{ voiceStore.sharedAudioVolume }}%</span
+
+          <button
+            v-if="videoFeeds.length"
+            type="button"
+            class="voice-dock-button metro-transition"
+            :class="showParticipants ? 'voice-dock-button-active' : ''"
+            :aria-pressed="showParticipants"
+            aria-label="Show participants"
+            :data-label="
+              showParticipants ? 'Hide participants' : 'Show participants'
+            "
+            @click="showParticipants = !showParticipants"
           >
-          <div
-            class="flex items-center gap-2"
-            :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"
-          >
-            <span class="text-xs font-medium">Sent level</span>
-            <progress
-              :class="[
-                'progress h-3 w-48',
-                voiceStore.sharedAudioStats.dbfs >= -12
-                  ? 'progress-error'
-                  : 'progress-success',
-              ]"
-              max="1"
-              :value="voiceStore.sharedAudioStats.level"
-            ></progress>
-            <span class="w-14 text-right text-xs tabular-nums"
-              >{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span
-            >
-          </div>
+            <Icon name="lucide:users" class="size-5" />
+          </button>
         </div>
-        <div class="h-4"></div>
+
+        <button
+          type="button"
+          class="voice-dock-button voice-dock-button-leave metro-transition shrink-0"
+          aria-label="Leave voice channel"
+          data-label="Leave"
+          @click="leaveChannel"
+        >
+          <Icon name="lucide:phone-off" class="size-5" />
+        </button>
       </div>
-    </div>
+      <div
+        v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
+        class="mx-auto mt-2 flex max-w-3xl flex-wrap items-center gap-3 bg-base-200 p-3"
+      >
+        <Icon name="lucide:volume-2" class="size-4 shrink-0" />
+        <label
+          for="shared-audio-volume"
+          class="whitespace-nowrap text-xs font-medium"
+          >Volume others hear</label
+        >
+        <input
+          id="shared-audio-volume"
+          class="range range-primary range-xs min-w-24 flex-1"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          :value="voiceStore.sharedAudioVolume"
+          @input="voiceStore.setSharedAudioVolume($event.target.value)"
+        />
+        <span class="w-10 text-right text-xs tabular-nums"
+          >{{ voiceStore.sharedAudioVolume }}%</span
+        >
+        <div
+          class="flex items-center gap-2"
+          :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"
+        >
+          <span class="text-xs font-medium">Sent level</span>
+          <progress
+            :class="[
+              'progress h-3 w-48',
+              voiceStore.sharedAudioStats.dbfs >= -12
+                ? 'progress-error'
+                : 'progress-success',
+            ]"
+            max="1"
+            :value="voiceStore.sharedAudioStats.level"
+          ></progress>
+          <span class="w-14 text-right text-xs tabular-nums"
+            >{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span
+          >
+        </div>
+      </div>
+    </footer>
 
-    <!-- Audio elements are managed in a global hidden container to persist across navigation -->
-
-    <!-- Not Connected State -->
     <div
       v-if="!voiceStore.connected"
-      class="flex-1 flex flex-col items-center justify-center py-12"
+      class="voice-stage flex flex-1 flex-col items-center justify-center px-6 py-12 text-center text-white"
     >
-      <Icon name="lucide:phone-outgoing" class="size-12 mb-4" />
-
-      <h4 class="text-xl font-medium text-base-content/60 mb-3">
-        Connect to {{ props.channel.name }}
-      </h4>
-      <p class="text-base-content/40 text-center max-w-md mb-6">
-        Click the button below to join this voice channel and start talking with
-        others.
+      <span
+        class="mb-6 grid size-20 place-items-center bg-primary/20 text-primary"
+      >
+        <Icon name="lucide:phone-outgoing" class="size-9 text-primary" />
+      </span>
+      <p
+        class="mb-2 text-xs font-semibold uppercase tracking-widest text-white"
+      >
+        Voice channel
+      </p>
+      <h2 class="mb-3 text-2xl font-semibold text-white">
+        Join {{ props.channel.name }}
+      </h2>
+      <p class="mb-8 max-w-md text-white/65">
+        Talk, share your camera, or present your screen. Your saved microphone
+        and audio settings will be applied when you join.
       </p>
       <button
         @click="joinThisChannel"
         :disabled="voiceStore.connecting"
-        class="btn btn-success btn-lg"
+        class="btn btn-primary btn-lg disabled:opacity-100"
       >
         <Icon name="lucide:mic" class="size-6" />
 
@@ -584,6 +603,7 @@ const identityStore = useIdentityStore();
 const channelsStore = useChannelsStore();
 const router = useRouter();
 const config = useRuntimeConfig();
+const showParticipants = ref(true);
 
 const connectedUsers = computed(() => {
   return voiceStore.getDisplayUsersArray();
@@ -777,59 +797,100 @@ onUnmounted(() =>
   isolation: isolate;
 }
 
-.voice-controls-shell {
-  display: grid;
-  flex-shrink: 0;
-  grid-template-rows: 1fr;
-  margin: 0 1rem 1rem;
+.voice-connecting-status {
+  color: #63c7f2;
+}
+
+.voice-stage {
+  background: #050505;
+}
+
+.participant-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
+
+.participant-tile {
+  box-shadow: inset 0 -4px 0 transparent;
+}
+
+.voice-stage .participant-tile:not(.participant-audio-tile) {
+  background: #18191c;
+  color: #f2f3f5;
+}
+
+.participant-tile-speaking {
+  border-color: var(--color-success);
+  box-shadow: inset 0 -4px 0 var(--color-success);
+}
+
+.participant-audio-tile {
+  border-color: rgb(255 255 255 / 12%);
+  background: #cdb597;
+  color: #171717;
+}
+
+.voice-dock-button,
+:deep(.voice-dock-button) {
+  position: relative;
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: #1e1f22;
+  color: #f2f3f5;
+}
+
+.voice-dock-button:hover,
+:deep(.voice-dock-button:hover) {
+  background: #35373c;
+}
+
+.voice-dock-button::after,
+:deep(.voice-dock-button::after) {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 50%;
+  z-index: 50;
+  max-width: 12rem;
+  padding: 0.375rem 0.5rem;
+  background: var(--color-neutral);
+  color: var(--color-neutral-content);
+  content: attr(data-label);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 0.25rem);
   transition:
-    grid-template-rows 180ms ease,
-    margin-bottom 180ms ease;
+    opacity 120ms ease,
+    transform 120ms ease;
+  white-space: nowrap;
 }
 
-.voice-controls {
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
+.voice-dock-button:hover::after,
+.voice-dock-button:focus-visible::after,
+:deep(.voice-dock-button:hover::after),
+:deep(.voice-dock-button:focus-visible::after) {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .voice-controls-shell {
-    grid-template-rows: 0fr;
-    margin-bottom: 0;
-  }
-
-  .voice-controls {
-    pointer-events: none;
-    opacity: 0;
-    transform: translateY(0.75rem);
-  }
-
-  .voice-channel:hover .voice-controls-shell,
-  .voice-channel:focus-within .voice-controls-shell {
-    grid-template-rows: 1fr;
-    margin-bottom: 1rem;
-  }
-
-  .voice-channel:hover .voice-controls,
-  .voice-channel:focus-within .voice-controls {
-    pointer-events: auto;
-    opacity: 1;
-    transform: translateY(0);
-  }
+.voice-dock-button-active {
+  background: var(--color-primary);
+  color: var(--color-primary-content);
 }
 
-.animate-pulse {
-  animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+.voice-dock-button-danger,
+.voice-dock-button-leave {
+  background: var(--color-error);
+  color: var(--color-error-content);
 }
 
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+.voice-dock-button-leave {
+  margin-left: 0.25rem;
 }
 </style>

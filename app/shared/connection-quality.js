@@ -27,6 +27,33 @@ export function getConnectionQualityLabel(bars) {
   return "Waiting for statistics";
 }
 
+export function getActiveConnectionLabel(
+  bars,
+  mediaState,
+  hasConnectedStatistics = false,
+) {
+  if (mediaState === "reconnecting") return "Reconnecting";
+  if (mediaState === "failed" || mediaState === "disconnected")
+    return "Connection issue";
+  if (mediaState === "playback-blocked") return "Playback blocked";
+  if (mediaState === "topology-probing") return "Selecting media route";
+  if (mediaState === "transport-connecting") return "Transport connecting";
+  if (mediaState === "ready-no-active-media") return "Ready · no active media";
+  if (mediaState === "media-flowing")
+    return hasConnectedStatistics
+      ? getConnectionQualityLabel(bars)
+      : "Media flowing";
+  return hasConnectedStatistics
+    ? getConnectionQualityLabel(bars)
+    : "Signaling connected";
+}
+
+export function normalizeConnectionMetricValue(value) {
+  return value != null && value !== "" && Number.isFinite(Number(value))
+    ? Number(value)
+    : null;
+}
+
 export function getConnectionQualityColorClass(bars) {
   if (bars > 3) return "text-success";
   if (bars >= 2) return "text-warning";

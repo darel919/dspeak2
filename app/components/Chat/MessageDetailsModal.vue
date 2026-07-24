@@ -1,9 +1,21 @@
 <template>
-  <div v-if="show" class="modal modal-open">
+  <div
+    v-if="show"
+    class="modal modal-open"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="message-details-title"
+  >
     <div class="modal-box">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold text-lg">Message Details</h3>
-        <button @click="$emit('close')" class="btn btn-sm btn-circle btn-ghost">
+        <h3 id="message-details-title" class="font-bold text-lg">
+          Message Details
+        </h3>
+        <button
+          class="btn btn-sm btn-circle btn-ghost"
+          aria-label="Close message details"
+          @click="$emit('close')"
+        >
           <Icon name="lucide:x" class="h-6 w-6" />
         </button>
       </div>

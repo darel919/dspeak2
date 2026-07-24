@@ -193,7 +193,7 @@ async function flushChatQueue() {
   const messages = await getQueuedMessages();
   for (const message of messages) {
     try {
-      const response = await fetch("/dspeak/chat/message", {
+      const response = await fetch("/api/chat/message", {
         method: "POST",
         credentials: "include",
         headers: {

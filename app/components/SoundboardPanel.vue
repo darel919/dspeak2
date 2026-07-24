@@ -1,8 +1,27 @@
 <template>
-  <div class="shrink-0 border-t border-base-300 bg-base-100 px-4 py-2">
-    <button type="button" class="btn btn-sm btn-outline" @click="open = true">
-      <Icon name="lucide:audio-lines" class="size-4" />Soundboard
-      <span class="badge badge-sm">{{ enabledClips.length }}</span>
+  <div
+    :class="
+      compact
+        ? 'contents'
+        : 'shrink-0 border-t border-base-300 bg-base-100 px-4 py-2'
+    "
+  >
+    <button
+      type="button"
+      :class="
+        compact
+          ? 'voice-dock-button metro-transition'
+          : 'btn btn-sm btn-outline'
+      "
+      :data-label="compact ? 'Soundboard' : undefined"
+      aria-label="Open soundboard"
+      @click="open = true"
+    >
+      <Icon name="lucide:audio-lines" class="size-5" />
+      <span v-if="!compact">Soundboard</span>
+      <span v-if="!compact" class="badge badge-sm">{{
+        enabledClips.length
+      }}</span>
     </button>
   </div>
 
@@ -58,6 +77,7 @@
           <input
             class="range range-primary range-sm flex-1"
             type="range"
+            aria-label="Room soundboard volume"
             min="0"
             max="100"
             :value="roomVolume"
@@ -233,6 +253,7 @@ import { useSettingsStore } from "~/stores/settings";
 const props = defineProps({
   roomId: { type: String, required: true },
   channelId: { type: String, required: true },
+  compact: { type: Boolean, default: false },
 });
 const store = useSoundboardStore();
 const settingsStore = useSettingsStore();

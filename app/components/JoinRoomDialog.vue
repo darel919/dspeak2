@@ -1,8 +1,16 @@
 <template>
   <Teleport to="body">
-    <div v-if="isOpen" class="modal modal-open" role="dialog" aria-modal="true">
+    <div
+      v-if="isOpen"
+      class="modal modal-open"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="join-room-dialog-title"
+    >
       <div class="modal-box">
-        <h3 class="mb-4 text-lg font-bold">Join Room</h3>
+        <h3 id="join-room-dialog-title" class="mb-4 text-lg font-bold">
+          Join Room
+        </h3>
         <p class="mb-4 text-base-content/70">
           Enter a room ID or paste an invite link to join a room.
         </p>

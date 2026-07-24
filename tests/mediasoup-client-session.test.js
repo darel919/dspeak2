@@ -6,54 +6,261 @@ function session() {
   return new MediasoupClientSession({ send() {}, iceServers: [] });
 }
 
-function report(type, bytesField, bytes) {
-  return new Map([["rtp", { type, [bytesField]: bytes }]]);
+function report(type, bytesField, bytes, timestamp) {
+  return new Map([["rtp", { type, [bytesField]: bytes, timestamp }]]);
 }
 
 test("SFU readiness requires every expected inbound and outbound stream", async () => {
   const client = session();
   client.sendTransport = {};
   client.recvTransport = {};
+  client.transportStates.set("send", "connected");
+  client.transportStates.set("recv", "connected");
   client.sources.set("audio", {});
+  let outboundBytes = 100;
+  let inboundBytes = 200;
+  let timestamp = 1000;
   client.producers.set("audio", {
     producer: {
-      getStats: async () => report("outbound-rtp", "bytesSent", 100),
+      id: "producer-1",
+      getStats: async () =>
+        report("outbound-rtp", "bytesSent", outboundBytes, timestamp),
     },
   });
   client.consumers.set("consumer-1", {
+    receiving: true,
     consumer: {
-      getStats: async () => report("inbound-rtp", "bytesReceived", 200),
+      id: "consumer-1",
+      getStats: async () =>
+        report("inbound-rtp", "bytesReceived", inboundBytes, timestamp),
     },
   });
 
+  assert.equal((await client.mediaReadiness(1)).ready, false);
+  outboundBytes += 10;
+  inboundBytes += 10;
+  timestamp += 100;
   assert.equal((await client.mediaReadiness(1)).ready, true);
+  timestamp += 100;
+  assert.equal((await client.mediaReadiness(1)).ready, false);
   assert.equal((await client.mediaReadiness(2)).ready, false);
 });
 
-test("server errors reject matching produce and transport requests immediately", async () => {
+test("server errors reject only matching correlated requests", async () => {
   const client = session();
-  const produceError = new Promise((resolve) => {
-    client.pendingProduce.push({
-      timer: setTimeout(() => {}, 1000),
-      reject: resolve,
-    });
-  });
+  const produceError = new Promise((resolve) =>
+    client.pendingProduce.set("produce-2", { reject: resolve }),
+  );
   const transportError = new Promise((resolve) => {
-    client.pending.set("connect:transport-1", { reject: resolve });
+    client.pending.set("connect-1", { reject: resolve });
   });
 
   client.handleServerError({
     requestType: "produce",
+    requestId: "produce-2",
     message: "produce rejected",
   });
   client.handleServerError({
     requestType: "connect-transport",
+    requestId: "connect-1",
     transportId: "transport-1",
     message: "connect rejected",
   });
 
   assert.equal((await produceError).message, "produce rejected");
   assert.equal((await transportError).message, "connect rejected");
+});
+
+test("reordered producer responses resolve their matching requests", async () => {
+  const client = session();
+  const results = [];
+  client.pendingProduce.set("produce-1", {
+    resolve: (value) => results.push(["microphone", value.id]),
+  });
+  client.pendingProduce.set("produce-2", {
+    resolve: (value) => results.push(["camera", value.id]),
+  });
+
+  await client.handle("producer-id", {
+    requestId: "produce-2",
+    id: "camera-producer",
+  });
+  await client.handle("producer-id", {
+    requestId: "produce-1",
+    id: "microphone-producer",
+  });
+
+  assert.deepEqual(results, [
+    ["camera", "camera-producer"],
+    ["microphone", "microphone-producer"],
+  ]);
+});
+
+test("timed out signaling requests clean up and ignore late responses", async () => {
+  const sent = [];
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+    requestTimeoutMs: 5,
+  });
+  client.sendTransport = {
+    id: "send-transport",
+    on(event, handler) {
+      if (event === "connect") this.connectHandler = handler;
+    },
+  };
+  client.bindSendTransport();
+
+  let timeoutError;
+  client.sendTransport.connectHandler(
+    { dtlsParameters: {} },
+    () => {},
+    (error) => {
+      timeoutError = error;
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 15));
+
+  const requestId = sent[0].data.requestId;
+  assert.match(timeoutError.message, /timed out/);
+  assert.equal(client.pending.has(requestId), false);
+  await client.handle("transport-connected", { requestId });
+  assert.equal(client.pending.size, 0);
+});
+
+test("transport objects are not ready before required directions connect", () => {
+  const client = session();
+  client.sendTransport = {};
+  client.recvTransport = {};
+  client.sources.set("audio", {});
+  client.requestedConsumers.add("remote-audio");
+
+  assert.equal(client.connectionState().ready, false);
+  client.transportStates.set("send", "connected");
+  assert.equal(client.connectionState().ready, false);
+  client.transportStates.set("recv", "connected");
+  assert.equal(client.connectionState().ready, true);
+});
+
+test("server transport states update readiness and normalize completed ICE", async () => {
+  const states = [];
+  const client = new MediasoupClientSession({
+    send() {},
+    iceServers: [],
+    onStateChange: (direction, state, summary) =>
+      states.push({ direction, state, summary }),
+  });
+  client.sources.set("audio", {});
+  client.requestedConsumers.add("remote-audio");
+
+  await client.handle("transport-state", {
+    direction: "send",
+    state: "completed",
+  });
+  await client.handle("transport-state", {
+    direction: "recv",
+    state: "connected",
+  });
+
+  assert.equal(client.connectionState().ready, true);
+  assert.deepEqual(
+    states.map(({ direction, state }) => [direction, state]),
+    [
+      ["send", "connected"],
+      ["recv", "connected"],
+    ],
+  );
+});
+
+test("duplicate terminal transport events schedule only one ICE recovery", async () => {
+  const client = session();
+  client.sendTransport = { close() {}, closed: false };
+  let restarts = 0;
+  client.restartTransportIce = async () => {
+    restarts += 1;
+  };
+
+  await client.handle("transport-state", {
+    direction: "send",
+    state: "failed",
+  });
+  await client.handle("transport-state", {
+    direction: "send",
+    state: "failed",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(restarts, 1);
+  client.close();
+});
+
+test("ICE restart applies only its correlated acknowledgement", async () => {
+  const sent = [];
+  const applied = [];
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+    requestTimeoutMs: 20,
+  });
+  client.sendTransport = {
+    id: "send-transport",
+    closed: false,
+    restartIce: async ({ iceParameters }) => applied.push(iceParameters),
+  };
+
+  const restart = client.restartTransportIce("send");
+  const requestId = sent[0].data.requestId;
+  await client.handle("ice-restarted", {
+    requestId: "stale-restart",
+    iceParameters: { usernameFragment: "stale" },
+  });
+  assert.deepEqual(applied, []);
+  await client.handle("ice-restarted", {
+    requestId,
+    iceParameters: { usernameFragment: "fresh" },
+  });
+
+  assert.equal(await restart, true);
+  assert.deepEqual(applied, [{ usernameFragment: "fresh" }]);
+  assert.equal(client.pending.size, 0);
+});
+
+test("ICE restart rejection and timeout clean exactly one pending request", async () => {
+  const rejectedClient = new MediasoupClientSession({
+    send() {},
+    iceServers: [],
+    requestTimeoutMs: 20,
+  });
+  rejectedClient.sendTransport = {
+    id: "send-transport",
+    closed: false,
+    restartIce: async () => {},
+  };
+  const rejected = rejectedClient.restartTransportIce("send");
+  const rejectedRequestId = [...rejectedClient.pending.keys()][0];
+  rejectedClient.handleServerError({
+    requestType: "restart-ice",
+    requestId: rejectedRequestId,
+    message: "ICE restart rejected",
+  });
+  await assert.rejects(rejected, /ICE restart rejected/);
+  assert.equal(rejectedClient.pending.size, 0);
+
+  const timedOutClient = new MediasoupClientSession({
+    send() {},
+    iceServers: [],
+    requestTimeoutMs: 5,
+  });
+  timedOutClient.recvTransport = {
+    id: "recv-transport",
+    closed: false,
+    restartIce: async () => {},
+  };
+  await assert.rejects(
+    timedOutClient.restartTransportIce("recv"),
+    /ICE restart timed out/,
+  );
+  assert.equal(timedOutClient.pending.size, 0);
 });
 
 test("duplicate consumer requests stay deduplicated until a response or error", () => {
@@ -99,7 +306,7 @@ test("closing SFU media explicitly retires consumers without waiting for tracken
   assert.equal(client.consumers.size, 0);
 });
 
-test("remote screen video and audio consumers pause and resume together", () => {
+test("remote screen video and audio consumers pause and resume after acknowledgements", async () => {
   const sent = [];
   const client = new MediasoupClientSession({
     send: (message) => sent.push(message),
@@ -113,26 +320,84 @@ test("remote screen video and audio consumers pause and resume together", () => 
   }));
   entries.forEach((entry) => client.consumers.set(entry.consumer.id, entry));
 
-  client.setRemoteReceiving("user-1", "screen", false);
+  const pausing = client.setRemoteReceiving("user-1", "screen", false);
   assert.deepEqual(
     sent.map((message) => message.type),
     ["pause-consumer", "pause-consumer"],
   );
+  for (const message of sent)
+    await client.handle("consumer-paused", {
+      ...message.data,
+      requestId: message.data.requestId,
+    });
+  await pausing;
   assert.equal(
     entries.every((entry) => entry.track.enabled === false),
     true,
   );
 
   sent.length = 0;
-  client.setRemoteReceiving("user-1", "screen", true);
+  const resuming = client.setRemoteReceiving("user-1", "screen", true);
   assert.deepEqual(
     sent.map((message) => message.type),
     ["resume-consumer", "resume-consumer"],
   );
+  for (const message of sent)
+    await client.handle("consumer-resumed", {
+      ...message.data,
+      requestId: message.data.requestId,
+    });
+  await resuming;
   assert.equal(
     entries.every((entry) => entry.track.enabled === true),
     true,
   );
+});
+
+test("consumer control retries once after a dropped acknowledgement", async () => {
+  const sent = [];
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+    consumerControlTimeoutMs: 5,
+  });
+  const entry = {
+    track: { enabled: false },
+    consumer: { id: "consumer-1" },
+  };
+
+  const resuming = client.setConsumerReceiving(entry, true);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(sent.length, 2);
+  await client.handle("consumer-resumed", sent[1].data);
+
+  assert.equal(await resuming, true);
+  assert.equal(entry.track.enabled, true);
+  assert.equal(entry.receiving, true);
+  assert.equal(client.pending.size, 0);
+});
+
+test("permanent consumer control failure disables the track and reports failure", async () => {
+  const states = [];
+  const client = new MediasoupClientSession({
+    send() {},
+    iceServers: [],
+    consumerControlTimeoutMs: 5,
+    onStateChange: (direction, state) => states.push([direction, state]),
+  });
+  const entry = {
+    track: { enabled: true },
+    consumer: { id: "consumer-1" },
+  };
+
+  await assert.rejects(
+    client.setConsumerReceiving(entry, true),
+    /consumer resume timed out/,
+  );
+  assert.equal(entry.track.enabled, false);
+  assert.equal(entry.receiving, false);
+  assert.equal(client.pending.size, 0);
+  assert.deepEqual(states, [["consumer", "failed"]]);
 });
 
 test("new remote screen sources remain paused until explicitly watched", () => {

@@ -6,7 +6,7 @@
 }
 
 @theme {
-  --color-hero: #e9b151;
+  --color-hero: #795300;
   --color-bg-dark: #161f30;
   --color-bg-light: #f7f1e5;
   --color-accent1: #769899;
@@ -46,17 +46,54 @@
   );
 }
 
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-hero: #e9b151;
+  --color-base-100: #111214;
+  --color-base-200: #17181c;
+  --color-base-300: #24262b;
+  --color-base-content: #f2f3f5;
+  --color-neutral: #0b0c0e;
+  --color-neutral-content: #f2f3f5;
+  --navbar-surface: #0b0c0e;
+  --metro-border: rgb(255 255 255 / 10%);
+  --metro-muted: rgb(242 243 245 / 68%);
+  --metro-overlay-shadow: 0 12px 32px rgb(0 0 0 / 48%);
+}
+
+[data-theme="light"] {
+  --color-error: #b4233c;
+  --color-error-content: #ffffff;
+  --color-info: #076b9c;
+  --color-info-content: #ffffff;
+  --color-success: #087a55;
+  --color-success-content: #ffffff;
+  --color-warning: #8a5a00;
+  --color-warning-content: #ffffff;
+}
+
+[data-theme="dark"] {
+  --color-error: #ff8a9d;
+  --color-error-content: #0b0c0e;
+  --color-info: #63c7f2;
+  --color-info-content: #0b0c0e;
+  --color-success: #5bd6a3;
+  --color-success-content: #0b0c0e;
+  --color-warning: #f2c14e;
+  --color-warning-content: #0b0c0e;
+}
+
 :root,
 [data-accent="cobalt"] {
-  --metro-accent: #0050ef;
+  --metro-accent: #075cff;
   --metro-accent-content: #ffffff;
 }
 [data-accent="cyan"] {
-  --metro-accent: #00aba9;
+  --metro-accent: #00827f;
   --metro-accent-content: #ffffff;
 }
 [data-accent="violet"] {
-  --metro-accent: #6a00ff;
+  --metro-accent: #7b2cff;
   --metro-accent-content: #ffffff;
 }
 [data-accent="magenta"] {
@@ -64,12 +101,37 @@
   --metro-accent-content: #ffffff;
 }
 [data-accent="orange"] {
-  --metro-accent: #e3a21a;
-  --metro-accent-content: #111111;
+  --metro-accent: #9c6800;
+  --metro-accent-content: #ffffff;
 }
 [data-accent="lime"] {
-  --metro-accent: #60a917;
+  --metro-accent: #4b8212;
   --metro-accent-content: #ffffff;
+}
+
+[data-theme="dark"][data-accent="cobalt"] {
+  --metro-accent: #75a7ff;
+  --metro-accent-content: #0b0c0e;
+}
+[data-theme="dark"][data-accent="cyan"] {
+  --metro-accent: #4fd1c5;
+  --metro-accent-content: #0b0c0e;
+}
+[data-theme="dark"][data-accent="violet"] {
+  --metro-accent: #b99cff;
+  --metro-accent-content: #0b0c0e;
+}
+[data-theme="dark"][data-accent="magenta"] {
+  --metro-accent: #ff7ab8;
+  --metro-accent-content: #0b0c0e;
+}
+[data-theme="dark"][data-accent="orange"] {
+  --metro-accent: #ffc857;
+  --metro-accent-content: #0b0c0e;
+}
+[data-theme="dark"][data-accent="lime"] {
+  --metro-accent: #9bdc63;
+  --metro-accent-content: #0b0c0e;
 }
 
 :where(.authenticated-shell, .metro-standalone, .modal, .toast)
@@ -155,12 +217,18 @@ textarea {
 .authenticated-shell .btn,
 .metro-standalone .btn,
 .modal .btn {
+  background-image: none;
   min-height: var(--metro-control-size);
   font-weight: 600;
   transition-duration: 180ms;
   transition-property:
     background-color, border-color, color, opacity, transform;
   transition-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+:where(.authenticated-shell, .metro-standalone, .modal, .toast)
+  :where(.alert, .badge) {
+  background-image: none;
 }
 
 .authenticated-shell .btn:active:not(:disabled),
@@ -180,6 +248,13 @@ textarea {
 .authenticated-shell .select,
 .authenticated-shell .file-input {
   background-color: var(--color-base-100);
+}
+
+.authenticated-shell .select,
+.metro-standalone .select,
+.modal .select {
+  appearance: auto;
+  background-image: none;
 }
 
 .metro-page {
@@ -334,10 +409,22 @@ body {
   --color-base-content: oklch(22% 0.025 255);
 }
 
-[data-theme="light"] .text-base-content\/40,
-[data-theme="light"] .text-base-content\/50,
-[data-theme="light"] .text-base-content\/60 {
-  color: color-mix(in oklab, var(--color-base-content) 72%, transparent);
+[data-theme]
+  :is(
+    .text-base-content\/30,
+    .text-base-content\/35,
+    .text-base-content\/40,
+    .text-base-content\/45,
+    .text-base-content\/50,
+    .text-base-content\/55,
+    .text-base-content\/60,
+    .text-base-content\/65
+  ) {
+  color: color-mix(
+    in oklab,
+    var(--color-base-content) 68%,
+    transparent
+  ) !important;
 }
 
 .navbar-surface {

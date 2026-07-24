@@ -30,10 +30,16 @@ can still delay or suppress presentation.
 
 ## Authentication and offline delivery
 
-The external access token is exchanged once for a random, server-stored session.
-Only a SHA-256 hash is stored in PocketBase. The browser receives the opaque
-token in a Secure, HttpOnly, SameSite=Strict cookie and never stores the external
-access token in local storage or an offline queue.
+dSpeak creates a random state value and enters the DWS Account broker. After
+OAuth, the broker returns only a two-minute, callback-bound, single-use code.
+The Nitro server validates the state and exchanges that code server-to-server
+for the allowlisted user profile. The external access token remains in the
+authentication API's host-only HttpOnly cookie and never reaches dSpeak.
+
+Nitro then creates a random, server-stored dSpeak session. Only its SHA-256 hash
+is stored in PocketBase. The browser receives the opaque session token in a
+Secure, HttpOnly, SameSite=Strict cookie and never stores authentication
+credentials in local storage or an offline queue.
 
 Protected HTTP and WebSocket endpoints are same-origin. The server derives the
 user and device from the session; request bodies and query strings are not an
@@ -53,6 +59,7 @@ Production requires:
 
 - `POCKETBASE_URL`, `POCKETBASE_EMAIL`, and `POCKETBASE_PASSWORD`
 - `AUTH_PATH`
+- `DSPEAK_PUBLIC_ORIGIN` and `DSPEAK_METRICS_TOKEN`
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVKEY`, and `VAPID_SUBJECT`
 - the media, TURN, DNS, and firewall configuration in
   [Deployment](deployment.md)
@@ -69,8 +76,18 @@ deployment and verify the migration records after startup.
 
 ## Operational checks
 
-`/health` reports the oldest queued push delivery and configured subsystem
-health. `/metrics` exposes push deliveries, retries, failures, expiry, active
+The browser handoff contract consumes one-time codes through
+`POST <AUTH_PATH>/handoff/exchange`; codes are bound to the exact
+`DSPEAK_PUBLIC_ORIGIN/auth` callback. The identity service also accepts
+`POST <AUTH_PATH>/verify` with an access token in an `Authorization: Bearer`
+header for trusted server integrations. It must never accept or log a token as a
+query value. dSpeak rejects browser WebSocket and state-changing HTTP origins
+that do not match `DSPEAK_PUBLIC_ORIGIN`. Set the originless client overrides
+only for an explicitly reviewed non-browser integration.
+
+`/health` reports the oldest queued push delivery and cached subsystem health.
+`/metrics` requires `Authorization: Bearer <DSPEAK_METRICS_TOKEN>` and exposes
+push deliveries, retries, failures, expiry, active
 subscriptions, pending jobs, and oldest pending age. Alert when pending age
 continues growing or failures increase without deliveries.
 
@@ -81,7 +98,7 @@ Before release:
    `bun run build`.
 3. Back up PocketBase and start the built server against the target migration
    environment.
-4. Confirm `/health` and `/metrics`, then restart the server with pending push
+4. Confirm `/health` and authenticated `/metrics`, then restart the server with pending push
    and offline-message work and confirm that processing resumes.
 5. Build and start the Docker Compose deployment and probe its public HTTP,
    WebSocket, RTP, and TURN paths.

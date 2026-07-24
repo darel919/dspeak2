@@ -8,6 +8,7 @@ const stunMagicCookie = 0x2112a442;
 const cacheDurationMs = 30_000;
 let cachedResult;
 let cachedAt = 0;
+let refreshPromise = null;
 
 function bindingRequest(transactionId) {
   const request = Buffer.alloc(20);
@@ -102,4 +103,28 @@ export async function probeSelfHostedTurn(
 export function resetTurnHealthCache() {
   cachedResult = undefined;
   cachedAt = 0;
+}
+
+export function readTurnHealth(environment = process.env) {
+  const host = environment.DSPEAK_RTC_DOMAIN?.trim();
+  const secret = environment.TURN_SHARED_SECRET?.trim();
+  if (!host || !secret)
+    return { configured: false, available: false, detail: "disabled" };
+  if (
+    !refreshPromise &&
+    (!cachedResult || Date.now() - cachedAt >= cacheDurationMs)
+  ) {
+    refreshPromise = probeSelfHostedTurn(environment, { bypassCache: true })
+      .catch(() => null)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return (
+    cachedResult || {
+      configured: true,
+      available: false,
+      detail: "probe-pending",
+    }
+  );
 }

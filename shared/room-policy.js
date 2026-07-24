@@ -24,6 +24,15 @@ export const ROOM_ACCENTS = Object.freeze([
 
 export const DEFAULT_ROOM_ACCENT = "cobalt";
 
+export const ROOM_ACCENT_LIGHT_COLORS = Object.freeze({
+  cobalt: "#075cff",
+  cyan: "#00827f",
+  violet: "#7b2cff",
+  magenta: "#d80073",
+  orange: "#9c6800",
+  lime: "#4b8212",
+});
+
 export const DEFAULT_ROLE_TEMPLATES = Object.freeze([
   {
     name: "Owner",

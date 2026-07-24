@@ -1,8 +1,28 @@
 <template>
-  <div class="flex items-center justify-center min-h-screen">
-    <div class="text-center">
-      <div class="loading loading-spinner loading-lg"></div>
-      <p class="mt-4">Authenticating...</p>
+  <div
+    class="metro-standalone flex min-h-screen items-center justify-center bg-base-100 px-6"
+  >
+    <div class="w-full max-w-lg border-l-8 border-primary pl-6">
+      <template v-if="status === 'working'">
+        <div class="loading loading-spinner loading-lg text-primary"></div>
+        <h1 class="mt-5 text-2xl font-semibold">Authenticating…</h1>
+        <p class="mt-2 text-base-content/65">
+          Verifying your account and preparing your dSpeak session.
+        </p>
+      </template>
+      <template v-else>
+        <p class="text-sm font-semibold text-error">Sign-in interrupted</p>
+        <h1 class="mt-2 text-2xl font-semibold">
+          We couldn’t complete authentication
+        </h1>
+        <p class="mt-3 text-base-content/70">{{ failureMessage }}</p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <button class="btn btn-primary" type="button" @click="startSignIn">
+            Try sign-in again
+          </button>
+          <NuxtLink class="btn btn-ghost" to="/">Return home</NuxtLink>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -15,6 +35,8 @@ const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const router = useRouter();
 const route = useRoute();
+const status = ref("working");
+const failureMessage = ref("");
 
 function readStorage(key) {
   try {
@@ -44,12 +66,25 @@ function internalRedirect(value) {
   }
 }
 
-onMounted(async () => {
-  const at = route.query.at;
+async function startSignIn() {
+  status.value = "working";
+  failureMessage.value = "";
+  try {
+    await authStore.beginExternalSignIn();
+  } catch {
+    status.value = "failed";
+    failureMessage.value =
+      "The authentication service is unavailable. Please try again.";
+  }
+}
 
-  if (at) {
-    window.history.replaceState({}, "", "/auth");
-    const valid = await authStore.verifyToken(at);
+onMounted(async () => {
+  const code = route.query.code;
+  const state = route.query.state;
+
+  if (code && state) {
+    await router.replace("/auth");
+    const valid = await authStore.exchangeHandoff(code, state);
     if (valid) {
       await roomsStore.fetchRooms();
       const redirectUrl = readStorage("redirectAfterAuth");
@@ -60,19 +95,20 @@ onMounted(async () => {
       }
       await router.replace("/");
       return;
-    } else {
-      authStore.clearAuth(false);
-      await new Promise((resolve) => setTimeout(resolve, 10000));
     }
+    authStore.clearAuth(false);
+    status.value = "failed";
+    failureMessage.value =
+      "The identity service rejected this sign-in. Try again, and contact the administrator if the problem continues.";
+    return;
   }
 
-  if (!at && (await authStore.restoreSession())) {
+  if (!code && !state && (await authStore.restoreSession())) {
     await roomsStore.fetchRooms();
     await router.replace("/");
     return;
   }
 
-  const rUrl = `${window.location.origin}/auth`;
-  window.location.href = `https://account.darelisme.my.id/start?rUrl=${encodeURIComponent(rUrl)}`;
+  await startSignIn();
 });
 </script>

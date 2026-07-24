@@ -1,12 +1,15 @@
-import { probeSelfHostedTurn } from "../utils/turn-health";
+import { readTurnHealth } from "../utils/turn-health";
 import { getPushMetrics } from "../utils/push-delivery";
 
 export default defineEventHandler(async () => {
-  const [turn, push] = await Promise.all([
-    probeSelfHostedTurn(),
-    getPushMetrics(),
-  ]);
+  const turn = readTurnHealth();
+  const push = getPushMetrics();
+  const snapshotAge = push.checkedAt
+    ? Date.now() - Date.parse(push.checkedAt)
+    : Number.POSITIVE_INFINITY;
   const pushHealthy =
+    push.available &&
+    snapshotAge < 30_000 &&
     push.oldestPendingSeconds < 3600 &&
     Number.isFinite(push.oldestPendingSeconds);
   return {

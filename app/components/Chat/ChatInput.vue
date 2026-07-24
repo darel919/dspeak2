@@ -5,12 +5,13 @@
         <textarea
           v-model="messageText"
           ref="chatTextarea"
+          aria-label="Message"
           :placeholder="
             chatStore.offline
               ? 'Write a message to send when you’re back online…'
               : 'Type a message…'
           "
-          class="textarea textarea-bordered w-full resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[2.5rem] max-h-[6.5rem] overflow-y-auto"
+          class="textarea textarea-bordered min-h-[2.5rem] max-h-[6.5rem] w-full resize-none overflow-y-auto"
           @input="handleTextareaInput"
           @focus="handleFocus"
           @blur="handleBlur"
@@ -24,6 +25,7 @@
       <button
         type="submit"
         class="btn btn-primary"
+        aria-label="Send message"
         :disabled="!messageText.trim()"
       >
         <Icon name="lucide:send" class="size-6" />

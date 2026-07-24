@@ -6,13 +6,13 @@ left by the previous multi-service deployment.
 
 ## API migration from `dws-backend`
 
-| Previous responsibility      | Current owner                         |
-| ---------------------------- | ------------------------------------- |
-| Room, channel, and chat APIs | `server/utils/dspeak-api.js`          |
-| Realtime chat                | `server/routes/dspeak/chat/socket.js` |
-| Presence                     | `server/routes/dspeak/presence.js`    |
-| Media presence updates       | `server/utils/mediasoup-sfu.js`       |
-| Privileged PocketBase access | `server/utils/pocketbase.js`          |
+| Previous responsibility      | Current owner                      |
+| ---------------------------- | ---------------------------------- |
+| Room, channel, and chat APIs | `server/utils/dspeak-api.js`       |
+| Realtime chat                | `server/routes/api/chat/socket.js` |
+| Presence                     | `server/routes/api/presence.js`    |
+| Media presence updates       | `server/utils/mediasoup-sfu.js`    |
+| Privileged PocketBase access | `server/utils/pocketbase.js`       |
 
 The original PocketBase collections remain supported:
 
@@ -54,7 +54,7 @@ maintains producer ownership, handles keepalive messages, and releases media
 resources on disconnect. `/metrics` exposes bounded Prometheus-compatible SFU
 gauges.
 
-The former `/dspeak/interop` WebSocket no longer exists. It connected two
+The former interop WebSocket no longer exists. It connected two
 separate services; the equivalent operations are now in-process calls.
 
 ## Production runtime

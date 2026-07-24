@@ -465,7 +465,10 @@
 
 <script setup>
 import { publicDisplayName } from "~~/shared/user-profile.js";
-import { ROOM_ACCENTS } from "~~/shared/room-policy.js";
+import {
+  ROOM_ACCENTS,
+  ROOM_ACCENT_LIGHT_COLORS,
+} from "~~/shared/room-policy.js";
 import { useAuthStore } from "../../../stores/auth";
 import { useRoomsStore } from "../../../stores/rooms";
 import SoundboardAdmin from "../../../components/SoundboardAdmin.vue";
@@ -577,16 +580,7 @@ const highestRolePosition = computed(() => {
 });
 
 function accentColor(value) {
-  return (
-    {
-      cobalt: "#0050ef",
-      cyan: "#00aba9",
-      violet: "#6a00ff",
-      magenta: "#d80073",
-      orange: "#e3a21a",
-      lime: "#60a917",
-    }[value] || "#0050ef"
-  );
+  return ROOM_ACCENT_LIGHT_COLORS[value] || ROOM_ACCENT_LIGHT_COLORS.cobalt;
 }
 
 function hasPermission(permission) {

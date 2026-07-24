@@ -502,6 +502,7 @@ import { useVoiceStore } from "~/stores/voice";
 import { useChannelsStore } from "~/stores/channels";
 import { useRtcStatsStore } from "~/stores/rtc-stats";
 import { storeToRefs } from "pinia";
+import { getActiveConnectionLabel } from "~/shared/connection-quality";
 
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
@@ -530,15 +531,29 @@ const activeStreams = computed(() =>
   section.value === "outbound" ? outbound.value : inbound.value,
 );
 const healthLabel = computed(() =>
-  metrics.value.connected ? metrics.value.label : "Connecting",
+  getActiveConnectionLabel(
+    metrics.value.score,
+    voiceStore.sfuComposable?.mediaConnectionState,
+    metrics.value.connected,
+  ),
 );
-const healthTone = computed(() =>
-  metrics.value.score >= 4
-    ? "good"
-    : metrics.value.score >= 2
-      ? "fair"
-      : "poor",
-);
+const healthTone = computed(() => {
+  if (
+    healthLabel.value === "Connection issue" ||
+    healthLabel.value === "Playback blocked"
+  )
+    return "poor";
+  if (
+    healthLabel.value === "Reconnecting" ||
+    healthLabel.value === "Selecting media route" ||
+    healthLabel.value === "Transport connecting"
+  )
+    return "fair";
+  if (!metrics.value.connected) return "good";
+  if (metrics.value.score >= 4) return "good";
+  if (metrics.value.score >= 2) return "fair";
+  return "poor";
+});
 const updatedLabel = computed(() =>
   snapshot.value
     ? `Updated ${new Date(snapshot.value.timestamp).toLocaleTimeString()}`
@@ -600,12 +615,12 @@ function formatRoute(value) {
   );
 }
 function formatMs(value) {
-  return Number.isFinite(Number(value))
+  return value != null && Number.isFinite(Number(value))
     ? `${Math.round(Number(value))} ms`
     : "—";
 }
 function formatSecondsMs(value) {
-  return Number.isFinite(Number(value))
+  return value != null && Number.isFinite(Number(value))
     ? `${Math.round(Number(value) * 1000)} ms`
     : "—";
 }
@@ -620,7 +635,9 @@ function formatCounts(stream) {
     .join(" / ");
 }
 function formatPercent(value) {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : "—";
+  return value != null && Number.isFinite(Number(value))
+    ? `${Number(value).toFixed(1)}%`
+    : "—";
 }
 function formatFps(value) {
   return Number.isFinite(Number(value))

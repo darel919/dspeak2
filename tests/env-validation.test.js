@@ -15,6 +15,7 @@ beforeEach(() => {
     VAPID_PUBLIC_KEY: "public",
     VAPID_PUBKEY: "public",
     VAPID_PRIVKEY: "private",
+    DSPEAK_PUBLIC_ORIGIN: "https://app.example.com",
     MEDIASOUP_LISTEN_IP: "0.0.0.0",
     MEDIASOUP_ANNOUNCED_ADDRESS: "auto",
     MEDIASOUP_RTC_PORT: "40000",

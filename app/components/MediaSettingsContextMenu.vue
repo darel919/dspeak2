@@ -15,7 +15,7 @@
       @contextmenu.prevent.stop
     >
       <NuxtLink
-        class="metro-transition flex min-h-11 items-center gap-3 px-3 py-2.5 text-sm font-medium hover:bg-base-200 focus-visible:bg-base-200 focus-visible:outline-none"
+        class="metro-transition flex min-h-11 items-center gap-3 px-3 py-2.5 text-sm font-medium hover:bg-base-200 focus-visible:bg-base-200"
         :to="settingsLink"
         role="menuitem"
         @click="closeMenu"
