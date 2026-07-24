@@ -55,6 +55,7 @@ export class MediasoupClientSession {
     this.recvTransport = null;
     this.sources = new Map();
     this.producers = new Map();
+    this.sourcePublications = new Map();
     this.consumers = new Map();
     this.pending = new Map();
     this.pendingProduce = new Map();
@@ -382,6 +383,17 @@ export class MediasoupClientSession {
   async publish(entry) {
     if (!this.sendTransport || this.producers.has(entry.source))
       return this.producers.get(entry.source) || null;
+    const activePublication = this.sourcePublications.get(entry.source);
+    if (activePublication) return activePublication;
+    const publication = this.publishSource(entry).finally(() => {
+      if (this.sourcePublications.get(entry.source) === publication)
+        this.sourcePublications.delete(entry.source);
+    });
+    this.sourcePublications.set(entry.source, publication);
+    return publication;
+  }
+
+  async publishSource(entry) {
     const track = entry.track.clone();
     const settings = track.getSettings?.() || {};
     const requestedVideo = this.getVideoSettings?.(entry.source) || {};
@@ -744,6 +756,7 @@ export class MediasoupClientSession {
       entry.close();
     }
     this.producers.clear();
+    this.sourcePublications.clear();
     this.consumers.clear();
     this.remoteReceiving.clear();
     this.rtpSamples.clear();

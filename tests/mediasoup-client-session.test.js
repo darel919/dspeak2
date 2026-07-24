@@ -170,6 +170,51 @@ test("an existing SFU source replaces its track without recreating the producer"
   assert.equal(client.producers.get("audio").track, replacementTrack);
 });
 
+test("concurrent publication of one SFU source creates one producer", async () => {
+  const client = session();
+  let releaseProduce;
+  let produceCalls = 0;
+  const producer = {
+    paused: false,
+    on() {},
+  };
+  client.sendTransport = {
+    produce() {
+      produceCalls += 1;
+      return new Promise((resolve) => {
+        releaseProduce = () => resolve(producer);
+      });
+    },
+  };
+  const clonedTracks = [];
+  const entry = {
+    source: "audio",
+    track: {
+      kind: "audio",
+      clone() {
+        const track = {
+          kind: "audio",
+          getSettings: () => ({}),
+          stop() {},
+        };
+        clonedTracks.push(track);
+        return track;
+      },
+    },
+  };
+
+  const first = client.publish(entry);
+  const second = client.publish(entry);
+
+  assert.equal(produceCalls, 1);
+  assert.equal(clonedTracks.length, 1);
+  releaseProduce();
+  assert.equal(await first, producer);
+  assert.equal(await second, producer);
+  assert.equal(client.producers.get("audio").producer, producer);
+  assert.equal(client.sourcePublications.size, 0);
+});
+
 test("transport objects are not ready before required directions connect", () => {
   const client = session();
   client.sendTransport = {};
