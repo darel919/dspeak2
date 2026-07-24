@@ -32,18 +32,20 @@ export function getActiveConnectionLabel(
   mediaState,
   hasConnectedStatistics = false,
 ) {
-  if (hasConnectedStatistics) return getConnectionQualityLabel(bars);
   if (mediaState === "reconnecting") return "Reconnecting";
   if (mediaState === "failed" || mediaState === "disconnected")
     return "Connection issue";
-  if (
-    mediaState === "media-flowing" ||
-    mediaState === "ready-no-active-media" ||
-    mediaState === "playback-blocked" ||
-    mediaState === "topology-probing"
-  )
-    return "Connected";
-  return "Connecting";
+  if (mediaState === "playback-blocked") return "Playback blocked";
+  if (mediaState === "topology-probing") return "Selecting media route";
+  if (mediaState === "transport-connecting") return "Transport connecting";
+  if (mediaState === "ready-no-active-media") return "Ready · no active media";
+  if (mediaState === "media-flowing")
+    return hasConnectedStatistics
+      ? getConnectionQualityLabel(bars)
+      : "Media flowing";
+  return hasConnectedStatistics
+    ? getConnectionQualityLabel(bars)
+    : "Signaling connected";
 }
 
 export function normalizeConnectionMetricValue(value) {

@@ -38,6 +38,8 @@ export class MediasoupClientSession {
     getAudioBitrate,
     getVideoSettings,
     getAudioStereo,
+    requestTimeoutMs = 8000,
+    consumerControlTimeoutMs = 4000,
   }) {
     this.send = send;
     this.iceServers = iceServers;
@@ -47,6 +49,8 @@ export class MediasoupClientSession {
     this.getAudioBitrate = getAudioBitrate;
     this.getVideoSettings = getVideoSettings;
     this.getAudioStereo = getAudioStereo;
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.consumerControlTimeoutMs = consumerControlTimeoutMs;
     this.device = null;
     this.sendTransport = null;
     this.recvTransport = null;
@@ -155,7 +159,7 @@ export class MediasoupClientSession {
       return true;
     }
     if (type === "transport-state") {
-      this.onStateChange?.(data.direction, data.state, this.connectionState());
+      this.handleServerTransportState(data);
       return true;
     }
     if (type === "error") {
@@ -191,7 +195,7 @@ export class MediasoupClientSession {
         waitFor(
           this.pending,
           requestId,
-          8000,
+          this.requestTimeoutMs,
           "SFU send transport connection",
         ).then(callback, errback);
         this.send({
@@ -208,10 +212,12 @@ export class MediasoupClientSession {
       "produce",
       ({ kind, rtpParameters, appData }, callback, errback) => {
         const requestId = this.requestId("produce");
-        waitFor(this.pendingProduce, requestId, 8000, "SFU produce").then(
-          callback,
-          errback,
-        );
+        waitFor(
+          this.pendingProduce,
+          requestId,
+          this.requestTimeoutMs,
+          "SFU produce",
+        ).then(callback, errback);
         this.send({
           type: "produce",
           data: {
@@ -239,7 +245,7 @@ export class MediasoupClientSession {
         waitFor(
           this.pending,
           requestId,
-          8000,
+          this.requestTimeoutMs,
           "SFU receive transport connection",
         ).then(callback, errback);
         this.send({
@@ -281,6 +287,28 @@ export class MediasoupClientSession {
     };
   }
 
+  handleServerTransportState(data) {
+    const direction = data?.direction;
+    if (direction !== "send" && direction !== "recv") return false;
+    const state = data.state === "completed" ? "connected" : data.state;
+    if (
+      ![
+        "new",
+        "connecting",
+        "connected",
+        "disconnected",
+        "failed",
+        "closed",
+      ].includes(state)
+    )
+      return false;
+    this.transportStates.set(direction, state);
+    const summary = this.connectionState();
+    this.onStateChange?.(direction, state, summary);
+    this.handleTransportRecovery(direction, state);
+    return true;
+  }
+
   handleTransportRecovery(direction, state) {
     clearTimeout(this.recoveryTimers.get(direction));
     this.recoveryTimers.delete(direction);
@@ -311,7 +339,7 @@ export class MediasoupClientSession {
     const response = waitFor(
       this.pending,
       requestId,
-      8000,
+      this.requestTimeoutMs,
       `SFU ${direction} ICE restart`,
     );
     this.send({
@@ -533,7 +561,7 @@ export class MediasoupClientSession {
       const acknowledgement = waitFor(
         this.pending,
         requestId,
-        4000,
+        this.consumerControlTimeoutMs,
         `SFU ${desired ? "consumer resume" : "consumer pause"}`,
       );
       this.send({

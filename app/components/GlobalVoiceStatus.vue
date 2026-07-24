@@ -102,10 +102,15 @@ const healthLabel = computed(() =>
   ),
 );
 const healthBadge = computed(() => {
-  if (healthLabel.value === "Connection issue") return "badge-error";
   if (
-    healthLabel.value === "Connecting" ||
-    healthLabel.value === "Reconnecting"
+    healthLabel.value === "Connection issue" ||
+    healthLabel.value === "Playback blocked"
+  )
+    return "badge-error";
+  if (
+    healthLabel.value === "Reconnecting" ||
+    healthLabel.value === "Selecting media route" ||
+    healthLabel.value === "Transport connecting"
   )
     return "badge-warning";
   if (!rtcStats.metrics.connected) return "badge-success";

@@ -10,6 +10,7 @@ const [
   rateLimit,
   security,
   health,
+  pushDelivery,
 ] = await Promise.all(
   [
     "../server/utils/authentication.js",
@@ -19,6 +20,7 @@ const [
     "../server/utils/rate-limit.js",
     "../server/middleware/security.js",
     "../server/routes/health.js",
+    "../server/utils/push-delivery.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
 
@@ -51,6 +53,12 @@ test("production CSP staging and cached health reads are explicit", () => {
   assert.match(security, /Content-Security-Policy-Report-Only/);
   assert.match(health, /readTurnHealth/);
   assert.doesNotMatch(health, /probeSelfHostedTurn/);
+  assert.match(health, /getPushMetrics/);
+  assert.doesNotMatch(health, /usePocketBaseAdmin/);
+  const cachedMetricsReader = pushDelivery.slice(
+    pushDelivery.indexOf("export function getPushMetrics"),
+  );
+  assert.doesNotMatch(cachedMetricsReader, /usePocketBaseAdmin/);
 });
 
 test("core orchestration is split into bounded ownership modules", async () => {

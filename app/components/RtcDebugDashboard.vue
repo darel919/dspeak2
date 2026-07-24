@@ -538,10 +538,15 @@ const healthLabel = computed(() =>
   ),
 );
 const healthTone = computed(() => {
-  if (healthLabel.value === "Connection issue") return "poor";
   if (
-    healthLabel.value === "Connecting" ||
-    healthLabel.value === "Reconnecting"
+    healthLabel.value === "Connection issue" ||
+    healthLabel.value === "Playback blocked"
+  )
+    return "poor";
+  if (
+    healthLabel.value === "Reconnecting" ||
+    healthLabel.value === "Selecting media route" ||
+    healthLabel.value === "Transport connecting"
   )
     return "fair";
   if (!metrics.value.connected) return "good";

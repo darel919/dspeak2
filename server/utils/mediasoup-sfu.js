@@ -410,7 +410,10 @@ async function createTransport(state, session, direction) {
       dtlsState,
       selectedTuple: Boolean(transport.iceSelectedTuple),
     });
-    if (dtlsState === "closed") removeTransport();
+    if (dtlsState === "failed" || dtlsState === "closed") {
+      removeTransport();
+      if (!transport.closed) transport.close();
+    }
   });
   if (direction === "recv") await queueSfuBandwidthRebalance(state);
   return transport;

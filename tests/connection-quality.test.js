@@ -37,7 +37,7 @@ test("connection quality handles unavailable data and labels every level", () =>
 test("active connection label follows transport state before statistics arrive", () => {
   assert.equal(
     getActiveConnectionLabel(0, "transport-connecting", false),
-    "Connecting",
+    "Transport connecting",
   );
   assert.equal(
     getActiveConnectionLabel(0, "reconnecting", false),
@@ -45,11 +45,27 @@ test("active connection label follows transport state before statistics arrive",
   );
   assert.equal(
     getActiveConnectionLabel(0, "ready-no-active-media", false),
-    "Connected",
+    "Ready · no active media",
   );
   assert.equal(
     getActiveConnectionLabel(1, "ready-no-active-media", false),
-    "Connected",
+    "Ready · no active media",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "topology-probing", false),
+    "Selecting media route",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "playback-blocked", false),
+    "Playback blocked",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "media-flowing", false),
+    "Media flowing",
+  );
+  assert.equal(
+    getActiveConnectionLabel(0, "signaling-connected", false),
+    "Signaling connected",
   );
   assert.equal(
     getActiveConnectionLabel(0, "failed", false),
