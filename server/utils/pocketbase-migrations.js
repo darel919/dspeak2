@@ -55,8 +55,28 @@ export function mergeCollectionFields(current = [], additions = []) {
   return [...merged, ...additionsByName.values()];
 }
 
-function mergeIndexes(current = [], additions = []) {
-  return [...new Set([...current, ...additions])];
+function indexSignature(definition) {
+  return definition
+    .replaceAll(/["`[\]]/g, "")
+    .replaceAll(/\s+/g, " ")
+    .trim()
+    .replace(
+      /^CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?\S+ ON /i,
+      (_, unique = "") => `${unique.toUpperCase()}ON `,
+    )
+    .toLowerCase();
+}
+
+export function mergeCollectionIndexes(current = [], additions = []) {
+  const merged = [...current];
+  const signatures = new Set(current.map(indexSignature));
+  for (const addition of additions) {
+    const signature = indexSignature(addition);
+    if (signatures.has(signature)) continue;
+    merged.push(addition);
+    signatures.add(signature);
+  }
+  return merged;
 }
 
 export function buildCollectionUpdate(current, definition) {
@@ -64,9 +84,22 @@ export function buildCollectionUpdate(current, definition) {
     fields: mergeCollectionFields(current.fields, definition.fields),
   };
   if (definition.indexes?.length) {
-    update.indexes = mergeIndexes(current.indexes, definition.indexes);
+    update.indexes = mergeCollectionIndexes(
+      current.indexes,
+      definition.indexes,
+    );
   }
   return update;
+}
+
+function collectionMigrationError(error, collection, operation) {
+  const details =
+    error?.response?.data || error?.data?.data || error?.response || null;
+  const message =
+    `[PocketBase migration] Failed ${operation} collection ` +
+    `${JSON.stringify(collection.name)} (${collection.id || "new"}): ` +
+    `${JSON.stringify(details)}`;
+  return new Error(message, { cause: error });
 }
 
 async function findCollection(pb, name) {
@@ -80,11 +113,19 @@ async function findCollection(pb, name) {
 
 async function upsertCollection(pb, definition) {
   const current = await findCollection(pb, definition.name);
-  if (!current) return pb.collections.create(definition);
-  return pb.collections.update(
-    current.id,
-    buildCollectionUpdate(current, definition),
-  );
+  try {
+    if (!current) return await pb.collections.create(definition);
+    return await pb.collections.update(
+      current.id,
+      buildCollectionUpdate(current, definition),
+    );
+  } catch (error) {
+    throw collectionMigrationError(
+      error,
+      current || definition,
+      current ? "updating" : "creating",
+    );
+  }
 }
 
 async function ensureMigrationCollection(pb) {

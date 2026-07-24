@@ -18,11 +18,14 @@ initializer supports both an existing deployment and a new PocketBase instance:
    replay the idempotent schema operations to repair the current schema and its
    relation collection IDs.
 
-Existing fields and indexes are merged by name. Field IDs are retained when a
-field is updated so PocketBase data remains attached to the same schema field.
-PocketBase-owned system fields retain their complete server-provided definitions,
-and server-managed indexes are left out of collection updates unless a migration
-adds an index. Multi-value relation fields are not assigned SQL indexes.
+Existing fields are merged by name. Indexes are merged by their normalized
+uniqueness, table, columns, and predicate so a generated PocketBase index and a
+named dSpeak index cannot duplicate the same constraint. Field IDs are retained
+when a field is updated so PocketBase data remains attached to the same schema
+field. PocketBase-owned system fields retain their complete server-provided
+definitions, and server-managed indexes are left out of collection updates
+unless a migration adds an index. Multi-value relation fields are not assigned
+SQL indexes.
 Startup fails if authentication, schema creation, repair, or data backfill
 fails. The application never continues against a known partial schema.
 

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   buildCollectionUpdate,
   mergeCollectionFields,
+  mergeCollectionIndexes,
 } from "../server/utils/pocketbase-migrations.js";
 import { readFileSync } from "node:fs";
 
@@ -64,6 +65,32 @@ test("PocketBase collection updates merge indexes when adding an index", () => {
   assert.deepEqual(update.indexes, [
     "CREATE INDEX existing_idx ON example (created)",
     "CREATE INDEX added_idx ON example (updated)",
+  ]);
+});
+
+test("PocketBase index merging deduplicates equivalent generated indexes", () => {
+  const current = [
+    "CREATE UNIQUE INDEX `idx_PAuDYJoK1r` ON `dspeak_users_state` (`user`)",
+  ];
+  const additions = [
+    "CREATE UNIQUE INDEX idx_dspeak_users_state_user ON dspeak_users_state (user)",
+    "CREATE INDEX idx_dspeak_users_state_connected ON dspeak_users_state (connected)",
+  ];
+  assert.deepEqual(mergeCollectionIndexes(current, additions), [
+    current[0],
+    additions[1],
+  ]);
+});
+
+test("PocketBase index merging distinguishes uniqueness and predicates", () => {
+  const current = ["CREATE INDEX current_idx ON example (value)"];
+  const additions = [
+    "CREATE UNIQUE INDEX unique_idx ON example (value)",
+    "CREATE INDEX partial_idx ON example (value) WHERE value != ''",
+  ];
+  assert.deepEqual(mergeCollectionIndexes(current, additions), [
+    ...current,
+    ...additions,
   ]);
 });
 
