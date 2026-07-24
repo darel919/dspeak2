@@ -1,17 +1,19 @@
 <template>
   <Init v-slot="{ authenticated }">
     <div
-      v-if="authenticated"
-      class="authenticated-shell"
+      :class="{ 'authenticated-shell': authenticated }"
       :style="{ '--navbar-height': roomHasHeaderImage ? '6rem' : undefined }"
     >
-      <MetroRoomRail />
-      <Navbar />
-      <main class="pt-[var(--navbar-height)] md:pl-[72px]">
+      <template v-if="authenticated">
+        <MetroRoomRail />
+        <Navbar />
+      </template>
+      <main
+        :class="{ 'pt-[var(--navbar-height)] md:pl-[72px]': authenticated }"
+      >
         <slot />
       </main>
     </div>
-    <slot v-else />
     <ToastContainer />
   </Init>
 </template>

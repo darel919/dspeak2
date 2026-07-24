@@ -4,7 +4,9 @@ import test from "node:test";
 
 test("authenticated shell owns fixed navigation and page content", async () => {
   const layout = await readFile("app/layouts/default.vue", "utf8");
-  assert.match(layout, /v-if="authenticated"\s+class="authenticated-shell"/);
+  assert.match(layout, /'authenticated-shell': authenticated/);
+  assert.match(layout, /<template v-if="authenticated">/);
+  assert.equal(layout.match(/<slot\s*\/>/g)?.length, 1);
   assert.match(layout, /<MetroRoomRail\s*\/>/);
   assert.match(layout, /<Navbar\s*\/>/);
 });
@@ -157,7 +159,7 @@ test("room branding places the banner in navigation and the avatar above the roo
   assert.match(navbar, /<Transition name="room-banner">/);
   assert.match(navbar, /\.room-navbar \{/);
   assert.match(navbar, /\.room-banner-enter-active/);
-  assert.match(layout, /class="authenticated-shell"/);
+  assert.match(layout, /'authenticated-shell': authenticated/);
   assert.match(
     await readFile("app/assets/app.css", "utf8"),
     /\.authenticated-shell > main \{/,

@@ -42,6 +42,10 @@ const authPage = await readFile(
   new URL("../app/pages/auth.vue", import.meta.url),
   "utf8",
 );
+const defaultLayout = await readFile(
+  new URL("../app/layouts/default.vue", import.meta.url),
+  "utf8",
+);
 const dspeakApi = files[0];
 
 test("protected server paths resolve identity through authenticated sessions", () => {
@@ -94,6 +98,12 @@ test("failed SSO callbacks stop with an actionable error instead of looping", ()
   assert.match(authPage, /Sign-in interrupted/);
   assert.match(authPage, /Try sign-in again/);
   assert.doesNotMatch(authPage, /setTimeout\(resolve,\s*10000\)/);
+});
+
+test("authentication state changes do not remount and replay the callback", () => {
+  assert.equal(defaultLayout.match(/<slot\s*\/>/g)?.length, 1);
+  assert.match(authPage, /await router\.replace\("\/auth"\)/);
+  assert.doesNotMatch(authPage, /history\.replaceState/);
 });
 
 test("notification migration reconciles duplicates before uniqueness", () => {

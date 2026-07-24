@@ -83,7 +83,7 @@ onMounted(async () => {
   const state = route.query.state;
 
   if (code && state) {
-    window.history.replaceState({}, "", "/auth");
+    await router.replace("/auth");
     const valid = await authStore.exchangeHandoff(code, state);
     if (valid) {
       await roomsStore.fetchRooms();
