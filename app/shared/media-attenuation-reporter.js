@@ -89,3 +89,20 @@ export function summarizeMediaAttenuation(reports, peers, localPeerId) {
     reportingListeners: values.length,
   };
 }
+
+export function resolveMediaAttenuation(roomValue, override) {
+  const attenuation = roomValue || {
+    enabled: true,
+    reductionPercent: 65,
+    attackMs: 120,
+    releaseMs: 650,
+  };
+  if (override.mode === "disabled") return { ...attenuation, enabled: false };
+  if (override.mode === "enabled")
+    return {
+      ...attenuation,
+      enabled: true,
+      reductionPercent: override.reductionPercent,
+    };
+  return attenuation;
+}

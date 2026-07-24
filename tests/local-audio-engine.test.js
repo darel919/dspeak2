@@ -152,13 +152,95 @@ test("zero shared volume immediately mutes gain and both transports", async () =
     engine.setSharedAudioVolume(0);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    assert.deepEqual(values.slice(-2), [
+    assert.deepEqual(values.slice(-3), [
       ["cancel", 7],
+      ["value", 1, 7],
       ["value", 0, 7],
     ]);
     assert.deepEqual(transmissions, [
       ["p2p", "screen-audio", false],
       ["sfu", "screen-audio", false],
+    ]);
+  } finally {
+    globalThis.MediaStream = originalMediaStream;
+    globalThis.window = originalWindow;
+  }
+});
+
+test("speech priority attenuates the processed outbound track", async () => {
+  const ramps = [];
+  const gainParameter = {
+    value: 1,
+    cancelScheduledValues() {},
+    setValueAtTime(value) {
+      this.value = value;
+    },
+    linearRampToValueAtTime(value, time) {
+      ramps.push([value, time]);
+      this.value = value;
+    },
+  };
+  const context = {
+    currentTime: 5,
+    state: "running",
+    createAnalyser: () => ({
+      connect() {},
+      disconnect() {},
+      fftSize: 0,
+    }),
+    createGain: () => ({
+      connect() {},
+      disconnect() {},
+      gain: gainParameter,
+    }),
+    createMediaStreamDestination: () => ({
+      stream: { getAudioTracks: () => [{ id: "processed", kind: "audio" }] },
+    }),
+    createMediaStreamSource: () => ({ connect() {}, disconnect() {} }),
+    resume: () => Promise.resolve(),
+  };
+  const originalMediaStream = globalThis.MediaStream;
+  const originalWindow = globalThis.window;
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+
+    getAudioTracks() {
+      return this.tracks;
+    }
+  };
+  globalThis.window = {
+    AudioContext: class {
+      constructor() {
+        return context;
+      }
+    },
+  };
+
+  try {
+    const engine = createEngine({ context });
+    await engine.createSharedAudioSource({
+      source: "screen-audio",
+      stream: new MediaStream([{ id: "capture", kind: "audio" }]),
+      track: { id: "capture", kind: "audio" },
+    });
+    engine.setSharedAudioAttenuation(true, {
+      enabled: true,
+      reductionPercent: 100,
+      attackMs: 120,
+      releaseMs: 650,
+    });
+    engine.setSharedAudioAttenuation(false, {
+      enabled: true,
+      reductionPercent: 100,
+      attackMs: 120,
+      releaseMs: 650,
+    });
+
+    assert.deepEqual(ramps, [
+      [0, 5.12],
+      [1, 5.65],
     ]);
   } finally {
     globalThis.MediaStream = originalMediaStream;

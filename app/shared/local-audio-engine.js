@@ -21,6 +21,8 @@ export function createLocalAudioEngine({
   let localVoiceDetector = null;
   let sharedAudioMeter = null;
   let sharedAudioStatsSample = null;
+  let sharedAudioBaseVolume = 1;
+  let sharedAudioAttenuation = 1;
 
   function producerFacade(entry) {
     return {
@@ -105,10 +107,9 @@ export function createLocalAudioEngine({
 
   function setSharedAudioVolume(value) {
     const normalized = Math.max(0, Math.min(100, Number(value))) / 100;
+    sharedAudioBaseVolume = normalized;
     if (sharedAudioMeter?.gain) {
-      const now = sharedAudioMeter.context.currentTime;
-      sharedAudioMeter.gain.gain.cancelScheduledValues(now);
-      sharedAudioMeter.gain.gain.setValueAtTime(normalized, now);
+      applySharedAudioGain(0);
       ensureSharedAudioProcessing().catch((error) =>
         console.warn("[Media] Shared audio context resume failed", error),
       );
@@ -127,6 +128,31 @@ export function createLocalAudioEngine({
             result.reason,
           );
     });
+  }
+
+  function setSharedAudioAttenuation(speaking, attenuation) {
+    const enabled = speaking && attenuation?.enabled;
+    sharedAudioAttenuation = enabled
+      ? 1 -
+        Math.max(0, Math.min(100, Number(attenuation.reductionPercent))) / 100
+      : 1;
+    applySharedAudioGain(
+      enabled
+        ? Number(attenuation.attackMs) || 120
+        : Number(attenuation?.releaseMs) || 650,
+    );
+  }
+
+  function applySharedAudioGain(durationMs) {
+    if (!sharedAudioMeter?.gain) return;
+    const now = sharedAudioMeter.context.currentTime;
+    const parameter = sharedAudioMeter.gain.gain;
+    const target = sharedAudioBaseVolume * sharedAudioAttenuation;
+    parameter.cancelScheduledValues(now);
+    parameter.setValueAtTime(parameter.value, now);
+    if (durationMs > 0)
+      parameter.linearRampToValueAtTime(target, now + durationMs / 1000);
+    else parameter.setValueAtTime(target, now);
   }
 
   function setSystemAudioBitrate(value) {
@@ -296,6 +322,7 @@ export function createLocalAudioEngine({
     refreshAudioSenderSettings,
     refreshMediaPolicy,
     setSharedAudioVolume,
+    setSharedAudioAttenuation,
     setSystemAudioBitrate,
     startLocalVoiceDetection,
     startSharedAudioMeter,

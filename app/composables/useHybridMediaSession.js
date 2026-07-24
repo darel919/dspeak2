@@ -12,6 +12,7 @@ import { setupMediaMessageHandlers } from "~/shared/media-message-handlers.js";
 import { createMediaSourceController } from "~/shared/media-source-controller.js";
 import {
   createMediaAttenuationReporter,
+  resolveMediaAttenuation,
   summarizeMediaAttenuation,
 } from "~/shared/media-attenuation-reporter.js";
 import {
@@ -124,6 +125,12 @@ export function useHybridMediaSession() {
     }),
   );
 
+  const getAttenuation = () =>
+    resolveMediaAttenuation(
+      roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
+      settingsStore.streamAttenuation,
+    );
+
   const registry = new RemoteMediaRegistry({
     audioFeeds: remoteAudioFeeds,
     videoFeeds: remoteVideoFeeds,
@@ -137,24 +144,7 @@ export function useHybridMediaSession() {
       ),
     onSpeaking: (userId, speaking) =>
       voiceStore.updateUserSpeaking(userId, speaking),
-    getAttenuation: () => {
-      const room = roomsStore.getRoomById(voiceStore.currentRoomId);
-      const roomValue = room?.attenuation || {
-        enabled: true,
-        reductionPercent: 65,
-        attackMs: 120,
-        releaseMs: 650,
-      };
-      const override = settingsStore.streamAttenuation;
-      if (override.mode === "disabled") return { ...roomValue, enabled: false };
-      if (override.mode === "enabled")
-        return {
-          ...roomValue,
-          enabled: true,
-          reductionPercent: override.reductionPercent,
-        };
-      return roomValue;
-    },
+    getAttenuation,
     onVideoReceivingChange: (entry, receiving) => {
       if (entry.provider === "sfu")
         sfu
@@ -187,29 +177,15 @@ export function useHybridMediaSession() {
   const attenuationReporter = createMediaAttenuationReporter({
     getLocalPeerId: () => localPeerId,
     getPeers: () => topologyState.value.peers,
-    onReportsChange: (reports) => {
-      attenuationReports.value = reports;
-    },
+    onReportsChange: (reports) => (attenuationReports.value = reports),
     send,
   });
-  const sharedAudioAttenuation = computed(() => {
-    return summarizeMediaAttenuation(
+  const sharedAudioAttenuation = computed(() =>
+    summarizeMediaAttenuation(
       attenuationReports.value,
       topologyState.value.peers,
       localPeerId,
-    );
-  });
-
-  watch(
-    () => [
-      settingsStore.streamAttenuation,
-      roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
-      [...voiceStore.connectedUsers.values()].some(
-        (participant) => participant.speaking === true,
-      ),
-    ],
-    () => registry.applyAttenuation(),
-    { deep: true },
+    ),
   );
 
   function setRouteConnectionState(state) {
@@ -596,6 +572,7 @@ export function useHybridMediaSession() {
     refreshAudioSenderSettings,
     refreshMediaPolicy,
     setSharedAudioVolume,
+    setSharedAudioAttenuation,
     setSystemAudioBitrate,
     startLocalVoiceDetection,
     startSharedAudioMeter,
@@ -622,6 +599,30 @@ export function useHybridMediaSession() {
     updateNoiseFloor,
     voiceStore,
   });
+
+  watch(
+    () => [
+      settingsStore.streamAttenuation,
+      roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
+      [...voiceStore.connectedUsers.values()].some(
+        (participant) => participant.speaking === true,
+      ),
+    ],
+    () => {
+      const speaking = [...voiceStore.connectedUsers.values()].some(
+        (participant) => participant.speaking === true,
+      );
+      registry.applyAttenuation();
+      setSharedAudioAttenuation(
+        speaking,
+        resolveMediaAttenuation(
+          roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
+          { mode: "inherit" },
+        ),
+      );
+    },
+    { deep: true, immediate: true },
+  );
 
   async function applyTopology(data) {
     if (Number(data.epoch) < topologyState.value.epoch) return;
