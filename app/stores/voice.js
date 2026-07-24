@@ -10,6 +10,7 @@ import { voiceJoinErrorMessage } from "~/shared/voice-errors.js";
 import { STORAGE_KEYS } from "~/const/storage.js";
 import { resolveVoicePreferences } from "~/shared/voice-preferences.js";
 import { createVoiceParticipantState } from "~/shared/voice-participant-state.js";
+import { waitForVoiceTransportReady } from "~/shared/voice-join-readiness.js";
 
 export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
@@ -349,7 +350,11 @@ export const useVoiceStore = defineStore("voice", () => {
       const roomUsers = session.lastInRoom ?? [];
       const alone =
         remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1;
-      if (alone || (await session.areTransportsIceConnected?.(isBroadcast)))
+      if (
+        alone ||
+        session.joinReady ||
+        (await session.areTransportsIceConnected?.(isBroadcast))
+      )
         return;
       await delay(100);
     }
@@ -442,10 +447,12 @@ export const useVoiceStore = defineStore("voice", () => {
       setCurrentChannel(channelId);
       restorePersistedVoiceState();
 
-      while (!session.transportReady) {
-        if (session.error) throw new Error(session.error);
-        await delay(50);
-      }
+      await waitForVoiceTransportReady({
+        getError: () => session.error,
+        isCurrent: () =>
+          generation === joinGeneration && sfuComposable.value === session,
+        isReady: () => session.joinReady,
+      });
       await delay(200);
       await waitForJoinReady(session, settingsStore.broadcastMode);
       ensureCurrentJoin();

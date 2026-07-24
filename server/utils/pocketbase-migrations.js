@@ -5,6 +5,28 @@ import {
 import { normalizeMediaPolicy } from "../../shared/media-policy.js";
 
 const MIGRATION_COLLECTION = "dspeak_migrations";
+const REQUIRED_COLLECTIONS = Object.freeze([
+  "users",
+  "dspeak_rooms",
+  "dspeak_rooms_channels",
+  "dspeak_messages",
+  "dspeak_webpush",
+  "dspeak_webpush_global",
+  "dspeak_users_state",
+  "dspeak_room_roles",
+  "dspeak_room_memberships",
+  "dspeak_notifications",
+  "dspeak_notification_preferences",
+  "dspeak_room_notification_preferences",
+  "dspeak_user_nicknames",
+  "dspeak_room_soundboards",
+  "dspeak_push_subscriptions",
+  "dspeak_push_jobs",
+  "dspeak_sessions",
+  "dspeak_message_revisions",
+  "dspeak_room_invites",
+  "dspeak_room_audit_log",
+]);
 
 function field(name, type, options = {}) {
   return {
@@ -84,6 +106,194 @@ async function recordMigration(pb, name) {
   await pb.collection(MIGRATION_COLLECTION).create({
     name,
     applied_at: new Date().toISOString(),
+  });
+}
+
+async function migrateFoundation(pb) {
+  const users = await upsertCollection(pb, {
+    name: "users",
+    type: "auth",
+    fields: [
+      field("name", "text", { max: 120 }),
+      field("username", "text", { max: 120 }),
+      field("avatar", "file", {
+        maxSelect: 1,
+        maxSize: 2 * 1024 * 1024,
+        mimeTypes: ["image/jpeg", "image/png", "image/webp"],
+      }),
+      field("online", "bool"),
+    ],
+    indexes: [],
+  });
+
+  const rooms = await upsertCollection(pb, {
+    name: "dspeak_rooms",
+    type: "base",
+    fields: [
+      field("name", "text", { required: true, max: 120 }),
+      field("desc", "text", { max: 2000 }),
+      field("picture", "file", {
+        maxSelect: 1,
+        maxSize: 2 * 1024 * 1024,
+        mimeTypes: ["image/jpeg", "image/png", "image/webp"],
+      }),
+      field("owner", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("members", "relation", {
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 999,
+      }),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_rooms_owner ON dspeak_rooms (owner)",
+      "CREATE INDEX idx_dspeak_rooms_members ON dspeak_rooms (members)",
+    ],
+  });
+
+  const channels = await upsertCollection(pb, {
+    name: "dspeak_rooms_channels",
+    type: "base",
+    fields: [
+      field("name", "text", { required: true, max: 120 }),
+      field("desc", "text", { max: 2000 }),
+      field("isMedia", "bool"),
+      field("audio_bitrate", "number", { min: 6, max: 510 }),
+      field("inRoom", "relation", {
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 999,
+      }),
+      field("owner", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("room", "relation", {
+        required: true,
+        collectionId: rooms.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_channels_room ON dspeak_rooms_channels (room)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: rooms.name,
+    type: rooms.type,
+    fields: [
+      field("channels", "relation", {
+        collectionId: channels.id,
+        cascadeDelete: false,
+        maxSelect: 999,
+      }),
+    ],
+    indexes: [],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_messages",
+    type: "base",
+    fields: [
+      field("content", "text", { required: true, max: 4000 }),
+      field("room_channel", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("sender", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("read_by", "relation", {
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 999,
+      }),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_messages_channel_created ON dspeak_messages (room_channel, created)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_webpush",
+    type: "base",
+    fields: [
+      field("room", "relation", {
+        required: true,
+        collectionId: rooms.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("keys", "json", { required: true, maxSize: 10000 }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_webpush_room_user ON dspeak_webpush (room, user)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_webpush_global",
+    type: "base",
+    fields: [
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("endpoint", "text", { max: 4096 }),
+      field("p256dh", "text", { max: 512 }),
+      field("auth", "text", { max: 512 }),
+      field("keys", "json", { maxSize: 10000 }),
+    ],
+    indexes: [],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_users_state",
+    type: "base",
+    fields: [
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("connected", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("muted", "bool"),
+      field("deafened", "bool"),
+      field("audioBroadcasting", "bool"),
+      field("videoSharing", "bool"),
+      field("screenSharing", "bool"),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_users_state_user ON dspeak_users_state (user)",
+      "CREATE INDEX idx_dspeak_users_state_connected ON dspeak_users_state (connected)",
+    ],
   });
 }
 
@@ -776,6 +986,10 @@ async function migrateRoomInvites(pb) {
 
 const migrations = Object.freeze([
   {
+    name: "20260724_foundation_v1",
+    run: migrateFoundation,
+  },
+  {
     name: "20260722_room_administration_v1",
     run: migrateRoomAdministration,
   },
@@ -840,14 +1054,30 @@ const migrations = Object.freeze([
 
 export async function runPocketBaseMigrations(pb, logger = console) {
   await ensureMigrationCollection(pb);
+  const missingCollections = (
+    await Promise.all(
+      REQUIRED_COLLECTIONS.map(async (name) => ({
+        name,
+        exists: Boolean(await findCollection(pb, name)),
+      })),
+    )
+  )
+    .filter((collection) => !collection.exists)
+    .map((collection) => collection.name);
   const applied = [];
   for (const migration of migrations) {
-    if (await hasMigration(pb, migration.name)) continue;
-    logger.info(`[PocketBase migration] Applying ${migration.name}`);
+    const completed = await hasMigration(pb, migration.name);
+    if (completed && !missingCollections.length) continue;
+    const operation = completed ? "Repairing with" : "Applying";
+    logger.info(`[PocketBase migration] ${operation} ${migration.name}`);
     await migration.run(pb);
-    await recordMigration(pb, migration.name);
-    applied.push(migration.name);
-    logger.info(`[PocketBase migration] Applied ${migration.name}`);
+    if (!completed) {
+      await recordMigration(pb, migration.name);
+      applied.push(migration.name);
+    }
+    logger.info(
+      `[PocketBase migration] ${completed ? "Repaired" : "Applied"} ${migration.name}`,
+    );
   }
   if (!applied.length) logger.debug("[PocketBase migration] Schema is current");
   return applied;

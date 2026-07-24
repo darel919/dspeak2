@@ -54,6 +54,52 @@ test("local microphone gating preserves the remote receiving preference", async 
   assert.equal(parameters.encodings[0].active, false);
 });
 
+test("P2P sender parameter updates are serialized per sender", async () => {
+  const parameters = { encodings: [{}] };
+  let releaseFirst;
+  let markFirstStarted;
+  const firstStarted = new Promise((resolve) => {
+    markFirstStarted = resolve;
+  });
+  let activeUpdates = 0;
+  let maximumConcurrentUpdates = 0;
+  let updateCount = 0;
+  const sender = {
+    getParameters: () => structuredClone(parameters),
+    async setParameters(next) {
+      updateCount += 1;
+      activeUpdates += 1;
+      maximumConcurrentUpdates = Math.max(
+        maximumConcurrentUpdates,
+        activeUpdates,
+      );
+      if (updateCount === 1) {
+        markFirstStarted();
+        await new Promise((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      Object.assign(parameters, next);
+      activeUpdates -= 1;
+    },
+  };
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal() {},
+    getSenderOptions: () => ({ encodings: [{ maxBitrate: 48000 }] }),
+  });
+
+  const configuring = mesh.configureSender(sender, "audio", {});
+  await firstStarted;
+  const gating = mesh.setSenderActive(sender, false);
+  releaseFirst();
+  await Promise.all([configuring, gating]);
+
+  assert.equal(maximumConcurrentUpdates, 1);
+  assert.equal(parameters.encodings[0].maxBitrate, 48000);
+  assert.equal(parameters.encodings[0].active, false);
+});
+
 test("P2P screen receiving signals video and shared audio together", () => {
   const signals = [];
   const mesh = new NativeP2pMesh({
