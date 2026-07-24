@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   automaticGateThreshold,
+  byteTimeDomainLevelDb,
   createNoiseFloorEstimator,
   microphoneLevelDb,
   normalizeMicrophoneGate,
@@ -26,8 +27,19 @@ test("microphone level and automatic threshold use dBFS", () => {
     Math.round(microphoneLevelDb(new Float32Array([0.1, -0.1]))),
     -20,
   );
-  assert.equal(automaticGateThreshold(-60), -48);
-  assert.equal(automaticGateThreshold(-35), -32);
+  assert.equal(automaticGateThreshold(-60), -44);
+  assert.equal(automaticGateThreshold(-35), -28);
+});
+
+test("automatic gate keeps moderate noise spikes below the opening level", () => {
+  assert.ok(-45 < automaticGateThreshold(-60));
+  assert.ok(-31 < automaticGateThreshold(-45));
+});
+
+test("byte waveform levels preserve quiet remote speech sensitivity", () => {
+  const quietSpeech = new Uint8Array([127, 129, 127, 129]);
+  assert.equal(Math.round(byteTimeDomainLevelDb(quietSpeech)), -42);
+  assert.equal(byteTimeDomainLevelDb(new Uint8Array([128, 128])), -100);
 });
 
 test("noise floor bootstraps from unprocessed room noise", () => {
@@ -37,7 +49,7 @@ test("noise floor bootstraps from unprocessed room noise", () => {
     updateNoiseFloor(estimator, -42, -42 >= thresholdDb);
   }
   assert.ok(estimator.noiseFloorDb > -43);
-  assert.ok(automaticGateThreshold(estimator.noiseFloorDb) > -33);
+  assert.ok(automaticGateThreshold(estimator.noiseFloorDb) > -29);
 });
 
 test("noise floor ignores intermittent speech", () => {

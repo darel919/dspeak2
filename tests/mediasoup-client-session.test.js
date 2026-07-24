@@ -128,6 +128,48 @@ test("timed out signaling requests clean up and ignore late responses", async ()
   assert.equal(client.pending.size, 0);
 });
 
+test("an existing SFU source replaces its track without recreating the producer", async () => {
+  const client = session();
+  const previousTrack = {
+    stopped: false,
+    stop() {
+      this.stopped = true;
+    },
+  };
+  const replacementTrack = {
+    stopped: false,
+    stop() {
+      this.stopped = true;
+    },
+  };
+  const captureTrack = {
+    clone() {
+      return replacementTrack;
+    },
+  };
+  const replacements = [];
+  const producer = {
+    async replaceTrack(options) {
+      replacements.push(options.track);
+    },
+  };
+  client.producers.set("audio", {
+    producer,
+    track: previousTrack,
+    source: "audio",
+  });
+
+  const result = await client.addSource({
+    source: "audio",
+    track: captureTrack,
+  });
+
+  assert.equal(result, producer);
+  assert.deepEqual(replacements, [replacementTrack]);
+  assert.equal(previousTrack.stopped, true);
+  assert.equal(client.producers.get("audio").track, replacementTrack);
+});
+
 test("transport objects are not ready before required directions connect", () => {
   const client = session();
   client.sendTransport = {};
@@ -400,11 +442,11 @@ test("permanent consumer control failure disables the track and reports failure"
   assert.deepEqual(states, [["consumer", "failed"]]);
 });
 
-test("new remote screen sources remain paused until explicitly watched", () => {
+test("new remote screen video waits for viewing while shared audio starts", () => {
   const client = session();
 
   assert.equal(client.shouldReceive("user-1", "screen"), false);
-  assert.equal(client.shouldReceive("user-1", "screen-audio"), false);
+  assert.equal(client.shouldReceive("user-1", "screen-audio"), true);
   assert.equal(client.shouldReceive("user-1", "camera"), true);
   assert.equal(client.shouldReceive("user-1", "audio"), true);
 });

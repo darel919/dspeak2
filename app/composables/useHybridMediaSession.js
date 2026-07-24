@@ -1,4 +1,4 @@
-import { computed, readonly, ref } from "vue";
+import { computed, readonly, ref, watch } from "vue";
 import { useRuntimeConfig } from "#app";
 import { MediaCaptureManager } from "~/shared/media-capture.js";
 import { MediasoupClientSession } from "~/shared/mediasoup-client-session.js";
@@ -63,6 +63,7 @@ export function useHybridMediaSession() {
   const iceConnectedBoth = ref(false);
   const mediaConnectionState = ref("disconnected");
   const playbackState = ref("idle");
+  const microphoneDeviceState = ref("preferred");
   const localVideoFeeds = ref(new Map());
   const remoteVideoFeeds = ref(new Map());
   const remoteAudioFeeds = ref(new Map());
@@ -130,6 +131,10 @@ export function useHybridMediaSession() {
     getOutputDevice: () => settingsStore.outputDeviceId,
     isDeafened: () => voiceStore.deafened,
     isBroadcastMode: () => settingsStore.broadcastMode,
+    isAnyoneSpeaking: () =>
+      [...voiceStore.connectedUsers.values()].some(
+        (participant) => participant.speaking === true,
+      ),
     onSpeaking: (userId, speaking) =>
       voiceStore.updateUserSpeaking(userId, speaking),
     getAttenuation: () => {
@@ -178,6 +183,18 @@ export function useHybridMediaSession() {
     },
   });
 
+  watch(
+    () => [
+      settingsStore.streamAttenuation,
+      roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
+      [...voiceStore.connectedUsers.values()].some(
+        (participant) => participant.speaking === true,
+      ),
+    ],
+    () => registry.applyAttenuation(),
+    { deep: true },
+  );
+
   function setRouteConnectionState(state) {
     mediaConnectionState.value =
       playbackState.value === "blocked" ||
@@ -190,7 +207,14 @@ export function useHybridMediaSession() {
   const capture = new MediaCaptureManager({
     getSettings: () => settingsStore,
     getAudioStereo,
-    onMicrophoneFallback: () => settingsStore.setMicDeviceId(null),
+    onMicrophoneFallback: () => {
+      microphoneDeviceState.value = "fallback";
+    },
+    onMicrophoneRestored: () => {
+      microphoneDeviceState.value = "preferred";
+      if (error.value === "Unable to restore microphone capture")
+        error.value = null;
+    },
     onSource: (entry) => sourceController.publishSource(entry),
     onSourceEnded: (entry, options) =>
       sourceController.removeSource(entry, options),
@@ -892,7 +916,6 @@ export function useHybridMediaSession() {
     refreshPublicMaps,
     reportSfuFailure,
     send,
-    settingsStore,
     setMicrophoneTransmission,
     startLocalVoiceDetection,
     startSharedAudioMeter,
@@ -951,6 +974,7 @@ export function useHybridMediaSession() {
     stopKeepalive();
     stopLocalVoiceDetection();
     stopSharedAudioMeter();
+    capture.stopDeviceMonitoring();
     socket?.close();
     socket = null;
     capture.stopAll();
@@ -983,6 +1007,7 @@ export function useHybridMediaSession() {
     iceConnectedBoth: readonly(iceConnectedBoth),
     mediaConnectionState: readonly(mediaConnectionState),
     playbackState: readonly(playbackState),
+    microphoneDeviceState: readonly(microphoneDeviceState),
     isProducing: computed(() => localSources.size > 0),
     producers: readonly(producers),
     consumers: readonly(consumers),

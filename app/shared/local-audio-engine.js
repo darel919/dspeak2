@@ -126,12 +126,26 @@ export function createLocalAudioEngine({
 
   function setSharedAudioVolume(value) {
     const normalized = Math.max(0, Math.min(100, Number(value))) / 100;
-    if (sharedAudioMeter?.gain)
-      sharedAudioMeter.gain.gain.setTargetAtTime(
-        normalized,
-        sharedAudioMeter.context.currentTime,
-        0.01,
-      );
+    if (sharedAudioMeter?.gain) {
+      const now = sharedAudioMeter.context.currentTime;
+      sharedAudioMeter.gain.gain.cancelScheduledValues(now);
+      sharedAudioMeter.gain.gain.setValueAtTime(normalized, now);
+      ensureSharedAudioProcessing();
+    }
+    const enabled = normalized > 0;
+    Promise.allSettled(
+      [
+        getP2pMesh()?.setSourceTransmission("screen-audio", enabled),
+        getSfu()?.setSourceTransmission("screen-audio", enabled),
+      ].filter(Boolean),
+    ).then((results) => {
+      for (const result of results)
+        if (result.status === "rejected")
+          console.warn(
+            "[Media] Shared audio transmission update failed",
+            result.reason,
+          );
+    });
   }
 
   function setSystemAudioBitrate(value) {
@@ -207,6 +221,7 @@ export function createLocalAudioEngine({
         timer: null,
         track,
       };
+      setSharedAudioVolume(settingsStore.sharedAudioVolume);
       return {
         ...entry,
         stream: new MediaStream([track]),
@@ -221,11 +236,22 @@ export function createLocalAudioEngine({
     }
   }
 
+  function ensureSharedAudioProcessing() {
+    if (!sharedAudioMeter || sharedAudioMeter.context.state === "running")
+      return;
+    sharedAudioMeter.context
+      .resume()
+      .catch((error) =>
+        console.warn("[Media] Shared audio context resume failed", error),
+      );
+  }
+
   function startSharedAudioMeter() {
     if (!sharedAudioMeter) return;
     const values = new Float32Array(sharedAudioMeter.analyser.fftSize);
     const sample = async () => {
       if (!sharedAudioMeter) return;
+      ensureSharedAudioProcessing();
       sharedAudioMeter.analyser.getFloatTimeDomainData(values);
       const rms = Math.sqrt(
         values.reduce((sum, value) => sum + value * value, 0) / values.length,

@@ -4,6 +4,7 @@ import {
   audioConstraints,
   canFallbackToDefaultMicrophone,
   captureMicrophone,
+  MediaCaptureManager,
   sharedAudioConstraints,
 } from "../app/shared/media-capture.js";
 
@@ -42,7 +43,7 @@ test("shared audio disables destructive speech processing", () => {
   });
 });
 
-test("failed selected microphone resets after system-default capture succeeds", async () => {
+test("failed selected microphone falls back without losing its identity", async () => {
   const expectedStream = { id: "default-stream" };
   const calls = [];
   let fallback = null;
@@ -63,7 +64,8 @@ test("failed selected microphone resets after system-default capture succeeds", 
       fallback = details;
     },
   });
-  assert.equal(stream, expectedStream);
+  assert.equal(stream.stream, expectedStream);
+  assert.equal(stream.fallback, true);
   assert.deepEqual(calls[0].audio.deviceId, { exact: "missing-device" });
   assert.equal(calls[1].audio.deviceId, undefined);
   assert.equal(fallback.failedDeviceId, "missing-device");
@@ -91,4 +93,132 @@ test("permission failures never trigger a second microphone request", async () =
     canFallbackToDefaultMicrophone(denied, "selected-device"),
     false,
   );
+});
+
+function fakeTrack(id) {
+  const listeners = new Map();
+  return {
+    id,
+    readyState: "live",
+    addEventListener(type, handler) {
+      listeners.set(type, handler);
+    },
+    stop() {
+      if (this.readyState === "ended") return;
+      this.readyState = "ended";
+      listeners.get("ended")?.();
+    },
+  };
+}
+
+function fakeStream(track) {
+  return {
+    getAudioTracks: () => [track],
+    getTracks: () => [track],
+  };
+}
+
+test("fallback microphone is replaced when the exact preferred device returns", async () => {
+  const fallbackTrack = fakeTrack("fallback");
+  const preferredTrack = fakeTrack("preferred");
+  const fallbackStream = fakeStream(fallbackTrack);
+  const preferredStream = fakeStream(preferredTrack);
+  const published = [];
+  const restored = [];
+  let request = 0;
+  const mediaDevices = {
+    addEventListener() {},
+    removeEventListener() {},
+    async enumerateDevices() {
+      return [{ kind: "audioinput", deviceId: "preferred-device" }];
+    },
+    async getUserMedia() {
+      request += 1;
+      if (request === 1)
+        throw Object.assign(new Error("Missing"), { name: "NotFoundError" });
+      return request === 2 ? fallbackStream : preferredStream;
+    },
+  };
+  const manager = new MediaCaptureManager({
+    mediaDevices,
+    getSettings: () => ({ micDeviceId: "preferred-device" }),
+    onSource: (entry) => published.push(entry.track.id),
+    onSourceEnded() {},
+    onMicrophoneRestored: (details) => restored.push(details.deviceId),
+  });
+
+  const initial = await manager.startMicrophone();
+  assert.equal(initial.track, fallbackTrack);
+  assert.equal(fallbackTrack.readyState, "live");
+
+  const replacement = await manager.restorePreferredMicrophone();
+  assert.equal(replacement.track, preferredTrack);
+  assert.deepEqual(published, ["fallback", "preferred"]);
+  assert.deepEqual(restored, ["preferred-device"]);
+  assert.equal(fallbackTrack.readyState, "ended");
+  assert.equal(manager.sources.get("audio").track, preferredTrack);
+});
+
+test("device recovery does not guess when the preferred microphone is absent", async () => {
+  const fallbackTrack = fakeTrack("fallback");
+  let requests = 0;
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      addEventListener() {},
+      removeEventListener() {},
+      async enumerateDevices() {
+        return [{ kind: "audioinput", deviceId: "another-device" }];
+      },
+      async getUserMedia() {
+        requests += 1;
+        if (requests === 1)
+          throw Object.assign(new Error("Missing"), { name: "NotFoundError" });
+        return fakeStream(fallbackTrack);
+      },
+    },
+    getSettings: () => ({ micDeviceId: "preferred-device" }),
+    onSource() {},
+    onSourceEnded() {},
+  });
+
+  await manager.startMicrophone();
+  assert.equal(await manager.restorePreferredMicrophone(), false);
+  assert.equal(requests, 2);
+  assert.equal(fallbackTrack.readyState, "live");
+});
+
+test("device reconciliation fails over even when an unplugged track stays live", async () => {
+  const selectedTrack = fakeTrack("selected");
+  const fallbackTrack = fakeTrack("fallback");
+  const fallbackEvents = [];
+  let request = 0;
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      addEventListener() {},
+      removeEventListener() {},
+      async enumerateDevices() {
+        return [{ kind: "audioinput", deviceId: "another-device" }];
+      },
+      async getUserMedia() {
+        request += 1;
+        return request === 1
+          ? fakeStream(selectedTrack)
+          : fakeStream(fallbackTrack);
+      },
+    },
+    getSettings: () => ({ micDeviceId: "preferred-device" }),
+    onSource() {},
+    onSourceEnded() {},
+    onMicrophoneFallback: (details) =>
+      fallbackEvents.push(details.failedDeviceId),
+  });
+
+  await manager.startMicrophone();
+  assert.equal(selectedTrack.readyState, "live");
+  const replacement = await manager.reconcileMicrophoneDevices();
+
+  assert.equal(replacement.track, fallbackTrack);
+  assert.equal(selectedTrack.readyState, "ended");
+  assert.equal(fallbackTrack.readyState, "live");
+  assert.deepEqual(fallbackEvents, ["preferred-device"]);
 });

@@ -115,59 +115,128 @@
             </button>
           </form>
 
-          <form
+          <section
             v-else-if="activeSection === 'attenuation'"
             class="space-y-6"
-            @submit.prevent="saveAttenuation"
           >
-            <h2 class="text-3xl font-light">Stream attenuation</h2>
+            <div>
+              <h2 class="text-3xl font-light">Speech priority</h2>
+              <p class="mt-2 max-w-2xl text-sm text-base-content/70">
+                Make conversations easier to hear by temporarily lowering shared
+                screen and system audio while someone speaks.
+              </p>
+            </div>
             <label
               class="flex items-center justify-between border-b border-base-300 py-4"
             >
-              <span
-                ><strong class="block"
-                  >Reduce shared streams during speech</strong
-                ><small>Applies to screen and system audio.</small></span
-              >
+              <span>
+                <strong class="block">Make voices easier to hear</strong>
+                <small>
+                  Shared audio returns to normal when the conversation stops.
+                </small>
+              </span>
               <input
                 v-model="form.attenuation.enabled"
                 type="checkbox"
                 class="toggle toggle-primary"
               />
             </label>
-            <label class="grid min-w-0 gap-2"
-              ><span>Reduction: {{ form.attenuation.reductionPercent }}%</span
-              ><input
+            <fieldset
+              v-if="form.attenuation.enabled"
+              class="grid min-w-0 gap-3"
+            >
+              <legend class="font-semibold">Shared audio during speech</legend>
+              <p class="text-sm text-base-content/70">
+                It will play at
+                <strong>{{ sharedAudioDuringSpeech }}% volume</strong>.
+              </p>
+              <input
                 v-model.number="form.attenuation.reductionPercent"
                 type="range"
                 min="0"
                 max="100"
                 class="range range-primary"
-            /></label>
-            <div class="grid gap-4 sm:grid-cols-2">
-              <label class="grid min-w-0 gap-2"
-                ><span>Attack (ms)</span
-                ><input
-                  v-model.number="form.attenuation.attackMs"
-                  class="input input-bordered w-full"
-                  type="number"
-                  min="20"
-                  max="2000"
-              /></label>
-              <label class="grid min-w-0 gap-2"
-                ><span>Release (ms)</span
-                ><input
-                  v-model.number="form.attenuation.releaseMs"
-                  class="input input-bordered w-full"
-                  type="number"
-                  min="50"
-                  max="5000"
-              /></label>
+                aria-label="Shared audio volume while someone speaks"
+                :aria-valuetext="`${sharedAudioDuringSpeech}% volume`"
+              />
+              <div
+                class="flex justify-between text-xs text-base-content/60"
+                aria-hidden="true"
+              >
+                <span>Full volume</span>
+                <span>Muted</span>
+              </div>
+            </fieldset>
+            <fieldset
+              v-if="form.attenuation.enabled"
+              class="grid min-w-0 gap-3"
+            >
+              <legend class="font-semibold">How should volume change?</legend>
+              <p class="text-sm text-base-content/70">
+                Choose whether shared audio moves out of the way quickly or
+                changes more gradually.
+              </p>
+              <div class="grid gap-2 sm:grid-cols-3">
+                <label
+                  v-for="preset in attenuationTimingPresets"
+                  :key="preset.id"
+                  :class="[
+                    'block min-h-24 cursor-pointer border p-4 transition-colors',
+                    attenuationTimingPreset === preset.id
+                      ? 'border-primary bg-primary text-primary-content'
+                      : 'border-base-300 hover:border-base-content/40',
+                  ]"
+                >
+                  <input
+                    class="sr-only"
+                    type="radio"
+                    name="attenuation-timing"
+                    :value="preset.id"
+                    :checked="attenuationTimingPreset === preset.id"
+                    @change="selectAttenuationTiming(preset)"
+                  />
+                  <strong class="block">{{ preset.label }}</strong>
+                  <small class="mt-1 block">{{ preset.description }}</small>
+                </label>
+              </div>
+              <p
+                v-if="attenuationTimingPreset === 'custom'"
+                class="text-sm text-base-content/70"
+              >
+                This room uses older custom timing. Choose a speed above to
+                replace it with a simpler preset.
+              </p>
+            </fieldset>
+            <div
+              class="flex min-h-11 items-center gap-2 border-t border-base-300 pt-4 text-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <Icon
+                :name="
+                  attenuationSaveState === 'error'
+                    ? 'lucide:circle-alert'
+                    : attenuationSaveState === 'saved'
+                      ? 'lucide:check'
+                      : 'lucide:loader-circle'
+                "
+                :class="[
+                  'size-4',
+                  attenuationSaveState === 'saving' ? 'animate-spin' : '',
+                  attenuationSaveState === 'error' ? 'text-error' : '',
+                ]"
+              />
+              <span>{{ attenuationSaveLabel }}</span>
+              <button
+                v-if="attenuationSaveState === 'error'"
+                type="button"
+                class="btn btn-ghost btn-sm"
+                @click="queueAttenuationSave(0)"
+              >
+                Retry
+              </button>
             </div>
-            <button class="btn btn-primary" :disabled="saving">
-              Save attenuation
-            </button>
-          </form>
+          </section>
 
           <section v-else-if="activeSection === 'roles'" class="space-y-6">
             <div class="flex items-end justify-between gap-4">
@@ -492,7 +561,11 @@ const roleForm = ref(null);
 const savingRole = ref(false);
 const auditEvents = ref([]);
 const auditLoading = ref(false);
+const attenuationSaveState = ref("saved");
 const roleFormTitleId = "room-role-form-title";
+let attenuationHydrating = false;
+let attenuationSaveTimer = null;
+let attenuationSaveQueue = Promise.resolve();
 const form = reactive({
   name: "",
   desc: "",
@@ -507,7 +580,7 @@ const form = reactive({
 const sections = [
   { id: "branding", label: "Identity", icon: "lucide:image" },
   { id: "roles", label: "Roles", icon: "lucide:shield-check" },
-  { id: "attenuation", label: "Attenuation", icon: "lucide:audio-lines" },
+  { id: "attenuation", label: "Speech priority", icon: "lucide:audio-lines" },
   { id: "soundboard", label: "Soundboard", icon: "lucide:music-2" },
   { id: "audit", label: "Audit log", icon: "lucide:scroll-text" },
 ];
@@ -518,6 +591,46 @@ const canViewAudit = computed(
       ["room.manage_invites", "room.manage_members"].includes(permission),
     ),
 );
+const attenuationTimingPresets = [
+  {
+    id: "fast",
+    label: "Fast",
+    description: "Lowers and restores shared audio right away.",
+    attackMs: 60,
+    releaseMs: 300,
+  },
+  {
+    id: "balanced",
+    label: "Balanced",
+    description: "Quickly makes room for voices, then returns smoothly.",
+    attackMs: 120,
+    releaseMs: 650,
+  },
+  {
+    id: "smooth",
+    label: "Smooth",
+    description: "Uses gentle volume changes for music and films.",
+    attackMs: 250,
+    releaseMs: 1200,
+  },
+];
+const sharedAudioDuringSpeech = computed(() =>
+  Math.max(0, 100 - Number(form.attenuation.reductionPercent || 0)),
+);
+const attenuationTimingPreset = computed(
+  () =>
+    attenuationTimingPresets.find(
+      (preset) =>
+        preset.attackMs === Number(form.attenuation.attackMs) &&
+        preset.releaseMs === Number(form.attenuation.releaseMs),
+    )?.id || "custom",
+);
+const attenuationSaveLabel = computed(() => {
+  if (attenuationSaveState.value === "saving") return "Saving changes…";
+  if (attenuationSaveState.value === "error")
+    return "Changes couldn’t be saved.";
+  return "Changes save automatically.";
+});
 const permissionOptions = [
   [
     "room.update_identity",
@@ -587,6 +700,11 @@ function hasPermission(permission) {
   return room.value?.isOwner || room.value?.permissions?.includes(permission);
 }
 
+function selectAttenuationTiming(preset) {
+  form.attenuation.attackMs = preset.attackMs;
+  form.attenuation.releaseMs = preset.releaseMs;
+}
+
 async function api(path, options = {}) {
   const response = await fetch(`${config.public.apiPath}${path}`, {
     ...options,
@@ -601,12 +719,15 @@ async function load() {
   loading.value = true;
   try {
     room.value = await roomsStore.getRoomDetails(roomId.value);
+    attenuationHydrating = true;
     Object.assign(form, {
       name: room.value.name,
       desc: room.value.desc,
       accent: room.value.accent,
       attenuation: { ...form.attenuation, ...room.value.attenuation },
     });
+    await nextTick();
+    attenuationHydrating = false;
     const roleData = await api(
       `/room/roles?roomId=${encodeURIComponent(roomId.value)}`,
     );
@@ -619,6 +740,7 @@ async function load() {
       assignmentError: "",
     }));
   } catch (cause) {
+    attenuationHydrating = false;
     error.value = cause.message;
   } finally {
     loading.value = false;
@@ -652,6 +774,13 @@ function formatAuditDate(value) {
 watch(activeSection, (section) => {
   if (section === "audit") loadAudit();
 });
+watch(
+  () => ({ ...form.attenuation }),
+  () => {
+    if (!attenuationHydrating && !loading.value) queueAttenuationSave();
+  },
+  { deep: true },
+);
 
 async function saveBranding() {
   saving.value = true;
@@ -686,16 +815,26 @@ async function saveAccent(accent) {
     savingAccent.value = false;
   }
 }
-async function saveAttenuation() {
-  saving.value = true;
-  try {
-    await roomsStore.updateRoom(roomId.value, {
-      attenuation: form.attenuation,
-    });
-    await load();
-  } finally {
-    saving.value = false;
-  }
+function queueAttenuationSave(delay = 400) {
+  clearTimeout(attenuationSaveTimer);
+  attenuationSaveState.value = "saving";
+  attenuationSaveTimer = setTimeout(() => {
+    const attenuation = { ...form.attenuation };
+    attenuationSaveQueue = attenuationSaveQueue
+      .catch(() => {})
+      .then(async () => {
+        try {
+          room.value = await roomsStore.updateRoom(roomId.value, {
+            attenuation,
+          });
+          if (JSON.stringify(attenuation) === JSON.stringify(form.attenuation))
+            attenuationSaveState.value = "saved";
+        } catch (cause) {
+          attenuationSaveState.value = "error";
+          error.value = cause.message;
+        }
+      });
+  }, delay);
 }
 function startRole() {
   roleForm.value = { name: "", color: "cyan", position: 200, permissions: [] };
@@ -809,4 +948,5 @@ async function deleteRole() {
   }
 }
 onMounted(load);
+onBeforeUnmount(() => clearTimeout(attenuationSaveTimer));
 </script>

@@ -25,8 +25,10 @@ digital screen-audio track.
 
 ## Viewer-controlled receiving
 
-Remote screen video and its paired audio begin paused. **Start screen share**
-resumes both sources for that viewer; **Stop** pauses both again.
+Remote screen video begins paused until the viewer selects **Start screen
+share**. Shared audio begins playing immediately so audio-only system shares do
+not wait for a video action that does not exist. After a paired screen has been
+started, **Stop** pauses both its video and audio.
 
 - On the SFU route, dSpeak pauses or resumes the viewer's mediasoup consumers.
 - On Direct and Mesh routes, the viewer asks the sender to deactivate or
@@ -34,3 +36,12 @@ resumes both sources for that viewer; **Stop** pauses both again.
 
 Merely disabling the rendered video element or track is insufficient because it
 would continue consuming network bandwidth.
+
+## Stream attenuation
+
+Both paired screen audio and audio-only system sharing use the viewer's stream
+attenuation setting. While any room participant speaks, the remote playback
+gain follows the room reduction, attack, and release values unless the viewer
+has enabled or disabled attenuation with a personal override. Changes to the
+room policy, personal override, and speaking state apply to active shares
+without requiring a rejoin.

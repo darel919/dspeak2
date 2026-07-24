@@ -36,7 +36,7 @@ class FakeAudioContext {
   }
 }
 
-function createRegistry() {
+function createRegistry(overrides = {}) {
   return new RemoteMediaRegistry({
     audioFeeds: { value: new Map() },
     videoFeeds: { value: new Map() },
@@ -44,7 +44,9 @@ function createRegistry() {
     getOutputDevice: () => "",
     isDeafened: () => false,
     isBroadcastMode: () => false,
+    isAnyoneSpeaking: () => false,
     onSpeaking: () => {},
+    ...overrides,
   });
 }
 
@@ -162,6 +164,37 @@ test("participant gain accepts a 200 percent target", () => {
   };
   registry.applyTrackGain(graph, track, false, 2);
   assert.deepEqual(values, [2]);
+});
+
+test("system audio respects stream attenuation while anyone speaks", () => {
+  const registry = createRegistry({
+    getAttenuation: () => ({
+      enabled: true,
+      reductionPercent: 65,
+      attackMs: 120,
+      releaseMs: 650,
+    }),
+    isAnyoneSpeaking: () => true,
+  });
+
+  assert.equal(registry.attenuatedVolume("screen-audio", 1), 0.35);
+  assert.ok(
+    Math.abs(registry.attenuatedVolume("system-audio", 0.8) - 0.28) <
+      Number.EPSILON,
+  );
+  assert.equal(registry.attenuatedVolume("audio", 1), 1);
+});
+
+test("disabled stream attenuation preserves system audio volume", () => {
+  const registry = createRegistry({
+    getAttenuation: () => ({
+      enabled: false,
+      reductionPercent: 65,
+    }),
+    isAnyoneSpeaking: () => true,
+  });
+
+  assert.equal(registry.attenuatedVolume("screen-audio", 1), 1);
 });
 
 test("remote playback is unlocked before delayed tracks arrive", async () => {

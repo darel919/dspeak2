@@ -1,3 +1,7 @@
+import { byteTimeDomainLevelDb } from "./microphone-gate.js";
+
+const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -48;
+
 export function replaceMediaStreamTrack(stream, track) {
   if (!stream.getTracks().includes(track)) stream.addTrack(track);
   for (const currentTrack of stream.getTracks()) {
@@ -14,6 +18,7 @@ export class RemoteMediaRegistry {
     getOutputDevice,
     isDeafened,
     isBroadcastMode,
+    isAnyoneSpeaking,
     onSpeaking,
     getAttenuation,
     onVideoReceivingChange,
@@ -25,6 +30,7 @@ export class RemoteMediaRegistry {
     this.getOutputDevice = getOutputDevice;
     this.isDeafened = isDeafened;
     this.isBroadcastMode = isBroadcastMode;
+    this.isAnyoneSpeaking = isAnyoneSpeaking;
     this.onSpeaking = onSpeaking;
     this.getAttenuation = getAttenuation;
     this.onVideoReceivingChange = onVideoReceivingChange;
@@ -232,7 +238,8 @@ export class RemoteMediaRegistry {
   }
 
   attenuatedVolume(source, baseVolume) {
-    if (!this.speakingUsers.size) return baseVolume;
+    if (!this.speakingUsers.size && !this.isAnyoneSpeaking?.())
+      return baseVolume;
     if (!["screen-audio", "system-audio"].includes(source)) return baseVolume;
     const attenuation = this.getAttenuation?.() || { enabled: false };
     if (!attenuation.enabled) return baseVolume;
@@ -375,11 +382,8 @@ export class RemoteMediaRegistry {
     this.voiceDetectionTimer = setInterval(() => {
       for (const detector of this.voiceDetectors.values()) {
         detector.analyser.getByteTimeDomainData(detector.samples);
-        const energy = Math.sqrt(
-          detector.samples.reduce((sum, value) => sum + (value - 128) ** 2, 0) /
-            detector.samples.length,
-        );
-        if (energy > 10) {
+        const levelDb = byteTimeDomainLevelDb(detector.samples);
+        if (levelDb >= REMOTE_VOICE_ACTIVITY_THRESHOLD_DB) {
           detector.quietSamples = 0;
           if (!detector.speaking) {
             detector.speaking = true;

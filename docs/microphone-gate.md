@@ -10,9 +10,11 @@ screen share, shared audio, soundboards, and remote playback remain independent.
   This is the default when no preference has been saved. The estimator uses the
   quietest portion of a rolling five-second input window, so it can bootstrap
   from raw room noise and is not dependent on browser echo cancellation, noise
-  suppression, or automatic gain control. While the gate is open, speech freezes
-  upward adjustment. A continuously open signal can establish the initial floor
-  only after remaining nearly level for three seconds.
+  suppression, or automatic gain control. The opening level stays 16 dB above
+  the estimated floor, bounded between -56 dBFS and -28 dBFS, so moderate bumps
+  in room noise remain closed. While the gate is open, speech freezes upward
+  adjustment. A continuously open signal can establish the initial floor only
+  after remaining nearly level for three seconds.
 - **Manual:** Uses a user-selected threshold from -60 dBFS to -20 dBFS.
 - **Bypassed:** HD audio channels always bypass the gate. The saved setting is
   retained and applies again when the user joins a standard audio channel.
@@ -42,9 +44,9 @@ The preview does not interrupt an active call. It restarts after an input-device
 or capture-processing change and releases its track and audio graph when the
 user leaves the settings section. A denied or unavailable microphone produces
 an inline error with a retry action. If a saved microphone disappears or fails,
-dSpeak retries once with the browser system default. A successful fallback
-clears the stale saved device selection and updates the selector. Device
-connection changes refresh the list automatically.
+dSpeak uses the browser system default without deleting the user's preference.
+The unavailable preference remains visible in the selector. Device connection
+changes refresh the list automatically.
 
 ## Active calls
 
@@ -57,5 +59,10 @@ reopen transmission without reacquiring the device.
   peer.
 
 Remote receiving preferences do not change when the local gate opens or closes.
-If an active microphone track ends unexpectedly, dSpeak clears the selected
-device and attempts to restore capture once with the system default.
+If an active microphone track ends unexpectedly, dSpeak attempts to restore
+capture with the system default while retaining the preferred device ID. While
+fallback capture is active, debounced media-device changes check whether the
+exact preferred input has returned. dSpeak acquires and publishes the returning
+microphone before stopping fallback capture, preserving the call, mute state,
+processing preferences, and media topology. Permission failures are never
+automatically retried, and dSpeak does not guess device identity from labels.

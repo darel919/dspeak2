@@ -132,10 +132,15 @@ A media-policy update persists a new revision, emits `channel_policy_updated`,
 and reapplies sender limits without replacing tracks. Reconnecting clients
 receive the latest policy in the channel response.
 
-The remote-media registry applies attenuation only to `screen-audio` and
-`system-audio`. Speech changes shared-stream volume over the configured attack
-and release periods. Cleanup follows the media entry that owns the playback
-resource.
+The room administration UI presents attenuation as **Speech priority**. Admins
+choose how loud shared audio remains while someone speaks and select Fast,
+Balanced, or Smooth volume changes. The saved room contract retains
+`reductionPercent`, `attackMs`, and `releaseMs` for backward compatibility.
+Changes save automatically; rapid slider changes are debounced and room updates
+are serialized so an older request cannot overwrite a newer choice.
+
+The remote-media registry applies the policy only to `screen-audio` and
+`system-audio`. Cleanup follows the media entry that owns the playback resource.
 
 ## Soundboards
 

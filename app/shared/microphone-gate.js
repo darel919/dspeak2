@@ -22,8 +22,18 @@ export function microphoneLevelDb(samples) {
   return rms > 0 ? Math.max(-100, 20 * Math.log10(rms)) : -100;
 }
 
+export function byteTimeDomainLevelDb(samples) {
+  let sum = 0;
+  for (const sample of samples) {
+    const normalized = (sample - 128) / 128;
+    sum += normalized * normalized;
+  }
+  const rms = Math.sqrt(sum / Math.max(1, samples.length));
+  return rms > 0 ? Math.max(-100, 20 * Math.log10(rms)) : -100;
+}
+
 export function automaticGateThreshold(noiseFloorDb) {
-  return Math.min(-32, Math.max(-58, noiseFloorDb + 12));
+  return Math.min(-28, Math.max(-56, noiseFloorDb + 16));
 }
 
 export function createNoiseFloorEstimator() {

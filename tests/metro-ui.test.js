@@ -301,6 +301,21 @@ test("room administration uses explicit responsive form layouts", async () => {
   assert.match(source, /Keep important content\s+centered/);
 });
 
+test("room speech priority settings explain audio behavior without jargon", async () => {
+  const source = await readFile("app/pages/room/[roomId]/settings.vue", "utf8");
+  assert.match(source, /Speech priority/);
+  assert.match(source, /Shared audio during speech/);
+  assert.match(source, /How should volume change\?/);
+  assert.match(source, /Fast/);
+  assert.match(source, /Balanced/);
+  assert.match(source, /Smooth/);
+  assert.match(source, /Changes save automatically/);
+  assert.match(source, /queueAttenuationSave/);
+  assert.doesNotMatch(source, />Attack \(ms\)</);
+  assert.doesNotMatch(source, />Release \(ms\)</);
+  assert.doesNotMatch(source, /Save speech priority/);
+});
+
 test("room role assignments use explicit role controls instead of a native multi-select", async () => {
   const source = await readFile("app/pages/room/[roomId]/settings.vue", "utf8");
   assert.doesNotMatch(source, /<select[\s\S]*multiple/);

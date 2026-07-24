@@ -350,10 +350,23 @@ export class MediasoupClientSession {
     return true;
   }
 
-  addSource(entry) {
+  async addSource(entry) {
     this.sources.set(entry.source, entry);
+    const existing = this.producers.get(entry.source);
+    if (existing) {
+      const track = entry.track.clone();
+      try {
+        await existing.producer.replaceTrack({ track });
+      } catch (error) {
+        track.stop();
+        throw error;
+      }
+      existing.track.stop();
+      existing.track = track;
+      return existing.producer;
+    }
     if (this.sendTransport) return this.publish(entry);
-    return Promise.resolve(null);
+    return null;
   }
 
   async setSourceTransmission(source, enabled) {
@@ -523,7 +536,7 @@ export class MediasoupClientSession {
   shouldReceive(userId, source) {
     const key = `${String(userId)}:${String(source)}`;
     if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
-    return source !== "screen" && source !== "screen-audio";
+    return source !== "screen";
   }
 
   setRemoteReceiving(userId, source, receiving) {

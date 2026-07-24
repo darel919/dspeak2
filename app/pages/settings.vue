@@ -299,6 +299,12 @@
                   >
                     <option value="">System default</option>
                     <option
+                      v-if="selectedMicrophoneUnavailable"
+                      :value="selectedDeviceId"
+                    >
+                      Previously selected microphone (unavailable)
+                    </option>
+                    <option
                       v-for="d in devices"
                       :key="d.deviceId"
                       :value="d.deviceId"
@@ -1281,10 +1287,9 @@ async function startMicrophonePreview() {
   microphonePreviewLoading.value = true;
   microphonePreviewError.value = "";
   try {
-    const stream = await captureMicrophone({
+    const { stream } = await captureMicrophone({
       settings: settingsStore,
       stereo: hdAudioEnabled.value,
-      onFallback: () => resetMicrophoneSelection(),
     });
     if (generation !== microphonePreviewGeneration) {
       stream.getTracks().forEach((track) => track.stop());
@@ -1468,11 +1473,11 @@ const videoDevices = ref([]);
 const devicesLoading = ref(false);
 const devicesError = ref("");
 const selectedDeviceId = ref("");
-
-function resetMicrophoneSelection() {
-  selectedDeviceId.value = "";
-  settingsStore.setMicDeviceId(null);
-}
+const selectedMicrophoneUnavailable = computed(
+  () =>
+    Boolean(selectedDeviceId.value) &&
+    !devices.value.some((device) => device.deviceId === selectedDeviceId.value),
+);
 
 onMounted(async () => {
   selectedDeviceId.value = settingsStore.micDeviceId || "";
@@ -1518,15 +1523,6 @@ async function refreshDevices() {
     devices.value = list.filter((d) => d.kind === "audioinput");
     outputDevices.value = list.filter((d) => d.kind === "audiooutput");
     videoDevices.value = list.filter((d) => d.kind === "videoinput");
-    if (
-      selectedDeviceId.value &&
-      !devices.value.some(
-        (device) => device.deviceId === selectedDeviceId.value,
-      )
-    ) {
-      resetMicrophoneSelection();
-      restartMicrophonePreview();
-    }
   } catch (e) {
     devicesError.value = "Failed to enumerate devices.";
   } finally {

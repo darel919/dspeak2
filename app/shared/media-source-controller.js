@@ -13,7 +13,6 @@ export function createMediaSourceController({
   refreshPublicMaps,
   reportSfuFailure,
   send,
-  settingsStore,
   setMicrophoneTransmission,
   startLocalVoiceDetection,
   startSharedAudioMeter,
@@ -92,7 +91,6 @@ export function createMediaSourceController({
       connected.value &&
       !getIntentionalClose()
     ) {
-      settingsStore.setMicDeviceId(null);
       startAudioProduction().catch((captureError) => {
         error.value =
           captureError?.message || "Unable to restore microphone capture";
