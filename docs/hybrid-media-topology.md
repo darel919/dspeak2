@@ -104,6 +104,17 @@ keeps its public contract topology-neutral. Server-side room transitions live in
 epochs, consensus, timeouts, recovery, and stale-event rejection can be tested
 without a live media worker.
 
+Each authenticated SFU session owns at most one live send transport and one live
+receive transport. Repeated transport creation requests return the existing
+directional transport instead of allocating another mediasoup resource. A
+session can publish only one producer for each supported logical source:
+microphone audio, camera video, screen video, and screen audio. The server
+validates the source and RTP kind together before allocating the producer.
+
+Initial and reconnected browser state is published after the server sends its
+authenticated `connected` acknowledgement. The raw WebSocket open event alone
+does not prove that the server has finished installing the session.
+
 ## RTC diagnostics
 
 The `/rtc-debug` RTC Statistics dashboard reports

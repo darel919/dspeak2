@@ -296,6 +296,12 @@ curl --fail \
 The metrics token is required and remains server-side. Reading `/metrics`
 without it returns `401` and never starts the mediasoup worker.
 
+Startup environment validation, PocketBase migration, and mediasoup
+initialization are mandatory readiness gates. Failure in any gate stops
+background work, closes partially created SFU resources, and exits the process
+with a nonzero status so the deployment platform cannot retain a
+half-initialized listener.
+
 The health response reports `turn.selfHosted.configured` and
 `turn.selfHosted.available` independently from `turn.communityFallbacks`. The
 self-hosted availability check is a background IPv6 STUN Binding transaction

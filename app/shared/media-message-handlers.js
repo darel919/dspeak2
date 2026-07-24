@@ -14,9 +14,11 @@ export function setupMediaMessageHandlers({
   syncConnectedUsers,
   voiceStore,
   ensureP2p,
+  onServerConnected,
 }) {
   registerHandler("connected", (data) => {
     setLocalPeerId(String(data.peerId));
+    onServerConnected?.();
   });
   registerHandler("heartbeat-ack", (data) => {
     acknowledgeHeartbeat(data);

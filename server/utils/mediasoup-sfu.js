@@ -10,6 +10,8 @@ import {
   buildConsumerOptions,
   buildWebRtcTransportOptions,
   calculateSfuClientOutgoingBitrate,
+  findTransportByDirection,
+  validateProducer,
 } from "./mediasoup-transport";
 import {
   createRoomTopology,
@@ -556,7 +558,9 @@ async function handleMessage(state, session, message) {
       const direction = String(data.type || "");
       if (direction !== "send" && direction !== "recv")
         throw new Error("Transport direction must be send or recv");
-      const transport = await createTransport(state, session, direction);
+      const transport =
+        findTransportByDirection(session.transports, direction) ||
+        (await createTransport(state, session, direction));
       send(
         session.peer,
         "transport-params",
@@ -592,13 +596,15 @@ async function handleMessage(state, session, message) {
       const transport = session.transports.get(data.transportId);
       if (!transport) throw new Error("Transport not found");
       assertTransportDirection(transport, "send", "Producing");
+      const source = data.appData?.source || data.kind;
+      validateProducer(session.producers, data.kind, source);
 
       const producer = await transport.produce({
         kind: data.kind,
         rtpParameters: data.rtpParameters,
         appData: {
           userId: session.userId,
-          source: data.appData?.source || data.kind,
+          source,
         },
       });
       session.producers.set(producer.id, producer);

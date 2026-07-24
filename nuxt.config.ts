@@ -23,7 +23,7 @@ function copyMediasoupWorker(nitro) {
 export default defineNuxtConfig({
   ssr: true,
   compatibilityDate: "2025-07-15",
-  devtools: { enabled: false },
+  devtools: { enabled: !isProduction },
   app: {
     head: {
       htmlAttrs: {
@@ -40,11 +40,11 @@ export default defineNuxtConfig({
   modules: ["@pinia/nuxt", "@vite-pwa/nuxt", "@nuxt/icon", "nuxt-security"],
 
   security: {
-    strict: false,
+    strict: true,
     headers: {
-      crossOriginResourcePolicy: false,
-      crossOriginOpenerPolicy: false,
-      crossOriginEmbedderPolicy: false,
+      crossOriginResourcePolicy: "same-origin",
+      crossOriginOpenerPolicy: "same-origin",
+      crossOriginEmbedderPolicy: "credentialless",
       contentSecurityPolicy: isProduction
         ? {
             "default-src": ["'self'"],
@@ -78,6 +78,7 @@ export default defineNuxtConfig({
         ? {
             maxAge: 31536000,
             includeSubdomains: true,
+            preload: true,
           }
         : false,
       xContentTypeOptions: "nosniff",
@@ -96,7 +97,11 @@ export default defineNuxtConfig({
         "screen-wake-lock": ["self"],
       },
     },
-    requestSizeLimiter: false,
+    requestSizeLimiter: {
+      maxRequestSizeInBytes: 2_000_000,
+      maxUploadFileRequestInBytes: 8_000_000,
+      throwError: true,
+    },
     rateLimiter: false,
     xssValidator: false,
     corsHandler: false,

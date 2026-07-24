@@ -270,8 +270,6 @@ export function useHybridMediaSession() {
         clearTimeout(timeout);
         connected.value = true;
         reconnectAttempt = 0;
-        sourceController.sendSourceState();
-        sendParticipantVoiceState();
         startKeepalive();
         resolve();
       };
@@ -411,6 +409,10 @@ export function useHybridMediaSession() {
       queueTopology,
       registerHandler: (type, handler) => messageHandlers.set(type, handler),
       remoteProducersCount,
+      onServerConnected: () => {
+        sourceController.sendSourceState();
+        sendParticipantVoiceState();
+      },
       setHeartbeatAck: (sequence, acknowledgedAt) => {
         lastHeartbeatAckSequence = sequence;
         lastHeartbeatAckAt = acknowledgedAt;
