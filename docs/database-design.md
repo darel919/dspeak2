@@ -21,7 +21,8 @@ initializer supports both an existing deployment and a new PocketBase instance:
 Existing fields and indexes are merged by name. Field IDs are retained when a
 field is updated so PocketBase data remains attached to the same schema field.
 PocketBase-owned system fields retain their complete server-provided definitions,
-and multi-value relation fields are not assigned SQL indexes.
+and server-managed indexes are left out of collection updates unless a migration
+adds an index. Multi-value relation fields are not assigned SQL indexes.
 Startup fails if authentication, schema creation, repair, or data backfill
 fails. The application never continues against a known partial schema.
 

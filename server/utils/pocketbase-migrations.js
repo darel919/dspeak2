@@ -59,6 +59,16 @@ function mergeIndexes(current = [], additions = []) {
   return [...new Set([...current, ...additions])];
 }
 
+export function buildCollectionUpdate(current, definition) {
+  const update = {
+    fields: mergeCollectionFields(current.fields, definition.fields),
+  };
+  if (definition.indexes?.length) {
+    update.indexes = mergeIndexes(current.indexes, definition.indexes);
+  }
+  return update;
+}
+
 async function findCollection(pb, name) {
   try {
     return await pb.collections.getOne(name);
@@ -71,10 +81,10 @@ async function findCollection(pb, name) {
 async function upsertCollection(pb, definition) {
   const current = await findCollection(pb, definition.name);
   if (!current) return pb.collections.create(definition);
-  return pb.collections.update(current.id, {
-    fields: mergeCollectionFields(current.fields, definition.fields),
-    indexes: mergeIndexes(current.indexes, definition.indexes),
-  });
+  return pb.collections.update(
+    current.id,
+    buildCollectionUpdate(current, definition),
+  );
 }
 
 async function ensureMigrationCollection(pb) {

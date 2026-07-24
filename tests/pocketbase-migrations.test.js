@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mergeCollectionFields } from "../server/utils/pocketbase-migrations.js";
+import {
+  buildCollectionUpdate,
+  mergeCollectionFields,
+} from "../server/utils/pocketbase-migrations.js";
 import { readFileSync } from "node:fs";
 
 test("PocketBase migration field merging is idempotent and preserves IDs", () => {
@@ -34,6 +37,34 @@ test("PocketBase migration field merging preserves system field definitions", ()
     [{ name: "username", type: "text", system: false, max: 120 }],
   );
   assert.deepEqual(merged, [username]);
+});
+
+test("PocketBase collection updates omit unchanged server-managed indexes", () => {
+  const current = {
+    fields: [{ id: "name", name: "name", type: "text" }],
+    indexes: ["CREATE UNIQUE INDEX system_idx ON users (username)"],
+  };
+  const update = buildCollectionUpdate(current, {
+    fields: [{ name: "online", type: "bool" }],
+    indexes: [],
+  });
+  assert.equal("indexes" in update, false);
+  assert.equal(update.fields.at(-1).name, "online");
+});
+
+test("PocketBase collection updates merge indexes when adding an index", () => {
+  const current = {
+    fields: [],
+    indexes: ["CREATE INDEX existing_idx ON example (created)"],
+  };
+  const update = buildCollectionUpdate(current, {
+    fields: [],
+    indexes: ["CREATE INDEX added_idx ON example (updated)"],
+  });
+  assert.deepEqual(update.indexes, [
+    "CREATE INDEX existing_idx ON example (created)",
+    "CREATE INDEX added_idx ON example (updated)",
+  ]);
 });
 
 test("PocketBase migrations enforce case-insensitive unique user handles", () => {
