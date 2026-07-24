@@ -135,13 +135,18 @@
             :key="channel.id"
             class="metro-transition group"
             @contextmenu.prevent.stop="openChannelMenu(channel, $event)"
-            :class="{
-              'bg-primary text-primary-content':
-                selectedChannelId === channel.id,
-              'bg-success/20 border border-success/50':
+            :class="[
+              selectedChannelId === channel.id &&
+              !(
                 voiceStore.currentChannelId === channel.id &&
-                voiceStore.connected,
-            }"
+                voiceStore.connected
+              )
+                ? 'bg-primary text-primary-content'
+                : '',
+              voiceStore.currentChannelId === channel.id && voiceStore.connected
+                ? 'border border-success/50 bg-success/20 text-base-content'
+                : '',
+            ]"
           >
             <!-- Row (clickable) -->
             <div
@@ -230,7 +235,7 @@
                         :class="
                           u.speaking
                             ? 'font-medium text-base-content'
-                            : 'text-base-content/45'
+                            : 'text-base-content/70'
                         "
                       >
                         {{ getUserName(u.id || u) }}

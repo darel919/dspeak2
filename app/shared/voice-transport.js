@@ -112,12 +112,16 @@ export function getRtcSignalMetrics(transports = []) {
       rttMs: null,
       jitterMs: null,
       loss: null,
-      score: 1,
+      score: 0,
       label: "Connecting",
     };
   }
 
-  const finiteValues = (values) => values.map(Number).filter(Number.isFinite);
+  const finiteValues = (values) =>
+    values
+      .filter((value) => value != null && value !== "")
+      .map(Number)
+      .filter(Number.isFinite);
   const rtts = finiteValues(
     connected.map(
       (transport) => transport?.candidatePair?.currentRoundTripTime,

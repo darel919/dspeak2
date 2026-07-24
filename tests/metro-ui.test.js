@@ -165,12 +165,12 @@ test("notification dropdown renders above navbar call controls", async () => {
   assert.match(notifications, /dropdown-content metro-pane z-50/);
 });
 
-test("voice controls resize the stage instead of covering participant tiles", async () => {
+test("voice controls remain visible in a compact floating dock", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
-  assert.match(source, /class="voice-controls-shell"/);
-  assert.match(source, /grid-template-rows: 0fr/);
-  assert.match(source, /\.voice-channel:hover \.voice-controls-shell/);
-  assert.doesNotMatch(source, /class="voice-controls absolute/);
+  assert.match(source, /class="voice-command-dock/);
+  assert.match(source, /class="voice-dock-button/);
+  assert.match(source, /aria-label="Leave voice channel"/);
+  assert.doesNotMatch(source, /voice-channel:hover \.voice-controls/);
 });
 
 test("participant volume controls render outside the scrolling participant strip", async () => {
@@ -188,7 +188,7 @@ test("voice channel indicators show participant avatars and media status", async
   const server = await readFile("server/utils/mediasoup-sfu.js", "utf8");
   assert.match(source, /getUserAvatar\(u\.id \|\| u\)/);
   assert.match(source, /u\.speaking[\s\S]*font-medium text-base-content/);
-  assert.match(source, /text-base-content\/45/);
+  assert.match(source, /text-base-content\/70/);
   assert.match(source, /v-if="u\.soundboardActivity"/);
   assert.match(source, /Playing \{\{ u\.soundboardActivity\.title \}\}/);
   assert.match(source, /lucide:headphone-off/);

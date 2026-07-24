@@ -76,6 +76,7 @@
 import { useVoiceStore } from "~/stores/voice";
 import { useChannelsStore } from "~/stores/channels";
 import { useRtcStatsStore } from "~/stores/rtc-stats";
+import { getActiveConnectionLabel } from "~/shared/connection-quality";
 
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
@@ -94,15 +95,24 @@ const participantLabel = computed(() => {
   return `${count} participant${count === 1 ? "" : "s"}`;
 });
 const healthLabel = computed(() =>
-  rtcStats.metrics.connected ? rtcStats.metrics.label : "Connecting",
+  getActiveConnectionLabel(
+    rtcStats.metrics.score,
+    voiceStore.sfuComposable?.mediaConnectionState,
+    rtcStats.metrics.connected,
+  ),
 );
-const healthBadge = computed(() =>
-  rtcStats.metrics.score >= 4
-    ? "badge-success"
-    : rtcStats.metrics.score >= 2
-      ? "badge-warning"
-      : "badge-error",
-);
+const healthBadge = computed(() => {
+  if (healthLabel.value === "Connection issue") return "badge-error";
+  if (
+    healthLabel.value === "Connecting" ||
+    healthLabel.value === "Reconnecting"
+  )
+    return "badge-warning";
+  if (!rtcStats.metrics.connected) return "badge-success";
+  if (rtcStats.metrics.score >= 4) return "badge-success";
+  if (rtcStats.metrics.score >= 2) return "badge-warning";
+  return "badge-error";
+});
 const routeLabel = computed(
   () =>
     ({
@@ -130,7 +140,7 @@ const averagePing = computed(() => {
 });
 
 function formatMs(value) {
-  return Number.isFinite(Number(value))
+  return value != null && Number.isFinite(Number(value))
     ? `${Math.round(Number(value))} ms`
     : "—";
 }

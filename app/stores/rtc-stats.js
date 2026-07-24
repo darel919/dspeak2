@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { useVoiceStore } from "./voice";
 import { getRtcSignalMetrics } from "../shared/voice-transport";
 import { calculateTransportBitrateBps } from "../shared/rtc-media-stats";
+import { normalizeConnectionMetricValue } from "../shared/connection-quality";
 
 const HISTORY_LIMIT = 60;
 
@@ -118,7 +119,7 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
 
   function appendHistory(target, value, timestamp) {
     target.push({
-      value: Number.isFinite(Number(value)) ? Number(value) : null,
+      value: normalizeConnectionMetricValue(value),
       timestamp,
     });
     if (target.length > HISTORY_LIMIT)
