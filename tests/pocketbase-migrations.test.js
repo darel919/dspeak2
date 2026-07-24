@@ -31,6 +31,49 @@ test("PocketBase migrations enforce case-insensitive unique user handles", () =>
   );
 });
 
+test("PocketBase migrations initialize and repair the complete database", () => {
+  const migrations = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    migrations,
+    /name: "20260724_foundation_v1"[\s\S]*run: migrateFoundation/,
+  );
+  for (const collection of [
+    "users",
+    "dspeak_rooms",
+    "dspeak_rooms_channels",
+    "dspeak_messages",
+    "dspeak_webpush",
+    "dspeak_webpush_global",
+    "dspeak_users_state",
+    "dspeak_room_roles",
+    "dspeak_room_memberships",
+    "dspeak_notifications",
+    "dspeak_notification_preferences",
+    "dspeak_room_notification_preferences",
+    "dspeak_user_nicknames",
+    "dspeak_room_soundboards",
+    "dspeak_push_subscriptions",
+    "dspeak_push_jobs",
+    "dspeak_sessions",
+    "dspeak_message_revisions",
+    "dspeak_room_invites",
+    "dspeak_room_audit_log",
+  ])
+    assert.match(
+      migrations,
+      new RegExp(`["']${collection}["']`),
+      `${collection} must be part of the managed schema`,
+    );
+  assert.match(
+    migrations,
+    /if \(completed && !missingCollections\.length\) continue/,
+  );
+  assert.match(migrations, /const operation = completed \? "Repairing with"/);
+});
+
 test("PocketBase migrations add soundboard timestamps used for stable sorting", () => {
   const source = readFileSync(
     new URL("../server/utils/pocketbase-migrations.js", import.meta.url),

@@ -19,6 +19,7 @@ import {
   collectOutboundAudioStats,
   collectVideoRtpStats,
 } from "~/shared/rtc-media-stats.js";
+import { hasUsableVoiceRoute } from "~/shared/voice-join-readiness.js";
 import { buildP2pVideoSenderOptions } from "~/shared/video-settings.js";
 import {
   buildVoiceProducerOptions,
@@ -111,6 +112,16 @@ export function useHybridMediaSession() {
   let reportedSfuFailureEpoch = null;
   let preparedTransition = null;
   const videoStatsSamples = new Map();
+  const joinReady = computed(() =>
+    hasUsableVoiceRoute({
+      activeProvider,
+      p2pReady: p2pMesh?.isMediaReady() === true,
+      sfuReady: sfu?.connectionState().ready === true,
+      signalingConnected: connected.value,
+      topologyMode: topologyState.value.mode,
+      transportReady: transportReady.value,
+    }),
+  );
 
   const registry = new RemoteMediaRegistry({
     audioFeeds: remoteAudioFeeds,
@@ -952,6 +963,7 @@ export function useHybridMediaSession() {
 
   return {
     connected: readonly(connected),
+    joinReady,
     error: readonly(error),
     transportReady: readonly(transportReady),
     iceConnectedBoth: readonly(iceConnectedBoth),

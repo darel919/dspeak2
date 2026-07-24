@@ -247,6 +247,7 @@ export class NativeP2pMesh {
     this.failureReportedKey = null;
     this.healthCheckRunning = false;
     this.healthRunToken = 0;
+    this.senderOperations = new WeakMap();
   }
 
   applyTopology({ mode, epoch, peers, localPeerId }) {
@@ -624,11 +625,23 @@ export class NativeP2pMesh {
 
   async setSenderActive(sender, active) {
     if (!sender?.getParameters || !sender?.setParameters) return;
-    const parameters = sender.getParameters();
-    if (!parameters.encodings?.length) parameters.encodings = [{}];
-    for (const encoding of parameters.encodings)
-      encoding.active = Boolean(active);
-    await sender.setParameters(parameters);
+    return this.updateSender(sender, async () => {
+      const parameters = sender.getParameters();
+      if (!parameters.encodings?.length) parameters.encodings = [{}];
+      for (const encoding of parameters.encodings)
+        encoding.active = Boolean(active);
+      await sender.setParameters(parameters);
+    });
+  }
+
+  updateSender(sender, operation) {
+    const previous = this.senderOperations.get(sender) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    this.senderOperations.set(sender, current);
+    return current.finally(() => {
+      if (this.senderOperations.get(sender) === current)
+        this.senderOperations.delete(sender);
+    });
   }
 
   attachSource(state, source, entry) {
@@ -671,7 +684,9 @@ export class NativeP2pMesh {
   async configureSender(sender, source, track) {
     const options = this.getSenderOptions?.(source, track);
     if (!options) return false;
-    return applyRtpSenderSettings(sender, options);
+    return this.updateSender(sender, () =>
+      applyRtpSenderSettings(sender, options),
+    );
   }
 
   configureStateSenders(state) {

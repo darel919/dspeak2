@@ -89,6 +89,10 @@ authentication callback is `<DSPEAK_PUBLIC_ORIGIN>/auth`.
 
 Nitro applies pending PocketBase migrations during startup. A migration failure
 stops the application so it cannot run against a partially updated schema.
+The initializer can prepare a fresh PocketBase instance and repairs a missing
+required collection on a later startup. See the
+[database design](docs/database-design.md) for the collection model and
+initialization contract.
 
 ## Production build
 
