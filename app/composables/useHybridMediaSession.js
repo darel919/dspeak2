@@ -576,7 +576,6 @@ export function useHybridMediaSession() {
     producerFacade,
     refreshAudioSenderSettings,
     refreshMediaPolicy,
-    setMicrophoneTransmission,
     setSharedAudioVolume,
     setSystemAudioBitrate,
     startLocalVoiceDetection,
@@ -626,7 +625,7 @@ export function useHybridMediaSession() {
     };
     topologyWaiter?.();
     if (data.mode === activeProvider) {
-      updateActiveTopology(data);
+      await updateActiveTopology(data);
       return;
     }
     if (data.mode === "idle") {
@@ -658,8 +657,11 @@ export function useHybridMediaSession() {
         return;
       }
       mesh.applyTopology({ ...data, localPeerId });
-      for (const entry of localSources.values())
-        mesh.publishSource(entry.source, entry.track, entry.stream);
+      await Promise.all(
+        [...localSources.values()].map((entry) =>
+          mesh.publishSource(entry.source, entry.track, entry.stream),
+        ),
+      );
       transportReady.value = true;
       iceConnectedBoth.value = false;
       mediaConnectionState.value = "topology-probing";
@@ -677,11 +679,14 @@ export function useHybridMediaSession() {
     if (data.mode === "sfu") await activateSfu(data);
   }
 
-  function updateActiveTopology(data) {
+  async function updateActiveTopology(data) {
     if (data.mode === "p2p") {
       p2pMesh?.applyTopology({ ...data, localPeerId });
-      for (const entry of localSources.values())
-        p2pMesh?.publishSource(entry.source, entry.track, entry.stream);
+      await Promise.all(
+        [...localSources.values()].map((entry) =>
+          p2pMesh?.publishSource(entry.source, entry.track, entry.stream),
+        ),
+      );
     } else if (data.mode === "sfu") {
       p2pMesh?.closeAll();
       p2pMesh = null;
@@ -749,8 +754,11 @@ export function useHybridMediaSession() {
         const mesh = ensureP2p();
         if (!mesh) throw new Error("Native WebRTC is unavailable");
         mesh.applyTopology({ ...data, mode: "p2p", localPeerId });
-        for (const entry of localSources.values())
-          mesh.publishSource(entry.source, entry.track, entry.stream);
+        await Promise.all(
+          [...localSources.values()].map((entry) =>
+            mesh.publishSource(entry.source, entry.track, entry.stream),
+          ),
+        );
         await waitForRemoteTracks("p2p", data);
       } else if (data.target === "sfu") {
         destinationSfu = ensureSfu();
@@ -799,8 +807,11 @@ export function useHybridMediaSession() {
   async function activateP2p(data) {
     const mesh = ensureP2p();
     mesh.applyTopology({ ...data, localPeerId });
-    for (const entry of localSources.values())
-      mesh.publishSource(entry.source, entry.track, entry.stream);
+    await Promise.all(
+      [...localSources.values()].map((entry) =>
+        mesh.publishSource(entry.source, entry.track, entry.stream),
+      ),
+    );
     if (!matchesPreparedActivation(preparedTransition, data, "p2p"))
       await waitForRemoteTracks("p2p", data);
     handoff.bind("p2p");
@@ -920,7 +931,6 @@ export function useHybridMediaSession() {
     refreshPublicMaps,
     reportSfuFailure,
     send,
-    setMicrophoneTransmission,
     startLocalVoiceDetection,
     startSharedAudioMeter,
     stopLocalVoiceDetection,
@@ -929,6 +939,7 @@ export function useHybridMediaSession() {
     voiceStore,
   });
   const {
+    restartAudioProduction,
     sendParticipantVoiceState,
     startAudioProduction,
     startSystemAudioProduction,
@@ -1037,6 +1048,7 @@ export function useHybridMediaSession() {
     connect,
     disconnect,
     prepareAudioPlayback: () => registry.preparePlayback(),
+    restartAudioProduction,
     startAudioProduction,
     stopAudioProduction,
     startVideoProduction,

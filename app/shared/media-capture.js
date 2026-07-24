@@ -100,7 +100,40 @@ export class MediaCaptureManager {
     this.microphoneFallback = result.fallback;
     if (wasFallback && !result.fallback)
       await this.onMicrophoneRestored?.({ deviceId: settings.micDeviceId });
-    return this.register("audio", stream, stream.getAudioTracks()[0]);
+    const entry = this.register("audio", stream, stream.getAudioTracks()[0]);
+    try {
+      const published = await entry.publication;
+      return published?.track ? published : entry;
+    } catch (error) {
+      if (this.sources.get("audio") === entry) this.stop("audio");
+      throw error;
+    }
+  }
+
+  async restartMicrophone() {
+    const current = this.sources.get("audio");
+    if (!current) return this.startMicrophone();
+    const settings = this.getSettings();
+    const previousFallback = this.microphoneFallback;
+    let fallbackDetails = null;
+    const result = await captureMicrophone({
+      mediaDevices: this.mediaDevices,
+      settings,
+      stereo: this.getAudioStereo?.("audio"),
+      onFallback: (details) => {
+        fallbackDetails = details;
+      },
+    });
+    const replacement = await this.replaceMicrophoneEntry(
+      current,
+      result.stream,
+    );
+    this.microphoneFallback = result.fallback;
+    if (result.fallback)
+      await this.onMicrophoneFallback?.(fallbackDetails || {});
+    else if (previousFallback)
+      await this.onMicrophoneRestored?.({ deviceId: settings.micDeviceId });
+    return replacement;
   }
 
   startDeviceMonitoring() {
@@ -163,7 +196,7 @@ export class MediaCaptureManager {
           this.getAudioStereo?.("audio"),
         ),
       });
-      const replacement = this.replaceMicrophoneEntry(current, stream);
+      const replacement = await this.replaceMicrophoneEntry(current, stream);
       if (!replacement) return false;
       this.microphoneFallback = true;
       await this.onMicrophoneFallback?.({
@@ -219,14 +252,14 @@ export class MediaCaptureManager {
         this.getAudioStereo?.("audio"),
       ),
     });
-    const replacement = this.replaceMicrophoneEntry(current, stream);
+    const replacement = await this.replaceMicrophoneEntry(current, stream);
     if (!replacement) return false;
     this.microphoneFallback = false;
     await this.onMicrophoneRestored?.({ deviceId: preferredDeviceId });
     return replacement;
   }
 
-  replaceMicrophoneEntry(current, stream) {
+  async replaceMicrophoneEntry(current, stream) {
     const track = stream.getAudioTracks()[0];
     if (
       !track ||
@@ -238,6 +271,17 @@ export class MediaCaptureManager {
       return null;
     }
     const replacement = this.register("audio", stream, track);
+    try {
+      await replacement.publication;
+    } catch (error) {
+      if (
+        current.track.readyState === "live" &&
+        this.sources.get("audio") !== current
+      )
+        this.sources.set("audio", current);
+      stream.getTracks().forEach((candidate) => candidate.stop());
+      throw error;
+    }
     current.stream.getTracks().forEach((candidate) => candidate.stop());
     return replacement;
   }
@@ -254,11 +298,11 @@ export class MediaCaptureManager {
       { display: screen, deviceId: screen ? null : settings.cameraDeviceId },
     );
     const stream = screen
-      ? await navigator.mediaDevices.getDisplayMedia({
+      ? await this.mediaDevices.getDisplayMedia({
           video: constraints,
           audio: sharedAudioConstraints(),
         })
-      : await navigator.mediaDevices.getUserMedia({
+      : await this.mediaDevices.getUserMedia({
           video: constraints,
           audio: false,
         });
@@ -277,21 +321,32 @@ export class MediaCaptureManager {
       throw error;
     }
     if (screen) track.contentHint = "motion";
-    const entry = this.register(source, stream, track);
-    const screenAudio = screen ? stream.getAudioTracks()[0] : null;
-    if (screenAudio) {
-      screenAudio.contentHint = "music";
-      this.register("screen-audio", stream, screenAudio, {
-        ownerSource: "screen",
-      });
+    try {
+      const entry = this.register(source, stream, track);
+      const published = await entry.publication;
+      const publishedEntry = published?.track ? published : entry;
+      const screenAudio = screen ? stream.getAudioTracks()[0] : null;
+      if (screenAudio) {
+        screenAudio.contentHint = "music";
+        const audioEntry = this.register("screen-audio", stream, screenAudio, {
+          ownerSource: "screen",
+        });
+        await audioEntry.publication;
+      }
+      return publishedEntry;
+    } catch (error) {
+      if (this.sources.get(source)?.stream === stream) this.stop(source);
+      const audioEntry = this.sources.get("screen-audio");
+      if (audioEntry?.stream === stream) this.stop("screen-audio");
+      stream.getTracks().forEach((candidate) => candidate.stop());
+      throw error;
     }
-    return entry;
   }
 
   async startSystemAudio() {
     const existing = this.sources.get("screen-audio");
     if (existing) return existing;
-    const stream = await navigator.mediaDevices.getDisplayMedia({
+    const stream = await this.mediaDevices.getDisplayMedia({
       video: true,
       audio: sharedAudioConstraints(),
       systemAudio: "include",
@@ -306,9 +361,16 @@ export class MediaCaptureManager {
       );
     }
     track.contentHint = "music";
-    return this.register("screen-audio", stream, track, {
+    const entry = this.register("screen-audio", stream, track, {
       ownerSource: "system-audio",
     });
+    try {
+      const published = await entry.publication;
+      return published?.track ? published : entry;
+    } catch (error) {
+      if (this.sources.get("screen-audio") === entry) this.stop("screen-audio");
+      throw error;
+    }
   }
 
   register(source, stream, track, metadata = {}) {
@@ -325,7 +387,11 @@ export class MediaCaptureManager {
       },
       { once: true },
     );
-    this.onSource?.(entry);
+    try {
+      entry.publication = Promise.resolve(this.onSource?.(entry));
+    } catch (error) {
+      entry.publication = Promise.reject(error);
+    }
     return entry;
   }
 

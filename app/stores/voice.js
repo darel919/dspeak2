@@ -317,8 +317,6 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
   function restorePersistedVoiceState() {
     if (typeof window === "undefined") return;
     try {
@@ -337,28 +335,6 @@ export const useVoiceStore = defineStore("voice", () => {
     } catch (_) {
       /* localStorage may be unavailable */
     }
-  }
-
-  async function waitForJoinReady(session, isBroadcast, timeoutMs = 45000) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (sfuComposable.value !== session)
-        throw new Error("Voice connection was replaced");
-      if (session.error) throw new Error(session.error);
-
-      const remoteCount = session.remoteProducersCount ?? -1;
-      const roomUsers = session.lastInRoom ?? [];
-      const alone =
-        remoteCount === 0 && Array.isArray(roomUsers) && roomUsers.length === 1;
-      if (
-        alone ||
-        session.joinReady ||
-        (await session.areTransportsIceConnected?.(isBroadcast))
-      )
-        return;
-      await delay(100);
-    }
-    throw new Error("Call Failed: Connection timed out");
   }
 
   async function disposeFailedSession(session) {
@@ -459,14 +435,12 @@ export const useVoiceStore = defineStore("voice", () => {
           generation === joinGeneration && sfuComposable.value === session,
         isReady: () => session.joinReady,
       });
-      await delay(200);
-      await waitForJoinReady(session, settingsStore.broadcastMode);
       ensureCurrentJoin();
-      await session.ensureAudioElements?.();
 
       connected.value = true;
       connectedAt.value = Date.now();
       session.sendParticipantVoiceState?.();
+      await session.ensureAudioElements?.();
       playSystemSound("voice-join", settingsStore);
     } catch (err) {
       await disposeFailedSession(session);

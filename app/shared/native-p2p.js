@@ -247,6 +247,7 @@ export class NativeP2pMesh {
     this.healthCheckRunning = false;
     this.healthRunToken = 0;
     this.senderOperations = new WeakMap();
+    this.trackOperations = new WeakMap();
   }
 
   applyTopology({ mode, epoch, peers, localPeerId }) {
@@ -357,7 +358,9 @@ export class NativeP2pMesh {
       );
     }
     for (const [source, entry] of this.localSources)
-      this.attachSource(state, source, entry);
+      this.attachSource(state, source, entry).catch((error) =>
+        this.fail("source-attachment-failed", error),
+      );
     return state;
   }
 
@@ -572,10 +575,13 @@ export class NativeP2pMesh {
     );
   }
 
-  publishSource(source, track, stream) {
+  async publishSource(source, track, stream) {
     this.localSources.set(source, { track, stream });
-    for (const state of this.connections.values())
-      this.attachSource(state, source, { track, stream });
+    await Promise.all(
+      [...this.connections.values()].map((state) =>
+        this.attachSource(state, source, { track, stream }),
+      ),
+    );
   }
 
   async setSourceTransmission(source, enabled) {
@@ -642,23 +648,26 @@ export class NativeP2pMesh {
     });
   }
 
-  attachSource(state, source, entry) {
+  async attachSource(state, source, entry) {
     const existing = state.senders.get(source);
     if (existing) {
-      existing
-        .replaceTrack(entry.track)
-        .then(() => this.configureSender(existing, source, entry.track))
-        .then(() =>
-          this.setSenderReceiving(
+      try {
+        await this.updateTrack(existing, async () => {
+          await existing.replaceTrack(entry.track);
+          await this.configureSender(existing, source, entry.track);
+          await this.setSenderReceiving(
             state,
             source,
             (state.sourceReceiving.get(source) ?? true) &&
               (this.sourceTransmission?.get(source) ?? true),
-          ),
-        )
-        .catch((error) => this.fail("track-replacement-failed", error));
+          );
+        });
+      } catch (error) {
+        this.fail("track-replacement-failed", error);
+        throw error;
+      }
       this.signal(state.peerId, { sourceRestored: { source } });
-      return;
+      return existing;
     }
     const sender = state.pc.addTrack(
       entry.track,
@@ -666,17 +675,47 @@ export class NativeP2pMesh {
     );
     applyP2pVideoCodecPreferences(state.pc);
     state.senders.set(source, sender);
-    this.configureSender(sender, source, entry.track)
-      .then(() =>
-        this.setSenderReceiving(
-          state,
-          source,
-          (state.sourceReceiving.get(source) ?? true) &&
-            (this.sourceTransmission?.get(source) ?? true),
-        ),
-      )
-      .catch((error) => this.fail("sender-configuration-failed", error));
+    try {
+      await this.configureSender(sender, source, entry.track);
+      await this.setSenderReceiving(
+        state,
+        source,
+        (state.sourceReceiving.get(source) ?? true) &&
+          (this.sourceTransmission?.get(source) ?? true),
+      );
+    } catch (error) {
+      this.fail("sender-configuration-failed", error);
+      throw error;
+    }
     this.signal(state.peerId, { source: { trackId: entry.track.id, source } });
+    return sender;
+  }
+
+  updateTrack(sender, operation) {
+    const previous = this.trackOperations.get(sender) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    this.trackOperations.set(sender, current);
+    return current.finally(() => {
+      if (this.trackOperations.get(sender) === current)
+        this.trackOperations.delete(sender);
+    });
+  }
+
+  async unpublishSource(source) {
+    this.localSources.delete(source);
+    await Promise.all(
+      [...this.connections.values()].map(async (state) => {
+        const sender = state.senders.get(source);
+        if (!sender) return;
+        try {
+          await this.updateTrack(sender, () => sender.replaceTrack(null));
+        } catch (error) {
+          this.fail("track-removal-failed", error);
+          throw error;
+        }
+        this.signal(state.peerId, { sourceRemoved: { source } });
+      }),
+    );
   }
 
   async configureSender(sender, source, track) {
@@ -715,18 +754,6 @@ export class NativeP2pMesh {
           : Promise.resolve(false);
       }),
     );
-  }
-
-  unpublishSource(source) {
-    this.localSources.delete(source);
-    for (const state of this.connections.values()) {
-      const sender = state.senders.get(source);
-      if (!sender) continue;
-      sender
-        .replaceTrack(null)
-        .catch((error) => this.fail("track-removal-failed", error));
-      this.signal(state.peerId, { sourceRemoved: { source } });
-    }
   }
 
   startQualificationTimeout() {

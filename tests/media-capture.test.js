@@ -43,6 +43,37 @@ test("shared audio disables destructive speech processing", () => {
   });
 });
 
+test("system audio start waits for processed publication", async () => {
+  const track = fakeTrack("captured-system-audio");
+  const stream = {
+    getAudioTracks: () => [track],
+    getVideoTracks: () => [{ stop() {} }],
+    getTracks: () => [track],
+  };
+  let finishPublication;
+  const published = new Promise((resolve) => {
+    finishPublication = resolve;
+  });
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      getDisplayMedia: async () => stream,
+    },
+    getSettings: () => ({}),
+    onSource: () => published,
+    onSourceEnded() {},
+  });
+
+  const starting = manager.startSystemAudio();
+  let settled = false;
+  starting.then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  finishPublication({ source: "screen-audio", track: { id: "processed" } });
+  assert.equal((await starting).track.id, "processed");
+});
+
 test("failed selected microphone falls back without losing its identity", async () => {
   const expectedStream = { id: "default-stream" };
   const calls = [];
@@ -157,6 +188,46 @@ test("fallback microphone is replaced when the exact preferred device returns", 
   assert.deepEqual(restored, ["preferred-device"]);
   assert.equal(fallbackTrack.readyState, "ended");
   assert.equal(manager.sources.get("audio").track, preferredTrack);
+});
+
+test("failed microphone publication keeps the currently published capture alive", async () => {
+  const fallbackTrack = fakeTrack("fallback");
+  const preferredTrack = fakeTrack("preferred");
+  let publication = 0;
+  let request = 0;
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      addEventListener() {},
+      removeEventListener() {},
+      async enumerateDevices() {
+        return [{ kind: "audioinput", deviceId: "preferred-device" }];
+      },
+      async getUserMedia() {
+        request += 1;
+        if (request === 1)
+          throw Object.assign(new Error("Missing"), { name: "NotFoundError" });
+        return request === 2
+          ? fakeStream(fallbackTrack)
+          : fakeStream(preferredTrack);
+      },
+    },
+    getSettings: () => ({ micDeviceId: "preferred-device" }),
+    onSource() {
+      publication += 1;
+      if (publication === 2) throw new Error("transport replacement failed");
+    },
+    onSourceEnded() {},
+  });
+
+  await manager.startMicrophone();
+  await assert.rejects(
+    manager.restorePreferredMicrophone(),
+    /transport replacement failed/,
+  );
+
+  assert.equal(manager.sources.get("audio").track, fallbackTrack);
+  assert.equal(fallbackTrack.readyState, "live");
+  assert.equal(preferredTrack.readyState, "ended");
 });
 
 test("device recovery does not guess when the preferred microphone is absent", async () => {

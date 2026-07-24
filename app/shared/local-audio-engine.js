@@ -19,29 +19,8 @@ export function createLocalAudioEngine({
   voiceStore,
 }) {
   let localVoiceDetector = null;
-  let microphoneTransmissionEnabled = true;
   let sharedAudioMeter = null;
   let sharedAudioStatsSample = null;
-
-  function microphoneGateEnabled() {
-    return settingsStore.microphoneGate.enabled && !getAudioStereo("audio");
-  }
-
-  function setMicrophoneTransmission(enabled) {
-    const next = Boolean(enabled) || !microphoneGateEnabled();
-    if (next === microphoneTransmissionEnabled) return;
-    microphoneTransmissionEnabled = next;
-    getP2pMesh()
-      ?.setSourceTransmission("audio", next)
-      .catch((error) =>
-        console.warn("[Media] P2P microphone gate update failed", error),
-      );
-    getSfu()
-      ?.setSourceTransmission("audio", next)
-      .catch((error) =>
-        console.warn("[Media] SFU microphone gate update failed", error),
-      );
-  }
 
   function producerFacade(entry) {
     return {
@@ -88,14 +67,10 @@ export function createLocalAudioEngine({
             voiceStore.updateUserSpeaking(userId, true);
             onSpeakingChange?.(userId, true);
           }
-          setMicrophoneTransmission(true);
         } else if (speaking && ++quietSamples >= 10) {
           speaking = false;
           voiceStore.updateUserSpeaking(userId, false);
           onSpeakingChange?.(userId, false);
-          setMicrophoneTransmission(false);
-        } else if (!speaking) {
-          setMicrophoneTransmission(false);
         }
       }, 40);
       localVoiceDetector = { analyser, context, source, timer, userId };
@@ -126,7 +101,6 @@ export function createLocalAudioEngine({
     voiceStore.updateUserSpeaking(localVoiceDetector.userId, false);
     onSpeakingChange?.(localVoiceDetector.userId, false);
     localVoiceDetector = null;
-    setMicrophoneTransmission(true);
   }
 
   function setSharedAudioVolume(value) {
@@ -135,7 +109,9 @@ export function createLocalAudioEngine({
       const now = sharedAudioMeter.context.currentTime;
       sharedAudioMeter.gain.gain.cancelScheduledValues(now);
       sharedAudioMeter.gain.gain.setValueAtTime(normalized, now);
-      ensureSharedAudioProcessing();
+      ensureSharedAudioProcessing().catch((error) =>
+        console.warn("[Media] Shared audio context resume failed", error),
+      );
     }
     const enabled = normalized > 0;
     Promise.allSettled(
@@ -197,7 +173,7 @@ export function createLocalAudioEngine({
     );
   }
 
-  function createSharedAudioSource(entry) {
+  async function createSharedAudioSource(entry) {
     try {
       const AudioContextConstructor =
         window.AudioContext || window.webkitAudioContext;
@@ -227,6 +203,9 @@ export function createLocalAudioEngine({
         track,
       };
       setSharedAudioVolume(settingsStore.sharedAudioVolume);
+      const ready = await ensureSharedAudioProcessing();
+      if (!ready)
+        throw new Error("Shared audio processing could not be started");
       return {
         ...entry,
         stream: new MediaStream([track]),
@@ -234,6 +213,7 @@ export function createLocalAudioEngine({
         captureTrack: entry.track,
       };
     } catch (error) {
+      stopSharedAudioMeter();
       console.warn(
         `[Media] Shared audio processing is unavailable: ${error?.message || error}`,
       );
@@ -241,14 +221,11 @@ export function createLocalAudioEngine({
     }
   }
 
-  function ensureSharedAudioProcessing() {
-    if (!sharedAudioMeter || sharedAudioMeter.context.state === "running")
-      return;
-    sharedAudioMeter.context
-      .resume()
-      .catch((error) =>
-        console.warn("[Media] Shared audio context resume failed", error),
-      );
+  async function ensureSharedAudioProcessing() {
+    if (!sharedAudioMeter) return false;
+    if (sharedAudioMeter.context.state !== "running")
+      await sharedAudioMeter.context.resume();
+    return sharedAudioMeter.context.state === "running";
   }
 
   function startSharedAudioMeter() {
@@ -256,7 +233,7 @@ export function createLocalAudioEngine({
     const values = new Float32Array(sharedAudioMeter.analyser.fftSize);
     const sample = async () => {
       if (!sharedAudioMeter) return;
-      ensureSharedAudioProcessing();
+      await ensureSharedAudioProcessing();
       sharedAudioMeter.analyser.getFloatTimeDomainData(values);
       const rms = Math.sqrt(
         values.reduce((sum, value) => sum + value * value, 0) / values.length,
@@ -318,7 +295,6 @@ export function createLocalAudioEngine({
     producerFacade,
     refreshAudioSenderSettings,
     refreshMediaPolicy,
-    setMicrophoneTransmission,
     setSharedAudioVolume,
     setSystemAudioBitrate,
     startLocalVoiceDetection,

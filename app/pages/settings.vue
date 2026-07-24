@@ -1217,8 +1217,7 @@ async function applyAudioSettings() {
   }
   applyBusy.value = true;
   try {
-    voiceStore.sfuComposable.stopAudioProduction();
-    await voiceStore.sfuComposable.startAudioProduction();
+    await voiceStore.sfuComposable.restartAudioProduction();
   } catch (error) {
     console.warn("[Settings] Unable to apply audio settings", error);
   } finally {

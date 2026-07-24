@@ -170,6 +170,38 @@ test("an existing SFU source replaces its track without recreating the producer"
   assert.equal(client.producers.get("audio").track, replacementTrack);
 });
 
+test("failed SFU track replacement preserves its previous source ownership", async () => {
+  const client = session();
+  const previousSource = { source: "audio", track: { id: "capture-old" } };
+  const replacementClone = {
+    stopped: false,
+    stop() {
+      this.stopped = true;
+    },
+  };
+  client.sources.set("audio", previousSource);
+  client.producers.set("audio", {
+    producer: {
+      async replaceTrack() {
+        throw new Error("replacement rejected");
+      },
+    },
+    track: { stop() {} },
+    source: "audio",
+  });
+
+  await assert.rejects(
+    client.addSource({
+      source: "audio",
+      track: { clone: () => replacementClone },
+    }),
+    /replacement rejected/,
+  );
+
+  assert.equal(client.sources.get("audio"), previousSource);
+  assert.equal(replacementClone.stopped, true);
+});
+
 test("concurrent publication of one SFU source creates one producer", async () => {
   const client = session();
   let releaseProduce;

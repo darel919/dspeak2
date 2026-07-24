@@ -352,7 +352,7 @@ export class MediasoupClientSession {
   }
 
   async addSource(entry) {
-    this.sources.set(entry.source, entry);
+    const previousSource = this.sources.get(entry.source);
     const existing = this.producers.get(entry.source);
     if (existing) {
       const track = entry.track.clone();
@@ -360,13 +360,24 @@ export class MediasoupClientSession {
         await existing.producer.replaceTrack({ track });
       } catch (error) {
         track.stop();
+        if (previousSource) this.sources.set(entry.source, previousSource);
         throw error;
       }
       existing.track.stop();
       existing.track = track;
+      this.sources.set(entry.source, entry);
       return existing.producer;
     }
-    if (this.sendTransport) return this.publish(entry);
+    this.sources.set(entry.source, entry);
+    if (this.sendTransport) {
+      try {
+        return await this.publish(entry);
+      } catch (error) {
+        if (previousSource) this.sources.set(entry.source, previousSource);
+        else this.sources.delete(entry.source);
+        throw error;
+      }
+    }
     return null;
   }
 

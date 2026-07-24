@@ -55,6 +55,12 @@ The destination is considered ready only when every advertised participant and
 source identity is staged. Track replacement adds the destination track before
 removing the retired track, so activation cannot expose an empty stream or
 temporarily remove a fullscreen player.
+Local source publication follows the same make-before-break rule. Capture and
+device replacement do not report success until every required P2P and SFU
+publication completes. P2P removal and replacement are serialized per sender,
+and a failed cross-provider replacement restores the previously published
+track. Applying microphone settings therefore cannot discard a working
+microphone before its replacement is confirmed.
 Late provider-close and track-ended events can remove a feed only when both the
 provider and track still own its registry entry. Browser fullscreen belongs to
 the persistent document root, while the selected logical feed is displayed as
@@ -73,6 +79,12 @@ room-wide commitment; an activation without matching lineage must verify media
 before it can replace the active provider.
 Failed SFU preparation is retried with a fresh epoch while the active route stays
 bound; an unverified destination is never reported as active.
+
+The voice UI becomes connected when the authoritative active route is usable.
+It does not wait on participant snapshots, producer counters, diagnostic RTP
+sampling, or a second topology poll after that route has already passed
+readiness. Those signals continue updating call diagnostics without holding the
+join screen open after media is available.
 
 Media-source revisions on an already-active route update its expected sources
 in place; they do not re-run provider activation. This prevents rapid camera,

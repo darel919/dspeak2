@@ -13,7 +13,6 @@ export function createMediaSourceController({
   refreshPublicMaps,
   reportSfuFailure,
   send,
-  setMicrophoneTransmission,
   startLocalVoiceDetection,
   startSharedAudioMeter,
   stopLocalVoiceDetection,
@@ -21,12 +20,74 @@ export function createMediaSourceController({
   topologyState,
   voiceStore,
 }) {
-  function publishSource(sourceEntry) {
+  async function publishSource(sourceEntry) {
     const entry =
       sourceEntry.source === "screen-audio"
-        ? createSharedAudioSource(sourceEntry)
+        ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
+    const previous = localSources.get(entry.source);
+    const p2pRequired =
+      topologyState.value.mode === "p2p" ||
+      topologyState.value.mode === "probing" ||
+      topologyState.value.target === "p2p";
+    const sfuRequired =
+      topologyState.value.mode === "sfu" ||
+      topologyState.value.target === "sfu";
+    try {
+      if (p2pRequired)
+        await getP2pMesh()?.publishSource(
+          entry.source,
+          entry.track,
+          entry.stream,
+        );
+      if (sfuRequired) await getSfu()?.addSource(entry);
+      const captureTrack = entry.captureTrack || entry.track;
+      if (
+        captureTrack.readyState === "ended" ||
+        entry.track.readyState === "ended"
+      )
+        throw new Error(`The ${entry.source} track ended during publication`);
+    } catch (sourceError) {
+      const reason = `source-${entry.source}-failed-${sourceError.message}`;
+      if (previous) {
+        await Promise.allSettled([
+          p2pRequired
+            ? getP2pMesh()?.publishSource(
+                previous.source,
+                previous.track,
+                previous.stream,
+              )
+            : null,
+          sfuRequired ? getSfu()?.addSource(previous) : null,
+        ]);
+      } else {
+        await Promise.allSettled([getP2pMesh()?.unpublishSource(entry.source)]);
+        getSfu()?.removeSource(entry.source);
+        if (entry.source === "screen-audio") stopSharedAudioMeter();
+      }
+      if (topologyState.value.mode === "sfu") reportSfuFailure(reason);
+      else if (topologyState.value.target === "sfu")
+        send({
+          type: "topology-failed",
+          data: {
+            epoch: topologyState.value.epoch,
+            target: "sfu",
+            sourceRevision: topologyState.value.sourceRevision,
+            reason,
+          },
+        });
+      throw sourceError;
+    }
     localSources.set(entry.source, entry);
+    if (entry.captureTrack && entry.track !== entry.captureTrack)
+      entry.track.addEventListener(
+        "ended",
+        () => {
+          if (localSources.get(entry.source)?.track === entry.track)
+            capture.stop(entry.source);
+        },
+        { once: true },
+      );
     if (entry.source === "audio") startLocalVoiceDetection(entry);
     if (entry.source === "camera" || entry.source === "screen") {
       localVideoFeeds.value.set(entry.source, {
@@ -36,37 +97,10 @@ export function createMediaSourceController({
       });
       localVideoFeeds.value = new Map(localVideoFeeds.value);
     }
-    if (
-      topologyState.value.mode === "p2p" ||
-      topologyState.value.mode === "probing" ||
-      topologyState.value.target === "p2p"
-    )
-      getP2pMesh()?.publishSource(entry.source, entry.track, entry.stream);
-    if (
-      topologyState.value.mode === "sfu" ||
-      topologyState.value.target === "sfu"
-    )
-      getSfu()
-        ?.addSource(entry)
-        .catch((sourceError) => {
-          const reason = `source-${entry.source}-failed-${sourceError.message}`;
-          if (topologyState.value.mode === "sfu") reportSfuFailure(reason);
-          else
-            send({
-              type: "topology-failed",
-              data: {
-                epoch: topologyState.value.epoch,
-                target: "sfu",
-                sourceRevision: topologyState.value.sourceRevision,
-                reason,
-              },
-            });
-        });
-    if (entry.source === "audio")
-      queueMicrotask(() => setMicrophoneTransmission(false));
     if (entry.source === "screen-audio") startSharedAudioMeter(entry.track);
     sendSourceState();
     refreshPublicMaps();
+    return entry;
   }
 
   function removeSource(entry, { unexpected = false } = {}) {
@@ -78,7 +112,12 @@ export function createMediaSourceController({
       return;
     localSources.delete(entry.source);
     if (entry.source === "audio") stopLocalVoiceDetection();
-    getP2pMesh()?.unpublishSource(entry.source);
+    getP2pMesh()
+      ?.unpublishSource(entry.source)
+      .catch((sourceError) => {
+        error.value =
+          sourceError?.message || `Unable to stop ${entry.source} publication`;
+      });
     getSfu()?.removeSource(entry.source);
     localVideoFeeds.value.delete(entry.source);
     localVideoFeeds.value = new Map(localVideoFeeds.value);
@@ -119,6 +158,10 @@ export function createMediaSourceController({
     return capture.startMicrophone().then((entry) => producerFacade(entry));
   }
 
+  function restartAudioProduction() {
+    return capture.restartMicrophone().then((entry) => producerFacade(entry));
+  }
+
   function startVideoProduction(source) {
     return capture.startVideo(source).then((entry) => producerFacade(entry));
   }
@@ -130,6 +173,7 @@ export function createMediaSourceController({
   return {
     publishSource,
     removeSource,
+    restartAudioProduction,
     sendParticipantVoiceState,
     sendSourceState,
     startAudioProduction,

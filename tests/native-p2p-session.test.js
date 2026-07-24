@@ -134,6 +134,7 @@ test("P2P source toggles reuse their sender instead of accumulating transceivers
   const connection = {
     peerId: "peer-2",
     senders: new Map([["camera", sender]]),
+    sourceReceiving: new Map(),
     pc: {
       addTrack: () => {
         throw new Error("must reuse existing sender");
@@ -145,8 +146,7 @@ test("P2P source toggles reuse their sender instead of accumulating transceivers
 
   mesh.unpublishSource("camera");
   const replacement = { id: "new" };
-  mesh.publishSource("camera", replacement, {});
-  await Promise.resolve();
+  await mesh.publishSource("camera", replacement, {});
 
   assert.equal(connection.senders.get("camera"), sender);
   assert.deepEqual(replacements, [null, replacement]);

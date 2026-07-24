@@ -47,3 +47,15 @@ room policy, personal override, and speaking state apply to active shares
 without requiring a rejoin. Local microphone activity updates the playback
 gain directly. Remote microphone playback also drives attenuation from its
 decoded waveform, so topology changes do not interrupt speech priority.
+
+The sender creates and resumes the shared-audio processing graph before
+publishing its destination track to P2P or SFU. Starting system audio therefore
+does not report success while the browser-owned processing context is still
+suspended. If processing cannot start, publication falls back to the original
+captured track so system audio remains available.
+
+Publication is transactional across the active and preparing transports.
+Starting a share fails visibly if either required provider rejects it, and any
+partial publication is removed instead of leaving a silent source registered.
+If the processed destination track ends, the share follows the normal source
+teardown path instead of remaining as a zero-bitrate producer.

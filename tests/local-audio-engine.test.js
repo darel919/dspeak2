@@ -28,7 +28,7 @@ function createEngine({ context, p2pMesh, sfu }) {
   });
 }
 
-test("shared audio publishes the gain-processed destination track", () => {
+test("shared audio publishes the gain-processed destination track", async () => {
   const originalMediaStream = globalThis.MediaStream;
   const originalWindow = globalThis.window;
   const destinationTrack = { id: "processed", kind: "audio" };
@@ -75,7 +75,7 @@ test("shared audio publishes the gain-processed destination track", () => {
   try {
     const captureTrack = { id: "capture", kind: "audio" };
     const engine = createEngine({ context });
-    const entry = engine.createSharedAudioSource({
+    const entry = await engine.createSharedAudioSource({
       source: "screen-audio",
       stream: new MediaStream([captureTrack]),
       track: captureTrack,
@@ -143,7 +143,7 @@ test("zero shared volume immediately mutes gain and both transports", async () =
       p2pMesh: transport("p2p"),
       sfu: transport("sfu"),
     });
-    engine.createSharedAudioSource({
+    await engine.createSharedAudioSource({
       source: "screen-audio",
       stream: new MediaStream([{ id: "capture", kind: "audio" }]),
       track: { id: "capture", kind: "audio" },
@@ -160,6 +160,70 @@ test("zero shared volume immediately mutes gain and both transports", async () =
       ["p2p", "screen-audio", false],
       ["sfu", "screen-audio", false],
     ]);
+  } finally {
+    globalThis.MediaStream = originalMediaStream;
+    globalThis.window = originalWindow;
+  }
+});
+
+test("shared audio waits for its processing context before publication", async () => {
+  const originalMediaStream = globalThis.MediaStream;
+  const originalWindow = globalThis.window;
+  const destinationTrack = { id: "processed", kind: "audio", stop() {} };
+  let resumed = 0;
+  const context = {
+    currentTime: 0,
+    state: "suspended",
+    createAnalyser: () => ({
+      connect() {},
+      disconnect() {},
+      fftSize: 0,
+    }),
+    createGain: () => ({
+      connect() {},
+      disconnect() {},
+      gain: {
+        value: 1,
+        cancelScheduledValues() {},
+        setValueAtTime() {},
+      },
+    }),
+    createMediaStreamDestination: () => ({
+      stream: { getAudioTracks: () => [destinationTrack] },
+    }),
+    createMediaStreamSource: () => ({ connect() {}, disconnect() {} }),
+    async resume() {
+      resumed += 1;
+      this.state = "running";
+    },
+  };
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+
+    getAudioTracks() {
+      return this.tracks;
+    }
+  };
+  globalThis.window = {
+    AudioContext: class {
+      constructor() {
+        return context;
+      }
+    },
+  };
+
+  try {
+    const engine = createEngine({ context });
+    const publication = engine.createSharedAudioSource({
+      source: "screen-audio",
+      stream: new MediaStream([{ id: "capture", kind: "audio" }]),
+      track: { id: "capture", kind: "audio" },
+    });
+    assert.equal(typeof publication.then, "function");
+    assert.equal((await publication).track, destinationTrack);
+    assert.equal(resumed, 1);
   } finally {
     globalThis.MediaStream = originalMediaStream;
     globalThis.window = originalWindow;

@@ -286,7 +286,7 @@ function broadcastChannelState(room) {
   for (const session of room.sessions.values()) {
     send(session.peer, "currentlyInChannel", data);
     send(session.peer, "available-producers", {
-      producers: snapshot.producers,
+      producers: snapshot.producers.filter((id) => !session.producers.has(id)),
       producerUserMap: snapshot.producerUserMap,
       producerSourceMap: snapshot.producerSourceMap,
     });

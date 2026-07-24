@@ -1,8 +1,10 @@
 # Microphone gate
 
-The microphone gate stops transmitting background noise while keeping local
-capture ready to detect speech. It affects microphone audio only. Camera,
-screen share, shared audio, soundboards, and remote playback remain independent.
+The microphone gate controls local speech detection sensitivity while browser
+echo cancellation and noise suppression remove background noise from the
+microphone track. It never pauses the microphone RTP sender: a suspended Web
+Audio analyser or a threshold miss must not create one-way audio. Camera, screen
+share, shared audio, soundboards, and remote playback remain independent.
 
 ## Modes
 
