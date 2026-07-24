@@ -113,7 +113,7 @@ paths are dashed until consensus activates them. The normal voice UI does not
 expose or depend on the active topology.
 
 `app/stores/rtc-stats.js` is the single owner of browser RTC statistics polling,
-the current snapshot, video stream measurements, and the bounded sixty-sample
+the current snapshot, per-stream RTP measurements, and the bounded sixty-sample
 history. The navbar, global connection summary, and `/rtc-debug` dashboard only
 render that shared state. This prevents multiple mounted displays from issuing
 overlapping `getStats()` calls or presenting different samples. The global

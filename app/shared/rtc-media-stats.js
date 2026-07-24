@@ -32,11 +32,12 @@ export function calculateTransportBitrateBps(
   );
 }
 
-export function collectVideoRtpStats(
+export function collectRtpStats(
   report,
   direction,
   trackSettings = {},
   previous = null,
+  expectedKind = null,
 ) {
   const values = [...report.values()];
   const type = direction === "outbound" ? "outbound-rtp" : "inbound-rtp";
@@ -44,11 +45,14 @@ export function collectVideoRtpStats(
     (stat) =>
       stat.type === type &&
       !stat.isRemote &&
-      (stat.kind === "video" || stat.mediaType === "video"),
+      (!expectedKind ||
+        stat.kind === expectedKind ||
+        stat.mediaType === expectedKind),
   );
   if (!rtp) return { stats: null, sample: previous };
 
   const codec = values.find((stat) => stat.id === rtp.codecId);
+  const kind = rtp.kind || rtp.mediaType || expectedKind || null;
   const timestamp = finite(rtp.timestamp) ?? Date.now();
   const frameCounter = finite(
     direction === "outbound" ? rtp.framesEncoded : rtp.framesDecoded,
@@ -79,6 +83,7 @@ export function collectVideoRtpStats(
     codecFrames > 0 && codecTime >= 0 ? (codecTime * 1000) / codecFrames : null;
 
   const common = {
+    kind,
     width:
       finite(direction === "outbound" ? rtp.frameWidth : rtp.frameWidth) ??
       finite(trackSettings.width),
@@ -119,6 +124,9 @@ export function collectVideoRtpStats(
           retransmittedBytesSent: finite(rtp.retransmittedBytesSent),
           qpSum: finite(rtp.qpSum),
           qualityLimitationDurations: rtp.qualityLimitationDurations || null,
+          audioLevel: finite(rtp.audioLevel),
+          totalAudioEnergy: finite(rtp.totalAudioEnergy),
+          totalSamplesDuration: finite(rtp.totalSamplesDuration),
         }
       : {
           ...common,
@@ -145,9 +153,24 @@ export function collectVideoRtpStats(
           totalInterFrameDelay: finite(rtp.totalInterFrameDelay),
           jitterBufferDelay: finite(rtp.jitterBufferDelay),
           jitterBufferEmittedCount: finite(rtp.jitterBufferEmittedCount),
+          audioLevel: finite(rtp.audioLevel),
+          totalAudioEnergy: finite(rtp.totalAudioEnergy),
+          totalSamplesDuration: finite(rtp.totalSamplesDuration),
+          totalSamplesReceived: finite(rtp.totalSamplesReceived),
+          concealedSamples: finite(rtp.concealedSamples),
+          silentConcealedSamples: finite(rtp.silentConcealedSamples),
         };
 
   return { stats, sample: { timestamp, frameCounter, bytes, totalCodecTime } };
+}
+
+export function collectVideoRtpStats(
+  report,
+  direction,
+  trackSettings = {},
+  previous = null,
+) {
+  return collectRtpStats(report, direction, trackSettings, previous, "video");
 }
 
 export function collectOutboundAudioStats(report, previous = null) {

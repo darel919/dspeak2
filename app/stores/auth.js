@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { deviceHeaders, getDeviceId } from "../shared/device-identity";
+import { purgeUserLocalData } from "../utils/idb";
 import { useRoomsStore } from "./rooms";
 import { useChatStore } from "./chat";
 
@@ -88,19 +89,38 @@ export const useAuthStore = defineStore("auths", () => {
       return false;
     }
   }
-  function clearAuth(revoke = true) {
-    if (revoke && import.meta.client) {
-      fetch(`${config.public.apiPath}/session`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: deviceHeaders(),
-      }).catch(() => {});
+  function storedUserId() {
+    if (!import.meta.client) return "";
+    try {
+      const metadata = JSON.parse(localStorage.getItem("userData") || "null");
+      return String(metadata?.id || "");
+    } catch {
+      return "";
     }
+  }
+  async function clearAuth(revoke = true) {
+    const userId = String(getUserData()?.id || storedUserId());
+    const revocation =
+      revoke && import.meta.client
+        ? fetch(`${config.public.apiPath}/session`, {
+            method: "DELETE",
+            credentials: "include",
+            headers: deviceHeaders(),
+          }).catch(() => {})
+        : Promise.resolve();
+
     setUser(null);
     removeStorage("token");
     removeStorage("userData");
     useRoomsStore().clearRooms();
-    useChatStore().clearChat();
+    useChatStore().clearChat(userId);
+
+    const cleanup = userId
+      ? purgeUserLocalData(userId).catch((error) => {
+          console.warn("[Auth] Could not purge user browser data:", error);
+        })
+      : Promise.resolve();
+    await Promise.all([revocation, cleanup]);
   }
   function getUserData() {
     return user.value?.user?.user_metadata || null;

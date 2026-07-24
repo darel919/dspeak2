@@ -24,6 +24,15 @@ boundary preserves the installed `dspeak-cache`, `dspeak-chat`, and
 native transaction to finish. The service worker flushes the queue after
 Background Sync or an explicit online retry.
 
+Logging out removes only the outgoing user's browser data before navigation.
+That purge deletes the user's cached rooms, cached channel messages, offline
+outgoing messages, and pending read-receipt IDs. It also clears the equivalent
+in-memory chat caches so late channel work cannot restore signed-out data.
+Device-scoped preferences such as appearance, media settings, volume, and
+selected input or output devices remain available. Deployment-scoped PWA asset
+and page caches also remain because they contain application resources rather
+than authenticated API responses.
+
 The boundary converts Vue reactive room and message state into plain
 JSON-compatible snapshots before writing. Browser IndexedDB therefore never
 receives reactive proxies that cannot be structured-cloned.

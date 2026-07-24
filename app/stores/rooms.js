@@ -114,6 +114,7 @@ export const useRoomsStore = defineStore("rooms", () => {
         throw new Error(`Failed to fetch rooms: ${response.status}`);
       }
       const data = await response.json();
+      if (authStore.getUserData()?.id !== userData.id) return;
       rooms.value = data;
       if (import.meta.client && isIdbAvailable()) {
         cacheRooms(userData.id, data).catch((cacheError) => {

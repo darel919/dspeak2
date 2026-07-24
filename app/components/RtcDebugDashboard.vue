@@ -382,12 +382,16 @@
             >
               <div class="rtc-transport-title">
                 <strong>{{
-                  stream.source || `Remote video ${index + 1}`
+                  stream.source ||
+                  `Remote ${stream.kind || "media"} ${index + 1}`
                 }}</strong
-                ><span>{{ stream.codec || "Codec unreported" }}</span>
+                ><span
+                  >{{ stream.kind || "Media" }} ·
+                  {{ stream.codec || "Codec unreported" }}</span
+                >
               </div>
               <div class="rtc-detail-grid">
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>Resolution</span
                   ><strong>{{
                     stream.width && stream.height
@@ -395,7 +399,7 @@
                       : "—"
                   }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>Frame rate</span
                   ><strong>{{ formatFps(stream.fps) }}</strong>
                 </div>
@@ -417,7 +421,7 @@
                     formatBytes(stream.bytesSent ?? stream.bytesReceived)
                   }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>Quality limit</span
                   ><strong>{{
                     stream.qualityLimitationReason || "none"
@@ -427,7 +431,7 @@
                   <span>SSRC</span
                   ><strong>{{ formatNumber(stream.ssrc) }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>{{
                     section === "outbound" ? "Frames encoded" : "Frames decoded"
                   }}</span
@@ -435,11 +439,11 @@
                     formatNumber(stream.framesEncoded ?? stream.framesDecoded)
                   }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>Frames dropped</span
                   ><strong>{{ formatNumber(stream.framesDropped) }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>Key frames</span
                   ><strong>{{
                     formatNumber(
@@ -447,11 +451,11 @@
                     )
                   }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>NACK / PLI / FIR</span
                   ><strong>{{ formatCounts(stream) }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>{{
                     section === "outbound" ? "Encode time" : "Decode time"
                   }}</span
@@ -459,7 +463,7 @@
                     formatMs(stream.frameTimeMs ?? stream.decodeTimeMs)
                   }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>Implementation</span
                   ><strong>{{
                     stream.encoderImplementation ||
@@ -467,7 +471,7 @@
                     "—"
                   }}</strong>
                 </div>
-                <div>
+                <div v-if="stream.kind === 'video'">
                   <span>Power efficient</span
                   ><strong>{{
                     formatBoolean(
@@ -476,16 +480,33 @@
                     )
                   }}</strong>
                 </div>
-                <div v-if="section === 'inbound'">
+                <div v-if="section === 'inbound' && stream.kind === 'video'">
                   <span>Freezes</span
                   ><strong>{{ formatNumber(stream.freezeCount) }}</strong>
+                </div>
+                <div v-if="stream.kind === 'audio'">
+                  <span>Audio level</span
+                  ><strong>{{ formatAudioLevel(stream.audioLevel) }}</strong>
+                </div>
+                <div v-if="section === 'inbound' && stream.kind === 'audio'">
+                  <span>Jitter</span
+                  ><strong>{{ formatSecondsMs(stream.jitter) }}</strong>
+                </div>
+                <div v-if="section === 'inbound' && stream.kind === 'audio'">
+                  <span>Samples received</span
+                  ><strong>{{
+                    formatNumber(stream.totalSamplesReceived)
+                  }}</strong>
+                </div>
+                <div v-if="section === 'inbound' && stream.kind === 'audio'">
+                  <span>Concealed samples</span
+                  ><strong>{{ formatNumber(stream.concealedSamples) }}</strong>
                 </div>
               </div>
             </article>
           </div>
           <div v-else class="rtc-no-streams">
-            No {{ section }} video streams are active. Audio transport
-            statistics remain available on the Transport tab.
+            No {{ section }} RTP streams are active.
           </div>
         </section>
       </template>
@@ -622,6 +643,11 @@ function formatMs(value) {
 function formatSecondsMs(value) {
   return value != null && Number.isFinite(Number(value))
     ? `${Math.round(Number(value) * 1000)} ms`
+    : "—";
+}
+function formatAudioLevel(value) {
+  return value != null && Number.isFinite(Number(value))
+    ? `${Math.round(Number(value) * 100)}%`
     : "—";
 }
 function formatBoolean(value) {

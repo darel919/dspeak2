@@ -129,7 +129,7 @@ async function checkAuth() {
     return;
   }
 
-  authStore.clearAuth(false);
+  await authStore.clearAuth(false);
   if (route.path !== "/" && route.path !== "/auth") {
     router.push("/");
   }

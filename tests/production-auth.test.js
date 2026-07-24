@@ -42,6 +42,18 @@ const authPage = await readFile(
   new URL("../app/pages/auth.vue", import.meta.url),
   "utf8",
 );
+const authStore = await readFile(
+  new URL("../app/stores/auth.js", import.meta.url),
+  "utf8",
+);
+const accountPage = await readFile(
+  new URL("../app/pages/account.vue", import.meta.url),
+  "utf8",
+);
+const settingsPage = await readFile(
+  new URL("../app/pages/settings.vue", import.meta.url),
+  "utf8",
+);
 const defaultLayout = await readFile(
   new URL("../app/layouts/default.vue", import.meta.url),
   "utf8",
@@ -104,6 +116,15 @@ test("authentication state changes do not remount and replay the callback", () =
   assert.equal(defaultLayout.match(/<slot\s*\/>/g)?.length, 1);
   assert.match(authPage, /await router\.replace\("\/auth"\)/);
   assert.doesNotMatch(authPage, /history\.replaceState/);
+});
+
+test("logout awaits a user-scoped browser-data purge before navigation", () => {
+  assert.match(authStore, /const userId = String\(getUserData\(\)\?\.id/);
+  assert.match(authStore, /purgeUserLocalData\(userId\)/);
+  assert.match(authStore, /useChatStore\(\)\.clearChat\(userId\)/);
+  assert.match(accountPage, /await authStore\.clearAuth\(\)/);
+  assert.match(settingsPage, /await authStore\.clearAuth\(\)/);
+  assert.doesNotMatch(authStore, /resetLocalDatabases/);
 });
 
 test("notification migration reconciles duplicates before uniqueness", () => {

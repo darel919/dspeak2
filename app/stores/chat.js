@@ -44,6 +44,7 @@ export const useChatStore = defineStore("chat", () => {
   let activeFetchController = null;
   let readFlushTimer = null;
   let readFlushPromise = null;
+  let localDataGeneration = 0;
   const pendingReadIds = new Set();
   const channelMessages = new Map();
   const pendingChannelPreparations = new Map();
@@ -59,6 +60,7 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   async function prepareChannel(channelId) {
+    const preparationGeneration = localDataGeneration;
     const normalizedChannelId = String(channelId || "");
     if (!normalizedChannelId) return false;
     if (isChannelPrepared(normalizedChannelId)) return true;
@@ -76,6 +78,7 @@ export const useChatStore = defineStore("chat", () => {
           userData.id,
           normalizedChannelId,
         );
+        if (preparationGeneration !== localDataGeneration) return false;
         if (cached && Array.isArray(cached.messages)) {
           channelMessages.set(normalizedChannelId, cached.messages);
         }
@@ -108,6 +111,7 @@ export const useChatStore = defineStore("chat", () => {
         if (!response.ok) return false;
 
         const data = await response.json();
+        if (preparationGeneration !== localDataGeneration) return false;
         const serverMessages = Array.isArray(data.messages)
           ? data.messages
           : Array.isArray(data)
@@ -959,6 +963,7 @@ export const useChatStore = defineStore("chat", () => {
     hydratePendingReadIds(userData.id);
     const messageIds = [...pendingReadIds].slice(0, 200);
     if (messageIds.length === 0) return;
+    const flushGeneration = localDataGeneration;
 
     readFlushPromise = (async () => {
       const response = await fetch(`${config.public.apiPath}/chat/read`, {
@@ -973,6 +978,7 @@ export const useChatStore = defineStore("chat", () => {
         throw new Error(`Failed to update read state: ${response.status}`);
       }
       const payload = await response.json();
+      if (flushGeneration !== localDataGeneration) return;
       for (const result of payload.results || []) {
         if (
           result.status === "marked_as_read" ||
@@ -1157,8 +1163,27 @@ export const useChatStore = defineStore("chat", () => {
     debugLog("[ChatStore] Current typing users:", typingUsers.value);
   }
 
-  function clearChat() {
+  function clearChat(userId = "") {
+    localDataGeneration += 1;
     disconnectFromChannel(true);
+    if (readFlushTimer) {
+      clearTimeout(readFlushTimer);
+      readFlushTimer = null;
+    }
+    pendingReadIds.clear();
+    channelMessages.clear();
+    pendingChannelPreparations.clear();
+    channelPreparedAt.clear();
+    if (import.meta.client && userId) {
+      try {
+        localStorage.removeItem(readStorageKey(userId));
+      } catch (storageError) {
+        console.warn(
+          "[ChatStore] Unable to remove pending read state:",
+          storageError,
+        );
+      }
+    }
     messages.value = [];
     error.value = null;
     onlineUsers.value = [];

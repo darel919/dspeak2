@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateTransportBitrateBps } from "../app/shared/rtc-media-stats.js";
+import {
+  calculateTransportBitrateBps,
+  collectRtpStats,
+} from "../app/shared/rtc-media-stats.js";
 
 test("transport bitrate uses byte and RTC timestamp deltas", () => {
   assert.equal(
@@ -22,4 +25,68 @@ test("transport bitrate rejects missing, reset, and zero-duration samples", () =
     calculateTransportBitrateBps(2000, 1000, { bytes: 1000, timestamp: 1000 }),
     null,
   );
+});
+
+test("RTP statistics include outbound audio streams", () => {
+  const report = new Map([
+    [
+      "audio",
+      {
+        id: "audio",
+        type: "outbound-rtp",
+        kind: "audio",
+        codecId: "opus",
+        timestamp: 2000,
+        packetsSent: 80,
+        bytesSent: 17_000,
+        audioLevel: 0.4,
+        totalAudioEnergy: 12,
+        totalSamplesDuration: 2,
+      },
+    ],
+    ["opus", { id: "opus", type: "codec", mimeType: "audio/opus" }],
+  ]);
+
+  const { stats } = collectRtpStats(
+    report,
+    "outbound",
+    {},
+    { timestamp: 1000, bytes: 1000 },
+    "audio",
+  );
+
+  assert.equal(stats.kind, "audio");
+  assert.equal(stats.codec, "audio/opus");
+  assert.equal(stats.bitrateKbps, 128);
+  assert.equal(stats.packetsSent, 80);
+  assert.equal(stats.audioLevel, 0.4);
+});
+
+test("RTP statistics include inbound audio playout details", () => {
+  const report = new Map([
+    [
+      "audio",
+      {
+        id: "audio",
+        type: "inbound-rtp",
+        mediaType: "audio",
+        timestamp: 2000,
+        packetsReceived: 100,
+        packetsLost: 2,
+        bytesReceived: 9000,
+        jitter: 0.004,
+        totalSamplesReceived: 48_000,
+        concealedSamples: 240,
+        silentConcealedSamples: 120,
+      },
+    ],
+  ]);
+
+  const { stats } = collectRtpStats(report, "inbound", {}, null, "audio");
+
+  assert.equal(stats.kind, "audio");
+  assert.equal(stats.packetsReceived, 100);
+  assert.equal(stats.packetsLost, 2);
+  assert.equal(stats.totalSamplesReceived, 48_000);
+  assert.equal(stats.concealedSamples, 240);
 });

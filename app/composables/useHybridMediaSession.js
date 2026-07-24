@@ -17,7 +17,7 @@ import {
 import { addressFamily, buildTopologyGraph } from "~/shared/rtc-topology.js";
 import {
   collectOutboundAudioStats,
-  collectVideoRtpStats,
+  collectRtpStats,
 } from "~/shared/rtc-media-stats.js";
 import { hasUsableVoiceRoute } from "~/shared/voice-join-readiness.js";
 import { buildP2pVideoSenderOptions } from "~/shared/video-settings.js";
@@ -111,7 +111,7 @@ export function useHybridMediaSession() {
   let latestTopologyKey = null;
   let reportedSfuFailureEpoch = null;
   let preparedTransition = null;
-  const videoStatsSamples = new Map();
+  const rtpStatsSamples = new Map();
   const joinReady = computed(() =>
     hasUsableVoiceRoute({
       activeProvider,
@@ -912,13 +912,13 @@ export function useHybridMediaSession() {
   } = sourceController;
 
   const {
-    getInboundVideoStats,
-    getOutboundVideoStats,
+    getInboundRtpStats,
+    getOutboundRtpStats,
     getWebRTCDiagnosticStats,
     getWebRTCStatsSnapshot,
     sfuProducerIds,
   } = createHybridMediaDiagnostics({
-    collectVideoRtpStats,
+    collectRtpStats,
     getActiveProvider: () => activeProvider,
     getP2pMesh: () => p2pMesh,
     getRequestedVideoSettings,
@@ -933,7 +933,7 @@ export function useHybridMediaSession() {
     sfuRoundTripTime,
     topologyGraph,
     updateP2pStats,
-    videoStatsSamples,
+    rtpStatsSamples,
   });
 
   function failSession(message) {
@@ -943,7 +943,7 @@ export function useHybridMediaSession() {
   }
 
   function disconnect() {
-    videoStatsSamples.clear();
+    rtpStatsSamples.clear();
     intentionalClose = true;
     channelId = null;
     clearTimeout(reconnectTimer);
@@ -1026,8 +1026,8 @@ export function useHybridMediaSession() {
       registry.applyVolume(userId, source, volume),
     ensureAudioElements: () => registry.ensurePlayback(),
     getWebRTCStatsSnapshot,
-    getOutboundVideoStats,
-    getInboundVideoStats,
+    getOutboundRtpStats,
+    getInboundRtpStats,
     getWebRTCDiagnosticStats,
     areTransportsIceConnected: () => Promise.resolve(iceConnectedBoth.value),
   };

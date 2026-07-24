@@ -1,5 +1,5 @@
 export function createHybridMediaDiagnostics({
-  collectVideoRtpStats,
+  collectRtpStats,
   getActiveProvider,
   getP2pMesh,
   getRequestedVideoSettings,
@@ -14,7 +14,7 @@ export function createHybridMediaDiagnostics({
   sfuRoundTripTime,
   topologyGraph,
   updateP2pStats,
-  videoStatsSamples,
+  rtpStatsSamples,
 }) {
   function sfuProducerIds() {
     const sfu = getSfu();
@@ -66,14 +66,12 @@ export function createHybridMediaDiagnostics({
     };
   }
 
-  async function getOutboundVideoStats() {
+  async function getOutboundRtpStats() {
     const activeProvider = getActiveProvider();
     const p2pMesh = getP2pMesh();
     const sfu = getSfu();
     const results = [];
-    for (const entry of [...localSources.values()].filter(
-      (entry) => entry.track.kind === "video",
-    )) {
+    for (const entry of localSources.values()) {
       const settings = entry.track.getSettings?.() || {};
       const producer = sfu?.producers.get(entry.source)?.producer;
       const key = `outbound:${entry.source}`;
@@ -86,14 +84,15 @@ export function createHybridMediaDiagnostics({
                 .catch(() => null)
             : null;
       const collected = report
-        ? collectVideoRtpStats(
+        ? collectRtpStats(
             report,
             "outbound",
             settings,
-            videoStatsSamples.get(key),
+            rtpStatsSamples.get(key),
+            entry.track.kind,
           )
         : null;
-      if (collected?.sample) videoStatsSamples.set(key, collected.sample);
+      if (collected?.sample) rtpStatsSamples.set(key, collected.sample);
       const senderParameters =
         activeProvider === "p2p"
           ? p2pMesh?.getOutboundTrackParameters(entry.source)
@@ -101,7 +100,11 @@ export function createHybridMediaDiagnostics({
       const encoding = senderParameters?.encodings?.[0] || null;
       results.push({
         source: entry.source,
-        targetFps: getRequestedVideoSettings(entry.source).frameRate,
+        kind: entry.track.kind,
+        targetFps:
+          entry.track.kind === "video"
+            ? getRequestedVideoSettings(entry.source).frameRate
+            : null,
         captureFps: settings.frameRate || null,
         configuredMaxBitrateKbps: Number.isFinite(Number(encoding?.maxBitrate))
           ? Number(encoding.maxBitrate) / 1000
@@ -120,10 +123,14 @@ export function createHybridMediaDiagnostics({
     return results;
   }
 
-  async function getInboundVideoStats() {
+  async function getInboundRtpStats() {
     const p2pMesh = getP2pMesh();
     const results = [];
-    for (const entry of remoteVideoFeeds.value.values()) {
+    const remoteFeeds = [
+      ...remoteAudioFeeds.value.values(),
+      ...remoteVideoFeeds.value.values(),
+    ];
+    for (const entry of remoteFeeds) {
       const settings = entry.track.getSettings?.() || {};
       const key = `inbound:${entry.key}`;
       const report = entry.consumer
@@ -134,17 +141,19 @@ export function createHybridMediaDiagnostics({
               .catch(() => null)
           : null;
       const collected = report
-        ? collectVideoRtpStats(
+        ? collectRtpStats(
             report,
             "inbound",
             settings,
-            videoStatsSamples.get(key),
+            rtpStatsSamples.get(key),
+            entry.track.kind,
           )
         : null;
-      if (collected?.sample) videoStatsSamples.set(key, collected.sample);
+      if (collected?.sample) rtpStatsSamples.set(key, collected.sample);
       results.push({
         consumerId: entry.key,
         source: entry.source,
+        kind: entry.track.kind,
         ...(collected?.stats || {
           width: settings.width || null,
           height: settings.height || null,
@@ -162,8 +171,8 @@ export function createHybridMediaDiagnostics({
   }
 
   return {
-    getInboundVideoStats,
-    getOutboundVideoStats,
+    getInboundRtpStats,
+    getOutboundRtpStats,
     getWebRTCDiagnosticStats,
     getWebRTCStatsSnapshot,
     sfuProducerIds,

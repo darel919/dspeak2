@@ -145,7 +145,7 @@ async function loadInvite() {
 async function checkAuthentication() {
   if (authStore.getUserData()?.id) return true;
   const restored = await authStore.restoreSession();
-  if (!restored) authStore.clearAuth(false);
+  if (!restored) await authStore.clearAuth(false);
   return restored;
 }
 

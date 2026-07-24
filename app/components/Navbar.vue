@@ -127,7 +127,9 @@ const signalTooltip = computed(() => {
   return parts.join(" • ");
 });
 
-const outboundVideoStats = computed(() => rtcStatsStore.outbound);
+const outboundVideoStats = computed(() =>
+  rtcStatsStore.outbound.filter((stat) => stat.kind === "video"),
+);
 const outboundVideoLabels = computed(() =>
   outboundVideoStats.value
     .map((stat) => ({ source: stat.source, text: formatVideoQuality(stat) }))

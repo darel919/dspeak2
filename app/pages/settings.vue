@@ -1169,9 +1169,9 @@ onBeforeUnmount(stopMicrophonePreview);
 onBeforeUnmount(clearMicCheck);
 
 async function handleLogout() {
-  authStore.clearAuth();
+  await authStore.clearAuth();
   await nextTick();
-  navigateTo("/");
+  await navigateTo("/");
 }
 
 function onToggle(key, checked) {

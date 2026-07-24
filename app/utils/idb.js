@@ -414,6 +414,33 @@ export async function deleteRecord(databaseId, storeName, key) {
   );
 }
 
+async function deleteRecordsWhere(databaseId, storeName, operation, predicate) {
+  return runTransaction(
+    databaseId,
+    storeName,
+    "readwrite",
+    operation,
+    (store) =>
+      new Promise((resolve, reject) => {
+        const request = store.openCursor();
+        request.onerror = () =>
+          reject(
+            request.error ||
+              new DOMException("Cursor request failed", "UnknownError"),
+          );
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) {
+            resolve();
+            return;
+          }
+          if (predicate(cursor.value)) cursor.delete();
+          cursor.continue();
+        };
+      }),
+  );
+}
+
 export async function cacheRooms(userId, rooms) {
   await putRecord("rooms", "roomsCache", { userId, rooms });
 }
@@ -448,7 +475,7 @@ export async function getCachedChannelMessages(userId, channelId) {
 }
 
 export async function enqueueMessage(message) {
-  await ensurePersistentStorage();
+  void ensurePersistentStorage();
   await putRecord("queue", "messageQueue", message);
 }
 
@@ -458,6 +485,26 @@ export async function getQueuedMessages() {
 
 export async function dequeueMessage(id) {
   await deleteRecord("queue", "messageQueue", id);
+}
+
+export async function purgeUserLocalData(userId) {
+  const normalizedUserId = String(userId || "");
+  if (!normalizedUserId) return;
+  await Promise.all([
+    deleteRecord("rooms", "roomsCache", normalizedUserId),
+    deleteRecordsWhere(
+      "chat",
+      "channelMessages",
+      "purge-user",
+      (record) => String(record?.userId || "") === normalizedUserId,
+    ),
+    deleteRecordsWhere(
+      "queue",
+      "messageQueue",
+      "purge-user",
+      (record) => String(record?.ownerId || "") === normalizedUserId,
+    ),
+  ]);
 }
 
 function deleteDatabase(databaseId) {

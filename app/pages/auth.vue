@@ -96,7 +96,7 @@ onMounted(async () => {
       await router.replace("/");
       return;
     }
-    authStore.clearAuth(false);
+    await authStore.clearAuth(false);
     status.value = "failed";
     failureMessage.value =
       "The identity service rejected this sign-in. Try again, and contact the administrator if the problem continues.";

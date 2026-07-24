@@ -63,9 +63,8 @@ const profile = computed(() => {
 });
 
 async function handleLogout() {
-  authStore.clearAuth();
-
+  await authStore.clearAuth();
   await nextTick();
-  router.push("/");
+  await router.push("/");
 }
 </script>

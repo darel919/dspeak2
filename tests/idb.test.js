@@ -16,6 +16,7 @@ import {
   IdbOperationError,
   putRecord,
   probeLocalDatabases,
+  purgeUserLocalData,
   reportIdbHealth,
   resetLocalDatabases,
 } from "../app/utils/idb.js";
@@ -67,6 +68,48 @@ test("reactive-style proxy records are converted to storage-safe snapshots", asy
     (await getCachedChannelMessages("proxy-user", "proxy-channel")).messages,
     [{ id: "proxied-message", sender: { id: "proxied-user" } }],
   );
+});
+
+test("logout purges only the outgoing user's local records", async () => {
+  await resetLocalDatabases();
+  await cacheRooms("user-one", [{ id: "room-one" }]);
+  await cacheRooms("user-two", [{ id: "room-two" }]);
+  await cacheChannelMessages("user-one", "channel-one", [
+    { id: "message-one" },
+  ]);
+  await cacheChannelMessages("user-two", "channel-two", [
+    { id: "message-two" },
+  ]);
+  await enqueueMessage({
+    id: "queue-one",
+    ownerId: "user-one",
+    channelId: "channel-one",
+    content: "one",
+  });
+  await enqueueMessage({
+    id: "queue-two",
+    ownerId: "user-two",
+    channelId: "channel-two",
+    content: "two",
+  });
+
+  await purgeUserLocalData("user-one");
+
+  assert.deepEqual(await getCachedRooms("user-one"), []);
+  assert.equal(await getCachedChannelMessages("user-one", "channel-one"), null);
+  assert.deepEqual(await getCachedRooms("user-two"), [{ id: "room-two" }]);
+  assert.deepEqual(
+    (await getCachedChannelMessages("user-two", "channel-two")).messages,
+    [{ id: "message-two" }],
+  );
+  assert.deepEqual(await getQueuedMessages(), [
+    {
+      id: "queue-two",
+      ownerId: "user-two",
+      channelId: "channel-two",
+      content: "two",
+    },
+  ]);
 });
 
 test("recoverable database failures retry once without losing the operation", async () => {

@@ -91,8 +91,8 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     const [currentSnapshot, currentOutbound, currentInbound, peerConnections] =
       await Promise.all([
         session.getWebRTCStatsSnapshot(),
-        session.getOutboundVideoStats ? session.getOutboundVideoStats() : [],
-        session.getInboundVideoStats ? session.getInboundVideoStats() : [],
+        session.getOutboundRtpStats ? session.getOutboundRtpStats() : [],
+        session.getInboundRtpStats ? session.getInboundRtpStats() : [],
         session.getWebRTCDiagnosticStats
           ? session.getWebRTCDiagnosticStats()
           : [],
@@ -166,11 +166,11 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
       outgoingBitrate.value = measured.outgoing;
       incomingBitrate.value = measured.incoming;
       snapshot.value = next;
-      outbound.value = session.getOutboundVideoStats
-        ? await session.getOutboundVideoStats()
+      outbound.value = session.getOutboundRtpStats
+        ? await session.getOutboundRtpStats()
         : [];
-      inbound.value = session.getInboundVideoStats
-        ? await session.getInboundVideoStats()
+      inbound.value = session.getInboundRtpStats
+        ? await session.getInboundRtpStats()
         : [];
       appendHistory(history.rtt, nextMetrics.rttMs, next.timestamp);
       appendHistory(history.jitter, nextMetrics.jitterMs, next.timestamp);
