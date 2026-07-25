@@ -13,6 +13,7 @@ export function createRoomTopology() {
     mode: "idle",
     epoch: 0,
     reason: "waiting-for-peer",
+    transitionFailure: null,
     activatedAt: Date.now(),
     readiness: new Map(),
     transitionReadiness: new Map(),
@@ -44,6 +45,7 @@ export function roomTopologyPayload(room) {
     mode: room.topology.mode,
     epoch: room.topology.epoch,
     reason: room.topology.reason,
+    transitionFailure: room.topology.transitionFailure,
     activatedAt: room.topology.activatedAt,
     target: room.topology.target,
     sourceRevision: room.topology.sourceRevision,
@@ -88,11 +90,19 @@ export class RoomTopologyCoordinator {
     }
   }
 
-  set(room, mode, reason, target = null, preparedEpoch = null) {
+  set(
+    room,
+    mode,
+    reason,
+    target = null,
+    preparedEpoch = null,
+    transitionFailure = null,
+  ) {
     this.clearTimers(room);
     room.topology.mode = mode;
     room.topology.target = target;
     room.topology.reason = reason;
+    room.topology.transitionFailure = transitionFailure;
     room.topology.preparedEpoch = preparedEpoch;
     room.topology.epoch += 1;
     room.topology.activatedAt = Date.now();
@@ -209,12 +219,14 @@ export class RoomTopologyCoordinator {
       .replace(/[^a-z0-9-]/g, "-")
       .replace(/-+/g, "-")
       .slice(0, 80);
+    room.topology.transitionFailure = detail;
+    this.broadcast(room);
     room.topology.transitionTimer = this.setTimer(() => {
       if (
         room.topology.epoch === Number(epoch) &&
         room.topology.mode === "switching"
       ) {
-        this.beginTransition(room, "sfu", `retrying-sfu-${detail}`);
+        this.set(room, "switching", room.topology.reason, "sfu", null, detail);
       }
     }, DEFAULT_SFU_RETRY_DELAY_MS);
     return true;

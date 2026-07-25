@@ -616,7 +616,6 @@ export function useHybridMediaSession() {
     { deep: true, immediate: true },
   );
   registerEchoWarning(echoDetected);
-
   async function applyTopology(data) {
     if (Number(data.epoch) < topologyState.value.epoch) return;
     for (const peer of Array.isArray(data.peers) ? data.peers : [])
@@ -626,6 +625,7 @@ export function useHybridMediaSession() {
       mode: data.mode,
       epoch: Number(data.epoch),
       reason: data.reason || null,
+      transitionFailure: data.transitionFailure || null,
       target: data.target || (data.mode === "probing" ? "p2p" : null),
       sourceRevision: Number(data.sourceRevision) || 0,
       preparedEpoch: Number.isInteger(Number(data.preparedEpoch))

@@ -2,10 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyOpusAudioProfile,
+  isP2pLivenessExpired,
   mediaFlowSnapshot,
   NativeP2pMesh,
   selectedPairSnapshot,
 } from "../app/shared/native-p2p.js";
+
+test("active P2P media stalls do not replace transport health", () => {
+  assert.equal(isP2pLivenessExpired(1000, 61000, 20000), true);
+  assert.equal(
+    /media-flow-stopped|stats-unavailable/.test(
+      NativeP2pMesh.prototype.startHealthChecks.toString(),
+    ),
+    false,
+  );
+});
 
 test("P2P receiving preferences disable the remote sender encoding", async () => {
   const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} });

@@ -21,14 +21,15 @@ parameters. Sender tuning cannot strand signaling in `have-remote-offer`.
 
 ## Health and recovery
 
-P2P health is checked every second. A twenty-second health or RTP liveness timeout,
+P2P health is checked every second. A twenty-second health-channel timeout,
 failed ICE restart, signaling failure, closed health channel, or a relay-selected
-candidate causes the server to select SFU for the whole room. Brief browser stats
-stalls and muted or idle sources do not immediately fail an active direct route.
-A fifth participant also selects SFU. After failure, direct probes may qualify a
-recovered complete mesh, but it must stay eligible for ten seconds before
-activation. Qualification remains revocable during that window: health-channel
-or RTP silence for five seconds cancels the upgrade while SFU remains active.
+candidate causes the server to select SFU for the whole room. RTP liveness is
+required during qualification, but muted, idle, static, or interrupted individual
+sources do not fail an active direct route. A fifth participant also selects SFU.
+After failure, direct probes may qualify a recovered complete mesh, but it must
+stay eligible for ten seconds before activation. Qualification remains revocable
+during that window: health-channel or RTP silence for five seconds cancels the
+upgrade while SFU remains active.
 
 The server WebSocket remains mandatory while P2P media is active. A sequenced
 five-second heartbeat carries the client's topology epoch and source revision.
@@ -320,3 +321,19 @@ mode, participant count, and reason:
 The automated tests cover the coordinator decisions and stale-event behavior.
 This matrix remains necessary because browser ICE timing, hardware capture, and
 real IPv4/IPv6 routing cannot be proven by the Node test environment.
+
+### Active direct-route health
+
+RTP byte progress is required while a direct route is being qualified, but an
+isolated RTP counter stall does not invalidate an already-active P2P route.
+Static video, muted or gated sources, browser statistics gaps, and individual
+source interruptions can stop one counter while ICE and the direct route remain
+healthy. Active P2P falls back to SFU only for route-level failures such as a
+failed or closed peer connection, an unrecovered ICE disconnect, loss of the
+health data channel, a non-direct candidate pair, or a topology membership
+change.
+
+During an SFU fallback, `reason` retains the original route-level trigger.
+`transitionFailure` reports a later SFU preparation error without replacing the
+trigger, so diagnostics distinguish why direct routing ended from why the
+fallback has not completed.

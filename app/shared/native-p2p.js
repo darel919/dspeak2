@@ -7,7 +7,6 @@ import { applyRtpSenderSettings } from "./rtp-sender-settings.js";
 import { sortP2pVideoCodecPreferences } from "./video-settings.js";
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
-export const P2P_ACTIVE_MEDIA_TIMEOUT_MS = 20000;
 export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 8000;
 export const P2P_DISCONNECT_GRACE_MS = 8000;
 export const P2P_ICE_RESTART_TIMEOUT_MS = 12000;
@@ -843,10 +842,6 @@ export class NativeP2pMesh {
             this.mode === "probing"
               ? P2P_STABILITY_LIVENESS_TIMEOUT_MS
               : p2pActiveLivenessTimeoutMs(this.connections.size);
-          const mediaTimeout =
-            this.mode === "probing"
-              ? P2P_STABILITY_LIVENESS_TIMEOUT_MS
-              : p2pActiveLivenessTimeoutMs(this.connections.size);
           if (state.channel?.readyState === "open") {
             try {
               state.channel.send(
@@ -886,47 +881,11 @@ export class NativeP2pMesh {
                 : outboundProgressing && inboundProgressing;
             state.lastOutboundBytes = flow.outboundBytes;
             state.lastInboundBytes = flow.inboundBytes;
-            if (
-              requireLiveness &&
-              outboundNeeded &&
-              isP2pLivenessExpired(
-                state.lastOutboundProgressAt,
-                checkedAt,
-                mediaTimeout,
-              )
-            )
-              this.fail("outbound-media-flow-stopped");
-            if (
-              requireLiveness &&
-              inboundNeeded &&
-              isP2pLivenessExpired(
-                state.lastInboundProgressAt,
-                checkedAt,
-                mediaTimeout,
-              )
-            )
-              this.fail("inbound-media-flow-stopped");
             if (state.selectedPair && !isViableP2pPair(state.selectedPair))
               this.fail("relay-candidate-selected");
           } catch (_) {
             state.selectedPair = null;
             state.mediaReady = false;
-            const outboundExpired =
-              this.localSources.size > 0 &&
-              isP2pLivenessExpired(
-                state.lastOutboundProgressAt,
-                checkedAt,
-                mediaTimeout,
-              );
-            const inboundExpired =
-              state.expectedRemoteSources > 0 &&
-              isP2pLivenessExpired(
-                state.lastInboundProgressAt,
-                checkedAt,
-                mediaTimeout,
-              );
-            if (requireLiveness && (outboundExpired || inboundExpired))
-              this.fail("stats-unavailable");
           }
         }
         this.checkQualification();

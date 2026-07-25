@@ -37,6 +37,8 @@ function harness(peerCount) {
         target: target.topology.target,
         epoch: target.topology.epoch,
         sourceRevision: target.topology.sourceRevision,
+        reason: target.topology.reason,
+        transitionFailure: target.topology.transitionFailure,
       }),
     setTimer,
     clearTimer,
@@ -372,6 +374,33 @@ test("an active P2P failure still requires all-client SFU preparation", () => {
   assert.equal(room.topology.target, "sfu");
   acknowledgeAll(room, coordinator);
   assert.equal(room.topology.reason, "direct-path-unavailable-ice-failed");
+});
+
+test("SFU preparation retries preserve the direct fallback cause", () => {
+  const { room, coordinator, timers } = harness(2);
+  reachP2p(room, coordinator, timers);
+  coordinator.p2pFailed(room, "peer-connection-failed", room.topology.epoch);
+  const failure = {
+    epoch: room.topology.epoch,
+    target: "sfu",
+    sourceRevision: room.topology.sourceRevision,
+    reason:
+      "SFU media did not become ready for handoff (tracks 2/2, outbound 0/0, inbound 1/2)",
+  };
+
+  coordinator.clientFailed(room, failure);
+
+  assert.equal(
+    room.topology.reason,
+    "direct-path-unavailable-peer-connection-failed",
+  );
+  assert.match(room.topology.transitionFailure, /^sfu-media-did-not-become/);
+  runActiveTimer(timers, 1000);
+  assert.equal(
+    room.topology.reason,
+    "direct-path-unavailable-peer-connection-failed",
+  );
+  assert.match(room.topology.transitionFailure, /^sfu-media-did-not-become/);
 });
 
 test("P2P membership changes return to SFU before qualifying the new mesh", () => {
