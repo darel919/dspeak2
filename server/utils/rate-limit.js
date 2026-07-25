@@ -22,34 +22,50 @@ export function resolveClientIp(event) {
   return getRequestIP(event, { xForwardedFor: trustProxy }) || "unknown";
 }
 
+export function resolveWebSocketClientIp(request) {
+  if (process.env.DSPEAK_TRUST_PROXY !== "true") return "untrusted-proxy";
+  const forwarded =
+    request.headers?.get?.("x-forwarded-for") ||
+    request.headers?.["x-forwarded-for"] ||
+    "";
+  return String(forwarded).split(",")[0].trim() || "unknown";
+}
+
 export function enforceRateLimit(event, scope, identity, limit, windowMs) {
+  try {
+    const resetSeconds = enforceIdentifierRateLimit(
+      scope,
+      identity || resolveClientIp(event),
+      limit,
+      windowMs,
+    );
+    setHeader(event, "RateLimit-Reset", String(resetSeconds));
+  } catch (error) {
+    if (error?.data?.retryAfter)
+      setHeader(event, "Retry-After", String(error.data.retryAfter));
+    throw error;
+  }
+}
+
+export function enforceIdentifierRateLimit(scope, identity, limit, windowMs) {
   const state = getState();
   const now = Date.now();
   if (now >= nextPruneAt || state.size > maximumEntries) {
     prune(state, now);
     nextPruneAt = now + pruneIntervalMs;
   }
-  const fallbackIdentity = resolveClientIp(event);
-  const key = `${scope}:${identity || fallbackIdentity}`;
+  const key = `${scope}:${identity}`;
   let entry = state.get(key);
   if (!entry || entry.resetAt <= now) {
     entry = { count: 0, resetAt: now + windowMs };
     state.set(key, entry);
   }
   entry.count += 1;
-  setHeader(
-    event,
-    "RateLimit-Reset",
-    String(Math.max(1, Math.ceil((entry.resetAt - now) / 1000))),
-  );
-  if (entry.count <= limit) return;
-  setHeader(
-    event,
-    "Retry-After",
-    String(Math.max(1, Math.ceil((entry.resetAt - now) / 1000))),
-  );
+  const resetSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+  if (entry.count <= limit) return resetSeconds;
   throw createError({
     statusCode: 429,
     statusMessage: "Too many requests",
+    data: { retryAfter: resetSeconds },
   });
 }

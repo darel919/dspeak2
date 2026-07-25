@@ -2,6 +2,7 @@ export function createChatApiHandler(dependencies) {
   const {
     broadcastToChannel,
     broadcastToUser,
+    assertSafeOutboundUrl,
     canDeleteMessage,
     canViewMessageHistory,
     createError,
@@ -13,7 +14,6 @@ export function createChatApiHandler(dependencies) {
     isMessageOwner,
     parseBody,
     persistMessageNotifications,
-    pocketBaseError,
     presentUser,
     requireAuthenticatedUser,
     requireRoomMember,
@@ -21,6 +21,7 @@ export function createChatApiHandler(dependencies) {
     sendPushTest,
     setResponseStatus,
     usePocketBaseAdmin,
+    pushAllowedHosts,
   } = dependencies;
 
   async function handleNotifications(event, pb, userId, suffix) {
@@ -33,7 +34,34 @@ export function createChatApiHandler(dependencies) {
           sort: "-created",
           expand: "actor,room,channel,message",
         });
-      return items;
+      return {
+        page: items.page,
+        perPage: items.perPage,
+        totalItems: items.totalItems,
+        totalPages: items.totalPages,
+        items: items.items.map((item) => ({
+          id: item.id,
+          type: item.type,
+          title: item.title,
+          body: item.body,
+          read_at: item.read_at || null,
+          created: item.created,
+          actor: presentUser(item.expand?.actor),
+          room: item.expand?.room
+            ? {
+                id: item.expand.room.id,
+                name: item.expand.room.name,
+              }
+            : null,
+          channel: item.expand?.channel
+            ? {
+                id: item.expand.channel.id,
+                name: item.expand.channel.name,
+              }
+            : null,
+          message: item.expand?.message ? { id: item.expand.message.id } : null,
+        })),
+      };
     }
     if (suffix === "notifications/read" && event.method === "POST") {
       const ids = Array.isArray(body.ids) ? body.ids.slice(0, 100) : [];
@@ -167,8 +195,15 @@ export function createChatApiHandler(dependencies) {
       return handleNotifications(event, pb, userId, suffix);
 
     if (suffix === "unread" && event.method === "GET") {
+      const memberships = await getBoundedList(pb, "dspeak_room_memberships", {
+        filter: `user = '${userId}'`,
+        fields: "room",
+      });
+      if (!memberships.length) return [];
       const rooms = await getBoundedList(pb, "dspeak_rooms", {
-        filter: `members ~ '${userId}'`,
+        filter: memberships
+          .map((membership) => `id = '${membership.room}'`)
+          .join(" || "),
       });
       if (!rooms.length) return [];
       const channels = await getBoundedList(pb, "dspeak_rooms_channels", {
@@ -323,9 +358,7 @@ export function createChatApiHandler(dependencies) {
         senderId: userId,
       });
       if (delivery.notifications) {
-        for (const recipient of (room.members || [])
-          .map(String)
-          .filter((id) => id !== String(userId))) {
+        for (const recipient of delivery.recipients) {
           broadcastToUser(recipient, { type: "notifications_changed" });
         }
       }
@@ -512,7 +545,7 @@ export function createChatApiHandler(dependencies) {
           results.push({
             messageId,
             status: "error",
-            error: pocketBaseError(error),
+            error: { code: "READ_UPDATE_FAILED" },
           });
         }
       }
@@ -579,12 +612,16 @@ export function createChatApiHandler(dependencies) {
             statusCode: 400,
             statusMessage: "Subscription data is too large",
           });
-        const endpointUrl = new URL(endpoint);
-        if (endpointUrl.protocol !== "https:")
+        try {
+          await assertSafeOutboundUrl(endpoint, {
+            allowedHosts: pushAllowedHosts,
+          });
+        } catch {
           throw createError({
             statusCode: 400,
-            statusMessage: "Subscription endpoint must use HTTPS",
+            statusMessage: "Subscription endpoint is not permitted",
           });
+        }
         const data = {
           user: userId,
           device_id: deviceId,
@@ -625,29 +662,6 @@ export function createChatApiHandler(dependencies) {
         "Device ID is required",
       );
       return sendPushTest(pb, userId, deviceId);
-    }
-
-    if (suffix === "subscribe" && event.method === "POST") {
-      requireValue(body.roomId, "Room ID and subscription are required");
-      requireValue(body.subscription, "Room ID and subscription are required");
-      const existing = await getBoundedList(pb, "dspeak_webpush", {
-        filter: pb.filter("room = {:room} && user = {:user}", {
-          room: body.roomId,
-          user: userId,
-        }),
-      });
-      if (!existing.length)
-        await pb.collection("dspeak_webpush").create({
-          room: body.roomId,
-          user: userId,
-          keys: {
-            endpoint: body.subscription.endpoint,
-            p256dh: body.subscription.keys.p256dh,
-            auth: body.subscription.keys.auth,
-          },
-        });
-      setResponseStatus(event, 201);
-      return { success: true };
     }
 
     throw createError({

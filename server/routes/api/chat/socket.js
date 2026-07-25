@@ -8,6 +8,11 @@ import {
 } from "../../../utils/dspeak-realtime";
 import { usePocketBaseAdmin } from "../../../utils/pocketbase";
 import { authenticateWebSocketRequest } from "../../../utils/authentication";
+import {
+  enforceIdentifierRateLimit,
+  resolveWebSocketClientIp,
+} from "../../../utils/rate-limit.js";
+import { requireRoomMember } from "../../../utils/room-authorization.js";
 
 const sessions = new Map();
 
@@ -18,21 +23,26 @@ function send(peer, type, data) {
 export default defineWebSocketHandler({
   async open(peer) {
     try {
+      enforceIdentifierRateLimit(
+        "chat-websocket-ip",
+        resolveWebSocketClientIp(peer.request),
+        120,
+        60 * 1000,
+      );
       const url = new URL(peer.request.url);
       const channelId = url.searchParams.get("channelId");
       const authentication = await authenticateWebSocketRequest(peer.request);
       if (!channelId || !authentication)
         return peer.close(1008, "Authentication and channel ID are required");
       const { userId, deviceId } = authentication;
+      enforceIdentifierRateLimit("chat-websocket-open", userId, 30, 60 * 1000);
 
       const pb = await usePocketBaseAdmin();
       const channel = await pb
         .collection("dspeak_rooms_channels")
         .getOne(channelId);
       const room = await pb.collection("dspeak_rooms").getOne(channel.room);
-      if (!(room.members || []).map(String).includes(String(userId))) {
-        return peer.close(1008, "Access denied to room");
-      }
+      await requireRoomMember(pb, room, userId);
 
       sessions.set(peer.id, {
         userId,
@@ -81,6 +91,12 @@ export default defineWebSocketHandler({
     const session = sessions.get(peer.id);
     if (!session) return;
     try {
+      enforceIdentifierRateLimit(
+        "chat-websocket-message",
+        session.userId,
+        120,
+        60 * 1000,
+      );
       const message = rawMessage.json();
       if (message.type === "ping") return send(peer, "pong");
       if (message.type === "typing") {

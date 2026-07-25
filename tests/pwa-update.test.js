@@ -79,11 +79,14 @@ test("service worker responses cannot be reused across deployments", () => {
 
 test("only the application-owned service worker registrar is enabled", () => {
   assert.match(nuxtConfig, /registerPlugin: false/);
-  assert.match(
+  assert.doesNotMatch(
     serviceWorkerRegistration,
     /navigator\.serviceWorker\.getRegistrations\(\)/,
   );
-  assert.match(serviceWorkerRegistration, /registration\.unregister\(\)/);
+  assert.doesNotMatch(
+    serviceWorkerRegistration,
+    /registration\.unregister\(\)/,
+  );
   assert.doesNotMatch(installPrompt, /\$pwa/);
   assert.match(installPrompt, /beforeinstallprompt/);
 });

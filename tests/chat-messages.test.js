@@ -153,7 +153,7 @@ test("message detail helpers reject absent timestamps and use channel IDs", () =
   assert.equal(isValidMessageTimestamp(message.updated), false);
   assert.equal(hasDistinctUpdatedTimestamp(message), false);
   assert.equal(messageChannelId(message), "channel-1");
-  assert.equal(messageChannelId({ room: "legacy-room" }), "legacy-room");
+  assert.equal(messageChannelId({ room: "obsolete-room" }), "");
 });
 
 test("chat GET routes do not attempt to read a request body", () => {

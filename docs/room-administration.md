@@ -1,9 +1,7 @@
 # Room administration contract
 
 Room administration covers branding, roles, memberships, channel media policy,
-notifications, user identity, stream attenuation, and room soundboards. Nitro
-keeps the legacy room-member relation compatible while the newer membership
-collections are populated.
+notifications, user identity, stream attenuation, and room soundboards.
 
 ## Migration behavior
 
@@ -36,8 +34,7 @@ It adds `media_policy` JSON to `dspeak_rooms_channels`. The object contains
 | Screen video        | Low 2000, Medium 3000, High 4000, Maximum 6000 kbps |
 | Shared audio        | Stereo, 64–256 kbps                                 |
 
-Camera and screen frame rate still follow each user's selected target. The
-legacy `audio_bitrate` field remains during the compatibility period.
+Camera and screen frame rate still follow each user's selected target.
 
 ## Roles and memberships
 
@@ -47,10 +44,8 @@ system status, and default status. `(room, position)` is indexed.
 `dspeak_room_memberships` stores the room, user, assigned roles, and join date.
 Each `(room, user)` pair is unique, and `user` is indexed.
 
-Existing rooms receive Owner, Admin, Moderator, and Member roles. The room owner
-receives Owner; all other existing members receive Member. The legacy `members`
-relation remains until every deployed client and maintenance task uses the new
-membership records.
+Rooms receive Owner, Admin, Moderator, and Member roles. Membership records are
+the only room membership authority.
 
 All room and channel mutations pass through
 `server/utils/room-authorization.js`. Permissions from multiple roles combine.

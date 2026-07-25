@@ -6,20 +6,13 @@ import {
   VIDEO_POLICY_QUALITY_STEPS,
 } from "../shared/media-policy.js";
 
-test("legacy channel audio bitrate populates microphone and shared audio", () => {
-  const policy = normalizeMediaPolicy({}, 160);
-  assert.equal(policy.microphoneKbps, 160);
-  assert.equal(policy.sharedAudioKbps, 160);
-  assert.equal(policy.hdAudio, true);
-});
-
-test("legacy null media policy is normalized without breaking room responses", () => {
-  assert.deepEqual(normalizeMediaPolicy(null, 96), {
+test("missing media policy fields receive current defaults", () => {
+  assert.deepEqual(normalizeMediaPolicy(null), {
     hdAudio: false,
-    microphoneKbps: 96,
+    microphoneKbps: 48,
     cameraKbps: 1500,
     screenKbps: 4000,
-    sharedAudioKbps: 96,
+    sharedAudioKbps: 128,
     revision: 1,
     updatedAt: null,
   });

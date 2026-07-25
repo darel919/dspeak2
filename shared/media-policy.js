@@ -23,9 +23,9 @@ export const VIDEO_POLICY_QUALITY_STEPS = Object.freeze({
   ]),
 });
 
-export function normalizeMediaPolicy(value = {}, legacyAudioBitrate = null) {
+export function normalizeMediaPolicy(value = {}) {
   value = value && typeof value === "object" ? value : {};
-  const requestedMicrophone = value.microphoneKbps ?? legacyAudioBitrate;
+  const requestedMicrophone = value.microphoneKbps;
   const hdAudio =
     value.hdAudio === true ||
     (value.hdAudio == null &&
@@ -54,7 +54,7 @@ export function normalizeMediaPolicy(value = {}, legacyAudioBitrate = null) {
       MEDIA_POLICY_LIMITS.screenKbps,
     ),
     sharedAudioKbps: readPolicyNumber(
-      value.sharedAudioKbps ?? legacyAudioBitrate,
+      value.sharedAudioKbps,
       MEDIA_POLICY_LIMITS.sharedAudioKbps,
     ),
     revision: Math.max(1, Math.floor(Number(value.revision) || 1)),

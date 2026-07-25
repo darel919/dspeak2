@@ -8,6 +8,10 @@ import {
 import { authenticateWebSocketRequest } from "../../utils/authentication";
 import { publicDisplayName } from "../../../shared/user-profile";
 import { getBoundedList } from "../../utils/pocketbase-query";
+import {
+  enforceIdentifierRateLimit,
+  resolveWebSocketClientIp,
+} from "../../utils/rate-limit.js";
 
 const sessions = new Map();
 
@@ -18,6 +22,12 @@ function send(peer, type, data) {
 export default defineWebSocketHandler({
   async open(peer) {
     try {
+      enforceIdentifierRateLimit(
+        "voice-presence-websocket-ip",
+        resolveWebSocketClientIp(peer.request),
+        120,
+        60 * 1000,
+      );
       const url = new URL(peer.request.url);
       const roomId = url.searchParams.get("roomId");
       const authentication = await authenticateWebSocketRequest(peer.request);
@@ -26,6 +36,12 @@ export default defineWebSocketHandler({
         return;
       }
       const { userId } = authentication;
+      enforceIdentifierRateLimit(
+        "voice-presence-websocket-open",
+        userId,
+        30,
+        60 * 1000,
+      );
 
       const pb = await usePocketBaseAdmin();
       const room = await pb.collection("dspeak_rooms").getOne(roomId);
@@ -87,6 +103,14 @@ export default defineWebSocketHandler({
 
   message(peer, message) {
     try {
+      const session = sessions.get(peer.id);
+      if (!session) return;
+      enforceIdentifierRateLimit(
+        "voice-presence-websocket-message",
+        peer.id,
+        120,
+        60 * 1000,
+      );
       const payload = JSON.parse(message.text());
       if (payload?.type === "ping") send(peer, "pong", { at: Date.now() });
     } catch {

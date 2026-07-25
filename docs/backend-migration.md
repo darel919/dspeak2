@@ -14,13 +14,11 @@ left by the previous multi-service deployment.
 | Media presence updates       | `server/utils/mediasoup-sfu.js`    |
 | Privileged PocketBase access | `server/utils/pocketbase.js`       |
 
-The original PocketBase collections remain supported:
+The application-owned PocketBase collections are:
 
 - `dspeak_rooms`
 - `dspeak_rooms_channels`
 - `dspeak_messages`
-- `dspeak_webpush`
-- `dspeak_webpush_global`
 - `dspeak_users_state`
 - `users`
 
@@ -38,9 +36,9 @@ Message authors may edit or unsend their own persisted messages. Room owners and
 roles with `message.moderate` may delete other members' messages and inspect
 revision history.
 
-`dspeak_webpush_global` is a migration source only. Startup copies usable legacy
-subscriptions into the device-scoped collection; new subscription writes never
-use the legacy collection.
+The obsolete `dspeak_webpush` and `dspeak_webpush_global` collections are
+deleted by `20260725_remove_obsolete_push_collections_v1`. Current clients use
+only device-scoped subscriptions.
 
 Room administration adds roles, memberships, branding, media policy,
 notifications, identities, and soundboards. Nitro applies these migrations at

@@ -22,7 +22,7 @@
     "@pinia/nuxt": "^1.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@vite-pwa/nuxt": "1.1.1",
-    "daisyui": "^5.7.0",
+    "daisyui": "^5.7.1",
     "mediasoup": "^3.22.0",
     "mediasoup-client": "^3.21.0",
     "nuxt": "^4.5.0",
@@ -40,7 +40,7 @@
   "overrides": {
     "@babel/plugin-transform-modules-systemjs": "7.29.7",
     "ajv": "8.20.0",
-    "brace-expansion": "5.0.7",
+    "brace-expansion": "5.0.8",
     "defu": "6.1.7",
     "fast-uri": "4.1.1",
     "glob": "13.0.6",

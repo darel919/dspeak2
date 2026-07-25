@@ -58,7 +58,8 @@ export const useVoiceStore = defineStore("voice", () => {
   const effectiveSystemAudioBitrate = computed(() => {
     const requested = Number(settingsStore.systemAudioBitrate) || 128;
     const channelLimit = Number(
-      channelsStore.getChannelById(currentChannelId.value)?.audio_bitrate,
+      channelsStore.getChannelById(currentChannelId.value)?.mediaPolicy
+        ?.sharedAudioKbps,
     );
     return Number.isFinite(channelLimit) && channelLimit > 0
       ? Math.min(requested, channelLimit)
@@ -667,7 +668,9 @@ export const useVoiceStore = defineStore("voice", () => {
   }
 
   watch(
-    () => channelsStore.getChannelById(currentChannelId.value)?.audio_bitrate,
+    () =>
+      channelsStore.getChannelById(currentChannelId.value)?.mediaPolicy
+        ?.sharedAudioKbps,
     () => {
       if (connected.value)
         sfuComposable.value

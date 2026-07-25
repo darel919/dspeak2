@@ -3,10 +3,20 @@ import {
   handleSfuPeerMessage,
   openSfuPeer,
 } from "../utils/mediasoup-sfu";
+import {
+  enforceIdentifierRateLimit,
+  resolveWebSocketClientIp,
+} from "../utils/rate-limit.js";
 
 export default defineWebSocketHandler({
   async open(peer) {
     try {
+      enforceIdentifierRateLimit(
+        "sfu-websocket-ip",
+        resolveWebSocketClientIp(peer.request),
+        120,
+        60 * 1000,
+      );
       await openSfuPeer(peer);
     } catch (error) {
       console.error("[SFU] failed to open peer", error);

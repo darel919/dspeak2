@@ -12,6 +12,7 @@ beforeEach(() => {
     POCKETBASE_URL: "https://pocketbase.example.com",
     PBASE_ADMIN_EMAIL: "admin@example.com",
     PBASE_ADMIN_PASSWORD: "secret",
+    DSPEAK_CSRF_SECRET: "test-secret-with-at-least-32-characters",
     VAPID_PUBLIC_KEY: "public",
     VAPID_PUBKEY: "public",
     VAPID_PRIVKEY: "private",
@@ -110,6 +111,6 @@ test("rejects unsafe TURN credential lifetimes", async () => {
 
   await assert.rejects(
     validateRuntimeEnvironment(),
-    /TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 86400/,
+    /TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 3600/,
   );
 });

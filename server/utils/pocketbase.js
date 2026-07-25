@@ -43,10 +43,3 @@ export async function usePocketBaseAdmin() {
   }
   return client;
 }
-
-export function pocketBaseError(error) {
-  return {
-    message: error instanceof Error ? error.message : String(error),
-    details: error?.response?.data || error?.data?.data || null,
-  };
-}

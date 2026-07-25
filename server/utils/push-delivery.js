@@ -8,6 +8,11 @@ import { publicDisplayName } from "../../shared/user-profile.js";
 import { isDeviceViewingChannel } from "./dspeak-realtime.js";
 import { usePocketBaseAdmin } from "./pocketbase.js";
 import { getBoundedList } from "./pocketbase-query.js";
+import {
+  assertSafeOutboundUrl,
+  configuredOutboundHosts,
+  createPublicHttpsAgent,
+} from "../infrastructure/network/outbound-request.js";
 
 const dispatcherKey = Symbol.for("dspeak.push.dispatcher");
 const retryDelays = [5_000, 30_000, 120_000, 600_000, 1_800_000];
@@ -17,6 +22,10 @@ const dispatchInterval = 5_000;
 const dispatchBatchSize = 50;
 const completedJobRetention = 7 * 24 * 60 * 60 * 1000;
 const cleanupInterval = 60 * 60 * 1000;
+const pushAllowedHosts = configuredOutboundHosts(
+  process.env.DSPEAK_PUSH_ALLOWED_HOSTS,
+);
+const pushAgent = createPublicHttpsAgent();
 
 function getState() {
   if (!globalThis[dispatcherKey]) {
@@ -99,10 +108,18 @@ export async function persistMessageNotifications({
   message,
   senderId,
 }) {
-  const recipientIds = (room.members || [])
-    .map(String)
-    .filter((id) => id !== String(senderId));
-  if (!recipientIds.length) return { notifications: 0, jobs: 0 };
+  const memberships = await getBoundedList(pb, "dspeak_room_memberships", {
+    filter: pb.filter("room = {:room} && user != {:sender}", {
+      room: room.id,
+      sender: senderId,
+    }),
+    fields: "user",
+  });
+  const recipientIds = [
+    ...new Set(memberships.map(({ user }) => String(user))),
+  ];
+  if (!recipientIds.length)
+    return { notifications: 0, jobs: 0, recipients: [] };
   const profiles = await getBoundedList(pb, "users", {
     filter: recipientIds
       .map((id) => pb.filter("id = {:id}", { id }))
@@ -231,7 +248,11 @@ export async function persistMessageNotifications({
       if (job) jobCount += 1;
     }
   }
-  return { notifications: notificationCount, jobs: jobCount };
+  return {
+    notifications: notificationCount,
+    jobs: jobCount,
+    recipients: recipientIds,
+  };
 }
 
 function retryAt(attempts) {
@@ -279,6 +300,9 @@ async function deliverJob(pb, job) {
     locked_until: new Date(Date.now() + lockLifetime).toISOString(),
   });
   try {
+    await assertSafeOutboundUrl(subscription.endpoint, {
+      allowedHosts: pushAllowedHosts,
+    });
     await webpush.sendNotification(
       {
         endpoint: subscription.endpoint,
@@ -293,6 +317,8 @@ async function deliverJob(pb, job) {
           0,
           Math.floor((Date.parse(job.expires_at) - Date.now()) / 1000),
         ),
+        agent: pushAgent,
+        timeout: 10_000,
       },
     );
     const deliveredAt = new Date().toISOString();

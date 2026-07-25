@@ -1,16 +1,57 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import { usePocketBaseAdmin } from "./pocketbase.js";
 import { enforceRateLimit } from "./rate-limit.js";
 
-const SESSION_COOKIE = "dspeak_session";
+const SESSION_COOKIE =
+  process.env.NODE_ENV === "production"
+    ? "__Host-dspeak_session"
+    : "dspeak_session";
 const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_REFRESH_SECONDS = 24 * 60 * 60;
-const AUTH_HANDOFF_COOKIE = "dspeak_auth_handoff";
+const AUTH_HANDOFF_COOKIE =
+  process.env.NODE_ENV === "production"
+    ? "__Host-dspeak_auth_handoff"
+    : "dspeak_auth_handoff";
 const AUTH_HANDOFF_LIFETIME_SECONDS = 10 * 60;
 const ACCOUNT_URL = "https://account.darelisme.my.id";
+const SESSION_ROTATION_GRACE_MS = 30 * 1000;
+const rotationStateKey = Symbol.for("dspeak.session-rotation");
+
+function rotationState() {
+  if (!globalThis[rotationStateKey])
+    globalThis[rotationStateKey] = {
+      previousTokens: new Map(),
+      locks: new Map(),
+      nextPruneAt: 0,
+    };
+  const state = globalThis[rotationStateKey];
+  if (state.nextPruneAt <= Date.now()) {
+    for (const [hash, value] of state.previousTokens)
+      if (value.expiresAt <= Date.now()) state.previousTokens.delete(hash);
+    state.nextPruneAt = Date.now() + 60 * 1000;
+  }
+  return state;
+}
 
 function hashSessionToken(token) {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function csrfTokenForSession(session) {
+  const secret = process.env.DSPEAK_CSRF_SECRET;
+  if (!secret) throw new Error("DSPEAK_CSRF_SECRET is not configured");
+  return createHmac("sha256", secret)
+    .update(`dspeak-csrf:${session.id}`)
+    .digest("base64url");
+}
+
+function exposeCsrfToken(event, session) {
+  setHeader(event, "X-dSpeak-CSRF-Token", csrfTokenForSession(session));
 }
 
 function sessionCookieOptions(maxAge = SESSION_LIFETIME_SECONDS) {
@@ -35,32 +76,100 @@ function authHandoffCookieOptions(maxAge = AUTH_HANDOFF_LIFETIME_SECONDS) {
 
 async function findSessionByToken(pb, token) {
   if (!token) return null;
+  const tokenHash = hashSessionToken(token);
   try {
     return await pb
       .collection("dspeak_sessions")
-      .getFirstListItem(
-        pb.filter("token_hash = {:hash}", { hash: hashSessionToken(token) }),
-      );
+      .getFirstListItem(pb.filter("token_hash = {:hash}", { hash: tokenHash }));
   } catch (error) {
-    if (error?.status === 404 || error?.response?.status === 404) return null;
-    throw error;
+    if (error?.status !== 404 && error?.response?.status !== 404) throw error;
+    const previous = rotationState().previousTokens.get(tokenHash);
+    if (!previous || previous.expiresAt <= Date.now()) {
+      rotationState().previousTokens.delete(tokenHash);
+      return null;
+    }
+    try {
+      return await pb.collection("dspeak_sessions").getOne(previous.sessionId);
+    } catch (lookupError) {
+      if (lookupError?.status === 404 || lookupError?.response?.status === 404)
+        return null;
+      throw lookupError;
+    }
   }
 }
 
-async function validateSession(pb, token) {
+function publicUserMetadata(user) {
+  return {
+    id: String(user.id),
+    name: user.name || "",
+    username: user.username || "",
+    display_name: user.display_name || "",
+    handle: user.handle || "",
+    avatar: user.avatar || null,
+  };
+}
+
+async function validateSession(pb, token, event = null) {
   const session = await findSessionByToken(pb, token);
   if (!session) return null;
+  const suppliedHash = hashSessionToken(token);
+  if (event && session.token_hash !== suppliedHash) {
+    const previous = rotationState().previousTokens.get(suppliedHash);
+    if (previous?.expiresAt > Date.now())
+      setCookie(
+        event,
+        SESSION_COOKIE,
+        previous.currentToken,
+        sessionCookieOptions(),
+      );
+  }
   if (Date.parse(session.expires_at) <= Date.now()) {
     await pb.collection("dspeak_sessions").delete(session.id);
     return null;
   }
   if (
-    !session.last_seen_at ||
-    Date.now() - Date.parse(session.last_seen_at) >= SESSION_REFRESH_SECONDS
+    (event && !session.last_seen_at) ||
+    (event &&
+      Date.now() - Date.parse(session.last_seen_at) >= SESSION_REFRESH_SECONDS)
   ) {
-    await pb.collection("dspeak_sessions").update(session.id, {
-      last_seen_at: new Date().toISOString(),
-    });
+    const state = rotationState();
+    const previousLock = state.locks.get(session.id) || Promise.resolve();
+    const refresh = previousLock
+      .catch(() => {})
+      .then(async () => {
+        const current = await pb
+          .collection("dspeak_sessions")
+          .getOne(session.id);
+        if (current.token_hash !== suppliedHash) {
+          const previous = state.previousTokens.get(suppliedHash);
+          if (previous?.expiresAt > Date.now())
+            setCookie(
+              event,
+              SESSION_COOKIE,
+              previous.currentToken,
+              sessionCookieOptions(),
+            );
+          return;
+        }
+        const rawToken = randomBytes(32).toString("base64url");
+        await pb.collection("dspeak_sessions").update(session.id, {
+          token_hash: hashSessionToken(rawToken),
+          last_seen_at: new Date().toISOString(),
+        });
+        state.previousTokens.set(suppliedHash, {
+          sessionId: session.id,
+          currentToken: rawToken,
+          expiresAt: Date.now() + SESSION_ROTATION_GRACE_MS,
+        });
+        setCookie(event, SESSION_COOKIE, rawToken, sessionCookieOptions());
+      });
+    state.locks.set(session.id, refresh);
+    try {
+      await refresh;
+    } finally {
+      if (state.locks.get(session.id) === refresh)
+        state.locks.delete(session.id);
+    }
   }
   return session;
 }
@@ -94,7 +203,7 @@ async function persistAuthenticatedSession(event, metadata, userId, deviceId) {
   );
   const rawToken = randomBytes(32).toString("base64url");
   const now = new Date();
-  await pb.collection("dspeak_sessions").create({
+  const session = await pb.collection("dspeak_sessions").create({
     token_hash: hashSessionToken(rawToken),
     user: userId,
     device_id: String(deviceId),
@@ -104,7 +213,8 @@ async function persistAuthenticatedSession(event, metadata, userId, deviceId) {
     last_seen_at: now.toISOString(),
   });
   setCookie(event, SESSION_COOKIE, rawToken, sessionCookieOptions());
-  return { user: { user_metadata: metadata } };
+  exposeCsrfToken(event, session);
+  return { user: { user_metadata: publicUserMetadata(metadata) } };
 }
 
 export function createAuthenticationHandoff(event) {
@@ -183,7 +293,26 @@ export async function exchangeAuthenticationHandoff(
 
 export async function getAuthenticatedSession(event) {
   const token = getCookie(event, SESSION_COOKIE);
-  return validateSession(await usePocketBaseAdmin(), token);
+  const session = await validateSession(
+    await usePocketBaseAdmin(),
+    token,
+    event,
+  );
+  if (session) exposeCsrfToken(event, session);
+  return session;
+}
+
+export async function validateCsrfRequest(event) {
+  const token = getCookie(event, SESSION_COOKIE);
+  if (!token) return true;
+  const session = await findSessionByToken(await usePocketBaseAdmin(), token);
+  if (!session) return true;
+  const supplied = getHeader(event, "x-dspeak-csrf-token") || "";
+  const expected = csrfTokenForSession(session);
+  return (
+    supplied.length === expected.length &&
+    timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))
+  );
 }
 
 export async function requireAuthenticatedUser(event) {
@@ -210,8 +339,7 @@ export async function restoreAuthenticatedSession(event) {
   return {
     user: {
       user_metadata: {
-        ...user,
-        id: user.id,
+        ...publicUserMetadata(user),
       },
     },
   };
@@ -289,7 +417,7 @@ function requestHeader(request, name) {
 
 function isAllowedWebSocketOrigin(request) {
   const origin = requestHeader(request, "origin");
-  if (!origin) return process.env.DSPEAK_ALLOW_ORIGINLESS_WEBSOCKETS === "true";
+  if (!origin) return false;
   try {
     const requestUrl = new URL(request.url);
     const forwardedHost = requestHeader(request, "x-forwarded-host");

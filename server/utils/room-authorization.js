@@ -1,16 +1,11 @@
 import {
   DEFAULT_ROLE_TEMPLATES,
-  ROOM_PERMISSIONS,
   canManageRole,
   getEffectivePermissions,
   getHighestRolePosition,
   normalizePermissions,
 } from "../../shared/room-policy.js";
 import { getBoundedList } from "./pocketbase-query.js";
-
-function isMissingCollection(error) {
-  return error?.status === 404 || error?.response?.status === 404;
-}
 
 export async function getRoomAccess(pb, room, userId) {
   const isOwner = String(room.owner) === String(userId);
@@ -28,24 +23,17 @@ export async function getRoomAccess(pb, room, userId) {
       isOwner,
       permissions: getEffectivePermissions(roles, isOwner),
       highestPosition: getHighestRolePosition(roles, isOwner),
-      source: "rbac",
     };
   } catch (error) {
-    if (!isMissingCollection(error) && error?.status !== 404) throw error;
+    if (error?.status !== 404 && error?.response?.status !== 404) throw error;
   }
-  const member =
-    isOwner || (room.members || []).map(String).includes(String(userId));
   return {
-    member,
+    member: false,
     membership: null,
     roles: [],
     isOwner,
-    permissions:
-      isOwner || !member
-        ? [...(isOwner ? ROOM_PERMISSIONS : [])]
-        : ["channel.create"],
+    permissions: [],
     highestPosition: isOwner ? Number.POSITIVE_INFINITY : 0,
-    source: "legacy",
   };
 }
 
@@ -70,75 +58,61 @@ export async function requireRoomPermission(pb, room, userId, permission) {
 }
 
 export async function seedRoomRoles(pb, room, ownerId) {
-  try {
-    const roles = [];
-    for (const template of DEFAULT_ROLE_TEMPLATES) {
-      roles.push(
-        await pb.collection("dspeak_room_roles").create({
-          room: room.id,
-          ...template,
-          permissions: [...template.permissions],
-        }),
-      );
-    }
-    const ownerRole = roles.find((role) => role.system);
-    await pb.collection("dspeak_room_memberships").create({
-      room: room.id,
-      user: ownerId,
-      roles: ownerRole ? [ownerRole.id] : [],
-      joined_at: new Date().toISOString(),
-    });
-    return roles;
-  } catch (error) {
-    if (isMissingCollection(error)) return [];
-    throw error;
+  const roles = [];
+  for (const template of DEFAULT_ROLE_TEMPLATES) {
+    roles.push(
+      await pb.collection("dspeak_room_roles").create({
+        room: room.id,
+        ...template,
+        permissions: [...template.permissions],
+      }),
+    );
   }
+  const ownerRole = roles.find((role) => role.system);
+  await pb.collection("dspeak_room_memberships").create({
+    room: room.id,
+    user: ownerId,
+    roles: ownerRole ? [ownerRole.id] : [],
+    joined_at: new Date().toISOString(),
+  });
+  return roles;
 }
 
 export async function ensureRoomMembership(pb, room, userId) {
-  try {
-    const existing = await getBoundedList(
-      pb,
-      "dspeak_room_memberships",
-      {
-        filter: `room = '${room.id}' && user = '${userId}'`,
-      },
-      2,
-    );
-    if (existing.length) return existing[0];
-    const roles = await getBoundedList(pb, "dspeak_room_roles", {
-      filter: `room = '${room.id}' && is_default = true`,
-    });
-    return pb.collection("dspeak_room_memberships").create({
-      room: room.id,
-      user: userId,
-      roles: roles.map((role) => role.id),
-      joined_at: new Date().toISOString(),
-    });
-  } catch (error) {
-    if (isMissingCollection(error)) return null;
-    throw error;
-  }
+  const existing = await getBoundedList(
+    pb,
+    "dspeak_room_memberships",
+    {
+      filter: `room = '${room.id}' && user = '${userId}'`,
+    },
+    2,
+  );
+  if (existing.length) return existing[0];
+  const roles = await getBoundedList(pb, "dspeak_room_roles", {
+    filter: `room = '${room.id}' && is_default = true`,
+  });
+  return pb.collection("dspeak_room_memberships").create({
+    room: room.id,
+    user: userId,
+    roles: roles.map((role) => role.id),
+    joined_at: new Date().toISOString(),
+  });
 }
 
 export async function removeRoomMembership(pb, roomId, userId) {
-  try {
-    const memberships = await getBoundedList(
-      pb,
-      "dspeak_room_memberships",
-      {
-        filter: `room = '${roomId}' && user = '${userId}'`,
-      },
-      2,
-    );
-    await Promise.all(
-      memberships.map((membership) =>
-        pb.collection("dspeak_room_memberships").delete(membership.id),
-      ),
-    );
-  } catch (error) {
-    if (!isMissingCollection(error)) throw error;
-  }
+  const memberships = await getBoundedList(
+    pb,
+    "dspeak_room_memberships",
+    {
+      filter: `room = '${roomId}' && user = '${userId}'`,
+    },
+    2,
+  );
+  await Promise.all(
+    memberships.map((membership) =>
+      pb.collection("dspeak_room_memberships").delete(membership.id),
+    ),
+  );
 }
 
 export async function presentRoomAccess(pb, room, userId) {

@@ -544,8 +544,8 @@ export function useHybridMediaSession() {
       : null;
     const channelBitrate =
       source === "screen-audio"
-        ? channel?.mediaPolicy?.sharedAudioKbps || channel?.audio_bitrate
-        : channel?.mediaPolicy?.microphoneKbps || channel?.audio_bitrate;
+        ? channel?.mediaPolicy?.sharedAudioKbps
+        : channel?.mediaPolicy?.microphoneKbps;
     return getAudioBitrateBps(
       source,
       channelBitrate,

@@ -4,14 +4,38 @@ import {
   removeGlobalSubscriber,
 } from "../../utils/dspeak-realtime";
 import { authenticateWebSocketRequest } from "../../utils/authentication";
+import {
+  enforceIdentifierRateLimit,
+  resolveWebSocketClientIp,
+} from "../../utils/rate-limit.js";
 
 const users = new Map();
 
 export default defineWebSocketHandler({
   async open(peer) {
+    try {
+      enforceIdentifierRateLimit(
+        "presence-websocket-ip",
+        resolveWebSocketClientIp(peer.request),
+        120,
+        60 * 1000,
+      );
+    } catch {
+      return peer.close(1008, "Too many presence connections");
+    }
     const authentication = await authenticateWebSocketRequest(peer.request);
     if (!authentication) return peer.close(1008, "Authentication required");
     const { userId } = authentication;
+    try {
+      enforceIdentifierRateLimit(
+        "presence-websocket-open",
+        userId,
+        30,
+        60 * 1000,
+      );
+    } catch {
+      return peer.close(1008, "Too many presence connections");
+    }
     users.set(peer.id, userId);
     addGlobalSubscriber(peer);
     try {

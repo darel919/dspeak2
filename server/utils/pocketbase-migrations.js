@@ -2,7 +2,6 @@ import {
   DEFAULT_ROLE_TEMPLATES,
   normalizeAttenuation,
 } from "../../shared/room-policy.js";
-import { normalizeMediaPolicy } from "../../shared/media-policy.js";
 
 const MIGRATION_COLLECTION = "dspeak_migrations";
 const REQUIRED_COLLECTIONS = Object.freeze([
@@ -10,8 +9,6 @@ const REQUIRED_COLLECTIONS = Object.freeze([
   "dspeak_rooms",
   "dspeak_rooms_channels",
   "dspeak_messages",
-  "dspeak_webpush",
-  "dspeak_webpush_global",
   "dspeak_users_state",
   "dspeak_room_roles",
   "dspeak_room_memberships",
@@ -90,6 +87,16 @@ export function buildCollectionUpdate(current, definition) {
     );
   }
   return update;
+}
+
+export function removeIndexesForFields(indexes = [], fieldNames = []) {
+  const fields = new Set(fieldNames.map((name) => String(name).toLowerCase()));
+  return indexes.filter((statement) => {
+    const indexedDefinition = String(statement).replace(/^[\s\S]*?\bON\b/i, "");
+    const tokens =
+      indexedDefinition.toLowerCase().match(/[a-z_][a-z0-9_]*/g) || [];
+    return !tokens.some((token) => fields.has(token));
+  });
 }
 
 function collectionMigrationError(error, collection, operation) {
@@ -195,11 +202,6 @@ async function migrateFoundation(pb) {
         cascadeDelete: false,
         maxSelect: 1,
       }),
-      field("members", "relation", {
-        collectionId: users.id,
-        cascadeDelete: false,
-        maxSelect: 999,
-      }),
     ],
     indexes: ["CREATE INDEX idx_dspeak_rooms_owner ON dspeak_rooms (owner)"],
   });
@@ -211,7 +213,6 @@ async function migrateFoundation(pb) {
       field("name", "text", { required: true, max: 120 }),
       field("desc", "text", { max: 2000 }),
       field("isMedia", "bool"),
-      field("audio_bitrate", "number", { min: 6, max: 510 }),
       field("inRoom", "relation", {
         collectionId: users.id,
         cascadeDelete: false,
@@ -274,47 +275,6 @@ async function migrateFoundation(pb) {
     indexes: [
       "CREATE INDEX idx_dspeak_messages_channel_created ON dspeak_messages (room_channel, created)",
     ],
-  });
-
-  await upsertCollection(pb, {
-    name: "dspeak_webpush",
-    type: "base",
-    fields: [
-      field("room", "relation", {
-        required: true,
-        collectionId: rooms.id,
-        cascadeDelete: true,
-        maxSelect: 1,
-      }),
-      field("user", "relation", {
-        required: true,
-        collectionId: users.id,
-        cascadeDelete: true,
-        maxSelect: 1,
-      }),
-      field("keys", "json", { required: true, maxSize: 10000 }),
-    ],
-    indexes: [
-      "CREATE UNIQUE INDEX idx_dspeak_webpush_room_user ON dspeak_webpush (room, user)",
-    ],
-  });
-
-  await upsertCollection(pb, {
-    name: "dspeak_webpush_global",
-    type: "base",
-    fields: [
-      field("user", "relation", {
-        required: true,
-        collectionId: users.id,
-        cascadeDelete: true,
-        maxSelect: 1,
-      }),
-      field("endpoint", "text", { max: 4096 }),
-      field("p256dh", "text", { max: 512 }),
-      field("auth", "text", { max: 512 }),
-      field("keys", "json", { maxSize: 10000 }),
-    ],
-    indexes: [],
   });
 
   await upsertCollection(pb, {
@@ -529,7 +489,7 @@ async function migrateRoomAdministration(pb) {
   });
 
   const roomRecords = await pb.collection("dspeak_rooms").getFullList({
-    fields: "id,owner,members,accent,attenuation",
+    fields: "id,owner,accent,attenuation",
   });
   for (const room of roomRecords) {
     await pb.collection("dspeak_rooms").update(room.id, {
@@ -549,35 +509,18 @@ async function migrateRoomAdministration(pb) {
       });
       roleMap.set(created.name, created);
     }
-    const members = [
-      ...new Set([room.owner, ...(room.members || [])].filter(Boolean)),
-    ];
-    for (const userId of members) {
-      const existing = await pb
-        .collection("dspeak_room_memberships")
-        .getFullList({ filter: `room = '${room.id}' && user = '${userId}'` });
-      if (existing.length) continue;
-      const role =
-        String(userId) === String(room.owner)
-          ? roleMap.get("Owner")
-          : roleMap.get("Member");
+    const existing = await pb
+      .collection("dspeak_room_memberships")
+      .getFullList({ filter: `room = '${room.id}' && user = '${room.owner}'` });
+    if (!existing.length) {
+      const role = roleMap.get("Owner");
       await pb.collection("dspeak_room_memberships").create({
         room: room.id,
-        user: userId,
+        user: room.owner,
         roles: role ? [role.id] : [],
         joined_at: new Date().toISOString(),
       });
     }
-  }
-
-  const channelRecords = await pb
-    .collection("dspeak_rooms_channels")
-    .getFullList({ fields: "id,isMedia,audio_bitrate,media_policy" });
-  for (const channel of channelRecords) {
-    if (!channel.isMedia || channel.media_policy) continue;
-    await pb.collection("dspeak_rooms_channels").update(channel.id, {
-      media_policy: normalizeMediaPolicy({}, channel.audio_bitrate),
-    });
   }
 }
 
@@ -756,47 +699,6 @@ async function migratePushDelivery(pb) {
       "CREATE INDEX idx_dspeak_push_subscriptions_user_device ON dspeak_push_subscriptions (user, device_id)",
     ],
   });
-  const legacyCollection = await findCollection(pb, "dspeak_webpush_global");
-  if (legacyCollection) {
-    const migratedSubscriptions = await pb
-      .collection("dspeak_webpush_global")
-      .getFullList();
-    for (const subscription of migratedSubscriptions) {
-      const endpoint = subscription.endpoint || subscription.keys?.endpoint;
-      const p256dh = subscription.p256dh || subscription.keys?.p256dh;
-      const auth = subscription.auth || subscription.keys?.auth;
-      if (!endpoint || !p256dh || !auth) continue;
-      const existing = await pb
-        .collection("dspeak_push_subscriptions")
-        .getFullList({
-          filter: pb.filter("endpoint = {:endpoint}", { endpoint }),
-        });
-      if (existing.length) continue;
-      await pb.collection("dspeak_push_subscriptions").create({
-        user: subscription.user,
-        device_id: `legacy-${subscription.id}`,
-        endpoint,
-        p256dh,
-        auth,
-        disabled: false,
-        failure_count: 0,
-      });
-      const preference = await pb
-        .collection("dspeak_notification_preferences")
-        .getFullList({
-          filter: pb.filter("user = {:user}", { user: subscription.user }),
-        });
-      if (!preference.length)
-        await pb.collection("dspeak_notification_preferences").create({
-          user: subscription.user,
-          mode: "all",
-          push: true,
-          sound: true,
-          previews: true,
-          attenuation_override: { mode: "room", reductionPercent: 65 },
-        });
-    }
-  }
   await upsertCollection(pb, {
     name: "dspeak_push_jobs",
     type: "base",
@@ -1033,6 +935,130 @@ async function migrateRoomInvites(pb) {
   });
 }
 
+async function removeObsoletePushCollections(pb) {
+  for (const name of ["dspeak_webpush", "dspeak_webpush_global"]) {
+    const collection = await findCollection(pb, name);
+    if (!collection) continue;
+    const records = await pb.collection(name).getFullList();
+    for (const record of records) {
+      const endpoint = record.endpoint || record.keys?.endpoint;
+      const p256dh = record.p256dh || record.keys?.p256dh;
+      const auth = record.auth || record.keys?.auth;
+      if (!record.user || !endpoint || !p256dh || !auth) continue;
+      let endpointUrl;
+      try {
+        endpointUrl = new URL(endpoint);
+      } catch {
+        continue;
+      }
+      if (endpointUrl.protocol !== "https:") continue;
+      const existing = await pb
+        .collection("dspeak_push_subscriptions")
+        .getFullList({
+          filter: pb.filter("endpoint = {:endpoint}", { endpoint }),
+          fields: "id",
+        });
+      if (existing.length) continue;
+      await pb.collection("dspeak_push_subscriptions").create({
+        user: record.user,
+        device_id: `migrated-${record.id}`,
+        endpoint,
+        p256dh,
+        auth,
+        disabled: false,
+        failure_count: 0,
+      });
+    }
+    await pb.collections.delete(collection.id);
+  }
+}
+
+async function removeObsoleteContractFields(pb) {
+  const roomCollection = await pb.collections.getOne("dspeak_rooms");
+  if (
+    roomCollection.fields.some(
+      (fieldDefinition) => fieldDefinition.name === "members",
+    )
+  ) {
+    const rooms = await pb
+      .collection("dspeak_rooms")
+      .getFullList({ fields: "id,owner,members" });
+    for (const room of rooms) {
+      const roles = await pb
+        .collection("dspeak_room_roles")
+        .getFullList({ filter: `room = '${room.id}'` });
+      for (const userId of new Set([
+        String(room.owner),
+        ...(room.members || []).map(String),
+      ])) {
+        const memberships = await pb
+          .collection("dspeak_room_memberships")
+          .getFullList({
+            filter: `room = '${room.id}' && user = '${userId}'`,
+            fields: "id",
+          });
+        if (!memberships.length)
+          await pb.collection("dspeak_room_memberships").create({
+            room: room.id,
+            user: userId,
+            roles: roles
+              .filter((role) =>
+                String(userId) === String(room.owner)
+                  ? role.system
+                  : role.is_default,
+              )
+              .map((role) => role.id),
+            joined_at: new Date().toISOString(),
+          });
+      }
+    }
+  }
+  const channelCollection = await pb.collections.getOne(
+    "dspeak_rooms_channels",
+  );
+  if (
+    channelCollection.fields.some(
+      (fieldDefinition) => fieldDefinition.name === "audio_bitrate",
+    )
+  ) {
+    const channels = await pb
+      .collection("dspeak_rooms_channels")
+      .getFullList({ fields: "id,isMedia,audio_bitrate,media_policy" });
+    for (const channel of channels) {
+      if (!channel.isMedia || channel.media_policy) continue;
+      const microphoneKbps = Number(channel.audio_bitrate) || 48;
+      await pb.collection("dspeak_rooms_channels").update(channel.id, {
+        media_policy: {
+          hdAudio: microphoneKbps > 96,
+          microphoneKbps,
+          cameraKbps: 1500,
+          screenKbps: 4000,
+          sharedAudioKbps: 128,
+          revision: 1,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    }
+  }
+  for (const [collection, obsoleteFields] of [
+    [roomCollection, new Set(["members"])],
+    [channelCollection, new Set(["audio_bitrate"])],
+  ]) {
+    if (
+      !collection.fields.some((fieldDefinition) =>
+        obsoleteFields.has(fieldDefinition.name),
+      )
+    )
+      continue;
+    await pb.collections.update(collection.id, {
+      fields: collection.fields.filter(
+        (fieldDefinition) => !obsoleteFields.has(fieldDefinition.name),
+      ),
+      indexes: removeIndexesForFields(collection.indexes, [...obsoleteFields]),
+    });
+  }
+}
+
 const migrations = Object.freeze([
   {
     name: "20260724_foundation_v1",
@@ -1098,6 +1124,14 @@ const migrations = Object.freeze([
   {
     name: "20260723_push_job_zero_attempts_v1",
     run: migratePushJobZeroAttempts,
+  },
+  {
+    name: "20260725_remove_obsolete_push_collections_v1",
+    run: removeObsoletePushCollections,
+  },
+  {
+    name: "20260725_remove_obsolete_contract_fields_v1",
+    run: removeObsoleteContractFields,
   },
 ]);
 

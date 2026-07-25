@@ -144,8 +144,6 @@ export function normalizeRoomAccent(value) {
 
 export function normalizeAttenuation(value = {}) {
   value = value && typeof value === "object" ? value : {};
-  const legacySmoothTiming =
-    Number(value.attackMs) === 250 && Number(value.releaseMs) === 1200;
   return {
     enabled: value.enabled !== false,
     reductionPercent: boundedNumber(value.reductionPercent, 65, 0, 100),
@@ -154,12 +152,8 @@ export function normalizeAttenuation(value = {}) {
     )
       ? value.sensitivity
       : "standard",
-    attackMs: legacySmoothTiming
-      ? 900
-      : boundedNumber(value.attackMs, 120, 20, 2000),
-    releaseMs: legacySmoothTiming
-      ? 2200
-      : boundedNumber(value.releaseMs, 650, 50, 5000),
+    attackMs: boundedNumber(value.attackMs, 120, 20, 2000),
+    releaseMs: boundedNumber(value.releaseMs, 650, 50, 5000),
   };
 }
 

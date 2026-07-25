@@ -20,6 +20,7 @@ import {
 } from "./soundboard-conversion.js";
 import { requireAuthenticatedUser } from "./authentication.js";
 import { getBoundedList } from "./pocketbase-query.js";
+import { enforceRateLimit } from "./rate-limit.js";
 
 const uploadLocks = new Map();
 
@@ -312,6 +313,16 @@ export async function handleSoundboardApi(event, suffix = "") {
   const userId = await requireAuthenticatedUser(event);
   const method = event.method;
   const query = getQuery(event);
+  if (!["GET", "HEAD"].includes(method))
+    enforceRateLimit(event, "soundboard-mutation", userId, 30, 60 * 60 * 1000);
+  if (!suffix && method === "POST")
+    enforceRateLimit(
+      event,
+      "soundboard-conversion",
+      userId,
+      10,
+      60 * 60 * 1000,
+    );
   if (!suffix && method === "GET")
     return listClips(pb, String(query.roomId || ""), userId);
   if (!suffix && method === "POST") return uploadClip(event, pb, userId);

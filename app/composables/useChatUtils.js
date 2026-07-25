@@ -148,50 +148,6 @@ export const useChatUtils = () => {
   }
 
   /**
-   * Escape HTML to prevent XSS
-   */
-  function escapeHtml(text) {
-    if (!import.meta.client) {
-      return String(text)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  /**
-   * Parse simple text formatting (basic markdown-like)
-   */
-  function parseMessageFormat(text) {
-    if (!text) return "";
-
-    let formatted = escapeHtml(text);
-
-    formatted = formatted.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-
-    formatted = formatted.replace(/\*(.*?)\*/g, "<em>$1</em>");
-
-    formatted = formatted.replace(
-      /`(.*?)`/g,
-      '<code class="bg-base-200 px-1 rounded text-sm">$1</code>',
-    );
-
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    formatted = formatted.replace(
-      urlRegex,
-      '<a href="$1" target="_blank" rel="noopener noreferrer" class="link link-primary">$1</a>',
-    );
-
-    return formatted;
-  }
-
-  /**
    * Check if two messages should be grouped (same sender, close in time)
    */
   function shouldGroupMessages(prevMessage, currentMessage) {
@@ -227,20 +183,8 @@ export const useChatUtils = () => {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
         return true;
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        textArea.style.position = "fixed";
-        textArea.style.left = "-999999px";
-        textArea.style.top = "-999999px";
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-
-        const success = document.execCommand("copy");
-        document.body.removeChild(textArea);
-        return success;
       }
+      return false;
     } catch (error) {
       console.error("Failed to copy to clipboard:", error);
       return false;
@@ -266,8 +210,6 @@ export const useChatUtils = () => {
     validateMessage,
     generateTempId,
     isUserMentioned,
-    escapeHtml,
-    parseMessageFormat,
     shouldGroupMessages,
     getUserDisplayName,
     copyToClipboard,

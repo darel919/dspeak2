@@ -37,7 +37,7 @@ import {
   moderateVoiceParticipant,
   updateActiveUserProfile,
 } from "./mediasoup-sfu";
-import { pocketBaseError, usePocketBaseAdmin } from "./pocketbase";
+import { usePocketBaseAdmin } from "./pocketbase";
 import { deleteMatchingRecords, getBoundedList } from "./pocketbase-query";
 import {
   ensureRoomMembership,
@@ -60,6 +60,10 @@ import {
   canViewMessageHistory,
   isMessageOwner,
 } from "../../shared/message-policy.js";
+import {
+  assertSafeOutboundUrl,
+  configuredOutboundHosts,
+} from "../infrastructure/network/outbound-request.js";
 
 function requireValue(value, message) {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
@@ -120,10 +124,19 @@ function avatarPath(user, authPrefix = false) {
 
 function presentUser(user, authPrefix = false) {
   if (!user) return null;
-  return { ...user, avatar: avatarPath(user, authPrefix) };
+  return {
+    id: String(user.id),
+    name: publicDisplayName(user),
+    display_name: user.display_name || "",
+    username: user.username || "",
+    handle: user.handle || "",
+    online: Boolean(user.online),
+    avatar: avatarPath(user, authPrefix),
+  };
 }
 
 function presentPublicProfile(user) {
+  if (!user) return null;
   const publicName = publicDisplayName(user);
   return {
     id: String(user.id),
@@ -137,16 +150,12 @@ function presentPublicProfile(user) {
 }
 
 function presentChannel(channel) {
-  const mediaPolicy = normalizeMediaPolicy(
-    channel.media_policy,
-    channel.audio_bitrate,
-  );
+  const mediaPolicy = normalizeMediaPolicy(channel.media_policy);
   return {
     id: channel.id,
     name: channel.name,
     desc: channel.desc,
     isMedia: channel.isMedia,
-    audio_bitrate: channel.audio_bitrate,
     mediaPolicy,
     inRoom: channel.inRoom || [],
     created: channel.created,
@@ -174,7 +183,7 @@ async function roomDetails(pb, room, userId = null) {
     }),
     getBoundedList(pb, "dspeak_room_memberships", {
       filter: `room = '${room.id}'`,
-      expand: "roles",
+      expand: "roles,user",
     }),
   ]);
   const access = userId ? await presentRoomAccess(pb, room, userId) : null;
@@ -202,10 +211,13 @@ async function roomDetails(pb, room, userId = null) {
     accent: normalizeRoomAccent(room.accent),
     attenuation: normalizeAttenuation(room.attenuation),
     owner: presentUser(room.expand?.owner),
-    members: (room.expand?.members || []).map((member) => ({
-      ...presentUser(member),
-      roles: rolesByUserId.get(String(member.id)) || [],
-    })),
+    members: memberships
+      .map((membership) => membership.expand?.user)
+      .filter(Boolean)
+      .map((member) => ({
+        ...presentUser(member),
+        roles: rolesByUserId.get(String(member.id)) || [],
+      })),
     channels: channels.map(presentChannel),
     roles: access?.roles || [],
     permissions: access?.permissions || [],
@@ -231,9 +243,11 @@ const handleRooms = createRoomsApiHandler({
   disconnectVoiceParticipant,
   encodeInvitePayload,
   ensureRoomMembership,
+  enforceRateLimit,
   getBoundedList,
   getQuery,
   normalizeAttenuation,
+  normalizeMediaPolicy,
   normalizePermissions,
   normalizeRoomAccent,
   parseBody,
@@ -261,6 +275,8 @@ async function handleChannels(event, suffix) {
   const userId = await requireAuthenticatedUser(event);
   const method = event.method;
   const query = getQuery(event);
+  if (!["GET", "HEAD"].includes(method))
+    enforceRateLimit(event, "channel-mutation", userId, 60, 60 * 1000);
 
   if (suffix === "details" && method === "GET") {
     const channel = await pb
@@ -405,9 +421,8 @@ async function handleChannels(event, suffix) {
       name: body.name,
       desc: body.desc || "",
       isMedia: Boolean(body.isMedia),
-      audio_bitrate: body.isMedia ? body.audio_bitrate || 64 : null,
       media_policy: body.isMedia
-        ? normalizeMediaPolicy(body.mediaPolicy, body.audio_bitrate || 64)
+        ? normalizeMediaPolicy(body.mediaPolicy)
         : null,
       inRoom: [],
       owner: userId,
@@ -445,12 +460,9 @@ async function handleChannels(event, suffix) {
         });
       update.media_policy = {
         ...validation.value,
-        revision:
-          normalizeMediaPolicy(channel.media_policy, channel.audio_bitrate)
-            .revision + 1,
+        revision: normalizeMediaPolicy(channel.media_policy).revision + 1,
         updatedAt: new Date().toISOString(),
       };
-      update.audio_bitrate = update.media_policy.microphoneKbps;
     }
     const result = await pb
       .collection("dspeak_rooms_channels")
@@ -529,6 +541,7 @@ async function handleChannels(event, suffix) {
 const handleChat = createChatApiHandler({
   broadcastToChannel,
   broadcastToUser,
+  assertSafeOutboundUrl,
   canDeleteMessage,
   canViewMessageHistory,
   createError,
@@ -540,7 +553,6 @@ const handleChat = createChatApiHandler({
   isMessageOwner,
   parseBody,
   persistMessageNotifications,
-  pocketBaseError,
   presentUser,
   requireAuthenticatedUser,
   requireRoomMember,
@@ -548,11 +560,16 @@ const handleChat = createChatApiHandler({
   sendPushTest,
   setResponseStatus,
   usePocketBaseAdmin,
+  pushAllowedHosts: configuredOutboundHosts(
+    process.env.DSPEAK_PUSH_ALLOWED_HOSTS,
+  ),
 });
 
 async function handleProfile(event, suffix) {
   const userId = await requireAuthenticatedUser(event);
   const pb = await usePocketBaseAdmin();
+  if (!["GET", "HEAD"].includes(event.method))
+    enforceRateLimit(event, "profile-mutation", userId, 30, 60 * 60 * 1000);
 
   if (!suffix && event.method === "GET") {
     return presentUser(await pb.collection("users").getOne(userId), true);
@@ -732,8 +749,11 @@ export async function handleDspeakApi(event) {
       return await restoreAuthenticatedSession(event);
     if (domain === "session" && !suffix && event.method === "DELETE")
       return await revokeAuthenticatedSession(event);
-    if (domain === "config" && event.method === "GET")
+    if (domain === "config" && event.method === "GET") {
+      const userId = await requireAuthenticatedUser(event);
+      enforceRateLimit(event, "turn-credentials", userId, 12, 10 * 60 * 1000);
       return createIceServers();
+    }
     if (domain === "room") return await handleRooms(event, suffix);
     if (domain === "channel") return await handleChannels(event, suffix);
     if (domain === "chat") return await handleChat(event, suffix);
@@ -747,11 +767,22 @@ export async function handleDspeakApi(event) {
     });
   } catch (error) {
     if (error?.statusCode) throw error;
-    console.error("[dSpeak API]", error);
+    if (Number(error?.status) >= 400 && Number(error?.status) < 500)
+      throw createError({
+        statusCode: Number(error.status),
+        statusMessage:
+          Number(error.status) === 404
+            ? "Resource not found"
+            : Number(error.status) === 409
+              ? "Resource conflict"
+              : "Invalid request",
+      });
+    const requestId = crypto.randomUUID();
+    console.error(`[dSpeak API] request ${requestId}`, error);
     throw createError({
-      statusCode: error?.status || 500,
-      statusMessage: error?.message || "Internal Server Error",
-      data: pocketBaseError(error),
+      statusCode: 500,
+      statusMessage: "Internal Server Error",
+      data: { code: "INTERNAL_ERROR", requestId },
     });
   }
 }

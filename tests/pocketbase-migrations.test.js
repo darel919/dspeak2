@@ -4,6 +4,7 @@ import {
   buildCollectionUpdate,
   mergeCollectionFields,
   mergeCollectionIndexes,
+  removeIndexesForFields,
 } from "../server/utils/pocketbase-migrations.js";
 import { readFileSync } from "node:fs";
 
@@ -94,6 +95,15 @@ test("PocketBase index merging distinguishes uniqueness and predicates", () => {
   ]);
 });
 
+test("PocketBase obsolete field cleanup removes dependent indexes", () => {
+  const indexes = [
+    "CREATE UNIQUE INDEX `idx_rooms_name` ON `dspeak_rooms` (`name`)",
+    "CREATE INDEX idx_dspeak_rooms_members ON dspeak_rooms (members)",
+    "CREATE INDEX partial_idx ON dspeak_rooms (owner) WHERE members != ''",
+  ];
+  assert.deepEqual(removeIndexesForFields(indexes, ["members"]), [indexes[0]]);
+});
+
 test("PocketBase migrations enforce case-insensitive unique user handles", () => {
   const source = readFileSync(
     new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
@@ -127,8 +137,6 @@ test("PocketBase migrations initialize and repair the complete database", () => 
     "dspeak_rooms",
     "dspeak_rooms_channels",
     "dspeak_messages",
-    "dspeak_webpush",
-    "dspeak_webpush_global",
     "dspeak_users_state",
     "dspeak_room_roles",
     "dspeak_room_memberships",
@@ -154,6 +162,9 @@ test("PocketBase migrations initialize and repair the complete database", () => 
     /if \(completed && !missingCollections\.length\) continue/,
   );
   assert.match(migrations, /const operation = completed \? "Repairing with"/);
+  assert.match(migrations, /20260725_remove_obsolete_push_collections_v1/);
+  assert.doesNotMatch(migrations, /name: "dspeak_webpush"/);
+  assert.doesNotMatch(migrations, /name: "dspeak_webpush_global"/);
 });
 
 test("PocketBase migrations add soundboard timestamps used for stable sorting", () => {

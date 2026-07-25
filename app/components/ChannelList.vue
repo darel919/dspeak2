@@ -1064,6 +1064,7 @@ import {
   MEDIA_POLICY_LIMITS,
   STANDARD_MICROPHONE_MAX_KBPS,
   VIDEO_POLICY_QUALITY_STEPS,
+  normalizeMediaPolicy,
 } from "~~/shared/media-policy.js";
 
 const inviteDialog = ref(null);
@@ -1365,10 +1366,12 @@ async function handleCreateChannel() {
       name: newChannelName.value.trim(),
       desc: newChannelDesc.value.trim(),
       isMedia: newChannelType.value === "voice",
-
-      audio_bitrate:
+      mediaPolicy:
         newChannelType.value === "voice"
-          ? Number(newChannelBitrate.value)
+          ? normalizeMediaPolicy({
+              microphoneKbps: Number(newChannelBitrate.value),
+              hdAudio: Number(newChannelBitrate.value) > 96,
+            })
           : null,
     };
 

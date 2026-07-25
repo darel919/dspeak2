@@ -41,7 +41,7 @@ users
 ├── dspeak_user_nicknames
 ├── dspeak_notification_preferences
 ├── dspeak_push_subscriptions ── dspeak_push_jobs
-├── dspeak_rooms (owner and members)
+├── dspeak_rooms (owner)
 │   ├── dspeak_rooms_channels
 │   │   ├── dspeak_messages
 │   │   │   ├── dspeak_message_revisions
@@ -52,7 +52,6 @@ users
 │   ├── dspeak_room_invites ── dspeak_room_audit_log
 │   ├── dspeak_room_soundboards
 │   └── dspeak_room_notification_preferences
-└── legacy web-push collections
 ```
 
 ## Collection catalog
@@ -60,7 +59,7 @@ users
 | Collection                             | Purpose                                                                | Principal relationships                                                          |
 | -------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `users`                                | Auth identity and public profile                                       | Owns rooms, messages, memberships, preferences, sessions, and media state        |
-| `dspeak_rooms`                         | Room identity, members, branding, and attenuation policy               | `owner`, `members` → `users`; `channels` → `dspeak_rooms_channels`               |
+| `dspeak_rooms`                         | Room identity, branding, and attenuation policy                        | `owner` → users; `channels` → `dspeak_rooms_channels`                            |
 | `dspeak_rooms_channels`                | Text or media channel and current voice occupancy                      | `room` → rooms; `owner`, `inRoom` → users                                        |
 | `dspeak_messages`                      | Current chat message and sender-only read state                        | `room_channel` → channels; `sender`, `read_by` → users                           |
 | `dspeak_message_revisions`             | Append-only message edit history                                       | `message` → messages; `editor` → users                                           |
@@ -77,8 +76,6 @@ users
 | `dspeak_push_jobs`                     | Durable, retryable Web Push work                                       | `recipient` → users; `subscription` → subscriptions; `message` → messages        |
 | `dspeak_sessions`                      | Hashed application sessions                                            | `user` → users                                                                   |
 | `dspeak_users_state`                   | Current persisted voice-control state                                  | `user` → users; `connected` → channels                                           |
-| `dspeak_webpush`                       | Legacy room-scoped push subscription                                   | `room` → rooms; `user` → users                                                   |
-| `dspeak_webpush_global`                | Read-only migration source for legacy global subscriptions             | `user` → users                                                                   |
 | `dspeak_migrations`                    | Applied migration ledger                                               | No application relation                                                          |
 
 ## Ownership and deletion

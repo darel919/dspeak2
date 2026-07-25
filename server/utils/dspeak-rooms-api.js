@@ -9,9 +9,11 @@ export function createRoomsApiHandler(dependencies) {
     disconnectVoiceParticipant,
     encodeInvitePayload,
     ensureRoomMembership,
+    enforceRateLimit,
     getBoundedList,
     getQuery,
     normalizeAttenuation,
+    normalizeMediaPolicy,
     normalizePermissions,
     normalizeRoomAccent,
     parseBody,
@@ -52,7 +54,20 @@ export function createRoomsApiHandler(dependencies) {
         filter: `room = '${roomId}'`,
         expand: "user,roles",
       });
-      return { roles, memberships };
+      return {
+        roles,
+        memberships: memberships.map((membership) => ({
+          id: membership.id,
+          room: membership.room,
+          user: membership.user,
+          roles: membership.roles || [],
+          joined_at: membership.joined_at,
+          expand: {
+            user: presentPublicProfile(membership.expand?.user),
+            roles: membership.expand?.roles || [],
+          },
+        })),
+      };
     }
     if (method === "POST" && body.action === "assign") {
       await requireRoleManagement(pb, room, userId, null);
@@ -154,8 +169,10 @@ export function createRoomsApiHandler(dependencies) {
       return handleRoomRoles(event, pb, await requireAuthenticatedUser(event));
 
     if ((suffix === "profile" || suffix === "header") && method === "GET") {
+      const userId = await requireAuthenticatedUser(event);
       const id = requireValue(query.id, "Room ID is required");
       const room = await pb.collection("dspeak_rooms").getOne(id);
+      await requireRoomMember(pb, room, userId);
       const field = suffix === "header" ? "header_image" : "picture";
       if (!room[field])
         throw createError({
@@ -168,7 +185,7 @@ export function createRoomsApiHandler(dependencies) {
           statusCode: response.status,
           statusMessage: "Failed to fetch room image",
         });
-      setHeader(event, "Cache-Control", "public, max-age=604800");
+      setHeader(event, "Cache-Control", "private, max-age=604800");
       setHeader(
         event,
         "Content-Type",
@@ -181,7 +198,7 @@ export function createRoomsApiHandler(dependencies) {
       const room = await pb
         .collection("dspeak_rooms")
         .getOne(requireValue(query.id, "Room ID is required"), {
-          expand: "owner,members",
+          expand: "owner",
         });
       const userId = await requireAuthenticatedUser(event);
       await requireRoomMember(pb, room, userId);
@@ -189,6 +206,7 @@ export function createRoomsApiHandler(dependencies) {
     }
 
     if (suffix === "invites" && method === "GET") {
+      enforceRateLimit(event, "invite-preview", null, 60, 10 * 60 * 1000);
       const payload = decodeInvitePayload(String(query.token || ""));
       if (!payload)
         throw createError({
@@ -222,11 +240,20 @@ export function createRoomsApiHandler(dependencies) {
     }
 
     const userId = await requireAuthenticatedUser(event);
+    if (!["GET", "HEAD"].includes(method))
+      enforceRateLimit(event, "room-mutation", userId, 60, 60 * 1000);
 
     if (!suffix && method === "GET") {
+      const memberships = await getBoundedList(pb, "dspeak_room_memberships", {
+        filter: `user = '${userId}'`,
+        fields: "room",
+      });
+      if (!memberships.length) return [];
       const rooms = await getBoundedList(pb, "dspeak_rooms", {
-        filter: `owner = '${userId}' || members ~ '${userId}'`,
-        expand: "owner,members",
+        filter: memberships
+          .map((membership) => `id = '${membership.room}'`)
+          .join(" || "),
+        expand: "owner",
       });
       return Promise.all(rooms.map((room) => roomDetails(pb, room, userId)));
     }
@@ -338,10 +365,7 @@ export function createRoomsApiHandler(dependencies) {
       } catch (error) {
         if (error?.status !== 404) throw error;
       }
-      const isLegacyMember = (room.members || [])
-        .map(String)
-        .includes(targetUserId);
-      if (!targetMembership && !isLegacyMember)
+      if (!targetMembership)
         throw createError({
           statusCode: 404,
           statusMessage: "This user is not a room member.",
@@ -357,11 +381,6 @@ export function createRoomsApiHandler(dependencies) {
           statusCode: 403,
           statusMessage: "You cannot kick a member at or above your role.",
         });
-      await pb.collection("dspeak_rooms").update(room.id, {
-        members: (room.members || [])
-          .map(String)
-          .filter((memberId) => memberId !== targetUserId),
-      });
       const channels = await getBoundedList(pb, "dspeak_rooms_channels", {
         filter: `room = '${room.id}'`,
       });
@@ -398,7 +417,6 @@ export function createRoomsApiHandler(dependencies) {
         name: body.name,
         desc: body.desc || "",
         owner: userId,
-        members: [userId],
         channels: [],
         accent: normalizeRoomAccent(body.accent),
         attenuation: normalizeAttenuation(structuredValue(body.attenuation)),
@@ -414,7 +432,6 @@ export function createRoomsApiHandler(dependencies) {
         name: "general",
         desc: "General chat channel",
         isMedia: false,
-        audio_bitrate: null,
         inRoom: [],
         owner: userId,
         room: room.id,
@@ -423,7 +440,7 @@ export function createRoomsApiHandler(dependencies) {
         name: "voice",
         desc: "Voice and video channel",
         isMedia: true,
-        audio_bitrate: 64,
+        media_policy: normalizeMediaPolicy(),
         inRoom: [],
         owner: userId,
         room: room.id,
@@ -432,7 +449,10 @@ export function createRoomsApiHandler(dependencies) {
         .collection("dspeak_rooms")
         .update(room.id, { channels: [general.id, voice.id] });
       setResponseStatus(event, 201);
-      return roomDetails(pb, room, userId);
+      const createdRoom = await pb.collection("dspeak_rooms").getOne(room.id, {
+        expand: "owner",
+      });
+      return roomDetails(pb, createdRoom, userId);
     }
 
     if (!suffix && method === "PUT") {
@@ -508,11 +528,19 @@ export function createRoomsApiHandler(dependencies) {
         .getOne(
           requireValue(body.roomId, `Room ID is required to ${suffix} a room.`),
         );
-      const members = (room.members || []).map(String);
+      const currentMembership = await getBoundedList(
+        pb,
+        "dspeak_room_memberships",
+        {
+          filter: `room = '${room.id}' && user = '${userId}'`,
+          fields: "id",
+        },
+        1,
+      );
       if (suffix === "join") {
         let joinedInvite = null;
         const payload = decodeInvitePayload(String(body.inviteToken || ""));
-        if (!members.includes(String(userId))) {
+        if (!currentMembership.length) {
           if (!payload || String(payload.roomId) !== String(room.id))
             throw createError({
               statusCode: 403,
@@ -538,10 +566,6 @@ export function createRoomsApiHandler(dependencies) {
             });
           joinedInvite = invite;
         }
-        if (!members.includes(String(userId)))
-          await pb
-            .collection("dspeak_rooms")
-            .update(room.id, { members: [...members, userId] });
         await ensureRoomMembership(pb, room, userId);
         if (joinedInvite)
           await pb.collection("dspeak_room_audit_log").create({
@@ -557,16 +581,12 @@ export function createRoomsApiHandler(dependencies) {
             },
           });
       } else {
-        if (String(room.owner) === String(userId) && members.length === 1) {
+        if (String(room.owner) === String(userId)) {
           throw createError({
             statusCode: 400,
-            statusMessage:
-              "Unable to leave this room, since you are the only member",
+            statusMessage: "Transfer ownership before leaving this room",
           });
         }
-        await pb.collection("dspeak_rooms").update(room.id, {
-          members: members.filter((id) => id !== String(userId)),
-        });
         await removeRoomMembership(pb, room.id, userId);
       }
       await broadcastParticipantChange(pb, room.id);

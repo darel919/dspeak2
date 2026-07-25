@@ -49,18 +49,17 @@ export default defineNuxtConfig({
         ? {
             "default-src": ["'self'"],
             "base-uri": ["'none'"],
-            "connect-src": ["'self'", "https:", "wss:"],
+            "connect-src": ["'self'"],
             "font-src": ["'self'", "data:"],
             "form-action": ["'self'"],
             "frame-ancestors": ["'none'"],
             "frame-src": ["'none'"],
-            "img-src": ["'self'", "data:", "blob:", "https:"],
+            "img-src": ["'self'", "data:", "blob:"],
             "manifest-src": ["'self'"],
             "media-src": ["'self'", "blob:"],
             "object-src": ["'none'"],
+            "require-trusted-types-for": ["'script'"],
             "script-src": [
-              "'self'",
-              "'unsafe-inline'",
               "'strict-dynamic'",
               "'nonce-{{nonce}}'",
               "'report-sample'",
@@ -68,8 +67,10 @@ export default defineNuxtConfig({
             "script-src-attr": ["'none'"],
             "style-src": ["'self'", "'unsafe-inline'", "'report-sample'"],
             "style-src-attr": ["'unsafe-inline'"],
+            "trusted-types": ["vue"],
             "worker-src": ["'self'", "blob:"],
             "upgrade-insecure-requests": true,
+            "report-to": ["csp-endpoint"],
           }
         : false,
       originAgentCluster: "?1",
@@ -117,6 +118,13 @@ export default defineNuxtConfig({
   },
 
   routeRules: {
+    "/**": {
+      headers: isProduction
+        ? {
+            "Reporting-Endpoints": 'csp-endpoint="/api/security/csp-report"',
+          }
+        : {},
+    },
     "/sw.js": {
       headers: {
         "Cache-Control": "no-cache",

@@ -63,6 +63,12 @@ to leave headroom for transport overhead and non-RTP traffic.
 Protected API and WebSocket routes are always same-origin. This is required by
 the HttpOnly session cookie and is the supported monolith deployment boundary.
 
+Generate `DSPEAK_CSRF_SECRET` as an independent random value of at least 32
+characters. Configure `DSPEAK_PUSH_ALLOWED_HOSTS` as a comma-separated hostname
+list when the supported browser push providers are known. See
+[Web threat mitigation](web-threat-mitigation.md) for the application and
+network egress policy.
+
 Configure Web Push with a stable key pair and monitored contact:
 
 ```dotenv
@@ -149,7 +155,7 @@ TURN_TLS_PORT=5349
 TURN_RELAY_MIN_PORT=49160
 TURN_RELAY_MAX_PORT=49259
 TURN_SHARED_SECRET=<long-random-secret>
-TURN_CREDENTIAL_TTL_SECONDS=3600
+TURN_CREDENTIAL_TTL_SECONDS=900
 ```
 
 Generate the shared secret with `openssl rand -hex 32`. Nitro uses it only to
@@ -164,9 +170,10 @@ TURN_MAX_BPS=25000000
 ```
 
 The Cloudflare DDNS container updates `DSPEAK_RTC_DOMAIN`, which is shared by
-mediasoup and Coturn on different ports. The record must remain DNS-only. Coturn
-is IPv6-first; community TURN entries remain last in the ICE list for IPv4-only
-clients.
+mediasoup and Coturn on different ports. The record must remain DNS-only.
+Production clients try this application-owned service first. Public STUN and
+best-effort community TURN entries remain last in the ICE configuration so
+IPv4-only clients have a relay path while Coturn is IPv6-only.
 
 ### TURN TLS certificate
 
@@ -303,18 +310,18 @@ with a nonzero status so the deployment platform cannot retain a
 half-initialized listener.
 
 The health response reports `turn.selfHosted.configured` and
-`turn.selfHosted.available` independently from `turn.communityFallbacks`. The
-self-hosted availability check is a background IPv6 STUN Binding transaction
-cached for thirty seconds; health requests only read the cached result. A
-failed optional TURN probe does not mark the Nitro/SFU
-service unhealthy while community fallbacks remain configured.
+`turn.selfHosted.available`. The availability check is a background IPv6 STUN
+Binding transaction cached for thirty seconds; health requests only read the
+cached result.
 
 ### Relay checks
 
 Validate authenticated relay allocations from an external IPv6 network with
 Coturn's `turnutils_uclient`, then force `iceTransportPolicy: "relay"` in a test
-browser session. Repeat from an IPv4-only network and confirm a community TURN
-candidate is selected instead of the IPv6-only hostname.
+browser session. Repeat from an IPv4-only network and confirm that a community
+TURN relay candidate can be selected. Community services have no availability,
+privacy, or capacity guarantee and must be replaced by application-owned IPv4
+Coturn when infrastructure permits.
 
 ### Direct media checks
 

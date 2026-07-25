@@ -5,6 +5,7 @@ const requiredVariables = [
   "POCKETBASE_URL",
   "PBASE_ADMIN_EMAIL",
   "PBASE_ADMIN_PASSWORD",
+  "DSPEAK_CSRF_SECRET",
   "VAPID_PRIVKEY",
 ];
 
@@ -95,6 +96,8 @@ export async function validateRuntimeEnvironment() {
       `Missing required environment variables: ${missing.join(", ")}`,
     );
   }
+  if (process.env.DSPEAK_CSRF_SECRET.trim().length < 32)
+    throw new Error("DSPEAK_CSRF_SECRET must contain at least 32 characters");
 
   let pocketBaseUrl;
   let authUrl;
@@ -157,15 +160,15 @@ export async function validateRuntimeEnvironment() {
   }
   if (turnSecret) {
     const credentialTtl = Number(
-      process.env.TURN_CREDENTIAL_TTL_SECONDS || 3600,
+      process.env.TURN_CREDENTIAL_TTL_SECONDS || 900,
     );
     if (
       !Number.isSafeInteger(credentialTtl) ||
       credentialTtl < 300 ||
-      credentialTtl > 86400
+      credentialTtl > 3600
     ) {
       throw new Error(
-        "TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 86400",
+        "TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 3600",
       );
     }
     readPort("TURN_PORT", 3478);

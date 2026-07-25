@@ -61,8 +61,7 @@ installed worker, bypasses its HTTP cache during update checks, and the worker
 response requires revalidation while disabling shared-CDN storage.
 The application registration module is the only service-worker registrar. The
 PWA module registrar stays disabled so an unversioned registration cannot race
-the application registration. Startup also removes legacy dSpeak registrations
-found under an obsolete scope. When another tab activates an accepted update,
+the application registration. When another tab activates an accepted update,
 remaining tabs show a reload notice without attempting to activate the same
 worker again.
 

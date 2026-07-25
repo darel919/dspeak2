@@ -12,11 +12,13 @@ Nuxt adds that nonce to every rendered script and places the same value in
 chunks they load. Script attributes such as `onclick` remain prohibited by
 `script-src-attr 'none'`.
 
-`'unsafe-inline'` is retained in `script-src` only as the CSP Level 1 fallback
-recommended for a nonce-based strict policy. Browsers that support nonces ignore
-that fallback when a nonce source is present. It must not be removed without
-reviewing the supported-browser policy, and it must never be used without the
-nonce and `strict-dynamic`.
+The production policy requires Trusted Types for script injection sinks. Vue is
+the only permitted policy name. Application code renders untrusted values
+through Vue text bindings and does not assign HTML strings to DOM sinks.
+
+Only current browsers are supported. The script policy therefore has no CSP
+Level 1 compatibility fallback: executable scripts must carry the response
+nonce or be loaded by a nonce-trusted script through `strict-dynamic`.
 
 Subresource Integrity is enabled for generated assets. New third-party scripts
 must be loaded through Nuxt's script integration so they inherit the active
@@ -33,14 +35,18 @@ inline styles. This does not weaken the script execution policy.
 The remaining directives allow only the resource classes dSpeak uses:
 
 - same-origin application, manifest, font, and form resources
-- HTTPS images and connections
-- secure WebSockets
+- same-origin images and connections
+- same-origin WebSockets
 - blob URLs for workers and browser media
 - no frames, embedded objects, framing ancestors, or script attributes
 
 The Permissions Policy restricts camera, microphone, display capture,
 fullscreen, autoplay, and screen wake lock to dSpeak's own origin and disables
 geolocation.
+
+Production responses advertise the same-origin `csp-endpoint` reporting
+endpoint. Reports are size- and rate-limited, reduced to an allowlist of CSP
+fields, and written to server logs without request headers or user identity.
 
 ## Deployment verification
 

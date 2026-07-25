@@ -112,5 +112,5 @@ export function hasDistinctUpdatedTimestamp(message) {
 }
 
 export function messageChannelId(message) {
-  return message?.room_channel || message?.room || "";
+  return message?.room_channel || "";
 }

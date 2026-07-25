@@ -27,15 +27,6 @@ const COMMUNITY_TURN_SERVERS = [
     username: "guest",
     credential: "password",
   },
-  {
-    urls: [
-      "turn:freeturn.net:3478?transport=udp",
-      "turn:freeturn.net:3478?transport=tcp",
-      "turn:freeturn.net:5349?transport=tcp",
-    ],
-    username: "free",
-    credential: "free",
-  },
 ];
 
 function positiveInteger(value, fallback) {
@@ -45,14 +36,14 @@ function positiveInteger(value, fallback) {
 
 export function createTurnCredentials({
   secret,
-  ttlSeconds = 3600,
+  ttlSeconds = 900,
   now = Date.now(),
 }) {
   if (!secret)
     throw new Error(
       "TURN_SHARED_SECRET is required to create TURN credentials",
     );
-  const expiresAt = Math.floor(now / 1000) + positiveInteger(ttlSeconds, 3600);
+  const expiresAt = Math.floor(now / 1000) + positiveInteger(ttlSeconds, 900);
   const username = `${expiresAt}:dspeak`;
   return {
     username,

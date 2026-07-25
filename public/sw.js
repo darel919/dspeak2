@@ -190,6 +190,13 @@ self.addEventListener("message", (event) => {
 });
 
 async function flushChatQueue() {
+  const sessionResponse = await fetch("/api/session", {
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!sessionResponse.ok) return;
+  const csrfToken = sessionResponse.headers.get("X-dSpeak-CSRF-Token");
+  if (!csrfToken) return;
   const messages = await getQueuedMessages();
   for (const message of messages) {
     try {
@@ -198,6 +205,7 @@ async function flushChatQueue() {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
+          "X-dSpeak-CSRF-Token": csrfToken,
         },
         body: JSON.stringify({
           channelId: message.channelId,

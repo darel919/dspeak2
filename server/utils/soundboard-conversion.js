@@ -184,11 +184,24 @@ async function convert(file) {
 }
 
 let conversionQueue = Promise.resolve();
+let pendingConversions = 0;
+
+function enqueueConversion(operation) {
+  if (pendingConversions >= 20)
+    throw createError({
+      statusCode: 503,
+      statusMessage: "Soundboard conversion queue is full",
+    });
+  pendingConversions += 1;
+  const result = conversionQueue.then(operation);
+  conversionQueue = result.catch(() => {});
+  return result.finally(() => {
+    pendingConversions -= 1;
+  });
+}
 
 export function convertSoundboardSource(file) {
-  const result = conversionQueue.then(() => convert(file));
-  conversionQueue = result.catch(() => {});
-  return result;
+  return enqueueConversion(() => convert(file));
 }
 
 async function convertIcon(file) {
@@ -247,7 +260,5 @@ async function convertIcon(file) {
 }
 
 export function convertSoundboardIcon(file) {
-  const result = conversionQueue.then(() => convertIcon(file));
-  conversionQueue = result.catch(() => {});
-  return result;
+  return enqueueConversion(() => convertIcon(file));
 }

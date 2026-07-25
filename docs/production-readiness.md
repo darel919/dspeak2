@@ -82,14 +82,19 @@ The browser handoff contract consumes one-time codes through
 `POST <AUTH_PATH>/verify` with an access token in an `Authorization: Bearer`
 header for trusted server integrations. It must never accept or log a token as a
 query value. dSpeak rejects browser WebSocket and state-changing HTTP origins
-that do not match `DSPEAK_PUBLIC_ORIGIN`. Set the originless client overrides
-only for an explicitly reviewed non-browser integration.
+that do not match `DSPEAK_PUBLIC_ORIGIN`. Originless HTTP and WebSocket clients
+are not supported.
 
 `/health` reports the oldest queued push delivery and cached subsystem health.
 `/metrics` requires `Authorization: Bearer <DSPEAK_METRICS_TOKEN>` and exposes
 push deliveries, retries, failures, expiry, active
 subscriptions, pending jobs, and oldest pending age. Alert when pending age
 continues growing or failures increase without deliveries.
+
+Production sessions use host-bound secure cookies and rotate their random
+tokens after twenty-four hours with a short in-process grace window for
+concurrent requests. TURN credentials require an authenticated session, are
+rate-limited, and default to a fifteen-minute lifetime.
 
 Before release:
 

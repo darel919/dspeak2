@@ -24,7 +24,6 @@ export default defineEventHandler(async () => {
     },
     turn: {
       selfHosted: turn,
-      communityFallbacks: true,
     },
   };
 });

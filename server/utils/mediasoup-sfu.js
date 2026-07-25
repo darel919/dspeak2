@@ -33,6 +33,8 @@ import {
   MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS,
 } from "./media-heartbeat";
 import { normalizeParticipantVoiceState } from "~~/shared/participant-voice-state.js";
+import { requireRoomMember } from "./room-authorization.js";
+import { enforceIdentifierRateLimit } from "./rate-limit.js";
 import { publishVoicePresence } from "./voice-presence";
 import { authenticateWebSocketRequest } from "./authentication";
 import {
@@ -744,6 +746,7 @@ export async function openSfuPeer(peer) {
     return;
   }
   const { userId } = authentication;
+  enforceIdentifierRateLimit("sfu-websocket-open", userId, 30, 60 * 1000);
 
   const pb = await usePocketBaseAdmin();
   const channel = await pb
@@ -754,10 +757,7 @@ export async function openSfuPeer(peer) {
     return;
   }
   const backendRoom = await pb.collection("dspeak_rooms").getOne(channel.room);
-  if (!(backendRoom.members || []).map(String).includes(String(userId))) {
-    peer.close(1008, "Access denied to this room");
-    return;
-  }
+  await requireRoomMember(pb, backendRoom, userId);
   const profile = mediaUserProfile(await pb.collection("users").getOne(userId));
 
   const state = await getState();

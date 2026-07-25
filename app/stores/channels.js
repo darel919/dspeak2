@@ -134,7 +134,7 @@ export const useChannelsStore = defineStore("channels", () => {
           name: channelData.name.trim(),
           desc: channelData.desc || "",
           isMedia: channelData.isMedia || false,
-          audio_bitrate: channelData.audio_bitrate || null,
+          mediaPolicy: channelData.mediaPolicy || null,
         }),
       });
 
@@ -186,7 +186,6 @@ export const useChannelsStore = defineStore("channels", () => {
           channelId,
           name: channelData.name?.trim(),
           desc: channelData.desc,
-          audio_bitrate: channelData.audio_bitrate,
           mediaPolicy: channelData.mediaPolicy,
         }),
       });
@@ -629,7 +628,6 @@ export const useChannelsStore = defineStore("channels", () => {
     )
       return false;
     channel.mediaPolicy = mediaPolicy;
-    channel.audio_bitrate = mediaPolicy.microphoneKbps;
     channels.value = [...channels.value];
     return true;
   }
