@@ -433,9 +433,12 @@ test("remote consumer lifecycle refreshes active media connection state", async 
     }
   };
   const states = [];
+  const subscriptionOrder = [];
   const client = new MediasoupClientSession({
     send() {},
     iceServers: [],
+    onRemoteTrack: (entry) =>
+      subscriptionOrder.push(["bound", entry.receiving]),
     onStateChange: (direction, state, summary) =>
       states.push({ direction, state, summary }),
   });
@@ -454,6 +457,7 @@ test("remote consumer lifecycle refreshes active media connection state", async 
     }),
   };
   client.setConsumerReceiving = async (entry, receiving) => {
+    subscriptionOrder.push(["receiving", receiving]);
     entry.receiving = receiving;
     return true;
   };
@@ -472,6 +476,10 @@ test("remote consumer lifecycle refreshes active media connection state", async 
     assert.equal(states[0].state, "connected");
     assert.equal(states[0].summary.receiveRequired, true);
     assert.equal(states[0].summary.ready, true);
+    assert.deepEqual(subscriptionOrder, [
+      ["receiving", true],
+      ["bound", true],
+    ]);
 
     transportClose();
     assert.equal(states[1].direction, "consumer");

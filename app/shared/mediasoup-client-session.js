@@ -561,9 +561,9 @@ export class MediasoupClientSession {
     entry.close = close;
     consumer.on("transportclose", close);
     consumer.on("trackended", close);
-    this.onRemoteTrack?.(entry);
     if (this.shouldReceive(data.userId, entry.source))
       await this.setConsumerReceiving(entry, true);
+    this.onRemoteTrack?.(entry);
   }
 
   shouldReceive(userId, source) {

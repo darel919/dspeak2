@@ -61,6 +61,13 @@ Sensitivity is independent of fade speed. Relaxed requires louder activity for
 longer, Standard suits normal conversation, and Responsive reacts to quieter
 voices with less confirmation time.
 
+Audio-only system shares are subscribed by default. SFU consumers are resumed
+before they are bound to playback and exposed to the UI, so the initial banner
+reflects the actual subscribed state and the audio graph never binds a
+default-listening share as paused. Stop listening disables the received track
+immediately and asks the active transport to stop transmission; Listen reverses
+both operations.
+
 The sender creates and resumes the shared-audio processing graph before
 publishing its destination track to P2P or SFU. Starting system audio therefore
 does not report success while the browser-owned processing context is still

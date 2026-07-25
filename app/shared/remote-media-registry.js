@@ -61,9 +61,11 @@ export class RemoteMediaRegistry {
       return;
     }
     this.remove(entry.key);
-    this.audioFeeds.value.set(entry.key, entry);
+    const receiving = entry.receiving !== false;
+    entry.track.enabled = receiving;
+    this.audioFeeds.value.set(entry.key, { ...entry, receiving });
     this.audioFeeds.value = new Map(this.audioFeeds.value);
-    this.createAudioElement(entry, staged);
+    this.createAudioElement({ ...entry, receiving }, staged);
     if (entry.source === "audio") this.startVoiceDetection(entry);
   }
 
@@ -84,6 +86,7 @@ export class RemoteMediaRegistry {
     const entry = this.audioFeeds.value.get(key);
     if (!entry || entry.source !== "screen-audio") return false;
     entry.receiving = Boolean(receiving);
+    entry.track.enabled = Boolean(receiving);
     this.audioFeeds.value.set(key, { ...entry });
     this.audioFeeds.value = new Map(this.audioFeeds.value);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));

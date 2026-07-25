@@ -247,6 +247,7 @@ test("audio-only system sharing can stop and resume remote transmission", () => 
           key: "remote:user:screen-audio",
           source: "screen-audio",
           userId: "user",
+          track: { enabled: true },
         },
       ],
     ]),
@@ -266,6 +267,10 @@ test("audio-only system sharing can stop and resume remote transmission", () => 
     false,
   );
   assert.equal(
+    audioFeeds.value.get("remote:user:screen-audio").track.enabled,
+    false,
+  );
+  assert.equal(
     registry.setAudioReceiving("remote:user:screen-audio", true),
     true,
   );
@@ -273,6 +278,10 @@ test("audio-only system sharing can stop and resume remote transmission", () => 
     ["screen-audio", false],
     ["screen-audio", true],
   ]);
+  assert.equal(
+    audioFeeds.value.get("remote:user:screen-audio").track.enabled,
+    true,
+  );
 });
 
 test("system audio respects stream attenuation while anyone speaks", () => {
