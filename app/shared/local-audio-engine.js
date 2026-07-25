@@ -15,6 +15,7 @@ export function createLocalAudioEngine({
   microphoneLevelDb,
   onSpeakingChange,
   settingsStore,
+  sharedAudioDucking,
   sharedAudioStats,
   updateNoiseFloor,
   voiceStore,
@@ -147,6 +148,11 @@ export function createLocalAudioEngine({
       ? 1 -
         Math.max(0, Math.min(100, Number(attenuation.reductionPercent))) / 100
       : 1;
+    if (sharedAudioDucking)
+      sharedAudioDucking.value = {
+        active: Boolean(enabled),
+        effectivePercent: Math.round(sharedAudioAttenuation * 100),
+      };
     applySharedAudioGain(
       enabled
         ? Number(attenuation.attackMs) || 120

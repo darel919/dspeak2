@@ -405,10 +405,8 @@
       "
       class="voice-command-bar shrink-0 border-t border-white/10 bg-black px-3 py-3 text-white"
     >
-      <div
-        class="voice-command-dock mx-auto flex w-fit max-w-full items-center gap-2"
-      >
-        <div class="flex min-w-0 items-center gap-2 overflow-x-auto">
+      <div class="voice-command-dock mx-auto">
+        <div class="voice-command-group">
           <MediaSettingsContextMenu kind="microphone">
             <button
               @click="voiceStore.toggleMic"
@@ -526,7 +524,7 @@
 
         <button
           type="button"
-          class="voice-dock-button voice-dock-button-leave metro-transition shrink-0"
+          class="voice-dock-button voice-dock-button-leave metro-transition"
           aria-label="Leave voice channel"
           data-label="Leave"
           @click="leaveChannel"
@@ -536,70 +534,82 @@
       </div>
       <div
         v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
-        class="mx-auto mt-2 flex max-w-3xl flex-wrap items-center gap-3 bg-base-200 p-3"
+        class="shared-audio-status mx-auto mt-3 max-w-3xl"
       >
-        <Icon name="lucide:volume-2" class="size-4 shrink-0" />
-        <label
-          for="shared-audio-volume"
-          class="whitespace-nowrap text-xs font-medium"
-          >Volume others hear</label
-        >
-        <input
-          id="shared-audio-volume"
-          class="range range-primary range-xs min-w-24 flex-1"
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          :value="voiceStore.sharedAudioVolume"
-          @input="voiceStore.setSharedAudioVolume($event.target.value)"
-        />
-        <span class="w-10 text-right text-xs tabular-nums"
-          >{{ voiceStore.sharedAudioVolume }}%</span
-        >
-        <div class="flex min-w-56 flex-1 items-center gap-2" aria-live="polite">
-          <span class="whitespace-nowrap text-xs font-medium">
-            {{
-              voiceStore.sharedAudioAttenuation.active
-                ? "Speech priority active"
-                : "Effective volume"
-            }}
+        <div class="shared-audio-heading">
+          <span class="shared-audio-icon">
+            <Icon
+              :name="
+                voiceStore.systemAudioSharing
+                  ? 'lucide:volume-2'
+                  : 'lucide:monitor-up'
+              "
+              class="size-4"
+            />
           </span>
-          <progress
-            class="progress progress-primary h-2 min-w-20 flex-1"
-            max="100"
-            :value="
-              Math.round(
-                (voiceStore.sharedAudioVolume *
-                  voiceStore.sharedAudioAttenuation.effectivePercent) /
-                  100,
-              )
-            "
-          ></progress>
-          <span class="w-9 text-right text-xs tabular-nums">
-            {{
-              Math.round(
-                (voiceStore.sharedAudioVolume *
-                  voiceStore.sharedAudioAttenuation.effectivePercent) /
-                  100,
-              )
-            }}%
-          </span>
-          <span class="whitespace-nowrap text-xs text-base-content/60">
-            {{ voiceStore.sharedAudioAttenuation.reportingListeners }}/{{
-              voiceStore.sharedAudioAttenuation.expectedListeners
-            }}
-            listeners confirmed
-          </span>
+          <div>
+            <p class="text-sm font-semibold">
+              {{
+                voiceStore.systemAudioSharing
+                  ? "System audio is live"
+                  : "Screen audio is live"
+              }}
+            </p>
+            <p class="text-xs text-white/60">
+              Control what everyone else hears
+            </p>
+          </div>
         </div>
+
+        <div class="shared-audio-control">
+          <label for="shared-audio-volume" class="shared-audio-label">
+            <span>Shared volume</span>
+            <span class="shared-audio-volume-status">
+              <output class="tabular-nums" aria-live="polite">
+                <span>{{ voiceStore.sharedAudioVolume }}%</span>
+                <template v-if="voiceStore.sharedAudioDucking.active">
+                  <span class="shared-audio-ducking-arrow" aria-hidden="true"
+                    >→</span
+                  >
+                  <span class="shared-audio-ducking-value">
+                    {{
+                      Math.round(
+                        (voiceStore.sharedAudioVolume *
+                          voiceStore.sharedAudioDucking.effectivePercent) /
+                          100,
+                      )
+                    }}%
+                  </span>
+                  <span class="sr-only">effective while voice is detected</span>
+                </template>
+              </output>
+            </span>
+          </label>
+          <input
+            id="shared-audio-volume"
+            class="range range-primary range-xs w-full"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            :value="voiceStore.sharedAudioVolume"
+            @input="voiceStore.setSharedAudioVolume($event.target.value)"
+          />
+        </div>
+
         <div
-          class="flex items-center gap-2"
+          class="shared-audio-meter"
           :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"
         >
-          <span class="text-xs font-medium">Sent level</span>
+          <div class="shared-audio-label">
+            <span>Signal sent</span>
+            <span class="tabular-nums"
+              >{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span
+            >
+          </div>
           <progress
             :class="[
-              'progress h-3 w-48',
+              'progress h-2 w-full',
               voiceStore.sharedAudioStats.dbfs >= -12
                 ? 'progress-error'
                 : 'progress-success',
@@ -607,9 +617,9 @@
             max="1"
             :value="voiceStore.sharedAudioStats.level"
           ></progress>
-          <span class="w-14 text-right text-xs tabular-nums"
-            >{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span
-          >
+          <span class="shared-audio-detail tabular-nums">
+            {{ voiceStore.sharedAudioStats.dbfs.toFixed(1) }} dBFS
+          </span>
         </div>
       </div>
     </footer>
@@ -926,6 +936,24 @@ onUnmounted(() =>
   color: #171717;
 }
 
+.voice-command-dock {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.voice-command-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
 .voice-dock-button,
 :deep(.voice-dock-button) {
   position: relative;
@@ -988,6 +1016,93 @@ onUnmounted(() =>
 }
 
 .voice-dock-button-leave {
-  margin-left: 0.25rem;
+  margin-left: 0.5rem;
+}
+
+.shared-audio-status {
+  display: grid;
+  grid-template-columns: minmax(11rem, 1fr) minmax(12rem, 1.5fr) 1fr;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: #151619;
+  padding: 1rem;
+  color: #f2f3f5;
+}
+
+.shared-audio-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.shared-audio-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+}
+
+.shared-audio-control,
+.shared-audio-meter {
+  min-width: 0;
+}
+
+.shared-audio-volume-status {
+  display: flex;
+  min-width: 7.5rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.shared-audio-ducking-arrow {
+  margin: 0 0.375rem;
+  color: rgb(242 243 245 / 48%);
+}
+
+.shared-audio-ducking-value {
+  color: var(--color-warning);
+  font-weight: 700;
+}
+
+.shared-audio-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  color: #f2f3f5;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.shared-audio-detail {
+  display: block;
+  margin-top: 0.375rem;
+  overflow: hidden;
+  color: rgb(242 243 245 / 60%);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 64rem) {
+  .shared-audio-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 30rem) {
+  .voice-dock-button-leave {
+    margin-left: 0;
+  }
+
+  .shared-audio-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

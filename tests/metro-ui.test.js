@@ -187,9 +187,33 @@ test("notification dropdown renders above navbar call controls", async () => {
 test("voice controls remain visible in a compact floating dock", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   assert.match(source, /class="voice-command-dock/);
+  assert.match(source, /\.voice-command-dock\s*\{[\s\S]*?flex-wrap: wrap/);
   assert.match(source, /class="voice-dock-button/);
   assert.match(source, /aria-label="Leave voice channel"/);
+  assert.doesNotMatch(source, /items-center gap-2 overflow-x-auto/);
   assert.doesNotMatch(source, /voice-channel:hover \.voice-controls/);
+});
+
+test("shared audio status keeps readable colors independent of the page theme", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  const statusStyles = source.match(
+    /\.shared-audio-status\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+  assert.ok(statusStyles);
+  assert.match(statusStyles, /background: #151619/);
+  assert.match(statusStyles, /color: #f2f3f5/);
+  assert.doesNotMatch(source, /shared-audio-status[^"]*bg-base-/);
+});
+
+test("shared audio ducking uses a reduced-volume status instead of a duplicate meter", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /shared-audio-ducking-arrow/);
+  assert.match(source, /shared-audio-ducking-value/);
+  assert.match(source, /min-width: 7\.5rem/);
+  assert.match(source, /effective while voice is detected/);
+  assert.doesNotMatch(source, /Ducking ready/);
+  assert.doesNotMatch(source, /shared-audio-status-ducking/);
+  assert.doesNotMatch(source, />Output</);
 });
 
 test("audio-only system shares expose automatic listening controls", async () => {

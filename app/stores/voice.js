@@ -46,6 +46,13 @@ export const useVoiceStore = defineStore("voice", () => {
         reportingListeners: 0,
       },
   );
+  const sharedAudioDucking = computed(
+    () =>
+      sfuComposable.value?.sharedAudioDucking || {
+        active: false,
+        effectivePercent: 100,
+      },
+  );
   const effectiveSystemAudioBitrate = computed(() => {
     const requested = Number(settingsStore.systemAudioBitrate) || 128;
     const channelLimit = Number(
@@ -736,6 +743,7 @@ export const useVoiceStore = defineStore("voice", () => {
     sharedAudioVolume,
     sharedAudioStats,
     sharedAudioAttenuation,
+    sharedAudioDucking,
     effectiveSystemAudioBitrate,
     sfuComposable,
     joinVoiceChannel,

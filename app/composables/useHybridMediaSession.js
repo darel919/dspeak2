@@ -49,7 +49,6 @@ import {
   microphoneLevelDb,
   updateNoiseFloor,
 } from "~/shared/microphone-gate.js";
-
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig();
   const authStore = useAuthStore();
@@ -124,7 +123,6 @@ export function useHybridMediaSession() {
       transportReady: transportReady.value,
     }),
   );
-
   const getAttenuation = () =>
     resolveMediaAttenuation(
       roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
@@ -185,7 +183,7 @@ export function useHybridMediaSession() {
       localPeerId,
     ),
   );
-
+  const sharedAudioDucking = ref({ active: false, effectivePercent: 100 });
   function setRouteConnectionState(state) {
     mediaConnectionState.value =
       playbackState.value === "blocked" ||
@@ -594,6 +592,7 @@ export function useHybridMediaSession() {
     onSpeakingChange: (userId, speaking) =>
       registry.setExternalSpeaking(userId, speaking),
     settingsStore,
+    sharedAudioDucking,
     sharedAudioStats,
     updateNoiseFloor,
     voiceStore,
@@ -1052,6 +1051,7 @@ export function useHybridMediaSession() {
     remoteAudioFeeds: readonly(remoteAudioFeeds),
     sharedAudioStats: readonly(sharedAudioStats),
     sharedAudioAttenuation,
+    sharedAudioDucking: readonly(sharedAudioDucking),
     peerRoundTripTimes: readonly(peerRoundTripTimes),
     peerConnectionMetrics: readonly(peerConnectionMetrics),
     sfuRoundTripTime: readonly(sfuRoundTripTime),

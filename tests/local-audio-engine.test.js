@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLocalAudioEngine } from "../app/shared/local-audio-engine.js";
 
-function createEngine({ context, p2pMesh, sfu }) {
+function createEngine({ context, p2pMesh, sfu, sharedAudioDucking }) {
   return createLocalAudioEngine({
     authStore: { getUserData: () => ({ id: "local-user" }) },
     automaticGateThreshold: () => -40,
@@ -22,6 +22,7 @@ function createEngine({ context, p2pMesh, sfu }) {
       sharedAudioVolume: 100,
       systemAudioBitrate: 128,
     },
+    sharedAudioDucking,
     sharedAudioStats: { value: {} },
     updateNoiseFloor() {},
     voiceStore: { updateUserSpeaking() {} },
@@ -233,6 +234,7 @@ test("zero shared volume immediately mutes gain and both transports", async () =
 
 test("speech priority attenuates the processed outbound track", async () => {
   const ramps = [];
+  const sharedAudioDucking = { value: null };
   const gainParameter = {
     value: 1,
     cancelScheduledValues() {},
@@ -283,7 +285,7 @@ test("speech priority attenuates the processed outbound track", async () => {
   };
 
   try {
-    const engine = createEngine({ context });
+    const engine = createEngine({ context, sharedAudioDucking });
     await engine.createSharedAudioSource({
       source: "screen-audio",
       stream: new MediaStream([{ id: "capture", kind: "audio" }]),
@@ -295,11 +297,19 @@ test("speech priority attenuates the processed outbound track", async () => {
       attackMs: 120,
       releaseMs: 650,
     });
+    assert.deepEqual(sharedAudioDucking.value, {
+      active: true,
+      effectivePercent: 0,
+    });
     engine.setSharedAudioAttenuation(false, {
       enabled: true,
       reductionPercent: 100,
       attackMs: 120,
       releaseMs: 650,
+    });
+    assert.deepEqual(sharedAudioDucking.value, {
+      active: false,
+      effectivePercent: 100,
     });
 
     assert.deepEqual(ramps, [
