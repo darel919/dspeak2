@@ -150,6 +150,7 @@ export class MediasoupClientSession {
     }
     if (type === "consumer-resumed" || type === "consumer-paused") {
       this.pending.get(data.requestId)?.resolve(data);
+      if (data.consumerClosed) return true;
       const entry = this.consumers.get(data.consumerId);
       if (entry) entry.receiving = type === "consumer-resumed";
       return true;
@@ -617,7 +618,14 @@ export class MediasoupClientSession {
         data: { consumerId: entry.consumer.id, requestId, revision },
       });
       try {
-        await acknowledgement;
+        const result = await acknowledgement;
+        if (result?.consumerClosed) {
+          if (entry.receivingRevision === revision) {
+            entry.track.enabled = false;
+            entry.receiving = false;
+          }
+          return false;
+        }
         if (entry.receivingRevision !== revision) return false;
         entry.track.enabled = desired;
         entry.receiving = desired;

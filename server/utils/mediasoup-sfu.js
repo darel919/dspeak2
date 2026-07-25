@@ -698,7 +698,16 @@ async function handleMessage(state, session, message) {
 
     case "resume-consumer": {
       const consumer = session.consumers.get(data.consumerId);
-      if (!consumer) throw new Error("Consumer not found");
+      if (!consumer) {
+        send(session.peer, "consumer-resumed", {
+          requestId: data.requestId,
+          revision: data.revision,
+          consumerId: data.consumerId,
+          producerId: data.producerId,
+          consumerClosed: true,
+        });
+        return;
+      }
       await consumer.resume();
       send(session.peer, "consumer-resumed", {
         requestId: data.requestId,
@@ -711,7 +720,16 @@ async function handleMessage(state, session, message) {
 
     case "pause-consumer": {
       const consumer = session.consumers.get(data.consumerId);
-      if (!consumer) throw new Error("Consumer not found");
+      if (!consumer) {
+        send(session.peer, "consumer-paused", {
+          requestId: data.requestId,
+          revision: data.revision,
+          consumerId: data.consumerId,
+          producerId: data.producerId,
+          consumerClosed: true,
+        });
+        return;
+      }
       await consumer.pause();
       send(session.peer, "consumer-paused", {
         requestId: data.requestId,
