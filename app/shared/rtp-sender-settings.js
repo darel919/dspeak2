@@ -16,7 +16,6 @@ export async function applyRtpSenderSettings(sender, options = {}) {
   ]) {
     if (requested[key] != null) encoding[key] = requested[key];
   }
-  if (options.dtx != null) encoding.dtx = options.dtx;
   if (options.degradationPreference)
     parameters.degradationPreference = options.degradationPreference;
 

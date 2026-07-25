@@ -434,7 +434,7 @@ export function useHybridMediaSession() {
             getEffectiveAudioBitrate(source),
             getAudioStereo(source),
           );
-          return { encodings: options.encodings, dtx: "disabled" };
+          return { encodings: options.encodings };
         }
         const settings = track.getSettings?.() || {};
         const options = buildP2pVideoSenderOptions({
