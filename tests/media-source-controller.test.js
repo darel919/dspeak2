@@ -4,6 +4,7 @@ import { createMediaSourceController } from "../app/shared/media-source-controll
 
 function controller(overrides = {}) {
   const localSources = new Map();
+  const localVideoFeeds = { value: new Map() };
   const sent = [];
   const failures = [];
   let stoppedMeter = 0;
@@ -17,7 +18,7 @@ function controller(overrides = {}) {
     getP2pMesh: () => null,
     getSfu: () => null,
     localSources,
-    localVideoFeeds: { value: new Map() },
+    localVideoFeeds,
     producerFacade: (entry) => entry,
     refreshPublicMaps() {},
     reportSfuFailure: (reason) => failures.push(reason),
@@ -36,6 +37,7 @@ function controller(overrides = {}) {
     failures,
     instance,
     localSources,
+    localVideoFeeds,
     sent,
     stoppedMeter: () => stoppedMeter,
   };
@@ -67,6 +69,54 @@ test("failed SFU publication never advertises a local source", async () => {
     false,
   );
   assert.equal(harness.failures.length, 1);
+});
+
+test("local screen preview is available while route publication is pending", async () => {
+  let releasePublication;
+  const publication = new Promise((resolve) => {
+    releasePublication = resolve;
+  });
+  const harness = controller({
+    getSfu: () => ({
+      addSource: () => publication,
+    }),
+  });
+  const stream = {};
+  const publishing = harness.instance.publishSource({
+    source: "screen",
+    stream,
+    track: { id: "screen-track", readyState: "live" },
+  });
+
+  assert.equal(harness.localSources.has("screen"), false);
+  assert.equal(harness.localVideoFeeds.value.get("screen").stream, stream);
+
+  releasePublication();
+  await publishing;
+
+  assert.equal(harness.localSources.has("screen"), true);
+});
+
+test("failed screen publication removes its provisional local preview", async () => {
+  const harness = controller({
+    getSfu: () => ({
+      async addSource() {
+        throw new Error("producer rejected");
+      },
+      removeSource() {},
+    }),
+  });
+
+  await assert.rejects(
+    harness.instance.publishSource({
+      source: "screen",
+      stream: {},
+      track: { id: "screen-track", readyState: "live" },
+    }),
+    /producer rejected/,
+  );
+
+  assert.equal(harness.localVideoFeeds.value.has("screen"), false);
 });
 
 test("a missing active transport cannot report publication success", async () => {

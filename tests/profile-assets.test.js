@@ -56,7 +56,7 @@ test("voice participant tiles use the shared avatar fallback", () => {
   );
 
   assert.match(source, /<ProfileAvatar/);
-  assert.match(source, /:src="userAvatarSource\(user\)"/);
+  assert.match(source, /:src="userAvatarSource\(tile\.user\)"/);
   assert.match(source, /return currentUser\.avatar \|\| ""/);
   assert.doesNotMatch(source, /function getUserAvatar/);
 });

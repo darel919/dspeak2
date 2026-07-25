@@ -118,6 +118,94 @@ test("P2P screen receiving signals video and shared audio together", () => {
   );
 });
 
+test("late P2P source identity reclassifies a generic track with a different browser ID", async () => {
+  const originalMediaStream = globalThis.MediaStream;
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+  };
+  const bound = [];
+  const ended = [];
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: () => {},
+    onRemoteTrack: (entry) =>
+      bound.push({ key: entry.key, source: entry.source }),
+    onRemoteTrackEnded: (entry) =>
+      ended.push({ key: entry.key, source: entry.source }),
+  });
+  mesh.epoch = 7;
+  const track = {
+    id: "screen-track",
+    kind: "video",
+    readyState: "live",
+    addEventListener: () => {},
+  };
+  const state = {
+    peerId: "peer-2",
+    userId: "user-2",
+    pc: {},
+    remoteTracks: new Map(),
+  };
+  mesh.connections.set("peer-2", state);
+
+  try {
+    mesh.handleTrack(state, { track });
+    await mesh.receiveSignal({
+      fromPeerId: "peer-2",
+      epoch: 7,
+      signal: {
+        source: { trackId: "sender-screen-track", source: "screen" },
+      },
+    });
+
+    assert.deepEqual(ended, [{ key: "p2p:peer-2:video", source: "video" }]);
+    assert.deepEqual(bound, [
+      { key: "p2p:peer-2:video", source: "video" },
+      { key: "p2p:peer-2:screen", source: "screen" },
+    ]);
+    assert.equal(state.remoteTracks.has("video"), false);
+    assert.equal(state.remoteTracks.get("screen").track, track);
+  } finally {
+    globalThis.MediaStream = originalMediaStream;
+  }
+});
+
+test("P2P resolves a uniquely signaled screen when browser track IDs differ", () => {
+  const bound = [];
+  const originalMediaStream = globalThis.MediaStream;
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+  };
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: () => {},
+    onRemoteTrack: (entry) => bound.push(entry),
+  });
+  const state = {
+    peerId: "peer-2",
+    userId: "user-2",
+    remoteTracks: new Map(),
+  };
+  const track = {
+    id: "receiver-generated-track-id",
+    kind: "video",
+    addEventListener: () => {},
+  };
+  mesh.remoteSources.set("peer-2:sender-track-id", "screen");
+
+  try {
+    mesh.handleTrack(state, { track });
+    assert.equal(bound[0].source, "screen");
+    assert.equal(state.remoteTracks.get("screen").track, track);
+  } finally {
+    globalThis.MediaStream = originalMediaStream;
+  }
+});
+
 test("P2P source toggles reuse their sender instead of accumulating transceivers", async () => {
   const signals = [];
   const replacements = [];

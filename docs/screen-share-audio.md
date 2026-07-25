@@ -28,7 +28,8 @@ digital screen-audio track.
 Remote screen video begins paused until the viewer selects **Start screen
 share**. Shared audio begins playing immediately so audio-only system shares do
 not wait for a video action that does not exist. After a paired screen has been
-started, **Stop** pauses both its video and audio.
+started, **Stop** pauses both its video and audio. The viewer's explicit choice
+is retained while the active media route changes between Direct, Mesh, and SFU.
 
 An audio-only share displays **[participant] is sharing system audio** to every
 listener. **Stop listening** pauses the SFU consumer or disables the matching

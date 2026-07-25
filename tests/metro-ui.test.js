@@ -223,6 +223,38 @@ test("audio-only system shares expose automatic listening controls", async () =>
   assert.match(source, /setRemoteSystemAudioReceiving/);
 });
 
+test("screen prompts and accepted video use one stable stage frame", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  const feed = await readFile("app/components/VideoFeed.vue", "utf8");
+  assert.match(source, /screen-feed-frame-single/);
+  assert.match(source, /aspect-ratio: 16 \/ 9/);
+  assert.match(source, /width: min\(100cqw, calc\(100cqh \* 16 \/ 9\)\)/);
+  assert.match(source, /:compact=/);
+  assert.match(source, /:avatar-src="tile\.feed\.avatar"/);
+  assert.match(feed, /\(localScreenPreviewPaused \|\| !receiving\)/);
+  assert.match(feed, />\s*LIVE\s*</);
+  assert.match(feed, /blur-xl opacity-60/);
+});
+
+test("voice video offers equal overview tiles and viewer-selected focus", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(
+    source,
+    /@click="tile\.type === 'feed' && scheduleTileFocus\(tile\.key\)"/,
+  );
+  assert.match(source, /@dblclick\.stop="cancelTileFocus"/);
+  assert.match(source, /voice-room-grid-focused/);
+  assert.match(source, /voice-room-tile-focused/);
+  assert.match(source, /justify-content: center/);
+  assert.match(source, /representedUsers/);
+  assert.match(source, /focusedTileKey\.value === key/);
+  assert.match(source, /viewMode\.value = "overview"/);
+  assert.match(source, /participant-audio-tile-compact/);
+  assert.match(source, /setTimeout\(\(\) => \{/);
+  assert.match(source, /}, 240\)/);
+  assert.doesNotMatch(source, /aria-label="Voice channel view"/);
+});
+
 test("participant volume controls render outside the scrolling participant strip", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   assert.match(source, /<Teleport to="body">/);

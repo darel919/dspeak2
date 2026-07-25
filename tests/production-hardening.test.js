@@ -120,3 +120,15 @@ test("state-changing audio operations publish or return failures", async () => {
     /getSnapshot\(\)[\s\S]{0,120}\.catch\(\(\) => \{\}\)/,
   );
 });
+
+test("remote screen acceptance attaches the existing stream to its new video element", async () => {
+  const videoFeed = await readFile(
+    new URL("../app/components/VideoFeed.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    videoFeed,
+    /watch\(\s*\(\) => props\.receiving,\s*\(receiving\) => \{\s*if \(receiving\) nextTick\(attachStream\);/,
+  );
+});

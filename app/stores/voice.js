@@ -12,6 +12,8 @@ import { resolveVoicePreferences } from "~/shared/voice-preferences.js";
 import { createVoiceParticipantState } from "~/shared/voice-participant-state.js";
 import { waitForVoiceTransportReady } from "~/shared/voice-join-readiness.js";
 
+const EMPTY_MEDIA_FEEDS = new Map();
+
 export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
   const currentRoomId = ref(null);
@@ -64,6 +66,15 @@ export const useVoiceStore = defineStore("voice", () => {
   });
 
   const sfuComposable = ref(null);
+  const localVideoFeeds = computed(
+    () => unref(sfuComposable.value?.localVideoFeeds) || EMPTY_MEDIA_FEEDS,
+  );
+  const remoteVideoFeeds = computed(
+    () => unref(sfuComposable.value?.remoteVideoFeeds) || EMPTY_MEDIA_FEEDS,
+  );
+  const remoteAudioFeeds = computed(
+    () => unref(sfuComposable.value?.remoteAudioFeeds) || EMPTY_MEDIA_FEEDS,
+  );
 
   let stopIceWatcher = null;
   let joinGeneration = 0;
@@ -566,12 +577,14 @@ export const useVoiceStore = defineStore("voice", () => {
   async function toggleScreenShare() {
     if (!connected.value || !sfuComposable.value) return;
     try {
-      if (screenSharing.value) {
-        sfuComposable.value.stopVideoProduction("screen");
+      const session = sfuComposable.value;
+      const currentLocalVideoFeeds = unref(session.localVideoFeeds);
+      if (currentLocalVideoFeeds?.has?.("screen")) {
+        session.stopVideoProduction("screen");
         screenSharing.value = false;
       } else {
-        const producer =
-          await sfuComposable.value.startVideoProduction("screen");
+        screenSharing.value = false;
+        const producer = await session.startVideoProduction("screen");
         screenSharing.value = true;
         playSystemSound("screen-start", settingsStore);
         const handleScreenShareEnded = () => {
@@ -746,6 +759,9 @@ export const useVoiceStore = defineStore("voice", () => {
     sharedAudioDucking,
     effectiveSystemAudioBitrate,
     sfuComposable,
+    localVideoFeeds,
+    remoteVideoFeeds,
+    remoteAudioFeeds,
     joinVoiceChannel,
     leaveVoiceChannel,
     toggleMic,

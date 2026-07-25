@@ -16,36 +16,30 @@
       @dblclick.prevent="toggleFullscreen"
       @touchend="handleTouchEnd"
     >
-      <video
-        v-show="previewEnabled && receiving"
-        ref="videoElement"
-        autoplay
-        playsinline
-        :muted="muted"
-        class="block h-full w-full object-contain"
-      />
       <div
-        v-if="source === 'screen' && !receiving"
-        class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
+        v-if="
+          compact &&
+          source === 'screen' &&
+          (localScreenPreviewPaused || !receiving)
+        "
+        class="relative h-full w-full overflow-hidden bg-base-300"
       >
-        <Icon name="lucide:monitor-play" class="size-10 text-primary" />
-        <div>
-          <div class="font-medium">{{ label }} is sharing a screen</div>
-          <div class="mt-1 text-sm text-base-content/60">
-            Start it only when you want to receive the video.
-          </div>
-        </div>
-        <button
-          type="button"
-          class="btn btn-primary btn-sm"
-          @click="$emit('start-receiving')"
+        <ProfileAvatar
+          :src="avatarSrc"
+          :name="label"
+          :base-api-path="baseApiPath"
+          class="absolute -inset-4 h-[calc(100%+2rem)] w-[calc(100%+2rem)] scale-110 blur-xl opacity-60"
+        />
+        <div class="absolute inset-0 bg-black/35" aria-hidden="true"></div>
+        <span
+          class="absolute right-3 top-3 bg-error px-2 py-1 text-xs font-bold tracking-wide text-error-content"
         >
-          Start screen share
-        </button>
+          LIVE
+        </span>
       </div>
       <div
-        v-if="localScreenPreviewPaused"
-        class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
+        v-else-if="localScreenPreviewPaused"
+        class="flex h-full w-full flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
       >
         <Icon name="lucide:monitor-pause" class="size-10 text-primary" />
         <div>
@@ -62,6 +56,33 @@
           Show preview
         </button>
       </div>
+      <div
+        v-else-if="source === 'screen' && !receiving"
+        class="flex h-full w-full flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
+      >
+        <Icon name="lucide:monitor-play" class="size-10 text-primary" />
+        <div>
+          <div class="font-medium">{{ label }} is sharing a screen</div>
+          <div class="mt-1 text-sm text-base-content/60">
+            Start it only when you want to receive the video.
+          </div>
+        </div>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          @click="$emit('start-receiving')"
+        >
+          Start screen share
+        </button>
+      </div>
+      <video
+        v-else
+        ref="videoElement"
+        autoplay
+        playsinline
+        :muted="muted"
+        class="block h-full w-full object-contain"
+      />
       <figcaption
         class="absolute bottom-2 left-2 bg-black/70 px-2 py-1 text-xs text-white"
       >
@@ -78,7 +99,7 @@
         <Icon name="lucide:minimize-2" class="size-4" />
       </button>
       <button
-        v-if="source === 'screen' && receiving && !isFullscreen"
+        v-if="source === 'screen' && !local && receiving && !isFullscreen"
         type="button"
         class="btn btn-sm absolute right-3 top-3 bg-black/70 text-white hover:bg-black/90"
         @click.stop="$emit('stop-receiving')"
@@ -113,6 +134,9 @@ const props = defineProps({
   receiving: { type: Boolean, default: true },
   ownCameraStream: { type: Object, default: null },
   ownCameraFeedKey: { type: String, default: null },
+  compact: { type: Boolean, default: false },
+  avatarSrc: { type: String, default: "" },
+  baseApiPath: { type: String, default: "" },
 });
 defineEmits(["start-receiving", "stop-receiving"]);
 
@@ -224,7 +248,19 @@ onMounted(() => {
   document.addEventListener("fullscreenchange", syncFullscreenState);
   document.addEventListener("webkitfullscreenchange", syncFullscreenState);
 });
-watch(() => props.stream, attachStream);
+watch(
+  () => props.stream,
+  () => {
+    if (props.local && props.source === "screen") previewEnabled.value = false;
+    nextTick(attachStream);
+  },
+);
+watch(
+  () => props.receiving,
+  (receiving) => {
+    if (receiving) nextTick(attachStream);
+  },
+);
 watch(
   () => props.ownCameraStream,
   () => nextTick(attachStream),

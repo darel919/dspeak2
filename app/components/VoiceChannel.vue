@@ -104,146 +104,103 @@
       "
       class="voice-stage flex min-h-0 flex-1 flex-col overflow-hidden"
     >
-      <!-- Video owns the available stage; the grid expands and reflows as feeds appear. -->
       <div
-        v-if="videoFeeds.length"
-        class="flex min-h-0 flex-1 items-center justify-center px-4 py-3 md:px-8 md:py-5"
+        v-if="roomTiles.length"
+        class="screen-feed-area min-h-0 flex-1 overflow-hidden p-4 md:p-6"
       >
         <div
-          class="grid h-full min-h-0 w-full content-center justify-center gap-3"
-          :class="
-            videoFeeds.length === 1
-              ? 'grid-cols-1 max-w-7xl'
-              : 'grid-cols-1 md:grid-cols-2'
-          "
+          class="voice-room-grid h-full min-h-0 w-full"
+          :class="{ 'voice-room-grid-focused': viewMode === 'focused' }"
         >
           <div
-            v-for="feed in videoFeeds"
-            :key="feed.key"
-            class="mx-auto min-h-0 overflow-hidden bg-black"
-            :class="
-              videoFeeds.length === 1
-                ? 'aspect-video h-full w-auto max-w-full'
-                : 'aspect-video w-full'
+            v-for="tile in displayedRoomTiles"
+            :key="tile.key"
+            class="voice-room-tile min-h-0 overflow-hidden"
+            :class="{
+              'voice-room-tile-focused':
+                viewMode === 'focused' && tile.key === focusedTileKey,
+              'participant-tile-speaking': tile.user?.speaking,
+            }"
+            :role="tile.type === 'feed' ? 'button' : undefined"
+            :tabindex="tile.type === 'feed' ? 0 : undefined"
+            :aria-label="
+              tile.type === 'feed'
+                ? `Maximize ${tile.feed.label} ${tile.feed.source}`
+                : undefined
+            "
+            @click="tile.type === 'feed' && scheduleTileFocus(tile.key)"
+            @dblclick.stop="cancelTileFocus"
+            @keydown.enter.prevent="tile.type === 'feed' && focusTile(tile.key)"
+            @keydown.space.prevent="tile.type === 'feed' && focusTile(tile.key)"
+            @contextmenu.prevent="
+              tile.type === 'participant' && openVolumeMenu(tile.user)
             "
           >
             <VideoFeed
-              :feed-key="feed.key"
-              :stream="feed.stream"
-              :source="feed.source"
-              :label="feed.label"
+              v-if="tile.type === 'feed'"
+              :feed-key="tile.feed.key"
+              :stream="tile.feed.stream"
+              :source="tile.feed.source"
+              :label="tile.feed.label"
               :muted="true"
-              :local="feed.local"
-              :receiving="feed.receiving !== false"
+              :local="tile.feed.local"
+              :receiving="tile.feed.receiving !== false"
+              :compact="viewMode === 'focused' && tile.key !== focusedTileKey"
+              :avatar-src="tile.feed.avatar"
+              :base-api-path="config.public.baseApiPath"
               :own-camera-stream="ownCameraFeed?.stream || null"
               :own-camera-feed-key="ownCameraFeed?.key || null"
-              @start-receiving="setScreenReceiving(feed, true)"
-              @stop-receiving="setScreenReceiving(feed, false)"
+              @start-receiving="setScreenReceiving(tile.feed, true)"
+              @stop-receiving="setScreenReceiving(tile.feed, false)"
             />
-          </div>
-        </div>
-      </div>
-      <!-- Participants Grid -->
-      <div
-        v-if="!videoFeeds.length || showParticipants"
-        :class="
-          videoFeeds.length
-            ? 'shrink-0 px-4 pb-3'
-            : 'min-h-0 flex-1 overflow-y-auto p-4 md:p-6'
-        "
-      >
-        <div v-if="connectedUsers.length > 0" class="h-full">
-          <!-- Participants Grid Layout -->
-          <div
-            :class="
-              videoFeeds.length
-                ? 'flex max-w-full items-center justify-center gap-3 overflow-x-auto'
-                : 'participant-grid grid h-full gap-3'
-            "
-          >
             <div
-              v-for="user in connectedUsers"
-              :key="user.id"
-              class="participant-tile metro-transition group relative flex min-w-0 flex-col items-center justify-center overflow-hidden border border-white/10 bg-base-300"
-              :class="[
-                videoFeeds.length
-                  ? 'min-w-36 border-base-content/20 bg-base-300 px-3 py-3'
-                  : connectedUsers.length === 1
-                    ? 'participant-audio-tile h-full min-h-0 p-6'
-                    : 'participant-audio-tile min-h-48 p-6 md:min-h-56',
-                user.speaking ? 'participant-tile-speaking' : '',
-              ]"
-              @contextmenu.prevent="openVolumeMenu(user)"
+              v-else
+              class="participant-tile participant-audio-tile metro-transition group relative flex h-full min-w-0 flex-col items-center justify-center overflow-hidden border"
+              :class="
+                viewMode === 'focused'
+                  ? 'participant-audio-tile-compact p-2'
+                  : 'p-6'
+              "
             >
               <button
-                v-if="!isLocalUser(user)"
+                v-if="!isLocalUser(tile.user)"
                 class="btn btn-ghost btn-square btn-sm absolute right-2 top-2 z-10 opacity-70 hover:opacity-100 focus-visible:opacity-100"
                 type="button"
-                :aria-label="`Adjust volume for ${getUserDisplayName(user)}`"
-                @click.stop="openVolumeMenu(user, $event.currentTarget)"
+                :aria-label="`Adjust volume for ${getUserDisplayName(tile.user)}`"
+                @click.stop="openVolumeMenu(tile.user, $event.currentTarget)"
               >
                 <Icon name="lucide:volume-2" class="size-4" />
               </button>
-              <!-- User Avatar -->
-              <div class="avatar" :class="videoFeeds.length ? 'mb-1' : 'mb-4'">
+              <div
+                class="avatar"
+                :class="viewMode === 'focused' ? 'mb-0' : 'mb-4'"
+              >
                 <ProfileAvatar
-                  :src="userAvatarSource(user)"
-                  :name="getUserDisplayName(user)"
+                  :src="userAvatarSource(tile.user)"
+                  :name="getUserDisplayName(tile.user)"
                   :base-api-path="config.public.baseApiPath"
                   class="metro-transition rounded-full bg-primary text-primary-content font-bold ring-2"
                   :class="[
-                    videoFeeds.length
-                      ? 'h-14 w-14 text-sm'
+                    viewMode === 'focused'
+                      ? 'h-12 w-12 text-sm'
                       : 'h-24 w-24 text-2xl md:h-28 md:w-28',
-                    user.speaking
+                    tile.user.speaking
                       ? 'ring-success ring-offset-2 ring-offset-base-100'
                       : 'ring-base-300',
                   ]"
                 />
               </div>
-              <!-- User Name -->
               <h4
-                class="font-semibold text-center"
+                class="max-w-full truncate text-center font-semibold"
                 :class="
-                  videoFeeds.length
-                    ? 'mt-2 max-w-32 truncate text-sm'
-                    : 'mt-4 max-w-full truncate text-lg'
+                  viewMode === 'focused' ? 'mt-1 text-sm' : 'mt-4 text-lg'
                 "
               >
-                {{ getUserDisplayName(user) }}
+                {{ getUserDisplayName(tile.user) }}
               </h4>
-              <!-- ICE / Connection Status for local user when not fully connected -->
-              <div
-                v-if="isLocalUser(user) && !voiceStore.connected"
-                class="text-xs text-base-content/60 mb-2"
-              >
-                <span v-if="voiceStore.connecting && !voiceStore.connected"
-                  >Waiting</span
-                >
-                <span
-                  v-else-if="
-                    voiceStore.sfuComposable &&
-                    !voiceStore.sfuComposable.transportReady
-                  "
-                  >Connecting</span
-                >
-                <span
-                  class="text-error"
-                  v-else-if="
-                    voiceStore.sfuComposable?.iceConnectedBoth === false
-                  "
-                  >Disconnected</span
-                >
-                <span v-else>Not connected</span>
-              </div>
-              <!-- User Status -->
               <div class="flex items-center gap-2">
-                <!-- <div v-if="user.speaking" class="flex items-center gap-1 text-success"> -->
-                <!-- <div class="w-2 h-2 bg-success rounded-full animate-pulse"></div> -->
-                <!-- <span class="text-sm">Speaking</span> -->
-                <!-- </div> -->
                 <div
-                  v-if="user.muted"
+                  v-if="tile.user.muted"
                   class="flex items-center gap-1 text-error"
                 >
                   <Icon
@@ -253,7 +210,7 @@
                   />
                 </div>
                 <div
-                  v-if="user.deafened"
+                  v-if="tile.user.deafened"
                   class="flex items-center gap-1 text-error"
                 >
                   <Icon
@@ -265,21 +222,6 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Empty state when no other users -->
-        <div v-else class="h-full flex flex-col items-center justify-center">
-          <Icon
-            name="lucide:users"
-            class="w-24 h-24 text-base-content/40 mb-6"
-          />
-          <h4 class="text-xl font-medium text-base-content/60 mb-2">
-            You're alone in this voice channel
-          </h4>
-          <p class="text-base-content/40 text-center max-w-md">
-            Others can join by clicking on this channel from the sidebar. Share
-            the room invite to get more people in here!
-          </p>
         </div>
       </div>
     </div>
@@ -505,21 +447,6 @@
             :channel-id="String(channel.id)"
             compact
           />
-
-          <button
-            v-if="videoFeeds.length"
-            type="button"
-            class="voice-dock-button metro-transition"
-            :class="showParticipants ? 'voice-dock-button-active' : ''"
-            :aria-pressed="showParticipants"
-            aria-label="Show participants"
-            :data-label="
-              showParticipants ? 'Hide participants' : 'Show participants'
-            "
-            @click="showParticipants = !showParticipants"
-          >
-            <Icon name="lucide:users" class="size-5" />
-          </button>
         </div>
 
         <button
@@ -684,32 +611,68 @@ const identityStore = useIdentityStore();
 const channelsStore = useChannelsStore();
 const router = useRouter();
 const config = useRuntimeConfig();
-const showParticipants = ref(true);
+const viewMode = ref("overview");
+const focusedTileKey = ref(null);
+let tileFocusTimer = null;
 
 const connectedUsers = computed(() => {
   return voiceStore.getDisplayUsersArray();
 });
 const videoFeeds = computed(() => {
-  const sfu = voiceStore.sfuComposable;
-  if (!sfu) return [];
-  const local = Array.from(sfu.localVideoFeeds || []).map(([source, feed]) => ({
-    ...feed,
-    key: `local-${source}`,
-    local: true,
-    label: "You",
-  }));
-  const remote = Array.from(sfu.remoteVideoFeeds || []).map(
-    ([producerId, feed]) => ({
+  const currentUser = authStore.getUserData?.();
+  const currentUserId = currentUser?.id;
+  const local = Array.from(voiceStore.localVideoFeeds).map(
+    ([source, feed]) => ({
       ...feed,
-      key: producerId,
-      local: false,
-      label: getUserDisplayName(
-        voiceStore.getUserById(feed.userId) || { id: feed.userId },
-      ),
+      source,
+      key: `local-${source}`,
+      userId: currentUserId ? String(currentUserId) : "local",
+      local: true,
+      label: "You",
+      avatar: userAvatarSource(currentUser || { id: currentUserId }),
     }),
+  );
+  const remote = Array.from(voiceStore.remoteVideoFeeds).map(
+    ([producerId, feed]) => {
+      const user = voiceStore.getUserById(feed.userId) || { id: feed.userId };
+      return {
+        ...feed,
+        source: feed.source,
+        key: producerId,
+        local: false,
+        label: getUserDisplayName(user),
+        avatar: userAvatarSource(user),
+      };
+    },
   );
   return [...local, ...remote].sort(
     (a, b) => Number(b.source === "screen") - Number(a.source === "screen"),
+  );
+});
+const roomTiles = computed(() => {
+  const representedUsers = new Set(
+    videoFeeds.value.map((feed) => String(feed.userId)),
+  );
+  const feeds = videoFeeds.value.map((feed) => ({
+    key: `feed-${feed.key}`,
+    type: "feed",
+    feed,
+  }));
+  const participants = connectedUsers.value
+    .filter((user) => !representedUsers.has(String(user.id)))
+    .map((user) => ({
+      key: `participant-${user.id}`,
+      type: "participant",
+      user,
+    }));
+  return [...feeds, ...participants];
+});
+const displayedRoomTiles = computed(() => {
+  if (viewMode.value !== "focused") return roomTiles.value;
+  return [...roomTiles.value].sort(
+    (a, b) =>
+      Number(b.key === focusedTileKey.value) -
+      Number(a.key === focusedTileKey.value),
   );
 });
 const ownCameraFeed = computed(
@@ -717,15 +680,46 @@ const ownCameraFeed = computed(
     videoFeeds.value.find((feed) => feed.local && feed.source === "camera") ||
     null,
 );
+
+function focusTile(key) {
+  if (viewMode.value === "focused" && focusedTileKey.value === key) {
+    viewMode.value = "overview";
+    return;
+  }
+  focusedTileKey.value = key;
+  viewMode.value = "focused";
+}
+
+function cancelTileFocus() {
+  if (tileFocusTimer) clearTimeout(tileFocusTimer);
+  tileFocusTimer = null;
+}
+
+function scheduleTileFocus(key) {
+  cancelTileFocus();
+  tileFocusTimer = setTimeout(() => {
+    tileFocusTimer = null;
+    focusTile(key);
+  }, 240);
+}
+
+watch(roomTiles, (tiles) => {
+  if (
+    focusedTileKey.value &&
+    !tiles.some((tile) => tile.key === focusedTileKey.value)
+  ) {
+    focusedTileKey.value =
+      tiles.find((tile) => tile.type === "feed")?.key || null;
+    if (!focusedTileKey.value) viewMode.value = "overview";
+  }
+});
 const remoteSystemAudioShares = computed(() => {
-  const sfu = voiceStore.sfuComposable;
-  if (!sfu) return [];
   const screenOwners = new Set(
-    Array.from(sfu.remoteVideoFeeds || [])
+    Array.from(voiceStore.remoteVideoFeeds)
       .filter(([, feed]) => feed.source === "screen")
       .map(([, feed]) => String(feed.userId)),
   );
-  return Array.from(sfu.remoteAudioFeeds || [])
+  return Array.from(voiceStore.remoteAudioFeeds)
     .filter(
       ([, feed]) =>
         feed.source === "screen-audio" &&
@@ -792,7 +786,7 @@ function onTrackVolumeChange(userId, source, event) {
 }
 
 function hasAudioSource(userId, source) {
-  return Array.from(voiceStore.sfuComposable?.remoteAudioFeeds || []).some(
+  return Array.from(voiceStore.remoteAudioFeeds).some(
     ([, feed]) =>
       String(feed.userId) === String(userId) && feed.source === source,
   );
@@ -894,9 +888,10 @@ async function leaveChannel() {
 }
 
 onMounted(() => document.addEventListener("keydown", onVolumeDialogKeydown));
-onUnmounted(() =>
-  document.removeEventListener("keydown", onVolumeDialogKeydown),
-);
+onUnmounted(() => {
+  cancelTileFocus();
+  document.removeEventListener("keydown", onVolumeDialogKeydown);
+});
 </script>
 
 <style scoped>
@@ -910,6 +905,71 @@ onUnmounted(() =>
 
 .voice-stage {
   background: #050505;
+}
+
+.screen-feed-area {
+  container-type: size;
+}
+
+.voice-room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  place-content: center;
+  gap: 0.75rem;
+}
+
+.voice-room-tile {
+  min-width: 0;
+  border: 1px solid rgb(255 255 255 / 12%);
+  background: #000;
+  cursor: default;
+}
+
+.voice-room-tile[role="button"] {
+  cursor: pointer;
+}
+
+.voice-room-tile[role="button"]:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.voice-room-grid-focused {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  justify-content: center;
+}
+
+.voice-room-tile-focused {
+  width: 100%;
+  height: calc(100% - 9rem);
+  flex: 0 0 100%;
+}
+
+.voice-room-grid-focused .voice-room-tile:not(.voice-room-tile-focused) {
+  width: min(14rem, calc(50% - 0.375rem));
+  height: 8rem;
+  flex: 0 0 min(14rem, calc(50% - 0.375rem));
+}
+
+.participant-audio-tile-compact {
+  min-height: 0;
+}
+
+.screen-feed-frame-single {
+  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 16 / 9;
+  contain: size layout paint;
+}
+
+@supports (width: 1cqw) and (height: 1cqh) {
+  .screen-feed-frame-single {
+    width: min(100cqw, calc(100cqh * 16 / 9));
+  }
 }
 
 .participant-grid {

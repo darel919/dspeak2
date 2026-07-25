@@ -27,6 +27,18 @@ export function createMediaSourceController({
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
     const previous = localSources.get(entry.source);
+    const isVideo = entry.source === "camera" || entry.source === "screen";
+    const previousVideoFeed = isVideo
+      ? localVideoFeeds.value.get(entry.source)
+      : null;
+    if (isVideo) {
+      localVideoFeeds.value.set(entry.source, {
+        source: entry.source,
+        stream: entry.stream,
+        producerId: `local:${entry.track.id}`,
+      });
+      localVideoFeeds.value = new Map(localVideoFeeds.value);
+    }
     const activeProvider = getActiveProvider();
     const p2pRequired =
       activeProvider === "p2p" ||
@@ -78,6 +90,15 @@ export function createMediaSourceController({
         getSfu()?.removeSource(entry.source);
         if (entry.source === "screen-audio") stopSharedAudioMeter();
       }
+      if (
+        isVideo &&
+        localVideoFeeds.value.get(entry.source)?.stream === entry.stream
+      ) {
+        if (previousVideoFeed)
+          localVideoFeeds.value.set(entry.source, previousVideoFeed);
+        else localVideoFeeds.value.delete(entry.source);
+        localVideoFeeds.value = new Map(localVideoFeeds.value);
+      }
       if (topologyState.value.mode === "sfu") reportSfuFailure(reason);
       else if (topologyState.value.target === "sfu")
         send({
@@ -102,7 +123,7 @@ export function createMediaSourceController({
         { once: true },
       );
     if (entry.source === "audio") startLocalVoiceDetection(entry);
-    if (entry.source === "camera" || entry.source === "screen") {
+    if (isVideo) {
       localVideoFeeds.value.set(entry.source, {
         source: entry.source,
         stream: entry.stream,

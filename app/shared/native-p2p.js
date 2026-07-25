@@ -375,10 +375,29 @@ export class NativeP2pMesh {
       this.ensureConnection(String(fromPeerId), String(fromPeerId));
     const pc = state.pc;
     if (signal.source) {
-      this.remoteSources.set(
-        `${state.peerId}:${signal.source.trackId}`,
-        signal.source.source,
+      const source = String(signal.source.source || "");
+      const trackId = String(signal.source.trackId || "");
+      this.remoteSources.set(`${state.peerId}:${trackId}`, source);
+      let current = [...state.remoteTracks.values()].find(
+        (entry) => String(entry.track?.id) === trackId,
       );
+      if (!current) {
+        const expectedKind =
+          source === "camera" || source === "screen" ? "video" : "audio";
+        const genericTracks = [...state.remoteTracks.values()].filter(
+          (entry) =>
+            entry.source === expectedKind && entry.track?.kind === expectedKind,
+        );
+        if (genericTracks.length === 1) current = genericTracks[0];
+      }
+      if (current && current.source !== source) {
+        state.remoteTracks.delete(current.source);
+        this.onRemoteTrackEnded(current);
+        current.source = source;
+        current.key = p2pRemoteFeedKey(state.peerId, source);
+        state.remoteTracks.set(source, current);
+        this.onRemoteTrack(current);
+      }
       return;
     }
     if (signal.sourceRemoved) {
@@ -545,8 +564,21 @@ export class NativeP2pMesh {
 
   handleTrack(state, event) {
     const track = event.track;
+    const exactSource = this.remoteSources.get(`${state.peerId}:${track.id}`);
+    const expectedKind = track.kind;
+    const unmatchedSources = [...this.remoteSources]
+      .filter(
+        ([key, source]) =>
+          key.startsWith(`${state.peerId}:`) &&
+          !state.remoteTracks.has(source) &&
+          (expectedKind === "video"
+            ? source === "camera" || source === "screen"
+            : source === "audio" || source === "screen-audio"),
+      )
+      .map(([, source]) => source);
     const source =
-      this.remoteSources.get(`${state.peerId}:${track.id}`) || track.kind;
+      exactSource ||
+      (unmatchedSources.length === 1 ? unmatchedSources[0] : track.kind);
     const key = p2pRemoteFeedKey(state.peerId, source);
     const entry = {
       key,

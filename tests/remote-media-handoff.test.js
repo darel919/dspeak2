@@ -157,6 +157,26 @@ test("handoff readiness requires every expected logical source", () => {
   assert.equal(handoff.hasExpectedFeeds("sfu", peers, "local-peer"), true);
 });
 
+test("a preparing screen feed is exposed as a paused viewer prompt", () => {
+  const { handoff, calls } = harness();
+  handoff.stage(
+    {
+      provider: "sfu",
+      key: "screen-producer",
+      userId: "user-1",
+      source: "screen",
+      track: {},
+    },
+    "p2p",
+  );
+
+  assert.deepEqual(calls[0], [
+    "bind",
+    "remote:user-1:screen",
+    { staged: true },
+  ]);
+});
+
 test("resolved participant identity replaces a staged peer-ID alias", () => {
   const { handoff } = harness();
   const track = { id: "screen-track" };
@@ -319,4 +339,46 @@ test("remote screen video requires an explicit receiving choice", () => {
   assert.equal(registry.setVideoReceiving(key, true), true);
   assert.equal(track.enabled, true);
   assert.equal(videoFeeds.value.get(key).receiving, true);
+});
+
+test("remote screen video keeps an explicit stopped state during handoff", () => {
+  const oldTrack = { id: "p2p-screen", kind: "video", enabled: true };
+  const newTrack = { id: "sfu-screen", kind: "video", enabled: true };
+  const tracks = [oldTrack];
+  const stream = {
+    getTracks: () => [...tracks],
+    removeTrack: (track) => tracks.splice(tracks.indexOf(track), 1),
+    addTrack: (track) => tracks.push(track),
+  };
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+  });
+  const key = "remote:user-1:screen";
+
+  registry.bind({
+    key,
+    provider: "p2p",
+    source: "screen",
+    track: oldTrack,
+    stream,
+  });
+  registry.setVideoReceiving(key, false);
+  registry.bind({
+    key,
+    provider: "sfu",
+    source: "screen",
+    track: newTrack,
+    stream: {},
+  });
+
+  assert.equal(newTrack.enabled, false);
+  assert.equal(videoFeeds.value.get(key).receiving, false);
+  assert.equal(videoFeeds.value.get(key).stream, stream);
 });

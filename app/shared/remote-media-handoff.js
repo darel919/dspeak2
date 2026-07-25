@@ -57,7 +57,13 @@ export class RemoteMediaHandoff {
         tracks.delete(key);
     }
     tracks.set(normalized.key, normalized);
-    if (activeProvider === normalized.provider) this.registry.bind(normalized);
+    if (
+      activeProvider === normalized.provider ||
+      normalized.source === "screen"
+    )
+      this.registry.bind(normalized, {
+        staged: activeProvider !== normalized.provider,
+      });
   }
 
   remove(entry) {
@@ -67,7 +73,7 @@ export class RemoteMediaHandoff {
     if (entry.track && current?.track && current.track !== entry.track)
       return false;
     tracks.delete(key);
-    if (this.activeProvider === entry.provider)
+    if (this.activeProvider === entry.provider || current?.source === "screen")
       this.registry.remove(key, current);
     return true;
   }
