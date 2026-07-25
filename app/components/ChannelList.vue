@@ -1311,6 +1311,7 @@ async function handleDeleteRoom() {
   )
     return;
   try {
+    await leaveActiveVoiceChannel();
     await roomsStore.deleteRoom(props.room.id);
     navigateTo("/");
   } catch (err) {
@@ -1323,10 +1324,20 @@ async function handleLeaveRoom() {
   if (!confirm(`Are you sure you want to leave the room "${props.room.name}"?`))
     return;
   try {
+    await leaveActiveVoiceChannel();
     await roomsStore.leaveRoom(props.room.id);
     navigateTo("/");
   } catch (err) {
     console.error("Failed to leave room:", err);
+  }
+}
+
+async function leaveActiveVoiceChannel() {
+  if (
+    voiceStore.connected &&
+    String(voiceStore.currentRoomId) === String(props.room?.id)
+  ) {
+    await voiceStore.leaveVoiceChannel();
   }
 }
 
