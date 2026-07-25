@@ -18,6 +18,14 @@ const serviceWorkerRegistration = await readFile(
   new URL("../app/shared/service-worker-registration.js", import.meta.url),
   "utf8",
 );
+const updateCoordinator = await readFile(
+  new URL("../app/composables/usePwaUpdate.js", import.meta.url),
+  "utf8",
+);
+const init = await readFile(
+  new URL("../app/components/Init.vue", import.meta.url),
+  "utf8",
+);
 const settings = await readFile(
   new URL("../app/pages/settings.vue", import.meta.url),
   "utf8",
@@ -27,15 +35,27 @@ const installPrompt = await readFile(
   "utf8",
 );
 
-test("service worker updates remain waiting for explicit user activation", () => {
+test("startup updates activate automatically before application bootstrap", () => {
   assert.match(nuxtConfig, /registerType: "prompt"/);
   assert.doesNotMatch(serviceWorker, /\.then\(\(\) => self\.skipWaiting/);
   assert.match(serviceWorker, /event\.data\.type === "SKIP_WAITING"/);
-  assert.match(updatePrompt, /activationWorker\.postMessage/);
-  assert.match(updatePrompt, /controllerchange/);
-  assert.match(updatePrompt, /window\.location\.reload/);
-  assert.match(updatePrompt, /registration\.waiting\.state === "installed"/);
-  assert.match(updatePrompt, /updateAvailable\.value = false/);
+  assert.match(init, /await runStartupUpdate\(\)/);
+  assert.match(init, /Checking for updates/);
+  assert.match(updateCoordinator, /activateWaitingWorker\("startup"\)/);
+  assert.match(updateCoordinator, /worker\.postMessage/);
+  assert.match(updateCoordinator, /controllerchange/);
+  assert.match(updateCoordinator, /window\.location\.reload/);
+});
+
+test("startup activation is bounded and guarded against reload loops", () => {
+  assert.match(updateCoordinator, /STARTUP_RESTART_GUARD/);
+  assert.match(updateCoordinator, /hasStartupRestartGuard/);
+  assert.match(updateCoordinator, /setStartupRestartGuard/);
+  assert.match(updateCoordinator, /clearStartupRestartGuard/);
+  assert.match(updateCoordinator, /INSTALL_WAIT_MS = 10000/);
+  assert.match(updateCoordinator, /ACTIVATION_WAIT_MS = 5000/);
+  assert.match(updateCoordinator, /reloadStarted/);
+  assert.match(updateCoordinator, /startupFinished\.value = true/);
 });
 
 test("each deployment receives an isolated precache", () => {
@@ -51,10 +71,11 @@ test("each deployment receives an isolated precache", () => {
 });
 
 test("clients check for updates across long-lived tab lifecycles", () => {
-  assert.match(updatePrompt, /registration\.update\(\)/);
-  assert.match(updatePrompt, /visibilitychange/);
-  assert.match(updatePrompt, /window\.addEventListener\("online"/);
-  assert.match(updatePrompt, /60 \* 60 \* 1000/);
+  assert.match(updateCoordinator, /registration\.update\(\)/);
+  assert.match(updateCoordinator, /visibilitychange/);
+  assert.match(updateCoordinator, /window\.addEventListener\("online"/);
+  assert.match(updateCoordinator, /60 \* 60 \* 1000/);
+  assert.match(updatePrompt, /startActiveMonitoring/);
 });
 
 test("service worker source and registration consistently use modules", () => {
@@ -76,8 +97,8 @@ test("service worker source and registration consistently use modules", () => {
     serviceWorkerRegistration,
     /\.register\(serviceWorkerScriptUrl\(\), SERVICE_WORKER_OPTIONS\)/,
   );
-  assert.match(updatePrompt, /registerServiceWorker/);
-  assert.match(updatePrompt, /if \(import\.meta\.dev/);
+  assert.match(updateCoordinator, /registerServiceWorker/);
+  assert.match(updateCoordinator, /if \(\s*import\.meta\.dev/);
 });
 
 test("service worker responses cannot be reused across deployments", () => {
@@ -101,10 +122,10 @@ test("only the application-owned service worker registrar is enabled", () => {
 });
 
 test("tabs already controlled by an activated update require one reload", () => {
-  assert.match(updatePrompt, /reloadRequired\.value = true/);
+  assert.match(updateCoordinator, /reloadRequired\.value = true/);
   assert.match(
-    updatePrompt,
-    /if \(reloadRequired\.value\) \{\s*window\.location\.reload\(\)/,
+    updateCoordinator,
+    /if \(reloadRequired\.value\) \{\s*reloadApplication\(activeRuntime\)/,
   );
 });
 

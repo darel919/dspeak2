@@ -52,6 +52,7 @@ const authChecked = ref(false);
 const startupComplete = ref(false);
 const startupStatus = ref("Checking authentication…");
 const isBootstrapping = ref(true);
+const { runStartupUpdate } = usePwaUpdate();
 
 const isAuthenticated = computed(() => {
   const userData = authStore.getUserData();
@@ -76,7 +77,10 @@ provide("presenceStatus", presenceStatus);
 
 onMounted(async () => {
   try {
+    startupStatus.value = "Checking for updates…";
+    await runStartupUpdate();
     if (!isAuthPage.value) {
+      startupStatus.value = "Checking authentication…";
       await checkAuth();
       if (authChecked.value) {
         startupStatus.value = "Preparing your workspace…";
