@@ -67,7 +67,7 @@ export default defineNuxtConfig({
             "script-src-attr": ["'none'"],
             "style-src": ["'self'", "'unsafe-inline'", "'report-sample'"],
             "style-src-attr": ["'unsafe-inline'"],
-            "trusted-types": ["vue"],
+            "trusted-types": ["vue", "dspeak-service-worker"],
             "worker-src": ["'self'", "blob:"],
             "upgrade-insecure-requests": true,
             "report-to": ["csp-endpoint"],

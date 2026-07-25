@@ -12,9 +12,11 @@ Nuxt adds that nonce to every rendered script and places the same value in
 chunks they load. Script attributes such as `onclick` remain prohibited by
 `script-src-attr 'none'`.
 
-The production policy requires Trusted Types for script injection sinks. Vue is
-the only permitted policy name. Application code renders untrusted values
-through Vue text bindings and does not assign HTML strings to DOM sinks.
+The production policy requires Trusted Types for script injection sinks. Vue's
+policy handles framework-owned HTML. The `dspeak-service-worker` policy handles
+only the fixed same-origin service worker URL used by the application-owned
+registrar. Application code renders untrusted values through Vue text bindings
+and does not assign HTML strings to DOM sinks.
 
 Only current browsers are supported. The script policy therefore has no CSP
 Level 1 compatibility fallback: executable scripts must carry the response

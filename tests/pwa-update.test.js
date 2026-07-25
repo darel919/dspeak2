@@ -67,6 +67,15 @@ test("service worker source and registration consistently use modules", () => {
   assert.match(serviceWorkerRegistration, /: "\/sw\.js"/);
   assert.doesNotMatch(serviceWorkerRegistration, /sw\.js\?build=/);
   assert.match(serviceWorkerRegistration, /let registrationRequest = null/);
+  assert.match(
+    serviceWorkerRegistration,
+    /createPolicy\(\s*TRUSTED_TYPES_POLICY_NAME/,
+  );
+  assert.match(serviceWorkerRegistration, /value !== SERVICE_WORKER_URL/);
+  assert.match(
+    serviceWorkerRegistration,
+    /\.register\(serviceWorkerScriptUrl\(\), SERVICE_WORKER_OPTIONS\)/,
+  );
   assert.match(updatePrompt, /registerServiceWorker/);
   assert.match(updatePrompt, /if \(import\.meta\.dev/);
 });

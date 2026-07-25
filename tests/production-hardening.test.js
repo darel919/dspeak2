@@ -122,7 +122,10 @@ test("CSRF, SSRF, Trusted Types, and cross-site reads are enforced", () => {
   assert.match(pushDelivery, /assertSafeOutboundUrl/);
   assert.match(pushDelivery, /agent: pushAgent/);
   assert.match(nuxtConfig, /"require-trusted-types-for": \["'script'"\]/);
-  assert.match(nuxtConfig, /"trusted-types": \["vue"\]/);
+  assert.match(
+    nuxtConfig,
+    /"trusted-types": \["vue", "dspeak-service-worker"\]/,
+  );
 });
 
 test("obsolete compatibility security paths are absent", () => {
