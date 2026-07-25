@@ -7,6 +7,9 @@ import { RemoteMediaRegistry } from "~/shared/remote-media-registry.js";
 import { RemoteMediaHandoff } from "~/shared/remote-media-handoff.js";
 import { createHybridMediaDiagnostics } from "~/shared/hybrid-media-diagnostics.js";
 import { createLocalAudioEngine } from "~/shared/local-audio-engine.js";
+import { registerEchoWarning } from "~/shared/echo-warning.js";
+import { closeMediaSessionTransports } from "~/shared/media-session-cleanup.js";
+import { initialMediaTopologyState } from "~/shared/media-session-state.js";
 import { createMediaTopologyView } from "~/shared/media-topology-view.js";
 import { setupMediaMessageHandlers } from "~/shared/media-message-handlers.js";
 import { createMediaSourceController } from "~/shared/media-source-controller.js";
@@ -69,19 +72,14 @@ export function useHybridMediaSession() {
   const lastInRoom = ref([]);
   const remoteProducersCount = ref(0);
   const sharedAudioStats = ref({ kbps: 0, level: 0, dbfs: -60 });
+  const echoDetected = ref(false);
   const attenuationReports = ref(new Map());
   const peerRoundTripTimes = ref({});
   const peerConnectionMetrics = ref({});
   const sfuRoundTripTime = ref(null);
   const participantSfuRoundTripTimes = ref({});
   const activeProviderState = ref(null);
-  const topologyState = ref({
-    mode: "idle",
-    epoch: 0,
-    reason: "waiting-for-peer",
-    peers: [],
-    activatedAt: null,
-  });
+  const topologyState = ref(initialMediaTopologyState());
   const topologyGraph = ref(
     buildTopologyGraph({ mode: "idle", participantIds: [] }),
   );
@@ -191,7 +189,6 @@ export function useHybridMediaSession() {
         ? "playback-blocked"
         : state;
   }
-
   let sourceController;
   const capture = new MediaCaptureManager({
     getSettings: () => settingsStore,
@@ -209,12 +206,10 @@ export function useHybridMediaSession() {
       sourceController.removeSource(entry, options),
   });
   const handoff = new RemoteMediaHandoff(registry);
-
   function setActiveProvider(provider) {
     activeProvider = provider;
     activeProviderState.value = provider;
   }
-
   function send(message) {
     if (intentionalClose) return false;
     if (socket?.readyState === WebSocket.OPEN) {
@@ -223,7 +218,6 @@ export function useHybridMediaSession() {
     }
     return false;
   }
-
   async function connect(nextChannelId) {
     if (connected.value && channelId === nextChannelId) return;
     intentionalClose = false;
@@ -588,6 +582,7 @@ export function useHybridMediaSession() {
     getRequestedVideoSettings,
     getSfu: () => sfu,
     localSources,
+    echoDetected,
     microphoneLevelDb,
     onSpeakingChange: (userId, speaking) =>
       registry.setExternalSpeaking(userId, speaking),
@@ -620,6 +615,7 @@ export function useHybridMediaSession() {
     },
     { deep: true, immediate: true },
   );
+  registerEchoWarning(echoDetected);
 
   async function applyTopology(data) {
     if (Number(data.epoch) < topologyState.value.epoch) return;
@@ -1010,14 +1006,17 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter();
     attenuationReporter.clear();
     capture.stopDeviceMonitoring();
-    socket?.close();
+
+    closeMediaSessionTransports({
+      capture,
+      getP2pMesh: () => p2pMesh,
+      getSfu: () => sfu,
+      handoff,
+      socket,
+    });
     socket = null;
-    capture.stopAll();
-    p2pMesh?.closeAll();
     p2pMesh = null;
-    sfu?.close();
     sfu = null;
-    handoff.clear();
     setActiveProvider(null);
     connected.value = false;
     transportReady.value = false;
@@ -1050,6 +1049,7 @@ export function useHybridMediaSession() {
     remoteVideoFeeds: readonly(remoteVideoFeeds),
     remoteAudioFeeds: readonly(remoteAudioFeeds),
     sharedAudioStats: readonly(sharedAudioStats),
+    echoDetected: readonly(echoDetected),
     sharedAudioAttenuation,
     sharedAudioDucking: readonly(sharedAudioDucking),
     peerRoundTripTimes: readonly(peerRoundTripTimes),

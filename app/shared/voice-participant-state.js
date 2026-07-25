@@ -1,3 +1,5 @@
+import { triggerRef } from "vue";
+
 export function createVoiceParticipantState({
   clearSoundboardActivity,
   connectedUsers,
@@ -158,7 +160,7 @@ export function createVoiceParticipantState({
   }
 
   function publishConnectedUsers() {
-    connectedUsers.value = new Map(connectedUsers.value);
+    triggerRef(connectedUsers);
   }
 
   return {

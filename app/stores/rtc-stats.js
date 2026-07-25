@@ -4,7 +4,7 @@ import { getRtcSignalMetrics } from "../shared/voice-transport";
 import { calculateTransportBitrateBps } from "../shared/rtc-media-stats";
 import { normalizeConnectionMetricValue } from "../shared/connection-quality";
 
-const HISTORY_LIMIT = 60;
+const HISTORY_LIMIT = 30;
 
 export const useRtcStatsStore = defineStore("rtc-stats", () => {
   const voiceStore = useVoiceStore();

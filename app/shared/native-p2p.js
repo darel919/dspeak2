@@ -8,7 +8,7 @@ import { sortP2pVideoCodecPreferences } from "./video-settings.js";
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
 export const P2P_ACTIVE_MEDIA_TIMEOUT_MS = 20000;
-export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 5000;
+export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 8000;
 export const P2P_DISCONNECT_GRACE_MS = 8000;
 export const P2P_ICE_RESTART_TIMEOUT_MS = 12000;
 
