@@ -147,7 +147,6 @@
               :receiving="tile.feed.receiving !== false"
               :compact="viewMode === 'focused' && tile.key !== focusedTileKey"
               :avatar-src="tile.feed.avatar"
-              :base-api-path="config.public.baseApiPath"
               :own-camera-stream="ownCameraFeed?.stream || null"
               :own-camera-feed-key="ownCameraFeed?.key || null"
               @start-receiving="setScreenReceiving(tile.feed, true)"
@@ -178,7 +177,6 @@
                 <ProfileAvatar
                   :src="userAvatarSource(tile.user)"
                   :name="getUserDisplayName(tile.user)"
-                  :base-api-path="config.public.baseApiPath"
                   class="metro-transition rounded-full bg-primary text-primary-content font-bold ring-2"
                   :class="[
                     viewMode === 'focused'

@@ -27,6 +27,7 @@ import {
 import { validP2pSignal } from "./p2p-signal";
 import { relayMediaAttenuationState } from "./media-attenuation-state";
 import { publicDisplayName } from "../../shared/user-profile.js";
+import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 import {
   isMediaSignalHeartbeatExpired,
   isValidMediaSignalHeartbeat,
@@ -87,9 +88,7 @@ function mediaUserProfile(user) {
     username: user.username || "",
     handle: user.handle || "",
     display_name: user.display_name || "",
-    avatar: user.avatar
-      ? `/api/assets/avatar?userId=${encodeURIComponent(id)}&fileName=${encodeURIComponent(user.avatar)}`
-      : null,
+    avatar: sameOriginAvatarPath({ id, avatar: user.avatar }),
   };
 }
 

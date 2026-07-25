@@ -202,6 +202,7 @@ import { useChannelsStore } from "../stores/channels";
 import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
 import { publicDisplayName } from "../../shared/user-profile";
 import { VIEWPORT_PADDING_PX } from "../const/ui";
+import { profileAssetUrl as resolveProfileAssetUrl } from "../shared/profile-assets.js";
 
 const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
@@ -245,9 +246,7 @@ function assetUrl(path) {
 }
 
 function profileAssetUrl(path) {
-  if (!path) return null;
-  if (/^(https?:)?\/\//i.test(path)) return path;
-  return `${config.public.baseApiPath.replace(/\/$/, "")}/${String(path).replace(/^\/+/, "")}`;
+  return resolveProfileAssetUrl(path);
 }
 
 function roomUnread(roomId) {

@@ -318,6 +318,7 @@ import { useRoomsStore } from "../stores/rooms";
 import { canManageMember } from "~~/shared/room-policy.js";
 import { publicFullName } from "~~/shared/user-profile.js";
 import { MEMBER_STATUS_ORDER, VIEWPORT_PADDING_PX } from "../const/ui";
+import { profileAssetUrl } from "../shared/profile-assets.js";
 const roomsStore = useRoomsStore();
 const memberMenuUser = ref(null);
 const memberMenuElement = ref(null);
@@ -591,12 +592,7 @@ const onlineMembersCount = computed(() => {
 });
 
 function getAvatarUrl(avatarPath) {
-  if (!avatarPath) return "/favicon-32x32.png";
-
-  if (avatarPath.startsWith("http")) return avatarPath;
-
-  const apiPath = config.public.baseApiPath;
-  return `${apiPath}/auth/${avatarPath}`;
+  return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
 }
 
 function isOwner(member) {

@@ -262,7 +262,6 @@
                         class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
                         :src="getUserAvatar(u.id || u)"
                         :name="getUserName(u.id || u)"
-                        :base-api-path="runtimeConfig.public.baseApiPath"
                       />
                     </div>
                     <div class="min-w-0 flex-1">
@@ -419,7 +418,6 @@
                         class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
                         :src="getUserAvatar(u.id)"
                         :name="getUserName(u.id)"
-                        :base-api-path="runtimeConfig.public.baseApiPath"
                       />
                     </div>
                     <span class="min-w-0 flex-1 truncate">{{

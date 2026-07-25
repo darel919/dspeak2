@@ -58,7 +58,7 @@ const profile = computed(() => {
 
   return {
     ...user,
-    avatar: getAvatarUrl(user.avatar, config.public.baseApiPath),
+    avatar: getAvatarUrl(user.avatar),
   };
 });
 

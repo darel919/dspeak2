@@ -23,14 +23,11 @@ import { profileAssetUrl, profileInitials } from "~/shared/profile-assets";
 const props = defineProps({
   src: { type: String, default: "" },
   name: { type: String, default: "" },
-  baseApiPath: { type: String, default: "" },
   fallback: { type: String, default: "?" },
 });
 
 const failed = ref(false);
-const resolvedUrl = computed(() =>
-  profileAssetUrl(props.src, props.baseApiPath),
-);
+const resolvedUrl = computed(() => profileAssetUrl(props.src));
 const initials = computed(() => profileInitials(props.name));
 const alt = computed(() => `${props.name || "User"} avatar`);
 

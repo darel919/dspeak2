@@ -7,6 +7,7 @@ import {
 } from "../../utils/voice-presence";
 import { authenticateWebSocketRequest } from "../../utils/authentication";
 import { publicDisplayName } from "../../../shared/user-profile";
+import { sameOriginAvatarPath } from "../../../shared/avatar-path.js";
 import { getBoundedList } from "../../utils/pocketbase-query";
 import {
   enforceIdentifierRateLimit,
@@ -68,9 +69,7 @@ export default defineWebSocketHandler({
             display_name: profile.display_name || "",
             username: profile.username || "",
             handle: profile.handle || "",
-            avatar: profile.avatar
-              ? `/api/assets/avatar?userId=${encodeURIComponent(profile.id)}&fileName=${encodeURIComponent(profile.avatar)}`
-              : null,
+            avatar: sameOriginAvatarPath(profile),
           },
         ]),
       );

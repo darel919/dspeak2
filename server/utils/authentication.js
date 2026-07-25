@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 import { usePocketBaseAdmin } from "./pocketbase.js";
 import { enforceRateLimit } from "./rate-limit.js";
+import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 
 const SESSION_COOKIE =
   process.env.NODE_ENV === "production"
@@ -105,7 +106,7 @@ function publicUserMetadata(user) {
     username: user.username || "",
     display_name: user.display_name || "",
     handle: user.handle || "",
-    avatar: user.avatar || null,
+    avatar: sameOriginAvatarPath(user),
   };
 }
 

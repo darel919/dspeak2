@@ -137,7 +137,7 @@ import {
   isValidMessageTimestamp,
   messageChannelId,
 } from "../../shared/chat-messages";
-import { useRuntimeConfig } from "#app";
+import { profileAssetUrl } from "../../shared/profile-assets.js";
 
 const props = defineProps({
   show: {
@@ -151,8 +151,6 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close"]);
-
-const config = useRuntimeConfig();
 
 function formatFullDate(dateString) {
   if (!isValidMessageTimestamp(dateString)) return "Unavailable";
@@ -169,15 +167,7 @@ function formatFullDate(dateString) {
 }
 
 function getAvatarUrl(avatarPath) {
-  if (!avatarPath) return "/favicon-32x32.png";
-
-  if (avatarPath.startsWith("http")) return avatarPath;
-
-  const baseApiPath = config.public.baseApiPath;
-  if (avatarPath.startsWith("auth/")) return `${baseApiPath}/${avatarPath}`;
-  if (avatarPath.startsWith("assets/"))
-    return `${baseApiPath}/auth/${avatarPath}`;
-  return `${config.public.apiPath}/files/${avatarPath}`;
+  return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
 }
 
 async function copyDetails() {

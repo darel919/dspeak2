@@ -37,8 +37,8 @@
               :title="identityStore.displayName(u)"
             >
               <img
-                v-if="u.avatar"
-                :src="u.avatar"
+                v-if="profileAssetUrl(u.avatar)"
+                :src="profileAssetUrl(u.avatar)"
                 :alt="identityStore.displayName(u)"
                 class="w-full h-full object-cover"
               />
@@ -91,6 +91,7 @@
 <script setup>
 import { useVoiceStore } from "~/stores/voice";
 import { useIdentityStore } from "~/stores/identity";
+import { profileAssetUrl } from "~/shared/profile-assets";
 
 const voiceStore = useVoiceStore();
 const identityStore = useIdentityStore();

@@ -52,8 +52,8 @@
 </template>
 
 <script setup>
-import { useRuntimeConfig } from "#app";
 import { useIdentityStore } from "../stores/identity";
+import { profileAssetUrl } from "../shared/profile-assets.js";
 
 const props = defineProps({
   onlineMembers: {
@@ -66,18 +66,9 @@ const props = defineProps({
   },
 });
 
-const config = useRuntimeConfig();
 const identityStore = useIdentityStore();
 
 function getAvatarUrl(avatarPath) {
-  if (!avatarPath) return "/favicon-32x32.png";
-
-  if (avatarPath.startsWith("http")) return avatarPath;
-
-  const baseApiPath = config.public.baseApiPath;
-  if (avatarPath.startsWith("auth/")) return `${baseApiPath}/${avatarPath}`;
-  if (avatarPath.startsWith("assets/"))
-    return `${baseApiPath}/auth/${avatarPath}`;
-  return `${config.public.apiPath}/files/${avatarPath}`;
+  return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
 }
 </script>

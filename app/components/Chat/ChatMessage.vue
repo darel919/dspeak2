@@ -117,12 +117,11 @@
 import { useAuthStore } from "../../stores/auth";
 import { useIdentityStore } from "../../stores/identity";
 import { useChatStore } from "../../stores/chat";
-import { useRuntimeConfig } from "#app";
 import MessageActions from "./MessageActions.vue";
 import { useChatUtils } from "../../composables/useChatUtils";
 import { hasReader, readerIds } from "../../shared/read-receipts";
 
-const { formatChatDisplayTime } = useChatUtils();
+const { formatChatDisplayTime, getAvatarUrl } = useChatUtils();
 
 const props = defineProps({
   message: {
@@ -154,7 +153,6 @@ const emit = defineEmits([
 const authStore = useAuthStore();
 const identityStore = useIdentityStore();
 const chatStore = useChatStore();
-const config = useRuntimeConfig();
 const showActions = ref(false);
 const messageElement = ref(null);
 let visibilityObserver = null;
@@ -249,14 +247,5 @@ function getStatusText() {
     return "Read by all";
   }
   return `Read by ${others.length}`;
-}
-
-function getAvatarUrl(avatarPath) {
-  if (!avatarPath) return "/favicon-32x32.png";
-
-  if (avatarPath.startsWith("http")) return avatarPath;
-
-  const apiPath = config.public.baseApiPath;
-  return `${apiPath}/${avatarPath}`;
 }
 </script>

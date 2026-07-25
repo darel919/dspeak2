@@ -60,6 +60,7 @@ import {
   canViewMessageHistory,
   isMessageOwner,
 } from "../../shared/message-policy.js";
+import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 import {
   assertSafeOutboundUrl,
   configuredOutboundHosts,
@@ -117,12 +118,7 @@ async function ensureMember(pb, room, userId) {
   return requireRoomMember(pb, room, userId);
 }
 
-function avatarPath(user, authPrefix = false) {
-  if (!user?.id || !user?.avatar) return null;
-  return `${authPrefix ? "auth/" : ""}assets/avatar?userId=${encodeURIComponent(user.id)}&fileName=${encodeURIComponent(user.avatar)}`;
-}
-
-function presentUser(user, authPrefix = false) {
+function presentUser(user) {
   if (!user) return null;
   return {
     id: String(user.id),
@@ -131,7 +127,7 @@ function presentUser(user, authPrefix = false) {
     username: user.username || "",
     handle: user.handle || "",
     online: Boolean(user.online),
-    avatar: avatarPath(user, authPrefix),
+    avatar: sameOriginAvatarPath(user),
   };
 }
 
@@ -145,7 +141,7 @@ function presentPublicProfile(user) {
     provider_name: user.name || "",
     username: user.username || "",
     handle: user.handle || "",
-    avatar: avatarPath(user, true),
+    avatar: sameOriginAvatarPath(user),
   };
 }
 
@@ -160,7 +156,7 @@ function presentChannel(channel) {
     inRoom: channel.inRoom || [],
     created: channel.created,
     updated: channel.updated,
-    owner: presentUser(channel.expand?.owner, true),
+    owner: presentUser(channel.expand?.owner),
     room: channel.room,
   };
 }
@@ -572,7 +568,7 @@ async function handleProfile(event, suffix) {
     enforceRateLimit(event, "profile-mutation", userId, 30, 60 * 60 * 1000);
 
   if (!suffix && event.method === "GET") {
-    return presentUser(await pb.collection("users").getOne(userId), true);
+    return presentUser(await pb.collection("users").getOne(userId));
   }
 
   if (!suffix && event.method === "PATCH") {
@@ -605,7 +601,7 @@ async function handleProfile(event, suffix) {
       });
     try {
       const updatedUser = await pb.collection("users").update(userId, update);
-      const profile = presentUser(updatedUser, true);
+      const profile = presentUser(updatedUser);
       const publicProfile = presentPublicProfile(updatedUser);
       await updateActiveUserProfile(publicProfile);
       broadcastGlobally({ type: "profile_updated", data: publicProfile });
@@ -691,7 +687,7 @@ async function handleAssets(event, suffix) {
   );
   const pb = await usePocketBaseAdmin();
   const user = await pb.collection("users").getOne(userId, {
-    fields: "id,avatar",
+    fields: "id,avatar,collectionId,collectionName",
   });
 
   if (!user.avatar || user.avatar !== requestedFileName)

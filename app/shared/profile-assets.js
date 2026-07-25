@@ -1,21 +1,34 @@
-export function profileAssetUrl(path, baseApiPath = "") {
+export function profileAssetUrl(path) {
   if (!path) return null;
 
   const value = String(path).trim();
   if (!value) return null;
-  if (/^(?:https?:)?\/\//i.test(value) || value.startsWith("blob:"))
-    return value;
+  if (value.startsWith("blob:")) return value;
+  try {
+    const url = new URL(value, "https://avatar.invalid");
+    if (
+      url.pathname.endsWith("/auth/assets/avatar") ||
+      url.pathname === "/api/assets/avatar"
+    ) {
+      const userId = url.searchParams.get("userId");
+      const fileName = url.searchParams.get("fileName");
+      if (!userId || !fileName) return null;
+      return `/api/assets/avatar?userId=${encodeURIComponent(userId)}&fileName=${encodeURIComponent(fileName)}`;
+    }
+  } catch {
+    return null;
+  }
+  if (/^(?:https?:)?\/\//i.test(value)) return null;
   if (value.startsWith("/")) return value;
 
-  const base = String(baseApiPath).replace(/\/+$/, "");
   const assetPath = value.replace(/^\/+/, "");
-  const normalizedPath = assetPath.startsWith("auth/")
-    ? assetPath
-    : assetPath.startsWith("assets/")
-      ? `auth/${assetPath}`
-      : `files/${assetPath}`;
+  const normalizedPath = assetPath.startsWith("auth/assets/")
+    ? `/api/${assetPath.slice("auth/".length)}`
+    : assetPath.startsWith("assets/avatar")
+      ? `/api/${assetPath}`
+      : null;
 
-  return `${base}/${normalizedPath}`;
+  return normalizedPath;
 }
 
 export function profileInitials(name) {

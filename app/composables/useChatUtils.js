@@ -1,3 +1,5 @@
+import { profileAssetUrl } from "../shared/profile-assets.js";
+
 export const useChatUtils = () => {
   /**
    * Format a timestamp for display in chat
@@ -94,16 +96,8 @@ export const useChatUtils = () => {
   /**
    * Get avatar URL with fallback
    */
-  function getAvatarUrl(avatarPath, apiPath) {
-    if (!avatarPath) return "/favicon-32x32.png";
-
-    if (avatarPath.startsWith("http")) return avatarPath;
-
-    if (avatarPath.startsWith("auth/")) return `${apiPath}/${avatarPath}`;
-    if (avatarPath.startsWith("assets/"))
-      return `${apiPath}/auth/${avatarPath}`;
-
-    return `${apiPath}/files/${avatarPath}`;
+  function getAvatarUrl(avatarPath) {
+    return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
   }
 
   /**

@@ -26,9 +26,7 @@ const config = useRuntimeConfig();
 const { getAvatarUrl } = useChatUtils();
 
 const profile = computed(() => authStore.getUserData());
-const profileAvatar = computed(() =>
-  getAvatarUrl(profile.value?.avatar, config.public.baseApiPath),
-);
+const profileAvatar = computed(() => getAvatarUrl(profile.value?.avatar));
 const broadcastMode = computed(() => settingsStore.broadcastMode);
 const presenceStatus = inject("presenceStatus", ref(null));
 const rtcSummaryVisible = useState("rtc-summary-visible", () => false);

@@ -40,6 +40,12 @@ The remaining directives allow only the resource classes dSpeak uses:
 - blob URLs for workers and browser media
 - no frames, embedded objects, framing ancestors, or script attributes
 
+Account avatar metadata is normalized to the authenticated same-origin
+`/api/assets/avatar` endpoint before it reaches an image element. The endpoint
+validates the requested filename against the user's current PocketBase record
+and fetches only from the configured PocketBase file store. Do not add the
+account API or arbitrary image hosts to `img-src`.
+
 The Permissions Policy restricts camera, microphone, display capture,
 fullscreen, autoplay, and screen wake lock to dSpeak's own origin and disables
 geolocation.

@@ -27,7 +27,6 @@
         <ProfileAvatar
           :src="avatarSrc"
           :name="label"
-          :base-api-path="baseApiPath"
           class="absolute -inset-4 h-[calc(100%+2rem)] w-[calc(100%+2rem)] scale-110 blur-xl opacity-60"
         />
         <div class="absolute inset-0 bg-black/35" aria-hidden="true"></div>
@@ -136,7 +135,6 @@ const props = defineProps({
   ownCameraFeedKey: { type: String, default: null },
   compact: { type: Boolean, default: false },
   avatarSrc: { type: String, default: "" },
-  baseApiPath: { type: String, default: "" },
 });
 defineEmits(["start-receiving", "stop-receiving"]);
 

@@ -1089,7 +1089,7 @@ const profile = computed(() => {
   if (!user) return null;
   return {
     ...user,
-    avatar: getAvatarUrl(user.avatar, config.public.baseApiPath),
+    avatar: getAvatarUrl(user.avatar),
   };
 });
 const profileDisplayName = ref("");
