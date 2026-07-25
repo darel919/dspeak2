@@ -3,6 +3,7 @@ import { registerServiceWorker } from "../shared/service-worker-registration.js"
 const STARTUP_RESTART_GUARD = "dspeak-pwa-startup-restart";
 const INSTALL_WAIT_MS = 10000;
 const ACTIVATION_WAIT_MS = 5000;
+const VERSION_WAIT_MS = 1000;
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
 let runtime = null;
@@ -41,11 +42,36 @@ function createRuntime(state) {
   };
 }
 
+function workerVersion(worker) {
+  if (!worker) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    let timer = null;
+    const finish = (version) => {
+      if (timer) window.clearTimeout(timer);
+      channel.port1.close();
+      channel.port2.close();
+      resolve(typeof version === "string" && version ? version : null);
+    };
+
+    channel.port1.onmessage = (event) => {
+      finish(event.data?.type === "VERSION" ? event.data.version : null);
+    };
+    timer = window.setTimeout(() => finish(null), VERSION_WAIT_MS);
+    worker.postMessage({ type: "GET_VERSION" }, [channel.port2]);
+  });
+}
+
 export function usePwaUpdate() {
   const updateAvailable = useState("pwa-update-available", () => false);
   const refreshing = useState("pwa-update-refreshing", () => false);
   const reloadRequired = useState("pwa-reload-required", () => false);
   const startupFinished = useState("pwa-startup-finished", () => false);
+  const startupUpdateStatus = useState(
+    "pwa-startup-update-status",
+    () => "idle",
+  );
 
   function currentRuntime() {
     if (!runtime) {
@@ -54,6 +80,7 @@ export function usePwaUpdate() {
         refreshing,
         reloadRequired,
         startupFinished,
+        startupUpdateStatus,
       });
     }
     return runtime;
@@ -91,27 +118,36 @@ export function usePwaUpdate() {
     window.location.reload();
   }
 
-  function hasStartupRestartGuard(activeRuntime) {
-    if (activeRuntime.startupRestartAttempted) return true;
+  function startupRestartGuard(activeRuntime) {
+    if (activeRuntime.startupRestartAttempted)
+      return activeRuntime.startupRestartAttempted;
     try {
-      return sessionStorage.getItem(STARTUP_RESTART_GUARD) === "attempted";
+      const storedGuard = sessionStorage.getItem(STARTUP_RESTART_GUARD);
+      if (!storedGuard || storedGuard === "attempted") return null;
+      const parsedGuard = JSON.parse(storedGuard);
+      return typeof parsedGuard?.version === "string"
+        ? parsedGuard.version
+        : null;
     } catch (error) {
       console.warn("[ServiceWorker] Startup restart guard unavailable:", error);
-      return false;
+      return null;
     }
   }
 
-  function setStartupRestartGuard(activeRuntime) {
-    activeRuntime.startupRestartAttempted = true;
+  function setStartupRestartGuard(activeRuntime, version) {
+    activeRuntime.startupRestartAttempted = version;
     try {
-      sessionStorage.setItem(STARTUP_RESTART_GUARD, "attempted");
+      sessionStorage.setItem(
+        STARTUP_RESTART_GUARD,
+        JSON.stringify({ version }),
+      );
     } catch (error) {
       console.warn("[ServiceWorker] Startup restart guard unavailable:", error);
     }
   }
 
   function clearStartupRestartGuard(activeRuntime) {
-    activeRuntime.startupRestartAttempted = false;
+    activeRuntime.startupRestartAttempted = null;
     try {
       sessionStorage.removeItem(STARTUP_RESTART_GUARD);
     } catch (error) {
@@ -126,9 +162,8 @@ export function usePwaUpdate() {
     }
     if (
       !activeRuntime.startupFinished.value &&
-      !hasStartupRestartGuard(activeRuntime)
+      !startupRestartGuard(activeRuntime)
     ) {
-      setStartupRestartGuard(activeRuntime);
       reloadApplication(activeRuntime);
       return;
     }
@@ -234,6 +269,7 @@ export function usePwaUpdate() {
     }
 
     const activeRuntime = currentRuntime();
+    startupUpdateStatus.value = "checking";
     try {
       await ensureRegistration(activeRuntime);
       await checkForUpdate();
@@ -243,16 +279,21 @@ export function usePwaUpdate() {
         return;
       }
 
-      if (hasStartupRestartGuard(activeRuntime)) {
+      startupUpdateStatus.value = "updating";
+      const version = await workerVersion(activeRuntime.registration.waiting);
+      const updateIdentity = version || "unknown";
+      const guardedVersion = startupRestartGuard(activeRuntime);
+      if (guardedVersion === updateIdentity) {
         syncUpdateAvailable(activeRuntime);
         return;
       }
 
-      setStartupRestartGuard(activeRuntime);
+      setStartupRestartGuard(activeRuntime, updateIdentity);
       await activateWaitingWorker("startup");
     } catch (error) {
       console.warn("[ServiceWorker] Startup update failed:", error);
     } finally {
+      startupUpdateStatus.value = "complete";
       startupFinished.value = true;
     }
   }
@@ -304,6 +345,7 @@ export function usePwaUpdate() {
     try {
       await ensureRegistration(activeRuntime);
       inspectRegistration(activeRuntime);
+      clearStartupRestartGuard(activeRuntime);
       if (!(await activateWaitingWorker("active"))) {
         updateAvailable.value = false;
         await checkForUpdate();
@@ -318,6 +360,7 @@ export function usePwaUpdate() {
     updateAvailable,
     refreshing,
     startupFinished,
+    startupUpdateStatus,
     runStartupUpdate,
     startActiveMonitoring,
     activateUpdate,

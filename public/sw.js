@@ -185,6 +185,12 @@ self.addEventListener("message", (event) => {
       type: "PONG",
       originalTimestamp: event.data.timestamp,
       responseTimestamp: Date.now(),
+      version: PRECACHE_NAME,
+    });
+  } else if (event.data && event.data.type === "GET_VERSION") {
+    event.ports[0]?.postMessage({
+      type: "VERSION",
+      version: PRECACHE_NAME,
     });
   }
 });

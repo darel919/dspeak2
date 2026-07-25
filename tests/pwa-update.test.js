@@ -49,13 +49,24 @@ test("startup updates activate automatically before application bootstrap", () =
 
 test("startup activation is bounded and guarded against reload loops", () => {
   assert.match(updateCoordinator, /STARTUP_RESTART_GUARD/);
-  assert.match(updateCoordinator, /hasStartupRestartGuard/);
+  assert.match(updateCoordinator, /startupRestartGuard/);
   assert.match(updateCoordinator, /setStartupRestartGuard/);
   assert.match(updateCoordinator, /clearStartupRestartGuard/);
+  assert.match(updateCoordinator, /storedGuard === "attempted"/);
+  assert.match(updateCoordinator, /guardedVersion === updateIdentity/);
+  assert.match(updateCoordinator, /workerVersion/);
   assert.match(updateCoordinator, /INSTALL_WAIT_MS = 10000/);
   assert.match(updateCoordinator, /ACTIVATION_WAIT_MS = 5000/);
   assert.match(updateCoordinator, /reloadStarted/);
   assert.match(updateCoordinator, /startupFinished\.value = true/);
+});
+
+test("service worker exposes its exact precache version to the startup guard", () => {
+  assert.match(serviceWorker, /event\.data\.type === "GET_VERSION"/);
+  assert.match(serviceWorker, /version: PRECACHE_NAME/);
+  assert.match(updateCoordinator, /new MessageChannel\(\)/);
+  assert.match(updateCoordinator, /type: "GET_VERSION"/);
+  assert.match(init, /Updating dSpeak/);
 });
 
 test("each deployment receives an isolated precache", () => {

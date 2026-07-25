@@ -52,7 +52,7 @@ const authChecked = ref(false);
 const startupComplete = ref(false);
 const startupStatus = ref("Checking authentication…");
 const isBootstrapping = ref(true);
-const { runStartupUpdate } = usePwaUpdate();
+const { runStartupUpdate, startupUpdateStatus } = usePwaUpdate();
 
 const isAuthenticated = computed(() => {
   const userData = authStore.getUserData();
@@ -75,9 +75,13 @@ const { status: presenceStatus, disconnect: disconnectPresence } =
   usePresence(userId);
 provide("presenceStatus", presenceStatus);
 
+watch(startupUpdateStatus, (status) => {
+  if (status === "checking") startupStatus.value = "Checking for updates…";
+  if (status === "updating") startupStatus.value = "Updating dSpeak…";
+});
+
 onMounted(async () => {
   try {
-    startupStatus.value = "Checking for updates…";
     await runStartupUpdate();
     if (!isAuthPage.value) {
       startupStatus.value = "Checking authentication…";
