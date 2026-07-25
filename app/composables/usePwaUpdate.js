@@ -34,6 +34,7 @@ function createRuntime(state) {
     registration: null,
     registrationPromise: null,
     installingWorker: null,
+    startupWorker: null,
     activationWorker: null,
     updateInterval: null,
     reloadStarted: false,
@@ -87,16 +88,22 @@ export function usePwaUpdate() {
   }
 
   function syncUpdateAvailable(activeRuntime) {
-    const waiting =
+    const waitingWorker =
       navigator.serviceWorker.controller &&
       activeRuntime.registration?.waiting?.state === "installed";
+    const activeSessionWaiting =
+      waitingWorker &&
+      activeRuntime.startupFinished.value &&
+      activeRuntime.registration.waiting !== activeRuntime.startupWorker;
     activeRuntime.updateAvailable.value =
-      activeRuntime.reloadRequired.value || Boolean(waiting);
+      activeRuntime.reloadRequired.value || Boolean(activeSessionWaiting);
   }
 
   function observeInstallingWorker(activeRuntime, worker) {
     if (!worker || worker === activeRuntime.installingWorker) return;
     activeRuntime.installingWorker = worker;
+    if (!activeRuntime.startupFinished.value)
+      activeRuntime.startupWorker = worker;
     worker.addEventListener("statechange", () => {
       if (worker.state === "installed" || worker.state === "redundant") {
         syncUpdateAvailable(activeRuntime);
@@ -157,6 +164,13 @@ export function usePwaUpdate() {
 
   function handleControllerChange(activeRuntime) {
     if (activeRuntime.activationWorker) {
+      reloadApplication(activeRuntime);
+      return;
+    }
+    if (
+      activeRuntime.startupWorker &&
+      activeRuntime.registration?.active === activeRuntime.startupWorker
+    ) {
       reloadApplication(activeRuntime);
       return;
     }
@@ -277,7 +291,8 @@ export function usePwaUpdate() {
       }
 
       startupUpdateStatus.value = "updating";
-      const version = await workerVersion(activeRuntime.registration.waiting);
+      activeRuntime.startupWorker = activeRuntime.registration.waiting;
+      const version = await workerVersion(activeRuntime.startupWorker);
       const updateIdentity = version || "unknown";
       const guardedVersion = startupRestartGuard(activeRuntime);
       if (guardedVersion !== updateIdentity)
@@ -286,6 +301,8 @@ export function usePwaUpdate() {
     } catch (error) {
       console.warn("[ServiceWorker] Startup update failed:", error);
     } finally {
+      if (!activeRuntime.reloadRequired.value)
+        activeRuntime.updateAvailable.value = false;
       startupUpdateStatus.value = "complete";
       startupFinished.value = true;
     }

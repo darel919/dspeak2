@@ -76,6 +76,30 @@ test("a controller handoff during startup always completes the reload", () => {
   );
 });
 
+test("a worker discovered during startup can never arm the session prompt", () => {
+  assert.match(updateCoordinator, /startupWorker: null/);
+  assert.match(
+    updateCoordinator,
+    /!activeRuntime\.startupFinished\.value\)\s*activeRuntime\.startupWorker = worker/,
+  );
+  assert.match(
+    updateCoordinator,
+    /activeRuntime\.registration\.waiting !== activeRuntime\.startupWorker/,
+  );
+  assert.match(
+    updateCoordinator,
+    /activeRuntime\.startupWorker = activeRuntime\.registration\.waiting/,
+  );
+  assert.match(
+    updateCoordinator,
+    /activeRuntime\.updateAvailable\.value = false/,
+  );
+  assert.match(
+    updateCoordinator,
+    /activeRuntime\.registration\?\.active === activeRuntime\.startupWorker[\s\S]{0,100}reloadApplication\(activeRuntime\)/,
+  );
+});
+
 test("service worker exposes its exact precache version to the startup guard", () => {
   assert.match(serviceWorker, /event\.data\.type === "GET_VERSION"/);
   assert.match(serviceWorker, /version: PRECACHE_NAME/);
