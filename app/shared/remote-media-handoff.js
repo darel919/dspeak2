@@ -57,9 +57,13 @@ export class RemoteMediaHandoff {
         tracks.delete(key);
     }
     tracks.set(normalized.key, normalized);
+    const activeTracks = activeProvider ? this.provider(activeProvider) : null;
+    const activeFeedExists =
+      activeProvider !== normalized.provider &&
+      activeTracks?.has(normalized.key) === true;
     if (
       activeProvider === normalized.provider ||
-      normalized.source === "screen"
+      (normalized.source === "screen" && !activeFeedExists)
     )
       this.registry.bind(normalized, {
         staged: activeProvider !== normalized.provider,

@@ -233,6 +233,59 @@ test("an inactive staged track ending cannot remove the active provider feed", (
   assert.equal(handoff.count("p2p"), 1);
 });
 
+test("an inactive screen probe cannot replace the active screen feed", () => {
+  const activeTrack = { id: "sfu-screen", kind: "video", enabled: true };
+  const probeTrack = { id: "p2p-screen", kind: "video", enabled: true };
+  const tracks = [activeTrack];
+  const stream = {
+    getTracks: () => [...tracks],
+    removeTrack: (track) => tracks.splice(tracks.indexOf(track), 1),
+    addTrack: (track) => tracks.push(track),
+  };
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+  });
+  const handoff = new RemoteMediaHandoff(registry);
+  const activeEntry = {
+    provider: "sfu",
+    key: "producer-1",
+    userId: "user-1",
+    source: "screen",
+    track: activeTrack,
+    stream,
+  };
+  const probeEntry = {
+    provider: "p2p",
+    key: "p2p:peer-1:screen",
+    userId: "user-1",
+    source: "screen",
+    track: probeTrack,
+    stream: {
+      getTracks: () => [probeTrack],
+      removeTrack: () => {},
+      addTrack: () => {},
+    },
+  };
+  const feedKey = "remote:user-1:screen";
+
+  handoff.stage(activeEntry, "sfu");
+  registry.setVideoReceiving(feedKey, true);
+  handoff.stage(probeEntry, "sfu");
+  handoff.remove(probeEntry);
+
+  assert.equal(videoFeeds.value.get(feedKey).provider, "sfu");
+  assert.equal(videoFeeds.value.get(feedKey).track, activeTrack);
+  assert.equal(videoFeeds.value.get(feedKey).receiving, true);
+  assert.deepEqual(tracks, [activeTrack]);
+});
+
 test("video handoff replaces the track without replacing the logical stream", () => {
   const oldTrack = { id: "p2p-track" };
   const newTrack = { id: "sfu-track" };
