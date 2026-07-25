@@ -279,6 +279,84 @@ test("P2P identifies a new source before negotiation can deliver its track", asy
   assert.deepEqual(operations, ["signal:screen-audio", "add-track"]);
 });
 
+test("a new topology epoch resends an outstanding offer and source identity", () => {
+  const signals = [];
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: (message) => signals.push(message),
+  });
+  mesh.epoch = 9;
+  mesh.mode = "probing";
+  mesh.localPeerId = "peer-1";
+  mesh.startHealthChecks = () => {};
+  mesh.startQualificationTimeout = () => {};
+  mesh.emitSnapshot = () => {};
+  const cameraTrack = { id: "camera-track" };
+  mesh.localSources.set("camera", { track: cameraTrack, stream: {} });
+  mesh.connections.set("peer-2", {
+    peerId: "peer-2",
+    userId: "user-2",
+    pc: {
+      signalingState: "have-local-offer",
+      localDescription: { type: "offer", sdp: "camera-offer" },
+    },
+    senders: new Map([["camera", { track: cameraTrack }]]),
+    remoteTracks: new Map(),
+    sourceReceiving: new Map(),
+  });
+
+  mesh.applyTopology({
+    mode: "probing",
+    epoch: 10,
+    localPeerId: "peer-1",
+    peers: [
+      { peerId: "peer-1", userId: "user-1", sources: ["camera"] },
+      { peerId: "peer-2", userId: "user-2", sources: [] },
+    ],
+  });
+
+  assert.deepEqual(signals, [
+    {
+      targetPeerId: "peer-2",
+      epoch: 10,
+      signal: {
+        source: { trackId: "camera-track", source: "camera" },
+      },
+    },
+    {
+      targetPeerId: "peer-2",
+      epoch: 10,
+      signal: {
+        description: { type: "offer", sdp: "camera-offer" },
+      },
+    },
+  ]);
+});
+
+test("a new topology epoch repeats source removal for a reused sender", () => {
+  const signals = [];
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: (message) => signals.push(message),
+  });
+  mesh.epoch = 10;
+  mesh.connections.set("peer-2", {
+    peerId: "peer-2",
+    pc: { signalingState: "stable", localDescription: null },
+    senders: new Map([["camera", { track: null }]]),
+  });
+
+  mesh.resynchronizeEpoch();
+
+  assert.deepEqual(signals, [
+    {
+      targetPeerId: "peer-2",
+      epoch: 10,
+      signal: { sourceRemoved: { source: "camera" } },
+    },
+  ]);
+});
+
 test("P2P source restoration republishes the preserved remote receiver track", async () => {
   const restored = [];
   const mesh = new NativeP2pMesh({

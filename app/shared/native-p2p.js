@@ -251,6 +251,8 @@ export class NativeP2pMesh {
   }
 
   applyTopology({ mode, epoch, peers, localPeerId }) {
+    const previousEpoch = this.epoch;
+    const existingPeerIds = new Set(this.connections.keys());
     const previousFailureKey = `${this.epoch}:${this.mode}`;
     this.mode = mode;
     this.epoch = Number(epoch) || 0;
@@ -276,6 +278,8 @@ export class NativeP2pMesh {
             : 0;
         }
       }
+      if (this.epoch !== previousEpoch)
+        this.resynchronizeEpoch(existingPeerIds);
       this.startHealthChecks();
       if (mode === "probing") this.startQualificationTimeout();
     } else {
@@ -283,6 +287,29 @@ export class NativeP2pMesh {
       if (mode === "idle") this.closeAll();
     }
     this.emitSnapshot();
+  }
+
+  resynchronizeEpoch(peerIds = null) {
+    for (const state of this.connections.values()) {
+      if (peerIds && !peerIds.has(state.peerId)) continue;
+      for (const [source, sender] of state.senders) {
+        const entry = this.localSources.get(source);
+        if (entry?.track) {
+          this.signal(state.peerId, {
+            source: { trackId: entry.track.id, source },
+          });
+        } else if (!sender.track) {
+          this.signal(state.peerId, { sourceRemoved: { source } });
+        }
+      }
+      if (
+        state.pc.signalingState === "have-local-offer" &&
+        state.pc.localDescription?.type === "offer"
+      )
+        this.signal(state.peerId, {
+          description: state.pc.localDescription,
+        });
+    }
   }
 
   ensureConnection(peerId, userId) {
