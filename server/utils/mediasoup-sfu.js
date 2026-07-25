@@ -18,6 +18,7 @@ import {
   ensureRoomTopology,
   RoomTopologyCoordinator,
   roomTopologyPayload,
+  supersededMediaSessions,
 } from "./room-topology";
 import {
   acquireSharedRoom,
@@ -51,6 +52,7 @@ import {
   removeMediaUserState,
 } from "./media-user-state.js";
 import { collectSfuMetrics } from "./mediasoup-metrics.js";
+import { closeMediaPeer } from "./media-peer.js";
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 function send(peer, type, data) {
   try {
@@ -127,11 +129,7 @@ async function createState(config) {
         `[SFU] removing peer ${session.peer.id}: signaling heartbeat timed out`,
       );
       closeSession(state, session);
-      try {
-        session.peer.close(4000, "Signaling heartbeat timed out");
-      } catch (error) {
-        console.warn("[SFU] failed to close timed-out peer", error);
-      }
+      closeMediaPeer(session.peer, 4000, "Signaling heartbeat timed out");
     }
   }, MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS);
   state.heartbeatTimer.unref?.();
@@ -140,14 +138,7 @@ async function createState(config) {
     console.error("[SFU] mediasoup worker died", error);
     for (const session of state.sessions.values()) {
       send(session.peer, "server-shutdown", { reason: "media worker stopped" });
-      try {
-        session.peer.close(1011, "Media worker stopped");
-      } catch (closeError) {
-        console.warn(
-          "[SFU] failed to close peer after worker death",
-          closeError,
-        );
-      }
+      closeMediaPeer(session.peer, 1011, "Media worker stopped");
     }
     state.sessions.clear();
     state.rooms.clear();
@@ -744,7 +735,7 @@ export async function openSfuPeer(peer) {
     peer.close(1008, "Authentication and channelId are required");
     return;
   }
-  const { userId } = authentication;
+  const { userId, deviceId } = authentication;
   enforceIdentifierRateLimit("sfu-websocket-open", userId, 30, 60 * 1000);
 
   const pb = await usePocketBaseAdmin();
@@ -763,9 +754,11 @@ export async function openSfuPeer(peer) {
   const room = await acquireRoom(state, channelId);
   room.backendRoomId = String(channel.room);
   try {
+    const supersededSessions = supersededMediaSessions(room, userId, deviceId);
     const session = {
       peer,
       userId,
+      deviceId,
       profile,
       room,
       transports: new Map(),
@@ -784,6 +777,10 @@ export async function openSfuPeer(peer) {
 
     state.sessions.set(peer.id, session);
     room.sessions.set(peer.id, session);
+    for (const superseded of supersededSessions) {
+      closeSession(state, superseded);
+      closeMediaPeer(superseded.peer, 4000, "Media session replaced");
+    }
     send(peer, "connected", { userId, channelId, peerId: peer.id });
     broadcastChannelState(room);
     topologyCoordinator.reconcile(room, "membership-changed");

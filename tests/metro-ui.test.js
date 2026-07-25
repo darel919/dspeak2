@@ -260,9 +260,21 @@ test("participant volume controls render outside the scrolling participant strip
   assert.match(source, /<Teleport to="body">/);
   assert.match(source, /aria-modal="true"/);
   assert.match(source, /Adjust volume for/);
+  assert.match(source, /@contextmenu\.prevent="openTileVolumeMenu\(tile\)"/);
+  assert.match(source, /voiceStore\.getUserById\(tile\.feed\.userId\)/);
+  assert.match(source, /tile\.feed\.local/);
   assert.match(source, /max="2"/);
   assert.match(source, /<span>200%<\/span>/);
   assert.doesNotMatch(source, /absolute top-2 right-2 bg-base-200/);
+});
+
+test("odd overview tiles center the final participant in the grid", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /@container \(min-width: 36\.75rem\)/);
+  assert.match(source, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(source, /\.voice-room-tile:last-child:nth-child\(odd\)/);
+  assert.match(source, /grid-column: 1 \/ -1/);
+  assert.match(source, /width: calc\(50% - 0\.375rem\)/);
 });
 
 test("voice channel indicators show participant avatars and media status", async () => {

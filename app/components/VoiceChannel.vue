@@ -132,9 +132,7 @@
             @dblclick.stop="cancelTileFocus"
             @keydown.enter.prevent="tile.type === 'feed' && focusTile(tile.key)"
             @keydown.space.prevent="tile.type === 'feed' && focusTile(tile.key)"
-            @contextmenu.prevent="
-              tile.type === 'participant' && openVolumeMenu(tile.user)
-            "
+            @contextmenu.prevent="openTileVolumeMenu(tile)"
           >
             <VideoFeed
               v-if="tile.type === 'feed'"
@@ -679,6 +677,17 @@ const ownCameraFeed = computed(
     null,
 );
 
+function volumeUserForTile(tile) {
+  if (tile.type === "participant") return tile.user;
+  if (tile.type !== "feed" || tile.feed.local) return null;
+  return voiceStore.getUserById(tile.feed.userId) || { id: tile.feed.userId };
+}
+
+function openTileVolumeMenu(tile) {
+  const user = volumeUserForTile(tile);
+  if (user) openVolumeMenu(user);
+}
+
 function focusTile(key) {
   if (viewMode.value === "focused" && focusedTileKey.value === key) {
     viewMode.value = "overview";
@@ -911,10 +920,15 @@ onUnmounted(() => {
 
 .voice-room-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: minmax(0, 1fr);
   place-content: center;
   gap: 0.75rem;
+}
+
+.voice-room-grid:not(.voice-room-grid-focused)
+  .voice-room-tile:last-child:nth-child(odd) {
+  justify-self: center;
 }
 
 .voice-room-tile {
@@ -967,6 +981,18 @@ onUnmounted(() => {
 @supports (width: 1cqw) and (height: 1cqh) {
   .screen-feed-frame-single {
     width: min(100cqw, calc(100cqh * 16 / 9));
+  }
+}
+
+@container (min-width: 36.75rem) {
+  .voice-room-grid:not(.voice-room-grid-focused) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .voice-room-grid:not(.voice-room-grid-focused)
+    .voice-room-tile:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    width: calc(50% - 0.375rem);
   }
 }
 

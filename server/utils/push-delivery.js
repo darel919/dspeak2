@@ -63,11 +63,7 @@ function configureWebPush() {
   const privateKey =
     process.env.VAPID_PRIVKEY || config.pocketbase.vapidPrivateKey;
   if (!publicKey || !privateKey) return false;
-  webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT || "mailto:darrell.cristanto@gmail.com",
-    publicKey,
-    privateKey,
-  );
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT, publicKey, privateKey);
   state.configured = true;
   return true;
 }

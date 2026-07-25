@@ -7,6 +7,7 @@ const requiredVariables = [
   "PBASE_ADMIN_PASSWORD",
   "DSPEAK_CSRF_SECRET",
   "VAPID_PRIVKEY",
+  "VAPID_SUBJECT",
 ];
 
 function readPort(name, fallback) {
@@ -101,11 +102,15 @@ export async function validateRuntimeEnvironment() {
 
   let pocketBaseUrl;
   let authUrl;
+  let vapidSubject;
   try {
     pocketBaseUrl = new URL(process.env.POCKETBASE_URL);
     authUrl = new URL(process.env.AUTH_PATH);
+    vapidSubject = new URL(process.env.VAPID_SUBJECT);
   } catch {
-    throw new Error("POCKETBASE_URL and AUTH_PATH must be valid absolute URLs");
+    throw new Error(
+      "POCKETBASE_URL, AUTH_PATH, and VAPID_SUBJECT must be valid absolute URLs",
+    );
   }
   if (!["http:", "https:"].includes(pocketBaseUrl.protocol)) {
     throw new Error("POCKETBASE_URL must use http or https");
@@ -115,6 +120,9 @@ export async function validateRuntimeEnvironment() {
   }
   if (process.env.NODE_ENV === "production" && authUrl.protocol !== "https:")
     throw new Error("AUTH_PATH must use https in production");
+  if (!["https:", "mailto:"].includes(vapidSubject.protocol)) {
+    throw new Error("VAPID_SUBJECT must use https or mailto");
+  }
   if (process.env.DSPEAK_PUBLIC_ORIGIN) {
     const publicOrigin = new URL(process.env.DSPEAK_PUBLIC_ORIGIN);
     const developmentLoopback =

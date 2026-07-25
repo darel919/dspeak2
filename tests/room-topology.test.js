@@ -4,6 +4,7 @@ import {
   createRoomTopology,
   RoomTopologyCoordinator,
   roomTopologyPayload,
+  supersededMediaSessions,
 } from "../server/utils/room-topology.js";
 import { matchesPreparedActivation } from "../server/utils/media-transition.js";
 
@@ -49,6 +50,43 @@ test("topology membership carries the authenticated participant profile", () => 
     id: "user-1",
     display_name: "User 1",
   });
+});
+
+test("a reconnect replaces only the same authenticated device", () => {
+  const sessions = new Map([
+    [
+      "same-device",
+      {
+        peer: { id: "same-device" },
+        userId: "user-1",
+        deviceId: "device-1",
+      },
+    ],
+    [
+      "other-device",
+      {
+        peer: { id: "other-device" },
+        userId: "user-1",
+        deviceId: "device-2",
+      },
+    ],
+    [
+      "other-user",
+      {
+        peer: { id: "other-user" },
+        userId: "user-2",
+        deviceId: "device-1",
+      },
+    ],
+  ]);
+  const room = { sessions };
+
+  assert.deepEqual(
+    supersededMediaSessions(room, "user-1", "device-1").map(
+      (session) => session.peer.id,
+    ),
+    ["same-device"],
+  );
 });
 
 function qualifyCompleteMesh(room, coordinator) {

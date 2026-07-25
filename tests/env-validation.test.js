@@ -16,6 +16,7 @@ beforeEach(() => {
     VAPID_PUBLIC_KEY: "public",
     VAPID_PUBKEY: "public",
     VAPID_PRIVKEY: "private",
+    VAPID_SUBJECT: "mailto:operator@example.com",
     DSPEAK_PUBLIC_ORIGIN: "https://app.example.com",
     MEDIASOUP_LISTEN_IP: "0.0.0.0",
     MEDIASOUP_ANNOUNCED_ADDRESS: "auto",
@@ -90,6 +91,43 @@ test("production rejects an HTTP loopback public origin", async () => {
   process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
 
   await assert.rejects(validateRuntimeEnvironment(), /must be an HTTPS origin/);
+});
+
+test("requires a VAPID subject", async () => {
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
+  delete process.env.VAPID_SUBJECT;
+
+  await assert.rejects(
+    validateRuntimeEnvironment(),
+    /Missing required environment variables: VAPID_SUBJECT/,
+  );
+});
+
+test("rejects a VAPID subject without a URL scheme", async () => {
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
+  process.env.VAPID_SUBJECT = "operator@example.com";
+
+  await assert.rejects(
+    validateRuntimeEnvironment(),
+    /VAPID_SUBJECT must be valid/,
+  );
+});
+
+test("rejects an unsupported VAPID subject protocol", async () => {
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
+  process.env.VAPID_SUBJECT = "http://operator.example.com";
+
+  await assert.rejects(
+    validateRuntimeEnvironment(),
+    /VAPID_SUBJECT must use https or mailto/,
+  );
+});
+
+test("accepts an HTTPS VAPID subject", async () => {
+  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
+  process.env.VAPID_SUBJECT = "https://operator.example.com/push-contact";
+
+  await assert.doesNotReject(validateRuntimeEnvironment());
 });
 
 test("requires the shared RTC hostname when TURN is enabled", async () => {

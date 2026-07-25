@@ -55,6 +55,17 @@ export function roomTopologyPayload(room) {
   };
 }
 
+export function supersededMediaSessions(room, userId, deviceId) {
+  const normalizedUserId = String(userId || "");
+  const normalizedDeviceId = String(deviceId || "");
+  if (!normalizedUserId || !normalizedDeviceId) return [];
+  return [...room.sessions.values()].filter(
+    (session) =>
+      String(session.userId) === normalizedUserId &&
+      String(session.deviceId) === normalizedDeviceId,
+  );
+}
+
 export class RoomTopologyCoordinator {
   constructor({
     broadcast,
