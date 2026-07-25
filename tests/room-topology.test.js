@@ -172,10 +172,9 @@ function reachP2p(room, coordinator, timers) {
   coordinator.reconcile(room, "joined");
   assert.equal(room.topology.target, "sfu");
   acknowledgeAll(room, coordinator);
-  runActiveTimer(timers, 10000);
+  runActiveTimer(timers, 3000);
   assert.equal(room.topology.mode, "probing");
   qualifyCompleteMesh(room, coordinator);
-  runActiveTimer(timers, 10000);
   assert.equal(room.topology.target, "p2p");
   acknowledgeAll(room, coordinator);
   assert.equal(room.topology.mode, "p2p");
@@ -198,7 +197,7 @@ test("one client establishes SFU without scheduling a direct upgrade", () => {
 test("two clients activate direct P2P only after complete qualification and handoff consensus", () => {
   const { room, coordinator, timers } = harness(2);
   reachP2p(room, coordinator, timers);
-  assert.equal(room.topology.reason, "recovered-direct-mesh");
+  assert.equal(room.topology.reason, "complete-direct-mesh");
 });
 
 test("two-device direct video keeps one resource-capped P2P sender", () => {
@@ -220,7 +219,7 @@ test("multi-peer video follows the normal SFU-first P2P qualification path", () 
 
   assert.equal(room.topology.mode, "sfu");
   assert.equal(
-    timers.some((timer) => timer.active && timer.delay === 20000),
+    timers.some((timer) => timer.active && timer.delay === 6000),
     true,
   );
 });
@@ -233,22 +232,23 @@ test("video does not block background direct recovery", () => {
 
   assert.equal(room.topology.mode, "sfu");
   assert.equal(
-    timers.some((timer) => timer.active && timer.delay === 10000),
+    timers.some((timer) => timer.active && timer.delay === 3000),
     true,
   );
 
-  runActiveTimer(timers, 10000);
+  runActiveTimer(timers, 3000);
   assert.equal(room.topology.mode, "probing");
   qualifyCompleteMesh(room, coordinator);
-  runActiveTimer(timers, 10000);
   assert.equal(room.topology.target, "p2p");
+  acknowledgeAll(room, coordinator);
+  assert.equal(room.topology.mode, "p2p");
 });
 
 test("four clients require every directed mesh edge before activation", () => {
   const { room, coordinator, timers } = harness(4);
   coordinator.reconcile(room, "joined");
   acknowledgeAll(room, coordinator);
-  runActiveTimer(timers, 30000);
+  runActiveTimer(timers, 10000);
   const peerIds = [...room.sessions.keys()];
   for (const peerId of peerIds.slice(0, 3)) {
     coordinator.p2pReady(
@@ -265,9 +265,9 @@ test("four clients require every directed mesh edge before activation", () => {
     peerIds.slice(0, 3),
     room.topology.epoch,
   );
-  assert.equal(room.topology.mode, "probing");
-  runActiveTimer(timers, 30000);
   assert.equal(room.topology.target, "p2p");
+  acknowledgeAll(room, coordinator);
+  assert.equal(room.topology.mode, "p2p");
 });
 
 test("five clients use SFU after all-client handoff consensus", () => {
@@ -299,7 +299,7 @@ test("source changes invalidate partial direct qualification", () => {
   const { room, coordinator, timers } = harness(3);
   coordinator.reconcile(room, "joined");
   acknowledgeAll(room, coordinator);
-  runActiveTimer(timers, 20000);
+  runActiveTimer(timers, 6000);
   const staleEpoch = room.topology.epoch;
   const peerIds = [...room.sessions.keys()];
   coordinator.p2pReady(room, "peer-1", ["peer-2", "peer-3"], staleEpoch);
@@ -325,18 +325,17 @@ test("stale P2P failures cannot disrupt an active SFU route", () => {
 
 test("SFU recovery waits for a stable complete direct mesh before switching", () => {
   const { room, coordinator, timers } = harness(2);
+  room.topology.p2pEverActivated = true;
   coordinator.beginTransition(room, "sfu", "direct-path-unavailable");
   acknowledgeAll(room, coordinator);
-  const recovery = timers.find(
-    (timer) => timer.active && timer.delay === 10000,
-  );
+  const recovery = timers.find((timer) => timer.active && timer.delay === 3000);
   assert.ok(recovery);
   recovery.callback();
   assert.equal(room.topology.mode, "probing");
   qualifyCompleteMesh(room, coordinator);
   assert.equal(room.topology.mode, "probing");
   const activation = timers.find(
-    (timer) => timer.active && timer.delay === 10000,
+    (timer) => timer.active && timer.delay === 2000,
   );
   assert.ok(activation);
   activation.callback();
@@ -346,9 +345,10 @@ test("SFU recovery waits for a stable complete direct mesh before switching", ()
 
 test("failed background direct recovery returns to the already-active SFU without another handoff", () => {
   const { room, coordinator, timers } = harness(2);
+  room.topology.p2pEverActivated = true;
   coordinator.beginTransition(room, "sfu", "initial-direct-failure");
   acknowledgeAll(room, coordinator);
-  timers.find((timer) => timer.active && timer.delay === 10000).callback();
+  timers.find((timer) => timer.active && timer.delay === 3000).callback();
   const recoveryEpoch = room.topology.epoch;
   assert.equal(room.topology.recovering, true);
   assert.equal(
@@ -420,7 +420,7 @@ test("stale SFU failures cannot restart a newer topology epoch", () => {
   assert.equal(room.topology.mode, "sfu");
 });
 
-test("five-to-four membership recovery keeps SFU until a stable mesh qualifies", () => {
+test("five-to-four membership keeps SFU until a stable mesh qualifies", () => {
   const { room, coordinator, timers } = harness(5);
   coordinator.reconcile(room, "joined");
   acknowledgeAll(room, coordinator);
@@ -428,17 +428,11 @@ test("five-to-four membership recovery keeps SFU until a stable mesh qualifies",
 
   coordinator.reconcile(room, "membership-changed");
   assert.equal(room.topology.mode, "sfu");
-  runActiveTimer(timers, 30000);
+  runActiveTimer(timers, 10000);
   assert.equal(room.topology.mode, "probing");
   assert.equal(room.topology.recovering, true);
   qualifyCompleteMesh(room, coordinator);
-  assert.equal(room.topology.mode, "probing");
-
-  const stabilityTimer = timers.find(
-    (timer) => timer.active && timer.delay === 30000,
-  );
-  assert.ok(stabilityTimer);
-  stabilityTimer.callback();
-  assert.equal(room.topology.mode, "switching");
   assert.equal(room.topology.target, "p2p");
+  acknowledgeAll(room, coordinator);
+  assert.equal(room.topology.mode, "p2p");
 });

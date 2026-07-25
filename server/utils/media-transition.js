@@ -5,10 +5,9 @@ export function p2pRoutingPolicy(participantCount) {
     2,
     Math.min(maxP2pParticipants, Number(participantCount) || 2),
   );
-  const confidenceWeight = count - 1;
   return {
-    recoveryDelayMs: confidenceWeight * 10000,
-    stabilityDelayMs: confidenceWeight * 10000,
+    recoveryDelayMs: count === 2 ? 3000 : count === 3 ? 6000 : 10000,
+    stabilityDelayMs: count === 2 ? 2000 : count === 3 ? 4000 : 8000,
   };
 }
 

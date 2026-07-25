@@ -1,4 +1,5 @@
 import { byteTimeDomainLevelDb } from "./microphone-gate.js";
+import { triggerRef } from "vue";
 
 const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -42;
 
@@ -55,7 +56,7 @@ export class RemoteMediaRegistry {
         entry.source === "screen" ? (current?.receiving ?? false) : true;
       entry.track.enabled = receiving;
       this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
-      this.videoFeeds.value = new Map(this.videoFeeds.value);
+      triggerRef(this.videoFeeds);
       if (entry.source === "screen")
         this.onVideoReceivingChange?.(entry, receiving);
       return;
@@ -64,7 +65,7 @@ export class RemoteMediaRegistry {
     const receiving = entry.receiving !== false;
     entry.track.enabled = receiving;
     this.audioFeeds.value.set(entry.key, { ...entry, receiving });
-    this.audioFeeds.value = new Map(this.audioFeeds.value);
+    triggerRef(this.audioFeeds);
     this.createAudioElement({ ...entry, receiving }, staged);
     if (entry.source === "audio") this.startVoiceDetection(entry);
   }
@@ -77,7 +78,7 @@ export class RemoteMediaRegistry {
       ...entry,
       receiving: Boolean(receiving),
     });
-    this.videoFeeds.value = new Map(this.videoFeeds.value);
+    triggerRef(this.videoFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     return true;
   }
@@ -88,7 +89,7 @@ export class RemoteMediaRegistry {
     entry.receiving = Boolean(receiving);
     entry.track.enabled = Boolean(receiving);
     this.audioFeeds.value.set(key, { ...entry });
-    this.audioFeeds.value = new Map(this.audioFeeds.value);
+    triggerRef(this.audioFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     return true;
   }
@@ -120,8 +121,8 @@ export class RemoteMediaRegistry {
     if (owner?.track && current.track !== owner.track) return;
     this.audioFeeds.value.delete(key);
     this.videoFeeds.value.delete(key);
-    this.audioFeeds.value = new Map(this.audioFeeds.value);
-    this.videoFeeds.value = new Map(this.videoFeeds.value);
+    triggerRef(this.audioFeeds);
+    triggerRef(this.videoFeeds);
     if (audio) this.removeAudioTrack(audio);
     this.stopVoiceDetection(key);
   }

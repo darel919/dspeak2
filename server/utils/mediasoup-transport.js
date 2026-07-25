@@ -1,5 +1,5 @@
 export const WEBRTC_INITIAL_OUTGOING_BITRATE = Object.freeze({
-  send: 600_000,
+  send: 1_500_000,
   recv: 1_000_000,
 });
 

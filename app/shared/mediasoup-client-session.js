@@ -150,6 +150,7 @@ export class MediasoupClientSession {
     }
     if (type === "consumer-resumed" || type === "consumer-paused") {
       this.pending.get(data.requestId)?.resolve(data);
+      if (data.consumerClosed) return true;
       const entry = this.consumers.get(data.consumerId);
       if (entry) entry.receiving = type === "consumer-resumed";
       return true;
@@ -561,6 +562,10 @@ export class MediasoupClientSession {
     entry.close = close;
     consumer.on("transportclose", close);
     consumer.on("trackended", close);
+    try {
+      if (consumer.receiver?.jitterBufferTarget !== undefined)
+        consumer.receiver.jitterBufferTarget = 40;
+    } catch (_) {}
     if (this.shouldReceive(data.userId, entry.source))
       await this.setConsumerReceiving(entry, true);
     this.onRemoteTrack?.(entry);
@@ -613,7 +618,14 @@ export class MediasoupClientSession {
         data: { consumerId: entry.consumer.id, requestId, revision },
       });
       try {
-        await acknowledgement;
+        const result = await acknowledgement;
+        if (result?.consumerClosed) {
+          if (entry.receivingRevision === revision) {
+            entry.track.enabled = false;
+            entry.receiving = false;
+          }
+          return false;
+        }
         if (entry.receivingRevision !== revision) return false;
         entry.track.enabled = desired;
         entry.receiving = desired;

@@ -24,16 +24,16 @@ test("membership topology enforces the four-device mesh limit", () => {
 
 test("P2P confidence decreases as the mesh gains participants", () => {
   assert.deepEqual(p2pRoutingPolicy(2), {
-    recoveryDelayMs: 10000,
-    stabilityDelayMs: 10000,
+    recoveryDelayMs: 3000,
+    stabilityDelayMs: 2000,
   });
   assert.deepEqual(p2pRoutingPolicy(3), {
-    recoveryDelayMs: 20000,
-    stabilityDelayMs: 20000,
+    recoveryDelayMs: 6000,
+    stabilityDelayMs: 4000,
   });
   assert.deepEqual(p2pRoutingPolicy(4), {
-    recoveryDelayMs: 30000,
-    stabilityDelayMs: 30000,
+    recoveryDelayMs: 10000,
+    stabilityDelayMs: 8000,
   });
 });
 
