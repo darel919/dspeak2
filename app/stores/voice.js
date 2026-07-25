@@ -78,6 +78,7 @@ export const useVoiceStore = defineStore("voice", () => {
   );
 
   let joinGeneration = 0;
+  let cameraToggleGeneration = 0;
   let mediaSessionError = null;
   const soundboardActivityTimers = new Map();
 
@@ -273,6 +274,7 @@ export const useVoiceStore = defineStore("voice", () => {
       screenSharing.value = false;
       systemAudioSharing.value = false;
       if (wasConnected) playSystemSound("voice-leave", settingsStore);
+      cameraToggleGeneration += 1;
     }
   }
 
@@ -541,16 +543,22 @@ export const useVoiceStore = defineStore("voice", () => {
 
   async function toggleCamera() {
     if (!connected.value || !sfuComposable.value) return;
+    const session = sfuComposable.value;
+    const generation = ++cameraToggleGeneration;
+    const enable = !cameraEnabled.value;
+    cameraEnabled.value = enable;
     try {
-      if (cameraEnabled.value) {
-        sfuComposable.value.stopVideoProduction("camera");
-        cameraEnabled.value = false;
+      if (!enable) {
+        session.stopVideoProduction("camera");
       } else {
-        await sfuComposable.value.startVideoProduction("camera");
-        cameraEnabled.value = true;
+        await session.startVideoProduction("camera");
       }
+      if (generation !== cameraToggleGeneration) return;
       error.value = null;
     } catch (err) {
+      if (generation !== cameraToggleGeneration) return;
+      cameraEnabled.value = false;
+      if (err?.code === "MEDIA_START_CANCELLED") return;
       error.value = err?.message || "Unable to access the camera";
       throw err;
     }

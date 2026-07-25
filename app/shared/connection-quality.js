@@ -48,7 +48,7 @@ export function getActiveConnectionLabel(
   if (mediaState === "playback-blocked") return "Playback blocked";
   if (mediaState === "topology-probing") return "Selecting media route";
   if (mediaState === "transport-connecting") return "Transport connecting";
-  if (mediaState === "ready-no-active-media") return "Ready · no active media";
+  if (mediaState === "ready-no-active-media") return "Connected";
   if (mediaState === "media-flowing")
     return hasConnectedStatistics
       ? getConnectionQualityLabel(bars)

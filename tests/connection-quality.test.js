@@ -46,11 +46,11 @@ test("active connection label follows transport state before statistics arrive",
   );
   assert.equal(
     getActiveConnectionLabel(0, "ready-no-active-media", false),
-    "Ready · no active media",
+    "Connected",
   );
   assert.equal(
     getActiveConnectionLabel(1, "ready-no-active-media", false),
-    "Ready · no active media",
+    "Connected",
   );
   assert.equal(
     getActiveConnectionLabel(0, "topology-probing", false),

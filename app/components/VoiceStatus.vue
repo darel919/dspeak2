@@ -98,7 +98,7 @@ const identityStore = useIdentityStore();
 const connectionLabel = computed(() => {
   const state = voiceStore.sfuComposable?.mediaConnectionState;
   if (state === "media-flowing") return "Media flowing";
-  if (state === "ready-no-active-media") return "Ready, no active media";
+  if (state === "ready-no-active-media") return "Connected";
   if (state === "playback-blocked") return "Playback needs attention";
   if (state === "reconnecting") return "Media reconnecting";
   if (state === "transport-connecting") return "Transport connecting";

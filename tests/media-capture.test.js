@@ -293,3 +293,80 @@ test("device reconciliation fails over even when an unplugged track stays live",
   assert.equal(fallbackTrack.readyState, "live");
   assert.deepEqual(fallbackEvents, ["preferred-device"]);
 });
+
+test("stopping camera cancels capture that has not finished opening", async () => {
+  const track = fakeTrack("camera");
+  track.kind = "video";
+  track.applyConstraints = async () => {};
+  const stream = {
+    getAudioTracks: () => [],
+    getVideoTracks: () => [track],
+    getTracks: () => [track],
+  };
+  let finishCapture;
+  let publications = 0;
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      getUserMedia: () =>
+        new Promise((resolve) => {
+          finishCapture = () => resolve(stream);
+        }),
+    },
+    getSettings: () => ({ cameraVideo: {} }),
+    onSource: () => {
+      publications += 1;
+    },
+    onSourceEnded() {},
+  });
+
+  const starting = manager.startVideo("camera");
+  manager.stop("camera");
+  finishCapture();
+
+  await assert.rejects(
+    starting,
+    (error) => error?.code === "MEDIA_START_CANCELLED",
+  );
+  assert.equal(track.readyState, "ended");
+  assert.equal(publications, 0);
+  assert.equal(manager.sources.has("camera"), false);
+});
+
+test("stopping camera wins over publication already in progress", async () => {
+  const track = fakeTrack("camera");
+  track.kind = "video";
+  track.applyConstraints = async () => {};
+  const stream = {
+    getAudioTracks: () => [],
+    getVideoTracks: () => [track],
+    getTracks: () => [track],
+  };
+  let finishPublication;
+  let ended = 0;
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      getUserMedia: async () => stream,
+    },
+    getSettings: () => ({ cameraVideo: {} }),
+    onSource: () =>
+      new Promise((resolve) => {
+        finishPublication = resolve;
+      }),
+    onSourceEnded: () => {
+      ended += 1;
+    },
+  });
+
+  const starting = manager.startVideo("camera");
+  while (!manager.sources.has("camera")) await Promise.resolve();
+  manager.stop("camera");
+  finishPublication({ source: "camera", track });
+
+  await assert.rejects(
+    starting,
+    (error) => error?.code === "MEDIA_START_CANCELLED",
+  );
+  assert.equal(track.readyState, "ended");
+  assert.equal(ended, 1);
+  assert.equal(manager.sources.has("camera"), false);
+});

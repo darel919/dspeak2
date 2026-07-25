@@ -77,6 +77,7 @@ export class MediaCaptureManager {
     this.onSource = onSource;
     this.onSourceEnded = onSourceEnded;
     this.sources = new Map();
+    this.sourceGenerations = new Map();
     this.microphoneFallback = false;
     this.microphoneRecovery = null;
     this.deviceChangeTimer = null;
@@ -291,6 +292,8 @@ export class MediaCaptureManager {
       throw new Error("Unsupported video source");
     const existing = this.sources.get(source);
     if (existing) return existing;
+    const generation = (this.sourceGenerations.get(source) || 0) + 1;
+    this.sourceGenerations.set(source, generation);
     const settings = this.getSettings();
     const screen = source === "screen";
     const constraints = buildVideoConstraints(
@@ -306,6 +309,10 @@ export class MediaCaptureManager {
           video: constraints,
           audio: false,
         });
+    if (this.sourceGenerations.get(source) !== generation) {
+      stream.getTracks().forEach((candidate) => candidate.stop());
+      throw this.cancelledStartError(source);
+    }
     const track = stream.getVideoTracks()[0];
     if (!track) {
       stream.getTracks().forEach((candidate) => candidate.stop());
@@ -320,10 +327,19 @@ export class MediaCaptureManager {
       stream.getTracks().forEach((candidate) => candidate.stop());
       throw error;
     }
+    if (this.sourceGenerations.get(source) !== generation) {
+      stream.getTracks().forEach((candidate) => candidate.stop());
+      throw this.cancelledStartError(source);
+    }
     if (screen) track.contentHint = "motion";
     try {
       const entry = this.register(source, stream, track);
       const published = await entry.publication;
+      if (
+        this.sourceGenerations.get(source) !== generation ||
+        this.sources.get(source) !== entry
+      )
+        throw this.cancelledStartError(source);
       const publishedEntry = published?.track ? published : entry;
       const screenAudio = screen ? stream.getAudioTracks()[0] : null;
       if (screenAudio) {
@@ -341,6 +357,12 @@ export class MediaCaptureManager {
       stream.getTracks().forEach((candidate) => candidate.stop());
       throw error;
     }
+  }
+
+  cancelledStartError(source) {
+    const error = new Error(`The ${source} start was cancelled`);
+    error.code = "MEDIA_START_CANCELLED";
+    return error;
   }
 
   async startSystemAudio() {
@@ -396,6 +418,10 @@ export class MediaCaptureManager {
   }
 
   stop(source) {
+    this.sourceGenerations.set(
+      source,
+      (this.sourceGenerations.get(source) || 0) + 1,
+    );
     const entry = this.sources.get(source);
     if (!entry) return;
     this.sources.delete(source);
