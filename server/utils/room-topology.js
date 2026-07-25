@@ -225,8 +225,7 @@ export class RoomTopologyCoordinator {
     if (room.topology.mode === "switching") {
       this.beginTransition(room, room.topology.target, "media-sources-changed");
     } else if (room.topology.mode === "probing") {
-      room.topology.readiness.clear();
-      room.topology.transitionReadiness.clear();
+      this.set(room, "probing", "media-sources-changed");
     } else {
       room.topology.transitionReadiness.clear();
       this.broadcast(room);

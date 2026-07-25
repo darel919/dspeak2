@@ -306,11 +306,11 @@ test("source changes invalidate partial direct qualification", () => {
   assert.equal(room.topology.readiness.size, 1);
 
   coordinator.sourcesChanged(room);
-  assert.equal(room.topology.epoch, staleEpoch);
+  assert.ok(room.topology.epoch > staleEpoch);
   assert.equal(room.topology.readiness.size, 0);
   assert.equal(
     coordinator.p2pReady(room, "peer-2", ["peer-1", "peer-3"], staleEpoch),
-    true,
+    false,
   );
 });
 

@@ -696,32 +696,12 @@ async function handleMessage(state, session, message) {
       return;
     }
 
-    case "resume-consumer": {
-      const consumer = session.consumers.get(data.consumerId);
-      if (!consumer) {
-        send(session.peer, "consumer-resumed", {
-          requestId: data.requestId,
-          revision: data.revision,
-          consumerId: data.consumerId,
-          producerId: data.producerId,
-          consumerClosed: true,
-        });
-        return;
-      }
-      await consumer.resume();
-      send(session.peer, "consumer-resumed", {
-        requestId: data.requestId,
-        revision: data.revision,
-        consumerId: consumer.id,
-        producerId: consumer.producerId,
-      });
-      return;
-    }
-
+    case "resume-consumer":
     case "pause-consumer": {
+      const resume = type === "resume-consumer";
       const consumer = session.consumers.get(data.consumerId);
       if (!consumer) {
-        send(session.peer, "consumer-paused", {
+        send(session.peer, resume ? "consumer-resumed" : "consumer-paused", {
           requestId: data.requestId,
           revision: data.revision,
           consumerId: data.consumerId,
@@ -730,8 +710,8 @@ async function handleMessage(state, session, message) {
         });
         return;
       }
-      await consumer.pause();
-      send(session.peer, "consumer-paused", {
+      await consumer[resume ? "resume" : "pause"]();
+      send(session.peer, resume ? "consumer-resumed" : "consumer-paused", {
         requestId: data.requestId,
         revision: data.revision,
         consumerId: consumer.id,
