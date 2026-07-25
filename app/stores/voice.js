@@ -196,7 +196,7 @@ export const useVoiceStore = defineStore("voice", () => {
           /* noop */
         }
       },
-      { deep: true, immediate: true },
+      { deep: true },
     );
     watch(
       trackVolumes,
@@ -207,7 +207,7 @@ export const useVoiceStore = defineStore("voice", () => {
           /* noop */
         }
       },
-      { deep: true, immediate: true },
+      { deep: true },
     );
   }
 

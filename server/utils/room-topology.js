@@ -20,6 +20,8 @@ export function createRoomTopology() {
     preparedEpoch: null,
     target: null,
     recovering: false,
+    p2pFailures: 0,
+    p2pEverActivated: false,
     recoveryTimer: null,
     activationTimer: null,
     transitionTimer: null,
@@ -175,7 +177,11 @@ export class RoomTopologyCoordinator {
     const activationReason =
       room.topology.reason || `all-clients-ready-${target}`;
     this.set(room, target, activationReason, null, Number(epoch));
-    if (target === "p2p") room.topology.recovering = false;
+    if (target === "p2p") {
+      room.topology.recovering = false;
+      room.topology.p2pFailures = 0;
+      room.topology.p2pEverActivated = true;
+    }
     if (target === "sfu") this.scheduleDirectRecovery(room);
     return true;
   }
@@ -189,6 +195,11 @@ export class RoomTopologyCoordinator {
       return false;
     if (Number(sourceRevision) !== room.topology.sourceRevision) return false;
     if (target === "p2p") {
+      room.topology.p2pFailures += 1;
+      if (room.topology.p2pFailures < 3) {
+        this.set(room, "probing", "retrying-direct-preparation");
+        return true;
+      }
       this.fallbackToSfu(room, "client-direct-preparation-failed");
       return true;
     }
@@ -244,6 +255,11 @@ export class RoomTopologyCoordinator {
     room.topology.readiness.set(peerId, qualified);
     const peerIds = [...room.sessions.keys()].sort();
     if (!hasCompleteMesh(peerIds, room.topology.readiness)) return true;
+    if (!room.topology.p2pEverActivated) {
+      this.beginTransition(room, "p2p", "complete-direct-mesh");
+      room.topology.recovering = false;
+      return true;
+    }
     if (!room.topology.recovering) {
       this.beginTransition(room, "p2p", "complete-direct-mesh");
       return true;
@@ -306,6 +322,7 @@ export class RoomTopologyCoordinator {
   }
 
   fallbackToSfu(room, reason) {
+    room.topology.p2pFailures = 0;
     if (room.topology.recovering) {
       room.topology.recovering = false;
       this.set(room, "sfu", reason);

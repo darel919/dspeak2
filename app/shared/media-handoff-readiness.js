@@ -13,59 +13,155 @@ export function waitForMediaHandoff({
   topologyState,
 }) {
   const startedAt = Date.now();
+  if (provider === "sfu") {
+    return waitForSfuHandoff({
+      getLatestTopologyKey,
+      getLocalPeerId,
+      getSfu,
+      handoff,
+      localSources,
+      pollIntervalMs,
+      timeoutMs,
+      topology,
+      topologyEventKey,
+      topologyState,
+      startedAt,
+    });
+  }
+  return waitForP2pHandoff({
+    getLatestTopologyKey,
+    getLocalPeerId,
+    getP2pMesh,
+    handoff,
+    localSources,
+    timeoutMs,
+    topology,
+    topologyEventKey,
+    topologyState,
+    startedAt,
+  });
+}
+
+function waitForSfuHandoff({
+  getLatestTopologyKey,
+  getLocalPeerId,
+  getSfu,
+  handoff,
+  localSources,
+  pollIntervalMs,
+  timeoutMs,
+  topology,
+  topologyEventKey,
+  topologyState,
+  startedAt,
+}) {
+  const localPeerId = getLocalPeerId();
+  const sfu = getSfu();
+  const connected = sfu?.connectionState().ready === true;
+  const expected = countExpectedFeeds(topologyState, localPeerId);
+  if (connected && expected === 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const poll = () => {
+      const key = topologyEventKey(topology);
+      if (key !== getLatestTopologyKey()) {
+        reject(new Error("Topology handoff was superseded"));
+        return;
+      }
+      const tracksReady = checkTracksReady(
+        handoff,
+        "sfu",
+        topologyState,
+        localPeerId,
+      );
+      if (
+        tracksReady &&
+        (countExpectedFeeds(topologyState, localPeerId) === 0 ||
+          localSources.size > 0)
+      ) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(
+          new Error(
+            `SFU media did not become ready for handoff (tracks ${handoff.count("sfu")}/${countExpectedFeeds(topologyState, localPeerId)})`,
+          ),
+        );
+        return;
+      }
+      setTimeout(poll, pollIntervalMs);
+    };
+    if (!connected) {
+      setTimeout(poll, pollIntervalMs);
+    } else {
+      poll();
+    }
+  });
+}
+
+function waitForP2pHandoff({
+  getLatestTopologyKey,
+  getLocalPeerId,
+  getP2pMesh,
+  handoff,
+  localSources,
+  timeoutMs,
+  topology,
+  topologyEventKey,
+  topologyState,
+  startedAt,
+}) {
+  const localPeerId = getLocalPeerId();
   return new Promise((resolve, reject) => {
     const poll = () => {
       if (topologyEventKey(topology) !== getLatestTopologyKey()) {
         reject(new Error("Topology handoff was superseded"));
         return;
       }
-      const localPeerId = getLocalPeerId();
-      const expected = topologyState.value.peers
-        .filter((peer) => String(peer.peerId) !== String(localPeerId))
-        .reduce(
-          (count, peer) =>
-            count + (Array.isArray(peer.sources) ? peer.sources.length : 0),
-          0,
-        );
       const tracksReady = handoff.hasExpectedFeeds(
-        provider,
+        "p2p",
         topologyState.value.peers,
         localPeerId,
       );
-      const mediaReady =
-        provider === "p2p" ? !!getP2pMesh()?.isMediaReady() : false;
-      const check =
-        provider === "sfu" && tracksReady
-          ? getSfu()
-              ?.mediaReadiness(expected)
-              .catch((error) => ({ ready: false, error: error.message }))
-          : Promise.resolve({ ready: mediaReady });
-      check.then((readiness) => {
-        const flowing = readiness?.ready === true;
-        if (
-          (tracksReady && flowing) ||
-          (expected === 0 && localSources.size === 0)
-        ) {
-          resolve();
-          return;
-        }
-        if (Date.now() - startedAt >= timeoutMs) {
-          const detail =
-            provider === "sfu"
-              ? `tracks ${handoff.count(provider)}/${expected}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expected}`
-              : `tracks ${handoff.count(provider)}/${expected}, mesh ready ${flowing ? "yes" : "no"}`;
-          reject(
-            new Error(
-              `${provider.toUpperCase()} media did not become ready for handoff (${detail})`,
-            ),
-          );
-          return;
-        }
-        setTimeout(poll, pollIntervalMs);
-      });
+      const mediaReady = !!getP2pMesh()?.isMediaReady();
+      const expected = countExpectedFeeds(topologyState, localPeerId);
+      if (
+        (tracksReady && mediaReady) ||
+        (expected === 0 && localSources.size === 0)
+      ) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(
+          new Error(
+            `P2P media did not become ready for handoff (tracks ${handoff.count("p2p")}/${expected}, mesh ready ${mediaReady ? "yes" : "no"})`,
+          ),
+        );
+        return;
+      }
+      setTimeout(poll, 200);
     };
     poll();
   });
+}
+
+function countExpectedFeeds(topologyState, localPeerId) {
+  return topologyState.value.peers
+    .filter((peer) => String(peer.peerId) !== String(localPeerId))
+    .reduce(
+      (count, peer) =>
+        count + (Array.isArray(peer.sources) ? peer.sources.length : 0),
+      0,
+    );
+}
+
+function checkTracksReady(handoff, provider, topologyState, localPeerId) {
+  return handoff.hasExpectedFeeds(
+    provider,
+    topologyState.value.peers,
+    localPeerId,
+  );
 }
 
 export function waitForInitialMediaTopology({ isReady, setWaiter, timeoutMs }) {
