@@ -1023,14 +1023,20 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter();
     attenuationReporter.clear();
     capture.stopDeviceMonitoring();
+
+    handoff.clear();
     socket?.close();
     socket = null;
     capture.stopAll();
-    p2pMesh?.closeAll();
+    try {
+      p2pMesh?.closeAll();
+    } catch (_) {}
     p2pMesh = null;
-    sfu?.close();
+    try {
+      sfu?.close();
+    } catch (_) {}
     sfu = null;
-    handoff.clear();
+
     setActiveProvider(null);
     connected.value = false;
     transportReady.value = false;

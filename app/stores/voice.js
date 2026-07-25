@@ -253,6 +253,21 @@ export const useVoiceStore = defineStore("voice", () => {
         }
         stopIceWatcher = null;
       }
+
+      if (typeof document !== "undefined") {
+        try {
+          const container = document.getElementById("webrtc-audio-global");
+          if (container) {
+            const audioElements = container.querySelectorAll("audio");
+            for (const audio of audioElements) {
+              audio.pause();
+              audio.srcObject = null;
+              audio.remove();
+            }
+          }
+        } catch (_) {}
+      }
+
       setCurrentChannel(null);
       currentRoomId.value = null;
       for (const timer of soundboardActivityTimers.values())
