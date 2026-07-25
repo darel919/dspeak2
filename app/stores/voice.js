@@ -77,7 +77,6 @@ export const useVoiceStore = defineStore("voice", () => {
     () => unref(sfuComposable.value?.remoteAudioFeeds) || EMPTY_MEDIA_FEEDS,
   );
 
-  let stopIceWatcher = null;
   let joinGeneration = 0;
   let mediaSessionError = null;
   const soundboardActivityTimers = new Map();
@@ -245,15 +244,6 @@ export const useVoiceStore = defineStore("voice", () => {
     } catch (err) {
       console.warn("[VoiceStore] Failed to close voice media cleanly:", err);
     } finally {
-      if (stopIceWatcher) {
-        try {
-          stopIceWatcher();
-        } catch (_) {
-          /* noop */
-        }
-        stopIceWatcher = null;
-      }
-
       if (typeof document !== "undefined") {
         try {
           const container = document.getElementById("webrtc-audio-global");
@@ -390,14 +380,6 @@ export const useVoiceStore = defineStore("voice", () => {
       );
     }
     if (sfuComposable.value !== session) return;
-    if (stopIceWatcher) {
-      try {
-        stopIceWatcher();
-      } catch (_) {
-        /* already stopped */
-      }
-      stopIceWatcher = null;
-    }
     sfuComposable.value = null;
     setCurrentChannel(null);
     currentRoomId.value = null;
@@ -446,22 +428,6 @@ export const useVoiceStore = defineStore("voice", () => {
       session = sfuComposable.value;
       await session.prepareAudioPlayback?.();
       ensureCurrentJoin();
-
-      if (stopIceWatcher) {
-        try {
-          stopIceWatcher();
-        } catch (_) {
-          /* noop */
-        }
-        stopIceWatcher = null;
-      }
-      stopIceWatcher = watch(
-        () => sfuComposable.value?.mediaConnectionState,
-        (value) => {
-          if (value === "failed" || value === "disconnected")
-            connected.value = false;
-        },
-      );
 
       await session.connect(channelId);
       ensureCurrentJoin();
