@@ -13,6 +13,7 @@ function harness() {
     remove: (key, owner) => calls.push(["remove", key, owner]),
     activateProvider: (provider) => calls.push(["activate", provider]),
     clearProvider: (provider) => calls.push(["retire", provider]),
+    clearReceivingPreference: (key) => calls.push(["clear-receiving", key]),
     clear: () => calls.push(["clear"]),
   };
   return { handoff: new RemoteMediaHandoff(registry), calls };
@@ -381,4 +382,67 @@ test("remote screen video keeps an explicit stopped state during handoff", () =>
   assert.equal(newTrack.enabled, false);
   assert.equal(videoFeeds.value.get(key).receiving, false);
   assert.equal(videoFeeds.value.get(key).stream, stream);
+});
+
+test("remote screen receiving choice survives a temporary handoff gap", () => {
+  const firstTrack = { id: "p2p-screen", kind: "video", enabled: true };
+  const replacementTrack = { id: "sfu-screen", kind: "video", enabled: true };
+  const stream = {
+    tracks: [firstTrack],
+    getTracks() {
+      return [...this.tracks];
+    },
+    removeTrack(track) {
+      this.tracks.splice(this.tracks.indexOf(track), 1);
+    },
+    addTrack(track) {
+      this.tracks.push(track);
+    },
+  };
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+  });
+  const key = "remote:user-1:screen";
+
+  registry.bind({
+    key,
+    provider: "p2p",
+    source: "screen",
+    track: firstTrack,
+    stream,
+  });
+  registry.setVideoReceiving(key, true);
+  registry.remove(key);
+  registry.bind({
+    key,
+    provider: "sfu",
+    source: "screen",
+    track: replacementTrack,
+    stream: {},
+  });
+
+  assert.equal(replacementTrack.enabled, true);
+  assert.equal(videoFeeds.value.get(key).receiving, true);
+});
+
+test("a fully ended share clears its receiving choice", () => {
+  const { handoff, calls } = harness();
+  const entry = {
+    provider: "sfu",
+    key: "producer-1",
+    userId: "user-1",
+    source: "screen",
+    track: {},
+  };
+  handoff.stage(entry, "sfu");
+  handoff.remove(entry);
+
+  assert.deepEqual(calls.at(-1), ["clear-receiving", "remote:user-1:screen"]);
 });

@@ -75,6 +75,8 @@ export class RemoteMediaHandoff {
     tracks.delete(key);
     if (this.activeProvider === entry.provider || current?.source === "screen")
       this.registry.remove(key, current);
+    if (!providers.some((provider) => this.provider(provider).has(key)))
+      this.registry.clearReceivingPreference?.(key);
     return true;
   }
 

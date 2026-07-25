@@ -41,6 +41,7 @@ export class RemoteMediaRegistry {
     this.voiceDetectors = new Map();
     this.speakingUsers = new Set();
     this.participantAudio = new Map();
+    this.receivingPreferences = new Map();
     this.audioContext = null;
     this.voiceDetectionTimer = null;
     this.externalSpeakingUsers = new Set();
@@ -53,7 +54,11 @@ export class RemoteMediaRegistry {
         current?.stream || entry.stream || new MediaStream([entry.track]);
       if (current?.stream) replaceMediaStreamTrack(stream, entry.track);
       const receiving =
-        entry.source === "screen" ? (current?.receiving ?? false) : true;
+        entry.source === "screen"
+          ? (this.receivingPreferences.get(entry.key) ??
+            current?.receiving ??
+            false)
+          : true;
       entry.track.enabled = receiving;
       this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
       triggerRef(this.videoFeeds);
@@ -74,6 +79,7 @@ export class RemoteMediaRegistry {
     const entry = this.videoFeeds.value.get(key);
     if (!entry || entry.source !== "screen") return false;
     entry.track.enabled = Boolean(receiving);
+    this.receivingPreferences.set(key, Boolean(receiving));
     this.videoFeeds.value.set(key, {
       ...entry,
       receiving: Boolean(receiving),
@@ -92,6 +98,10 @@ export class RemoteMediaRegistry {
     triggerRef(this.audioFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     return true;
+  }
+
+  clearReceivingPreference(key) {
+    this.receivingPreferences.delete(key);
   }
 
   activateProvider(provider) {
@@ -144,6 +154,7 @@ export class RemoteMediaRegistry {
     for (const key of keys) this.remove(key);
     for (const graph of this.participantAudio.values()) this.closeGraph(graph);
     this.participantAudio.clear();
+    this.receivingPreferences.clear();
     this.speakingUsers.clear();
     this.externalSpeakingUsers.clear();
     this.stopVoiceDetectionScheduler();
