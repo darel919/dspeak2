@@ -69,6 +69,7 @@ export function useHybridMediaSession() {
   const lastInRoom = ref([]);
   const remoteProducersCount = ref(0);
   const sharedAudioStats = ref({ kbps: 0, level: 0, dbfs: -60 });
+  const echoDetected = ref(false);
   const attenuationReports = ref(new Map());
   const peerRoundTripTimes = ref({});
   const peerConnectionMetrics = ref({});
@@ -588,6 +589,7 @@ export function useHybridMediaSession() {
     getRequestedVideoSettings,
     getSfu: () => sfu,
     localSources,
+    echoDetected,
     microphoneLevelDb,
     onSpeakingChange: (userId, speaking) =>
       registry.setExternalSpeaking(userId, speaking),
@@ -620,6 +622,17 @@ export function useHybridMediaSession() {
     },
     { deep: true, immediate: true },
   );
+
+  watch(echoDetected, (detected) => {
+    if (!detected) return;
+    import("~/composables/useToast").then(({ useToast }) => {
+      const { warning } = useToast();
+      warning(
+        "Others may hear an echo from you. Try enabling echo cancellation in your audio settings.",
+        8000,
+      );
+    });
+  });
 
   async function applyTopology(data) {
     if (Number(data.epoch) < topologyState.value.epoch) return;
@@ -1050,6 +1063,7 @@ export function useHybridMediaSession() {
     remoteVideoFeeds: readonly(remoteVideoFeeds),
     remoteAudioFeeds: readonly(remoteAudioFeeds),
     sharedAudioStats: readonly(sharedAudioStats),
+    echoDetected: readonly(echoDetected),
     sharedAudioAttenuation,
     sharedAudioDucking: readonly(sharedAudioDucking),
     peerRoundTripTimes: readonly(peerRoundTripTimes),

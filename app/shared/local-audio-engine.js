@@ -4,6 +4,7 @@ export function createLocalAudioEngine({
   capture,
   collectOutboundAudioStats,
   createNoiseFloorEstimator,
+  echoDetected,
   getActiveProvider,
   getAudioStereo,
   getAttenuation,
@@ -25,6 +26,37 @@ export function createLocalAudioEngine({
   let sharedAudioStatsSample = null;
   let sharedAudioBaseVolume = 1;
   let sharedAudioAttenuation = 1;
+
+  const ECHO_SAMPLES_REQUIRED = 10;
+  const ECHO_QUIET_RESET = 8;
+  const ECHO_COOLDOWN_MS = 30_000;
+  let echoActiveSamples = 0;
+  let echoQuietSamples = 0;
+  let echoReported = false;
+  let echoCooldownTimer = null;
+
+  function isAnyRemoteUserSpeaking() {
+    const localId = authStore.getUserData()?.id;
+    if (!localId) return false;
+    for (const user of voiceStore.connectedUsers.values()) {
+      if (String(user.id) !== String(localId) && user.speaking === true)
+        return true;
+    }
+    return false;
+  }
+
+  function resetEchoDetection() {
+    echoActiveSamples = 0;
+    echoQuietSamples = 0;
+  }
+
+  function clearEchoCooldown() {
+    if (echoCooldownTimer) {
+      clearTimeout(echoCooldownTimer);
+      echoCooldownTimer = null;
+    }
+    echoReported = false;
+  }
 
   function producerFacade(entry) {
     return {
@@ -86,6 +118,31 @@ export function createLocalAudioEngine({
         } else {
           activeSamples = 0;
         }
+
+        if (
+          !settingsStore.audio?.echoCancellation &&
+          !speaking &&
+          isAnyRemoteUserSpeaking()
+        ) {
+          if (active) {
+            echoQuietSamples = 0;
+            echoActiveSamples += 1;
+            if (!echoReported && echoActiveSamples >= ECHO_SAMPLES_REQUIRED) {
+              echoReported = true;
+              echoDetected.value = true;
+              echoCooldownTimer = setTimeout(() => {
+                echoDetected.value = false;
+                echoReported = false;
+                echoCooldownTimer = null;
+              }, ECHO_COOLDOWN_MS);
+            }
+          } else if (++echoQuietSamples >= ECHO_QUIET_RESET) {
+            echoActiveSamples = 0;
+            echoQuietSamples = 0;
+          }
+        } else {
+          resetEchoDetection();
+        }
       }, 40);
       localVoiceDetector = { analyser, context, source, timer, userId };
       context
@@ -115,6 +172,8 @@ export function createLocalAudioEngine({
     voiceStore.updateUserSpeaking(localVoiceDetector.userId, false);
     onSpeakingChange?.(localVoiceDetector.userId, false);
     localVoiceDetector = null;
+    clearEchoCooldown();
+    resetEchoDetection();
   }
 
   function setSharedAudioVolume(value) {
