@@ -48,8 +48,11 @@ const roomBannerStyle = computed(() => ({
     : undefined,
 }));
 const currentVoiceChannel = computed(() =>
-  voiceStore.currentChannelId
-    ? channelsStore.getChannelById(voiceStore.currentChannelId)
+  voiceStore.currentRoomId && voiceStore.currentChannelId
+    ? channelsStore.getRoomChannelById(
+        voiceStore.currentRoomId,
+        voiceStore.currentChannelId,
+      )
     : null,
 );
 const isDisconnected = computed(

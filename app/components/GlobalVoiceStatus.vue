@@ -87,8 +87,10 @@ const visible = useState("rtc-summary-visible", () => false);
 
 const channelName = computed(
   () =>
-    channelsStore.getChannelById(voiceStore.currentChannelId)?.name ||
-    "Voice channel",
+    channelsStore.getRoomChannelById(
+      voiceStore.currentRoomId,
+      voiceStore.currentChannelId,
+    )?.name || "Voice channel",
 );
 const participantLabel = computed(() => {
   const count = voiceStore.getDisplayUsersArray().length;

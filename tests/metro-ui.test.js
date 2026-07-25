@@ -194,6 +194,15 @@ test("voice controls remain visible in a compact floating dock", async () => {
   assert.doesNotMatch(source, /voice-channel:hover \.voice-controls/);
 });
 
+test("global voice controls keep the connected channel name across room navigation", async () => {
+  const navbar = await readFile("app/components/Navbar.vue", "utf8");
+  const status = await readFile("app/components/GlobalVoiceStatus.vue", "utf8");
+  const connectedChannelLookup =
+    /getRoomChannelById\(\s*voiceStore\.currentRoomId,\s*voiceStore\.currentChannelId,\s*\)/;
+  assert.match(navbar, connectedChannelLookup);
+  assert.match(status, connectedChannelLookup);
+});
+
 test("shared audio status keeps readable colors independent of the page theme", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   const statusStyles = source.match(
