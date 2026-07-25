@@ -53,12 +53,27 @@ test("startup activation is bounded and guarded against reload loops", () => {
   assert.match(updateCoordinator, /setStartupRestartGuard/);
   assert.match(updateCoordinator, /clearStartupRestartGuard/);
   assert.match(updateCoordinator, /storedGuard === "attempted"/);
-  assert.match(updateCoordinator, /guardedVersion === updateIdentity/);
+  assert.match(updateCoordinator, /guardedVersion !== updateIdentity/);
   assert.match(updateCoordinator, /workerVersion/);
   assert.match(updateCoordinator, /INSTALL_WAIT_MS = 10000/);
   assert.match(updateCoordinator, /ACTIVATION_WAIT_MS = 5000/);
   assert.match(updateCoordinator, /reloadStarted/);
   assert.match(updateCoordinator, /startupFinished\.value = true/);
+});
+
+test("a controller handoff during startup always completes the reload", () => {
+  assert.match(
+    updateCoordinator,
+    /if \(!activeRuntime\.startupFinished\.value\) \{\s*reloadApplication\(activeRuntime\)/,
+  );
+  assert.doesNotMatch(
+    updateCoordinator,
+    /!activeRuntime\.startupFinished\.value &&\s*!startupRestartGuard/,
+  );
+  assert.doesNotMatch(
+    updateCoordinator,
+    /guardedVersion === updateIdentity[\s\S]{0,100}return/,
+  );
 });
 
 test("service worker exposes its exact precache version to the startup guard", () => {

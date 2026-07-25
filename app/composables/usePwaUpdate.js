@@ -160,10 +160,7 @@ export function usePwaUpdate() {
       reloadApplication(activeRuntime);
       return;
     }
-    if (
-      !activeRuntime.startupFinished.value &&
-      !startupRestartGuard(activeRuntime)
-    ) {
+    if (!activeRuntime.startupFinished.value) {
       reloadApplication(activeRuntime);
       return;
     }
@@ -283,12 +280,8 @@ export function usePwaUpdate() {
       const version = await workerVersion(activeRuntime.registration.waiting);
       const updateIdentity = version || "unknown";
       const guardedVersion = startupRestartGuard(activeRuntime);
-      if (guardedVersion === updateIdentity) {
-        syncUpdateAvailable(activeRuntime);
-        return;
-      }
-
-      setStartupRestartGuard(activeRuntime, updateIdentity);
+      if (guardedVersion !== updateIdentity)
+        setStartupRestartGuard(activeRuntime, updateIdentity);
       await activateWaitingWorker("startup");
     } catch (error) {
       console.warn("[ServiceWorker] Startup update failed:", error);
