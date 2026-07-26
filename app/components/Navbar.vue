@@ -291,6 +291,8 @@ onBeforeUnmount(() => {
         <span class="hidden sm:inline">{{ connectionWarning }}</span>
       </div>
 
+      <FriendsList />
+      <PresenceStatusSelector v-if="profile" />
       <NotificationCenter />
       <section
         v-if="profile"

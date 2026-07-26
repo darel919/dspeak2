@@ -38,6 +38,9 @@ import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useIdentityStore } from "../stores/identity";
 import { useNotifications } from "../composables/useNotifications";
+import { usePresenceStatusStore } from "../stores/presenceStatus";
+import { useIdleDetection } from "../composables/useIdleDetection";
+import { useGlobalKeyboardShortcuts } from "../composables/useGlobalKeyboardShortcuts";
 import NotificationWarning from "./NotificationWarning.vue";
 import { usePresence } from "../composables/usePresence.js";
 import startupLogo from "../assets/logo/logo_96.png";
@@ -86,6 +89,11 @@ const userId = computed(() => {
 const { status: presenceStatus, disconnect: disconnectPresence } =
   usePresence(userId);
 provide("presenceStatus", presenceStatus);
+provide(
+  "presenceEffectiveStatus",
+  computed(() => usePresenceStatusStore().effectiveStatus),
+);
+provide("presenceStore", usePresenceStatusStore());
 
 watch(startupUpdateStatus, (status) => {
   if (status === "checking") startupStatus.value = "Checking for updates…";
@@ -100,6 +108,12 @@ onMounted(async () => {
       await checkAuth();
       if (authChecked.value) {
         startupStatus.value = "Preparing your workspace…";
+        const presenceStatusStore = usePresenceStatusStore();
+        presenceStatusStore.init();
+        const { init: initIdle } = useIdleDetection();
+        initIdle();
+        const { init: initKeyboardShortcuts } = useGlobalKeyboardShortcuts();
+        initKeyboardShortcuts();
       }
     } else {
       authChecked.value = true;

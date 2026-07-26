@@ -892,6 +892,10 @@
             <NotificationSettings />
           </section>
 
+          <section v-else-if="activeSection === 'keyboard'">
+            <KeyboardShortcutsSettings />
+          </section>
+
           <footer
             class="mt-8 border-t border-base-300 pt-4 text-center text-xs text-base-content/45"
           >
@@ -945,6 +949,7 @@ const settingsNavigation = [
   { id: "voice", label: "Voice & Video", icon: "lucide:audio-lines" },
   { id: "appearance", label: "Appearance", icon: "lucide:palette" },
   { id: "notifications", label: "Notifications", icon: "lucide:bell" },
+  { id: "keyboard", label: "Keyboard", icon: "lucide:keyboard" },
 ];
 const sectionDetails = {
   account: {
@@ -963,6 +968,10 @@ const sectionDetails = {
   notifications: {
     title: "Notifications",
     description: "Choose how this browser alerts you about new activity.",
+  },
+  keyboard: {
+    title: "Keyboard shortcuts",
+    description: "View all available keyboard shortcuts and their keybindings.",
   },
 };
 const activeSectionMeta = computed(() => sectionDetails[activeSection.value]);

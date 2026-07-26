@@ -22,6 +22,11 @@ import {
   reconcileIncomingMessage,
   reconcileSentMessage,
 } from "../shared/chat-messages";
+import {
+  canSendInChannel,
+  isSlowModeCooldownActive,
+  slowModeRemainingMs,
+} from "~~/shared/channel-policy.js";
 import { debugLog } from "../shared/debug";
 
 export const useChatStore = defineStore("chat", () => {
@@ -689,6 +694,12 @@ export const useChatStore = defineStore("chat", () => {
           debugLog("[ChatStore] Participant change detected:", data);
           await handleParticipantChange();
           break;
+        case "channel_policy_updated":
+          useChannelsStore().applyRealtimePolicy(data.data.channelId, {
+            policy: data.data.policy,
+            slow_mode: data.data.slow_mode,
+          });
+          break;
         case "notification_created":
         case "notifications_read":
           useNotificationsStore().receiveRealtime(data);
@@ -837,6 +848,37 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   async function sendMessage(channelId, content) {
+    const channelsStore = useChannelsStore();
+    const { canSend, slowModeSeconds } =
+      channelsStore.getChannelSendPermission(channelId);
+
+    if (!canSend) {
+      throw new Error(
+        "You do not have permission to send messages in this channel",
+      );
+    }
+
+    if (slowModeSeconds > 0 && connected.value) {
+      const lastMessageFromUser = messages.value
+        .filter((m) => {
+          const senderId = m.sender?.id || m.sender;
+          const auth = useAuthStore();
+          return String(senderId) === String(auth.getUserData()?.id);
+        })
+        .pop();
+      const lastMsgAt = lastMessageFromUser?.created
+        ? new Date(lastMessageFromUser.created).getTime()
+        : 0;
+      if (isSlowModeCooldownActive(lastMsgAt, slowModeSeconds)) {
+        const remaining = Math.ceil(
+          slowModeRemainingMs(lastMsgAt, slowModeSeconds) / 1000,
+        );
+        throw new Error(
+          `Slow mode enabled. Please wait ${remaining} seconds before sending another message.`,
+        );
+      }
+    }
+
     let pendingMessage = null;
     try {
       const authStore = useAuthStore();

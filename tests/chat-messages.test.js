@@ -12,6 +12,7 @@ import {
   reconcileIncomingMessage,
   reconcileSentMessage,
 } from "../app/shared/chat-messages.js";
+import { apiErrorMessage } from "../app/shared/api-errors.js";
 import { readFileSync } from "node:fs";
 
 test("reconciles a pending message without breaking existing references", () => {
@@ -177,5 +178,34 @@ test("chat API errors expose a user-facing message without the server stack", ()
   assert.equal(
     chatApiErrorMessage(response, 405),
     "HTTP method is not allowed.",
+  );
+});
+
+test("API error parsing never falls back to a server stack from structured errors", () => {
+  const response = JSON.stringify({
+    statusCode: 400,
+    stack: ["private stack"],
+  });
+
+  assert.equal(
+    apiErrorMessage(response, 400, "Friend request failed"),
+    "Friend request failed (400)",
+  );
+});
+
+test("API error parsing preserves a plain user-facing response", () => {
+  assert.equal(
+    apiErrorMessage("Friend request already pending", 400),
+    "Friend request already pending",
+  );
+});
+
+test("API error parsing replaces an unstructured stack trace with a safe fallback", () => {
+  assert.equal(
+    apiErrorMessage(
+      "Error: database failed\n    at handler (server.js:10:2)",
+      500,
+    ),
+    "Request failed (500)",
   );
 });

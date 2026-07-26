@@ -2,6 +2,10 @@ import { defineStore } from "pinia";
 import { debugLog } from "../shared/debug";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
+import {
+  normalizeChannelPolicy,
+  normalizeSlowMode,
+} from "~~/shared/channel-policy.js";
 
 export const useChannelsStore = defineStore("channels", () => {
   const channels = ref([]);
@@ -13,6 +17,7 @@ export const useChannelsStore = defineStore("channels", () => {
   const roomChannels = reactive(new Map());
   const pendingRoomRequests = new Map();
   const voicePresenceConnections = new Map();
+  const channelPolicies = ref(new Map());
   const config = useRuntimeConfig();
 
   async function fetchChannels(roomId, options = {}) {
@@ -625,17 +630,93 @@ export const useChannelsStore = defineStore("channels", () => {
     return voiceProfiles.value.get(String(userId));
   }
 
-  function applyRealtimePolicy(channelId, mediaPolicy) {
-    const channel = channels.value.find((item) => item.id === channelId);
-    if (!channel || !mediaPolicy) return false;
-    if (
-      Number(channel.mediaPolicy?.revision || 0) >=
-      Number(mediaPolicy.revision || 0)
-    )
-      return false;
-    channel.mediaPolicy = mediaPolicy;
-    channels.value = [...channels.value];
-    return true;
+  function applyRealtimePolicy(channelId, data) {
+    if (data?.mediaPolicy) {
+      const channel = channels.value.find((item) => item.id === channelId);
+      if (!channel) return false;
+      if (
+        Number(channel.mediaPolicy?.revision || 0) >=
+        Number(data.mediaPolicy.revision || 0)
+      )
+        return false;
+      channel.mediaPolicy = data.mediaPolicy;
+      channels.value = [...channels.value];
+      return true;
+    }
+
+    if (data?.policy || data?.slow_mode !== undefined) {
+      const channel = channels.value.find((item) => item.id === channelId);
+      if (!channel) return false;
+      if (data.policy !== undefined) {
+        channel.policy = normalizeChannelPolicy(data.policy);
+      }
+      if (data.slow_mode !== undefined) {
+        channel.slow_mode = normalizeSlowMode(data.slow_mode);
+      }
+      channelPolicies.value.set(String(channelId), {
+        policy: channel.policy,
+        slow_mode: channel.slow_mode,
+      });
+      channelPolicies.value = new Map(channelPolicies.value);
+      channels.value = [...channels.value];
+      return true;
+    }
+
+    return false;
+  }
+
+  async function updateChannelPolicy(channelId, { policy, slowMode }) {
+    const authStore = useAuthStore();
+    const userData = authStore.getUserData();
+    if (!userData?.id) throw new Error("User not authenticated");
+
+    const response = await fetch(`${config.public.apiPath}/channel-policy`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelId, policy, slowMode }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        text || `Failed to update channel policy: ${response.status}`,
+      );
+    }
+
+    const result = await response.json();
+    applyRealtimePolicy(channelId, result);
+    return result;
+  }
+
+  function getChannelPolicy(channelId) {
+    return channelPolicies.value.get(String(channelId)) || null;
+  }
+
+  function getChannelSendPermission(channelId) {
+    const channel = channels.value.find(
+      (c) => String(c.id) === String(channelId),
+    );
+    if (!channel) return { canSend: true, slowModeSeconds: 0 };
+
+    const policy = channelPolicies.value.get(String(channelId)) || {
+      policy: channel.policy || "free",
+      slow_mode: channel.slow_mode || 0,
+    };
+
+    const effectivePolicy = policy.policy || "free";
+    const effectiveSlowMode = policy.slow_mode || 0;
+
+    let canSend = true;
+    if (effectivePolicy === "read_only") canSend = false;
+    if (effectivePolicy === "moderator_only") {
+      const roomInfo = channel;
+      canSend = Boolean(
+        roomInfo?.isModerator || roomInfo?.isAdmin || roomInfo?.isOwner,
+      );
+    }
+
+    return { canSend, slowModeSeconds: effectiveSlowMode };
   }
 
   return {
@@ -644,6 +725,7 @@ export const useChannelsStore = defineStore("channels", () => {
     error,
     currentChannelId,
     loadedRoomId,
+    channelPolicies,
     fetchChannels,
     activateRoomChannels,
     getRoomChannelById,
@@ -661,6 +743,9 @@ export const useChannelsStore = defineStore("channels", () => {
     getMediaChannels,
     clearChannels,
     applyRealtimePolicy,
+    updateChannelPolicy,
+    getChannelPolicy,
+    getChannelSendPermission,
     connectVoicePresence,
     disconnectVoicePresence,
     syncVoicePresenceRooms,

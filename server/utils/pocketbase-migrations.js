@@ -2,6 +2,7 @@ import {
   DEFAULT_ROLE_TEMPLATES,
   normalizeAttenuation,
 } from "../../shared/room-policy.js";
+import { DEFAULT_IDLE_TIMEOUT_MS } from "../../shared/presence-status.js";
 
 const MIGRATION_COLLECTION = "dspeak_migrations";
 const REQUIRED_COLLECTIONS = Object.freeze([
@@ -23,6 +24,7 @@ const REQUIRED_COLLECTIONS = Object.freeze([
   "dspeak_message_revisions",
   "dspeak_room_invites",
   "dspeak_room_audit_log",
+  "dspeak_friends",
 ]);
 
 function field(name, type, options = {}) {
@@ -58,22 +60,44 @@ function indexSignature(definition) {
     .replaceAll(/\s+/g, " ")
     .trim()
     .replace(
-      /^CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?\S+ ON /i,
-      (_, unique = "") => `${unique.toUpperCase()}ON `,
+      /^CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?\S* ON /i,
+      (_, unique = "") => `${unique ? "UNIQUE" : ""}ON `,
     )
+    .replace(/\b(DESC|ASC|COLLATE \w+|NULLS (?:FIRST|LAST))\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
     .toLowerCase();
 }
 
+function indexName(definition) {
+  const match = definition.match(
+    /^CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?(\S+)/i,
+  );
+  return match ? match[1].toLowerCase() : "";
+}
+
 export function mergeCollectionIndexes(current = [], additions = []) {
-  const merged = [...current];
-  const signatures = new Set(current.map(indexSignature));
-  for (const addition of additions) {
-    const signature = indexSignature(addition);
-    if (signatures.has(signature)) continue;
-    merged.push(addition);
-    signatures.add(signature);
+  const nameSet = new Set();
+  const result = [];
+
+  for (const idx of current) {
+    const name = indexName(idx);
+    if (name && nameSet.has(name)) continue;
+    if (name) nameSet.add(name);
+    result.push(idx);
   }
-  return merged;
+
+  for (const addition of additions) {
+    const name = indexName(addition);
+    if (name && nameSet.has(name)) continue;
+    const signature = indexSignature(addition);
+    if (result.some((existing) => indexSignature(existing) === signature))
+      continue;
+    if (name) nameSet.add(name);
+    result.push(addition);
+  }
+
+  return result;
 }
 
 export function buildCollectionUpdate(current, definition) {
@@ -127,6 +151,22 @@ async function upsertCollection(pb, definition) {
       buildCollectionUpdate(current, definition),
     );
   } catch (error) {
+    const indexErrors =
+      error?.response?.data?.indexes || error?.data?.data?.indexes || null;
+    const hasIndexNameConflict = indexErrors
+      ? Object.values(indexErrors).some(
+          (e) =>
+            e?.code === "validation_duplicated_index_name" ||
+            /duplicate.*index.*name/i.test(e?.message || ""),
+        )
+      : false;
+
+    if (current && hasIndexNameConflict) {
+      const update = {
+        fields: mergeCollectionFields(current.fields, definition.fields),
+      };
+      return await pb.collections.update(current.id, update);
+    }
     throw collectionMigrationError(
       error,
       current || definition,
@@ -1059,6 +1099,97 @@ async function removeObsoleteContractFields(pb) {
   }
 }
 
+async function migratePresenceStatus(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: users.name,
+    type: users.type,
+    fields: [
+      field("presence_status", "select", {
+        maxSelect: 1,
+        values: ["online", "idle", "dnd", "offline"],
+      }),
+    ],
+    indexes: [
+      "CREATE INDEX idx_users_presence_status ON users (presence_status)",
+    ],
+  });
+}
+
+async function migrateChannelPolicy(pb) {
+  const channels = await pb.collections.getOne("dspeak_rooms_channels");
+  await upsertCollection(pb, {
+    name: channels.name,
+    type: channels.type,
+    fields: [
+      field("policy", "select", {
+        maxSelect: 1,
+        values: ["free", "send_restricted", "read_only", "moderator_only"],
+      }),
+      field("slow_mode", "number", { min: 0, max: 3600 }),
+    ],
+    indexes: [],
+  });
+}
+
+async function migrateFriends(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: "dspeak_friends",
+    type: "base",
+    fields: [
+      field("requester", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("recipient", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("status", "select", {
+        required: true,
+        maxSelect: 1,
+        values: ["pending", "accepted", "rejected", "blocked"],
+      }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_friends_pair ON dspeak_friends (requester, recipient)",
+      "CREATE INDEX idx_dspeak_friends_recipient_status ON dspeak_friends (recipient, status)",
+    ],
+  });
+}
+
+async function migratePushSubscriptionMetadata(pb) {
+  const subscriptions = await pb.collections.getOne(
+    "dspeak_push_subscriptions",
+  );
+  await upsertCollection(pb, {
+    name: subscriptions.name,
+    type: subscriptions.type,
+    fields: [
+      field("user_agent", "text", { max: 512 }),
+      field("last_seen_at", "date"),
+    ],
+    indexes: [],
+  });
+}
+
+async function migrateNotificationUnreadIndex(pb) {
+  const notifications = await pb.collections.getOne("dspeak_notifications");
+  await upsertCollection(pb, {
+    name: notifications.name,
+    type: notifications.type,
+    fields: [],
+    indexes: [
+      "CREATE INDEX idx_dspeak_notifications_recipient ON dspeak_notifications (recipient)",
+    ],
+  });
+}
+
 const migrations = Object.freeze([
   {
     name: "20260724_foundation_v1",
@@ -1132,6 +1263,26 @@ const migrations = Object.freeze([
   {
     name: "20260725_remove_obsolete_contract_fields_v1",
     run: removeObsoleteContractFields,
+  },
+  {
+    name: "20260727_presence_status_v1",
+    run: migratePresenceStatus,
+  },
+  {
+    name: "20260727_channel_policy_v1",
+    run: migrateChannelPolicy,
+  },
+  {
+    name: "20260727_friends_v1",
+    run: migrateFriends,
+  },
+  {
+    name: "20260727_push_subscription_metadata_v1",
+    run: migratePushSubscriptionMetadata,
+  },
+  {
+    name: "20260727_notification_unread_index_v1",
+    run: migrateNotificationUnreadIndex,
   },
 ]);
 
