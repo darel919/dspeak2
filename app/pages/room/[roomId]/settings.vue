@@ -569,6 +569,7 @@
 <script setup>
 import { publicDisplayName } from "~~/shared/user-profile.js";
 import {
+  canAccessRoomAdministration,
   ROOM_ACCENTS,
   ROOM_ACCENT_LIGHT_COLORS,
 } from "~~/shared/room-policy.js";
@@ -581,10 +582,10 @@ const route = useRoute();
 const config = useRuntimeConfig();
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
+const { presentNavigationError } = useNavigationError();
 const startupReadiness = inject(STARTUP_READINESS_KEY, null);
 const releaseInitialSettingsLoad =
   startupReadiness?.hold("Loading room settings…") || (() => {});
-let initialSettingsLoadPending = true;
 const roomId = computed(() => String(route.params.roomId));
 const room = ref(null);
 const roles = ref([]);
@@ -768,7 +769,11 @@ async function api(path, options = {}) {
     credentials: "include",
     headers: { ...options.headers },
   });
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    const cause = new Error(await response.text());
+    cause.status = response.status;
+    throw cause;
+  }
   return response.json();
 }
 
@@ -777,6 +782,14 @@ async function load() {
   error.value = "";
   try {
     room.value = await roomsStore.getRoomDetails(roomId.value);
+    if (!canAccessRoomAdministration(room.value)) {
+      room.value = null;
+      presentNavigationError(
+        { statusCode: 403 },
+        "This room settings link is invalid, or your account does not have permission to manage this room.",
+      );
+      return;
+    }
     attenuationHydrating = true;
     Object.assign(form, {
       name: room.value.name,
@@ -799,7 +812,14 @@ async function load() {
     }));
   } catch (cause) {
     attenuationHydrating = false;
-    error.value = cause.message;
+    if (
+      !presentNavigationError(
+        cause,
+        "This room settings link is invalid, or your account does not have permission to manage this room.",
+      )
+    ) {
+      error.value = cause.message;
+    }
   } finally {
     loading.value = false;
   }
@@ -839,22 +859,6 @@ watch(
   },
   { deep: true },
 );
-watch(
-  [() => authStore.getUserData()?.id, roomId],
-  async ([userId]) => {
-    if (!userId) return;
-    try {
-      await load();
-    } finally {
-      if (initialSettingsLoadPending) {
-        initialSettingsLoadPending = false;
-        releaseInitialSettingsLoad();
-      }
-    }
-  },
-  { immediate: true },
-);
-
 async function saveBranding() {
   saving.value = true;
   try {
@@ -1020,6 +1024,13 @@ async function deleteRole() {
     savingRole.value = false;
   }
 }
+onMounted(async () => {
+  try {
+    await load();
+  } finally {
+    releaseInitialSettingsLoad();
+  }
+});
 onBeforeUnmount(() => {
   clearTimeout(attenuationSaveTimer);
   releaseInitialSettingsLoad();

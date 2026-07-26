@@ -37,6 +37,8 @@ const router = useRouter();
 const route = useRoute();
 const status = ref("working");
 const failureMessage = ref("");
+let completingAuthentication = false;
+let processingHandoff = false;
 
 function readStorage(key) {
   try {
@@ -78,22 +80,44 @@ async function startSignIn() {
   }
 }
 
+async function finishAuthentication() {
+  if (completingAuthentication || !authStore.getUserData()?.id) return false;
+  completingAuthentication = true;
+  try {
+    await roomsStore.fetchRooms();
+    const redirectUrl = readStorage("redirectAfterAuth");
+    if (redirectUrl) removeStorage("redirectAfterAuth");
+    await router.replace(internalRedirect(redirectUrl));
+    return true;
+  } catch {
+    completingAuthentication = false;
+    status.value = "failed";
+    failureMessage.value =
+      "Your session is ready, but dSpeak could not open the requested page. Please try again.";
+    return false;
+  }
+}
+
+watch(
+  () => authStore.getUserData()?.id,
+  async (userId) => {
+    if (userId && !processingHandoff && route.path === "/auth") {
+      await finishAuthentication();
+    }
+  },
+);
+
 onMounted(async () => {
   const code = route.query.code;
   const state = route.query.state;
 
   if (code && state) {
+    processingHandoff = true;
     await router.replace("/auth");
     const valid = await authStore.exchangeHandoff(code, state);
+    processingHandoff = false;
     if (valid) {
-      await roomsStore.fetchRooms();
-      const redirectUrl = readStorage("redirectAfterAuth");
-      if (redirectUrl) {
-        removeStorage("redirectAfterAuth");
-        await router.replace(internalRedirect(redirectUrl));
-        return;
-      }
-      await router.replace("/");
+      await finishAuthentication();
       return;
     }
     await authStore.clearAuth(false);
@@ -103,9 +127,10 @@ onMounted(async () => {
     return;
   }
 
+  if (await finishAuthentication()) return;
+
   if (!code && !state && (await authStore.restoreSession())) {
-    await roomsStore.fetchRooms();
-    await router.replace("/");
+    await finishAuthentication();
     return;
   }
 

@@ -27,14 +27,18 @@ const roomsStore = useRoomsStore();
 const channelsStore = useChannelsStore();
 const route = useRoute();
 const router = useRouter();
+const { presentNavigationError } = useNavigationError();
 
 const roomId = computed(() => route.params.roomId);
-const room = computed(() =>
-  roomsStore.rooms.find((r) => r.id === roomId.value),
+const resolvedRoom = ref(null);
+const room = computed(
+  () =>
+    roomsStore.rooms.find((r) => r.id === roomId.value) || resolvedRoom.value,
 );
 
 const isMobile = ref(false);
 let resizeHandler = null;
+let roomAccessGeneration = 0;
 
 onMounted(() => {
   if (typeof window !== "undefined") {
@@ -47,7 +51,37 @@ onMounted(() => {
   }
 });
 
+async function resolveRoomAccess() {
+  const requestedRoomId = String(roomId.value || "");
+  const generation = ++roomAccessGeneration;
+  resolvedRoom.value = null;
+  if (roomsStore.rooms.some((candidate) => candidate.id === requestedRoomId)) {
+    return;
+  }
+  try {
+    const details = await roomsStore.getRoomDetails(requestedRoomId);
+    if (generation !== roomAccessGeneration) return;
+    resolvedRoom.value = details;
+  } catch (error) {
+    if (generation !== roomAccessGeneration) return;
+    if (
+      presentNavigationError(
+        error,
+        "This room link is invalid, or your account does not have permission to open this room.",
+      )
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
+onMounted(async () => {
+  await resolveRoomAccess();
+});
+
 onUnmounted(() => {
+  roomAccessGeneration += 1;
   if (typeof window !== "undefined" && resizeHandler) {
     window.removeEventListener("resize", resizeHandler);
   }
@@ -63,6 +97,8 @@ function onChannelSelected(channel) {
 function onBackToHome() {
   router.push("/");
 }
+
+watch(roomId, resolveRoomAccess);
 
 watchEffect(async () => {
   if (room.value) {

@@ -78,6 +78,7 @@ const voiceStore = useVoiceStore();
 const chatStore = useChatStore();
 const route = useRoute();
 const router = useRouter();
+const { presentNavigationError } = useNavigationError();
 const startupReadiness = inject(STARTUP_READINESS_KEY, null);
 const releaseInitialChannelLoad =
   startupReadiness?.hold("Loading room channels…") || (() => {});
@@ -89,17 +90,53 @@ definePageMeta({
 
 const roomId = computed(() => route.params.roomId);
 const channelId = computed(() => route.params.channelId);
+const resolvedRoom = ref(null);
 let ownedChatChannelId = String(route.params.channelId || "");
-const room = computed(() =>
-  roomsStore.rooms.find((r) => r.id === roomId.value),
+const room = computed(
+  () =>
+    roomsStore.rooms.find((r) => r.id === roomId.value) || resolvedRoom.value,
 );
 const selectedChannelId = ref(channelId.value || null);
 const selectedChannel = computed(() =>
   channelsStore.getRoomChannelById(roomId.value, selectedChannelId.value),
 );
 let channelSelectionGeneration = 0;
+let roomAccessGeneration = 0;
+
+async function resolveRoomAccess() {
+  const requestedRoomId = String(roomId.value || "");
+  const generation = ++roomAccessGeneration;
+  resolvedRoom.value = null;
+  if (roomsStore.rooms.some((candidate) => candidate.id === requestedRoomId)) {
+    return;
+  }
+  try {
+    const details = await roomsStore.getRoomDetails(requestedRoomId);
+    if (generation !== roomAccessGeneration) return;
+    resolvedRoom.value = details;
+  } catch (error) {
+    if (generation !== roomAccessGeneration) return;
+    if (
+      presentNavigationError(
+        error,
+        "This room link is invalid, or your account does not have permission to open this room.",
+      )
+    ) {
+      await nextTick();
+      releaseInitialChannelReadiness();
+      return;
+    }
+    releaseInitialChannelReadiness();
+    throw error;
+  }
+}
+
+onMounted(async () => {
+  await resolveRoomAccess();
+});
 
 onUnmounted(() => {
+  roomAccessGeneration += 1;
   releaseInitialChannelReadiness();
   if (chatStore && chatStore.disconnectFromChannel) {
     chatStore.disconnectFromChannel(true, false, true, ownedChatChannelId);
@@ -188,6 +225,8 @@ function releaseInitialChannelReadiness() {
   initialChannelLoadPending = false;
   releaseInitialChannelLoad();
 }
+
+watch(roomId, resolveRoomAccess);
 
 watch(
   () => route.params.channelId,

@@ -196,6 +196,7 @@
 </template>
 
 <script setup>
+import { canAccessRoomAdministration } from "~~/shared/room-policy.js";
 import { useRoomsStore } from "../stores/rooms";
 import { useAuthStore } from "../stores/auth";
 import { useChannelsStore } from "../stores/channels";
@@ -306,13 +307,7 @@ function isRoomOwner(room) {
 }
 
 function canManageRoom(room) {
-  return (
-    isRoomOwner(room) ||
-    (room?.permissions || []).some(
-      (permission) =>
-        permission.startsWith("room.") || permission.startsWith("channel."),
-    )
-  );
+  return canAccessRoomAdministration(room);
 }
 
 async function showRoomTooltip(room, event) {

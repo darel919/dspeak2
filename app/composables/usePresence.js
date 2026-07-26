@@ -49,9 +49,14 @@ export function usePresence(userId) {
     const base = config.public.websocketPath || `${origin}/api`;
     const wsUrl = `${base}/presence`;
     debugLog("[usePresence] Connecting to:", wsUrl);
-    ws = new WebSocket(wsUrl);
-    ws.onmessage = receiveMessage;
-    ws.onopen = () => {
+    const socket = new WebSocket(wsUrl);
+    ws = socket;
+    socket.onmessage = receiveMessage;
+    socket.onopen = () => {
+      if (socket !== ws) {
+        socket.close();
+        return;
+      }
       debugLog("[usePresence] Connected successfully");
       status.value = "connected";
       retryCount = 0;
@@ -64,7 +69,8 @@ export function usePresence(userId) {
         }
       }, 30000);
     };
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (socket !== ws && !intentionallyDisconnected) return;
       debugLog("[usePresence] Connection closed, retry count:", retryCount);
       status.value = "disconnected";
       if (pingInterval) {
@@ -78,9 +84,9 @@ export function usePresence(userId) {
         status.value = "permanently-disconnected";
       }
     };
-    ws.onerror = (error) => {
+    socket.onerror = (error) => {
       debugLog("[usePresence] WebSocket error:", error);
-      ws.close();
+      socket.close();
     };
   }
   function disconnect() {

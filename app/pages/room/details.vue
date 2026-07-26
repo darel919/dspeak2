@@ -61,6 +61,7 @@ const router = useRouter();
 const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
 const { success, error } = useToast();
+const { presentNavigationError } = useNavigationError();
 
 const room = ref(null);
 const deleting = ref(false);
@@ -73,8 +74,15 @@ const isOwner = computed(() => {
 
 async function fetchRoomDetails() {
   const roomId = route.query.roomId;
-  if (!roomId) return;
-  room.value = await roomsStore.getRoomDetails(roomId);
+  if (!roomId) {
+    presentNavigationError({ statusCode: 404 });
+    return;
+  }
+  try {
+    room.value = await roomsStore.getRoomDetails(roomId);
+  } catch (cause) {
+    if (!presentNavigationError(cause)) throw cause;
+  }
 }
 
 async function deleteRoom() {

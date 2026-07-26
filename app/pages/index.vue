@@ -319,6 +319,7 @@ import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigat
 const roomsStore = useRoomsStore();
 const channelsStore = useChannelsStore();
 const authStore = useAuthStore();
+const clientMounted = ref(false);
 const router = useRouter();
 const route = useRoute();
 const config = useRuntimeConfig();
@@ -445,7 +446,11 @@ function onBackToRoomList() {
 }
 
 const isAuthenticated = computed(() => {
-  return Boolean(authStore.getUserData());
+  return Boolean(clientMounted.value && authStore.getUserData());
+});
+
+onMounted(() => {
+  clientMounted.value = true;
 });
 
 watch(

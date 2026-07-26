@@ -427,7 +427,13 @@ export const useChannelsStore = defineStore("channels", () => {
       );
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch channel details: ${response.status}`);
+        const error = new Error(
+          response.status === 403 || response.status === 404
+            ? "Invalid link"
+            : "Failed to fetch channel details",
+        );
+        error.status = response.status;
+        throw error;
       }
 
       const channelDetails = await response.json();

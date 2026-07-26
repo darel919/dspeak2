@@ -157,7 +157,15 @@ export const useRoomsStore = defineStore("rooms", () => {
         "Content-Type": "application/json",
       },
     });
-    if (!response.ok) throw new Error("Failed to fetch room details");
+    if (!response.ok) {
+      const error = new Error(
+        response.status === 403 || response.status === 404
+          ? "Invalid link"
+          : "Failed to fetch room details",
+      );
+      error.status = response.status;
+      throw error;
+    }
     return await response.json();
   }
 

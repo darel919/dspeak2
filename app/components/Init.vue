@@ -50,7 +50,6 @@ import {
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const identityStore = useIdentityStore();
-const router = useRouter();
 const route = useRoute();
 const authChecked = ref(false);
 const startupComplete = ref(false);
@@ -131,22 +130,13 @@ watch(
   },
 );
 
-watch(
-  () => route.path,
-  async () => {
-    if (route.path !== "/auth" && !authChecked.value) {
-      await checkAuth();
-    }
-  },
-);
-
 async function checkAuth() {
   if (route.path === "/auth") {
     authChecked.value = true;
     return;
   }
 
-  const restored = await authStore.restoreSession();
+  const restored = await authStore.ensureSession();
   if (restored) {
     startupStatus.value = "Loading your rooms…";
     await roomsStore.fetchRooms();
@@ -156,9 +146,6 @@ async function checkAuth() {
   }
 
   await authStore.clearAuth(false);
-  if (route.path !== "/" && route.path !== "/auth") {
-    router.push("/");
-  }
   authChecked.value = true;
 }
 </script>

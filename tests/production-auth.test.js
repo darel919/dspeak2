@@ -115,6 +115,12 @@ test("failed SSO callbacks stop with an actionable error instead of looping", ()
 test("authentication state changes do not remount and replay the callback", () => {
   assert.equal(defaultLayout.match(/<slot\s*\/>/g)?.length, 1);
   assert.match(authPage, /await router\.replace\("\/auth"\)/);
+  assert.match(authPage, /async function finishAuthentication\(\)/);
+  assert.match(authPage, /watch\(\s*\(\) => authStore\.getUserData\(\)\?\.id,/);
+  assert.match(
+    authStore,
+    /if \(getUserData\(\)\?\.id\) \{\s*sessionChecked\.value = true;\s*return true;/,
+  );
   assert.doesNotMatch(authPage, /history\.replaceState/);
 });
 

@@ -22,6 +22,17 @@ export const ROOM_ACCENTS = Object.freeze([
   "lime",
 ]);
 
+export function canAccessRoomAdministration(room) {
+  return Boolean(
+    room?.isOwner ||
+    (room?.permissions || []).some(
+      (permission) =>
+        String(permission).startsWith("room.") ||
+        String(permission).startsWith("channel."),
+    ),
+  );
+}
+
 export const DEFAULT_ROOM_ACCENT = "cobalt";
 
 export const ROOM_ACCENT_LIGHT_COLORS = Object.freeze({

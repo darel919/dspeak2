@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  canAccessRoomAdministration,
   canManageMember,
   canManageRole,
   canModerateVoiceMember,
@@ -8,6 +9,19 @@ import {
   normalizeAttenuation,
   normalizeRoomAccent,
 } from "../shared/room-policy.js";
+
+test("room administration access follows the room rail permission contract", () => {
+  assert.equal(canAccessRoomAdministration({ isOwner: true }), true);
+  assert.equal(
+    canAccessRoomAdministration({ permissions: ["room.manage_roles"] }),
+    true,
+  );
+  assert.equal(
+    canAccessRoomAdministration({ permissions: ["channel.update"] }),
+    true,
+  );
+  assert.equal(canAccessRoomAdministration({ permissions: [] }), false);
+});
 
 test("room permissions combine multiple roles without duplicates", () => {
   assert.deepEqual(

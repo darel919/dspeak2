@@ -7,7 +7,9 @@ import { useChatStore } from "./chat";
 
 export const useAuthStore = defineStore("auths", () => {
   const user = ref(null);
+  const sessionChecked = ref(false);
   const config = useRuntimeConfig();
+  let sessionCheckPromise = null;
 
   function writeStorage(key, value) {
     if (!import.meta.client) return;
@@ -73,6 +75,7 @@ export const useAuthStore = defineStore("auths", () => {
     );
     if (!response.ok) return false;
     setUser(await response.json());
+    sessionChecked.value = true;
     removeStorage("token");
     return true;
   }
@@ -88,6 +91,19 @@ export const useAuthStore = defineStore("auths", () => {
     } catch {
       return false;
     }
+  }
+  async function ensureSession() {
+    if (getUserData()?.id) {
+      sessionChecked.value = true;
+      return true;
+    }
+    if (sessionChecked.value) return Boolean(getUserData()?.id);
+    if (sessionCheckPromise) return sessionCheckPromise;
+    sessionCheckPromise = restoreSession().finally(() => {
+      sessionChecked.value = true;
+      sessionCheckPromise = null;
+    });
+    return sessionCheckPromise;
   }
   function storedUserId() {
     if (!import.meta.client) return "";
@@ -110,6 +126,7 @@ export const useAuthStore = defineStore("auths", () => {
         : Promise.resolve();
 
     setUser(null);
+    sessionChecked.value = true;
     removeStorage("token");
     removeStorage("userData");
     useRoomsStore().clearRooms();
@@ -143,6 +160,7 @@ export const useAuthStore = defineStore("auths", () => {
     beginExternalSignIn,
     exchangeHandoff,
     restoreSession,
+    ensureSession,
     clearAuth,
     getUserData,
     updateUserData,

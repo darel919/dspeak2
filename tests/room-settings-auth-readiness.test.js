@@ -8,13 +8,12 @@ const source = await readFile(
 );
 
 describe("room settings authentication readiness", () => {
-  it("waits for restored authentication before loading protected room data", () => {
-    assert.match(
+  it("loads normally after the application-level authentication gate", () => {
+    assert.match(source, /onMounted\(async \(\) => \{/);
+    assert.doesNotMatch(
       source,
-      /watch\(\s*\[\(\) => authStore\.getUserData\(\)\?\.id, roomId\]/,
+      /\[\(\) => authStore\.getUserData\(\)\?\.id, roomId\]/,
     );
-    assert.match(source, /if \(!userId\) return;/);
-    assert.doesNotMatch(source, /onMounted\(load\)/);
   });
 
   it("keeps startup pending until the initial settings request settles", () => {
@@ -23,5 +22,11 @@ describe("room settings authentication readiness", () => {
       /startupReadiness\?\.hold\("Loading room settings…"\)/,
     );
     assert.match(source, /releaseInitialSettingsLoad\(\)/);
+  });
+
+  it("uses the global navigation error surface for missing room access", () => {
+    assert.match(source, /canAccessRoomAdministration\(room\.value\)/);
+    assert.match(source, /presentNavigationError\(/);
+    assert.doesNotMatch(source, /InvalidLinkState/);
   });
 });
