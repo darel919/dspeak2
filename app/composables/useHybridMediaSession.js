@@ -881,7 +881,6 @@ export function useHybridMediaSession() {
         });
     },
   );
-
   const {
     refreshPublicMaps,
     refreshTopologyGraph,
@@ -909,7 +908,6 @@ export function useHybridMediaSession() {
     topologyState,
     voiceStore,
   });
-
   sourceController = createMediaSourceController({
     capture,
     connected,
@@ -919,10 +917,19 @@ export function useHybridMediaSession() {
     getIntentionalClose: () => intentionalClose,
     getP2pMesh: () => p2pMesh,
     getSfu: () => sfu,
+    getVideoReport: (source) => {
+      if (activeProvider === "sfu")
+        return sfu?.producers.get(source)?.producer.getStats() || null;
+      if (activeProvider === "p2p")
+        return p2pMesh?.getOutboundTrackStats(source) || null;
+      return null;
+    },
+    getVideoSettings: getRequestedVideoSettings,
     localSources,
     localVideoFeeds,
     onSharedAudioStopped: attenuationReporter.clear,
     producerFacade,
+    refreshMediaPolicy,
     refreshPublicMaps,
     reportSfuFailure,
     send,
@@ -943,7 +950,6 @@ export function useHybridMediaSession() {
     stopSystemAudioProduction,
     stopVideoProduction,
   } = sourceController;
-
   const {
     getInboundRtpStats,
     getOutboundRtpStats,
@@ -1023,7 +1029,6 @@ export function useHybridMediaSession() {
     refreshPublicMaps();
     refreshTopologyGraph();
   }
-
   return {
     connected: readonly(connected),
     joinReady,

@@ -16,6 +16,10 @@ background and diagnostic work before reducing audio quality.
 - Remote video reception pauses while the document is hidden. Camera reception
   resumes when visible, and screen reception restores the user's explicit
   choice.
+- Screen capture adapts only after sustained encoder pressure. The user's
+  resolution and frame rate are hard ceilings. Frame-rate priority reduces
+  resolution first; resolution priority reduces frame cadence first. Recovery
+  is slower than degradation and proceeds one step at a time.
 - Chat renders the latest 200 messages initially and adds older messages in
   100-message windows.
 - Reactive chat memory retains at most 1,000 messages for the active channel,

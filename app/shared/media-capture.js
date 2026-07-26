@@ -296,10 +296,11 @@ export class MediaCaptureManager {
     this.sourceGenerations.set(source, generation);
     const settings = this.getSettings();
     const screen = source === "screen";
-    const constraints = buildVideoConstraints(
-      screen ? settings.screenVideo : settings.cameraVideo,
-      { display: screen, deviceId: screen ? null : settings.cameraDeviceId },
-    );
+    const videoSettings = screen ? settings.screenVideo : settings.cameraVideo;
+    const constraints = buildVideoConstraints(videoSettings, {
+      display: screen,
+      deviceId: screen ? null : settings.cameraDeviceId,
+    });
     const stream = screen
       ? await this.mediaDevices.getDisplayMedia({
           video: constraints,
@@ -319,7 +320,7 @@ export class MediaCaptureManager {
       throw new Error(`No ${source} video track is available`);
     }
     const trackConstraints = screen
-      ? buildVideoConstraints(settings.screenVideo, { display: false })
+      ? buildVideoConstraints(videoSettings, { display: false })
       : constraints;
     try {
       await track.applyConstraints(trackConstraints);

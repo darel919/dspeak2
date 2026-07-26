@@ -1,3 +1,8 @@
+import {
+  adaptiveTrackConstraints,
+  createAdaptiveVideoController,
+} from "./adaptive-video-controller.js";
+
 export function createMediaSourceController({
   capture,
   connected,
@@ -7,10 +12,17 @@ export function createMediaSourceController({
   getIntentionalClose,
   getP2pMesh,
   getSfu,
+  getVideoReport = () => null,
+  getVideoSettings = () => ({
+    frameRate: 30,
+    qualityPriority: "framerate",
+    resolution: "original",
+  }),
   localSources,
   localVideoFeeds,
   onSharedAudioStopped,
   producerFacade,
+  refreshMediaPolicy = () => Promise.resolve(),
   refreshPublicMaps,
   reportSfuFailure,
   send,
@@ -21,6 +33,20 @@ export function createMediaSourceController({
   topologyState,
   voiceStore,
 }) {
+  const adaptiveVideo = createAdaptiveVideoController({
+    apply: async (entry, state, settings) => {
+      await entry.track.applyConstraints(
+        adaptiveTrackConstraints(entry, state, settings),
+      );
+      await refreshMediaPolicy();
+    },
+    getReport: getVideoReport,
+    getSettings: getVideoSettings,
+    onError: (adaptationError) =>
+      console.warn(
+        `[Media] Video adaptation failed: ${adaptationError?.message || adaptationError}`,
+      ),
+  });
   async function publishSource(sourceEntry) {
     const entry =
       sourceEntry.source === "screen-audio"
@@ -130,6 +156,7 @@ export function createMediaSourceController({
         producerId: `${getActiveProvider() || "local"}:${entry.track.id}`,
       });
       localVideoFeeds.value = new Map(localVideoFeeds.value);
+      if (entry.source === "screen") adaptiveVideo.start(entry);
     }
     if (entry.source === "screen-audio") startSharedAudioMeter(entry.track);
     sendSourceState();
@@ -155,6 +182,7 @@ export function createMediaSourceController({
     getSfu()?.removeSource(entry.source);
     localVideoFeeds.value.delete(entry.source);
     localVideoFeeds.value = new Map(localVideoFeeds.value);
+    if (entry.source === "screen") adaptiveVideo.stop();
     if (entry.source === "screen-audio") {
       stopSharedAudioMeter();
       onSharedAudioStopped?.();
