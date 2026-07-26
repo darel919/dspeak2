@@ -9,20 +9,34 @@ transition cannot change the current room.
 
 Media signaling protocol version 919 uses a strict server-first handshake. Once
 the authenticated WebSocket opens, the server sends `hi919` with the protocol
-version, media-session correlation ID, server time, heartbeat interval, and
-heartbeat timeout. The client must reply with `hello919` containing the same
-version and correlation ID before it becomes a room participant. Heartbeats,
-topology messages, and media operations are rejected before negotiation.
+ID, contract revision, media-session correlation ID, server time, heartbeat
+interval, and heartbeat timeout. The client must reply with `hello919`
+containing the same ID, contract revision, and correlation ID before it becomes
+a room participant. Heartbeats, topology messages, and media operations are
+rejected before negotiation.
+Connection attempts are single-flight. Leave, navigation, and rapid rejoin
+reject and close any pending attempt before a replacement can start, while a
+WebSocket send race closes through the same owned reconnect lifecycle.
 
 Missing, mismatched, duplicated, or late negotiation closes the socket with code
 4002 and the reason `Media client update required`. The client treats this as a
 terminal update state rather than entering its reconnect loop. This handshake
 does not replace cookie-backed authentication and does not add media encryption.
 
-Protocol 919 is an atomic cutover. A deployment invalidates already loaded
-clients; operators should expect those tabs to refresh before voice reconnects.
-The normal voice interface shows a refresh action, while the RTC diagnostics
-retain a bounded, sanitized, memory-only phase timeline.
+Protocol ID 919 is a permanent dSpeak product identifier and never changes. Its
+contract revision provides atomic cutovers and invalidates incompatible already
+loaded clients; operators should expect those tabs to refresh before voice
+reconnects. The normal voice interface shows a refresh action, while the RTC
+diagnostics retain a bounded, sanitized, memory-only phase timeline.
+
+SFU initialization commands and their RTP-capability and transport responses
+carry request IDs. A response from a retired topology generation is ignored.
+Closing a media generation immediately retires its transports and rejects any
+producer or consumer that finishes creation afterward. Server socket closure
+also tears down the session immediately instead of waiting behind its signaling
+queue. Client socket replacement retires the complete topology generation, so
+an asynchronous operation from the previous peer identity cannot bind media,
+publish readiness, or change the active provider after reconnect.
 
 ## Route selection
 
@@ -308,9 +322,11 @@ cannot keep a stalled route healthy.
 
 A transient SFU transport disconnection receives a three-second grace period.
 A failed direction requests one correlated mediasoup ICE restart. If recovery
-fails, the topology coordinator rebuilds the SFU session. Server transport logs
-contain only direction, ICE and DTLS state, and selected-tuple presence; they
-exclude peer identity, candidate addresses, SDP, fingerprints, and credentials.
+does not return the direction to connected within five seconds, the client
+escalates the failure and the topology coordinator rebuilds the SFU session.
+Server transport logs contain only direction, ICE and DTLS state, and
+selected-tuple presence; they exclude peer identity, candidate addresses, SDP,
+fingerprints, and credentials.
 
 Remote participant audio shares one room AudioContext and one voice-activity
 scheduler. Output-device and autoplay failures publish playback state instead

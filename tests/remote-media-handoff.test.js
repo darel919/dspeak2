@@ -158,6 +158,36 @@ test("handoff readiness requires every expected logical source", () => {
   assert.equal(handoff.hasExpectedFeeds("sfu", peers, "local-peer"), true);
 });
 
+test("authoritative source snapshots prune retired remote camera feeds", () => {
+  const { handoff, calls } = harness();
+  handoff.stage(
+    {
+      provider: "sfu",
+      key: "camera-producer",
+      userId: "user-1",
+      source: "camera",
+      track: {},
+    },
+    "sfu",
+  );
+
+  handoff.pruneExpectedFeeds(
+    [
+      { peerId: "local-peer", userId: "local-user", sources: ["screen"] },
+      { peerId: "peer-1", userId: "user-1", sources: ["audio"] },
+    ],
+    "local-peer",
+  );
+
+  assert.equal(handoff.count("sfu"), 0);
+  assert.equal(
+    calls.some(
+      (call) => call[0] === "remove" && call[1] === "remote:user-1:camera",
+    ),
+    true,
+  );
+});
+
 test("a preparing screen feed is exposed as a paused viewer prompt", () => {
   const { handoff, calls } = harness();
   handoff.stage(

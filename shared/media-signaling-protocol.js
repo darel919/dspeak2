@@ -1,4 +1,5 @@
 export const MEDIA_SIGNALING_PROTOCOL_VERSION = 919;
+export const MEDIA_SIGNALING_CONTRACT_REVISION = 2;
 export const MEDIA_SIGNALING_SERVER_HELLO = "hi919";
 export const MEDIA_SIGNALING_CLIENT_HELLO = "hello919";
 export const MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE = 4002;
@@ -12,6 +13,7 @@ export const MEDIA_SIGNALING_HEARTBEAT_TIMEOUT_MS = 20_000;
 export function isMediaSignalingServerHello(data) {
   return (
     data?.protocolVersion === MEDIA_SIGNALING_PROTOCOL_VERSION &&
+    data.contractRevision === MEDIA_SIGNALING_CONTRACT_REVISION &&
     typeof data.mediaSessionId === "string" &&
     data.mediaSessionId.length > 0 &&
     data.mediaSessionId.length <= 160 &&
@@ -23,9 +25,19 @@ export function isMediaSignalingServerHello(data) {
   );
 }
 
+export const MEDIA_SIGNALING_CLIENT_PROTOCOL = Object.freeze({
+  clientHello: MEDIA_SIGNALING_CLIENT_HELLO,
+  closeCode: MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE,
+  closeReason: MEDIA_SIGNALING_PROTOCOL_CLOSE_REASON,
+  isServerHello: isMediaSignalingServerHello,
+  version: MEDIA_SIGNALING_PROTOCOL_VERSION,
+  contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
+});
+
 export function isMediaSignalingClientHello(data, mediaSessionId) {
   return (
     data?.protocolVersion === MEDIA_SIGNALING_PROTOCOL_VERSION &&
+    data.contractRevision === MEDIA_SIGNALING_CONTRACT_REVISION &&
     typeof data.mediaSessionId === "string" &&
     data.mediaSessionId === mediaSessionId
   );

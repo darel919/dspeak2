@@ -55,6 +55,22 @@ test("media signaling rejects unsupported and malformed message schemas", () => 
 });
 
 test("media signaling accepts the supported transport command schemas", () => {
+  const capabilities = parseSignalingMessage(
+    JSON.stringify({
+      type: "get-rtp-capabilities",
+      data: { requestId: "initialize-1" },
+    }),
+  );
+  assert.equal(capabilities.data.requestId, "initialize-1");
+
+  const create = parseSignalingMessage(
+    JSON.stringify({
+      type: "create-transport",
+      data: { requestId: "create-send-1", type: "send" },
+    }),
+  );
+  assert.equal(create.data.type, "send");
+
   const connect = parseSignalingMessage(
     JSON.stringify({
       type: "connect-transport",
@@ -92,6 +108,17 @@ test("media signaling accepts the supported transport command schemas", () => {
     }),
   );
   assert.equal(attenuation.data.effectivePercent, 0);
+});
+
+test("media signaling requires correlation for initialization commands", () => {
+  for (const message of [
+    { type: "get-rtp-capabilities", data: {} },
+    { type: "create-transport", data: { type: "recv" } },
+  ])
+    assert.throws(
+      () => parseSignalingMessage(JSON.stringify(message)),
+      /message data/,
+    );
 });
 
 test("media signaling rejects malformed attenuation reports", () => {

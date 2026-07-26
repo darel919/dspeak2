@@ -432,12 +432,16 @@ export class NativeP2pMesh {
         if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
           this.remoteSources.delete(key);
       }
-      this.onRemoteTrackEnded({
-        key: p2pRemoteFeedKey(state.peerId, source),
-        peerId: state.peerId,
-        userId: state.userId,
-        source,
-      });
+      const current = state.remoteTracks.get(source);
+      state.remoteTracks.delete(source);
+      this.onRemoteTrackEnded(
+        current || {
+          key: p2pRemoteFeedKey(state.peerId, source),
+          peerId: state.peerId,
+          userId: state.userId,
+          source,
+        },
+      );
       return;
     }
     if (signal.sourceRestored) {

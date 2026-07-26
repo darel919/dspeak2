@@ -11,8 +11,14 @@ import {
 } from "~/shared/hybrid-media-diagnostics.js";
 import { createLocalAudioEngine } from "~/shared/local-audio-engine.js";
 import { registerEchoWarning } from "~/shared/echo-warning.js";
-import { closeMediaSessionTransports } from "~/shared/media-session-cleanup.js";
-import { initialMediaTopologyState } from "~/shared/media-session-state.js";
+import {
+  closeMediaProviders,
+  closeMediaSessionTransports,
+} from "~/shared/media-session-cleanup.js";
+import {
+  createMediaGeneration,
+  initialMediaTopologyState,
+} from "~/shared/media-session-state.js";
 import { createMediaTopologyView } from "~/shared/media-topology-view.js";
 import { createMediaLifecycleState } from "~/shared/media-lifecycle-trace.js";
 import { createMediaAudioPolicy } from "~/shared/media-audio-policy.js";
@@ -53,6 +59,7 @@ import {
   shouldAcceptTopologyEvent,
   topologyEventKey,
 } from "~~/server/utils/media-transition.js";
+import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "~~/shared/media-signaling-protocol.js";
 import { useAuthStore } from "~/stores/auth";
 import { useChannelsStore } from "~/stores/channels";
 import { useSettingsStore } from "~/stores/settings";
@@ -119,6 +126,7 @@ export function useHybridMediaSession() {
   let preparedTransition = null;
   const rtpStatsSamples = new Map();
   const lifecycleState = createMediaLifecycleState();
+  const mediaGeneration = createMediaGeneration();
   const connectionPhase = lifecycleState.phase;
   const lifecycle = lifecycleState.lifecycle;
   const setConnectionPhase = lifecycleState.record;
@@ -161,6 +169,7 @@ export function useHybridMediaSession() {
       });
     },
     onReconnect: () => setConnectionPhase("reconnecting"),
+    protocol: MEDIA_SIGNALING_CLIENT_PROTOCOL,
   });
   const joinReady = computed(() =>
     hasUsableVoiceRoute({
@@ -284,23 +293,23 @@ export function useHybridMediaSession() {
     await openSocket();
     await waitForInitialTopology();
   }
-
   function openSocket() {
     const userId = authStore.getUserData()?.id;
     if (!userId) return Promise.reject(new Error("User not authenticated"));
     if (!channelId) return Promise.reject(new Error("Channel ID is required"));
     return signaling.open();
   }
-
   function handleSignalingClose(event, protocolRejected) {
     connected.value = false;
     protocolState.value = null;
     if (intentionalClose) return;
-    p2pMesh?.closeAll();
+    closeMediaProviders({
+      getP2pMesh: () => p2pMesh,
+      getSfu: () => sfu,
+      handoff,
+    });
     p2pMesh = null;
-    sfu?.close();
     sfu = null;
-    handoff.clear();
     setActiveProvider(null);
     transportReady.value = false;
     iceConnectedBoth.value = false;
@@ -316,7 +325,6 @@ export function useHybridMediaSession() {
         reason: event.reason || "signaling-closed",
       });
   }
-
   function waitForInitialTopology() {
     return waitForInitialMediaTopology({
       isReady: () => topologyState.value.epoch > 0,
@@ -326,8 +334,8 @@ export function useHybridMediaSession() {
       timeoutMs: MEDIA_TIMING.connectionTimeoutMs,
     });
   }
-
   function resetTopologySequencing(reason = "reconnecting") {
+    mediaGeneration.retire();
     pendingTopologyKey = null;
     appliedTopologyKey = null;
     latestTopologyKey = null;
@@ -342,7 +350,6 @@ export function useHybridMediaSession() {
     };
     attenuationReporter.clear();
   }
-
   function setupHandlers() {
     if (messageHandlers.size) return;
     setupMediaMessageHandlers({
@@ -381,7 +388,6 @@ export function useHybridMediaSession() {
       voiceStore,
     });
   }
-
   function ensureP2p() {
     if (p2pMesh || typeof RTCPeerConnection === "undefined") return p2pMesh;
     p2pMesh = new NativeP2pMesh({
@@ -426,7 +432,6 @@ export function useHybridMediaSession() {
     });
     return p2pMesh;
   }
-
   function queueTopology(data) {
     setConnectionPhase("topology-selecting", {
       topologyEpoch: Number(data.epoch) || 0,
@@ -442,9 +447,10 @@ export function useHybridMediaSession() {
     if (key === appliedTopologyKey || key === pendingTopologyKey)
       return topologyOperation;
     pendingTopologyKey = key;
+    const generation = mediaGeneration.capture();
     topologyOperation = topologyOperation
       .catch(() => {})
-      .then(() => applyTopology(data))
+      .then(() => applyTopology(data, generation))
       .then(() => {
         appliedTopologyKey = key;
       })
@@ -454,7 +460,6 @@ export function useHybridMediaSession() {
       });
     return topologyOperation;
   }
-
   function ensureSfu() {
     if (sfu) return sfu;
     sfu = new MediasoupClientSession({
@@ -499,7 +504,6 @@ export function useHybridMediaSession() {
     });
     return sfu;
   }
-
   function getRequestedVideoSettings(source) {
     const policy = voiceStore.currentChannelId
       ? channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
@@ -510,7 +514,6 @@ export function useHybridMediaSession() {
       source,
     });
   }
-
   const {
     createSharedAudioSource,
     producerFacade,
@@ -571,7 +574,8 @@ export function useHybridMediaSession() {
     { deep: true, immediate: true },
   );
   registerEchoWarning(echoDetected);
-  async function applyTopology(data) {
+  async function applyTopology(data, generation) {
+    mediaGeneration.assert(generation);
     if (Number(data.epoch) < topologyState.value.epoch) return;
     for (const peer of Array.isArray(data.peers) ? data.peers : [])
       if (peer.profile) voiceStore.upsertUserProfile(peer.profile);
@@ -591,10 +595,11 @@ export function useHybridMediaSession() {
       displayMode:
         data.mode === "probing" && previousProvider ? "switching" : null,
     };
+    handoff.pruneExpectedFeeds(topologyState.value.peers, localPeerId);
     attenuationReporter.prune();
     topologyWaiter?.();
     if (data.mode === activeProvider) {
-      await updateActiveTopology(data);
+      await updateActiveTopology(data, generation);
       return;
     }
     if (data.mode === "idle") {
@@ -632,6 +637,7 @@ export function useHybridMediaSession() {
           mesh.publishSource(entry.source, entry.track, entry.stream),
         ),
       );
+      mediaGeneration.assert(generation);
       transportReady.value = true;
       iceConnectedBoth.value = false;
       mediaConnectionState.value = "topology-probing";
@@ -643,17 +649,16 @@ export function useHybridMediaSession() {
       return;
     }
     if (data.mode === "switching") {
-      await prepareTransition(data);
+      await prepareTransition(data, generation);
       return;
     }
     if (data.mode === "p2p") {
-      await activateP2p(data);
+      await activateP2p(data, generation);
       return;
     }
-    if (data.mode === "sfu") await activateSfu(data);
+    if (data.mode === "sfu") await activateSfu(data, generation);
   }
-
-  async function updateActiveTopology(data) {
+  async function updateActiveTopology(data, generation) {
     if (data.mode === "p2p") {
       p2pMesh?.applyTopology({ ...data, localPeerId });
       await Promise.all(
@@ -661,6 +666,7 @@ export function useHybridMediaSession() {
           p2pMesh?.publishSource(entry.source, entry.track, entry.stream),
         ),
       );
+      mediaGeneration.assert(generation);
     } else if (data.mode === "sfu") {
       p2pMesh?.closeAll();
       p2pMesh = null;
@@ -694,7 +700,6 @@ export function useHybridMediaSession() {
     refreshPublicMaps();
     refreshTopologyGraph();
   }
-
   function handleTopologyFailure(data, topologyError) {
     if (topologyEventKey(data) !== latestTopologyKey) return;
     const reason = topologyError?.message || "Topology operation failed";
@@ -713,7 +718,6 @@ export function useHybridMediaSession() {
     }
     failSession(reason);
   }
-
   function reportSfuFailure(reason) {
     const epoch = topologyState.value.epoch;
     if (reportedSfuFailureEpoch === epoch) return;
@@ -727,8 +731,7 @@ export function useHybridMediaSession() {
       `[Media] SFU failure reported for topology epoch ${epoch}: ${reason}`,
     );
   }
-
-  async function prepareTransition(data) {
+  async function prepareTransition(data, generation) {
     let destinationSfu = null;
     try {
       transportReady.value = true;
@@ -752,6 +755,7 @@ export function useHybridMediaSession() {
       } else {
         throw new Error("The server requested an invalid media topology");
       }
+      mediaGeneration.assert(generation);
       preparedTransition = {
         target: data.target,
         epoch: Number(data.epoch),
@@ -785,8 +789,7 @@ export function useHybridMediaSession() {
       );
     }
   }
-
-  async function activateP2p(data) {
+  async function activateP2p(data, generation) {
     const mesh = ensureP2p();
     mesh.applyTopology({ ...data, localPeerId });
     await Promise.all(
@@ -796,6 +799,7 @@ export function useHybridMediaSession() {
     );
     if (!matchesPreparedActivation(preparedTransition, data, "p2p"))
       await waitForRemoteTracks("p2p", data);
+    mediaGeneration.assert(generation);
     handoff.bind("p2p");
     setActiveProvider("p2p");
     sfuRoundTripTime.value = null;
@@ -814,8 +818,7 @@ export function useHybridMediaSession() {
     refreshPublicMaps();
     refreshTopologyGraph();
   }
-
-  async function activateSfu(data) {
+  async function activateSfu(data, generation) {
     transportReady.value = false;
     mediaConnectionState.value = "transport-connecting";
     setConnectionPhase("transport-connecting", {
@@ -827,6 +830,7 @@ export function useHybridMediaSession() {
     for (const entry of localSources.values()) await session.addSource(entry);
     if (!matchesPreparedActivation(preparedTransition, data, "sfu"))
       await waitForRemoteTracks("sfu", data);
+    mediaGeneration.assert(generation);
     handoff.bind("sfu");
     setActiveProvider("sfu");
     reportedSfuFailureEpoch = null;
@@ -852,7 +856,6 @@ export function useHybridMediaSession() {
     refreshPublicMaps();
     refreshTopologyGraph();
   }
-
   function waitForRemoteTracks(provider, topology) {
     return waitForMediaHandoff({
       getLatestTopologyKey: () => latestTopologyKey,
@@ -869,7 +872,6 @@ export function useHybridMediaSession() {
       topologyState,
     });
   }
-
   watch(
     () =>
       channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
@@ -984,14 +986,12 @@ export function useHybridMediaSession() {
         transportReady: transportReady.value,
       }),
   });
-
   function failSession(message) {
     error.value = message;
     iceConnectedBoth.value = false;
     mediaConnectionState.value = "failed";
     setConnectionPhase("failed", { reason: message });
   }
-
   function disconnect() {
     rtpStatsSamples.clear();
     intentionalClose = true;
@@ -1001,7 +1001,6 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter();
     attenuationReporter.clear();
     capture.stopDeviceMonitoring();
-
     closeMediaSessionTransports({
       capture,
       getP2pMesh: () => p2pMesh,

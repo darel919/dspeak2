@@ -1,11 +1,3 @@
-import {
-  isMediaSignalingServerHello,
-  MEDIA_SIGNALING_CLIENT_HELLO,
-  MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE,
-  MEDIA_SIGNALING_PROTOCOL_CLOSE_REASON,
-  MEDIA_SIGNALING_PROTOCOL_VERSION,
-} from "~~/shared/media-signaling-protocol.js";
-
 export function createMediaSignalingSocket({
   buildHeartbeatData,
   buildUrl,
@@ -19,6 +11,7 @@ export function createMediaSignalingSocket({
   onOpen,
   onProtocolRejected,
   onReconnect,
+  protocol,
 }) {
   let socket = null;
   let pendingReady = null;
@@ -35,8 +28,13 @@ export function createMediaSignalingSocket({
   function send(message) {
     if (isIntentionalClose()) return false;
     if (socket?.readyState !== WebSocket.OPEN) return false;
-    socket.send(JSON.stringify(message));
-    return true;
+    try {
+      socket.send(JSON.stringify(message));
+      return true;
+    } catch {
+      socket.close(4000, "Media signaling send failed");
+      return false;
+    }
   }
 
   function stopHeartbeat() {
@@ -65,7 +63,9 @@ export function createMediaSignalingSocket({
   }
 
   function open() {
-    return new Promise((resolve, reject) => {
+    if (pendingReady?.promise) return pendingReady.promise;
+    if (socket?.readyState === WebSocket.OPEN) return Promise.resolve();
+    const promise = new Promise((resolve, reject) => {
       const candidate = new WebSocket(buildUrl());
       socket = candidate;
       const timeout = setTimeout(() => {
@@ -73,7 +73,7 @@ export function createMediaSignalingSocket({
         pendingReady = null;
         reject(new Error("Media signaling connection timed out"));
       }, connectionTimeoutMs);
-      pendingReady = { candidate, resolve, reject, timeout };
+      pendingReady = { candidate, resolve, reject, timeout, promise: null };
       candidate.onopen = () => {
         if (socket === candidate) onOpen();
       };
@@ -81,9 +81,7 @@ export function createMediaSignalingSocket({
         if (socket === candidate) handleMessage(event.data);
       };
       candidate.onerror = () => {
-        clearTimeout(timeout);
-        pendingReady = null;
-        reject(new Error("Media signaling connection failed"));
+        candidate.close(4000, "Media signaling connection failed");
       };
       candidate.onclose = (event) => {
         clearTimeout(timeout);
@@ -91,12 +89,12 @@ export function createMediaSignalingSocket({
         if (pendingReady?.candidate === candidate) {
           pendingReady = null;
           const closeError = new Error(
-            event.code === MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE
-              ? MEDIA_SIGNALING_PROTOCOL_CLOSE_REASON
+            event.code === protocol.closeCode
+              ? protocol.closeReason
               : "Media signaling connection closed",
           );
           closeError.code =
-            event.code === MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE
+            event.code === protocol.closeCode
               ? "MEDIA_PROTOCOL_UPDATE_REQUIRED"
               : "MEDIA_SIGNALING_CLOSED";
           reject(closeError);
@@ -104,30 +102,29 @@ export function createMediaSignalingSocket({
         socket = null;
         protocolState = null;
         stopHeartbeat();
-        const protocolRejected =
-          event.code === MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE;
+        const protocolRejected = event.code === protocol.closeCode;
         if (protocolRejected) onProtocolRejected(event);
         onClose(event, protocolRejected);
         if (!isIntentionalClose() && !protocolRejected) scheduleReconnect();
       };
     });
+    if (pendingReady) pendingReady.promise = promise;
+    return promise;
   }
 
   function acceptServerHello(data) {
-    if (!isMediaSignalingServerHello(data)) {
-      socket?.close(
-        MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE,
-        MEDIA_SIGNALING_PROTOCOL_CLOSE_REASON,
-      );
+    if (!protocol.isServerHello(data)) {
+      socket?.close(protocol.closeCode, protocol.closeReason);
       return false;
     }
     protocolState = { ...data };
     heartbeatIntervalMs = data.heartbeatIntervalMs;
     heartbeatTimeoutMs = data.heartbeatTimeoutMs;
     return send({
-      type: MEDIA_SIGNALING_CLIENT_HELLO,
+      type: protocol.clientHello,
       data: {
-        protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+        protocolVersion: protocol.version,
+        contractRevision: protocol.contractRevision,
         mediaSessionId: data.mediaSessionId,
       },
     });
@@ -156,8 +153,10 @@ export function createMediaSignalingSocket({
       try {
         await open();
       } catch (error) {
-        onError(error);
-        scheduleReconnect();
+        if (!isIntentionalClose()) {
+          onError(error);
+          scheduleReconnect();
+        }
       }
     }, delay);
   }
@@ -165,9 +164,14 @@ export function createMediaSignalingSocket({
   function stop() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
-    if (pendingReady) clearTimeout(pendingReady.timeout);
+    const pending = pendingReady;
     pendingReady = null;
+    if (pending) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("Media signaling connection stopped"));
+    }
     stopHeartbeat();
+    socket?.close(1000, "Media signaling stopped");
   }
 
   return {

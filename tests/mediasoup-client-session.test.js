@@ -128,6 +128,94 @@ test("timed out signaling requests clean up and ignore late responses", async ()
   assert.equal(client.pending.size, 0);
 });
 
+test("stale transport parameters cannot attach to a newer initialization", async () => {
+  const client = session();
+  client.device = {
+    createSendTransport() {
+      throw new Error("stale transport was created");
+    },
+  };
+  client.transportRequestIds.set("send", "create-send-2");
+
+  assert.equal(
+    await client.handle("transport-params", {
+      direction: "send",
+      requestId: "create-send-1",
+    }),
+    false,
+  );
+  assert.equal(client.sendTransport, null);
+});
+
+test("a producer resolving after media closure is discarded", async () => {
+  let resolveProduce;
+  let producerClosed = false;
+  let trackStopped = false;
+  const client = session();
+  client.sendTransport = {
+    close() {},
+    produce: () =>
+      new Promise((resolve) => {
+        resolveProduce = resolve;
+      }),
+  };
+  const publication = client.publishSource({
+    source: "camera",
+    track: {
+      clone: () => ({
+        getSettings: () => ({}),
+        stop: () => {
+          trackStopped = true;
+        },
+      }),
+    },
+  });
+
+  client.closeMedia();
+  resolveProduce({
+    close() {
+      producerClosed = true;
+    },
+  });
+
+  assert.equal(await publication, null);
+  assert.equal(client.producers.size, 0);
+  assert.equal(producerClosed, true);
+  assert.equal(trackStopped, true);
+});
+
+test("a consumer resolving after media closure is discarded", async () => {
+  let resolveConsume;
+  let consumerClosed = false;
+  const client = session();
+  client.recvTransport = {
+    close() {},
+    consume: () =>
+      new Promise((resolve) => {
+        resolveConsume = resolve;
+      }),
+  };
+  const consumption = client.createConsumer({
+    id: "consumer-late",
+    producerId: "producer-late",
+    kind: "video",
+    rtpParameters: {},
+    userId: "user-2",
+    source: "camera",
+  });
+
+  client.closeMedia();
+  resolveConsume({
+    close() {
+      consumerClosed = true;
+    },
+  });
+
+  await consumption;
+  assert.equal(client.consumers.size, 0);
+  assert.equal(consumerClosed, true);
+});
+
 test("an existing SFU source replaces its track without recreating the producer", async () => {
   const client = session();
   const previousTrack = {
@@ -324,6 +412,7 @@ test("ICE restart applies only its correlated acknowledgement", async () => {
   client.sendTransport = {
     id: "send-transport",
     closed: false,
+    close() {},
     restartIce: async ({ iceParameters }) => applied.push(iceParameters),
   };
 
@@ -342,6 +431,38 @@ test("ICE restart applies only its correlated acknowledgement", async () => {
   assert.equal(await restart, true);
   assert.deepEqual(applied, [{ usernameFragment: "fresh" }]);
   assert.equal(client.pending.size, 0);
+  client.close();
+});
+
+test("ICE restart escalates when the transport never reconnects", async () => {
+  const sent = [];
+  const states = [];
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+    requestTimeoutMs: 20,
+    recoveryTimeoutMs: 5,
+    onStateChange: (direction, state) => states.push([direction, state]),
+  });
+  client.transportStates.set("send", "failed");
+  client.sendTransport = {
+    id: "send-transport",
+    closed: false,
+    close() {},
+    restartIce: async () => {},
+  };
+
+  const restart = client.restartTransportIce("send");
+  await client.handle("ice-restarted", {
+    requestId: sent[0].data.requestId,
+    iceParameters: { usernameFragment: "fresh" },
+  });
+  await restart;
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.deepEqual(states, [["send", "failed"]]);
+  assert.equal(client.recoveryTimers.size, 0);
+  client.close();
 });
 
 test("ICE restart rejection and timeout clean exactly one pending request", async () => {

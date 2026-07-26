@@ -68,13 +68,14 @@ function validFailure(data) {
 }
 
 function validMessageData(type, data) {
-  if (["ping", "get-rtp-capabilities", "close-media"].includes(type))
+  if (["ping", "close-media"].includes(type))
     return data === undefined || isRecord(data);
   if (!isRecord(data)) return false;
   switch (type) {
     case "hello919":
       return (
         isNonNegativeInteger(data.protocolVersion) &&
+        isNonNegativeInteger(data.contractRevision) &&
         isIdentifier(data.mediaSessionId)
       );
     case "heartbeat":
@@ -124,10 +125,15 @@ function validMessageData(type, data) {
       return validFailure(data);
     case "client-sfu-rtt":
       return isFiniteNumber(data.rttMs);
+    case "get-rtp-capabilities":
+      return isIdentifier(data.requestId);
     case "client-rtp-capabilities":
       return isRecord(data.rtpCapabilities);
     case "create-transport":
-      return data.type === "send" || data.type === "recv";
+      return (
+        isIdentifier(data.requestId) &&
+        (data.type === "send" || data.type === "recv")
+      );
     case "connect-transport":
       return (
         isIdentifier(data.requestId) &&

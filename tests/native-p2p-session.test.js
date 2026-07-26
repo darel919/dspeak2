@@ -391,6 +391,39 @@ test("P2P source restoration republishes the preserved remote receiver track", a
   assert.deepEqual(restored, [entry]);
 });
 
+test("P2P source removal retires the retained remote receiver track", async () => {
+  const retired = [];
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal() {},
+    onRemoteTrackEnded: (entry) => retired.push(entry),
+  });
+  const entry = {
+    key: "p2p:peer-2:camera",
+    peerId: "peer-2",
+    userId: "user-2",
+    source: "camera",
+    track: { readyState: "live" },
+  };
+  const state = {
+    peerId: "peer-2",
+    userId: "user-2",
+    remoteTracks: new Map([["camera", entry]]),
+  };
+  mesh.connections.set("peer-2", state);
+  mesh.remoteSources.set("peer-2:camera-track", "camera");
+
+  await mesh.receiveSignal({
+    fromPeerId: "peer-2",
+    epoch: 0,
+    signal: { sourceRemoved: { source: "camera" } },
+  });
+
+  assert.deepEqual(retired, [entry]);
+  assert.equal(state.remoteTracks.has("camera"), false);
+  assert.equal(mesh.remoteSources.has("peer-2:camera-track"), false);
+});
+
 test("topology identity reconciles an early signaling connection", () => {
   const restaged = [];
   const mesh = new NativeP2pMesh({

@@ -1,6 +1,7 @@
 import {
   classifyMediaSignalingClientHello,
   MEDIA_SIGNALING_CLIENT_HELLO,
+  MEDIA_SIGNALING_CONTRACT_REVISION,
   MEDIA_SIGNALING_HANDSHAKE_TIMEOUT_MS,
   MEDIA_SIGNALING_HEARTBEAT_INTERVAL_MS,
   MEDIA_SIGNALING_HEARTBEAT_TIMEOUT_MS,
@@ -33,6 +34,7 @@ export function startMediaProtocolHandshake({
   session.handshakeTimer.unref?.();
   send(MEDIA_SIGNALING_SERVER_HELLO, {
     protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+    contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
     heartbeatIntervalMs: MEDIA_SIGNALING_HEARTBEAT_INTERVAL_MS,
     heartbeatTimeoutMs: MEDIA_SIGNALING_HEARTBEAT_TIMEOUT_MS,
     serverTime: now(),

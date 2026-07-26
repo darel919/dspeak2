@@ -4,6 +4,7 @@ import {
   classifyMediaSignalingClientHello,
   isMediaSignalingServerHello,
   MEDIA_SIGNALING_CLIENT_HELLO,
+  MEDIA_SIGNALING_CONTRACT_REVISION,
   MEDIA_SIGNALING_PROTOCOL_VERSION,
 } from "../shared/media-signaling-protocol.js";
 import { parseSignalingMessage } from "../server/utils/media-signaling-policy.js";
@@ -20,6 +21,7 @@ test("media signaling accepts the strict 919 handshake", () => {
       type: MEDIA_SIGNALING_CLIENT_HELLO,
       data: {
         protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+        contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
         mediaSessionId,
       },
     }),
@@ -40,6 +42,12 @@ test("media signaling rejects version and correlation mismatches", () => {
     { protocolVersion: 918, mediaSessionId },
     {
       protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+      contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION - 1,
+      mediaSessionId,
+    },
+    {
+      protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+      contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
       mediaSessionId: "another-session",
     },
   ]) {
@@ -57,7 +65,11 @@ test("media signaling rejects version and correlation mismatches", () => {
     parseSignalingMessage(
       JSON.stringify({
         type: MEDIA_SIGNALING_CLIENT_HELLO,
-        data: { protocolVersion: 918, mediaSessionId },
+        data: {
+          protocolVersion: 918,
+          contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
+          mediaSessionId,
+        },
       }),
     ).data.protocolVersion,
     918,
@@ -78,6 +90,7 @@ test("media signaling rejects pre-handshake operations and duplicate replies", (
     classifyMediaSignalingClientHello({
       data: {
         protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+        contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
         mediaSessionId,
       },
       mediaSessionId,
@@ -91,6 +104,7 @@ test("media signaling rejects pre-handshake operations and duplicate replies", (
 test("server hello requires bounded negotiated heartbeat settings", () => {
   const hello = {
     protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+    contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
     heartbeatIntervalMs: 5000,
     heartbeatTimeoutMs: 20000,
     serverTime: Date.now(),

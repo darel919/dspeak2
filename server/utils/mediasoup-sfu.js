@@ -9,7 +9,6 @@ import {
   assertTransportDirection,
   buildConsumerOptions,
   buildWebRtcTransportOptions,
-  calculateSfuClientOutgoingBitrate,
   findTransportByDirection,
   validateProducer,
 } from "./mediasoup-transport";
@@ -58,6 +57,12 @@ import {
 import { mediaUserProfile } from "./media-user-profile.js";
 import { collectSfuMetrics } from "./mediasoup-metrics.js";
 import { closeMediaPeer } from "./media-peer.js";
+import { queueSfuBandwidthRebalance } from "./mediasoup-bandwidth.js";
+import {
+  isMediaPeerClosed,
+  markMediaPeerClosed,
+  retainMediaSessionResource,
+} from "./media-session-lifecycle.js";
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 function send(peer, type, data) {
   try {
@@ -348,42 +353,13 @@ function closeSessionMedia(state, session) {
   queueSfuBandwidthRebalance(state);
 }
 
-function receiveTransports(state) {
-  return [...state.sessions.values()]
-    .flatMap((session) => [...session.transports.values()])
-    .filter(
-      (transport) =>
-        !transport.closed && transport.appData?.direction === "recv",
-    );
-}
-
-function queueSfuBandwidthRebalance(state) {
-  state.bandwidthRebalance = state.bandwidthRebalance
-    .catch(() => {})
-    .then(async () => {
-      const transports = receiveTransports(state);
-      if (!transports.length) return;
-      const bitrate = calculateSfuClientOutgoingBitrate(
-        transports.length,
-        state.config.maxClientOutgoingBitrate,
-        state.config.maxServerOutgoingBitrate,
-      );
-      await Promise.all(
-        transports.map((transport) => transport.setMaxOutgoingBitrate(bitrate)),
-      );
-    });
-  state.bandwidthRebalance.catch((error) =>
-    console.error("[SFU] failed to rebalance outgoing bandwidth", error),
-  );
-  return state.bandwidthRebalance;
-}
-
 async function createTransport(state, session, direction) {
   const transport = await session.room.router.createWebRtcTransport(
     buildWebRtcTransportOptions(state.webRtcServer, session.peer.id, direction),
   );
 
-  session.transports.set(transport.id, transport);
+  if (!retainMediaSessionResource(session, session.transports, transport))
+    throw new Error("Media session closed while creating transport");
   const removeTransport = () => {
     session.transports.delete(transport.id);
     queueSfuBandwidthRebalance(state);
@@ -429,7 +405,7 @@ async function createTransport(state, session, direction) {
       if (!transport.closed) transport.close();
     }
   });
-  if (direction === "recv") await queueSfuBandwidthRebalance(state);
+  if (direction === "recv") queueSfuBandwidthRebalance(state);
   return transport;
 }
 
@@ -557,11 +533,10 @@ async function handleMessage(state, session, message) {
     }
 
     case "get-rtp-capabilities":
-      send(
-        session.peer,
-        "rtp-capabilities",
-        session.room.router.rtpCapabilities,
-      );
+      send(session.peer, "rtp-capabilities", {
+        ...session.room.router.rtpCapabilities,
+        requestId: data.requestId,
+      });
       return;
 
     case "client-rtp-capabilities":
@@ -576,11 +551,10 @@ async function handleMessage(state, session, message) {
       const transport =
         findTransportByDirection(session.transports, direction) ||
         (await createTransport(state, session, direction));
-      send(
-        session.peer,
-        "transport-params",
-        await publicTransportData(transport, state.config),
-      );
+      send(session.peer, "transport-params", {
+        ...(await publicTransportData(transport, state.config)),
+        requestId: data.requestId,
+      });
       return;
     }
 
@@ -622,7 +596,8 @@ async function handleMessage(state, session, message) {
           source,
         },
       });
-      session.producers.set(producer.id, producer);
+      if (!retainMediaSessionResource(session, session.producers, producer))
+        throw new Error("Media session closed while creating producer");
 
       producer.on("transportclose", () =>
         session.producers.delete(producer.id),
@@ -695,7 +670,8 @@ async function handleMessage(state, session, message) {
       const consumer = await transport.consume(
         buildConsumerOptions(data.producerId, capabilities, owner.userId),
       );
-      session.consumers.set(consumer.id, consumer);
+      if (!retainMediaSessionResource(session, session.consumers, consumer))
+        throw new Error("Media session closed while creating consumer");
       consumer.on("transportclose", () =>
         session.consumers.delete(consumer.id),
       );
@@ -749,6 +725,7 @@ async function handleMessage(state, session, message) {
 }
 
 export async function openSfuPeer(peer) {
+  if (isMediaPeerClosed(peer)) return;
   const url = new URL(peer.request.url);
   const channelId = url.searchParams.get("channelId");
   const authentication = await authenticateWebSocketRequest(peer.request);
@@ -770,11 +747,18 @@ export async function openSfuPeer(peer) {
   const backendRoom = await pb.collection("dspeak_rooms").getOne(channel.room);
   await requireRoomMember(pb, backendRoom, userId);
   const profile = mediaUserProfile(await pb.collection("users").getOne(userId));
+  if (isMediaPeerClosed(peer)) return;
 
   const state = await getState();
+  if (isMediaPeerClosed(peer)) return;
   const room = await acquireRoom(state, channelId);
   room.backendRoomId = String(channel.room);
   try {
+    if (isMediaPeerClosed(peer)) {
+      releaseRoomReservation(room);
+      disposeRoomIfUnused(state, room);
+      return;
+    }
     const mediaSessionId = crypto.randomUUID();
     const session = createPendingMediaProtocolSession({
       peer,
@@ -802,6 +786,7 @@ export async function openSfuPeer(peer) {
 }
 
 export async function handleSfuPeerMessage(peer, rawMessage) {
+  if (isMediaPeerClosed(peer)) return;
   const state = await getState();
   const session = state.sessions.get(peer.id);
   if (!session) return;
@@ -835,6 +820,7 @@ export async function handleSfuPeerMessage(peer, rawMessage) {
     })
   )
     return;
+  if (session.closed || isMediaPeerClosed(peer)) return;
 
   if (
     message?.type === "heartbeat" &&
@@ -885,16 +871,14 @@ function reportSignalingError(peer, message, error) {
 }
 
 export async function closeSfuPeer(peer) {
+  markMediaPeerClosed(peer);
   const statePromise = globalThis[stateKey];
   if (!statePromise) return;
   const state = await statePromise.catch(() => null);
   if (!state) return;
   const session = state.sessions.get(peer.id);
   if (!session) return;
-  session.queue = session.queue
-    .catch(() => {})
-    .then(() => closeSession(state, session));
-  await session.queue;
+  closeSession(state, session);
 }
 
 export async function getSfuMetrics() {

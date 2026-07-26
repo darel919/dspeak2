@@ -41,6 +41,26 @@ export class RemoteMediaHandoff {
       );
   }
 
+  pruneExpectedFeeds(peers, localPeerId) {
+    const expected = new Set();
+    for (const peer of Array.isArray(peers) ? peers : []) {
+      if (String(peer.peerId) === String(localPeerId)) continue;
+      for (const source of Array.isArray(peer.sources) ? peer.sources : [])
+        expected.add(
+          remoteMediaFeedKey({
+            userId: peer.userId,
+            peerId: peer.peerId,
+            source,
+          }),
+        );
+    }
+    for (const provider of providers) {
+      for (const entry of [...this.entries(provider)]) {
+        if (!expected.has(entry.key)) this.remove(entry);
+      }
+    }
+  }
+
   stage(entry, activeProvider) {
     this.activeProvider = activeProvider || this.activeProvider;
     const normalized = {

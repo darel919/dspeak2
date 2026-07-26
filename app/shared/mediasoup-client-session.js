@@ -39,6 +39,7 @@ export class MediasoupClientSession {
     getAudioStereo,
     requestTimeoutMs = 8000,
     consumerControlTimeoutMs = 4000,
+    recoveryTimeoutMs = 5000,
   }) {
     this.send = send;
     this.iceServers = iceServers;
@@ -50,6 +51,7 @@ export class MediasoupClientSession {
     this.getAudioStereo = getAudioStereo;
     this.requestTimeoutMs = requestTimeoutMs;
     this.consumerControlTimeoutMs = consumerControlTimeoutMs;
+    this.recoveryTimeoutMs = recoveryTimeoutMs;
     this.device = null;
     this.sendTransport = null;
     this.recvTransport = null;
@@ -77,6 +79,9 @@ export class MediasoupClientSession {
     this.nextRequestSequence = 0;
     this.recoveryAttempts = new Map();
     this.recoveryTimers = new Map();
+    this.mediaRevision = 0;
+    this.initializationRequestId = null;
+    this.transportRequestIds = new Map();
   }
 
   async initialize() {
@@ -91,25 +96,46 @@ export class MediasoupClientSession {
       this.resetReadiness();
       reject?.(new Error("SFU initialization timed out"));
     }, 10000);
-    this.send({ type: "get-rtp-capabilities" });
+    this.initializationRequestId = this.requestId("initialize");
+    this.send({
+      type: "get-rtp-capabilities",
+      data: { requestId: this.initializationRequestId },
+    });
     return this.readyPromise;
   }
 
   async handle(type, data) {
     if (this.closed) return false;
     if (type === "rtp-capabilities") {
+      if (data.requestId !== this.initializationRequestId) return false;
+      const mediaRevision = this.mediaRevision;
       this.device = new Device();
       await this.device.load({ routerRtpCapabilities: data });
+      if (
+        this.closed ||
+        mediaRevision !== this.mediaRevision ||
+        data.requestId !== this.initializationRequestId
+      )
+        return false;
       this.lastSentClientRtpCapabilities = this.device.rtpCapabilities;
       this.send({
         type: "client-rtp-capabilities",
         data: { rtpCapabilities: this.device.rtpCapabilities },
       });
-      this.send({ type: "create-transport", data: { type: "send" } });
-      this.send({ type: "create-transport", data: { type: "recv" } });
+      for (const direction of ["send", "recv"]) {
+        const requestId = this.requestId(`create-${direction}`);
+        this.transportRequestIds.set(direction, requestId);
+        this.send({
+          type: "create-transport",
+          data: { type: direction, requestId },
+        });
+      }
       return true;
     }
     if (type === "transport-params") {
+      if (this.transportRequestIds.get(data.direction) !== data.requestId)
+        return false;
+      this.transportRequestIds.delete(data.direction);
       this.createTransport(data);
       if (this.sendTransport && this.recvTransport) {
         clearTimeout(this.initializationTimer);
@@ -349,6 +375,20 @@ export class MediasoupClientSession {
     });
     const iceParameters = await response;
     await transport.restartIce({ iceParameters });
+    clearTimeout(this.recoveryTimers.get(direction));
+    const validationTimer = setTimeout(() => {
+      this.recoveryTimers.delete(direction);
+      const current =
+        direction === "send" ? this.sendTransport : this.recvTransport;
+      if (
+        current !== transport ||
+        this.transportStates.get(direction) === "connected"
+      )
+        return;
+      this.transportStates.set(direction, "failed");
+      this.onStateChange?.(direction, "failed", this.connectionState());
+    }, this.recoveryTimeoutMs);
+    this.recoveryTimers.set(direction, validationTimer);
     return true;
   }
 
@@ -406,6 +446,7 @@ export class MediasoupClientSession {
   }
 
   async publishSource(entry) {
+    const mediaRevision = this.mediaRevision;
     const track = entry.track.clone();
     const settings = track.getSettings?.() || {};
     const requestedVideo = this.getVideoSettings?.(entry.source) || {};
@@ -438,6 +479,11 @@ export class MediasoupClientSession {
     } catch (error) {
       track.stop();
       throw error;
+    }
+    if (this.closed || mediaRevision !== this.mediaRevision) {
+      producer.close();
+      track.stop();
+      return null;
     }
     this.producers.set(entry.source, { producer, track, source: entry.source });
     if (this.sourceTransmission?.get(entry.source) === false) producer.pause();
@@ -522,6 +568,7 @@ export class MediasoupClientSession {
   async createConsumer(data) {
     this.requestedConsumers.delete(data.producerId);
     if (!this.recvTransport || this.consumers.has(data.id)) return;
+    const mediaRevision = this.mediaRevision;
     this.lastReceivedConsumerParams = data;
     const consumer = await this.recvTransport.consume({
       id: data.id,
@@ -530,6 +577,10 @@ export class MediasoupClientSession {
       rtpParameters: data.rtpParameters,
       appData: { userId: data.userId, source: data.source },
     });
+    if (this.closed || mediaRevision !== this.mediaRevision) {
+      consumer.close();
+      return;
+    }
     const entry = {
       key: data.producerId,
       producerId: data.producerId,
@@ -774,6 +825,9 @@ export class MediasoupClientSession {
   }
 
   closeMedia() {
+    this.mediaRevision += 1;
+    this.initializationRequestId = null;
+    this.transportRequestIds.clear();
     const hadMedia =
       !!this.sendTransport ||
       !!this.recvTransport ||
