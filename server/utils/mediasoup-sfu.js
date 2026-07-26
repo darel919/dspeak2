@@ -27,14 +27,18 @@ import {
 } from "./room-lifecycle";
 import { validP2pSignal } from "./p2p-signal";
 import { relayMediaAttenuationState } from "./media-attenuation-state";
-import { publicDisplayName } from "../../shared/user-profile.js";
-import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 import {
   isMediaSignalHeartbeatExpired,
   isValidMediaSignalHeartbeat,
   MEDIA_SIGNAL_HEARTBEAT_SWEEP_MS,
 } from "./media-heartbeat";
 import { normalizeParticipantVoiceState } from "~~/shared/participant-voice-state.js";
+import {
+  activateMediaProtocolSession,
+  createPendingMediaProtocolSession,
+  handleMediaProtocolHandshake,
+  startMediaProtocolHandshake,
+} from "./media-protocol-session.js";
 import { requireRoomMember } from "./room-authorization.js";
 import { enforceIdentifierRateLimit } from "./rate-limit.js";
 import { publishVoicePresence } from "./voice-presence";
@@ -51,6 +55,7 @@ import {
   persistParticipantVoiceState,
   removeMediaUserState,
 } from "./media-user-state.js";
+import { mediaUserProfile } from "./media-user-profile.js";
 import { collectSfuMetrics } from "./mediasoup-metrics.js";
 import { closeMediaPeer } from "./media-peer.js";
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
@@ -80,18 +85,6 @@ async function publicTransportData(transport, config) {
 }
 function serializeError(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function mediaUserProfile(user) {
-  const id = String(user.id);
-  return {
-    id,
-    name: publicDisplayName(user),
-    username: user.username || "",
-    handle: user.handle || "",
-    display_name: user.display_name || "",
-    avatar: sameOriginAvatarPath({ id, avatar: user.avatar }),
-  };
 }
 
 async function createState(config) {
@@ -189,9 +182,7 @@ async function getState(resolvedConfig) {
   return globalThis[stateKey];
 }
 
-export async function initializeSfu(config) {
-  return getState(config);
-}
+export const initializeSfu = (config) => getState(config);
 
 export async function closeSfu() {
   const statePromise = globalThis[stateKey];
@@ -293,17 +284,25 @@ function broadcastChannelState(room) {
 function closeSession(state, session) {
   if (!session || session.closed) return;
   session.closed = true;
+  clearTimeout(session.handshakeTimer);
+  session.handshakeTimer = null;
   closeSessionMedia(state, session);
-  session.room.sessions.delete(session.peer.id);
+  if (session.roomReservationHeld) {
+    releaseRoomReservation(session.room);
+    session.roomReservationHeld = false;
+  }
+  const wasActivated = session.activated;
+  if (wasActivated) session.room.sessions.delete(session.peer.id);
   state.sessions.delete(session.peer.id);
-  broadcastChannelState(session.room);
-  if (!disposeRoomIfUnused(state, session.room)) {
+  if (wasActivated) broadcastChannelState(session.room);
+  if (!disposeRoomIfUnused(state, session.room) && wasActivated) {
     topologyCoordinator.reconcile(session.room, "membership-changed");
   }
 
-  persistMediaPresence(session.room).catch((error) =>
-    console.error("[SFU] failed to persist presence", error),
-  );
+  if (wasActivated)
+    persistMediaPresence(session.room).catch((error) =>
+      console.error("[SFU] failed to persist presence", error),
+    );
   const userStillConnected = [...session.room.sessions.values()].some(
     (candidate) => String(candidate.userId) === String(session.userId),
   );
@@ -312,6 +311,30 @@ function closeSession(state, session) {
       console.error("[SFU] failed to remove user state", error),
     );
   }
+}
+
+async function activateNegotiatedSession(state, session) {
+  return activateMediaProtocolSession({
+    closeSuperseded: (superseded) => {
+      closeSession(state, superseded);
+      closeMediaPeer(superseded.peer, 4000, "Media session replaced");
+    },
+    createUserState: () => createMediaUserState(session),
+    persistPresence: () => persistMediaPresence(session.room),
+    reconcile: () =>
+      topologyCoordinator.reconcile(session.room, "membership-changed"),
+    releaseReservation: () => releaseRoomReservation(session.room),
+    sendConnected: () =>
+      send(session.peer, "connected", {
+        userId: session.userId,
+        channelId: session.room.id,
+        peerId: session.peer.id,
+      }),
+    session,
+    supersededSessions: () =>
+      supersededMediaSessions(session.room, session.userId, session.deviceId),
+    synchronizeChannel: () => broadcastChannelState(session.room),
+  });
 }
 
 function closeSessionMedia(state, session) {
@@ -752,69 +775,29 @@ export async function openSfuPeer(peer) {
   const room = await acquireRoom(state, channelId);
   room.backendRoomId = String(channel.room);
   try {
-    const supersededSessions = supersededMediaSessions(room, userId, deviceId);
-    const session = {
+    const mediaSessionId = crypto.randomUUID();
+    const session = createPendingMediaProtocolSession({
       peer,
       userId,
       deviceId,
       profile,
       room,
-      transports: new Map(),
-      producers: new Map(),
-      consumers: new Map(),
-      sources: new Set(),
-      muted: true,
-      deafened: false,
-      rtpCapabilities: null,
-      queue: Promise.resolve(),
-      queueDepth: 0,
-      ...createSignalingBudget(),
-      closed: false,
-      lastHeartbeatAt: Date.now(),
-    };
+      mediaSessionId,
+      signalingBudget: createSignalingBudget(),
+    });
 
     state.sessions.set(peer.id, session);
-    room.sessions.set(peer.id, session);
-    for (const superseded of supersededSessions) {
-      closeSession(state, superseded);
-      closeMediaPeer(superseded.peer, 4000, "Media session replaced");
-    }
-    send(peer, "connected", { userId, channelId, peerId: peer.id });
-    broadcastChannelState(room);
-    topologyCoordinator.reconcile(room, "membership-changed");
-    const presenceResults = await Promise.allSettled([
-      persistMediaPresence(room),
-      createMediaUserState(session),
-    ]);
-    for (const result of presenceResults) {
-      if (result.status === "rejected")
-        console.error(
-          "[SFU] failed to persist opened media session",
-          result.reason,
-        );
-    }
-    if (session.closed) {
-      await persistMediaPresence(room).catch((error) =>
-        console.error(
-          "[SFU] failed to repair presence after concurrent close",
-          error,
-        ),
-      );
-      const userStillConnected = [...room.sessions.values()].some(
-        (candidate) => String(candidate.userId) === String(userId),
-      );
-      if (!userStillConnected) {
-        await removeMediaUserState(userId, channelId).catch((error) =>
-          console.error(
-            "[SFU] failed to repair user state after concurrent close",
-            error,
-          ),
-        );
-      }
-    }
-  } finally {
+    startMediaProtocolHandshake({
+      close: (code, reason) => closeMediaPeer(peer, code, reason),
+      mediaSessionId,
+      onTimeout: () => closeSession(state, session),
+      send: (type, data) => send(peer, type, data),
+      session,
+    });
+  } catch (error) {
     releaseRoomReservation(room);
     disposeRoomIfUnused(state, room);
+    throw error;
   }
 }
 
@@ -833,6 +816,25 @@ export async function handleSfuPeerMessage(peer, rawMessage) {
       peer.close(1008, "Signaling protocol violation");
     return;
   }
+
+  if (
+    await handleMediaProtocolHandshake({
+      activate: () => activateNegotiatedSession(state, session),
+      close: (code, reason) => {
+        closeSession(state, session);
+        closeMediaPeer(peer, code, reason);
+      },
+      message,
+      onReject: (decision) =>
+        console.warn("[SFU] media signaling protocol rejected", {
+          decision,
+          mediaSessionId: session.mediaSessionId,
+          requestType: message?.type || null,
+        }),
+      session,
+    })
+  )
+    return;
 
   if (
     message?.type === "heartbeat" &&

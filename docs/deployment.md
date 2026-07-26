@@ -3,6 +3,15 @@
 This runbook contains the network and platform details for deploying dSpeak with
 Docker Compose, Coolify, Zoraxy, direct IPv6, and Playit IPv4 fallback.
 
+## Media signaling protocol cutovers
+
+Media signaling protocol 919 is strict and has no legacy fallback. Deploying a
+build that introduces or changes the `hi919`/`hello919` contract requires
+already loaded clients to refresh. Old tabs are rejected with WebSocket close
+code 4002 instead of reconnecting indefinitely. Include this client refresh in
+the deployment notice and verify the update-required action before completing
+the rollout.
+
 ## Deployment model
 
 The supported production layout uses one long-running dSpeak container, one

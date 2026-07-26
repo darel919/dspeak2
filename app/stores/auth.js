@@ -113,13 +113,13 @@ export const useAuthStore = defineStore("auths", () => {
     removeStorage("token");
     removeStorage("userData");
     useRoomsStore().clearRooms();
-    useChatStore().clearChat(userId);
+    const chatCleanup = useChatStore().clearChat();
 
-    const cleanup = userId
-      ? purgeUserLocalData(userId).catch((error) => {
-          console.warn("[Auth] Could not purge user browser data:", error);
-        })
-      : Promise.resolve();
+    const cleanup = chatCleanup
+      .then(() => (userId ? purgeUserLocalData(userId) : undefined))
+      .catch((error) => {
+        console.warn("[Auth] Could not purge user browser data:", error);
+      });
     await Promise.all([revocation, cleanup]);
   }
   function getUserData() {

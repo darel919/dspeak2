@@ -42,6 +42,10 @@ import NotificationWarning from "./NotificationWarning.vue";
 import { usePresence } from "../composables/usePresence.js";
 import startupLogo from "../assets/logo/logo_96.png";
 import { debugLog } from "../shared/debug";
+import {
+  createStartupReadiness,
+  STARTUP_READINESS_KEY,
+} from "../shared/startup-readiness";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
@@ -52,7 +56,16 @@ const authChecked = ref(false);
 const startupComplete = ref(false);
 const startupStatus = ref("Checking authentication…");
 const isBootstrapping = ref(true);
+const waitingForPageReadiness = ref(false);
 const { runStartupUpdate, startupUpdateStatus } = usePwaUpdate();
+const startupReadiness = createStartupReadiness({
+  onPending(status) {
+    if (waitingForPageReadiness.value && status) {
+      startupStatus.value = status;
+    }
+  },
+});
+provide(STARTUP_READINESS_KEY, startupReadiness);
 
 const isAuthenticated = computed(() => {
   const userData = authStore.getUserData();
@@ -92,7 +105,12 @@ onMounted(async () => {
     } else {
       authChecked.value = true;
     }
+    waitingForPageReadiness.value = true;
+    startupStatus.value =
+      startupReadiness.status() || "Preparing your workspace…";
+    await startupReadiness.waitForIdle(nextTick);
   } finally {
+    startupReadiness.seal();
     isBootstrapping.value = false;
     startupComplete.value = true;
   }

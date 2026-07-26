@@ -9,7 +9,9 @@ import {
   dequeueMessage,
   enqueueMessage,
   getCachedChannelMessages,
+  getPendingReadIds,
   IdbOperationError,
+  savePendingReadIds,
 } from "../utils/idb";
 import { addReader, hasReader, mergeReaders } from "../shared/read-receipts";
 import {
@@ -44,12 +46,46 @@ export const useChatStore = defineStore("chat", () => {
   let activeFetchController = null;
   let readFlushTimer = null;
   let readFlushPromise = null;
+  let pendingReadHydration = null;
+  let pendingReadPersistence = Promise.resolve();
   let localDataGeneration = 0;
   const pendingReadIds = new Set();
   const channelMessages = new Map();
   const pendingChannelPreparations = new Map();
   const channelPreparedAt = new Map();
   const PREPARED_CHANNEL_MAX_AGE_MS = 15000;
+  const ACTIVE_CHANNEL_MESSAGE_LIMIT = 1000;
+  const INACTIVE_CHANNEL_MESSAGE_LIMIT = 300;
+  const CHANNEL_MEMORY_LIMIT = 8;
+
+  function boundedMessages(items, limit) {
+    if (!Array.isArray(items)) return [];
+    return items.length > limit ? items.slice(-limit) : items;
+  }
+
+  function setChannelMessages(channelId, items, active = false) {
+    const normalizedChannelId = String(channelId);
+    channelMessages.delete(normalizedChannelId);
+    channelMessages.set(
+      normalizedChannelId,
+      boundedMessages(
+        items,
+        active ? ACTIVE_CHANNEL_MESSAGE_LIMIT : INACTIVE_CHANNEL_MESSAGE_LIMIT,
+      ),
+    );
+    while (channelMessages.size > CHANNEL_MEMORY_LIMIT) {
+      const oldestChannelId = channelMessages.keys().next().value;
+      if (oldestChannelId === String(currentChannelId.value)) {
+        const activeMessages = channelMessages.get(oldestChannelId);
+        channelMessages.delete(oldestChannelId);
+        channelMessages.set(oldestChannelId, activeMessages);
+        continue;
+      }
+      channelMessages.delete(oldestChannelId);
+      channelPreparedAt.delete(oldestChannelId);
+    }
+    return channelMessages.get(normalizedChannelId);
+  }
 
   function isChannelPrepared(channelId) {
     const preparedAt = channelPreparedAt.get(String(channelId || ""));
@@ -605,8 +641,14 @@ export const useChatStore = defineStore("chat", () => {
         case "connected":
           break;
         case "new_message":
-          if (reconcileIncomingMessage(messages.value, data.data).inserted)
+          if (reconcileIncomingMessage(messages.value, data.data).inserted) {
+            messages.value = boundedMessages(
+              messages.value,
+              ACTIVE_CHANNEL_MESSAGE_LIMIT,
+            );
+            setChannelMessages(currentChannelId.value, messages.value, true);
             handleNewMessageNotification(data.data);
+          }
           break;
         case "message_updated":
           debugLog("[ChatStore] Message updated:", data.data);
@@ -741,7 +783,7 @@ export const useChatStore = defineStore("chat", () => {
         channelMessages.get(channelId) ||
           (currentChannelId.value === channelId ? messages.value : []),
       );
-      channelMessages.set(channelId, nextMessages);
+      nextMessages = setChannelMessages(channelId, nextMessages, true);
       channelPreparedAt.set(String(channelId), Date.now());
       messages.value = nextMessages;
       cacheChannelMessages(userData.id, channelId, nextMessages).catch(
@@ -754,25 +796,19 @@ export const useChatStore = defineStore("chat", () => {
       );
 
       try {
-        const storageKey = `dspeak2_unread_message_ids_${userData.id}`;
-        let unreadIds = [];
-        try {
-          unreadIds = JSON.parse(localStorage.getItem(storageKey)) || [];
-        } catch (e) {
-          unreadIds = [];
-        }
-
+        await hydratePendingReadIds(userData.id);
         const alreadyReadIds = messages.value
           .filter(
             (msg) =>
               Array.isArray(msg.read_by) && msg.read_by.includes(userData.id),
           )
           .map((msg) => msg.id);
-        const filteredUnread = unreadIds.filter(
-          (id) => !alreadyReadIds.includes(id),
-        );
-        if (filteredUnread.length !== unreadIds.length) {
-          localStorage.setItem(storageKey, JSON.stringify(filteredUnread));
+        const originalSize = pendingReadIds.size;
+        for (const messageId of alreadyReadIds) {
+          pendingReadIds.delete(messageId);
+        }
+        if (pendingReadIds.size !== originalSize) {
+          await persistPendingReadIds(userData.id);
         }
       } catch (e) {
         console.warn("[ChatStore] Failed to reconcile local unread IDs:", e);
@@ -829,7 +865,11 @@ export const useChatStore = defineStore("chat", () => {
       };
 
       messages.value.push(pendingMessage);
-      channelMessages.set(channelId, messages.value);
+      messages.value = boundedMessages(
+        messages.value,
+        ACTIVE_CHANNEL_MESSAGE_LIMIT,
+      );
+      setChannelMessages(channelId, messages.value, true);
       cacheChannelMessages(userData.id, channelId, messages.value).catch(
         (cacheError) => {
           console.warn(
@@ -910,42 +950,68 @@ export const useChatStore = defineStore("chat", () => {
 
     message.read_by = addReader(message.read_by, userData);
     pendingReadIds.add(messageId);
-    persistPendingReadIds(userData.id);
+    void persistPendingReadIds(userData.id);
     scheduleReadFlush();
   }
 
-  function readStorageKey(userId) {
+  function legacyReadStorageKey(userId) {
     return `dspeak2_unread_message_ids_${userId}`;
   }
 
-  function hydratePendingReadIds(userId) {
-    try {
-      const stored = JSON.parse(
-        localStorage.getItem(readStorageKey(userId)) || "[]",
-      );
-      if (Array.isArray(stored)) {
-        for (const messageId of stored) pendingReadIds.add(messageId);
+  async function hydratePendingReadIds(userId) {
+    if (pendingReadHydration) return pendingReadHydration;
+    pendingReadHydration = (async () => {
+      const stored = await getPendingReadIds(userId);
+      let legacy = [];
+      try {
+        legacy = JSON.parse(
+          localStorage.getItem(legacyReadStorageKey(userId)) || "[]",
+        );
+      } catch (storageError) {
+        console.warn(
+          "[ChatStore] Unable to import legacy pending read state:",
+          storageError,
+        );
       }
-    } catch (storageError) {
+      for (const messageId of [
+        ...stored,
+        ...(Array.isArray(legacy) ? legacy : []),
+      ]) {
+        pendingReadIds.add(String(messageId));
+      }
+      if (Array.isArray(legacy) && legacy.length > 0) {
+        await persistPendingReadIds(userId);
+      }
+      try {
+        localStorage.removeItem(legacyReadStorageKey(userId));
+      } catch (storageError) {
+        console.warn(
+          "[ChatStore] Unable to remove legacy pending read state:",
+          storageError,
+        );
+      }
+    })().catch((storageError) => {
+      pendingReadHydration = null;
       console.warn(
         "[ChatStore] Unable to restore pending read state:",
         storageError,
       );
-    }
+    });
+    return pendingReadHydration;
   }
 
   function persistPendingReadIds(userId) {
-    try {
-      localStorage.setItem(
-        readStorageKey(userId),
-        JSON.stringify([...pendingReadIds]),
-      );
-    } catch (storageError) {
-      console.warn(
-        "[ChatStore] Unable to persist pending read state:",
-        storageError,
-      );
-    }
+    const snapshot = [...pendingReadIds];
+    pendingReadPersistence = pendingReadPersistence
+      .catch(() => {})
+      .then(() => savePendingReadIds(userId, snapshot))
+      .catch((storageError) => {
+        console.warn(
+          "[ChatStore] Unable to persist pending read state:",
+          storageError,
+        );
+      });
+    return pendingReadPersistence;
   }
 
   function scheduleReadFlush() {
@@ -960,7 +1026,7 @@ export const useChatStore = defineStore("chat", () => {
     if (readFlushPromise) return readFlushPromise;
     const userData = useAuthStore().getUserData();
     if (!userData?.id || !navigator.onLine) return;
-    hydratePendingReadIds(userData.id);
+    await hydratePendingReadIds(userData.id);
     const messageIds = [...pendingReadIds].slice(0, 200);
     if (messageIds.length === 0) return;
     const flushGeneration = localDataGeneration;
@@ -987,7 +1053,7 @@ export const useChatStore = defineStore("chat", () => {
           pendingReadIds.delete(result.messageId);
         }
       }
-      persistPendingReadIds(userData.id);
+      await persistPendingReadIds(userData.id);
       useChannelsStore().fetchUnreadCounts();
     })()
       .catch((readError) => {
@@ -1121,7 +1187,7 @@ export const useChatStore = defineStore("chat", () => {
     const userId = useAuthStore().getUserData()?.id;
     const channelId = currentChannelId.value;
     if (!userId || !channelId) return;
-    channelMessages.set(channelId, messages.value);
+    setChannelMessages(channelId, messages.value, true);
     cacheChannelMessages(userId, channelId, messages.value).catch(
       (cacheError) => {
         console.warn(
@@ -1163,31 +1229,27 @@ export const useChatStore = defineStore("chat", () => {
     debugLog("[ChatStore] Current typing users:", typingUsers.value);
   }
 
-  function clearChat(userId = "") {
+  function clearChat() {
     localDataGeneration += 1;
+    const pendingStorageCleanup = (async () => {
+      await pendingReadHydration;
+      await pendingReadPersistence;
+    })();
     disconnectFromChannel(true);
     if (readFlushTimer) {
       clearTimeout(readFlushTimer);
       readFlushTimer = null;
     }
     pendingReadIds.clear();
+    pendingReadHydration = null;
     channelMessages.clear();
     pendingChannelPreparations.clear();
     channelPreparedAt.clear();
-    if (import.meta.client && userId) {
-      try {
-        localStorage.removeItem(readStorageKey(userId));
-      } catch (storageError) {
-        console.warn(
-          "[ChatStore] Unable to remove pending read state:",
-          storageError,
-        );
-      }
-    }
     messages.value = [];
     error.value = null;
     onlineUsers.value = [];
     typingUsers.value = [];
+    return pendingStorageCleanup;
   }
 
   async function handleNewMessageNotification(message) {

@@ -103,6 +103,15 @@
 
         <!-- Messages -->
         <div v-else class="space-y-4">
+          <button
+            v-if="hiddenMessageCount > 0"
+            type="button"
+            class="btn btn-ghost btn-sm mx-auto flex"
+            @click="showOlderMessages"
+          >
+            Show {{ Math.min(MESSAGE_WINDOW_STEP, hiddenMessageCount) }} older
+            messages
+          </button>
           <ChatMessage
             v-for="message in messages"
             :key="message.id"
@@ -312,6 +321,7 @@ import MemberList from "../MemberList.vue";
 import OfflineBanner from "./OfflineBanner.vue";
 import { STORAGE_KEYS } from "../../const/storage";
 import { isPendingDuplicate } from "../../shared/chat-messages";
+import { STARTUP_READINESS_KEY } from "../../shared/startup-readiness";
 
 const showMemberList = ref(true);
 
@@ -354,6 +364,10 @@ const emit = defineEmits(["back"]);
 
 const chatStore = useChatStore();
 const router = useRouter();
+const startupReadiness = inject(STARTUP_READINESS_KEY, null);
+const releaseInitialChatLoad =
+  startupReadiness?.hold("Loading your conversation…") || (() => {});
+let initialChatLoadPending = true;
 const messagesContainer = ref(null);
 const showScrollButton = ref(false);
 const isNearBottom = ref(true);
@@ -369,11 +383,19 @@ const historyLoading = ref(false);
 const actionError = ref("");
 const authStore = useAuthStore();
 const currentUserId = computed(() => authStore.getUserData()?.id);
+const MESSAGE_WINDOW_STEP = 100;
+const messageWindowSize = ref(200);
 
-const messages = computed(() => {
+const deduplicatedMessages = computed(() => {
   const all = chatStore.messages;
   return all.filter((message) => !isPendingDuplicate(message, all));
 });
+const hiddenMessageCount = computed(() =>
+  Math.max(0, deduplicatedMessages.value.length - messageWindowSize.value),
+);
+const messages = computed(() =>
+  deduplicatedMessages.value.slice(-messageWindowSize.value),
+);
 const loading = computed(() => chatStore.loading);
 const error = computed(() => chatStore.error);
 const connected = computed(() => chatStore.connected);
@@ -393,12 +415,15 @@ onMounted(async () => {
   await initializeChat();
 });
 
-onUnmounted(() => {});
+onUnmounted(() => {
+  releaseInitialChatReadiness();
+});
 
 watch(
   () => props.channelId,
   async (newChannelId, oldChannelId) => {
     if (newChannelId !== oldChannelId) {
+      messageWindowSize.value = 200;
       await initializeChat();
     }
   },
@@ -417,7 +442,10 @@ watch(
 );
 
 async function initializeChat() {
-  if (!props.channelId) return;
+  if (!props.channelId) {
+    releaseInitialChatReadiness();
+    return;
+  }
 
   try {
     await chatStore.connectToChannel(
@@ -431,17 +459,36 @@ async function initializeChat() {
     });
   } catch (error) {
     console.error("Failed to initialize chat:", error);
+  } finally {
+    await nextTick();
+    releaseInitialChatReadiness();
   }
+}
+
+function releaseInitialChatReadiness() {
+  if (!initialChatLoadPending) return;
+  initialChatLoadPending = false;
+  releaseInitialChatLoad();
 }
 
 function handleScroll() {
   if (!messagesContainer.value) return;
 
   const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value;
+  if (scrollTop < 80 && hiddenMessageCount.value > 0) showOlderMessages();
   const scrollFromBottom = scrollHeight - scrollTop - clientHeight;
 
   isNearBottom.value = scrollFromBottom < 100;
   showScrollButton.value = scrollFromBottom > 200;
+}
+
+async function showOlderMessages() {
+  const container = messagesContainer.value;
+  const previousHeight = container?.scrollHeight || 0;
+  messageWindowSize.value += MESSAGE_WINDOW_STEP;
+  await nextTick();
+  if (container)
+    container.scrollTop += Math.max(0, container.scrollHeight - previousHeight);
 }
 
 function scrollToBottom() {

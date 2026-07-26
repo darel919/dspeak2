@@ -11,6 +11,7 @@ import {
   getCachedChannelMessages,
   getCachedRooms,
   getLastIdbHealthIssue,
+  getPendingReadIds,
   getQueuedMessages,
   HEALTH_EVENT,
   IdbOperationError,
@@ -19,6 +20,7 @@ import {
   purgeUserLocalData,
   reportIdbHealth,
   resetLocalDatabases,
+  savePendingReadIds,
 } from "../app/utils/idb.js";
 
 globalThis.indexedDB = fakeIndexedDB;
@@ -35,6 +37,7 @@ test("central database API preserves every existing cache contract", async () =>
     channelId: "channel-one",
     content: "queued",
   });
+  await savePendingReadIds("user-one", ["message-one", "message-two"]);
 
   assert.deepEqual(await getCachedRooms("user-one"), [{ id: "room-one" }]);
   assert.deepEqual(
@@ -47,6 +50,10 @@ test("central database API preserves every existing cache contract", async () =>
       channelId: "channel-one",
       content: "queued",
     },
+  ]);
+  assert.deepEqual(await getPendingReadIds("user-one"), [
+    "message-one",
+    "message-two",
   ]);
 
   await dequeueMessage("queue-one");
@@ -92,6 +99,8 @@ test("logout purges only the outgoing user's local records", async () => {
     channelId: "channel-two",
     content: "two",
   });
+  await savePendingReadIds("user-one", ["message-one"]);
+  await savePendingReadIds("user-two", ["message-two"]);
 
   await purgeUserLocalData("user-one");
 
@@ -110,6 +119,8 @@ test("logout purges only the outgoing user's local records", async () => {
       content: "two",
     },
   ]);
+  assert.deepEqual(await getPendingReadIds("user-one"), []);
+  assert.deepEqual(await getPendingReadIds("user-two"), ["message-two"]);
 });
 
 test("recoverable database failures retry once without losing the operation", async () => {

@@ -5,6 +5,25 @@ mediasoup SFU media routing. The topology coordinator is process-owned and uses
 monotonically increasing epochs so messages from an older membership or
 transition cannot change the current room.
 
+## Signaling protocol negotiation
+
+Media signaling protocol version 919 uses a strict server-first handshake. Once
+the authenticated WebSocket opens, the server sends `hi919` with the protocol
+version, media-session correlation ID, server time, heartbeat interval, and
+heartbeat timeout. The client must reply with `hello919` containing the same
+version and correlation ID before it becomes a room participant. Heartbeats,
+topology messages, and media operations are rejected before negotiation.
+
+Missing, mismatched, duplicated, or late negotiation closes the socket with code
+4002 and the reason `Media client update required`. The client treats this as a
+terminal update state rather than entering its reconnect loop. This handshake
+does not replace cookie-backed authentication and does not add media encryption.
+
+Protocol 919 is an atomic cutover. A deployment invalidates already loaded
+clients; operators should expect those tabs to refresh before voice reconnects.
+The normal voice interface shows a refresh action, while the RTC diagnostics
+retain a bounded, sanitized, memory-only phase timeline.
+
 ## Route selection
 
 Rooms with one device establish mediasoup and remain on it. Rooms with two or more

@@ -12,9 +12,10 @@ const DATABASES = Object.freeze({
   },
   chat: {
     name: "dspeak-chat",
-    version: 1,
+    version: 2,
     stores: {
       channelMessages: { keyPath: "key" },
+      pendingReads: { keyPath: "userId" },
     },
   },
   queue: {
@@ -474,6 +475,19 @@ export async function getCachedChannelMessages(userId, channelId) {
   );
 }
 
+export async function savePendingReadIds(userId, messageIds) {
+  await putRecord("chat", "pendingReads", {
+    userId: String(userId),
+    messageIds: [...new Set(messageIds.map(String))],
+    updatedAt: Date.now(),
+  });
+}
+
+export async function getPendingReadIds(userId) {
+  const record = await getRecord("chat", "pendingReads", String(userId || ""));
+  return Array.isArray(record?.messageIds) ? record.messageIds : [];
+}
+
 export async function enqueueMessage(message) {
   void ensurePersistentStorage();
   await putRecord("queue", "messageQueue", message);
@@ -498,6 +512,7 @@ export async function purgeUserLocalData(userId) {
       "purge-user",
       (record) => String(record?.userId || "") === normalizedUserId,
     ),
+    deleteRecord("chat", "pendingReads", normalizedUserId),
     deleteRecordsWhere(
       "queue",
       "messageQueue",

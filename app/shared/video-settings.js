@@ -21,6 +21,17 @@ export const VIDEO_RESOLUTIONS = Object.freeze({
   "2160p": { width: 3840, height: 2160 },
 });
 
+export function resolveRequestedVideoSettings({ policy, settings, source }) {
+  const base =
+    source === "screen" ? settings.screenVideo : settings.cameraVideo;
+  return {
+    ...base,
+    maxBitrate:
+      Number(source === "screen" ? policy?.screenKbps : policy?.cameraKbps) *
+        1000 || null,
+  };
+}
+
 export function normalizeVideoSettings(value = {}) {
   value = value && typeof value === "object" ? value : {};
   const resolution = Object.hasOwn(VIDEO_RESOLUTIONS, value.resolution)

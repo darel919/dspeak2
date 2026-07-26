@@ -11,6 +11,13 @@ import {
   normalizeMicrophoneGate,
 } from "~/shared/microphone-gate";
 import { useVoiceStore } from "~/stores/voice";
+import {
+  boundedStorageMap,
+  reportBrowserStorageMetric,
+  updateBoundedStorageMap,
+} from "~/shared/bounded-browser-storage";
+
+const MAX_ROOM_VOLUME_ENTRIES = 100;
 
 export const useSettingsStore = defineStore("settings", () => {
   const audio = skipHydrate(
@@ -56,7 +63,12 @@ export const useSettingsStore = defineStore("settings", () => {
     ref(normalizePercent(loadPersisted(STORAGE_KEYS.soundboardVolume, 100))),
   );
   const soundboardRoomVolumes = skipHydrate(
-    ref(loadPersisted(STORAGE_KEYS.soundboardRoomVolumes, {})),
+    ref(
+      boundedStorageMap(
+        loadPersisted(STORAGE_KEYS.soundboardRoomVolumes, {}),
+        MAX_ROOM_VOLUME_ENTRIES,
+      ),
+    ),
   );
   const systemSoundTheme = skipHydrate(
     ref(
@@ -85,10 +97,17 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   function setRoomSoundboardVolume(roomId, value) {
-    const next = { ...soundboardRoomVolumes.value };
-    if (value === null || value === undefined || value === "")
+    let next = { ...soundboardRoomVolumes.value };
+    if (value === null || value === undefined || value === "") {
       delete next[roomId];
-    else next[roomId] = normalizePercent(value);
+    } else {
+      next = updateBoundedStorageMap(
+        next,
+        roomId,
+        normalizePercent(value),
+        MAX_ROOM_VOLUME_ENTRIES,
+      );
+    }
     soundboardRoomVolumes.value = next;
     persist(STORAGE_KEYS.soundboardRoomVolumes, next);
   }
@@ -261,6 +280,7 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       if (typeof localStorage === "undefined") return;
       localStorage.setItem(key, JSON.stringify(value));
+      reportBrowserStorageMetric(key, value);
     } catch (_) {
       /* noop */
     }

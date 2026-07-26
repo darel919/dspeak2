@@ -40,7 +40,7 @@ const failureMessage = ref("");
 
 function readStorage(key) {
   try {
-    return localStorage.getItem(key);
+    return sessionStorage.getItem(key);
   } catch (error) {
     console.warn(`[Auth] Could not read ${key}:`, error);
     return null;
@@ -49,7 +49,7 @@ function readStorage(key) {
 
 function removeStorage(key) {
   try {
-    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
   } catch (error) {
     console.warn(`[Auth] Could not remove ${key}:`, error);
   }

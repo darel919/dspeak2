@@ -485,6 +485,69 @@ test("remote screen receiving choice survives a temporary handoff gap", () => {
   assert.equal(videoFeeds.value.get(key).receiving, true);
 });
 
+test("background suspension restores camera and explicit screen choices", () => {
+  const originalMediaStream = globalThis.MediaStream;
+  globalThis.MediaStream = class {
+    constructor(tracks) {
+      this.tracks = tracks;
+    }
+
+    getTracks() {
+      return this.tracks;
+    }
+
+    addTrack(track) {
+      this.tracks.push(track);
+    }
+
+    removeTrack(track) {
+      this.tracks = this.tracks.filter((candidate) => candidate !== track);
+    }
+  };
+  const changes = [];
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => "",
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    isAnyoneSpeaking: () => false,
+    onSpeaking: () => {},
+    onVideoReceivingChange: (entry, receiving) =>
+      changes.push([entry.source, receiving]),
+  });
+  const cameraTrack = { enabled: true, kind: "video" };
+  const screenTrack = { enabled: true, kind: "video" };
+  registry.bind({
+    key: "remote:user:camera",
+    source: "camera",
+    track: cameraTrack,
+    userId: "user",
+  });
+  registry.bind({
+    key: "remote:user:screen",
+    source: "screen",
+    track: screenTrack,
+    userId: "user",
+  });
+  registry.setVideoReceiving("remote:user:screen", true);
+
+  registry.setDocumentHidden(true);
+  assert.equal(cameraTrack.enabled, false);
+  assert.equal(screenTrack.enabled, false);
+
+  registry.setDocumentHidden(false);
+  assert.equal(cameraTrack.enabled, true);
+  assert.equal(screenTrack.enabled, true);
+  assert.deepEqual(changes.slice(-2), [
+    ["camera", true],
+    ["screen", true],
+  ]);
+  globalThis.MediaStream = originalMediaStream;
+});
+
 test("a fully ended share clears its receiving choice", () => {
   const { handoff, calls } = harness();
   const entry = {

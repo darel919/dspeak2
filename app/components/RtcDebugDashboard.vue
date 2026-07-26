@@ -701,10 +701,10 @@ function formatCandidate(candidate) {
 }
 
 onMounted(() => {
-  rtcStats.start();
-  rtcStats.update();
+  rtcStats.startDetailed();
 });
 onBeforeUnmount(() => {
+  rtcStats.stopDetailed();
   if (copiedTimer) clearTimeout(copiedTimer);
 });
 </script>

@@ -2,7 +2,8 @@
 
 Chat history uses a stale-while-revalidate lifecycle. Each authenticated user's
 channel history is held in a channel-scoped memory cache and persisted in the
-`dspeak-chat` IndexedDB database. Returning to a channel paints its last known
+`dspeak-chat` IndexedDB database. Pending read receipts share that transactional
+boundary in a user-keyed store. Returning to a channel paints its last known
 messages immediately while the HTTP endpoint refreshes them in the background.
 The server response remains authoritative.
 
@@ -26,7 +27,7 @@ Background Sync or an explicit online retry.
 
 Logging out removes only the outgoing user's browser data before navigation.
 That purge deletes the user's cached rooms, cached channel messages, offline
-outgoing messages, and pending read-receipt IDs. It also clears the equivalent
+outgoing messages, and pending read-receipt record. It also clears the equivalent
 in-memory chat caches so late channel work cannot restore signed-out data.
 Device-scoped preferences such as appearance, media settings, volume, and
 selected input or output devices remain available. Deployment-scoped PWA asset

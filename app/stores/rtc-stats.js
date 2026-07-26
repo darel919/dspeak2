@@ -5,6 +5,9 @@ import { calculateTransportBitrateBps } from "../shared/rtc-media-stats";
 import { normalizeConnectionMetricValue } from "../shared/connection-quality";
 
 const HISTORY_LIMIT = 30;
+const SUMMARY_INTERVAL_MS = 5000;
+const HIDDEN_INTERVAL_MS = 15000;
+const DETAILED_INTERVAL_MS = 1000;
 
 export const useRtcStatsStore = defineStore("rtc-stats", () => {
   const voiceStore = useVoiceStore();
@@ -22,11 +25,13 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     jitter: [],
     loss: [],
   });
-  const polling = ref(true);
+  const polling = ref(false);
+  const detailedPolling = ref(false);
   const lastError = ref("");
-  let intervalId = null;
+  let pollTimer = null;
   let pollBusy = false;
   let previousTrafficSample = null;
+  let detailedConsumers = 0;
 
   function sumFinite(pairs, field) {
     const values = pairs
@@ -107,6 +112,9 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
         deviceMemory: navigator.deviceMemory || null,
         online: navigator.onLine,
       },
+      protocol: currentSnapshot.protocol || null,
+      lifecycle: currentSnapshot.lifecycle || [],
+      readiness: currentSnapshot.readiness || null,
       snapshot: currentSnapshot,
       outbound: currentOutbound,
       inbound: currentInbound,
@@ -143,7 +151,7 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     lastError.value = "";
   }
 
-  async function update() {
+  async function update({ detailed = detailedPolling.value } = {}) {
     if (pollBusy || !polling.value || !voiceStore.connected) return;
     const session = voiceStore.sfuComposable;
     if (!session?.getWebRTCStatsSnapshot) return;
@@ -166,12 +174,14 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
       outgoingBitrate.value = measured.outgoing;
       incomingBitrate.value = measured.incoming;
       snapshot.value = next;
-      outbound.value = session.getOutboundRtpStats
-        ? await session.getOutboundRtpStats()
-        : [];
-      inbound.value = session.getInboundRtpStats
-        ? await session.getInboundRtpStats()
-        : [];
+      if (detailed) {
+        outbound.value = session.getOutboundRtpStats
+          ? await session.getOutboundRtpStats()
+          : [];
+        inbound.value = session.getInboundRtpStats
+          ? await session.getInboundRtpStats()
+          : [];
+      }
       appendHistory(history.rtt, nextMetrics.rttMs, next.timestamp);
       appendHistory(history.jitter, nextMetrics.jitterMs, next.timestamp);
       appendHistory(
@@ -200,20 +210,60 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     }
   }
 
+  function nextPollDelay() {
+    if (document.hidden) return HIDDEN_INTERVAL_MS;
+    return detailedPolling.value ? DETAILED_INTERVAL_MS : SUMMARY_INTERVAL_MS;
+  }
+
+  function scheduleNextPoll(delay = nextPollDelay()) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(async () => {
+      pollTimer = null;
+      await update();
+      if (polling.value && voiceStore.connected) scheduleNextPoll();
+    }, delay);
+  }
+
   function start() {
-    if (!import.meta.client || intervalId) return;
-    update();
-    intervalId = setInterval(update, 1000);
+    if (!import.meta.client) return;
+    polling.value = true;
+    void update();
+    scheduleNextPoll();
   }
 
   function stop() {
-    if (intervalId) clearInterval(intervalId);
-    intervalId = null;
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = null;
+    polling.value = false;
+  }
+
+  function startDetailed() {
+    detailedConsumers += 1;
+    detailedPolling.value = true;
+    start();
+    scheduleNextPoll(0);
+  }
+
+  function stopDetailed() {
+    detailedConsumers = Math.max(0, detailedConsumers - 1);
+    detailedPolling.value = detailedConsumers > 0;
+    if (polling.value && voiceStore.connected) scheduleNextPoll();
   }
 
   function togglePolling() {
     polling.value = !polling.value;
-    if (polling.value) update();
+    if (polling.value) {
+      void update();
+      scheduleNextPoll();
+    } else if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function handleVisibilityChange() {
+    if (!polling.value || !voiceStore.connected) return;
+    scheduleNextPoll(document.hidden ? HIDDEN_INTERVAL_MS : 0);
   }
 
   watch(
@@ -221,12 +271,21 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     (connected) => {
       if (connected) {
         start();
-        update();
       } else {
+        stop();
         reset();
       }
     },
+    { immediate: true },
   );
+
+  if (import.meta.client) {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    onScopeDispose(() => {
+      stop();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    });
+  }
 
   return {
     snapshot,
@@ -234,13 +293,16 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     inbound,
     history,
     polling,
+    detailedPolling,
     lastError,
     metrics,
     report,
     createDiagnosticReport,
     update,
     start,
+    startDetailed,
     stop,
+    stopDetailed,
     reset,
     togglePolling,
   };

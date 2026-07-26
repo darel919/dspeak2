@@ -27,16 +27,13 @@
     <div class="h-full min-h-0 overflow-hidden">
       <div class="flex h-full">
         <div v-if="!isMobile" class="flex min-h-0 w-full overflow-hidden">
-          <div
-            v-if="selectedRoom"
-            class="w-[280px] shrink-0 border-r border-base-300"
-          >
+          <DesktopChannelSidebar v-if="selectedRoom">
             <ChannelList
               :room="selectedRoom"
               :selected-channel-id="selectedChannelId"
               @channel-selected="onChannelSelected"
             />
-          </div>
+          </DesktopChannelSidebar>
 
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
             <ChatWindow
@@ -313,6 +310,7 @@ import { useChannelsStore } from "../stores/channels";
 import { useAuthStore } from "../stores/auth";
 import ChatWindow from "../components/Chat/ChatWindow.vue";
 import ChannelList from "../components/ChannelList.vue";
+import DesktopChannelSidebar from "../components/DesktopChannelSidebar.vue";
 import MobileRoomSidebar from "../components/MobileRoomSidebar.vue";
 import MobileChannelList from "../components/MobileChannelList.vue";
 import { MOBILE_BREAKPOINT_PX } from "../const/ui";

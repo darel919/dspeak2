@@ -120,8 +120,8 @@ test("authentication state changes do not remount and replay the callback", () =
 
 test("logout awaits a user-scoped browser-data purge before navigation", () => {
   assert.match(authStore, /const userId = String\(getUserData\(\)\?\.id/);
-  assert.match(authStore, /purgeUserLocalData\(userId\)/);
-  assert.match(authStore, /useChatStore\(\)\.clearChat\(userId\)/);
+  assert.match(authStore, /chatCleanup[\s\S]*purgeUserLocalData\(userId\)/);
+  assert.match(authStore, /useChatStore\(\)\.clearChat\(\)/);
   assert.match(accountPage, /await authStore\.clearAuth\(\)/);
   assert.match(settingsPage, /await authStore\.clearAuth\(\)/);
   assert.doesNotMatch(authStore, /resetLocalDatabases/);

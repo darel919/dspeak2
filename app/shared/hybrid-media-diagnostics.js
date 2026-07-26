@@ -3,6 +3,9 @@ export function createHybridMediaDiagnostics({
   getActiveProvider,
   getP2pMesh,
   getRequestedVideoSettings,
+  getLifecycle,
+  getProtocolState,
+  getReadiness,
   getSfu,
   localSources,
   playbackState,
@@ -49,6 +52,9 @@ export function createHybridMediaDiagnostics({
     refreshTopologyGraph(pair);
     return {
       timestamp: Date.now(),
+      protocol: getProtocolState?.() || null,
+      lifecycle: getLifecycle?.() || [],
+      readiness: getReadiness?.() || null,
       media: {
         localAudioTracks: [...localSources.values()].filter(
           (entry) => entry.track.kind === "audio",
@@ -176,5 +182,23 @@ export function createHybridMediaDiagnostics({
     getWebRTCDiagnosticStats,
     getWebRTCStatsSnapshot,
     sfuProducerIds,
+  };
+}
+
+export function mediaReadinessSnapshot({
+  connected,
+  mediaConnectionState,
+  playbackState,
+  topologyState,
+  transportReady,
+}) {
+  return {
+    signaling: connected,
+    topology: topologyState.epoch > 0,
+    transport: transportReady,
+    rtp:
+      mediaConnectionState === "media-flowing" ||
+      mediaConnectionState === "ready-no-active-media",
+    playback: playbackState,
   };
 }

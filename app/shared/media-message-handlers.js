@@ -15,8 +15,10 @@ export function setupMediaMessageHandlers({
   voiceStore,
   ensureP2p,
   onServerConnected,
+  onServerHello,
   onAttenuationState,
 }) {
+  registerHandler("hi919", onServerHello);
   registerHandler("connected", (data) => {
     setLocalPeerId(String(data.peerId));
     onServerConnected?.();

@@ -171,7 +171,7 @@ test("participant gain accepts a 200 percent target", () => {
   assert.deepEqual(values, [2]);
 });
 
-test("attenuation is applied to the native media element volume", () => {
+test("attenuation is applied through the Web Audio gain", () => {
   const registry = createRegistry({
     getAttenuation: () => ({
       enabled: true,
@@ -181,6 +181,7 @@ test("attenuation is applied to the native media element volume", () => {
     isAnyoneSpeaking: () => true,
   });
   const graph = { context: { currentTime: 5 } };
+  const applied = [];
   const track = {
     active: true,
     audio: { volume: 1 },
@@ -189,16 +190,18 @@ test("attenuation is applied to the native media element volume", () => {
       gain: {
         value: 1,
         cancelScheduledValues() {},
-        setValueAtTime() {},
+        setValueAtTime(value) {
+          applied.push(value);
+        },
         linearRampToValueAtTime() {},
       },
     },
-    volumeTimer: null,
   };
 
   registry.applyTrackGain(graph, track, true);
 
-  assert.equal(track.audio.volume, 0);
+  assert.equal(track.audio.volume, 1);
+  assert.equal(applied.at(-1), 0);
 });
 
 test("unchanged attenuation does not restart an active volume fade", () => {
@@ -227,14 +230,13 @@ test("unchanged attenuation does not restart an active volume fade", () => {
         },
       },
     },
-    volumeTimer: null,
   };
 
   registry.applyTrackGain(graph, track);
   registry.applyTrackGain(graph, track);
-  clearInterval(track.volumeTimer);
-
-  assert.deepEqual(ramps, [[1, 5.9]]);
+  assert.equal(ramps.length, 1);
+  assert.ok(Math.abs(ramps[0][0] - 0.3) < 0.000001);
+  assert.equal(ramps[0][1], 5.9);
 });
 
 test("audio-only system sharing can stop and resume remote transmission", () => {

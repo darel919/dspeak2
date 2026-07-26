@@ -1,14 +1,14 @@
 <template>
   <section class="h-screen-minus-navbar overflow-hidden bg-base-100">
     <div class="flex h-full min-h-0 overflow-hidden">
-      <div class="hidden w-[280px] shrink-0 border-r border-base-300 md:block">
+      <DesktopChannelSidebar>
         <ChannelList
           v-if="room"
           :room="room"
           :selected-channel-id="selectedChannelId"
           @channel-selected="onChannelSelected"
         />
-      </div>
+      </DesktopChannelSidebar>
 
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
@@ -66,9 +66,11 @@ import { useChannelsStore } from "../../../../stores/channels";
 import { useVoiceStore } from "../../../../stores/voice";
 import ChatWindow from "../../../../components/Chat/ChatWindow.vue";
 import ChannelList from "../../../../components/ChannelList.vue";
+import DesktopChannelSidebar from "../../../../components/DesktopChannelSidebar.vue";
 import MobileChannelList from "../../../../components/MobileChannelList.vue";
 import VoiceChannel from "../../../../components/VoiceChannel.vue";
 import { MOBILE_BREAKPOINT_PX } from "../../../../const/ui";
+import { STARTUP_READINESS_KEY } from "../../../../shared/startup-readiness";
 
 const roomsStore = useRoomsStore();
 const channelsStore = useChannelsStore();
@@ -76,6 +78,10 @@ const voiceStore = useVoiceStore();
 const chatStore = useChatStore();
 const route = useRoute();
 const router = useRouter();
+const startupReadiness = inject(STARTUP_READINESS_KEY, null);
+const releaseInitialChannelLoad =
+  startupReadiness?.hold("Loading room channels…") || (() => {});
+let initialChannelLoadPending = true;
 
 definePageMeta({
   key: "room-channel",
@@ -94,6 +100,7 @@ const selectedChannel = computed(() =>
 let channelSelectionGeneration = 0;
 
 onUnmounted(() => {
+  releaseInitialChannelReadiness();
   if (chatStore && chatStore.disconnectFromChannel) {
     chatStore.disconnectFromChannel(true, false, true, ownedChatChannelId);
   }
@@ -167,11 +174,20 @@ watch(
         }
       } catch (error) {
         console.error("Failed to fetch channels:", error);
+      } finally {
+        await nextTick();
+        releaseInitialChannelReadiness();
       }
     }
   },
   { immediate: true },
 );
+
+function releaseInitialChannelReadiness() {
+  if (!initialChannelLoadPending) return;
+  initialChannelLoadPending = false;
+  releaseInitialChannelLoad();
+}
 
 watch(
   () => route.params.channelId,

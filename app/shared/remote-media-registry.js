@@ -2,6 +2,8 @@ import { byteTimeDomainLevelDb } from "./microphone-gate.js";
 import { triggerRef } from "vue";
 
 const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -42;
+const VISIBLE_VOICE_DETECTION_INTERVAL_MS = 120;
+const HIDDEN_VOICE_DETECTION_INTERVAL_MS = 300;
 
 export function replaceMediaStreamTrack(stream, track) {
   if (!stream.getTracks().includes(track)) stream.addTrack(track);
@@ -58,7 +60,7 @@ export class RemoteMediaRegistry {
           ? (this.receivingPreferences.get(entry.key) ??
             current?.receiving ??
             false)
-          : true;
+          : typeof document === "undefined" || !document.hidden;
       entry.track.enabled = receiving;
       this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
       triggerRef(this.videoFeeds);
@@ -75,11 +77,12 @@ export class RemoteMediaRegistry {
     if (entry.source === "audio") this.startVoiceDetection(entry);
   }
 
-  setVideoReceiving(key, receiving) {
+  setVideoReceiving(key, receiving, persistPreference = true) {
     const entry = this.videoFeeds.value.get(key);
-    if (!entry || entry.source !== "screen") return false;
+    if (!entry) return false;
     entry.track.enabled = Boolean(receiving);
-    this.receivingPreferences.set(key, Boolean(receiving));
+    if (entry.source === "screen" && persistPreference)
+      this.receivingPreferences.set(key, Boolean(receiving));
     this.videoFeeds.value.set(key, {
       ...entry,
       receiving: Boolean(receiving),
@@ -87,6 +90,19 @@ export class RemoteMediaRegistry {
     triggerRef(this.videoFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     return true;
+  }
+
+  setDocumentHidden(hidden) {
+    for (const [key, entry] of this.videoFeeds.value) {
+      if (entry.source === "screen") {
+        const receiving = hidden
+          ? false
+          : (this.receivingPreferences.get(key) ?? entry.receiving);
+        this.setVideoReceiving(key, receiving, false);
+        continue;
+      }
+      this.setVideoReceiving(key, !hidden);
+    }
   }
 
   setAudioReceiving(key, receiving) {
@@ -187,7 +203,6 @@ export class RemoteMediaRegistry {
       gain,
       handleUnmute,
       source,
-      volumeTimer: null,
     };
     source.connect(gain);
     gain.connect(graph.context.destination);
@@ -314,39 +329,15 @@ export class RemoteMediaRegistry {
         ? Number(attenuation.attackMs) || 120
         : Number(attenuation.releaseMs) || 650;
     const now = graph.context.currentTime;
-    const elementTarget = Math.max(0, Math.min(1, target));
-    const gainTarget = target > 1 ? target : 1;
-    if (
-      !immediate &&
-      track.volumeTarget === elementTarget &&
-      track.gainTarget === gainTarget
-    )
-      return;
-    track.volumeTarget = elementTarget;
+    const gainTarget = Math.max(0, Math.min(2, target));
+    if (!immediate && track.gainTarget === gainTarget) return;
     track.gainTarget = gainTarget;
-    clearInterval(track.volumeTimer);
-    track.volumeTimer = null;
     track.gain.gain.cancelScheduledValues(now);
     track.gain.gain.setValueAtTime(track.gain.gain.value, now);
+    track.audio.volume = 1;
     if (immediate) {
-      track.audio.volume = elementTarget;
       track.gain.gain.setValueAtTime(gainTarget, now);
     } else {
-      const initialVolume = track.audio.volume;
-      const startedAt = performance.now();
-      const updateVolume = () => {
-        const elapsed = performance.now() - startedAt;
-        const progress = duration > 0 ? Math.min(1, elapsed / duration) : 1;
-        track.audio.volume =
-          initialVolume + (elementTarget - initialVolume) * progress;
-        if (progress >= 1) {
-          clearInterval(track.volumeTimer);
-          track.volumeTimer = null;
-        }
-      };
-      updateVolume();
-      if (track.audio.volume !== elementTarget)
-        track.volumeTimer = setInterval(updateVolume, 20);
       track.gain.gain.linearRampToValueAtTime(
         gainTarget,
         now + duration / 1000,
@@ -456,7 +447,6 @@ export class RemoteMediaRegistry {
     const graph = this.participantAudio.get(String(entry.userId));
     const track = graph?.tracks.get(entry.key);
     if (!graph || !track) return;
-    clearInterval(track.volumeTimer);
     track.source.disconnect();
     track.gain.disconnect();
     track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
@@ -475,7 +465,6 @@ export class RemoteMediaRegistry {
     graph.resumeTimer = null;
     graph.resumePromise = null;
     for (const track of graph.tracks.values()) {
-      clearInterval(track.volumeTimer);
       track.source.disconnect();
       track.gain.disconnect();
       track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
@@ -505,6 +494,7 @@ export class RemoteMediaRegistry {
       let quietSamples = 0;
       this.voiceDetectors.set(entry.key, {
         analyser,
+        key: entry.key,
         source: detectionSource,
         samples,
         speaking,
@@ -521,8 +511,14 @@ export class RemoteMediaRegistry {
 
   startVoiceDetectionScheduler() {
     if (this.voiceDetectionTimer) return;
-    this.voiceDetectionTimer = setInterval(() => {
+    const sample = () => {
+      this.voiceDetectionTimer = null;
       for (const detector of this.voiceDetectors.values()) {
+        const playbackTrack = this.participantAudio
+          .get(String(detector.userId))
+          ?.tracks.get(detector.key);
+        if (!playbackTrack?.active || playbackTrack.entry.receiving === false)
+          continue;
         detector.analyser.getByteTimeDomainData(detector.samples);
         const levelDb = byteTimeDomainLevelDb(detector.samples);
         const sensitivity = this.getAttenuation?.()?.sensitivity || "standard";
@@ -549,11 +545,19 @@ export class RemoteMediaRegistry {
           detector.activeSamples = 0;
         }
       }
-    }, 80);
+      if (this.voiceDetectors.size)
+        this.voiceDetectionTimer = setTimeout(
+          sample,
+          document.hidden
+            ? HIDDEN_VOICE_DETECTION_INTERVAL_MS
+            : VISIBLE_VOICE_DETECTION_INTERVAL_MS,
+        );
+    };
+    this.voiceDetectionTimer = setTimeout(sample, 0);
   }
 
   stopVoiceDetectionScheduler() {
-    clearInterval(this.voiceDetectionTimer);
+    clearTimeout(this.voiceDetectionTimer);
     this.voiceDetectionTimer = null;
   }
 

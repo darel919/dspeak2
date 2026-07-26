@@ -130,7 +130,7 @@ async function loadInvite() {
     await checkAuthentication();
     if (!authStore.getUserData()?.id) {
       loadingMessage.value = "Redirecting to login...";
-      localStorage.setItem("redirectAfterAuth", window.location.href);
+      sessionStorage.setItem("redirectAfterAuth", window.location.href);
       await router.push("/auth");
       return;
     }
@@ -168,7 +168,7 @@ async function attemptJoin() {
       loadingMessage.value = "Redirecting to login...";
 
       const currentUrl = window.location.href;
-      localStorage.setItem("redirectAfterAuth", currentUrl);
+      sessionStorage.setItem("redirectAfterAuth", currentUrl);
       setTimeout(() => {
         router.push("/auth");
       }, 1500);

@@ -13,12 +13,21 @@
       </div>
 
       <div class="flex shrink-0 items-center gap-2" aria-live="polite">
+        <button
+          v-if="voiceStore.protocolUpdateRequired"
+          type="button"
+          class="btn btn-warning btn-sm"
+          @click="reloadForMediaUpdate"
+        >
+          <Icon name="lucide:refresh-cw" />
+          <span class="hidden sm:inline">Refresh to update voice</span>
+        </button>
         <div
-          v-if="voiceStore.connecting && !voiceStore.connected"
+          v-else-if="voiceStore.connecting && !voiceStore.connected"
           class="voice-connecting-status flex items-center gap-2 text-sm"
         >
           <span class="loading loading-spinner loading-sm"></span>
-          <span class="hidden sm:inline">Connecting</span>
+          <span class="hidden sm:inline">{{ connectionPhaseLabel }}</span>
         </div>
         <span
           v-else-if="voiceStore.connected"
@@ -568,8 +577,19 @@
         Talk, share your camera, or present your screen. Your saved microphone
         and audio settings will be applied when you join.
       </p>
+      <div
+        v-if="voiceStore.protocolUpdateRequired"
+        class="mb-6 max-w-md bg-warning/15 px-4 py-3 text-sm text-warning"
+        role="alert"
+      >
+        Voice signaling was updated. Refresh dSpeak before reconnecting.
+      </div>
       <button
-        @click="joinThisChannel"
+        @click="
+          voiceStore.protocolUpdateRequired
+            ? reloadForMediaUpdate()
+            : joinThisChannel()
+        "
         :disabled="voiceStore.connecting"
         class="btn btn-primary btn-lg disabled:opacity-100"
       >
@@ -580,9 +600,11 @@
           class="loading loading-spinner loading-sm mr-2"
         ></span>
         {{
-          voiceStore.connecting
-            ? "Connecting..."
-            : "Connect to " + props.channel.name
+          voiceStore.protocolUpdateRequired
+            ? "Refresh to update voice"
+            : voiceStore.connecting
+              ? "Connecting..."
+              : "Connect to " + props.channel.name
         }}
       </button>
     </div>
@@ -608,6 +630,18 @@ const channelsStore = useChannelsStore();
 const router = useRouter();
 const config = useRuntimeConfig();
 const viewMode = ref("overview");
+const connectionPhaseLabel = computed(() => {
+  const phase = voiceStore.sfuComposable?.connectionPhase;
+  if (phase === "protocol-negotiating") return "Negotiating connection";
+  if (phase === "topology-selecting") return "Selecting media route";
+  if (phase === "transport-connecting") return "Connecting media";
+  if (phase === "reconnecting") return "Reconnecting";
+  return "Connecting";
+});
+
+function reloadForMediaUpdate() {
+  window.location.reload();
+}
 const focusedTileKey = ref(null);
 let tileFocusTimer = null;
 

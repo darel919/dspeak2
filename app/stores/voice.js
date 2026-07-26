@@ -11,8 +11,14 @@ import { STORAGE_KEYS } from "~/const/storage.js";
 import { resolveVoicePreferences } from "~/shared/voice-preferences.js";
 import { createVoiceParticipantState } from "~/shared/voice-participant-state.js";
 import { waitForVoiceTransportReady } from "~/shared/voice-join-readiness.js";
+import {
+  boundedStorageMap,
+  reportBrowserStorageMetric,
+} from "~/shared/bounded-browser-storage.js";
 
 const EMPTY_MEDIA_FEEDS = new Map();
+const MAX_USER_VOLUME_ENTRIES = 200;
+const MAX_TRACK_VOLUME_ENTRIES = 400;
 
 export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
@@ -27,6 +33,7 @@ export const useVoiceStore = defineStore("voice", () => {
   const deafened = skipHydrate(ref(false));
   const connecting = ref(false);
   const connected = ref(false);
+  const protocolUpdateRequired = ref(false);
   const error = ref(null);
   const connectedAt = ref(null);
   const cameraEnabled = ref(false);
@@ -150,7 +157,10 @@ export const useVoiceStore = defineStore("voice", () => {
         try {
           const parsed = JSON.parse(persistedVolumes);
           if (parsed && typeof parsed === "object") {
-            Object.assign(userVolumes.value, parsed);
+            Object.assign(
+              userVolumes.value,
+              boundedStorageMap(parsed, MAX_USER_VOLUME_ENTRIES),
+            );
           }
         } catch (_) {
           /* ignore */
@@ -158,7 +168,13 @@ export const useVoiceStore = defineStore("voice", () => {
       }
       const persistedTrackVolumes = localStorage.getItem("voice.trackVolumes");
       if (persistedTrackVolumes)
-        Object.assign(trackVolumes.value, JSON.parse(persistedTrackVolumes));
+        Object.assign(
+          trackVolumes.value,
+          boundedStorageMap(
+            JSON.parse(persistedTrackVolumes),
+            MAX_TRACK_VOLUME_ENTRIES,
+          ),
+        );
     } catch (_) {
       /* noop */
     }
@@ -191,7 +207,12 @@ export const useVoiceStore = defineStore("voice", () => {
       userVolumes,
       (vols) => {
         try {
-          localStorage.setItem("voice.userVolumes", JSON.stringify(vols));
+          const bounded = boundedStorageMap(vols, MAX_USER_VOLUME_ENTRIES);
+          if (Object.keys(vols).length > MAX_USER_VOLUME_ENTRIES) {
+            userVolumes.value = bounded;
+          }
+          localStorage.setItem("voice.userVolumes", JSON.stringify(bounded));
+          reportBrowserStorageMetric("voice.userVolumes", bounded);
         } catch (_) {
           /* noop */
         }
@@ -202,7 +223,12 @@ export const useVoiceStore = defineStore("voice", () => {
       trackVolumes,
       (vols) => {
         try {
-          localStorage.setItem("voice.trackVolumes", JSON.stringify(vols));
+          const bounded = boundedStorageMap(vols, MAX_TRACK_VOLUME_ENTRIES);
+          if (Object.keys(vols).length > MAX_TRACK_VOLUME_ENTRIES) {
+            trackVolumes.value = bounded;
+          }
+          localStorage.setItem("voice.trackVolumes", JSON.stringify(bounded));
+          reportBrowserStorageMetric("voice.trackVolumes", bounded);
         } catch (_) {
           /* noop */
         }
@@ -415,6 +441,7 @@ export const useVoiceStore = defineStore("voice", () => {
     try {
       connecting.value = true;
       error.value = null;
+      protocolUpdateRequired.value = false;
       await ensureMicrophonePermission();
       ensureCurrentJoin();
 
@@ -454,6 +481,8 @@ export const useVoiceStore = defineStore("voice", () => {
       await session.ensureAudioElements?.();
       playSystemSound("voice-join", settingsStore);
     } catch (err) {
+      if (err?.code === "MEDIA_PROTOCOL_UPDATE_REQUIRED")
+        protocolUpdateRequired.value = true;
       await disposeFailedSession(session);
       if (err?.code === "VOICE_JOIN_CANCELLED") return;
       console.error("[VoiceStore] Failed to join voice channel:", err);
@@ -740,6 +769,7 @@ export const useVoiceStore = defineStore("voice", () => {
     deafened,
     connecting,
     connected,
+    protocolUpdateRequired,
     error,
     connectedAt,
     cameraEnabled,

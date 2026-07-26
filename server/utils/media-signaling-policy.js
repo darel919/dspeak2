@@ -2,6 +2,7 @@ const maximumSignalBytes = 96_000;
 const signalBurstCapacity = 80;
 const signalRefillPerSecond = 20;
 const supportedMessageTypes = new Set([
+  "hello919",
   "ping",
   "heartbeat",
   "media-sources",
@@ -71,6 +72,11 @@ function validMessageData(type, data) {
     return data === undefined || isRecord(data);
   if (!isRecord(data)) return false;
   switch (type) {
+    case "hello919":
+      return (
+        isNonNegativeInteger(data.protocolVersion) &&
+        isIdentifier(data.mediaSessionId)
+      );
     case "heartbeat":
       return (
         isNonNegativeInteger(data.sequence) &&
