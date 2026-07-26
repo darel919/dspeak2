@@ -575,11 +575,16 @@ import {
 import { useAuthStore } from "../../../stores/auth";
 import { useRoomsStore } from "../../../stores/rooms";
 import SoundboardAdmin from "../../../components/SoundboardAdmin.vue";
+import { STARTUP_READINESS_KEY } from "../../../shared/startup-readiness";
 
 const route = useRoute();
 const config = useRuntimeConfig();
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
+const startupReadiness = inject(STARTUP_READINESS_KEY, null);
+const releaseInitialSettingsLoad =
+  startupReadiness?.hold("Loading room settings…") || (() => {});
+let initialSettingsLoadPending = true;
 const roomId = computed(() => String(route.params.roomId));
 const room = ref(null);
 const roles = ref([]);
@@ -769,6 +774,7 @@ async function api(path, options = {}) {
 
 async function load() {
   loading.value = true;
+  error.value = "";
   try {
     room.value = await roomsStore.getRoomDetails(roomId.value);
     attenuationHydrating = true;
@@ -832,6 +838,21 @@ watch(
     if (!attenuationHydrating && !loading.value) queueAttenuationSave();
   },
   { deep: true },
+);
+watch(
+  [() => authStore.getUserData()?.id, roomId],
+  async ([userId]) => {
+    if (!userId) return;
+    try {
+      await load();
+    } finally {
+      if (initialSettingsLoadPending) {
+        initialSettingsLoadPending = false;
+        releaseInitialSettingsLoad();
+      }
+    }
+  },
+  { immediate: true },
 );
 
 async function saveBranding() {
@@ -999,6 +1020,8 @@ async function deleteRole() {
     savingRole.value = false;
   }
 }
-onMounted(load);
-onBeforeUnmount(() => clearTimeout(attenuationSaveTimer));
+onBeforeUnmount(() => {
+  clearTimeout(attenuationSaveTimer);
+  releaseInitialSettingsLoad();
+});
 </script>
