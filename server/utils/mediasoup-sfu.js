@@ -72,6 +72,7 @@ function send(peer, type, data) {
     console.warn(
       `[SFU] failed to send ${type} to peer ${peer?.id || "unknown"}: ${serializeError(error)}`,
     );
+    closeMediaPeer(peer, 1011, "Media signaling send failed");
     return false;
   }
 }

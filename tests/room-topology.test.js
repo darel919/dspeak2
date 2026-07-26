@@ -403,6 +403,37 @@ test("SFU preparation retries preserve the direct fallback cause", () => {
   assert.match(room.topology.transitionFailure, /^sfu-media-did-not-become/);
 });
 
+test("repeated SFU preparation failures use bounded recovery backoff", () => {
+  const { room, coordinator, timers } = harness(2);
+  coordinator.reconcile(room, "joined");
+  const fail = () =>
+    coordinator.clientFailed(room, {
+      epoch: room.topology.epoch,
+      target: "sfu",
+      sourceRevision: room.topology.sourceRevision,
+      reason: "transport-not-ready",
+    });
+
+  assert.equal(fail(), true);
+  runActiveTimer(timers, 1000);
+  assert.equal(fail(), true);
+  runActiveTimer(timers, 2000);
+  assert.equal(fail(), true);
+  runActiveTimer(timers, 4000);
+  assert.equal(fail(), true);
+  runActiveTimer(timers, 8000);
+  assert.equal(fail(), true);
+  runActiveTimer(timers, 16000);
+  assert.equal(fail(), true);
+  runActiveTimer(timers, 30000);
+  assert.equal(fail(), true);
+  runActiveTimer(timers, 30000);
+
+  acknowledgeAll(room, coordinator);
+  assert.equal(room.topology.mode, "sfu");
+  assert.equal(room.topology.sfuPreparationFailures, 0);
+});
+
 test("P2P membership changes return to SFU before qualifying the new mesh", () => {
   const { room, coordinator, timers } = harness(2);
   reachP2p(room, coordinator, timers);

@@ -40,6 +40,7 @@ export class MediasoupClientSession {
     requestTimeoutMs = 8000,
     consumerControlTimeoutMs = 4000,
     recoveryTimeoutMs = 5000,
+    consumerRetryDelayMs = 250,
   }) {
     this.send = send;
     this.iceServers = iceServers;
@@ -52,6 +53,7 @@ export class MediasoupClientSession {
     this.requestTimeoutMs = requestTimeoutMs;
     this.consumerControlTimeoutMs = consumerControlTimeoutMs;
     this.recoveryTimeoutMs = recoveryTimeoutMs;
+    this.consumerRetryDelayMs = consumerRetryDelayMs;
     this.device = null;
     this.sendTransport = null;
     this.recvTransport = null;
@@ -63,6 +65,8 @@ export class MediasoupClientSession {
     this.pendingProduce = new Map();
     this.pendingConsumers = new Set();
     this.requestedConsumers = new Set();
+    this.consumerRetryAttempts = new Map();
+    this.consumerRetryTimers = new Map();
     this.readyPromise = null;
     this.readyResolve = null;
     this.readyReject = null;
@@ -78,6 +82,7 @@ export class MediasoupClientSession {
     this.rtpSamples = new Map();
     this.nextRequestSequence = 0;
     this.recoveryAttempts = new Map();
+    this.recoveryOperations = new Map();
     this.recoveryTimers = new Map();
     this.mediaRevision = 0;
     this.initializationRequestId = null;
@@ -97,10 +102,18 @@ export class MediasoupClientSession {
       reject?.(new Error("SFU initialization timed out"));
     }, 10000);
     this.initializationRequestId = this.requestId("initialize");
-    this.send({
-      type: "get-rtp-capabilities",
-      data: { requestId: this.initializationRequestId },
-    });
+    try {
+      this.sendOrThrow(
+        {
+          type: "get-rtp-capabilities",
+          data: { requestId: this.initializationRequestId },
+        },
+        "SFU initialization",
+      );
+    } catch (error) {
+      this.rejectReadiness(error);
+      throw error;
+    }
     return this.readyPromise;
   }
 
@@ -118,17 +131,28 @@ export class MediasoupClientSession {
       )
         return false;
       this.lastSentClientRtpCapabilities = this.device.rtpCapabilities;
-      this.send({
-        type: "client-rtp-capabilities",
-        data: { rtpCapabilities: this.device.rtpCapabilities },
-      });
-      for (const direction of ["send", "recv"]) {
-        const requestId = this.requestId(`create-${direction}`);
-        this.transportRequestIds.set(direction, requestId);
-        this.send({
-          type: "create-transport",
-          data: { type: direction, requestId },
-        });
+      try {
+        this.sendOrThrow(
+          {
+            type: "client-rtp-capabilities",
+            data: { rtpCapabilities: this.device.rtpCapabilities },
+          },
+          "SFU capability negotiation",
+        );
+        for (const direction of ["send", "recv"]) {
+          const requestId = this.requestId(`create-${direction}`);
+          this.transportRequestIds.set(direction, requestId);
+          this.sendOrThrow(
+            {
+              type: "create-transport",
+              data: { type: direction, requestId },
+            },
+            `SFU ${direction} transport creation`,
+          );
+        }
+      } catch (error) {
+        this.rejectReadiness(error);
+        throw error;
       }
       return true;
     }
@@ -219,42 +243,58 @@ export class MediasoupClientSession {
       "connect",
       ({ dtlsParameters }, callback, errback) => {
         const requestId = this.requestId("connect");
-        waitFor(
+        const acknowledgement = waitFor(
           this.pending,
           requestId,
           this.requestTimeoutMs,
           "SFU send transport connection",
-        ).then(callback, errback);
-        this.send({
-          type: "connect-transport",
-          data: {
-            requestId,
-            transportId: this.sendTransport.id,
-            dtlsParameters,
-          },
-        });
+        );
+        try {
+          this.sendOrThrow(
+            {
+              type: "connect-transport",
+              data: {
+                requestId,
+                transportId: this.sendTransport.id,
+                dtlsParameters,
+              },
+            },
+            "SFU send transport connection",
+          );
+        } catch (error) {
+          this.pending.get(requestId)?.reject(error);
+        }
+        acknowledgement.then(callback, errback);
       },
     );
     this.sendTransport.on(
       "produce",
       ({ kind, rtpParameters, appData }, callback, errback) => {
         const requestId = this.requestId("produce");
-        waitFor(
+        const acknowledgement = waitFor(
           this.pendingProduce,
           requestId,
           this.requestTimeoutMs,
           "SFU produce",
-        ).then(callback, errback);
-        this.send({
-          type: "produce",
-          data: {
-            requestId,
-            transportId: this.sendTransport.id,
-            kind,
-            rtpParameters,
-            appData,
-          },
-        });
+        );
+        try {
+          this.sendOrThrow(
+            {
+              type: "produce",
+              data: {
+                requestId,
+                transportId: this.sendTransport.id,
+                kind,
+                rtpParameters,
+                appData,
+              },
+            },
+            "SFU producer publication",
+          );
+        } catch (error) {
+          this.pendingProduce.get(requestId)?.reject(error);
+        }
+        acknowledgement.then(callback, errback);
       },
     );
     this.sendTransport.on("connectionstatechange", (state) => {
@@ -269,20 +309,28 @@ export class MediasoupClientSession {
       "connect",
       ({ dtlsParameters }, callback, errback) => {
         const requestId = this.requestId("connect");
-        waitFor(
+        const acknowledgement = waitFor(
           this.pending,
           requestId,
           this.requestTimeoutMs,
           "SFU receive transport connection",
-        ).then(callback, errback);
-        this.send({
-          type: "connect-transport",
-          data: {
-            requestId,
-            transportId: this.recvTransport.id,
-            dtlsParameters,
-          },
-        });
+        );
+        try {
+          this.sendOrThrow(
+            {
+              type: "connect-transport",
+              data: {
+                requestId,
+                transportId: this.recvTransport.id,
+                dtlsParameters,
+              },
+            },
+            "SFU receive transport connection",
+          );
+        } catch (error) {
+          this.pending.get(requestId)?.reject(error);
+        }
+        acknowledgement.then(callback, errback);
       },
     );
     this.recvTransport.on("connectionstatechange", (state) => {
@@ -295,6 +343,19 @@ export class MediasoupClientSession {
   requestId(operation) {
     this.nextRequestSequence = (this.nextRequestSequence + 1) % 1_000_000_000;
     return `${operation}-${this.nextRequestSequence}`;
+  }
+
+  sendOrThrow(message, label) {
+    if (this.send(message) === false)
+      throw new Error(`${label} signaling unavailable`);
+  }
+
+  rejectReadiness(error) {
+    const reject = this.readyReject;
+    this.initializationRequestId = null;
+    this.transportRequestIds.clear();
+    this.resetReadiness();
+    reject?.(error);
   }
 
   connectionState() {
@@ -354,7 +415,18 @@ export class MediasoupClientSession {
     this.recoveryTimers.set(direction, timer);
   }
 
-  async restartTransportIce(direction) {
+  restartTransportIce(direction) {
+    const active = this.recoveryOperations.get(direction);
+    if (active) return active;
+    const operation = this.performTransportIceRestart(direction).finally(() => {
+      if (this.recoveryOperations.get(direction) === operation)
+        this.recoveryOperations.delete(direction);
+    });
+    this.recoveryOperations.set(direction, operation);
+    return operation;
+  }
+
+  async performTransportIceRestart(direction) {
     const attempts = this.recoveryAttempts.get(direction) || 0;
     if (attempts >= 1) throw new Error("SFU ICE recovery was exhausted");
     const transport =
@@ -369,11 +441,23 @@ export class MediasoupClientSession {
       this.requestTimeoutMs,
       `SFU ${direction} ICE restart`,
     );
-    this.send({
-      type: "restart-ice",
-      data: { requestId, transportId: transport.id },
-    });
+    try {
+      this.sendOrThrow(
+        {
+          type: "restart-ice",
+          data: { requestId, transportId: transport.id },
+        },
+        `SFU ${direction} ICE restart`,
+      );
+    } catch (error) {
+      this.pending.get(requestId)?.reject(error);
+    }
     const iceParameters = await response;
+    const current =
+      direction === "send" ? this.sendTransport : this.recvTransport;
+    if (current !== transport || transport.closed)
+      throw new Error("SFU transport changed during ICE recovery");
+    if (this.transportStates.get(direction) === "connected") return true;
     await transport.restartIce({ iceParameters });
     clearTimeout(this.recoveryTimers.get(direction));
     const validationTimer = setTimeout(() => {
@@ -545,6 +629,8 @@ export class MediasoupClientSession {
       this.pendingConsumers.add(producerId);
       return;
     }
+    clearTimeout(this.consumerRetryTimers.get(producerId));
+    this.consumerRetryTimers.delete(producerId);
     this.pendingConsumers.delete(producerId);
     if (
       this.requestedConsumers.has(producerId) ||
@@ -554,19 +640,30 @@ export class MediasoupClientSession {
     )
       return;
     this.requestedConsumers.add(producerId);
-    this.send({
-      type: "consume",
-      data: {
-        requestId: this.requestId("consume"),
-        transportId: this.recvTransport.id,
-        producerId,
-        rtpCapabilities: this.device.rtpCapabilities,
-      },
-    });
+    try {
+      this.sendOrThrow(
+        {
+          type: "consume",
+          data: {
+            requestId: this.requestId("consume"),
+            transportId: this.recvTransport.id,
+            producerId,
+            rtpCapabilities: this.device.rtpCapabilities,
+          },
+        },
+        "SFU consumer request",
+      );
+    } catch (_) {
+      this.requestedConsumers.delete(producerId);
+      this.pendingConsumers.add(producerId);
+    }
   }
 
   async createConsumer(data) {
     this.requestedConsumers.delete(data.producerId);
+    this.consumerRetryAttempts.delete(data.producerId);
+    clearTimeout(this.consumerRetryTimers.get(data.producerId));
+    this.consumerRetryTimers.delete(data.producerId);
     if (!this.recvTransport || this.consumers.has(data.id)) return;
     const mediaRevision = this.mediaRevision;
     this.lastReceivedConsumerParams = data;
@@ -664,10 +761,17 @@ export class MediasoupClientSession {
         this.consumerControlTimeoutMs,
         `SFU ${desired ? "consumer resume" : "consumer pause"}`,
       );
-      this.send({
-        type: operation,
-        data: { consumerId: entry.consumer.id, requestId, revision },
-      });
+      try {
+        this.sendOrThrow(
+          {
+            type: operation,
+            data: { consumerId: entry.consumer.id, requestId, revision },
+          },
+          `SFU ${desired ? "consumer resume" : "consumer pause"}`,
+        );
+      } catch (error) {
+        this.pending.get(requestId)?.reject(error);
+      }
       try {
         const result = await acknowledgement;
         if (result?.consumerClosed) {
@@ -695,6 +799,9 @@ export class MediasoupClientSession {
 
   closeConsumerByProducer(producerId) {
     this.requestedConsumers.delete(producerId);
+    this.consumerRetryAttempts.delete(producerId);
+    clearTimeout(this.consumerRetryTimers.get(producerId));
+    this.consumerRetryTimers.delete(producerId);
     const match = [...this.consumers.values()].find(
       (entry) => entry.producerId === producerId,
     );
@@ -712,6 +819,16 @@ export class MediasoupClientSession {
     if (data?.requestType === "consume" && data.producerId) {
       this.requestedConsumers.delete(data.producerId);
       this.pendingConsumers.delete(data.producerId);
+      const attempts = this.consumerRetryAttempts.get(data.producerId) || 0;
+      if (!this.closed && attempts < 2) {
+        this.consumerRetryAttempts.set(data.producerId, attempts + 1);
+        const delay = this.consumerRetryDelayMs * 2 ** attempts;
+        const timer = setTimeout(() => {
+          this.consumerRetryTimers.delete(data.producerId);
+          this.requestConsumer(data.producerId);
+        }, delay);
+        this.consumerRetryTimers.set(data.producerId, timer);
+      }
     }
     if (data?.requestType === "connect-transport" && data.transportId) {
       this.pending.get(data.requestId)?.reject(error);
@@ -752,6 +869,12 @@ export class MediasoupClientSession {
       transports.push(await collectPeerConnectionDiagnosticStats(pc, kind));
     }
     return transports;
+  }
+
+  expectedInboundFlowCount() {
+    return [...this.consumers.values()].filter((entry) =>
+      this.shouldReceive(entry.userId, entry.source),
+    ).length;
   }
 
   async mediaReadiness(expectedInbound) {
@@ -845,13 +968,13 @@ export class MediasoupClientSession {
     this.producers.clear();
     this.sourcePublications.clear();
     this.consumers.clear();
-    this.remoteReceiving.clear();
     this.rtpSamples.clear();
     this.transportStates.set("send", "new");
     this.transportStates.set("recv", "new");
     for (const timer of this.recoveryTimers.values()) clearTimeout(timer);
     this.recoveryTimers.clear();
     this.recoveryAttempts.clear();
+    this.recoveryOperations.clear();
     this.sendTransport?.close();
     this.recvTransport?.close();
     this.sendTransport = null;
@@ -863,6 +986,9 @@ export class MediasoupClientSession {
     for (const request of this.pending.values()) request.reject(closedError);
     this.pending.clear();
     this.pendingConsumers.clear();
+    for (const timer of this.consumerRetryTimers.values()) clearTimeout(timer);
+    this.consumerRetryTimers.clear();
+    this.consumerRetryAttempts.clear();
     this.requestedConsumers.clear();
     for (const request of this.pendingProduce.values())
       request.reject(closedError);
@@ -870,6 +996,7 @@ export class MediasoupClientSession {
   }
 
   resetReadiness() {
+    this.readyPromise?.catch(() => {});
     clearTimeout(this.initializationTimer);
     this.initializationTimer = null;
     this.readyPromise = null;
@@ -880,6 +1007,7 @@ export class MediasoupClientSession {
   close() {
     this.closed = true;
     this.closeMedia();
+    this.remoteReceiving.clear();
     this.sources.clear();
     this.pendingConsumers.clear();
     this.requestedConsumers.clear();

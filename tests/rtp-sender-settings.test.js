@@ -2,6 +2,44 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyRtpSenderSettings } from "../app/shared/rtp-sender-settings.js";
 
+test("sender updates do not create a browser encoding", async () => {
+  let setCalls = 0;
+  const sender = {
+    getParameters: () => ({
+      encodings: [],
+      transactionId: "browser-owned",
+    }),
+    async setParameters() {
+      setCalls += 1;
+    },
+  };
+
+  const applied = await applyRtpSenderSettings(sender, {
+    encodings: [{ maxBitrate: 48000 }],
+  });
+
+  assert.equal(applied, false);
+  assert.equal(setCalls, 0);
+});
+
+test("optional sender tuning rejection does not abort publication", async () => {
+  const sender = {
+    getParameters: () => ({ encodings: [{}] }),
+    async setParameters() {
+      throw new DOMException(
+        "Read-only field modified in setParameters().",
+        "InvalidModificationError",
+      );
+    },
+  };
+
+  const applied = await applyRtpSenderSettings(sender, {
+    encodings: [{ maxBitrate: 48000 }],
+  });
+
+  assert.equal(applied, false);
+});
+
 test("sender updates preserve browser-owned DTX parameters", async () => {
   const parameters = {
     encodings: [{ dtx: "disabled" }],

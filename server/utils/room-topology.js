@@ -7,6 +7,14 @@ import {
 
 const DEFAULT_TRANSITION_TIMEOUT_MS = 15000;
 const DEFAULT_SFU_RETRY_DELAY_MS = 1000;
+const MAX_SFU_RETRY_DELAY_MS = 30000;
+
+function sfuRetryDelay(failures) {
+  return Math.min(
+    MAX_SFU_RETRY_DELAY_MS,
+    DEFAULT_SFU_RETRY_DELAY_MS * 2 ** Math.max(0, failures - 1),
+  );
+}
 
 export function createRoomTopology() {
   return {
@@ -22,6 +30,7 @@ export function createRoomTopology() {
     target: null,
     recovering: false,
     p2pFailures: 0,
+    sfuPreparationFailures: 0,
     p2pEverActivated: false,
     recoveryTimer: null,
     activationTimer: null,
@@ -115,6 +124,7 @@ export class RoomTopologyCoordinator {
     const next = membershipTopology(room.sessions.size);
     if (next === "idle") {
       room.topology.recovering = false;
+      room.topology.sfuPreparationFailures = 0;
       return this.set(room, "idle", "waiting-for-peer");
     }
     if (next === "sfu") {
@@ -157,8 +167,10 @@ export class RoomTopologyCoordinator {
     room.topology.transitionTimer = this.setTimer(() => {
       if (room.topology.epoch !== epoch || room.topology.mode !== "switching")
         return;
-      if (target === "sfu")
-        return this.beginTransition(room, "sfu", "retrying-sfu-preparation");
+      if (target === "sfu") {
+        room.topology.transitionTimer = null;
+        return this.scheduleSfuRetry(room, epoch, "sfu-preparation-timeout");
+      }
       this.fallbackToSfu(room, "direct-transition-timeout");
     }, DEFAULT_TRANSITION_TIMEOUT_MS);
   }
@@ -187,6 +199,7 @@ export class RoomTopologyCoordinator {
     const activationReason =
       room.topology.reason || `all-clients-ready-${target}`;
     this.set(room, target, activationReason, null, Number(epoch));
+    room.topology.sfuPreparationFailures = 0;
     if (target === "p2p") {
       room.topology.recovering = false;
       room.topology.p2pFailures = 0;
@@ -213,14 +226,21 @@ export class RoomTopologyCoordinator {
       this.fallbackToSfu(room, "client-direct-preparation-failed");
       return true;
     }
-    this.clearTimer(room.topology.transitionTimer);
     const detail = String(reason || "preparation-failed")
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "-")
       .replace(/-+/g, "-")
       .slice(0, 80);
+    this.clearTimer(room.topology.transitionTimer);
+    this.scheduleSfuRetry(room, Number(epoch), detail);
+    return true;
+  }
+
+  scheduleSfuRetry(room, epoch, detail) {
+    room.topology.sfuPreparationFailures += 1;
     room.topology.transitionFailure = detail;
     this.broadcast(room);
+    const delay = sfuRetryDelay(room.topology.sfuPreparationFailures);
     room.topology.transitionTimer = this.setTimer(() => {
       if (
         room.topology.epoch === Number(epoch) &&
@@ -228,8 +248,7 @@ export class RoomTopologyCoordinator {
       ) {
         this.set(room, "switching", room.topology.reason, "sfu", null, detail);
       }
-    }, DEFAULT_SFU_RETRY_DELAY_MS);
-    return true;
+    }, delay);
   }
 
   sourcesChanged(room) {

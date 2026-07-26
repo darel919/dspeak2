@@ -31,6 +31,12 @@ export function requiresP2pLiveness(mode, readyReported) {
   return mode === "p2p" || (mode === "probing" && readyReported);
 }
 
+export function countEnabledP2pSources(sources, receiving = new Map()) {
+  return [...(sources || [])].filter(
+    (source) => receiving.get(String(source)) !== false,
+  ).length;
+}
+
 export function p2pRemoteFeedKey(peerId, source) {
   return `p2p:${String(peerId)}:${String(source || "media")}`;
 }
@@ -272,9 +278,13 @@ export class NativeP2pMesh {
         const peerId = String(peer.peerId);
         if (peerId !== this.localPeerId) {
           const state = this.ensureConnection(peerId, peer.userId);
-          state.expectedRemoteSources = Array.isArray(peer.sources)
-            ? peer.sources.length
-            : 0;
+          state.remoteSourceNames = new Set(
+            (Array.isArray(peer.sources) ? peer.sources : []).map(String),
+          );
+          state.expectedRemoteSources = countEnabledP2pSources(
+            state.remoteSourceNames,
+            state.remoteReceiving,
+          );
         }
       }
       if (this.epoch !== previousEpoch)
@@ -342,38 +352,36 @@ export class NativeP2pMesh {
       restarted: false,
       senders: new Map(),
       sourceReceiving: new Map(),
+      remoteReceiving: new Map(),
+      remoteSourceNames: new Set(),
       remoteTracks: new Map(),
+      retiredRemoteTracks: new Map(),
       expectedRemoteSources: 0,
       mediaReady: false,
       lastOutboundBytes: null,
       lastInboundBytes: null,
       lastOutboundProgressAt: performance.now(),
       lastInboundProgressAt: performance.now(),
+      signalingOperation: null,
+      signalingPhase: null,
+      signalingStep: null,
+      negotiationRequested: false,
+      negotiationTimer: null,
     };
     this.connections.set(peerId, state);
 
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) this.signal(peerId, { candidate: candidate.toJSON() });
     };
-    pc.onnegotiationneeded = async () => {
-      try {
-        state.makingOffer = true;
-        applyP2pVideoCodecPreferences(pc);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription({
-          type: offer.type,
-          sdp: applyOpusAudioProfile(offer.sdp, this.usesStereoAudio()),
-        });
-        this.signal(peerId, { description: pc.localDescription });
-        await this.configureStateSenders(state);
-      } catch (error) {
-        this.fail("negotiation-failed", error);
-      } finally {
-        state.makingOffer = false;
-      }
+    pc.onnegotiationneeded = () => {
+      this.schedulePeerNegotiation(state);
     };
     pc.onconnectionstatechange = () => this.handleConnectionState(state);
     pc.oniceconnectionstatechange = () => this.handleIceState(state);
+    pc.onsignalingstatechange = () => {
+      if (pc.signalingState === "stable" && state.negotiationRequested)
+        queueMicrotask(() => this.schedulePeerNegotiation(state));
+    };
     pc.ontrack = (event) => this.handleTrack(state, event);
     pc.ondatachannel = (event) => this.bindHealthChannel(state, event.channel);
 
@@ -391,7 +399,83 @@ export class NativeP2pMesh {
   }
 
   signal(targetPeerId, signal) {
-    this.sendSignal({ targetPeerId, epoch: this.epoch, signal });
+    return this.sendControl(
+      { targetPeerId, epoch: this.epoch, signal },
+      "signaling-unavailable",
+    );
+  }
+
+  sendControl(payload, failureReason = "signaling-unavailable") {
+    try {
+      const delivered = this.sendSignal(payload);
+      if (delivered === false) this.fail(failureReason);
+      return delivered !== false;
+    } catch (error) {
+      this.fail("signaling-send-failed", error);
+      return false;
+    }
+  }
+
+  enqueuePeerSignaling(state, operation, phase = "signal") {
+    const previous = state.signalingOperation || Promise.resolve();
+    const current = previous
+      .catch(() => {})
+      .then(async () => {
+        state.signalingPhase = phase;
+        try {
+          return await operation();
+        } finally {
+          if (state.signalingPhase === phase) state.signalingPhase = null;
+        }
+      });
+    state.signalingOperation = current;
+    return current.finally(() => {
+      if (state.signalingOperation === current) state.signalingOperation = null;
+    });
+  }
+
+  schedulePeerNegotiation(state) {
+    state.negotiationRequested = true;
+    clearTimeout(state.negotiationTimer);
+    state.negotiationTimer = null;
+    return this.enqueuePeerSignaling(
+      state,
+      async () => {
+        if (!state.negotiationRequested) return false;
+        if (state.pc.signalingState !== "stable") {
+          this.retryPeerNegotiation(state);
+          return false;
+        }
+        state.negotiationRequested = false;
+        state.makingOffer = true;
+        try {
+          applyP2pVideoCodecPreferences(state.pc);
+          const offer = await state.pc.createOffer();
+          await state.pc.setLocalDescription({
+            type: offer.type,
+            sdp: applyOpusAudioProfile(offer.sdp, this.usesStereoAudio()),
+          });
+          this.signal(state.peerId, { description: state.pc.localDescription });
+          await this.configureStateSenders(state);
+          return true;
+        } finally {
+          state.makingOffer = false;
+        }
+      },
+      "negotiation",
+    ).catch((error) => {
+      this.fail("negotiation-failed", error);
+      return false;
+    });
+  }
+
+  retryPeerNegotiation(state) {
+    if (state.negotiationTimer || !state.negotiationRequested) return;
+    state.negotiationTimer = setTimeout(() => {
+      state.negotiationTimer = null;
+      if (state.negotiationRequested && state.pc.connectionState !== "closed")
+        this.schedulePeerNegotiation(state);
+    }, 50);
   }
 
   async receiveSignal({ fromPeerId, epoch, signal }) {
@@ -399,6 +483,17 @@ export class NativeP2pMesh {
     const state =
       this.connections.get(String(fromPeerId)) ||
       this.ensureConnection(String(fromPeerId), String(fromPeerId));
+    return this.enqueuePeerSignaling(
+      state,
+      () => this.applyPeerSignal(state, signal),
+      `remote-${Object.keys(signal)[0] || "signal"}`,
+    ).finally(() => {
+      if (state.negotiationRequested && state.pc.signalingState === "stable")
+        this.schedulePeerNegotiation(state);
+    });
+  }
+
+  async applyPeerSignal(state, signal) {
     const pc = state.pc;
     if (signal.source) {
       const source = String(signal.source.source || "");
@@ -428,12 +523,14 @@ export class NativeP2pMesh {
     }
     if (signal.sourceRemoved) {
       const source = String(signal.sourceRemoved.source || "");
+      state.retiredRemoteTracks ||= new Map();
       for (const [key, mappedSource] of this.remoteSources) {
         if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
           this.remoteSources.delete(key);
       }
       const current = state.remoteTracks.get(source);
       state.remoteTracks.delete(source);
+      if (current) state.retiredRemoteTracks.set(source, current);
       this.onRemoteTrackEnded(
         current || {
           key: p2pRemoteFeedKey(state.peerId, source),
@@ -446,8 +543,14 @@ export class NativeP2pMesh {
     }
     if (signal.sourceRestored) {
       const source = String(signal.sourceRestored.source || "");
-      const entry = state.remoteTracks.get(source);
-      if (entry?.track.readyState === "live") this.onRemoteTrack(entry);
+      state.retiredRemoteTracks ||= new Map();
+      const entry =
+        state.remoteTracks.get(source) || state.retiredRemoteTracks.get(source);
+      if (entry?.track.readyState === "live") {
+        state.retiredRemoteTracks.delete(source);
+        state.remoteTracks.set(source, entry);
+        this.onRemoteTrack(entry);
+      }
       return;
     }
     if (signal.sourceReceiving) {
@@ -460,6 +563,7 @@ export class NativeP2pMesh {
       return;
     }
     if (signal.description) {
+      state.signalingStep = "description-start";
       const readyForOffer =
         !state.makingOffer &&
         (pc.signalingState === "stable" || state.settingRemoteAnswer);
@@ -469,20 +573,23 @@ export class NativeP2pMesh {
       state.settingRemoteAnswer = signal.description.type === "answer";
       try {
         if (collision && state.polite) {
-          await Promise.all([
-            pc.setLocalDescription({ type: "rollback" }),
-            pc.setRemoteDescription(signal.description),
-          ]);
+          state.signalingStep = "rollback";
+          await pc.setLocalDescription({ type: "rollback" });
+          state.signalingStep = "remote-description";
+          await pc.setRemoteDescription(signal.description);
         } else {
+          state.signalingStep = "remote-description";
           await pc.setRemoteDescription(signal.description);
         }
         applyP2pVideoCodecPreferences(pc);
       } finally {
         state.settingRemoteAnswer = false;
       }
+      state.signalingStep = "candidates";
       for (const candidate of state.candidates.splice(0))
         await pc.addIceCandidate(candidate);
       if (signal.description.type === "offer") {
+        state.signalingStep = "answer";
         const answer = await pc.createAnswer();
         await pc.setLocalDescription({
           type: answer.type,
@@ -490,9 +597,11 @@ export class NativeP2pMesh {
         });
         this.signal(state.peerId, { description: pc.localDescription });
       }
+      state.signalingStep = "sender-configuration";
       await this.configureStateSenders(state).catch((error) =>
         this.fail("sender-configuration-failed", error),
       );
+      state.signalingStep = null;
       return;
     }
     if (signal.candidate) {
@@ -618,6 +727,8 @@ export class NativeP2pMesh {
       track,
       stream: new MediaStream([track]),
     };
+    state.retiredRemoteTracks ||= new Map();
+    state.retiredRemoteTracks.delete(source);
     state.remoteTracks.set(source, entry);
     this.onRemoteTrack(entry);
     track.addEventListener(
@@ -625,6 +736,8 @@ export class NativeP2pMesh {
       () => {
         if (state.remoteTracks.get(source)?.track === track)
           state.remoteTracks.delete(source);
+        if (state.retiredRemoteTracks.get(source)?.track === track)
+          state.retiredRemoteTracks.delete(source);
         this.onRemoteTrackEnded({
           key,
           peerId: state.peerId,
@@ -672,13 +785,21 @@ export class NativeP2pMesh {
       source === "screen" || source === "screen-audio"
         ? ["screen", "screen-audio"]
         : [source];
-    for (const pairedSource of pairedSources)
+    const state = this.connections.get(String(peerId));
+    for (const pairedSource of pairedSources) {
+      state?.remoteReceiving.set(pairedSource, Boolean(receiving));
       this.signal(String(peerId), {
         sourceReceiving: {
           source: pairedSource,
           receiving: Boolean(receiving),
         },
       });
+    }
+    if (state)
+      state.expectedRemoteSources = countEnabledP2pSources(
+        state.remoteSourceNames,
+        state.remoteReceiving,
+      );
   }
 
   async setSenderReceiving(state, source, receiving) {
@@ -693,10 +814,24 @@ export class NativeP2pMesh {
     if (!sender?.getParameters || !sender?.setParameters) return;
     return this.updateSender(sender, async () => {
       const parameters = sender.getParameters();
-      if (!parameters.encodings?.length) parameters.encodings = [{}];
+      if (!parameters.encodings?.length) return false;
       for (const encoding of parameters.encodings)
         encoding.active = Boolean(active);
-      await sender.setParameters(parameters);
+      try {
+        await sender.setParameters(parameters);
+      } catch (error) {
+        if (
+          Boolean(active) &&
+          [
+            "InvalidModificationError",
+            "InvalidAccessError",
+            "NotSupportedError",
+          ].includes(error?.name)
+        )
+          return false;
+        throw error;
+      }
+      return true;
     });
   }
 
@@ -791,6 +926,10 @@ export class NativeP2pMesh {
   configureStateSenders(state) {
     return Promise.all(
       [...state.senders].map(([source, sender]) => {
+        const transceiver = state.pc
+          .getTransceivers()
+          .find((candidate) => candidate.sender === sender);
+        if (transceiver?.mid == null) return false;
         const track = this.localSources.get(source)?.track || sender.track;
         return track
           ? this.configureSender(sender, source, track).then(() =>
@@ -864,10 +1003,20 @@ export class NativeP2pMesh {
             const report = await state.pc.getStats();
             state.selectedPair = await selectedPairSnapshot(state.pc, report);
             const flow = await mediaFlowSnapshot(state.pc, report);
+            const expectedOutboundSources = countEnabledP2pSources(
+              this.localSources.keys(),
+              new Map(
+                [...this.localSources.keys()].map((source) => [
+                  source,
+                  (state.sourceReceiving.get(source) ?? true) &&
+                    (this.sourceTransmission?.get(source) ?? true),
+                ]),
+              ),
+            );
             const countsReady =
-              flow.outboundCount >= this.localSources.size &&
+              flow.outboundCount >= expectedOutboundSources &&
               flow.inboundCount >= state.expectedRemoteSources;
-            const outboundNeeded = this.localSources.size > 0;
+            const outboundNeeded = expectedOutboundSources > 0;
             const inboundNeeded = state.expectedRemoteSources > 0;
             const outboundProgressing =
               !outboundNeeded ||
@@ -934,11 +1083,14 @@ export class NativeP2pMesh {
     if (qualified.length !== this.connections.size) return;
     this.readyReported = true;
     clearTimeout(this.qualificationTimeout);
-    this.sendSignal({
-      type: "ready",
-      epoch: this.epoch,
-      qualifiedPeerIds: qualified.map((state) => state.peerId),
-    });
+    if (
+      !this.sendControl({
+        type: "ready",
+        epoch: this.epoch,
+        qualifiedPeerIds: qualified.map((state) => state.peerId),
+      })
+    )
+      this.readyReported = false;
   }
 
   async getSnapshot() {
@@ -1051,9 +1203,11 @@ export class NativeP2pMesh {
     const state = this.connections.get(peerId);
     if (!state) return;
     clearTimeout(state.disconnectTimer);
+    clearTimeout(state.negotiationTimer);
     for (const entry of state.remoteTracks.values())
       this.onRemoteTrackEnded(entry);
     state.remoteTracks.clear();
+    state.retiredRemoteTracks?.clear();
     try {
       state.channel?.close();
     } catch (error) {

@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMediaSignalingSocket } from "../app/shared/media-signaling-socket.js";
+import {
+  closeMediaSignalingForRecovery,
+  createMediaSignalingSocket,
+  mediaSignalingUrl,
+} from "../app/shared/media-signaling-socket.js";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../shared/media-signaling-protocol.js";
 
 class FakeWebSocket {
   static OPEN = 1;
+  static CLOSED = 3;
   static instances = [];
+  static constructionError = null;
 
   constructor(url) {
+    if (FakeWebSocket.constructionError) throw FakeWebSocket.constructionError;
     this.url = url;
     this.readyState = 0;
     FakeWebSocket.instances.push(this);
@@ -43,10 +50,34 @@ function harness(options = {}) {
   });
 }
 
+function resetFakeWebSocket() {
+  FakeWebSocket.instances = [];
+  FakeWebSocket.constructionError = null;
+}
+
+test("media signaling URL preserves the configured endpoint and channel", () => {
+  assert.equal(
+    mediaSignalingUrl("/socket", "room & one", {
+      protocol: "https:",
+      host: "voice.example",
+    }),
+    "/socket?channelId=room%20%26%20one",
+  );
+});
+
+test("media signaling recovery closes the poisoned socket", () => {
+  const socket = new FakeWebSocket("wss://example.test/socket");
+  closeMediaSignalingForRecovery(socket);
+  assert.deepEqual(socket.closeRequest, {
+    code: 4000,
+    reason: "Media signaling session recovery required",
+  });
+});
+
 test("media signaling connection attempts are single-flight", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket;
-  FakeWebSocket.instances = [];
+  resetFakeWebSocket();
   try {
     const signaling = harness();
     const first = signaling.open();
@@ -66,7 +97,7 @@ test("media signaling connection attempts are single-flight", async () => {
 test("media signaling errors close through the owned socket lifecycle", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket;
-  FakeWebSocket.instances = [];
+  resetFakeWebSocket();
   try {
     const signaling = harness();
     const opening = signaling.open();
@@ -90,7 +121,7 @@ test("media signaling errors close through the owned socket lifecycle", async ()
 test("stopping signaling rejects and closes an in-flight connection", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket;
-  FakeWebSocket.instances = [];
+  resetFakeWebSocket();
   try {
     const signaling = harness();
     const opening = signaling.open();
@@ -111,7 +142,7 @@ test("stopping signaling rejects and closes an in-flight connection", async () =
 test("a signaling send race closes the socket instead of throwing", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket;
-  FakeWebSocket.instances = [];
+  resetFakeWebSocket();
   try {
     const signaling = harness();
     const opening = signaling.open();
@@ -123,6 +154,183 @@ test("a signaling send race closes the socket instead of throwing", async () => 
     assert.deepEqual(candidate.closeRequest, {
       code: 4000,
       reason: "Media signaling send failed",
+    });
+    candidate.onclose(candidate.closeRequest);
+    await assert.rejects(opening, /connection closed/);
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("a signaling send while the socket is not writable closes the candidate", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  try {
+    const signaling = harness();
+    const opening = signaling.open();
+    const candidate = FakeWebSocket.instances[0];
+
+    assert.equal(signaling.send({ type: "heartbeat" }), false);
+    assert.deepEqual(candidate.closeRequest, {
+      code: 4000,
+      reason: "Media signaling socket is not writable",
+    });
+    candidate.onclose(candidate.closeRequest);
+    await assert.rejects(opening, /connection closed/);
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("a successful manual reopen cancels the stale automatic retry", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  let reconnects = 0;
+  try {
+    const signaling = harness({
+      onReconnect: () => {
+        reconnects += 1;
+      },
+      reconnectBaseDelayMs: 1,
+      reconnectJitterMs: 0,
+      reconnectMaxDelayMs: 1,
+    });
+    const firstOpening = signaling.open();
+    const first = FakeWebSocket.instances[0];
+    first.onclose({ code: 4000, reason: "network changed" });
+    await assert.rejects(firstOpening, /connection closed/);
+
+    const secondOpening = signaling.open();
+    const second = FakeWebSocket.instances[1];
+    second.readyState = FakeWebSocket.OPEN;
+    assert.equal(signaling.markReady(), true);
+    await secondOpening;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(reconnects, 0);
+    assert.equal(FakeWebSocket.instances.length, 2);
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("a connection timeout schedules recovery even without a close event", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  let intentionalClose = false;
+  let reconnects = 0;
+  try {
+    const signaling = harness({
+      connectionTimeoutMs: 2,
+      isIntentionalClose: () => intentionalClose,
+      onReconnect: () => {
+        reconnects += 1;
+      },
+      reconnectBaseDelayMs: 1,
+      reconnectJitterMs: 0,
+      reconnectMaxDelayMs: 1,
+    });
+
+    await assert.rejects(signaling.open(), /connection timed out/);
+    await new Promise((resolve) => setTimeout(resolve, 8));
+
+    assert.ok(reconnects >= 1);
+    assert.ok(FakeWebSocket.instances.length >= 2);
+    intentionalClose = true;
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("a synchronous WebSocket construction failure schedules recovery", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  let intentionalClose = false;
+  let reconnects = 0;
+  try {
+    FakeWebSocket.constructionError = new Error("browser socket unavailable");
+    const signaling = harness({
+      isIntentionalClose: () => intentionalClose,
+      onReconnect: () => {
+        reconnects += 1;
+      },
+      reconnectBaseDelayMs: 1,
+      reconnectJitterMs: 0,
+      reconnectMaxDelayMs: 1,
+    });
+
+    await assert.rejects(signaling.open(), /browser socket unavailable/);
+    await new Promise((resolve) => setTimeout(resolve, 8));
+
+    assert.ok(reconnects >= 1);
+    intentionalClose = true;
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("a reconnect callback failure cannot stop socket recovery", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  const errors = [];
+  let intentionalClose = false;
+  try {
+    const signaling = harness({
+      isIntentionalClose: () => intentionalClose,
+      onError: (error) => errors.push(error.message),
+      onReconnect: () => {
+        throw new Error("UI reconnect callback failed");
+      },
+      reconnectBaseDelayMs: 1,
+      reconnectJitterMs: 0,
+      reconnectMaxDelayMs: 1,
+    });
+    const opening = signaling.open();
+    const first = FakeWebSocket.instances[0];
+    first.onclose({ code: 4000, reason: "network changed" });
+    await assert.rejects(opening, /connection closed/);
+    await new Promise((resolve) => setTimeout(resolve, 8));
+
+    assert.ok(errors.includes("UI reconnect callback failed"));
+    assert.ok(FakeWebSocket.instances.length >= 2);
+    intentionalClose = true;
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("message handler failures close the socket through recovery lifecycle", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  const errors = [];
+  try {
+    const signaling = harness({
+      handleMessage: () => {
+        throw new Error("message state corrupted");
+      },
+      onError: (error) => errors.push(error.message),
+    });
+    const opening = signaling.open();
+    const candidate = FakeWebSocket.instances[0];
+
+    candidate.onmessage({ data: "{}" });
+
+    assert.deepEqual(errors, ["message state corrupted"]);
+    assert.deepEqual(candidate.closeRequest, {
+      code: 4000,
+      reason: "Media signaling message handler failed",
     });
     candidate.onclose(candidate.closeRequest);
     await assert.rejects(opening, /connection closed/);

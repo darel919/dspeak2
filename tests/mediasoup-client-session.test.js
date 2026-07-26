@@ -46,6 +46,31 @@ test("SFU readiness requires every expected inbound and outbound stream", async 
   assert.equal((await client.mediaReadiness(2)).ready, false);
 });
 
+test("SFU readiness expects RTP only from media selected for reception", () => {
+  const client = session();
+  client.consumers.set("microphone", {
+    userId: "user-2",
+    source: "audio",
+  });
+  client.consumers.set("screen", {
+    userId: "user-2",
+    source: "screen",
+  });
+  client.consumers.set("screen-audio", {
+    userId: "user-2",
+    source: "screen-audio",
+  });
+
+  assert.equal(client.expectedInboundFlowCount(), 2);
+
+  client.remoteReceiving.set("user-2:screen", true);
+  assert.equal(client.expectedInboundFlowCount(), 3);
+
+  client.remoteReceiving.set("user-2:screen", false);
+  client.remoteReceiving.set("user-2:screen-audio", false);
+  assert.equal(client.expectedInboundFlowCount(), 1);
+});
+
 test("server errors reject only matching correlated requests", async () => {
   const client = session();
   const produceError = new Promise((resolve) =>
@@ -126,6 +151,46 @@ test("timed out signaling requests clean up and ignore late responses", async ()
   assert.equal(client.pending.has(requestId), false);
   await client.handle("transport-connected", { requestId });
   assert.equal(client.pending.size, 0);
+});
+
+test("failed signaling rejects SFU transport requests immediately", async () => {
+  const client = new MediasoupClientSession({
+    send: () => false,
+    iceServers: [],
+    requestTimeoutMs: 5000,
+  });
+  const connectionErrors = [];
+  client.sendTransport = {
+    id: "send-transport",
+    on(event, handler) {
+      if (event === "connect") this.connectHandler = handler;
+    },
+  };
+  client.bindSendTransport();
+
+  client.sendTransport.connectHandler(
+    { dtlsParameters: {} },
+    () => {},
+    (error) => connectionErrors.push(error),
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(connectionErrors[0].message, /signaling unavailable/);
+  assert.equal(client.pending.size, 0);
+});
+
+test("failed SFU initialization does not leave a ten-second readiness waiter", async () => {
+  const client = new MediasoupClientSession({
+    send: () => false,
+    iceServers: [],
+  });
+  const startedAt = Date.now();
+
+  await assert.rejects(client.initialize(), /signaling unavailable/);
+
+  assert.ok(Date.now() - startedAt < 1000);
+  assert.equal(client.readyPromise, null);
+  assert.equal(client.initializationRequestId, null);
 });
 
 test("stale transport parameters cannot attach to a newer initialization", async () => {
@@ -395,7 +460,7 @@ test("duplicate terminal transport events schedule only one ICE recovery", async
     direction: "send",
     state: "failed",
   });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await new Promise((resolve) => setTimeout(resolve, 20));
 
   assert.equal(restarts, 1);
   client.close();
@@ -431,6 +496,68 @@ test("ICE restart applies only its correlated acknowledgement", async () => {
   assert.equal(await restart, true);
   assert.deepEqual(applied, [{ usernameFragment: "fresh" }]);
   assert.equal(client.pending.size, 0);
+  client.close();
+});
+
+test("concurrent ICE restart requests share one signaling operation", async () => {
+  const sent = [];
+  const applied = [];
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+    requestTimeoutMs: 20,
+  });
+  client.transportStates.set("send", "failed");
+  client.sendTransport = {
+    id: "send-transport",
+    closed: false,
+    close() {},
+    restartIce: async ({ iceParameters }) => applied.push(iceParameters),
+  };
+
+  const first = client.restartTransportIce("send");
+  const second = client.restartTransportIce("send");
+  assert.equal(first, second);
+  assert.equal(sent.length, 1);
+
+  await client.handle("ice-restarted", {
+    requestId: sent[0].data.requestId,
+    iceParameters: { usernameFragment: "shared" },
+  });
+
+  assert.equal(await first, true);
+  assert.deepEqual(applied, [{ usernameFragment: "shared" }]);
+  assert.equal(client.recoveryOperations.size, 0);
+  client.close();
+});
+
+test("late ICE restart acknowledgement does not disturb a recovered transport", async () => {
+  const sent = [];
+  let applied = 0;
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+    requestTimeoutMs: 20,
+  });
+  client.transportStates.set("send", "disconnected");
+  client.sendTransport = {
+    id: "send-transport",
+    closed: false,
+    close() {},
+    restartIce: async () => {
+      applied += 1;
+    },
+  };
+
+  const restart = client.restartTransportIce("send");
+  client.transportStates.set("send", "connected");
+  await client.handle("ice-restarted", {
+    requestId: sent[0].data.requestId,
+    iceParameters: { usernameFragment: "late" },
+  });
+
+  assert.equal(await restart, true);
+  assert.equal(applied, 0);
   client.close();
 });
 
@@ -509,7 +636,7 @@ test("duplicate consumer requests stay deduplicated until a response or error", 
     send: (message) => sent.push(message),
     iceServers: [],
   });
-  client.recvTransport = { id: "recv" };
+  client.recvTransport = { id: "recv", close() {} };
   client.device = { loaded: true, rtpCapabilities: {} };
 
   client.requestConsumer("producer-1");
@@ -523,6 +650,29 @@ test("duplicate consumer requests stay deduplicated until a response or error", 
   });
   client.requestConsumer("producer-1");
   assert.equal(sent.filter((message) => message.type === "consume").length, 2);
+  client.close();
+});
+
+test("rejected consumer requests retry after a transient signaling race", async () => {
+  const sent = [];
+  const client = new MediasoupClientSession({
+    send: (message) => sent.push(message),
+    iceServers: [],
+    consumerRetryDelayMs: 1,
+  });
+  client.recvTransport = { id: "recv", close() {} };
+  client.device = { loaded: true, rtpCapabilities: {} };
+
+  client.requestConsumer("producer-1");
+  client.handleServerError({
+    requestType: "consume",
+    producerId: "producer-1",
+    message: "Transport not found",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  assert.equal(sent.filter((message) => message.type === "consume").length, 2);
+  client.close();
 });
 
 test("closing SFU media explicitly retires consumers without waiting for trackended", () => {
@@ -544,6 +694,17 @@ test("closing SFU media explicitly retires consumers without waiting for tracken
   assert.equal(consumerClosed, 1);
   assert.equal(feedRetired, 1);
   assert.equal(client.consumers.size, 0);
+});
+
+test("SFU media rebuild preserves remote receiving preferences", () => {
+  const client = session();
+  client.remoteReceiving.set("user-2:screen", true);
+
+  client.closeMedia();
+  assert.equal(client.remoteReceiving.get("user-2:screen"), true);
+
+  client.close();
+  assert.equal(client.remoteReceiving.size, 0);
 });
 
 test("remote consumer lifecycle refreshes active media connection state", async () => {
@@ -664,7 +825,7 @@ test("consumer control retries once after a dropped acknowledgement", async () =
   const client = new MediasoupClientSession({
     send: (message) => sent.push(message),
     iceServers: [],
-    consumerControlTimeoutMs: 5,
+    consumerControlTimeoutMs: 20,
   });
   const entry = {
     track: { enabled: false },
@@ -672,7 +833,7 @@ test("consumer control retries once after a dropped acknowledgement", async () =
   };
 
   const resuming = client.setConsumerReceiving(entry, true);
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await new Promise((resolve) => setTimeout(resolve, 25));
   assert.equal(sent.length, 2);
   await client.handle("consumer-resumed", sent[1].data);
 
@@ -703,6 +864,28 @@ test("permanent consumer control failure disables the track and reports failure"
   assert.equal(entry.receiving, false);
   assert.equal(client.pending.size, 0);
   assert.deepEqual(states, [["consumer", "failed"]]);
+});
+
+test("failed consumer control signaling rejects without waiting for timeout", async () => {
+  const client = new MediasoupClientSession({
+    send: () => false,
+    iceServers: [],
+    consumerControlTimeoutMs: 5000,
+  });
+  const entry = {
+    track: { enabled: true },
+    consumer: { id: "consumer-1" },
+  };
+  const startedAt = Date.now();
+
+  await assert.rejects(
+    client.setConsumerReceiving(entry, true),
+    /signaling unavailable/,
+  );
+
+  assert.ok(Date.now() - startedAt < 1000);
+  assert.equal(client.pending.size, 0);
+  assert.equal(entry.track.enabled, false);
 });
 
 test("new remote screen video waits for viewing while shared audio starts", () => {

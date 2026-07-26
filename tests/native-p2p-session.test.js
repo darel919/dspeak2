@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyOpusAudioProfile,
+  countEnabledP2pSources,
   isP2pLivenessExpired,
   mediaFlowSnapshot,
   NativeP2pMesh,
@@ -16,6 +17,16 @@ test("active P2P media stalls do not replace transport health", () => {
     ),
     false,
   );
+});
+
+test("P2P readiness counts only sources selected for transmission", () => {
+  const sources = new Set(["audio", "screen", "screen-audio"]);
+  const receiving = new Map([
+    ["screen", false],
+    ["screen-audio", false],
+  ]);
+
+  assert.equal(countEnabledP2pSources(sources, receiving), 1);
 });
 
 test("P2P receiving preferences disable the remote sender encoding", async () => {
@@ -38,6 +49,41 @@ test("P2P receiving preferences disable the remote sender encoding", async () =>
 
   assert.equal(state.sourceReceiving.get("screen"), false);
   assert.equal(parameters.encodings[0].active, false);
+});
+
+test("P2P sender gating does not create a browser encoding", async () => {
+  let setCalls = 0;
+  const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} });
+  const sender = {
+    getParameters: () => ({ encodings: [] }),
+    async setParameters() {
+      setCalls += 1;
+    },
+  };
+
+  const changed = await mesh.setSenderActive(sender, true);
+
+  assert.equal(changed, false);
+  assert.equal(setCalls, 0);
+});
+
+test("P2P sender enablement tolerates optional browser parameter rejection", async () => {
+  const mesh = new NativeP2pMesh({ iceServers: [], sendSignal() {} });
+  const sender = {
+    getParameters: () => ({ encodings: [{}] }),
+    async setParameters() {
+      throw new DOMException(
+        "Read-only field modified in setParameters().",
+        "InvalidModificationError",
+      );
+    },
+  };
+
+  assert.equal(await mesh.setSenderActive(sender, true), false);
+  await assert.rejects(
+    mesh.setSenderActive(sender, false),
+    /Read-only field modified/,
+  );
 });
 
 test("local microphone gating preserves the remote receiving preference", async () => {
@@ -117,6 +163,10 @@ test("P2P screen receiving signals video and shared audio together", () => {
     sendSignal: (signal) => signals.push(signal),
   });
   mesh.epoch = 7;
+  mesh.connections.set("peer-2", {
+    remoteReceiving: new Map(),
+    remoteSourceNames: new Set(["audio", "screen", "screen-audio"]),
+  });
 
   mesh.setRemoteReceiving("peer-2", "screen", false);
 
@@ -127,6 +177,7 @@ test("P2P screen receiving signals video and shared audio together", () => {
       { source: "screen-audio", receiving: false },
     ],
   );
+  assert.equal(mesh.connections.get("peer-2").expectedRemoteSources, 1);
 });
 
 test("late P2P source identity reclassifies a generic track with a different browser ID", async () => {
@@ -263,6 +314,65 @@ test("P2P source toggles reuse their sender instead of accumulating transceivers
   ]);
 });
 
+test("P2P signaling failures are surfaced and do not escape event callbacks", () => {
+  const failures = [];
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: () => false,
+    onFailure: (failure) => failures.push(failure),
+  });
+  mesh.mode = "p2p";
+  mesh.epoch = 4;
+
+  assert.equal(
+    mesh.signal("peer-2", { candidate: { candidate: "candidate" } }),
+    false,
+  );
+  assert.deepEqual(failures, [
+    { reason: "signaling-unavailable", error: undefined, epoch: 4 },
+  ]);
+
+  const throwingMesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: () => {
+      throw new Error("socket closed");
+    },
+    onFailure: (failure) => failures.push(failure),
+  });
+  throwingMesh.mode = "p2p";
+  throwingMesh.epoch = 5;
+
+  assert.equal(throwingMesh.signal("peer-2", { description: {} }), false);
+  assert.equal(failures.at(-1).reason, "signaling-send-failed");
+  assert.equal(failures.at(-1).error.message, "socket closed");
+});
+
+test("P2P qualification is not latched when its ready signal is dropped", () => {
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: () => false,
+  });
+  mesh.mode = "probing";
+  mesh.epoch = 6;
+  mesh.connections.set("peer-2", {
+    peerId: "peer-2",
+    pc: { connectionState: "connected" },
+    channel: { readyState: "open" },
+    healthReceived: 3,
+    mediaReady: true,
+    selectedPair: {
+      state: "succeeded",
+      nominated: true,
+      local: { candidateType: "host" },
+      remote: { candidateType: "host" },
+    },
+  });
+
+  mesh.checkQualification();
+
+  assert.equal(mesh.readyReported, false);
+});
+
 test("P2P identifies a new source before negotiation can deliver its track", async () => {
   const operations = [];
   const mesh = new NativeP2pMesh({
@@ -379,7 +489,8 @@ test("P2P source restoration republishes the preserved remote receiver track", a
   mesh.connections.set("peer-2", {
     peerId: "peer-2",
     userId: "user-2",
-    remoteTracks: new Map([["camera", entry]]),
+    remoteTracks: new Map(),
+    retiredRemoteTracks: new Map([["camera", entry]]),
   });
 
   await mesh.receiveSignal({
@@ -389,6 +500,14 @@ test("P2P source restoration republishes the preserved remote receiver track", a
   });
 
   assert.deepEqual(restored, [entry]);
+  assert.equal(
+    mesh.connections.get("peer-2").remoteTracks.get("camera"),
+    entry,
+  );
+  assert.equal(
+    mesh.connections.get("peer-2").retiredRemoteTracks.has("camera"),
+    false,
+  );
 });
 
 test("P2P source removal retires the retained remote receiver track", async () => {
@@ -421,6 +540,7 @@ test("P2P source removal retires the retained remote receiver track", async () =
 
   assert.deepEqual(retired, [entry]);
   assert.equal(state.remoteTracks.has("camera"), false);
+  assert.equal(state.retiredRemoteTracks.get("camera"), entry);
   assert.equal(mesh.remoteSources.has("peer-2:camera-track"), false);
 });
 
@@ -452,7 +572,7 @@ test("topology identity reconciles an early signaling connection", () => {
   );
 });
 
-test("polite glare rollback answers before sender reconfiguration can fail", async () => {
+test("polite glare rollback answers without touching an unnegotiated sender", async () => {
   const operations = [];
   const signals = [];
   const failures = [];
@@ -521,7 +641,66 @@ test("polite glare rollback answers before sender reconfiguration can fail", asy
     "local:answer",
   ]);
   assert.equal(signals.at(-1).signal.description.type, "answer");
-  assert.equal(failures.at(-1).reason, "sender-configuration-failed");
+  assert.deepEqual(failures, []);
+});
+
+test("polite glare completes rollback before applying the remote offer", async () => {
+  let finishRollback;
+  let remoteDescriptionCalls = 0;
+  const rollback = new Promise((resolve) => {
+    finishRollback = resolve;
+  });
+  const pc = {
+    signalingState: "have-local-offer",
+    remoteDescription: null,
+    localDescription: null,
+    async setLocalDescription(description) {
+      if (description.type === "rollback") {
+        await rollback;
+        this.signalingState = "stable";
+        return;
+      }
+      this.localDescription = description;
+      this.signalingState = "stable";
+    },
+    async setRemoteDescription(description) {
+      remoteDescriptionCalls += 1;
+      this.remoteDescription = description;
+      this.signalingState = "have-remote-offer";
+    },
+    async createAnswer() {
+      return { type: "answer", sdp: "v=0\r\n" };
+    },
+    getTransceivers: () => [],
+  };
+  const mesh = new NativeP2pMesh({
+    iceServers: [],
+    sendSignal: () => true,
+  });
+  mesh.epoch = 3;
+  mesh.connections.set("peer-2", {
+    peerId: "peer-2",
+    polite: true,
+    makingOffer: true,
+    settingRemoteAnswer: false,
+    ignoreOffer: false,
+    pc,
+    candidates: [],
+    senders: new Map(),
+  });
+
+  const receiving = mesh.receiveSignal({
+    fromPeerId: "peer-2",
+    epoch: 3,
+    signal: { description: { type: "offer", sdp: "v=0\r\n" } },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(remoteDescriptionCalls, 0);
+
+  finishRollback();
+  await receiving;
+  assert.equal(remoteDescriptionCalls, 1);
 });
 
 test("P2P SDP requests stereo low-latency Opus with loss protection", () => {

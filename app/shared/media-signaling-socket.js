@@ -1,3 +1,21 @@
+export function mediaSignalingUrl(
+  configuredPath,
+  channelId,
+  location = window.location,
+) {
+  const origin = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
+  const base = configuredPath || `${origin}/socket`;
+  return `${base}?channelId=${encodeURIComponent(channelId)}`;
+}
+
+export function closeMediaSignalingForRecovery(socket) {
+  try {
+    socket?.close(4000, "Media signaling session recovery required");
+  } catch (error) {
+    console.warn("[Media] failed to recycle signaling socket", error);
+  }
+}
+
 export function createMediaSignalingSocket({
   buildHeartbeatData,
   buildUrl,
@@ -12,6 +30,9 @@ export function createMediaSignalingSocket({
   onProtocolRejected,
   onReconnect,
   protocol,
+  reconnectBaseDelayMs = 500,
+  reconnectJitterMs = 250,
+  reconnectMaxDelayMs = 10000,
 }) {
   let socket = null;
   let pendingReady = null;
@@ -25,9 +46,21 @@ export function createMediaSignalingSocket({
   let heartbeatTimeoutMs = defaultHeartbeatTimeoutMs;
   let protocolState = null;
 
+  function reportError(error) {
+    try {
+      onError(error);
+    } catch (reportingError) {
+      console.error("[Media] signaling error reporter failed", reportingError);
+    }
+  }
+
   function send(message) {
     if (isIntentionalClose()) return false;
-    if (socket?.readyState !== WebSocket.OPEN) return false;
+    if (socket?.readyState !== WebSocket.OPEN) {
+      if (socket && socket.readyState !== WebSocket.CLOSED)
+        socket.close(4000, "Media signaling socket is not writable");
+      return false;
+    }
     try {
       socket.send(JSON.stringify(message));
       return true;
@@ -47,38 +80,69 @@ export function createMediaSignalingSocket({
     lastHeartbeatAckAt = Date.now();
     lastHeartbeatAckSequence = heartbeatSequence;
     const heartbeat = () => {
-      if (Date.now() - lastHeartbeatAckAt >= heartbeatTimeoutMs) {
-        console.warn("[Media] signaling heartbeat acknowledgement timed out");
-        socket?.close(4000, "Signaling heartbeat timed out");
-        return;
+      try {
+        if (Date.now() - lastHeartbeatAckAt >= heartbeatTimeoutMs) {
+          console.warn("[Media] signaling heartbeat acknowledgement timed out");
+          socket?.close(4000, "Signaling heartbeat timed out");
+          return;
+        }
+        heartbeatSequence += 1;
+        send({
+          type: "heartbeat",
+          data: buildHeartbeatData(heartbeatSequence),
+        });
+      } catch (error) {
+        reportError(error);
+        socket?.close(4000, "Signaling heartbeat failed");
       }
-      heartbeatSequence += 1;
-      send({
-        type: "heartbeat",
-        data: buildHeartbeatData(heartbeatSequence),
-      });
     };
     heartbeat();
     heartbeatTimer = setInterval(heartbeat, heartbeatIntervalMs);
   }
 
+  function stopReconnect() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
   function open() {
     if (pendingReady?.promise) return pendingReady.promise;
     if (socket?.readyState === WebSocket.OPEN) return Promise.resolve();
+    stopReconnect();
     const promise = new Promise((resolve, reject) => {
-      const candidate = new WebSocket(buildUrl());
+      let candidate;
+      try {
+        candidate = new WebSocket(buildUrl());
+      } catch (error) {
+        reject(error);
+        if (!isIntentionalClose()) scheduleReconnect();
+        return;
+      }
       socket = candidate;
       const timeout = setTimeout(() => {
         candidate.close(4000, "Media signaling connection timed out");
         pendingReady = null;
         reject(new Error("Media signaling connection timed out"));
+        if (!isIntentionalClose()) scheduleReconnect();
       }, connectionTimeoutMs);
       pendingReady = { candidate, resolve, reject, timeout, promise: null };
       candidate.onopen = () => {
-        if (socket === candidate) onOpen();
+        if (socket !== candidate) return;
+        try {
+          onOpen();
+        } catch (error) {
+          reportError(error);
+          candidate.close(4000, "Media signaling open handler failed");
+        }
       };
       candidate.onmessage = (event) => {
-        if (socket === candidate) handleMessage(event.data);
+        if (socket !== candidate) return;
+        try {
+          handleMessage(event.data);
+        } catch (error) {
+          reportError(error);
+          candidate.close(4000, "Media signaling message handler failed");
+        }
       };
       candidate.onerror = () => {
         candidate.close(4000, "Media signaling connection failed");
@@ -103,9 +167,20 @@ export function createMediaSignalingSocket({
         protocolState = null;
         stopHeartbeat();
         const protocolRejected = event.code === protocol.closeCode;
-        if (protocolRejected) onProtocolRejected(event);
-        onClose(event, protocolRejected);
-        if (!isIntentionalClose() && !protocolRejected) scheduleReconnect();
+        if (protocolRejected) {
+          try {
+            onProtocolRejected(event);
+          } catch (error) {
+            reportError(error);
+          }
+        }
+        try {
+          onClose(event, protocolRejected);
+        } catch (error) {
+          reportError(error);
+        } finally {
+          if (!isIntentionalClose() && !protocolRejected) scheduleReconnect();
+        }
       };
     });
     if (pendingReady) pendingReady.promise = promise;
@@ -134,6 +209,7 @@ export function createMediaSignalingSocket({
     const pending = pendingReady;
     if (pending?.candidate !== socket) return false;
     clearTimeout(pending.timeout);
+    stopReconnect();
     pendingReady = null;
     reconnectAttempt = 0;
     startHeartbeat();
@@ -144,17 +220,23 @@ export function createMediaSignalingSocket({
   function scheduleReconnect() {
     if (reconnectTimer || isIntentionalClose()) return;
     const delay =
-      Math.min(10000, 500 * 2 ** reconnectAttempt) +
-      Math.floor(Math.random() * 250);
+      Math.min(
+        reconnectMaxDelayMs,
+        reconnectBaseDelayMs * 2 ** reconnectAttempt,
+      ) + Math.floor(Math.random() * reconnectJitterMs);
     reconnectAttempt += 1;
     reconnectTimer = setTimeout(async () => {
       reconnectTimer = null;
-      onReconnect();
+      try {
+        onReconnect();
+      } catch (error) {
+        reportError(error);
+      }
       try {
         await open();
       } catch (error) {
         if (!isIntentionalClose()) {
-          onError(error);
+          reportError(error);
           scheduleReconnect();
         }
       }
@@ -162,8 +244,7 @@ export function createMediaSignalingSocket({
   }
 
   function stop() {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+    stopReconnect();
     const pending = pendingReady;
     pendingReady = null;
     if (pending) {

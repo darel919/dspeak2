@@ -1,9 +1,7 @@
 export async function applyRtpSenderSettings(sender, options = {}) {
   if (!sender?.getParameters || !sender?.setParameters) return false;
   const parameters = sender.getParameters();
-  parameters.encodings = parameters.encodings?.length
-    ? parameters.encodings
-    : [{}];
+  if (!parameters.encodings?.length) return false;
   const requested = options.encodings?.[0] || {};
   const encoding = parameters.encodings[0];
 
@@ -19,6 +17,18 @@ export async function applyRtpSenderSettings(sender, options = {}) {
   if (options.degradationPreference)
     parameters.degradationPreference = options.degradationPreference;
 
-  await sender.setParameters(parameters);
+  try {
+    await sender.setParameters(parameters);
+  } catch (error) {
+    if (
+      [
+        "InvalidModificationError",
+        "InvalidAccessError",
+        "NotSupportedError",
+      ].includes(error?.name)
+    )
+      return false;
+    throw error;
+  }
   return true;
 }

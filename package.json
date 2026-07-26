@@ -12,6 +12,7 @@
     "format:check": "prettier --check . --ignore-unknown",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "smoke:p2p-browser": "bun scripts/p2p-browser-smoke.mjs",
     "start": "node --env-file=.env .output/server/index.mjs",
     "test": "node --test tests/*.test.js",
     "postinstall": "nuxt prepare"

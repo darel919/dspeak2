@@ -15,6 +15,13 @@ test("initial media topology waits for its first peer", () => {
   });
 });
 
+test("initial media topology records a reconnect reason", () => {
+  assert.equal(
+    initialMediaTopologyState("reconnecting").reason,
+    "reconnecting",
+  );
+});
+
 test("retiring a media generation rejects delayed topology work", () => {
   const generation = createMediaGeneration();
   const captured = generation.capture();

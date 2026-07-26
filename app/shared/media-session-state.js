@@ -1,8 +1,8 @@
-export function initialMediaTopologyState() {
+export function initialMediaTopologyState(reason = "waiting-for-peer") {
   return {
     mode: "idle",
     epoch: 0,
-    reason: "waiting-for-peer",
+    reason,
     peers: [],
     activatedAt: null,
   };

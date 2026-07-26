@@ -24,8 +24,10 @@ import { createMediaLifecycleState } from "~/shared/media-lifecycle-trace.js";
 import { createMediaAudioPolicy } from "~/shared/media-audio-policy.js";
 import { setupMediaMessageHandlers } from "~/shared/media-message-handlers.js";
 import {
+  closeMediaSignalingForRecovery,
   createMediaSignalingSocket,
   dispatchMediaSignalingMessage,
+  mediaSignalingUrl,
 } from "~/shared/media-signaling-socket.js";
 import { createMediaSourceController } from "~/shared/media-source-controller.js";
 import { bindMediaVisibility } from "~/shared/media-visibility.js";
@@ -141,11 +143,7 @@ export function useHybridMediaSession() {
       topologyEpoch: topologyState.value.epoch,
       sourceRevision: topologyState.value.sourceRevision || 0,
     }),
-    buildUrl: () => {
-      const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-      const base = runtimeConfig.public.sfuPath || `${origin}/socket`;
-      return `${base}?channelId=${encodeURIComponent(channelId)}`;
-    },
+    buildUrl: () => mediaSignalingUrl(runtimeConfig.public.sfuPath, channelId),
     connectionTimeoutMs: MEDIA_TIMING.connectionTimeoutMs,
     defaultHeartbeatIntervalMs: MEDIA_TIMING.heartbeatIntervalMs,
     defaultHeartbeatTimeoutMs: MEDIA_TIMING.heartbeatTimeoutMs,
@@ -156,9 +154,7 @@ export function useHybridMediaSession() {
       }),
     isIntentionalClose: () => intentionalClose,
     onClose: handleSignalingClose,
-    onError: (signalingError) => {
-      error.value = signalingError.message;
-    },
+    onError: (signalingError) => (error.value = signalingError.message),
     onOpen: () => setConnectionPhase("protocol-negotiating"),
     onProtocolRejected: (event) => {
       protocolUpdateRequired.value = true;
@@ -303,6 +299,10 @@ export function useHybridMediaSession() {
     connected.value = false;
     protocolState.value = null;
     if (intentionalClose) return;
+    if (protocolRejected)
+      topologyWaiter?.(
+        new Error(event.reason || "Media signaling protocol was rejected"),
+      );
     closeMediaProviders({
       getP2pMesh: () => p2pMesh,
       getSfu: () => sfu,
@@ -336,18 +336,17 @@ export function useHybridMediaSession() {
   }
   function resetTopologySequencing(reason = "reconnecting") {
     mediaGeneration.retire();
+    preparedTransition = null;
+    reportedSfuFailureEpoch = null;
+    localPeerId = null;
+    lastP2pEdges = [];
+    rtpStatsSamples.clear();
     pendingTopologyKey = null;
     appliedTopologyKey = null;
     latestTopologyKey = null;
     highestQueuedEpoch = 0;
     topologyOperation = Promise.resolve();
-    topologyState.value = {
-      mode: "idle",
-      epoch: 0,
-      reason,
-      peers: [],
-      activatedAt: null,
-    };
+    topologyState.value = initialMediaTopologyState(reason);
     attenuationReporter.clear();
   }
   function setupHandlers() {
@@ -394,8 +393,8 @@ export function useHybridMediaSession() {
       iceServers,
       sendSignal: (payload) => {
         if (payload.type === "ready")
-          send({ type: "p2p-ready", data: payload });
-        else send({ type: "p2p-signal", data: payload });
+          return send({ type: "p2p-ready", data: payload });
+        return send({ type: "p2p-signal", data: payload });
       },
       onRemoteTrack: (entry) =>
         handoff.stage({ ...entry, provider: "p2p" }, activeProvider),
@@ -991,10 +990,12 @@ export function useHybridMediaSession() {
     iceConnectedBoth.value = false;
     mediaConnectionState.value = "failed";
     setConnectionPhase("failed", { reason: message });
+    closeMediaSignalingForRecovery(signaling.getSocket());
   }
   function disconnect() {
     rtpStatsSamples.clear();
     intentionalClose = true;
+    topologyWaiter?.(new Error("Media signaling connection stopped"));
     channelId = null;
     signaling.stop();
     stopLocalVoiceDetection();

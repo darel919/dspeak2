@@ -65,15 +65,22 @@ function waitForSfuHandoff({
         reject(new Error("Topology handoff was superseded"));
         return;
       }
+      const sfu = getSfu();
+      const expectedSfu = countExpectedSfuFeeds(
+        topologyState,
+        localPeerId,
+        sfu,
+      );
       const tracksReady = checkTracksReady(
         handoff,
         "sfu",
         topologyState,
         localPeerId,
+        sfu,
       );
       const readiness = tracksReady
-        ? await getSfu()
-            ?.mediaReadiness(expected)
+        ? await sfu
+            ?.mediaReadiness(sfu?.expectedInboundFlowCount?.() ?? expected)
             .catch((error) => ({ ready: false, error: error.message }))
         : null;
       if (tracksReady && readiness?.ready === true) {
@@ -83,7 +90,7 @@ function waitForSfuHandoff({
       if (Date.now() - startedAt >= timeoutMs) {
         reject(
           new Error(
-            `SFU media did not become ready for handoff (tracks ${handoff.count("sfu")}/${expected}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expected})`,
+            `SFU media did not become ready for handoff (tracks ${handoff.count("sfu")}/${expectedSfu}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expectedSfu})`,
           ),
         );
         return;
@@ -151,7 +158,48 @@ function countExpectedFeeds(topologyState, localPeerId) {
     );
 }
 
-function checkTracksReady(handoff, provider, topologyState, localPeerId) {
+function countExpectedSfuFeeds(topologyState, localPeerId, sfu) {
+  return topologyState.value.peers
+    .filter((peer) => String(peer.peerId) !== String(localPeerId))
+    .reduce(
+      (count, peer) =>
+        count +
+        (Array.isArray(peer.sources)
+          ? peer.sources.filter((source) =>
+              shouldExpectSfuSource(sfu, peer.userId, source),
+            ).length
+          : 0),
+      0,
+    );
+}
+
+function shouldExpectSfuSource(sfu, userId, source) {
+  return sfu?.shouldReceive ? sfu.shouldReceive(userId, source) : true;
+}
+
+function checkTracksReady(
+  handoff,
+  provider,
+  topologyState,
+  localPeerId,
+  sfu = null,
+) {
+  if (provider === "sfu" && sfu?.shouldReceive) {
+    const tracks = [...handoff.entries(provider)];
+    return topologyState.value.peers
+      .filter((peer) => String(peer.peerId) !== String(localPeerId))
+      .every((peer) =>
+        (Array.isArray(peer.sources) ? peer.sources : []).every(
+          (source) =>
+            !shouldExpectSfuSource(sfu, peer.userId, source) ||
+            tracks.some(
+              (entry) =>
+                String(entry.userId) === String(peer.userId) &&
+                entry.source === source,
+            ),
+        ),
+      );
+  }
   return handoff.hasExpectedFeeds(
     provider,
     topologyState.value.peers,
@@ -166,10 +214,11 @@ export function waitForInitialMediaTopology({ isReady, setWaiter, timeoutMs }) {
       setWaiter(null);
       reject(new Error("Initial media topology timed out"));
     }, timeoutMs);
-    setWaiter(() => {
+    setWaiter((error = null) => {
       clearTimeout(timeout);
       setWaiter(null);
-      resolve();
+      if (error) reject(error);
+      else resolve();
     });
   });
 }
