@@ -353,6 +353,15 @@
                     }}</strong>
                   </div>
                   <div>
+                    <span>Min buffer</span
+                    ><strong>{{
+                      formatMs(
+                        transport.inboundAudio
+                          .averageJitterBufferMinimumDelayMs,
+                      )
+                    }}</strong>
+                  </div>
+                  <div>
                     <span>Bytes received</span
                     ><strong>{{
                       formatBytes(transport.inboundAudio.bytesReceived)

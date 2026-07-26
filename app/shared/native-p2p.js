@@ -253,6 +253,8 @@ export class NativeP2pMesh {
     this.healthRunToken = 0;
     this.senderOperations = new WeakMap();
     this.trackOperations = new WeakMap();
+    this.jitterBufferMinimumDelay = 0;
+    this.jitterBufferTargetDelay = 20;
   }
 
   applyTopology({ mode, epoch, peers, localPeerId }) {
@@ -356,6 +358,7 @@ export class NativeP2pMesh {
       remoteSourceNames: new Set(),
       remoteTracks: new Map(),
       retiredRemoteTracks: new Map(),
+      audioReceivers: new Map(),
       expectedRemoteSources: 0,
       mediaReady: false,
       lastOutboundBytes: null,
@@ -719,6 +722,9 @@ export class NativeP2pMesh {
       exactSource ||
       (unmatchedSources.length === 1 ? unmatchedSources[0] : track.kind);
     const key = p2pRemoteFeedKey(state.peerId, source);
+    if (track.kind === "audio") {
+      state.audioReceivers.set(source, event.receiver);
+    }
     const entry = {
       key,
       peerId: state.peerId,
@@ -738,6 +744,7 @@ export class NativeP2pMesh {
           state.remoteTracks.delete(source);
         if (state.retiredRemoteTracks.get(source)?.track === track)
           state.retiredRemoteTracks.delete(source);
+        state.audioReceivers.delete(source);
         this.onRemoteTrackEnded({
           key,
           peerId: state.peerId,
@@ -1191,6 +1198,22 @@ export class NativeP2pMesh {
       );
   }
 
+  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 }) {
+    this.jitterBufferMinimumDelay = minDelayMs >= 0 ? minDelayMs / 1000 : 0;
+    this.jitterBufferTargetDelay = targetDelayMs >= 0 ? targetDelayMs : 20;
+    for (const state of this.connections.values()) {
+      for (const [, receiver] of state.audioReceivers) {
+        if (!receiver) continue;
+        try {
+          if (receiver.jitterBufferMinimumDelay !== undefined)
+            receiver.jitterBufferMinimumDelay = this.jitterBufferMinimumDelay;
+          if (receiver.jitterBufferTarget !== undefined)
+            receiver.jitterBufferTarget = this.jitterBufferTargetDelay;
+        } catch (_) {}
+      }
+    }
+  }
+
   fail(reason, error) {
     if (this.mode !== "probing" && this.mode !== "p2p") return;
     const key = `${this.epoch}:${this.mode}`;
@@ -1208,6 +1231,7 @@ export class NativeP2pMesh {
       this.onRemoteTrackEnded(entry);
     state.remoteTracks.clear();
     state.retiredRemoteTracks?.clear();
+    state.audioReceivers.clear();
     try {
       state.channel?.close();
     } catch (error) {

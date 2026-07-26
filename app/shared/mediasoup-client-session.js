@@ -75,6 +75,8 @@ export class MediasoupClientSession {
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
     this.remoteReceiving = new Map();
+    this.jitterBufferMinimumDelay = 0;
+    this.jitterBufferTargetDelay = 20;
     this.transportStates = new Map([
       ["send", "new"],
       ["recv", "new"],
@@ -712,8 +714,10 @@ export class MediasoupClientSession {
     consumer.on("trackended", close);
     try {
       if (consumer.receiver?.jitterBufferTarget !== undefined)
-        consumer.receiver.jitterBufferTarget = 40;
+        consumer.receiver.jitterBufferTarget =
+          this.jitterBufferTargetDelay ?? 20;
     } catch (_) {}
+    this.applyJitterBufferConfig(entry);
     if (this.shouldReceive(data.userId, entry.source))
       await this.setConsumerReceiving(entry, true);
     this.onRemoteTrack?.(entry);
@@ -744,6 +748,25 @@ export class MediasoupClientSession {
           operations.push(this.setConsumerReceiving(entry, receiving));
     }
     return Promise.all(operations);
+  }
+
+  applyJitterBufferConfig(entry) {
+    const receiver = entry?.consumer?.receiver;
+    if (!receiver) return;
+    try {
+      if (receiver.jitterBufferMinimumDelay !== undefined)
+        receiver.jitterBufferMinimumDelay = this.jitterBufferMinimumDelay ?? 0;
+      if (receiver.jitterBufferTarget !== undefined)
+        receiver.jitterBufferTarget = this.jitterBufferTargetDelay ?? 20;
+    } catch (_) {}
+  }
+
+  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 }) {
+    this.jitterBufferMinimumDelay = minDelayMs >= 0 ? minDelayMs / 1000 : 0;
+    this.jitterBufferTargetDelay = targetDelayMs >= 0 ? targetDelayMs : 20;
+    for (const entry of this.consumers.values()) {
+      this.applyJitterBufferConfig(entry);
+    }
   }
 
   async setConsumerReceiving(entry, receiving) {

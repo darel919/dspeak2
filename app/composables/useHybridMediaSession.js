@@ -57,6 +57,11 @@ import {
   mapPeerRoundTripTimes,
 } from "~/shared/voice-transport.js";
 import {
+  computeJitterBufferConfig,
+  computeSfuJitterBufferConfig,
+  smoothJitterBufferConfig,
+} from "~/shared/adaptive-jitter-buffer.js";
+import {
   matchesPreparedActivation,
   shouldAcceptTopologyEvent,
   topologyEventKey,
@@ -100,6 +105,7 @@ export function useHybridMediaSession() {
   const peerRoundTripTimes = ref({});
   const peerConnectionMetrics = ref({});
   const sfuRoundTripTime = ref(null);
+  const currentJitterBufferConfig = ref({ minDelayMs: 0, targetDelayMs: 20 });
   const participantSfuRoundTripTimes = ref({});
   const activeProviderState = ref(null);
   const topologyState = ref(initialMediaTopologyState());
@@ -265,8 +271,17 @@ export function useHybridMediaSession() {
   });
   const handoff = new RemoteMediaHandoff(registry);
   function setActiveProvider(provider) {
+    if (provider !== activeProvider) {
+      if (activeProvider === "sfu" && sfu) {
+        sfu.setJitterBufferConfig({ minDelayMs: 0, targetDelayMs: 20 });
+      } else if (activeProvider === "p2p" && p2pMesh) {
+        p2pMesh.setJitterBufferConfig({ minDelayMs: 0, targetDelayMs: 20 });
+      }
+      currentJitterBufferConfig.value = { minDelayMs: 0, targetDelayMs: 20 };
+    }
     activeProvider = provider;
     activeProviderState.value = provider;
+    if (provider) applyAdaptiveJitterBuffer();
   }
   function send(message) {
     return signaling.send(message);
@@ -612,6 +627,7 @@ export function useHybridMediaSession() {
       peerRoundTripTimes.value = {};
       peerConnectionMetrics.value = {};
       sfuRoundTripTime.value = null;
+      currentJitterBufferConfig.value = { minDelayMs: 0, targetDelayMs: 20 };
       participantSfuRoundTripTimes.value = {};
       transportReady.value = true;
       iceConnectedBoth.value = false;
@@ -985,6 +1001,50 @@ export function useHybridMediaSession() {
         transportReady: transportReady.value,
       }),
   });
+  function applyAdaptiveJitterBuffer() {
+    const provider = activeProvider;
+    if (provider === "p2p" && p2pMesh) {
+      const values = Object.values(peerConnectionMetrics.value).filter(
+        (m) => m && Number.isFinite(m.rttMs),
+      );
+      const jitterMs = values.reduce(
+        (max, m) => Math.max(max, m.jitterMs ?? 0),
+        0,
+      );
+      const rttMs = values.reduce((max, m) => Math.max(max, m.rttMs ?? 0), 0);
+      const lossPercent = values.reduce(
+        (max, m) => Math.max(max, m.packetLossPercent ?? 0),
+        0,
+      );
+      const raw = computeJitterBufferConfig({ jitterMs, rttMs, lossPercent });
+      if (raw) {
+        const smoothed = smoothJitterBufferConfig(
+          currentJitterBufferConfig.value,
+          raw,
+        );
+        currentJitterBufferConfig.value = smoothed;
+        p2pMesh.setJitterBufferConfig(smoothed);
+      }
+    } else if (provider === "sfu" && sfu) {
+      const rttMs = sfuRoundTripTime.value;
+      const raw = computeSfuJitterBufferConfig({ rttMs });
+      if (raw) {
+        const smoothed = smoothJitterBufferConfig(
+          currentJitterBufferConfig.value,
+          raw,
+        );
+        currentJitterBufferConfig.value = smoothed;
+        sfu.setJitterBufferConfig(smoothed);
+      }
+    }
+  }
+  watch(
+    () => [peerConnectionMetrics.value, sfuRoundTripTime.value],
+    () => {
+      applyAdaptiveJitterBuffer();
+    },
+    { deep: true, immediate: false },
+  );
   function failSession(message) {
     error.value = message;
     iceConnectedBoth.value = false;
