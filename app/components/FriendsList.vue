@@ -1,5 +1,5 @@
 <template>
-  <details class="dropdown dropdown-end relative z-30">
+  <details ref="dropdownRef" class="dropdown dropdown-end relative z-30">
     <summary
       class="btn btn-square btn-ghost btn-sm relative"
       aria-label="Friends"
@@ -189,6 +189,7 @@ const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
 const router = useRouter();
 
+const dropdownRef = ref(null);
 const showRequests = ref(false);
 const showAddFriend = ref(false);
 const friendHandle = ref("");
@@ -209,6 +210,20 @@ onMounted(async () => {
     friendsStore.fetchFriendRequests(),
   ]);
   localFriendRequests.value = [...friendsStore.friendRequests];
+
+  const handleOutsideClick = (event) => {
+    if (
+      dropdownRef.value &&
+      !dropdownRef.value.contains(event.target) &&
+      dropdownRef.value.open
+    ) {
+      dropdownRef.value.removeAttribute("open");
+    }
+  };
+  document.addEventListener("pointerdown", handleOutsideClick);
+  onScopeDispose(() =>
+    document.removeEventListener("pointerdown", handleOutsideClick),
+  );
 });
 
 const sortedFriends = computed(() => {

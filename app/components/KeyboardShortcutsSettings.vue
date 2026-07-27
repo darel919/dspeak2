@@ -33,7 +33,7 @@
             <kbd
               class="inline-flex shrink-0 items-center gap-1 rounded-md border border-base-300 bg-base-200 px-2 py-0.5 font-mono text-xs"
             >
-              <template v-for="(key, ki) in shortcut.keys" :key="ki">
+              <template v-for="(key, ki) in shortcut.displayKeys" :key="ki">
                 <span v-if="ki > 0" class="text-base-content/40">+</span>
                 <span>{{ key }}</span>
               </template>
@@ -53,7 +53,22 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.js";
+
+function formatKeyForDisplay(key) {
+  const isMac = navigator.platform.includes("Mac");
+  return key
+    .replace("Mod", isMac ? "⌘" : "Ctrl")
+    .replace("Shift", isMac ? "⇧" : "Shift")
+    .replace("Alt", isMac ? "⌥" : "Alt")
+    .replace("ArrowUp", "↑")
+    .replace("ArrowDown", "↓")
+    .replace("ArrowLeft", "←")
+    .replace("ArrowRight", "→")
+    .replace("Escape", "Esc")
+    .replace("Enter", "⏎");
+}
 
 const shortcutGroups = computed(() => {
   const groups = {};
@@ -65,7 +80,7 @@ const shortcutGroups = computed(() => {
       id: shortcut.id,
       label: shortcut.label,
       description: shortcut.description,
-      keys: shortcut.keys.map((k) => k.replace("Mod", "Ctrl")),
+      displayKeys: shortcut.keys.map((k) => formatKeyForDisplay(k)),
     });
   }
   return Object.entries(groups).map(([scope, shortcuts]) => ({

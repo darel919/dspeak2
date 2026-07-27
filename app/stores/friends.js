@@ -117,10 +117,10 @@ export const useFriendsStore = defineStore("friends", () => {
       body: JSON.stringify({ action: "respond", requestId, accept }),
     });
     if (accept) {
+      await fetchFriends();
       friendRequests.value = friendRequests.value.filter(
         (r) => r.id !== requestId,
       );
-      await fetchFriends();
     } else {
       friendRequests.value = friendRequests.value.filter(
         (r) => r.id !== requestId,

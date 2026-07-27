@@ -29,6 +29,9 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
   let idleCheckInterval = null;
   let presenceWs = null;
   let intentDisconnect = false;
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_ATTEMPTS = 10;
+  const BASE_RECONNECT_DELAY = 1000;
 
   const label = computed(
     () => PRESENCE_LABELS[effectiveStatus.value] || "Offline",
@@ -62,6 +65,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     if (!userData?.id) return;
+    if (presenceWs && presenceWs.readyState === WebSocket.OPEN) return;
 
     intentDisconnect = false;
     const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
@@ -73,6 +77,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
 
     socket.onopen = () => {
       if (socket !== presenceWs) return socket.close();
+      reconnectAttempts = 0;
       connectionStatus.value = "connected";
       effectiveStatus.value = normalizePresenceStatus(
         presenceOverride.value || "online",
@@ -112,7 +117,15 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
       connectionStatus.value = "disconnected";
       stopActivityTracking();
       if (!intentDisconnect) {
-        setTimeout(() => connect(), 3000);
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          const delay =
+            BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts) +
+            Math.random() * 1000;
+          reconnectAttempts++;
+          setTimeout(() => connect(), delay);
+        } else {
+          console.warn("[Presence] Max reconnect attempts reached, giving up");
+        }
       }
     };
 
@@ -123,6 +136,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
 
   function disconnect() {
     intentDisconnect = true;
+    reconnectAttempts = 0;
     stopActivityTracking();
     if (presenceWs) {
       presenceWs.onclose = null;
@@ -132,7 +146,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
   }
 
   function startActivityTracking() {
-    stopActivityTracking();
+    if (activityTimer) return;
 
     const events = [
       "mousedown",
@@ -141,10 +155,6 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
       "scroll",
       "mousemove",
     ];
-    const handler = () => {
-      sendActivity();
-    };
-
     let lastActivitySent = 0;
     const throttledHandler = () => {
       const now = Date.now();

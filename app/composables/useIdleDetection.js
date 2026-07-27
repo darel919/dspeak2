@@ -1,6 +1,8 @@
 import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { DEFAULT_IDLE_TIMEOUT_MS } from "~~/shared/presence-status.js";
 
+let isInitialized = false;
+
 export function useIdleDetection() {
   const presenceStore = usePresenceStatusStore();
   const idleTimeoutMs = ref(DEFAULT_IDLE_TIMEOUT_MS);
@@ -46,6 +48,8 @@ export function useIdleDetection() {
 
   function init() {
     if (!import.meta.client) return;
+    if (isInitialized) return;
+    isInitialized = true;
 
     const events = [
       "mousedown",
@@ -75,6 +79,7 @@ export function useIdleDetection() {
         window.removeEventListener(event, handler);
       }
       stopIdleTimer();
+      isInitialized = false;
     });
   }
 

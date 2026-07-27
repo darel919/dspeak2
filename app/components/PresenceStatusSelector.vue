@@ -1,5 +1,5 @@
 <template>
-  <details class="dropdown dropdown-end relative z-30">
+  <details ref="dropdownRef" class="dropdown dropdown-end relative z-30">
     <summary
       class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-base-200"
       aria-label="Set your status"
@@ -57,6 +57,7 @@ import {
 } from "~~/shared/presence-status.js";
 
 const presenceStore = usePresenceStatusStore();
+const dropdownRef = ref(null);
 
 const statuses = computed(() =>
   PRESENCE_STATUSES.map((value) => ({
@@ -86,9 +87,29 @@ const formattedTimeout = computed(() => {
 
 function setStatus(status) {
   presenceStore.setStatus(status);
+  if (dropdownRef.value) {
+    dropdownRef.value.removeAttribute("open");
+  }
 }
 
 function setTimeout(seconds) {
   presenceStore.setIdleTimeout(Number(seconds) * 1000);
 }
+
+onMounted(() => {
+  if (!import.meta.client) return;
+  const handleOutsideClick = (event) => {
+    if (
+      dropdownRef.value &&
+      !dropdownRef.value.contains(event.target) &&
+      dropdownRef.value.open
+    ) {
+      dropdownRef.value.removeAttribute("open");
+    }
+  };
+  document.addEventListener("pointerdown", handleOutsideClick);
+  onScopeDispose(() =>
+    document.removeEventListener("pointerdown", handleOutsideClick),
+  );
+});
 </script>

@@ -65,6 +65,9 @@
 </template>
 
 <script setup>
+import { computed, onMounted } from "vue";
+import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.js";
+
 const props = defineProps({
   visible: {
     type: Boolean,
@@ -78,75 +81,37 @@ function close() {
   emit("close");
 }
 
-const shortcutGroups = [
-  {
-    label: "Global",
-    shortcuts: [
-      {
-        id: "command-palette",
-        label: "Command palette",
-        displayKeys: ["Ctrl", "K"],
-      },
-      {
-        id: "open-settings",
-        label: "Open settings",
-        displayKeys: ["Ctrl", ","],
-      },
-      {
-        id: "toggle-mic",
-        label: "Toggle microphone",
-        displayKeys: ["Ctrl", "Shift", "M"],
-      },
-      {
-        id: "toggle-deafen",
-        label: "Toggle deafen",
-        displayKeys: ["Ctrl", "Shift", "D"],
-      },
-      {
-        id: "prev-channel",
-        label: "Previous channel",
-        displayKeys: ["Alt", "\u2191"],
-      },
-      {
-        id: "next-channel",
-        label: "Next channel",
-        displayKeys: ["Alt", "\u2193"],
-      },
-      {
-        id: "toggle-rtc-debug",
-        label: "Toggle RTC debug",
-        displayKeys: ["Ctrl", "Shift", "I"],
-      },
-      {
-        id: "toggle-chat-history",
-        label: "Toggle member list",
-        displayKeys: ["Ctrl", "Shift", "H"],
-      },
-    ],
-  },
-  {
-    label: "Chat",
-    shortcuts: [
-      { id: "send-message", label: "Send message", displayKeys: ["Enter"] },
-      {
-        id: "newline",
-        label: "Insert newline",
-        displayKeys: ["Shift", "Enter"],
-      },
-      { id: "cancel-edit", label: "Cancel editing", displayKeys: ["Esc"] },
-    ],
-  },
-  {
-    label: "Room",
-    shortcuts: [
-      {
-        id: "room-search",
-        label: "Search members",
-        displayKeys: ["Ctrl", "Shift", "U"],
-      },
-    ],
-  },
-];
+const shortcutGroups = computed(() => {
+  const groups = {};
+  for (const [, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
+    if (!groups[shortcut.scope]) {
+      groups[shortcut.scope] = [];
+    }
+    groups[shortcut.scope].push({
+      id: shortcut.id,
+      label: shortcut.label,
+      displayKeys: shortcut.keys.map((k) => formatKeyForDisplay(k)),
+    });
+  }
+  return Object.entries(groups).map(([scope, shortcuts]) => ({
+    label: scope.charAt(0).toUpperCase() + scope.slice(1),
+    shortcuts,
+  }));
+});
+
+function formatKeyForDisplay(key) {
+  const isMac = navigator.platform.includes("Mac");
+  return key
+    .replace("Mod", isMac ? "⌘" : "Ctrl")
+    .replace("Shift", isMac ? "⇧" : "Shift")
+    .replace("Alt", isMac ? "⌥" : "Alt")
+    .replace("ArrowUp", "↑")
+    .replace("ArrowDown", "↓")
+    .replace("ArrowLeft", "←")
+    .replace("ArrowRight", "→")
+    .replace("Escape", "Esc")
+    .replace("Enter", "⏎");
+}
 
 onMounted(() => {
   if (!import.meta.client) return;
