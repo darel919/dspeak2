@@ -1,14 +1,14 @@
 <template>
-  <details class="dropdown dropdown-end relative z-30">
+  <details ref="dropdownRef" class="dropdown dropdown-end relative z-30">
     <summary
       class="btn btn-square btn-ghost btn-sm relative"
       aria-label="Notifications"
     >
       <Icon name="lucide:bell" class="size-5" />
       <span
-        v-if="store.unreadCount"
+        v-if="totalUnreadCount"
         class="absolute right-0 top-0 min-w-4 bg-error px-0.5 text-[10px] text-error-content"
-        >{{ store.unreadCount }}</span
+        >{{ totalUnreadCount }}</span
       >
     </summary>
     <section
@@ -39,8 +39,58 @@
             item.body
           }}</span>
         </button>
+        <div v-if="friendRequests.length" class="border-t border-base-300">
+          <div
+            class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-base-content/50"
+          >
+            Friend requests
+          </div>
+          <div
+            v-for="req in friendRequests"
+            :key="req.id"
+            class="flex items-center gap-3 border-b border-base-300 px-3 py-2.5"
+          >
+            <div class="avatar placeholder shrink-0">
+              <div
+                class="size-8 overflow-hidden rounded-full bg-base-300 text-xs text-base-content"
+              >
+                <img
+                  v-if="req.requester?.avatar"
+                  :src="profileAssetUrl(req.requester.avatar)"
+                  alt=""
+                  class="size-full object-cover"
+                />
+                <span v-else>{{ initials(req.requester?.name || "?") }}</span>
+              </div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <strong class="block truncate text-sm">{{
+                req.requester?.name || "Someone"
+              }}</strong>
+              <span
+                v-if="req.requester?.handle"
+                class="text-xs text-base-content/60"
+                >@{{ req.requester.handle }}</span
+              >
+            </div>
+            <button
+              class="btn btn-primary btn-xs"
+              :disabled="handlingRequest[req.id]"
+              @click="acceptFriendRequest(req)"
+            >
+              Accept
+            </button>
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="handlingRequest[req.id]"
+              @click="declineFriendRequest(req)"
+            >
+              <Icon name="lucide:x" class="size-3.5" />
+            </button>
+          </div>
+        </div>
         <p
-          v-if="!store.inbox.length"
+          v-if="!store.inbox.length && !friendRequests.length"
           class="p-6 text-center text-sm text-base-content/60"
         >
           You are all caught up.
@@ -52,8 +102,71 @@
 
 <script setup>
 import { useNotificationsStore } from "../stores/notifications";
+import { useFriendsStore } from "../stores/friends";
+import { profileAssetUrl } from "../shared/profile-assets.js";
 
 const store = useNotificationsStore();
+const friendsStore = useFriendsStore();
+
+const dropdownRef = ref(null);
+const handlingRequest = ref({});
+
+const { friendRequests } = storeToRefs(friendsStore);
+
+const totalUnreadCount = computed(
+  () => store.unreadCount + friendRequests.value.length,
+);
+
+onMounted(async () => {
+  await friendsStore.fetchFriendRequests();
+
+  const handleOutsideClick = (event) => {
+    if (
+      dropdownRef.value &&
+      !dropdownRef.value.contains(event.target) &&
+      dropdownRef.value.open
+    ) {
+      dropdownRef.value.removeAttribute("open");
+    }
+  };
+  document.addEventListener("pointerdown", handleOutsideClick);
+  onScopeDispose(() =>
+    document.removeEventListener("pointerdown", handleOutsideClick),
+  );
+});
+
+function initials(name) {
+  return String(name || "?")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase();
+}
+
+async function acceptFriendRequest(req) {
+  handlingRequest.value = { ...handlingRequest.value, [req.id]: true };
+  try {
+    await friendsStore.respondToRequest(req.id, true);
+    await friendsStore.fetchFriends();
+  } finally {
+    const next = { ...handlingRequest.value };
+    delete next[req.id];
+    handlingRequest.value = next;
+  }
+}
+
+async function declineFriendRequest(req) {
+  handlingRequest.value = { ...handlingRequest.value, [req.id]: true };
+  try {
+    await friendsStore.respondToRequest(req.id, false);
+  } finally {
+    const next = { ...handlingRequest.value };
+    delete next[req.id];
+    handlingRequest.value = next;
+  }
+}
 
 async function open(item) {
   if (!item.read_at) await store.markRead([item.id]);

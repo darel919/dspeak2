@@ -17,24 +17,37 @@
       <header
         class="flex items-center justify-between border-b border-base-300 p-3"
       >
-        <h2 class="font-semibold">Friends</h2>
         <div class="flex items-center gap-1">
+          <button
+            class="btn btn-ghost btn-xs"
+            :class="friendsView === 'friends' && 'btn-active'"
+            @click="friendsView = 'friends'"
+          >
+            Friends
+          </button>
           <button
             v-if="friendRequests.length"
             class="btn btn-ghost btn-xs"
-            @click="showRequests = !showRequests"
+            :class="friendsView === 'incoming' && 'btn-active'"
+            @click="friendsView = 'incoming'"
           >
-            {{
-              showRequests ? "Friends" : `Requests (${friendRequests.length})`
-            }}
+            Incoming ({{ friendRequests.length }})
           </button>
           <button
+            v-if="sentRequests.length"
             class="btn btn-ghost btn-xs"
-            @click="showAddFriend = !showAddFriend"
+            :class="friendsView === 'sent' && 'btn-active'"
+            @click="friendsView = 'sent'"
           >
-            <Icon name="lucide:user-plus" class="size-4" />
+            Sent ({{ sentRequests.length }})
           </button>
         </div>
+        <button
+          class="btn btn-ghost btn-xs"
+          @click="showAddFriend = !showAddFriend"
+        >
+          <Icon name="lucide:user-plus" class="size-4" />
+        </button>
       </header>
 
       <div v-if="showAddFriend" class="border-b border-base-300 p-3">
@@ -64,7 +77,7 @@
       </div>
 
       <div
-        v-if="showRequests && friendRequests.length"
+        v-if="friendsView === 'incoming' && friendRequests.length"
         class="max-h-48 overflow-y-auto"
       >
         <div
@@ -104,7 +117,50 @@
         </div>
       </div>
 
-      <div v-else class="max-h-96 overflow-y-auto">
+      <div
+        v-else-if="friendsView === 'sent' && sentRequests.length"
+        class="max-h-48 overflow-y-auto"
+      >
+        <div
+          v-for="req in sentRequests"
+          :key="req.id"
+          class="flex items-center gap-3 border-b border-base-300 p-3"
+        >
+          <div class="avatar placeholder">
+            <div
+              class="size-8 overflow-hidden rounded-full bg-base-300 text-xs text-base-content"
+            >
+              <img
+                v-if="req.recipient?.avatar"
+                :src="profileAssetUrl(req.recipient.avatar)"
+                alt=""
+                class="size-full object-cover"
+              />
+              <span v-else>{{ initials(req.recipient?.name || "?") }}</span>
+            </div>
+          </div>
+          <div class="min-w-0 flex-1">
+            <strong class="block truncate text-sm">{{
+              req.recipient?.name || "Someone"
+            }}</strong>
+            <span
+              v-if="req.recipient?.handle"
+              class="text-xs text-base-content/60"
+              >@{{ req.recipient.handle }}</span
+            >
+          </div>
+          <span class="text-xs text-base-content/50">Pending</span>
+          <button
+            class="btn btn-ghost btn-sm text-error"
+            title="Cancel request"
+            @click="cancelSentRequest(req.id)"
+          >
+            <Icon name="lucide:x" class="size-4" />
+          </button>
+        </div>
+      </div>
+
+      <div v-if="friendsView === 'friends'" class="max-h-96 overflow-y-auto">
         <div
           v-for="friend in sortedFriends"
           :key="friend.id"
@@ -165,9 +221,19 @@
         <span class="text-xs text-base-content/50">
           {{ onlineCount }} online
         </span>
-        <button class="btn btn-ghost btn-xs" @click="refresh()">
-          <Icon name="lucide:refresh-cw" class="size-3.5" />
-        </button>
+        <div class="flex items-center gap-1">
+          <NuxtLink
+            to="/friends"
+            class="btn btn-ghost btn-xs"
+            title="Open friends page"
+          >
+            <Icon name="lucide:external-link" class="size-3.5" />
+            Manage
+          </NuxtLink>
+          <button class="btn btn-ghost btn-xs" @click="refresh()">
+            <Icon name="lucide:refresh-cw" class="size-3.5" />
+          </button>
+        </div>
       </footer>
     </section>
   </details>
@@ -190,7 +256,7 @@ const authStore = useAuthStore();
 const router = useRouter();
 
 const dropdownRef = ref(null);
-const showRequests = ref(false);
+const friendsView = ref("friends");
 const showAddFriend = ref(false);
 const friendHandle = ref("");
 const addingFriend = ref(false);
@@ -200,7 +266,7 @@ const pendingRequestsCount = computed(
   () => friendRequests.value.filter((r) => r.status === "pending").length,
 );
 
-const { friends, friendRequests } = storeToRefs(friendsStore);
+const { friends, friendRequests, sentRequests } = storeToRefs(friendsStore);
 
 const localFriendRequests = ref([]);
 
@@ -208,6 +274,7 @@ onMounted(async () => {
   await Promise.all([
     friendsStore.fetchFriends(),
     friendsStore.fetchFriendRequests(),
+    friendsStore.fetchSentRequests(),
   ]);
   localFriendRequests.value = [...friendsStore.friendRequests];
 
@@ -322,10 +389,15 @@ function openFriendProfile(friend) {
   // Navigate to DM or friend profile
 }
 
+async function cancelSentRequest(requestId) {
+  await friendsStore.cancelRequest(requestId);
+}
+
 async function refresh() {
   await Promise.all([
     friendsStore.fetchFriends(),
     friendsStore.fetchFriendRequests(),
+    friendsStore.fetchSentRequests(),
   ]);
 }
 </script>

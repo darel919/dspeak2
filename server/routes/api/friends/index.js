@@ -2,8 +2,13 @@ import { requireAuthenticatedUser } from "../../../utils/authentication.js";
 import {
   getFriendsList,
   getFriendRequests,
+  getSentFriendRequests,
+  getFriendshipStatus,
+  getMutualFriends,
   sendFriendRequest,
+  sendFriendRequestById,
   respondToFriendRequest,
+  cancelFriendRequest,
   removeFriend,
 } from "../../../utils/friends-manager.js";
 
@@ -13,23 +18,46 @@ export default defineEventHandler(async (event) => {
 
   try {
     if (method === "GET") {
-      const type = getQuery(event).type || "list";
+      const query = getQuery(event);
+      const type = query.type || "list";
+
       if (type === "requests") {
         return { items: await getFriendRequests(userId) };
       }
+
+      if (type === "sent") {
+        return { items: await getSentFriendRequests(userId) };
+      }
+
+      if (type === "status" && query.targetId) {
+        return await getFriendshipStatus(userId, query.targetId);
+      }
+
+      if (type === "mutual" && query.targetId) {
+        return { items: await getMutualFriends(userId, query.targetId) };
+      }
+
       return { items: await getFriendsList(userId) };
     }
 
     if (method === "POST") {
       const body = await readBody(event);
-      const { action, recipientHandle, requestId, accept } = body;
+      const { action, recipientHandle, targetUserId, requestId, accept } = body;
 
       if (action === "send" && recipientHandle) {
         return await sendFriendRequest(userId, recipientHandle);
       }
 
+      if (action === "send" && targetUserId) {
+        return await sendFriendRequestById(userId, targetUserId);
+      }
+
       if (action === "respond" && requestId) {
         return await respondToFriendRequest(requestId, userId, Boolean(accept));
+      }
+
+      if (action === "cancel" && requestId) {
+        return await cancelFriendRequest(requestId, userId);
       }
 
       throw createError({ statusCode: 400, statusMessage: "Invalid request" });

@@ -137,6 +137,59 @@ export const useFriendsStore = defineStore("friends", () => {
     friends.value = friends.value.filter((f) => f.id !== friendId);
   }
 
+  const sentRequests = ref([]);
+
+  async function fetchSentRequests() {
+    try {
+      const result = await apiFetch("?type=sent", { method: "GET" });
+      sentRequests.value = Array.isArray(result?.items) ? result.items : [];
+      return sentRequests.value;
+    } catch {
+      return [];
+    }
+  }
+
+  async function checkFriendshipStatus(userId) {
+    try {
+      return await apiFetch(
+        `?type=status&targetId=${encodeURIComponent(userId)}`,
+        {
+          method: "GET",
+        },
+      );
+    } catch {
+      return { status: "none" };
+    }
+  }
+
+  async function fetchMutualFriends(userId) {
+    try {
+      const result = await apiFetch(
+        `?type=mutual&targetId=${encodeURIComponent(userId)}`,
+        { method: "GET" },
+      );
+      return Array.isArray(result?.items) ? result.items : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async function sendRequestById(userId) {
+    const result = await apiFetch("", {
+      method: "POST",
+      body: JSON.stringify({ action: "send", targetUserId: userId }),
+    });
+    return result;
+  }
+
+  async function cancelRequest(requestId) {
+    await apiFetch("", {
+      method: "POST",
+      body: JSON.stringify({ action: "cancel", requestId }),
+    });
+    sentRequests.value = sentRequests.value.filter((r) => r.id !== requestId);
+  }
+
   function getOnlineFriends() {
     return friends.value.filter(
       (f) => f.online && f.presence_status !== "offline",
@@ -146,12 +199,18 @@ export const useFriendsStore = defineStore("friends", () => {
   return {
     friends,
     friendRequests,
+    sentRequests,
     loading,
     error,
     fetchFriends,
     fetchFriendRequests,
+    fetchSentRequests,
+    checkFriendshipStatus,
+    fetchMutualFriends,
     sendRequest,
+    sendRequestById,
     respondToRequest,
+    cancelRequest,
     removeFriend,
     getOnlineFriends,
   };
