@@ -110,6 +110,15 @@ const friendsStore = useFriendsStore();
 
 const dropdownRef = ref(null);
 const handlingRequest = ref({});
+const handleOutsideClick = (event) => {
+  if (
+    dropdownRef.value &&
+    !dropdownRef.value.contains(event.target) &&
+    dropdownRef.value.open
+  ) {
+    dropdownRef.value.removeAttribute("open");
+  }
+};
 
 const { friendRequests } = storeToRefs(friendsStore);
 
@@ -117,23 +126,14 @@ const totalUnreadCount = computed(
   () => store.unreadCount + friendRequests.value.length,
 );
 
-onMounted(async () => {
-  await friendsStore.fetchFriendRequests();
-
-  const handleOutsideClick = (event) => {
-    if (
-      dropdownRef.value &&
-      !dropdownRef.value.contains(event.target) &&
-      dropdownRef.value.open
-    ) {
-      dropdownRef.value.removeAttribute("open");
-    }
-  };
+onMounted(() => {
   document.addEventListener("pointerdown", handleOutsideClick);
-  onScopeDispose(() =>
-    document.removeEventListener("pointerdown", handleOutsideClick),
-  );
+  friendsStore.fetchFriendRequests();
 });
+
+onUnmounted(() =>
+  document.removeEventListener("pointerdown", handleOutsideClick),
+);
 
 function initials(name) {
   return String(name || "?")

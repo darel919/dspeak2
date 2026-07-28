@@ -67,6 +67,10 @@
 <script setup>
 import { computed, onMounted } from "vue";
 import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.js";
+import {
+  effectiveKeysForShortcut,
+  loadCustomKeybindings,
+} from "../shared/keybinding-preferences.js";
 
 const props = defineProps({
   visible: {
@@ -81,6 +85,7 @@ function close() {
   emit("close");
 }
 
+const customKeybindings = ref({});
 const shortcutGroups = computed(() => {
   const groups = {};
   for (const [, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
@@ -90,7 +95,11 @@ const shortcutGroups = computed(() => {
     groups[shortcut.scope].push({
       id: shortcut.id,
       label: shortcut.label,
-      displayKeys: shortcut.keys.map((k) => formatKeyForDisplay(k)),
+      displayKeys: effectiveKeysForShortcut(
+        shortcut.id,
+        shortcut.keys,
+        customKeybindings.value,
+      ).map((k) => formatKeyForDisplay(k)),
     });
   }
   return Object.entries(groups).map(([scope, shortcuts]) => ({
@@ -100,7 +109,7 @@ const shortcutGroups = computed(() => {
 });
 
 function formatKeyForDisplay(key) {
-  const isMac = navigator.platform.includes("Mac");
+  const isMac = import.meta.client && navigator.platform.includes("Mac");
   return key
     .replace("Mod", isMac ? "⌘" : "Ctrl")
     .replace("Shift", isMac ? "⇧" : "Shift")
@@ -115,10 +124,24 @@ function formatKeyForDisplay(key) {
 
 onMounted(() => {
   if (!import.meta.client) return;
+  customKeybindings.value = loadCustomKeybindings();
+  const handleKeybindingsChanged = (event) => {
+    customKeybindings.value = event.detail || {};
+  };
+  window.addEventListener(
+    "dspeak:keybindings-changed",
+    handleKeybindingsChanged,
+  );
   const handler = (e) => {
     if (e.key === "Escape") close();
   };
   document.addEventListener("keydown", handler);
   onScopeDispose(() => document.removeEventListener("keydown", handler));
+  onScopeDispose(() =>
+    window.removeEventListener(
+      "dspeak:keybindings-changed",
+      handleKeybindingsChanged,
+    ),
+  );
 });
 </script>

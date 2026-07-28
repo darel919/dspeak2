@@ -292,7 +292,6 @@ onBeforeUnmount(() => {
       </div>
 
       <FriendsList />
-      <PresenceStatusSelector v-if="profile" />
       <NotificationCenter />
       <section
         v-if="profile"
@@ -669,34 +668,13 @@ onBeforeUnmount(() => {
         <span>Connecting…</span>
       </div>
 
-      <NuxtLink
+      <PresenceStatusSelector
         v-if="profile"
-        to="/settings"
-        class="profile-button"
-        aria-label="Open account settings"
-      >
-        <span class="hidden max-w-32 text-right md:block">
-          <span class="block truncate text-sm font-semibold">{{
-            profile?.name
-          }}</span>
-          <span class="block truncate text-xs text-base-content/60"
-            >Account</span
-          >
-        </span>
-        <span class="avatar relative select-none" :class="avatarStatusClass">
-          <span
-            class="size-10 overflow-hidden rounded-full ring-1 ring-base-content/15"
-          >
-            <img :src="profileAvatar" alt="" />
-          </span>
-          <span
-            v-if="voiceStore.connected"
-            class="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-success ring-2 ring-base-100"
-          >
-            <Icon name="lucide:mic" class="size-2.5 text-success-content" />
-          </span>
-        </span>
-      </NuxtLink>
+        :profile="profile"
+        :profile-avatar="profileAvatar"
+        :avatar-status-class="avatarStatusClass"
+        :voice-connected="voiceStore.connected"
+      />
     </div>
   </header>
 </template>
@@ -764,12 +742,6 @@ onBeforeUnmount(() => {
   gap: 0.625rem;
   padding: 0.25rem 0.55rem;
   transition: background-color 150ms ease;
-}
-
-.profile-button:hover,
-.profile-button:focus-visible {
-  background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
-  outline: none;
 }
 
 .channel-link:hover,
@@ -914,15 +886,6 @@ onBeforeUnmount(() => {
   border-radius: 0.65rem;
   background: color-mix(in oklab, var(--color-base-content) 6%, transparent);
   padding: 0.75rem;
-}
-.profile-button {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 0.7rem;
-  border-radius: 0.75rem;
-  padding: 0.25rem;
-  transition: background-color 150ms ease;
 }
 .connection-warning {
   display: flex;

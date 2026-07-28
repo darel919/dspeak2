@@ -25,6 +25,10 @@ const REQUIRED_COLLECTIONS = Object.freeze([
   "dspeak_room_invites",
   "dspeak_room_audit_log",
   "dspeak_friends",
+  "dspeak_chat_files",
+  "dspeak_message_reactions",
+  "dspeak_pinned_messages",
+  "dspeak_bookmarks",
 ]);
 
 function field(name, type, options = {}) {
@@ -467,6 +471,8 @@ async function migrateRoomAdministration(pb) {
       field("title", "text", { max: 240 }),
       field("body", "text", { max: 2000 }),
       field("read_at", "date"),
+      field("created", "autodate", { onCreate: true, onUpdate: false }),
+      field("updated", "autodate", { onCreate: true, onUpdate: true }),
     ],
     indexes: [
       "CREATE INDEX idx_dspeak_notifications_unread ON dspeak_notifications (recipient, read_at)",
@@ -1155,6 +1161,8 @@ async function migrateFriends(pb) {
         maxSelect: 1,
         values: ["pending", "accepted", "rejected", "blocked"],
       }),
+      field("created", "autodate", { onCreate: true, onUpdate: false }),
+      field("updated", "autodate", { onCreate: true, onUpdate: true }),
     ],
     indexes: [
       "CREATE UNIQUE INDEX idx_dspeak_friends_pair ON dspeak_friends (requester, recipient)",
@@ -1186,6 +1194,148 @@ async function migrateNotificationUnreadIndex(pb) {
     fields: [],
     indexes: [
       "CREATE INDEX idx_dspeak_notifications_recipient ON dspeak_notifications (recipient)",
+    ],
+  });
+}
+
+async function migrateChatFeatures(pb) {
+  const users = await pb.collections.getOne("users");
+  const channels = await pb.collections.getOne("dspeak_rooms_channels");
+  const messages = await pb.collections.getOne("dspeak_messages");
+
+  await upsertCollection(pb, {
+    name: messages.name,
+    type: messages.type,
+    fields: [
+      field("reply_to", "relation", {
+        collectionId: messages.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("attachments", "json", { maxSize: 50000 }),
+      field("pinned", "bool"),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_messages_reply_to ON dspeak_messages (reply_to)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_chat_files",
+    type: "base",
+    fields: [
+      field("uploader", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("room_channel", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("message", "relation", {
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("file", "file", {
+        maxSelect: 1,
+        maxSize: 10 * 1024 * 1024,
+        mimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      }),
+      field("name", "text", { max: 255 }),
+      field("size", "number"),
+      field("mime_type", "text", { max: 100 }),
+      field("width", "number"),
+      field("height", "number"),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_chat_files_channel ON dspeak_chat_files (room_channel)",
+      "CREATE INDEX idx_dspeak_chat_files_uploader ON dspeak_chat_files (uploader)",
+      "CREATE INDEX idx_dspeak_chat_files_message ON dspeak_chat_files (message)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_message_reactions",
+    type: "base",
+    fields: [
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("emoji", "text", { required: true, max: 80 }),
+      field("skin_tone", "text", { max: 20 }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_reactions_message_user_emoji ON dspeak_message_reactions (message, user, emoji)",
+      "CREATE INDEX idx_dspeak_reactions_message ON dspeak_message_reactions (message)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_pinned_messages",
+    type: "base",
+    fields: [
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("channel", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("pinned_by", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("pinned_at", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_pinned_messages_message ON dspeak_pinned_messages (message)",
+      "CREATE INDEX idx_dspeak_pinned_messages_channel ON dspeak_pinned_messages (channel)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_bookmarks",
+    type: "base",
+    fields: [
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("note", "text", { max: 500 }),
+      field("saved_at", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_bookmarks_user_message ON dspeak_bookmarks (user, message)",
+      "CREATE INDEX idx_dspeak_bookmarks_user ON dspeak_bookmarks (user)",
     ],
   });
 }
@@ -1283,6 +1433,33 @@ const migrations = Object.freeze([
   {
     name: "20260727_notification_unread_index_v1",
     run: migrateNotificationUnreadIndex,
+  },
+  {
+    name: "20260728_chat_features_v1",
+    run: migrateChatFeatures,
+  },
+  {
+    name: "20260728_foundation_schema_refresh_v1",
+    run: migrateFoundation,
+  },
+  {
+    name: "20260728_friends_schema_refresh_v1",
+    run: migrateFriends,
+  },
+  {
+    name: "20260728_chat_schema_refresh_v1",
+    run: migrateChatFeatures,
+  },
+  {
+    name: "20260728_sortable_timestamps_v1",
+    run: async (pb) => {
+      await migrateFoundation(pb);
+      await migrateFriends(pb);
+    },
+  },
+  {
+    name: "20260728_notification_timestamps_v1",
+    run: migrateRoomAdministration,
   },
 ]);
 

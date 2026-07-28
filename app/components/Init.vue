@@ -94,6 +94,9 @@ provide(
   computed(() => usePresenceStatusStore().effectiveStatus),
 );
 provide("presenceStore", usePresenceStatusStore());
+const { init: initIdle, destroy: destroyIdle } = useIdleDetection();
+const { init: initKeyboardShortcuts, destroy: destroyKeyboardShortcuts } =
+  useGlobalKeyboardShortcuts();
 
 watch(startupUpdateStatus, (status) => {
   if (status === "checking") startupStatus.value = "Checking for updates…";
@@ -110,9 +113,7 @@ onMounted(async () => {
         startupStatus.value = "Preparing your workspace…";
         const presenceStatusStore = usePresenceStatusStore();
         presenceStatusStore.init();
-        const { init: initIdle } = useIdleDetection();
         initIdle();
-        const { init: initKeyboardShortcuts } = useGlobalKeyboardShortcuts();
         initKeyboardShortcuts();
       }
     } else {
@@ -131,6 +132,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disconnectPresence();
+  destroyIdle();
+  destroyKeyboardShortcuts();
 });
 
 watch(

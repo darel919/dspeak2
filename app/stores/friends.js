@@ -8,6 +8,7 @@ import { apiErrorMessage } from "../shared/api-errors.js";
 export const useFriendsStore = defineStore("friends", () => {
   const friends = ref([]);
   const friendRequests = ref([]);
+  const sentRequests = ref([]);
   const loading = ref(false);
   const error = ref(null);
   const config = useRuntimeConfig();
@@ -108,6 +109,12 @@ export const useFriendsStore = defineStore("friends", () => {
       method: "POST",
       body: JSON.stringify({ action: "send", recipientHandle }),
     });
+    if (result?.status === "pending" && result?.id) {
+      sentRequests.value = [
+        result,
+        ...sentRequests.value.filter((request) => request.id !== result.id),
+      ];
+    }
     return result;
   }
 
@@ -137,15 +144,15 @@ export const useFriendsStore = defineStore("friends", () => {
     friends.value = friends.value.filter((f) => f.id !== friendId);
   }
 
-  const sentRequests = ref([]);
-
   async function fetchSentRequests() {
+    error.value = null;
     try {
       const result = await apiFetch("?type=sent", { method: "GET" });
       sentRequests.value = Array.isArray(result?.items) ? result.items : [];
       return sentRequests.value;
-    } catch {
-      return [];
+    } catch (cause) {
+      error.value = cause.message;
+      throw cause;
     }
   }
 
@@ -179,6 +186,12 @@ export const useFriendsStore = defineStore("friends", () => {
       method: "POST",
       body: JSON.stringify({ action: "send", targetUserId: userId }),
     });
+    if (result?.status === "pending" && result?.id) {
+      sentRequests.value = [
+        result,
+        ...sentRequests.value.filter((request) => request.id !== result.id),
+      ];
+    }
     return result;
   }
 

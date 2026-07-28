@@ -184,6 +184,21 @@ test("notification dropdown renders above navbar call controls", async () => {
   assert.match(notifications, /dropdown-content metro-pane z-50/);
 });
 
+test("friends menu routes primary actions and refreshes when opened", async () => {
+  const menu = await readFile("app/components/FriendsList.vue", "utf8");
+  const page = await readFile("app/pages/friends.vue", "utf8");
+  assert.match(menu, /@toggle="handleDropdownToggle"/);
+  assert.match(menu, /to="\/friends"[\s\S]*?>\s*Friends\s*<\/NuxtLink>/);
+  assert.match(menu, /navigateToAddFriend/);
+  assert.match(menu, /path: "\/friends"[\s\S]*?tab: "add"/);
+  assert.doesNotMatch(menu, />\s*Manage\s*</);
+  assert.doesNotMatch(menu, /lucide:refresh-cw/);
+  assert.doesNotMatch(menu, /Sent \(\{\{ sentRequests\.length \}\}\)/);
+  assert.doesNotMatch(menu, /friendsView === 'sent'/);
+  assert.doesNotMatch(menu, /friendsStore\.fetchSentRequests\(\)/);
+  assert.match(page, /route\.query\.tab/);
+});
+
 test("voice controls remain visible in a compact floating dock", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   assert.match(source, /class="voice-command-dock/);
@@ -566,4 +581,36 @@ test("app blocks the browser context menu by default", async () => {
     source,
     /document\.removeEventListener\("contextmenu", preventBrowserContextMenu, true\)/,
   );
+});
+
+test("presence selector uses a bounded Metro command surface", async () => {
+  const selector = await readFile(
+    "app/components/PresenceStatusSelector.vue",
+    "utf8",
+  );
+  assert.match(selector, /aria-haspopup="dialog"/);
+  assert.match(selector, /:aria-expanded="isOpen"/);
+  assert.match(selector, /role="radiogroup"/);
+  assert.match(selector, /role="radio"/);
+  assert.match(selector, /:aria-checked=/);
+  assert.match(selector, /min-h-11/);
+  assert.match(selector, /calc\(100vw-2rem\)/);
+  assert.match(selector, /event\.key === "Escape"/);
+  assert.doesNotMatch(selector, /rounded-lg|shadow-xl|range-xs|text-\[10px\]/);
+});
+
+test("image lightbox traps focus and restores its opener", async () => {
+  const source = await readFile(
+    new URL("../app/components/Chat/ImageLightbox.vue", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /ref="dialogRef"/);
+  assert.match(source, /event\.key === "Tab"/);
+  assert.match(source, /previouslyFocused\?\.focus\(\)/);
+  assert.match(source, /closeButtonRef\.value\?\.focus\(\)/);
+  assert.doesNotMatch(
+    source,
+    /btn-circle|rounded-(?:lg|xl|2xl|full)|shadow-(?:lg|xl|2xl)/,
+  );
+  assert.doesNotMatch(source, /<img[\s\S]*?@click=/);
 });

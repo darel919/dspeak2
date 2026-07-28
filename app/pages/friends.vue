@@ -42,7 +42,6 @@
       </div>
 
       <main class="min-w-0 flex-1 overflow-y-auto">
-        <!-- ALL FRIENDS -->
         <section
           v-if="activeTab === 'friends'"
           class="divide-y divide-base-300"
@@ -113,7 +112,6 @@
           </p>
         </section>
 
-        <!-- INCOMING REQUESTS -->
         <section
           v-if="activeTab === 'incoming'"
           class="divide-y divide-base-300"
@@ -168,7 +166,6 @@
           </p>
         </section>
 
-        <!-- SENT REQUESTS -->
         <section v-if="activeTab === 'sent'" class="divide-y divide-base-300">
           <div
             v-for="req in sentRequests"
@@ -176,17 +173,13 @@
             class="flex items-center gap-3 px-5 py-3"
           >
             <div class="avatar placeholder shrink-0">
-              <div
+              <ProfileAvatar
                 class="size-10 overflow-hidden rounded-full bg-base-300 text-xs text-base-content"
-              >
-                <img
-                  v-if="req.recipient?.avatar"
-                  :src="profileAssetUrl(req.recipient.avatar)"
-                  alt=""
-                  class="size-full object-cover"
-                />
-                <span v-else>{{ initials(req.recipient?.name || "?") }}</span>
-              </div>
+                :src="req.recipient?.avatar"
+                :name="
+                  req.recipient?.display_name || req.recipient?.name || 'User'
+                "
+              />
             </div>
             <div class="min-w-0 flex-1">
               <span class="block truncate text-sm font-semibold">
@@ -209,14 +202,20 @@
             </button>
           </div>
           <p
-            v-if="!sentRequests.length"
+            v-if="sentRequestsError"
+            class="p-10 text-center text-sm text-error"
+            role="alert"
+          >
+            {{ sentRequestsError }}
+          </p>
+          <p
+            v-else-if="!sentRequests.length"
             class="p-10 text-center text-sm text-base-content/50"
           >
             No sent requests.
           </p>
         </section>
 
-        <!-- ADD FRIEND -->
         <section v-if="activeTab === 'add'" class="p-5">
           <div class="max-w-md">
             <h2 class="text-base font-semibold mb-1">Add a friend</h2>
@@ -267,14 +266,24 @@ const presenceStatusStore = usePresenceStatusStore();
 const identityStore = useIdentityStore();
 const roomsStore = useRoomsStore();
 const router = useRouter();
+const route = useRoute();
 const { success, error: toastError } = useToast();
 
-const activeTab = ref("friends");
+const friendTabs = new Set(["friends", "incoming", "sent", "add"]);
+const requestedTab = computed(() => String(route.query.tab || "friends"));
+const activeTab = ref(
+  friendTabs.has(requestedTab.value) ? requestedTab.value : "friends",
+);
 const friendHandle = ref("");
 const addingFriend = ref(false);
 const friendError = ref("");
+const sentRequestsError = ref("");
 
 const { friends, friendRequests, sentRequests } = storeToRefs(friendsStore);
+
+watch(requestedTab, (tab) => {
+  activeTab.value = friendTabs.has(tab) ? tab : "friends";
+});
 
 const tabs = computed(() => [
   {
@@ -302,12 +311,22 @@ const tabs = computed(() => [
 ]);
 
 onMounted(async () => {
-  await Promise.all([
+  await Promise.allSettled([
     friendsStore.fetchFriends(),
     friendsStore.fetchFriendRequests(),
-    friendsStore.fetchSentRequests(),
+    loadSentRequests(),
   ]);
 });
+
+async function loadSentRequests() {
+  sentRequestsError.value = "";
+  try {
+    await friendsStore.fetchSentRequests();
+  } catch (cause) {
+    sentRequestsError.value =
+      cause.message || "Could not load sent friend requests";
+  }
+}
 
 const sortedFriends = computed(() => {
   return [...friendsStore.friends].sort((a, b) => {
@@ -362,7 +381,6 @@ async function addFriend() {
     await friendsStore.sendRequest(handle);
     friendHandle.value = "";
     success("Friend request sent");
-    await friendsStore.fetchSentRequests();
   } catch (cause) {
     friendError.value = cause.message;
   } finally {

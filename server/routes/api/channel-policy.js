@@ -1,5 +1,8 @@
 import { requireAuthenticatedUser } from "../../utils/authentication.js";
-import { requireRoomPermission } from "../../utils/room-authorization.js";
+import {
+  requireRoomMember,
+  requireRoomPermission,
+} from "../../utils/room-authorization.js";
 import { usePocketBaseAdmin } from "../../utils/pocketbase.js";
 import { getChannelSubscribers } from "../../utils/dspeak-realtime.js";
 import {
@@ -26,6 +29,7 @@ export default defineEventHandler(async (event) => {
       .getOne(channelId, {
         fields: "id,name,room,policy,slow_mode",
       });
+    await requireRoomMember(pb, { id: channel.room }, userId);
 
     return {
       id: channel.id,
@@ -53,7 +57,12 @@ export default defineEventHandler(async (event) => {
         fields: "id,room,policy,slow_mode",
       });
 
-    requireRoomPermission(pb, { id: channel.room }, userId, "channel.update");
+    await requireRoomPermission(
+      pb,
+      { id: channel.room },
+      userId,
+      "channel.update",
+    );
 
     const updateData = {};
     if (policy !== undefined) {
@@ -84,9 +93,7 @@ export default defineEventHandler(async (event) => {
     for (const peer of subscribers) {
       try {
         peer.send(message);
-      } catch {
-        // Skip
-      }
+      } catch {}
     }
 
     return {

@@ -1,5 +1,9 @@
 <template>
-  <details ref="dropdownRef" class="dropdown dropdown-end relative z-30">
+  <details
+    ref="dropdownRef"
+    class="dropdown dropdown-end relative z-30"
+    @toggle="handleDropdownToggle"
+  >
     <summary
       class="btn btn-square btn-ghost btn-sm relative"
       aria-label="Friends"
@@ -18,13 +22,9 @@
         class="flex items-center justify-between border-b border-base-300 p-3"
       >
         <div class="flex items-center gap-1">
-          <button
-            class="btn btn-ghost btn-xs"
-            :class="friendsView === 'friends' && 'btn-active'"
-            @click="friendsView = 'friends'"
-          >
+          <NuxtLink to="/friends" class="btn btn-ghost btn-xs">
             Friends
-          </button>
+          </NuxtLink>
           <button
             v-if="friendRequests.length"
             class="btn btn-ghost btn-xs"
@@ -33,48 +33,16 @@
           >
             Incoming ({{ friendRequests.length }})
           </button>
-          <button
-            v-if="sentRequests.length"
-            class="btn btn-ghost btn-xs"
-            :class="friendsView === 'sent' && 'btn-active'"
-            @click="friendsView = 'sent'"
-          >
-            Sent ({{ sentRequests.length }})
-          </button>
         </div>
         <button
           class="btn btn-ghost btn-xs"
-          @click="showAddFriend = !showAddFriend"
+          type="button"
+          aria-label="Add friend"
+          @click="navigateToAddFriend"
         >
           <Icon name="lucide:user-plus" class="size-4" />
         </button>
       </header>
-
-      <div v-if="showAddFriend" class="border-b border-base-300 p-3">
-        <form class="flex items-center gap-2" @submit.prevent="addFriend">
-          <input
-            v-model="friendHandle"
-            class="input input-bordered input-sm flex-1 bg-base-100"
-            type="text"
-            placeholder="Enter @username"
-            required
-          />
-          <button
-            class="btn btn-primary btn-sm"
-            type="submit"
-            :disabled="addingFriend || !friendHandle.trim()"
-          >
-            <span
-              v-if="addingFriend"
-              class="loading loading-spinner loading-xs"
-            ></span>
-            <span v-else>Add</span>
-          </button>
-        </form>
-        <p v-if="friendError" class="mt-1 text-xs text-error" role="alert">
-          {{ friendError }}
-        </p>
-      </div>
 
       <div
         v-if="friendsView === 'incoming' && friendRequests.length"
@@ -117,49 +85,6 @@
         </div>
       </div>
 
-      <div
-        v-else-if="friendsView === 'sent' && sentRequests.length"
-        class="max-h-48 overflow-y-auto"
-      >
-        <div
-          v-for="req in sentRequests"
-          :key="req.id"
-          class="flex items-center gap-3 border-b border-base-300 p-3"
-        >
-          <div class="avatar placeholder">
-            <div
-              class="size-8 overflow-hidden rounded-full bg-base-300 text-xs text-base-content"
-            >
-              <img
-                v-if="req.recipient?.avatar"
-                :src="profileAssetUrl(req.recipient.avatar)"
-                alt=""
-                class="size-full object-cover"
-              />
-              <span v-else>{{ initials(req.recipient?.name || "?") }}</span>
-            </div>
-          </div>
-          <div class="min-w-0 flex-1">
-            <strong class="block truncate text-sm">{{
-              req.recipient?.name || "Someone"
-            }}</strong>
-            <span
-              v-if="req.recipient?.handle"
-              class="text-xs text-base-content/60"
-              >@{{ req.recipient.handle }}</span
-            >
-          </div>
-          <span class="text-xs text-base-content/50">Pending</span>
-          <button
-            class="btn btn-ghost btn-sm text-error"
-            title="Cancel request"
-            @click="cancelSentRequest(req.id)"
-          >
-            <Icon name="lucide:x" class="size-4" />
-          </button>
-        </div>
-      </div>
-
       <div v-if="friendsView === 'friends'" class="max-h-96 overflow-y-auto">
         <div
           v-for="friend in sortedFriends"
@@ -188,12 +113,9 @@
             ></span>
           </div>
           <div class="min-w-0 flex-1">
-            <button
-              class="block truncate text-left text-sm font-semibold hover:text-primary"
-              @click="openFriendProfile(friend)"
-            >
+            <span class="block truncate text-sm font-semibold">
               {{ friend.display_name || friend.name }}
-            </button>
+            </span>
             <span class="text-xs" :class="presenceTextClass(friend)">
               {{ presenceLabel(friend) }}
             </span>
@@ -221,19 +143,6 @@
         <span class="text-xs text-base-content/50">
           {{ onlineCount }} online
         </span>
-        <div class="flex items-center gap-1">
-          <NuxtLink
-            to="/friends"
-            class="btn btn-ghost btn-xs"
-            title="Open friends page"
-          >
-            <Icon name="lucide:external-link" class="size-3.5" />
-            Manage
-          </NuxtLink>
-          <button class="btn btn-ghost btn-xs" @click="refresh()">
-            <Icon name="lucide:refresh-cw" class="size-3.5" />
-          </button>
-        </div>
       </footer>
     </section>
   </details>
@@ -241,56 +150,46 @@
 
 <script setup>
 import { useFriendsStore } from "../stores/friends";
-import { usePresenceStatusStore } from "../stores/presenceStatus";
-import { useIdentityStore } from "../stores/identity";
 import { useRoomsStore } from "../stores/rooms";
 import { PRESENCE_LABELS } from "~~/shared/presence-status.js";
 import { profileAssetUrl } from "../shared/profile-assets.js";
-import { useAuthStore } from "../stores/auth";
 
 const friendsStore = useFriendsStore();
-const presenceStatusStore = usePresenceStatusStore();
-const identityStore = useIdentityStore();
 const roomsStore = useRoomsStore();
-const authStore = useAuthStore();
 const router = useRouter();
 
 const dropdownRef = ref(null);
 const friendsView = ref("friends");
-const showAddFriend = ref(false);
-const friendHandle = ref("");
-const addingFriend = ref(false);
-const friendError = ref("");
 
 const pendingRequestsCount = computed(
   () => friendRequests.value.filter((r) => r.status === "pending").length,
 );
 
-const { friends, friendRequests, sentRequests } = storeToRefs(friendsStore);
+const { friends, friendRequests } = storeToRefs(friendsStore);
 
 const localFriendRequests = ref([]);
 
-onMounted(async () => {
-  await Promise.all([
+function handleOutsideClick(event) {
+  if (
+    dropdownRef.value &&
+    !dropdownRef.value.contains(event.target) &&
+    dropdownRef.value.open
+  ) {
+    dropdownRef.value.removeAttribute("open");
+  }
+}
+
+onMounted(() => {
+  Promise.allSettled([
     friendsStore.fetchFriends(),
     friendsStore.fetchFriendRequests(),
-    friendsStore.fetchSentRequests(),
   ]);
   localFriendRequests.value = [...friendsStore.friendRequests];
-
-  const handleOutsideClick = (event) => {
-    if (
-      dropdownRef.value &&
-      !dropdownRef.value.contains(event.target) &&
-      dropdownRef.value.open
-    ) {
-      dropdownRef.value.removeAttribute("open");
-    }
-  };
   document.addEventListener("pointerdown", handleOutsideClick);
-  onScopeDispose(() =>
-    document.removeEventListener("pointerdown", handleOutsideClick),
-  );
+});
+
+onUnmounted(() => {
+  document.removeEventListener("pointerdown", handleOutsideClick);
 });
 
 const sortedFriends = computed(() => {
@@ -344,23 +243,6 @@ function presenceLabel(friend) {
   return PRESENCE_LABELS[friend.presence_status] || "Online";
 }
 
-async function addFriend() {
-  const handle = friendHandle.value.trim().replace(/^@/, "");
-  if (!handle) return;
-  addingFriend.value = true;
-  friendError.value = "";
-  try {
-    await friendsStore.sendRequest(handle);
-    friendHandle.value = "";
-    showAddFriend.value = false;
-    await friendsStore.fetchFriendRequests();
-  } catch (cause) {
-    friendError.value = cause.message;
-  } finally {
-    addingFriend.value = false;
-  }
-}
-
 async function acceptRequest(requestId) {
   await friendsStore.respondToRequest(requestId, true);
   localFriendRequests.value = localFriendRequests.value.filter(
@@ -385,19 +267,18 @@ function joinFriendRoom(friend) {
   }
 }
 
-function openFriendProfile(friend) {
-  // Navigate to DM or friend profile
-}
-
-async function cancelSentRequest(requestId) {
-  await friendsStore.cancelRequest(requestId);
-}
-
 async function refresh() {
-  await Promise.all([
+  await Promise.allSettled([
     friendsStore.fetchFriends(),
     friendsStore.fetchFriendRequests(),
-    friendsStore.fetchSentRequests(),
   ]);
+}
+
+function handleDropdownToggle(event) {
+  if (event.currentTarget.open) refresh();
+}
+
+function navigateToAddFriend() {
+  router.push({ path: "/friends", query: { tab: "add" } });
 }
 </script>

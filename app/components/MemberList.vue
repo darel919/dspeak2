@@ -44,7 +44,6 @@
               alt=""
               class="block rounded-full"
             />
-            <!-- Status dot at right bottom -->
             <span
               v-if="
                 member.id === currentUser?.id &&
@@ -69,12 +68,15 @@
             ></span>
           </div>
         </div>
-        <!-- Name and owner icon -->
-        <div class="flex items-center gap-1 text-base-content font-medium">
-          <span class="text-sm font-bold">{{ memberDisplayName(member) }}</span>
-          <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
-            <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
-          </span>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1 text-base-content font-medium">
+            <span class="truncate text-sm font-bold">{{
+              memberDisplayName(member)
+            }}</span>
+            <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
+              <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
+            </span>
+          </div>
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { usePocketBaseAdmin } from "./pocketbase.js";
 import { getBoundedList } from "./pocketbase-query.js";
+import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 
 export async function getFriendsList(userId) {
   const pb = await usePocketBaseAdmin();
@@ -114,7 +115,23 @@ export async function sendFriendRequest(requesterId, recipientHandle) {
       throw new Error("Already friends with this user");
     }
     if (existing.status === "pending") {
-      throw new Error("Friend request already pending");
+      const isRequester = String(existing.requester) === String(requesterId);
+      if (!isRequester) {
+        await respondToFriendRequest(existing.id, requesterId, true);
+        return { id: existing.id, status: "accepted", accepted: true };
+      }
+      return {
+        id: existing.id,
+        recipientId: recipient.id,
+        recipient: {
+          id: recipient.id,
+          name: recipient.name || recipient.username || "",
+          handle: recipient.handle || "",
+          avatar: recipient.avatar || "",
+        },
+        status: existing.status,
+        createdAt: existing.created,
+      };
     }
     if (existing.status === "blocked") {
       throw new Error("Unable to send friend request");
@@ -306,7 +323,6 @@ export async function sendFriendRequestById(requesterId, recipientId) {
       if (isRequester) {
         throw new Error("Friend request already sent");
       }
-      // Other user sent us a request — accept it
       await respondToFriendRequest(existing.id, requesterId, true);
       return { id: existing.id, status: "accepted", accepted: true };
     }
@@ -337,35 +353,30 @@ export async function sendFriendRequestById(requesterId, recipientId) {
 
 export async function getSentFriendRequests(userId) {
   const pb = await usePocketBaseAdmin();
-  let requests;
-  try {
-    requests = await getBoundedList(pb, "dspeak_friends", {
-      filter: pb.filter("requester = {:userId} && status = 'pending'", {
-        userId,
-      }),
-      expand: "recipient",
-      sort: "-created",
-    });
-  } catch (error) {
-    return [];
-  }
+  const requests = await getBoundedList(pb, "dspeak_friends", {
+    filter: pb.filter("requester = {:userId}", { userId }),
+    expand: "recipient",
+    sort: "-created",
+  });
 
-  return requests.map((req) => ({
-    id: req.id,
-    recipientId: String(req.recipient),
-    recipient: req.expand?.recipient
-      ? {
-          id: req.expand.recipient.id,
-          name:
-            req.expand.recipient.name || req.expand.recipient.username || "",
-          display_name: req.expand.recipient.display_name || "",
-          handle: req.expand.recipient.handle || "",
-          avatar: req.expand.recipient.avatar || "",
-        }
-      : null,
-    status: req.status,
-    createdAt: req.created,
-  }));
+  return requests
+    .filter((req) => req.status === "pending")
+    .map((req) => ({
+      id: req.id,
+      recipientId: String(req.recipient),
+      recipient: req.expand?.recipient
+        ? {
+            id: req.expand.recipient.id,
+            name:
+              req.expand.recipient.name || req.expand.recipient.username || "",
+            display_name: req.expand.recipient.display_name || "",
+            handle: req.expand.recipient.handle || "",
+            avatar: sameOriginAvatarPath(req.expand.recipient) || "",
+          }
+        : null,
+      status: req.status,
+      createdAt: req.created,
+    }));
 }
 
 export async function cancelFriendRequest(requestId, userId) {

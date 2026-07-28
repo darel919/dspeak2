@@ -152,11 +152,11 @@
                       class="sr-only"
                       type="file"
                       aria-label="Choose profile picture"
-                      accept="image/jpeg,image/png,image/webp"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
                       @change="selectProfileAvatar"
                     />
                     <p class="mt-2 text-xs leading-4 text-base-content/50">
-                      JPG, PNG or WebP. Max 5 MB.
+                      JPG, PNG, WebP or animated GIF. Max 5 MB.
                     </p>
                   </div>
                   <div class="grid content-start gap-5">
@@ -1123,15 +1123,34 @@ watch(
   { immediate: true },
 );
 
+const allowedProfileImageTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
 function selectProfileAvatar(event) {
+  const selected = event.target.files?.[0] || null;
+  if (
+    selected &&
+    (!allowedProfileImageTypes.has(selected.type) ||
+      selected.size > 5 * 1024 * 1024)
+  ) {
+    event.target.value = "";
+    profileError.value = true;
+    profileMessage.value = "Choose a JPG, PNG, WebP or GIF up to 5 MB.";
+    return;
+  }
   if (profileAvatarObjectUrl.value) {
     URL.revokeObjectURL(profileAvatarObjectUrl.value);
   }
-  profileAvatar.value = event.target.files?.[0] || null;
+  profileAvatar.value = selected;
   profileAvatarObjectUrl.value = profileAvatar.value
     ? URL.createObjectURL(profileAvatar.value)
     : "";
   profileMessage.value = "";
+  profileError.value = false;
 }
 
 function openAvatarPicker() {
@@ -1521,8 +1540,7 @@ async function refreshDevices() {
         permissionStream = await navigator.mediaDevices.getUserMedia({
           audio: true,
         });
-      } catch (_) {
-        /* ignore */
+      } catch {
       } finally {
         permissionStream?.getTracks().forEach((track) => track.stop());
       }

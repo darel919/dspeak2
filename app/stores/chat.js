@@ -43,6 +43,8 @@ export const useChatStore = defineStore("chat", () => {
   const onlineUsers = ref([]);
   const typingUsers = ref([]);
   const offline = ref(import.meta.client ? !navigator.onLine : false);
+  const reactionChanged = ref(null);
+  const pinChanged = ref(null);
   const config = useRuntimeConfig();
   let reconnectTimer = null;
   let backoffAttempts = 0;
@@ -694,21 +696,37 @@ export const useChatStore = defineStore("chat", () => {
           debugLog("[ChatStore] Participant change detected:", data);
           await handleParticipantChange();
           break;
-        case "channel_policy_updated":
-          useChannelsStore().applyRealtimePolicy(data.data.channelId, {
-            policy: data.data.policy,
-            slow_mode: data.data.slow_mode,
-          });
+        case "message_reaction_added":
+        case "message_reaction_removed":
+          debugLog("[ChatStore] Reaction event:", data.type, data.data);
+          reactionChanged.value = {
+            messageId: data.data?.messageId,
+            type: data.type,
+            ts: Date.now(),
+          };
           break;
-        case "notification_created":
-        case "notifications_read":
-          useNotificationsStore().receiveRealtime(data);
+        case "message_pinned":
+        case "message_unpinned":
+          updateMessage({
+            id: data.data.messageId,
+            pinned: data.type === "message_pinned",
+          });
+          pinChanged.value = {
+            messageId: data.data.messageId,
+            channelId: data.data.channelId,
+            pinned: data.type === "message_pinned",
+            ts: Date.now(),
+          };
           break;
         case "channel_policy_updated":
           useChannelsStore().applyRealtimePolicy(
             data.data.channelId,
-            data.data.mediaPolicy,
+            data.data,
           );
+          break;
+        case "notification_created":
+        case "notifications_read":
+          useNotificationsStore().receiveRealtime(data);
           break;
         default:
           debugLog("[ChatStore] Unknown message type:", data.type);
@@ -847,7 +865,8 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
-  async function sendMessage(channelId, content) {
+  async function sendMessage(channelId, content, options = {}) {
+    const { attachments = [], replyTo = null } = options;
     const channelsStore = useChannelsStore();
     const { canSend, slowModeSeconds } =
       channelsStore.getChannelSendPermission(channelId);
@@ -903,6 +922,8 @@ export const useChatStore = defineStore("chat", () => {
         updated: created,
         read_by: [userData.id],
         client_id: clientMessageId,
+        attachments,
+        reply_to: replyTo,
         status: "pending",
       };
 
@@ -928,6 +949,8 @@ export const useChatStore = defineStore("chat", () => {
           content,
           ownerId: userData.id,
           pendingId: pendingMessage.id,
+          attachments,
+          replyTo,
         };
         await enqueueMessage(queuedMessage);
         requestBackgroundSync();
@@ -947,11 +970,16 @@ export const useChatStore = defineStore("chat", () => {
             content,
             clientMessageId,
             ownerId: userData.id,
+            ...(attachments.length > 0 && { attachments }),
+            ...(replyTo && { replyTo }),
           }),
         });
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          const deliveryError = await chatResponseError(response);
+          deliveryError.retryable =
+            response.status === 408 || response.status >= 500;
+          throw deliveryError;
         }
 
         const message = await response.json();
@@ -960,12 +988,18 @@ export const useChatStore = defineStore("chat", () => {
 
         return message;
       } catch (fetchError) {
+        if (fetchError.retryable === false) {
+          removeMessage(pendingMessage.id, clientMessageId);
+          throw fetchError;
+        }
         const queuedMessage = {
           id: clientMessageId,
           channelId,
           content,
           ownerId: userData.id,
           pendingId: pendingMessage.id,
+          attachments,
+          replyTo,
         };
         await enqueueMessage(queuedMessage);
         requestBackgroundSync();
@@ -1397,6 +1431,72 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
+  async function fetchBookmarks() {
+    try {
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/chat/bookmarks`, {
+        credentials: "include",
+      });
+      if (!response.ok) return { bookmarks: [] };
+      return await response.json();
+    } catch (err) {
+      console.error("[ChatStore] Failed to fetch bookmarks:", err);
+      return { bookmarks: [] };
+    }
+  }
+
+  async function fetchPinned(channelId) {
+    try {
+      const apiPath = config.public.apiPath;
+      const response = await fetch(
+        `${apiPath}/chat/pinned?channelId=${encodeURIComponent(channelId)}`,
+        { credentials: "include" },
+      );
+      if (!response.ok) return { pinned: [] };
+      return await response.json();
+    } catch (err) {
+      console.error("[ChatStore] Failed to fetch pinned messages:", err);
+      return { pinned: [] };
+    }
+  }
+
+  async function searchMessages(channelId, query, filters) {
+    try {
+      const apiPath = config.public.apiPath;
+      const params = new URLSearchParams({ channelId, q: query });
+      if (filters?.author) params.set("author", filters.author);
+      if (filters?.has) params.set("has", filters.has);
+      if (filters?.before) params.set("before", filters.before);
+      if (filters?.after) params.set("after", filters.after);
+      const response = await fetch(`${apiPath}/chat/search?${params}`, {
+        credentials: "include",
+      });
+      if (!response.ok) throw await chatResponseError(response);
+      return await response.json();
+    } catch (err) {
+      console.error("[ChatStore] Failed to search messages:", err);
+      throw err;
+    }
+  }
+
+  async function undoMessage(messageId) {
+    try {
+      const apiPath = config.public.apiPath;
+      const response = await fetch(`${apiPath}/chat/message/undo`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+      if (!response.ok) throw await chatResponseError(response);
+      removeMessage(messageId);
+      return await response.json();
+    } catch (err) {
+      console.error("[ChatStore] Failed to undo message:", err);
+      throw err;
+    }
+  }
+
   onScopeDispose(() => {
     if (!process.client) return;
     if ("serviceWorker" in navigator) {
@@ -1437,8 +1537,14 @@ export const useChatStore = defineStore("chat", () => {
     markMessageAsRead,
     sendTypingIndicator,
     sendPing,
+    fetchBookmarks,
+    fetchPinned,
+    searchMessages,
+    undoMessage,
     clearChat,
     handleBackgroundSyncSuccess,
     triggerManualSync,
+    reactionChanged,
+    pinChanged,
   };
 });

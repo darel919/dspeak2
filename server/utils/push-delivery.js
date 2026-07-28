@@ -1,11 +1,15 @@
 import webpush from "web-push";
 import {
   isMessageNotificationEligible,
+  messageContainsBroadcastMention,
   notificationBody,
   resolveNotificationPreference,
 } from "../../shared/notification-policy.js";
 import { publicDisplayName } from "../../shared/user-profile.js";
-import { isDeviceViewingChannel } from "./dspeak-realtime.js";
+import {
+  isDeviceViewingChannel,
+  isUserViewingChannel,
+} from "./dspeak-realtime.js";
 import { usePocketBaseAdmin } from "./pocketbase.js";
 import { getBoundedList } from "./pocketbase-query.js";
 import {
@@ -158,6 +162,11 @@ export async function persistMessageNotifications({
     subscriptionsByUser.set(String(subscription.user), userSubscriptions);
   }
   const senderName = publicDisplayName(message.expand?.sender);
+  const mentionsEveryone = messageContainsBroadcastMention(
+    message.content,
+    "everyone",
+  );
+  const mentionsHere = messageContainsBroadcastMention(message.content, "here");
   let notificationCount = 0;
   let jobCount = 0;
 
@@ -171,6 +180,9 @@ export async function persistMessageNotifications({
         preference,
         content: message.content,
         recipientHandle: profilesById.get(recipientId)?.handle,
+        broadcastMention:
+          mentionsEveryone ||
+          (mentionsHere && isUserViewingChannel(recipientId, channel.id)),
       })
     ) {
       continue;

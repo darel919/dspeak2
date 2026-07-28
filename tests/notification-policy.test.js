@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isMessageNotificationEligible,
+  messageContainsBroadcastMention,
   messageMentionsHandle,
   notificationBody,
   resolveNotificationPreference,
 } from "../shared/notification-policy.js";
 import {
   isDeviceViewingChannel,
+  isUserViewingChannel,
   setDeviceViewingChannel,
 } from "../server/utils/dspeak-realtime.js";
 
@@ -62,6 +64,36 @@ test("message eligibility enforces muted and mentions modes", () => {
   );
 });
 
+test("everyone and here mentions use complete tokens and respect notification modes", () => {
+  assert.equal(
+    messageContainsBroadcastMention("Hello @everyone!", "everyone"),
+    true,
+  );
+  assert.equal(
+    messageContainsBroadcastMention("Hello @everyone2", "everyone"),
+    false,
+  );
+  assert.equal(messageContainsBroadcastMention("Hello @here", "here"), true);
+  assert.equal(
+    isMessageNotificationEligible({
+      preference: { mode: "mentions" },
+      content: "Hello @everyone",
+      recipientHandle: "unmentioned-user",
+      broadcastMention: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isMessageNotificationEligible({
+      preference: { mode: "muted" },
+      content: "Hello @everyone",
+      recipientHandle: "unmentioned-user",
+      broadcastMention: true,
+    }),
+    false,
+  );
+});
+
 test("disabled previews never expose sender or message content", () => {
   assert.equal(
     notificationBody({
@@ -90,4 +122,5 @@ test("active-channel suppression is reference counted per device", () => {
     isDeviceViewingChannel("policy-user", "policy-device", "channel-one"),
     false,
   );
+  assert.equal(isUserViewingChannel("policy-user", "channel-one"), false);
 });

@@ -84,6 +84,27 @@ test("avatar proxy retains the PocketBase collection metadata needed for file UR
     /fields: "id,avatar,collectionId,collectionName"/,
   );
   assert.match(avatarHandler, /pb\.files\.getURL\(user, user\.avatar\)/);
+  assert.match(avatarHandler, /X-Content-Type-Options", "nosniff"/);
+});
+
+test("animated GIF profile pictures are accepted and preserved end to end", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-api.js", import.meta.url),
+    "utf8",
+  );
+  const settings = readFileSync(
+    new URL("../app/pages/settings.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    settings,
+    /accept="image\/jpeg,image\/png,image\/webp,image\/gif"/,
+  );
+  assert.match(settings, /allowedProfileImageTypes/);
+  assert.match(api, /allowGif/);
+  assert.match(api, /GIF8/);
+  assert.match(api, /validateRoomImage\([\s\S]*?body\.avatar,[\s\S]*?true/);
 });
 
 test("profileInitials derives a stable fallback", () => {

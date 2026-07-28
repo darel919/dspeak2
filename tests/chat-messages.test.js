@@ -168,6 +168,428 @@ test("chat GET routes do not attempt to read a request body", () => {
   );
 });
 
+test("chat messages preserve attachment and thread metadata end to end", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  const store = readFileSync(
+    new URL("../app/stores/chat.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(api, /attachments: parseAttachments\(message\),\s+reply_to:/);
+  assert.match(api, /const hasContent = typeof body\.content === "string"/);
+  assert.match(api, /validateMessageAttachments\(/);
+  assert.match(api, /validateReplyTarget\(/);
+  assert.match(store, /attachments,\s+reply_to: replyTo/);
+  assert.match(store, /queuedMessage = \{[\s\S]*?attachments,[\s\S]*?replyTo,/);
+});
+
+test("multipart uploads are parsed once and background delivery preserves metadata", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  const worker = readFileSync(
+    new URL("../public/sw.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(api, /const form = body/);
+  assert.doesNotMatch(api, /const form = await parseBody\(event\)/);
+  assert.match(worker, /attachments: message\.attachments/);
+  assert.match(worker, /replyTo: message\.replyTo/);
+});
+
+test("chat image uploads use the CSRF-aware browser fetch path", () => {
+  const upload = readFileSync(
+    new URL("../app/shared/image-upload.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(upload, /fetch\(`\$\{path\}\/chat\/upload`/);
+  assert.doesNotMatch(upload, /XMLHttpRequest/);
+});
+
+test("chat uploads are associated with messages and abandoned files are removable", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  const migration = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  const input = readFileSync(
+    new URL("../app/components/Chat/ChatInput.vue", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    migration,
+    /field\("message", "relation"[\s\S]*?cascadeDelete: true/,
+  );
+  assert.match(api, /suffix === "upload" && event\.method === "DELETE"/);
+  assert.match(
+    api,
+    /record\.message[\s\S]*?Image is already attached to a message/,
+  );
+  assert.match(api, /update\(attachment\.id, \{ message: created\.id \}\)/);
+  assert.match(
+    input,
+    /uploadedAttachmentIds\.map\(\(id\) => deleteChatFile\(id, apiPath\)\)/,
+  );
+});
+
+test("chat message actions expose a direct reaction command", () => {
+  const actions = readFileSync(
+    new URL("../app/components/Chat/MessageActions.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(actions, />\s*Add reaction\s*</);
+  assert.match(actions, /emit\("react", props\.message\)/);
+  assert.match(actions, /aria-expanded="isOpen"/);
+  assert.match(actions, /role="menu"/);
+  assert.match(actions, /handleMenuKeydown/);
+  assert.match(actions, /event\.key === "Escape"/);
+  assert.match(actions, /min-h-11 min-w-11/);
+  assert.doesNotMatch(actions, /<label|btn-xs|shadow-xl/);
+});
+
+test("emoji picker reflows at 320px with Metro-sized controls", () => {
+  const picker = readFileSync(
+    new URL("../app/components/Chat/EmojiPicker.vue", import.meta.url),
+    "utf8",
+  );
+  assert.match(picker, /w-\[min\(320px,calc\(100vw-2rem\)\)\]/);
+  assert.doesNotMatch(picker, /w-\[320px\]/);
+  assert.doesNotMatch(picker, /rounded-lg|shadow-xl|btn-xs|btn-sm/);
+  assert.match(picker, /min-h-11 min-w-11/);
+  assert.match(picker, /grid-cols-5/);
+  assert.match(picker, /min-\[352px\]:grid-cols-6/);
+});
+
+test("thread refresh stays inside the Vue component contract", () => {
+  const sidebar = readFileSync(
+    new URL("../app/components/Chat/ThreadSidebar.vue", import.meta.url),
+    "utf8",
+  );
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(sidebar, /defineExpose\(\{ refresh \}\)/);
+  assert.doesNotMatch(sidebar, /querySelector|addEventListener|refresh-thread/);
+  assert.match(window, /ref="threadSidebar"/);
+  assert.match(window, /threadSidebar\.value\?\.refresh\(\)/);
+  assert.match(sidebar, /threadRequestGeneration/);
+  assert.match(sidebar, /requestGeneration !== threadRequestGeneration/);
+});
+
+test("reaction hydration is authorized and batched per channel", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(api, /messageIds/);
+  assert.match(api, /reactionsByMessage/);
+  assert.match(window, /messageIds: reactionMessageIds\.join\(","\)/);
+  assert.doesNotMatch(window, /window\._reactionLoadTimer/);
+  assert.match(window, /reactionChannelGeneration/);
+  assert.match(window, /messageReactions\.value = \{\}/);
+  assert.match(window, /generation !== reactionChannelGeneration/);
+});
+
+test("reaction writes validate and bind client-controlled emoji values", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(api, /enforceRateLimit\(event, "chat-reaction"/);
+  assert.match(api, /Invalid emoji/);
+  assert.match(
+    api,
+    /pb\.filter\([\s\S]*?message = \{:message\}[\s\S]*?emoji = \{:emoji\}/,
+  );
+  assert.doesNotMatch(
+    api,
+    /`message = '\$\{messageId\}' && user = '\$\{userId\}' && emoji = '\$\{emoji\}'`/,
+  );
+});
+
+test("link previews use bounded redirect-safe outbound HTML fetching", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  const outbound = readFileSync(
+    new URL(
+      "../server/infrastructure/network/outbound-request.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(api, /fetchPublicHtml\(url/);
+  assert.doesNotMatch(api, /const html = await response\.text\(\)/);
+  assert.match(outbound, /maxRedirects/);
+  assert.match(outbound, /maxBytes/);
+  assert.match(outbound, /text\/html/);
+});
+
+test("message search binds and validates user-controlled filters", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(api, /pb\.filter\(conditions\.join\(" && "\), parameters\)/);
+  assert.match(api, /Search query must be 200 characters or fewer/);
+  assert.match(api, /if \(searchQ\) \{/);
+  assert.match(api, /Invalid content filter/);
+  assert.match(api, /Invalid author filter/);
+  assert.match(api, /statusMessage: `Invalid \$\{name\} date`/);
+  assert.doesNotMatch(api, /const escapedQ = searchQ\.replace/);
+  const search = readFileSync(
+    new URL("../app/components/Chat/MessageSearch.vue", import.meta.url),
+    "utf8",
+  );
+  assert.match(search, /const hasFilters =/);
+  assert.match(search, /if \(!searchQuery\.value\.trim\(\) && !hasFilters\)/);
+});
+
+test("chat mutations reject failed responses before changing local state", () => {
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(window, /async function requireSuccessfulResponse/);
+  assert.match(
+    window,
+    /await requireSuccessfulResponse\(response, "Reaction failed"\)/,
+  );
+  assert.match(
+    window,
+    /await requireSuccessfulResponse\(response, "Bookmark update failed"\)/,
+  );
+  assert.match(
+    window,
+    /await requireSuccessfulResponse\(response, "Pin update failed"\)/,
+  );
+  assert.match(window, /role="alert"[\s\S]*?\{\{ actionError \}\}/);
+});
+
+test("message policy is owned by the channel settings modal", () => {
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+  const channelList = readFileSync(
+    new URL("../app/components/ChannelList.vue", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(window, /Send permission/);
+  assert.match(channelList, /Channel settings[\s\S]*?Message policy/);
+  assert.match(channelList, /editingMessagePolicy/);
+  assert.match(channelList, /editingSlowMode/);
+  assert.match(channelList, /updateChannelPolicy/);
+});
+
+test("slow mode rejects concurrent sends before persistence", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    api,
+    /validateReplyTarget[\s\S]*?enforceRateLimit\([\s\S]*?"chat-slow-mode"[\s\S]*?collection\("dspeak_messages"\)\.create/,
+  );
+  assert.match(api, /`\$\{userId\}:\$\{channel\.id\}`/);
+});
+
+test("undo send uses the server message timestamp and preserves visible failures", () => {
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+  const undo = readFileSync(
+    new URL("../app/components/Chat/UndoSend.vue", import.meta.url),
+    "utf8",
+  );
+  assert.match(window, /new Date\(result\.created\)\.getTime\(\) \+ 3000/);
+  assert.match(window, /:expires-at="lastSentUndoExpiresAt"/);
+  assert.match(undo, /const remainingMs = props\.expiresAt - Date\.now\(\)/);
+  assert.match(undo, /role="alert"[\s\S]*?\{\{ undoError \}\}/);
+  assert.doesNotMatch(undo, /finally[\s\S]*?emit\("expired"\)/);
+  assert.doesNotMatch(undo, /rounded-lg|shadow-xl|btn-sm/);
+});
+
+test("the chat store does not expose stale duplicate mutation paths", () => {
+  const store = readFileSync(
+    new URL("../app/stores/chat.js", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(store, /async function fetchReactions/);
+  assert.doesNotMatch(store, /async function toggleReaction/);
+  assert.doesNotMatch(store, /async function toggleBookmark/);
+  assert.doesNotMatch(store, /async function togglePin/);
+});
+
+test("thread replies use the shared chat delivery contract", () => {
+  const sidebar = readFileSync(
+    new URL("../app/components/Chat/ThreadSidebar.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    sidebar,
+    /chatStore\.sendMessage\(props\.channelId, content, \{/,
+  );
+  assert.match(sidebar, /replyTo: threadParent\.value\.id/);
+  assert.doesNotMatch(
+    sidebar,
+    /fetch\(`\$\{config\.public\.apiPath\}\/chat\/message`/,
+  );
+  assert.match(sidebar, /role="alert"[\s\S]*?replyError/);
+});
+
+test("bookmark access and thread hydration preserve room-scoped message contracts", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(api, /accessibleBookmarks/);
+  assert.match(api, /ensureMember\(pb, room, userId\)/);
+  assert.match(api, /enforceRateLimit\(event, "chat-pin"/);
+  assert.match(api, /enforceRateLimit\(event, "chat-unpin"/);
+  assert.match(api, /enforceRateLimit\(event, "chat-bookmark"/);
+  assert.match(
+    api,
+    /parent:[\s\S]*?attachments: parseAttachments\(parent\)[\s\S]*?reply_to:/,
+  );
+  assert.match(
+    api,
+    /replies: replies\.map[\s\S]*?attachments: parseAttachments\(reply\)[\s\S]*?reply_to:/,
+  );
+});
+
+test("message images and thread layout remain keyboard and reflow accessible", () => {
+  const message = readFileSync(
+    new URL("../app/components/Chat/ChatMessage.vue", import.meta.url),
+    "utf8",
+  );
+  const sidebar = readFileSync(
+    new URL("../app/components/Chat/ThreadSidebar.vue", import.meta.url),
+    "utf8",
+  );
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    message,
+    /<button[\s\S]*?:aria-label="`Open image: \$\{att\.name/,
+  );
+  assert.match(message, /object-contain/);
+  assert.match(sidebar, /fixed inset-0[\s\S]*?md:static/);
+  assert.match(window, /flex-1 min-w-0 flex flex-col/);
+});
+
+test("message reactions and thread link share one compact footer row", () => {
+  const message = readFileSync(
+    new URL("../app/components/Chat/ChatMessage.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(message, /class="chat-footer message-engagement"/);
+  assert.match(message, /class="message-reactions/);
+  assert.match(message, /class="message-thread-link/);
+  assert.doesNotMatch(message, /class="chat-footer mt-1 flex flex-wrap gap-1"/);
+  assert.doesNotMatch(message, /class="chat-footer mt-1 flex min-h-11/);
+});
+
+test("broadcast mentions require moderation permission", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(api, /messageContainsBroadcastMention\(content/);
+  assert.match(api, /Missing permission to mention everyone or here/);
+  assert.match(api, /access\.permissions\?\.includes\("message\.moderate"\)/);
+});
+
+test("pin state is synchronized through the realtime store contract", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  const store = readFileSync(
+    new URL("../app/stores/chat.js", import.meta.url),
+    "utf8",
+  );
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(api, /type: "message_unpinned",[\s\S]*?channelId/);
+  assert.match(store, /case "message_pinned":[\s\S]*?case "message_unpinned":/);
+  assert.match(
+    store,
+    /updateMessage\(\{[\s\S]*?id: data\.data\.messageId,[\s\S]*?pinned:/,
+  );
+  assert.match(store, /pinChanged/);
+  assert.match(
+    window,
+    /chatStore\.pinChanged[\s\S]*?pinnedMessages\.value\?\.refresh/,
+  );
+  assert.match(window, /ref="pinnedMessages"/);
+});
+
+test("pin records and message state mutate in PocketBase transactions", () => {
+  const api = readFileSync(
+    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(api, /const pinBatch = pb\.createBatch\(\)/);
+  assert.match(
+    api,
+    /pinBatch[\s\S]*?dspeak_pinned_messages[\s\S]*?dspeak_messages[\s\S]*?await pinBatch\.send\(\)/,
+  );
+  assert.match(api, /const unpinBatch = pb\.createBatch\(\)/);
+  assert.match(
+    api,
+    /unpinBatch[\s\S]*?dspeak_pinned_messages[\s\S]*?dspeak_messages[\s\S]*?await unpinBatch\.send\(\)/,
+  );
+});
+
+test("chat action dialogs trap focus and restore message actions", () => {
+  const window = readFileSync(
+    new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
+    "utf8",
+  );
+  const actions = readFileSync(
+    new URL("../app/components/Chat/MessageActions.vue", import.meta.url),
+    "utf8",
+  );
+  assert.match(actions, /data-message-actions-trigger/);
+  assert.match(window, /ref="actionDialog"/);
+  assert.match(window, /@keydown="handleActionDialogKeydown"/);
+  assert.match(window, /event\.key !== "Tab"/);
+  assert.match(window, /event\.key === "Escape"/);
+  assert.match(window, /actionReturnFocus\?\.focus\(\)/);
+  assert.match(window, /actionFirstControl\.value\?\.focus\(\)/);
+});
+
 test("chat API errors expose a user-facing message without the server stack", () => {
   const response = JSON.stringify({
     statusCode: 405,

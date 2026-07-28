@@ -90,10 +90,7 @@ async function onSubmit() {
   }
   loading.value = true;
   try {
-    const newRoom = await roomsStore.createRoom({
-      name: roomName.value,
-      desc: roomDesc.value,
-    });
+    const newRoom = await roomsStore.createRoom(roomName.value, roomDesc.value);
     if (newRoom && newRoom.id) {
       await router.push(`/room/${newRoom.id}`);
     } else {

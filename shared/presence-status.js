@@ -29,6 +29,12 @@ export function normalizePresenceStatus(value) {
   return PRESENCE_STATUSES.includes(value) ? value : "online";
 }
 
+export function resolveAutomaticPresence(manualStatus, automaticStatus) {
+  return manualStatus
+    ? normalizePresenceStatus(manualStatus)
+    : normalizePresenceStatus(automaticStatus);
+}
+
 export function normalizeIdleTimeout(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric)

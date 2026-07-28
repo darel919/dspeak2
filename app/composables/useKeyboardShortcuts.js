@@ -1,4 +1,5 @@
 import { shortcutMatchesEvent } from "~~/shared/keyboard-shortcuts.js";
+import { effectiveKeysForShortcut } from "../shared/keybinding-preferences.js";
 
 const activeScope = ref("global");
 const registeredShortcuts = new Map();
@@ -11,7 +12,8 @@ function handleKeydown(event) {
     if (binding.scope && binding.scope !== activeScope.value) continue;
     if (binding.scope === "modal" && activeScope.value !== "modal") continue;
 
-    if (shortcutMatchesEvent(binding.keys, event)) {
+    const effectiveKeys = effectiveKeysForShortcut(binding.id, binding.keys);
+    if (shortcutMatchesEvent(effectiveKeys, event)) {
       const preventDefault = binding.handler(event);
       if (preventDefault !== false) {
         event.preventDefault();

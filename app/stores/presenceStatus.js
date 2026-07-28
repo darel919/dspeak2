@@ -4,6 +4,7 @@ import { useAuthStore } from "./auth";
 import { STORAGE_KEYS } from "~/const/storage";
 import {
   normalizePresenceStatus,
+  resolveAutomaticPresence,
   normalizeIdleTimeout,
   DEFAULT_IDLE_TIMEOUT_MS,
   PRESENCE_LABELS,
@@ -55,9 +56,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     if (!import.meta.client) return;
     try {
       localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // noop
-    }
+    } catch {}
   }
 
   function connect() {
@@ -104,12 +103,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
         if (data.type === "online_users" && Array.isArray(data.data)) {
           onlineUsersList.value = data.data;
         }
-        if (data.type === "pong") {
-          // Keep alive acknowledgment
-        }
-      } catch {
-        // Ignore
-      }
+      } catch {}
     };
 
     socket.onclose = () => {
@@ -210,23 +204,32 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     );
   }
 
-  function setStatus(status) {
-    const normalized = normalizePresenceStatus(status);
-    presenceOverride.value = normalized === "online" ? null : normalized;
-    persist(STORAGE_KEYS.presenceOverride, presenceOverride.value);
-    effectiveStatus.value = normalized;
-
+  function sendStatus(status, manual) {
     if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
       presenceWs.send(
         JSON.stringify({
           type: "status",
-          status: normalized,
-          manual: Boolean(presenceOverride.value),
+          status,
+          manual,
           idleTimeoutMs: idleTimeout.value,
           timestamp: new Date().toISOString(),
         }),
       );
     }
+  }
+
+  function setStatus(status) {
+    const normalized = normalizePresenceStatus(status);
+    presenceOverride.value = normalized === "online" ? null : normalized;
+    persist(STORAGE_KEYS.presenceOverride, presenceOverride.value);
+    effectiveStatus.value = normalized;
+    sendStatus(normalized, Boolean(presenceOverride.value));
+  }
+
+  function setAutomaticStatus(status) {
+    if (presenceOverride.value) return;
+    effectiveStatus.value = resolveAutomaticPresence(null, status);
+    sendStatus(effectiveStatus.value, false);
   }
 
   function setIdleTimeout(ms) {
@@ -275,6 +278,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     connect,
     disconnect,
     setStatus,
+    setAutomaticStatus,
     setIdleTimeout,
     getUserStatus,
     updateUserStatus,

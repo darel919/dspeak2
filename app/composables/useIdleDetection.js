@@ -10,6 +10,22 @@ export function useIdleDetection() {
 
   let idleTimeout = null;
   let lastActivity = Date.now();
+  const events = [
+    "mousedown",
+    "keydown",
+    "touchstart",
+    "scroll",
+    "mousemove",
+    "wheel",
+  ];
+  let lastEvent = 0;
+
+  const handler = () => {
+    const now = Date.now();
+    if (now - lastEvent < 2000) return;
+    lastEvent = now;
+    onActivity();
+  };
 
   function resetIdleTimer() {
     lastActivity = Date.now();
@@ -23,8 +39,7 @@ export function useIdleDetection() {
     stopIdleTimer();
     const timeout = presenceStore.idleTimeout || DEFAULT_IDLE_TIMEOUT_MS;
     idleTimeout = setTimeout(() => {
-      if (presenceStore.presenceOverride) return;
-      presenceStore.setStatus("idle");
+      presenceStore.setAutomaticStatus("idle");
     }, timeout);
   }
 
@@ -40,7 +55,7 @@ export function useIdleDetection() {
       presenceStore.effectiveStatus === "idle" &&
       !presenceStore.presenceOverride
     ) {
-      presenceStore.setStatus("online");
+      presenceStore.setAutomaticStatus("online");
     }
     resetIdleTimer();
     startIdleTimer();
@@ -51,42 +66,28 @@ export function useIdleDetection() {
     if (isInitialized) return;
     isInitialized = true;
 
-    const events = [
-      "mousedown",
-      "keydown",
-      "touchstart",
-      "scroll",
-      "mousemove",
-      "wheel",
-    ];
-    let lastEvent = 0;
-
-    const handler = () => {
-      const now = Date.now();
-      if (now - lastEvent < 2000) return;
-      lastEvent = now;
-      onActivity();
-    };
-
     for (const event of events) {
       window.addEventListener(event, handler, { passive: true });
     }
 
     startIdleTimer();
+  }
 
-    onScopeDispose(() => {
+  function destroy() {
+    if (import.meta.client && isInitialized) {
       for (const event of events) {
         window.removeEventListener(event, handler);
       }
-      stopIdleTimer();
-      isInitialized = false;
-    });
+    }
+    stopIdleTimer();
+    isInitialized = false;
   }
 
   return {
     idleTimeoutMs,
     isIdle,
     init,
+    destroy,
     onActivity,
     setIdleTimeout: (ms) => {
       presenceStore.setIdleTimeout(ms);
