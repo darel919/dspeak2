@@ -160,4 +160,4 @@ constitutes acceptance of the updated policy.
 
 Contact the instance operator for privacy-related inquiries. The operator's
 contact information is available on the instance's home page or in the
-repository at `https://github.com/darelisme/dspeak`.
+repository at `https://github.com/darel919/dspeak`.

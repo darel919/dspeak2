@@ -81,7 +81,7 @@ the content.
 
 dSpeak is free software released under the GNU Affero General Public License
 version 3 (AGPL-3.0). The source code is available at
-`https://github.com/darelisme/dspeak`.
+`https://github.com/darel919/dspeak`.
 
 If you modify dSpeak and run a modified version on a publicly accessible
 server, you must make the modified source code available to users who interact
@@ -133,4 +133,4 @@ effect, you agree to the revised terms.
 
 For questions about these terms, contact the instance operator. The operator's
 contact information is available on the instance's home page or in the
-repository at `https://github.com/darelisme/dspeak`.
+repository at `https://github.com/darel919/dspeak`.
