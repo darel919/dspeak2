@@ -1360,6 +1360,16 @@ async function migrateChatFeatures(pb) {
   });
 }
 
+async function migrateAllowEmptyContent(pb) {
+  const messages = await pb.collections.getOne("dspeak_messages");
+  await upsertCollection(pb, {
+    name: messages.name,
+    type: messages.type,
+    fields: [field("content", "text", { required: false })],
+    indexes: [],
+  });
+}
+
 const migrations = Object.freeze([
   {
     name: "20260724_foundation_v1",
@@ -1488,6 +1498,10 @@ const migrations = Object.freeze([
   {
     name: "20260728_notification_timestamps_v1",
     run: migrateRoomAdministration,
+  },
+  {
+    name: "20260729_allow_empty_content_v1",
+    run: migrateAllowEmptyContent,
   },
 ]);
 

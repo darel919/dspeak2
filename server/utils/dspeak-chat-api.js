@@ -6,6 +6,7 @@ import {
   slowModeRemainingMs,
 } from "../../shared/channel-policy.js";
 import { messageContainsBroadcastMention } from "../../shared/notification-policy.js";
+import { cacheUploadedFile, getCachedFile } from "./upload-cache.js";
 
 export function createChatApiHandler(dependencies) {
   const {
@@ -68,27 +69,59 @@ export function createChatApiHandler(dependencies) {
           statusMessage: "Invalid image attachment",
         });
       seen.add(id);
-      const record = await pb.collection("dspeak_chat_files").getOne(id);
-      if (
-        String(record.uploader) !== String(userId) ||
-        String(record.room_channel) !== String(channelId)
-      )
-        throw createError({
-          statusCode: 403,
-          statusMessage: "Image attachment is not available in this channel",
-        });
-      if (record.message) {
-        const attachedMessage = await pb
-          .collection("dspeak_messages")
-          .getOne(record.message);
+      const cached = getCachedFile(id);
+      const record = cached
+        ? cached
+        : await pb
+            .collection("dspeak_chat_files")
+            .getOne(id)
+            .catch((err) => {
+              console.error(
+                "[Chat] validateMessageAttachments: file record getOne failed",
+                {
+                  id,
+                  status: err?.status,
+                  message: err?.message,
+                  data: err?.response?.data,
+                  url: err?.url,
+                  userId,
+                  channelId,
+                  submittedKeys: Object.keys(submitted || {}),
+                },
+              );
+              throw err;
+            });
+      if (cached) {
         if (
-          String(attachedMessage.sender) !== String(userId) ||
-          String(attachedMessage.client_id) !== String(clientId)
+          String(cached.uploader) !== String(userId) ||
+          String(cached.room_channel) !== String(channelId)
         )
           throw createError({
-            statusCode: 409,
-            statusMessage: "Image is already attached to a message",
+            statusCode: 403,
+            statusMessage: "Image attachment is not available in this channel",
           });
+      } else {
+        if (
+          String(record.uploader) !== String(userId) ||
+          String(record.room_channel) !== String(channelId)
+        )
+          throw createError({
+            statusCode: 403,
+            statusMessage: "Image attachment is not available in this channel",
+          });
+        if (record.message) {
+          const attachedMessage = await pb
+            .collection("dspeak_messages")
+            .getOne(record.message);
+          if (
+            String(attachedMessage.sender) !== String(userId) ||
+            String(attachedMessage.client_id) !== String(clientId)
+          )
+            throw createError({
+              statusCode: 409,
+              statusMessage: "Image is already attached to a message",
+            });
+        }
       }
       attachments.push({
         id: record.id,
@@ -417,8 +450,27 @@ export function createChatApiHandler(dependencies) {
         });
       const channel = await pb
         .collection("dspeak_rooms_channels")
-        .getOne(body.channelId);
-      const room = await pb.collection("dspeak_rooms").getOne(channel.room);
+        .getOne(body.channelId)
+        .catch((err) => {
+          console.error("[ChatMessage] channel lookup failed", {
+            channelId: body.channelId,
+            status: err?.status,
+            message: err?.message,
+          });
+          throw err;
+        });
+      const room = await pb
+        .collection("dspeak_rooms")
+        .getOne(channel.room)
+        .catch((err) => {
+          console.error("[ChatMessage] room lookup failed", {
+            roomId: channel?.room,
+            channelId: body.channelId,
+            status: err?.status,
+            message: err?.message,
+          });
+          throw err;
+        });
       const access = await ensureMember(pb, room, userId);
       if (channel.isMedia)
         throw createError({
@@ -516,12 +568,28 @@ export function createChatApiHandler(dependencies) {
           wasCreated = true;
         } catch (createError) {
           if (createError?.status !== 400) throw createError;
-          created = await pb.collection("dspeak_messages").getFirstListItem(
-            pb.filter("sender = {:sender} && client_id = {:client}", {
-              sender: userId,
-              client: clientId,
-            }),
-          );
+          try {
+            created = await pb.collection("dspeak_messages").getFirstListItem(
+              pb.filter("sender = {:sender} && client_id = {:client}", {
+                sender: userId,
+                client: clientId,
+              }),
+            );
+          } catch (lookupError) {
+            if (
+              lookupError?.status === 404 ||
+              lookupError?.response?.status === 404
+            )
+              throw createError({
+                statusCode: 400,
+                statusMessage: "Message could not be created",
+                data: {
+                  cause: "validation_failed",
+                  details: createError.response?.data,
+                },
+              });
+            throw lookupError;
+          }
         }
       }
       for (const attachment of validatedAttachments)
@@ -914,9 +982,38 @@ export function createChatApiHandler(dependencies) {
         width: Math.max(0, Math.min(20000, Number(form.width) || 0)),
         height: Math.max(0, Math.min(20000, Number(form.height) || 0)),
       });
+      let verifiedId = record.id;
+      try {
+        const verified = await pb
+          .collection("dspeak_chat_files")
+          .getOne(record.id);
+        verifiedId = verified.id;
+      } catch (verifyError) {
+        console.error(
+          "[ChatUpload] created file record not queryable by getOne",
+          {
+            id: record.id,
+            status: verifyError?.status,
+            message: verifyError?.message,
+          },
+        );
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Uploaded file record could not be verified",
+        });
+      }
+      cacheUploadedFile(userId, {
+        id: verifiedId,
+        room_channel: channelId,
+        name: record.name,
+        size: record.size,
+        mime_type: record.mime_type,
+        width: record.width || 0,
+        height: record.height || 0,
+      });
       return {
-        id: record.id,
-        url: `/api/assets/chat-file?id=${record.id}`,
+        id: verifiedId,
+        url: `/api/assets/chat-file?id=${verifiedId}`,
         name: record.name,
         size: record.size,
         mime_type: record.mime_type,

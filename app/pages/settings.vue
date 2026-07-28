@@ -67,10 +67,7 @@
           </header>
 
           <section v-if="activeSection === 'account'" class="space-y-5">
-            <div
-              v-if="profile"
-              class="bg-base-100"
-            >
+            <div v-if="profile" class="bg-base-100">
               <div class="flex items-center gap-4 sm:gap-5">
                 <div class="avatar shrink-0">
                   <div class="w-16 bg-base-200 ring-2 ring-base-100 sm:w-20">

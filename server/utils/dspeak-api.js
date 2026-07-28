@@ -825,7 +825,18 @@ export async function handleDspeakApi(event) {
     });
   } catch (error) {
     if (error?.statusCode) throw error;
-    if (Number(error?.status) >= 400 && Number(error?.status) < 500)
+    if (Number(error?.status) >= 400 && Number(error?.status) < 500) {
+      console.error("[dSpeak API] client error caught in catch-all handler", {
+        domain,
+        suffix,
+        method: event.method,
+        path: getRequestURL(event).pathname,
+        status: Number(error.status),
+        statusMessage: error.message || error.statusMessage,
+        responseData: error.response?.data || error.response,
+        errorUrl: error.url,
+        url: error?.response?.url,
+      });
       throw createError({
         statusCode: Number(error.status),
         statusMessage:
@@ -835,6 +846,7 @@ export async function handleDspeakApi(event) {
               ? "Resource conflict"
               : "Invalid request",
       });
+    }
     const requestId = crypto.randomUUID();
     console.error(`[dSpeak API] request ${requestId}`, error);
     throw createError({

@@ -5,9 +5,7 @@
     role="status"
     aria-live="polite"
   >
-    <div
-      class="flex items-center gap-3 bg-base-200 px-4 py-3"
-    >
+    <div class="flex items-center gap-3 bg-base-200 px-4 py-3">
       <Icon name="lucide:check-circle" class="h-5 w-5 text-success" />
       <span class="min-w-0 flex-1 text-sm font-semibold">Message sent</span>
       <button
