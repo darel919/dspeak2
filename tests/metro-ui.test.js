@@ -82,7 +82,6 @@ test("authenticated page copy consistently calls shared spaces rooms", async () 
 test("home workspace uses a content-led Metro room composition", async () => {
   const source = await readFile("app/pages/index.vue", "utf8");
   assert.match(source, /class="home-workspace flex-1 overflow-y-auto"/);
-  assert.match(source, /class="border-l-8 border-primary/);
   assert.match(source, /aria-labelledby="home-rooms-title"/);
   assert.match(source, /v-for="room in roomsStore\.rooms"/);
   assert.match(source, /class="home-room-tile metro-transition/);

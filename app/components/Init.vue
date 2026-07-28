@@ -4,7 +4,7 @@
       v-if="!startupComplete && !isAuthPage"
       class="metro-standalone flex min-h-screen items-center bg-base-100 px-6 py-12 sm:px-12"
     >
-      <div class="w-full max-w-3xl border-l-8 border-hero pl-6 sm:pl-10">
+      <div class="w-full max-w-3xl">
         <img :src="startupLogo" alt="" class="mb-8 size-24" />
         <p class="mb-3 text-sm font-semibold tracking-wide text-hero">dSpeak</p>
         <h1 class="metro-title">Welcome to dSpeak</h1>

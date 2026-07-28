@@ -18,6 +18,10 @@ const AUTH_HANDOFF_COOKIE =
   process.env.NODE_ENV === "production"
     ? "__Host-dspeak_auth_handoff"
     : "dspeak_auth_handoff";
+const AUTH_HANDOFF_CONSENT_COOKIE =
+  process.env.NODE_ENV === "production"
+    ? "__Host-dspeak_terms_acceptance"
+    : "dspeak_terms_acceptance";
 const AUTH_HANDOFF_LIFETIME_SECONDS = 10 * 60;
 const ACCOUNT_URL = "https://account.darelisme.my.id";
 const SESSION_ROTATION_GRACE_MS = 30 * 1000;
@@ -175,7 +179,13 @@ async function validateSession(pb, token, event = null) {
   return session;
 }
 
-async function persistAuthenticatedSession(event, metadata, userId, deviceId) {
+async function persistAuthenticatedSession(
+  event,
+  metadata,
+  userId,
+  deviceId,
+  termsAcceptedAt = null,
+) {
   if (!metadata?.id || !deviceId)
     throw createError({
       statusCode: 400,
@@ -212,6 +222,7 @@ async function persistAuthenticatedSession(event, metadata, userId, deviceId) {
       now.getTime() + SESSION_LIFETIME_SECONDS * 1000,
     ).toISOString(),
     last_seen_at: now.toISOString(),
+    ...(termsAcceptedAt ? { terms_accepted_at: termsAcceptedAt } : {}),
   });
   setCookie(event, SESSION_COOKIE, rawToken, sessionCookieOptions());
   exposeCsrfToken(event, session);
@@ -225,6 +236,12 @@ export function createAuthenticationHandoff(event) {
     process.env.DSPEAK_PUBLIC_ORIGIN || getRequestURL(event).origin;
   const redirectUri = new URL("/auth", publicOrigin).toString();
   setCookie(event, AUTH_HANDOFF_COOKIE, state, authHandoffCookieOptions());
+  setCookie(
+    event,
+    AUTH_HANDOFF_CONSENT_COOKIE,
+    "1",
+    authHandoffCookieOptions(),
+  );
   const loginUrl = new URL("/start", ACCOUNT_URL);
   loginUrl.searchParams.set("rUrl", redirectUri);
   loginUrl.searchParams.set("state", state);
@@ -239,7 +256,14 @@ export async function exchangeAuthenticationHandoff(
 ) {
   enforceRateLimit(event, "session-handoff-exchange", null, 20, 10 * 60 * 1000);
   const expectedState = getCookie(event, AUTH_HANDOFF_COOKIE) || "";
+  const consentAccepted = getCookie(event, AUTH_HANDOFF_CONSENT_COOKIE) === "1";
   deleteCookie(event, AUTH_HANDOFF_COOKIE, authHandoffCookieOptions(0));
+  deleteCookie(event, AUTH_HANDOFF_CONSENT_COOKIE, authHandoffCookieOptions(0));
+  if (!consentAccepted)
+    throw createError({
+      statusCode: 403,
+      statusMessage: "Terms acceptance is required",
+    });
   if (
     typeof code !== "string" ||
     !/^[a-zA-Z0-9_-]{32,128}$/.test(code) ||
@@ -289,6 +313,7 @@ export async function exchangeAuthenticationHandoff(
     metadata,
     String(metadata.id),
     deviceId,
+    new Date().toISOString(),
   );
 }
 

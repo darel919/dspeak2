@@ -34,6 +34,11 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    resolve: {
+      alias: {
+        "@legal": resolve("docs"),
+      },
+    },
   },
 
   css: ["~/assets/app.css"],

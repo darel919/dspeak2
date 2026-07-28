@@ -838,6 +838,16 @@ async function migrateAuthenticatedSessions(pb) {
   });
 }
 
+async function migrateLegalConsent(pb) {
+  const sessions = await pb.collections.getOne("dspeak_sessions");
+  await upsertCollection(pb, {
+    name: sessions.name,
+    type: sessions.type,
+    fields: [field("terms_accepted_at", "date")],
+    indexes: [],
+  });
+}
+
 async function migrateMessageIdempotency(pb) {
   const messages = await pb.collections.getOne("dspeak_messages");
   await upsertCollection(pb, {
@@ -1389,6 +1399,10 @@ const migrations = Object.freeze([
   {
     name: "20260723_authenticated_sessions_v1",
     run: migrateAuthenticatedSessions,
+  },
+  {
+    name: "20260728_legal_consent_v1",
+    run: migrateLegalConsent,
   },
   {
     name: "20260723_message_idempotency_v1",

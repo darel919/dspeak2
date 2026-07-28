@@ -4,7 +4,7 @@
     class="metro-standalone min-h-screen bg-base-100 px-6 py-16 sm:px-12 lg:px-20"
   >
     <div class="mx-auto flex min-h-[70dvh] max-w-6xl items-center">
-      <div class="max-w-3xl border-l-8 border-primary pl-6 sm:pl-10">
+      <div class="max-w-3xl">
         <p class="mb-4 text-sm font-semibold text-primary">dSpeak</p>
         <h1 class="metro-title max-w-2xl text-5xl sm:text-7xl">
           Conversation, without the clutter.
@@ -49,7 +49,7 @@
               class="room-empty-state flex flex-1 items-center overflow-y-auto"
             >
               <div class="w-full max-w-4xl px-8 py-16 lg:px-16">
-                <div class="border-l-8 border-primary pl-6 sm:pl-10">
+                <div>
                   <p class="mb-3 text-sm font-semibold text-primary">
                     Room ready
                   </p>
@@ -94,7 +94,7 @@
                 class="mx-auto w-full max-w-7xl px-8 py-12 lg:px-16 lg:py-16"
               >
                 <header class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
-                  <div class="border-l-8 border-primary pl-6 sm:pl-10">
+                  <div>
                     <p class="mb-3 text-sm font-semibold text-primary">
                       Your workspace
                     </p>

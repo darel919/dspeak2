@@ -8,6 +8,7 @@
     <PwaUpdatePrompt />
     <DatabaseHealthPrompt />
     <FatalErrorPrompt />
+    <CookieConsent />
   </NuxtLayout>
 </template>
 

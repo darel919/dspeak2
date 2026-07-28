@@ -24,6 +24,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@vite-pwa/nuxt": "1.1.1",
     "daisyui": "^5.7.1",
+    "marked": "^18.0.7",
     "mediasoup": "^3.22.0",
     "mediasoup-client": "^3.21.0",
     "nuxt": "^4.5.0",

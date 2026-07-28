@@ -779,8 +779,17 @@ export async function handleDspeakApi(event) {
       domain === "session" &&
       suffix === "handoff/start" &&
       event.method === "POST"
-    )
+    ) {
+      const body = await parseBody(event);
+      if (body.terms_accepted !== true) {
+        throw createError({
+          statusCode: 403,
+          statusMessage:
+            "You must accept the Terms of Service and Privacy Policy",
+        });
+      }
       return createAuthenticationHandoff(event);
+    }
     if (
       domain === "session" &&
       suffix === "handoff/exchange" &&

@@ -5,6 +5,16 @@ video, screen sharing, soundboards, and notifications. It runs as one long-lived
 Nuxt and Nitro application. PocketBase stores persistent data; native WebRTC and
 mediasoup carry realtime media.
 
+## License
+
+dSpeak is free software released under the
+[GNU Affero General Public License version 3 (AGPL-3.0)](LICENSE).
+You can use, modify, and distribute it under the terms of that license.
+
+If you modify dSpeak and run a modified version on a publicly accessible
+network service, you must make the modified source code available to all users
+who interact with it, as required by section 13 of the AGPL-3.0.
+
 ## What dSpeak provides
 
 - Rooms with text, voice, camera, screen sharing, and shared audio
