@@ -99,6 +99,7 @@ export default defineNitroPlugin(() => {
         channelId,
         streamKey,
         bitrate,
+        relayStarting: true,
         startedAt: new Date().toISOString(),
       });
 
@@ -130,6 +131,14 @@ export default defineNitroPlugin(() => {
       }
     } catch (error) {
       console.error("[RTMP] Error starting stream relay:", error);
+      manager.unregisterStream(channelId);
+      const cleanupPb = await usePocketBaseAdmin();
+      await cleanupPb
+        .collection("dspeak_rooms_channels")
+        .update(channelId, {
+          stream_active: false,
+        })
+        .catch(() => {});
     }
   });
 
@@ -175,6 +184,7 @@ function startMetadataPolling(session, channelId, pb) {
 
   let lastTitle = "";
   let lastArtist = "";
+  let lastChangedAt = Date.now();
 
   const timer = setInterval(async () => {
     try {
@@ -186,20 +196,20 @@ function startMetadataPolling(session, channelId, pb) {
       if (!rawTitle || !rawArtist) return;
       if (rawTitle === lastTitle && rawArtist === lastArtist) return;
 
+      const previousChangedAt = lastChangedAt;
       lastTitle = rawTitle;
       lastArtist = rawArtist;
+      lastChangedAt = Date.now();
 
       const metadata = await processStreamMetadata(pb, rawTitle, rawArtist);
 
       if (metadata.songId) {
-        const manager = getStreamManager();
-        const stream = manager.getStream(channelId);
         const logEntry = await logPlayToHistory(
           pb,
           metadata.songId,
           channelId,
           null,
-          stream?.startedAt,
+          new Date(previousChangedAt).toISOString(),
           null,
         );
         if (logEntry) {

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const ALBUM_ART_DIR = "data/album-art";
@@ -19,8 +19,8 @@ export function getAlbumArtPath(songId) {
   return join(ALBUM_ART_DIR, `${songId}.jpg`);
 }
 
-export function ensureAlbumArtDir() {
-  mkdirSync(ALBUM_ART_DIR, { recursive: true });
+export async function ensureAlbumArtDir() {
+  await mkdir(ALBUM_ART_DIR, { recursive: true });
 }
 
 export async function processStreamMetadata(pb, title, artist) {
@@ -68,8 +68,8 @@ export async function logPlayToHistory(
 }
 
 async function lookupCachedSong(pb, normalizedTitle, normalizedArtist) {
-  const escapedTitle = normalizedTitle.replace(/'/g, "\\'");
-  const escapedArtist = normalizedArtist.replace(/'/g, "\\'");
+  const escapedTitle = normalizedTitle.replace(/'/g, "''");
+  const escapedArtist = normalizedArtist.replace(/'/g, "''");
 
   try {
     const record = await pb
@@ -164,14 +164,26 @@ async function fetchFromItunes(
     title: normalizeSongTitle(itunesTitle),
     artist: normalizeArtist(itunesArtist),
     album,
-    albumArtPath: localArtPath,
+    albumArtPath: null,
     itunesArtworkUrl: artworkUrl,
   });
 
-  const albumArtUrl = songId
-    ? `/api/assets/album-art/${songId}`
-    : itunesResult?.artworkUrl100?.replace("100x100bb.jpg", "192x192bb.jpg") ||
-      null;
+  let albumArtUrl = null;
+  if (songId && localArtPath) {
+    const destPath = getAlbumArtPath(songId);
+    try {
+      await ensureAlbumArtDir();
+      const data = await readFile(localArtPath);
+      await writeFile(destPath, data);
+      await unlink(localArtPath).catch(() => {});
+      albumArtUrl = `/api/assets/album-art/${songId}`;
+    } catch {
+      albumArtUrl =
+        artworkUrl?.replace("100x100bb.jpg", "192x192bb.jpg") || null;
+    }
+  } else if (songId) {
+    albumArtUrl = artworkUrl?.replace("100x100bb.jpg", "192x192bb.jpg") || null;
+  }
 
   return {
     songId,
@@ -201,7 +213,7 @@ function buildFallbackResult(
 
 async function downloadAlbumArt(url) {
   try {
-    ensureAlbumArtDir();
+    await ensureAlbumArtDir();
     const response = await fetch(url);
     if (!response.ok) {
       console.warn(
@@ -214,7 +226,7 @@ async function downloadAlbumArt(url) {
     const buffer = Buffer.from(await response.arrayBuffer());
     const tempId = crypto.randomUUID();
     const filePath = getAlbumArtPath(tempId);
-    writeFileSync(filePath, buffer);
+    await writeFile(filePath, buffer);
     return filePath;
   } catch (error) {
     console.error("[StreamMetadata] album art download error", error);

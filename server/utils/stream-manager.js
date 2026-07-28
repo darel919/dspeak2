@@ -45,6 +45,7 @@ function createStreamManager() {
     hasStreamWithoutRelay(channelId) {
       const stream = streams.get(String(channelId));
       if (!stream) return false;
+      if (stream.relayStarting) return false;
       return !stream.plainTransport && !stream.producer;
     },
   };

@@ -1425,7 +1425,7 @@ async function migrateStreamRelay(pb) {
         maxSelect: 1,
       }),
       field("played_by", "relation", {
-        required: true,
+        required: false,
         collectionId: users.id,
         cascadeDelete: false,
         maxSelect: 1,

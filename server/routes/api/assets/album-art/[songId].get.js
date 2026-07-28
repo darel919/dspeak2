@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { usePocketBaseAdmin } from "../../../../utils/pocketbase.js";
 
@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
   const filePath = join(ALBUM_ART_DIR, `${songId}.jpg`);
 
   try {
-    const imageBuffer = readFileSync(filePath);
+    const imageBuffer = await readFile(filePath);
     setHeader(event, "Cache-Control", "public, max-age=86400");
     setHeader(event, "Content-Type", "image/jpeg");
     return imageBuffer;

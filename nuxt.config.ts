@@ -59,7 +59,7 @@ export default defineNuxtConfig({
             "form-action": ["'self'"],
             "frame-ancestors": ["'none'"],
             "frame-src": ["'none'"],
-            "img-src": ["'self'", "data:", "blob:"],
+            "img-src": ["'self'", "data:", "blob:", "https://*.mzstatic.com"],
             "manifest-src": ["'self'"],
             "media-src": ["'self'", "blob:"],
             "object-src": ["'none'"],

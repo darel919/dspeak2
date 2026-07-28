@@ -56,12 +56,10 @@ export default defineEventHandler(async (event) => {
   });
 
   const config = useRuntimeConfig();
-  const host = config.public?.baseApiPath
-    ? new URL(config.public.baseApiPath).hostname
-    : "localhost";
-
+  const host = config.stream?.rtmpHost || "localhost";
+  const port = config.stream?.rtmpPort || 1935;
   return {
     streamKey: newKey,
-    rtmpUrl: `rtmp://${host}:1935/live/${newKey}`,
+    rtmpUrl: `rtmp://${host}:${port}/live/${newKey}`,
   };
 });

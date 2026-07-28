@@ -31,7 +31,9 @@ export async function startStreamRelay(router, channelId, streamKey, bitrate) {
   });
 
   const localPort = transport.tuple.localPort;
-  const rtmpUrl = `rtmp://127.0.0.1:1935/live/${streamKey}`;
+  const config = useRuntimeConfig();
+  const rtmpPort = config.stream?.rtmpPort || 1935;
+  const rtmpUrl = `rtmp://127.0.0.1:${rtmpPort}/live/${streamKey}`;
   const rtpTarget = `rtp://127.0.0.1:${localPort}`;
 
   const ffmpegProcess = spawn(
@@ -77,6 +79,7 @@ export async function startStreamRelay(router, channelId, streamKey, bitrate) {
     plainTransport: transport,
     producer,
     ffmpegProcess,
+    relayStarting: false,
     startedAt: new Date().toISOString(),
   });
 
@@ -201,7 +204,7 @@ function waitForProducer(transport, channelId) {
                 parameters: { sprop_stereo: 1 },
               },
             ],
-            encodings: [{ ssrc: null }],
+            encodings: [{}],
             headerExtensions: [],
           },
           appData: { source: "system-audio", channelId },
