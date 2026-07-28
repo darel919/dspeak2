@@ -848,6 +848,16 @@ async function migrateLegalConsent(pb) {
   });
 }
 
+async function migrateAccountDeletionState(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: users.name,
+    type: users.type,
+    fields: [field("deleted_at", "date")],
+    indexes: [],
+  });
+}
+
 async function migrateMessageIdempotency(pb) {
   const messages = await pb.collections.getOne("dspeak_messages");
   await upsertCollection(pb, {
@@ -1403,6 +1413,10 @@ const migrations = Object.freeze([
   {
     name: "20260728_legal_consent_v1",
     run: migrateLegalConsent,
+  },
+  {
+    name: "20260728_account_deletion_state_v1",
+    run: migrateAccountDeletionState,
   },
   {
     name: "20260723_message_idempotency_v1",

@@ -38,6 +38,8 @@ async function deleteAccount(pb, userId) {
     fields: "id",
   });
 
+  await deleteUserRecords(pb, "dspeak_room_memberships", "user", userId);
+
   for (const room of ownedRooms) {
     const otherMembers = await pb
       .collection("dspeak_room_memberships")
@@ -119,7 +121,6 @@ async function deleteAccount(pb, userId) {
     ),
   );
 
-  await deleteUserRecords(pb, "dspeak_room_memberships", "user", userId);
   await deleteUserRecords(
     pb,
     "dspeak_notification_preferences",
@@ -154,6 +155,7 @@ async function deleteAccount(pb, userId) {
     email: "",
     online: false,
     presence_status: "offline",
+    deleted_at: new Date().toISOString(),
   });
 
   await deleteUserRecords(pb, "dspeak_sessions", "user", userId);

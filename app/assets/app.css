@@ -308,8 +308,8 @@ textarea {
   display: flex;
   align-items: flex-start;
   gap: var(--metro-space-3);
-  border-inline-start: 4px solid currentColor;
-  padding: var(--metro-space-3) var(--metro-space-4);
+  /* border-inline-start: 4px solid currentColor; */
+  /* padding: var(--metro-space-3) var(--metro-space-4); */
 }
 
 .metro-skeleton {

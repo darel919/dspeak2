@@ -35,7 +35,7 @@
             class="metro-transition flex min-h-11 min-w-0 items-center justify-center gap-2 px-3 py-2 text-sm font-medium lg:w-full lg:justify-start"
             :class="
               activeSection === item.id
-                ? 'border-l-4 border-primary bg-primary/12 text-base-content'
+                ? 'bg-primary/12 text-base-content'
                 : 'text-base-content/65 hover:bg-base-300/70 hover:text-base-content'
             "
             @click="activeSection = item.id"
@@ -82,12 +82,6 @@
                     <h2 class="truncate text-lg font-bold sm:text-xl">
                       {{ profileDisplayName || profile.name }}
                     </h2>
-                    <span
-                      class="inline-flex items-center gap-1.5 bg-success/12 px-2.5 py-1 text-xs font-semibold text-success"
-                    >
-                      <span class="size-1.5 rounded-full bg-success"></span>
-                      Signed in
-                    </span>
                   </div>
                   <p class="truncate text-sm text-base-content/60">
                     {{ profile.email }}
@@ -241,7 +235,7 @@
               </div>
             </form>
             <div
-              class="metro-status flex-col border-error bg-error/5 sm:flex-row sm:items-center sm:justify-between"
+              class="metro-status flex-col sm:flex-row sm:items-center sm:justify-between"
             >
               <div>
                 <h2 class="text-sm font-semibold">Sign out of dSpeak</h2>
@@ -257,7 +251,107 @@
                 <Icon name="lucide:log-out" class="size-4" />Log out
               </button>
             </div>
+
+            <div
+              class="flex flex-col gap-4 border-t border-base-300 pt-6 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div>
+                <h3 class="text-lg font-medium">Export your data</h3>
+                <p class="mt-1 text-sm text-base-content/60">
+                  Download a JSON file containing your profile, messages, rooms,
+                  settings, and all associated data.
+                </p>
+              </div>
+              <button
+                class="btn btn-primary"
+                :disabled="exporting"
+                :aria-busy="exporting"
+                @click="handleExport"
+              >
+                <span
+                  v-if="exporting"
+                  class="loading loading-spinner loading-sm"
+                />
+                <span v-else>
+                  <Icon name="lucide:download" class="size-4 mr-2" />Export data
+                </span>
+              </button>
+            </div>
+
+            <div
+              class="flex flex-col gap-4 border-t border-base-300 pt-6 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div>
+                <h3 class="text-lg font-medium text-error">
+                  Delete your account
+                </h3>
+                <p class="mt-1 text-sm text-base-content/60">
+                  Deactivate your profile, remove your account data, and
+                  anonymize messages that remain in shared rooms.
+                </p>
+              </div>
+              <button
+                class="btn btn-error"
+                :disabled="deleting"
+                :aria-busy="deleting"
+                @click="confirmDelete = true"
+              >
+                <span
+                  v-if="deleting"
+                  class="loading loading-spinner loading-sm"
+                />
+                <span v-else>
+                  <Icon name="lucide:trash-2" class="size-4 mr-2" />Delete
+                  account
+                </span>
+              </button>
+            </div>
           </section>
+
+          <div
+            v-if="confirmDelete"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            @click.self="confirmDelete = false"
+          >
+            <div
+              ref="deleteDialog"
+              class="w-full max-w-md rounded-box bg-base-100 p-6 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-account-title"
+              tabindex="-1"
+              @keydown.esc.stop="confirmDelete = false"
+            >
+              <h2
+                id="delete-account-title"
+                class="text-2xl font-semibold text-error"
+              >
+                Delete your account?
+              </h2>
+              <p class="mt-3 text-base-content/70">
+                This will deactivate your profile, remove your settings and
+                personal records, and anonymize messages you sent in rooms that
+                remain. You cannot undo this action.
+              </p>
+              <div class="mt-6 flex gap-3 justify-end">
+                <button class="btn btn-ghost" @click="confirmDelete = false">
+                  Cancel
+                </button>
+                <button
+                  class="btn btn-error"
+                  :disabled="deleting"
+                  :aria-busy="deleting"
+                  @click="handleDelete"
+                >
+                  <span
+                    v-if="deleting"
+                    class="loading loading-spinner loading-sm"
+                  />
+                  <span v-else>Yes, delete my account</span>
+                </button>
+              </div>
+            </div>
+          </div>
 
           <section v-else-if="activeSection === 'voice'" class="space-y-6">
             <div id="microphone-settings" class="settings-panel scroll-mt-6">
@@ -315,7 +409,7 @@
                 </label>
 
                 <div
-                  class="grid gap-4 border-l-4 border-primary bg-base-200/45 p-4 sm:p-5"
+                  class="grid gap-4"
                 >
                   <div
                     class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
@@ -914,6 +1008,7 @@ import { useSettingsStore } from "../stores/settings";
 import { useVoiceStore } from "../stores/voice";
 import { useRuntimeConfig } from "#app";
 import { useChatUtils } from "../composables/useChatUtils";
+import { useToast } from "../composables/useToast";
 import {
   SYSTEM_AUDIO_BITRATE_OPTIONS,
   VIDEO_FRAME_RATE_OPTIONS,
@@ -1092,6 +1187,18 @@ const videoQualitySections = computed(() => [
 const config = useRuntimeConfig();
 const appVersion = config.public.appVersion;
 const { getAvatarUrl } = useChatUtils();
+const toast = useToast();
+
+const exporting = ref(false);
+const deleting = ref(false);
+const confirmDelete = ref(false);
+const deleteDialog = ref(null);
+
+watch(confirmDelete, async (visible) => {
+  if (!visible) return;
+  await nextTick();
+  deleteDialog.value?.focus();
+});
 
 const profile = computed(() => {
   const user = authStore.getUserData();
@@ -1206,6 +1313,47 @@ async function handleLogout() {
   await authStore.clearAuth();
   await nextTick();
   await navigateTo("/");
+}
+
+async function handleExport() {
+  exporting.value = true;
+  try {
+    const response = await fetch(`${config.public.apiPath}/account/export`, {
+      credentials: "include",
+    });
+    if (!response.ok) throw new Error("Export failed");
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dspeak-export-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  } catch {
+    toast.error("Failed to export data. Please try again.");
+  } finally {
+    exporting.value = false;
+  }
+}
+
+async function handleDelete() {
+  deleting.value = true;
+  try {
+    const response = await fetch(`${config.public.apiPath}/account/delete`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!response.ok) throw new Error("Deletion failed");
+    confirmDelete.value = false;
+    await authStore.clearAuth();
+    await navigateTo("/");
+  } catch {
+    toast.error("Failed to delete account. Please try again.");
+  } finally {
+    deleting.value = false;
+  }
 }
 
 function onToggle(key, checked) {

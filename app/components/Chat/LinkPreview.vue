@@ -4,7 +4,7 @@
     :href="preview.url"
     target="_blank"
     rel="noopener noreferrer"
-    class="group mt-3 block max-w-md overflow-hidden border-l-4 border-primary bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    class="group mt-3 block max-w-md overflow-hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     :aria-label="`Open link preview: ${preview.title || getDomain(preview.url)}`"
   >
     <div class="flex">

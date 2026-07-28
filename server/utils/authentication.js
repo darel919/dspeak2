@@ -197,7 +197,14 @@ async function persistAuthenticatedSession(
       statusMessage: "Invalid authentication input",
     });
   const pb = await usePocketBaseAdmin();
-  await pb.collection("users").getOne(userId, { fields: "id" });
+  const user = await pb
+    .collection("users")
+    .getOne(userId, { fields: "id,deleted_at" });
+  if (user.deleted_at)
+    throw createError({
+      statusCode: 403,
+      statusMessage: "This account has been deleted",
+    });
   const existingSessions = await pb
     .collection("dspeak_sessions")
     .getList(1, 10, {
