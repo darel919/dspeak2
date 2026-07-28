@@ -6,7 +6,7 @@
     aria-live="polite"
   >
     <div
-      class="flex items-center gap-3 border-l-4 border-success bg-base-200 px-4 py-3"
+      class="flex items-center gap-3 bg-base-200 px-4 py-3"
     >
       <Icon name="lucide:check-circle" class="h-5 w-5 text-success" />
       <span class="min-w-0 flex-1 text-sm font-semibold">Message sent</span>
@@ -23,7 +23,7 @@
     </div>
     <p
       v-if="undoError"
-      class="border-l-4 border-error bg-error/10 px-4 py-3 text-sm text-error"
+      class="bg-error/10 px-4 py-3 text-sm text-error"
       role="alert"
     >
       {{ undoError }}

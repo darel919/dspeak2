@@ -62,7 +62,7 @@
           v-for="status in statuses"
           :key="status.value"
           type="button"
-          class="flex min-h-11 w-full items-center gap-3 border-l-4 px-3 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
+          class="flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
           :class="
             presenceStore.effectiveStatus === status.value
               ? 'border-primary bg-primary/10 font-bold'

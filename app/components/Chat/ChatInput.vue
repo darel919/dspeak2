@@ -28,7 +28,7 @@
 
         <div
           v-if="pendingImages.length > 0"
-          class="mb-3 border-l-4 border-primary bg-base-200 p-3"
+          class="mb-3 bg-base-200 p-3"
           role="list"
           aria-label="Image previews"
         >

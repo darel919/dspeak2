@@ -353,7 +353,7 @@
           </header>
           <div class="px-5 py-5">
             <div
-              class="mb-4 border-l-4 border-info bg-info/10 px-3 py-2.5 text-sm text-base-content/70"
+              class="mb-4 bg-info/10 px-3 py-2.5 text-sm text-base-content/70"
             >
               This nickname is private and only changes how this member appears
               to you.

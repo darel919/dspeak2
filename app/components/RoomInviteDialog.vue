@@ -33,7 +33,7 @@
 
         <div
           v-if="mode === 'denied'"
-          class="mt-6 border-l-4 border-warning bg-warning/10 p-4"
+          class="mt-6 bg-warning/10 p-4"
         >
           <strong class="block">Your role cannot create invite links.</strong>
           <p class="mt-1 text-sm text-base-content/65">

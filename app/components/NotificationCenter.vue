@@ -40,7 +40,7 @@
           v-for="item in store.inbox"
           :key="item.id"
           class="metro-transition flex border-b border-base-300 hover:bg-base-200"
-          :class="!item.read_at && 'border-l-4 border-l-primary'"
+          :class="!item.read_at"
         >
           <button class="min-w-0 flex-1 p-3 text-left" @click="open(item)">
             <strong class="block truncate text-sm">{{ item.title }}</strong>

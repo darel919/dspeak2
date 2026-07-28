@@ -69,7 +69,7 @@
           <section v-if="activeSection === 'account'" class="space-y-5">
             <div
               v-if="profile"
-              class="border-l-4 border-primary bg-base-100 p-5 sm:p-6"
+              class="bg-base-100"
             >
               <div class="flex items-center gap-4 sm:gap-5">
                 <div class="avatar shrink-0">
