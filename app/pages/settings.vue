@@ -408,9 +408,7 @@
                   </select>
                 </label>
 
-                <div
-                  class="grid gap-4"
-                >
+                <div class="grid gap-4">
                   <div
                     class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
                   >

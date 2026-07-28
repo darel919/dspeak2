@@ -62,6 +62,10 @@ test("account deletion preserves required message senders and delays session rem
     deleteRoute.indexOf('await deleteUserRecords(pb, "dspeak_sessions"') >
       deleteRoute.indexOf('await pb.collection("users").update'),
   );
+  assert.match(
+    deleteRoute,
+    /await deleteUserRecords\(pb, "dspeak_room_invites", "created_by", userId\);/,
+  );
 });
 
 test("legal Markdown links reject executable URL schemes", () => {

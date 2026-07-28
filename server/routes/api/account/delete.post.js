@@ -145,6 +145,7 @@ async function deleteAccount(pb, userId) {
   await deleteUserRecords(pb, "dspeak_room_soundboards", "uploader", userId);
   await deleteUserRecords(pb, "dspeak_chat_files", "uploader", userId);
   await deleteUserRecords(pb, "dspeak_pinned_messages", "pinned_by", userId);
+  await deleteUserRecords(pb, "dspeak_room_invites", "created_by", userId);
 
   await pb.collection("users").update(userId, {
     name: "[deleted]",
