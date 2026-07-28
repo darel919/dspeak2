@@ -4,6 +4,7 @@ import { useAuthStore } from "./auth";
 import { useRoomsStore } from "./rooms";
 import { useChannelsStore } from "./channels";
 import { useNotificationsStore } from "./notifications";
+import { useStreamStore } from "./stream";
 import {
   cacheChannelMessages,
   dequeueMessage,
@@ -641,6 +642,29 @@ export const useChatStore = defineStore("chat", () => {
     return true;
   }
 
+  function handleStreamEvent(event) {
+    if (!event?.type) return;
+    const streamStore = useStreamStore();
+    switch (event.type) {
+      case "stream:start":
+        streamStore.applyStreamStart(event.data || {});
+        break;
+      case "stream:metadata":
+        streamStore.applyStreamMetadata(event.data || {});
+        break;
+      case "stream:stop":
+        streamStore.applyStreamStop();
+        break;
+      case "stream:playlog":
+        if (event.data?.history) {
+          for (const entry of event.data.history) {
+            streamStore.applyPlaylogEntry(entry);
+          }
+        }
+        break;
+    }
+  }
+
   async function handleWebSocketMessage(event) {
     try {
       const data = JSON.parse(event.data);
@@ -723,6 +747,12 @@ export const useChatStore = defineStore("chat", () => {
             data.data.channelId,
             data.data,
           );
+          break;
+        case "stream:start":
+        case "stream:metadata":
+        case "stream:stop":
+        case "stream:playlog":
+          handleStreamEvent(data);
           break;
         case "notification_created":
         case "notifications_read":

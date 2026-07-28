@@ -75,7 +75,30 @@
       </div>
     </div>
 
-    <!-- Connection Info Banner -->
+    <StreamNowPlaying />
+
+    <div
+      v-if="
+        isChannelModerator &&
+        voiceStore.connected &&
+        voiceStore.currentChannelId === props.channel.id
+      "
+      class="shrink-0 border-b border-base-content/15 px-4 py-3"
+    >
+      <StreamSetup :channel-id="props.channel.id" />
+    </div>
+
+    <div
+      v-if="
+        streamHistory.length &&
+        voiceStore.connected &&
+        voiceStore.currentChannelId === props.channel.id
+      "
+      class="shrink-0 border-b border-base-content/15 px-4 py-3"
+    >
+      <StreamHistory />
+    </div>
+
     <div
       v-if="
         voiceStore.connected && voiceStore.currentChannelId !== props.channel.id
@@ -106,7 +129,6 @@
       </div>
     </div>
 
-    <!-- Main Content Area - Participants View -->
     <div
       v-if="
         voiceStore.connected && voiceStore.currentChannelId === props.channel.id
@@ -615,6 +637,12 @@
 import { useVoiceStore } from "~/stores/voice";
 import { useAuthStore } from "~/stores/auth";
 import { useIdentityStore } from "~/stores/identity";
+import { useStreamStore } from "~/stores/stream";
+import { useChannelsStore } from "~/stores/channels";
+import { useStreamRelay } from "~/composables/useStreamRelay";
+import StreamSetup from "~/components/StreamSetup.vue";
+import StreamNowPlaying from "~/components/StreamNowPlaying.vue";
+import StreamHistory from "~/components/StreamHistory.vue";
 
 const props = defineProps({
   channel: {
@@ -710,6 +738,27 @@ const ownCameraFeed = computed(
     videoFeeds.value.find((feed) => feed.local && feed.source === "camera") ||
     null,
 );
+
+const streamStore = useStreamStore();
+useStreamRelay();
+
+const isChannelModerator = computed(() => {
+  const channel = props.channel;
+  const userData = authStore.getUserData?.();
+  if (!userData?.id || !channel) return false;
+  if (String(channel.owner) === String(userData.id)) return true;
+  const room = channelsStore.getRoomChannels(channel.room);
+  const membership = room
+    ?.find((c) => c.id === channel.id)
+    ?.expand?.memberships?.find((m) => String(m.user) === String(userData.id));
+  return (
+    membership?.expand?.roles?.some((r) =>
+      r.permissions?.includes("channel.moderate_voice"),
+    ) || false
+  );
+});
+
+const streamHistory = computed(() => streamStore.playHistory);
 
 function volumeUserForTile(tile) {
   if (tile.type === "participant") return tile.user;
@@ -857,9 +906,7 @@ function getUserDisplayName(user) {
   try {
     const me = useAuthStore().getUserData && useAuthStore().getUserData();
     if (me && me.id && String(me.id) === String(merged.id)) return "You";
-  } catch (_) {
-    /* noop */
-  }
+  } catch (_) {}
   return identityStore.displayName(merged);
 }
 

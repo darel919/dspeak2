@@ -66,6 +66,7 @@ import {
   configuredOutboundHosts,
   fetchPublicHtml,
 } from "../infrastructure/network/outbound-request.js";
+import { generateStreamKey } from "./stream-manager.js";
 
 function requireValue(value, message) {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
@@ -173,6 +174,9 @@ function presentChannel(channel) {
     room: channel.room,
     policy: channel.policy || "free",
     slow_mode: channel.slow_mode || 0,
+    streamKey: channel.stream_key || null,
+    streamActive: Boolean(channel.stream_active),
+    streamMetadata: channel.stream_metadata || null,
   };
 }
 
@@ -438,6 +442,7 @@ async function handleChannels(event, suffix) {
       inRoom: [],
       owner: userId,
       room: body.roomId,
+      stream_key: body.isMedia ? generateStreamKey() : null,
     });
   }
 

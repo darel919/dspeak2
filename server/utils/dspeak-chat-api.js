@@ -7,6 +7,7 @@ import {
 } from "../../shared/channel-policy.js";
 import { messageContainsBroadcastMention } from "../../shared/notification-policy.js";
 import { cacheUploadedFile, getCachedFile } from "./upload-cache.js";
+import { handleStreamCommand } from "../integrations/stream-commands.js";
 
 export function createChatApiHandler(dependencies) {
   const {
@@ -437,6 +438,31 @@ export function createChatApiHandler(dependencies) {
           statusCode: 400,
           statusMessage: "Message content must be at most 4000 characters",
         });
+      const trimmedContent = (body.content || "").trim();
+      if (trimmedContent.startsWith("/")) {
+        const spaceIndex = trimmedContent.indexOf(" ");
+        const command =
+          spaceIndex === -1
+            ? trimmedContent.toLowerCase()
+            : trimmedContent.slice(0, spaceIndex).toLowerCase();
+        const args =
+          spaceIndex === -1 ? "" : trimmedContent.slice(spaceIndex + 1).trim();
+        if (["/streamkey", "/stopstream", "/np"].includes(command)) {
+          const result = await handleStreamCommand(
+            event,
+            pb,
+            userId,
+            body.channelId,
+            command,
+            args,
+          );
+          return {
+            type: "stream_command",
+            command,
+            result,
+          };
+        }
+      }
       if (String(body.ownerId || "") !== String(userId))
         throw createError({
           statusCode: 409,

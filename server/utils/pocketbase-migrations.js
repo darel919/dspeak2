@@ -29,6 +29,8 @@ const REQUIRED_COLLECTIONS = Object.freeze([
   "dspeak_message_reactions",
   "dspeak_pinned_messages",
   "dspeak_bookmarks",
+  "dspeak_lib_song",
+  "dspeak_stream_playlog",
 ]);
 
 function field(name, type, options = {}) {
@@ -1370,6 +1372,75 @@ async function migrateAllowEmptyContent(pb) {
   });
 }
 
+async function migrateStreamRelay(pb) {
+  const channels = await pb.collections.getOne("dspeak_rooms_channels");
+  const users = await pb.collections.getOne("users");
+
+  await upsertCollection(pb, {
+    name: channels.name,
+    type: channels.type,
+    fields: [
+      field("stream_key", "text", { unique: true, max: 200 }),
+      field("stream_active", "bool"),
+      field("stream_metadata", "json", { maxSize: 10000 }),
+    ],
+    indexes: [],
+  });
+
+  const songCollection = await upsertCollection(pb, {
+    name: "dspeak_lib_song",
+    type: "base",
+    fields: [
+      field("title", "text", { required: true, max: 500 }),
+      field("artist", "text", { required: true, max: 500 }),
+      field("album", "text", { max: 500 }),
+      field("album_art_path", "text", { max: 500 }),
+      field("itunes_artwork_url", "text", { max: 1000 }),
+      field("lyrics", "json", { maxSize: 50000 }),
+      field("last_updated", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_lib_song_title_artist ON dspeak_lib_song (title, artist)",
+      "CREATE INDEX idx_dspeak_lib_song_title ON dspeak_lib_song (title)",
+      "CREATE INDEX idx_dspeak_lib_song_artist ON dspeak_lib_song (artist)",
+      "CREATE INDEX idx_dspeak_lib_song_album ON dspeak_lib_song (album)",
+      "CREATE INDEX idx_dspeak_lib_song_last_updated ON dspeak_lib_song (last_updated)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_stream_playlog",
+    type: "base",
+    fields: [
+      field("song", "relation", {
+        required: true,
+        collectionId: songCollection.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("channel", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("played_by", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("played_at", "date", { required: true }),
+      field("duration", "number"),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_playlog_played_at ON dspeak_stream_playlog (played_at)",
+      "CREATE INDEX idx_dspeak_playlog_channel ON dspeak_stream_playlog (channel)",
+      "CREATE INDEX idx_dspeak_playlog_song ON dspeak_stream_playlog (song)",
+    ],
+  });
+}
+
 const migrations = Object.freeze([
   {
     name: "20260724_foundation_v1",
@@ -1502,6 +1573,10 @@ const migrations = Object.freeze([
   {
     name: "20260729_allow_empty_content_v1",
     run: migrateAllowEmptyContent,
+  },
+  {
+    name: "20260729_stream_relay_v1",
+    run: migrateStreamRelay,
   },
 ]);
 
