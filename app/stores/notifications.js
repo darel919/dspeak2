@@ -76,6 +76,17 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return inbox.value;
   }
 
+  async function dismiss(ids = []) {
+    await authenticatedFetch("notifications/dismiss", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+    const selected = new Set(ids);
+    inbox.value = ids.length
+      ? inbox.value.filter((item) => !selected.has(item.id))
+      : [];
+  }
+
   async function markRead(ids = []) {
     await authenticatedFetch("notifications/read", {
       method: "POST",
@@ -313,6 +324,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     getExistingSubscription,
     fetchInbox,
     markRead,
+    dismiss,
     fetchPreferences,
     savePreferences,
     receiveRealtime,

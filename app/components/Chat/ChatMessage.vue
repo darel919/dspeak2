@@ -77,12 +77,31 @@
       <button
         v-if="message.reply_to"
         type="button"
-        class="mb-2 flex min-h-11 w-full items-center gap-2 border-b border-current/20 pb-2 text-left text-xs opacity-80 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        class="reply-preview mb-2 flex min-h-11 w-full items-stretch gap-2 border-b border-current/20 pb-2 text-left text-xs opacity-80 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         @click="$emit('jump-to', message.reply_to)"
-        :aria-label="`Jump to message from ${getReplySenderName()}`"
+        :aria-label="`Replied to ${getReplySenderName()}${replyPreviewText ? ': ' + replyPreviewText : ''}`"
       >
-        <Icon name="lucide:corner-down-right" class="h-4 w-4 shrink-0" />
-        <span class="truncate">Replying to {{ getReplySenderName() }}</span>
+        <Icon
+          name="lucide:corner-down-right"
+          class="mt-0.5 h-4 w-4 shrink-0 self-start"
+        />
+        <div
+          class="flex min-w-0 flex-col gap-0.5 border-l-2 border-primary/30 pl-2"
+        >
+          <span class="truncate font-semibold leading-tight">{{
+            getReplySenderName()
+          }}</span>
+          <span
+            v-if="replyPreviewText"
+            class="truncate text-base-content/50 leading-tight"
+            >{{ replyPreviewText }}</span
+          >
+          <span
+            v-else
+            class="truncate italic text-base-content/30 leading-tight"
+            >View message</span
+          >
+        </div>
       </button>
       <div
         class="chat-message-content"
@@ -397,11 +416,44 @@ function renderContent(content) {
   return html;
 }
 
-function getReplySenderName() {
-  if (!props.message.reply_to) return "";
+const replyTargetMessage = computed(() => {
+  if (!props.message.reply_to) return null;
   const replyTo = props.message.reply_to;
-  if (typeof replyTo === "object" && replyTo.sender) {
-    return replyTo.sender.name || "Unknown";
+  if (typeof replyTo === "object") return replyTo;
+  return chatStore.messages.find((m) => m.id === replyTo) || null;
+});
+
+function stripMarkdown(text) {
+  if (!text) return "";
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/```[\s\S]*?```/g, "[code block]")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/\[(.+?)\]\(.+?\)/g, "$1")
+    .replace(/>\s?(.*)/g, "$1")
+    .replace(/#{1,6}\s/g, "")
+    .replace(/\n+/g, " ")
+    .trim();
+}
+
+const replyPreviewText = computed(() => {
+  const target = replyTargetMessage.value;
+  if (!target || !target.content) return "";
+  let text = stripMarkdown(target.content);
+  if (text.length > 100) {
+    text = text.slice(0, 97) + "...";
+  }
+  return text;
+});
+
+function getReplySenderName() {
+  const target = replyTargetMessage.value;
+  if (target && target.sender) {
+    return target.sender.name || "Unknown";
   }
   return "a message";
 }

@@ -18,27 +18,45 @@
         class="flex items-center justify-between border-b border-base-300 p-3"
       >
         <h2 class="font-semibold">Notifications</h2>
-        <button
-          v-if="store.unreadCount"
-          class="btn btn-ghost btn-xs"
-          @click="store.markRead()"
-        >
-          Mark all read
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            v-if="store.inbox.length"
+            class="btn btn-ghost btn-xs"
+            @click="dismissAll"
+          >
+            Dismiss all
+          </button>
+          <button
+            v-if="store.unreadCount"
+            class="btn btn-ghost btn-xs"
+            @click="store.markRead()"
+          >
+            Mark all read
+          </button>
+        </div>
       </header>
       <div class="max-h-96 overflow-y-auto">
-        <button
+        <div
           v-for="item in store.inbox"
           :key="item.id"
-          class="metro-transition block w-full border-b border-base-300 p-3 text-left hover:bg-base-200"
+          class="metro-transition flex border-b border-base-300 hover:bg-base-200"
           :class="!item.read_at && 'border-l-4 border-l-primary'"
-          @click="open(item)"
         >
-          <strong class="block truncate text-sm">{{ item.title }}</strong>
-          <span class="mt-1 line-clamp-2 text-xs text-base-content/65">{{
-            item.body
-          }}</span>
-        </button>
+          <button class="min-w-0 flex-1 p-3 text-left" @click="open(item)">
+            <strong class="block truncate text-sm">{{ item.title }}</strong>
+            <span class="mt-1 line-clamp-2 text-xs text-base-content/65">{{
+              item.body
+            }}</span>
+          </button>
+          <button
+            class="metro-transition shrink-0 px-2 text-base-content/40 hover:text-base-content"
+            :aria-label="`Dismiss notification: ${item.title}`"
+            title="Dismiss"
+            @click.stop="dismissOne(item)"
+          >
+            <Icon name="lucide:x" class="size-3.5" />
+          </button>
+        </div>
         <div v-if="friendRequests.length" class="border-t border-base-300">
           <div
             class="px-3 py-2 text-xs font-bold uppercase tracking-wide text-base-content/50"
@@ -170,8 +188,18 @@ async function declineFriendRequest(req) {
 
 async function open(item) {
   if (!item.read_at) await store.markRead([item.id]);
+  store.dismiss([item.id]).catch(() => {});
   const roomId = item.room?.id || item.room;
   const channelId = item.channel?.id || item.channel;
   if (roomId && channelId) await navigateTo(`/room/${roomId}/${channelId}`);
+}
+
+function dismissOne(item) {
+  store.dismiss([item.id]).catch(() => {});
+}
+
+function dismissAll() {
+  const ids = store.inbox.map((item) => item.id);
+  if (ids.length) store.dismiss(ids).catch(() => {});
 }
 </script>

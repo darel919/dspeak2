@@ -82,13 +82,16 @@
         {{ actionError }}
       </div>
 
-      <MessageSearch
-        v-if="showSearch"
-        :channel-id="channelId"
-        :members="room?.members || []"
-        @close="showSearch = false"
-        @jump-to="jumpToMessage"
-      />
+      <Transition name="charm">
+        <MessageSearch
+          v-if="showSearch"
+          key="message-search"
+          :channel-id="channelId"
+          :members="room?.members || []"
+          @close="showSearch = false"
+          @jump-to="jumpToMessage"
+        />
+      </Transition>
 
       <div
         ref="messagesContainer"
@@ -370,9 +373,10 @@
       @pin="handlePinMessage"
     />
 
-    <transition name="fade">
+    <Transition name="charm">
       <div
         v-if="showMemberList && !showThreadSidebar"
+        key="member-list"
         class="hidden md:flex flex-col w-[260px] min-w-[260px] border-l border-base-300 bg-base-100 h-full relative"
       >
         <button
@@ -389,7 +393,7 @@
           :channel-id="channelId"
         />
       </div>
-    </transition>
+    </Transition>
 
     <button
       v-if="!showMemberList && !showThreadSidebar"
@@ -557,12 +561,10 @@ const messagesWithReplyCount = computed(() => {
       replyCounts[parentId] = (replyCounts[parentId] || 0) + 1;
     }
   }
-  return msgList
-    .filter((m) => !m.reply_to)
-    .map((m) => ({
-      ...m,
-      replyCount: m.replyCount || replyCounts[m.id] || 0,
-    }));
+  return msgList.map((m) => ({
+    ...m,
+    replyCount: m.replyCount || replyCounts[m.id] || 0,
+  }));
 });
 
 const messages = computed(() =>
@@ -1078,17 +1080,21 @@ async function requireSuccessfulResponse(response, fallback) {
   throw new Error(`${fallback} (${response.status})`);
 }
 
-function jumpToMessage(message) {
+function jumpToMessage(messageOrId) {
   showSearch.value = false;
 
-  const index = chatStore.messages.findIndex((m) => m.id === message.id);
+  const targetId =
+    typeof messageOrId === "string" ? messageOrId : messageOrId?.id;
+  if (!targetId) return;
+
+  const index = chatStore.messages.findIndex((m) => m.id === targetId);
   if (index !== -1) {
     messageWindowSize.value = Math.max(messageWindowSize.value, index + 1);
     nextTick(() => {
       const container = messagesContainer.value;
       if (container) {
         const messageEl = container.querySelector(
-          `[data-message-id="${message.id}"]`,
+          `[data-message-id="${CSS.escape(targetId)}"]`,
         );
         if (messageEl) {
           messageEl.scrollIntoView({ behavior: "smooth", block: "center" });

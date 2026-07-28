@@ -177,6 +177,37 @@ export function createChatApiHandler(dependencies) {
       });
       return { success: true, readAt };
     }
+    if (suffix === "notifications/dismiss" && event.method === "POST") {
+      const ids = Array.isArray(body.ids) ? body.ids.slice(0, 100) : [];
+      const records = ids.length
+        ? await getBoundedList(
+            pb,
+            "dspeak_notifications",
+            {
+              filter: ids.map((id) => `id = '${id}'`).join(" || "),
+            },
+            100,
+          )
+        : await getBoundedList(
+            pb,
+            "dspeak_notifications",
+            {
+              filter: `recipient = '${userId}'`,
+            },
+            500,
+          );
+      await Promise.all(
+        records
+          .filter((record) => String(record.recipient) === String(userId))
+          .map((record) =>
+            pb.collection("dspeak_notifications").delete(record.id),
+          ),
+      );
+      broadcastToUser(String(userId), {
+        type: "notifications_changed",
+      });
+      return { success: true };
+    }
     if (suffix === "notification-preferences") {
       const existing = await getBoundedList(
         pb,
@@ -268,6 +299,7 @@ export function createChatApiHandler(dependencies) {
     if (
       suffix === "notifications" ||
       suffix === "notifications/read" ||
+      suffix === "notifications/dismiss" ||
       suffix === "notification-preferences" ||
       suffix === "room-notification-preferences"
     )
