@@ -60,6 +60,6 @@ export default defineEventHandler(async (event) => {
   const port = config.stream?.rtmpPort || 1935;
   return {
     streamKey: newKey,
-    rtmpUrl: `rtmp://${host}:${port}/live/${newKey}`,
+    rtmpUrl: `rtmp://${host}:${port}/${newKey}`,
   };
 });

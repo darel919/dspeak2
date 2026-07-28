@@ -59,7 +59,7 @@ async function handleGetStreamKey(pb, userId, channelId, args) {
 
   return {
     streamKey,
-    rtmpUrl: `rtmp://${host}:${port}/live/${streamKey}`,
+    rtmpUrl: `rtmp://${host}:${port}/${streamKey}`,
   };
 }
 
@@ -82,7 +82,7 @@ async function handleRotateStreamKey(pb, userId, channelId) {
   const port = config.stream?.rtmpPort || 1935;
   return {
     streamKey: newKey,
-    rtmpUrl: `rtmp://${host}:${port}/live/${newKey}`,
+    rtmpUrl: `rtmp://${host}:${port}/${newKey}`,
     rotated: true,
   };
 }

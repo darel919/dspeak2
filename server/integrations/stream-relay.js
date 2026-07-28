@@ -33,7 +33,7 @@ export async function startStreamRelay(router, channelId, streamKey, bitrate) {
   const localPort = transport.tuple.localPort;
   const config = useRuntimeConfig();
   const rtmpPort = config.stream?.rtmpPort || 1935;
-  const rtmpUrl = `rtmp://127.0.0.1:${rtmpPort}/live/${streamKey}`;
+  const rtmpUrl = `rtmp://127.0.0.1:${rtmpPort}/${streamKey}`;
   const rtpTarget = `rtp://127.0.0.1:${localPort}`;
 
   const ffmpegProcess = spawn(

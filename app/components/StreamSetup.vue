@@ -1,96 +1,80 @@
 <template>
-  <div
-    class="stream-setup rounded-box border border-base-content/20 bg-base-300 p-4"
-  >
-    <h3
-      class="mb-3 text-sm font-semibold text-base-content/70 uppercase tracking-wide"
-    >
-      DJ Stream
-    </h3>
-
+  <div class="stream-setup">
     <div
       v-if="loading"
-      class="flex items-center gap-2 text-sm text-base-content/60"
+      class="flex items-center gap-2 py-8 text-sm text-base-content/50"
     >
       <span class="loading loading-spinner loading-sm"></span>
       Loading stream settings...
     </div>
 
     <template v-else-if="streamKey">
-      <div class="mb-3">
-        <label for="stream-key" class="mb-1 text-xs text-base-content/60"
-          >Stream Key</label
-        >
-        <div class="flex gap-2">
-          <input
-            id="stream-key"
-            :value="streamKey"
-            class="input input-bordered input-sm flex-1 font-mono text-xs"
-            readonly
-            @click="copyStreamKey"
-          />
+      <div class="space-y-5">
+        <div>
+          <p class="mb-2 text-xs font-medium text-base-content/40">
+            Stream key
+          </p>
           <button
-            class="btn btn-sm btn-ghost"
-            title="Copy"
+            type="button"
+            class="flex w-full items-center gap-2 rounded bg-base-200 px-3 py-2.5 text-left font-mono text-xs text-base-content/80 transition-colors hover:bg-base-content/5"
             @click="copyStreamKey"
           >
-            <Icon name="lucide:copy" class="size-4" />
+            <span class="min-w-0 flex-1 truncate">{{ streamKey }}</span>
+            <Icon
+              name="lucide:copy"
+              class="size-3.5 shrink-0 text-base-content/30"
+            />
           </button>
         </div>
-      </div>
 
-      <div class="mb-3">
-        <label for="rtmp-url" class="mb-1 text-xs text-base-content/60"
-          >RTMP URL</label
-        >
-        <div class="flex gap-2">
-          <input
-            id="rtmp-url"
-            :value="rtmpUrl"
-            class="input input-bordered input-sm flex-1 font-mono text-xs"
-            readonly
-            @click="copyRtmpUrl"
-          />
+        <div>
+          <p class="mb-2 text-xs font-medium text-base-content/40">RTMP URL</p>
           <button
-            class="btn btn-sm btn-ghost"
-            title="Copy"
+            type="button"
+            class="flex w-full items-center gap-2 rounded bg-base-200 px-3 py-2.5 text-left font-mono text-xs text-base-content/80 transition-colors hover:bg-base-content/5"
             @click="copyRtmpUrl"
           >
-            <Icon name="lucide:copy" class="size-4" />
+            <span class="min-w-0 flex-1 truncate">{{ rtmpUrl }}</span>
+            <Icon
+              name="lucide:copy"
+              class="size-3.5 shrink-0 text-base-content/30"
+            />
           </button>
         </div>
-      </div>
 
-      <div class="mb-3 flex items-center gap-2 text-sm">
-        <span
-          class="inline-block size-2 rounded-full"
-          :class="streamActive ? 'bg-success' : 'bg-base-content/30'"
-        ></span>
-        <span class="text-base-content/80">
-          {{ streamActive ? "Live" : "Waiting for stream..." }}
-        </span>
-      </div>
+        <div class="flex items-center gap-2.5 pt-1">
+          <span
+            class="inline-block size-1.5 rounded-full"
+            :class="streamActive ? 'bg-success' : 'bg-base-content/20'"
+          ></span>
+          <span class="text-xs text-base-content/60">
+            {{ streamActive ? "Stream is live" : "Waiting for stream..." }}
+          </span>
+        </div>
 
-      <div class="flex gap-2">
-        <button
-          v-if="streamActive"
-          class="btn btn-error btn-sm"
-          @click="stopStream"
-        >
-          <Icon name="lucide:square" class="size-4" />
-          Stop Stream
-        </button>
-        <button class="btn btn-ghost btn-sm" @click="rotateKey">
-          <Icon name="lucide:refresh-cw" class="size-4" />
-          Regenerate Key
-        </button>
+        <div class="flex items-center gap-2 pt-1">
+          <button
+            v-if="streamActive"
+            class="btn btn-error btn-sm"
+            @click="stopStream"
+          >
+            <Icon name="lucide:stop-circle" class="size-4" />
+            Stop stream
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="rotateKey">
+            <Icon name="lucide:refresh-cw" class="size-4" />
+            Regenerate key
+          </button>
+        </div>
       </div>
     </template>
 
-    <div v-else class="text-sm text-base-content/60">
-      No stream key configured. Click to generate.
-      <button class="btn btn-primary btn-sm mt-2" @click="fetchKey">
-        Generate Stream Key
+    <div v-else class="py-6 text-center">
+      <p class="mb-4 text-sm text-base-content/50">
+        No stream key configured for this channel.
+      </p>
+      <button class="btn btn-primary btn-sm" @click="fetchKey">
+        Generate stream key
       </button>
     </div>
   </div>

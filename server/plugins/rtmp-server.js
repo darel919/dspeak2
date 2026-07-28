@@ -1,6 +1,3 @@
-import { createRequire } from "module";
-import { fileURLToPath } from "url";
-import { dirname, resolve } from "path";
 import NodeMediaServer from "node-media-server";
 import { getStreamManager } from "../utils/stream-manager.js";
 import { usePocketBaseAdmin } from "../utils/pocketbase.js";
@@ -15,13 +12,14 @@ import {
 } from "../integrations/stream-metadata.js";
 import { getSfuRouter } from "../utils/mediasoup-sfu.js";
 import { broadcastToChannel } from "../utils/dspeak-realtime.js";
+import { createRequire } from "module";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
-const _require = createRequire(import.meta.url);
-const amfPath = resolve(
-  dirname(fileURLToPath(_require.resolve("node-media-server"))),
-  "src/node_core_amf",
-);
-const AMF = _require(amfPath);
+const _require = createRequire(fileURLToPath(import.meta.url));
+const nmsMain = _require.resolve("node-media-server");
+const amfRequire = createRequire(nmsMain);
+const AMF = amfRequire("./node_core_amf.js");
 
 const METADATA_POLL_INTERVAL_MS = 3000;
 

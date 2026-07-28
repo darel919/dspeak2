@@ -59,6 +59,6 @@ export default defineEventHandler(async (event) => {
   return {
     streamKey,
     streamActive: Boolean(channel.stream_active),
-    rtmpUrl: `rtmp://${host}:${port}/live/${streamKey}`,
+    rtmpUrl: `rtmp://${host}:${port}/${streamKey}`,
   };
 });
