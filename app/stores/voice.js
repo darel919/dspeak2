@@ -673,16 +673,21 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
+  async function startBroadcast(url) {
+    if (!connected.value || !sfuComposable.value)
+      throw new Error("Not connected to a voice channel");
+    await sfuComposable.value.startBroadcastProduction({ url });
+    broadcastAudioSharing.value = true;
+  }
+
+  async function stopBroadcast() {
+    if (!sfuComposable.value) return;
+    await sfuComposable.value.stopBroadcastProduction();
+    broadcastAudioSharing.value = false;
+  }
+
   async function toggleBroadcast() {
-    if (!connected.value || !sfuComposable.value) return;
-    if (broadcastAudioSharing.value) {
-      try {
-        sfuComposable.value.stopBroadcastProduction();
-      } catch (_) {
-        /* noop */
-      }
-      broadcastAudioSharing.value = false;
-    }
+    if (broadcastAudioSharing.value) await stopBroadcast();
   }
 
   function setSharedAudioVolume(value) {
@@ -808,6 +813,8 @@ export const useVoiceStore = defineStore("voice", () => {
     setRemoteScreenReceiving,
     setRemoteSystemAudioReceiving,
     toggleSystemAudioShare,
+    startBroadcast,
+    stopBroadcast,
     toggleBroadcast,
     setSharedAudioVolume,
     setSystemAudioBitrate,

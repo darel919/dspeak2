@@ -149,19 +149,5 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?Create a Cloudflare Tunnel at https://one.dash.cloudflare.com/ → Networks → Tunnels → add RTMP ingress pointing to dspeak:1935}
-    network_mode: service:dspeak
-    depends_on:
-      dspeak:
-        condition: service_healthy
-    restart: unless-stopped
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-
 volumes:
   turn-certificates:

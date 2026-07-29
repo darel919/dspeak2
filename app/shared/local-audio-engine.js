@@ -320,8 +320,9 @@ export function createLocalAudioEngine({
     );
   }
 
-  function startSharedAudioMeter() {
+  function startSharedAudioMeter(source) {
     if (!sharedAudioMeter) return;
+    clearInterval(sharedAudioMeter.timer);
     const values = new Float32Array(sharedAudioMeter.analyser.fftSize);
     const sample = async () => {
       if (!sharedAudioMeter) return;
@@ -333,14 +334,12 @@ export function createLocalAudioEngine({
       const dbfs = rms > 0 ? 20 * Math.log10(rms) : -60;
       const sfu = getSfu();
       const p2pMesh = getP2pMesh();
-      const producer = sfu?.producers.get("screen-audio")?.producer;
+      const producer = sfu?.producers.get(source)?.producer;
       const report =
         getActiveProvider() === "sfu" && producer
           ? await producer.getStats().catch(() => null)
           : p2pMesh
-            ? await p2pMesh
-                .getOutboundTrackStats("screen-audio")
-                .catch(() => null)
+            ? await p2pMesh.getOutboundTrackStats(source).catch(() => null)
             : null;
       const collected = collectOutboundAudioStats(
         report,

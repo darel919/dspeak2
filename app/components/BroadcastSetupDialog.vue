@@ -1,19 +1,27 @@
 <template>
-  <dialog
-    class="modal modal-open px-3 py-4"
-    @click.self="emit('close')"
+  <aside
+    aria-labelledby="broadcast-dialog-title"
+    class="pointer-events-none fixed inset-x-3 bottom-20 z-[70] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-[28rem]"
     @keydown.esc="emit('close')"
   >
     <section
-      class="modal-box flex max-h-[80dvh] w-full max-w-sm flex-col overflow-hidden border border-base-content/10 bg-base-100 p-0"
+      class="pointer-events-auto flex max-h-[min(72dvh,44rem)] w-full max-w-md flex-col overflow-hidden border border-base-content/15 bg-base-100 shadow-2xl"
     >
       <header
         class="flex items-center justify-between border-b border-base-content/10 px-5 py-4"
       >
-        <h3 class="text-sm font-semibold">Local broadcast</h3>
+        <div>
+          <h3 id="broadcast-dialog-title" class="text-sm font-semibold">
+            DJ broadcast
+          </h3>
+          <p class="mt-0.5 text-[11px] text-base-content/55">
+            Close this panel anytime. Your broadcast will keep playing.
+          </p>
+        </div>
         <button
           type="button"
           class="btn btn-square btn-ghost btn-sm"
+          aria-label="Close local broadcast setup"
           @click="emit('close')"
         >
           <Icon name="lucide:x" class="size-4" />
@@ -57,6 +65,12 @@
               >) for uninterrupted broadcasting.
             </p>
           </div>
+          <p
+            v-if="broadcastError"
+            class="rounded bg-error/10 p-2 text-[11px] text-error"
+          >
+            {{ broadcastError }}
+          </p>
         </div>
         <div v-else class="space-y-3">
           <div
@@ -78,6 +92,13 @@
               aria-label="Error"
             ></span>
             <span class="text-xs font-medium">{{ statusLabel }}</span>
+            <span
+              v-if="broadcastStatus === 'live'"
+              class="ml-auto text-[11px] tabular-nums text-base-content/55"
+            >
+              {{ broadcastStats.dbfs.toFixed(0) }} dBFS ·
+              {{ broadcastStats.kbps.toFixed(0) }} kbps
+            </span>
           </div>
           <div v-if="broadcastStatus === 'live'" class="space-y-1">
             <label class="text-[11px] font-medium text-base-content/60"
@@ -106,7 +127,7 @@
           type="button"
           class="btn btn-primary btn-sm"
           :disabled="connecting"
-          @click="startBroadcast"
+          @click.stop="startBroadcast()"
         >
           <span
             v-if="connecting"
@@ -126,11 +147,11 @@
         </button>
       </footer>
     </section>
-  </dialog>
+  </aside>
 </template>
 
 <script setup>
-import { computed, ref, watch, onUnmounted } from "vue";
+import { computed, ref, watch } from "vue";
 import { useVoiceStore } from "../stores/voice";
 import { useSettingsStore } from "../stores/settings";
 
@@ -143,11 +164,12 @@ const sessionToken = ref(generateToken());
 const connecting = ref(false);
 const broadcastError = ref(null);
 const broadcastStatus = ref("idle");
-const levelPercent = ref(0);
-
-let meterInterval = null;
 
 const broadcastActive = computed(() => voiceStore.broadcastAudioSharing);
+const broadcastStats = computed(() => voiceStore.sharedAudioStats);
+const levelPercent = computed(() =>
+  Math.min(100, Math.round((broadcastStats.value.level || 0) * 100)),
+);
 
 const statusLabel = computed(() => {
   switch (broadcastStatus.value) {
@@ -183,31 +205,11 @@ watch(broadcastActive, (active) => {
   if (active) {
     broadcastStatus.value = "live";
     broadcastError.value = null;
-    startMeter();
   } else {
     broadcastStatus.value = "idle";
     broadcastError.value = null;
-    stopMeter();
   }
 });
-
-function startMeter() {
-  const sharedAudioStats = voiceStore.sharedAudioStats;
-  meterInterval = setInterval(() => {
-    levelPercent.value = Math.min(
-      100,
-      Math.round((sharedAudioStats.level || 0) * 100),
-    );
-  }, 200);
-}
-
-function stopMeter() {
-  if (meterInterval) {
-    clearInterval(meterInterval);
-    meterInterval = null;
-  }
-  levelPercent.value = 0;
-}
 
 async function startBroadcast() {
   connecting.value = true;
@@ -215,11 +217,8 @@ async function startBroadcast() {
   broadcastStatus.value = "connecting";
 
   try {
-    if (!voiceStore.sfuComposable?.value) {
-      throw new Error("Not connected to a voice channel");
-    }
     const proxyUrl = `/api/broadcast/stream?port=${broadcastPort.value}&token=${sessionToken.value}`;
-    await voiceStore.sfuComposable.value.startBroadcastProduction(proxyUrl);
+    await voiceStore.startBroadcast(proxyUrl);
     broadcastStatus.value = "live";
   } catch (err) {
     broadcastError.value = err.message || "Failed to start broadcast";
@@ -231,15 +230,13 @@ async function startBroadcast() {
 
 async function stopBroadcast() {
   try {
-    await voiceStore.sfuComposable.value?.stopBroadcastProduction?.();
-  } catch (_) {
-    /* noop */
+    await voiceStore.stopBroadcast();
+  } catch (err) {
+    broadcastError.value = err?.message || "Failed to stop broadcast";
+    broadcastStatus.value = "error";
+    return;
   }
   broadcastStatus.value = "idle";
   broadcastError.value = null;
 }
-
-onUnmounted(() => {
-  stopMeter();
-});
 </script>

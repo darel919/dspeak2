@@ -275,7 +275,7 @@ export function useHybridMediaSession() {
       new (window.AudioContext || window.webkitAudioContext)(),
     createMediaElement: () => document.createElement("audio"),
     onStateChange: (state) => {
-      voiceStore.broadcastAudioSharing = state === "live";
+      if (state === "stopped") voiceStore.broadcastAudioSharing = false;
     },
   });
   const handoff = new RemoteMediaHandoff(registry);

@@ -443,7 +443,13 @@ async function handleMessage(state, session, message) {
     }
 
     case "media-sources": {
-      const allowed = new Set(["audio", "camera", "screen", "screen-audio"]);
+      const allowed = new Set([
+        "audio",
+        "camera",
+        "screen",
+        "screen-audio",
+        "broadcast-audio",
+      ]);
       const sources = Array.isArray(data.sources)
         ? data.sources.map(String).filter((source) => allowed.has(source))
         : [];

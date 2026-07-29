@@ -3,6 +3,7 @@ const mediaSources = new Set([
   "camera",
   "screen",
   "screen-audio",
+  "broadcast-audio",
   "video",
 ]);
 

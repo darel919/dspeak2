@@ -143,6 +143,43 @@ describe("LocalBroadcastCapture stop cleanup", () => {
     assert.ok(mediaElementSrcRemoved, "Audio element src should be cleared");
     assert.equal(capture.getState(), "stopped");
   });
+
+  it("cleans up a failed stream load so the user can retry", async () => {
+    let audioContextClosed = false;
+    let mediaElementPaused = false;
+    const capture = new LocalBroadcastCapture({
+      createAudioContext: () => ({
+        state: "running",
+        resume: () => Promise.resolve(),
+        close: () => {
+          audioContextClosed = true;
+          return Promise.resolve();
+        },
+      }),
+      createMediaElement: () => ({
+        addEventListener: (type, handler) => {
+          if (type === "error") setTimeout(handler, 0);
+        },
+        load: () => {},
+        pause: () => {
+          mediaElementPaused = true;
+        },
+        removeAttribute: () => {},
+        error: { message: "VLC is unavailable" },
+      }),
+      onStateChange: () => {},
+    });
+
+    await assert.rejects(
+      () => capture.start({ url: "/api/broadcast/stream" }),
+      /VLC is unavailable/,
+    );
+
+    assert.ok(audioContextClosed);
+    assert.ok(mediaElementPaused);
+    assert.equal(capture.getState(), "stopped");
+    assert.equal(capture.started, false);
+  });
 });
 
 describe("Broadcast contract (integration)", () => {

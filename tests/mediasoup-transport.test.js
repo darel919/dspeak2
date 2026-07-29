@@ -103,6 +103,10 @@ test("transport creation reuses the one live transport for each direction", () =
 test("producer sources are bounded to their expected media kind", () => {
   assert.equal(validateProducerSource("audio", "audio"), "audio");
   assert.equal(validateProducerSource("audio", "screen-audio"), "screen-audio");
+  assert.equal(
+    validateProducerSource("audio", "broadcast-audio"),
+    "broadcast-audio",
+  );
   assert.equal(validateProducerSource("video", "camera"), "camera");
   assert.equal(validateProducerSource("video", "screen"), "screen");
   assert.throws(

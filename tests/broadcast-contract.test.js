@@ -37,6 +37,17 @@ describe("broadcast contract", () => {
     );
   });
 
+  it("broadcast proxy remains loopback-only and forwards the token path", () => {
+    const source = readFileSync(
+      "server/routes/api/broadcast/stream.get.js",
+      "utf-8",
+    );
+    assert.ok(source.includes("127.0.0.1"));
+    assert.ok(source.includes("encodeURIComponent(token)"));
+    assert.ok(!source.includes("const { port, url }"));
+    assert.ok(!source.includes("url ||"));
+  });
+
   it("source controller handles broadcast-audio source type", () => {
     const source = readFileSync(
       "app/shared/media-source-controller.js",
@@ -46,6 +57,11 @@ describe("broadcast contract", () => {
       source.includes("broadcast-audio"),
       "source controller must handle broadcast-audio sources",
     );
+  });
+
+  it("SFU signaling advertises broadcast-audio sources", () => {
+    const source = readFileSync("server/utils/mediasoup-sfu.js", "utf-8");
+    assert.ok(source.includes('"broadcast-audio"'));
   });
 
   it("broadcast audio uses a dedicated capture class", async () => {

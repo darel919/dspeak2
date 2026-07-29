@@ -7,6 +7,7 @@ function controller(overrides = {}) {
   const localVideoFeeds = { value: new Map() };
   const sent = [];
   const failures = [];
+  const meteredSources = [];
   let stoppedMeter = 0;
   const instance = createMediaSourceController({
     capture: { stop() {} },
@@ -24,13 +25,19 @@ function controller(overrides = {}) {
     reportSfuFailure: (reason) => failures.push(reason),
     send: (message) => sent.push(message),
     startLocalVoiceDetection() {},
-    startSharedAudioMeter() {},
+    startSharedAudioMeter: (source) => meteredSources.push(source),
     stopLocalVoiceDetection() {},
     stopSharedAudioMeter: () => {
       stoppedMeter += 1;
     },
     topologyState: { value: { mode: "sfu", epoch: 2, sourceRevision: 3 } },
     voiceStore: { micMuted: false, deafened: false },
+    broadcastCapture: {
+      async start() {
+        throw new Error("Broadcast capture is not configured");
+      },
+      async stop() {},
+    },
     ...overrides,
   });
   return {
@@ -38,6 +45,7 @@ function controller(overrides = {}) {
     instance,
     localSources,
     localVideoFeeds,
+    meteredSources,
     sent,
     stoppedMeter: () => stoppedMeter,
   };
@@ -231,4 +239,52 @@ test("new sources publish to the active and preparing transports", async () => {
   });
 
   assert.deepEqual(published, ["p2p:screen-audio", "sfu:screen-audio"]);
+});
+
+test("broadcast start publishes the captured source and stop unpublishes it", async () => {
+  const removed = [];
+  let captureStopped = 0;
+  const entry = {
+    source: "broadcast-audio",
+    stream: {},
+    track: {
+      id: "broadcast-track",
+      kind: "audio",
+      readyState: "live",
+      addEventListener() {},
+    },
+  };
+  const harness = controller({
+    broadcastCapture: {
+      async start({ url }) {
+        assert.equal(url, "/api/broadcast/stream");
+        return entry;
+      },
+      async stop() {
+        captureStopped += 1;
+      },
+    },
+    getSfu: () => ({
+      async addSource(sourceEntry) {
+        assert.equal(sourceEntry.source, "broadcast-audio");
+      },
+      removeSource(source) {
+        removed.push(source);
+      },
+    }),
+  });
+
+  const producer = await harness.instance.startBroadcastProduction({
+    url: "/api/broadcast/stream",
+  });
+
+  assert.equal(producer.track, entry.track);
+  assert.equal(harness.localSources.get("broadcast-audio"), entry);
+  assert.deepEqual(harness.meteredSources, ["broadcast-audio"]);
+
+  await harness.instance.stopBroadcastProduction();
+
+  assert.deepEqual(removed, ["broadcast-audio"]);
+  assert.equal(harness.localSources.has("broadcast-audio"), false);
+  assert.equal(captureStopped, 1);
 });

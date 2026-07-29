@@ -606,33 +606,6 @@
         }}
       </button>
     </div>
-
-    <dialog
-      v-if="showStreamSetup"
-      class="modal modal-open px-3 py-4"
-      @click.self="settingsStore.setBroadcastMode(false)"
-      @keydown.esc="settingsStore.setBroadcastMode(false)"
-    >
-      <section
-        class="modal-box flex max-h-[80dvh] w-full max-w-sm flex-col overflow-hidden border border-base-content/10 bg-base-100 p-0"
-      >
-        <header
-          class="flex items-center justify-between border-b border-base-content/10 px-5 py-4"
-        >
-          <h3 class="text-sm font-semibold">Stream settings</h3>
-          <button
-            type="button"
-            class="btn btn-square btn-ghost btn-sm"
-            @click="settingsStore.setBroadcastMode(false)"
-          >
-            <Icon name="lucide:x" class="size-4" />
-          </button>
-        </header>
-        <div class="overflow-y-auto px-5 py-5">
-          <StreamSetup :channel-id="props.channel.id" />
-        </div>
-      </section>
-    </dialog>
   </div>
 </template>
 

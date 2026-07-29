@@ -20,68 +20,74 @@ export class LocalBroadcastCapture {
 
     this.setState("connecting");
 
-    this.audioContext = this.createAudioContext();
-    await this.audioContext.resume();
+    try {
+      this.audioContext = this.createAudioContext();
+      await this.audioContext.resume();
 
-    this.audioElement = this.createMediaElement();
-    this.audioElement.crossOrigin = "anonymous";
-    this.audioElement.preload = "auto";
-    this.audioElement.src = url;
+      this.audioElement = this.createMediaElement();
+      this.audioElement.crossOrigin = "anonymous";
+      this.audioElement.preload = "auto";
+      this.audioElement.src = url;
 
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(
-        () => reject(new Error("Stream load timed out")),
-        15000,
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Stream load timed out")),
+          15000,
+        );
+        this.audioElement.addEventListener(
+          "canplay",
+          () => {
+            clearTimeout(timeout);
+            resolve();
+          },
+          { once: true },
+        );
+        this.audioElement.addEventListener(
+          "error",
+          () => {
+            clearTimeout(timeout);
+            const errMsg =
+              this.audioElement.error?.message ||
+              `Failed to load stream from ${url}`;
+            reject(new Error(errMsg));
+          },
+          { once: true },
+        );
+        this.audioElement.load();
+      });
+
+      this.mediaSourceNode = this.audioContext.createMediaElementSource(
+        this.audioElement,
       );
-      this.audioElement.addEventListener(
-        "canplay",
-        () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        { once: true },
-      );
-      this.audioElement.addEventListener(
-        "error",
-        () => {
-          clearTimeout(timeout);
-          const errMsg =
-            this.audioElement.error?.message ||
-            `Failed to load stream from ${url}`;
-          reject(new Error(errMsg));
-        },
-        { once: true },
-      );
-      this.audioElement.load();
-    });
+      this.destNode = this.audioContext.createMediaStreamDestination();
+      this.mediaSourceNode.connect(this.destNode);
 
-    this.mediaSourceNode = this.audioContext.createMediaElementSource(
-      this.audioElement,
-    );
-    this.destNode = this.audioContext.createMediaStreamDestination();
-    this.mediaSourceNode.connect(this.destNode);
+      await this.audioElement.play();
 
-    await this.audioElement.play();
+      this.stream = this.destNode.stream;
+      this.track = this.stream.getAudioTracks()[0];
+      if (!this.track) throw new Error("Broadcast stream has no audio track");
+      this.track.contentHint = "music";
 
-    this.stream = this.destNode.stream;
-    this.track = this.stream.getAudioTracks()[0];
-    this.track.contentHint = "music";
+      this.endedHandler = () => {
+        if (this.started) this.stop();
+      };
+      this.track.addEventListener("ended", this.endedHandler);
 
-    this.endedHandler = () => {
-      if (this.started) this.stop();
-    };
-    this.track.addEventListener("ended", this.endedHandler);
+      this.started = true;
+      this.setState("live");
 
-    this.started = true;
-    this.setState("live");
-
-    return {
-      source: "broadcast-audio",
-      stream: this.stream,
-      track: this.track,
-      captureTrack: this.track,
-      ownerSource: "local-broadcast",
-    };
+      return {
+        source: "broadcast-audio",
+        stream: this.stream,
+        track: this.track,
+        captureTrack: this.track,
+        ownerSource: "local-broadcast",
+      };
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
   }
 
   async stop() {
@@ -113,7 +119,10 @@ export class LocalBroadcastCapture {
       this.destNode = null;
     }
 
-    this.mediaSourceNode = null;
+    if (this.mediaSourceNode) {
+      this.mediaSourceNode.disconnect?.();
+      this.mediaSourceNode = null;
+    }
 
     if (this.audioContext && this.audioContext.state !== "closed") {
       try {

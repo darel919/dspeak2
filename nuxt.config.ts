@@ -1,30 +1,9 @@
 import tailwindcss from "@tailwindcss/vite";
-import {
-  chmodSync,
-  copyFileSync,
-  mkdirSync,
-  cpSync,
-  existsSync,
-} from "node:fs";
+import { mkdirSync, cpSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import packageMetadata from "./package.json" with { type: "json" };
 
 const isProduction = process.env.NODE_ENV === "production";
-
-function copyMediasoupWorker(nitro) {
-  if (nitro.options.dev) return;
-
-  const source = resolve(
-    "node_modules/mediasoup/worker/out/Release/mediasoup-worker",
-  );
-  const destination = resolve(
-    nitro.options.output.serverDir,
-    "node_modules/mediasoup/worker/out/Release/mediasoup-worker",
-  );
-  mkdirSync(dirname(destination), { recursive: true });
-  copyFileSync(source, destination);
-  chmodSync(destination, 0o755);
-}
 
 function copyWsModule(nitro) {
   if (nitro.options.dev) return;
@@ -168,14 +147,15 @@ export default defineNuxtConfig({
     sourceMap: false,
     externals: {
       inline: [resolve("shared")],
-      trace: ["ws"],
+      traceInclude: [
+        resolve("node_modules/mediasoup/worker/out/Release/mediasoup-worker"),
+      ],
     },
     experimental: {
       websocket: true,
     },
     hooks: {
       compiled: (nitro) => {
-        copyMediasoupWorker(nitro);
         copyWsModule(nitro);
       },
     },

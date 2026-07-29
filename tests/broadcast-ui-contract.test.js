@@ -27,6 +27,19 @@ describe("Broadcast UI contract", () => {
     );
   });
 
+  it("BroadcastSetupDialog uses a non-blocking utility panel", () => {
+    const source = readFileSync(
+      "app/components/BroadcastSetupDialog.vue",
+      "utf-8",
+    );
+    assert.ok(source.includes("<aside"));
+    assert.ok(source.includes("pointer-events-none"));
+    assert.ok(source.includes("pointer-events-auto"));
+    assert.ok(!source.includes("modal-open"));
+    assert.ok(!source.includes("<dialog"));
+    assert.ok(source.includes('@click.stop="startBroadcast()"'));
+  });
+
   it("BroadcastSetupDialog has start and stop controls", () => {
     const source = readFileSync(
       "app/components/BroadcastSetupDialog.vue",
@@ -40,6 +53,35 @@ describe("Broadcast UI contract", () => {
       source.includes("stopBroadcast") || source.includes("endBroadcast"),
       "Must have a stop action",
     );
+  });
+
+  it("BroadcastSetupDialog starts through voice store actions", () => {
+    const source = readFileSync(
+      "app/components/BroadcastSetupDialog.vue",
+      "utf-8",
+    );
+    assert.ok(source.includes("voiceStore.startBroadcast(proxyUrl)"));
+    assert.ok(source.includes("voiceStore.stopBroadcast()"));
+    assert.ok(!source.includes("voiceStore.sfuComposable.value"));
+  });
+
+  it("BroadcastSetupDialog displays inactive start failures", () => {
+    const source = readFileSync(
+      "app/components/BroadcastSetupDialog.vue",
+      "utf-8",
+    );
+    const setupPanel = source.slice(
+      source.indexOf('<div v-if="!broadcastActive"'),
+      source.indexOf('<div v-else class="space-y-3">'),
+    );
+    assert.ok(setupPanel.includes('v-if="broadcastError"'));
+  });
+
+  it("VoiceChannel has no removed RTMP setup remnants", () => {
+    const source = readFileSync("app/components/VoiceChannel.vue", "utf-8");
+    assert.ok(!source.includes("StreamSetup"));
+    assert.ok(!source.includes("showStreamSetup"));
+    assert.ok(!source.includes("setBroadcastMode"));
   });
 
   it("BroadcastSetupDialog shows the VLC command", () => {
@@ -75,6 +117,16 @@ describe("Voice store broadcast contract", () => {
       source.includes("broadcastAudioSharing"),
       "Must expose broadcastAudioSharing",
     );
+  });
+
+  it("voice store passes the broadcast URL contract", () => {
+    const source = readFileSync("app/stores/voice.js", "utf-8");
+    assert.ok(source.includes("startBroadcastProduction({ url })"));
+    assert.ok(
+      source.indexOf("broadcastAudioSharing.value = true") >
+        source.indexOf("await sfuComposable.value.startBroadcastProduction"),
+    );
+    assert.ok(!source.includes("startBroadcastProduction(url)"));
   });
 
   it("voice store has broadcast control actions", () => {

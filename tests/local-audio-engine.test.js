@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createLocalAudioEngine } from "../app/shared/local-audio-engine.js";
+
+test("shared audio statistics follow the active source", () => {
+  const source = readFileSync("app/shared/local-audio-engine.js", "utf8");
+
+  assert.match(source, /function startSharedAudioMeter\(source\)/);
+  assert.match(source, /producers\.get\(source\)/);
+  assert.match(source, /getOutboundTrackStats\(source\)/);
+});
 
 function createEngine({ context, p2pMesh, sfu, sharedAudioDucking }) {
   return createLocalAudioEngine({

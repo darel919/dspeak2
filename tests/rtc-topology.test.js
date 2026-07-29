@@ -222,6 +222,10 @@ test("P2P remote feed identity remains stable across replacement tracks", () => 
 
 test("P2P signaling accepts explicit source removal and rejects unknown sources", () => {
   assert.equal(validP2pSignal({ sourceRemoved: { source: "camera" } }), true);
+  assert.equal(
+    validP2pSignal({ sourceRemoved: { source: "broadcast-audio" } }),
+    true,
+  );
   assert.equal(validP2pSignal({ sourceRemoved: { source: "unknown" } }), false);
   assert.equal(validP2pSignal({ sourceRestored: { source: "camera" } }), true);
   assert.equal(

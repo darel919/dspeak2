@@ -11,6 +11,7 @@ const MEDIA_SOURCE_KINDS = Object.freeze({
   camera: "video",
   screen: "video",
   "screen-audio": "audio",
+  "broadcast-audio": "audio",
 });
 
 export function calculateSfuClientOutgoingBitrate(
