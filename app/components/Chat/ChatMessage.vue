@@ -104,7 +104,7 @@
         </div>
       </button>
       <div class="chat-message-content">
-        <FormattedContent :content="message.content" />
+        <ChatMarkdownRenderer :content="message.content" />
       </div>
 
       <div
@@ -237,10 +237,11 @@ import { useAuthStore } from "../../stores/auth";
 import { useIdentityStore } from "../../stores/identity";
 import { useChatStore } from "../../stores/chat";
 import MessageActions from "./MessageActions.vue";
+import ChatMarkdownRenderer from "./MarkdownRenderer.vue";
 import LinkPreview from "./LinkPreview.vue";
 import { useChatUtils } from "../../composables/useChatUtils";
 import { hasReader, readerIds } from "../../shared/read-receipts";
-import { parseMarkdown } from "../../shared/markdown-parser";
+
 import {
   extractUrls,
   fetchLinkPreview,
@@ -396,23 +397,6 @@ function getStatusText() {
     return "Read by all";
   }
   return `Read by ${others.length}`;
-}
-
-function renderContent(content) {
-  if (!content) return "";
-
-  let html = parseMarkdown(content);
-
-  html = html.replace(
-    /@(everyone|here)\b/g,
-    '<span class="mention-everyone bg-warning/20 text-warning px-1 rounded font-semibold">@$1</span>',
-  );
-
-  html = html.replace(
-    /@(\w+)/g,
-    '<span class="mention-user bg-primary/10 text-primary px-1 rounded">@$1</span>',
-  );
-  return html;
 }
 
 const replyTargetMessage = computed(() => {

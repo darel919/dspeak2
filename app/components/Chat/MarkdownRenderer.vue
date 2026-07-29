@@ -72,12 +72,12 @@ const parseMarkdown = (text) => {
       inBlockquote = false;
     }
 
-    const listMatch = trimmed.match(/^(\s*)([-*+]|\d+\.)\s+/);
+    const listMatch = line.match(/^(\s*)([-*+]|\d+\.)\s+/);
     if (listMatch) {
       if (!inBlockquote) flushBlockquote();
       const indent = listMatch[1].length;
       const marker = listMatch[2];
-      const content = trimmed.slice(listMatch[0].length);
+      const content = line.slice(listMatch[0].length);
       const isOrdered = /\d+\./.test(marker);
 
       let listItem = { type: "listItem", ordered: isOrdered, indent, content };
@@ -158,8 +158,9 @@ const renderInline = (text) => {
     { regex: /\*(.+?)\*/g, type: "em" },
     { regex: /_(.+?)_/g, type: "em" },
     { regex: /`(.+?)`/g, type: "code" },
-    { regex: /\[([^\]]+)\]\(([^)]+)\)/g, type: "link" },
     { regex: /!\[([^\]]*)\]\(([^)]+)\)/g, type: "image" },
+    { regex: /(?<!!)\[([^\]]+)\]\(([^)]+)\)/g, type: "link" },
+    { regex: /~~(.+?)~~/g, type: "del" },
   ];
 
   const matches = [];
@@ -212,11 +213,23 @@ const renderInline = (text) => {
   return nodes.length > 0 ? nodes : [{ type: "text", content: text }];
 };
 
-const tokens = parseMarkdown(props.content);
+const tokens = computed(() => parseMarkdown(props.content));
+
+function safeHref(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const href = value.trim();
+  if (/[\u0000-\u001f\u007f]/.test(href)) return "";
+  try {
+    const url = new URL(href, "https://dspeak.invalid");
+    return ["http:", "https:", "mailto:"].includes(url.protocol) ? href : "";
+  } catch {
+    return "";
+  }
+}
 </script>
 
 <template>
-  <div class="prose prose-sm max-w-none">
+  <div class="chat-markdown min-w-0 max-w-none break-words whitespace-normal">
     <template v-for="(token, idx) in tokens" :key="idx">
       <h1
         v-if="token.type === 'heading' && token.level === 1"
@@ -255,30 +268,29 @@ const tokens = parseMarkdown(props.content);
         {{ token.content }}
       </h6>
 
-      <p v-else-if="token.type === 'paragraph'" class="my-2">
+      <p
+        v-else-if="token.type === 'paragraph'"
+        class="my-0 whitespace-pre-wrap"
+      >
         <span v-for="(node, ni) in renderInline(token.content)" :key="ni">
           <strong v-if="node.type === 'strong'">{{ node.content }}</strong>
           <em v-else-if="node.type === 'em'">{{ node.content }}</em>
+          <del v-else-if="node.type === 'del'">{{ node.content }}</del>
           <code
             v-else-if="node.type === 'code'"
             class="px-1.5 py-0.5 bg-base-200 rounded text-sm font-mono"
             >{{ node.content }}</code
           >
           <a
-            v-else-if="node.type === 'link'"
-            :href="node.href"
+            v-else-if="node.type === 'link' && safeHref(node.href)"
+            :href="safeHref(node.href)"
             target="_blank"
             rel="noopener noreferrer"
             class="link link-primary"
             >{{ node.text }}</a
           >
-          <img
-            v-else-if="node.type === 'image'"
-            :src="node.src"
-            :alt="node.alt"
-            class="max-w-full h-auto rounded my-2"
-          />
-          <span v-else>{{ node.content }}</span>
+          <span v-else-if="node.type === 'image'">{{ node.alt }}</span>
+          <span v-else>{{ node.text || node.content }}</span>
         </span>
       </p>
 
