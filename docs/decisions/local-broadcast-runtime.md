@@ -10,11 +10,11 @@ decoding and refuse `application/octet-stream` media.
 
 ## Compatibility evidence
 
-| Runtime | Direct VLC stream | With Nitro proxy | Notes |
-|---------|------------------|-------------------|-------|
-| Chromium (Brave) | ❌ No | ✅ Yes | All 5 probe tests pass via proxy |
-| Safari | ❌ No | ✅ Yes (deduced) | Same Content-Type dependency |
-| Firefox | Not tested | ✅ Yes (deduced) | Not installed on dev machine |
+| Runtime          | Direct VLC stream | With Nitro proxy | Notes                            |
+| ---------------- | ----------------- | ---------------- | -------------------------------- |
+| Chromium (Brave) | ❌ No             | ✅ Yes           | All 5 probe tests pass via proxy |
+| Safari           | ❌ No             | ✅ Yes (deduced) | Same Content-Type dependency     |
+| Firefox          | Not tested        | ✅ Yes (deduced) | Not installed on dev machine     |
 
 The proxy rewrites `Content-Type: audio/ogg` and adds
 `Access-Control-Allow-Origin: *`. Chromium decodes the stream successfully

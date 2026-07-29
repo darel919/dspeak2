@@ -266,13 +266,5 @@ export default defineNuxtConfig({
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,
     },
-    stream: {
-      rtmpPort: Number(process.env.DSPEAK_RTMP_PORT || 1935),
-      rtmpHost: process.env.DSPEAK_RTMP_HOST || "localhost",
-      maxStreams: Number(process.env.DSPEAK_RTMP_MAX_STREAMS || 10),
-      opusBitrateDefault: Number(
-        process.env.DSPEAK_OPUS_BITRATE_DEFAULT || 128,
-      ),
-    },
   },
 });

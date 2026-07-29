@@ -77,19 +77,19 @@
             >
           </div>
           <button
-                      class="btn btn-primary btn-sm"
-                      @click="acceptRequest(req.id)"
-                      aria-label="Accept friend request from {{ req.username }}"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      class="btn btn-ghost btn-sm"
-                      @click="declineRequest(req.id)"
-                      aria-label="Decline friend request from {{ req.username }}"
-                    >
-                      Decline
-                    </button>
+            class="btn btn-primary btn-sm"
+            @click="acceptRequest(req.id)"
+            aria-label="Accept friend request from {{ req.username }}"
+          >
+            Accept
+          </button>
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="declineRequest(req.id)"
+            aria-label="Decline friend request from {{ req.username }}"
+          >
+            Decline
+          </button>
         </div>
       </div>
 
