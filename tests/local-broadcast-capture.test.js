@@ -168,6 +168,22 @@ describe("Broadcast contract (integration)", () => {
     );
   });
 
+  it("useHybridMediaSession initializes shared audio before source control", () => {
+    const source = readFileSync(
+      "app/composables/useHybridMediaSession.js",
+      "utf-8",
+    );
+    const initialization = source.indexOf("= createLocalAudioEngine({");
+    const controller = source.indexOf(
+      "sourceController = createMediaSourceController({",
+    );
+    assert.ok(initialization >= 0, "Must initialize the local audio engine");
+    assert.ok(
+      initialization < controller,
+      "Must initialize shared audio before creating source control",
+    );
+  });
+
   it("useHybridMediaSession.js exposes start/stop broadcast", () => {
     const source = readFileSync(
       "app/composables/useHybridMediaSession.js",
