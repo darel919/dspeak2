@@ -59,4 +59,10 @@ describe("broadcast contract", () => {
     assert.match(sessions, /authorizeDjIngest/);
     assert.match(sessions, /libopus/);
   });
+
+  it("does not shadow the Node process global while starting FFmpeg", () => {
+    const sessions = readFileSync("server/domains/dj/dj-sessions.js", "utf-8");
+    assert.doesNotMatch(sessions, /const process = session\.process/);
+    assert.match(sessions, /const bridgeProcess = session\.process/);
+  });
 });

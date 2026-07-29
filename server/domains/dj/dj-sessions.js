@@ -205,12 +205,12 @@ async function startBridge(session) {
     session.process.stderr.on("data", (chunk) => {
       stderr = `${stderr}${chunk}`.slice(-2048);
     });
-    const process = session.process;
+    const bridgeProcess = session.process;
     session.process.once("spawn", () => {
       session.bridge
         ?.waitForRtp()
         .then(() => {
-          if (session.process !== process || session.status === "stopped")
+          if (session.process !== bridgeProcess || session.status === "stopped")
             return;
           session.status = "live";
           session.error = null;
@@ -223,7 +223,7 @@ async function startBridge(session) {
           session.expiryTimer.unref?.();
         })
         .catch((error) => {
-          if (session.process !== process || session.status === "stopped")
+          if (session.process !== bridgeProcess || session.status === "stopped")
             return;
           scheduleRecovery(session, error.message);
         });
