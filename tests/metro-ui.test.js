@@ -269,6 +269,8 @@ test("voice video offers equal overview tiles and viewer-selected focus", async 
   assert.match(source, /voice-room-grid-focused/);
   assert.match(source, /voice-room-tile-focused/);
   assert.match(source, /justify-content: center/);
+  assert.match(source, /grid-template-rows: minmax\(0, 1fr\) 8rem/);
+  assert.match(source, /grid-column: 1 \/ -1/);
   assert.match(source, /representedUsers/);
   assert.match(source, /focusedTileKey\.value === key/);
   assert.match(source, /viewMode\.value = "overview"/);
@@ -284,8 +286,12 @@ test("participant volume controls render outside the scrolling participant strip
   assert.match(source, /aria-modal="true"/);
   assert.match(source, /Adjust volume for/);
   assert.match(source, /@contextmenu\.prevent="openTileVolumeMenu\(tile\)"/);
-  assert.match(source, /voiceStore\.getUserById\(tile\.feed\.userId\)/);
-  assert.match(source, /tile\.feed\.local/);
+  assert.match(source, /Adjust DJ and voice volume for/);
+  assert.match(source, /tile\.type === "broadcast" \? tile\.broadcast/);
+  assert.match(source, /DJ broadcast/);
+  assert.match(source, /"broadcast-audio"/);
+  assert.match(source, /voiceStore\.getUserById\(media\.userId\)/);
+  assert.match(source, /media\.local/);
   assert.match(source, /max="2"/);
   assert.match(source, /<span>200%<\/span>/);
   assert.doesNotMatch(source, /absolute top-2 right-2 bg-base-200/);

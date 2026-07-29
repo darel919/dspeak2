@@ -165,26 +165,69 @@
             />
             <div
               v-else-if="tile.type === 'broadcast'"
-              class="relative flex h-full min-h-[18rem] flex-col items-center justify-center overflow-hidden border border-primary/40 bg-black p-8 text-center text-white"
+              class="relative flex h-full flex-col items-center justify-center overflow-hidden border border-primary/40 bg-black text-center text-white"
+              :class="
+                viewMode === 'focused' && tile.key !== focusedTileKey
+                  ? 'min-h-0 p-3'
+                  : 'min-h-[18rem] p-8'
+              "
             >
               <div
                 class="absolute inset-x-0 top-0 h-1 bg-primary"
                 aria-hidden="true"
               ></div>
-              <div
-                class="grid size-24 place-items-center rounded-full bg-primary text-black shadow-[0_0_60px_rgba(244,114,182,0.28)]"
+              <button
+                class="btn btn-ghost btn-square btn-sm absolute right-2 top-2 z-10 text-white"
+                type="button"
+                :aria-label="`Adjust DJ and voice volume for ${tile.broadcast.label}`"
+                @click.stop="
+                  openVolumeMenu(volumeUserForTile(tile), $event.currentTarget)
+                "
               >
-                <Icon name="lucide:disc-3" class="size-11 animate-spin-slow" />
+                <Icon name="lucide:sliders-horizontal" class="size-4" />
+              </button>
+              <div
+                class="grid place-items-center rounded-full bg-primary text-black shadow-[0_0_60px_rgba(244,114,182,0.28)]"
+                :class="
+                  viewMode === 'focused' && tile.key !== focusedTileKey
+                    ? 'size-12'
+                    : 'size-24'
+                "
+              >
+                <Icon
+                  name="lucide:disc-3"
+                  class="animate-spin-slow"
+                  :class="
+                    viewMode === 'focused' && tile.key !== focusedTileKey
+                      ? 'size-6'
+                      : 'size-11'
+                  "
+                />
               </div>
               <p
-                class="mt-7 text-xs font-bold uppercase tracking-[0.24em] text-primary"
+                class="text-xs font-bold uppercase tracking-[0.24em] text-primary"
+                :class="
+                  viewMode === 'focused' && tile.key !== focusedTileKey
+                    ? 'mt-2'
+                    : 'mt-7'
+                "
               >
                 Live DJ broadcast
               </p>
-              <h2 class="mt-2 max-w-full truncate text-2xl font-bold">
+              <h2
+                class="mt-2 max-w-full truncate font-bold"
+                :class="
+                  viewMode === 'focused' && tile.key !== focusedTileKey
+                    ? 'text-sm'
+                    : 'text-2xl'
+                "
+              >
                 {{ tile.broadcast.label }}
               </h2>
-              <div class="mt-5 flex items-center gap-2 text-sm text-white/60">
+              <div
+                v-if="viewMode !== 'focused' || tile.key === focusedTileKey"
+                class="mt-5 flex items-center gap-2 text-sm text-white/60"
+              >
                 <span class="size-2 bg-success"></span>
                 Application audio is live
               </div>
@@ -362,6 +405,50 @@
                 "
                 @input="
                   onTrackVolumeChange(volumeMenuUser.id, 'screen-audio', $event)
+                "
+              />
+              <div
+                class="mt-2 flex justify-between text-xs text-base-content/55"
+              >
+                <span>Muted</span>
+                <span>200%</span>
+              </div>
+            </div>
+
+            <div v-if="hasAudioSource(volumeMenuUser.id, 'broadcast-audio')">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <label
+                  class="flex items-center gap-2 font-semibold"
+                  for="participant-broadcast-volume"
+                >
+                  <Icon name="lucide:disc-3" class="size-4 text-primary" />
+                  DJ broadcast
+                </label>
+                <output class="text-sm font-semibold tabular-nums">
+                  {{
+                    trackVolumePercent(volumeMenuUser.id, "broadcast-audio")
+                  }}%
+                </output>
+              </div>
+              <input
+                id="participant-broadcast-volume"
+                class="range range-primary w-full"
+                type="range"
+                min="0"
+                max="2"
+                step="0.01"
+                :value="
+                  voiceStore.getTrackVolume(
+                    volumeMenuUser.id,
+                    'broadcast-audio',
+                  )
+                "
+                @input="
+                  onTrackVolumeChange(
+                    volumeMenuUser.id,
+                    'broadcast-audio',
+                    $event,
+                  )
                 "
               />
               <div
@@ -780,8 +867,9 @@ const isChannelModerator = computed(() => {
 
 function volumeUserForTile(tile) {
   if (tile.type === "participant") return tile.user;
-  if (tile.type !== "feed" || tile.feed.local) return null;
-  return voiceStore.getUserById(tile.feed.userId) || { id: tile.feed.userId };
+  const media = tile.type === "broadcast" ? tile.broadcast : tile.feed;
+  if (!media || media.local) return null;
+  return voiceStore.getUserById(media.userId) || { id: media.userId };
 }
 
 function openTileVolumeMenu(tile) {
@@ -1058,22 +1146,20 @@ onUnmounted(() => {
 }
 
 .voice-room-grid-focused {
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 14rem));
+  grid-template-rows: minmax(0, 1fr) 8rem;
   justify-content: center;
 }
 
 .voice-room-tile-focused {
+  grid-column: 1 / -1;
   width: 100%;
-  height: calc(100% - 9rem);
-  flex: 0 0 100%;
+  height: 100%;
 }
 
 .voice-room-grid-focused .voice-room-tile:not(.voice-room-tile-focused) {
-  width: min(14rem, calc(50% - 0.375rem));
+  width: 100%;
   height: 8rem;
-  flex: 0 0 min(14rem, calc(50% - 0.375rem));
 }
 
 .participant-audio-tile-compact {
