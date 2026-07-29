@@ -123,7 +123,22 @@ async function handleNowPlaying(pb, userId, channelId, args) {
     return { error: "Usage: /np Artist - Title" };
   }
 
-  const metadata = await processStreamMetadata(pb, parsed.title, parsed.artist);
+  // Validate and sanitize input: max 200 chars each, strip control characters
+  const MAX_LENGTH = 200;
+  const sanitize = (str) =>
+    str
+      .replace(/[\x00-\x1F\x7F]/g, "") // Remove control characters
+      .trim()
+      .slice(0, MAX_LENGTH);
+
+  const artist = sanitize(parsed.artist);
+  const title = sanitize(parsed.title);
+
+  if (!artist || !title) {
+    return { error: "Artist and title must not be empty after sanitization" };
+  }
+
+  const metadata = await processStreamMetadata(pb, title, artist);
 
   await pb.collection("dspeak_rooms_channels").update(channelId, {
     stream_metadata: {

@@ -2,6 +2,13 @@ import { spawn } from "node:child_process";
 import { getStreamManager } from "../utils/stream-manager.js";
 
 const FFmpegTerminationTimeoutMs = 3000;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function validateStreamKey(streamKey) {
+  if (!UUID_REGEX.test(streamKey)) {
+    throw new Error("Invalid stream key format");
+  }
+}
 
 export function getChannelBitrate(channel) {
   const raw = channel?.mediaPolicy?.sharedAudioKbps;
@@ -33,6 +40,10 @@ export async function startStreamRelay(router, channelId, streamKey, bitrate) {
   const localPort = transport.tuple.localPort;
   const config = useRuntimeConfig();
   const rtmpPort = config.stream?.rtmpPort || 1935;
+
+  // CRITICAL: Validate streamKey is a UUID before using in command args
+  validateStreamKey(streamKey);
+
   const rtmpUrl = `rtmp://127.0.0.1:${rtmpPort}/${streamKey}`;
   const rtpTarget = `rtp://127.0.0.1:${localPort}`;
 

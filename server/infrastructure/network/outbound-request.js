@@ -171,7 +171,10 @@ export async function fetchPublicHtml(value, options = {}) {
               reject(error);
               return;
             }
-            fetchPage(nextUrl, redirectsRemaining - 1).then(resolve, reject);
+            // CRITICAL: Re-validate redirect target against allowlist to prevent SSRF
+            assertSafeOutboundUrl(nextUrl, { allowedHosts })
+              .then(() => fetchPage(nextUrl, redirectsRemaining - 1).then(resolve, reject))
+              .catch(reject);
             return;
           }
           if (status < 200 || status >= 300) {

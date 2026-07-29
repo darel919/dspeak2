@@ -16,6 +16,42 @@ import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
+// UUID validation for stream keys
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function validateStreamKey(streamKey) {
+  if (!UUID_REGEX.test(streamKey)) {
+    return false;
+  }
+  return true;
+}
+
+// Rate limiting for prePublish: 5 attempts per minute per IP
+const prePublishAttempts = new Map();
+const PREPUBLISH_MAX_ATTEMPTS = 5;
+const PREPUBLISH_WINDOW_MS = 60 * 1000;
+
+function checkPrePublishRateLimit(ip) {
+  const now = Date.now();
+  const attempts = prePublishAttempts.get(ip) || [];
+  // Remove expired attempts
+  const recent = attempts.filter((t) => now - t < PREPUBLISH_WINDOW_MS);
+  if (recent.length >= PREPUBLISH_MAX_ATTEMPTS) {
+    return false;
+  }
+  recent.push(now);
+  prePublishAttempts.set(ip, recent);
+  // Cleanup old entries periodically
+  if (prePublishAttempts.size > 1000) {
+    for (const [key, value] of prePublishAttempts.entries()) {
+      const filtered = value.filter((t) => now - t < PREPUBLISH_WINDOW_MS);
+      if (filtered.length === 0) prePublishAttempts.delete(key);
+      else prePublishAttempts.set(key, filtered);
+    }
+  }
+  return true;
+}
+
 const _require = createRequire(fileURLToPath(import.meta.url));
 const nmsMain = _require.resolve("node-media-server");
 const amfRequire = createRequire(nmsMain);
@@ -64,20 +100,49 @@ export default defineNitroPlugin(() => {
 
   nms.on("prePublish", (id, StreamPath, args) => {
     const streamKey = StreamPath.split("/").pop();
+    const clientIp = args?.ip || args?.remoteAddress || "unknown";
+
+    // CRITICAL: Rate limit prePublish attempts per IP
+    if (!checkPrePublishRateLimit(clientIp)) {
+      console.log(
+        "[RTMP] Rejecting publish: rate limit exceeded for IP:",
+        clientIp,
+      );
+      return false;
+    }
+
+    // CRITICAL: Validate streamKey format before any processing
+    if (!validateStreamKey(streamKey)) {
+      console.log(
+        "[RTMP] Rejecting publish for invalid stream key format:",
+        streamKey,
+        "from IP:",
+        clientIp,
+      );
+      return false;
+    }
+
     const manager = getStreamManager();
     const channelId = manager.getStreamByKey(streamKey);
     if (!channelId) {
       console.log(
         "[RTMP] Rejecting publish for unknown stream key:",
         streamKey,
+        "from IP:",
+        clientIp,
       );
       return false;
     }
     if (manager.hasActiveStream(channelId)) {
-      console.log("[RTMP] Rejecting duplicate stream for channel:", channelId);
+      console.log(
+        "[RTMP] Rejecting duplicate stream for channel:",
+        channelId,
+        "from IP:",
+        clientIp,
+      );
       return false;
     }
-    console.log("[RTMP] Accepting publish for channel:", channelId);
+    console.log("[RTMP] Accepting publish for channel:", channelId, "from IP:", clientIp);
   });
 
   nms.on("postPublish", async (id, StreamPath, args) => {
@@ -173,6 +238,17 @@ export default defineNitroPlugin(() => {
 
   nms.run();
   console.log(`[RTMP] Server listening on port ${rtmpPort}`);
+
+  // Reconcile stream state with PocketBase on startup (async, non-blocking)
+  (async () => {
+    try {
+      const pb = await usePocketBaseAdmin();
+      const { reconcileStreamState } = await import("../utils/stream-manager.js");
+      await reconcileStreamState(pb);
+    } catch (error) {
+      console.error("[RTMP] Failed to reconcile stream state on startup:", error);
+    }
+  })();
 });
 
 const pollingTimers = new Map();
