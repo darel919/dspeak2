@@ -4,6 +4,7 @@ const instanceKey = Symbol.for("dspeak.stream-manager");
 
 function createStreamManager() {
   const streams = new Map();
+  const streamKeys = new Map();
 
   return {
     registerStream(channelId, state) {
@@ -22,12 +23,17 @@ function createStreamManager() {
       return streams.delete(String(channelId));
     },
 
+    registerStreamKey(channelId, streamKey) {
+      const normalizedChannelId = String(channelId);
+      for (const [key, value] of streamKeys.entries()) {
+        if (value === normalizedChannelId) streamKeys.delete(key);
+      }
+      streamKeys.set(streamKey, normalizedChannelId);
+    },
+
     getStreamByKey(streamKey) {
       if (!streamKey) return null;
-      for (const state of streams.values()) {
-        if (state.streamKey === streamKey) return state.channelId;
-      }
-      return null;
+      return streamKeys.get(streamKey) || null;
     },
 
     hasActiveStream(channelId) {
@@ -52,10 +58,13 @@ function createStreamManager() {
     async syncToDatabase(pb) {
       for (const stream of streams.values()) {
         if (stream.relayStarting || stream.plainTransport || stream.producer) {
-          await pb.collection("dspeak_rooms_channels").update(stream.channelId, {
-            stream_active: true,
-            stream_key: stream.streamKey,
-          }).catch(() => {});
+          await pb
+            .collection("dspeak_rooms_channels")
+            .update(stream.channelId, {
+              stream_active: true,
+              stream_key: stream.streamKey,
+            })
+            .catch(() => {});
         }
       }
     },
@@ -75,9 +84,11 @@ export function generateStreamKey() {
 
 export async function reconcileStreamState(pb) {
   try {
-    const activeChannels = await pb.collection("dspeak_rooms_channels").getList(1, 500, {
-      filter: "stream_active = true",
-    });
+    const activeChannels = await pb
+      .collection("dspeak_rooms_channels")
+      .getList(1, 500, {
+        filter: "stream_active = true",
+      });
 
     const manager = getStreamManager();
     let reconciled = 0;
@@ -85,16 +96,21 @@ export async function reconcileStreamState(pb) {
     for (const channel of activeChannels.items) {
       const stream = manager.getStream(channel.id);
       if (!stream || !stream.plainTransport || !stream.producer) {
-        await pb.collection("dspeak_rooms_channels").update(channel.id, {
-          stream_active: false,
-          stream_metadata: null,
-        }).catch(() => {});
+        await pb
+          .collection("dspeak_rooms_channels")
+          .update(channel.id, {
+            stream_active: false,
+            stream_metadata: null,
+          })
+          .catch(() => {});
         reconciled++;
       }
     }
 
     if (reconciled > 0) {
-      console.log(`[StreamManager] Reconciled ${reconciled} stale stream_active entries`);
+      console.log(
+        `[StreamManager] Reconciled ${reconciled} stale stream_active entries`,
+      );
     }
   } catch (error) {
     console.error("[StreamManager] Stream reconciliation failed:", error);

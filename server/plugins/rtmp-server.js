@@ -14,7 +14,6 @@ import { getSfuRouter } from "../utils/mediasoup-sfu.js";
 import { broadcastToChannel } from "../utils/dspeak-realtime.js";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -110,7 +109,8 @@ export default defineNitroPlugin(() => {
         "[RTMP] Rejecting publish: rate limit exceeded for IP:",
         clientIp,
       );
-      return false;
+      nms.getSession(id)?.reject();
+      return;
     }
     if (!validateStreamKey(streamKey)) {
       console.log(
@@ -119,7 +119,8 @@ export default defineNitroPlugin(() => {
         "from IP:",
         clientIp,
       );
-      return false;
+      nms.getSession(id)?.reject();
+      return;
     }
 
     const manager = getStreamManager();
@@ -131,7 +132,8 @@ export default defineNitroPlugin(() => {
         "from IP:",
         clientIp,
       );
-      return false;
+      nms.getSession(id)?.reject();
+      return;
     }
     if (manager.hasActiveStream(channelId)) {
       console.log(
@@ -140,7 +142,8 @@ export default defineNitroPlugin(() => {
         "from IP:",
         clientIp,
       );
-      return false;
+      nms.getSession(id)?.reject();
+      return;
     }
     console.log(
       "[RTMP] Accepting publish for channel:",
@@ -247,6 +250,15 @@ export default defineNitroPlugin(() => {
   (async () => {
     try {
       const pb = await usePocketBaseAdmin();
+      const channels = await pb
+        .collection("dspeak_rooms_channels")
+        .getFullList({ fields: "id,stream_key" });
+      const manager = getStreamManager();
+      for (const channel of channels) {
+        if (channel.stream_key) {
+          manager.registerStreamKey(channel.id, channel.stream_key);
+        }
+      }
       const { reconcileStreamState } =
         await import("../utils/stream-manager.js");
       await reconcileStreamState(pb);

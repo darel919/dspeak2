@@ -1,7 +1,10 @@
 import { requireAuthenticatedUser } from "../../../../utils/authentication.js";
 import { usePocketBaseAdmin } from "../../../../utils/pocketbase.js";
 import { requireRoomMember } from "../../../../utils/room-authorization.js";
-import { generateStreamKey } from "../../../../utils/stream-manager.js";
+import {
+  generateStreamKey,
+  getStreamManager,
+} from "../../../../utils/stream-manager.js";
 import { stopStreamRelay } from "../../../../integrations/stream-relay.js";
 
 export default defineEventHandler(async (event) => {
@@ -54,6 +57,7 @@ export default defineEventHandler(async (event) => {
     stream_key: newKey,
     stream_active: false,
   });
+  getStreamManager().registerStreamKey(channelId, newKey);
 
   const config = useRuntimeConfig();
   const host = config.stream?.rtmpHost || "localhost";
