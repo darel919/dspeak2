@@ -6,6 +6,7 @@ import { registerDjParticipantDisconnectedHandler } from "./dj-lifecycle.js";
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const ACTIVE_SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 const PUBLISHER_RECOVERY_MS = 20 * 1000;
+const BRIDGE_RETRY_MS = 1000;
 const stateKey = Symbol.for("dspeak.dj.sessions");
 
 function state() {
@@ -113,6 +114,7 @@ export function createDjSession({ channelId, userId }) {
     bridge: null,
     process: null,
     recoveryTimer: null,
+    recoveryDeadline: null,
     expiresAt: Date.now() + SESSION_TTL_MS,
     directUrl: publisherUrl(directHost, directPort, path, token),
     fallbackUrl: publisherUrl(fallbackHost, fallbackPort, path, token),
@@ -148,17 +150,25 @@ function findAuthorizedSession(payload) {
 function scheduleRecovery(session, message) {
   if (session.status === "stopped") return;
   closeBridge(session);
+  if (!session.recoveryDeadline)
+    session.recoveryDeadline = Date.now() + PUBLISHER_RECOVERY_MS;
+  if (session.recoveryDeadline <= Date.now()) {
+    closeDjSession(session.id);
+    return;
+  }
   session.status = "recovering";
   session.error = message;
   session.recoveryTimer = setTimeout(
-    () => closeDjSession(session.id),
-    PUBLISHER_RECOVERY_MS,
+    () => startBridge(session),
+    BRIDGE_RETRY_MS,
   );
   session.recoveryTimer.unref?.();
 }
 
 async function startBridge(session) {
   if (session.bridge || session.status === "stopped") return;
+  if (session.recoveryTimer) clearTimeout(session.recoveryTimer);
+  session.recoveryTimer = null;
   session.status = "connecting";
   session.error = null;
   const ssrc = randomInt(1, 0xffffffff);
@@ -214,6 +224,7 @@ async function startBridge(session) {
             return;
           session.status = "live";
           session.error = null;
+          session.recoveryDeadline = null;
           clearTimeout(session.expiryTimer);
           session.expiresAt = Date.now() + ACTIVE_SESSION_TTL_MS;
           session.expiryTimer = setTimeout(
@@ -229,10 +240,17 @@ async function startBridge(session) {
         });
     });
     session.process.once("error", (error) => {
+      if (session.process !== bridgeProcess || session.status === "stopped")
+        return;
       scheduleRecovery(session, error.message || "FFmpeg failed to start");
     });
     session.process.once("exit", (code, signal) => {
-      if (session.status === "stopped" || signal === "SIGTERM") return;
+      if (
+        session.process !== bridgeProcess ||
+        session.status === "stopped" ||
+        signal === "SIGTERM"
+      )
+        return;
       scheduleRecovery(
         session,
         stderr.trim() || `Publisher bridge exited with code ${code}`,
@@ -246,7 +264,14 @@ async function startBridge(session) {
 export function authorizeDjIngest(payload) {
   const session = findAuthorizedSession(payload);
   if (!session) return false;
-  if (payload.action === "publish")
-    setTimeout(() => startBridge(session), 350).unref?.();
+  if (payload.action === "publish") {
+    session.recoveryDeadline = Date.now() + PUBLISHER_RECOVERY_MS;
+    if (session.recoveryTimer) clearTimeout(session.recoveryTimer);
+    session.recoveryTimer = setTimeout(
+      () => startBridge(session),
+      BRIDGE_RETRY_MS,
+    );
+    session.recoveryTimer.unref?.();
+  }
   return true;
 }

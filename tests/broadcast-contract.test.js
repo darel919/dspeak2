@@ -65,4 +65,15 @@ describe("broadcast contract", () => {
     assert.doesNotMatch(sessions, /const process = session\.process/);
     assert.match(sessions, /const bridgeProcess = session\.process/);
   });
+
+  it("retries the RTSP bridge while a new MediaMTX publisher becomes ready", () => {
+    const sessions = readFileSync("server/domains/dj/dj-sessions.js", "utf-8");
+    assert.match(sessions, /const BRIDGE_RETRY_MS = 1000/);
+    assert.match(
+      sessions,
+      /session\.recoveryDeadline = Date\.now\(\) \+ PUBLISHER_RECOVERY_MS/,
+    );
+    assert.match(sessions, /\(\) => startBridge\(session\)/);
+    assert.match(sessions, /session\.process !== bridgeProcess/);
+  });
 });
