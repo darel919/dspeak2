@@ -16,7 +16,8 @@ import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function validateStreamKey(streamKey) {
   if (!UUID_REGEX.test(streamKey)) {
@@ -48,16 +49,23 @@ function checkPrePublishRateLimit(ip) {
   return true;
 }
 
-const _require = createRequire(fileURLToPath(import.meta.url));
-const nmsMain = _require.resolve("node-media-server");
-const amfRequire = createRequire(nmsMain);
-const AMF = amfRequire("./node_core_amf.js");
+let _amfDecoder = null;
+function getAmfDecoder() {
+  if (!_amfDecoder) {
+    const _require = createRequire(fileURLToPath(import.meta.url));
+    const nmsMain = _require.resolve("node-media-server");
+    const amfRequire = createRequire(nmsMain);
+    _amfDecoder = amfRequire("./node_core_amf.js");
+  }
+  return _amfDecoder;
+}
 
 const METADATA_POLL_INTERVAL_MS = 3000;
 
 function decodeSessionMetaData(session) {
   if (!session?.metaData) return null;
   try {
+    const AMF = getAmfDecoder();
     const decoded = AMF.decodeAmf0Data(session.metaData);
     if (decoded?.cmd === "onMetaData" && decoded?.dataObj) {
       return decoded.dataObj;
@@ -134,7 +142,12 @@ export default defineNitroPlugin(() => {
       );
       return false;
     }
-    console.log("[RTMP] Accepting publish for channel:", channelId, "from IP:", clientIp);
+    console.log(
+      "[RTMP] Accepting publish for channel:",
+      channelId,
+      "from IP:",
+      clientIp,
+    );
   });
 
   nms.on("postPublish", async (id, StreamPath, args) => {
@@ -234,10 +247,14 @@ export default defineNitroPlugin(() => {
   (async () => {
     try {
       const pb = await usePocketBaseAdmin();
-      const { reconcileStreamState } = await import("../utils/stream-manager.js");
+      const { reconcileStreamState } =
+        await import("../utils/stream-manager.js");
       await reconcileStreamState(pb);
     } catch (error) {
-      console.error("[RTMP] Failed to reconcile stream state on startup:", error);
+      console.error(
+        "[RTMP] Failed to reconcile stream state on startup:",
+        error,
+      );
     }
   })();
 });
