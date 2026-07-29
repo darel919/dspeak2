@@ -140,12 +140,12 @@ services:
     restart: unless-stopped
 
   dj-ingest:
-    image: bluenviron/mediamtx:1.19.3
+    build:
+      context: .
+      dockerfile: ops/mediamtx/Dockerfile
     network_mode: service:dspeak
     environment:
       MTX_AUTHHTTPADDRESS: http://127.0.0.1:3000/api/dj/ingest-auth?secret=${DSPEAK_INGEST_AUTH_SECRET:?Generate a strong DJ ingest authentication secret}
-    volumes:
-      - ./ops/mediamtx/mediamtx.yml:/mediamtx.yml:ro
     depends_on:
       dspeak:
         condition: service_healthy

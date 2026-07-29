@@ -192,7 +192,8 @@ Direct IPv6: srt://live.dspeak.example.com:9999
 Playit IPv4: srt://live4.dspeak.example.com:<assigned-playit-public-port>
 ```
 
-The Compose `dj-ingest` service runs MediaMTX in dSpeak's network namespace and
+The Compose `dj-ingest` service builds MediaMTX with its configuration embedded,
+runs it in dSpeak's network namespace, and
 binds the SRT listener. Its HTTP authentication callback is protected by
 `DSPEAK_INGEST_AUTH_SECRET`. DNS, Docker port publication, and the Playit tunnel
 do not create an SRT listener when that service is stopped.
