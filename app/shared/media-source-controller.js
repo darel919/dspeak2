@@ -32,6 +32,7 @@ export function createMediaSourceController({
   stopSharedAudioMeter,
   topologyState,
   voiceStore,
+  broadcastCapture,
 }) {
   const adaptiveVideo = createAdaptiveVideoController({
     apply: async (entry, state, settings) => {
@@ -49,7 +50,8 @@ export function createMediaSourceController({
   });
   async function publishSource(sourceEntry) {
     const entry =
-      sourceEntry.source === "screen-audio"
+      sourceEntry.source === "screen-audio" ||
+      sourceEntry.source === "broadcast-audio"
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
     const previous = localSources.get(entry.source);
@@ -149,6 +151,8 @@ export function createMediaSourceController({
         { once: true },
       );
     if (entry.source === "audio") startLocalVoiceDetection(entry);
+    if (entry.source === "screen-audio") startSharedAudioMeter(entry.track);
+    if (entry.source === "broadcast-audio") startSharedAudioMeter(entry.track);
     if (isVideo) {
       localVideoFeeds.value.set(entry.source, {
         source: entry.source,
@@ -184,6 +188,10 @@ export function createMediaSourceController({
     localVideoFeeds.value = new Map(localVideoFeeds.value);
     if (entry.source === "screen") adaptiveVideo.stop();
     if (entry.source === "screen-audio") {
+      stopSharedAudioMeter();
+      onSharedAudioStopped?.();
+    }
+    if (entry.source === "broadcast-audio") {
       stopSharedAudioMeter();
       onSharedAudioStopped?.();
     }
@@ -233,6 +241,15 @@ export function createMediaSourceController({
 
   function startSystemAudioProduction() {
     return capture.startSystemAudio().then((entry) => producerFacade(entry));
+  }
+
+  async function startBroadcastProduction({ url }) {
+    const entry = await broadcastCapture.start({ url });
+    return producerFacade(entry);
+  }
+
+  function stopBroadcastProduction() {
+    broadcastCapture.stop();
   }
 
   return {

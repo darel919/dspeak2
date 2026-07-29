@@ -39,6 +39,7 @@ export const useVoiceStore = defineStore("voice", () => {
   const cameraEnabled = ref(false);
   const screenSharing = ref(false);
   const systemAudioSharing = ref(false);
+  const broadcastAudioSharing = ref(false);
   const settingsStore = useSettingsStore();
   const channelsStore = useChannelsStore();
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
@@ -299,6 +300,7 @@ export const useVoiceStore = defineStore("voice", () => {
       cameraEnabled.value = false;
       screenSharing.value = false;
       systemAudioSharing.value = false;
+      broadcastAudioSharing.value = false;
       if (wasConnected) playSystemSound("voice-leave", settingsStore);
       cameraToggleGeneration += 1;
     }
@@ -775,6 +777,7 @@ export const useVoiceStore = defineStore("voice", () => {
     cameraEnabled,
     screenSharing,
     systemAudioSharing,
+    broadcastAudioSharing,
     sharedAudioVolume,
     sharedAudioStats,
     sharedAudioAttenuation,

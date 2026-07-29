@@ -36,6 +36,7 @@ import {
   resolveMediaAttenuation,
   summarizeMediaAttenuation,
 } from "~/shared/media-attenuation-reporter.js";
+import { LocalBroadcastCapture } from "~/shared/local-broadcast-capture.js";
 import {
   waitForInitialMediaTopology,
   waitForMediaHandoff,
@@ -269,6 +270,14 @@ export function useHybridMediaSession() {
     onSourceEnded: (entry, options) =>
       sourceController.removeSource(entry, options),
   });
+  const broadcastCapture = new LocalBroadcastCapture({
+    createAudioContext: () =>
+      new (window.AudioContext || window.webkitAudioContext)(),
+    createMediaElement: () => document.createElement("audio"),
+    onStateChange: (state) => {
+      voiceStore.broadcastAudioSharing = state === "live";
+    },
+  });
   const handoff = new RemoteMediaHandoff(registry);
   function setActiveProvider(provider) {
     if (provider !== activeProvider) {
@@ -498,19 +507,6 @@ export function useHybridMediaSession() {
           summary.receiveRequired &&
           summary.send === "connected" &&
           summary.recv === "connected";
-        setRouteConnectionState(
-          summary.ready
-            ? summary.sendRequired || summary.receiveRequired
-              ? "transport-connected"
-              : "ready-no-active-media"
-            : state === "disconnected"
-              ? "reconnecting"
-              : "transport-connecting",
-        );
-        setConnectionPhase(
-          summary.ready ? "media-ready" : "transport-connecting",
-          { direction: _, topologyMode: "sfu" },
-        );
       },
       getAudioBitrate: getEffectiveAudioBitrate,
       getAudioStereo,
@@ -528,66 +524,6 @@ export function useHybridMediaSession() {
       source,
     });
   }
-  const {
-    createSharedAudioSource,
-    producerFacade,
-    refreshAudioSenderSettings,
-    refreshMediaPolicy,
-    setSharedAudioVolume,
-    setSharedAudioAttenuation,
-    setSystemAudioBitrate,
-    startLocalVoiceDetection,
-    startSharedAudioMeter,
-    stopLocalVoiceDetection,
-    stopSharedAudioMeter,
-  } = createLocalAudioEngine({
-    authStore,
-    automaticGateThreshold,
-    capture,
-    collectOutboundAudioStats,
-    createNoiseFloorEstimator,
-    getActiveProvider: () => activeProvider,
-    getAttenuation,
-    getAudioStereo,
-    getEffectiveAudioBitrate,
-    getP2pMesh: () => p2pMesh,
-    getRequestedVideoSettings,
-    getSfu: () => sfu,
-    localSources,
-    echoDetected,
-    microphoneLevelDb,
-    onSpeakingChange: (userId, speaking) =>
-      registry.setExternalSpeaking(userId, speaking),
-    settingsStore,
-    sharedAudioDucking,
-    sharedAudioStats,
-    updateNoiseFloor,
-    voiceStore,
-  });
-  watch(
-    () => [
-      settingsStore.streamAttenuation,
-      roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
-      [...voiceStore.connectedUsers.values()].some(
-        (participant) => participant.speaking === true,
-      ),
-    ],
-    () => {
-      const speaking = [...voiceStore.connectedUsers.values()].some(
-        (participant) => participant.speaking === true,
-      );
-      registry.applyAttenuation();
-      setSharedAudioAttenuation(
-        speaking,
-        resolveMediaAttenuation(
-          roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
-          { mode: "inherit" },
-        ),
-      );
-    },
-    { deep: true, immediate: true },
-  );
-  registerEchoWarning(echoDetected);
   async function applyTopology(data, generation) {
     mediaGeneration.assert(generation);
     if (Number(data.epoch) < topologyState.value.epoch) return;
@@ -704,13 +640,10 @@ export function useHybridMediaSession() {
           : "ready-no-active-media"
         : "transport-connecting",
     );
-    setConnectionPhase(
-      transportReady.value ? "media-ready" : "transport-connecting",
-      {
-        topologyEpoch: Number(data.epoch),
-        topologyMode: data.mode,
-      },
-    );
+    setConnectionPhase("media-ready", {
+      topologyEpoch: Number(data.epoch),
+      topologyMode: data.mode,
+    });
     error.value = null;
     refreshPublicMaps();
     refreshTopologyGraph();
@@ -956,6 +889,7 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter,
     topologyState,
     voiceStore,
+    broadcastCapture,
   });
   const {
     restartAudioProduction,
@@ -966,6 +900,8 @@ export function useHybridMediaSession() {
     stopAudioProduction,
     stopSystemAudioProduction,
     stopVideoProduction,
+    startBroadcastProduction,
+    stopBroadcastProduction,
   } = sourceController;
   const {
     getInboundRtpStats,
@@ -1062,6 +998,7 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter();
     attenuationReporter.clear();
     capture.stopDeviceMonitoring();
+    broadcastCapture.stop();
     closeMediaSessionTransports({
       capture,
       getP2pMesh: () => p2pMesh,
@@ -1137,6 +1074,8 @@ export function useHybridMediaSession() {
     stopVideoProduction,
     startSystemAudioProduction,
     stopSystemAudioProduction,
+    startBroadcastProduction,
+    stopBroadcastProduction,
     setRemoteScreenReceiving: (feedKey, receiving) =>
       registry.setVideoReceiving(feedKey, receiving),
     setRemoteSystemAudioReceiving: (key, on) =>
