@@ -103,10 +103,9 @@
           >
         </div>
       </button>
-      <div
-        class="chat-message-content"
-        v-html="renderContent(message.content)"
-      ></div>
+      <div class="chat-message-content">
+        <FormattedContent :content="message.content" />
+      </div>
 
       <div
         v-if="message.attachments && message.attachments.length > 0"

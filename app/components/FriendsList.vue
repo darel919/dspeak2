@@ -76,12 +76,20 @@
               >@{{ req.requester.handle }}</span
             >
           </div>
-          <button class="btn btn-primary btn-sm" @click="acceptRequest(req.id)">
-            Accept
-          </button>
-          <button class="btn btn-ghost btn-sm" @click="declineRequest(req.id)">
-            <Icon name="lucide:x" class="size-4" />
-          </button>
+          <button
+                      class="btn btn-primary btn-sm"
+                      @click="acceptRequest(req.id)"
+                      aria-label="Accept friend request from {{ req.username }}"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      @click="declineRequest(req.id)"
+                      aria-label="Decline friend request from {{ req.username }}"
+                    >
+                      Decline
+                    </button>
         </div>
       </div>
 
