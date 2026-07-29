@@ -32,7 +32,6 @@ export function createMediaSourceController({
   stopSharedAudioMeter,
   topologyState,
   voiceStore,
-  broadcastCapture,
 }) {
   const adaptiveVideo = createAdaptiveVideoController({
     apply: async (entry, state, settings) => {
@@ -48,11 +47,9 @@ export function createMediaSourceController({
         `[Media] Video adaptation failed: ${adaptationError?.message || adaptationError}`,
       ),
   });
-  let broadcastEntry = null;
   async function publishSource(sourceEntry) {
     const entry =
-      sourceEntry.source === "screen-audio" ||
-      sourceEntry.source === "broadcast-audio"
+      sourceEntry.source === "screen-audio"
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
     const previous = localSources.get(entry.source);
@@ -153,7 +150,6 @@ export function createMediaSourceController({
       );
     if (entry.source === "audio") startLocalVoiceDetection(entry);
     if (entry.source === "screen-audio") startSharedAudioMeter(entry.source);
-    if (entry.source === "broadcast-audio") startSharedAudioMeter(entry.source);
     if (isVideo) {
       localVideoFeeds.value.set(entry.source, {
         source: entry.source,
@@ -188,10 +184,6 @@ export function createMediaSourceController({
     localVideoFeeds.value = new Map(localVideoFeeds.value);
     if (entry.source === "screen") adaptiveVideo.stop();
     if (entry.source === "screen-audio") {
-      stopSharedAudioMeter();
-      onSharedAudioStopped?.();
-    }
-    if (entry.source === "broadcast-audio") {
       stopSharedAudioMeter();
       onSharedAudioStopped?.();
     }
@@ -243,26 +235,6 @@ export function createMediaSourceController({
     return capture.startSystemAudio().then((entry) => producerFacade(entry));
   }
 
-  async function startBroadcastProduction({ file }) {
-    const entry = await broadcastCapture.start({ file });
-    try {
-      const publishedEntry = await publishSource(entry);
-      broadcastEntry = publishedEntry;
-      return producerFacade(publishedEntry);
-    } catch (sourceError) {
-      await broadcastCapture.stop();
-      throw sourceError;
-    }
-  }
-
-  async function stopBroadcastProduction() {
-    if (broadcastEntry) {
-      removeSource(broadcastEntry);
-      broadcastEntry = null;
-    }
-    await broadcastCapture.stop();
-  }
-
   return {
     publishSource,
     removeSource,
@@ -270,11 +242,9 @@ export function createMediaSourceController({
     sendParticipantVoiceState,
     sendSourceState,
     startAudioProduction,
-    startBroadcastProduction,
     startSystemAudioProduction,
     startVideoProduction,
     stopAudioProduction: () => capture.stop("audio"),
-    stopBroadcastProduction,
     stopSystemAudioProduction: () => {
       const entry = localSources.get("screen-audio");
       if (entry?.ownerSource === "system-audio") capture.stop("screen-audio");

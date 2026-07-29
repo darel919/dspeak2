@@ -8,10 +8,10 @@ selected voice channel.
 
 ## Status
 
-DJ Mode is under development. The direct IPv6 and Playit IPv4 deployment routes
-are configured, but the authenticated SRT ingest gateway and its mediasoup
-bridge are not implemented yet. The documented publisher URLs will not accept a
-broadcast until that gateway is running.
+DJ Mode is implemented for the Docker Compose deployment. MediaMTX accepts
+authenticated SRT publishers, dSpeak starts an FFmpeg Opus bridge, and the SFU
+publishes the resulting server-owned audio source. External IPv6 and Playit
+reachability and audible playback still require production verification.
 
 ## Product boundaries
 
@@ -43,7 +43,7 @@ into a supported application's streaming-output settings.
 ```text
 VLC or OBS
   -> authenticated SRT stream
-  -> dSpeak ingest gateway on UDP 9999
+  -> MediaMTX ingest gateway on UDP 9999
   -> decode or transcode to Opus RTP
   -> mediasoup PlainTransport
   -> server-owned broadcast producer
@@ -98,12 +98,12 @@ and Playit configuration.
 3. The server creates a short-lived ingest session bound to the participant,
    room, and channel.
 4. The UI presents direct IPv6 and IPv4 fallback connection details containing
-   the session's signed SRT stream ID.
+   the session's random SRT publishing credential.
 5. VLC, OBS, or another supported publisher connects to one of the routes.
 6. The gateway validates the stream ID before accepting media.
-7. The server creates a mediasoup `PlainTransport` and a server-owned audio
-   producer for the channel.
-8. dSpeak reports **Live** only after media is flowing and the producer exists.
+7. The server creates a mediasoup `PlainTransport`, starts an FFmpeg Opus RTP
+   bridge, and creates a server-owned audio producer for the channel.
+8. dSpeak reports **Live** only after mediasoup reports incoming RTP.
 9. Explicit stop, publisher disconnect, session expiration, channel leave, or
    authorization loss closes the ingest process, transport, and producer.
 
@@ -152,7 +152,7 @@ The interface should expose:
 
 - waiting, connecting, live, recovering, stopped, and error states
 - direct and fallback publisher connection details
-- copy actions for non-secret fields
+- copy actions for the temporary credential-bearing publisher URLs
 - concise VLC and OBS setup guidance
 - input activity and outbound health
 - the current broadcaster identity
@@ -184,6 +184,9 @@ state. A signaling success response alone is not proof that audio is flowing.
 - Playit must forward public UDP `5627` to local UDP `9999`.
 - The ingest gateway and mediasoup bridge must communicate over an internal
   network path that does not require another public port.
+- `DSPEAK_INGEST_AUTH_SECRET` must contain an independent random secret of at
+  least 32 characters. It authenticates MediaMTX's internal callback and must
+  remain server-only.
 - Only one Nitro application instance is supported until distributed ownership,
   router piping, and a shared state backplane are introduced.
 - Health checks should report gateway readiness without creating a session.

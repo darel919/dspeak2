@@ -81,7 +81,12 @@ async function discoverAnnouncedAddress() {
 export async function validateRuntimeEnvironment() {
   const environmentRequiredVariables =
     process.env.NODE_ENV === "production"
-      ? [...requiredVariables, "DSPEAK_PUBLIC_ORIGIN", "DSPEAK_METRICS_TOKEN"]
+      ? [
+          ...requiredVariables,
+          "DSPEAK_PUBLIC_ORIGIN",
+          "DSPEAK_METRICS_TOKEN",
+          "DSPEAK_INGEST_AUTH_SECRET",
+        ]
       : requiredVariables;
   const missing = environmentRequiredVariables.filter(
     (name) => !process.env[name]?.trim(),
@@ -99,6 +104,13 @@ export async function validateRuntimeEnvironment() {
   }
   if (process.env.DSPEAK_CSRF_SECRET.trim().length < 32)
     throw new Error("DSPEAK_CSRF_SECRET must contain at least 32 characters");
+  if (
+    process.env.DSPEAK_INGEST_AUTH_SECRET &&
+    process.env.DSPEAK_INGEST_AUTH_SECRET.trim().length < 32
+  )
+    throw new Error(
+      "DSPEAK_INGEST_AUTH_SECRET must contain at least 32 characters",
+    );
 
   let pocketBaseUrl;
   let authUrl;
@@ -139,6 +151,8 @@ export async function validateRuntimeEnvironment() {
   }
 
   const rtcPort = readPort("MEDIASOUP_RTC_PORT", 40000);
+  readPort("DSPEAK_INGEST_LISTEN_PORT", 9999);
+  readPort("DSPEAK_INGEST_FALLBACK_PORT", 9999);
   const announcedPort = process.env.MEDIASOUP_ANNOUNCED_PORT?.trim()
     ? readPort("MEDIASOUP_ANNOUNCED_PORT", rtcPort)
     : rtcPort;

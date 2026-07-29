@@ -38,6 +38,7 @@ services:
       DSPEAK_INGEST_LISTEN_PORT: ${DSPEAK_INGEST_LISTEN_PORT:-9999}
       DSPEAK_INGEST_FALLBACK_DOMAIN: ${DSPEAK_INGEST_FALLBACK_DOMAIN:-live4.dspeak.example.com}
       DSPEAK_INGEST_FALLBACK_PORT: ${DSPEAK_INGEST_FALLBACK_PORT:-5627}
+      DSPEAK_INGEST_AUTH_SECRET: ${DSPEAK_INGEST_AUTH_SECRET:?Generate a strong DJ ingest authentication secret}
       TURN_PORT: ${TURN_PORT:-3478}
       TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
       TURN_CREDENTIAL_TTL_SECONDS: ${TURN_CREDENTIAL_TTL_SECONDS:-900}
@@ -133,6 +134,18 @@ services:
     environment:
       SECRET_KEY: ${PLAYIT_SECRET_KEY:?Create a Docker agent in Playit and set PLAYIT_SECRET_KEY}
     network_mode: service:dspeak
+    depends_on:
+      dspeak:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dj-ingest:
+    image: bluenviron/mediamtx:1.19.3
+    network_mode: service:dspeak
+    environment:
+      MTX_AUTHHTTPADDRESS: http://127.0.0.1:3000/api/dj/ingest-auth?secret=${DSPEAK_INGEST_AUTH_SECRET:?Generate a strong DJ ingest authentication secret}
+    volumes:
+      - ./ops/mediamtx/mediamtx.yml:/mediamtx.yml:ro
     depends_on:
       dspeak:
         condition: service_healthy

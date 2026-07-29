@@ -23,5 +23,9 @@ export function releaseRoomReservation(room) {
 }
 
 export function isRoomUnused(room) {
-  return room.sessions.size === 0 && (Number(room.pendingJoins) || 0) === 0;
+  return (
+    room.sessions.size === 0 &&
+    (room.broadcasts?.size || 0) === 0 &&
+    (Number(room.pendingJoins) || 0) === 0
+  );
 }

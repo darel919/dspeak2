@@ -60,7 +60,7 @@ describe("Broadcast UI contract", () => {
       "app/components/BroadcastSetupDialog.vue",
       "utf-8",
     );
-    assert.ok(source.includes("voiceStore.startBroadcast(selectedFile.value)"));
+    assert.ok(source.includes("voiceStore.startBroadcast()"));
     assert.ok(source.includes("voiceStore.stopBroadcast()"));
     assert.ok(!source.includes("voiceStore.sfuComposable.value"));
   });
@@ -71,8 +71,8 @@ describe("Broadcast UI contract", () => {
       "utf-8",
     );
     const setupPanel = source.slice(
-      source.indexOf('<div v-if="!broadcastActive"'),
-      source.indexOf('<div v-else class="space-y-3">'),
+      source.indexOf('<div v-if="!djSession"'),
+      source.indexOf('<div v-else class="space-y-4">'),
     );
     assert.ok(setupPanel.includes('v-if="broadcastError"'));
   });
@@ -84,14 +84,15 @@ describe("Broadcast UI contract", () => {
     assert.ok(!source.includes("setBroadcastMode"));
   });
 
-  it("BroadcastSetupDialog selects a browser-owned audio file", () => {
+  it("BroadcastSetupDialog provides VLC SRT destinations", () => {
     const source = readFileSync(
       "app/components/BroadcastSetupDialog.vue",
       "utf-8",
     );
-    assert.ok(source.includes('type="file"'));
-    assert.ok(source.includes('accept="audio/*"'));
-    assert.ok(!source.includes("VLC"));
+    assert.ok(!source.includes('type="file"'));
+    assert.ok(source.includes("VLC"));
+    assert.ok(source.includes("directUrl"));
+    assert.ok(source.includes("fallbackUrl"));
   });
 
   it("BroadcastSetupDialog shows status (waiting, connecting, live, error)", () => {
@@ -118,14 +119,11 @@ describe("Voice store broadcast contract", () => {
     );
   });
 
-  it("voice store passes the broadcast URL contract", () => {
+  it("voice store creates an authenticated DJ session", () => {
     const source = readFileSync("app/stores/voice.js", "utf-8");
-    assert.ok(source.includes("startBroadcastProduction({ file })"));
-    assert.ok(
-      source.indexOf("broadcastAudioSharing.value = true") >
-        source.indexOf("await sfuComposable.value.startBroadcastProduction"),
-    );
-    assert.ok(!source.includes("startBroadcastProduction(url)"));
+    assert.ok(source.includes('$fetch("/api/dj/session"'));
+    assert.ok(source.includes("body: { channelId: currentChannelId.value }"));
+    assert.ok(source.includes('next.status === "live"'));
   });
 
   it("voice store has broadcast control actions", () => {

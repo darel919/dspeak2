@@ -39,5 +39,6 @@ EXPOSE 3000/tcp
 EXPOSE 1935/tcp
 EXPOSE 40000/udp
 EXPOSE 40000/tcp
+EXPOSE 9999/udp
 
 CMD ["node", ".output/server/index.mjs"]

@@ -263,7 +263,7 @@ test("voice video offers equal overview tiles and viewer-selected focus", async 
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   assert.match(
     source,
-    /@click="tile\.type === 'feed' && scheduleTileFocus\(tile\.key\)"/,
+    /tile\.type !== 'participant' && scheduleTileFocus\(tile\.key\)/,
   );
   assert.match(source, /@dblclick\.stop="cancelTileFocus"/);
   assert.match(source, /voice-room-grid-focused/);

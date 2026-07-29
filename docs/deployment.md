@@ -174,6 +174,7 @@ DSPEAK_LIVE_DOMAIN=live.dspeak.example.com
 DSPEAK_INGEST_LISTEN_PORT=9999
 DSPEAK_INGEST_FALLBACK_DOMAIN=live4.dspeak.example.com
 DSPEAK_INGEST_FALLBACK_PORT=5627
+DSPEAK_INGEST_AUTH_SECRET=<independent-random-secret-of-at-least-32-characters>
 ```
 
 In Playit, keep Proxy Protocol disabled and configure the second custom UDP
@@ -191,9 +192,10 @@ Direct IPv6: srt://live.dspeak.example.com:9999
 Playit IPv4: srt://live4.dspeak.example.com:<assigned-playit-public-port>
 ```
 
-These routes become usable only when the authenticated SRT ingest gateway is
-running. DNS, Docker port publication, and the Playit tunnel do not create an
-SRT listener.
+The Compose `dj-ingest` service runs MediaMTX in dSpeak's network namespace and
+binds the SRT listener. Its HTTP authentication callback is protected by
+`DSPEAK_INGEST_AUTH_SECRET`. DNS, Docker port publication, and the Playit tunnel
+do not create an SRT listener when that service is stopped.
 
 ## Self-hosted IPv6 STUN and TURN
 

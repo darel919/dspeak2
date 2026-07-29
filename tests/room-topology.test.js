@@ -125,6 +125,18 @@ test("activation identifies the exact transition epoch accepted by every client"
   assert.equal(room.topology.epoch, preparedEpoch + 1);
 });
 
+test("a server DJ broadcast keeps eligible rooms on the SFU", () => {
+  const { room, coordinator } = harness(2);
+  room.broadcasts = new Map([["producer-1", {}]]);
+  room.topology.mode = "p2p";
+
+  coordinator.reconcile(room, "server-broadcast-started");
+
+  assert.equal(room.topology.mode, "switching");
+  assert.equal(room.topology.target, "sfu");
+  assert.equal(room.topology.reason, "server-broadcast-active");
+});
+
 test("client accepts only the activation produced by its verified transition", () => {
   const prepared = { target: "sfu", epoch: 7, sourceRevision: 3 };
   assert.equal(

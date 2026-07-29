@@ -32,12 +32,6 @@ function controller(overrides = {}) {
     },
     topologyState: { value: { mode: "sfu", epoch: 2, sourceRevision: 3 } },
     voiceStore: { micMuted: false, deafened: false },
-    broadcastCapture: {
-      async start() {
-        throw new Error("Broadcast capture is not configured");
-      },
-      async stop() {},
-    },
     ...overrides,
   });
   return {
@@ -239,53 +233,4 @@ test("new sources publish to the active and preparing transports", async () => {
   });
 
   assert.deepEqual(published, ["p2p:screen-audio", "sfu:screen-audio"]);
-});
-
-test("broadcast start publishes the captured source and stop unpublishes it", async () => {
-  const removed = [];
-  let captureStopped = 0;
-  const entry = {
-    source: "broadcast-audio",
-    stream: {},
-    track: {
-      id: "broadcast-track",
-      kind: "audio",
-      readyState: "live",
-      addEventListener() {},
-    },
-  };
-  const file = { name: "set.mp3", type: "audio/mpeg" };
-  const harness = controller({
-    broadcastCapture: {
-      async start(options) {
-        assert.equal(options.file, file);
-        return entry;
-      },
-      async stop() {
-        captureStopped += 1;
-      },
-    },
-    getSfu: () => ({
-      async addSource(sourceEntry) {
-        assert.equal(sourceEntry.source, "broadcast-audio");
-      },
-      removeSource(source) {
-        removed.push(source);
-      },
-    }),
-  });
-
-  const producer = await harness.instance.startBroadcastProduction({
-    file,
-  });
-
-  assert.equal(producer.track, entry.track);
-  assert.equal(harness.localSources.get("broadcast-audio"), entry);
-  assert.deepEqual(harness.meteredSources, ["broadcast-audio"]);
-
-  await harness.instance.stopBroadcastProduction();
-
-  assert.deepEqual(removed, ["broadcast-audio"]);
-  assert.equal(harness.localSources.has("broadcast-audio"), false);
-  assert.equal(captureStopped, 1);
 });

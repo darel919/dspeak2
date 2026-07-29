@@ -9,9 +9,14 @@ export function collectSfuMetrics(state) {
     switching: 0,
     idle: 0,
   };
-  for (const room of state.rooms.values())
+  for (const room of state.rooms.values()) {
     if (Object.hasOwn(topologies, room.topology.mode))
       topologies[room.topology.mode] += 1;
+    for (const broadcast of room.broadcasts?.values() || []) {
+      transports += Number(Boolean(broadcast.transport));
+      producers += Number(Boolean(broadcast.producer));
+    }
+  }
   for (const session of state.sessions.values()) {
     transports += session.transports.size;
     producers += session.producers.size;

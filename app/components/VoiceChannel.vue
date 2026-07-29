@@ -128,17 +128,23 @@
                 viewMode === 'focused' && tile.key === focusedTileKey,
               'participant-tile-speaking': tile.user?.speaking,
             }"
-            :role="tile.type === 'feed' ? 'button' : undefined"
-            :tabindex="tile.type === 'feed' ? 0 : undefined"
+            :role="tile.type !== 'participant' ? 'button' : undefined"
+            :tabindex="tile.type !== 'participant' ? 0 : undefined"
             :aria-label="
               tile.type === 'feed'
                 ? `Maximize ${tile.feed.label} ${tile.feed.source}`
-                : undefined
+                : tile.type === 'broadcast'
+                  ? `Maximize DJ broadcast from ${tile.broadcast.label}`
+                  : undefined
             "
-            @click="tile.type === 'feed' && scheduleTileFocus(tile.key)"
+            @click="tile.type !== 'participant' && scheduleTileFocus(tile.key)"
             @dblclick.stop="cancelTileFocus"
-            @keydown.enter.prevent="tile.type === 'feed' && focusTile(tile.key)"
-            @keydown.space.prevent="tile.type === 'feed' && focusTile(tile.key)"
+            @keydown.enter.prevent="
+              tile.type !== 'participant' && focusTile(tile.key)
+            "
+            @keydown.space.prevent="
+              tile.type !== 'participant' && focusTile(tile.key)
+            "
             @contextmenu.prevent="openTileVolumeMenu(tile)"
           >
             <VideoFeed
@@ -157,6 +163,32 @@
               @start-receiving="setScreenReceiving(tile.feed, true)"
               @stop-receiving="setScreenReceiving(tile.feed, false)"
             />
+            <div
+              v-else-if="tile.type === 'broadcast'"
+              class="relative flex h-full min-h-[18rem] flex-col items-center justify-center overflow-hidden border border-primary/40 bg-black p-8 text-center text-white"
+            >
+              <div
+                class="absolute inset-x-0 top-0 h-1 bg-primary"
+                aria-hidden="true"
+              ></div>
+              <div
+                class="grid size-24 place-items-center rounded-full bg-primary text-black shadow-[0_0_60px_rgba(244,114,182,0.28)]"
+              >
+                <Icon name="lucide:disc-3" class="size-11 animate-spin-slow" />
+              </div>
+              <p
+                class="mt-7 text-xs font-bold uppercase tracking-[0.24em] text-primary"
+              >
+                Live DJ broadcast
+              </p>
+              <h2 class="mt-2 max-w-full truncate text-2xl font-bold">
+                {{ tile.broadcast.label }}
+              </h2>
+              <div class="mt-5 flex items-center gap-2 text-sm text-white/60">
+                <span class="size-2 bg-success"></span>
+                Application audio is live
+              </div>
+            </div>
             <div
               v-else
               class="participant-tile participant-audio-tile metro-transition group relative flex h-full min-w-0 flex-col items-center justify-center overflow-hidden border"
@@ -679,6 +711,17 @@ const videoFeeds = computed(() => {
     (a, b) => Number(b.source === "screen") - Number(a.source === "screen"),
   );
 });
+const broadcastFeeds = computed(() =>
+  Array.from(voiceStore.remoteAudioFeeds)
+    .filter(([, feed]) => feed.source === "broadcast-audio")
+    .map(([key, feed]) => ({
+      ...feed,
+      key,
+      label: getUserDisplayName(
+        voiceStore.getUserById(feed.userId) || { id: feed.userId },
+      ),
+    })),
+);
 const roomTiles = computed(() => {
   const representedUsers = new Set(
     videoFeeds.value.map((feed) => String(feed.userId)),
@@ -688,6 +731,11 @@ const roomTiles = computed(() => {
     type: "feed",
     feed,
   }));
+  const broadcasts = broadcastFeeds.value.map((broadcast) => ({
+    key: `broadcast-${broadcast.key}`,
+    type: "broadcast",
+    broadcast,
+  }));
   const participants = connectedUsers.value
     .filter((user) => !representedUsers.has(String(user.id)))
     .map((user) => ({
@@ -695,7 +743,7 @@ const roomTiles = computed(() => {
       type: "participant",
       user,
     }));
-  return [...feeds, ...participants];
+  return [...broadcasts, ...feeds, ...participants];
 });
 const displayedRoomTiles = computed(() => {
   if (viewMode.value !== "focused") return roomTiles.value;
@@ -773,6 +821,17 @@ watch(roomTiles, (tiles) => {
     if (!focusedTileKey.value) viewMode.value = "overview";
   }
 });
+watch(
+  broadcastFeeds,
+  (feeds, previous) => {
+    const previousKeys = new Set((previous || []).map((feed) => feed.key));
+    const started = feeds.find((feed) => !previousKeys.has(feed.key));
+    if (!started) return;
+    focusedTileKey.value = `broadcast-${started.key}`;
+    viewMode.value = "focused";
+  },
+  { flush: "post" },
+);
 const remoteSystemAudioShares = computed(() => {
   const screenOwners = new Set(
     Array.from(voiceStore.remoteVideoFeeds)

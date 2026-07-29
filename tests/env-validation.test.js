@@ -13,6 +13,7 @@ beforeEach(() => {
     PBASE_ADMIN_EMAIL: "admin@example.com",
     PBASE_ADMIN_PASSWORD: "secret",
     DSPEAK_CSRF_SECRET: "test-secret-with-at-least-32-characters",
+    DSPEAK_INGEST_AUTH_SECRET: "test-ingest-secret-with-at-least-32-characters",
     VAPID_PUBLIC_KEY: "public",
     VAPID_PUBKEY: "public",
     VAPID_PRIVKEY: "private",

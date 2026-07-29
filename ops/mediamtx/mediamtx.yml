@@ -1,0 +1,23 @@
+logLevel: warn
+
+authMethod: http
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+rtsp: true
+rtspAddress: 127.0.0.1:8554
+rtspTransports: [tcp]
+rtmp: false
+hls: false
+webrtc: false
+srt: true
+srtAddress: :9999
+api: false
+metrics: false
+pprof: false
+playback: false
+
+paths:
+  all_others:

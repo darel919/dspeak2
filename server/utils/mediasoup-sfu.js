@@ -63,6 +63,7 @@ import {
   markMediaPeerClosed,
   retainMediaSessionResource,
 } from "./media-session-lifecycle.js";
+import { notifyDjParticipantDisconnected } from "../domains/dj/dj-lifecycle.js";
 const stateKey = Symbol.for("dspeak.mediasoup.sfu");
 function send(peer, type, data) {
   try {
@@ -208,6 +209,7 @@ async function acquireRoom(state, channelId) {
     creations: state.roomCreations,
     key: channelId,
     create: async () => ({
+      broadcasts: new Map(),
       id: channelId,
       router: await state.worker.createRouter({ mediaCodecs }),
       sessions: new Map(),
@@ -249,6 +251,11 @@ function producerSnapshot(room) {
       producerSourceMap[producer.id] =
         producer.appData?.source || producer.kind;
     }
+  }
+  for (const broadcast of room.broadcasts?.values() || []) {
+    producers.push(broadcast.producer.id);
+    producerUserMap[broadcast.producer.id] = broadcast.userId;
+    producerSourceMap[broadcast.producer.id] = "broadcast-audio";
   }
 
   return { producers, producerUserMap, producerSourceMap };
@@ -313,6 +320,7 @@ function closeSession(state, session) {
     (candidate) => String(candidate.userId) === String(session.userId),
   );
   if (!userStillConnected) {
+    notifyDjParticipantDisconnected(session.room.id, session.userId);
     removeMediaUserState(session.userId, session.room.id).catch((error) =>
       console.error("[SFU] failed to remove user state", error),
     );
@@ -667,11 +675,13 @@ async function handleMessage(state, session, message) {
         throw new Error("Producer is already consumed by this peer");
       }
 
-      const owner = [...session.room.sessions.values()].find((candidate) =>
-        candidate.producers.has(data.producerId),
+      const participantOwner = [...session.room.sessions.values()].find(
+        (candidate) => candidate.producers.has(data.producerId),
       );
+      const broadcastOwner = session.room.broadcasts?.get(data.producerId);
+      const owner = participantOwner || broadcastOwner;
       if (!owner) throw new Error("Producer not found in this channel");
-      if (owner === session)
+      if (participantOwner === session)
         throw new Error("A peer cannot consume its own producer");
 
       const consumer = await transport.consume(
@@ -695,7 +705,8 @@ async function handleMessage(state, session, message) {
         rtpParameters: consumer.rtpParameters,
         userId: owner.userId,
         source:
-          owner.producers.get(data.producerId)?.appData?.source ||
+          participantOwner?.producers.get(data.producerId)?.appData?.source ||
+          broadcastOwner?.producer.appData?.source ||
           consumer.kind,
         producerPaused: consumer.producerPaused,
       });
@@ -972,6 +983,93 @@ export async function getSfuRouter(channelId) {
   const state = await getState();
   const room = state.rooms.get(String(channelId));
   return room ? room.router : null;
+}
+
+export async function createDjBroadcastProducer(channelId, userId, ssrc) {
+  const state = await getState();
+  const room = await acquireRoom(state, String(channelId));
+  let transport;
+  let producer;
+  try {
+    transport = await room.router.createPlainTransport({
+      listenInfo: {
+        protocol: "udp",
+        ip: "127.0.0.1",
+      },
+      comedia: true,
+      rtcpMux: true,
+    });
+    producer = await transport.produce({
+      kind: "audio",
+      rtpParameters: {
+        codecs: [
+          {
+            mimeType: "audio/opus",
+            payloadType: 111,
+            clockRate: 48000,
+            channels: 2,
+            parameters: {
+              minptime: 10,
+              useinbandfec: 1,
+            },
+            rtcpFeedback: [],
+          },
+        ],
+        encodings: [{ ssrc }],
+        rtcp: { cname: `dj-${String(userId)}`, reducedSize: true },
+      },
+      appData: {
+        userId: String(userId),
+        source: "broadcast-audio",
+      },
+    });
+    const broadcast = {
+      producer,
+      transport,
+      userId: String(userId),
+    };
+    room.broadcasts.set(producer.id, broadcast);
+    const close = () => {
+      if (room.broadcasts.get(producer.id) !== broadcast) return;
+      room.broadcasts.delete(producer.id);
+      producer.close();
+      transport.close();
+      broadcastChannelState(room);
+      topologyCoordinator.reconcile(room, "server-broadcast-stopped");
+      disposeRoomIfUnused(state, room);
+    };
+    producer.on("transportclose", close);
+    broadcastChannelState(room);
+    topologyCoordinator.reconcile(room, "server-broadcast-started");
+    const waitForRtp = (timeoutMs = 10000) =>
+      new Promise((resolve, reject) => {
+        const onScore = (scores) => {
+          if (!scores?.some((score) => Number(score.score) > 0)) return;
+          clearTimeout(timer);
+          producer.off("score", onScore);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          producer.off("score", onScore);
+          reject(new Error("No audio packets reached mediasoup"));
+        }, timeoutMs);
+        timer.unref?.();
+        producer.on("score", onScore);
+      });
+    return {
+      close,
+      producerId: producer.id,
+      rtpPort: transport.tuple.localPort,
+      waitForRtp,
+    };
+  } catch (error) {
+    producer?.close();
+    transport?.close();
+    throw error;
+  } finally {
+    releaseRoomReservation(room);
+    if (!producer) disposeRoomIfUnused(state, room);
+  }
 }
 
 export async function updateActiveUserProfile(profile) {

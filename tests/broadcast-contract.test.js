@@ -3,15 +3,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 describe("broadcast contract", () => {
-  it("broadcast capture module has no getDisplayMedia dependency", async () => {
-    const source = readFileSync(
-      "app/shared/local-broadcast-capture.js",
+  it("DJ Mode does not use browser-owned file capture", () => {
+    assert.equal(existsSync("app/shared/local-broadcast-capture.js"), false);
+    const dialog = readFileSync(
+      "app/components/BroadcastSetupDialog.vue",
       "utf-8",
     );
-    assert.ok(
-      !source.includes("getDisplayMedia"),
-      "broadcast capture must not call getDisplayMedia",
-    );
+    assert.doesNotMatch(dialog, /type="file"/);
   });
 
   it("broadcast mode toggle does not alias toggleSystemAudioShare", () => {
@@ -37,25 +35,15 @@ describe("broadcast contract", () => {
     );
   });
 
-  it("broadcast files remain browser-owned", () => {
-    const source = readFileSync(
-      "app/shared/local-broadcast-capture.js",
-      "utf-8",
-    );
-    assert.ok(source.includes("createObjectUrl(file)"));
-    assert.ok(source.includes("revokeObjectUrl(this.objectUrl)"));
+  it("obsolete loopback proxy remains removed", () => {
     assert.ok(!existsSync("server/routes/api/broadcast/stream.get.js"));
   });
 
-  it("source controller handles broadcast-audio source type", () => {
-    const source = readFileSync(
-      "app/shared/media-source-controller.js",
-      "utf-8",
-    );
-    assert.ok(
-      source.includes("broadcast-audio"),
-      "source controller must handle broadcast-audio sources",
-    );
+  it("server owns the DJ broadcast producer", () => {
+    const source = readFileSync("server/utils/mediasoup-sfu.js", "utf-8");
+    assert.match(source, /createDjBroadcastProducer/);
+    assert.match(source, /createPlainTransport/);
+    assert.match(source, /source: "broadcast-audio"/);
   });
 
   it("SFU signaling advertises broadcast-audio sources", () => {
@@ -63,20 +51,12 @@ describe("broadcast contract", () => {
     assert.ok(source.includes('"broadcast-audio"'));
   });
 
-  it("broadcast audio uses a dedicated capture class", async () => {
-    const { LocalBroadcastCapture } =
-      await import("../app/shared/local-broadcast-capture.js");
-    assert.ok(
-      typeof LocalBroadcastCapture === "function",
-      "LocalBroadcastCapture must be a class",
-    );
-    assert.ok(
-      typeof LocalBroadcastCapture.prototype.start === "function",
-      "LocalBroadcastCapture must have a start method",
-    );
-    assert.ok(
-      typeof LocalBroadcastCapture.prototype.stop === "function",
-      "LocalBroadcastCapture must have a stop method",
-    );
+  it("uses authenticated SRT ingest through MediaMTX", () => {
+    const config = readFileSync("ops/mediamtx/mediamtx.yml", "utf-8");
+    const sessions = readFileSync("server/domains/dj/dj-sessions.js", "utf-8");
+    assert.match(config, /authMethod: http/);
+    assert.match(config, /srtAddress: :9999/);
+    assert.match(sessions, /authorizeDjIngest/);
+    assert.match(sessions, /libopus/);
   });
 });

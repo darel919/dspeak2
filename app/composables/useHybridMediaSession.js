@@ -36,7 +36,6 @@ import {
   resolveMediaAttenuation,
   summarizeMediaAttenuation,
 } from "~/shared/media-attenuation-reporter.js";
-import { LocalBroadcastCapture } from "~/shared/local-broadcast-capture.js";
 import {
   waitForInitialMediaTopology,
   waitForMediaHandoff,
@@ -269,14 +268,6 @@ export function useHybridMediaSession() {
     onSource: (entry) => sourceController.publishSource(entry),
     onSourceEnded: (entry, options) =>
       sourceController.removeSource(entry, options),
-  });
-  const broadcastCapture = new LocalBroadcastCapture({
-    createAudioContext: () =>
-      new (window.AudioContext || window.webkitAudioContext)(),
-    createMediaElement: () => document.createElement("audio"),
-    onStateChange: (state) => {
-      if (state === "stopped") voiceStore.broadcastAudioSharing = false;
-    },
   });
   const handoff = new RemoteMediaHandoff(registry);
   function setActiveProvider(provider) {
@@ -949,7 +940,6 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter,
     topologyState,
     voiceStore,
-    broadcastCapture,
   });
   const {
     restartAudioProduction,
@@ -960,8 +950,6 @@ export function useHybridMediaSession() {
     stopAudioProduction,
     stopSystemAudioProduction,
     stopVideoProduction,
-    startBroadcastProduction,
-    stopBroadcastProduction,
   } = sourceController;
   const {
     getInboundRtpStats,
@@ -1058,7 +1046,6 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter();
     attenuationReporter.clear();
     capture.stopDeviceMonitoring();
-    broadcastCapture.stop();
     closeMediaSessionTransports({
       capture,
       getP2pMesh: () => p2pMesh,
@@ -1134,8 +1121,6 @@ export function useHybridMediaSession() {
     stopVideoProduction,
     startSystemAudioProduction,
     stopSystemAudioProduction,
-    startBroadcastProduction,
-    stopBroadcastProduction,
     setRemoteScreenReceiving: (feedKey, receiving) =>
       registry.setVideoReceiving(feedKey, receiving),
     setRemoteSystemAudioReceiving: (key, on) =>

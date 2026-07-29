@@ -121,7 +121,12 @@ export class RoomTopologyCoordinator {
   }
 
   reconcile(room, reason) {
-    const next = membershipTopology(room.sessions.size);
+    const hasServerBroadcast = (room.broadcasts?.size || 0) > 0;
+    const next = hasServerBroadcast
+      ? room.sessions.size
+        ? "sfu"
+        : "idle"
+      : membershipTopology(room.sessions.size);
     if (next === "idle") {
       room.topology.recovering = false;
       room.topology.sfuPreparationFailures = 0;
@@ -133,8 +138,11 @@ export class RoomTopologyCoordinator {
         this.clearTimers(room);
         return this.broadcast(room);
       }
-      const transitionReason =
-        room.sessions.size === 1 ? "establishing-sfu" : "participant-limit";
+      const transitionReason = hasServerBroadcast
+        ? "server-broadcast-active"
+        : room.sessions.size === 1
+          ? "establishing-sfu"
+          : "participant-limit";
       return this.beginTransition(room, "sfu", transitionReason);
     }
     if (room.topology.recovering) {
@@ -365,11 +373,16 @@ export class RoomTopologyCoordinator {
   }
 
   scheduleDirectRecovery(room) {
-    if (room.sessions.size < 2 || room.sessions.size > this.maxP2pParticipants)
+    if (
+      (room.broadcasts?.size || 0) > 0 ||
+      room.sessions.size < 2 ||
+      room.sessions.size > this.maxP2pParticipants
+    )
       return;
     room.topology.recoveryTimer = this.setTimer(() => {
       if (
         room.topology.mode !== "sfu" ||
+        (room.broadcasts?.size || 0) > 0 ||
         room.sessions.size < 2 ||
         room.sessions.size > this.maxP2pParticipants
       )

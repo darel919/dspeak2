@@ -40,7 +40,7 @@ export const useVoiceStore = defineStore("voice", () => {
   const screenSharing = ref(false);
   const systemAudioSharing = ref(false);
   const broadcastAudioSharing = ref(false);
-  const broadcastFileName = ref("");
+  const djSession = ref(null);
   const settingsStore = useSettingsStore();
   const channelsStore = useChannelsStore();
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
@@ -89,6 +89,7 @@ export const useVoiceStore = defineStore("voice", () => {
   let joinGeneration = 0;
   let cameraToggleGeneration = 0;
   let mediaSessionError = null;
+  let djStatusTimer = null;
   const soundboardActivityTimers = new Map();
 
   function clearSoundboardActivity(userId, expectedActivity = null) {
@@ -268,6 +269,7 @@ export const useVoiceStore = defineStore("voice", () => {
     const wasConnected = connected.value;
     if (cancelPendingJoin) joinGeneration += 1;
     const session = sfuComposable.value;
+    if (djSession.value) await stopBroadcast().catch(() => {});
     try {
       await session?.disconnect?.();
     } catch (err) {
@@ -302,7 +304,7 @@ export const useVoiceStore = defineStore("voice", () => {
       screenSharing.value = false;
       systemAudioSharing.value = false;
       broadcastAudioSharing.value = false;
-      broadcastFileName.value = "";
+      djSession.value = null;
       if (wasConnected) playSystemSound("voice-leave", settingsStore);
       cameraToggleGeneration += 1;
     }
@@ -675,23 +677,62 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
-  async function startBroadcast(file) {
+  function clearDjStatusTimer() {
+    if (djStatusTimer) clearTimeout(djStatusTimer);
+    djStatusTimer = null;
+  }
+
+  async function refreshDjSession(sessionId) {
+    if (!djSession.value || djSession.value.id !== sessionId) return;
+    try {
+      const next = await $fetch("/api/dj/session", {
+        query: { sessionId },
+      });
+      if (!djSession.value || djSession.value.id !== sessionId) return;
+      djSession.value = next;
+      broadcastAudioSharing.value = next.status === "live";
+      if (!["stopped", "error"].includes(next.status)) {
+        djStatusTimer = setTimeout(() => refreshDjSession(sessionId), 1500);
+      }
+    } catch (err) {
+      if (err?.statusCode === 404) {
+        djSession.value = null;
+        broadcastAudioSharing.value = false;
+        return;
+      }
+      djStatusTimer = setTimeout(() => refreshDjSession(sessionId), 3000);
+    }
+  }
+
+  async function startBroadcast() {
     if (!connected.value || !sfuComposable.value)
       throw new Error("Not connected to a voice channel");
-    await sfuComposable.value.startBroadcastProduction({ file });
-    broadcastFileName.value = file.name;
-    broadcastAudioSharing.value = true;
+    clearDjStatusTimer();
+    const session = await $fetch("/api/dj/session", {
+      method: "POST",
+      body: { channelId: currentChannelId.value },
+    });
+    djSession.value = session;
+    broadcastAudioSharing.value = false;
+    djStatusTimer = setTimeout(() => refreshDjSession(session.id), 1000);
+    return session;
   }
 
   async function stopBroadcast() {
-    if (!sfuComposable.value) return;
-    await sfuComposable.value.stopBroadcastProduction();
+    const sessionId = djSession.value?.id;
+    clearDjStatusTimer();
+    if (sessionId)
+      await $fetch("/api/dj/session", {
+        method: "DELETE",
+        query: { sessionId },
+      });
     broadcastAudioSharing.value = false;
-    broadcastFileName.value = "";
+    djSession.value = null;
   }
 
   async function toggleBroadcast() {
-    if (broadcastAudioSharing.value) await stopBroadcast();
+    if (djSession.value) await stopBroadcast();
+    else await startBroadcast();
   }
 
   function setSharedAudioVolume(value) {
@@ -799,7 +840,7 @@ export const useVoiceStore = defineStore("voice", () => {
     screenSharing,
     systemAudioSharing,
     broadcastAudioSharing,
-    broadcastFileName,
+    djSession,
     sharedAudioVolume,
     sharedAudioStats,
     sharedAudioAttenuation,
