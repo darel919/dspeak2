@@ -16,7 +16,6 @@ import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
-// UUID validation for stream keys
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function validateStreamKey(streamKey) {
@@ -26,7 +25,6 @@ function validateStreamKey(streamKey) {
   return true;
 }
 
-// Rate limiting for prePublish: 5 attempts per minute per IP
 const prePublishAttempts = new Map();
 const PREPUBLISH_MAX_ATTEMPTS = 5;
 const PREPUBLISH_WINDOW_MS = 60 * 1000;
@@ -34,14 +32,12 @@ const PREPUBLISH_WINDOW_MS = 60 * 1000;
 function checkPrePublishRateLimit(ip) {
   const now = Date.now();
   const attempts = prePublishAttempts.get(ip) || [];
-  // Remove expired attempts
   const recent = attempts.filter((t) => now - t < PREPUBLISH_WINDOW_MS);
   if (recent.length >= PREPUBLISH_MAX_ATTEMPTS) {
     return false;
   }
   recent.push(now);
   prePublishAttempts.set(ip, recent);
-  // Cleanup old entries periodically
   if (prePublishAttempts.size > 1000) {
     for (const [key, value] of prePublishAttempts.entries()) {
       const filtered = value.filter((t) => now - t < PREPUBLISH_WINDOW_MS);
@@ -101,8 +97,6 @@ export default defineNitroPlugin(() => {
   nms.on("prePublish", (id, StreamPath, args) => {
     const streamKey = StreamPath.split("/").pop();
     const clientIp = args?.ip || args?.remoteAddress || "unknown";
-
-    // CRITICAL: Rate limit prePublish attempts per IP
     if (!checkPrePublishRateLimit(clientIp)) {
       console.log(
         "[RTMP] Rejecting publish: rate limit exceeded for IP:",
@@ -110,8 +104,6 @@ export default defineNitroPlugin(() => {
       );
       return false;
     }
-
-    // CRITICAL: Validate streamKey format before any processing
     if (!validateStreamKey(streamKey)) {
       console.log(
         "[RTMP] Rejecting publish for invalid stream key format:",
@@ -239,7 +231,6 @@ export default defineNitroPlugin(() => {
   nms.run();
   console.log(`[RTMP] Server listening on port ${rtmpPort}`);
 
-  // Reconcile stream state with PocketBase on startup (async, non-blocking)
   (async () => {
     try {
       const pb = await usePocketBaseAdmin();

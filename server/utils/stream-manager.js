@@ -49,7 +49,6 @@ function createStreamManager() {
       return !stream.plainTransport && !stream.producer;
     },
 
-    // Sync stream state to PocketBase (for persistence across restarts)
     async syncToDatabase(pb) {
       for (const stream of streams.values()) {
         if (stream.relayStarting || stream.plainTransport || stream.producer) {
@@ -74,8 +73,6 @@ export function generateStreamKey() {
   return randomUUID();
 }
 
-// Reconcile stream state with PocketBase on server startup
-// Resets stream_active=false for channels that have no active relay
 export async function reconcileStreamState(pb) {
   try {
     const activeChannels = await pb.collection("dspeak_rooms_channels").getList(1, 500, {
@@ -88,7 +85,6 @@ export async function reconcileStreamState(pb) {
     for (const channel of activeChannels.items) {
       const stream = manager.getStream(channel.id);
       if (!stream || !stream.plainTransport || !stream.producer) {
-        // No active relay - reset stream_active
         await pb.collection("dspeak_rooms_channels").update(channel.id, {
           stream_active: false,
           stream_metadata: null,
