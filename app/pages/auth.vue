@@ -10,6 +10,27 @@
           Verifying your account and preparing your dSpeak session.
         </p>
       </template>
+      <template v-else-if="status === 'waiting'">
+        <p class="text-sm font-semibold text-primary">Waiting for browser</p>
+        <h1 class="mt-2 text-2xl font-semibold">
+          Complete sign-in in your browser
+        </h1>
+        <p class="mt-3 text-base-content/70" role="status" aria-live="polite">
+          Return here after authentication. If the browser tab was closed, you
+          can open it again.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <button class="btn btn-primary" type="button" @click="checkSignIn">
+            I've finished signing in
+          </button>
+          <button class="btn btn-ghost" type="button" @click="reopenBrowser">
+            Open browser again
+          </button>
+          <button class="btn btn-ghost" type="button" @click="cancelSignIn">
+            Cancel
+          </button>
+        </div>
+      </template>
       <template v-else-if="showTerms">
         <p class="text-sm font-semibold text-primary">Welcome to dSpeak</p>
         <h1 class="mt-2 text-2xl font-semibold">Before you sign in</h1>
@@ -93,6 +114,24 @@ const termsAccepted = ref(false);
 const failureMessage = ref("");
 let completingAuthentication = false;
 let processingHandoff = false;
+let loginUrl = "";
+let signInTimeout;
+
+function clearSignInTimeout() {
+  if (!signInTimeout) return;
+  clearTimeout(signInTimeout);
+  signInTimeout = undefined;
+}
+
+function startSignInTimeout() {
+  clearSignInTimeout();
+  signInTimeout = setTimeout(() => {
+    if (status.value !== "waiting") return;
+    status.value = "failed";
+    failureMessage.value =
+      "Sign-in was not completed. The browser may have been closed. Try again when you're ready.";
+  }, 180_000);
+}
 
 function readStorage(key) {
   try {
@@ -124,14 +163,56 @@ function internalRedirect(value) {
 
 async function startSignIn() {
   status.value = "working";
+  showTerms.value = false;
   failureMessage.value = "";
   try {
-    await authStore.beginExternalSignIn(termsAccepted.value);
-  } catch {
+    const result = await authStore.beginExternalSignIn(termsAccepted.value);
+    if (result.isDesktop) {
+      loginUrl = result.loginUrl;
+      status.value = "waiting";
+      startSignInTimeout();
+    }
+  } catch (error) {
+    console.error("[Auth] Could not start sign-in:", error);
     status.value = "failed";
     failureMessage.value =
       "The authentication service is unavailable. Please try again.";
   }
+}
+
+async function reopenBrowser() {
+  if (!loginUrl) return;
+  const { open } = await import("@tauri-apps/plugin-shell");
+  await open(loginUrl);
+  startSignInTimeout();
+}
+
+async function checkSignIn() {
+  status.value = "working";
+  try {
+    const completed =
+      authStore.getUserData()?.id ||
+      (await authStore.completePendingDesktopSignIn()) ||
+      (await authStore.restoreSession());
+    if (completed) {
+      clearSignInTimeout();
+      await finishAuthentication();
+      return;
+    }
+    status.value = "waiting";
+  } catch (error) {
+    console.error("[Auth] Could not complete desktop sign-in:", error);
+    status.value = "failed";
+    failureMessage.value =
+      "The completed browser sign-in could not be transferred to dSpeak. Start sign-in again.";
+  }
+}
+
+function cancelSignIn() {
+  clearSignInTimeout();
+  loginUrl = "";
+  status.value = "idle";
+  showTerms.value = true;
 }
 
 async function finishAuthentication() {
@@ -156,6 +237,7 @@ watch(
   () => authStore.getUserData()?.id,
   async (userId) => {
     if (userId && !processingHandoff && route.path === "/auth") {
+      clearSignInTimeout();
       await finishAuthentication();
     }
   },
@@ -171,6 +253,12 @@ onMounted(async () => {
     const valid = await authStore.exchangeHandoff(code, state);
     processingHandoff = false;
     if (valid) {
+      if (!window.__TAURI__ && code && state) {
+        window.location.replace(
+          `tauri://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
+        );
+        return;
+      }
       await finishAuthentication();
       return;
     }
@@ -191,4 +279,6 @@ onMounted(async () => {
   status.value = "idle";
   showTerms.value = true;
 });
+
+onUnmounted(clearSignInTimeout);
 </script>

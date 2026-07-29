@@ -801,6 +801,7 @@ export async function handleDspeakApi(event) {
         body.code,
         body.state,
         getHeader(event, "x-dspeak-device") || body.deviceId,
+        body.redirectUri,
       );
     }
     if (domain === "session" && !suffix && event.method === "GET")

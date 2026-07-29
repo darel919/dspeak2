@@ -18,6 +18,7 @@ import {
 } from "../../utils/user-presence-manager.js";
 
 const users = new Map();
+const userPlatforms = new Map();
 let idleCheckInterval = null;
 
 function startIdleCheck() {
@@ -87,6 +88,7 @@ export default defineWebSocketHandler({
           status: savedStatus,
           updatedAt: new Date().toISOString(),
           isManualOverride: false,
+          platform: userPlatforms.get(userId) || "web",
         },
       });
 
@@ -112,6 +114,11 @@ export default defineWebSocketHandler({
 
       if (data.type === "activity") {
         touchUserActivity(userId);
+        return;
+      }
+
+      if (data.type === "hello" && data.platform) {
+        userPlatforms.set(userId, data.platform);
         return;
       }
 
@@ -141,6 +148,7 @@ export default defineWebSocketHandler({
             status: newStatus,
             updatedAt: new Date().toISOString(),
             isManualOverride,
+            platform: userPlatforms.get(userId) || "web",
           },
         });
         return;
@@ -185,6 +193,7 @@ export default defineWebSocketHandler({
         status: "offline",
         updatedAt: new Date().toISOString(),
         isManualOverride: false,
+        platform: userPlatforms.get(userId) || "web",
       },
     });
 

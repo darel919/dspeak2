@@ -10,6 +10,7 @@ export const useAuthStore = defineStore("auths", () => {
   const sessionChecked = ref(false);
   const config = useRuntimeConfig();
   let sessionCheckPromise = null;
+  let desktopRedirectUri = "";
 
   function writeStorage(key, value) {
     if (!import.meta.client) return;
@@ -44,23 +45,54 @@ export const useAuthStore = defineStore("auths", () => {
       navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
     }
   }
+
   async function beginExternalSignIn(termsAccepted = false) {
+    const isDesktop =
+      typeof window !== "undefined" &&
+      Boolean(window.__TAURI__ || window.__TAURI_INTERNALS__);
+
+    let redirectUri;
+    if (isDesktop) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      redirectUri = await invoke("get_oauth_callback_url");
+      desktopRedirectUri = redirectUri;
+    }
+
     const response = await fetch(
       `${config.public.apiPath}/session/handoff/start`,
       {
         method: "POST",
         credentials: "include",
-        headers: deviceHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ terms_accepted: termsAccepted }),
+        headers: deviceHeaders({
+          "Content-Type": "application/json",
+          ...(isDesktop ? { "X-Desktop-App": "true" } : {}),
+        }),
+        body: JSON.stringify({
+          terms_accepted: termsAccepted,
+          ...(redirectUri ? { redirectUri } : {}),
+        }),
       },
     );
     if (!response.ok) throw new Error("Unable to start authentication");
     const result = await response.json();
     if (!result?.loginUrl) throw new Error("Authentication URL is unavailable");
-    window.location.assign(result.loginUrl);
+    if (isDesktop) {
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(result.loginUrl);
+    } else {
+      window.location.assign(result.loginUrl);
+    }
+    return { isDesktop, loginUrl: result.loginUrl };
   }
 
   async function exchangeHandoff(code, state) {
+    const isDesktop =
+      typeof window !== "undefined" &&
+      Boolean(window.__TAURI__ || window.__TAURI_INTERNALS__);
+    if (isDesktop && !desktopRedirectUri) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      desktopRedirectUri = await invoke("get_oauth_callback_url");
+    }
     const response = await fetch(
       `${config.public.apiPath}/session/handoff/exchange`,
       {
@@ -71,6 +103,7 @@ export const useAuthStore = defineStore("auths", () => {
           code,
           state,
           deviceId: getDeviceId(),
+          ...(desktopRedirectUri ? { redirectUri: desktopRedirectUri } : {}),
         }),
       },
     );
@@ -80,6 +113,23 @@ export const useAuthStore = defineStore("auths", () => {
     removeStorage("token");
     return true;
   }
+
+  async function completePendingDesktopSignIn() {
+    if (
+      typeof window === "undefined" ||
+      !(window.__TAURI__ || window.__TAURI_INTERNALS__)
+    ) {
+      return false;
+    }
+
+    const { invoke } = await import("@tauri-apps/api/core");
+    const callback = await invoke("get_pending_oauth_callback");
+    if (!callback?.code || !callback?.state) return false;
+    const valid = await exchangeHandoff(callback.code, callback.state);
+    if (!valid) throw new Error("Desktop authentication handoff was rejected");
+    return true;
+  }
+
   async function restoreSession() {
     try {
       const response = await fetch(`${config.public.apiPath}/session`, {
@@ -93,6 +143,7 @@ export const useAuthStore = defineStore("auths", () => {
       return false;
     }
   }
+
   async function ensureSession() {
     if (getUserData()?.id) {
       sessionChecked.value = true;
@@ -106,6 +157,7 @@ export const useAuthStore = defineStore("auths", () => {
     });
     return sessionCheckPromise;
   }
+
   function storedUserId() {
     if (!import.meta.client) return "";
     try {
@@ -115,6 +167,7 @@ export const useAuthStore = defineStore("auths", () => {
       return "";
     }
   }
+
   async function clearAuth(revoke = true) {
     const userId = String(getUserData()?.id || storedUserId());
     const revocation =
@@ -140,9 +193,11 @@ export const useAuthStore = defineStore("auths", () => {
       });
     await Promise.all([revocation, cleanup]);
   }
+
   function getUserData() {
     return user.value?.user?.user_metadata || null;
   }
+
   function updateUserData(update) {
     if (!user.value?.user || !update) return;
     const userMetadata = {
@@ -155,11 +210,13 @@ export const useAuthStore = defineStore("auths", () => {
     };
     writeStorage("userData", JSON.stringify(userMetadata));
   }
+
   return {
     user,
     setUser,
     beginExternalSignIn,
     exchangeHandoff,
+    completePendingDesktopSignIn,
     restoreSession,
     ensureSession,
     clearAuth,

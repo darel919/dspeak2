@@ -4,6 +4,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
+import { readBody } from "h3";
 import { usePocketBaseAdmin } from "./pocketbase.js";
 import { enforceRateLimit } from "./rate-limit.js";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
@@ -236,12 +237,21 @@ async function persistAuthenticatedSession(
   return { user: { user_metadata: publicUserMetadata(metadata) } };
 }
 
-export function createAuthenticationHandoff(event) {
+export async function createAuthenticationHandoff(event) {
   enforceRateLimit(event, "session-handoff-start", null, 20, 10 * 60 * 1000);
   const state = randomBytes(32).toString("base64url");
   const publicOrigin =
     process.env.DSPEAK_PUBLIC_ORIGIN || getRequestURL(event).origin;
-  const redirectUri = new URL("/auth", publicOrigin).toString();
+
+  const isDesktop = getHeader(event, "x-desktop-app") === "true";
+
+  const body = await readBody(event);
+  const redirectUri =
+    body?.redirectUri ||
+    (isDesktop
+      ? "http://127.0.0.1:0/callback"
+      : new URL("/auth", publicOrigin).toString());
+
   setCookie(event, AUTH_HANDOFF_COOKIE, state, authHandoffCookieOptions());
   setCookie(
     event,
@@ -260,12 +270,11 @@ export async function exchangeAuthenticationHandoff(
   code,
   state,
   deviceId,
+  requestedRedirectUri,
 ) {
   enforceRateLimit(event, "session-handoff-exchange", null, 20, 10 * 60 * 1000);
   const expectedState = getCookie(event, AUTH_HANDOFF_COOKIE) || "";
   const consentAccepted = getCookie(event, AUTH_HANDOFF_CONSENT_COOKIE) === "1";
-  deleteCookie(event, AUTH_HANDOFF_COOKIE, authHandoffCookieOptions(0));
-  deleteCookie(event, AUTH_HANDOFF_CONSENT_COOKIE, authHandoffCookieOptions(0));
   if (!consentAccepted)
     throw createError({
       statusCode: 403,
@@ -278,20 +287,31 @@ export async function exchangeAuthenticationHandoff(
     state.length !== expectedState.length ||
     !expectedState ||
     !timingSafeEqual(Buffer.from(state), Buffer.from(expectedState))
-  )
+  ) {
+    deleteCookie(event, AUTH_HANDOFF_COOKIE, authHandoffCookieOptions(0));
+    deleteCookie(
+      event,
+      AUTH_HANDOFF_CONSENT_COOKIE,
+      authHandoffCookieOptions(0),
+    );
     throw createError({
       statusCode: 400,
       statusMessage: "Invalid authentication handoff",
     });
+  }
 
   const authPath = process.env.AUTH_PATH || useRuntimeConfig().public.authPath;
   if (!authPath) throw new Error("AUTH_PATH is not configured");
-  const redirectUri = new URL(
-    "/auth",
-    process.env.DSPEAK_PUBLIC_ORIGIN || getRequestURL(event).origin,
-  ).toString();
+
+  const redirectUri =
+    requestedRedirectUri ||
+    new URL(
+      "/auth",
+      process.env.DSPEAK_PUBLIC_ORIGIN || getRequestURL(event).origin,
+    ).toString();
+
   const response = await fetch(
-    `${String(authPath).replace(/\/$/, "")}/handoff/exchange`,
+    `${String(authPath).replace(/\/+$/, "")}/handoff/exchange`,
     {
       method: "POST",
       headers: {
@@ -315,6 +335,8 @@ export async function exchangeAuthenticationHandoff(
       statusCode: 401,
       statusMessage: "Authentication response has no user identity",
     });
+  deleteCookie(event, AUTH_HANDOFF_COOKIE, authHandoffCookieOptions(0));
+  deleteCookie(event, AUTH_HANDOFF_CONSENT_COOKIE, authHandoffCookieOptions(0));
   return persistAuthenticatedSession(
     event,
     metadata,

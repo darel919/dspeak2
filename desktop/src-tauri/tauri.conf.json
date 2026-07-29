@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nice/tauri/dev/crates/tauri-cli/schema.json",
+  "productName": "dSpeak",
+  "version": "2.7.0-alpha12",
+  "identifier": "com.dspeak.desktop",
+  "build": {
+    "frontendDist": "../.output/public",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "cd .. && bun run dev",
+    "beforeBuildCommand": "cd .. && npx nuxi generate desktop --config desktop/nuxt.desktop.config.ts"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "dSpeak",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deepLink": {
+      "schemes": [
+        {
+          "scheme": "tauri"
+        }
+      ]
+    },
+    "updater": {
+      "endpoints": [
+        "https://releases.dspeak.dev/desktop/{{target}}-{{arch}}/{{current_version}}"
+      ],
+      "pubkey": ""
+    },
+    "notification": null
+  }
+}

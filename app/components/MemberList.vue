@@ -73,6 +73,16 @@
             <span class="truncate text-sm font-bold">{{
               memberDisplayName(member)
             }}</span>
+            <span
+              v-if="memberPlatform(member)"
+              :title="platformLabel(memberPlatform(member))"
+              class="opacity-40 group-hover:opacity-70 transition-opacity"
+            >
+              <Icon
+                :name="platformIcon(memberPlatform(member))"
+                class="w-3.5 h-3.5"
+              />
+            </span>
             <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
               <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
             </span>
@@ -421,6 +431,7 @@
 
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
+import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { canManageMember } from "~~/shared/room-policy.js";
 import { publicFullName } from "~~/shared/user-profile.js";
 import { MEMBER_STATUS_ORDER, VIEWPORT_PADDING_PX } from "../const/ui";
@@ -742,6 +753,33 @@ function memberPresenceLabel(member) {
     offline: "Offline",
     unknown: "Status unavailable while offline",
   }[getMemberPresenceStatus(member)];
+}
+
+function memberPlatform(member) {
+  const store = usePresenceStatusStore();
+  return store.trackedUsers.get(String(member.id))?.platform;
+}
+
+function platformIcon(platform) {
+  const icons = {
+    web: "lucide:globe",
+    macos: "lucide:apple",
+    windows: "lucide:monitor",
+    linux: "lucide:terminal",
+    desktop: "lucide:monitor",
+  };
+  return icons[platform] || "lucide:smartphone";
+}
+
+function platformLabel(platform) {
+  const labels = {
+    web: "Browser",
+    macos: "macOS",
+    windows: "Windows",
+    linux: "Linux",
+    desktop: "Desktop",
+  };
+  return labels[platform] || platform;
 }
 
 function isSelf(member) {

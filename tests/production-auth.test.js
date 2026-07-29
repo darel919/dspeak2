@@ -112,6 +112,17 @@ test("failed SSO callbacks stop with an actionable error instead of looping", ()
   assert.doesNotMatch(authPage, /setTimeout\(resolve,\s*10000\)/);
 });
 
+test("desktop sign-in opens the system browser and exposes startup failures", () => {
+  assert.match(
+    authStore,
+    /const \{ open \} = await import\("@tauri-apps\/plugin-shell"\)/,
+  );
+  assert.match(authStore, /await open\(result\.loginUrl\)/);
+  assert.doesNotMatch(authStore, /const \{ shell \}/);
+  assert.match(authPage, /showTerms\.value = false/);
+  assert.match(authPage, /console\.error\("\[Auth\] Could not start sign-in:"/);
+});
+
 test("authentication state changes do not remount and replay the callback", () => {
   assert.equal(defaultLayout.match(/<slot\s*\/>/g)?.length, 1);
   assert.match(authPage, /await router\.replace\("\/auth"\)/);

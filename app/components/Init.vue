@@ -43,6 +43,7 @@ import { useIdleDetection } from "../composables/useIdleDetection";
 import { useGlobalKeyboardShortcuts } from "../composables/useGlobalKeyboardShortcuts";
 import NotificationWarning from "./NotificationWarning.vue";
 import { usePresence } from "../composables/usePresence.js";
+import { useDeepLinkAuth } from "../composables/useDeepLinkAuth";
 import startupLogo from "../assets/logo/logo_96.png";
 import { debugLog } from "../shared/debug";
 import {
@@ -76,6 +77,7 @@ const isAuthenticated = computed(() => {
 
 const isAuthPage = computed(() => route.path === "/auth");
 const { isSupported, permission, isEnabled } = useNotifications();
+useDeepLinkAuth();
 
 const shouldShowNotificationWarning = computed(() => {
   if (!isSupported.value) return false;
