@@ -254,10 +254,11 @@ test("broadcast start publishes the captured source and stop unpublishes it", as
       addEventListener() {},
     },
   };
+  const file = { name: "set.mp3", type: "audio/mpeg" };
   const harness = controller({
     broadcastCapture: {
-      async start({ url }) {
-        assert.equal(url, "/api/broadcast/stream");
+      async start(options) {
+        assert.equal(options.file, file);
         return entry;
       },
       async stop() {
@@ -275,7 +276,7 @@ test("broadcast start publishes the captured source and stop unpublishes it", as
   });
 
   const producer = await harness.instance.startBroadcastProduction({
-    url: "/api/broadcast/stream",
+    file,
   });
 
   assert.equal(producer.track, entry.track);

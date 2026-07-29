@@ -65,11 +65,13 @@ describe("LocalBroadcastCapture", () => {
         }),
       }),
       createMediaElement: () => mockElem,
+      createObjectUrl: () => "blob:test",
+      revokeObjectUrl() {},
       onStateChange: () => {},
     });
-    await capture.start({ url: "http://localhost:19350/stream.ogg" });
+    await capture.start({ file: { name: "test.ogg" } });
     await assert.rejects(
-      () => capture.start({ url: "http://localhost:19350/stream.ogg" }),
+      () => capture.start({ file: { name: "test.ogg" } }),
       /already started/,
     );
     await capture.stop();
@@ -132,10 +134,12 @@ describe("LocalBroadcastCapture stop cleanup", () => {
         },
         src: "",
       }),
+      createObjectUrl: () => "blob:test",
+      revokeObjectUrl() {},
       onStateChange: () => {},
     });
 
-    await capture.start({ url: "http://localhost:19350/stream.ogg" });
+    await capture.start({ file: { name: "test.ogg" } });
     await capture.stop();
 
     assert.ok(audioContextClosed, "AudioContext should be closed");
@@ -167,11 +171,13 @@ describe("LocalBroadcastCapture stop cleanup", () => {
         removeAttribute: () => {},
         error: { message: "VLC is unavailable" },
       }),
+      createObjectUrl: () => "blob:test",
+      revokeObjectUrl() {},
       onStateChange: () => {},
     });
 
     await assert.rejects(
-      () => capture.start({ url: "/api/broadcast/stream" }),
+      () => capture.start({ file: { name: "broken.ogg" } }),
       /VLC is unavailable/,
     );
 
@@ -179,6 +185,58 @@ describe("LocalBroadcastCapture stop cleanup", () => {
     assert.ok(mediaElementPaused);
     assert.equal(capture.getState(), "stopped");
     assert.equal(capture.started, false);
+  });
+
+  it("owns and revokes the selected file URL", async () => {
+    let revokedUrl = null;
+    const file = { name: "set.mp3" };
+    const capture = new LocalBroadcastCapture({
+      createAudioContext: () => ({
+        state: "running",
+        resume: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+        createMediaElementSource: () => ({
+          connect() {},
+          disconnect() {},
+        }),
+        createMediaStreamDestination: () => ({
+          stream: {
+            getAudioTracks: () => [
+              {
+                contentHint: "",
+                readyState: "live",
+                stop() {},
+                addEventListener() {},
+                removeEventListener() {},
+              },
+            ],
+          },
+          disconnect() {},
+        }),
+      }),
+      createMediaElement: () => ({
+        addEventListener: (type, handler) => {
+          if (type === "canplay") setTimeout(handler, 0);
+        },
+        load() {},
+        play: () => Promise.resolve(),
+        pause() {},
+        removeAttribute() {},
+      }),
+      createObjectUrl: (selectedFile) => {
+        assert.equal(selectedFile, file);
+        return "blob:local-set";
+      },
+      revokeObjectUrl: (url) => {
+        revokedUrl = url;
+      },
+      onStateChange() {},
+    });
+
+    await capture.start({ file });
+    await capture.stop();
+
+    assert.equal(revokedUrl, "blob:local-set");
   });
 });
 

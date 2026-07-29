@@ -40,6 +40,7 @@ export const useVoiceStore = defineStore("voice", () => {
   const screenSharing = ref(false);
   const systemAudioSharing = ref(false);
   const broadcastAudioSharing = ref(false);
+  const broadcastFileName = ref("");
   const settingsStore = useSettingsStore();
   const channelsStore = useChannelsStore();
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
@@ -301,6 +302,7 @@ export const useVoiceStore = defineStore("voice", () => {
       screenSharing.value = false;
       systemAudioSharing.value = false;
       broadcastAudioSharing.value = false;
+      broadcastFileName.value = "";
       if (wasConnected) playSystemSound("voice-leave", settingsStore);
       cameraToggleGeneration += 1;
     }
@@ -673,10 +675,11 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
-  async function startBroadcast(url) {
+  async function startBroadcast(file) {
     if (!connected.value || !sfuComposable.value)
       throw new Error("Not connected to a voice channel");
-    await sfuComposable.value.startBroadcastProduction({ url });
+    await sfuComposable.value.startBroadcastProduction({ file });
+    broadcastFileName.value = file.name;
     broadcastAudioSharing.value = true;
   }
 
@@ -684,6 +687,7 @@ export const useVoiceStore = defineStore("voice", () => {
     if (!sfuComposable.value) return;
     await sfuComposable.value.stopBroadcastProduction();
     broadcastAudioSharing.value = false;
+    broadcastFileName.value = "";
   }
 
   async function toggleBroadcast() {
@@ -795,6 +799,7 @@ export const useVoiceStore = defineStore("voice", () => {
     screenSharing,
     systemAudioSharing,
     broadcastAudioSharing,
+    broadcastFileName,
     sharedAudioVolume,
     sharedAudioStats,
     sharedAudioAttenuation,

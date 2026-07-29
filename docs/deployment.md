@@ -15,15 +15,17 @@ the update-required action before completing the rollout.
 ## Deployment model
 
 The supported production layout uses one long-running dSpeak container, one
-Playit agent for mediasoup IPv4 fallback, one IPv6 Coturn service, a certificate
-sidecar, and Cloudflare DDNS for the RTC hostname. HTTP and WebSockets may pass
-through Zoraxy. RTP and TURN traffic must reach their published ports directly.
+Playit agent for mediasoup and ingest IPv4 fallback, one IPv6 Coturn service, a
+certificate sidecar, and Cloudflare DDNS for the direct RTC and ingest
+hostnames. HTTP and WebSockets may pass through Zoraxy. RTP, SRT, and TURN
+traffic must reach their published ports directly.
 
 Prepare these values before deployment:
 
 - PocketBase and authentication-service credentials
-- a DNS-only RTC hostname
-- a scoped Cloudflare token for RTC AAAA updates
+- DNS-only direct RTC and ingest hostnames
+- a DNS-only Playit ingest fallback hostname
+- a scoped Cloudflare token for direct AAAA updates
 - a separate scoped Cloudflare token for the TURN certificate challenge
 - a Playit Docker-agent secret
 - a random Coturn shared secret
@@ -96,9 +98,11 @@ The Compose stack publishes:
 - `31100/tcp` to Nitro port `3000`
 - `40000/udp` for preferred RTP
 - `40000/tcp` for TCP fallback
+- `9999/udp` for direct SRT ingest
 - a Playit agent in dSpeak's network namespace
 
 All mediasoup transports share one `WebRtcServer` and one UDP/TCP port.
+The SRT ingest listener is separate from the mediasoup `WebRtcServer`.
 
 ### Coolify setup
 
@@ -147,9 +151,49 @@ dSpeak rewrites the public candidate port while mediasoup continues listening on
 `40000`. Direct IPv6 has higher ICE priority; Playit remains available to
 IPv4-only clients or when direct connectivity fails.
 
-Playit is used only for the fixed mediasoup port. Do not create a Playit tunnel
-for Coturn: TURN relay allocations require a public relay address that can send
-to arbitrary peers, which an application tunnel does not provide.
+Playit is used only for the fixed mediasoup port and the fixed SRT ingest port.
+Do not create a Playit tunnel for Coturn: TURN relay allocations require a
+public relay address that can send to arbitrary peers, which an application
+tunnel does not provide.
+
+## SRT ingest routes
+
+Application ingest uses a preferred direct IPv6 route and a separate Playit
+IPv4 fallback. Configure these DNS-only Cloudflare records:
+
+| Name                       | Type    | Content                          |
+| -------------------------- | ------- | -------------------------------- |
+| `live.dspeak.example.com`  | `AAAA`  | The server's public IPv6 address |
+| `live4.dspeak.example.com` | `CNAME` | The assigned Playit hostname     |
+
+The Cloudflare DDNS service updates both the RTC and direct ingest AAAA records.
+Configure the ingest names and ports with:
+
+```dotenv
+DSPEAK_LIVE_DOMAIN=live.dspeak.example.com
+DSPEAK_INGEST_LISTEN_PORT=9999
+DSPEAK_INGEST_FALLBACK_DOMAIN=live4.dspeak.example.com
+DSPEAK_INGEST_FALLBACK_PORT=5627
+```
+
+In Playit, keep Proxy Protocol disabled and configure the second custom UDP
+tunnel as:
+
+```text
+Public: <assigned-playit-hostname>:<assigned-playit-public-port>
+Local: 127.0.0.1:9999
+```
+
+The resulting publisher destinations are:
+
+```text
+Direct IPv6: srt://live.dspeak.example.com:9999
+Playit IPv4: srt://live4.dspeak.example.com:<assigned-playit-public-port>
+```
+
+These routes become usable only when the authenticated SRT ingest gateway is
+running. DNS, Docker port publication, and the Playit tunnel do not create an
+SRT listener.
 
 ## Self-hosted IPv6 STUN and TURN
 
@@ -260,10 +304,10 @@ To use a plain-text external recognizer instead:
 DSPEAK_DDNS_IP6_PROVIDER=url:https://6.ident.me
 ```
 
-For IPv6 Internet access, allow mediasoup UDP/TCP `40000`, Coturn UDP/TCP `3478`,
-Coturn TCP `5349`, and the configured Coturn UDP relay range to the Coolify
-host. DNS and auto-discovery advertise an address; they cannot create the
-required packet-forwarding path.
+For IPv6 Internet access, allow mediasoup UDP/TCP `40000`, SRT ingest UDP `9999`,
+Coturn UDP/TCP `3478`, Coturn TCP `5349`, and the configured Coturn UDP relay
+range to the Coolify host. DNS and auto-discovery advertise an address; they
+cannot create the required packet-forwarding path.
 
 ## Ports and firewall
 
@@ -271,6 +315,7 @@ required packet-forwarding path.
 | ------------------------- | --------------------------- | ----------------------------------- |
 | Nitro HTTP and WebSockets | `31100/tcp` on the host     | Reverse proxy or direct host access |
 | mediasoup RTP             | `40000/udp` and `40000/tcp` | Direct IPv6 or Playit IPv4          |
+| SRT application ingest    | `9999/udp`                  | Direct IPv6 or Playit IPv4          |
 | TURN and STUN             | `3478/udp` and `3478/tcp`   | Direct to host                      |
 | TURN over TLS             | `5349/tcp`                  | Direct to host                      |
 |                           | TURN relay media            | `49160–49259/udp`                   | Direct to host |
@@ -289,12 +334,14 @@ docker run --env-file .env \
   -p 31100:3000 \
   -p 40000:40000/udp \
   -p 40000:40000/tcp \
+  -p 9999:9999/udp \
   dspeak
 ```
 
-Allow the HTTP/WebSocket port, mediasoup UDP/TCP port, TURN listener ports, and
-TURN UDP relay range through the host firewall and deployment platform. Do not
-forward the TURN ports through Playit or an HTTP reverse proxy.
+Allow the HTTP/WebSocket port, mediasoup UDP/TCP port, SRT ingest UDP port, TURN
+listener ports, and TURN UDP relay range through the host firewall and
+deployment platform. Do not forward the TURN ports through Playit or an HTTP
+reverse proxy.
 
 ## Production checks
 

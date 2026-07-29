@@ -1,7 +1,15 @@
 export class LocalBroadcastCapture {
-  constructor({ createAudioContext, createMediaElement, onStateChange }) {
+  constructor({
+    createAudioContext,
+    createMediaElement,
+    createObjectUrl = (file) => URL.createObjectURL(file),
+    revokeObjectUrl = (url) => URL.revokeObjectURL(url),
+    onStateChange,
+  }) {
     this.createAudioContext = createAudioContext;
     this.createMediaElement = createMediaElement;
+    this.createObjectUrl = createObjectUrl;
+    this.revokeObjectUrl = revokeObjectUrl;
     this.onStateChange = onStateChange;
 
     this.audioContext = null;
@@ -13,10 +21,12 @@ export class LocalBroadcastCapture {
     this.state = "stopped";
     this.endedHandler = null;
     this.started = false;
+    this.objectUrl = null;
   }
 
-  async start({ url }) {
+  async start({ file }) {
     if (this.started) throw new Error("Broadcast is already started");
+    if (!file) throw new Error("Choose an audio file to broadcast");
 
     this.setState("connecting");
 
@@ -27,7 +37,8 @@ export class LocalBroadcastCapture {
       this.audioElement = this.createMediaElement();
       this.audioElement.crossOrigin = "anonymous";
       this.audioElement.preload = "auto";
-      this.audioElement.src = url;
+      this.objectUrl = this.createObjectUrl(file);
+      this.audioElement.src = this.objectUrl;
 
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(
@@ -48,7 +59,7 @@ export class LocalBroadcastCapture {
             clearTimeout(timeout);
             const errMsg =
               this.audioElement.error?.message ||
-              `Failed to load stream from ${url}`;
+              "The selected audio file could not be decoded";
             reject(new Error(errMsg));
           },
           { once: true },
@@ -112,6 +123,11 @@ export class LocalBroadcastCapture {
       this.audioElement.removeAttribute("src");
       this.audioElement.load();
       this.audioElement = null;
+    }
+
+    if (this.objectUrl) {
+      this.revokeObjectUrl(this.objectUrl);
+      this.objectUrl = null;
     }
 
     if (this.destNode) {

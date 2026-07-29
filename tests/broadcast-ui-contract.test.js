@@ -60,7 +60,7 @@ describe("Broadcast UI contract", () => {
       "app/components/BroadcastSetupDialog.vue",
       "utf-8",
     );
-    assert.ok(source.includes("voiceStore.startBroadcast(proxyUrl)"));
+    assert.ok(source.includes("voiceStore.startBroadcast(selectedFile.value)"));
     assert.ok(source.includes("voiceStore.stopBroadcast()"));
     assert.ok(!source.includes("voiceStore.sfuComposable.value"));
   });
@@ -84,15 +84,14 @@ describe("Broadcast UI contract", () => {
     assert.ok(!source.includes("setBroadcastMode"));
   });
 
-  it("BroadcastSetupDialog shows the VLC command", () => {
+  it("BroadcastSetupDialog selects a browser-owned audio file", () => {
     const source = readFileSync(
       "app/components/BroadcastSetupDialog.vue",
       "utf-8",
     );
-    assert.ok(
-      source.includes("VLC") || source.includes("vlc"),
-      "Must reference VLC in the setup instructions",
-    );
+    assert.ok(source.includes('type="file"'));
+    assert.ok(source.includes('accept="audio/*"'));
+    assert.ok(!source.includes("VLC"));
   });
 
   it("BroadcastSetupDialog shows status (waiting, connecting, live, error)", () => {
@@ -121,7 +120,7 @@ describe("Voice store broadcast contract", () => {
 
   it("voice store passes the broadcast URL contract", () => {
     const source = readFileSync("app/stores/voice.js", "utf-8");
-    assert.ok(source.includes("startBroadcastProduction({ url })"));
+    assert.ok(source.includes("startBroadcastProduction({ file })"));
     assert.ok(
       source.indexOf("broadcastAudioSharing.value = true") >
         source.indexOf("await sfuComposable.value.startBroadcastProduction"),

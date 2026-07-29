@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -37,15 +37,14 @@ describe("broadcast contract", () => {
     );
   });
 
-  it("broadcast proxy remains loopback-only and forwards the token path", () => {
+  it("broadcast files remain browser-owned", () => {
     const source = readFileSync(
-      "server/routes/api/broadcast/stream.get.js",
+      "app/shared/local-broadcast-capture.js",
       "utf-8",
     );
-    assert.ok(source.includes("127.0.0.1"));
-    assert.ok(source.includes("encodeURIComponent(token)"));
-    assert.ok(!source.includes("const { port, url }"));
-    assert.ok(!source.includes("url ||"));
+    assert.ok(source.includes("createObjectUrl(file)"));
+    assert.ok(source.includes("revokeObjectUrl(this.objectUrl)"));
+    assert.ok(!existsSync("server/routes/api/broadcast/stream.get.js"));
   });
 
   it("source controller handles broadcast-audio source type", () => {

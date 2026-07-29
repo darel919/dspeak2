@@ -21,21 +21,21 @@ test("creates native IPv6 candidates before IPv4 fallback candidates", () => {
     listenIp: "0.0.0.0",
     rtcPort: 9988,
     announcedAddress: "vote-minds.gl.at.ply.gg",
-    directAddress: "rtc.dspeak.darelisme.my.id",
+    directAddress: "rtc.dspeak.example.com",
   });
 
   assert.deepEqual(infos, [
     {
       ip: "::",
       port: 9988,
-      announcedAddress: "rtc.dspeak.darelisme.my.id",
+      announcedAddress: "rtc.dspeak.example.com",
       flags: { ipv6Only: true },
       protocol: "udp",
     },
     {
       ip: "::",
       port: 9988,
-      announcedAddress: "rtc.dspeak.darelisme.my.id",
+      announcedAddress: "rtc.dspeak.example.com",
       flags: { ipv6Only: true },
       protocol: "tcp",
     },
@@ -59,7 +59,7 @@ test("resolves direct DDNS and advertises each configured external port", async 
     [
       {
         ...serverCandidates[0],
-        ip: "rtc.dspeak.darelisme.my.id",
+        ip: "rtc.dspeak.example.com",
       },
       {
         ...serverCandidates[0],
@@ -70,7 +70,7 @@ test("resolves direct DDNS and advertises each configured external port", async 
     {
       announcedAddress: "vote-minds.gl.at.ply.gg",
       announcedPort: 57554,
-      directAddress: "rtc.dspeak.darelisme.my.id",
+      directAddress: "rtc.dspeak.example.com",
       directPort: 40001,
     },
     async () => ["2001:448a:1041:9065:2a0:98ff:fe3b:e46"],
@@ -105,13 +105,13 @@ test("keeps the existing single public candidate when direct access is disabled"
 test("drops only the direct candidate when its DDNS lookup fails", async () => {
   const candidates = await buildPublicIceCandidates(
     [
-      { ...serverCandidates[0], ip: "rtc.dspeak.darelisme.my.id" },
+      { ...serverCandidates[0], ip: "rtc.dspeak.example.com" },
       { ...serverCandidates[0], ip: "vote-minds.gl.at.ply.gg" },
     ],
     {
       announcedAddress: "vote-minds.gl.at.ply.gg",
       announcedPort: 57554,
-      directAddress: "rtc.dspeak.darelisme.my.id",
+      directAddress: "rtc.dspeak.example.com",
     },
     async () => {
       throw new Error("DNS unavailable");
@@ -128,7 +128,7 @@ test("forces native IPv6 candidate priority above the Playit fallback", async ()
     [
       {
         ...serverCandidates[0],
-        ip: "rtc.dspeak.darelisme.my.id",
+        ip: "rtc.dspeak.example.com",
         priority: 100,
       },
       { ...serverCandidates[0], ip: "vote-minds.gl.at.ply.gg", priority: 100 },
@@ -136,7 +136,7 @@ test("forces native IPv6 candidate priority above the Playit fallback", async ()
     {
       announcedAddress: "vote-minds.gl.at.ply.gg",
       announcedPort: 57554,
-      directAddress: "rtc.dspeak.darelisme.my.id",
+      directAddress: "rtc.dspeak.example.com",
     },
     async () => ["2001:db8::10"],
   );

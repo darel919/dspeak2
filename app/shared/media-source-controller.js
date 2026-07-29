@@ -243,8 +243,8 @@ export function createMediaSourceController({
     return capture.startSystemAudio().then((entry) => producerFacade(entry));
   }
 
-  async function startBroadcastProduction({ url }) {
-    const entry = await broadcastCapture.start({ url });
+  async function startBroadcastProduction({ file }) {
+    const entry = await broadcastCapture.start({ file });
     try {
       const publishedEntry = await publishSource(entry);
       broadcastEntry = publishedEntry;
