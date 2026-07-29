@@ -122,12 +122,10 @@ async function handleNowPlaying(pb, userId, channelId, args) {
   if (!parsed) {
     return { error: "Usage: /np Artist - Title" };
   }
-
-  // Validate and sanitize input: max 200 chars each, strip control characters
   const MAX_LENGTH = 200;
   const sanitize = (str) =>
     str
-      .replace(/[\x00-\x1F\x7F]/g, "") // Remove control characters
+      .replace(/[\x00-\x1F\x7F]/g, "")
       .trim()
       .slice(0, MAX_LENGTH);
 

@@ -40,8 +40,6 @@ export async function startStreamRelay(router, channelId, streamKey, bitrate) {
   const localPort = transport.tuple.localPort;
   const config = useRuntimeConfig();
   const rtmpPort = config.stream?.rtmpPort || 1935;
-
-  // CRITICAL: Validate streamKey is a UUID before using in command args
   validateStreamKey(streamKey);
 
   const rtmpUrl = `rtmp://127.0.0.1:${rtmpPort}/${streamKey}`;

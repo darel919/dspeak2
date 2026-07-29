@@ -171,7 +171,6 @@ export async function fetchPublicHtml(value, options = {}) {
               reject(error);
               return;
             }
-            // CRITICAL: Re-validate redirect target against allowlist to prevent SSRF
             assertSafeOutboundUrl(nextUrl, { allowedHosts })
               .then(() => fetchPage(nextUrl, redirectsRemaining - 1).then(resolve, reject))
               .catch(reject);
