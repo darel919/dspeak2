@@ -44,13 +44,14 @@ export const useAuthStore = defineStore("auths", () => {
       navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
     }
   }
-  async function beginExternalSignIn() {
+  async function beginExternalSignIn(termsAccepted = false) {
     const response = await fetch(
       `${config.public.apiPath}/session/handoff/start`,
       {
         method: "POST",
         credentials: "include",
-        headers: deviceHeaders(),
+        headers: deviceHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ terms_accepted: termsAccepted }),
       },
     );
     if (!response.ok) throw new Error("Unable to start authentication");

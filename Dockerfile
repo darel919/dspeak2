@@ -36,6 +36,7 @@ RUN ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libopus \
 COPY --from=build /app/.output ./.output
 
 EXPOSE 3000/tcp
+EXPOSE 1935/tcp
 EXPOSE 40000/udp
 EXPOSE 40000/tcp
 

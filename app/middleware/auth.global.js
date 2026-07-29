@@ -6,7 +6,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const authStore = useAuthStore();
   const authenticated = await authStore.ensureSession();
   const publicEntry =
-    to.path === "/" || String(to.path || "").startsWith("/join/");
+    to.path === "/" ||
+    to.path === "/privacy" ||
+    to.path === "/terms" ||
+    String(to.path || "").startsWith("/join/");
 
   if (!authenticated && !publicEntry) {
     try {

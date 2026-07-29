@@ -1,3 +1,5 @@
+import { apiErrorMessage } from "./api-errors.js";
+
 export function reconcileSentMessage(messages, pendingId, serverMessage) {
   const pendingIndex = messages.findIndex((message) => {
     if (message.id === pendingId) return true;
@@ -88,16 +90,7 @@ export function pendingMessageClientId(message) {
 }
 
 export function chatApiErrorMessage(text, status) {
-  try {
-    const payload = JSON.parse(text);
-    return (
-      payload.statusMessage ||
-      payload.message ||
-      `Chat request failed with status ${status}`
-    );
-  } catch {
-    return text || `Chat request failed with status ${status}`;
-  }
+  return apiErrorMessage(text, status, "Chat request failed");
 }
 
 export function isValidMessageTimestamp(value) {

@@ -2,6 +2,7 @@ import {
   DEFAULT_ROLE_TEMPLATES,
   normalizeAttenuation,
 } from "../../shared/room-policy.js";
+import { DEFAULT_IDLE_TIMEOUT_MS } from "../../shared/presence-status.js";
 
 const MIGRATION_COLLECTION = "dspeak_migrations";
 const REQUIRED_COLLECTIONS = Object.freeze([
@@ -23,6 +24,13 @@ const REQUIRED_COLLECTIONS = Object.freeze([
   "dspeak_message_revisions",
   "dspeak_room_invites",
   "dspeak_room_audit_log",
+  "dspeak_friends",
+  "dspeak_chat_files",
+  "dspeak_message_reactions",
+  "dspeak_pinned_messages",
+  "dspeak_bookmarks",
+  "dspeak_lib_song",
+  "dspeak_stream_playlog",
 ]);
 
 function field(name, type, options = {}) {
@@ -58,22 +66,44 @@ function indexSignature(definition) {
     .replaceAll(/\s+/g, " ")
     .trim()
     .replace(
-      /^CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?\S+ ON /i,
-      (_, unique = "") => `${unique.toUpperCase()}ON `,
+      /^CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?\S* ON /i,
+      (_, unique = "") => `${unique ? "UNIQUE" : ""}ON `,
     )
+    .replace(/\b(DESC|ASC|COLLATE \w+|NULLS (?:FIRST|LAST))\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
     .toLowerCase();
 }
 
+function indexName(definition) {
+  const match = definition.match(
+    /^CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?(\S+)/i,
+  );
+  return match ? match[1].toLowerCase() : "";
+}
+
 export function mergeCollectionIndexes(current = [], additions = []) {
-  const merged = [...current];
-  const signatures = new Set(current.map(indexSignature));
-  for (const addition of additions) {
-    const signature = indexSignature(addition);
-    if (signatures.has(signature)) continue;
-    merged.push(addition);
-    signatures.add(signature);
+  const nameSet = new Set();
+  const result = [];
+
+  for (const idx of current) {
+    const name = indexName(idx);
+    if (name && nameSet.has(name)) continue;
+    if (name) nameSet.add(name);
+    result.push(idx);
   }
-  return merged;
+
+  for (const addition of additions) {
+    const name = indexName(addition);
+    if (name && nameSet.has(name)) continue;
+    const signature = indexSignature(addition);
+    if (result.some((existing) => indexSignature(existing) === signature))
+      continue;
+    if (name) nameSet.add(name);
+    result.push(addition);
+  }
+
+  return result;
 }
 
 export function buildCollectionUpdate(current, definition) {
@@ -127,6 +157,22 @@ async function upsertCollection(pb, definition) {
       buildCollectionUpdate(current, definition),
     );
   } catch (error) {
+    const indexErrors =
+      error?.response?.data?.indexes || error?.data?.data?.indexes || null;
+    const hasIndexNameConflict = indexErrors
+      ? Object.values(indexErrors).some(
+          (e) =>
+            e?.code === "validation_duplicated_index_name" ||
+            /duplicate.*index.*name/i.test(e?.message || ""),
+        )
+      : false;
+
+    if (current && hasIndexNameConflict) {
+      const update = {
+        fields: mergeCollectionFields(current.fields, definition.fields),
+      };
+      return await pb.collections.update(current.id, update);
+    }
     throw collectionMigrationError(
       error,
       current || definition,
@@ -427,6 +473,8 @@ async function migrateRoomAdministration(pb) {
       field("title", "text", { max: 240 }),
       field("body", "text", { max: 2000 }),
       field("read_at", "date"),
+      field("created", "autodate", { onCreate: true, onUpdate: false }),
+      field("updated", "autodate", { onCreate: true, onUpdate: true }),
     ],
     indexes: [
       "CREATE INDEX idx_dspeak_notifications_unread ON dspeak_notifications (recipient, read_at)",
@@ -792,6 +840,26 @@ async function migrateAuthenticatedSessions(pb) {
   });
 }
 
+async function migrateLegalConsent(pb) {
+  const sessions = await pb.collections.getOne("dspeak_sessions");
+  await upsertCollection(pb, {
+    name: sessions.name,
+    type: sessions.type,
+    fields: [field("terms_accepted_at", "date")],
+    indexes: [],
+  });
+}
+
+async function migrateAccountDeletionState(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: users.name,
+    type: users.type,
+    fields: [field("deleted_at", "date")],
+    indexes: [],
+  });
+}
+
 async function migrateMessageIdempotency(pb) {
   const messages = await pb.collections.getOne("dspeak_messages");
   await upsertCollection(pb, {
@@ -1059,6 +1127,320 @@ async function removeObsoleteContractFields(pb) {
   }
 }
 
+async function migratePresenceStatus(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: users.name,
+    type: users.type,
+    fields: [
+      field("presence_status", "select", {
+        maxSelect: 1,
+        values: ["online", "idle", "dnd", "offline"],
+      }),
+    ],
+    indexes: [
+      "CREATE INDEX idx_users_presence_status ON users (presence_status)",
+    ],
+  });
+}
+
+async function migrateChannelPolicy(pb) {
+  const channels = await pb.collections.getOne("dspeak_rooms_channels");
+  await upsertCollection(pb, {
+    name: channels.name,
+    type: channels.type,
+    fields: [
+      field("policy", "select", {
+        maxSelect: 1,
+        values: ["free", "send_restricted", "read_only", "moderator_only"],
+      }),
+      field("slow_mode", "number", { min: 0, max: 3600 }),
+    ],
+    indexes: [],
+  });
+}
+
+async function migrateFriends(pb) {
+  const users = await pb.collections.getOne("users");
+  await upsertCollection(pb, {
+    name: "dspeak_friends",
+    type: "base",
+    fields: [
+      field("requester", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("recipient", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("status", "select", {
+        required: true,
+        maxSelect: 1,
+        values: ["pending", "accepted", "rejected", "blocked"],
+      }),
+      field("created", "autodate", { onCreate: true, onUpdate: false }),
+      field("updated", "autodate", { onCreate: true, onUpdate: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_friends_pair ON dspeak_friends (requester, recipient)",
+      "CREATE INDEX idx_dspeak_friends_recipient_status ON dspeak_friends (recipient, status)",
+    ],
+  });
+}
+
+async function migratePushSubscriptionMetadata(pb) {
+  const subscriptions = await pb.collections.getOne(
+    "dspeak_push_subscriptions",
+  );
+  await upsertCollection(pb, {
+    name: subscriptions.name,
+    type: subscriptions.type,
+    fields: [
+      field("user_agent", "text", { max: 512 }),
+      field("last_seen_at", "date"),
+    ],
+    indexes: [],
+  });
+}
+
+async function migrateNotificationUnreadIndex(pb) {
+  const notifications = await pb.collections.getOne("dspeak_notifications");
+  await upsertCollection(pb, {
+    name: notifications.name,
+    type: notifications.type,
+    fields: [],
+    indexes: [
+      "CREATE INDEX idx_dspeak_notifications_recipient ON dspeak_notifications (recipient)",
+    ],
+  });
+}
+
+async function migrateChatFeatures(pb) {
+  const users = await pb.collections.getOne("users");
+  const channels = await pb.collections.getOne("dspeak_rooms_channels");
+  const messages = await pb.collections.getOne("dspeak_messages");
+
+  await upsertCollection(pb, {
+    name: messages.name,
+    type: messages.type,
+    fields: [
+      field("reply_to", "relation", {
+        collectionId: messages.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("attachments", "json", { maxSize: 50000 }),
+      field("pinned", "bool"),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_messages_reply_to ON dspeak_messages (reply_to)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_chat_files",
+    type: "base",
+    fields: [
+      field("uploader", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("room_channel", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("message", "relation", {
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("file", "file", {
+        maxSelect: 1,
+        maxSize: 10 * 1024 * 1024,
+        mimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      }),
+      field("name", "text", { max: 255 }),
+      field("size", "number"),
+      field("mime_type", "text", { max: 100 }),
+      field("width", "number"),
+      field("height", "number"),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_chat_files_channel ON dspeak_chat_files (room_channel)",
+      "CREATE INDEX idx_dspeak_chat_files_uploader ON dspeak_chat_files (uploader)",
+      "CREATE INDEX idx_dspeak_chat_files_message ON dspeak_chat_files (message)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_message_reactions",
+    type: "base",
+    fields: [
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("emoji", "text", { required: true, max: 80 }),
+      field("skin_tone", "text", { max: 20 }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_reactions_message_user_emoji ON dspeak_message_reactions (message, user, emoji)",
+      "CREATE INDEX idx_dspeak_reactions_message ON dspeak_message_reactions (message)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_pinned_messages",
+    type: "base",
+    fields: [
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("channel", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("pinned_by", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("pinned_at", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_pinned_messages_message ON dspeak_pinned_messages (message)",
+      "CREATE INDEX idx_dspeak_pinned_messages_channel ON dspeak_pinned_messages (channel)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_bookmarks",
+    type: "base",
+    fields: [
+      field("user", "relation", {
+        required: true,
+        collectionId: users.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("message", "relation", {
+        required: true,
+        collectionId: messages.id,
+        cascadeDelete: true,
+        maxSelect: 1,
+      }),
+      field("note", "text", { max: 500 }),
+      field("saved_at", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_bookmarks_user_message ON dspeak_bookmarks (user, message)",
+      "CREATE INDEX idx_dspeak_bookmarks_user ON dspeak_bookmarks (user)",
+    ],
+  });
+}
+
+async function migrateAllowEmptyContent(pb) {
+  const messages = await pb.collections.getOne("dspeak_messages");
+  await upsertCollection(pb, {
+    name: messages.name,
+    type: messages.type,
+    fields: [field("content", "text", { required: false })],
+    indexes: [],
+  });
+}
+
+async function migrateStreamRelay(pb) {
+  const channels = await pb.collections.getOne("dspeak_rooms_channels");
+  const users = await pb.collections.getOne("users");
+
+  await upsertCollection(pb, {
+    name: channels.name,
+    type: channels.type,
+    fields: [
+      field("stream_key", "text", { unique: true, max: 200 }),
+      field("stream_active", "bool"),
+      field("stream_metadata", "json", { maxSize: 10000 }),
+    ],
+    indexes: [],
+  });
+
+  const songCollection = await upsertCollection(pb, {
+    name: "dspeak_lib_song",
+    type: "base",
+    fields: [
+      field("title", "text", { required: true, max: 500 }),
+      field("artist", "text", { required: true, max: 500 }),
+      field("album", "text", { max: 500 }),
+      field("album_art_path", "text", { max: 500 }),
+      field("itunes_artwork_url", "text", { max: 1000 }),
+      field("lyrics", "json", { maxSize: 50000 }),
+      field("last_updated", "date", { required: true }),
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_dspeak_lib_song_title_artist ON dspeak_lib_song (title, artist)",
+      "CREATE INDEX idx_dspeak_lib_song_title ON dspeak_lib_song (title)",
+      "CREATE INDEX idx_dspeak_lib_song_artist ON dspeak_lib_song (artist)",
+      "CREATE INDEX idx_dspeak_lib_song_album ON dspeak_lib_song (album)",
+      "CREATE INDEX idx_dspeak_lib_song_last_updated ON dspeak_lib_song (last_updated)",
+    ],
+  });
+
+  await upsertCollection(pb, {
+    name: "dspeak_stream_playlog",
+    type: "base",
+    fields: [
+      field("song", "relation", {
+        required: true,
+        collectionId: songCollection.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("channel", "relation", {
+        required: true,
+        collectionId: channels.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("played_by", "relation", {
+        required: false,
+        collectionId: users.id,
+        cascadeDelete: false,
+        maxSelect: 1,
+      }),
+      field("played_at", "date", { required: true }),
+      field("duration", "number"),
+    ],
+    indexes: [
+      "CREATE INDEX idx_dspeak_playlog_played_at ON dspeak_stream_playlog (played_at)",
+      "CREATE INDEX idx_dspeak_playlog_channel ON dspeak_stream_playlog (channel)",
+      "CREATE INDEX idx_dspeak_playlog_song ON dspeak_stream_playlog (song)",
+    ],
+  });
+}
+
 const migrations = Object.freeze([
   {
     name: "20260724_foundation_v1",
@@ -1110,6 +1492,14 @@ const migrations = Object.freeze([
     run: migrateAuthenticatedSessions,
   },
   {
+    name: "20260728_legal_consent_v1",
+    run: migrateLegalConsent,
+  },
+  {
+    name: "20260728_account_deletion_state_v1",
+    run: migrateAccountDeletionState,
+  },
+  {
     name: "20260723_message_idempotency_v1",
     run: migrateMessageIdempotency,
   },
@@ -1132,6 +1522,61 @@ const migrations = Object.freeze([
   {
     name: "20260725_remove_obsolete_contract_fields_v1",
     run: removeObsoleteContractFields,
+  },
+  {
+    name: "20260727_presence_status_v1",
+    run: migratePresenceStatus,
+  },
+  {
+    name: "20260727_channel_policy_v1",
+    run: migrateChannelPolicy,
+  },
+  {
+    name: "20260727_friends_v1",
+    run: migrateFriends,
+  },
+  {
+    name: "20260727_push_subscription_metadata_v1",
+    run: migratePushSubscriptionMetadata,
+  },
+  {
+    name: "20260727_notification_unread_index_v1",
+    run: migrateNotificationUnreadIndex,
+  },
+  {
+    name: "20260728_chat_features_v1",
+    run: migrateChatFeatures,
+  },
+  {
+    name: "20260728_foundation_schema_refresh_v1",
+    run: migrateFoundation,
+  },
+  {
+    name: "20260728_friends_schema_refresh_v1",
+    run: migrateFriends,
+  },
+  {
+    name: "20260728_chat_schema_refresh_v1",
+    run: migrateChatFeatures,
+  },
+  {
+    name: "20260728_sortable_timestamps_v1",
+    run: async (pb) => {
+      await migrateFoundation(pb);
+      await migrateFriends(pb);
+    },
+  },
+  {
+    name: "20260728_notification_timestamps_v1",
+    run: migrateRoomAdministration,
+  },
+  {
+    name: "20260729_allow_empty_content_v1",
+    run: migrateAllowEmptyContent,
+  },
+  {
+    name: "20260729_stream_relay_v1",
+    run: migrateStreamRelay,
   },
 ]);
 

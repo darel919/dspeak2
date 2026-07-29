@@ -69,3 +69,14 @@ test("obsolete room teardown cannot disconnect the destination channel", () => {
     /function disconnectFromChannel\([\s\S]*expectedChannelId = null/,
   );
 });
+
+test("permanent HTTP rejections are not queued for repeated delivery", () => {
+  assert.match(chatStore, /deliveryError\.retryable =/);
+  assert.match(chatStore, /fetchError\.retryable === false/);
+  assert.match(
+    chatStore,
+    /removeMessage\(pendingMessage\.id, clientMessageId\)/,
+  );
+  assert.match(chatStore, /throw fetchError/);
+  assert.doesNotMatch(chatStore, /response\.status === 429/);
+});

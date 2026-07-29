@@ -74,6 +74,13 @@ export default defineWebSocketHandler({
           data: { userId, channelId },
         });
         broadcastToChannel(channelId, { type: "currentlyInChannel", inRoom });
+        if (channel.policy || channel.slow_mode) {
+          send(peer, "channel_policy_updated", {
+            channelId,
+            policy: channel.policy || "free",
+            slow_mode: channel.slow_mode || 0,
+          });
+        }
       } else {
         send(peer, "connected", {
           channelId,

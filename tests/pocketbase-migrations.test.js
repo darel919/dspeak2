@@ -8,6 +8,42 @@ import {
 } from "../server/utils/pocketbase-migrations.js";
 import { readFileSync } from "node:fs";
 
+test("pending schema changes receive new immutable migration identities", () => {
+  const source = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /20260728_foundation_schema_refresh_v1/);
+  assert.match(source, /20260728_friends_schema_refresh_v1/);
+  assert.match(source, /20260728_chat_schema_refresh_v1/);
+});
+
+test("collections queried by creation time define PocketBase autodate fields", () => {
+  const source = readFileSync(
+    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+    "utf8",
+  );
+  const notifications = source.slice(
+    source.indexOf('name: "dspeak_notifications"'),
+    source.indexOf('name: "dspeak_notification_preferences"'),
+  );
+  const friends = source.slice(
+    source.indexOf("async function migrateFriends"),
+    source.indexOf("async function migratePushSubscriptionMetadata"),
+  );
+
+  for (const definition of [notifications, friends]) {
+    assert.match(
+      definition,
+      /field\("created", "autodate", \{ onCreate: true, onUpdate: false \}\)/,
+    );
+    assert.match(
+      definition,
+      /field\("updated", "autodate", \{ onCreate: true, onUpdate: true \}\)/,
+    );
+  }
+});
+
 test("PocketBase migration field merging is idempotent and preserves IDs", () => {
   const current = [
     { id: "existing", name: "accent", type: "text", required: false },

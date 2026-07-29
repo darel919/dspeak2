@@ -37,7 +37,7 @@ MEDIASOUP_ANNOUNCED_ADDRESS=auto
 MEDIASOUP_ANNOUNCED_ADDRESS_URL=https://api6.ipify.org
 MEDIASOUP_RTC_PORT=40000
 MEDIASOUP_ANNOUNCED_PORT=40000
-MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
+MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.example.com
 MEDIASOUP_DIRECT_PORT=40000
 MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE=4500000
 MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE=40000000
@@ -139,7 +139,7 @@ PLAYIT_SECRET_KEY=<docker-agent-secret>
 MEDIASOUP_RTC_PORT=40000
 MEDIASOUP_ANNOUNCED_PORT=<assigned-playit-public-port>
 MEDIASOUP_ANNOUNCED_ADDRESS=<playit-tunnel-hostname-or-ipv4>
-MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.darelisme.my.id
+MEDIASOUP_DIRECT_ADDRESS=rtc.dspeak.example.com
 MEDIASOUP_DIRECT_PORT=40000
 ```
 
@@ -151,6 +151,55 @@ Playit is used only for the fixed mediasoup port. Do not create a Playit tunnel
 for Coturn: TURN relay allocations require a public relay address that can send
 to arbitrary peers, which an application tunnel does not provide.
 
+## Cloudflare Tunnel for RTMP ingest
+
+RTMP uses a proprietary TCP protocol that Cloudflare DNS proxy cannot forward.
+The free Cloudflare Tunnel (cloudflared) bridges IPv4 and IPv6 clients to the
+container's RTMP port.
+
+### Setup
+
+1. Create a tunnel in [Cloudflare Zero Trust](https://one.dash.cloudflare.com/):
+   - Networks → Tunnels → Add a tunnel → "Cloudflared"
+   - Name it `dspeak-rtmp`
+   - Run the displayed install command (discard after noting the token)
+
+2. Add RTMP ingress to the tunnel:
+   - Type: **TCP**
+   - Hostname: `live.dspeak.example.com` (or your chosen subdomain)
+   - Service: `dspeak:1935`
+
+3. Add the tunnel token to your environment:
+
+```dotenv
+CLOUDFLARE_TUNNEL_TOKEN=<token-from-step-1>
+```
+
+4. Start the stack. `cloudflared` shares dSpeak's network namespace and reaches
+   the RTMP server at `127.0.0.1:1935` inside the container.
+
+### How it works
+
+- DJ pushes RTMP to `live.dspeak.example.com:1935`
+- Cloudflare edge receives the TCP connection
+- Tunnels through `cloudflared` to the dSpeak container
+- Node-Media-Server receives the stream and starts relay
+
+Both IPv4 and IPv6 clients can connect. The tunnel handles routing
+transparently.
+
+### DNS note
+
+The RTMP hostname must use Cloudflare proxy (not DNS-only) for the tunnel to
+work. This is different from the RTC hostname, which must be DNS-only because
+Cloudflare proxy does not forward mediasoup RTP.
+
+### Limitations
+
+- RTMP streams are limited to ~12 hours per connection (Cloudflare Tunnel timeout)
+- Cloudflare free tier: 50 connections/second, 100 MB/second per tunnel
+- For DJ use case (1-2 concurrent streams), this is more than sufficient
+
 ## Self-hosted IPv6 STUN and TURN
 
 The Compose stack runs Coturn on the host network so its IPv6 relay candidates
@@ -158,7 +207,7 @@ refer to the host directly. Configure a dedicated DNS-only AAAA hostname and a
 shared authentication secret:
 
 ```dotenv
-DSPEAK_RTC_DOMAIN=rtc.dspeak.darelisme.my.id
+DSPEAK_RTC_DOMAIN=rtc.dspeak.example.com
 TURN_PORT=3478
 TURN_TLS_PORT=5349
 TURN_RELAY_MIN_PORT=49160
@@ -250,7 +299,7 @@ Create a scoped Cloudflare token with `Zone / DNS / Edit` permission, then set:
 
 ```dotenv
 DSPEAK_CLOUDFLARE_API_TOKEN=<scoped-token>
-DSPEAK_RTC_DOMAIN=rtc.dspeak.darelisme.my.id
+DSPEAK_RTC_DOMAIN=rtc.dspeak.example.com
 DSPEAK_DDNS_IP6_PROVIDER=local.iface:ens3
 ```
 
@@ -274,6 +323,7 @@ required packet-forwarding path.
 | TURN and STUN             | `3478/udp` and `3478/tcp`   | Direct to host                      |
 | TURN over TLS             | `5349/tcp`                  | Direct to host                      |
 | TURN relay media          | `49160–49259/udp`           | Direct to host                      |
+| RTMP ingest               | `1935/tcp`                  | Cloudflare Tunnel (IPv4+IPv6)       |
 
 The HTTP host port can be changed with:
 

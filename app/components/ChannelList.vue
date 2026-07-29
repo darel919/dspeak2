@@ -773,6 +773,65 @@
             </section>
 
             <fieldset
+              v-if="!editingChannel.isMedia && hasPermission('channel.update')"
+              class="mt-8 border-t border-base-300 pt-7"
+            >
+              <legend class="sr-only">Message policy</legend>
+              <h3 class="text-xl font-semibold">Message policy</h3>
+              <p class="mt-1 max-w-xl text-sm leading-6 text-base-content/65">
+                Control who can post and how often messages can be sent.
+              </p>
+              <div
+                class="mt-5 divide-y divide-base-300 border-y border-base-300"
+              >
+                <label
+                  class="grid gap-3 py-5 sm:grid-cols-[minmax(0,1fr)_18rem] sm:items-center"
+                >
+                  <span>
+                    <strong class="block">Send permission</strong>
+                    <small class="mt-1 block text-base-content/65">
+                      Choose which channel members can send messages.
+                    </small>
+                  </span>
+                  <select
+                    v-model="editingMessagePolicy"
+                    class="select select-bordered w-full bg-base-100"
+                  >
+                    <option
+                      v-for="option in CHANNEL_POLICY_OPTIONS"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label
+                  class="grid gap-3 py-5 sm:grid-cols-[minmax(0,1fr)_18rem] sm:items-center"
+                >
+                  <span>
+                    <strong class="block">Slow mode</strong>
+                    <small class="mt-1 block text-base-content/65">
+                      Set the wait between messages from the same member.
+                    </small>
+                  </span>
+                  <select
+                    v-model.number="editingSlowMode"
+                    class="select select-bordered w-full bg-base-100"
+                  >
+                    <option
+                      v-for="option in SLOW_MODE_OPTIONS"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset
               v-if="
                 editingChannel.isMedia &&
                 hasPermission('channel.manage_media_policy')
@@ -1064,6 +1123,12 @@ import {
   VIDEO_POLICY_QUALITY_STEPS,
   normalizeMediaPolicy,
 } from "~~/shared/media-policy.js";
+import {
+  CHANNEL_POLICY_LABELS,
+  SLOW_MODE_OPTIONS,
+  normalizeChannelPolicy,
+  normalizeSlowMode,
+} from "~~/shared/channel-policy.js";
 
 const inviteDialog = ref(null);
 
@@ -1227,6 +1292,14 @@ const editChannelNameInput = ref(null);
 const editingChannel = ref(null);
 const editingChannelPolicy = ref({});
 const originalEditingChannelPolicy = ref({});
+const editingMessagePolicy = ref("free");
+const editingSlowMode = ref(0);
+const CHANNEL_POLICY_OPTIONS = computed(() =>
+  Object.entries(CHANNEL_POLICY_LABELS).map(([value, label]) => ({
+    value,
+    label,
+  })),
+);
 let createReturnFocus = null;
 let editReturnFocus = null;
 const channelPolicyFields = computed(() =>
@@ -1396,6 +1469,8 @@ async function editChannel(channel) {
   editingChannel.value = { ...channel };
   editingChannelPolicy.value = { ...(channel.mediaPolicy || {}) };
   originalEditingChannelPolicy.value = { ...editingChannelPolicy.value };
+  editingMessagePolicy.value = normalizeChannelPolicy(channel.policy);
+  editingSlowMode.value = normalizeSlowMode(channel.slow_mode);
   showEditChannel.value = true;
   await nextTick();
   editChannelNameInput.value?.focus();
@@ -1415,6 +1490,12 @@ async function handleEditChannel() {
     )
       update.mediaPolicy = editingChannelPolicy.value;
     await channelsStore.editChannel(editingChannel.value.id, update);
+    if (!editingChannel.value.isMedia && hasPermission("channel.update")) {
+      await channelsStore.updateChannelPolicy(editingChannel.value.id, {
+        policy: editingMessagePolicy.value,
+        slowMode: editingSlowMode.value,
+      });
+    }
     closeEditModal();
   } catch (error) {
     console.error("Failed to edit channel:", error);
@@ -1464,6 +1545,8 @@ function closeEditModal() {
   editingChannel.value = null;
   editingChannelPolicy.value = {};
   originalEditingChannelPolicy.value = {};
+  editingMessagePolicy.value = "free";
+  editingSlowMode.value = 0;
   editReturnFocus = null;
   nextTick(() => returnFocus?.isConnected && returnFocus.focus());
 }

@@ -44,7 +44,6 @@
               alt=""
               class="block rounded-full"
             />
-            <!-- Status dot at right bottom -->
             <span
               v-if="
                 member.id === currentUser?.id &&
@@ -69,12 +68,15 @@
             ></span>
           </div>
         </div>
-        <!-- Name and owner icon -->
-        <div class="flex items-center gap-1 text-base-content font-medium">
-          <span class="text-sm font-bold">{{ memberDisplayName(member) }}</span>
-          <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
-            <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
-          </span>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1 text-base-content font-medium">
+            <span class="truncate text-sm font-bold">{{
+              memberDisplayName(member)
+            }}</span>
+            <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
+              <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -129,6 +131,54 @@
                 Member
               </span>
             </div>
+          </div>
+          <div
+            v-if="!isSelf(profileCardUser) && mutualFriends.length"
+            class="mt-4 border-t border-base-300 pt-3"
+          >
+            <div
+              class="mb-2 text-xs font-bold uppercase tracking-wide text-base-content/50"
+            >
+              Mutual friends
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="mf in mutualFriends.slice(0, 10)"
+                :key="mf.id"
+                class="badge badge-ghost gap-1"
+              >
+                <span
+                  class="size-3 rounded-full"
+                  :class="
+                    mf.online && mf.presence_status !== 'offline'
+                      ? 'bg-success'
+                      : 'bg-base-content/30'
+                  "
+                ></span>
+                {{ mf.display_name || mf.name }}
+              </span>
+              <span
+                v-if="mutualFriends.length > 10"
+                class="text-xs text-base-content/50"
+              >
+                +{{ mutualFriends.length - 10 }} more
+              </span>
+            </div>
+          </div>
+          <div
+            v-if="
+              !isSelf(profileCardUser) &&
+              !mutualFriends.length &&
+              !mutualFriendsLoading
+            "
+            class="mt-4 border-t border-base-300 pt-3"
+          >
+            <div
+              class="mb-2 text-xs font-bold uppercase tracking-wide text-base-content/50"
+            >
+              Mutual friends
+            </div>
+            <p class="text-sm text-base-content/50">None</p>
           </div>
         </div>
       </div>
@@ -205,6 +255,62 @@
           />
         </button>
         <button
+          v-if="
+            !isSelf(memberMenuUser) &&
+            friendshipStatus &&
+            friendshipStatus.status === 'none'
+          "
+          type="button"
+          class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm transition-colors hover:bg-base-200"
+          :disabled="friendSaving"
+          @click="addFriendFromMenu"
+        >
+          <Icon name="lucide:user-plus" class="size-4 text-base-content/60" />
+          {{ friendSaving ? "Adding…" : "Add friend" }}
+        </button>
+        <button
+          v-if="
+            !isSelf(memberMenuUser) &&
+            friendshipStatus &&
+            friendshipStatus.status === 'request-sent'
+          "
+          type="button"
+          class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm transition-colors hover:bg-base-200"
+          :disabled="friendSaving"
+          @click="cancelFriendRequestFromMenu"
+        >
+          <Icon name="lucide:user-minus" class="size-4 text-base-content/60" />
+          {{ friendSaving ? "Cancelling…" : "Cancel friend request" }}
+        </button>
+        <button
+          v-if="
+            !isSelf(memberMenuUser) &&
+            friendshipStatus &&
+            friendshipStatus.status === 'request-received'
+          "
+          type="button"
+          class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm transition-colors hover:bg-base-200"
+          :disabled="friendSaving"
+          @click="acceptFriendRequestFromMenu"
+        >
+          <Icon name="lucide:user-check" class="size-4 text-base-content/60" />
+          {{ friendSaving ? "Accepting…" : "Accept friend request" }}
+        </button>
+        <button
+          v-if="
+            !isSelf(memberMenuUser) &&
+            friendshipStatus &&
+            friendshipStatus.status === 'friends'
+          "
+          type="button"
+          class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm text-error transition-colors hover:bg-error/10"
+          :disabled="friendSaving"
+          @click="removeFriendFromMenu"
+        >
+          <Icon name="lucide:user-x" class="size-4" />
+          {{ friendSaving ? "Removing…" : "Remove friend" }}
+        </button>
+        <button
           v-if="canKickMember(memberMenuUser)"
           class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm text-error transition-colors hover:bg-error/10"
           :disabled="kickSaving"
@@ -247,7 +353,7 @@
           </header>
           <div class="px-5 py-5">
             <div
-              class="mb-4 border-l-4 border-info bg-info/10 px-3 py-2.5 text-sm text-base-content/70"
+              class="mb-4 bg-info/10 px-3 py-2.5 text-sm text-base-content/70"
             >
               This nickname is private and only changes how this member appears
               to you.
@@ -340,6 +446,10 @@ const nicknameDraft = ref("");
 const nicknameError = ref("");
 const nicknameSaving = ref(false);
 const kickSaving = ref(false);
+const friendSaving = ref(false);
+const friendshipStatus = ref(null);
+const mutualFriends = ref([]);
+const mutualFriendsLoading = ref(false);
 
 async function openMemberMenu(member, event) {
   closeProfileCard();
@@ -347,6 +457,7 @@ async function openMemberMenu(member, event) {
   nicknameDraft.value = identityStore.nicknameFor(member.id);
   nicknameError.value = "";
   memberMenuPosition.value = { x: event.clientX, y: event.clientY };
+  loadFriendshipStatus(member);
   await nextTick();
   keepElementInViewport(memberMenuElement, memberMenuPosition);
 }
@@ -359,6 +470,8 @@ async function openProfileCard(member, event) {
   profileCardUser.value = member;
   const rect = event.currentTarget.getBoundingClientRect();
   profileCardPosition.value = { x: rect.left - 296, y: rect.top };
+  loadFriendshipStatus(member);
+  loadMutualFriends(member);
   await nextTick();
   keepElementInViewport(profileCardElement, profileCardPosition);
 }
@@ -369,6 +482,7 @@ async function openMenuUserProfile() {
   profileCardUser.value = member;
   profileCardPosition.value = { ...memberMenuPosition.value };
   closeMemberMenu();
+  loadMutualFriends(member);
   await nextTick();
   keepElementInViewport(profileCardElement, profileCardPosition);
 }
@@ -514,6 +628,8 @@ import { useRuntimeConfig } from "#app";
 import { useChatStore } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
 import { useIdentityStore } from "../stores/identity";
+import { useFriendsStore } from "../stores/friends";
+import { useToast } from "../composables/useToast";
 
 const props = defineProps({
   members: {
@@ -538,6 +654,12 @@ const config = useRuntimeConfig();
 const chatStore = useChatStore();
 const authStore = useAuthStore();
 const identityStore = useIdentityStore();
+const friendsStore = useFriendsStore();
+const {
+  success: toastSuccess,
+  info: toastInfo,
+  error: toastError,
+} = useToast();
 
 function memberDisplayName(member) {
   return identityStore.displayName(member);
@@ -620,5 +742,115 @@ function memberPresenceLabel(member) {
     offline: "Offline",
     unknown: "Status unavailable while offline",
   }[getMemberPresenceStatus(member)];
+}
+
+function isSelf(member) {
+  return (
+    member &&
+    currentUser.value &&
+    String(member.id) === String(currentUser.value.id)
+  );
+}
+
+async function loadFriendshipStatus(member) {
+  if (!member || isSelf(member)) {
+    friendshipStatus.value = null;
+    mutualFriends.value = [];
+    return;
+  }
+  const status = await friendsStore.checkFriendshipStatus(member.id);
+  friendshipStatus.value = status;
+}
+
+async function loadMutualFriends(member) {
+  if (!member || isSelf(member)) {
+    mutualFriends.value = [];
+    return;
+  }
+  mutualFriendsLoading.value = true;
+  try {
+    mutualFriends.value = await friendsStore.fetchMutualFriends(member.id);
+  } finally {
+    mutualFriendsLoading.value = false;
+  }
+}
+
+async function addFriendFromMenu() {
+  const member = memberMenuUser.value;
+  if (!member || friendSaving.value) return;
+  friendSaving.value = true;
+  try {
+    const result = await friendsStore.sendRequestById(member.id);
+    if (result?.accepted) {
+      toastSuccess("Friend request accepted — you are now friends");
+      await friendsStore.fetchFriends();
+    } else {
+      toastSuccess("Friend request sent");
+    }
+    friendshipStatus.value = {
+      status: result?.accepted ? "friends" : "request-sent",
+    };
+    closeMemberMenu();
+  } catch (error) {
+    toastError(error.message || "Could not send friend request");
+  } finally {
+    friendSaving.value = false;
+  }
+}
+
+async function cancelFriendRequestFromMenu() {
+  const member = memberMenuUser.value;
+  if (!member || !friendshipStatus.value?.friendshipId || friendSaving.value)
+    return;
+  friendSaving.value = true;
+  try {
+    await friendsStore.cancelRequest(friendshipStatus.value.friendshipId);
+    toastInfo("Friend request cancelled");
+    friendshipStatus.value = { status: "none" };
+    closeMemberMenu();
+  } catch (error) {
+    toastError(error.message || "Could not cancel request");
+  } finally {
+    friendSaving.value = false;
+  }
+}
+
+async function acceptFriendRequestFromMenu() {
+  const member = memberMenuUser.value;
+  if (!member || !friendshipStatus.value?.friendshipId || friendSaving.value)
+    return;
+  friendSaving.value = true;
+  try {
+    await friendsStore.respondToRequest(
+      friendshipStatus.value.friendshipId,
+      true,
+    );
+    await friendsStore.fetchFriends();
+    toastSuccess("Friend request accepted");
+    friendshipStatus.value = { status: "friends" };
+    closeMemberMenu();
+  } catch (error) {
+    toastError(error.message || "Could not accept request");
+  } finally {
+    friendSaving.value = false;
+  }
+}
+
+async function removeFriendFromMenu() {
+  const member = memberMenuUser.value;
+  if (!member || friendSaving.value) return;
+  if (!window.confirm(`Remove ${memberDisplayName(member)} from your friends?`))
+    return;
+  friendSaving.value = true;
+  try {
+    await friendsStore.removeFriend(member.id);
+    toastInfo("Friend removed");
+    friendshipStatus.value = { status: "none" };
+    closeMemberMenu();
+  } catch (error) {
+    toastError(error.message || "Could not remove friend");
+  } finally {
+    friendSaving.value = false;
+  }
 }
 </script>

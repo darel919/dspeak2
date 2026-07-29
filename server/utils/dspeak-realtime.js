@@ -43,6 +43,14 @@ export function isDeviceViewingChannel(userId, deviceId, channelId) {
   );
 }
 
+export function isUserViewingChannel(userId, channelId) {
+  const prefix = `${String(userId)}:`;
+  for (const [key, channels] of getState().deviceChannels) {
+    if (key.startsWith(prefix) && channels.has(String(channelId))) return true;
+  }
+  return false;
+}
+
 export function addGlobalSubscriber(peer) {
   getState().global.add(peer);
 }

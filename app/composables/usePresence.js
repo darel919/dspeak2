@@ -3,6 +3,7 @@ import { useAuthStore } from "../stores/auth";
 import { useIdentityStore } from "../stores/identity";
 import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
+import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { debugLog } from "../shared/debug";
 
 export function usePresence(userId) {
@@ -18,6 +19,7 @@ export function usePresence(userId) {
   const identityStore = useIdentityStore();
   const roomsStore = useRoomsStore();
   const voiceStore = useVoiceStore();
+  const presenceStatusStore = usePresenceStatusStore();
 
   function receiveMessage(event) {
     let message;
@@ -30,6 +32,26 @@ export function usePresence(userId) {
       roomsStore.applyRealtimeRoomUpdate(message.data);
       return;
     }
+
+    if (message?.type === "status_updated" && message.data?.userId) {
+      presenceStatusStore.updateUserStatus(message.data);
+      return;
+    }
+
+    if (message?.type === "online_users" && Array.isArray(message.data)) {
+      for (const entry of message.data) {
+        if (entry.userId) {
+          presenceStatusStore.updateUserStatus({
+            userId: entry.userId,
+            status: entry.status,
+            updatedAt: entry.updatedAt,
+            isManualOverride: entry.isManualOverride,
+          });
+        }
+      }
+      return;
+    }
+
     if (message?.type !== "profile_updated" || !message.data?.id) return;
     const profile = message.data;
     identityStore.upsertPublicProfile(profile);
@@ -59,6 +81,7 @@ export function usePresence(userId) {
       }
       debugLog("[usePresence] Connected successfully");
       status.value = "connected";
+      presenceStatusStore.connectionStatus = "connected";
       retryCount = 0;
       clearTimeout(retryTimer);
 
@@ -73,6 +96,7 @@ export function usePresence(userId) {
       if (socket !== ws && !intentionallyDisconnected) return;
       debugLog("[usePresence] Connection closed, retry count:", retryCount);
       status.value = "disconnected";
+      presenceStatusStore.connectionStatus = "disconnected";
       if (pingInterval) {
         clearInterval(pingInterval);
         pingInterval = null;
