@@ -218,6 +218,8 @@ async function flushChatQueue() {
           content: message.content,
           clientMessageId: message.id,
           ownerId: message.ownerId,
+          attachments: message.attachments || [],
+          replyTo: message.replyTo || null,
         }),
       });
       if (response.ok) {

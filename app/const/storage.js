@@ -10,4 +10,9 @@ export const STORAGE_KEYS = Object.freeze({
   systemSoundsMuted: "dspeak_system_sounds_muted",
   voiceDeafened: "voice.deafened",
   voiceMicMuted: "voice.micMuted",
+  presenceOverride: "dspeak:presenceOverride",
+  idleTimeout: "dspeak:idleTimeout",
+  friendsList: "dspeak:friendsListCache",
+  friendRequests: "dspeak:friendRequestsCache",
+  keybindings: "dspeak:customKeybindings",
 });

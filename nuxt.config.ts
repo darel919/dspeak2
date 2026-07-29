@@ -34,6 +34,11 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    resolve: {
+      alias: {
+        "@legal": resolve("docs"),
+      },
+    },
   },
 
   css: ["~/assets/app.css"],
@@ -54,7 +59,7 @@ export default defineNuxtConfig({
             "form-action": ["'self'"],
             "frame-ancestors": ["'none'"],
             "frame-src": ["'none'"],
-            "img-src": ["'self'", "data:", "blob:"],
+            "img-src": ["'self'", "data:", "blob:", "https://*.mzstatic.com"],
             "manifest-src": ["'self'"],
             "media-src": ["'self'", "blob:"],
             "object-src": ["'none'"],
@@ -238,6 +243,14 @@ export default defineNuxtConfig({
       appVersion: packageMetadata.version,
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,
+    },
+    stream: {
+      rtmpPort: Number(process.env.DSPEAK_RTMP_PORT || 1935),
+      rtmpHost: process.env.DSPEAK_RTMP_HOST || "localhost",
+      maxStreams: Number(process.env.DSPEAK_RTMP_MAX_STREAMS || 10),
+      opusBitrateDefault: Number(
+        process.env.DSPEAK_OPUS_BITRATE_DEFAULT || 128,
+      ),
     },
   },
 });

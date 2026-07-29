@@ -64,7 +64,9 @@ import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 import {
   assertSafeOutboundUrl,
   configuredOutboundHosts,
+  fetchPublicHtml,
 } from "../infrastructure/network/outbound-request.js";
+import { generateStreamKey } from "./stream-manager.js";
 
 function requireValue(value, message) {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
@@ -88,18 +90,23 @@ function sameInstant(left, right) {
   );
 }
 
-async function validateRoomImage(file, limit, label) {
+async function validateRoomImage(file, limit, label, allowGif = false) {
   if (!(file instanceof File) || !file.size) return;
   if (file.size > limit)
     throw createError({
       statusCode: 413,
       statusMessage: `${label} exceeds the upload limit`,
     });
-  const allowed = ["image/jpeg", "image/png", "image/webp"];
+  const allowed = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    ...(allowGif ? ["image/gif"] : []),
+  ];
   if (!allowed.includes(file.type))
     throw createError({
       statusCode: 415,
-      statusMessage: `${label} must be JPEG, PNG, or WebP`,
+      statusMessage: `${label} must be JPEG, PNG, WebP${allowGif ? ", or GIF" : ""}`,
     });
   const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
   const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
@@ -107,7 +114,14 @@ async function validateRoomImage(file, limit, label) {
   const webp =
     String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
     String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
-  if (!jpeg && !png && !webp)
+  const gif = String.fromCharCode(...bytes.slice(0, 4)) === "GIF8";
+  const validSignature = {
+    "image/jpeg": jpeg,
+    "image/png": png,
+    "image/webp": webp,
+    "image/gif": gif,
+  }[file.type];
+  if (!validSignature)
     throw createError({
       statusCode: 415,
       statusMessage: `${label} is invalid`,
@@ -158,6 +172,11 @@ function presentChannel(channel) {
     updated: channel.updated,
     owner: presentUser(channel.expand?.owner),
     room: channel.room,
+    policy: channel.policy || "free",
+    slow_mode: channel.slow_mode || 0,
+    streamKey: channel.stream_key || null,
+    streamActive: Boolean(channel.stream_active),
+    streamMetadata: channel.stream_metadata || null,
   };
 }
 
@@ -423,6 +442,7 @@ async function handleChannels(event, suffix) {
       inRoom: [],
       owner: userId,
       room: body.roomId,
+      stream_key: body.isMedia ? generateStreamKey() : null,
     });
   }
 
@@ -543,6 +563,7 @@ const handleChat = createChatApiHandler({
   createError,
   enforceRateLimit,
   ensureMember,
+  fetchPublicHtml,
   getBoundedList,
   getHeader,
   getQuery,
@@ -589,7 +610,12 @@ async function handleProfile(event, suffix) {
       }
     }
     if (body.avatar instanceof File && body.avatar.size) {
-      await validateRoomImage(body.avatar, 5 * 1024 * 1024, "Profile picture");
+      await validateRoomImage(
+        body.avatar,
+        5 * 1024 * 1024,
+        "Profile picture",
+        true,
+      );
       update.set("avatar", body.avatar, body.avatar.name);
     }
     if (body.removeAvatar === "true" || body.removeAvatar === true)
@@ -672,20 +698,51 @@ async function handleProfile(event, suffix) {
 }
 
 async function handleAssets(event, suffix) {
-  if (suffix !== "avatar" || event.method !== "GET")
+  if (event.method !== "GET")
     throw createError({
       statusCode: 404,
       statusMessage: "Asset endpoint not found",
     });
 
-  await requireAuthenticatedUser(event);
+  const authenticatedUserId = await requireAuthenticatedUser(event);
   const query = getQuery(event);
+  const pb = await usePocketBaseAdmin();
+  if (suffix === "chat-file") {
+    const fileId = requireValue(query.id, "Chat file ID is required");
+    const record = await pb.collection("dspeak_chat_files").getOne(fileId);
+    const channel = await pb
+      .collection("dspeak_rooms_channels")
+      .getOne(record.room_channel);
+    await requireRoomMember(
+      pb,
+      await pb.collection("dspeak_rooms").getOne(channel.room),
+      authenticatedUserId,
+    );
+    const response = await fetch(pb.files.getURL(record, record.file));
+    if (!response.ok)
+      throw createError({
+        statusCode: response.status,
+        statusMessage: "Failed to load chat image",
+      });
+    setHeader(event, "Cache-Control", "private, max-age=604800, immutable");
+    setHeader(
+      event,
+      "Content-Type",
+      response.headers.get("content-type") || record.mime_type,
+    );
+    setHeader(event, "X-Content-Type-Options", "nosniff");
+    return sendWebResponse(event, response);
+  }
+  if (suffix !== "avatar")
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Asset endpoint not found",
+    });
   const userId = requireValue(query.userId, "User ID is required");
   const requestedFileName = requireValue(
     query.fileName,
     "Avatar filename is required",
   );
-  const pb = await usePocketBaseAdmin();
   const user = await pb.collection("users").getOne(userId, {
     fields: "id,avatar,collectionId,collectionName",
   });
@@ -709,6 +766,7 @@ async function handleAssets(event, suffix) {
     "Content-Type",
     response.headers.get("content-type") || "image/jpeg",
   );
+  setHeader(event, "X-Content-Type-Options", "nosniff");
   return sendWebResponse(event, response);
 }
 
@@ -726,8 +784,17 @@ export async function handleDspeakApi(event) {
       domain === "session" &&
       suffix === "handoff/start" &&
       event.method === "POST"
-    )
+    ) {
+      const body = await parseBody(event);
+      if (body.terms_accepted !== true) {
+        throw createError({
+          statusCode: 403,
+          statusMessage:
+            "You must accept the Terms of Service and Privacy Policy",
+        });
+      }
       return createAuthenticationHandoff(event);
+    }
     if (
       domain === "session" &&
       suffix === "handoff/exchange" &&
@@ -763,7 +830,18 @@ export async function handleDspeakApi(event) {
     });
   } catch (error) {
     if (error?.statusCode) throw error;
-    if (Number(error?.status) >= 400 && Number(error?.status) < 500)
+    if (Number(error?.status) >= 400 && Number(error?.status) < 500) {
+      console.error("[dSpeak API] client error caught in catch-all handler", {
+        domain,
+        suffix,
+        method: event.method,
+        path: getRequestURL(event).pathname,
+        status: Number(error.status),
+        statusMessage: error.message || error.statusMessage,
+        responseData: error.response?.data || error.response,
+        errorUrl: error.url,
+        url: error?.response?.url,
+      });
       throw createError({
         statusCode: Number(error.status),
         statusMessage:
@@ -773,6 +851,7 @@ export async function handleDspeakApi(event) {
               ? "Resource conflict"
               : "Invalid request",
       });
+    }
     const requestId = crypto.randomUUID();
     console.error(`[dSpeak API] request ${requestId}`, error);
     throw createError({

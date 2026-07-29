@@ -2,7 +2,7 @@
   <div
     class="metro-standalone flex min-h-screen items-center justify-center bg-base-100 px-6"
   >
-    <div class="w-full max-w-lg border-l-8 border-primary pl-6">
+    <div class="w-full max-w-lg">
       <template v-if="status === 'working'">
         <div class="loading loading-spinner loading-lg text-primary"></div>
         <h1 class="mt-5 text-2xl font-semibold">Authenticating…</h1>
@@ -10,14 +10,66 @@
           Verifying your account and preparing your dSpeak session.
         </p>
       </template>
+      <template v-else-if="showTerms">
+        <p class="text-sm font-semibold text-primary">Welcome to dSpeak</p>
+        <h1 class="mt-2 text-2xl font-semibold">Before you sign in</h1>
+        <p class="mt-3 text-base-content/70">
+          Please review and accept the Terms of Service and Privacy Policy to
+          continue.
+        </p>
+        <div class="mt-4">
+          <label class="flex cursor-pointer items-start gap-3">
+            <input
+              v-model="termsAccepted"
+              class="checkbox checkbox-primary mt-0.5"
+              type="checkbox"
+            />
+            <span class="text-sm leading-relaxed">
+              I have read and agree to the
+              <a
+                class="link link-primary"
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Terms of Service
+              </a>
+              and
+              <a
+                class="link link-primary"
+                href="/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Privacy Policy </a
+              >.
+            </span>
+          </label>
+        </div>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <button
+            class="btn btn-primary"
+            type="button"
+            :disabled="!termsAccepted"
+            @click="startSignIn"
+          >
+            Sign in
+          </button>
+          <NuxtLink class="btn btn-ghost" to="/">Return home</NuxtLink>
+        </div>
+      </template>
       <template v-else>
         <p class="text-sm font-semibold text-error">Sign-in interrupted</p>
         <h1 class="mt-2 text-2xl font-semibold">
-          We couldn’t complete authentication
+          We couldn't complete authentication
         </h1>
         <p class="mt-3 text-base-content/70">{{ failureMessage }}</p>
         <div class="mt-6 flex flex-wrap gap-3">
-          <button class="btn btn-primary" type="button" @click="startSignIn">
+          <button
+            class="btn btn-primary"
+            type="button"
+            @click="showTerms = true"
+          >
             Try sign-in again
           </button>
           <NuxtLink class="btn btn-ghost" to="/">Return home</NuxtLink>
@@ -36,6 +88,8 @@ const roomsStore = useRoomsStore();
 const router = useRouter();
 const route = useRoute();
 const status = ref("working");
+const showTerms = ref(false);
+const termsAccepted = ref(false);
 const failureMessage = ref("");
 let completingAuthentication = false;
 let processingHandoff = false;
@@ -72,7 +126,7 @@ async function startSignIn() {
   status.value = "working";
   failureMessage.value = "";
   try {
-    await authStore.beginExternalSignIn();
+    await authStore.beginExternalSignIn(termsAccepted.value);
   } catch {
     status.value = "failed";
     failureMessage.value =
@@ -134,6 +188,7 @@ onMounted(async () => {
     return;
   }
 
-  await startSignIn();
+  status.value = "idle";
+  showTerms.value = true;
 });
 </script>

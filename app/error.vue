@@ -3,10 +3,7 @@
     class="metro-standalone flex min-h-screen items-center bg-base-100 px-6 py-12 sm:px-12"
     role="alert"
   >
-    <div
-      class="w-full max-w-3xl border-l-8 pl-6 sm:pl-10"
-      :class="invalidLink ? 'border-error' : 'border-hero'"
-    >
+    <div class="w-full max-w-3xl">
       <Icon
         :name="invalidLink ? 'lucide:link-2-off' : 'lucide:triangle-alert'"
         class="mb-8 size-12"

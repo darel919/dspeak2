@@ -14,6 +14,15 @@ export function messageMentionsHandle(content, handle) {
   );
 }
 
+export function messageContainsBroadcastMention(content, mention) {
+  const normalizedMention = String(mention || "").toLowerCase();
+  if (!new Set(["everyone", "here"]).has(normalizedMention)) return false;
+  return new RegExp(
+    `(^|[^a-z0-9_-])@${normalizedMention}(?![a-z0-9_-])`,
+    "i",
+  ).test(String(content || ""));
+}
+
 export function resolveNotificationPreference(
   globalPreference,
   roomPreference,
@@ -41,10 +50,11 @@ export function isMessageNotificationEligible({
   preference,
   content,
   recipientHandle,
+  broadcastMention = false,
 }) {
   if (preference.mode === "muted") return false;
   if (preference.mode === "mentions")
-    return messageMentionsHandle(content, recipientHandle);
+    return broadcastMention || messageMentionsHandle(content, recipientHandle);
   return true;
 }
 

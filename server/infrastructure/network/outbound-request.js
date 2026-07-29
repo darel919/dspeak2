@@ -1,5 +1,5 @@
 import { lookup } from "node:dns/promises";
-import { Agent } from "node:https";
+import { Agent, request } from "node:https";
 import { isIP } from "node:net";
 
 const blockedIpv4Ranges = Object.freeze([
@@ -134,6 +134,96 @@ export function createPublicHttpsAgent(options = {}) {
     },
     ...options,
   });
+}
+
+export async function fetchPublicHtml(value, options = {}) {
+  const maxBytes = options.maxBytes || 512 * 1024;
+  const maxRedirects = options.maxRedirects ?? 3;
+  const timeoutMs = options.timeoutMs || 5000;
+  const allowedHosts = options.allowedHosts;
+  const fetchPage = async (target, redirectsRemaining) => {
+    const url = await assertSafeOutboundUrl(target, { allowedHosts });
+    return new Promise((resolve, reject) => {
+      const outbound = request(
+        url,
+        {
+          agent: createPublicHttpsAgent(),
+          headers: {
+            Accept: "text/html,application/xhtml+xml",
+            "User-Agent": options.userAgent || "dSpeak/1.0",
+          },
+          method: "GET",
+          timeout: timeoutMs,
+        },
+        (response) => {
+          const status = response.statusCode || 0;
+          if ([301, 302, 303, 307, 308].includes(status)) {
+            const location = response.headers.location;
+            response.resume();
+            if (!location || redirectsRemaining <= 0) {
+              reject(new Error("Outbound redirect limit exceeded"));
+              return;
+            }
+            let nextUrl;
+            try {
+              nextUrl = new URL(location, url).href;
+            } catch (error) {
+              reject(error);
+              return;
+            }
+            // CRITICAL: Re-validate redirect target against allowlist to prevent SSRF
+            assertSafeOutboundUrl(nextUrl, { allowedHosts })
+              .then(() => fetchPage(nextUrl, redirectsRemaining - 1).then(resolve, reject))
+              .catch(reject);
+            return;
+          }
+          if (status < 200 || status >= 300) {
+            response.resume();
+            reject(new Error(`Outbound request failed with status ${status}`));
+            return;
+          }
+          const contentType = String(response.headers["content-type"] || "")
+            .split(";", 1)[0]
+            .trim()
+            .toLowerCase();
+          if (!["text/html", "application/xhtml+xml"].includes(contentType)) {
+            response.resume();
+            reject(new Error("Outbound response is not HTML"));
+            return;
+          }
+          const contentLength = Number(response.headers["content-length"] || 0);
+          if (contentLength > maxBytes) {
+            response.resume();
+            reject(new Error("Outbound response is too large"));
+            return;
+          }
+          const chunks = [];
+          let totalBytes = 0;
+          response.on("data", (chunk) => {
+            totalBytes += chunk.length;
+            if (totalBytes > maxBytes) {
+              response.destroy(new Error("Outbound response is too large"));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          response.on("end", () =>
+            resolve({
+              html: Buffer.concat(chunks).toString("utf8"),
+              url: url.href,
+            }),
+          );
+          response.on("error", reject);
+        },
+      );
+      outbound.on("timeout", () =>
+        outbound.destroy(new Error("Outbound request timed out")),
+      );
+      outbound.on("error", reject);
+      outbound.end();
+    });
+  };
+  return fetchPage(value, maxRedirects);
 }
 
 export function configuredOutboundHosts(value) {

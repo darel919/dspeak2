@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const storeSource = await readFile(
+  new URL("../app/stores/friends.js", import.meta.url),
+  "utf8",
+);
+const pageSource = await readFile(
+  new URL("../app/pages/friends.vue", import.meta.url),
+  "utf8",
+);
+const managerSource = await readFile(
+  new URL("../server/utils/friends-manager.js", import.meta.url),
+  "utf8",
+);
+const memberListSource = await readFile(
+  new URL("../app/components/MemberList.vue", import.meta.url),
+  "utf8",
+);
+
+test("sending a friend request immediately adds the canonical request to Sent", () => {
+  assert.match(
+    storeSource,
+    /sentRequests\.value = \[[\s\S]{0,80}result,[\s\S]{0,80}\.\.\.sentRequests\.value\.filter\(/,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /await friendsStore\.sendRequest\(handle\);[\s\S]{0,200}await friendsStore\.fetchSentRequests\(\);/,
+  );
+});
+
+test("resending an existing outgoing request returns its canonical pending record", () => {
+  assert.doesNotMatch(
+    managerSource,
+    /throw new Error\("Friend request already pending"\)/,
+  );
+  assert.match(
+    managerSource,
+    /if \(existing\.status === "pending"\)[\s\S]{0,700}status: existing\.status/,
+  );
+});
+
+test("a failed Sent refresh preserves confirmed requests and exposes the error", () => {
+  assert.doesNotMatch(
+    storeSource,
+    /async function fetchSentRequests\(\)[\s\S]{0,400}catch \{[\s\S]{0,80}return \[\];/,
+  );
+  assert.match(
+    storeSource,
+    /async function fetchSentRequests\(\)[\s\S]{0,500}error\.value = cause\.message;[\s\S]{0,120}throw cause;/,
+  );
+});
+
+test("Sent request avatars use the protected same-origin asset path", () => {
+  assert.match(
+    managerSource,
+    /avatar: sameOriginAvatarPath\(req\.expand\.recipient\)/,
+  );
+  assert.match(
+    pageSource,
+    /<ProfileAvatar[\s\S]{0,180}:src="req\.recipient\?\.avatar"/,
+  );
+});
+
+test("Sent persistence lookup avoids the failing compound PocketBase filter", () => {
+  assert.match(
+    managerSource,
+    /getSentFriendRequests[\s\S]{0,500}filter: pb\.filter\("requester = \{:userId\}"/,
+  );
+  assert.match(
+    managerSource,
+    /getSentFriendRequests[\s\S]{0,1200}\.filter\(\(req\) => req\.status === "pending"\)/,
+  );
+});
+
+test("room member rows do not display friend request status", () => {
+  assert.doesNotMatch(memberListSource, /friendRequestLabel\(member\)/);
+  assert.doesNotMatch(memberListSource, /Request sent/);
+  assert.doesNotMatch(memberListSource, /Respond to request/);
+  assert.doesNotMatch(memberListSource, /friendsStore\.fetchSentRequests\(\)/);
+  assert.doesNotMatch(
+    memberListSource,
+    /friendsStore\.fetchFriendRequests\(\)/,
+  );
+});

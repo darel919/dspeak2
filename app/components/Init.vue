@@ -4,7 +4,7 @@
       v-if="!startupComplete && !isAuthPage"
       class="metro-standalone flex min-h-screen items-center bg-base-100 px-6 py-12 sm:px-12"
     >
-      <div class="w-full max-w-3xl border-l-8 border-hero pl-6 sm:pl-10">
+      <div class="w-full max-w-3xl">
         <img :src="startupLogo" alt="" class="mb-8 size-24" />
         <p class="mb-3 text-sm font-semibold tracking-wide text-hero">dSpeak</p>
         <h1 class="metro-title">Welcome to dSpeak</h1>
@@ -38,6 +38,9 @@ import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useIdentityStore } from "../stores/identity";
 import { useNotifications } from "../composables/useNotifications";
+import { usePresenceStatusStore } from "../stores/presenceStatus";
+import { useIdleDetection } from "../composables/useIdleDetection";
+import { useGlobalKeyboardShortcuts } from "../composables/useGlobalKeyboardShortcuts";
 import NotificationWarning from "./NotificationWarning.vue";
 import { usePresence } from "../composables/usePresence.js";
 import startupLogo from "../assets/logo/logo_96.png";
@@ -86,6 +89,14 @@ const userId = computed(() => {
 const { status: presenceStatus, disconnect: disconnectPresence } =
   usePresence(userId);
 provide("presenceStatus", presenceStatus);
+provide(
+  "presenceEffectiveStatus",
+  computed(() => usePresenceStatusStore().effectiveStatus),
+);
+provide("presenceStore", usePresenceStatusStore());
+const { init: initIdle, destroy: destroyIdle } = useIdleDetection();
+const { init: initKeyboardShortcuts, destroy: destroyKeyboardShortcuts } =
+  useGlobalKeyboardShortcuts();
 
 watch(startupUpdateStatus, (status) => {
   if (status === "checking") startupStatus.value = "Checking for updates…";
@@ -100,6 +111,10 @@ onMounted(async () => {
       await checkAuth();
       if (authChecked.value) {
         startupStatus.value = "Preparing your workspace…";
+        const presenceStatusStore = usePresenceStatusStore();
+        presenceStatusStore.init();
+        initIdle();
+        initKeyboardShortcuts();
       }
     } else {
       authChecked.value = true;
@@ -117,6 +132,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disconnectPresence();
+  destroyIdle();
+  destroyKeyboardShortcuts();
 });
 
 watch(

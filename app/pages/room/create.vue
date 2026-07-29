@@ -53,7 +53,7 @@
           </label>
           <p
             v-if="error"
-            class="mt-4 border-l-4 border-error bg-error/10 p-3 text-sm text-error"
+            class="mt-4 bg-error/10 p-3 text-sm text-error"
             role="alert"
           >
             {{ error }}
@@ -90,10 +90,7 @@ async function onSubmit() {
   }
   loading.value = true;
   try {
-    const newRoom = await roomsStore.createRoom({
-      name: roomName.value,
-      desc: roomDesc.value,
-    });
+    const newRoom = await roomsStore.createRoom(roomName.value, roomDesc.value);
     if (newRoom && newRoom.id) {
       await router.push(`/room/${newRoom.id}`);
     } else {
