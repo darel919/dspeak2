@@ -125,3 +125,36 @@ Firefox all produce a non-silent live track without extensions, display
 capture, or unsafe browser flags. If any mandatory browser fails, the
 browser-only architecture is rejected and an approved runtime decision must
 replace it.
+
+---
+
+## VLC loopback transport behavior (verified)
+
+**VLC version:** 3.0.23 (macOS, installed at /Applications/VLC.app/Contents/MacOS/VLC)
+
+**Command used:**
+
+```bash
+/Applications/VLC.app/Contents/MacOS/VLC \
+  --intf dummy \
+  --no-audio \
+  --repeat \
+  --no-video \
+  --sout '#transcode{acodec=vorbis,ab=128,channels=2,samplerate=48000}:http{mux=ogg,dst=127.0.0.1:PORT/}' \
+  --sout-keep \
+  tests/fixtures/broadcast-tone.wav
+```
+
+**Results:**
+
+| Check                | Result                                          |
+| -------------------- | ----------------------------------------------- |
+| TCP connection       | 127.0.0.1:19350                                 |
+| HTTP status          | 200 OK                                          |
+| Content-Type         | application/octet-stream (not audio/ogg)        |
+| Stream continuity    | Bytes arrive continuously for 10+ seconds       |
+| Disconnect/reconnect | New connections receive fresh data              |
+| Approximate bitrate  | ~39 kbps (128 kbps Vorbis target, Ogg overhead) |
+| Loopback only        | Binds to 127.0.0.1 (verified via lsof)          |
+
+**Content-Type caveat:** VLC's `http` access output does not set `Content-Type: audio/ogg` or `application/ogg`. The response is `application/octet-stream`. This may affect browser `<audio>` element playback and requires testing in Task 3.
