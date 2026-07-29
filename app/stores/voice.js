@@ -673,6 +673,18 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
+  async function toggleBroadcast() {
+    if (!connected.value || !sfuComposable.value) return;
+    if (broadcastAudioSharing.value) {
+      try {
+        sfuComposable.value.stopBroadcastProduction();
+      } catch (_) {
+        /* noop */
+      }
+      broadcastAudioSharing.value = false;
+    }
+  }
+
   function setSharedAudioVolume(value) {
     settingsStore.setSharedAudioVolume(value);
     sfuComposable.value?.setSharedAudioVolume?.(
@@ -796,6 +808,7 @@ export const useVoiceStore = defineStore("voice", () => {
     setRemoteScreenReceiving,
     setRemoteSystemAudioReceiving,
     toggleSystemAudioShare,
+    toggleBroadcast,
     setSharedAudioVolume,
     setSystemAudioBitrate,
     addConnectedUser,

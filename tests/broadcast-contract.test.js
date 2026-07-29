@@ -16,13 +16,16 @@ describe("broadcast contract", () => {
 
   it("broadcast mode toggle does not alias toggleSystemAudioShare", () => {
     const source = readFileSync("app/components/Navbar.vue", "utf-8");
-    const toggleDef = source.match(
-      /function\s+toggleBroadcastMode[\s\S]*?^\s*}/m,
-    );
-    assert.ok(toggleDef, "toggleBroadcastMode function must be defined");
     assert.ok(
-      !toggleDef[0].includes("toggleSystemAudioShare"),
-      "toggleBroadcastMode must not call toggleSystemAudioShare",
+      !source.includes("toggleBroadcastMode"),
+      "Must not have legacy toggleBroadcastMode function",
+    );
+    const broadcastLabels = source.match(
+      /Broadcast[\\s\\S]{0,200}toggleSystemAudioShare/,
+    );
+    assert.ok(
+      !broadcastLabels,
+      "Broadcast button must not alias system audio share",
     );
   });
 

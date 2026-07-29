@@ -6,6 +6,7 @@ import { useChannelsStore } from "../stores/channels";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
+import BroadcastSetupDialog from "./BroadcastSetupDialog.vue";
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
 import {
   getActiveConnectionLabel,
@@ -27,7 +28,7 @@ const { getAvatarUrl } = useChatUtils();
 
 const profile = computed(() => authStore.getUserData());
 const profileAvatar = computed(() => getAvatarUrl(profile.value?.avatar));
-const broadcastMode = computed(() => settingsStore.broadcastMode);
+const broadcastDialogOpen = ref(false);
 const presenceStatus = inject("presenceStatus", ref(null));
 const rtcSummaryVisible = useState("rtc-summary-visible", () => false);
 const callMenu = ref(null);
@@ -202,8 +203,8 @@ function navigateToVoiceChannel() {
   }
 }
 
-function toggleBroadcastMode() {
-  settingsStore.setBroadcastMode(!settingsStore.broadcastMode);
+function showBroadcastDialog() {
+  broadcastDialogOpen.value = true;
 }
 
 function barClass(level) {
@@ -516,13 +517,13 @@ onBeforeUnmount(() => {
             <button
               class="menu-row"
               type="button"
-              :class="broadcastMode && 'text-warning'"
-              @click="toggleBroadcastMode"
+              :class="voiceStore.broadcastAudioSharing && 'text-warning'"
+              @click="showBroadcastDialog"
             >
               <Icon name="lucide:radio" />
-              <span>Broadcast mode</span>
+              <span>Broadcast</span>
               <span class="ml-auto text-xs font-semibold">{{
-                broadcastMode ? "On" : "Off"
+                voiceStore.broadcastAudioSharing ? "Live" : "Off"
               }}</span>
             </button>
 
@@ -677,6 +678,10 @@ onBeforeUnmount(() => {
       />
     </div>
   </header>
+  <BroadcastSetupDialog
+    v-if="broadcastDialogOpen"
+    @close="broadcastDialogOpen = false"
+  />
 </template>
 
 <style scoped>
