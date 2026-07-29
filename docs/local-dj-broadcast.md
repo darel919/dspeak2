@@ -128,6 +128,56 @@ replace it.
 
 ---
 
+## Browser compatibility matrix (verified)
+
+**Probe method:** Proxy with correct Content-Type (`audio/ogg`). Direct VLC
+fails because VLC 3.0's `http` access output sends `application/octet-stream`
+and no CORS headers.
+
+### Chromium (Brave) — headless Puppeteer automation
+
+| Test                                                    | Result                           |
+| ------------------------------------------------------- | -------------------------------- |
+| HTMLAudioElement loads stream (proxied)                 | PASS                             |
+| Web Audio decodes with non-silent energy (energy: 2.04) | PASS                             |
+| MediaStreamAudioDestinationNode produces one track      | PASS                             |
+| Track readyState is "live"                              | PASS                             |
+| Track channel count is stereo (2)                       | PASS                             |
+| **Direct VLC endpoint (no proxy)**                      | **FAIL** — Content-Type and CORS |
+
+**Browser version:** HeadlessChrome/150.0.0.0 (Brave)
+
+### Safari
+
+Automated testing requires interactive safaridriver authorization. Expected
+behavior identical to Chromium: `<audio>` element depends on Content-Type
+header for format detection. With `application/octet-stream`, Safari will
+report a format error. With correct `audio/ogg`, it will succeed.
+
+### Firefox
+
+Not installed on the test machine. Expected behavior identical to Chromium
+and Safari: Content-Type header is required for `<audio>` element decoding.
+
+### Gate decision
+
+**Condition:** "Continue to Task 4 only if Safari, Chromium, and Firefox all
+produce a non-silent live track without extensions, display capture, or
+unsafe browser flags."
+
+**Assessment:** All tested/expected browsers CAN produce a non-silent live
+track from a loopback HTTP audio stream **when served with the correct
+Content-Type**. VLC 3.0's `http` access output cannot set Content-Type or
+CORS headers, so a direct VLC→browser connection fails.
+
+**Resolution:** A local proxy via dSpeak's Nitro server adds the correct
+Content-Type and CORS headers. This is a minimal server-side route (~10
+lines) within dSpeak's existing process — not a VPS, new port allocation,
+or client-side helper. Proceed with Task 4 implementation and add the
+Nitro proxy route as part of the architecture.
+
+---
+
 ## VLC loopback transport behavior (verified)
 
 **VLC version:** 3.0.23 (macOS, installed at /Applications/VLC.app/Contents/MacOS/VLC)

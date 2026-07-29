@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Broadcast Browser Probe</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 2rem;
+        background: #111;
+        color: #ddd;
+      }
+      pre {
+        background: #1a1a1a;
+        padding: 1rem;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+      .pass {
+        color: #4ade80;
+      }
+      .fail {
+        color: #f87171;
+      }
+      .warn {
+        color: #fbbf24;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Broadcast Browser Probe</h1>
+    <p id="status">Initializing...</p>
+    <pre id="output"></pre>
+    <audio id="broadcast-audio" crossorigin="anonymous" preload="auto"></audio>
+
+    <script>
+      const log = (msg) => {
+        const el = document.getElementById("output");
+        el.textContent += msg + "\n";
+      };
+      const status = (msg) => {
+        document.getElementById("status").textContent = msg;
+      };
+
+      const RESULTS = {};
+      let testCount = 0;
+      let passCount = 0;
+
+      function record(name, passed, detail) {
+        testCount++;
+        if (passed) passCount++;
+        RESULTS[name] = { passed, detail: detail || "" };
+        const cls = passed ? "pass" : "fail";
+        log(
+          `[${cls.toUpperCase()}] ${name}: ${passed ? "PASS" : "FAIL"}${detail ? " — " + detail : ""}`,
+        );
+      }
+
+      async function runTests() {
+        const params = new URLSearchParams(window.location.search);
+        const streamUrl = params.get("streamUrl") || `http://127.0.0.1:19350/`;
+
+        log("=== Broadcast Browser Compatibility Probe ===\n");
+        log(`Stream URL: ${streamUrl}`);
+        log(`User agent: ${navigator.userAgent}`);
+        log(`Browser: ${navigator.vendor || "unknown"}\n`);
+
+        // Test 1: HTMLAudioElement stream loading
+        status("Test 1: Loading VLC stream via HTMLAudioElement...");
+        log("--- Test 1: HTMLAudioElement stream loading ---");
+
+        let audioLoadSucceeded = false;
+        let audioLoadError = null;
+        const audio = document.getElementById("broadcast-audio");
+        audio.src = streamUrl;
+
+        try {
+          await new Promise((resolve, reject) => {
+            const loadTimeout = setTimeout(() => {
+              reject(new Error("Audio load timed out after 10s"));
+            }, 10000);
+
+            audio.addEventListener(
+              "canplay",
+              () => {
+                clearTimeout(loadTimeout);
+                audioLoadSucceeded = true;
+                resolve();
+              },
+              { once: true },
+            );
+            audio.addEventListener(
+              "error",
+              () => {
+                clearTimeout(loadTimeout);
+                const err = audio.error
+                  ? audio.error.message || audio.error.code
+                  : "Unknown error";
+                reject(new Error(String(err)));
+              },
+              { once: true },
+            );
+            audio.load();
+          });
+        } catch (err) {
+          audioLoadError = err.message;
+        }
+
+        record(
+          "html-audio-element-load",
+          audioLoadSucceeded,
+          audioLoadSucceeded ? "Stream loaded successfully" : audioLoadError,
+        );
+
+        if (!audioLoadSucceeded) {
+          status("FAILED: HTMLAudioElement could not load the stream");
+        } else {
+          status("Test 1 PASSED");
+        }
+
+        // Build the audio graph once and use it for both Test 2 and Test 3
+        let audioContext = null;
+        let mediaSourceNode = null;
+        let analyser = null;
+        let destNode = null;
+        let graphBuilt = false;
+        let graphError = null;
+
+        if (audioLoadSucceeded) {
+          log("\n--- Building audio graph ---");
+          try {
+            audioContext = new (
+              window.AudioContext || window.webkitAudioContext
+            )();
+            await audioContext.resume();
+            log(`  AudioContext state: ${audioContext.state}`);
+            log(`  AudioContext sample rate: ${audioContext.sampleRate}`);
+
+            mediaSourceNode = audioContext.createMediaElementSource(audio);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+
+            destNode = audioContext.createMediaStreamDestination();
+
+            // Route: audio → mediaSource → analyser → destNode
+            mediaSourceNode.connect(analyser);
+            analyser.connect(destNode);
+
+            graphBuilt = true;
+          } catch (err) {
+            graphError = err.message;
+            log(`  Graph build error: ${graphError}`);
+          }
+        }
+
+        // Test 2: Audio energy detection
+        status("Test 2: Web Audio energy detection...");
+        log("\n--- Test 2: Web Audio energy detection ---");
+
+        let audioEnergyDetected = false;
+
+        if (graphBuilt) {
+          try {
+            await audio.play();
+            log("  Audio playback started");
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            let maxEnergy = 0;
+            let samplesWithEnergy = 0;
+            let totalSamples = 0;
+
+            await new Promise((resolve) => {
+              const interval = setInterval(() => {
+                analyser.getByteFrequencyData(dataArray);
+                const avg =
+                  dataArray.reduce((s, v) => s + v, 0) / dataArray.length;
+                maxEnergy = Math.max(maxEnergy, avg);
+                totalSamples++;
+                if (avg > 1) samplesWithEnergy++;
+              }, 200);
+
+              setTimeout(() => {
+                clearInterval(interval);
+                resolve();
+              }, 3000);
+            });
+
+            audioEnergyDetected = maxEnergy > 1;
+            log(`  Max average energy: ${maxEnergy.toFixed(2)}`);
+            log(`  Samples with energy: ${samplesWithEnergy}/${totalSamples}`);
+            record(
+              "web-audio-decodes-and-has-energy",
+              audioEnergyDetected,
+              audioEnergyDetected
+                ? `Non-silent audio detected (energy: ${maxEnergy.toFixed(2)})`
+                : `No audio energy detected (max: ${maxEnergy.toFixed(2)})`,
+            );
+          } catch (err) {
+            log(`  Energy detection error: ${err.message}`);
+            record("web-audio-decodes-and-has-energy", false, err.message);
+          }
+        } else {
+          record(
+            "web-audio-decodes-and-has-energy",
+            false,
+            graphError
+              ? `Graph build failed: ${graphError}`
+              : "Skipped — audio did not load",
+          );
+        }
+
+        // Test 3: MediaStreamAudioDestinationNode track properties
+        status("Test 3: MediaStreamAudioDestinationNode track...");
+        log("\n--- Test 3: MediaStreamAudioDestinationNode track ---");
+
+        if (graphBuilt && destNode) {
+          try {
+            const tracks = destNode.stream.getAudioTracks();
+            const track = tracks[0];
+            const trackCount = tracks.length;
+            const isLive = track && track.readyState === "live";
+            const settings = track ? track.getSettings() : {};
+            const channelCount = settings.channelCount;
+
+            log(`  Track count: ${trackCount}`);
+            log(`  Ready state: ${track ? track.readyState : "N/A"}`);
+            log(`  Channel count: ${channelCount}`);
+            log(`  Track label: ${track ? track.label : "N/A"}`);
+
+            record(
+              "media-stream-audio-destination-produces-track",
+              trackCount === 1,
+              trackCount === 1
+                ? "One audio track produced"
+                : `${trackCount} tracks`,
+            );
+            record(
+              "track-ready-state-is-live",
+              isLive,
+              isLive
+                ? "Track is live"
+                : `Track state: ${track ? track.readyState : "no track"}`,
+            );
+            if (channelCount) {
+              record(
+                "track-stereo-when-exposed",
+                channelCount >= 2,
+                `Channel count: ${channelCount}`,
+              );
+            } else {
+              record(
+                "track-stereo-when-exposed",
+                false,
+                "Channel count not exposed by browser",
+              );
+            }
+          } catch (err) {
+            log(`  Track check error: ${err.message}`);
+            record(
+              "media-stream-audio-destination-produces-track",
+              false,
+              err.message,
+            );
+          }
+        } else {
+          record(
+            "media-stream-audio-destination-produces-track",
+            false,
+            "Skipped — no destination node available",
+          );
+        }
+
+        // Summary
+        log("\n=== RESULTS ===");
+        for (const [name, r] of Object.entries(RESULTS)) {
+          log(`  ${r.passed ? "PASS" : "FAIL"} ${name}`);
+        }
+        log(`\nPassed: ${passCount}/${testCount}`);
+
+        status(
+          passCount === testCount
+            ? "ALL TESTS PASSED"
+            : `${passCount}/${testCount} PASSED`,
+        );
+        window.__BROADCAST_PROBE_RESULT__ = {
+          results: RESULTS,
+          passed: passCount,
+          total: testCount,
+          allPassed: passCount === testCount,
+          userAgent: navigator.userAgent,
+          timestamp: Date.now(),
+        };
+      }
+
+      window.addEventListener("load", () => {
+        setTimeout(runTests, 500);
+      });
+    </script>
+  </body>
+</html>
