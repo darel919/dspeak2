@@ -754,28 +754,6 @@ export async function openSfuPeer(peer) {
   if (isMediaPeerClosed(peer)) return;
   const room = await acquireRoom(state, channelId);
   room.backendRoomId = String(channel.room);
-
-  try {
-    const { getStreamManager } = await import("../utils/stream-manager.js");
-    const sm = getStreamManager();
-    if (sm.hasStreamWithoutRelay(channelId)) {
-      const stream = sm.getStream(channelId);
-      if (stream) {
-        const { startStreamRelay } =
-          await import("../integrations/stream-relay.js");
-        startStreamRelay(
-          room.router,
-          channelId,
-          stream.streamKey,
-          stream.bitrate,
-        ).catch((error) =>
-          console.error("[SFU] lazy relay start failed:", error),
-        );
-      }
-    }
-  } catch (error) {
-    console.error("[SFU] lazy relay start check failed:", error);
-  }
   try {
     if (isMediaPeerClosed(peer)) {
       releaseRoomReservation(room);

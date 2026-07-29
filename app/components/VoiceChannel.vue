@@ -75,19 +75,6 @@
       </div>
     </div>
 
-    <StreamNowPlaying />
-
-    <div
-      v-if="
-        streamHistory.length &&
-        voiceStore.connected &&
-        voiceStore.currentChannelId === props.channel.id
-      "
-      class="shrink-0 border-b border-base-content/15 px-4 py-3"
-    >
-      <StreamHistory />
-    </div>
-
     <div
       v-if="
         voiceStore.connected && voiceStore.currentChannelId !== props.channel.id
@@ -654,12 +641,7 @@ import { useVoiceStore } from "~/stores/voice";
 import { useAuthStore } from "~/stores/auth";
 import { useSettingsStore } from "~/stores/settings";
 import { useIdentityStore } from "~/stores/identity";
-import { useStreamStore } from "~/stores/stream";
 import { useChannelsStore } from "~/stores/channels";
-import { useStreamRelay } from "~/composables/useStreamRelay";
-import StreamSetup from "~/components/StreamSetup.vue";
-import StreamNowPlaying from "~/components/StreamNowPlaying.vue";
-import StreamHistory from "~/components/StreamHistory.vue";
 
 const props = defineProps({
   channel: {
@@ -756,16 +738,7 @@ const ownCameraFeed = computed(
     null,
 );
 
-const streamStore = useStreamStore();
 const settingsStore = useSettingsStore();
-const showStreamSetup = computed(
-  () =>
-    settingsStore.broadcastMode &&
-    isChannelModerator.value &&
-    voiceStore.connected &&
-    voiceStore.currentChannelId === props.channel.id,
-);
-useStreamRelay();
 
 const isChannelModerator = computed(() => {
   const channel = props.channel;
@@ -783,8 +756,6 @@ const isChannelModerator = computed(() => {
     ) || false
   );
 });
-
-const streamHistory = computed(() => streamStore.playHistory);
 
 function volumeUserForTile(tile) {
   if (tile.type === "participant") return tile.user;
