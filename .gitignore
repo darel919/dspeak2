@@ -4,7 +4,7 @@
 .nuxt
 .nitro
 .cache
-.github
+.github/copilot-instructions.md
 dist
 .codex
 AGENTS.md

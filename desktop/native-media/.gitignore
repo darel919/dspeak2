@@ -1,0 +1,5 @@
+# Native dependency checkouts and binaries are provisioned outside Git.
+*
+!.gitignore
+!README.md
+!dependencies.env.example

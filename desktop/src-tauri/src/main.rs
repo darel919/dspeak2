@@ -20,6 +20,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
+mod media;
+
 #[derive(Clone)]
 struct OAuthState {
     callback_url: std::sync::Arc<Mutex<Option<String>>>,
@@ -56,6 +58,7 @@ fn main() {
             callback_url: std::sync::Arc::new(Mutex::new(None)),
             pending_callback: std::sync::Arc::new(Mutex::new(None)),
         })
+        .manage(media::NativeMediaStore::default())
         .setup(|app| {
             let oauth_state = app.state::<OAuthState>().inner().clone();
             let app_handle = app.handle().clone();
@@ -127,6 +130,27 @@ fn main() {
             get_hide_on_close,
             get_oauth_callback_url,
             get_pending_oauth_callback,
+            media::media_initialize,
+            media::media_join,
+            media::media_leave,
+            media::media_shutdown,
+            media::media_set_topology,
+            media::media_set_ice_servers,
+            media::media_handle_signal,
+            media::media_get_devices,
+            media::media_list_capture_sources,
+            media::media_get_permissions,
+            media::media_select_capture_source,
+            media::media_get_capabilities,
+            media::media_get_stats,
+            media::media_set_microphone,
+            media::media_set_microphone_device,
+            media::media_set_output_device,
+            media::media_set_camera,
+            media::media_start_screen_share,
+            media::media_stop_screen_share,
+            media::media_start_system_audio,
+            media::media_stop_system_audio,
         ])
         .run(tauri::generate_context!())
         .expect("error while running dspeak desktop");

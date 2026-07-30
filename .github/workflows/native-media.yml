@@ -1,0 +1,207 @@
+name: Native Media Artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  WEBRTC_BRANCH: branch-heads/7339
+  WEBRTC_REVISION: m140
+  LIBMEDIASOUPCLIENT_REPOSITORY: https://github.com/versatica/libmediasoupclient.git
+  LIBMEDIASOUPCLIENT_REF: webrtc-m140
+  LIBMEDIASOUPCLIENT_COMMIT: b9602ba50477d9a22b673fc3e6b5abff16c02deb
+
+jobs:
+  build-libwebrtc:
+    name: Build libwebrtc (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            artifact: libwebrtc-macos-arm64
+            gn_args: "is_debug=false is_component_build=false is_clang=true rtc_include_tests=false rtc_use_h264=true treat_warnings_as_errors=false use_rtti=true target_cpu=\"arm64\""
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            artifact: libwebrtc-linux-x64
+            gn_args: "is_debug=false is_component_build=false is_clang=true rtc_include_tests=false rtc_use_h264=true treat_warnings_as_errors=false use_rtti=true"
+          - platform: windows-x64
+            runner: windows-2022
+            artifact: libwebrtc-windows-x64
+            gn_args: "is_debug=false is_component_build=false is_clang=true rtc_include_tests=false rtc_use_h264=true treat_warnings_as_errors=false use_rtti=true target_cpu=\"x64\""
+    steps:
+      - name: Install depot_tools
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${{ runner.temp }}/depot_tools"
+          echo "${{ runner.temp }}/depot_tools" >> $GITHUB_PATH
+
+      - name: Fetch WebRTC source
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p webrtc-checkout && cd webrtc-checkout
+          fetch --nohooks webrtc
+
+      - name: Checkout pinned revision
+        working-directory: ${{ runner.temp }}/webrtc-checkout/src
+        run: |
+          git checkout -b ${{ env.WEBRTC_REVISION }} refs/remotes/${{ env.WEBRTC_BRANCH }}
+          gclient sync
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        working-directory: ${{ runner.temp }}/webrtc-checkout/src
+        run: |
+          sudo -S -p '' ./build/install-build-deps.sh --no-prompt
+
+      - name: Generate build files
+        working-directory: ${{ runner.temp }}/webrtc-checkout/src
+        run: |
+          gn gen out/${{ env.WEBRTC_REVISION }} --args='${{ matrix.gn_args }}'
+
+      - name: Build libwebrtc
+        working-directory: ${{ runner.temp }}/webrtc-checkout/src
+        run: |
+          ninja -C out/${{ env.WEBRTC_REVISION }}
+
+      - name: Package artifact
+        id: package
+        working-directory: ${{ runner.temp }}/webrtc-checkout/src
+        run: |
+          ARTIFACT_DIR="${{ runner.temp }}/artifact"
+          mkdir -p "${ARTIFACT_DIR}/lib" "${ARTIFACT_DIR}/include"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "out/${{ env.WEBRTC_REVISION }}/obj/libwebrtc.lib" "${ARTIFACT_DIR}/lib/libwebrtc.lib"
+          else
+            cp "out/${{ env.WEBRTC_REVISION }}/obj/libwebrtc.a" "${ARTIFACT_DIR}/lib/libwebrtc.a"
+          fi
+          find . -name "*.h" ! -path "./out/${{ env.WEBRTC_REVISION }}/*" | tar czf "${ARTIFACT_DIR}/include.tar.gz" -T -
+          tar czf "${{ runner.temp }}/${{ matrix.artifact }}.tar.gz" -C "${{ runner.temp }}" artifact/
+          echo "artifact_path=${{ runner.temp }}/${{ matrix.artifact }}.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: Upload libwebrtc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/${{ matrix.artifact }}.tar.gz
+          retention-days: 7
+
+  build-libmediasoupclient:
+    name: Build libmediasoupclient (${{ matrix.platform }})
+    needs: build-libwebrtc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            webrtc_artifact: libwebrtc-macos-arm64
+            artifact: libmediasoupclient-macos-arm64
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            webrtc_artifact: libwebrtc-linux-x64
+            artifact: libmediasoupclient-linux-x64
+          - platform: windows-x64
+            runner: windows-2022
+            webrtc_artifact: libwebrtc-windows-x64
+            artifact: libmediasoupclient-windows-x64
+    steps:
+      - name: Download libwebrtc artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.webrtc_artifact }}
+          path: ${{ runner.temp }}/libwebrtc
+
+      - name: Extract libwebrtc
+        run: |
+          mkdir -p "${{ runner.temp }}/libwebrtc-extracted"
+          tar xzf "${{ runner.temp }}/libwebrtc/${{ matrix.webrtc_artifact }}.tar.gz" -C "${{ runner.temp }}/libwebrtc-extracted"
+
+      - name: Checkout libmediasoupclient
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBMEDIASOUPCLIENT_REF }} ${{ env.LIBMEDIASOUPCLIENT_REPOSITORY }} "${{ runner.temp }}/libmediasoupclient"
+          cd "${{ runner.temp }}/libmediasoupclient"
+          git checkout ${{ env.LIBMEDIASOUPCLIENT_COMMIT }}
+
+      - name: Configure CMake
+        working-directory: ${{ runner.temp }}/libmediasoupclient
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLIBWEBRTC_INCLUDE_PATH="${{ runner.temp }}/libwebrtc-extracted/artifact/include" -DLIBWEBRTC_BINARY_PATH="${{ runner.temp }}/libwebrtc-extracted/artifact/lib" -DMEDIASOUPCLIENT_BUILD_TESTS=OFF -DMEDIASOUPCLIENT_BUILD_DEMO=OFF
+
+      - name: Build libmediasoupclient
+        working-directory: ${{ runner.temp }}/libmediasoupclient
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Package libmediasoupclient artifact
+        run: |
+          ARTIFACT_DIR="${{ runner.temp }}/artifact"
+          mkdir -p "${ARTIFACT_DIR}/lib" "${ARTIFACT_DIR}/include"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "${{ runner.temp }}/libmediasoupclient/build/Release/mediasoupclient.lib" "${ARTIFACT_DIR}/lib/libmediasoupclient.lib"
+          else
+            cp "${{ runner.temp }}/libmediasoupclient/build/libmediasoupclient.a" "${ARTIFACT_DIR}/lib/libmediasoupclient.a"
+          fi
+          cp -r "${{ runner.temp }}/libmediasoupclient/include/"* "${ARTIFACT_DIR}/include/"
+          cp -r "${{ runner.temp }}/libwebrtc-extracted/artifact/lib/"* "${ARTIFACT_DIR}/lib/"
+          cp -r "${{ runner.temp }}/libwebrtc-extracted/artifact/include/"* "${ARTIFACT_DIR}/include/" 2>/dev/null || true
+          tar czf "${{ runner.temp }}/${{ matrix.artifact }}.tar.gz" -C "${{ runner.temp }}" artifact/
+
+      - name: Upload libmediasoupclient artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/${{ matrix.artifact }}.tar.gz
+          retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-libwebrtc, build-libmediasoupclient]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Create release notes file
+        run: |
+          cat > /tmp/release-notes.md << 'EOF'
+          Pre-built native media artifacts for dspeak desktop.
+
+          libwebrtc: ${{ env.WEBRTC_REVISION }} (${{ env.WEBRTC_BRANCH }})
+          libmediasoupclient: ${{ env.LIBMEDIASOUPCLIENT_REF }} (${{ env.LIBMEDIASOUPCLIENT_COMMIT }})
+
+          Artifacts contain:
+          - lib/libwebrtc.a (.lib on Windows)
+          - lib/libmediasoupclient.a (.lib on Windows)
+          - include/ (all headers for both libraries)
+
+          Use with desktop/native-media/dependencies.env pointing to the extracted artifact directory.
+          EOF
+
+      - name: Create or replace release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_TAG="webrtc-${{ env.WEBRTC_REVISION }}"
+          gh release delete "${RELEASE_TAG}" --repo ${{ github.repository }} --yes 2>/dev/null || true
+          gh release create "${RELEASE_TAG}" \
+            --repo ${{ github.repository }} \
+            --title "libwebrtc ${{ env.WEBRTC_REVISION }} (${{ env.WEBRTC_BRANCH }}) + libmediasoupclient ${{ env.LIBMEDIASOUPCLIENT_REF }}" \
+            --notes-file /tmp/release-notes.md \
+            artifacts/*.tar.gz
