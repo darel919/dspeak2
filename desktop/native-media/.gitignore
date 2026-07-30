@@ -1,5 +1,15 @@
 # Native dependency checkouts and binaries are provisioned outside Git.
+# Keep the portable C++/Objective-C++ shim and its reproducible build definition
+# tracked; ignore only generated build products and developer-provisioned bundles.
 *
 !.gitignore
 !README.md
 !dependencies.env.example
+!libdspeak_media/
+!libdspeak_media/**
+libdspeak_media/build/
+libdspeak_media/build/**
+libdspeak_media/bundle/
+!platform/
+!platform/macos/
+!platform/macos/**

@@ -23,6 +23,11 @@ logs
 .fleet
 .idea
 
+# Native/Rust generated outputs
+/desktop/native-media/libdspeak_media/build/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+
 # Local env files
 .env
 .env.*
