@@ -448,8 +448,13 @@ export const useVoiceStore = defineStore("voice", () => {
       connecting.value = true;
       error.value = null;
       protocolUpdateRequired.value = false;
-      await ensureMicrophonePermission();
+      const { isTauriRuntime, useMediasoupSfu } =
+        await import("~/composables/useMediasoupSfu");
       ensureCurrentJoin();
+      if (!isTauriRuntime()) {
+        await ensureMicrophonePermission();
+        ensureCurrentJoin();
+      }
 
       if (connected.value && currentChannelId.value !== channelId) {
         await leaveVoiceChannel(false);
@@ -457,8 +462,6 @@ export const useVoiceStore = defineStore("voice", () => {
         ensureCurrentJoin();
       }
 
-      const { useMediasoupSfu } = await import("~/composables/useMediasoupSfu");
-      ensureCurrentJoin();
       sfuComposable.value = useMediasoupSfu();
       session = sfuComposable.value;
       await session.prepareAudioPlayback?.();
@@ -599,7 +602,7 @@ export const useVoiceStore = defineStore("voice", () => {
     }
   }
 
-  async function toggleScreenShare() {
+  async function toggleScreenShare(captureSelection = null) {
     if (!connected.value || !sfuComposable.value) return;
     try {
       const session = sfuComposable.value;
@@ -609,7 +612,15 @@ export const useVoiceStore = defineStore("voice", () => {
         screenSharing.value = false;
       } else {
         screenSharing.value = false;
-        const producer = await session.startVideoProduction("screen");
+        const producer = await session.startVideoProduction(
+          "screen",
+          captureSelection
+            ? {
+                captureSelection,
+                roomBitrateBps: effectiveSystemAudioBitrate.value * 1000,
+              }
+            : undefined,
+        );
         screenSharing.value = true;
         playSystemSound("screen-start", settingsStore);
         const handleScreenShareEnded = () => {
@@ -641,24 +652,32 @@ export const useVoiceStore = defineStore("voice", () => {
     );
   }
 
-  async function toggleSystemAudioShare() {
+  async function toggleSystemAudioShare(captureSelection = null) {
     if (!connected.value || !sfuComposable.value) return;
     try {
       if (systemAudioSharing.value) {
         sfuComposable.value.stopSystemAudioProduction();
         systemAudioSharing.value = false;
       } else {
-        const confirmed =
-          typeof window === "undefined" ||
-          window.confirm(
-            "Share system audio only?\n\n" +
-              "Your browser will show its regular screen-sharing dialog because that is how it gives access to system audio.\n\n" +
-              "1. Choose “Entire Screen” in the browser dialog.\n" +
-              "2. Make sure “Share audio” is enabled.\n\n" +
-              "Your screen video will not be shared—only the audio will be sent.",
-          );
+        const confirmed = captureSelection
+          ? true
+          : typeof window === "undefined" ||
+            window.confirm(
+              "Share system audio only?\n\n" +
+                "Your browser will show its regular screen-sharing dialog because that is how it gives access to system audio.\n\n" +
+                "1. Choose “Entire Screen” in the browser dialog.\n" +
+                "2. Make sure “Share audio” is enabled.\n\n" +
+                "Your screen video will not be shared—only the audio will be sent.",
+            );
         if (!confirmed) return;
-        const producer = await sfuComposable.value.startSystemAudioProduction();
+        const producer = await sfuComposable.value.startSystemAudioProduction(
+          captureSelection
+            ? {
+                captureSelection,
+                roomBitrateBps: effectiveSystemAudioBitrate.value * 1000,
+              }
+            : undefined,
+        );
         systemAudioSharing.value = true;
         const handleEnded = () => {
           systemAudioSharing.value = false;

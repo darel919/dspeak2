@@ -55,9 +55,9 @@ export class BrowserMediaEngine extends MediaEngine {
 
   async startScreenShare(options = {}) {
     if (options.includeSystemAudio) {
-      await this.session.startSystemAudioProduction();
+      await this.session.startSystemAudioProduction(options);
     }
-    await this.session.startVideoProduction("screen");
+    await this.session.startVideoProduction("screen", options);
     this.screenSharing = true;
   }
 
@@ -288,10 +288,10 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.stopAudioProduction();
   }
 
-  startVideoProduction(source) {
+  startVideoProduction(source, options = {}) {
     if (source === "camera") this.cameraEnabled = true;
     if (source === "screen") this.screenSharing = true;
-    return this.session.startVideoProduction(source);
+    return this.session.startVideoProduction(source, options);
   }
 
   stopVideoProduction(source) {
@@ -300,8 +300,8 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.stopVideoProduction(source);
   }
 
-  startSystemAudioProduction() {
-    return this.session.startSystemAudioProduction();
+  startSystemAudioProduction(options = {}) {
+    return this.session.startSystemAudioProduction(options);
   }
 
   stopSystemAudioProduction() {

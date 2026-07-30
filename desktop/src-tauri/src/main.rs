@@ -9,7 +9,7 @@ use axum::{
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
@@ -43,7 +43,7 @@ struct OAuthServerState {
 static HIDE_ON_CLOSE: AtomicBool = AtomicBool::new(true);
 
 fn main() {
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_keyring_store::Builder::default().build())
@@ -60,6 +60,16 @@ fn main() {
         })
         .manage(media::NativeMediaStore::default())
         .setup(|app| {
+            if let Err(error) =
+                media::strict_startup_check(app.state::<media::NativeMediaStore>().inner())
+            {
+                eprintln!("[dspeak:fatal-startup] {error}");
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                }
+                std::process::exit(1);
+            }
+
             let oauth_state = app.state::<OAuthState>().inner().clone();
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -82,18 +92,6 @@ fn main() {
 
             let _ = create_tray(app.handle())?;
             setup_global_shortcuts(app.handle());
-
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                if let Ok(updater) = handle.updater() {
-                    if let Ok(Some(update)) = updater.check().await {
-                        let _ = update
-                            .download_and_install(|_chunk, _total| {}, || {})
-                            .await;
-                    }
-                }
-            });
 
             if let Some(window) = app.get_webview_window("main") {
                 let _ = restore_window_state(window.clone());
@@ -151,17 +149,24 @@ fn main() {
             media::media_fail_connect,
             media::media_complete_produce,
             media::media_fail_produce,
+            media::media_create_capture_producer,
             media::media_set_microphone,
             media::media_set_microphone_device,
             media::media_set_output_device,
             media::media_set_camera,
             media::media_start_screen_share,
+            media::media_replace_screen_share,
             media::media_stop_screen_share,
             media::media_start_system_audio,
+            media::media_replace_system_audio,
             media::media_stop_system_audio,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running dspeak desktop");
+        .run(tauri::generate_context!());
+
+    if let Err(error) = result {
+        eprintln!("[dspeak:fatal-startup] {error}");
+        std::process::exit(1);
+    }
 }
 
 #[tauri::command]

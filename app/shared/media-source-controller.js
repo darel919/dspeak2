@@ -227,12 +227,16 @@ export function createMediaSourceController({
     return capture.restartMicrophone().then((entry) => producerFacade(entry));
   }
 
-  function startVideoProduction(source) {
-    return capture.startVideo(source).then((entry) => producerFacade(entry));
+  function startVideoProduction(source, options = {}) {
+    return capture
+      .startVideo(source, options)
+      .then((entry) => producerFacade(entry));
   }
 
-  function startSystemAudioProduction() {
-    return capture.startSystemAudio().then((entry) => producerFacade(entry));
+  function startSystemAudioProduction(options = {}) {
+    return capture
+      .startSystemAudio(options)
+      .then((entry) => producerFacade(entry));
   }
 
   return {

@@ -19,23 +19,39 @@ produced by CI or a separate developer provisioning step.
 The native media build must provide, for the target platform:
 
 ```text
-build/lib/libdspeak_media.a
-build/lib/libmediasoupclient.a
-build/lib/libwebrtc.a
-build/include/        # libwebrtc and libmediasoupclient headers
+lib/libdspeak_media.a
+lib/libsdptransform.a
+lib/libmediasoupclient.a
+lib/libwebrtc.a
+include/                # libwebrtc, libmediasoupclient, and json.hpp headers
 ```
 
 The Rust/Tauri application should link only against this prebuilt artifact
 bundle. It must not invoke `fetch`, `gclient`, CMake, or a package download from
 application startup.
 
+## Development
+
+Desktop builds require `NATIVE_MEDIA_ARTIFACT_DIR` to point to the artifact
+bundle. A missing or incomplete bundle is a build error; desktop never silently
+switches to WebView WebRTC. For example:
+
+```sh
+cd desktop
+NATIVE_MEDIA_ARTIFACT_DIR=/path/to/native-bundle npm run dev
+```
+
+The web application does not use this variable and continues to use browser
+WebRTC.
+
 ## Current state
 
-This repository currently contains the typed Tauri control-plane boundary, but
-no checked-in `libdspeak_media` implementation or prebuilt artifact bundle.
-Consequently Rust reports native capabilities as unavailable and the frontend
-keeps browser WebRTC as its default/fallback path.
+The repository contains the C++20 `libdspeak_media` shim, its narrow C ABI, and
+the Tauri control-plane boundary. The shim and native-enabled Tauri target can
+be compiled and linked when a matching artifact bundle is provided.
 
-The next backend step is to add a C++20 `libdspeak_media` shim that owns
-libwebrtc/libmediasoupclient, exposes a narrow C ABI, and is linked by a
-platform-specific `build.rs` only when the artifact directory is present.
+Native capabilities remain unavailable by default. Source enumeration, native
+capture delivery, native SFU/P2P session ownership, and native receive
+rendering are not yet complete or runtime-validated. The desktop build fails
+closed until those required native capabilities are operational; only the web
+application retains browser WebRTC as its media path.

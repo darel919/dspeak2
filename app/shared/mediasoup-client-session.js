@@ -536,27 +536,39 @@ export class MediasoupClientSession {
     const track = entry.track.clone();
     const settings = track.getSettings?.() || {};
     const requestedVideo = this.getVideoSettings?.(entry.source) || {};
+    const selectedBitrate = Number(
+      entry.captureSelection?.audio?.maxBitrateBps || entry.roomBitrateBps,
+    );
+    const appData = {
+      source: entry.source,
+      ...(entry.captureSelection
+        ? { captureSelection: entry.captureSelection }
+        : {}),
+    };
     const options =
       track.kind === "audio"
         ? {
             ...buildVoiceProducerOptions(
               track,
-              this.getAudioBitrate?.(entry.source),
+              Number.isFinite(selectedBitrate) && selectedBitrate > 0
+                ? selectedBitrate
+                : this.getAudioBitrate?.(entry.source),
               this.getAudioStereo?.(entry.source),
             ),
             stopTracks: false,
-            appData: { source: entry.source },
+            appData,
           }
         : {
             track,
             stopTracks: false,
-            appData: { source: entry.source },
+            appData,
             ...buildVideoProduceOptions({
               width: settings.width,
               height: settings.height,
               frameRate: settings.frameRate,
               qualityPriority: requestedVideo.qualityPriority,
               screen: entry.source === "screen",
+              maxBitrate: requestedVideo.maxBitrate,
             }),
           };
     let producer;

@@ -4,14 +4,16 @@ import { useHybridMediaSession } from "./useHybridMediaSession.js";
 /**
  * Creates the application-facing media session.
  *
- * The hybrid session remains the browser implementation and is wrapped by the
- * runtime-selected engine so existing consumers can migrate incrementally.
+ * The browser hybrid session is created lazily, after the runtime has selected
+ * the browser engine. Tauri receives the native-only boundary instead.
  *
  * @returns {import("./media/browserMediaEngine.js").BrowserMediaEngine}
  *   or a native compatibility engine in the Tauri runtime.
  */
-export function useMediasoupSfu() {
-  return useMediaEngine(useHybridMediaSession());
+export function useMediasoupSfu(options = {}) {
+  return useMediaEngine(useHybridMediaSession, options);
 }
+
+export { isTauriRuntime } from "./media/useMediaEngine.js";
 
 export default useMediasoupSfu;

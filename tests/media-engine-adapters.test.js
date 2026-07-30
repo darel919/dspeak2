@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { BrowserMediaEngine } from "../app/composables/media/browserMediaEngine.js";
 import { NativeMediaEngine } from "../app/composables/media/nativeMediaEngine.js";
+import { useMediaEngine } from "../app/composables/media/useMediaEngine.js";
 
 function createSession() {
   const calls = [];
@@ -21,6 +23,51 @@ function createSession() {
 }
 
 describe("MediaEngine adapters", () => {
+  it("selects Tauri before constructing the browser session", () => {
+    let browserSessionConstructed = false;
+    const sessionFactory = () => {
+      browserSessionConstructed = true;
+      return createSession().session;
+    };
+
+    const webEngine = useMediaEngine(sessionFactory, { isTauri: false });
+    assert.equal(browserSessionConstructed, true);
+    assert.ok(webEngine instanceof BrowserMediaEngine);
+
+    browserSessionConstructed = false;
+    const nativeEngine = useMediaEngine(sessionFactory, { isTauri: true });
+    assert.equal(browserSessionConstructed, false);
+    assert.ok(nativeEngine instanceof NativeMediaEngine);
+  });
+
+  it("does not probe browser microphone access before the Tauri factory", async () => {
+    const voiceStore = await readFile("app/stores/voice.js", "utf8");
+    const factoryImport = voiceStore.indexOf('"~/composables/useMediasoupSfu"');
+    const permissionProbe = voiceStore.indexOf(
+      "await ensureMicrophonePermission();",
+    );
+
+    assert.ok(factoryImport >= 0);
+    assert.ok(permissionProbe > factoryImport);
+    assert.match(
+      voiceStore.slice(factoryImport, permissionProbe),
+      /if \(!isTauriRuntime\(\)\) \{/,
+    );
+  });
+
+  it("fails explicitly when native-only media has no native session", async () => {
+    const engine = new NativeMediaEngine({
+      flags: { nativeRtc: false },
+      nativeOnly: true,
+    });
+
+    await assert.rejects(
+      () => engine.connect("channel-native-boundary"),
+      /Native WebRTC operation is unavailable: connect/,
+    );
+    assert.equal(engine.browserEngine instanceof BrowserMediaEngine, false);
+  });
+
   it("BrowserMediaEngine delegates session operations without changing them", async () => {
     const { calls, session } = createSession();
     const engine = new BrowserMediaEngine(session);
@@ -78,7 +125,13 @@ describe("MediaEngine adapters", () => {
       invoke: async (command, payload) => {
         calls.push([command, payload]);
         if (command === "media_initialize") {
-          return { capabilities: { nativeRtc: true, screenVideo: true } };
+          return {
+            capabilities: {
+              nativeRtc: true,
+              nativeBackendReady: true,
+              screenVideo: true,
+            },
+          };
         }
         return command === "media_get_stats" ? { engine: "native" } : undefined;
       },
@@ -179,5 +232,45 @@ describe("MediaEngine adapters", () => {
       nativeCalls.map(([command]) => command),
       ["media_start_screen_share"],
     );
+  });
+
+  it("NativeMediaEngine does not silently replace a source-aware failure with browser capture", async () => {
+    const { calls, session } = createSession();
+    const engine = new NativeMediaEngine({
+      browserEngine: new BrowserMediaEngine(session),
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeScreenShare: true,
+      },
+      tauri: {
+        invoke: async (command) => {
+          if (command === "media_start_screen_share") {
+            throw new Error(
+              "unsupported: PipeWire portal capture is unavailable",
+            );
+          }
+          return undefined;
+        },
+        listen: async () => () => {},
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        engine.startScreenShare({
+          source: {
+            sourceId: "display:one",
+            sourceType: "display",
+            sourceKey: "display:display:one",
+          },
+          sourceId: "display:one",
+          sourceType: "display",
+          sourceKey: "display:display:one",
+          mode: "video",
+        }),
+      /unsupported: PipeWire portal capture is unavailable/,
+    );
+    assert.deepEqual(calls, []);
   });
 });

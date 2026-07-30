@@ -1,5 +1,10 @@
 import { buildVideoConstraints } from "./video-settings.js";
 import { DEFAULT_AUDIO_SETTINGS } from "../const/media.js";
+import {
+  DESKTOP_CAPTURE_ERROR_CODES,
+  DesktopCaptureError,
+  assertDesktopCaptureSelection,
+} from "./desktop-capture.js";
 
 export function audioConstraints(settings, stereo = false) {
   const processing = {
@@ -287,9 +292,20 @@ export class MediaCaptureManager {
     return replacement;
   }
 
-  async startVideo(source) {
+  async startVideo(source, options = {}) {
     if (source !== "camera" && source !== "screen")
       throw new Error("Unsupported video source");
+    if (source === "screen" && options.captureSelection) {
+      assertDesktopCaptureSelection(options.captureSelection, "screen-video");
+      if (!options.explicitBrowserFallback)
+        throw new DesktopCaptureError(
+          "The selected desktop source requires native capture; choose browser capture explicitly to use the browser picker.",
+          {
+            code: DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNSUPPORTED,
+            operation: "screen-video",
+          },
+        );
+    }
     const existing = this.sources.get(source);
     if (existing) return existing;
     const generation = (this.sourceGenerations.get(source) || 0) + 1;
@@ -305,6 +321,8 @@ export class MediaCaptureManager {
       ? await this.mediaDevices.getDisplayMedia({
           video: constraints,
           audio: sharedAudioConstraints(),
+          selfBrowserSurface: "exclude",
+          systemAudio: "include",
         })
       : await this.mediaDevices.getUserMedia({
           video: constraints,
@@ -334,7 +352,10 @@ export class MediaCaptureManager {
     }
     if (screen) track.contentHint = "motion";
     try {
-      const entry = this.register(source, stream, track);
+      const entry = this.register(source, stream, track, {
+        captureSelection: options.captureSelection || null,
+        roomBitrateBps: options.roomBitrateBps || null,
+      });
       const published = await entry.publication;
       if (
         this.sourceGenerations.get(source) !== generation ||
@@ -366,9 +387,20 @@ export class MediaCaptureManager {
     return error;
   }
 
-  async startSystemAudio() {
+  async startSystemAudio(options = {}) {
     const existing = this.sources.get("screen-audio");
     if (existing) return existing;
+    if (options.captureSelection) {
+      assertDesktopCaptureSelection(options.captureSelection, "system-audio");
+      if (!options.explicitBrowserFallback)
+        throw new DesktopCaptureError(
+          "The selected desktop source requires native capture; choose browser capture explicitly to use the browser picker.",
+          {
+            code: DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNSUPPORTED,
+            operation: "system-audio",
+          },
+        );
+    }
     const stream = await this.mediaDevices.getDisplayMedia({
       video: true,
       audio: sharedAudioConstraints(),
@@ -386,6 +418,8 @@ export class MediaCaptureManager {
     track.contentHint = "music";
     const entry = this.register("screen-audio", stream, track, {
       ownerSource: "system-audio",
+      captureSelection: options.captureSelection || null,
+      roomBitrateBps: options.roomBitrateBps || null,
     });
     try {
       const published = await entry.publication;

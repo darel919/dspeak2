@@ -434,6 +434,7 @@ export function useHybridMediaSession() {
           frameRate: getRequestedVideoSettings(source).frameRate,
           qualityPriority: getRequestedVideoSettings(source).qualityPriority,
           screen: source === "screen",
+          maxBitrate: getRequestedVideoSettings(source).maxBitrate,
         });
         const ceiling = getRequestedVideoSettings(source).maxBitrate;
         if (ceiling && options.encodings?.[0])

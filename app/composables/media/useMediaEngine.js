@@ -8,7 +8,7 @@ function isTauriRuntime() {
 }
 
 function environmentFlag(name, fallback = false) {
-  const value = import.meta.env[name];
+  const value = import.meta.env?.[name];
   if (value === undefined) return fallback;
   return value === "1" || value === "true";
 }
@@ -27,22 +27,36 @@ export function resolveNativeMediaFlags(overrides = {}) {
     ),
     nativeP2P: environmentFlag("VITE_DSPEAK_NATIVE_P2P", nativeRtc),
     nativeSfu: environmentFlag("VITE_DSPEAK_NATIVE_SFU", nativeRtc),
-    nativeMicrophone: environmentFlag("VITE_DSPEAK_NATIVE_MICROPHONE"),
+    nativeMicrophone: environmentFlag(
+      "VITE_DSPEAK_NATIVE_MICROPHONE",
+      nativeRtc,
+    ),
     nativeCamera: environmentFlag("VITE_DSPEAK_NATIVE_CAMERA", nativeRtc),
-    nativeAudioReceive: environmentFlag("VITE_DSPEAK_NATIVE_AUDIO_RECEIVE"),
-    nativeVideoReceive: environmentFlag("VITE_DSPEAK_NATIVE_VIDEO_RECEIVE"),
+    nativeAudioReceive: environmentFlag(
+      "VITE_DSPEAK_NATIVE_AUDIO_RECEIVE",
+      nativeRtc,
+    ),
+    nativeVideoReceive: environmentFlag(
+      "VITE_DSPEAK_NATIVE_VIDEO_RECEIVE",
+      nativeRtc,
+    ),
     ...overrides,
   };
 }
 
-export function useMediaEngine(session, options = {}) {
-  const browserEngine = new BrowserMediaEngine(session);
-  if (!isTauriRuntime()) return browserEngine;
-  return new NativeMediaEngine({
-    browserEngine,
-    flags: resolveNativeMediaFlags(options.flags),
-    tauri: options.tauri,
-  });
+export function useMediaEngine(sessionOrFactory, options = {}) {
+  const tauriRuntime = options.isTauri ?? isTauriRuntime();
+  if (tauriRuntime)
+    return new NativeMediaEngine({
+      flags: resolveNativeMediaFlags({ nativeRtc: true, ...options.flags }),
+      tauri: options.tauri,
+      nativeOnly: true,
+    });
+  const session =
+    typeof sessionOrFactory === "function"
+      ? sessionOrFactory()
+      : sessionOrFactory;
+  return new BrowserMediaEngine(session);
 }
 
 export { isTauriRuntime };

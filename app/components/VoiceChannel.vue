@@ -1,5 +1,12 @@
 <template>
   <div class="voice-channel relative flex h-full flex-col bg-base-200">
+    <DesktopCapturePicker
+      :open="capturePickerOpen"
+      :audio-only="capturePickerAudioOnly"
+      @close="closeCapturePicker"
+      @fallback="useBrowserCaptureFallback"
+      @select="selectDesktopCapture"
+    />
     <header
       class="voice-channel-header flex min-h-12 shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-black px-4 text-white"
     >
@@ -539,7 +546,7 @@
             :data-label="
               voiceStore.screenSharing ? 'Stop sharing' : 'Share screen'
             "
-            @click="toggleScreenShare"
+            @click="requestScreenShare"
           >
             <Icon name="lucide:monitor-up" class="size-5" />
           </button>
@@ -559,7 +566,7 @@
                 ? 'Stop system audio'
                 : 'System audio'
             "
-            @click="toggleSystemAudioShare"
+            @click="requestSystemAudioShare"
           >
             <Icon name="lucide:volume-2" class="size-5" />
           </button>
@@ -734,6 +741,7 @@ import { useAuthStore } from "~/stores/auth";
 import { useSettingsStore } from "~/stores/settings";
 import { useIdentityStore } from "~/stores/identity";
 import { useChannelsStore } from "~/stores/channels";
+import { getDesktopCaptureApi } from "../shared/desktop-capture";
 
 const props = defineProps({
   channel: {
@@ -963,6 +971,59 @@ async function toggleScreenShare() {
     await voiceStore.toggleScreenShare();
   } catch (err) {
     console.error("[VoiceChannel] Screen share error:", err);
+  }
+}
+
+const capturePickerOpen = ref(false);
+const capturePickerAudioOnly = ref(false);
+
+async function requestScreenShare() {
+  if (voiceStore.screenSharing) {
+    await toggleScreenShare();
+    return;
+  }
+  const api = await getDesktopCaptureApi();
+  if (api) {
+    capturePickerAudioOnly.value = false;
+    capturePickerOpen.value = true;
+    return;
+  }
+  await toggleScreenShare();
+}
+
+async function requestSystemAudioShare() {
+  if (voiceStore.systemAudioSharing) {
+    await toggleSystemAudioShare();
+    return;
+  }
+  const api = await getDesktopCaptureApi();
+  if (api) {
+    capturePickerAudioOnly.value = true;
+    capturePickerOpen.value = true;
+    return;
+  }
+  await toggleSystemAudioShare();
+}
+
+function closeCapturePicker() {
+  capturePickerOpen.value = false;
+}
+
+async function selectDesktopCapture(selection) {
+  capturePickerOpen.value = false;
+  if (capturePickerAudioOnly.value) {
+    await voiceStore.toggleSystemAudioShare(selection);
+  } else {
+    await voiceStore.toggleScreenShare(selection);
+  }
+}
+
+async function useBrowserCaptureFallback() {
+  capturePickerOpen.value = false;
+  if (capturePickerAudioOnly.value) {
+    await toggleSystemAudioShare();
+  } else {
+    await toggleScreenShare();
   }
 }
 

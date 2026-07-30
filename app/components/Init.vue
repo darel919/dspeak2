@@ -1,7 +1,11 @@
 <template>
   <div>
+    <StartupLoader
+      v-if="desktopRuntime && !startupComplete && !isAuthPage"
+      :status="startupStatus"
+    />
     <div
-      v-if="!startupComplete && !isAuthPage"
+      v-else-if="!desktopRuntime && !startupComplete && !isAuthPage"
       class="metro-standalone flex min-h-screen items-center bg-base-100 px-6 py-12 sm:px-12"
     >
       <div class="w-full max-w-3xl">
@@ -58,9 +62,14 @@ const route = useRoute();
 const authChecked = ref(false);
 const startupComplete = ref(false);
 const startupStatus = ref("Checking authentication…");
+const desktopRuntime = ref(false);
 const isBootstrapping = ref(true);
 const waitingForPageReadiness = ref(false);
 const { runStartupUpdate, startupUpdateStatus } = usePwaUpdate();
+const {
+  runStartupUpdate: runDesktopStartupUpdate,
+  status: desktopUpdateStatus,
+} = useDesktopUpdate();
 const startupReadiness = createStartupReadiness({
   onPending(status) {
     if (waitingForPageReadiness.value && status) {
@@ -105,9 +114,22 @@ watch(startupUpdateStatus, (status) => {
   if (status === "updating") startupStatus.value = "Updating dSpeak…";
 });
 
+watch(desktopUpdateStatus, (status) => {
+  if (status === "checking") startupStatus.value = "Checking for updates…";
+  if (status === "error") startupStatus.value = "Continuing without an update…";
+});
+
+function isDesktopRuntime() {
+  return Boolean(
+    import.meta.client && (window.__TAURI_INTERNALS__ || window.__TAURI__),
+  );
+}
+
 onMounted(async () => {
+  desktopRuntime.value = isDesktopRuntime();
   try {
-    await runStartupUpdate();
+    if (isDesktopRuntime()) await runDesktopStartupUpdate();
+    else await runStartupUpdate();
     if (!isAuthPage.value) {
       startupStatus.value = "Checking authentication…";
       await checkAuth();

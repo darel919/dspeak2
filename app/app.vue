@@ -6,6 +6,7 @@
     <GlobalVoiceStatus />
     <PwaInstallPrompt />
     <PwaUpdatePrompt />
+    <DesktopUpdatePrompt />
     <DatabaseHealthPrompt />
     <FatalErrorPrompt />
     <CookieConsent />

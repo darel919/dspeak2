@@ -17,6 +17,10 @@ env:
   LIBMEDIASOUPCLIENT_REF: webrtc-m140
   LIBMEDIASOUPCLIENT_COMMIT: b9602ba50477d9a22b673fc3e6b5abff16c02deb
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-libwebrtc:
     name: Build libwebrtc (${{ matrix.platform }})
@@ -84,6 +88,8 @@ jobs:
             cp "out/${{ env.WEBRTC_REVISION }}/obj/libwebrtc.a" "${ARTIFACT_DIR}/lib/libwebrtc.a"
           fi
           find . -name "*.h" ! -path "./out/${{ env.WEBRTC_REVISION }}/*" | tar czf "${ARTIFACT_DIR}/include.tar.gz" -T -
+          tar xzf "${ARTIFACT_DIR}/include.tar.gz" -C "${ARTIFACT_DIR}/include"
+          rm "${ARTIFACT_DIR}/include.tar.gz"
           tar czf "${{ runner.temp }}/${{ matrix.artifact }}.tar.gz" -C "${{ runner.temp }}" artifact/
           echo "artifact_path=${{ runner.temp }}/${{ matrix.artifact }}.tar.gz" >> $GITHUB_OUTPUT
 
@@ -131,6 +137,7 @@ jobs:
         run: |
           git clone --depth 1 --branch ${{ env.LIBMEDIASOUPCLIENT_REF }} ${{ env.LIBMEDIASOUPCLIENT_REPOSITORY }} "${{ runner.temp }}/libmediasoupclient"
           cd "${{ runner.temp }}/libmediasoupclient"
+          git fetch --depth 1 origin ${{ env.LIBMEDIASOUPCLIENT_COMMIT }}
           git checkout ${{ env.LIBMEDIASOUPCLIENT_COMMIT }}
 
       - name: Configure CMake
@@ -155,6 +162,12 @@ jobs:
           cp -r "${{ runner.temp }}/libmediasoupclient/include/"* "${ARTIFACT_DIR}/include/"
           cp -r "${{ runner.temp }}/libwebrtc-extracted/artifact/lib/"* "${ARTIFACT_DIR}/lib/"
           cp -r "${{ runner.temp }}/libwebrtc-extracted/artifact/include/"* "${ARTIFACT_DIR}/include/" 2>/dev/null || true
+          JSON_HEADER="$(find "${{ runner.temp }}/libmediasoupclient/build" -name json.hpp -print -quit)"
+          [[ -n "${JSON_HEADER}" ]] || { echo "json.hpp was not produced by libsdptransform" >&2; exit 1; }
+          cp "${JSON_HEADER}" "${ARTIFACT_DIR}/include/json.hpp"
+          SDP_LIBRARY="$(find "${{ runner.temp }}/libmediasoupclient/build" \( -name 'libsdptransform.a' -o -name 'sdptransform.lib' \) -print -quit)"
+          [[ -n "${SDP_LIBRARY}" ]] || { echo "libsdptransform archive was not produced" >&2; exit 1; }
+          cp "${SDP_LIBRARY}" "${ARTIFACT_DIR}/lib/$(basename "${SDP_LIBRARY}")"
           tar czf "${{ runner.temp }}/${{ matrix.artifact }}.tar.gz" -C "${{ runner.temp }}" artifact/
 
       - name: Upload libmediasoupclient artifact
@@ -164,9 +177,72 @@ jobs:
           path: ${{ runner.temp }}/${{ matrix.artifact }}.tar.gz
           retention-days: 7
 
+  build-dspeak-media:
+    name: Build dSpeak native shim (${{ matrix.platform }})
+    needs: build-libmediasoupclient
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            dependency_artifact: libmediasoupclient-macos-arm64
+            artifact: lib-dspeak-media-macos-arm64
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            dependency_artifact: libmediasoupclient-linux-x64
+            artifact: lib-dspeak-media-linux-x64
+          - platform: windows-x64
+            runner: windows-2022
+            dependency_artifact: libmediasoupclient-windows-x64
+            artifact: lib-dspeak-media-windows-x64
+    steps:
+      - name: Checkout dSpeak
+        uses: actions/checkout@v4
+
+      - name: Download libmediasoupclient artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.dependency_artifact }}
+          path: ${{ runner.temp }}/dependencies
+
+      - name: Extract dependency bundle
+        run: |
+          mkdir -p "${{ runner.temp }}/bundle"
+          tar xzf "${{ runner.temp }}/dependencies/${{ matrix.dependency_artifact }}.tar.gz" -C "${{ runner.temp }}/bundle"
+
+      - name: Configure dSpeak native shim
+        env:
+          NATIVE_MEDIA_ARTIFACT_DIR: ${{ runner.temp }}/bundle/artifact
+        run: |
+          cmake -S "$GITHUB_WORKSPACE/desktop/native-media/libdspeak_media" \
+            -B "${{ runner.temp }}/dspeak-native-build" \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build dSpeak native shim
+        run: |
+          cmake --build "${{ runner.temp }}/dspeak-native-build" --config Release --parallel
+
+      - name: Package complete native bundle
+        run: |
+          ARTIFACT_DIR="${{ runner.temp }}/bundle/artifact"
+          SHIM_LIBRARY="$(find "${{ runner.temp }}/dspeak-native-build" \( -name 'libdspeak_media.a' -o -name 'libdspeak_media.lib' \) -print -quit)"
+          [[ -n "${SHIM_LIBRARY}" ]] || { echo "libdspeak_media archive was not produced" >&2; exit 1; }
+          cp "${SHIM_LIBRARY}" "${ARTIFACT_DIR}/lib/$(basename "${SHIM_LIBRARY}")"
+          tar czf "${{ runner.temp }}/${{ matrix.artifact }}.tar.gz" -C "${{ runner.temp }}/bundle" artifact/
+
+      - name: Upload complete native bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/${{ matrix.artifact }}.tar.gz
+          retention-days: 7
+
   create-release:
     name: Create GitHub Release
-    needs: [build-libwebrtc, build-libmediasoupclient]
+    needs: [build-libwebrtc, build-libmediasoupclient, build-dspeak-media]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -189,6 +265,8 @@ jobs:
           Artifacts contain:
           - lib/libwebrtc.a (.lib on Windows)
           - lib/libmediasoupclient.a (.lib on Windows)
+          - lib/libsdptransform.a (.lib on Windows)
+          - lib/libdspeak_media.a (.lib on Windows)
           - include/ (all headers for both libraries)
 
           Use with desktop/native-media/dependencies.env pointing to the extracted artifact directory.
