@@ -63,9 +63,10 @@ const {
 
 const visible = computed(
   () =>
-    (!deferred.value && updateAvailable.value) ||
-    status.value === "installed" ||
-    status.value === "error",
+    !deferred.value &&
+    (updateAvailable.value ||
+      status.value === "installed" ||
+      status.value === "error"),
 );
 </script>
 

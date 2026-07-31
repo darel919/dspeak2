@@ -13,7 +13,8 @@ function environmentFlag(name, fallback = false) {
 }
 
 export function resolveNativeMediaFlags(overrides = {}) {
-  const nativeRtc = environmentFlag("VITE_DSPEAK_NATIVE_MEDIA");
+  const nativeRtc =
+    overrides.nativeRtc ?? environmentFlag("VITE_DSPEAK_NATIVE_MEDIA");
   return {
     nativeRtc,
     nativeScreenShare: environmentFlag(

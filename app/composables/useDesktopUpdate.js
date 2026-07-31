@@ -21,7 +21,7 @@ export function useDesktopUpdate() {
   const completed = computed(() => state.value.status === "complete");
 
   async function runStartupUpdate() {
-    if (!runtimeStore.isTauri) {
+    if (!runtimeStore.isTauri || import.meta.dev) {
       state.value.status = "complete";
       return null;
     }

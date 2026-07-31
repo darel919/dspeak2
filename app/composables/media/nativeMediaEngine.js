@@ -111,6 +111,10 @@ function hasNativeCapability(flags) {
   return flags.nativeRtc === true && flags.nativeBackendReady === true;
 }
 
+function canAttemptNativeCapture(flags) {
+  return hasNativeCapability(flags);
+}
+
 function getCaptureSelection(request) {
   if (request?.captureSelection) return request.captureSelection;
   if (
@@ -236,7 +240,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async setMicrophoneDevice(deviceId) {
-    if (!this._usesNativeCapture("nativeMicrophone")) {
+    if (!canAttemptNativeCapture(this.flags)) {
       if (this.nativeOnly) throw nativeOnlyError("microphone device");
       return this.browserEngine.setMicrophoneDevice?.(deviceId);
     }
@@ -296,7 +300,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async setMicrophoneEnabled(enabled) {
-    if (!this._usesNativeCapture("nativeMicrophone")) {
+    if (!canAttemptNativeCapture(this.flags)) {
       if (this.nativeOnly) throw nativeOnlyError("microphone");
       return this.browserEngine.setMicrophoneEnabled(enabled);
     }
@@ -320,7 +324,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async setCameraEnabled(enabled) {
-    if (!this._usesNativeCapture("nativeCamera")) {
+    if (!canAttemptNativeCapture(this.flags)) {
       if (this.nativeOnly) throw nativeOnlyError("camera");
       return this.browserEngine.setCameraEnabled(enabled);
     }
@@ -740,7 +744,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   startAudioProduction(...args) {
-    if (this._usesNativeCapture("nativeMicrophone")) {
+    if (canAttemptNativeCapture(this.flags)) {
       return this.setMicrophoneEnabled(true);
     }
     if (this.nativeOnly) throw nativeOnlyError("microphone production");
@@ -748,7 +752,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   stopAudioProduction(...args) {
-    if (this._usesNativeCapture("nativeMicrophone")) {
+    if (canAttemptNativeCapture(this.flags)) {
       return this.setMicrophoneEnabled(false);
     }
     if (this.nativeOnly) throw nativeOnlyError("microphone production stop");

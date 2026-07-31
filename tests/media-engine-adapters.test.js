@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { BrowserMediaEngine } from "../app/composables/media/browserMediaEngine.js";
 import { NativeMediaEngine } from "../app/composables/media/nativeMediaEngine.js";
-import { useMediaEngine } from "../app/composables/media/useMediaEngine.js";
+import {
+  resolveNativeMediaFlags,
+  useMediaEngine,
+} from "../app/composables/media/useMediaEngine.js";
 
 function createSession() {
   const calls = [];
@@ -38,6 +41,14 @@ describe("MediaEngine adapters", () => {
     const nativeEngine = useMediaEngine(sessionFactory, { isTauri: true });
     assert.equal(browserSessionConstructed, false);
     assert.ok(nativeEngine instanceof NativeMediaEngine);
+  });
+
+  it("derives native capability defaults from an explicit native runtime", () => {
+    const flags = resolveNativeMediaFlags({ nativeRtc: true });
+    assert.equal(flags.nativeRtc, true);
+    assert.equal(flags.nativeSfu, true);
+    assert.equal(flags.nativeMicrophone, true);
+    assert.equal(flags.nativeAudioReceive, true);
   });
 
   it("does not probe browser microphone access before the Tauri factory", async () => {
@@ -152,6 +163,31 @@ describe("MediaEngine adapters", () => {
       ["media_initialize", { config: {} }],
       ["connect", "channel-3"],
     ]);
+  });
+
+  it("NativeMediaEngine attempts microphone capture before callback health is proven", async () => {
+    const calls = [];
+    const engine = new NativeMediaEngine({
+      flags: { nativeRtc: true, nativeBackendReady: true },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => {
+          calls.push(command);
+          return undefined;
+        },
+      },
+    });
+    engine.nativeSession = {
+      addSource: async () => {},
+      removeSource: () => {},
+    };
+    engine.nativeP2pSession = {
+      addSource: async () => {},
+      removeSource: async () => {},
+    };
+
+    await engine.startAudioProduction();
+    assert.deepEqual(calls, ["media_set_microphone"]);
   });
 
   it("reports native source state and removes stopped native sources", async () => {
