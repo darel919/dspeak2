@@ -44,7 +44,7 @@ jobs:
       matrix:
         include:
           - platform: macos-arm64
-            runner: macos-15
+            runner: self-hosted
             artifact: dspeak-macos-arm64
             native_artifact: lib-dspeak-media-macos-arm64
             upload_pattern: |
