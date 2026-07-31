@@ -45,11 +45,19 @@ static bool probe_core_runtime() {
         }
         signaling_thread->Start();
         worker_thread->Start();
+        auto null_adm = webrtc::CreateAudioDeviceModule(
+            webrtc::CreateEnvironment(),
+            webrtc::AudioDeviceModule::kDummyAudio);
+        if (!null_adm) {
+            delete signaling_thread;
+            delete worker_thread;
+            return false;
+        }
         auto factory = webrtc::CreatePeerConnectionFactory(
             nullptr,
             worker_thread,
             signaling_thread,
-            nullptr,
+            null_adm,
             webrtc::CreateBuiltinAudioEncoderFactory(),
             webrtc::CreateBuiltinAudioDecoderFactory(),
             nullptr,

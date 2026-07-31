@@ -23,6 +23,20 @@
 #include <Producer.hpp>
 #include <Consumer.hpp>
 #include <api/create_peerconnection_factory.h>
+#include <api/audio/create_audio_device_module.h>
+#include <api/audio_codecs/builtin_audio_encoder_factory.h>
+#include <api/audio_codecs/builtin_audio_decoder_factory.h>
+#include <api/environment/environment_factory.h>
+#include <api/video_codecs/video_decoder_factory_template.h>
+#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_open_h264_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template.h>
+#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_open_h264_adapter.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
@@ -253,9 +267,60 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
     if (error_out) *error_out = 0;
     try {
         auto d = std::make_unique<lib_dspeak_media_device>();
+        d->network_thread = webrtc::Thread::CreateWithSocketServer().release();
+        d->network_thread->SetName("dspeak_network", nullptr);
+        d->signaling_thread = webrtc::Thread::Create().release();
+        d->signaling_thread->SetName("dspeak_signaling", nullptr);
+        d->worker_thread = webrtc::Thread::Create().release();
+        d->worker_thread->SetName("dspeak_worker", nullptr);
+        d->network_thread->Start();
+        d->signaling_thread->Start();
+        d->worker_thread->Start();
+        auto null_adm = webrtc::CreateAudioDeviceModule(
+            webrtc::CreateEnvironment(),
+            webrtc::AudioDeviceModule::kDummyAudio);
+        if (!null_adm) {
+            delete d->network_thread;
+            delete d->signaling_thread;
+            delete d->worker_thread;
+            if (error_out) *error_out = -2;
+            return nullptr;
+        }
+        d->factory = webrtc::CreatePeerConnectionFactory(
+            d->network_thread,
+            d->worker_thread,
+            d->signaling_thread,
+            null_adm,
+            webrtc::CreateBuiltinAudioEncoderFactory(),
+            webrtc::CreateBuiltinAudioDecoderFactory(),
+            std::make_unique<webrtc::VideoEncoderFactoryTemplate<
+                webrtc::LibvpxVp8EncoderTemplateAdapter,
+                webrtc::LibvpxVp9EncoderTemplateAdapter,
+                webrtc::OpenH264EncoderTemplateAdapter,
+                webrtc::LibaomAv1EncoderTemplateAdapter>>(),
+            std::make_unique<webrtc::VideoDecoderFactoryTemplate<
+                webrtc::LibvpxVp8DecoderTemplateAdapter,
+                webrtc::LibvpxVp9DecoderTemplateAdapter,
+                webrtc::OpenH264DecoderTemplateAdapter,
+                webrtc::Dav1dDecoderTemplateAdapter>>(),
+            /*audio_mixer=*/nullptr,
+            /*audio_processing=*/nullptr);
+        if (!d->factory) {
+            delete d->network_thread;
+            delete d->signaling_thread;
+            delete d->worker_thread;
+            if (error_out) *error_out = -3;
+            return nullptr;
+        }
+        mediasoupclient::PeerConnection::Options options;
+        options.factory = d->factory.get();
         d->device = std::make_unique<mediasoupclient::Device>();
-        d->device->Load(lib_dspeak_media_json_arg(router_rtp_capabilities_json));
+        d->device->Load(lib_dspeak_media_json_arg(router_rtp_capabilities_json), &options);
         return d.release();
+    } catch (const std::exception& ex) {
+        fprintf(stderr, "[dspeak:media] create-device exception: %s\n", ex.what());
+        if (error_out) *error_out = -4;
+        return nullptr;
     } catch (...) {
         if (error_out) *error_out = -1;
         return nullptr;
@@ -264,6 +329,10 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
 
 extern "C" void lib_dspeak_media_destroy_device(lib_dspeak_media_device_t* device)
 {
+    if (!device) return;
+    delete device->network_thread;
+    delete device->signaling_thread;
+    delete device->worker_thread;
     delete device;
 }
 
@@ -296,11 +365,14 @@ extern "C" lib_dspeak_media_send_transport_t* lib_dspeak_media_create_send_trans
         st->listener  = listener.get();
         g_send_listeners.push_back(std::move(listener));
 
+        mediasoupclient::PeerConnection::Options options;
+        options.factory = device->factory.get();
         st->transport = device->device->CreateSendTransport(
             st->listener, id,
             lib_dspeak_media_json_arg(ice_parameters_json),
             lib_dspeak_media_json_arg(ice_candidates_json),
-            lib_dspeak_media_json_arg(dtls_parameters_json));
+            lib_dspeak_media_json_arg(dtls_parameters_json),
+            &options);
         return st.release();
     } catch (...) {
         if (error_out) *error_out = -1;
@@ -344,11 +416,14 @@ extern "C" lib_dspeak_media_recv_transport_t* lib_dspeak_media_create_recv_trans
         rt->listener  = listener.get();
         g_recv_listeners.push_back(std::move(listener));
 
+        mediasoupclient::PeerConnection::Options options;
+        options.factory = device->factory.get();
         rt->transport = device->device->CreateRecvTransport(
             rt->listener, id,
             lib_dspeak_media_json_arg(ice_parameters_json),
             lib_dspeak_media_json_arg(ice_candidates_json),
-            lib_dspeak_media_json_arg(dtls_parameters_json));
+            lib_dspeak_media_json_arg(dtls_parameters_json),
+            &options);
         return rt.release();
     } catch (...) {
         if (error_out) *error_out = -1;

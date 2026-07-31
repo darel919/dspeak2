@@ -217,6 +217,10 @@ private:
 
 struct lib_dspeak_media_device {
     std::unique_ptr<mediasoupclient::Device> device;
+    webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
+    webrtc::Thread* network_thread = nullptr;
+    webrtc::Thread* signaling_thread = nullptr;
+    webrtc::Thread* worker_thread = nullptr;
 };
 
 struct lib_dspeak_media_consumer {
@@ -259,6 +263,7 @@ struct lib_dspeak_media_audio_track {
 struct lib_dspeak_media_p2p_handle {
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
     webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+    webrtc::Thread* network_thread = nullptr;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
     std::queue<std::string> ice_candidates;

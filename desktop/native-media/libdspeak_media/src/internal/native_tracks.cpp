@@ -126,11 +126,21 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
         webrtc::Thread* worker_thread = webrtc::Thread::Create().release();
         worker_thread->Start();
 
+        auto null_adm = webrtc::CreateAudioDeviceModule(
+            webrtc::CreateEnvironment(),
+            webrtc::AudioDeviceModule::kDummyAudio);
+        if (!null_adm) {
+            delete signaling_thread;
+            delete worker_thread;
+            if (error_out) *error_out = -2;
+            return nullptr;
+        }
+
         auto factory = webrtc::CreatePeerConnectionFactory(
             /*network_thread=*/nullptr,
             worker_thread,
             signaling_thread,
-            /*default_adm=*/nullptr,
+            /*default_adm=*/null_adm,
             /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
             /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
             /*video_encoder_factory=*/nullptr,
@@ -188,11 +198,21 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
         webrtc::Thread* worker_thread = webrtc::Thread::Create().release();
         worker_thread->Start();
 
+        auto null_adm = webrtc::CreateAudioDeviceModule(
+            webrtc::CreateEnvironment(),
+            webrtc::AudioDeviceModule::kDummyAudio);
+        if (!null_adm) {
+            delete signaling_thread;
+            delete worker_thread;
+            if (error_out) *error_out = -2;
+            return nullptr;
+        }
+
         auto factory = webrtc::CreatePeerConnectionFactory(
             /*network_thread=*/nullptr,
             worker_thread,
             signaling_thread,
-            /*default_adm=*/nullptr,
+            /*default_adm=*/null_adm,
             /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
             /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
             /*video_encoder_factory=*/nullptr,

@@ -27,6 +27,16 @@
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/environment/environment_factory.h>
+#include <api/video_codecs/video_decoder_factory_template.h>
+#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
+#include <api/video_codecs/video_decoder_factory_template_open_h264_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template.h>
+#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
+#include <api/video_codecs/video_encoder_factory_template_open_h264_adapter.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
@@ -189,23 +199,48 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(void)
     auto* h = new(std::nothrow) lib_dspeak_media_p2p_handle();
     if (!h) return nullptr;
 
+    h->network_thread = webrtc::Thread::CreateWithSocketServer().release();
+    h->network_thread->SetName("dspeak_p2p_network", nullptr);
+    h->network_thread->Start();
     h->signaling_thread = webrtc::Thread::Create().release();
+    h->signaling_thread->SetName("dspeak_p2p_signaling", nullptr);
     h->signaling_thread->Start();
     h->worker_thread = webrtc::Thread::Create().release();
+    h->worker_thread->SetName("dspeak_p2p_worker", nullptr);
     h->worker_thread->Start();
 
+    auto null_adm = webrtc::CreateAudioDeviceModule(
+        webrtc::CreateEnvironment(),
+        webrtc::AudioDeviceModule::kDummyAudio);
+    if (!null_adm) {
+        delete h->network_thread;
+        delete h->signaling_thread;
+        delete h->worker_thread;
+        delete h;
+        return nullptr;
+    }
+
     h->factory = webrtc::CreatePeerConnectionFactory(
-        /*network_thread=*/nullptr,
+        h->network_thread,
         h->worker_thread,
         h->signaling_thread,
-        /*default_adm=*/nullptr,
+        /*default_adm=*/null_adm,
         /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
         /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
-        /*video_encoder_factory=*/nullptr,
-        /*video_decoder_factory=*/nullptr,
+        std::make_unique<webrtc::VideoEncoderFactoryTemplate<
+            webrtc::LibvpxVp8EncoderTemplateAdapter,
+            webrtc::LibvpxVp9EncoderTemplateAdapter,
+            webrtc::OpenH264EncoderTemplateAdapter,
+            webrtc::LibaomAv1EncoderTemplateAdapter>>(),
+        std::make_unique<webrtc::VideoDecoderFactoryTemplate<
+            webrtc::LibvpxVp8DecoderTemplateAdapter,
+            webrtc::LibvpxVp9DecoderTemplateAdapter,
+            webrtc::OpenH264DecoderTemplateAdapter,
+            webrtc::Dav1dDecoderTemplateAdapter>>(),
         /*audio_mixer=*/nullptr,
         /*audio_processing=*/nullptr);
     if (!h->factory) {
+        delete h->network_thread;
         delete h->signaling_thread;
         delete h->worker_thread;
         delete h;
@@ -220,6 +255,7 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(void)
         config, webrtc::PeerConnectionDependencies(observer));
     if (!result.ok()) {
         h->factory = nullptr;
+        delete h->network_thread;
         delete h->signaling_thread;
         delete h->worker_thread;
         delete h;
@@ -228,6 +264,7 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(void)
     h->pc = std::move(result).value();
     if (!h->pc) {
         h->factory = nullptr;
+        delete h->network_thread;
         delete h->signaling_thread;
         delete h->worker_thread;
         delete h;
@@ -255,6 +292,7 @@ extern "C" void lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h)
         h->signaling_thread->BlockingCall(destroy);
     else
         destroy();
+    delete h->network_thread;
     delete h->signaling_thread;
     delete h->worker_thread;
     delete h;
