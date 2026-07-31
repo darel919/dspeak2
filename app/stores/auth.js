@@ -4,11 +4,13 @@ import { deviceHeaders, getDeviceId } from "../shared/device-identity";
 import { purgeUserLocalData } from "../utils/idb";
 import { useRoomsStore } from "./rooms";
 import { useChatStore } from "./chat";
+import { useRuntimeStore } from "./runtime";
 
 export const useAuthStore = defineStore("auths", () => {
   const user = ref(null);
   const sessionChecked = ref(false);
   const config = useRuntimeConfig();
+  const runtimeStore = useRuntimeStore();
   let sessionCheckPromise = null;
   let desktopRedirectUri = "";
 
@@ -47,9 +49,7 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function beginExternalSignIn(termsAccepted = false) {
-    const isDesktop =
-      typeof window !== "undefined" &&
-      Boolean(window.__TAURI__ || window.__TAURI_INTERNALS__);
+    const isDesktop = runtimeStore.isTauri;
 
     let redirectUri;
     if (isDesktop) {
@@ -86,9 +86,7 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function exchangeHandoff(code, state) {
-    const isDesktop =
-      typeof window !== "undefined" &&
-      Boolean(window.__TAURI__ || window.__TAURI_INTERNALS__);
+    const isDesktop = runtimeStore.isTauri;
     if (isDesktop && !desktopRedirectUri) {
       const { invoke } = await import("@tauri-apps/api/core");
       desktopRedirectUri = await invoke("get_oauth_callback_url");
@@ -115,12 +113,7 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function completePendingDesktopSignIn() {
-    if (
-      typeof window === "undefined" ||
-      !(window.__TAURI__ || window.__TAURI_INTERNALS__)
-    ) {
-      return false;
-    }
+    if (!runtimeStore.isTauri) return false;
 
     const { invoke } = await import("@tauri-apps/api/core");
     const callback = await invoke("get_pending_oauth_callback");

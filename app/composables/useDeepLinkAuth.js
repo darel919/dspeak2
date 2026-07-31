@@ -1,8 +1,10 @@
 import { onMounted, onUnmounted } from "vue";
 import { useAuthStore } from "~/stores/auth";
+import { useRuntimeStore } from "~/stores/runtime";
 
 export function useDeepLinkAuth() {
   const authStore = useAuthStore();
+  const runtimeStore = useRuntimeStore();
   let unlistenOAuthCallback;
 
   async function exchangeCallback(payload) {
@@ -19,12 +21,8 @@ export function useDeepLinkAuth() {
   }
 
   onMounted(async () => {
-    if (
-      typeof window === "undefined" ||
-      !(window.__TAURI__ || window.__TAURI_INTERNALS__)
-    ) {
-      return;
-    }
+    await runtimeStore.initialize();
+    if (!runtimeStore.isTauri) return;
 
     const [{ listen }, { invoke }] = await Promise.all([
       import("@tauri-apps/api/event"),

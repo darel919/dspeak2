@@ -43,6 +43,7 @@ import { useRoomsStore } from "../stores/rooms";
 import { useIdentityStore } from "../stores/identity";
 import { useNotifications } from "../composables/useNotifications";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
+import { useRuntimeStore } from "../stores/runtime";
 import { useIdleDetection } from "../composables/useIdleDetection";
 import { useGlobalKeyboardShortcuts } from "../composables/useGlobalKeyboardShortcuts";
 import NotificationWarning from "./NotificationWarning.vue";
@@ -58,11 +59,12 @@ import {
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const identityStore = useIdentityStore();
+const runtimeStore = useRuntimeStore();
 const route = useRoute();
 const authChecked = ref(false);
 const startupComplete = ref(false);
 const startupStatus = ref("Checking authentication…");
-const desktopRuntime = ref(false);
+const desktopRuntime = computed(() => runtimeStore.isTauri);
 const isBootstrapping = ref(true);
 const waitingForPageReadiness = ref(false);
 const { runStartupUpdate, startupUpdateStatus } = usePwaUpdate();
@@ -119,16 +121,10 @@ watch(desktopUpdateStatus, (status) => {
   if (status === "error") startupStatus.value = "Continuing without an update…";
 });
 
-function isDesktopRuntime() {
-  return Boolean(
-    import.meta.client && (window.__TAURI_INTERNALS__ || window.__TAURI__),
-  );
-}
-
 onMounted(async () => {
-  desktopRuntime.value = isDesktopRuntime();
   try {
-    if (isDesktopRuntime()) await runDesktopStartupUpdate();
+    await runtimeStore.initialize();
+    if (desktopRuntime.value) await runDesktopStartupUpdate();
     else await runStartupUpdate();
     if (!isAuthPage.value) {
       startupStatus.value = "Checking authentication…";

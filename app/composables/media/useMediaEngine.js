@@ -1,10 +1,9 @@
 import { BrowserMediaEngine } from "./browserMediaEngine.js";
 import { NativeMediaEngine } from "./nativeMediaEngine.js";
+import { useRuntimeStore } from "../../stores/runtime.js";
 
 function isTauriRuntime() {
-  return Boolean(
-    import.meta.client && (window.__TAURI_INTERNALS__ || window.__TAURI__),
-  );
+  return useRuntimeStore().isTauri;
 }
 
 function environmentFlag(name, fallback = false) {

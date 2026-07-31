@@ -743,6 +743,7 @@ import { useAuthStore } from "~/stores/auth";
 import { useSettingsStore } from "~/stores/settings";
 import { useIdentityStore } from "~/stores/identity";
 import { useChannelsStore } from "~/stores/channels";
+import { useRuntimeStore } from "~/stores/runtime";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
 
 const props = defineProps({
@@ -756,6 +757,7 @@ const voiceStore = useVoiceStore();
 const authStore = useAuthStore();
 const identityStore = useIdentityStore();
 const channelsStore = useChannelsStore();
+const runtimeStore = useRuntimeStore();
 const router = useRouter();
 const config = useRuntimeConfig();
 const viewMode = ref("overview");
@@ -984,11 +986,13 @@ async function requestScreenShare() {
     await toggleScreenShare();
     return;
   }
-  const api = await getDesktopCaptureApi();
-  if (api) {
-    capturePickerAudioOnly.value = false;
-    capturePickerOpen.value = true;
-    return;
+  if (runtimeStore.isTauri) {
+    const api = await getDesktopCaptureApi();
+    if (api) {
+      capturePickerAudioOnly.value = false;
+      capturePickerOpen.value = true;
+      return;
+    }
   }
   await toggleScreenShare();
 }
@@ -998,11 +1002,13 @@ async function requestSystemAudioShare() {
     await toggleSystemAudioShare();
     return;
   }
-  const api = await getDesktopCaptureApi();
-  if (api) {
-    capturePickerAudioOnly.value = true;
-    capturePickerOpen.value = true;
-    return;
+  if (runtimeStore.isTauri) {
+    const api = await getDesktopCaptureApi();
+    if (api) {
+      capturePickerAudioOnly.value = true;
+      capturePickerOpen.value = true;
+      return;
+    }
   }
   await toggleSystemAudioShare();
 }

@@ -3,11 +3,25 @@ import { describe, it } from "node:test";
 import {
   createDesktopCaptureSelection,
   desktopCaptureRequest,
+  hasTauriRuntimeMarker,
   isDesktopCaptureSelection,
   normalizeCaptureSources,
 } from "../app/shared/desktop-capture.js";
 
 describe("desktop capture contract", () => {
+  it("detects Tauri synchronously without treating a browser as desktop", () => {
+    const previousWindow = globalThis.window;
+    try {
+      globalThis.window = {};
+      assert.equal(hasTauriRuntimeMarker(), false);
+      globalThis.window = { __TAURI_INTERNALS__: {} };
+      assert.equal(hasTauriRuntimeMarker(), true);
+    } finally {
+      if (previousWindow === undefined) delete globalThis.window;
+      else globalThis.window = previousWindow;
+    }
+  });
+
   it("normalizes app, window, display, and system audio sources", () => {
     const sources = normalizeCaptureSources([
       { id: "app:one", kind: "application", name: "Editor" },

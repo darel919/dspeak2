@@ -103,9 +103,11 @@
 <script setup>
 import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
+import { useRuntimeStore } from "../stores/runtime";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
+const runtimeStore = useRuntimeStore();
 const router = useRouter();
 const route = useRoute();
 const status = ref("working");
@@ -244,6 +246,7 @@ watch(
 );
 
 onMounted(async () => {
+  await runtimeStore.initialize();
   const code = route.query.code;
   const state = route.query.state;
 
@@ -253,7 +256,7 @@ onMounted(async () => {
     const valid = await authStore.exchangeHandoff(code, state);
     processingHandoff = false;
     if (valid) {
-      if (!window.__TAURI__ && code && state) {
+      if (!runtimeStore.isTauri && code && state) {
         window.location.replace(
           `tauri://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
         );

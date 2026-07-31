@@ -1,13 +1,15 @@
+import { useRuntimeStore } from "~/stores/runtime";
+
 export function useDesktopAuth() {
-  const isDesktop =
-    typeof window !== "undefined" && window.__TAURI__ !== undefined;
+  const runtimeStore = useRuntimeStore();
+  const isDesktop = computed(() => runtimeStore.isTauri);
   const serverUrl = ref("");
   const token = ref("");
   const isAuthenticated = ref(false);
   const isLoading = ref(true);
 
   async function initialize() {
-    if (!isDesktop) {
+    if (!isDesktop.value) {
       isLoading.value = false;
       return;
     }
@@ -39,7 +41,7 @@ export function useDesktopAuth() {
   }
 
   async function login(url) {
-    if (!isDesktop) return;
+    if (!isDesktop.value) return;
 
     const { invoke } = await import("@tauri-apps/api/core");
     const { open } = await import("@tauri-apps/plugin-shell");
@@ -56,7 +58,7 @@ export function useDesktopAuth() {
   }
 
   async function finishLogin(code, state) {
-    if (!isDesktop) return;
+    if (!isDesktop.value) return;
 
     const response = await fetch(`${serverUrl.value}/api/auth/token`, {
       method: "POST",
@@ -79,7 +81,7 @@ export function useDesktopAuth() {
   }
 
   async function logout() {
-    if (!isDesktop) return;
+    if (!isDesktop.value) return;
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("delete_credential", {
       server: serverUrl.value,
@@ -90,7 +92,7 @@ export function useDesktopAuth() {
   }
 
   function getAuthHeaders() {
-    if (!isDesktop || !token.value) return {};
+    if (!isDesktop.value || !token.value) return {};
     return { Authorization: `Bearer ${token.value}` };
   }
 

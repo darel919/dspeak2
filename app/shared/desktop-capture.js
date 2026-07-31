@@ -278,11 +278,16 @@ export function desktopCaptureInvoke(invoke, command, payload = {}) {
   return invoke(command, payload);
 }
 
+export function hasTauriRuntimeMarker() {
+  return Boolean(
+    typeof window !== "undefined" &&
+    (window.__TAURI__ || window.__TAURI_INTERNALS__),
+  );
+}
+
 export async function isDesktopClient() {
   if (!import.meta.client) return false;
-  if (typeof window !== "undefined") {
-    if (window.__TAURI__ || window.__TAURI_INTERNALS__) return true;
-  }
+  if (hasTauriRuntimeMarker()) return true;
   try {
     const { isTauri } = await import("@tauri-apps/api/core");
     return typeof isTauri === "function" && isTauri();

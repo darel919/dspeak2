@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
+import { useRuntimeStore } from "./runtime";
 import { STORAGE_KEYS } from "~/const/storage";
 import {
   normalizePresenceStatus,
@@ -11,9 +12,9 @@ import {
 } from "~~/shared/presence-status.js";
 import { deviceHeaders } from "~/shared/device-identity";
 
-function detectPlatform() {
-  if (typeof window === "undefined") return "web";
-  if (window.__TAURI__) {
+function detectPlatform(isTauri) {
+  if (typeof window === "undefined" || !isTauri) return "web";
+  if (isTauri) {
     const ua = navigator.userAgent.toLowerCase();
     if (ua.includes("mac")) return "macos";
     if (ua.includes("win")) return "windows";
@@ -24,6 +25,7 @@ function detectPlatform() {
 }
 
 export const usePresenceStatusStore = defineStore("presenceStatus", () => {
+  const runtimeStore = useRuntimeStore();
   const presenceOverride = ref(
     loadPersisted(STORAGE_KEYS.presenceOverride, null),
   );
@@ -102,7 +104,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
           timestamp: new Date().toISOString(),
         }),
       );
-      const platform = detectPlatform();
+      const platform = detectPlatform(runtimeStore.isTauri);
       socket.send(
         JSON.stringify({
           type: "hello",

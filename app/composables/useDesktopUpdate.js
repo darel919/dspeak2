@@ -1,10 +1,6 @@
-const DESKTOP_UPDATE_STATE = "desktop-update-state";
+import { useRuntimeStore } from "~/stores/runtime";
 
-function isDesktopRuntime() {
-  return Boolean(
-    import.meta.client && (window.__TAURI_INTERNALS__ || window.__TAURI__),
-  );
-}
+const DESKTOP_UPDATE_STATE = "desktop-update-state";
 
 async function getTauriInvoke() {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -12,6 +8,7 @@ async function getTauriInvoke() {
 }
 
 export function useDesktopUpdate() {
+  const runtimeStore = useRuntimeStore();
   const state = useState(DESKTOP_UPDATE_STATE, () => ({
     status: "idle",
     update: null,
@@ -24,7 +21,7 @@ export function useDesktopUpdate() {
   const completed = computed(() => state.value.status === "complete");
 
   async function runStartupUpdate() {
-    if (!isDesktopRuntime()) {
+    if (!runtimeStore.isTauri) {
       state.value.status = "complete";
       return null;
     }

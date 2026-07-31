@@ -207,6 +207,14 @@ function showBroadcastDialog() {
   broadcastDialogOpen.value = true;
 }
 
+async function requestScreenShare() {
+  try {
+    await voiceStore.toggleScreenShare();
+  } catch (error) {
+    console.error("[Navbar] Screen share error:", error);
+  }
+}
+
 function barClass(level) {
   if (signalIsConnecting.value) return "";
   return signalLevel.value >= level ? "" : "opacity-25";
@@ -386,7 +394,7 @@ onBeforeUnmount(() => {
             :title="
               voiceStore.screenSharing ? 'Stop sharing screen' : 'Share screen'
             "
-            @click="voiceStore.toggleScreenShare"
+            @click="requestScreenShare"
           >
             <Icon name="lucide:monitor-up" class="size-4" />
           </button>
@@ -481,7 +489,7 @@ onBeforeUnmount(() => {
             <button
               class="menu-row lg:hidden"
               type="button"
-              @click="voiceStore.toggleScreenShare"
+              @click="requestScreenShare"
             >
               <Icon name="lucide:monitor-up" />
               <span>{{

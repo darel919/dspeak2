@@ -64,9 +64,11 @@ public:
     }
 
     void SetState(webrtc::MediaSourceInterface::SourceState new_state) {
-        webrtc::MutexLock lock(&mutex_);
-        if (state_ == new_state) return;
-        state_ = new_state;
+        {
+            webrtc::MutexLock lock(&mutex_);
+            if (state_ == new_state) return;
+            state_ = new_state;
+        }
         FireOnChanged();
     }
 
@@ -184,8 +186,10 @@ public:
     }
 
     void OnClose() {
-        webrtc::MutexLock lock(&mutex_);
-        state_ = webrtc::MediaSourceInterface::kEnded;
+        {
+            webrtc::MutexLock lock(&mutex_);
+            state_ = webrtc::MediaSourceInterface::kEnded;
+        }
         FireOnChanged();
     }
 

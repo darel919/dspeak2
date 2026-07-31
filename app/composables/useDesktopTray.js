@@ -1,11 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
+import { useRuntimeStore } from "~/stores/runtime";
 
 export function useDesktopTray() {
-  const isDesktop =
-    typeof window !== "undefined" && window.__TAURI__ !== undefined;
+  const runtimeStore = useRuntimeStore();
 
   function setup() {
-    if (!isDesktop) return;
+    if (!runtimeStore.isTauri) return;
 
     listen("tray:mute-toggle", () => {
       const voiceStore = useVoiceStore();
@@ -19,7 +19,7 @@ export function useDesktopTray() {
   }
 
   function updatePresence(status) {
-    if (!isDesktop) return;
+    if (!runtimeStore.isTauri) return;
     const { invoke } = require("@tauri-apps/api/core");
     invoke("set_tray_presence", { status });
   }
