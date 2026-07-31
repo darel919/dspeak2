@@ -130,9 +130,7 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
             /*network_thread=*/nullptr,
             worker_thread,
             signaling_thread,
-            /*default_adm=*/webrtc::CreateAudioDeviceModule(
-                webrtc::CreateEnvironment(),
-                webrtc::AudioDeviceModule::kPlatformDefaultAudio),
+            /*default_adm=*/nullptr,
             /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
             /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
             /*video_encoder_factory=*/nullptr,
@@ -194,9 +192,7 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
             /*network_thread=*/nullptr,
             worker_thread,
             signaling_thread,
-            /*default_adm=*/webrtc::CreateAudioDeviceModule(
-                webrtc::CreateEnvironment(),
-                webrtc::AudioDeviceModule::kPlatformDefaultAudio),
+            /*default_adm=*/nullptr,
             /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
             /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
             /*video_encoder_factory=*/nullptr,

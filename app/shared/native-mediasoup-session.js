@@ -119,6 +119,7 @@ export class NativeMediasoupSfuSession {
     this.connectPromise = null;
     this.connectResolve = null;
     this.connectReject = null;
+    this.nativeTeardownPromise = null;
     this.readyPromise = null;
     this.readyResolve = null;
     this.readyReject = null;
@@ -274,6 +275,7 @@ export class NativeMediasoupSfuSession {
 
   async _startNegotiation() {
     if (this.readyPromise) return this.readyPromise;
+    await this.nativeTeardownPromise;
     this.connectionPhase = "transport-connecting";
     this.readyPromise = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
@@ -295,7 +297,7 @@ export class NativeMediasoupSfuSession {
     const routerCapabilities = { ...data };
     delete routerCapabilities.requestId;
     const device = await this.invoke("media_create_device", {
-      router_rtp_capabilities: JSON.stringify(routerCapabilities),
+      routerRtpCapabilities: JSON.stringify(routerCapabilities),
     });
     if (!device?.handle || !device.rtpCapabilities)
       throw new Error("Native device negotiation returned no capabilities");
@@ -336,12 +338,12 @@ export class NativeMediasoupSfuSession {
         ? "media_create_send_transport"
         : "media_create_recv_transport",
       {
-        device_handle: this.device.handle,
+        deviceHandle: this.device.handle,
         id: data.id,
-        ice_parameters: data.iceParameters,
-        ice_candidates: data.iceCandidates,
-        dtls_parameters: data.dtlsParameters,
-        app_data: { direction },
+        iceParameters: data.iceParameters,
+        iceCandidates: data.iceCandidates,
+        dtlsParameters: data.dtlsParameters,
+        appData: { direction },
       },
     );
     if (!result?.handle)
@@ -401,7 +403,7 @@ export class NativeMediasoupSfuSession {
           (entry.source === "camera" || entry.source === "screen"
             ? "video"
             : "audio"),
-        app_data: appData,
+        appData,
       });
       const producer = {
         id: result?.id,
@@ -490,10 +492,10 @@ export class NativeMediasoupSfuSession {
     try {
       const result = await this.invoke("media_consume", {
         id: data.id,
-        producer_id: data.producerId,
+        producerId: data.producerId,
         kind: data.kind,
-        rtp_parameters: data.rtpParameters,
-        app_data: { userId: data.userId, source: data.source },
+        rtpParameters: data.rtpParameters,
+        appData: { userId: data.userId, source: data.source },
       });
       const consumerId = result?.id || data.id;
       const source = data.source || data.kind;
@@ -569,7 +571,7 @@ export class NativeMediasoupSfuSession {
       )
       .map((entry) =>
         this.invoke("media_set_consumer_volume", {
-          consumer_id: entry.consumerId,
+          consumerId: entry.consumerId,
           volume: normalized,
         }),
       );
@@ -612,7 +614,7 @@ export class NativeMediasoupSfuSession {
       return false;
     }
     await this.invoke("media_set_consumer_enabled", {
-      consumer_id: entry.consumerId,
+      consumerId: entry.consumerId,
       enabled: desired,
     });
     if (entry.closed) return false;
@@ -662,7 +664,7 @@ export class NativeMediasoupSfuSession {
     this.onRemoteTrackEnded?.(entry);
     if (releaseNative)
       this.invoke("media_close_consumer", {
-        consumer_id: entry.consumerId,
+        consumerId: entry.consumerId,
       }).catch((error) =>
         this.onError?.(asError(error, "Native consumer close failed")),
       );
@@ -716,7 +718,7 @@ export class NativeMediasoupSfuSession {
         `SFU ${direction} transport connection`,
       );
       await acknowledgement;
-      await this.invoke("media_complete_connect", { transport_ptr: pointer });
+      await this.invoke("media_complete_connect", { transportPtr: pointer });
       return true;
     }
     if (action.kind === 2) {
@@ -747,8 +749,8 @@ export class NativeMediasoupSfuSession {
       );
       const result = await acknowledgement;
       await this.invoke("media_complete_produce", {
-        action_id: Number(action.actionId),
-        producer_id: result.id,
+        actionId: Number(action.actionId),
+        producerId: result.id,
       });
       return true;
     }
@@ -871,7 +873,7 @@ export class NativeMediasoupSfuSession {
     this.connected = false;
     this.signaling?.stop?.();
     this._closeMedia(false);
-    await this.invoke("media_leave").catch(() => undefined);
+    await this._beginNativeTeardown();
     this.connectionPhase = "closed";
     this.mediaConnectionState = "disconnected";
     this._emitState();
@@ -923,6 +925,7 @@ export class NativeMediasoupSfuSession {
     this.protocolState = null;
     if (this.intentionalClose) return;
     this._closeMedia(false);
+    this._beginNativeTeardown();
     this.connectionPhase = "reconnecting";
     this.mediaConnectionState = "disconnected";
     this._emitState();
@@ -931,6 +934,19 @@ export class NativeMediasoupSfuSession {
       error.code = "MEDIA_PROTOCOL_UPDATE_REQUIRED";
       this._fail(error);
     }
+  }
+
+  _beginNativeTeardown() {
+    if (this.nativeTeardownPromise) return this.nativeTeardownPromise;
+    const teardown = Promise.resolve()
+      .then(() => this.invoke("media_leave"))
+      .catch(() => undefined);
+    this.nativeTeardownPromise = teardown;
+    teardown.then(() => {
+      if (this.nativeTeardownPromise === teardown)
+        this.nativeTeardownPromise = null;
+    });
+    return teardown;
   }
 
   _handleServerError(data) {

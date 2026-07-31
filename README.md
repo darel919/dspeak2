@@ -5,6 +5,11 @@ video, screen sharing, soundboards, and notifications. It runs as one long-lived
 Nuxt and Nitro application. PocketBase stores persistent data; native WebRTC and
 mediasoup carry realtime media.
 
+The same interface is also shipped as a Tauri desktop client for macOS, Linux,
+and Windows. The desktop app renders the Nuxt frontend in a WebView and replaces
+browser capture and playback with a native C++ media engine (libwebrtc and
+libmediasoupclient).
+
 ## License
 
 dSpeak is free software released under the
@@ -18,6 +23,8 @@ who interact with it, as required by section 13 of the AGPL-3.0.
 ## What dSpeak provides
 
 - Rooms with text, voice, camera, screen sharing, and shared audio
+- Native desktop apps for macOS, Linux, and Windows (Tauri) with a C++ media
+  engine for capture, SFU, P2P, and playback
 - Room roles, branding, media policies, notifications, and member nicknames
 - Protected room soundboards and personal system-sound settings
 - Direct WebRTC for two participants and optional mesh for three or four
@@ -35,6 +42,7 @@ dSpeak is a Nuxt 4 monolith:
 | `app/`           | Vue interface, Pinia state, browser capture, and media playback       |
 | `server/routes/` | Nitro HTTP and WebSocket endpoints                                    |
 | `server/utils/`  | PocketBase access, authorization, migrations, and media orchestration |
+| `desktop/`       | Tauri 2 shell, Rust commands, and the `libdspeak_media` C++ shim      |
 | PocketBase       | Persistent users, rooms, messages, policies, and notifications        |
 | mediasoup        | Process-owned SFU workers, routers, transports, and RTP forwarding    |
 
@@ -42,6 +50,13 @@ The application must run as a persistent Node.js process. Serverless and edge
 runtimes are unsupported because WebSockets and mediasoup resources live in
 process memory. Run one application instance unless a distributed signaling
 backplane and mediasoup router piping have been implemented.
+
+The desktop client (`desktop/`) renders the same Nuxt interface in a Tauri
+WebView. Rust (`desktop/src-tauri/`) owns the window lifecycle, deep links,
+notifications, autostart, global shortcuts, and auto-updates. A prebuilt native
+media bundle (libwebrtc, libmediasoupclient, and the `libdspeak_media` shim)
+supplies capture, SFU, P2P, and playback instead of browser WebRTC. See the
+[native media build boundary](desktop/native-media/README.md).
 
 ## Media routing
 
@@ -65,12 +80,19 @@ handoff, bitrate, and recovery details.
 
 - Bun for installation, development, testing, and builds
 - Node.js 24 for the production server
+- Rust stable toolchain with the Tauri CLI to build the desktop client
+- A prebuilt native media bundle (`NATIVE_MEDIA_ARTIFACT_DIR`) to build the
+  desktop client with native WebRTC media
 - PocketBase with an administrator account available to Nitro
 - FFmpeg and ffprobe when running outside Docker
 - A public IPv4 or IPv6 route for production WebRTC traffic
 
 Docker includes FFmpeg and ffprobe. A non-container host must provide both tools
 on `PATH` for soundboard conversion.
+
+Desktop builds need Rust and a complete native media bundle. The bundle is
+produced by CI or a separate provisioning step and is never downloaded at
+runtime; see [desktop/native-media/README.md](desktop/native-media/README.md).
 
 ## Local development
 
@@ -81,6 +103,20 @@ bun run dev
 ```
 
 The development server listens on `http://localhost:3000`.
+
+### Desktop client
+
+```bash
+cp desktop/native-media/dependencies.env.example desktop/native-media/dependencies.env
+# set NATIVE_MEDIA_ARTIFACT_DIR to a complete native media bundle, then:
+bun run dev:desktop
+```
+
+`dev:desktop` loads `desktop/native-media/dependencies.env`, requires a complete
+native media bundle (a missing one is a build error), and launches the Tauri
+shell against the dev server. The web application keeps using browser WebRTC and
+does not require the bundle. See the
+[native media build boundary](desktop/native-media/README.md).
 
 At minimum, configure the authentication service and PocketBase connection:
 
@@ -120,6 +156,18 @@ port `40000`.
 For the complete Coolify, Docker Compose, DNS, firewall, Playit, and TURN setup,
 follow the [deployment runbook](docs/deployment.md). Do not expose a production
 instance until the runbook's external connectivity checks pass.
+
+### Desktop client
+
+```bash
+bun run build:desktop
+```
+
+builds the Tauri app for the host platform. Version-tagged releases are built
+for macOS, Linux, and Windows by the
+[desktop CI build](docs/native-media/ci-desktop-build.md), which publishes the
+installers to a GitHub Release; installed clients update through the updater
+endpoint configured in `desktop/src-tauri/tauri.conf.json`.
 
 ## Operational endpoints
 
@@ -175,6 +223,8 @@ hardware capture, firewall rules, or public IPv4 and IPv6 reachability.
 ## Documentation
 
 - [Deployment runbook](docs/deployment.md)
+- [Desktop CI build runbook](docs/native-media/ci-desktop-build.md)
+- [Native media build boundary](desktop/native-media/README.md)
 - [Hybrid media topology](docs/hybrid-media-topology.md)
 - [Room administration contract](docs/room-administration.md)
 - [Chat cache and room switching](docs/chat-cache.md)

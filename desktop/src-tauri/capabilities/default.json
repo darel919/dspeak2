@@ -7,6 +7,7 @@
     "shell:default",
     "shell:allow-open",
     "keyring-store:default",
-    "deep-link:default"
+    "deep-link:default",
+    "notification:default"
   ]
 }

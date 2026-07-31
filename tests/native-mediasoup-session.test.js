@@ -125,6 +125,43 @@ describe("NativeMediasoupSfuSession", () => {
     }
   });
 
+  it("tears down native media before renegotiating after signaling loss", async () => {
+    let releaseTeardown;
+    const teardown = new Promise((resolve) => {
+      releaseTeardown = resolve;
+    });
+    const calls = [];
+    const sent = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command) => {
+        calls.push(command);
+        if (command === "media_leave") await teardown;
+        return undefined;
+      },
+    });
+    session.signaling = {
+      send(message) {
+        sent.push(message);
+        return true;
+      },
+    };
+
+    session._handleSignalingClose({ code: 1006, reason: "connection lost" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, ["media_leave"]);
+
+    const negotiation = session._startNegotiation();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(findMessage({ sent }, "get-rtp-capabilities"), undefined);
+
+    releaseTeardown();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(findMessage({ sent }, "get-rtp-capabilities"));
+    session.readyReject?.(new Error("test complete"));
+    await negotiation.catch(() => undefined);
+  });
+
   it("correlates native connect and produce actions with signaling acknowledgements", async () => {
     const harness = createSocketHarness();
     const previousWebSocket = globalThis.WebSocket;
@@ -188,10 +225,10 @@ describe("NativeMediasoupSfuSession", () => {
       await producing;
 
       assert.deepEqual(calls, [
-        ["media_complete_connect", { transport_ptr: 301 }],
+        ["media_complete_connect", { transportPtr: 301 }],
         [
           "media_complete_produce",
-          { action_id: 77, producer_id: "producer-native" },
+          { actionId: 77, producerId: "producer-native" },
         ],
       ]);
     } finally {
@@ -231,7 +268,7 @@ describe("NativeMediasoupSfuSession", () => {
 
     assert.equal(session.consumers.has(entry.consumerId), false);
     assert.deepEqual(calls, [
-      ["media_close_consumer", { consumer_id: entry.consumerId }],
+      ["media_close_consumer", { consumerId: entry.consumerId }],
     ]);
   });
 
@@ -321,7 +358,7 @@ describe("NativeMediasoupSfuSession", () => {
     assert.deepEqual(ended, ["consumer-native"]);
     assert.deepEqual(calls.at(-1), [
       "media_close_consumer",
-      { consumer_id: "consumer-native" },
+      { consumerId: "consumer-native" },
     ]);
     assert.equal(
       session.handleReceiveEvent({
@@ -382,11 +419,11 @@ describe("NativeMediasoupSfuSession", () => {
     assert.deepEqual(calls.slice(1), [
       [
         "media_set_consumer_enabled",
-        { consumer_id: "consumer-native", enabled: true },
+        { consumerId: "consumer-native", enabled: true },
       ],
       [
         "media_set_consumer_volume",
-        { consumer_id: "consumer-native", volume: 0.4 },
+        { consumerId: "consumer-native", volume: 0.4 },
       ],
     ]);
   });

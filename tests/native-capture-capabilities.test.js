@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import {
   getNativeCaptureCapability,
@@ -28,6 +29,17 @@ const unsupportedLinux = {
 };
 
 describe("native capture capability contract", () => {
+  it("allows the first native microphone capture to establish health", async () => {
+    const commands = await readFile(
+      new URL("../desktop/src-tauri/src/media/commands.rs", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      commands,
+      /state\.capabilities\.native_rtc\s*\|\|\s*!state\.capabilities\.microphone/,
+    );
+  });
+
   it("normalizes every platform backend to an explicit capability record", () => {
     const normalized = normalizeNativeCaptureCapabilities(unsupportedLinux);
 

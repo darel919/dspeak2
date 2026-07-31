@@ -12,6 +12,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <cstdio>
 #include <mutex>
 #include <new>
 #include <string>
@@ -915,6 +916,8 @@ static void device_capture_end_callback(lib_dspeak_media_device_capture_session*
 static void device_capture_report_error(lib_dspeak_media_device_capture_session* session,
                                         int error_code,
                                         const char* message) {
+    fprintf(stderr, "[dspeak:capture] device-error code=%d message=%s\n",
+            error_code, message ?: "Native device capture failed");
     lib_dspeak_media_capture_error_cb callback = nullptr;
     void* user_data = nullptr;
     {
@@ -1061,9 +1064,15 @@ lib_dspeak_media_platform_device_capture_create(const char* device_id,
         NSString* device_id_string = string_from_utf8(device_id);
         NSString* kind_string = string_from_utf8(kind);
         if (!kind_string || (![kind_string isEqualToString:@"microphone"] &&
-                             ![kind_string isEqualToString:@"camera"])) return nullptr;
+                             ![kind_string isEqualToString:@"camera"])) {
+            fprintf(stderr, "[dspeak:capture] device-create rejected kind=%s\n", kind ?: "<null>");
+            return nullptr;
+        }
         auto* session = new(std::nothrow) lib_dspeak_media_device_capture_session();
-        if (!session) return nullptr;
+        if (!session) {
+            fprintf(stderr, "[dspeak:capture] device-create allocation failed kind=%s\n", kind);
+            return nullptr;
+        }
         session->microphone = [kind_string isEqualToString:@"microphone"];
         session->device_id = [device_id_string retain];
         session->queue = dispatch_queue_create(
@@ -1071,10 +1080,13 @@ lib_dspeak_media_platform_device_capture_create(const char* device_id,
                                   "com.dspeaks.media.capture.camera",
             DISPATCH_QUEUE_SERIAL);
         if (!session->queue) {
+            fprintf(stderr, "[dspeak:capture] device-create queue failed kind=%s\n", kind);
             [session->device_id release];
             delete session;
             return nullptr;
         }
+        fprintf(stderr, "[dspeak:capture] device-create success kind=%s device=%s\n",
+                kind, device_id ?: "<default>");
         return session;
     }
 }
@@ -1143,7 +1155,7 @@ int lib_dspeak_media_platform_device_capture_start(
                 [engine connect:input to:mixer format:nil];
                 [engine connect:mixer to:engine.mainMixerNode format:format];
                 __block lib_dspeak_media_device_capture_session* block_session = session;
-                [mixer installTapOnBus:0 bufferSize:480 format:format usingBlock:^(AVAudioPCMBuffer* buffer,
+                [mixer installTapOnBus:0 bufferSize:480 format:format block:^(AVAudioPCMBuffer* buffer,
                                                                                    AVAudioTime* time) {
                     (void)time;
                     if (!block_session || !buffer) return;
@@ -1158,13 +1170,26 @@ int lib_dspeak_media_platform_device_capture_start(
                         device_capture_report_error(block_session, -222,
                                                     "AVAudioEngine did not deliver real stereo 48 kHz float PCM");
                     } else if (audio_callback) {
-                        audio_callback(callback_user_data, samples.data(), frame_count, 48000, 2);
+                        dispatch_queue_t callback_queue = nullptr;
+                        {
+                            std::lock_guard<std::mutex> lock(block_session->mutex);
+                            callback_queue = block_session->queue;
+                        }
+                        auto* queued_samples = new std::vector<float>(std::move(samples));
+                        dispatch_async(callback_queue, ^{
+                            audio_callback(callback_user_data, queued_samples->data(), frame_count, 48000, 2);
+                            delete queued_samples;
+                            device_capture_end_callback(block_session);
+                        });
+                        return;
                     }
                     device_capture_end_callback(block_session);
                 }];
             } @catch (NSException* exception) {
                 NSString* description = exception.reason ?: @"AVAudioEngine microphone graph failed";
                 const char* message = description.UTF8String;
+                fprintf(stderr, "[dspeak:capture] microphone-graph exception=%s\n",
+                        message ?: "AVAudioEngine microphone graph failed");
                 [engine release];
                 [mixer release];
                 [format release];

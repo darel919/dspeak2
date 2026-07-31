@@ -31,6 +31,22 @@ Prepare these values before deployment:
 - a random Coturn shared secret
 - firewall access for every port listed in this runbook
 
+## Desktop client releases
+
+The desktop client is distributed separately from the web application. Pushing
+a `v*` tag runs the native media build and then the
+[desktop build workflow](native-media/ci-desktop-build.md), which publishes
+macOS, Linux, and Windows installers to a GitHub Release at that tag. Installed
+clients check the updater endpoint configured in
+`desktop/src-tauri/tauri.conf.json` (`updater.endpoints`) for new versions;
+make that endpoint serve the release artifacts or point it at the release
+hosting you use.
+
+The desktop client renders the same Nuxt interface in a WebView, so it connects
+to the same origin as the browser and the same same-origin, TLS, and RTC
+requirements in this runbook apply. If the WebView origin must differ from the
+SFU endpoint, set `VITE_DSPEAK_SFU_PATH` at desktop build time.
+
 ## Production media environment
 
 ```dotenv

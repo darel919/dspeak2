@@ -45,19 +45,11 @@ static bool probe_core_runtime() {
         }
         signaling_thread->Start();
         worker_thread->Start();
-        auto audio_device = webrtc::CreateAudioDeviceModule(
-            webrtc::CreateEnvironment(),
-            webrtc::AudioDeviceModule::kPlatformDefaultAudio);
-        if (!audio_device) {
-            delete signaling_thread;
-            delete worker_thread;
-            return false;
-        }
         auto factory = webrtc::CreatePeerConnectionFactory(
             nullptr,
             worker_thread,
             signaling_thread,
-            audio_device,
+            nullptr,
             webrtc::CreateBuiltinAudioEncoderFactory(),
             webrtc::CreateBuiltinAudioDecoderFactory(),
             nullptr,
@@ -315,6 +307,18 @@ extern "C" const char* lib_dspeak_media_capture_error_message(int error_code)
             return "native capture request is invalid";
         case -103:
             return "native capture is not running";
+        case -220:
+            return "microphone or camera permission was denied";
+        case -221:
+            return "AVAudioEngine microphone failed to start";
+        case -222:
+            return "AVAudioEngine delivered an unsupported PCM format";
+        case -223:
+            return "camera capture graph could not be created";
+        case -224:
+            return "AVAudioEngine microphone graph failed during setup";
+        case -225:
+            return "selected microphone is not available";
         case -301:
             return "native capture health probe could not find a usable source";
         case -302:

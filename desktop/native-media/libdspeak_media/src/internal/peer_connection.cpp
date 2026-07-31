@@ -193,21 +193,12 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(void)
     h->signaling_thread->Start();
     h->worker_thread = webrtc::Thread::Create().release();
     h->worker_thread->Start();
-    auto audio_device = webrtc::CreateAudioDeviceModule(
-        webrtc::CreateEnvironment(),
-        webrtc::AudioDeviceModule::kPlatformDefaultAudio);
-    if (!audio_device) {
-        delete h->signaling_thread;
-        delete h->worker_thread;
-        delete h;
-        return nullptr;
-    }
 
     h->factory = webrtc::CreatePeerConnectionFactory(
         /*network_thread=*/nullptr,
         h->worker_thread,
         h->signaling_thread,
-        /*default_adm=*/audio_device,
+        /*default_adm=*/nullptr,
         /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
         /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
         /*video_encoder_factory=*/nullptr,

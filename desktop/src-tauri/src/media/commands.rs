@@ -447,14 +447,25 @@ pub async fn media_create_device(
     store: State<'_, NativeMediaStore>,
     router_rtp_capabilities: String,
 ) -> Result<Value, String> {
+    eprintln!(
+        "[dspeak:media] create-device start capabilities_bytes={}",
+        router_rtp_capabilities.len()
+    );
     let mut handles = store
         .handles
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
     handles.clear_all();
-    let device = native::create_device(&router_rtp_capabilities)?;
+    let device = native::create_device(&router_rtp_capabilities).map_err(|error| {
+        eprintln!("[dspeak:media] create-device failed: {error}");
+        error
+    })?;
     handles.device = device;
-    let rtp_capabilities = native::device_rtp_capabilities(device)?;
+    let rtp_capabilities = native::device_rtp_capabilities(device).map_err(|error| {
+        eprintln!("[dspeak:media] device-capabilities failed: {error}");
+        error
+    })?;
+    eprintln!("[dspeak:media] create-device success");
     Ok(serde_json::json!({
         "handle": device as u64,
         "rtpCapabilities": serde_json::from_str::<Value>(&rtp_capabilities)
@@ -473,6 +484,7 @@ pub async fn media_create_send_transport(
     dtls_parameters: Value,
     app_data: Option<Value>,
 ) -> Result<Value, String> {
+    eprintln!("[dspeak:media] create-send-transport start id={id}");
     let mut handles = store
         .handles
         .lock()
@@ -493,8 +505,13 @@ pub async fn media_create_send_transport(
         &ice_candidates.to_string(),
         &dtls_parameters.to_string(),
         app_data_json.as_deref(),
-    )?;
+    )
+    .map_err(|error| {
+        eprintln!("[dspeak:media] create-send-transport failed id={id}: {error}");
+        error
+    })?;
     handles.send_transport = transport;
+    eprintln!("[dspeak:media] create-send-transport success id={id}");
     Ok(serde_json::json!({ "handle": transport as u64 }))
 }
 
@@ -509,6 +526,7 @@ pub async fn media_create_recv_transport(
     dtls_parameters: Value,
     app_data: Option<Value>,
 ) -> Result<Value, String> {
+    eprintln!("[dspeak:media] create-recv-transport start id={id}");
     let mut handles = store
         .handles
         .lock()
@@ -529,8 +547,13 @@ pub async fn media_create_recv_transport(
         &ice_candidates.to_string(),
         &dtls_parameters.to_string(),
         app_data_json.as_deref(),
-    )?;
+    )
+    .map_err(|error| {
+        eprintln!("[dspeak:media] create-recv-transport failed id={id}: {error}");
+        error
+    })?;
     handles.recv_transport = transport;
+    eprintln!("[dspeak:media] create-recv-transport success id={id}");
     Ok(serde_json::json!({ "handle": transport as u64 }))
 }
 
@@ -1279,6 +1302,7 @@ pub async fn media_set_microphone(
     store: State<'_, NativeMediaStore>,
     enabled: bool,
 ) -> Result<(), String> {
+    eprintln!("[dspeak:media] set-microphone enabled={enabled}");
     #[cfg(native_rtc)]
     {
         if enabled {
@@ -1286,7 +1310,7 @@ pub async fn media_set_microphone(
                 .state
                 .lock()
                 .map_err(|_| "native media state lock poisoned".to_string())?;
-            if !state.native_backend_ready || !state.capabilities.native_rtc || !state.capabilities.microphone {
+            if !state.native_backend_ready || !state.capabilities.native_rtc {
                 return Err("native microphone capture is unavailable".to_string());
             }
         }
@@ -1299,8 +1323,20 @@ pub async fn media_set_microphone(
             }
         };
         if result != 0 {
-            return Err(format!("native microphone capture failed (error {})", error));
+            let detail = unsafe { ffi::lib_dspeak_media_capture_error_message(error) };
+            let detail = if detail.is_null() {
+                "native capture failed".to_string()
+            } else {
+                unsafe { CStr::from_ptr(detail) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            eprintln!("[dspeak:media] set-microphone failed error={error} detail={detail}");
+            return Err(format!(
+                "native microphone capture failed (error {error}): {detail}"
+            ));
         }
+        eprintln!("[dspeak:media] set-microphone success enabled={enabled}");
         return Ok(());
     }
     #[cfg(not(native_rtc))]
@@ -1323,7 +1359,7 @@ pub async fn media_set_camera(
                 .state
                 .lock()
                 .map_err(|_| "native media state lock poisoned".to_string())?;
-            if !state.native_backend_ready || !state.capabilities.native_rtc || !state.capabilities.camera {
+            if !state.native_backend_ready || !state.capabilities.native_rtc {
                 return Err("native camera capture is unavailable".to_string());
             }
         }

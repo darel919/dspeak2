@@ -75,7 +75,7 @@ export const useVoiceStore = defineStore("voice", () => {
       : requested;
   });
 
-  const sfuComposable = ref(null);
+  const sfuComposable = shallowRef(null);
   const localVideoFeeds = computed(
     () => unref(sfuComposable.value?.localVideoFeeds) || EMPTY_MEDIA_FEEDS,
   );
@@ -499,7 +499,9 @@ export const useVoiceStore = defineStore("voice", () => {
         useFatalClientError().report(err);
         return;
       }
-      error.value = voiceJoinErrorMessage(err);
+      error.value = voiceJoinErrorMessage(err, {
+        includeDetails: import.meta.dev || isTauriRuntime(),
+      });
       if (typeof window !== "undefined") {
         const { useToast } = await import("~/composables/useToast");
         const { error: showError } = useToast();

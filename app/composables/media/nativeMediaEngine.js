@@ -9,6 +9,9 @@ import {
 import { NativeMediasoupSfuSession } from "../../shared/native-mediasoup-session.js";
 import { NativeP2pSession } from "../../shared/native-p2p-session.js";
 
+const NATIVE_ACTION_POLL_IDLE_MS = 100;
+const NATIVE_ACTION_POLL_ACTIVE_MS = 5;
+
 const NATIVE_EVENT_NAMES = [
   "media:state",
   "media:local-track",
@@ -266,19 +269,34 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async joinSession(input) {
-    await this.initialize();
-    if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
-      try {
+    let phase = "initialize";
+    try {
+      await this.initialize();
+      if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
+        phase = "native-connect";
         await this.nativeSession?.connect(input.channelId || input);
-      } catch (error) {
-        this.flags.nativeBackendReady = false;
-        this._emit("error", { source: "native", operation: "join", error });
-        throw error;
+      } else if (this.nativeOnly) {
+        throw new Error("Native WebRTC is not ready for this desktop session");
       }
-    } else if (this.nativeOnly) {
-      throw new Error("Native WebRTC is not ready for this desktop session");
+      phase = "browser-fallback";
+      if (!this.nativeOnly) return this.browserEngine.joinSession(input);
+    } catch (error) {
+      try {
+        this.flags.nativeBackendReady = false;
+      } catch (_) {}
+      const message = error?.message || String(error);
+      const wrapped = new Error(
+        `Native voice join failed during ${phase}: ${message}`,
+      );
+      wrapped.code = error?.code;
+      wrapped.cause = error;
+      this._emit("error", {
+        source: "native",
+        operation: "join",
+        error: wrapped,
+      });
+      throw wrapped;
     }
-    if (!this.nativeOnly) return this.browserEngine.joinSession(input);
   }
 
   async leaveSession() {
@@ -712,20 +730,35 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async connect(...args) {
-    await this.initialize();
-    const input = { channelId: args[0] };
-    if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
-      try {
+    let phase = "initialize";
+    try {
+      await this.initialize();
+      const input = { channelId: args[0] };
+      if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
+        phase = "native-connect";
         await this.nativeSession?.connect(input.channelId);
-      } catch (error) {
-        this.flags.nativeBackendReady = false;
-        this._emit("error", { source: "native", operation: "join", error });
-        throw error;
+      } else if (this.nativeOnly) {
+        throw nativeOnlyError("connect");
       }
-    } else if (this.nativeOnly) {
-      throw nativeOnlyError("connect");
+      phase = "browser-fallback";
+      if (!this.nativeOnly) return this.browserEngine.connect(...args);
+    } catch (error) {
+      try {
+        this.flags.nativeBackendReady = false;
+      } catch (_) {}
+      const message = error?.message || String(error);
+      const wrapped = new Error(
+        `Native voice connect failed during ${phase}: ${message}`,
+      );
+      wrapped.code = error?.code;
+      wrapped.cause = error;
+      this._emit("error", {
+        source: "native",
+        operation: "join",
+        error: wrapped,
+      });
+      throw wrapped;
     }
-    if (!this.nativeOnly) return this.browserEngine.connect(...args);
   }
 
   disconnect(...args) {
@@ -1050,14 +1083,17 @@ export class NativeMediaEngine extends MediaEngine {
   _startNativeActionPump() {
     if (this.nativeActionPump || !this.flags.nativeRtc) return;
     let stopped = false;
+    let timer = null;
     const schedule = (delay) => {
-      this.nativeActionPump = setTimeout(pump, delay);
-      this.nativeActionPump.unref?.();
+      timer = setTimeout(pump, delay);
+      timer?.unref?.();
     };
     const pump = async () => {
       if (stopped || !this.initialized) return;
+      let active = false;
       try {
         const action = await this._invoke("media_poll_action");
+        active = Boolean(action?.kind || action?.state);
         if (
           action?.kind === 1 ||
           action?.kind === 2 ||
@@ -1095,6 +1131,7 @@ export class NativeMediaEngine extends MediaEngine {
           });
         }
         const receiveEvent = await this._invoke("media_poll_receive_event");
+        active = active || Boolean(receiveEvent?.kind);
         if (receiveEvent?.kind) {
           this.nativeReceiveEventHandler?.(receiveEvent);
           this._syncNativeFeeds();
@@ -1115,13 +1152,18 @@ export class NativeMediaEngine extends MediaEngine {
           });
         }
       }
-      if (!stopped) schedule(10);
+      if (!stopped)
+        schedule(
+          active ? NATIVE_ACTION_POLL_ACTIVE_MS : NATIVE_ACTION_POLL_IDLE_MS,
+        );
     };
     schedule(0);
-    this.nativeActionPump.stop = () => {
-      stopped = true;
-      clearTimeout(this.nativeActionPump);
-      this.nativeActionPump = null;
+    this.nativeActionPump = {
+      stop: () => {
+        stopped = true;
+        if (timer !== null) clearTimeout(timer);
+        this.nativeActionPump = null;
+      },
     };
   }
 

@@ -51,6 +51,23 @@ describe("MediaEngine adapters", () => {
     assert.equal(flags.nativeAudioReceive, true);
   });
 
+  it("uses adaptive native action polling instead of a fixed idle spin", async () => {
+    const source = await readFile(
+      "app/composables/media/nativeMediaEngine.js",
+      "utf8",
+    );
+
+    assert.match(source, /NATIVE_ACTION_POLL_IDLE_MS = 100/);
+    assert.match(source, /NATIVE_ACTION_POLL_ACTIVE_MS = 5/);
+    assert.match(
+      source,
+      /active \? NATIVE_ACTION_POLL_ACTIVE_MS : NATIVE_ACTION_POLL_IDLE_MS/,
+    );
+    assert.match(source, /this\.nativeActionPump = \{/);
+    assert.doesNotMatch(source, /this\.nativeActionPump\.stop\s*=/);
+    assert.doesNotMatch(source, /schedule\(10\)/);
+  });
+
   it("does not probe browser microphone access before the Tauri factory", async () => {
     const voiceStore = await readFile("app/stores/voice.js", "utf8");
     const factoryImport = voiceStore.indexOf('"~/composables/useMediasoupSfu"');

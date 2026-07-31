@@ -10,9 +10,12 @@
 #include "runtime_health.hpp"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -89,6 +92,7 @@ static lib_dspeak_media_audio_track_t* g_audio_track = nullptr;
 static lib_dspeak_media_video_track_t* g_camera_track = nullptr;
 static lib_dspeak_media_audio_track_t* g_microphone_track = nullptr;
 static std::string g_microphone_device_id;
+static std::deque<float> g_audio_pending[3];
 static std::atomic<int> g_capture_error{0};
 static std::atomic<uint64_t> g_probe_video_frames{0};
 static std::atomic<uint64_t> g_probe_audio_frames{0};
@@ -98,6 +102,10 @@ enum class CaptureRoute {
     kMicrophone,
     kCamera,
 };
+
+static std::deque<float>& audio_pending_for_route(CaptureRoute route) {
+    return g_audio_pending[static_cast<size_t>(route)];
+}
 
 static CaptureRoute* capture_route(void* user_data) {
     return static_cast<CaptureRoute*>(user_data);
@@ -147,16 +155,47 @@ static void on_audio_frame(void* user_data,
                            uint32_t sample_rate,
                            uint8_t channels) {
     CaptureRoute route = user_data ? *capture_route(user_data) : CaptureRoute::kDesktop;
-    std::lock_guard<std::mutex> lock(g_track_mutex);
-    lib_dspeak_media_audio_track_t* track = audio_track_for_route(route);
-    if (!track || !track->source || !data || frame_count == 0 || channels != 2 || sample_rate != 48000) return;
-    int64_t timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::vector<std::vector<float>> chunks;
+    NativeAudioSource* source = nullptr;
+    webrtc::Thread* audio_thread = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
+        lib_dspeak_media_audio_track_t* track = audio_track_for_route(route);
+        if (!track || !track->source || !track->worker_thread || !data || frame_count == 0 ||
+            channels != 2 || sample_rate != 48000) return;
+        auto& pending = audio_pending_for_route(route);
+        pending.insert(pending.end(), data, data + static_cast<size_t>(frame_count) * channels);
+        constexpr size_t frames_per_webrtc_audio_frame = 480;
+        constexpr size_t samples_per_webrtc_audio_frame = frames_per_webrtc_audio_frame * 2;
+        while (pending.size() >= samples_per_webrtc_audio_frame) {
+            std::vector<float> chunk(samples_per_webrtc_audio_frame);
+            std::copy_n(pending.begin(), samples_per_webrtc_audio_frame, chunk.begin());
+            pending.erase(pending.begin(), pending.begin() + samples_per_webrtc_audio_frame);
+            chunks.push_back(std::move(chunk));
+        }
+        source = track->source;
+        audio_thread = track->worker_thread;
+    }
+
+    const int64_t timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
-    track->source->OnCapturedData(data, 32, sample_rate, channels, frame_count, timestamp_ms);
-    if (route == CaptureRoute::kDesktop) {
+    constexpr size_t frames_per_webrtc_audio_frame = 480;
+    size_t emitted_frames = 0;
+    for (auto& chunk : chunks) {
+        webrtc::scoped_refptr<NativeAudioSource> source_ref(source);
+        audio_thread->BlockingCall([source_ref, &chunk, sample_rate, channels, timestamp_ms,
+                                    emitted_frames, frames_per_webrtc_audio_frame] {
+            source_ref->OnCapturedData(
+                chunk.data(), 32, sample_rate, channels, frames_per_webrtc_audio_frame,
+                timestamp_ms + static_cast<int64_t>(emitted_frames * 1000 / sample_rate));
+        });
+        emitted_frames += frames_per_webrtc_audio_frame;
+    }
+
+    if (!chunks.empty() && route == CaptureRoute::kDesktop) {
         g_probe_audio_frames.fetch_add(1);
         dspeak_media_runtime::screen_audio_ready.store(true);
-    } else if (route == CaptureRoute::kMicrophone) {
+    } else if (!chunks.empty() && route == CaptureRoute::kMicrophone) {
         dspeak_media_runtime::microphone_ready.store(true);
     }
 }
@@ -304,6 +343,8 @@ static int start_microphone_request(const char* device_id, int* error_out) {
     auto* capture = lib_dspeak_media_platform_device_capture_create(
         device_id && device_id[0] ? device_id : nullptr, "microphone");
     if (!capture) {
+        fprintf(stderr, "[dspeak:capture] microphone session creation returned null device=%s\\n",
+                device_id ?: "<default>");
         std::lock_guard<std::mutex> track_lock(g_track_mutex);
         lib_dspeak_media_destroy_audio_track(g_microphone_track);
         g_microphone_track = nullptr;
@@ -368,7 +409,11 @@ static int start_camera_request(const char* device_id, int* error_out) {
 static int stop_microphone_request(int* error_out) {
     if (error_out) *error_out = 0;
     std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
-    if (!g_microphone_capture) return 0;
+    if (!g_microphone_capture) {
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        audio_pending_for_route(CaptureRoute::kMicrophone).clear();
+        return 0;
+    }
     auto* capture = g_microphone_capture;
     g_microphone_capture = nullptr;
     lib_dspeak_media_platform_device_capture_stop(capture);
@@ -378,6 +423,7 @@ static int stop_microphone_request(int* error_out) {
         lib_dspeak_media_destroy_audio_track(g_microphone_track);
         g_microphone_track = nullptr;
     }
+    audio_pending_for_route(CaptureRoute::kMicrophone).clear();
     return 0;
 }
 

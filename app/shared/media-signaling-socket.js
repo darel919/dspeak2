@@ -285,6 +285,12 @@ export function dispatchMediaSignalingMessage(raw, { getHandler, onFailure }) {
   const handler = getHandler(message.type);
   if (!handler) return;
   Promise.resolve(handler(message.data || {})).catch((error) => {
-    onFailure(error.message || "Media message handling failed");
+    const detail = error?.message || String(error || "Unknown handler error");
+    const failure = new Error(
+      `Media message handling failed for ${message.type}: ${detail}`,
+    );
+    failure.code = "MEDIA_MESSAGE_HANDLER_FAILED";
+    failure.cause = error;
+    onFailure(failure);
   });
 }

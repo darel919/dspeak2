@@ -42,6 +42,11 @@ fn main() {
             vec![lib_dir.join("libwebrtc.a")],
         ]
     };
+    for candidates in &required_libraries {
+        for path in candidates {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
     let missing = required_libraries
         .iter()
         .filter(|candidates| !candidates.iter().any(|path| path.is_file()))
