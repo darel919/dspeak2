@@ -50,6 +50,10 @@ export function useMediaEngine(sessionOrFactory, options = {}) {
     return new NativeMediaEngine({
       flags: resolveNativeMediaFlags({ nativeRtc: true, ...options.flags }),
       tauri: options.tauri,
+      nativeConfig: {
+        signalingPath: import.meta.env?.VITE_DSPEAK_SFU_PATH || undefined,
+        ...options.nativeConfig,
+      },
       nativeOnly: true,
     });
   const session =

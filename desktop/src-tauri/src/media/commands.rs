@@ -1,14 +1,34 @@
 use super::startup::{call_native_shutdown, native_capabilities_value, try_native_initialize};
 use super::state::{emit_state, lock_state, NativeMediaStore};
+#[cfg(native_rtc)]
+use super::state::NativeHandleRegistry;
 use super::types::{
     capture_error, validate_capture_request, NativeMediaCapabilities, NativeMediaError,
     NativeMediaState,
 };
 #[cfg(native_rtc)]
+use base64::Engine;
+#[cfg(native_rtc)]
 use super::{ffi, native};
 use serde_json::Value;
 use std::ffi::{CStr, CString};
 use tauri::{AppHandle, State};
+
+#[cfg(native_rtc)]
+fn consumer_index(handles: &NativeHandleRegistry, consumer_id: &str) -> Option<usize> {
+    handles.consumers.iter().position(|consumer| {
+        let pointer = unsafe { ffi::lib_dspeak_media_consumer_get_id(*consumer) };
+        if pointer.is_null() {
+            return false;
+        }
+        let matches = unsafe { CStr::from_ptr(pointer) }
+            .to_str()
+            .map(|value| value == consumer_id)
+            .unwrap_or(false);
+        unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+        matches
+    })
+}
 
 #[tauri::command]
 pub async fn media_initialize(
@@ -182,11 +202,13 @@ pub async fn media_get_permissions(
         let capabilities = native_capabilities_value();
         let granted = match kind.as_str() {
             "microphone" => capabilities
-                .get("nativeMicrophone")
+                .get("microphone")
+                .or_else(|| capabilities.get("nativeMicrophone"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             "camera" => capabilities
-                .get("nativeCamera")
+                .get("camera")
+                .or_else(|| capabilities.get("nativeCamera"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             "screen" | "screenVideo" => capabilities
@@ -380,10 +402,35 @@ pub async fn media_stop_screen_share(
 
 #[tauri::command]
 pub async fn media_set_microphone_device(
-    _store: State<'_, NativeMediaStore>,
-    _device_id: String,
+    store: State<'_, NativeMediaStore>,
+    device_id: String,
 ) -> Result<(), String> {
-    Ok(())
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let device_id = CString::new(device_id).map_err(|_| "microphone device id is invalid".to_string())?;
+        let mut error = 0;
+        let result = unsafe {
+            ffi::lib_dspeak_media_set_microphone_device(device_id.as_ptr(), &mut error)
+        };
+        if result != 0 {
+            return Err(format!("native microphone device selection failed (error {})", error));
+        }
+        return Ok(());
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = device_id;
+        Err("native media backend not available".to_string())
+    }
 }
 
 #[tauri::command]
@@ -489,6 +536,368 @@ pub async fn media_create_recv_transport(
 
 #[cfg(native_rtc)]
 #[tauri::command]
+pub async fn media_consume(
+    store: State<'_, NativeMediaStore>,
+    id: String,
+    producer_id: String,
+    kind: String,
+    rtp_parameters: Value,
+    app_data: Option<Value>,
+) -> Result<Value, String> {
+    let mut handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    if handles.recv_transport.is_null() {
+        return Err("native receive transport is not ready".to_string());
+    }
+    let consumer = native::consume(
+        handles.recv_transport,
+        &id,
+        &producer_id,
+        &kind,
+        &rtp_parameters.to_string(),
+        &app_data.unwrap_or_else(|| serde_json::json!({})).to_string(),
+    )?;
+    if unsafe { ffi::lib_dspeak_media_consumer_set_enabled(consumer, false) } != 0 {
+        unsafe { ffi::lib_dspeak_media_destroy_consumer(consumer) };
+        return Err("native consumer could not be paused before resume acknowledgement".to_string());
+    }
+    let metadata = native::consumer_metadata(consumer)?;
+    handles.consumers.push(consumer);
+    Ok(serde_json::json!({
+        "id": metadata.0,
+        "producerId": metadata.1,
+        "kind": metadata.2,
+    }))
+}
+
+#[cfg(native_rtc)]
+fn owned_p2p_handle(
+    handles: &super::state::NativeHandleRegistry,
+    handle: u64,
+) -> Result<*mut ffi::lib_dspeak_media_p2p_handle_t, String> {
+    handles
+        .p2p_handles
+        .get(&handle)
+        .copied()
+        .filter(|value| !value.is_null())
+        .ok_or_else(|| "native P2P handle is not owned by this session".to_string())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_create(store: State<'_, NativeMediaStore>) -> Result<Value, String> {
+    let mut handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = native::p2p_create()?;
+    let key = handle as u64;
+    handles.p2p_handles.insert(key, handle);
+    Ok(serde_json::json!({ "handle": key }))
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_destroy(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+) -> Result<(), String> {
+    let mut handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = handles
+        .p2p_handles
+        .remove(&p2p_handle)
+        .ok_or_else(|| "native P2P handle is not owned by this session".to_string())?;
+    handles
+        .p2p_tracks
+        .retain(|(key, _), _| *key != p2p_handle);
+    native::p2p_destroy(handle);
+    Ok(())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_create_offer(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+) -> Result<String, String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    native::p2p_create_offer(owned_p2p_handle(&handles, p2p_handle)?)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_create_answer(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    remote_sdp: String,
+) -> Result<String, String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    native::p2p_create_answer(owned_p2p_handle(&handles, p2p_handle)?, &remote_sdp)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_set_remote_description(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    sdp: String,
+) -> Result<(), String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    native::p2p_set_remote_description(owned_p2p_handle(&handles, p2p_handle)?, &sdp)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_add_ice_candidate(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    candidate: String,
+) -> Result<(), String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    native::p2p_add_ice_candidate(owned_p2p_handle(&handles, p2p_handle)?, &candidate)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_poll_ice_candidate(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+) -> Result<Option<String>, String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    Ok(native::p2p_poll_ice_candidate(handle))
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_ice_state(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+) -> Result<i32, String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    Ok(native::p2p_ice_state(owned_p2p_handle(&handles, p2p_handle)?))
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_restart_ice(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+) -> Result<String, String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    native::p2p_restart_ice(owned_p2p_handle(&handles, p2p_handle)?)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_add_track(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    source: String,
+    kind: String,
+) -> Result<Value, String> {
+    let mut handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    let c_source = CString::new(source.as_str()).map_err(|error| error.to_string())?;
+    let track = if kind == "video" {
+        unsafe { ffi::lib_dspeak_media_get_video_track(c_source.as_ptr()) }
+    } else if kind == "audio" {
+        unsafe { ffi::lib_dspeak_media_get_audio_track(c_source.as_ptr()) }
+    } else {
+        return Err("native P2P track kind is invalid".to_string());
+    };
+    if track.is_null() {
+        return Err(format!("native {kind} capture track is unavailable"));
+    }
+    let result = unsafe {
+        if kind == "video" {
+            ffi::lib_dspeak_media_p2p_add_video_track(handle, track)
+        } else {
+            ffi::lib_dspeak_media_p2p_add_audio_track(handle, track)
+        }
+    };
+    if result != 0 {
+        return Err(format!("native P2P {kind} track attachment failed"));
+    }
+    let pointer = unsafe {
+        if kind == "video" {
+            ffi::lib_dspeak_media_video_track_get_id(track)
+        } else {
+            ffi::lib_dspeak_media_audio_track_get_id(track)
+        }
+    };
+    if pointer.is_null() {
+        return Err("native P2P track did not return an identifier".to_string());
+    }
+    let track_id = unsafe { CStr::from_ptr(pointer) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+    handles
+        .p2p_tracks
+        .insert((p2p_handle, source), (kind, track));
+    Ok(serde_json::json!({ "trackId": track_id }))
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_remove_track(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    source: String,
+) -> Result<(), String> {
+    let mut handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    let (kind, track) = handles
+        .p2p_tracks
+        .remove(&(p2p_handle, source))
+        .ok_or_else(|| "native P2P source is not attached".to_string())?;
+    let result = unsafe {
+        if kind == "video" {
+            ffi::lib_dspeak_media_p2p_remove_video_track(handle, track)
+        } else {
+            ffi::lib_dspeak_media_p2p_remove_audio_track(handle, track)
+        }
+    };
+    if result != 0 {
+        return Err(format!("native P2P {kind} track removal failed"));
+    }
+    Ok(())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_poll_event(
+    store: State<'_, NativeMediaStore>,
+) -> Result<Value, String> {
+    media_poll_receive_event(store).await
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_set_consumer_enabled(
+    store: State<'_, NativeMediaStore>,
+    consumer_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let index = consumer_index(&handles, &consumer_id)
+        .ok_or_else(|| "native consumer is not owned by this session".to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_consumer_set_enabled(handles.consumers[index], enabled)
+    };
+    if result != 0 {
+        return Err("native consumer enable state could not be changed".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_set_consumer_volume(
+    store: State<'_, NativeMediaStore>,
+    consumer_id: String,
+    volume: f64,
+) -> Result<(), String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let index = consumer_index(&handles, &consumer_id)
+        .ok_or_else(|| "native consumer is not owned by this session".to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_consumer_set_volume(handles.consumers[index], volume)
+    };
+    if result != 0 {
+        return Err("native consumer volume could not be changed".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_close_consumer(
+    store: State<'_, NativeMediaStore>,
+    consumer_id: String,
+) -> Result<(), String> {
+    let mut handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let Some(index) = consumer_index(&handles, &consumer_id) else {
+        return Ok(());
+    };
+    let consumer = handles.consumers.remove(index);
+    unsafe { ffi::lib_dspeak_media_destroy_consumer(consumer) };
+    Ok(())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_set_consumer_enabled(
+    _store: State<'_, NativeMediaStore>,
+    _consumer_id: String,
+    _enabled: bool,
+) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_set_consumer_volume(
+    _store: State<'_, NativeMediaStore>,
+    _consumer_id: String,
+    _volume: f64,
+) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_close_consumer(
+    _store: State<'_, NativeMediaStore>,
+    _consumer_id: String,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
 pub async fn media_poll_action(_store: State<'_, NativeMediaStore>) -> Result<Value, String> {
     let action = native::poll_action();
     let params_ptr = action.params_json;
@@ -516,6 +925,43 @@ pub async fn media_poll_action(_store: State<'_, NativeMediaStore>) -> Result<Va
         "paramsJson": params,
         "state": state,
     }))
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_poll_receive_event(
+    _store: State<'_, NativeMediaStore>,
+) -> Result<Value, String> {
+    let mut event = unsafe { ffi::lib_dspeak_media_poll_receive_event() };
+    if event.kind == 0 {
+        return Ok(serde_json::json!({ "kind": 0 }));
+    }
+    let id = if event.id.is_null() {
+        None
+    } else {
+        Some(unsafe { CStr::from_ptr(event.id) }.to_string_lossy().into_owned())
+    };
+    let payload = if event.payload_json.is_null() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str::<Value>(unsafe { CStr::from_ptr(event.payload_json) }.to_str().unwrap_or("{}"))
+            .unwrap_or_else(|_| serde_json::json!({}))
+    };
+    let data = if event.data.is_null() || event.data_len == 0 {
+        None
+    } else {
+        let bytes = unsafe { std::slice::from_raw_parts(event.data, event.data_len as usize) };
+        Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+    };
+    let result = serde_json::json!({
+        "kind": event.kind,
+        "eventId": event.event_id,
+        "id": id,
+        "payload": payload,
+        "data": data,
+    });
+    unsafe { ffi::lib_dspeak_media_free_receive_event(&mut event) };
+    Ok(result)
 }
 
 #[cfg(native_rtc)]
@@ -650,8 +1096,101 @@ pub async fn media_create_recv_transport(
 
 #[cfg(not(native_rtc))]
 #[tauri::command]
+pub async fn media_consume(
+    _store: State<'_, NativeMediaStore>,
+    _id: String,
+    _producer_id: String,
+    _kind: String,
+    _rtp_parameters: Value,
+    _app_data: Option<Value>,
+) -> Result<Value, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_create(_store: State<'_, NativeMediaStore>) -> Result<Value, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_destroy(_store: State<'_, NativeMediaStore>, _p2p_handle: u64) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_create_offer(_store: State<'_, NativeMediaStore>, _p2p_handle: u64) -> Result<String, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_create_answer(_store: State<'_, NativeMediaStore>, _p2p_handle: u64, _remote_sdp: String) -> Result<String, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_set_remote_description(_store: State<'_, NativeMediaStore>, _p2p_handle: u64, _sdp: String) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_add_ice_candidate(_store: State<'_, NativeMediaStore>, _p2p_handle: u64, _candidate: String) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_poll_ice_candidate(_store: State<'_, NativeMediaStore>, _p2p_handle: u64) -> Result<Option<String>, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_ice_state(_store: State<'_, NativeMediaStore>, _p2p_handle: u64) -> Result<i32, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_restart_ice(_store: State<'_, NativeMediaStore>, _p2p_handle: u64) -> Result<String, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_add_track(_store: State<'_, NativeMediaStore>, _p2p_handle: u64, _source: String, _kind: String) -> Result<Value, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_remove_track(_store: State<'_, NativeMediaStore>, _p2p_handle: u64, _source: String) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_poll_event(_store: State<'_, NativeMediaStore>) -> Result<Value, String> {
+    Ok(serde_json::json!({ "kind": 0 }))
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
 pub async fn media_poll_action(_store: State<'_, NativeMediaStore>) -> Result<Value, String> {
     Ok(serde_json::json!({ "kind": 0, "transportPtr": 0, "actionId": 0 }))
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_poll_receive_event(
+    _store: State<'_, NativeMediaStore>,
+) -> Result<Value, String> {
+    Ok(serde_json::json!({ "kind": 0 }))
 }
 
 #[cfg(not(native_rtc))]
@@ -702,24 +1241,111 @@ pub async fn media_handle_signal(
 }
 
 #[tauri::command]
-pub async fn media_get_devices(_store: State<'_, NativeMediaStore>) -> Result<Vec<Value>, String> {
-    Ok(vec![])
+pub async fn media_get_devices(
+    store: State<'_, NativeMediaStore>,
+) -> Result<Vec<Value>, String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let pointer = unsafe { ffi::lib_dspeak_media_list_capture_devices() };
+        if pointer.is_null() {
+            return Err("native media device enumeration failed".to_string());
+        }
+        let text = unsafe { CStr::from_ptr(pointer) }
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| "native media device list was not UTF-8".to_string());
+        unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+        let text = text?;
+        return serde_json::from_str(&text)
+            .map_err(|_| "native media device list was invalid JSON".to_string());
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        Err("native media backend not available".to_string())
+    }
 }
 
 #[tauri::command]
 pub async fn media_set_microphone(
-    _store: State<'_, NativeMediaStore>,
-    _enabled: bool,
+    store: State<'_, NativeMediaStore>,
+    enabled: bool,
 ) -> Result<(), String> {
-    Ok(())
+    #[cfg(native_rtc)]
+    {
+        if enabled {
+            let state = store
+                .state
+                .lock()
+                .map_err(|_| "native media state lock poisoned".to_string())?;
+            if !state.native_backend_ready || !state.capabilities.native_rtc || !state.capabilities.microphone {
+                return Err("native microphone capture is unavailable".to_string());
+            }
+        }
+        let mut error = 0;
+        let result = unsafe {
+            if enabled {
+                ffi::lib_dspeak_media_start_microphone_capture(&mut error)
+            } else {
+                ffi::lib_dspeak_media_stop_microphone_capture(&mut error)
+            }
+        };
+        if result != 0 {
+            return Err(format!("native microphone capture failed (error {})", error));
+        }
+        return Ok(());
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = enabled;
+        Err("native media backend not available".to_string())
+    }
 }
 
 #[tauri::command]
 pub async fn media_set_camera(
-    _store: State<'_, NativeMediaStore>,
-    _enabled: bool,
+    store: State<'_, NativeMediaStore>,
+    enabled: bool,
 ) -> Result<(), String> {
-    Ok(())
+    #[cfg(native_rtc)]
+    {
+        if enabled {
+            let state = store
+                .state
+                .lock()
+                .map_err(|_| "native media state lock poisoned".to_string())?;
+            if !state.native_backend_ready || !state.capabilities.native_rtc || !state.capabilities.camera {
+                return Err("native camera capture is unavailable".to_string());
+            }
+        }
+        let mut error = 0;
+        let result = unsafe {
+            if enabled {
+                ffi::lib_dspeak_media_start_camera_capture(&mut error)
+            } else {
+                ffi::lib_dspeak_media_stop_camera_capture(&mut error)
+            }
+        };
+        if result != 0 {
+            return Err(format!("native camera capture failed (error {})", error));
+        }
+        return Ok(());
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = enabled;
+        Err("native media backend not available".to_string())
+    }
 }
 
 #[tauri::command]

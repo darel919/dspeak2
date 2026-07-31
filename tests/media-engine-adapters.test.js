@@ -118,8 +118,7 @@ describe("MediaEngine adapters", () => {
     });
   });
 
-  it("NativeMediaEngine routes enabled native commands through Tauri", async () => {
-    const { session } = createSession();
+  it("NativeMediaEngine joins before live SFU health is proven", async () => {
     const calls = [];
     const tauri = {
       invoke: async (command, payload) => {
@@ -138,25 +137,76 @@ describe("MediaEngine adapters", () => {
       listen: async () => () => {},
     };
     const engine = new NativeMediaEngine({
-      browserEngine: new BrowserMediaEngine(session),
+      browserEngine: new BrowserMediaEngine(createSession().session),
       flags: { nativeRtc: true, nativeScreenShare: true },
       tauri,
     });
 
+    await engine.initialize();
+    engine._stopNativeActionPump();
+    engine.nativeSession = {
+      connect: async (channelId) => calls.push(["connect", channelId]),
+    };
     await engine.joinSession({ channelId: "channel-3" });
-    await engine.startScreenShare({ includeSystemAudio: true });
-    const stats = await engine.getStats();
+    assert.deepEqual(calls, [
+      ["media_initialize", { config: {} }],
+      ["connect", "channel-3"],
+    ]);
+  });
 
-    assert.equal(stats.engine, "native");
-    assert.deepEqual(
-      calls.map(([command]) => command),
-      [
-        "media_initialize",
-        "media_join",
-        "media_start_screen_share",
-        "media_get_stats",
-      ],
-    );
+  it("reports native source state and removes stopped native sources", async () => {
+    const nativeCalls = [];
+    const nativeSession = {
+      sources: new Map([
+        ["audio", { source: "audio" }],
+        ["screen", { source: "screen" }],
+      ]),
+      getState: () => "ready",
+      removeSource(source) {
+        this.sources.delete(source);
+      },
+    };
+    const nativeP2pSession = {
+      sources: new Map([
+        ["audio", { source: "audio" }],
+        ["screen", { source: "screen" }],
+      ]),
+      async removeSource(source) {
+        this.sources.delete(source);
+      },
+    };
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeScreenShare: true,
+        nativeScreenAudio: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => {
+          nativeCalls.push(command);
+        },
+      },
+    });
+    engine.nativeSession = nativeSession;
+    engine.nativeP2pSession = nativeP2pSession;
+
+    assert.equal(engine.getState(), "ready");
+    assert.equal(engine.isMicrophoneEnabled(), true);
+    assert.equal(engine.isScreenSharing(), true);
+    await engine.stopScreenShare();
+    assert.equal(engine.isScreenSharing(), false);
+
+    nativeSession.sources.set("screen-audio", { source: "screen-audio" });
+    nativeP2pSession.sources.set("screen-audio", { source: "screen-audio" });
+    await engine.stopSystemAudioProduction();
+    assert.equal(nativeSession.sources.has("screen-audio"), false);
+    assert.equal(nativeP2pSession.sources.has("screen-audio"), false);
+    assert.deepEqual(nativeCalls, [
+      "media_stop_screen_share",
+      "media_stop_system_audio",
+    ]);
   });
 
   it("NativeMediaEngine falls back when the native runtime reports no capabilities", async () => {

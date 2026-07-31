@@ -734,4 +734,572 @@ void lib_dspeak_media_platform_capture_destroy(struct lib_dspeak_media_capture_s
     delete session;
 }
 
+static NSString* device_id_from_source_id(NSString* source_id, NSString* kind) {
+    if (!source_id) return nil;
+    NSString* prefix = [NSString stringWithFormat:@"macos:%@:", kind];
+    if ([source_id hasPrefix:prefix]) return [source_id substringFromIndex:prefix.length];
+    return source_id;
+}
+
+static NSDictionary* device_dictionary(AVCaptureDevice* device, NSString* kind) {
+    NSString* unique_id = device.uniqueID ?: @"";
+    bool microphone = [kind isEqualToString:@"microphone"];
+    NSString* source_id = [NSString stringWithFormat:@"macos:%@:%@", kind, unique_id];
+    NSMutableDictionary* result = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"deviceId": unique_id,
+        @"sourceId": source_id,
+        @"sourceType": kind,
+        @"sourceKey": [NSString stringWithFormat:@"%@:%@", kind, source_id],
+        @"title": device.localizedName ?: @"Unnamed device",
+        @"label": device.localizedName ?: @"Unnamed device",
+        @"available": @YES,
+        @"capabilities": microphone ? @{
+            @"audio": @YES,
+            @"video": @NO,
+            @"stereo": @YES,
+            @"channels": @2,
+            @"sampleRate": @48000,
+        } : @{
+            @"audio": @NO,
+            @"video": @YES,
+            @"stereo": @NO,
+            @"channels": @0,
+            @"sampleRate": @0,
+        },
+    }];
+    return result;
+}
+
+static NSArray* capture_device_sources(void) {
+    NSMutableArray* devices = [NSMutableArray array];
+    NSArray* microphones = [AVCaptureDevice devicesWithMediaType:AVMediaTypeAudio];
+    for (AVCaptureDevice* device in microphones) {
+        [devices addObject:device_dictionary(device, @"microphone")];
+    }
+    NSArray* cameras = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
+    for (AVCaptureDevice* device in cameras) {
+        [devices addObject:device_dictionary(device, @"camera")];
+    }
+    [devices sortUsingComparator:^NSComparisonResult(NSDictionary* left, NSDictionary* right) {
+        return [left[@"deviceId"] compare:right[@"deviceId"]];
+    }];
+    return devices;
+}
+
+char* lib_dspeak_media_platform_capture_list_devices(void) {
+    @autoreleasepool {
+        return json_string_from_object(capture_device_sources());
+    }
+}
+
+char* lib_dspeak_media_platform_capture_capabilities(void) {
+    @autoreleasepool {
+        NSArray* sources = capture_device_sources();
+        NSMutableArray* microphones = [NSMutableArray array];
+        NSMutableArray* cameras = [NSMutableArray array];
+        for (NSDictionary* source in sources) {
+            if ([source[@"sourceType"] isEqualToString:@"microphone"]) {
+                [microphones addObject:source];
+            } else if ([source[@"sourceType"] isEqualToString:@"camera"]) {
+                [cameras addObject:source];
+            }
+        }
+        bool microphone_available = microphones.count > 0;
+        bool camera_available = cameras.count > 0;
+        NSDictionary* result = @{
+            @"microphone": @{
+                @"available": @(microphone_available),
+                @"reason": microphone_available
+                    ? @"AVAudioEngine has an enumerated CoreAudio input device"
+                    : @"No CoreAudio input device is available",
+                @"sources": microphones,
+            },
+            @"camera": @{
+                @"available": @(camera_available),
+                @"reason": camera_available
+                    ? @"AVCaptureSession has an enumerated camera device"
+                    : @"No AVCaptureSession camera device is available",
+                @"sources": cameras,
+            },
+        };
+        return json_string_from_object(result);
+    }
+}
+
+static AudioDeviceID core_audio_device_for_uid(NSString* uid) {
+    if (!uid.length) return kAudioObjectUnknown;
+    AudioObjectPropertyAddress address = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain,
+    };
+    UInt32 data_size = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &address, 0, nullptr, &data_size) != noErr ||
+        data_size < sizeof(AudioDeviceID)) return kAudioObjectUnknown;
+    std::vector<AudioDeviceID> devices(data_size / sizeof(AudioDeviceID));
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, nullptr,
+                                   &data_size, devices.data()) != noErr) return kAudioObjectUnknown;
+    address.mSelector = kAudioDevicePropertyDeviceUID;
+    address.mScope = kAudioObjectPropertyScopeGlobal;
+    for (AudioDeviceID device : devices) {
+        CFStringRef device_uid = nullptr;
+        UInt32 uid_size = sizeof(device_uid);
+        if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &uid_size, &device_uid) != noErr ||
+            !device_uid) continue;
+        bool matches = CFStringCompare(device_uid, (__bridge CFStringRef)uid, 0) == kCFCompareEqualTo;
+        CFRelease(device_uid);
+        if (matches) return device;
+    }
+    return kAudioObjectUnknown;
+}
+
+static int device_capture_permission(NSString* media_type) {
+    AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:media_type];
+    if (status == AVAuthorizationStatusAuthorized) return 0;
+    if (status == AVAuthorizationStatusDenied || status == AVAuthorizationStatusRestricted) return -220;
+    __block bool granted = false;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    [AVCaptureDevice requestAccessForMediaType:media_type completionHandler:^(BOOL value) {
+        granted = value;
+        dispatch_semaphore_signal(semaphore);
+    }];
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
+    dispatch_release(semaphore);
+    return granted ? 0 : -220;
+}
+
+struct lib_dspeak_media_device_capture_session {
+    std::mutex mutex;
+    std::condition_variable state_changed;
+    bool starting = false;
+    bool running = false;
+    bool stopping = false;
+    bool error_reported = false;
+    uint32_t in_flight_callbacks = 0;
+    bool microphone = false;
+    lib_dspeak_media_screen_frame_cb screen_cb = nullptr;
+    lib_dspeak_media_audio_frame_cb audio_cb = nullptr;
+    lib_dspeak_media_capture_error_cb error_cb = nullptr;
+    void* user_data = nullptr;
+    NSString* device_id = nil;
+    AVAudioEngine* audio_engine = nil;
+    AVAudioInputNode* audio_input = nil;
+    AVAudioMixerNode* audio_mixer = nil;
+    AVAudioFormat* audio_format = nil;
+    AVCaptureSession* camera_session = nil;
+    AVCaptureDeviceInput* camera_input = nil;
+    AVCaptureVideoDataOutput* camera_output = nil;
+    id camera_delegate = nil;
+    dispatch_queue_t queue = nullptr;
+};
+
+static bool device_capture_begin_callback(lib_dspeak_media_device_capture_session* session,
+                                           lib_dspeak_media_screen_frame_cb* screen_cb,
+                                           lib_dspeak_media_audio_frame_cb* audio_cb,
+                                           void** user_data) {
+    std::lock_guard<std::mutex> lock(session->mutex);
+    if (!session->running) return false;
+    session->in_flight_callbacks += 1;
+    *screen_cb = session->screen_cb;
+    *audio_cb = session->audio_cb;
+    *user_data = session->user_data;
+    return true;
+}
+
+static void device_capture_end_callback(lib_dspeak_media_device_capture_session* session) {
+    std::lock_guard<std::mutex> lock(session->mutex);
+    if (session->in_flight_callbacks > 0) session->in_flight_callbacks -= 1;
+    session->state_changed.notify_all();
+}
+
+static void device_capture_report_error(lib_dspeak_media_device_capture_session* session,
+                                        int error_code,
+                                        const char* message) {
+    lib_dspeak_media_capture_error_cb callback = nullptr;
+    void* user_data = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(session->mutex);
+        if (session->error_reported) return;
+        session->error_reported = true;
+        session->running = false;
+        session->starting = false;
+        callback = session->error_cb;
+        user_data = session->user_data;
+        session->screen_cb = nullptr;
+        session->audio_cb = nullptr;
+        session->state_changed.notify_all();
+    }
+    if (callback) callback(user_data, error_code, message ?: "Native device capture failed");
+}
+
+@interface DSMDeviceCameraDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
+- (instancetype)initWithSession:(lib_dspeak_media_device_capture_session*)session;
+@end
+
+@implementation DSMDeviceCameraDelegate {
+    lib_dspeak_media_device_capture_session* _session;
+}
+
+- (instancetype)initWithSession:(lib_dspeak_media_device_capture_session*)session {
+    self = [super init];
+    if (self) _session = session;
+    return self;
+}
+
+- (void)captureOutput:(AVCaptureOutput*)output
+    didOutputSampleBuffer:(CMSampleBufferRef)sample_buffer
+    fromConnection:(AVCaptureConnection*)connection {
+    (void)output;
+    (void)connection;
+    if (!_session || !sample_buffer) return;
+    lib_dspeak_media_screen_frame_cb screen_cb = nullptr;
+    lib_dspeak_media_audio_frame_cb audio_cb = nullptr;
+    void* user_data = nullptr;
+    if (!device_capture_begin_callback(_session, &screen_cb, &audio_cb, &user_data)) return;
+    if (screen_cb) {
+        CFRetain(sample_buffer);
+        screen_cb(user_data, sample_buffer);
+    }
+    device_capture_end_callback(_session);
+}
+@end
+
+static bool audio_buffer_to_stereo(AVAudioPCMBuffer* buffer,
+                                   std::vector<float>& samples,
+                                   uint32_t& frame_count) {
+    AVAudioFormat* format = buffer.format;
+    if (!format || format.sampleRate != 48000.0 || format.channelCount != 2 ||
+        format.commonFormat != AVAudioPCMFormatFloat32 || buffer.frameLength == 0) return false;
+    const uint32_t frames = buffer.frameLength;
+    if (frames > UINT32_MAX) return false;
+    samples.resize(static_cast<size_t>(frames) * 2);
+    const AudioBufferList* list = buffer.audioBufferList;
+    if (!list) return false;
+    if (format.isInterleaved) {
+        if (list->mNumberBuffers != 1 || list->mBuffers[0].mNumberChannels != 2 ||
+            list->mBuffers[0].mDataByteSize < samples.size() * sizeof(float) ||
+            !list->mBuffers[0].mData) return false;
+        const float* input = static_cast<const float*>(list->mBuffers[0].mData);
+        std::copy(input, input + samples.size(), samples.begin());
+    } else {
+        if (list->mNumberBuffers != 2 || !list->mBuffers[0].mData || !list->mBuffers[1].mData ||
+            list->mBuffers[0].mDataByteSize < frames * sizeof(float) ||
+            list->mBuffers[1].mDataByteSize < frames * sizeof(float)) return false;
+        const float* left = static_cast<const float*>(list->mBuffers[0].mData);
+        const float* right = static_cast<const float*>(list->mBuffers[1].mData);
+        for (uint32_t index = 0; index < frames; ++index) {
+            samples[static_cast<size_t>(index) * 2] = left[index];
+            samples[static_cast<size_t>(index) * 2 + 1] = right[index];
+        }
+    }
+    frame_count = frames;
+    return true;
+}
+
+static void device_capture_cleanup(lib_dspeak_media_device_capture_session* session) {
+    AVAudioEngine* audio_engine = nil;
+    AVAudioInputNode* audio_input = nil;
+    AVAudioMixerNode* audio_mixer = nil;
+    AVAudioFormat* audio_format = nil;
+    AVCaptureSession* camera_session = nil;
+    AVCaptureVideoDataOutput* camera_output = nil;
+    AVCaptureDeviceInput* camera_input = nil;
+    id camera_delegate = nil;
+    dispatch_queue_t queue = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(session->mutex);
+        audio_engine = session->audio_engine;
+        audio_input = session->audio_input;
+        audio_mixer = session->audio_mixer;
+        audio_format = session->audio_format;
+        camera_session = session->camera_session;
+        camera_input = session->camera_input;
+        camera_output = session->camera_output;
+        camera_delegate = session->camera_delegate;
+        queue = session->queue;
+        session->audio_engine = nil;
+        session->audio_input = nil;
+        session->audio_mixer = nil;
+        session->audio_format = nil;
+        session->camera_session = nil;
+        session->camera_input = nil;
+        session->camera_output = nil;
+        session->camera_delegate = nil;
+        session->queue = nullptr;
+    }
+    if (audio_mixer) {
+        @try {
+            [audio_mixer removeTapOnBus:0];
+        } @catch (NSException* exception) {
+            (void)exception;
+        }
+    }
+    if (audio_engine) [audio_engine stop];
+    if (camera_output) [camera_output setSampleBufferDelegate:nil queue:nil];
+    if (camera_session && camera_session.isRunning) [camera_session stopRunning];
+    if (camera_session && camera_input) [camera_session removeInput:camera_input];
+    if (camera_session && camera_output) [camera_session removeOutput:camera_output];
+    {
+        std::unique_lock<std::mutex> lock(session->mutex);
+        session->state_changed.wait(lock, [session] { return session->in_flight_callbacks == 0; });
+        [audio_engine release];
+        [audio_mixer release];
+        [camera_session release];
+        [camera_output release];
+        [camera_input release];
+        [camera_delegate release];
+        [audio_input release];
+        [audio_format release];
+        if (queue) dispatch_release(queue);
+    }
+}
+
+struct lib_dspeak_media_device_capture_session*
+lib_dspeak_media_platform_device_capture_create(const char* device_id,
+                                                const char* kind) {
+    @autoreleasepool {
+        NSString* device_id_string = string_from_utf8(device_id);
+        NSString* kind_string = string_from_utf8(kind);
+        if (!kind_string || (![kind_string isEqualToString:@"microphone"] &&
+                             ![kind_string isEqualToString:@"camera"])) return nullptr;
+        auto* session = new(std::nothrow) lib_dspeak_media_device_capture_session();
+        if (!session) return nullptr;
+        session->microphone = [kind_string isEqualToString:@"microphone"];
+        session->device_id = [device_id_string retain];
+        session->queue = dispatch_queue_create(
+            session->microphone ? "com.dspeaks.media.capture.microphone" :
+                                  "com.dspeaks.media.capture.camera",
+            DISPATCH_QUEUE_SERIAL);
+        if (!session->queue) {
+            [session->device_id release];
+            delete session;
+            return nullptr;
+        }
+        return session;
+    }
+}
+
+int lib_dspeak_media_platform_device_capture_start(
+    struct lib_dspeak_media_device_capture_session* session,
+    lib_dspeak_media_screen_frame_cb screen_cb,
+    lib_dspeak_media_audio_frame_cb audio_cb,
+    lib_dspeak_media_capture_error_cb error_cb,
+    void* user_data) {
+    if (!session) return -224;
+    {
+        std::unique_lock<std::mutex> lock(session->mutex);
+        while (session->starting || session->stopping) {
+            session->state_changed.wait(lock);
+        }
+        if (session->running) return 0;
+        session->starting = true;
+        session->error_reported = false;
+        session->screen_cb = screen_cb;
+        session->audio_cb = audio_cb;
+        session->error_cb = error_cb;
+        session->user_data = user_data;
+    }
+    @autoreleasepool {
+        const int permission_error = device_capture_permission(
+            session->microphone ? AVMediaTypeAudio : AVMediaTypeVideo);
+        if (permission_error != 0) {
+            device_capture_report_error(session, permission_error,
+                                         session->microphone ?
+                                         "Microphone permission was denied" :
+                                         "Camera permission was denied");
+            device_capture_cleanup(session);
+            return permission_error;
+        }
+        if (session->microphone) {
+            AVAudioEngine* engine = [[AVAudioEngine alloc] init];
+            AVAudioInputNode* input = [engine inputNode];
+            AVAudioMixerNode* mixer = [[AVAudioMixerNode alloc] init];
+            AVAudioFormat* format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:48000.0
+                                                                                      channels:2];
+            if (!engine || !input || !mixer || !format) {
+                [engine release];
+                [mixer release];
+                [format release];
+                device_capture_report_error(session, -224, "AVAudioEngine microphone graph could not be created");
+                device_capture_cleanup(session);
+                return -224;
+            }
+            NSString* core_audio_uid = device_id_from_source_id(session->device_id, @"microphone");
+            if (core_audio_uid.length) {
+                AudioDeviceID device = core_audio_device_for_uid(core_audio_uid);
+                if (device == kAudioObjectUnknown ||
+                    AudioUnitSetProperty(input.audioUnit, kAudioOutputUnitProperty_CurrentDevice,
+                                         kAudioUnitScope_Global, 0, &device, sizeof(device)) != noErr) {
+                    [engine release];
+                    [mixer release];
+                    [format release];
+                    device_capture_report_error(session, -225, "Selected microphone is not available");
+                    device_capture_cleanup(session);
+                    return -225;
+                }
+            }
+            @try {
+                [engine attachNode:mixer];
+                [engine connect:input to:mixer format:nil];
+                [engine connect:mixer to:engine.mainMixerNode format:format];
+                __block lib_dspeak_media_device_capture_session* block_session = session;
+                [mixer installTapOnBus:0 bufferSize:480 format:format usingBlock:^(AVAudioPCMBuffer* buffer,
+                                                                                   AVAudioTime* time) {
+                    (void)time;
+                    if (!block_session || !buffer) return;
+                    lib_dspeak_media_screen_frame_cb screen_callback = nullptr;
+                    lib_dspeak_media_audio_frame_cb audio_callback = nullptr;
+                    void* callback_user_data = nullptr;
+                    if (!device_capture_begin_callback(block_session, &screen_callback,
+                                                       &audio_callback, &callback_user_data)) return;
+                    std::vector<float> samples;
+                    uint32_t frame_count = 0;
+                    if (!audio_buffer_to_stereo(buffer, samples, frame_count)) {
+                        device_capture_report_error(block_session, -222,
+                                                    "AVAudioEngine did not deliver real stereo 48 kHz float PCM");
+                    } else if (audio_callback) {
+                        audio_callback(callback_user_data, samples.data(), frame_count, 48000, 2);
+                    }
+                    device_capture_end_callback(block_session);
+                }];
+            } @catch (NSException* exception) {
+                NSString* description = exception.reason ?: @"AVAudioEngine microphone graph failed";
+                const char* message = description.UTF8String;
+                [engine release];
+                [mixer release];
+                [format release];
+                device_capture_report_error(session, -224, message);
+                device_capture_cleanup(session);
+                return -224;
+            }
+            {
+                std::lock_guard<std::mutex> lock(session->mutex);
+                session->audio_engine = engine;
+                session->audio_input = [input retain];
+                session->audio_mixer = mixer;
+                session->audio_format = format;
+            }
+            [engine prepare];
+            NSError* start_error = nil;
+            if (![engine startAndReturnError:&start_error]) {
+                const char* message = start_error.localizedDescription.UTF8String;
+                device_capture_report_error(session, -221,
+                                             message ?: "AVAudioEngine microphone failed to start");
+                device_capture_cleanup(session);
+                return -221;
+            }
+        } else {
+            AVCaptureDevice* device = nil;
+            NSString* selected_id = device_id_from_source_id(session->device_id, @"camera");
+            if (selected_id.length) {
+                device = [AVCaptureDevice deviceWithUniqueID:selected_id];
+            } else {
+                device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+            }
+            if (!device) {
+                device_capture_report_error(session, -224, "Selected camera is not available");
+                device_capture_cleanup(session);
+                return -224;
+            }
+            NSError* input_error = nil;
+            AVCaptureDeviceInput* input = [[AVCaptureDeviceInput alloc] initWithDevice:device error:&input_error];
+            AVCaptureSession* capture_session = [[AVCaptureSession alloc] init];
+            AVCaptureVideoDataOutput* output = [[AVCaptureVideoDataOutput alloc] init];
+            DSMDeviceCameraDelegate* delegate = [[DSMDeviceCameraDelegate alloc] initWithSession:session];
+            if (!input || !capture_session || !output || !delegate) {
+                [input release];
+                [capture_session release];
+                [output release];
+                [delegate release];
+                device_capture_report_error(session, -223, input_error.localizedDescription.UTF8String);
+                device_capture_cleanup(session);
+                return -223;
+            }
+            @try {
+                [capture_session beginConfiguration];
+                if ([capture_session canSetSessionPreset:AVCaptureSessionPresetHigh]) {
+                    capture_session.sessionPreset = AVCaptureSessionPresetHigh;
+                }
+                output.videoSettings = @{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)};
+                output.alwaysDiscardsLateVideoFrames = YES;
+                if (![capture_session canAddInput:input] || ![capture_session canAddOutput:output]) {
+                    [capture_session commitConfiguration];
+                    [input release];
+                    [capture_session release];
+                    [output release];
+                    [delegate release];
+                    device_capture_report_error(session, -223, "AVCaptureSession rejected the camera graph");
+                    device_capture_cleanup(session);
+                    return -223;
+                }
+                [capture_session addInput:input];
+                [capture_session addOutput:output];
+                [capture_session commitConfiguration];
+                [output setSampleBufferDelegate:delegate queue:session->queue];
+            } @catch (NSException* exception) {
+                [capture_session commitConfiguration];
+                NSString* description = exception.reason ?: @"AVCaptureSession camera graph failed";
+                const char* message = description.UTF8String;
+                [input release];
+                [capture_session release];
+                [output release];
+                [delegate release];
+                device_capture_report_error(session, -223, message);
+                device_capture_cleanup(session);
+                return -223;
+            }
+            {
+                std::lock_guard<std::mutex> lock(session->mutex);
+                session->camera_session = capture_session;
+                session->camera_input = input;
+                session->camera_output = output;
+                session->camera_delegate = delegate;
+            }
+            [capture_session startRunning];
+        }
+        {
+            std::lock_guard<std::mutex> lock(session->mutex);
+            session->starting = false;
+            session->running = true;
+            session->state_changed.notify_all();
+        }
+        return 0;
+    }
+}
+
+void lib_dspeak_media_platform_device_capture_stop(
+    struct lib_dspeak_media_device_capture_session* session) {
+    if (!session) return;
+    {
+        std::unique_lock<std::mutex> lock(session->mutex);
+        while (session->starting) session->state_changed.wait(lock);
+        if (session->stopping) {
+            session->state_changed.wait(lock, [session] { return !session->stopping; });
+            return;
+        }
+        const bool has_resources = session->audio_engine || session->camera_session || session->queue;
+        if (!session->running && !has_resources) return;
+        session->running = false;
+        session->screen_cb = nullptr;
+        session->audio_cb = nullptr;
+        session->error_cb = nullptr;
+        session->user_data = nullptr;
+        session->stopping = true;
+    }
+    device_capture_cleanup(session);
+    {
+        std::lock_guard<std::mutex> lock(session->mutex);
+        session->stopping = false;
+        session->state_changed.notify_all();
+    }
+}
+
+void lib_dspeak_media_platform_device_capture_destroy(
+    struct lib_dspeak_media_device_capture_session* session) {
+    if (!session) return;
+    lib_dspeak_media_platform_device_capture_stop(session);
+    [session->device_id release];
+    delete session;
+}
+
 #endif

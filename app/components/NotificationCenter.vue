@@ -100,6 +100,7 @@
             </button>
             <button
               class="btn btn-ghost btn-xs"
+              aria-label="Decline friend request"
               :disabled="handlingRequest[req.id]"
               @click="declineFriendRequest(req)"
             >

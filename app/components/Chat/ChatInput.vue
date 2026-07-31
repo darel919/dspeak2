@@ -20,6 +20,7 @@
           }}</span>
           <button
             class="btn btn-ghost btn-xs btn-square"
+            aria-label="Cancel reply"
             @click="$emit('cancel-reply')"
           >
             <Icon name="lucide:x" class="h-3 w-3" />

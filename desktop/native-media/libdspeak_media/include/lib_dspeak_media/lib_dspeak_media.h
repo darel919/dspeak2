@@ -29,6 +29,7 @@ typedef enum {
     LIB_DSPEAK_MEDIA_ACTION_TRANSPORT_CONNECT    = 1,
     LIB_DSPEAK_MEDIA_ACTION_PRODUCER_CREATED     = 2,
     LIB_DSPEAK_MEDIA_ACTION_CONSUMER_CREATED     = 3,
+    LIB_DSPEAK_MEDIA_ACTION_CONSUMER_EVENT        = 4,
 } lib_dspeak_media_action_kind_t;
 
 typedef struct {
@@ -39,8 +40,26 @@ typedef struct {
     char*             state;
 } lib_dspeak_media_action_t;
 
+typedef enum {
+    LIB_DSPEAK_MEDIA_RECEIVE_EVENT_NONE = 0,
+    LIB_DSPEAK_MEDIA_RECEIVE_EVENT_TRACK = 1,
+    LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME = 2,
+    LIB_DSPEAK_MEDIA_RECEIVE_EVENT_TRACK_CLOSED = 3,
+    LIB_DSPEAK_MEDIA_RECEIVE_EVENT_P2P = 4,
+} lib_dspeak_media_receive_event_kind_t;
+
+typedef struct {
+    lib_dspeak_media_receive_event_kind_t kind;
+    uint64_t event_id;
+    char* id;
+    char* payload_json;
+    uint8_t* data;
+    uint32_t data_len;
+} lib_dspeak_media_receive_event_t;
+
 /* ── Lifecycle ──────────────────────────────────────── */
 int          lib_dspeak_media_initialize(void);
+int          lib_dspeak_media_probe_runtime(int* error_out);
 void         lib_dspeak_media_shutdown(void);
 
 /* ── Device ─────────────────────────────────────────── */
@@ -68,6 +87,8 @@ void lib_dspeak_media_destroy_recv_transport(lib_dspeak_media_recv_transport_t* 
 
 /* ── Action polling ─────────────────────────────────── */
 lib_dspeak_media_action_t lib_dspeak_media_poll_action(void);
+lib_dspeak_media_receive_event_t lib_dspeak_media_poll_receive_event(void);
+void lib_dspeak_media_free_receive_event(lib_dspeak_media_receive_event_t* event);
 
 /* ── Connect completion ─────────────────────────────── */
 void lib_dspeak_media_complete_connect(void* transport_ptr);
@@ -104,6 +125,10 @@ lib_dspeak_media_consumer_t* lib_dspeak_media_consume(lib_dspeak_media_recv_tran
                             const char* app_data_json, int* error_out);
 void lib_dspeak_media_destroy_producer(lib_dspeak_media_producer_t* p);
 void lib_dspeak_media_destroy_consumer(lib_dspeak_media_consumer_t* c);
+int  lib_dspeak_media_consumer_set_enabled(lib_dspeak_media_consumer_t* c, bool enabled);
+int  lib_dspeak_media_consumer_set_volume(lib_dspeak_media_consumer_t* c, double volume);
+const char* lib_dspeak_media_consumer_get_producer_id(lib_dspeak_media_consumer_t* c);
+const char* lib_dspeak_media_consumer_get_kind(lib_dspeak_media_consumer_t* c);
 void lib_dspeak_media_complete_produce(uint64_t action_id, const char* producer_id);
 void lib_dspeak_media_fail_produce(uint64_t action_id, const char* error_message);
 
@@ -138,6 +163,12 @@ int  lib_dspeak_media_start_capture(const char* request_json, int* error_out);
 int  lib_dspeak_media_stop_capture(int* error_out);
 int  lib_dspeak_media_probe_capture(int timeout_ms, int* error_out);
 char* lib_dspeak_media_list_capture_sources(void);
+char* lib_dspeak_media_list_capture_devices(void);
+int  lib_dspeak_media_set_microphone_device(const char* device_id, int* error_out);
+int  lib_dspeak_media_start_microphone_capture(int* error_out);
+int  lib_dspeak_media_stop_microphone_capture(int* error_out);
+int  lib_dspeak_media_start_camera_capture(int* error_out);
+int  lib_dspeak_media_stop_camera_capture(int* error_out);
 int  lib_dspeak_media_start_screen_capture(uint64_t display_id, int* error_out);
 int  lib_dspeak_media_stop_screen_capture(int* error_out);
 int  lib_dspeak_media_start_system_audio_capture(int* error_out);
@@ -159,6 +190,8 @@ lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(const char* 
 
 lib_dspeak_media_video_track_t* lib_dspeak_media_get_active_video_track(void);
 lib_dspeak_media_audio_track_t* lib_dspeak_media_get_active_audio_track(void);
+lib_dspeak_media_video_track_t* lib_dspeak_media_get_video_track(const char* source);
+lib_dspeak_media_audio_track_t* lib_dspeak_media_get_audio_track(const char* source);
 void lib_dspeak_media_destroy_video_track(lib_dspeak_media_video_track_t* t);
 
 /* Release a native audio track. */

@@ -7,6 +7,7 @@
 #include <CoreMedia/CoreMedia.h>
 #endif
 #include "media_handles.hpp"
+#include "runtime_health.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -81,18 +82,46 @@ extern "C" int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_hand
 static std::mutex g_capture_mutex;
 static std::mutex g_track_mutex;
 static lib_dspeak_media_capture_session* g_capture = nullptr;
+static lib_dspeak_media_device_capture_session* g_microphone_capture = nullptr;
+static lib_dspeak_media_device_capture_session* g_camera_capture = nullptr;
 static lib_dspeak_media_video_track_t* g_video_track = nullptr;
 static lib_dspeak_media_audio_track_t* g_audio_track = nullptr;
+static lib_dspeak_media_video_track_t* g_camera_track = nullptr;
+static lib_dspeak_media_audio_track_t* g_microphone_track = nullptr;
+static std::string g_microphone_device_id;
 static std::atomic<int> g_capture_error{0};
 static std::atomic<uint64_t> g_probe_video_frames{0};
 static std::atomic<uint64_t> g_probe_audio_frames{0};
 
+enum class CaptureRoute {
+    kDesktop,
+    kMicrophone,
+    kCamera,
+};
+
+static CaptureRoute* capture_route(void* user_data) {
+    return static_cast<CaptureRoute*>(user_data);
+}
+
+static lib_dspeak_media_video_track_t* video_track_for_route(CaptureRoute route) {
+    return route == CaptureRoute::kCamera ? g_camera_track : g_video_track;
+}
+
+static lib_dspeak_media_audio_track_t* audio_track_for_route(CaptureRoute route) {
+    return route == CaptureRoute::kMicrophone ? g_microphone_track : g_audio_track;
+}
+
+static CaptureRoute g_desktop_route = CaptureRoute::kDesktop;
+static CaptureRoute g_microphone_route = CaptureRoute::kMicrophone;
+static CaptureRoute g_camera_route = CaptureRoute::kCamera;
+
 static void on_screen_frame(void* user_data, void* sample_buffer) {
-    (void)user_data;
+    CaptureRoute route = user_data ? *capture_route(user_data) : CaptureRoute::kDesktop;
     CMSampleBufferRef sample = static_cast<CMSampleBufferRef>(sample_buffer);
     if (!sample) return;
     std::lock_guard<std::mutex> lock(g_track_mutex);
-    if (!g_video_track || !g_video_track->source) {
+    lib_dspeak_media_video_track_t* track = video_track_for_route(route);
+    if (!track || !track->source) {
         CFRelease(sample);
         return;
     }
@@ -101,8 +130,13 @@ static void on_screen_frame(void* user_data, void* sample_buffer) {
         CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample);
         int64_t timestamp_ms = 0;
         if (pts.timescale > 0) timestamp_ms = (pts.value * 1000) / pts.timescale;
-        g_video_track->source->OnCapturedFrame(pixel_buffer, timestamp_ms);
-        g_probe_video_frames.fetch_add(1);
+        track->source->OnCapturedFrame(pixel_buffer, timestamp_ms);
+        if (route == CaptureRoute::kDesktop) {
+            g_probe_video_frames.fetch_add(1);
+            dspeak_media_runtime::screen_video_ready.store(true);
+        } else if (route == CaptureRoute::kCamera) {
+            dspeak_media_runtime::camera_ready.store(true);
+        }
     }
     CFRelease(sample);
 }
@@ -112,13 +146,19 @@ static void on_audio_frame(void* user_data,
                            uint32_t frame_count,
                            uint32_t sample_rate,
                            uint8_t channels) {
-    (void)user_data;
+    CaptureRoute route = user_data ? *capture_route(user_data) : CaptureRoute::kDesktop;
     std::lock_guard<std::mutex> lock(g_track_mutex);
-    if (!g_audio_track || !g_audio_track->source || !data || channels != 2 || sample_rate != 48000) return;
+    lib_dspeak_media_audio_track_t* track = audio_track_for_route(route);
+    if (!track || !track->source || !data || frame_count == 0 || channels != 2 || sample_rate != 48000) return;
     int64_t timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
-    g_audio_track->source->OnCapturedData(data, 32, sample_rate, channels, frame_count, timestamp_ms);
-    g_probe_audio_frames.fetch_add(1);
+    track->source->OnCapturedData(data, 32, sample_rate, channels, frame_count, timestamp_ms);
+    if (route == CaptureRoute::kDesktop) {
+        g_probe_audio_frames.fetch_add(1);
+        dspeak_media_runtime::screen_audio_ready.store(true);
+    } else if (route == CaptureRoute::kMicrophone) {
+        dspeak_media_runtime::microphone_ready.store(true);
+    }
 }
 
 static void on_capture_error(void* user_data, int error_code, const char* message) {
@@ -221,7 +261,7 @@ static int start_capture_request(const char* request_json, int* error_out) {
         capture_video ? on_screen_frame : nullptr,
         capture_audio ? on_audio_frame : nullptr,
         on_capture_error,
-        nullptr);
+        &g_desktop_route);
     if (result != 0) {
         lib_dspeak_media_platform_capture_destroy(capture);
         destroy_capture_tracks();
@@ -244,6 +284,159 @@ static int stop_capture_request(int* error_out) {
     return 0;
 }
 
+static int stop_camera_request(int* error_out);
+
+static int start_microphone_request(const char* device_id, int* error_out) {
+    if (error_out) *error_out = 0;
+    std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
+    if (g_microphone_capture) return 0;
+    {
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        if (!g_microphone_track) {
+            int error = 0;
+            g_microphone_track = lib_dspeak_media_create_audio_track("microphone_capture_audio", &error);
+            if (!g_microphone_track) {
+                if (error_out) *error_out = error;
+                return -1;
+            }
+        }
+    }
+    auto* capture = lib_dspeak_media_platform_device_capture_create(
+        device_id && device_id[0] ? device_id : nullptr, "microphone");
+    if (!capture) {
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        lib_dspeak_media_destroy_audio_track(g_microphone_track);
+        g_microphone_track = nullptr;
+        if (error_out) *error_out = -224;
+        return -1;
+    }
+    g_capture_error.store(0);
+    int result = lib_dspeak_media_platform_device_capture_start(
+        capture, nullptr, on_audio_frame, on_capture_error, &g_microphone_route);
+    if (result != 0) {
+        lib_dspeak_media_platform_device_capture_destroy(capture);
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        lib_dspeak_media_destroy_audio_track(g_microphone_track);
+        g_microphone_track = nullptr;
+        if (error_out) *error_out = result;
+        return result;
+    }
+    g_microphone_capture = capture;
+    return 0;
+}
+
+static int start_camera_request(const char* device_id, int* error_out) {
+    if (error_out) *error_out = 0;
+    std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
+    if (g_camera_capture) return 0;
+    {
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        if (!g_camera_track) {
+            int error = 0;
+            g_camera_track = lib_dspeak_media_create_video_track("camera_capture_video", &error);
+            if (!g_camera_track) {
+                if (error_out) *error_out = error;
+                return -1;
+            }
+            g_camera_track->source->SetScreencast(false);
+        }
+    }
+    auto* capture = lib_dspeak_media_platform_device_capture_create(
+        device_id && device_id[0] ? device_id : nullptr, "camera");
+    if (!capture) {
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        lib_dspeak_media_destroy_video_track(g_camera_track);
+        g_camera_track = nullptr;
+        if (error_out) *error_out = -224;
+        return -1;
+    }
+    g_capture_error.store(0);
+    int result = lib_dspeak_media_platform_device_capture_start(
+        capture, on_screen_frame, nullptr, on_capture_error, &g_camera_route);
+    if (result != 0) {
+        lib_dspeak_media_platform_device_capture_destroy(capture);
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        lib_dspeak_media_destroy_video_track(g_camera_track);
+        g_camera_track = nullptr;
+        if (error_out) *error_out = result;
+        return result;
+    }
+    g_camera_capture = capture;
+    return 0;
+}
+
+static int stop_microphone_request(int* error_out) {
+    if (error_out) *error_out = 0;
+    std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
+    if (!g_microphone_capture) return 0;
+    auto* capture = g_microphone_capture;
+    g_microphone_capture = nullptr;
+    lib_dspeak_media_platform_device_capture_stop(capture);
+    lib_dspeak_media_platform_device_capture_destroy(capture);
+    std::lock_guard<std::mutex> track_lock(g_track_mutex);
+    if (g_microphone_track) {
+        lib_dspeak_media_destroy_audio_track(g_microphone_track);
+        g_microphone_track = nullptr;
+    }
+    return 0;
+}
+
+static int stop_camera_request(int* error_out) {
+    if (error_out) *error_out = 0;
+    std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
+    if (!g_camera_capture) return 0;
+    auto* capture = g_camera_capture;
+    g_camera_capture = nullptr;
+    lib_dspeak_media_platform_device_capture_stop(capture);
+    lib_dspeak_media_platform_device_capture_destroy(capture);
+    std::lock_guard<std::mutex> track_lock(g_track_mutex);
+    if (g_camera_track) {
+        lib_dspeak_media_destroy_video_track(g_camera_track);
+        g_camera_track = nullptr;
+    }
+    return 0;
+}
+
+extern "C" char* lib_dspeak_media_list_capture_devices(void) {
+    return lib_dspeak_media_platform_capture_list_devices();
+}
+
+extern "C" int lib_dspeak_media_set_microphone_device(const char* device_id, int* error_out) {
+    if (error_out) *error_out = 0;
+    bool restart = false;
+    {
+        std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
+        g_microphone_device_id = device_id ? device_id : "";
+        restart = g_microphone_capture != nullptr;
+    }
+    if (restart) {
+        int stop_error = 0;
+        stop_microphone_request(&stop_error);
+        if (stop_error != 0) {
+            if (error_out) *error_out = stop_error;
+            return -1;
+        }
+        return start_microphone_request(g_microphone_device_id.c_str(), error_out);
+    }
+    return 0;
+}
+
+extern "C" int lib_dspeak_media_start_microphone_capture(int* error_out) {
+    return start_microphone_request(g_microphone_device_id.c_str(), error_out);
+}
+
+extern "C" int lib_dspeak_media_stop_microphone_capture(int* error_out) {
+    return stop_microphone_request(error_out);
+}
+
+extern "C" int lib_dspeak_media_start_camera_capture(int* error_out) {
+    return start_camera_request(nullptr, error_out);
+}
+
+extern "C" int lib_dspeak_media_stop_camera_capture(int* error_out) {
+    return stop_camera_request(error_out);
+}
+
 extern "C" char* lib_dspeak_media_list_capture_sources(void) {
     return lib_dspeak_media_platform_capture_list_sources();
 }
@@ -254,11 +447,23 @@ extern "C" int lib_dspeak_media_start_capture(const char* request_json, int* err
 
 extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_get_active_video_track(void) {
     std::lock_guard<std::mutex> lock(g_track_mutex);
-    return g_video_track;
+    return g_camera_track ? g_camera_track : g_video_track;
 }
 
 extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_get_active_audio_track(void) {
     std::lock_guard<std::mutex> lock(g_track_mutex);
+    return g_microphone_track ? g_microphone_track : g_audio_track;
+}
+
+extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_get_video_track(const char* source) {
+    std::lock_guard<std::mutex> lock(g_track_mutex);
+    if (source && std::strcmp(source, "camera") == 0) return g_camera_track;
+    return g_video_track;
+}
+
+extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_get_audio_track(const char* source) {
+    std::lock_guard<std::mutex> lock(g_track_mutex);
+    if (source && std::strcmp(source, "audio") == 0) return g_microphone_track;
     return g_audio_track;
 }
 
@@ -417,6 +622,36 @@ extern "C" char* lib_dspeak_media_list_capture_sources(void) {
     return empty_sources();
 }
 
+extern "C" char* lib_dspeak_media_list_capture_devices(void) {
+    return empty_sources();
+}
+
+extern "C" int lib_dspeak_media_set_microphone_device(const char* device_id, int* error_out) {
+    (void)device_id;
+    if (error_out) *error_out = -100;
+    return -1;
+}
+
+extern "C" int lib_dspeak_media_start_microphone_capture(int* error_out) {
+    if (error_out) *error_out = -100;
+    return -1;
+}
+
+extern "C" int lib_dspeak_media_stop_microphone_capture(int* error_out) {
+    if (error_out) *error_out = 0;
+    return 0;
+}
+
+extern "C" int lib_dspeak_media_start_camera_capture(int* error_out) {
+    if (error_out) *error_out = -100;
+    return -1;
+}
+
+extern "C" int lib_dspeak_media_stop_camera_capture(int* error_out) {
+    if (error_out) *error_out = 0;
+    return 0;
+}
+
 extern "C" int lib_dspeak_media_start_capture(const char* request_json, int* error_out) {
     (void)request_json;
     if (error_out) *error_out = -100;
@@ -432,6 +667,16 @@ extern "C" int lib_dspeak_media_probe_capture(int timeout_ms, int* error_out) {
     (void)timeout_ms;
     if (error_out) *error_out = -100;
     return -1;
+}
+
+extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_get_video_track(const char* source) {
+    (void)source;
+    return nullptr;
+}
+
+extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_get_audio_track(const char* source) {
+    (void)source;
+    return nullptr;
 }
 
 extern "C" int lib_dspeak_media_start_screen_capture(uint64_t display_id, int* error_out) {

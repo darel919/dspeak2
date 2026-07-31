@@ -34,24 +34,36 @@ application startup.
 
 Desktop builds require `NATIVE_MEDIA_ARTIFACT_DIR` to point to the artifact
 bundle. A missing or incomplete bundle is a build error; desktop never silently
-switches to WebView WebRTC. For example:
+switches to WebView WebRTC. For local development, create the ignored
+`dependencies.env` file from the example and set the artifact path:
 
 ```sh
-cd desktop
-NATIVE_MEDIA_ARTIFACT_DIR=/path/to/native-bundle npm run dev
+cp desktop/native-media/dependencies.env.example desktop/native-media/dependencies.env
+NATIVE_MEDIA_ARTIFACT_DIR=/path/to/native-bundle bun run dev:desktop
 ```
+
+The `dev:desktop` wrapper loads `desktop/native-media/dependencies.env`
+automatically. An explicit environment variable overrides the local file.
 
 The web application does not use this variable and continues to use browser
 WebRTC.
 
-## Current state
+Native desktop signaling can be configured independently of the WebView origin:
+
+```sh
+VITE_DSPEAK_SFU_PATH=wss://app.example.com/socket bun run build:desktop
+```
+
+When unset, development uses the current WebView origin and `/socket`.
+
+## Runtime state
 
 The repository contains the C++20 `libdspeak_media` shim, its narrow C ABI, and
 the Tauri control-plane boundary. The shim and native-enabled Tauri target can
 be compiled and linked when a matching artifact bundle is provided.
 
-Native capabilities remain unavailable by default. Source enumeration, native
-capture delivery, native SFU/P2P session ownership, and native receive
-rendering are not yet complete or runtime-validated. The desktop build fails
-closed until those required native capabilities are operational; only the web
-application retains browser WebRTC as its media path.
+Native capability reporting is fail-closed. Capture, SFU, P2P, and receive
+capabilities are enabled only after their native runtime probes succeed; a
+successful compile or exported symbol is not sufficient. The desktop client
+does not silently switch to browser WebRTC when a required native capability is
+unavailable.

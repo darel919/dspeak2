@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 typedef struct lib_dspeak_media_capture_session lib_dspeak_media_capture_session;
+typedef struct lib_dspeak_media_device_capture_session lib_dspeak_media_device_capture_session;
 
 typedef void (*lib_dspeak_media_screen_frame_cb)(void* user_data, void* sample_buffer);
 typedef void (*lib_dspeak_media_audio_frame_cb)(void* user_data, const float* samples,
@@ -38,6 +39,26 @@ void lib_dspeak_media_platform_capture_stop(
 
 void lib_dspeak_media_platform_capture_destroy(
     struct lib_dspeak_media_capture_session* session);
+
+char* lib_dspeak_media_platform_capture_list_devices(void);
+char* lib_dspeak_media_platform_capture_capabilities(void);
+
+struct lib_dspeak_media_device_capture_session*
+lib_dspeak_media_platform_device_capture_create(const char* device_id,
+                                                const char* kind);
+
+int lib_dspeak_media_platform_device_capture_start(
+    struct lib_dspeak_media_device_capture_session* session,
+    lib_dspeak_media_screen_frame_cb screen_cb,
+    lib_dspeak_media_audio_frame_cb audio_cb,
+    lib_dspeak_media_capture_error_cb error_cb,
+    void* user_data);
+
+void lib_dspeak_media_platform_device_capture_stop(
+    struct lib_dspeak_media_device_capture_session* session);
+
+void lib_dspeak_media_platform_device_capture_destroy(
+    struct lib_dspeak_media_device_capture_session* session);
 
 #ifdef __cplusplus
 }

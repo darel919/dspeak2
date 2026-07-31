@@ -158,6 +158,8 @@
               v-if="tile.type === 'feed'"
               :feed-key="tile.feed.key"
               :stream="tile.feed.stream"
+              :native="tile.feed.native === true"
+              :native-frame="tile.feed.frame || null"
               :source="tile.feed.source"
               :label="tile.feed.label"
               :muted="true"

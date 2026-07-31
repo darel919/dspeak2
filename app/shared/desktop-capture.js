@@ -20,6 +20,8 @@ export const DESKTOP_CAPTURE_VIDEO_POLICY = Object.freeze({
 });
 
 export const NATIVE_CAPTURE_BACKENDS = Object.freeze([
+  "screenCaptureKit",
+  "screenAudio",
   "pipewirePortal",
   "x11",
   "systemAudio",
@@ -55,8 +57,8 @@ export function getNativeCaptureCapability(value, mode = "video") {
   const capabilities = normalizeNativeCaptureCapabilities(value);
   const backends =
     mode === "audio"
-      ? ["systemAudio", "wasapiProcessLoopback"]
-      : ["pipewirePortal", "x11", "windowsGraphicsCapture"];
+      ? ["screenAudio", "systemAudio", "wasapiProcessLoopback"]
+      : ["screenCaptureKit", "pipewirePortal", "x11", "windowsGraphicsCapture"];
   const available = backends.find((backend) => capabilities[backend].available);
   if (available) return capabilities[available];
   const reasons = backends

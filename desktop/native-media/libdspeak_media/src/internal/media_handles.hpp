@@ -25,6 +25,7 @@
 #include <api/video/video_frame.h>
 #include <common_video/libyuv/include/webrtc_libyuv.h>
 #include <third_party/libyuv/include/libyuv/convert.h>
+#include "receive_render.hpp"
 
 #if defined(__APPLE__)
 #include <CoreVideo/CoreVideo.h>
@@ -34,6 +35,7 @@ using CVPixelBufferRef = void*;
 
 class CxxSendListener;
 class CxxRecvListener;
+class CxxConsumerListener;
 
 #if defined(__APPLE__)
 class NativeVideoSource : public webrtc::AdaptedVideoTrackSource {
@@ -47,9 +49,14 @@ public:
     }
 
     bool remote() const override { return false; }
-    bool is_screencast() const override { return true; }
+    bool is_screencast() const override { return is_screencast_; }
     std::optional<bool> needs_denoising() const override { return std::nullopt; }
     bool GetStats(Stats* stats) override { return false; }
+
+    void SetScreencast(bool value) {
+        webrtc::MutexLock lock(&mutex_);
+        is_screencast_ = value;
+    }
 
     void OnCapturedFrame(CVPixelBufferRef pixel_buffer, int64_t timestamp_ms) {
         webrtc::VideoFrame frame = ConvertPixelBuffer(pixel_buffer, timestamp_ms);
@@ -70,6 +77,7 @@ private:
     mutable webrtc::Mutex mutex_;
     webrtc::MediaSourceInterface::SourceState state_ RTC_GUARDED_BY(mutex_) =
         webrtc::MediaSourceInterface::kLive;
+    bool is_screencast_ RTC_GUARDED_BY(mutex_) = true;
 
     webrtc::VideoFrame ConvertPixelBuffer(CVPixelBufferRef pb, int64_t timestamp_ms) {
         size_t width = CVPixelBufferGetWidth(pb);
@@ -207,6 +215,13 @@ struct lib_dspeak_media_device {
     std::unique_ptr<mediasoupclient::Device> device;
 };
 
+struct lib_dspeak_media_consumer {
+    mediasoupclient::Consumer* consumer = nullptr;
+    CxxConsumerListener* listener = nullptr;
+    std::unique_ptr<NativeReceiveAudioSink> audio_sink;
+    std::unique_ptr<NativeReceiveVideoSink> video_sink;
+};
+
 struct lib_dspeak_media_send_transport {
     mediasoupclient::SendTransport* transport = nullptr;
     CxxSendListener* listener = nullptr;
@@ -247,6 +262,8 @@ struct lib_dspeak_media_p2p_handle {
     bool connected = false;
     bool failed = false;
     bool closed = false;
+    std::vector<std::unique_ptr<NativeReceiveAudioSink>> audio_sinks;
+    std::vector<std::unique_ptr<NativeReceiveVideoSink>> video_sinks;
 };
 
 using lib_dspeak_media_json = nlohmann::json;

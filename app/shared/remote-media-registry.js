@@ -50,6 +50,28 @@ export class RemoteMediaRegistry {
   }
 
   bind(entry, { staged = false } = {}) {
+    if (entry.native && !entry.track) {
+      const feeds = entry.kind === "video" ? this.videoFeeds : this.audioFeeds;
+      const current = feeds.value.get(entry.key);
+      const receiving =
+        entry.receiving !== false &&
+        (entry.kind !== "video" ||
+          entry.source !== "screen" ||
+          (this.receivingPreferences.get(entry.key) ??
+            current?.receiving ??
+            true));
+      const normalized = {
+        ...entry,
+        stream: null,
+        receiving,
+      };
+      feeds.value.set(entry.key, normalized);
+      triggerRef(feeds);
+      if (entry.kind === "video")
+        this.onVideoReceivingChange?.(normalized, receiving);
+      return;
+    }
+    if (!entry?.track) return;
     if (entry.track.kind === "video") {
       const current = this.videoFeeds.value.get(entry.key);
       const stream =
@@ -80,7 +102,7 @@ export class RemoteMediaRegistry {
   setVideoReceiving(key, receiving, persistPreference = true) {
     const entry = this.videoFeeds.value.get(key);
     if (!entry) return false;
-    entry.track.enabled = Boolean(receiving);
+    if (entry.track) entry.track.enabled = Boolean(receiving);
     if (entry.source === "screen" && persistPreference)
       this.receivingPreferences.set(key, Boolean(receiving));
     this.videoFeeds.value.set(key, {
@@ -109,7 +131,7 @@ export class RemoteMediaRegistry {
     const entry = this.audioFeeds.value.get(key);
     if (!entry || entry.source !== "screen-audio") return false;
     entry.receiving = Boolean(receiving);
-    entry.track.enabled = Boolean(receiving);
+    if (entry.track) entry.track.enabled = Boolean(receiving);
     this.audioFeeds.value.set(key, { ...entry });
     triggerRef(this.audioFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));

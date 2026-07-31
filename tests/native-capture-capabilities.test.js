@@ -32,6 +32,8 @@ describe("native capture capability contract", () => {
     const normalized = normalizeNativeCaptureCapabilities(unsupportedLinux);
 
     assert.deepEqual(Object.keys(normalized), [
+      "screenCaptureKit",
+      "screenAudio",
       "pipewirePortal",
       "x11",
       "systemAudio",

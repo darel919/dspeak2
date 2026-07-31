@@ -24,6 +24,14 @@ impl Default for NativeCaptureCapability {
 #[serde(rename_all = "camelCase")]
 pub struct NativeCaptureMatrix {
     #[serde(default)]
+    pub screen_capture_kit: NativeCaptureCapability,
+    #[serde(default)]
+    pub screen_audio: NativeCaptureCapability,
+    #[serde(default)]
+    pub microphone: NativeCaptureCapability,
+    #[serde(default)]
+    pub camera: NativeCaptureCapability,
+    #[serde(default)]
     pub pipewire_portal: NativeCaptureCapability,
     #[serde(default)]
     pub x11: NativeCaptureCapability,
@@ -33,6 +41,45 @@ pub struct NativeCaptureMatrix {
     pub windows_graphics_capture: NativeCaptureCapability,
     #[serde(default)]
     pub wasapi_process_loopback: NativeCaptureCapability,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeRuntimeCapability {
+    pub available: bool,
+    pub reason: String,
+}
+
+impl Default for NativeRuntimeCapability {
+    fn default() -> Self {
+        Self {
+            available: false,
+            reason: "The native runtime health probe has not passed.".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeMediaHealth {
+    #[serde(default)]
+    pub native_rtc: NativeRuntimeCapability,
+    #[serde(default)]
+    pub microphone: NativeRuntimeCapability,
+    #[serde(default)]
+    pub camera: NativeRuntimeCapability,
+    #[serde(default)]
+    pub screen_video: NativeRuntimeCapability,
+    #[serde(default)]
+    pub screen_audio: NativeRuntimeCapability,
+    #[serde(default)]
+    pub audio_receive: NativeRuntimeCapability,
+    #[serde(default)]
+    pub video_receive: NativeRuntimeCapability,
+    #[serde(default)]
+    pub p2p: NativeRuntimeCapability,
+    #[serde(default)]
+    pub sfu: NativeRuntimeCapability,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -58,6 +105,8 @@ pub struct NativeMediaCapabilities {
     pub sfu: bool,
     #[serde(default)]
     pub capture: NativeCaptureMatrix,
+    #[serde(default)]
+    pub health: NativeMediaHealth,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -166,4 +215,38 @@ pub(crate) fn validate_capture_request(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_json_keeps_runtime_health_separate_from_boolean_flags() {
+        let mut capabilities = NativeMediaCapabilities::default();
+        capabilities.native_rtc = true;
+        capabilities.native_backend_ready = true;
+        capabilities.health.native_rtc = NativeRuntimeCapability {
+            available: true,
+            reason: "peer factory probe passed".to_string(),
+        };
+        let value = serde_json::to_value(capabilities).expect("capability JSON should serialize");
+        assert_eq!(value["nativeRtc"], true);
+        assert_eq!(value["nativeBackendReady"], true);
+        assert_eq!(value["health"]["nativeRtc"]["available"], true);
+        assert_eq!(value["health"]["p2p"]["available"], false);
+        assert_eq!(value["p2p"], false);
+    }
+
+    #[test]
+    fn missing_optional_paths_do_not_become_required_startup_components() {
+        let capabilities = NativeMediaCapabilities {
+            native_rtc: true,
+            native_backend_ready: true,
+            ..Default::default()
+        };
+        assert!(
+            crate::media::startup::missing_required_native_components(&capabilities).is_empty()
+        );
+    }
 }

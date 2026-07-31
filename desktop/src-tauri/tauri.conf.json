@@ -44,9 +44,7 @@
       ]
     },
     "updater": {
-      "endpoints": [
-        "https://releases.dspeak.dev/desktop/{{target}}-{{arch}}/{{current_version}}"
-      ],
+      "endpoints": ["https://releases-dspeak.darelisme.my.id"],
       "pubkey": ""
     },
     "notification": null

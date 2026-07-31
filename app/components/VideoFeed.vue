@@ -74,6 +74,17 @@
           Start screen share
         </button>
       </div>
+      <canvas
+        v-else-if="nativeFrame"
+        ref="nativeCanvasElement"
+        class="block h-full w-full object-contain"
+      />
+      <div
+        v-else-if="native"
+        class="flex h-full w-full items-center justify-center bg-base-300 text-sm text-base-content/60"
+      >
+        Waiting for native video…
+      </div>
       <video
         v-else
         ref="videoElement"
@@ -125,7 +136,9 @@ import { playSystemSound } from "~/shared/system-sounds.js";
 const settingsStore = useSettingsStore();
 const props = defineProps({
   feedKey: { type: String, required: true },
-  stream: { type: Object, required: true },
+  stream: { type: Object, default: null },
+  native: { type: Boolean, default: false },
+  nativeFrame: { type: Object, default: null },
   source: { type: String, required: true },
   label: { type: String, required: true },
   muted: { type: Boolean, default: false },
@@ -139,6 +152,7 @@ const props = defineProps({
 defineEmits(["start-receiving", "stop-receiving"]);
 
 const videoElement = ref(null);
+const nativeCanvasElement = ref(null);
 const feedElement = ref(null);
 const ownCameraElement = ref(null);
 const isFullscreen = ref(false);
@@ -209,7 +223,35 @@ function handleTouchEnd(event) {
   lastTouchAt = now;
 }
 
+function drawNativeFrame() {
+  const frame = props.nativeFrame;
+  const canvas = nativeCanvasElement.value;
+  if (!frame || !canvas || typeof atob !== "function") return;
+  const width = Number(frame.width);
+  const height = Number(frame.height);
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0
+  )
+    return;
+  const binary = atob(frame.data || "");
+  const pixels = new Uint8ClampedArray(binary.length);
+  for (let index = 0; index < binary.length; index += 1)
+    pixels[index] = binary.charCodeAt(index);
+  if (pixels.length !== width * height * 4) return;
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (context) context.putImageData(new ImageData(pixels, width, height), 0, 0);
+}
+
 function attachStream() {
+  if (props.native) {
+    drawNativeFrame();
+    return;
+  }
   if (
     previewEnabled.value &&
     videoElement.value &&
@@ -252,6 +294,10 @@ watch(
     if (props.local && props.source === "screen") previewEnabled.value = false;
     nextTick(attachStream);
   },
+);
+watch(
+  () => props.nativeFrame,
+  () => nextTick(attachStream),
 );
 watch(
   () => props.receiving,

@@ -188,6 +188,8 @@ if(APPLE)
     "-framework OpenGL"
     "-framework Metal"
     "-framework AVFoundation"
+    "-framework CoreAudio"
+    "-framework AudioUnit"
     "-framework Security"
     "-framework Cocoa"
     "-framework AppKit"

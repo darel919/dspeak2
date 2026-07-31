@@ -1169,6 +1169,7 @@ name = "dspeak-desktop"
 version = "2.7.0-alpha12"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "serde",
  "serde_json",
  "tauri",

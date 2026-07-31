@@ -153,6 +153,7 @@
             </button>
             <button
               class="btn btn-ghost btn-sm"
+              aria-label="Decline friend request"
               @click="declineRequest(req.id)"
             >
               <Icon name="lucide:x" class="size-4" />
@@ -228,6 +229,7 @@
                 class="input input-bordered flex-1 bg-base-100"
                 type="text"
                 placeholder="@username"
+                aria-label="Friend username"
                 required
               />
               <button

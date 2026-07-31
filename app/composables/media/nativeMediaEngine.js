@@ -1,3 +1,4 @@
+import { shallowRef, triggerRef } from "vue";
 import { MediaEngine } from "../../shared/media/contracts.js";
 import {
   DESKTOP_CAPTURE_ERROR_CODES,
@@ -5,6 +6,8 @@ import {
   desktopCaptureRequest,
   nativeCaptureFailure,
 } from "../../shared/desktop-capture.js";
+import { NativeMediasoupSfuSession } from "../../shared/native-mediasoup-session.js";
+import { NativeP2pSession } from "../../shared/native-p2p-session.js";
 
 const NATIVE_EVENT_NAMES = [
   "media:state",
@@ -99,8 +102,8 @@ export function createNativeSessionBoundary() {
   };
 }
 
-function capabilityBackend(enabled, hybrid = false) {
-  if (!enabled) return "browser";
+function capabilityBackend(enabled, hybrid = false, nativeOnly = false) {
+  if (!enabled) return nativeOnly ? "unavailable" : "browser";
   return hybrid ? "hybrid" : "native";
 }
 
@@ -133,7 +136,13 @@ function isSourceAwareCaptureRequest(request) {
 }
 
 export class NativeMediaEngine extends MediaEngine {
-  constructor({ browserEngine, flags = {}, tauri, nativeOnly = false } = {}) {
+  constructor({
+    browserEngine,
+    flags = {},
+    tauri,
+    nativeConfig = {},
+    nativeOnly = false,
+  } = {}) {
     super();
     if (!browserEngine && !nativeOnly) {
       throw new TypeError(
@@ -143,21 +152,77 @@ export class NativeMediaEngine extends MediaEngine {
     this.browserEngine = browserEngine || createNativeSessionBoundary();
     this.flags = { ...DEFAULT_FLAGS, ...flags };
     this.tauri = tauri;
+    this.nativeConfig = nativeConfig;
     this.nativeOnly = nativeOnly;
     this.listeners = new Map();
     this.unlisten = [];
     this.initialized = false;
     this.activeDesktopCapture = null;
+    this.nativeActionPump = null;
+    this.nativeSession = null;
+    this.nativeP2pSession = null;
+    this.nativeActionHandler = null;
+    this.nativeCapabilityPollAt = 0;
+    this.remoteVideoFeedsRef = shallowRef(new Map());
+    this.remoteAudioFeedsRef = shallowRef(new Map());
   }
 
   async initialize(config = {}) {
     if (this.initialized) return;
+    const resolvedConfig = { ...this.nativeConfig, ...config };
+    this.nativeConfig = resolvedConfig;
 
     try {
       if (this.flags.nativeRtc) {
         await this._bindNativeEvents();
-        const nativeState = await this._invoke("media_initialize", { config });
+        const nativeState = await this._invoke("media_initialize", {
+          config: resolvedConfig,
+        });
         this._mergeNativeCapabilities(nativeState?.capabilities);
+        this.nativeSession = new NativeMediasoupSfuSession({
+          invoke: (command, payload) => this._invoke(command, payload),
+          signalingPath: resolvedConfig.signalingPath,
+          onStateChange: (state) => {
+            if (state.topologyState)
+              this.nativeP2pSession
+                ?.applyTopology(state.topologyState)
+                .catch((error) =>
+                  this._emit("error", { source: "native-p2p", error }),
+                );
+            this._emit("state", state);
+          },
+          onP2pSignal: (data) => this.nativeP2pSession?.handleSignal(data),
+          onRemoteTrack: (entry) => {
+            this._syncNativeFeeds();
+            this._emit("remote-track", entry);
+          },
+          onRemoteTrackEnded: (entry) => {
+            this._syncNativeFeeds();
+            this._emit("remote-track-ended", entry);
+          },
+          onError: (error) => this._emit("error", { source: "native", error }),
+        });
+        this.nativeP2pSession = new NativeP2pSession({
+          invoke: (command, payload) => this._invoke(command, payload),
+          sendSignal: (data) =>
+            this.nativeSession?.signaling?.send?.({
+              type: "p2p-signal",
+              data,
+            }),
+          sendMessage: (type, data) =>
+            this.nativeSession?.signaling?.send?.({ type, data }),
+          onRemoteTrack: () => this._syncNativeFeeds(),
+          onRemoteTrackEnded: () => this._syncNativeFeeds(),
+          onStateChange: () => this._emit("state", this.nativeP2pSession),
+          onError: (error) =>
+            this._emit("error", { source: "native-p2p", error }),
+        });
+        this.nativeActionHandler = (action) =>
+          this.nativeSession?.handleNativeAction(action);
+        this.nativeReceiveEventHandler = (event) => {
+          if (this.nativeP2pSession?.handleReceiveEvent(event)) return;
+          this.nativeSession?.handleReceiveEvent(event);
+        };
       }
     } catch (error) {
       this.flags.nativeBackendReady = false;
@@ -167,6 +232,7 @@ export class NativeMediaEngine extends MediaEngine {
 
     if (!this.nativeOnly) await this.browserEngine.initialize(config);
     this.initialized = true;
+    if (this.flags.nativeRtc) this._startNativeActionPump();
   }
 
   async setMicrophoneDevice(deviceId) {
@@ -195,23 +261,11 @@ export class NativeMediaEngine extends MediaEngine {
     );
   }
 
-  async shutdown() {
-    if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
-      await this._invoke("media_shutdown").catch(() => undefined);
-    }
-    if (!this.nativeOnly) await this.browserEngine.shutdown();
-    await Promise.allSettled(
-      this.unlisten.splice(0).map((unlisten) => unlisten()),
-    );
-    this.listeners.clear();
-    this.initialized = false;
-  }
-
   async joinSession(input) {
     await this.initialize();
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       try {
-        await this._invoke("media_join", { input });
+        await this.nativeSession?.connect(input.channelId || input);
       } catch (error) {
         this.flags.nativeBackendReady = false;
         this._emit("error", { source: "native", operation: "join", error });
@@ -226,7 +280,9 @@ export class NativeMediaEngine extends MediaEngine {
   async leaveSession() {
     const nativeLeave =
       this.flags.nativeRtc && hasNativeCapability(this.flags)
-        ? this._invoke("media_leave")
+        ? this.nativeSession
+            ?.disconnect()
+            .catch(() => this._invoke("media_leave"))
         : Promise.resolve();
     const browserLeave = this.nativeOnly
       ? Promise.resolve()
@@ -250,6 +306,17 @@ export class NativeMediaEngine extends MediaEngine {
       if (this.nativeOnly) throw error;
       return this.browserEngine.setMicrophoneEnabled(enabled);
     });
+    if (enabled) {
+      const entry = {
+        source: "audio",
+        track: { kind: "audio" },
+      };
+      await this.nativeSession?.addSource(entry);
+      await this.nativeP2pSession?.addSource(entry);
+    } else {
+      this.nativeSession?.removeSource("audio");
+      await this.nativeP2pSession?.removeSource("audio");
+    }
   }
 
   async setCameraEnabled(enabled) {
@@ -263,6 +330,17 @@ export class NativeMediaEngine extends MediaEngine {
       if (this.nativeOnly) throw error;
       return this.browserEngine.setCameraEnabled(enabled);
     });
+    if (enabled) {
+      const entry = {
+        source: "camera",
+        track: { kind: "video" },
+      };
+      await this.nativeSession?.addSource(entry);
+      await this.nativeP2pSession?.addSource(entry);
+    } else {
+      this.nativeSession?.removeSource("camera");
+      await this.nativeP2pSession?.removeSource("camera");
+    }
   }
 
   async startScreenShare(options = {}) {
@@ -293,6 +371,13 @@ export class NativeMediaEngine extends MediaEngine {
         : "media_start_screen_share";
       const result = await this._invoke(command, { request });
       this.activeDesktopCapture = selection;
+      const entry = {
+        source: "screen",
+        track: { kind: "video" },
+        captureSelection: selection,
+      };
+      await this.nativeSession?.addSource(entry);
+      await this.nativeP2pSession?.addSource(entry);
       return result;
     } catch (error) {
       this.flags.nativeScreenShare = false;
@@ -330,6 +415,8 @@ export class NativeMediaEngine extends MediaEngine {
       });
     } finally {
       this.activeDesktopCapture = null;
+      this.nativeSession?.removeSource("screen");
+      await this.nativeP2pSession?.removeSource("screen");
     }
   }
 
@@ -338,7 +425,7 @@ export class NativeMediaEngine extends MediaEngine {
       if (this.nativeOnly) throw nativeOnlyError("signaling");
       return this.browserEngine.handleSignal(message);
     }
-    await this._invoke("media_handle_signal", { message });
+    return this.nativeSession?.handle(message.type, message.data || {});
   }
 
   async getDevices() {
@@ -408,33 +495,50 @@ export class NativeMediaEngine extends MediaEngine {
     return {
       microphone: capabilityBackend(
         this._usesNativeCapture("nativeMicrophone"),
+        false,
+        this.nativeOnly,
       ),
-      camera: capabilityBackend(this._usesNativeCapture("nativeCamera")),
+      camera: capabilityBackend(
+        this._usesNativeCapture("nativeCamera"),
+        false,
+        this.nativeOnly,
+      ),
       screenVideo: capabilityBackend(
         this._usesNativeCapture("nativeScreenShare"),
+        false,
+        this.nativeOnly,
       ),
       screenAudio: capabilityBackend(
         this._usesNativeCapture("nativeScreenAudio"),
+        false,
+        this.nativeOnly,
       ),
       p2p: capabilityBackend(
         hasNativeCapability(this.flags) && this.flags.nativeP2P,
         true,
+        this.nativeOnly,
       ),
       sfu: capabilityBackend(
         hasNativeCapability(this.flags) && this.flags.nativeSfu,
         true,
+        this.nativeOnly,
       ),
       receiveVideo: capabilityBackend(
         hasNativeCapability(this.flags) && this.flags.nativeVideoReceive,
+        false,
+        this.nativeOnly,
       ),
       receiveAudio: capabilityBackend(
         hasNativeCapability(this.flags) && this.flags.nativeAudioReceive,
+        false,
+        this.nativeOnly,
       ),
     };
   }
 
   async setTopology(topology) {
     if (!this.flags.nativeRtc || !hasNativeCapability(this.flags)) return;
+    await this.nativeP2pSession?.applyTopology(topology);
     await this._invoke("media_set_topology", { topology }).catch(() => {});
   }
 
@@ -444,7 +548,10 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async shutdown() {
+    this._stopNativeActionPump();
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
+      await this.nativeSession?.disconnect().catch(() => undefined);
+      await this.nativeP2pSession?.shutdown().catch(() => undefined);
       await this._invoke("media_shutdown").catch(() => undefined);
     }
     if (!this.nativeOnly) await this.browserEngine.shutdown();
@@ -453,34 +560,41 @@ export class NativeMediaEngine extends MediaEngine {
     );
     this.listeners.clear();
     this.initialized = false;
+    this.nativeSession = null;
+    this.nativeP2pSession = null;
+    this.nativeActionHandler = null;
+    this.remoteVideoFeedsRef.value = new Map();
+    this.remoteAudioFeedsRef.value = new Map();
+    triggerRef(this.remoteVideoFeedsRef);
+    triggerRef(this.remoteAudioFeedsRef);
   }
 
   get connected() {
-    return this.browserEngine.connected;
+    return (this.nativeSession || this.browserEngine).connected;
   }
 
   get joinReady() {
-    return this.browserEngine.joinReady;
+    return (this.nativeSession || this.browserEngine).joinReady;
   }
 
   get error() {
-    return this.browserEngine.error;
+    return (this.nativeSession || this.browserEngine).error;
   }
 
   get transportReady() {
-    return this.browserEngine.transportReady;
+    return (this.nativeSession || this.browserEngine).transportReady;
   }
 
   get iceConnectedBoth() {
-    return this.browserEngine.iceConnectedBoth;
+    return (this.nativeSession || this.browserEngine).iceConnectedBoth;
   }
 
   get mediaConnectionState() {
-    return this.browserEngine.mediaConnectionState;
+    return (this.nativeSession || this.browserEngine).mediaConnectionState;
   }
 
   get connectionPhase() {
-    return this.browserEngine.connectionPhase;
+    return (this.nativeSession || this.browserEngine).connectionPhase;
   }
 
   get lifecycle() {
@@ -488,11 +602,11 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get protocolState() {
-    return this.browserEngine.protocolState;
+    return (this.nativeSession || this.browserEngine).protocolState;
   }
 
   get protocolUpdateRequired() {
-    return this.browserEngine.protocolUpdateRequired;
+    return (this.nativeSession || this.browserEngine).protocolUpdateRequired;
   }
 
   get playbackState() {
@@ -504,27 +618,31 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get isProducing() {
-    return this.browserEngine.isProducing;
+    return (this.nativeSession || this.browserEngine).isProducing;
   }
 
   get producers() {
-    return this.browserEngine.producers;
+    return (this.nativeSession || this.browserEngine).producers;
   }
 
   get consumers() {
-    return this.browserEngine.consumers;
+    return (this.nativeSession || this.browserEngine).consumers;
   }
 
   get localVideoFeeds() {
-    return this.browserEngine.localVideoFeeds;
+    return (this.nativeSession || this.browserEngine).localVideoFeeds;
   }
 
   get remoteVideoFeeds() {
-    return this.browserEngine.remoteVideoFeeds;
+    return this.nativeSession
+      ? this.remoteVideoFeedsRef
+      : this.browserEngine.remoteVideoFeeds;
   }
 
   get remoteAudioFeeds() {
-    return this.browserEngine.remoteAudioFeeds;
+    return this.nativeSession
+      ? this.remoteAudioFeedsRef
+      : this.browserEngine.remoteAudioFeeds;
   }
 
   get sharedAudioStats() {
@@ -560,7 +678,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get remoteProducersCount() {
-    return this.browserEngine.remoteProducersCount;
+    return (this.nativeSession || this.browserEngine).remoteProducersCount;
   }
 
   get lastInRoom() {
@@ -568,7 +686,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get topologyState() {
-    return this.browserEngine.topologyState;
+    return (this.nativeSession || this.browserEngine).topologyState;
   }
 
   get topologyGraph() {
@@ -576,15 +694,17 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get activeProvider() {
-    return this.browserEngine.activeProvider;
+    return (this.nativeSession || this.browserEngine).activeProvider;
   }
 
   get lastSentClientRtpCapabilities() {
-    return this.browserEngine.lastSentClientRtpCapabilities;
+    return (this.nativeSession || this.browserEngine)
+      .lastSentClientRtpCapabilities;
   }
 
   get lastReceivedConsumerParams() {
-    return this.browserEngine.lastReceivedConsumerParams;
+    return (this.nativeSession || this.browserEngine)
+      .lastReceivedConsumerParams;
   }
 
   async connect(...args) {
@@ -592,7 +712,7 @@ export class NativeMediaEngine extends MediaEngine {
     const input = { channelId: args[0] };
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       try {
-        await this._invoke("media_join", { input });
+        await this.nativeSession?.connect(input.channelId);
       } catch (error) {
         this.flags.nativeBackendReady = false;
         this._emit("error", { source: "native", operation: "join", error });
@@ -610,7 +730,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   prepareAudioPlayback(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("audio playback preparation");
+    if (this.nativeOnly) return Promise.resolve();
     return this.browserEngine.prepareAudioPlayback(...args);
   }
 
@@ -690,7 +810,13 @@ export class NativeMediaEngine extends MediaEngine {
     return this._invoke(command, { request })
       .then((result) => {
         this.activeDesktopCapture = selection;
-        return result;
+        return this.nativeSession
+          ?.addSource({
+            source: "screen-audio",
+            track: { kind: "audio" },
+            captureSelection: selection,
+          })
+          .then(() => result);
       })
       .catch((error) => {
         this.flags.nativeScreenAudio = false;
@@ -730,6 +856,8 @@ export class NativeMediaEngine extends MediaEngine {
         })
         .finally(() => {
           this.activeDesktopCapture = null;
+          this.nativeSession?.removeSource("screen-audio");
+          this.nativeP2pSession?.removeSource("screen-audio");
         });
     }
     if (this.nativeOnly) throw nativeOnlyError("system audio production stop");
@@ -737,12 +865,12 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   setRemoteScreenReceiving(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("remote screen receiving");
+    if (this.nativeOnly) return this.nativeSession?.setRemoteReceiving(...args);
     return this.browserEngine.setRemoteScreenReceiving(...args);
   }
 
   setRemoteSystemAudioReceiving(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("remote system audio receiving");
+    if (this.nativeOnly) return this.nativeSession?.setRemoteReceiving(...args);
     return this.browserEngine.setRemoteSystemAudioReceiving(...args);
   }
 
@@ -757,7 +885,8 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   sendParticipantVoiceState(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("participant voice state");
+    if (this.nativeOnly)
+      return this.nativeSession?.sendParticipantVoiceState(...args);
     return this.browserEngine.sendParticipantVoiceState(...args);
   }
 
@@ -767,17 +896,23 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   applyVolumeForUser(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("user volume");
+    if (this.nativeOnly) {
+      const [userId, volume] = args;
+      return this.nativeSession?.setConsumerVolume(userId, null, volume);
+    }
     return this.browserEngine.applyVolumeForUser(...args);
   }
 
   applyVolumeForTrack(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("track volume");
+    if (this.nativeOnly) {
+      const [userId, source, volume] = args;
+      return this.nativeSession?.setConsumerVolume(userId, source, volume);
+    }
     return this.browserEngine.applyVolumeForTrack(...args);
   }
 
   ensureAudioElements(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("browser audio elements");
+    if (this.nativeOnly) return Promise.resolve();
     return this.browserEngine.ensureAudioElements(...args);
   }
 
@@ -807,19 +942,32 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   getState() {
-    return this.browserEngine.getState();
+    return (this.nativeSession || this.browserEngine).getState();
   }
 
   isScreenSharing() {
-    return this.browserEngine.isScreenSharing();
+    return this._hasNativeSource("screen")
+      ? true
+      : this.browserEngine.isScreenSharing();
   }
 
   isMicrophoneEnabled() {
-    return this.browserEngine.isMicrophoneEnabled();
+    return this._hasNativeSource("audio")
+      ? true
+      : this.browserEngine.isMicrophoneEnabled();
   }
 
   isCameraEnabled() {
-    return this.browserEngine.isCameraEnabled();
+    return this._hasNativeSource("camera")
+      ? true
+      : this.browserEngine.isCameraEnabled();
+  }
+
+  _hasNativeSource(source) {
+    return Boolean(
+      this.nativeSession?.sources?.has(source) ||
+      this.nativeP2pSession?.sources?.has(source),
+    );
   }
 
   _mergeNativeCapabilities(capabilities = {}) {
@@ -844,8 +992,20 @@ export class NativeMediaEngine extends MediaEngine {
       nativeSfu: "nativeSfu",
     };
     for (const [nativeName, flagName] of Object.entries(mapping)) {
-      if (capabilities[nativeName] === true) this.flags[flagName] = true;
+      if (Object.prototype.hasOwnProperty.call(capabilities, nativeName))
+        this.flags[flagName] = capabilities[nativeName] === true;
     }
+    const capture = capabilities.capture || {};
+    const hasSources = (name) =>
+      Array.isArray(capture[name]?.sources) && capture[name].sources.length > 0;
+    if (Object.prototype.hasOwnProperty.call(capture, "microphone"))
+      this.flags.nativeMicrophone = hasSources("microphone");
+    if (Object.prototype.hasOwnProperty.call(capture, "camera"))
+      this.flags.nativeCamera = hasSources("camera");
+    if (Object.prototype.hasOwnProperty.call(capture, "screenCaptureKit"))
+      this.flags.nativeScreenShare = hasSources("screenCaptureKit");
+    if (Object.prototype.hasOwnProperty.call(capture, "screenAudio"))
+      this.flags.nativeScreenAudio = hasSources("screenAudio");
     this.flags.nativeBackendReady =
       capabilities.nativeRtc === true &&
       capabilities.nativeBackendReady === true;
@@ -859,6 +1019,111 @@ export class NativeMediaEngine extends MediaEngine {
   async _invoke(command, payload = {}) {
     const tauri = await this._getTauri();
     return tauri.invoke(command, payload);
+  }
+
+  _syncNativeFeeds() {
+    if (!this.nativeSession) return;
+    this.remoteVideoFeedsRef.value = new Map([
+      ...this.nativeSession.remoteVideoFeeds,
+      ...(this.nativeP2pSession?.trackEntries
+        ? [...this.nativeP2pSession.trackEntries.values()]
+            .filter((entry) => entry.kind === "video" && !entry.closed)
+            .map((entry) => [entry.key, entry])
+        : []),
+    ]);
+    this.remoteAudioFeedsRef.value = new Map([
+      ...this.nativeSession.remoteAudioFeeds,
+      ...(this.nativeP2pSession?.trackEntries
+        ? [...this.nativeP2pSession.trackEntries.values()]
+            .filter((entry) => entry.kind === "audio" && !entry.closed)
+            .map((entry) => [entry.key, entry])
+        : []),
+    ]);
+    triggerRef(this.remoteVideoFeedsRef);
+    triggerRef(this.remoteAudioFeedsRef);
+  }
+
+  _startNativeActionPump() {
+    if (this.nativeActionPump || !this.flags.nativeRtc) return;
+    let stopped = false;
+    const schedule = (delay) => {
+      this.nativeActionPump = setTimeout(pump, delay);
+      this.nativeActionPump.unref?.();
+    };
+    const pump = async () => {
+      if (stopped || !this.initialized) return;
+      try {
+        const action = await this._invoke("media_poll_action");
+        if (
+          action?.kind === 1 ||
+          action?.kind === 2 ||
+          action?.kind === 3 ||
+          action?.kind === 4
+        ) {
+          let params = null;
+          if (typeof action.paramsJson === "string") {
+            try {
+              params = JSON.parse(action.paramsJson);
+            } catch (error) {
+              this._emit("error", {
+                source: "native",
+                operation: "action-pump",
+                error,
+              });
+            }
+          }
+          const nativeAction = {
+            ...action,
+            type:
+              action.kind === 1
+                ? "transport-connect"
+                : action.kind === 2
+                  ? "produce"
+                  : "consumer-event",
+            params,
+          };
+          this._emit("native-action", nativeAction);
+          await this.nativeActionHandler?.(nativeAction);
+        } else if (action?.state) {
+          this._emit("ice-state", {
+            transportPtr: action.transportPtr,
+            state: action.state,
+          });
+        }
+        const receiveEvent = await this._invoke("media_poll_receive_event");
+        if (receiveEvent?.kind) {
+          this.nativeReceiveEventHandler?.(receiveEvent);
+          this._syncNativeFeeds();
+          this._emit("native-receive-event", receiveEvent);
+        }
+        if (Date.now() >= this.nativeCapabilityPollAt) {
+          this.nativeCapabilityPollAt = Date.now() + 500;
+          this._mergeNativeCapabilities(
+            await this._invoke("media_get_capabilities"),
+          );
+        }
+      } catch (error) {
+        if (!stopped) {
+          this._emit("error", {
+            source: "native",
+            operation: "action-pump",
+            error,
+          });
+        }
+      }
+      if (!stopped) schedule(10);
+    };
+    schedule(0);
+    this.nativeActionPump.stop = () => {
+      stopped = true;
+      clearTimeout(this.nativeActionPump);
+      this.nativeActionPump = null;
+    };
+  }
+
+  _stopNativeActionPump() {
+    this.nativeActionPump?.stop?.();
+    this.nativeActionPump = null;
   }
 
   async _bindNativeEvents() {

@@ -1,6 +1,7 @@
 #include "lib_dspeak_media/lib_dspeak_media.h"
 #include <json.hpp>
 #include "media_handles.hpp"
+#include "runtime_health.hpp"
 
 #include <cstring>
 #include <cstdlib>
@@ -81,6 +82,9 @@ static std::map<uint64_t, std::promise<std::string>> g_produce_promises;
 
 class CxxSendListener : public mediasoupclient::SendTransport::Listener {
 public:
+    explicit CxxSendListener(std::string direction)
+        : direction_(std::move(direction)) {}
+
     std::future<void> OnConnect(mediasoupclient::Transport* transport,
                                 const json& dtlsParameters) override
     {
@@ -90,19 +94,28 @@ public:
             std::lock_guard<std::mutex> lock(g_promise_mutex);
             g_connect_promises[static_cast<void*>(transport)] = std::move(p);
         }
+        json params = dtlsParameters;
+        params["direction"] = direction_;
         lib_dspeak_media_push_action(LIB_DSPEAK_MEDIA_ACTION_TRANSPORT_CONNECT,
                 static_cast<void*>(transport), lib_dspeak_media_next_action_id(),
-                &dtlsParameters, nullptr);
+                &params, nullptr);
         return f;
     }
 
     void OnConnectionStateChange(mediasoupclient::Transport* transport,
                                  const std::string& connectionState) override
     {
+        dspeak_media_runtime::update_sfu_connection(
+            connected_, connectionState == "connected");
         json j(connectionState);
         lib_dspeak_media_push_action(LIB_DSPEAK_MEDIA_ACTION_NONE,
                 static_cast<void*>(transport), 0,
                 nullptr, &j);
+    }
+
+    void ResetHealth()
+    {
+        dspeak_media_runtime::update_sfu_connection(connected_, false);
     }
 
     std::future<std::string> OnProduce(
@@ -152,12 +165,19 @@ public:
                 &params, nullptr);
         return f;
     }
+
+private:
+    std::string direction_;
+    bool connected_ = false;
 };
 
 /* ── Listener: RecvTransport ───────────────────────── */
 
 class CxxRecvListener : public mediasoupclient::RecvTransport::Listener {
 public:
+    explicit CxxRecvListener(std::string direction)
+        : direction_(std::move(direction)) {}
+
     std::future<void> OnConnect(mediasoupclient::Transport* transport,
                                 const json& dtlsParameters) override
     {
@@ -167,19 +187,44 @@ public:
             std::lock_guard<std::mutex> lock(g_promise_mutex);
             g_connect_promises[static_cast<void*>(transport)] = std::move(p);
         }
+        json params = dtlsParameters;
+        params["direction"] = direction_;
         lib_dspeak_media_push_action(LIB_DSPEAK_MEDIA_ACTION_TRANSPORT_CONNECT,
                 static_cast<void*>(transport), lib_dspeak_media_next_action_id(),
-                &dtlsParameters, nullptr);
+                &params, nullptr);
         return f;
     }
 
     void OnConnectionStateChange(mediasoupclient::Transport* transport,
                                  const std::string& connectionState) override
     {
+        dspeak_media_runtime::update_sfu_connection(
+            connected_, connectionState == "connected");
         json j(connectionState);
         lib_dspeak_media_push_action(LIB_DSPEAK_MEDIA_ACTION_NONE,
                 static_cast<void*>(transport), 0,
                 nullptr, &j);
+    }
+
+    void ResetHealth()
+    {
+        dspeak_media_runtime::update_sfu_connection(connected_, false);
+    }
+
+private:
+    std::string direction_;
+    bool connected_ = false;
+};
+
+class CxxConsumerListener : public mediasoupclient::Consumer::Listener {
+public:
+    void OnTransportClose(mediasoupclient::Consumer* consumer) override
+    {
+        if (!consumer) return;
+        lib_dspeak_media_push_receive_track_closed_event(
+            consumer->GetId().c_str(),
+            consumer->GetProducerId().c_str(),
+            consumer->GetKind().c_str());
     }
 };
 
@@ -247,7 +292,7 @@ extern "C" lib_dspeak_media_send_transport_t* lib_dspeak_media_create_send_trans
     if (error_out) *error_out = 0;
     try {
         auto st       = std::make_unique<lib_dspeak_media_send_transport>();
-        auto listener = std::make_shared<CxxSendListener>();
+        auto listener = std::make_shared<CxxSendListener>("send");
         st->listener  = listener.get();
         g_send_listeners.push_back(std::move(listener));
 
@@ -267,6 +312,7 @@ extern "C" void lib_dspeak_media_destroy_send_transport(lib_dspeak_media_send_tr
 {
     if (!transport) return;
     auto* listener = transport->listener;
+    listener->ResetHealth();
     clear_connect_promise(transport->transport);
     transport->transport->Close();
     {
@@ -294,7 +340,7 @@ extern "C" lib_dspeak_media_recv_transport_t* lib_dspeak_media_create_recv_trans
     if (error_out) *error_out = 0;
     try {
         auto rt       = std::make_unique<lib_dspeak_media_recv_transport>();
-        auto listener = std::make_shared<CxxRecvListener>();
+        auto listener = std::make_shared<CxxRecvListener>("recv");
         rt->listener  = listener.get();
         g_recv_listeners.push_back(std::move(listener));
 
@@ -314,6 +360,7 @@ extern "C" void lib_dspeak_media_destroy_recv_transport(lib_dspeak_media_recv_tr
 {
     if (!transport) return;
     auto* listener = transport->listener;
+    listener->ResetHealth();
     clear_connect_promise(transport->transport);
     transport->transport->Close();
     {
@@ -405,13 +452,43 @@ extern "C" lib_dspeak_media_consumer_t* lib_dspeak_media_consume(
     int* error_out)
 {
     if (error_out) *error_out = 0;
+    if (!transport || !transport->transport || !id || !producer_id || !kind ||
+        !rtp_parameters_json) {
+        if (error_out) *error_out = -1;
+        return nullptr;
+    }
     try {
+        auto result = std::make_unique<lib_dspeak_media_consumer>();
+        result->listener = new CxxConsumerListener();
         auto rtpParams = lib_dspeak_media_json_arg(rtp_parameters_json);
-        auto* consumer = transport->transport->Consume(
-            /* consumerListener = */ nullptr,
+        auto app_data = lib_dspeak_media_json_arg(app_data_json);
+        result->consumer = transport->transport->Consume(
+            result->listener,
             id, producer_id, kind, &rtpParams,
-            lib_dspeak_media_json_arg(app_data_json));
-        return reinterpret_cast<lib_dspeak_media_consumer_t*>(consumer);
+            app_data);
+        if (!result->consumer) {
+            delete result->listener;
+            if (error_out) *error_out = -2;
+            return nullptr;
+        }
+        auto* track = result->consumer->GetTrack();
+        if (std::strcmp(kind, "audio") == 0 && track) {
+            result->audio_sink = std::make_unique<NativeReceiveAudioSink>(id);
+            static_cast<webrtc::AudioTrackInterface*>(track)->AddSink(result->audio_sink.get());
+        } else if (std::strcmp(kind, "video") == 0 && track) {
+            result->video_sink = std::make_unique<NativeReceiveVideoSink>(id);
+            static_cast<webrtc::VideoTrackInterface*>(track)->AddOrUpdateSink(
+                result->video_sink.get(), webrtc::VideoSinkWants());
+        } else {
+            result->consumer->Close();
+            delete result->listener;
+            if (error_out) *error_out = -3;
+            return nullptr;
+        }
+        const auto app_data_text = app_data.dump();
+        lib_dspeak_media_push_receive_track_event(
+            "consumer-created", id, producer_id, kind, app_data_text.c_str());
+        return result.release();
     } catch (...) {
         if (error_out) *error_out = -1;
         return nullptr;
@@ -427,7 +504,34 @@ extern "C" void lib_dspeak_media_destroy_producer(lib_dspeak_media_producer_t* p
 extern "C" void lib_dspeak_media_destroy_consumer(lib_dspeak_media_consumer_t* consumer)
 {
     if (!consumer) return;
-    reinterpret_cast<mediasoupclient::Consumer*>(consumer)->Close();
+    if (consumer->consumer) {
+        lib_dspeak_media_push_receive_track_closed_event(
+            consumer->consumer->GetId().c_str(),
+            consumer->consumer->GetProducerId().c_str(),
+            consumer->consumer->GetKind().c_str());
+        consumer->consumer->Close();
+    }
+    consumer->audio_sink.reset();
+    consumer->video_sink.reset();
+    delete consumer->listener;
+    delete consumer;
+}
+
+extern "C" int lib_dspeak_media_consumer_set_enabled(
+    lib_dspeak_media_consumer_t* consumer, bool enabled)
+{
+    if (!consumer || !consumer->consumer) return -1;
+    if (consumer->audio_sink) consumer->audio_sink->SetEnabled(enabled);
+    if (consumer->video_sink) consumer->video_sink->SetEnabled(enabled);
+    return 0;
+}
+
+extern "C" int lib_dspeak_media_consumer_set_volume(
+    lib_dspeak_media_consumer_t* consumer, double volume)
+{
+    if (!consumer || !consumer->consumer || !consumer->audio_sink) return -1;
+    consumer->audio_sink->SetVolume(volume);
+    return 0;
 }
 
 extern "C" const char* lib_dspeak_media_producer_get_id(lib_dspeak_media_producer_t* producer)
@@ -438,6 +542,20 @@ extern "C" const char* lib_dspeak_media_producer_get_id(lib_dspeak_media_produce
 
 extern "C" const char* lib_dspeak_media_consumer_get_id(lib_dspeak_media_consumer_t* consumer)
 {
-    auto* c = reinterpret_cast<mediasoupclient::Consumer*>(consumer);
-    return lib_dspeak_media_strdup(c->GetId().c_str());
+    if (!consumer || !consumer->consumer) return nullptr;
+    return lib_dspeak_media_strdup(consumer->consumer->GetId().c_str());
+}
+
+extern "C" const char* lib_dspeak_media_consumer_get_producer_id(
+    lib_dspeak_media_consumer_t* consumer)
+{
+    if (!consumer || !consumer->consumer) return nullptr;
+    return lib_dspeak_media_strdup(consumer->consumer->GetProducerId().c_str());
+}
+
+extern "C" const char* lib_dspeak_media_consumer_get_kind(
+    lib_dspeak_media_consumer_t* consumer)
+{
+    if (!consumer || !consumer->consumer) return nullptr;
+    return lib_dspeak_media_strdup(consumer->consumer->GetKind().c_str());
 }

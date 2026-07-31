@@ -64,21 +64,12 @@ pub(crate) fn native_capture_sources_for_startup() -> Result<Vec<Value>, String>
         .map_err(|_| "native capture source enumeration returned invalid JSON".to_string())
 }
 
-#[cfg(native_rtc)]
 pub(crate) fn missing_required_native_components(
     capabilities: &NativeMediaCapabilities,
 ) -> Vec<&'static str> {
     [
         ("nativeRtc", capabilities.native_rtc),
         ("nativeBackendReady", capabilities.native_backend_ready),
-        ("microphone", capabilities.microphone),
-        ("camera", capabilities.camera),
-        ("screenVideo", capabilities.screen_video),
-        ("screenAudio", capabilities.screen_audio),
-        ("audioReceive", capabilities.audio_receive),
-        ("videoReceive", capabilities.video_receive),
-        ("p2p", capabilities.p2p),
-        ("sfu", capabilities.sfu),
     ]
     .into_iter()
     .filter_map(|(name, available)| (!available).then_some(name))
@@ -98,28 +89,12 @@ pub fn strict_startup_check(store: &NativeMediaStore) -> Result<(), String> {
             return Err("native media backend failed to initialize".to_string());
         }
 
-        let capabilities =
-            serde_json::from_value::<NativeMediaCapabilities>(native_capabilities_value())
-                .map_err(|error| format!("native media capability report is invalid: {error}"))?;
-        let missing = missing_required_native_components(&capabilities);
-        if !missing.is_empty() {
-            return Err(format!(
-                "required native media components are unavailable: {}",
-                missing.join(", ")
-            ));
-        }
-
-        let sources = native_capture_sources_for_startup()?;
-        if sources.is_empty() {
-            return Err("native capture source enumeration returned no usable sources".to_string());
-        }
-
-        let mut probe_error = 0;
-        let probe_result = unsafe { ffi::lib_dspeak_media_probe_capture(1500, &mut probe_error) };
-        if probe_result != 0 {
-            let detail = unsafe { ffi::lib_dspeak_media_capture_error_message(probe_error) };
+        let mut runtime_error = 0;
+        let runtime_result = unsafe { ffi::lib_dspeak_media_probe_runtime(&mut runtime_error) };
+        if runtime_result != 0 {
+            let detail = unsafe { ffi::lib_dspeak_media_capture_error_message(runtime_error) };
             let message = if detail.is_null() {
-                format!("native capture health probe failed (error {probe_error})")
+                format!("native runtime health probe failed (error {runtime_error})")
             } else {
                 unsafe { CStr::from_ptr(detail) }
                     .to_string_lossy()
@@ -128,13 +103,82 @@ pub fn strict_startup_check(store: &NativeMediaStore) -> Result<(), String> {
             return Err(message);
         }
 
+        let initial_capabilities =
+            serde_json::from_value::<NativeMediaCapabilities>(native_capabilities_value())
+                .map_err(|error| format!("native media capability report is invalid: {error}"))?;
+        let missing = missing_required_native_components(&initial_capabilities);
+        if !missing.is_empty() {
+            return Err(format!(
+                "required native media components are unavailable: {}",
+                missing.join(", ")
+            ));
+        }
+
+        let sources = native_capture_sources_for_startup()?;
+        if !sources.is_empty() {
+            let mut probe_error = 0;
+            let probe_result =
+                unsafe { ffi::lib_dspeak_media_probe_capture(1500, &mut probe_error) };
+            if probe_result != 0 {
+                let detail = unsafe { ffi::lib_dspeak_media_capture_error_message(probe_error) };
+                let message = if detail.is_null() {
+                    format!("native capture health probe failed (error {probe_error})")
+                } else {
+                    unsafe { CStr::from_ptr(detail) }
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                eprintln!("[dspeak:native-capability] capture unavailable: {message}");
+            }
+        }
+
+        let capabilities =
+            serde_json::from_value::<NativeMediaCapabilities>(native_capabilities_value())
+                .map_err(|error| format!("native media capability report is invalid: {error}"))?;
         let mut state = store
             .state
             .lock()
             .map_err(|_| "native media state lock poisoned during startup".to_string())?;
         state.initialized = true;
         state.native_backend_ready = capabilities.native_backend_ready;
-        state.capabilities = capabilities;
+        state.capabilities = capabilities.clone();
+        eprintln!(
+            "[dspeak:startup-ready] core={} backend={} microphone={} camera={} screenVideo={} screenAudio={} audioReceive={} videoReceive={} p2p={} sfu={}",
+            capabilities.native_rtc,
+            capabilities.native_backend_ready,
+            capabilities.microphone,
+            capabilities.camera,
+            capabilities.screen_video,
+            capabilities.screen_audio,
+            capabilities.audio_receive,
+            capabilities.video_receive,
+            capabilities.p2p,
+            capabilities.sfu,
+        );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_requires_only_proven_core_runtime() {
+        let capabilities = NativeMediaCapabilities {
+            native_rtc: true,
+            native_backend_ready: true,
+            ..Default::default()
+        };
+        assert!(missing_required_native_components(&capabilities).is_empty());
+    }
+
+    #[test]
+    fn startup_reports_missing_core_without_requiring_media_sessions() {
+        let capabilities = NativeMediaCapabilities::default();
+        assert_eq!(
+            missing_required_native_components(&capabilities),
+            vec!["nativeRtc", "nativeBackendReady"]
+        );
     }
 }

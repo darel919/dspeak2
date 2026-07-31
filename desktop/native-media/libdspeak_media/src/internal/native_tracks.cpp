@@ -29,8 +29,13 @@
 #include <Producer.hpp>
 #include <Consumer.hpp>
 #include <api/create_peerconnection_factory.h>
+#include <api/audio/create_audio_device_module.h>
+#include <api/audio_codecs/builtin_audio_encoder_factory.h>
+#include <api/audio_codecs/builtin_audio_decoder_factory.h>
+#include <api/environment/environment_factory.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
+#include <api/rtp_parameters.h>
 #include <api/scoped_refptr.h>
 #include <api/video/i420_buffer.h>
 #include <api/video/video_frame.h>
@@ -48,6 +53,60 @@
 #endif
 
 using json = nlohmann::json;
+
+static webrtc::Priority parse_priority(const json& value, webrtc::Priority fallback)
+{
+    if (!value.is_string()) return fallback;
+    const auto priority = value.get<std::string>();
+    if (priority == "very-low") return webrtc::Priority::kVeryLow;
+    if (priority == "low") return webrtc::Priority::kLow;
+    if (priority == "medium") return webrtc::Priority::kMedium;
+    if (priority == "high") return webrtc::Priority::kHigh;
+    return fallback;
+}
+
+static double priority_value(const json& value)
+{
+    switch (parse_priority(value, webrtc::Priority::kMedium)) {
+        case webrtc::Priority::kVeryLow: return 0.5;
+        case webrtc::Priority::kLow: return 1.0;
+        case webrtc::Priority::kHigh: return 4.0;
+        case webrtc::Priority::kMedium: return 2.0;
+    }
+    return 2.0;
+}
+
+static std::vector<webrtc::RtpEncodingParameters> parse_encodings(const json& app_data)
+{
+    std::vector<webrtc::RtpEncodingParameters> encodings;
+    const auto value = app_data.value("encodings", json::array());
+    if (!value.is_array()) return encodings;
+
+    for (const auto& item : value) {
+        if (!item.is_object()) continue;
+        webrtc::RtpEncodingParameters encoding;
+        if (item.contains("maxBitrate") && item["maxBitrate"].is_number_integer())
+            encoding.max_bitrate_bps = item["maxBitrate"].get<int>();
+        if (item.contains("minBitrate") && item["minBitrate"].is_number_integer())
+            encoding.min_bitrate_bps = item["minBitrate"].get<int>();
+        if (item.contains("maxFramerate") && item["maxFramerate"].is_number())
+            encoding.max_framerate = item["maxFramerate"].get<double>();
+        if (item.contains("scaleResolutionDownBy") && item["scaleResolutionDownBy"].is_number())
+            encoding.scale_resolution_down_by = item["scaleResolutionDownBy"].get<double>();
+        if (item.contains("scalabilityMode") && item["scalabilityMode"].is_string())
+            encoding.scalability_mode = item["scalabilityMode"].get<std::string>();
+        if (item.contains("rid") && item["rid"].is_string())
+            encoding.rid = item["rid"].get<std::string>();
+        if (item.contains("active") && item["active"].is_boolean())
+            encoding.active = item["active"].get<bool>();
+        if (item.contains("priority"))
+            encoding.bitrate_priority = priority_value(item["priority"]);
+        if (item.contains("networkPriority"))
+            encoding.network_priority = parse_priority(item["networkPriority"], encoding.network_priority);
+        encodings.push_back(std::move(encoding));
+    }
+    return encodings;
+}
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Native track creation and mediasoup producer attachment            */
@@ -71,9 +130,11 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
             /*network_thread=*/nullptr,
             worker_thread,
             signaling_thread,
-            /*default_adm=*/nullptr,
-            /*audio_encoder_factory=*/nullptr,
-            /*audio_decoder_factory=*/nullptr,
+            /*default_adm=*/webrtc::CreateAudioDeviceModule(
+                webrtc::CreateEnvironment(),
+                webrtc::AudioDeviceModule::kPlatformDefaultAudio),
+            /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
+            /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
             /*video_encoder_factory=*/nullptr,
             /*video_decoder_factory=*/nullptr,
             /*audio_mixer=*/nullptr,
@@ -133,9 +194,11 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
             /*network_thread=*/nullptr,
             worker_thread,
             signaling_thread,
-            /*default_adm=*/nullptr,
-            /*audio_encoder_factory=*/nullptr,
-            /*audio_decoder_factory=*/nullptr,
+            /*default_adm=*/webrtc::CreateAudioDeviceModule(
+                webrtc::CreateEnvironment(),
+                webrtc::AudioDeviceModule::kPlatformDefaultAudio),
+            /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
+            /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
             /*video_encoder_factory=*/nullptr,
             /*video_decoder_factory=*/nullptr,
             /*audio_mixer=*/nullptr,
@@ -188,12 +251,20 @@ extern "C" void lib_dspeak_media_destroy_video_track(lib_dspeak_media_video_trac
 {
     if (!t) return;
 #if defined(__APPLE__)
-    if (t->source) {
-        t->source->SetState(webrtc::MediaSourceInterface::kEnded);
-    }
-#endif
+    auto destroy = [t] {
+        if (t->source)
+            t->source->SetState(webrtc::MediaSourceInterface::kEnded);
+        t->track = nullptr;
+        t->factory = nullptr;
+    };
+    if (t->signaling_thread)
+        t->signaling_thread->BlockingCall(destroy);
+    else
+        destroy();
+#else
     t->track = nullptr;
     t->factory = nullptr;
+#endif
     delete t->signaling_thread;
     delete t->worker_thread;
     delete t;
@@ -203,12 +274,20 @@ extern "C" void lib_dspeak_media_destroy_audio_track(lib_dspeak_media_audio_trac
 {
     if (!t) return;
 #if defined(__APPLE__)
-    if (t->source) {
-        t->source->OnClose();
-    }
-#endif
+    auto destroy = [t] {
+        if (t->source)
+            t->source->OnClose();
+        t->track = nullptr;
+        t->factory = nullptr;
+    };
+    if (t->signaling_thread)
+        t->signaling_thread->BlockingCall(destroy);
+    else
+        destroy();
+#else
     t->track = nullptr;
     t->factory = nullptr;
+#endif
     delete t->signaling_thread;
     delete t->worker_thread;
     delete t;
@@ -239,9 +318,9 @@ extern "C" lib_dspeak_media_producer_t* lib_dspeak_media_produce_video_track(
     }
     try {
         auto app_data = app_data_json ? nlohmann::json::parse(app_data_json) : nlohmann::json::object();
-        auto encodings = app_data.value("encodings", nlohmann::json::array());
+        auto encodings = parse_encodings(app_data);
         auto* producer = transport->transport->Produce(
-            nullptr, track->track.get(), &encodings, nullptr, nullptr, app_data);
+            nullptr, track->track.get(), encodings.empty() ? nullptr : &encodings, nullptr, nullptr, app_data);
         return reinterpret_cast<lib_dspeak_media_producer_t*>(producer);
     } catch (...) {
         if (error_out) *error_out = -1;
@@ -262,9 +341,9 @@ extern "C" lib_dspeak_media_producer_t* lib_dspeak_media_produce_audio_track(
     }
     try {
         auto app_data = app_data_json ? nlohmann::json::parse(app_data_json) : nlohmann::json::object();
-        auto encodings = app_data.value("encodings", nlohmann::json::array());
+        auto encodings = parse_encodings(app_data);
         auto* producer = transport->transport->Produce(
-            nullptr, track->track.get(), &encodings, nullptr, nullptr, app_data);
+            nullptr, track->track.get(), encodings.empty() ? nullptr : &encodings, nullptr, nullptr, app_data);
         return reinterpret_cast<lib_dspeak_media_producer_t*>(producer);
     } catch (...) {
         if (error_out) *error_out = -1;
