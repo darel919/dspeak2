@@ -30,7 +30,7 @@ const authMiddleware = await readFile(
 
 test("persistent layout keeps NuxtPage mounted behind global route auth", () => {
   assert.match(app, /<NuxtLayout>[\s\S]*<NuxtPage \/>/);
-  assert.match(init, /v-show="startupComplete \|\| isAuthPage"/);
+  assert.match(init, /v-if="startupComplete \|\| isAuthPage"/);
   assert.doesNotMatch(init, /<div v-else>/);
   assert.doesNotMatch(init, /v-if="canMountPage"/);
   assert.match(

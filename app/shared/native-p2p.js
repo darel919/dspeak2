@@ -498,6 +498,10 @@ export class NativeP2pMesh {
 
   async applyPeerSignal(state, signal) {
     const pc = state.pc;
+    if (signal.renegotiationNeeded === true) {
+      this.schedulePeerNegotiation(state);
+      return;
+    }
     if (signal.source) {
       const source = String(signal.source.source || "");
       const trackId = String(signal.source.trackId || "");
@@ -892,6 +896,8 @@ export class NativeP2pMesh {
       this.fail("sender-configuration-failed", error);
       throw error;
     }
+    if (state.pc.remoteDescription && state.pc.signalingState === "stable")
+      this.schedulePeerNegotiation(state);
     return sender;
   }
 

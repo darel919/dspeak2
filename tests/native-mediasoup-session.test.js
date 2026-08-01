@@ -48,7 +48,100 @@ function findMessage(socket, type) {
   return socket.sent.find((message) => message.type === type);
 }
 
+function createControlSignaling(session, messages, { stop } = {}) {
+  return {
+    send(message) {
+      messages.push(message);
+      if (
+        message.type === "resume-consumer" ||
+        message.type === "pause-consumer"
+      ) {
+        queueMicrotask(() =>
+          session.handle(
+            message.type === "resume-consumer"
+              ? "consumer-resumed"
+              : "consumer-paused",
+            {
+              requestId: message.data.requestId,
+              consumerId: message.data.consumerId,
+            },
+          ),
+        );
+      }
+      return true;
+    },
+    ...(stop ? { stop } : {}),
+  };
+}
+
 describe("NativeMediasoupSfuSession", () => {
+  it("publishes browser-compatible media kinds for every native source", async () => {
+    const calls = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        return { id: `producer-${payload.appData.source}` };
+      },
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport", handle: 21 };
+
+    await session.addSource({ source: "audio", track: { kind: "audio" } });
+    await session.addSource({ source: "camera", track: { kind: "video" } });
+    await session.addSource({ source: "screen", track: { kind: "video" } });
+    await session.addSource({
+      source: "screen-audio",
+      track: { kind: "audio" },
+    });
+
+    assert.deepEqual(
+      calls.map(([, payload]) => [payload.kind, payload.appData.source]),
+      [
+        ["audio", "audio"],
+        ["video", "camera"],
+        ["video", "screen"],
+        ["audio", "screen-audio"],
+      ],
+    );
+    assert.equal(session.producers.get("camera").kind, "video");
+    assert.equal(session.producers.get("screen").kind, "video");
+    assert.equal(calls[0][1].appData.encodings[0].priority, "high");
+    assert.equal(calls[2][1].appData.encodings[0].maxFramerate, 60);
+  });
+
+  it("uses the shared audio and screen video producer policy", async () => {
+    const calls = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        return { id: `producer-${payload.appData.source}` };
+      },
+      getAudioBitrate: () => 96000,
+      getAudioStereo: () => true,
+      getVideoSettings: () => ({
+        width: 2560,
+        height: 1440,
+        frameRate: 30,
+        qualityPriority: "resolution",
+        maxBitrate: 2400000,
+      }),
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport", handle: 21 };
+
+    await session.addSource({ source: "audio", track: { kind: "audio" } });
+    await session.addSource({ source: "screen", track: { kind: "video" } });
+
+    assert.equal(calls[0][1].appData.encodings[0].maxBitrate, 96000);
+    assert.equal(calls[0][1].appData.codecOptions.opusStereo, true);
+    assert.equal(calls[1][1].appData.encodings[0].maxBitrate, 2400000);
+    assert.equal(calls[1][1].appData.encodings[0].maxFramerate, 30);
+    assert.equal(
+      calls[1][1].appData.degradationPreference,
+      "maintain-resolution",
+    );
+  });
+
   it("negotiates the native device and both transports without browser WebRTC", async () => {
     const previousWebSocket = globalThis.WebSocket;
     const harness = createSocketHarness();
@@ -125,6 +218,49 @@ describe("NativeMediasoupSfuSession", () => {
     }
   });
 
+  it("hydrates membership from the native connected handshake", async () => {
+    const members = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+      onCurrentlyInChannel: (data) => members.push(data),
+    });
+    session.signaling = { markReady() {}, send: () => true };
+    session._startNegotiation = async () => undefined;
+
+    await session.handle("connected", {
+      peerId: "peer-native",
+      inRoom: ["user-native", "user-browser"],
+      profiles: [{ id: "user-browser", name: "Browser User" }],
+      participantStates: [
+        {
+          userId: "user-browser",
+          muted: false,
+          deafened: false,
+          cameraEnabled: false,
+          screenSharing: false,
+        },
+      ],
+    });
+
+    assert.deepEqual(members, [
+      {
+        peerId: "peer-native",
+        inRoom: ["user-native", "user-browser"],
+        profiles: [{ id: "user-browser", name: "Browser User" }],
+        participantStates: [
+          {
+            userId: "user-browser",
+            muted: false,
+            deafened: false,
+            cameraEnabled: false,
+            screenSharing: false,
+          },
+        ],
+      },
+    ]);
+    await session.disconnect();
+  });
+
   it("tears down native media before renegotiating after signaling loss", async () => {
     let releaseTeardown;
     const teardown = new Promise((resolve) => {
@@ -160,6 +296,40 @@ describe("NativeMediasoupSfuSession", () => {
     assert.ok(findMessage({ sent }, "get-rtp-capabilities"));
     session.readyReject?.(new Error("test complete"));
     await negotiation.catch(() => undefined);
+  });
+
+  it("acknowledges signaling heartbeats without restarting the native SFU", async () => {
+    const acknowledgements = [];
+    const topologyStates = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+      onStateChange: (state) => topologyStates.push(state.topologyState),
+    });
+    session.closed = false;
+    session.signaling = {
+      acknowledgeHeartbeat(sequence, acknowledgedAt) {
+        acknowledgements.push([sequence, acknowledgedAt]);
+      },
+    };
+
+    assert.equal(await session.handle("heartbeat-ack", { sequence: 4 }), true);
+    assert.equal(
+      await session.handle("heartbeat-nack", {
+        sequence: 5,
+        topology: { mode: "sfu", epoch: 2 },
+      }),
+      true,
+    );
+    assert.equal(acknowledgements.length, 2);
+    assert.deepEqual(
+      acknowledgements.map(([sequence]) => sequence),
+      [4, 5],
+    );
+    assert.deepEqual(topologyStates.at(-1), {
+      mode: "sfu",
+      epoch: 2,
+      localPeerId: "",
+    });
   });
 
   it("correlates native connect and produce actions with signaling acknowledgements", async () => {
@@ -272,6 +442,23 @@ describe("NativeMediasoupSfuSession", () => {
     ]);
   });
 
+  it("applies native transport state actions after JSON decoding", async () => {
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.closed = false;
+    session.transportPointers.set(22, "recv");
+
+    await session.handleNativeAction({
+      kind: 0,
+      transportPtr: 22,
+      state: JSON.stringify("connected"),
+    });
+
+    assert.equal(session.transportStates.get("recv"), "connected");
+    assert.equal(session.mediaConnectionState, "transport-connecting");
+  });
+
   it("correlates receive frames and closes the exact native consumer", async () => {
     const calls = [];
     const ended = [];
@@ -291,7 +478,7 @@ describe("NativeMediasoupSfuSession", () => {
     session.connected = true;
     session.closed = false;
     session.recvTransport = { id: "recv-transport", handle: 22 };
-    session.signaling = { send: () => true };
+    session.signaling = createControlSignaling(session, []);
 
     await session.handle("consumer-params", {
       id: "consumer-native",
@@ -394,9 +581,7 @@ describe("NativeMediasoupSfuSession", () => {
     session.connected = true;
     session.closed = false;
     session.recvTransport = { id: "recv-transport", handle: 22 };
-    session.signaling = {
-      send: (message) => (messages.push(message), true),
-    };
+    session.signaling = createControlSignaling(session, messages);
 
     await session.handle("consumer-params", {
       id: "consumer-native",
@@ -407,13 +592,7 @@ describe("NativeMediasoupSfuSession", () => {
       source: "audio",
     });
     const entry = session.consumers.get("consumer-native");
-    const resume = session.setConsumerReceiving(entry, true);
-    await new Promise((resolve) => setImmediate(resolve));
-    await session.handle("consumer-resumed", {
-      requestId: messages.at(-1).data.requestId,
-      consumerId: entry.consumerId,
-    });
-    await resume;
+    assert.equal(entry.receiving, true);
     await session.setConsumerVolume("user-remote", "audio", 0.4);
 
     assert.deepEqual(calls.slice(1), [
@@ -447,10 +626,9 @@ describe("NativeMediasoupSfuSession", () => {
     session.closed = false;
     session.recvTransport = { id: "recv-transport", handle: 22 };
     session.transportPointers.set(302, "recv");
-    session.signaling = {
-      send: (message) => (messages.push(message), true),
+    session.signaling = createControlSignaling(session, messages, {
       stop() {},
-    };
+    });
 
     await session.handle("consumer-params", {
       requestId: "consume-1",
@@ -461,18 +639,19 @@ describe("NativeMediasoupSfuSession", () => {
       userId: "user-remote",
       source: "audio",
     });
+    assert.equal(session.consumers.get("consumer-native").receiving, true);
+
+    const pause = session.setConsumerReceiving(
+      session.consumers.get("consumer-native"),
+      false,
+    );
+    await pause;
     assert.equal(session.consumers.get("consumer-native").receiving, false);
 
     const resume = session.setConsumerReceiving(
       session.consumers.get("consumer-native"),
       true,
     );
-    await new Promise((resolve) => setImmediate(resolve));
-    const resumeMessage = messages.at(-1);
-    await session.handle("consumer-resumed", {
-      requestId: resumeMessage.data.requestId,
-      consumerId: "consumer-native",
-    });
     await resume;
     assert.equal(session.consumers.get("consumer-native").receiving, true);
 

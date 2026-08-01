@@ -107,6 +107,20 @@ int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* h, lib_d
 int lib_dspeak_media_p2p_add_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
 int lib_dspeak_media_p2p_remove_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track);
 int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
+int lib_dspeak_media_p2p_set_track_parameters(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_id,
+    const char* parameters_json);
+int lib_dspeak_media_p2p_set_audio_stereo(
+    lib_dspeak_media_p2p_handle_t* h,
+    bool stereo);
+int lib_dspeak_media_p2p_set_receive_enabled(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_id,
+    bool enabled);
+int lib_dspeak_media_p2p_send_health(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* message);
 
 /* ── Mediasoup produce from native tracks ────────────── */
 lib_dspeak_media_producer_t* lib_dspeak_media_produce_video_track(lib_dspeak_media_send_transport_t* t,
@@ -124,6 +138,9 @@ lib_dspeak_media_consumer_t* lib_dspeak_media_consume(lib_dspeak_media_recv_tran
                             const char* kind, const char* rtp_parameters_json,
                             const char* app_data_json, int* error_out);
 void lib_dspeak_media_destroy_producer(lib_dspeak_media_producer_t* p);
+int lib_dspeak_media_producer_set_paused(lib_dspeak_media_producer_t* p, bool paused);
+int lib_dspeak_media_producer_set_parameters(
+    lib_dspeak_media_producer_t* p, const char* parameters_json);
 void lib_dspeak_media_destroy_consumer(lib_dspeak_media_consumer_t* c);
 int  lib_dspeak_media_consumer_set_enabled(lib_dspeak_media_consumer_t* c, bool enabled);
 int  lib_dspeak_media_consumer_set_volume(lib_dspeak_media_consumer_t* c, double volume);
@@ -142,7 +159,9 @@ void  lib_dspeak_media_free_string(char* s);
 const char* lib_dspeak_media_capture_error_message(int error_code);
 
 /* ── P2P (PeerConnection) transport ─────────────────── */
-lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(void);
+lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
+    const char* ice_servers_json,
+    bool offerer);
 void              lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* h, char** sdp_out);
 int               lib_dspeak_media_p2p_create_answer(lib_dspeak_media_p2p_handle_t* h, const char* remote_sdp, char** sdp_out);

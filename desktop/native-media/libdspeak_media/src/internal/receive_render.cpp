@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -36,6 +37,7 @@ struct ReceiveEvent {
 std::mutex g_receive_event_mutex;
 std::deque<ReceiveEvent> g_receive_events;
 std::atomic<uint64_t> g_receive_event_id{1};
+std::atomic<bool> g_video_frame_logged{false};
 constexpr size_t kMaxReceiveEvents = 96;
 
 char* duplicate_string(const char* value) {
@@ -330,6 +332,11 @@ void NativeReceiveAudioSink::OnData(const void* audio_data,
 
 void NativeReceiveAudioSink::SetEnabled(bool enabled) {
     lib_dspeak_media_audio_output_set_enabled(output_, enabled);
+    if (enabled) {
+        lib_dspeak_media_audio_output_start(output_);
+    } else {
+        lib_dspeak_media_audio_output_stop(output_);
+    }
 }
 
 void NativeReceiveAudioSink::SetVolume(double volume) {
@@ -347,7 +354,7 @@ void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
     const int height = buffer->height();
     if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return;
     std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
-    if (libyuv::I420ToABGR(buffer->DataY(), buffer->StrideY(),
+    if (libyuv::I420ToRGBA(buffer->DataY(), buffer->StrideY(),
                            buffer->DataU(), buffer->StrideU(),
                            buffer->DataV(), buffer->StrideV(),
                            rgba.data(), width * 4, width, height) != 0) return;
@@ -359,6 +366,9 @@ void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
     };
     push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME, consumer_id_.c_str(), payload, rgba.data(),
                static_cast<uint32_t>(rgba.size()));
+    if (!g_video_frame_logged.exchange(true))
+        std::fprintf(stderr, "[dspeak:media] native video frame received consumer=%s size=%dx%d\n",
+                     consumer_id_.c_str(), width, height);
     dspeak_media_runtime::video_receive_ready.store(true);
 }
 

@@ -34,8 +34,8 @@ test("replaces the previously owned media error", () => {
       new Error("Initial media topology timed out"),
     ),
     {
-      error: "Error: Initial media topology timed out",
-      ownedError: "Error: Initial media topology timed out",
+      error: "Initial media topology timed out",
+      ownedError: "Initial media topology timed out",
     },
   );
 });

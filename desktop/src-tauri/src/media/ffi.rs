@@ -114,6 +114,14 @@ extern "C" {
         error_out: *mut c_int,
     ) -> *mut lib_dspeak_media_consumer_t;
     pub fn lib_dspeak_media_destroy_producer(producer: *mut lib_dspeak_media_producer_t);
+    pub fn lib_dspeak_media_producer_set_paused(
+        producer: *mut lib_dspeak_media_producer_t,
+        paused: bool,
+    ) -> c_int;
+    pub fn lib_dspeak_media_producer_set_parameters(
+        producer: *mut lib_dspeak_media_producer_t,
+        parameters_json: *const c_char,
+    ) -> c_int;
     pub fn lib_dspeak_media_destroy_consumer(consumer: *mut lib_dspeak_media_consumer_t);
     pub fn lib_dspeak_media_consumer_set_enabled(
         consumer: *mut lib_dspeak_media_consumer_t,
@@ -180,8 +188,26 @@ extern "C" {
         handle: *mut c_void,
         track: *mut c_void,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_set_track_parameters(
+        handle: *mut c_void,
+        track_id: *const c_char,
+        parameters_json: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_set_audio_stereo(handle: *mut c_void, stereo: bool) -> c_int;
+    pub fn lib_dspeak_media_p2p_set_receive_enabled(
+        handle: *mut c_void,
+        track_id: *const c_char,
+        enabled: bool,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_send_health(
+        handle: *mut c_void,
+        message: *const c_char,
+    ) -> c_int;
 
-    pub fn lib_dspeak_media_p2p_create() -> *mut lib_dspeak_media_p2p_handle_t;
+    pub fn lib_dspeak_media_p2p_create(
+        ice_servers_json: *const c_char,
+        offerer: bool,
+    ) -> *mut lib_dspeak_media_p2p_handle_t;
     pub fn lib_dspeak_media_p2p_destroy(handle: *mut lib_dspeak_media_p2p_handle_t);
     pub fn lib_dspeak_media_p2p_create_offer(
         handle: *mut lib_dspeak_media_p2p_handle_t,

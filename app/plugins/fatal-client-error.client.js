@@ -5,7 +5,19 @@ export default defineNuxtPlugin(() => {
 
   function handleError(event) {
     const error = event.error || event.reason || event.message;
-    if (isFatalClientError(error)) report(error);
+    if (!isFatalClientError(error)) return;
+    report(error);
+    if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
+      const message = error instanceof Error ? error.message : String(error);
+      import("@tauri-apps/api/core")
+        .then(({ invoke }) =>
+          invoke("show_notification", {
+            title: "dSpeak encountered a fatal error",
+            body: message,
+          }),
+        )
+        .catch(() => {});
+    }
   }
 
   window.addEventListener("error", handleError);

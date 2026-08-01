@@ -1031,10 +1031,10 @@ export function useHybridMediaSession() {
     { deep: true, immediate: false },
   );
   function failSession(message) {
-    error.value = message;
+    error.value = message?.message || message;
     iceConnectedBoth.value = false;
     mediaConnectionState.value = "failed";
-    setConnectionPhase("failed", { reason: message });
+    setConnectionPhase("failed", { reason: error.value });
     closeMediaSignalingForRecovery(signaling.getSocket());
   }
   function disconnect() {

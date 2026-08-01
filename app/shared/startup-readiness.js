@@ -1,4 +1,5 @@
 export const STARTUP_READINESS_KEY = Symbol("startup-readiness");
+export const STARTUP_READINESS_TIMEOUT_MS = 15_000;
 
 export function createStartupReadiness({ onPending } = {}) {
   const tasks = new Map();
@@ -30,10 +31,32 @@ export function createStartupReadiness({ onPending } = {}) {
     };
   }
 
-  async function waitForIdle(settle) {
+  async function waitForIdle(
+    settle,
+    { timeoutMs = STARTUP_READINESS_TIMEOUT_MS } = {},
+  ) {
+    const startedAt = Date.now();
     while (accepting) {
       const observedGeneration = generation;
-      await Promise.all([...tasks.values()]);
+      const pending = Promise.all([...tasks.values()]);
+      const remaining = Math.max(timeoutMs - (Date.now() - startedAt), 0);
+      let timer;
+      try {
+        await Promise.race([
+          pending,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              reject(
+                new Error(
+                  `Startup readiness timed out with ${tasks.size} pending task(s): ${latestStatus || "unknown phase"}`,
+                ),
+              );
+            }, remaining);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
       await settle?.();
 
       if (tasks.size === 0 && generation === observedGeneration) return;

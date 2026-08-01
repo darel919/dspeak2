@@ -96,7 +96,10 @@ export const useAuthStore = defineStore("auths", () => {
       {
         method: "POST",
         credentials: "include",
-        headers: deviceHeaders({ "Content-Type": "application/json" }),
+        headers: deviceHeaders({
+          "Content-Type": "application/json",
+          ...(isDesktop ? { "X-Desktop-App": "true" } : {}),
+        }),
         body: JSON.stringify({
           code,
           state,
@@ -106,9 +109,58 @@ export const useAuthStore = defineStore("auths", () => {
       },
     );
     if (!response.ok) return false;
-    setUser(await response.json());
+    const session = await response.json();
+    setUser(session);
+    if (isDesktop && session.desktopToken) {
+      await registerDesktopNotificationSession(session.desktopToken);
+    }
     sessionChecked.value = true;
     removeStorage("token");
+    return true;
+  }
+
+  async function registerDesktopNotificationSession(token) {
+    if (!runtimeStore.isTauri || !token) return false;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const serverUrl = String(config.public.authPath || "").replace(
+      /\/auth\/?$/,
+      "",
+    );
+    if (!serverUrl) return false;
+    await invoke("set_credential", {
+      server: serverUrl,
+      key: "session_token",
+      value: token,
+    });
+    await invoke("set_credential", {
+      server: "dspeak",
+      key: "server_url",
+      value: serverUrl,
+    });
+    await invoke("register_background_notifications", {
+      serverUrl,
+      token,
+    });
+    return true;
+  }
+
+  async function restoreDesktopNotificationSession() {
+    if (!runtimeStore.isTauri) return false;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const serverUrl = await invoke("get_credential", {
+      server: "dspeak",
+      key: "server_url",
+    });
+    if (!serverUrl) return false;
+    const token = await invoke("get_credential", {
+      server: serverUrl,
+      key: "session_token",
+    });
+    if (!token) return false;
+    await invoke("register_background_notifications", {
+      serverUrl,
+      token,
+    });
     return true;
   }
 
@@ -131,6 +183,7 @@ export const useAuthStore = defineStore("auths", () => {
       });
       if (!response.ok) return false;
       setUser(await response.json());
+      await restoreDesktopNotificationSession().catch(() => false);
       return true;
     } catch {
       return false;
@@ -139,6 +192,7 @@ export const useAuthStore = defineStore("auths", () => {
 
   async function ensureSession() {
     if (getUserData()?.id) {
+      await restoreDesktopNotificationSession().catch(() => false);
       sessionChecked.value = true;
       return true;
     }
@@ -173,6 +227,31 @@ export const useAuthStore = defineStore("auths", () => {
         : Promise.resolve();
 
     setUser(null);
+    const nativeCleanup = runtimeStore.isTauri
+      ? import("@tauri-apps/api/core")
+          .then(({ invoke }) => {
+            const serverUrl = String(config.public.authPath || "").replace(
+              /\/auth\/?$/,
+              "",
+            );
+            return Promise.allSettled([
+              invoke("clear_background_notifications"),
+              invoke("delete_credential", {
+                server: "dspeak",
+                key: "server_url",
+              }),
+              ...(serverUrl
+                ? [
+                    invoke("delete_credential", {
+                      server: serverUrl,
+                      key: "session_token",
+                    }),
+                  ]
+                : []),
+            ]);
+          })
+          .catch(() => {})
+      : Promise.resolve();
     sessionChecked.value = true;
     removeStorage("token");
     removeStorage("userData");
@@ -184,7 +263,7 @@ export const useAuthStore = defineStore("auths", () => {
       .catch((error) => {
         console.warn("[Auth] Could not purge user browser data:", error);
       });
-    await Promise.all([revocation, cleanup]);
+    await Promise.all([revocation, cleanup, nativeCleanup]);
   }
 
   function getUserData() {

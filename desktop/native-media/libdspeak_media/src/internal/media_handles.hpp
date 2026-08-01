@@ -19,6 +19,7 @@
 #include <Transport.hpp>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
+#include <api/data_channel_interface.h>
 #include <api/scoped_refptr.h>
 #include <rtc_base/thread.h>
 #include <api/video/i420_buffer.h>
@@ -36,6 +37,7 @@ using CVPixelBufferRef = void*;
 class CxxSendListener;
 class CxxRecvListener;
 class CxxConsumerListener;
+class P2pHealthDataChannelObserver;
 
 #if defined(__APPLE__)
 class NativeVideoSource : public webrtc::AdaptedVideoTrackSource {
@@ -93,7 +95,7 @@ private:
             webrtc::I420Buffer::Create(width, height);
 
         if (base_addr) {
-            libyuv::ARGBToI420(
+            libyuv::BGRAToI420(
                 static_cast<const uint8_t*>(base_addr),
                 bytes_per_row,
                 i420_buffer->MutableDataY(), i420_buffer->StrideY(),
@@ -271,6 +273,9 @@ struct lib_dspeak_media_p2p_handle {
     bool connected = false;
     bool failed = false;
     bool closed = false;
+    bool audio_stereo = false;
+    webrtc::scoped_refptr<webrtc::DataChannelInterface> health_channel;
+    std::unique_ptr<P2pHealthDataChannelObserver> health_observer;
     std::vector<std::unique_ptr<NativeReceiveAudioSink>> audio_sinks;
     std::vector<std::unique_ptr<NativeReceiveVideoSink>> video_sinks;
 };

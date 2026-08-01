@@ -244,6 +244,8 @@ test("P2P signaling accepts explicit source removal and rejects unknown sources"
     }),
     false,
   );
+  assert.equal(validP2pSignal({ renegotiationNeeded: true }), true);
+  assert.equal(validP2pSignal({ renegotiationNeeded: false }), false);
 });
 
 test("P2P media readiness requires every expected RTP direction to flow", async () => {

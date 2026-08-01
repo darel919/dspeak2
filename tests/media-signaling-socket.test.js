@@ -65,6 +65,18 @@ test("media signaling URL preserves the configured endpoint and channel", () => 
   );
 });
 
+test("media signaling URL carries a desktop access token without dropping endpoint parameters", () => {
+  assert.equal(
+    mediaSignalingUrl(
+      "wss://voice.example/socket?region=one",
+      "room one",
+      { protocol: "https:", host: "voice.example" },
+      "desktop token",
+    ),
+    "wss://voice.example/socket?region=one&channelId=room+one&accessToken=desktop+token",
+  );
+});
+
 test("media signaling recovery closes the poisoned socket", () => {
   const socket = new FakeWebSocket("wss://example.test/socket");
   closeMediaSignalingForRecovery(socket);

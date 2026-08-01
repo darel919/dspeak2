@@ -111,10 +111,8 @@ describe("MediaEngine adapters", () => {
       ["connect", "channel-1"],
       ["startAudio"],
       ["startVideo", "camera"],
-      ["startSystemAudio"],
       ["startVideo", "screen"],
       ["stopVideo", "screen"],
-      ["stopSystemAudio"],
       ["disconnect"],
     ]);
   });
@@ -132,7 +130,6 @@ describe("MediaEngine adapters", () => {
       ["connect", "channel-2"],
       ["stopAudio"],
       ["stopVideo", "screen"],
-      ["stopSystemAudio"],
     ]);
     assert.deepEqual(engine.getCapabilities(), {
       microphone: "browser",
@@ -205,6 +202,128 @@ describe("MediaEngine adapters", () => {
 
     await engine.startAudioProduction();
     assert.deepEqual(calls, ["media_set_microphone"]);
+  });
+
+  it("NativeMediaEngine keeps screen video and system audio in parity", async () => {
+    const calls = [];
+    const nativeSession = {
+      async addSource(entry) {
+        calls.push(["sfu-add", entry.source]);
+      },
+      removeSource(source) {
+        calls.push(["sfu-remove", source]);
+      },
+    };
+    const nativeP2pSession = {
+      async addSource(entry) {
+        calls.push(["p2p-add", entry.source]);
+      },
+      async removeSource(source) {
+        calls.push(["p2p-remove", source]);
+      },
+    };
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeScreenShare: true,
+        nativeScreenAudio: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => {
+          calls.push(command);
+          return {};
+        },
+      },
+    });
+    engine.nativeSession = nativeSession;
+    engine.nativeP2pSession = nativeP2pSession;
+
+    await engine.startScreenShare({ includeSystemAudio: true });
+    await engine.stopScreenShare();
+
+    assert.deepEqual(calls, [
+      "media_start_system_audio",
+      ["sfu-add", "screen-audio"],
+      ["p2p-add", "screen-audio"],
+      "media_start_screen_share",
+      ["sfu-add", "screen"],
+      ["p2p-add", "screen"],
+      "media_stop_screen_share",
+      ["sfu-remove", "screen"],
+      ["p2p-remove", "screen"],
+      "media_stop_system_audio",
+      ["sfu-remove", "screen-audio"],
+      ["p2p-remove", "screen-audio"],
+    ]);
+  });
+
+  it("publishes both tracks from one native combined capture", async () => {
+    const calls = [];
+    const selection = {
+      source: {
+        sourceId: "display-1",
+        sourceType: "display",
+        sourceKey: "display:display-1",
+      },
+      sourceId: "display-1",
+      sourceType: "display",
+      sourceKey: "display:display-1",
+      mode: "both",
+      excludeSelf: true,
+      video: {
+        resolution: "original",
+        frameRate: 60,
+        qualityPriority: "framerate",
+      },
+      audio: {
+        channels: 2,
+        sampleRate: 48000,
+        stereo: true,
+        excludeSelfAudio: true,
+      },
+      excludeSelfAudio: true,
+    };
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeScreenShare: true,
+        nativeScreenAudio: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => {
+          calls.push(command);
+          return {};
+        },
+      },
+    });
+    engine.nativeSession = {
+      addSource: async (entry) => calls.push(["sfu-add", entry.source]),
+      removeSource: (source) => calls.push(["sfu-remove", source]),
+    };
+    engine.nativeP2pSession = {
+      addSource: async (entry) => calls.push(["p2p-add", entry.source]),
+      removeSource: async (source) => calls.push(["p2p-remove", source]),
+    };
+
+    await engine.startScreenShare({ captureSelection: selection });
+    await engine.stopScreenShare();
+
+    assert.deepEqual(calls, [
+      "media_start_screen_share",
+      ["sfu-add", "screen"],
+      ["p2p-add", "screen"],
+      ["sfu-add", "screen-audio"],
+      ["p2p-add", "screen-audio"],
+      "media_stop_screen_share",
+      ["sfu-remove", "screen"],
+      ["p2p-remove", "screen"],
+      ["sfu-remove", "screen-audio"],
+      ["p2p-remove", "screen-audio"],
+    ]);
   });
 
   it("reports native source state and removes stopped native sources", async () => {

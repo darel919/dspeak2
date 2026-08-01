@@ -1,11 +1,25 @@
 export function mediaSignalingUrl(
   configuredPath,
   channelId,
-  location = window.location,
+  location = globalThis.window?.location || {
+    protocol: "http:",
+    host: "localhost",
+  },
+  accessToken = "",
 ) {
+  if (typeof configuredPath === "string" && /^wss?:\/\//.test(configuredPath)) {
+    const endpoint = new URL(configuredPath);
+    endpoint.searchParams.set("channelId", channelId);
+    if (accessToken) endpoint.searchParams.set("accessToken", accessToken);
+    return endpoint.toString();
+  }
   const origin = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
   const base = configuredPath || `${origin}/socket`;
-  return `${base}?channelId=${encodeURIComponent(channelId)}`;
+  const separator = base.includes("?") ? "&" : "?";
+  const token = accessToken
+    ? `&accessToken=${encodeURIComponent(accessToken)}`
+    : "";
+  return `${base}${separator}channelId=${encodeURIComponent(channelId)}${token}`;
 }
 
 export function closeMediaSignalingForRecovery(socket) {

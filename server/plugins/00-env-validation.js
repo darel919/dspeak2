@@ -10,6 +10,11 @@ import { pruneExpiredSessions } from "../utils/authentication";
 import { terminateFailedStartup } from "../utils/startup-failure";
 
 export default defineNitroPlugin(async (nitroApp) => {
+  if (
+    process.env.NITRO_PRESET === "static" ||
+    nitroApp.options?.preset === "static"
+  )
+    return;
   let sessionCleanupTimer = null;
   try {
     const config = await validateRuntimeEnvironment();

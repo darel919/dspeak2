@@ -256,12 +256,6 @@ onMounted(async () => {
     const valid = await authStore.exchangeHandoff(code, state);
     processingHandoff = false;
     if (valid) {
-      if (!runtimeStore.isTauri && code && state) {
-        window.location.replace(
-          `tauri://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
-        );
-        return;
-      }
       await finishAuthentication();
       return;
     }

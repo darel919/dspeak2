@@ -47,6 +47,34 @@
     </header>
 
     <div
+      v-if="
+        !voiceStore.connected ||
+        voiceStore.currentChannelId !== props.channel.id
+      "
+      class="flex min-h-0 flex-1 items-center justify-center p-6"
+    >
+      <div class="max-w-md text-center">
+        <Icon name="lucide:volume-2" class="mx-auto size-12 text-primary/70" />
+        <h2 class="mt-4 text-lg font-semibold">{{ channel.name }}</h2>
+        <p class="mt-2 text-sm text-base-content/60">
+          {{
+            voiceStore.connected
+              ? "You are connected to another voice channel."
+              : "Join this voice channel to start talking."
+          }}
+        </p>
+        <button
+          v-if="!voiceStore.connected"
+          type="button"
+          class="btn btn-primary mt-5"
+          @click="joinThisChannel"
+        >
+          Join voice channel
+        </button>
+      </div>
+    </div>
+
+    <div
       v-if="remoteSystemAudioShares.length"
       class="grid shrink-0 gap-px border-b border-base-content/15 bg-base-content/15"
       aria-live="polite"
@@ -309,6 +337,23 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+      <div
+        v-else
+        class="flex min-h-0 flex-1 items-center justify-center p-6 text-center"
+      >
+        <div class="max-w-md">
+          <Icon
+            name="lucide:users-round"
+            class="mx-auto size-14 text-primary/80"
+            aria-hidden="true"
+          />
+          <h2 class="mt-5 text-xl font-semibold">You’re the only one here</h2>
+          <p class="mt-2 text-sm text-white/60">
+            Invite someone to join {{ channel.name }} or wait for another
+            participant.
+          </p>
         </div>
       </div>
     </div>
@@ -681,59 +726,6 @@
         </div>
       </div>
     </footer>
-
-    <div
-      v-if="!voiceStore.connected"
-      class="voice-stage flex flex-1 flex-col items-center justify-center px-6 py-12 text-center text-white"
-    >
-      <span
-        class="mb-6 grid size-20 place-items-center bg-primary/20 text-primary"
-      >
-        <Icon name="lucide:phone-outgoing" class="size-9 text-primary" />
-      </span>
-      <p
-        class="mb-2 text-xs font-semibold uppercase tracking-widest text-white"
-      >
-        Voice channel
-      </p>
-      <h2 class="mb-3 text-2xl font-semibold text-white">
-        Join {{ props.channel.name }}
-      </h2>
-      <p class="mb-8 max-w-md text-white/65">
-        Talk, share your camera, or present your screen. Your saved microphone
-        and audio settings will be applied when you join.
-      </p>
-      <div
-        v-if="voiceStore.protocolUpdateRequired"
-        class="mb-6 max-w-md bg-warning/15 px-4 py-3 text-sm text-warning"
-        role="alert"
-      >
-        Voice signaling was updated. Refresh dSpeak before reconnecting.
-      </div>
-      <button
-        @click="
-          voiceStore.protocolUpdateRequired
-            ? reloadForMediaUpdate()
-            : joinThisChannel()
-        "
-        :disabled="voiceStore.connecting"
-        class="btn btn-primary btn-lg disabled:opacity-100"
-      >
-        <Icon name="lucide:mic" class="size-6" />
-
-        <span
-          v-if="voiceStore.connecting"
-          class="loading loading-spinner loading-sm mr-2"
-        ></span>
-        {{
-          voiceStore.protocolUpdateRequired
-            ? "Refresh to update voice"
-            : voiceStore.connecting
-              ? "Connecting..."
-              : "Connect to " + props.channel.name
-        }}
-      </button>
-    </div>
   </div>
 </template>
 
@@ -1029,9 +1021,13 @@ async function selectDesktopCapture(selection) {
 async function useBrowserCaptureFallback() {
   capturePickerOpen.value = false;
   if (capturePickerAudioOnly.value) {
-    await toggleSystemAudioShare();
+    await voiceStore.toggleSystemAudioShare(null, {
+      explicitBrowserFallback: true,
+    });
   } else {
-    await toggleScreenShare();
+    await voiceStore.toggleScreenShare(null, {
+      explicitBrowserFallback: true,
+    });
   }
 }
 

@@ -6,13 +6,16 @@ import { useChannelsStore } from "../stores/channels";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
+import { useRuntimeStore } from "../stores/runtime";
 import BroadcastSetupDialog from "./BroadcastSetupDialog.vue";
+import DesktopCapturePicker from "./DesktopCapturePicker.vue";
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
 import {
   getActiveConnectionLabel,
   isConnectionPending,
 } from "../shared/connection-quality";
 import { useChatUtils } from "../composables/useChatUtils";
+import { getDesktopCaptureApi } from "../shared/desktop-capture";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
@@ -21,6 +24,7 @@ const chatStore = useChatStore();
 const channelsStore = useChannelsStore();
 const settingsStore = useSettingsStore();
 const rtcStatsStore = useRtcStatsStore();
+const runtimeStore = useRuntimeStore();
 const route = useRoute();
 const router = useRouter();
 const config = useRuntimeConfig();
@@ -29,6 +33,7 @@ const { getAvatarUrl } = useChatUtils();
 const profile = computed(() => authStore.getUserData());
 const profileAvatar = computed(() => getAvatarUrl(profile.value?.avatar));
 const broadcastDialogOpen = ref(false);
+const capturePickerOpen = ref(false);
 const presenceStatus = inject("presenceStatus", ref(null));
 const rtcSummaryVisible = useState("rtc-summary-visible", () => false);
 const callMenu = ref(null);
@@ -209,10 +214,40 @@ function showBroadcastDialog() {
 
 async function requestScreenShare() {
   try {
+    if (voiceStore.screenSharing) {
+      await voiceStore.toggleScreenShare();
+      return;
+    }
+    if (runtimeStore.isTauri || (await getDesktopCaptureApi())) {
+      capturePickerOpen.value = true;
+      return;
+    }
     await voiceStore.toggleScreenShare();
   } catch (error) {
     console.error("[Navbar] Screen share error:", error);
   }
+}
+
+async function selectDesktopCapture(selection) {
+  capturePickerOpen.value = false;
+  try {
+    await voiceStore.toggleScreenShare(selection);
+  } catch (error) {
+    console.error("[Navbar] Screen share selection error:", error);
+  }
+}
+
+async function useBrowserCaptureFallback() {
+  capturePickerOpen.value = false;
+  try {
+    await voiceStore.toggleScreenShare(null, { explicitBrowserFallback: true });
+  } catch (error) {
+    console.error("[Navbar] Browser screen share fallback error:", error);
+  }
+}
+
+function closeCapturePicker() {
+  capturePickerOpen.value = false;
 }
 
 function barClass(level) {
@@ -686,6 +721,12 @@ onBeforeUnmount(() => {
       />
     </div>
   </header>
+  <DesktopCapturePicker
+    :open="capturePickerOpen"
+    @close="closeCapturePicker"
+    @select="selectDesktopCapture"
+    @fallback="useBrowserCaptureFallback"
+  />
   <BroadcastSetupDialog
     v-if="broadcastDialogOpen"
     @close="broadcastDialogOpen = false"

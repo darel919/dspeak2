@@ -30,7 +30,8 @@ export async function waitForVoiceTransportReady({
       throw error;
     }
     const sessionError = getError();
-    if (sessionError) throw new Error(sessionError);
+    if (sessionError)
+      throw new Error(sessionError?.message || String(sessionError));
     if (isReady()) return;
     await wait(pollIntervalMs);
   }

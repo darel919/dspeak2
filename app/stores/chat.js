@@ -28,6 +28,7 @@ import {
   slowModeRemainingMs,
 } from "~~/shared/channel-policy.js";
 import { debugLog } from "../shared/debug";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
@@ -303,7 +304,12 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   async function requestBackgroundSync() {
-    if (!("serviceWorker" in navigator) || !("SyncManager" in window)) return;
+    if (
+      hasTauriRuntimeMarker() ||
+      !("serviceWorker" in navigator) ||
+      !("SyncManager" in window)
+    )
+      return;
     try {
       const registration = await navigator.serviceWorker.ready;
       await registration.sync.register("chat-sync");
@@ -313,7 +319,11 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function triggerManualSync() {
-    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+    if (
+      !hasTauriRuntimeMarker() &&
+      "serviceWorker" in navigator &&
+      navigator.serviceWorker.controller
+    ) {
       navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
     }
   }

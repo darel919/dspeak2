@@ -44,18 +44,42 @@ export function resolveNativeMediaFlags(overrides = {}) {
   };
 }
 
+function resolveSfuPath() {
+  if (typeof useRuntimeConfig === "function") {
+    try {
+      const rc = useRuntimeConfig();
+      if (rc?.public?.sfuPath) return rc.public.sfuPath;
+    } catch {
+      // useRuntimeConfig unavailable (test environment)
+    }
+  }
+  return import.meta.env?.VITE_DSPEAK_SFU_PATH || "";
+}
+
 export function useMediaEngine(sessionOrFactory, options = {}) {
   const tauriRuntime = options.isTauri ?? isTauriRuntime();
-  if (tauriRuntime)
+  if (tauriRuntime) {
+    const runtimeConfig =
+      typeof useRuntimeConfig === "function" ? useRuntimeConfig() : {};
+    const publicConfig = runtimeConfig?.public || {};
+    const serverUrl =
+      publicConfig.baseApiPath ||
+      String(publicConfig.authPath || "").replace(/\/auth\/?$/, "");
     return new NativeMediaEngine({
       flags: resolveNativeMediaFlags({ nativeRtc: true, ...options.flags }),
       tauri: options.tauri,
       nativeConfig: {
-        signalingPath: import.meta.env?.VITE_DSPEAK_SFU_PATH || undefined,
+        signalingPath: resolveSfuPath(),
+        serverUrl,
+        apiPath: publicConfig.apiPath || "/api",
         ...options.nativeConfig,
       },
       nativeOnly: true,
+      voiceStore: options.voiceStore || null,
+      settingsStore: options.settingsStore || null,
+      channelsStore: options.channelsStore || null,
     });
+  }
   const session =
     typeof sessionOrFactory === "function"
       ? sessionOrFactory()

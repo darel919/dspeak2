@@ -343,6 +343,21 @@ async function activateNegotiatedSession(state, session) {
         userId: session.userId,
         channelId: session.room.id,
         peerId: session.peer.id,
+        inRoom: [...session.room.sessions.values()].map(
+          (candidate) => candidate.userId,
+        ),
+        profiles: [...session.room.sessions.values()].map(
+          (candidate) => candidate.profile,
+        ),
+        participantStates: [...session.room.sessions.values()].map(
+          (candidate) => ({
+            userId: candidate.userId,
+            muted: candidate.muted,
+            deafened: candidate.deafened,
+            cameraEnabled: candidate.sources.has("camera"),
+            screenSharing: candidate.sources.has("screen"),
+          }),
+        ),
       }),
     session,
     supersededSessions: () =>

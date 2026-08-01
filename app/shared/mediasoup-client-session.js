@@ -738,7 +738,7 @@ export class MediasoupClientSession {
   shouldReceive(userId, source) {
     const key = `${String(userId)}:${String(source)}`;
     if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
-    return source !== "screen";
+    return true;
   }
 
   setRemoteReceiving(userId, source, receiving) {

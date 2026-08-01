@@ -4,6 +4,10 @@ import {
   mediaSignalingUrl,
 } from "./media-signaling-socket.js";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.js";
+import {
+  buildVideoProduceOptions,
+  VIDEO_RESOLUTIONS,
+} from "./video-settings.js";
 
 function waitFor(map, key, timeoutMs, label) {
   return new Promise((resolve, reject) => {
@@ -45,19 +49,74 @@ function receiveEventMatches(entry, payload) {
   return true;
 }
 
+function nativeProducerAppData(entry, kind) {
+  const appData = {
+    source: entry.source,
+    ...(entry.captureSelection
+      ? { captureSelection: entry.captureSelection }
+      : {}),
+  };
+  if (kind === "audio") {
+    const maxBitrate = Number(
+      entry.captureSelection?.audio?.maxBitrateBps ||
+        entry.audioBitrate ||
+        entry.roomBitrateBps,
+    );
+    appData.encodings = [
+      {
+        ...(Number.isFinite(maxBitrate) && maxBitrate > 0
+          ? { maxBitrate: Math.floor(maxBitrate) }
+          : {}),
+        priority: "high",
+        networkPriority: "high",
+      },
+    ];
+    appData.codecOptions = {
+      opusDtx: false,
+      opusFec: true,
+      opusNack: true,
+      opusStereo:
+        entry.audioStereo === undefined
+          ? entry.source === "screen-audio"
+          : entry.audioStereo === true,
+      opusPtime: 10,
+    };
+    return appData;
+  }
+  const video = entry.videoSettings || entry.captureSelection?.video || {};
+  const resolution = VIDEO_RESOLUTIONS[video.resolution];
+  const options = buildVideoProduceOptions({
+    width: video.width || resolution?.width || 1920,
+    height: video.height || resolution?.height || 1080,
+    frameRate: video.frameRate || 60,
+    qualityPriority: video.qualityPriority || "framerate",
+    screen: entry.source === "screen",
+    maxBitrate: video.maxBitrate,
+  });
+  appData.encodings = options.encodings;
+  appData.codecOptions = options.codecOptions;
+  appData.degradationPreference = options.degradationPreference;
+  return appData;
+}
+
 export class NativeMediasoupSfuSession {
   constructor({
     invoke,
     buildUrl,
     signalingPath,
+    signalingToken,
     location,
     onP2pSignal,
+    onCurrentlyInChannel,
     requestTimeoutMs = 8000,
     consumerControlTimeoutMs = 4000,
     onRemoteTrack,
     onRemoteTrackEnded,
     onStateChange,
     onError,
+    getAudioBitrate,
+    getAudioStereo,
+    getVideoSettings,
   } = {}) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeMediasoupSfuSession requires invoke");
@@ -73,14 +132,19 @@ export class NativeMediasoupSfuSession {
               protocol: "http:",
               host: "localhost",
             },
+          signalingToken,
         ));
     this.requestTimeoutMs = requestTimeoutMs;
     this.consumerControlTimeoutMs = consumerControlTimeoutMs;
     this.onRemoteTrack = onRemoteTrack;
     this.onRemoteTrackEnded = onRemoteTrackEnded;
     this.onP2pSignal = onP2pSignal;
+    this.onCurrentlyInChannel = onCurrentlyInChannel;
     this.onStateChange = onStateChange;
     this.onError = onError;
+    this.getAudioBitrate = getAudioBitrate;
+    this.getAudioStereo = getAudioStereo;
+    this.getVideoSettings = getVideoSettings;
     this.signaling = null;
     this.messageHandlers = new Map();
     this.pending = new Map();
@@ -90,6 +154,8 @@ export class NativeMediasoupSfuSession {
     this.transportPointers = new Map();
     this.sources = new Map();
     this.producers = new Map();
+    this.sourceTransmission = new Map();
+    this.producerRemovals = new Map();
     this.consumers = new Map();
     this.transportStates = new Map([
       ["send", "new"],
@@ -145,6 +211,10 @@ export class NativeMediasoupSfuSession {
     this._installHandlers();
   }
 
+  get errorMessage() {
+    return this.error?.message || this.error || null;
+  }
+
   _installHandlers() {
     this.messageHandlers.set("hi919", (data) => {
       if (this.signaling.acceptServerHello(data))
@@ -156,6 +226,7 @@ export class NativeMediasoupSfuSession {
       this.closed = false;
       this.connectionPhase = "signaling-ready";
       this.signaling.markReady();
+      this.onCurrentlyInChannel?.(data);
       this._resolveConnect();
       this._emitState();
       this._startNegotiation().catch((error) => this._fail(error));
@@ -201,8 +272,15 @@ export class NativeMediasoupSfuSession {
       this.topologyState = { ...data, localPeerId: this.localPeerId };
       this._emitState();
     });
+    this.messageHandlers.set("heartbeat-ack", (data) => {
+      this._acknowledgeHeartbeat(data);
+    });
+    this.messageHandlers.set("heartbeat-nack", (data) => {
+      this._acknowledgeHeartbeat(data);
+    });
     this.messageHandlers.set("currentlyInChannel", (data) => {
       this.lastInRoom = Array.isArray(data?.inRoom) ? data.inRoom : [];
+      this.onCurrentlyInChannel?.(data);
     });
     this.messageHandlers.set("error", (data) => this._handleServerError(data));
     this.messageHandlers.set("p2p-signal", (data) => this.onP2pSignal?.(data));
@@ -374,9 +452,16 @@ export class NativeMediasoupSfuSession {
   async addSource(entry) {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
-    this.sources.set(entry.source, entry);
+    const normalized = {
+      ...entry,
+      audioBitrate: entry.audioBitrate ?? this.getAudioBitrate?.(entry.source),
+      audioStereo: entry.audioStereo ?? this.getAudioStereo?.(entry.source),
+      videoSettings:
+        entry.videoSettings || this.getVideoSettings?.(entry.source) || null,
+    };
+    this.sources.set(entry.source, normalized);
     if (!this.sendTransport) return null;
-    return this._publishSource(entry);
+    return this._publishSource(normalized);
   }
 
   async _republishSources() {
@@ -386,35 +471,39 @@ export class NativeMediasoupSfuSession {
   }
 
   async _publishSource(entry) {
+    await this.producerRemovals.get(entry.source);
     if (this.producers.has(entry.source))
       return this.producers.get(entry.source);
-    const appData = {
-      source: entry.source,
-      ...(entry.captureSelection
-        ? { captureSelection: entry.captureSelection }
-        : {}),
-    };
+    const kind =
+      entry.kind ||
+      (entry.source === "camera" || entry.source === "screen"
+        ? "video"
+        : "audio");
+    const appData = nativeProducerAppData(entry, kind);
     const previousDirection = this.pendingNativeDirection;
     this.pendingNativeDirection = "send";
     try {
       const result = await this.invoke("media_create_capture_producer", {
-        kind:
-          entry.kind ||
-          (entry.source === "camera" || entry.source === "screen"
-            ? "video"
-            : "audio"),
+        kind,
         appData,
       });
       const producer = {
         id: result?.id,
         source: entry.source,
-        kind: entry.kind || "audio",
+        kind,
         entry,
         paused: false,
       };
       if (!producer.id)
         throw new Error("Native producer did not return an identifier");
       this.producers.set(entry.source, producer);
+      if (this.sourceTransmission.get(entry.source) === false) {
+        await this.invoke("media_set_producer_paused", {
+          source: entry.source,
+          paused: true,
+        });
+        producer.paused = true;
+      }
       this._sendSourceState();
       this._emitState();
       return producer;
@@ -433,10 +522,72 @@ export class NativeMediasoupSfuSession {
         type: "close-producer",
         data: { producerId: producer.id },
       });
+      const removal = this.invoke("media_remove_capture_producer", { source })
+        .catch((error) =>
+          this.onError?.(asError(error, "Native producer close failed")),
+        )
+        .finally(() => {
+          if (this.producerRemovals.get(source) === removal)
+            this.producerRemovals.delete(source);
+        });
+      this.producerRemovals.set(source, removal);
     }
     this._sendSourceState();
     this._emitState();
     return entry || null;
+  }
+
+  async setSourceTransmission(source, enabled) {
+    const normalizedSource = String(source || "");
+    const nextEnabled = Boolean(enabled);
+    this.sourceTransmission.set(normalizedSource, nextEnabled);
+    const producer = this.producers.get(normalizedSource);
+    if (!producer) return false;
+    await this.invoke("media_set_producer_paused", {
+      source: normalizedSource,
+      paused: !nextEnabled,
+    });
+    producer.paused = !nextEnabled;
+    this._emitState();
+    return true;
+  }
+
+  async updateAudioBitrate(source, maxBitrate) {
+    const producer = this.producers.get(String(source || ""));
+    const bitrate = Number(maxBitrate);
+    if (
+      !producer ||
+      producer.kind !== "audio" ||
+      !Number.isFinite(bitrate) ||
+      bitrate <= 0
+    )
+      return false;
+    await this.invoke("media_set_producer_parameters", {
+      source: producer.source,
+      parameters: {
+        maxBitrate: Math.floor(bitrate),
+        priority: "high",
+        networkPriority: "high",
+      },
+    });
+    return true;
+  }
+
+  async updateVideoBitrate(source, maxBitrate) {
+    const producer = this.producers.get(String(source || ""));
+    const bitrate = Number(maxBitrate);
+    if (
+      !producer ||
+      producer.kind !== "video" ||
+      !Number.isFinite(bitrate) ||
+      bitrate <= 0
+    )
+      return false;
+    await this.invoke("media_set_producer_parameters", {
+      source: producer.source,
+      parameters: { maxBitrate: Math.floor(bitrate) },
+    });
+    return true;
   }
 
   _sendSourceState() {
@@ -519,11 +670,14 @@ export class NativeMediasoupSfuSession {
         frame: null,
         receiving: false,
         desiredReceiving: false,
+        receivingRevision: 0,
         closed: false,
       };
       this.consumers.set(entry.consumerId, entry);
       if (entry.kind === "audio") this.remoteAudioFeeds.set(entry.key, entry);
       if (entry.kind === "video") this.remoteVideoFeeds.set(entry.key, entry);
+      if (this.shouldReceive(entry.userId, entry.source))
+        await this.setConsumerReceiving(entry, true);
       this.onRemoteTrack?.(entry);
       this._emitState();
       return entry;
@@ -542,23 +696,37 @@ export class NativeMediasoupSfuSession {
         this.remoteVideoFeeds.get(userIdOrKey) ||
         this.remoteAudioFeeds.get(userIdOrKey);
       return entry
-        ? this.setConsumerReceiving(entry, sourceOrReceiving)
+        ? this.setRemoteReceiving(entry.userId, entry.source, sourceOrReceiving)
         : Promise.resolve(false);
     }
     const userId = userIdOrKey;
     const source = sourceOrReceiving;
     const receiving = receivingValue;
-    this.remoteReceiving.set(
-      `${String(userId)}:${String(source)}`,
-      Boolean(receiving),
-    );
-    const operations = [...this.consumers.values()]
-      .filter(
-        (entry) =>
-          String(entry.userId) === String(userId) && entry.source === source,
-      )
-      .map((entry) => this.setConsumerReceiving(entry, receiving));
+    const pairedSources =
+      source === "screen" || source === "screen-audio"
+        ? ["screen", "screen-audio"]
+        : [source];
+    const operations = [];
+    for (const pairedSource of pairedSources) {
+      this.remoteReceiving.set(
+        `${String(userId)}:${String(pairedSource)}`,
+        Boolean(receiving),
+      );
+      for (const entry of this.consumers.values()) {
+        if (
+          String(entry.userId) === String(userId) &&
+          entry.source === pairedSource
+        )
+          operations.push(this.setConsumerReceiving(entry, receiving));
+      }
+    }
     return Promise.all(operations);
+  }
+
+  shouldReceive(userId, source) {
+    const key = `${String(userId)}:${String(source)}`;
+    if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
+    return true;
   }
 
   setConsumerVolume(userId, source, volume) {
@@ -592,6 +760,7 @@ export class NativeMediasoupSfuSession {
     if (!entry || entry.closed) return false;
     const desired = Boolean(receiving);
     entry.desiredReceiving = desired;
+    entry.receivingRevision = (entry.receivingRevision || 0) + 1;
     const requestId = this.requestId(
       desired ? "resume-consumer" : "pause-consumer",
     );
@@ -604,7 +773,11 @@ export class NativeMediasoupSfuSession {
     this.sendOrThrow(
       {
         type: desired ? "resume-consumer" : "pause-consumer",
-        data: { consumerId: entry.consumerId, requestId, revision: 1 },
+        data: {
+          consumerId: entry.consumerId,
+          requestId,
+          revision: entry.receivingRevision,
+        },
       },
       `SFU consumer ${desired ? "resume" : "pause"}`,
     );
@@ -657,9 +830,6 @@ export class NativeMediasoupSfuSession {
     this.consumers.delete(entry.consumerId);
     this.remoteAudioFeeds.delete(entry.key);
     this.remoteVideoFeeds.delete(entry.key);
-    this.remoteReceiving.delete(
-      `${String(entry.userId)}:${String(entry.source)}`,
-    );
     entry.receiving = false;
     this.onRemoteTrackEnded?.(entry);
     if (releaseNative)
@@ -688,6 +858,12 @@ export class NativeMediasoupSfuSession {
     if (!action || this.closed) return false;
     let params = action.params;
     if (typeof params === "string") params = JSON.parse(params);
+    let state = action.state;
+    if (typeof state === "string") {
+      try {
+        state = JSON.parse(state);
+      } catch {}
+    }
     const pointer = Number(action.transportPtr);
     if (action.kind === 1) {
       const direction =
@@ -712,7 +888,11 @@ export class NativeMediasoupSfuSession {
           data: {
             requestId,
             transportId: transport.id,
-            dtlsParameters: params || {},
+            dtlsParameters: Object.fromEntries(
+              Object.entries(params || {}).filter(
+                ([key]) => key !== "direction",
+              ),
+            ),
           },
         },
         `SFU ${direction} transport connection`,
@@ -765,10 +945,9 @@ export class NativeMediasoupSfuSession {
       }
       return true;
     }
-    if (action.state) {
+    if (state) {
       const direction = this.transportPointers.get(pointer);
-      if (direction)
-        this._handleTransportState({ direction, state: action.state });
+      if (direction) this._handleTransportState({ direction, state });
       return true;
     }
     return false;
@@ -934,6 +1113,20 @@ export class NativeMediasoupSfuSession {
       error.code = "MEDIA_PROTOCOL_UPDATE_REQUIRED";
       this._fail(error);
     }
+  }
+
+  _acknowledgeHeartbeat(data) {
+    const sequence = Number(data?.sequence);
+    if (!Number.isSafeInteger(sequence)) return false;
+    this.signaling?.acknowledgeHeartbeat?.(sequence, Date.now());
+    if (data?.topology) {
+      this.topologyState = {
+        ...data.topology,
+        localPeerId: this.localPeerId,
+      };
+      this._emitState();
+    }
+    return true;
   }
 
   _beginNativeTeardown() {

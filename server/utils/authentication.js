@@ -115,6 +115,15 @@ function publicUserMetadata(user) {
   };
 }
 
+function isDesktopClientRequest(event) {
+  if (getHeader(event, "x-desktop-app") !== "true") return false;
+  const origin = getHeader(event, "origin") || "";
+  return (
+    origin === "tauri://localhost" ||
+    /^https?:\/\/tauri\.localhost(?::\d+)?$/.test(origin)
+  );
+}
+
 async function validateSession(pb, token, event = null) {
   const session = await findSessionByToken(pb, token);
   if (!session) return null;
@@ -180,12 +189,13 @@ async function validateSession(pb, token, event = null) {
   return session;
 }
 
-async function persistAuthenticatedSession(
+export async function persistAuthenticatedSession(
   event,
   metadata,
   userId,
   deviceId,
   termsAcceptedAt = null,
+  includeToken = false,
 ) {
   if (!metadata?.id || !deviceId)
     throw createError({
@@ -234,7 +244,10 @@ async function persistAuthenticatedSession(
   });
   setCookie(event, SESSION_COOKIE, rawToken, sessionCookieOptions());
   exposeCsrfToken(event, session);
-  return { user: { user_metadata: publicUserMetadata(metadata) } };
+  return {
+    user: { user_metadata: publicUserMetadata(metadata) },
+    ...(includeToken ? { desktopToken: rawToken } : {}),
+  };
 }
 
 export async function createAuthenticationHandoff(event) {
@@ -243,7 +256,7 @@ export async function createAuthenticationHandoff(event) {
   const publicOrigin =
     process.env.DSPEAK_PUBLIC_ORIGIN || getRequestURL(event).origin;
 
-  const isDesktop = getHeader(event, "x-desktop-app") === "true";
+  const isDesktop = isDesktopClientRequest(event);
 
   const body = await readBody(event);
   const redirectUri =
@@ -343,11 +356,12 @@ export async function exchangeAuthenticationHandoff(
     String(metadata.id),
     deviceId,
     new Date().toISOString(),
+    isDesktopClientRequest(event),
   );
 }
 
 export async function getAuthenticatedSession(event) {
-  const token = getCookie(event, SESSION_COOKIE);
+  const token = event.context.token || getCookie(event, SESSION_COOKIE);
   const session = await validateSession(
     await usePocketBaseAdmin(),
     token,
@@ -449,16 +463,32 @@ function cookieValue(request, name) {
 }
 
 export async function authenticateWebSocketRequest(request) {
-  if (!isAllowedWebSocketOrigin(request)) return null;
-  const session = await validateSession(
-    await usePocketBaseAdmin(),
-    cookieValue(request, SESSION_COOKIE),
-  );
+  const requestUrl = new URL(request.url);
+  const token =
+    cookieValue(request, SESSION_COOKIE) ||
+    requestUrl.searchParams.get("accessToken") ||
+    "";
+  if (
+    !isAllowedWebSocketOrigin(request) &&
+    !(token && isAllowedDesktopWebViewOrigin(request))
+  )
+    return null;
+  const session = await validateSession(await usePocketBaseAdmin(), token);
   if (!session) return null;
   return {
     userId: String(session.user),
     deviceId: String(session.device_id),
   };
+}
+
+function isAllowedDesktopWebViewOrigin(request) {
+  const origin = requestHeader(request, "origin");
+  try {
+    const url = new URL(origin);
+    return url.hostname === "tauri.localhost" || url.protocol === "tauri:";
+  } catch {
+    return false;
+  }
 }
 
 function requestHeader(request, name) {

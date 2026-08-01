@@ -11,8 +11,7 @@ pub(crate) struct NativeHandleRegistry {
     pub(crate) device: *mut ffi::lib_dspeak_media_device_t,
     pub(crate) send_transport: *mut ffi::lib_dspeak_media_send_transport_t,
     pub(crate) recv_transport: *mut ffi::lib_dspeak_media_recv_transport_t,
-    pub(crate) audio_producer: *mut ffi::lib_dspeak_media_producer_t,
-    pub(crate) video_producer: *mut ffi::lib_dspeak_media_producer_t,
+    pub(crate) producers: BTreeMap<String, *mut ffi::lib_dspeak_media_producer_t>,
     pub(crate) consumers: Vec<*mut ffi::lib_dspeak_media_consumer_t>,
     pub(crate) p2p_handles: BTreeMap<u64, *mut ffi::lib_dspeak_media_p2p_handle_t>,
     pub(crate) p2p_tracks: BTreeMap<(u64, String), (String, *mut std::ffi::c_void)>,
@@ -28,8 +27,7 @@ impl Default for NativeHandleRegistry {
             device: std::ptr::null_mut(),
             send_transport: std::ptr::null_mut(),
             recv_transport: std::ptr::null_mut(),
-            audio_producer: std::ptr::null_mut(),
-            video_producer: std::ptr::null_mut(),
+            producers: BTreeMap::new(),
             consumers: Vec::new(),
             p2p_handles: BTreeMap::new(),
             p2p_tracks: BTreeMap::new(),
@@ -57,13 +55,10 @@ impl NativeHandleRegistry {
                     ffi::lib_dspeak_media_destroy_consumer(consumer);
                 }
             }
-            if !self.audio_producer.is_null() {
-                ffi::lib_dspeak_media_destroy_producer(self.audio_producer);
-                self.audio_producer = std::ptr::null_mut();
-            }
-            if !self.video_producer.is_null() {
-                ffi::lib_dspeak_media_destroy_producer(self.video_producer);
-                self.video_producer = std::ptr::null_mut();
+            for (_, producer) in std::mem::take(&mut self.producers) {
+                if !producer.is_null() {
+                    ffi::lib_dspeak_media_destroy_producer(producer);
+                }
             }
             if !self.recv_transport.is_null() {
                 ffi::lib_dspeak_media_destroy_recv_transport(self.recv_transport);

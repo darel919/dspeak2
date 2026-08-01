@@ -27,6 +27,7 @@ public:
 
     void SetEnabled(bool enabled);
     void SetVolume(double volume);
+    const std::string& id() const { return consumer_id_; }
 
 private:
     std::string consumer_id_;
@@ -40,6 +41,7 @@ public:
 
     void OnFrame(const webrtc::VideoFrame& frame) override;
     void SetEnabled(bool enabled);
+    const std::string& id() const { return consumer_id_; }
 
 private:
     std::string consumer_id_;

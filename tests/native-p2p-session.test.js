@@ -54,6 +54,14 @@ describe("NativeP2pSession", () => {
           data.signal.candidate?.candidate === "candidate",
       ),
     );
+    assert.ok(
+      messages.some(
+        ([type, data]) =>
+          type === "p2p-signal" &&
+          data.signal.source?.trackId === "camera_capture_video" &&
+          data.signal.source?.source === "camera",
+      ),
+    );
 
     await session.handleSignal({
       fromPeerId: "peer-b",
@@ -64,6 +72,17 @@ describe("NativeP2pSession", () => {
           sdpMid: "0",
           sdpMLineIndex: 0,
         },
+      },
+    });
+    assert.equal(
+      calls.some(([command]) => command === "media_p2p_add_ice_candidate"),
+      false,
+    );
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 4,
+      signal: {
+        description: { type: "offer", sdp: "remote-offer" },
       },
     });
     const candidateCall = calls.find(
@@ -97,5 +116,143 @@ describe("NativeP2pSession", () => {
 
     await session.closeAll();
     assert.ok(calls.some(([command]) => command === "media_p2p_destroy"));
+  });
+
+  it("asks the browser peer to renegotiate when native is the answerer", async () => {
+    const messages = [];
+    const calls = [];
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 12 };
+        if (command === "media_p2p_add_track")
+          return { trackId: `${payload.source}_capture` };
+        if (command === "media_p2p_create_answer") return "native-answer";
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 7,
+      localPeerId: "peer-z",
+      peers: [{ peerId: "peer-a", userId: "user-a" }],
+    });
+    await session.handleSignal({
+      fromPeerId: "peer-a",
+      epoch: 7,
+      signal: { description: { type: "offer", sdp: "browser-offer" } },
+    });
+    await session.addSource({ source: "screen", kind: "video" });
+    session.handleReceiveEvent({
+      kind: 4,
+      id: "screen_capture",
+      payload: {
+        event: "renegotiation-needed",
+        handle: 12,
+        trackId: "screen_capture",
+        kind: "video",
+      },
+    });
+
+    assert.equal(
+      calls.some(([command]) => command === "media_p2p_create_offer"),
+      false,
+    );
+    assert.ok(
+      messages.some((message) => message.signal?.renegotiationNeeded === true),
+    );
+  });
+
+  it("maps native desktop capture track ids to screen sources", async () => {
+    const tracks = [];
+    const session = new NativeP2pSession({
+      invoke: async (command) => {
+        if (command === "media_p2p_create") return { handle: 18 };
+        return null;
+      },
+      onRemoteTrack: (entry) => tracks.push(entry),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 8,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    session.handleReceiveEvent({
+      kind: 4,
+      id: "desktop_capture_video",
+      payload: {
+        event: "track-added",
+        handle: 18,
+        trackId: "desktop_capture_video",
+        kind: "video",
+      },
+    });
+
+    assert.equal(tracks.at(-1).source, "screen");
+  });
+
+  it("qualifies a browser-compatible health channel before reporting readiness", async () => {
+    const calls = [];
+    const messages = [];
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 21 };
+        if (command === "media_p2p_send_health") return 0;
+        return null;
+      },
+      sendMessage: (type, data) => messages.push([type, data]),
+    });
+
+    await session.applyTopology({
+      mode: "probing",
+      epoch: 9,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b", sources: ["camera"] }],
+    });
+
+    assert.deepEqual(
+      calls.find(([command]) => command === "media_p2p_create")?.[1],
+      { offerer: true },
+    );
+
+    const event = (name, value) =>
+      session.handleReceiveEvent({
+        kind: 4,
+        payload: { event: name, handle: 21, value },
+      });
+    event("ice-state", "2");
+    event("data-channel-state", "open");
+    session.handleReceiveEvent({
+      kind: 4,
+      id: "camera_capture_video",
+      payload: {
+        event: "track-added",
+        handle: 21,
+        trackId: "camera_capture_video",
+        kind: "video",
+      },
+    });
+    session.handleReceiveEvent({
+      kind: 2,
+      id: "camera_capture_video",
+      payload: { width: 2, height: 1, timestampMs: 12 },
+      data: "AQIDBAUGBw==",
+    });
+    event("health-received", "0");
+    event("health-received", "1");
+    event("health-received", "2");
+
+    assert.ok(calls.some(([command]) => command === "media_p2p_send_health"));
+    assert.deepEqual(messages.at(-1), [
+      "p2p-ready",
+      { qualifiedPeerIds: ["peer-b"], epoch: 9 },
+    ]);
+
+    await session.closeAll();
   });
 });

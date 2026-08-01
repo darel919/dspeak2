@@ -57,6 +57,28 @@
 
 using json = nlohmann::json;
 
+static webrtc::Priority native_priority(const json& value, webrtc::Priority fallback)
+{
+    if (!value.is_string()) return fallback;
+    const auto priority = value.get<std::string>();
+    if (priority == "very-low") return webrtc::Priority::kVeryLow;
+    if (priority == "low") return webrtc::Priority::kLow;
+    if (priority == "medium") return webrtc::Priority::kMedium;
+    if (priority == "high") return webrtc::Priority::kHigh;
+    return fallback;
+}
+
+static double native_priority_value(const json& value)
+{
+    switch (native_priority(value, webrtc::Priority::kMedium)) {
+        case webrtc::Priority::kVeryLow: return 0.5;
+        case webrtc::Priority::kLow: return 1.0;
+        case webrtc::Priority::kHigh: return 4.0;
+        case webrtc::Priority::kMedium: return 2.0;
+    }
+    return 2.0;
+}
+
 /* ── Action queue ─────────────────────────────────── */
 
 
@@ -119,8 +141,10 @@ public:
     void OnConnectionStateChange(mediasoupclient::Transport* transport,
                                  const std::string& connectionState) override
     {
+        const bool next_connected = connectionState == "connected";
         dspeak_media_runtime::update_sfu_connection(
-            connected_, connectionState == "connected");
+            connected_, next_connected);
+        connected_ = next_connected;
         json j(connectionState);
         lib_dspeak_media_push_action(LIB_DSPEAK_MEDIA_ACTION_NONE,
                 static_cast<void*>(transport), 0,
@@ -212,8 +236,10 @@ public:
     void OnConnectionStateChange(mediasoupclient::Transport* transport,
                                  const std::string& connectionState) override
     {
+        const bool next_connected = connectionState == "connected";
         dspeak_media_runtime::update_sfu_connection(
-            connected_, connectionState == "connected");
+            connected_, next_connected);
+        connected_ = next_connected;
         json j(connectionState);
         lib_dspeak_media_push_action(LIB_DSPEAK_MEDIA_ACTION_NONE,
                 static_cast<void*>(transport), 0,
@@ -306,6 +332,7 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
             /*audio_mixer=*/nullptr,
             /*audio_processing=*/nullptr);
         if (!d->factory) {
+            d->factory = nullptr;
             delete d->network_thread;
             delete d->signaling_thread;
             delete d->worker_thread;
@@ -330,6 +357,8 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
 extern "C" void lib_dspeak_media_destroy_device(lib_dspeak_media_device_t* device)
 {
     if (!device) return;
+    device->device.reset();
+    device->factory = nullptr;
     delete device->network_thread;
     delete device->signaling_thread;
     delete device->worker_thread;
@@ -550,10 +579,12 @@ extern "C" lib_dspeak_media_consumer_t* lib_dspeak_media_consume(
         if (std::strcmp(kind, "audio") == 0 && track) {
             result->audio_sink = std::make_unique<NativeReceiveAudioSink>(id);
             static_cast<webrtc::AudioTrackInterface*>(track)->AddSink(result->audio_sink.get());
+            result->audio_sink->SetEnabled(true);
         } else if (std::strcmp(kind, "video") == 0 && track) {
             result->video_sink = std::make_unique<NativeReceiveVideoSink>(id);
             static_cast<webrtc::VideoTrackInterface*>(track)->AddOrUpdateSink(
                 result->video_sink.get(), webrtc::VideoSinkWants());
+            result->video_sink->SetEnabled(true);
         } else {
             result->consumer->Close();
             delete result->listener;
@@ -561,6 +592,8 @@ extern "C" lib_dspeak_media_consumer_t* lib_dspeak_media_consume(
             return nullptr;
         }
         const auto app_data_text = app_data.dump();
+        std::fprintf(stderr, "[dspeak:media] native consumer created id=%s kind=%s producer=%s\n",
+                     id, kind, producer_id);
         lib_dspeak_media_push_receive_track_event(
             "consumer-created", id, producer_id, kind, app_data_text.c_str());
         return result.release();
@@ -572,65 +605,142 @@ extern "C" lib_dspeak_media_consumer_t* lib_dspeak_media_consume(
 
 extern "C" void lib_dspeak_media_destroy_producer(lib_dspeak_media_producer_t* producer)
 {
-    if (!producer) return;
-    reinterpret_cast<mediasoupclient::Producer*>(producer)->Close();
+    try {
+        if (!producer) return;
+        reinterpret_cast<mediasoupclient::Producer*>(producer)->Close();
+    } catch (...) {
+        // ignore exceptions in destructor
+    }
+}
+
+extern "C" int lib_dspeak_media_producer_set_paused(
+    lib_dspeak_media_producer_t* producer, bool paused)
+{
+    try {
+        if (!producer) return -1;
+        auto* value = reinterpret_cast<mediasoupclient::Producer*>(producer);
+        if (paused && !value->IsPaused()) value->Pause();
+        if (!paused && value->IsPaused()) value->Resume();
+        return 0;
+    } catch (...) {
+        return -1;
+    }
+}
+
+extern "C" int lib_dspeak_media_producer_set_parameters(
+    lib_dspeak_media_producer_t* producer, const char* parameters_json)
+{
+    try {
+        if (!producer || !parameters_json) return -1;
+        auto* value = reinterpret_cast<mediasoupclient::Producer*>(producer);
+        const auto parameters = lib_dspeak_media_json_arg(parameters_json);
+        if (!parameters.is_object()) return -1;
+        auto* sender = value->GetRtpSender();
+        if (!sender) return -1;
+        auto current = sender->GetParameters();
+        for (auto& encoding : current.encodings) {
+            if (parameters.contains("active") && parameters["active"].is_boolean())
+                encoding.active = parameters["active"].get<bool>();
+            if (parameters.contains("maxBitrate") && parameters["maxBitrate"].is_number_integer())
+                encoding.max_bitrate_bps = parameters["maxBitrate"].get<int>();
+            if (parameters.contains("maxFramerate") && parameters["maxFramerate"].is_number())
+                encoding.max_framerate = parameters["maxFramerate"].get<double>();
+            if (parameters.contains("scaleResolutionDownBy") && parameters["scaleResolutionDownBy"].is_number())
+                encoding.scale_resolution_down_by = parameters["scaleResolutionDownBy"].get<double>();
+            if (parameters.contains("priority") && parameters["priority"].is_string())
+                encoding.bitrate_priority = native_priority_value(parameters["priority"]);
+            if (parameters.contains("networkPriority") && parameters["networkPriority"].is_string())
+                encoding.network_priority = native_priority(parameters["networkPriority"], webrtc::Priority::kLow);
+        }
+        return sender->SetParameters(current).ok() ? 0 : -1;
+    } catch (...) {
+        return -1;
+    }
 }
 
 extern "C" void lib_dspeak_media_destroy_consumer(lib_dspeak_media_consumer_t* consumer)
 {
-    if (!consumer) return;
-    if (consumer->consumer) {
-        lib_dspeak_media_push_receive_track_closed_event(
-            consumer->consumer->GetId().c_str(),
-            consumer->consumer->GetProducerId().c_str(),
-            consumer->consumer->GetKind().c_str());
-        consumer->consumer->Close();
+    try {
+        if (!consumer) return;
+        if (consumer->consumer) {
+            lib_dspeak_media_push_receive_track_closed_event(
+                consumer->consumer->GetId().c_str(),
+                consumer->consumer->GetProducerId().c_str(),
+                consumer->consumer->GetKind().c_str());
+            consumer->consumer->Close();
+        }
+        consumer->audio_sink.reset();
+        consumer->video_sink.reset();
+        delete consumer->listener;
+        delete consumer;
+    } catch (...) {
+        // ignore exceptions in destructor
     }
-    consumer->audio_sink.reset();
-    consumer->video_sink.reset();
-    delete consumer->listener;
-    delete consumer;
 }
 
 extern "C" int lib_dspeak_media_consumer_set_enabled(
     lib_dspeak_media_consumer_t* consumer, bool enabled)
 {
-    if (!consumer || !consumer->consumer) return -1;
-    if (consumer->audio_sink) consumer->audio_sink->SetEnabled(enabled);
-    if (consumer->video_sink) consumer->video_sink->SetEnabled(enabled);
-    return 0;
+    try {
+        if (!consumer || !consumer->consumer) return -1;
+        if (consumer->audio_sink) consumer->audio_sink->SetEnabled(enabled);
+        if (consumer->video_sink) consumer->video_sink->SetEnabled(enabled);
+        return 0;
+    } catch (...) {
+        return -1;
+    }
 }
 
 extern "C" int lib_dspeak_media_consumer_set_volume(
     lib_dspeak_media_consumer_t* consumer, double volume)
 {
-    if (!consumer || !consumer->consumer || !consumer->audio_sink) return -1;
-    consumer->audio_sink->SetVolume(volume);
-    return 0;
+    try {
+        if (!consumer || !consumer->consumer || !consumer->audio_sink) return -1;
+        consumer->audio_sink->SetVolume(volume);
+        return 0;
+    } catch (...) {
+        return -1;
+    }
 }
 
 extern "C" const char* lib_dspeak_media_producer_get_id(lib_dspeak_media_producer_t* producer)
 {
-    auto* p = reinterpret_cast<mediasoupclient::Producer*>(producer);
-    return lib_dspeak_media_strdup(p->GetId().c_str());
+    try {
+        auto* p = reinterpret_cast<mediasoupclient::Producer*>(producer);
+        return lib_dspeak_media_strdup(p->GetId().c_str());
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 extern "C" const char* lib_dspeak_media_consumer_get_id(lib_dspeak_media_consumer_t* consumer)
 {
-    if (!consumer || !consumer->consumer) return nullptr;
-    return lib_dspeak_media_strdup(consumer->consumer->GetId().c_str());
+    try {
+        if (!consumer || !consumer->consumer) return nullptr;
+        return lib_dspeak_media_strdup(consumer->consumer->GetId().c_str());
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 extern "C" const char* lib_dspeak_media_consumer_get_producer_id(
     lib_dspeak_media_consumer_t* consumer)
 {
-    if (!consumer || !consumer->consumer) return nullptr;
-    return lib_dspeak_media_strdup(consumer->consumer->GetProducerId().c_str());
+    try {
+        if (!consumer || !consumer->consumer) return nullptr;
+        return lib_dspeak_media_strdup(consumer->consumer->GetProducerId().c_str());
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 extern "C" const char* lib_dspeak_media_consumer_get_kind(
     lib_dspeak_media_consumer_t* consumer)
 {
-    if (!consumer || !consumer->consumer) return nullptr;
-    return lib_dspeak_media_strdup(consumer->consumer->GetKind().c_str());
+    try {
+        if (!consumer || !consumer->consumer) return nullptr;
+        return lib_dspeak_media_strdup(consumer->consumer->GetKind().c_str());
+    } catch (...) {
+        return nullptr;
+    }
 }

@@ -44,6 +44,19 @@ test("desktop sign-in automatically exchanges a loopback callback", () => {
   assert.match(authPage, /Could not complete desktop sign-in/);
 });
 
+test("desktop sign-in registers native background notifications without exposing browser cookies", () => {
+  assert.match(authStore, /X-Desktop-App/);
+  assert.match(authStore, /session\.desktopToken/);
+  assert.match(authStore, /register_background_notifications/);
+  assert.match(authStore, /set_credential/);
+  assert.match(authStore, /restoreDesktopNotificationSession/);
+  assert.match(authStore, /clear_background_notifications/);
+  assert.match(tauriMain, /register_background_notifications/);
+  assert.match(tauriMain, /set_background_notifications_enabled/);
+  assert.match(tauriMain, /bearer_auth\(&session\.token\)/);
+  assert.doesNotMatch(authStore, /document\.cookie/);
+});
+
 test("desktop sign-in provides a recoverable browser waiting state", () => {
   assert.match(authPage, /status\.value = "waiting"/);
   assert.match(authPage, /Waiting for browser/);
@@ -53,4 +66,15 @@ test("desktop sign-in provides a recoverable browser waiting state", () => {
   assert.match(authPage, /180_000/);
   assert.match(authPage, /Sign-in was not completed/);
   assert.match(authStore, /return \{ isDesktop, loginUrl: result\.loginUrl \}/);
+});
+
+test("web sign-in finishes after exchanging the callback", () => {
+  assert.match(
+    authPage,
+    /if \(valid\) \{\s+await finishAuthentication\(\);\s+return;/,
+  );
+  assert.doesNotMatch(
+    authPage,
+    /window\.location\.replace\([\s\S]*tauri:\/\/callback/,
+  );
 });

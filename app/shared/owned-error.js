@@ -1,6 +1,6 @@
 export function reconcileOwnedError(currentError, ownedError, nextError) {
   if (nextError) {
-    const normalizedError = String(nextError);
+    const normalizedError = nextError?.message || String(nextError);
     return { error: normalizedError, ownedError: normalizedError };
   }
 

@@ -25,7 +25,10 @@ struct lib_dspeak_media_capture_session*
 lib_dspeak_media_platform_capture_create(const char* source_id,
                                          const char* source_type,
                                          const char* mode,
-                                         bool exclude_self_audio);
+                                         bool exclude_self_audio,
+                                         uint32_t video_width,
+                                         uint32_t video_height,
+                                         uint32_t video_frame_rate);
 
 int lib_dspeak_media_platform_capture_start(
     struct lib_dspeak_media_capture_session* session,

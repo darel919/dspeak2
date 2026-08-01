@@ -2,6 +2,7 @@
   <div>
     <StartupLoader
       v-if="desktopRuntime && !startupComplete && !isAuthPage"
+      :visible="true"
       :status="startupStatus"
     />
     <div
@@ -28,7 +29,7 @@
         </div>
       </div>
     </div>
-    <div v-show="startupComplete || isAuthPage">
+    <div v-if="startupComplete || isAuthPage">
       <NotificationWarning
         v-if="authChecked && !isAuthPage && shouldShowNotificationWarning"
       />
@@ -55,6 +56,7 @@ import {
   createStartupReadiness,
   STARTUP_READINESS_KEY,
 } from "../shared/startup-readiness";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
@@ -63,21 +65,16 @@ const runtimeStore = useRuntimeStore();
 const route = useRoute();
 const authChecked = ref(false);
 const startupComplete = ref(false);
-const startupStatus = ref("Checking authentication…");
-const desktopRuntime = computed(() => runtimeStore.isTauri);
+const startupStatus = ref("Starting dSpeak…");
+const STARTUP_TIMEOUT_MS = 15000;
+const desktopRuntime = computed(
+  () => runtimeStore.isTauri || hasTauriRuntimeMarker(),
+);
 const isBootstrapping = ref(true);
-const waitingForPageReadiness = ref(false);
-const { runStartupUpdate, startupUpdateStatus } = usePwaUpdate();
-const {
-  runStartupUpdate: runDesktopStartupUpdate,
-  status: desktopUpdateStatus,
-} = useDesktopUpdate();
+const { runStartupUpdate } = usePwaUpdate();
+const { runStartupUpdate: runDesktopStartupUpdate } = useDesktopUpdate();
 const startupReadiness = createStartupReadiness({
-  onPending(status) {
-    if (waitingForPageReadiness.value && status) {
-      startupStatus.value = status;
-    }
-  },
+  onPending() {},
 });
 provide(STARTUP_READINESS_KEY, startupReadiness);
 
@@ -111,44 +108,67 @@ const { init: initIdle, destroy: destroyIdle } = useIdleDetection();
 const { init: initKeyboardShortcuts, destroy: destroyKeyboardShortcuts } =
   useGlobalKeyboardShortcuts();
 
-watch(startupUpdateStatus, (status) => {
-  if (status === "checking") startupStatus.value = "Checking for updates…";
-  if (status === "updating") startupStatus.value = "Updating dSpeak…";
-});
-
-watch(desktopUpdateStatus, (status) => {
-  if (status === "checking") startupStatus.value = "Checking for updates…";
-  if (status === "error") startupStatus.value = "Continuing without an update…";
-});
-
 onMounted(async () => {
+  let startupTimeoutId;
+  let startupPhase = "runtime detection";
   try {
-    await runtimeStore.initialize();
-    if (desktopRuntime.value) await runDesktopStartupUpdate();
-    else await runStartupUpdate();
-    if (!isAuthPage.value) {
-      startupStatus.value = "Checking authentication…";
-      await checkAuth();
-      if (authChecked.value) {
-        startupStatus.value = "Preparing your workspace…";
-        const presenceStatusStore = usePresenceStatusStore();
-        presenceStatusStore.init();
-        initIdle();
-        initKeyboardShortcuts();
-      }
-    } else {
-      authChecked.value = true;
-    }
-    waitingForPageReadiness.value = true;
-    startupStatus.value =
-      startupReadiness.status() || "Preparing your workspace…";
-    await startupReadiness.waitForIdle(nextTick);
+    await Promise.race([
+      (async () => {
+        startupStatus.value = "Preparing desktop runtime…";
+        await runtimeStore.initialize();
+        startupPhase = desktopRuntime.value
+          ? "desktop update check"
+          : "update check";
+        startupStatus.value = desktopRuntime.value
+          ? "Looking for desktop updates…"
+          : "Looking for updates…";
+        if (desktopRuntime.value) await runDesktopStartupUpdate();
+        else await runStartupUpdate();
+        if (!isAuthPage.value) {
+          startupPhase = "authentication";
+          startupStatus.value = "Restoring your session…";
+          await checkAuth();
+          if (authChecked.value) {
+            const presenceStatusStore = usePresenceStatusStore();
+            presenceStatusStore.init();
+            initIdle();
+            initKeyboardShortcuts();
+          }
+        } else {
+          authChecked.value = true;
+        }
+        startupPhase = "page readiness";
+        startupStatus.value = "Loading your workspace…";
+        await startupReadiness.waitForIdle(nextTick);
+      })(),
+      new Promise((_, reject) => {
+        startupTimeoutId = window.setTimeout(() => {
+          reject(new Error(`Startup timed out during ${startupPhase}.`));
+        }, STARTUP_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    debugLog("[Init] Startup did not complete:", error);
+    startupStatus.value = "Continuing without optional startup tasks…";
+    authChecked.value = true;
   } finally {
+    window.clearTimeout(startupTimeoutId);
     startupReadiness.seal();
     isBootstrapping.value = false;
     startupComplete.value = true;
+    void signalDesktopReady();
   }
 });
+
+async function signalDesktopReady() {
+  if (!import.meta.client || !desktopRuntime.value) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("desktop_ready");
+  } catch (error) {
+    debugLog("[Init] Failed to reveal desktop window:", error);
+  }
+}
 
 onUnmounted(() => {
   disconnectPresence();
@@ -175,14 +195,15 @@ async function checkAuth() {
 
   const restored = await authStore.ensureSession();
   if (restored) {
-    startupStatus.value = "Loading your rooms…";
     await roomsStore.fetchRooms();
     await identityStore.loadNicknames();
     authChecked.value = true;
     return;
   }
 
-  await authStore.clearAuth(false);
+  void authStore.clearAuth(false).catch((error) => {
+    debugLog("[Init] Failed to clear an anonymous session:", error);
+  });
   authChecked.value = true;
 }
 </script>

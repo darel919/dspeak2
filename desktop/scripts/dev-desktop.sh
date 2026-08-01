@@ -16,4 +16,4 @@ if [[ -z "${NATIVE_MEDIA_ARTIFACT_DIR:-}" ]]; then
   exit 1
 fi
 
-exec bun x tauri dev "$@"
+exec npx tauri dev "$@"

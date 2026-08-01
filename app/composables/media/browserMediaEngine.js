@@ -54,16 +54,12 @@ export class BrowserMediaEngine extends MediaEngine {
   }
 
   async startScreenShare(options = {}) {
-    if (options.includeSystemAudio) {
-      await this.session.startSystemAudioProduction(options);
-    }
     await this.session.startVideoProduction("screen", options);
     this.screenSharing = true;
   }
 
   async stopScreenShare() {
     await this.session.stopVideoProduction("screen");
-    await this.session.stopSystemAudioProduction();
     this.screenSharing = false;
   }
 
@@ -139,7 +135,7 @@ export class BrowserMediaEngine extends MediaEngine {
   }
 
   get error() {
-    return this.session.error;
+    return this.session.error?.value ?? null;
   }
 
   get transportReady() {

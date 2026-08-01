@@ -1,3 +1,5 @@
+import { hasTauriRuntimeMarker } from "./desktop-capture.js";
+
 export const SERVICE_WORKER_OPTIONS = Object.freeze({
   type: "module",
   updateViaCache: "none",
@@ -29,6 +31,7 @@ function serviceWorkerScriptUrl() {
 }
 
 export function registerServiceWorker() {
+  if (hasTauriRuntimeMarker()) return Promise.resolve(null);
   if (!("serviceWorker" in navigator)) return Promise.resolve(null);
   if (!registrationRequest) {
     registrationRequest = navigator.serviceWorker

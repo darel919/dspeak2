@@ -7,6 +7,15 @@ async function getTauriInvoke() {
   return invoke;
 }
 
+function isDesktopDevelopment() {
+  if (import.meta.dev) return true;
+  if (!import.meta.client) return false;
+  return (
+    ["http:", "https:"].includes(window.location.protocol) &&
+    ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
+  );
+}
+
 export function useDesktopUpdate() {
   const runtimeStore = useRuntimeStore();
   const state = useState(DESKTOP_UPDATE_STATE, () => ({
@@ -21,7 +30,7 @@ export function useDesktopUpdate() {
   const completed = computed(() => state.value.status === "complete");
 
   async function runStartupUpdate() {
-    if (!runtimeStore.isTauri || import.meta.dev) {
+    if (!runtimeStore.isTauri || isDesktopDevelopment()) {
       state.value.status = "complete";
       return null;
     }

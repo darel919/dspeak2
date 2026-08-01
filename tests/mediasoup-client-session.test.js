@@ -61,7 +61,7 @@ test("SFU readiness expects RTP only from media selected for reception", () => {
     source: "screen-audio",
   });
 
-  assert.equal(client.expectedInboundFlowCount(), 2);
+  assert.equal(client.expectedInboundFlowCount(), 3);
 
   client.remoteReceiving.set("user-2:screen", true);
   assert.equal(client.expectedInboundFlowCount(), 3);
@@ -888,10 +888,10 @@ test("failed consumer control signaling rejects without waiting for timeout", as
   assert.equal(entry.track.enabled, false);
 });
 
-test("new remote screen video waits for viewing while shared audio starts", () => {
+test("new remote screen video starts with shared audio", () => {
   const client = session();
 
-  assert.equal(client.shouldReceive("user-1", "screen"), false);
+  assert.equal(client.shouldReceive("user-1", "screen"), true);
   assert.equal(client.shouldReceive("user-1", "screen-audio"), true);
   assert.equal(client.shouldReceive("user-1", "camera"), true);
   assert.equal(client.shouldReceive("user-1", "audio"), true);

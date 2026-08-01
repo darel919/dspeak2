@@ -259,6 +259,7 @@ export function createDesktopCaptureSelection(source, mode, options = {}) {
     sourceId: normalized.sourceId,
     sourceType: normalized.sourceType,
     sourceKey: normalized.sourceKey,
+    ...(normalized.bounds ? { bounds: normalized.bounds } : {}),
     mode,
     excludeSelf: true,
     video: { ...DESKTOP_CAPTURE_VIDEO_POLICY, ...(options.video || {}) },

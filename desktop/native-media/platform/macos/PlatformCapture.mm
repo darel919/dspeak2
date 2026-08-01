@@ -35,6 +35,9 @@ struct lib_dspeak_media_capture_session {
     bool capture_video = false;
     bool capture_audio = false;
     bool exclude_self_audio = true;
+    uint32_t video_width = 1920;
+    uint32_t video_height = 1080;
+    uint32_t video_frame_rate = 60;
     lib_dspeak_media_screen_frame_cb screen_cb = nullptr;
     lib_dspeak_media_audio_frame_cb audio_cb = nullptr;
     lib_dspeak_media_capture_error_cb error_cb = nullptr;
@@ -496,7 +499,10 @@ struct lib_dspeak_media_capture_session*
 lib_dspeak_media_platform_capture_create(const char* source_id,
                                          const char* source_type,
                                          const char* mode,
-                                         bool exclude_self_audio) {
+                                         bool exclude_self_audio,
+                                         uint32_t video_width,
+                                         uint32_t video_height,
+                                         uint32_t video_frame_rate) {
     @autoreleasepool {
         NSString* source_id_string = string_from_utf8(source_id);
         NSString* source_type_string = string_from_utf8(source_type);
@@ -516,6 +522,9 @@ lib_dspeak_media_platform_capture_create(const char* source_id,
         session->capture_video = capture_video;
         session->capture_audio = capture_audio;
         session->exclude_self_audio = exclude_self_audio;
+        session->video_width = video_width >= 320 && video_width <= 7680 ? video_width : 1920;
+        session->video_height = video_height >= 180 && video_height <= 4320 ? video_height : 1080;
+        session->video_frame_rate = video_frame_rate >= 1 && video_frame_rate <= 60 ? video_frame_rate : 60;
         session->source_id = [source_id_string retain];
         session->source_type = [source_type_string retain];
         if (capture_video) {
@@ -577,9 +586,9 @@ int lib_dspeak_media_platform_capture_start(
         }
 
         SCStreamConfiguration* configuration = [[SCStreamConfiguration alloc] init];
-        configuration.width = 1920;
-        configuration.height = 1080;
-        configuration.minimumFrameInterval = CMTimeMake(1, 60);
+        configuration.width = session->video_width;
+        configuration.height = session->video_height;
+        configuration.minimumFrameInterval = CMTimeMake(1, session->video_frame_rate);
         configuration.queueDepth = 2;
         configuration.pixelFormat = kCVPixelFormatType_32BGRA;
         configuration.showsCursor = YES;

@@ -121,6 +121,7 @@ describe("desktop capture contract", () => {
       {
         sourceId: "display:main",
         sourceType: "display",
+        bounds: { width: 2560, height: 1440 },
         selfExcluded: true,
         capabilities: { video: true, audio: true, stereo: true },
       },
@@ -138,5 +139,11 @@ describe("desktop capture contract", () => {
     assert.equal(request.excludeSelfAudio, true);
     assert.equal(request.roomBitrateBps, 128000);
     assert.equal(request.captureSelection.audio.maxBitrateBps, 128000);
+    assert.deepEqual(request.captureSelection.bounds, {
+      x: 0,
+      y: 0,
+      width: 2560,
+      height: 1440,
+    });
   });
 });

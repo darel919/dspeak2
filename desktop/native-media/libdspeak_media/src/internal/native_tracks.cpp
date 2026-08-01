@@ -108,6 +108,26 @@ static std::vector<webrtc::RtpEncodingParameters> parse_encodings(const json& ap
     return encodings;
 }
 
+static void apply_degradation_preference(
+    mediasoupclient::Producer* producer, const json& app_data)
+{
+    if (!producer || !app_data.value("degradationPreference", json()).is_string()) return;
+    const auto preference = app_data["degradationPreference"].get<std::string>();
+    std::optional<webrtc::DegradationPreference> value;
+    if (preference == "maintain-framerate")
+        value = webrtc::DegradationPreference::MAINTAIN_FRAMERATE;
+    else if (preference == "maintain-resolution")
+        value = webrtc::DegradationPreference::MAINTAIN_RESOLUTION;
+    else if (preference == "balanced")
+        value = webrtc::DegradationPreference::BALANCED;
+    if (!value) return;
+    auto* sender = producer->GetRtpSender();
+    if (!sender) return;
+    auto parameters = sender->GetParameters();
+    parameters.degradation_preference = value;
+    sender->SetParameters(parameters);
+}
+
 /* ────────────────────────────────────────────────────────────────── */
 /* Native track creation and mediasoup producer attachment            */
 /* ────────────────────────────────────────────────────────────────── */
@@ -335,8 +355,11 @@ extern "C" lib_dspeak_media_producer_t* lib_dspeak_media_produce_video_track(
     try {
         auto app_data = app_data_json ? nlohmann::json::parse(app_data_json) : nlohmann::json::object();
         auto encodings = parse_encodings(app_data);
+        const auto codec_options = app_data.value("codecOptions", nlohmann::json::object());
         auto* producer = transport->transport->Produce(
-            nullptr, track->track.get(), encodings.empty() ? nullptr : &encodings, nullptr, nullptr, app_data);
+            nullptr, track->track.get(), encodings.empty() ? nullptr : &encodings,
+            &codec_options, nullptr, app_data);
+        apply_degradation_preference(producer, app_data);
         return reinterpret_cast<lib_dspeak_media_producer_t*>(producer);
     } catch (...) {
         if (error_out) *error_out = -1;
@@ -358,8 +381,11 @@ extern "C" lib_dspeak_media_producer_t* lib_dspeak_media_produce_audio_track(
     try {
         auto app_data = app_data_json ? nlohmann::json::parse(app_data_json) : nlohmann::json::object();
         auto encodings = parse_encodings(app_data);
+        const auto codec_options = app_data.value("codecOptions", nlohmann::json::object());
         auto* producer = transport->transport->Produce(
-            nullptr, track->track.get(), encodings.empty() ? nullptr : &encodings, nullptr, nullptr, app_data);
+            nullptr, track->track.get(), encodings.empty() ? nullptr : &encodings,
+            &codec_options, nullptr, app_data);
+        apply_degradation_preference(producer, app_data);
         return reinterpret_cast<lib_dspeak_media_producer_t*>(producer);
     } catch (...) {
         if (error_out) *error_out = -1;

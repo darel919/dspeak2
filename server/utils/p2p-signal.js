@@ -38,5 +38,6 @@ export function validP2pSignal(signal) {
       mediaSources.has(String(signal.sourceReceiving.source || "")) &&
       typeof signal.sourceReceiving.receiving === "boolean"
     );
+  if (signal.renegotiationNeeded) return signal.renegotiationNeeded === true;
   return false;
 }

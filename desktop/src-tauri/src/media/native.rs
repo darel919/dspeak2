@@ -37,22 +37,24 @@ pub fn device_rtp_capabilities(
 pub fn produce_capture(
     transport: *mut ffi::lib_dspeak_media_send_transport_t,
     kind: &str,
+    source: &str,
     app_data: &str,
 ) -> Result<*mut ffi::lib_dspeak_media_producer_t, String> {
     let app_data = CString::new(app_data).map_err(|error| error.to_string())?;
+    let source = CString::new(source).map_err(|error| error.to_string())?;
     let mut error = 0;
     let producer = unsafe {
         if kind == "video" {
             ffi::lib_dspeak_media_produce_video_track(
                 transport,
-                ffi::lib_dspeak_media_get_active_video_track(),
+                ffi::lib_dspeak_media_get_video_track(source.as_ptr()),
                 app_data.as_ptr(),
                 &mut error,
             )
         } else if kind == "audio" {
             ffi::lib_dspeak_media_produce_audio_track(
                 transport,
-                ffi::lib_dspeak_media_get_active_audio_track(),
+                ffi::lib_dspeak_media_get_audio_track(source.as_ptr()),
                 app_data.as_ptr(),
                 &mut error,
             )
@@ -67,6 +69,33 @@ pub fn produce_capture(
         ))
     } else {
         Ok(producer)
+    }
+}
+
+pub fn producer_set_paused(
+    producer: *mut ffi::lib_dspeak_media_producer_t,
+    paused: bool,
+) -> Result<(), String> {
+    let result = unsafe { ffi::lib_dspeak_media_producer_set_paused(producer, paused) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native producer pause state update failed".to_string())
+    }
+}
+
+pub fn producer_set_parameters(
+    producer: *mut ffi::lib_dspeak_media_producer_t,
+    parameters: &str,
+) -> Result<(), String> {
+    let parameters = CString::new(parameters).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_producer_set_parameters(producer, parameters.as_ptr())
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native producer RTP parameters update failed".to_string())
     }
 }
 
@@ -96,12 +125,59 @@ pub fn consume(
         )
     };
     if consumer.is_null() {
-        Err(format!(
-            "lib_dspeak_media_consume failed (error {})",
-            error
-        ))
+        Err(format!("lib_dspeak_media_consume failed (error {})", error))
     } else {
         Ok(consumer)
+    }
+}
+
+pub fn p2p_set_track_parameters(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    track_id: &str,
+    parameters: &str,
+) -> Result<(), String> {
+    let track_id = CString::new(track_id).map_err(|error| error.to_string())?;
+    let parameters = CString::new(parameters).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_set_track_parameters(
+            handle,
+            track_id.as_ptr(),
+            parameters.as_ptr(),
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P sender RTP parameters update failed".to_string())
+    }
+}
+
+pub fn p2p_set_receive_enabled(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    track_id: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    let track_id = CString::new(track_id).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_set_receive_enabled(handle, track_id.as_ptr(), enabled)
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P receive state update failed".to_string())
+    }
+}
+
+pub fn p2p_send_health(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    message: &str,
+) -> Result<(), String> {
+    let message = CString::new(message).map_err(|error| error.to_string())?;
+    let result = unsafe { ffi::lib_dspeak_media_p2p_send_health(handle, message.as_ptr()) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P health message could not be sent".to_string())
     }
 }
 
@@ -234,8 +310,12 @@ pub fn fail_produce(action_id: u64, error: &str) {
     unsafe { ffi::lib_dspeak_media_fail_produce(action_id, c_err.as_ptr()) }
 }
 
-pub fn p2p_create() -> Result<*mut ffi::lib_dspeak_media_p2p_handle_t, String> {
-    let handle = unsafe { ffi::lib_dspeak_media_p2p_create() };
+pub fn p2p_create(
+    ice_servers_json: &str,
+    offerer: bool,
+) -> Result<*mut ffi::lib_dspeak_media_p2p_handle_t, String> {
+    let ice_servers = CString::new(ice_servers_json).map_err(|error| error.to_string())?;
+    let handle = unsafe { ffi::lib_dspeak_media_p2p_create(ice_servers.as_ptr(), offerer) };
     if handle.is_null() {
         Err("native P2P PeerConnection creation failed".to_string())
     } else {
@@ -268,9 +348,7 @@ fn p2p_sdp_result(
     value
 }
 
-pub fn p2p_create_offer(
-    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
-) -> Result<String, String> {
+pub fn p2p_create_offer(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Result<String, String> {
     let mut pointer = ptr::null_mut();
     let result = unsafe { ffi::lib_dspeak_media_p2p_create_offer(handle, &mut pointer) };
     p2p_sdp_result(result, pointer, "offer")
@@ -306,9 +384,7 @@ pub fn p2p_add_ice_candidate(
     candidate: &str,
 ) -> Result<(), String> {
     let candidate = CString::new(candidate).map_err(|error| error.to_string())?;
-    let result = unsafe {
-        ffi::lib_dspeak_media_p2p_add_ice_candidate(handle, candidate.as_ptr())
-    };
+    let result = unsafe { ffi::lib_dspeak_media_p2p_add_ice_candidate(handle, candidate.as_ptr()) };
     if result == 0 {
         Ok(())
     } else {
@@ -316,9 +392,7 @@ pub fn p2p_add_ice_candidate(
     }
 }
 
-pub fn p2p_poll_ice_candidate(
-    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
-) -> Option<String> {
+pub fn p2p_poll_ice_candidate(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Option<String> {
     let pointer = unsafe { ffi::lib_dspeak_media_p2p_poll_ice_candidate(handle) };
     if pointer.is_null() {
         return None;
@@ -334,9 +408,7 @@ pub fn p2p_ice_state(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> i32 {
     unsafe { ffi::lib_dspeak_media_p2p_ice_connection_state(handle) }
 }
 
-pub fn p2p_restart_ice(
-    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
-) -> Result<String, String> {
+pub fn p2p_restart_ice(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Result<String, String> {
     let mut pointer = ptr::null_mut();
     let result = unsafe { ffi::lib_dspeak_media_p2p_restart_ice(handle, &mut pointer) };
     p2p_sdp_result(result, pointer, "ICE restart")

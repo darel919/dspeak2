@@ -31,7 +31,6 @@ export function withMediaOperationTimeout(operation, label, timeoutMs = 3000) {
       () => reject(new Error(`${label} timed out`)),
       timeoutMs,
     );
-    timer.unref?.();
   });
   return Promise.race([Promise.resolve(operation), timeout]).finally(() =>
     clearTimeout(timer),

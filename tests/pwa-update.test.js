@@ -40,7 +40,8 @@ test("startup updates activate automatically before application bootstrap", () =
   assert.doesNotMatch(serviceWorker, /\.then\(\(\) => self\.skipWaiting/);
   assert.match(serviceWorker, /event\.data\.type === "SKIP_WAITING"/);
   assert.match(init, /await runStartupUpdate\(\)/);
-  assert.match(init, /Checking for updates/);
+  assert.match(init, /Starting dSpeak…/);
+  assert.doesNotMatch(init, /Checking for updates/);
   assert.match(updateCoordinator, /activateWaitingWorker\("startup"\)/);
   assert.match(updateCoordinator, /worker\.postMessage/);
   assert.match(updateCoordinator, /controllerchange/);
@@ -105,7 +106,8 @@ test("service worker exposes its exact precache version to the startup guard", (
   assert.match(serviceWorker, /version: PRECACHE_NAME/);
   assert.match(updateCoordinator, /new MessageChannel\(\)/);
   assert.match(updateCoordinator, /type: "GET_VERSION"/);
-  assert.match(init, /Updating dSpeak/);
+  assert.match(init, /Starting dSpeak…/);
+  assert.doesNotMatch(init, /Updating dSpeak/);
 });
 
 test("each deployment receives an isolated precache", () => {

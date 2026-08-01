@@ -63,7 +63,7 @@
         <div>
           <div class="font-medium">{{ label }} is sharing a screen</div>
           <div class="mt-1 text-sm text-base-content/60">
-            Start it only when you want to receive the video.
+            Screen sharing is paused.
           </div>
         </div>
         <button

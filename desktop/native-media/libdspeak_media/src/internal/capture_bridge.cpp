@@ -40,44 +40,184 @@
 
 using json = nlohmann::json;
 
+static size_t video_codec_priority(const webrtc::RtpCodecCapability& codec) {
+    const auto mime_type = codec.mime_type();
+    if (mime_type == "video/H264") return 0;
+    if (mime_type == "video/VP9") return 1;
+    if (mime_type == "video/VP8") return 2;
+    return 3;
+}
+
+static void apply_video_codec_preferences(
+    webrtc::PeerConnectionFactoryInterface* factory,
+    const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>& transceiver) {
+    if (!factory || !transceiver || !transceiver->sender() ||
+        !transceiver->sender()->track() ||
+        transceiver->sender()->track()->kind() != "video") return;
+    auto capabilities = factory->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO).codecs;
+    std::stable_sort(capabilities.begin(), capabilities.end(),
+                     [](const auto& left, const auto& right) {
+                         return video_codec_priority(left) < video_codec_priority(right);
+                     });
+    transceiver->SetCodecPreferences(capabilities);
+}
+
+static webrtc::Priority native_priority(const json& value, webrtc::Priority fallback)
+{
+    if (!value.is_string()) return fallback;
+    const auto priority = value.get<std::string>();
+    if (priority == "very-low") return webrtc::Priority::kVeryLow;
+    if (priority == "low") return webrtc::Priority::kLow;
+    if (priority == "medium") return webrtc::Priority::kMedium;
+    if (priority == "high") return webrtc::Priority::kHigh;
+    return fallback;
+}
+
+static double native_priority_value(const json& value)
+{
+    switch (native_priority(value, webrtc::Priority::kMedium)) {
+        case webrtc::Priority::kVeryLow: return 0.5;
+        case webrtc::Priority::kLow: return 1.0;
+        case webrtc::Priority::kHigh: return 4.0;
+        case webrtc::Priority::kMedium: return 2.0;
+    }
+    return 2.0;
+}
+
 extern "C" int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* handle,
                                                       lib_dspeak_media_video_track_t* track) {
-    if (!handle || !handle->pc || !track || !track->track) return -1;
-    auto result = handle->pc->AddTrack(track->track, {"stream0"});
-    return result.ok() ? 0 : -1;
+    try {
+        if (!handle || !handle->pc || !track || !track->track) return -1;
+        return handle->signaling_thread->BlockingCall([handle, track] {
+            auto result = handle->pc->AddTrack(track->track, {"stream0"});
+            if (!result.ok()) return -1;
+            const auto sender = result.value();
+            for (const auto& transceiver : handle->pc->GetTransceivers()) {
+                if (transceiver->sender() == sender) {
+                    apply_video_codec_preferences(handle->factory.get(), transceiver);
+                    break;
+                }
+            }
+            return result.ok() ? 0 : -1;
+        });
+    } catch (...) {
+        return -1;
+    }
 }
 
 extern "C" int lib_dspeak_media_p2p_add_audio_track(lib_dspeak_media_p2p_handle_t* handle,
                                                       lib_dspeak_media_audio_track_t* track) {
-    if (!handle || !handle->pc || !track || !track->track) return -1;
-    auto result = handle->pc->AddTrack(track->track, {"stream0"});
-    return result.ok() ? 0 : -1;
+    try {
+        if (!handle || !handle->pc || !track || !track->track) return -1;
+        return handle->signaling_thread->BlockingCall([handle, track] {
+            auto result = handle->pc->AddTrack(track->track, {"stream0"});
+            return result.ok() ? 0 : -1;
+        });
+    } catch (...) {
+        return -1;
+    }
 }
 
 extern "C" int lib_dspeak_media_p2p_remove_video_track(lib_dspeak_media_p2p_handle_t* handle,
                                                          lib_dspeak_media_video_track_t* track) {
-    if (!handle || !handle->pc || !track || !track->track) return -1;
-    auto senders = handle->pc->GetSenders();
-    for (auto& sender : senders) {
-        if (sender->track() && sender->track()->id() == track->track->id()) {
-            auto error = handle->pc->RemoveTrackOrError(sender);
-            return error.ok() ? 0 : -1;
-        }
+    try {
+        if (!handle || !handle->pc || !track || !track->track) return -1;
+        return handle->signaling_thread->BlockingCall([handle, track] {
+            auto senders = handle->pc->GetSenders();
+            for (auto& sender : senders) {
+                if (sender->track() && sender->track()->id() == track->track->id()) {
+                    auto error = handle->pc->RemoveTrackOrError(sender);
+                    return error.ok() ? 0 : -1;
+                }
+            }
+            return -1;
+        });
+    } catch (...) {
+        return -1;
     }
-    return -1;
 }
 
 extern "C" int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_handle_t* handle,
                                                          lib_dspeak_media_audio_track_t* track) {
-    if (!handle || !handle->pc || !track || !track->track) return -1;
-    auto senders = handle->pc->GetSenders();
-    for (auto& sender : senders) {
-        if (sender->track() && sender->track()->id() == track->track->id()) {
-            auto error = handle->pc->RemoveTrackOrError(sender);
-            return error.ok() ? 0 : -1;
-        }
+    try {
+        if (!handle || !handle->pc || !track || !track->track) return -1;
+        return handle->signaling_thread->BlockingCall([handle, track] {
+            auto senders = handle->pc->GetSenders();
+            for (auto& sender : senders) {
+                if (sender->track() && sender->track()->id() == track->track->id()) {
+                    auto error = handle->pc->RemoveTrackOrError(sender);
+                    return error.ok() ? 0 : -1;
+                }
+            }
+            return -1;
+        });
+    } catch (...) {
+        return -1;
     }
-    return -1;
+}
+
+extern "C" int lib_dspeak_media_p2p_set_track_parameters(
+    lib_dspeak_media_p2p_handle_t* handle,
+    const char* track_id,
+    const char* parameters_json) {
+    try {
+        if (!handle || !handle->pc || !track_id || !parameters_json) return -1;
+        const std::string expected_id(track_id);
+        const std::string parameters(parameters_json);
+        return handle->signaling_thread->BlockingCall([handle, expected_id, parameters] {
+            const auto value = json::parse(parameters);
+            if (!value.is_object()) return -1;
+            for (const auto& sender : handle->pc->GetSenders()) {
+                if (!sender->track() || sender->track()->id() != expected_id) continue;
+                auto current = sender->GetParameters();
+                for (auto& encoding : current.encodings) {
+                    if (value.contains("active") && value["active"].is_boolean())
+                        encoding.active = value["active"].get<bool>();
+                    if (value.contains("maxBitrate") && value["maxBitrate"].is_number_integer())
+                        encoding.max_bitrate_bps = value["maxBitrate"].get<int>();
+                    if (value.contains("maxFramerate") && value["maxFramerate"].is_number())
+                        encoding.max_framerate = value["maxFramerate"].get<double>();
+                    if (value.contains("scaleResolutionDownBy") && value["scaleResolutionDownBy"].is_number())
+                        encoding.scale_resolution_down_by = value["scaleResolutionDownBy"].get<double>();
+                    if (value.contains("priority") && value["priority"].is_string())
+                        encoding.bitrate_priority = native_priority_value(value["priority"]);
+                    if (value.contains("networkPriority") && value["networkPriority"].is_string())
+                        encoding.network_priority = native_priority(value["networkPriority"], webrtc::Priority::kLow);
+                }
+                return sender->SetParameters(current).ok() ? 0 : -1;
+            }
+            return -1;
+        });
+    } catch (...) {
+        return -1;
+    }
+}
+
+extern "C" int lib_dspeak_media_p2p_set_receive_enabled(
+    lib_dspeak_media_p2p_handle_t* handle,
+    const char* track_id,
+    bool enabled) {
+    try {
+        if (!handle || !handle->signaling_thread || !track_id) return -1;
+        const std::string expected_id(track_id);
+        return handle->signaling_thread->BlockingCall([handle, expected_id, enabled] {
+            for (const auto& sink : handle->audio_sinks) {
+                if (sink && expected_id == sink->id()) {
+                    sink->SetEnabled(enabled);
+                    return 0;
+                }
+            }
+            for (const auto& sink : handle->video_sinks) {
+                if (sink && expected_id == sink->id()) {
+                    sink->SetEnabled(enabled);
+                    return 0;
+                }
+            }
+            return -1;
+        });
+    } catch (...) {
+        return -1;
+    }
 }
 
 #if defined(__APPLE__)
@@ -85,6 +225,10 @@ extern "C" int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_hand
 static std::mutex g_capture_mutex;
 static std::mutex g_track_mutex;
 static lib_dspeak_media_capture_session* g_capture = nullptr;
+static lib_dspeak_media_capture_session* g_system_audio_capture = nullptr;
+static bool g_capture_has_video = false;
+static bool g_capture_has_audio = false;
+static bool g_system_audio_has_audio = false;
 static lib_dspeak_media_device_capture_session* g_microphone_capture = nullptr;
 static lib_dspeak_media_device_capture_session* g_camera_capture = nullptr;
 static lib_dspeak_media_video_track_t* g_video_track = nullptr;
@@ -96,6 +240,7 @@ static std::deque<float> g_audio_pending[3];
 static std::atomic<int> g_capture_error{0};
 static std::atomic<uint64_t> g_probe_video_frames{0};
 static std::atomic<uint64_t> g_probe_audio_frames{0};
+static std::atomic<bool> g_screen_frame_logged{false};
 
 enum class CaptureRoute {
     kDesktop,
@@ -135,6 +280,12 @@ static void on_screen_frame(void* user_data, void* sample_buffer) {
     }
     CVPixelBufferRef pixel_buffer = CMSampleBufferGetImageBuffer(sample);
     if (pixel_buffer) {
+        if (route == CaptureRoute::kDesktop &&
+            !g_screen_frame_logged.exchange(true)) {
+            std::fprintf(stderr, "[dspeak:media] native screen frame delivered %zux%zu\n",
+                         CVPixelBufferGetWidth(pixel_buffer),
+                         CVPixelBufferGetHeight(pixel_buffer));
+        }
         CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample);
         int64_t timestamp_ms = 0;
         if (pts.timescale > 0) timestamp_ms = (pts.value * 1000) / pts.timescale;
@@ -215,7 +366,8 @@ static bool create_capture_tracks(const json& request, int* error_out) {
         return false;
     }
     std::lock_guard<std::mutex> lock(g_track_mutex);
-    if (capture_video) {
+    const bool created_video = capture_video && !g_video_track;
+    if (capture_video && !g_video_track) {
         int error = 0;
         g_video_track = lib_dspeak_media_create_video_track("desktop_capture_video", &error);
         if (!g_video_track) {
@@ -223,11 +375,11 @@ static bool create_capture_tracks(const json& request, int* error_out) {
             return false;
         }
     }
-    if (capture_audio) {
+    if (capture_audio && !g_audio_track) {
         int error = 0;
         g_audio_track = lib_dspeak_media_create_audio_track("desktop_capture_audio", &error);
         if (!g_audio_track) {
-            if (g_video_track) {
+            if (created_video && g_video_track) {
                 lib_dspeak_media_destroy_video_track(g_video_track);
                 g_video_track = nullptr;
             }
@@ -238,13 +390,13 @@ static bool create_capture_tracks(const json& request, int* error_out) {
     return true;
 }
 
-static void destroy_capture_tracks() {
+static void destroy_capture_tracks(bool video, bool audio) {
     std::lock_guard<std::mutex> lock(g_track_mutex);
-    if (g_video_track) {
+    if (video && g_video_track) {
         lib_dspeak_media_destroy_video_track(g_video_track);
         g_video_track = nullptr;
     }
-    if (g_audio_track) {
+    if (audio && g_audio_track) {
         lib_dspeak_media_destroy_audio_track(g_audio_track);
         g_audio_track = nullptr;
     }
@@ -277,24 +429,62 @@ static int start_capture_request(const char* request_json, int* error_out) {
         return -1;
     }
 
+    const bool system_audio = source_type == "system-audio";
+    const bool capture_video = mode == "video" || mode == "both";
+    const bool capture_audio = mode == "audio" || mode == "both";
+    const auto video = request.value("video", json::object());
+    const auto resolution = video.value("resolution", "original");
+    uint32_t video_width = video.value("width", 0u);
+    uint32_t video_height = video.value("height", 0u);
+    const auto bounds = request.value("bounds", json::object());
+    if (video_width == 0 && bounds.is_object()) video_width = bounds.value("width", 0u);
+    if (video_height == 0 && bounds.is_object()) video_height = bounds.value("height", 0u);
+    if (video_width == 0 || video_height == 0) {
+        if (resolution == "720p") {
+            video_width = 1280;
+            video_height = 720;
+        } else if (resolution == "1080p") {
+            video_width = 1920;
+            video_height = 1080;
+        } else if (resolution == "1440p") {
+            video_width = 2560;
+            video_height = 1440;
+        } else if (resolution == "2160p") {
+            video_width = 3840;
+            video_height = 2160;
+        } else {
+            video_width = 1920;
+            video_height = 1080;
+        }
+    }
+    const uint32_t video_frame_rate = video.value("frameRate", 60u);
     std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
-    if (g_capture) {
+    auto*& capture_slot = system_audio ? g_system_audio_capture : g_capture;
+    if (capture_slot) {
+        if (error_out) *error_out = -102;
+        return -1;
+    }
+    if ((system_audio && g_capture_has_audio) || (!system_audio && g_system_audio_has_audio)) {
         if (error_out) *error_out = -102;
         return -1;
     }
     if (!create_capture_tracks(request, error_out)) return -1;
 
     auto* capture = lib_dspeak_media_platform_capture_create(
-        source_id.c_str(), source_type.c_str(), mode.c_str(), exclude_self_audio);
+        source_id.c_str(), source_type.c_str(), mode.c_str(), exclude_self_audio,
+        video_width, video_height, video_frame_rate);
     if (!capture) {
-        destroy_capture_tracks();
+        destroy_capture_tracks(capture_video, capture_audio);
         if (error_out) *error_out = -103;
         return -1;
     }
 
-    const bool capture_video = mode == "video" || mode == "both";
-    const bool capture_audio = mode == "audio" || mode == "both";
     g_capture_error.store(0);
+    g_screen_frame_logged.store(false);
+    std::fprintf(stderr,
+                 "[dspeak:media] native capture start source=%s type=%s mode=%s video=%ux%u@%u\n",
+                 source_id.c_str(), source_type.c_str(), mode.c_str(), video_width,
+                 video_height, video_frame_rate);
     int result = lib_dspeak_media_platform_capture_start(
         capture,
         capture_video ? on_screen_frame : nullptr,
@@ -303,23 +493,38 @@ static int start_capture_request(const char* request_json, int* error_out) {
         &g_desktop_route);
     if (result != 0) {
         lib_dspeak_media_platform_capture_destroy(capture);
-        destroy_capture_tracks();
+        destroy_capture_tracks(capture_video, capture_audio);
         if (error_out) *error_out = result;
         return result;
     }
-    g_capture = capture;
+    capture_slot = capture;
+    if (system_audio) {
+        g_system_audio_has_audio = capture_audio;
+    } else {
+        g_capture_has_video = capture_video;
+        g_capture_has_audio = capture_audio;
+    }
     return 0;
 }
 
-static int stop_capture_request(int* error_out) {
+static int stop_capture_request(int* error_out, bool system_audio = false) {
     if (error_out) *error_out = 0;
     std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
-    if (!g_capture) return 0;
-    auto* capture = g_capture;
-    g_capture = nullptr;
+    auto*& capture_slot = system_audio ? g_system_audio_capture : g_capture;
+    if (!capture_slot) return 0;
+    auto* capture = capture_slot;
+    const bool capture_video = system_audio ? false : g_capture_has_video;
+    const bool capture_audio = system_audio ? g_system_audio_has_audio : g_capture_has_audio;
+    capture_slot = nullptr;
+    if (system_audio) {
+        g_system_audio_has_audio = false;
+    } else {
+        g_capture_has_video = false;
+        g_capture_has_audio = false;
+    }
     lib_dspeak_media_platform_capture_stop(capture);
     lib_dspeak_media_platform_capture_destroy(capture);
-    destroy_capture_tracks();
+    destroy_capture_tracks(capture_video, capture_audio);
     return 0;
 }
 
@@ -444,11 +649,17 @@ static int stop_camera_request(int* error_out) {
 }
 
 extern "C" char* lib_dspeak_media_list_capture_devices(void) {
-    return lib_dspeak_media_platform_capture_list_devices();
+    try {
+        return lib_dspeak_media_platform_capture_list_devices();
+    } catch (...) {
+        return nullptr;
+    }
+
 }
 
 extern "C" int lib_dspeak_media_set_microphone_device(const char* device_id, int* error_out) {
-    if (error_out) *error_out = 0;
+    try {
+        if (error_out) *error_out = 0;
     bool restart = false;
     {
         std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
@@ -465,56 +676,121 @@ extern "C" int lib_dspeak_media_set_microphone_device(const char* device_id, int
         return start_microphone_request(g_microphone_device_id.c_str(), error_out);
     }
     return 0;
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
 }
 
 extern "C" int lib_dspeak_media_start_microphone_capture(int* error_out) {
-    return start_microphone_request(g_microphone_device_id.c_str(), error_out);
+    try {
+        return start_microphone_request(g_microphone_device_id.c_str(), error_out);
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+
 }
 
 extern "C" int lib_dspeak_media_stop_microphone_capture(int* error_out) {
-    return stop_microphone_request(error_out);
+    try {
+        return stop_microphone_request(error_out);
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+
 }
 
 extern "C" int lib_dspeak_media_start_camera_capture(int* error_out) {
-    return start_camera_request(nullptr, error_out);
+    try {
+        return start_camera_request(nullptr, error_out);
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+
 }
 
 extern "C" int lib_dspeak_media_stop_camera_capture(int* error_out) {
-    return stop_camera_request(error_out);
+    try {
+        return stop_camera_request(error_out);
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+
 }
 
 extern "C" char* lib_dspeak_media_list_capture_sources(void) {
-    return lib_dspeak_media_platform_capture_list_sources();
+    try {
+        return lib_dspeak_media_platform_capture_list_sources();
+    } catch (...) {
+        return nullptr;
+    }
+
 }
 
 extern "C" int lib_dspeak_media_start_capture(const char* request_json, int* error_out) {
-    return start_capture_request(request_json, error_out);
+    try {
+        return start_capture_request(request_json, error_out);
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+
 }
 
 extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_get_active_video_track(void) {
-    std::lock_guard<std::mutex> lock(g_track_mutex);
+    try {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
     return g_camera_track ? g_camera_track : g_video_track;
+
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_get_active_audio_track(void) {
-    std::lock_guard<std::mutex> lock(g_track_mutex);
+    try {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
     return g_microphone_track ? g_microphone_track : g_audio_track;
+
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_get_video_track(const char* source) {
-    std::lock_guard<std::mutex> lock(g_track_mutex);
+    try {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
     if (source && std::strcmp(source, "camera") == 0) return g_camera_track;
     return g_video_track;
+
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_get_audio_track(const char* source) {
-    std::lock_guard<std::mutex> lock(g_track_mutex);
+    try {
+        std::lock_guard<std::mutex> lock(g_track_mutex);
     if (source && std::strcmp(source, "audio") == 0) return g_microphone_track;
     return g_audio_track;
+
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 extern "C" int lib_dspeak_media_stop_capture(int* error_out) {
-    return stop_capture_request(error_out);
+    try {
+        return stop_capture_request(error_out);
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+
 }
 
 extern "C" int lib_dspeak_media_probe_capture(int timeout_ms, int* error_out) {
@@ -652,7 +928,7 @@ extern "C" int lib_dspeak_media_start_system_audio_capture(int* error_out) {
 }
 
 extern "C" void lib_dspeak_media_stop_system_audio_capture(void) {
-    stop_capture_request(nullptr);
+    stop_capture_request(nullptr, true);
 }
 
 #else

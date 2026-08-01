@@ -12,7 +12,12 @@ const update = await readFile(
 );
 
 test("desktop updater does not query release updates during dev startup", () => {
-  assert.match(update, /if \(!runtimeStore\.isTauri \|\| import\.meta\.dev\)/);
+  assert.match(update, /function isDesktopDevelopment\(\)/);
+  assert.match(update, /localhost.*127\.0\.0\.1.*::1/);
+  assert.match(
+    update,
+    /if \(!runtimeStore\.isTauri \|\| isDesktopDevelopment\(\)\)/,
+  );
 });
 
 test("desktop update prompt can be dismissed after an install error", () => {

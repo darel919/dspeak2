@@ -8,6 +8,9 @@ import {
 } from "../../shared/desktop-capture.js";
 import { NativeMediasoupSfuSession } from "../../shared/native-mediasoup-session.js";
 import { NativeP2pSession } from "../../shared/native-p2p-session.js";
+import { mediaSignalingUrl } from "../../shared/media-signaling-socket.js";
+import { getAudioBitrateBps } from "../../shared/voice-transport.js";
+import { resolveRequestedVideoSettings } from "../../shared/video-settings.js";
 
 const NATIVE_ACTION_POLL_IDLE_MS = 100;
 const NATIVE_ACTION_POLL_ACTIVE_MS = 5;
@@ -142,6 +145,13 @@ function isSourceAwareCaptureRequest(request) {
   );
 }
 
+function channelMediaPolicy(channelsStore, voiceStore) {
+  return (
+    channelsStore?.getChannelById?.(voiceStore?.currentChannelId)
+      ?.mediaPolicy || null
+  );
+}
+
 export class NativeMediaEngine extends MediaEngine {
   constructor({
     browserEngine,
@@ -149,6 +159,12 @@ export class NativeMediaEngine extends MediaEngine {
     tauri,
     nativeConfig = {},
     nativeOnly = false,
+    voiceStore = null,
+    settingsStore = null,
+    channelsStore = null,
+    getAudioBitrate,
+    getAudioStereo,
+    getVideoSettings,
   } = {}) {
     super();
     if (!browserEngine && !nativeOnly) {
@@ -161,17 +177,51 @@ export class NativeMediaEngine extends MediaEngine {
     this.tauri = tauri;
     this.nativeConfig = nativeConfig;
     this.nativeOnly = nativeOnly;
+    this.voiceStore = voiceStore;
+    this.settingsStore = settingsStore;
+    this.channelsStore = channelsStore;
+    this.getAudioBitrate =
+      getAudioBitrate ||
+      ((source) => {
+        const channel = this.channelsStore?.getChannelById?.(
+          this.voiceStore?.currentChannelId,
+        );
+        return getAudioBitrateBps(
+          source,
+          source === "screen-audio"
+            ? channel?.mediaPolicy?.sharedAudioKbps
+            : channel?.mediaPolicy?.microphoneKbps,
+          this.settingsStore?.systemAudioBitrate,
+        );
+      });
+    this.getAudioStereo =
+      getAudioStereo ||
+      ((source) =>
+        source === "screen-audio" ||
+        channelMediaPolicy(this.channelsStore, this.voiceStore)?.hdAudio ===
+          true);
+    this.getVideoSettings =
+      getVideoSettings ||
+      ((source) =>
+        resolveRequestedVideoSettings({
+          policy: channelMediaPolicy(this.channelsStore, this.voiceStore),
+          settings: this.settingsStore || {},
+          source,
+        }));
     this.listeners = new Map();
     this.unlisten = [];
     this.initialized = false;
-    this.activeDesktopCapture = null;
+    this.activeScreenCapture = null;
+    this.activeSystemAudioCapture = null;
     this.nativeActionPump = null;
     this.nativeSession = null;
     this.nativeP2pSession = null;
     this.nativeActionHandler = null;
-    this.nativeCapabilityPollAt = 0;
     this.remoteVideoFeedsRef = shallowRef(new Map());
     this.remoteAudioFeedsRef = shallowRef(new Map());
+    this.nativeProvider = "sfu";
+    this.nativeP2pFailureEpoch = null;
+    this.nativeTopologyKey = null;
   }
 
   async initialize(config = {}) {
@@ -186,16 +236,48 @@ export class NativeMediaEngine extends MediaEngine {
           config: resolvedConfig,
         });
         this._mergeNativeCapabilities(nativeState?.capabilities);
+        const signalingToken = await this._loadSignalingToken(resolvedConfig);
         this.nativeSession = new NativeMediasoupSfuSession({
           invoke: (command, payload) => this._invoke(command, payload),
+          getAudioBitrate: this.getAudioBitrate,
+          getAudioStereo: this.getAudioStereo,
+          getVideoSettings: this.getVideoSettings,
           signalingPath: resolvedConfig.signalingPath,
+          signalingToken,
+          onCurrentlyInChannel: (data) => {
+            const voiceStore = this.voiceStore;
+            if (!voiceStore) return;
+            const inRoom = Array.isArray(data?.inRoom) ? data.inRoom : [];
+            const active = new Set(inRoom.map(String));
+            const authenticatedUser = voiceStore.getAuthenticatedUser?.();
+            if (authenticatedUser?.id) active.add(String(authenticatedUser.id));
+            const profiles = Array.isArray(data?.profiles) ? data.profiles : [];
+            for (const profile of profiles) {
+              voiceStore.upsertUserProfile(profile);
+            }
+            for (const userId of active) {
+              if (!voiceStore.isUserConnected(userId)) {
+                voiceStore.addConnectedUser(userId, { id: userId });
+              }
+            }
+            for (const user of voiceStore.getConnectedUsersArray()) {
+              if (!active.has(String(user.id))) {
+                voiceStore.removeConnectedUser(user.id);
+              }
+            }
+            const participantStates = Array.isArray(data?.participantStates)
+              ? data.participantStates
+              : [];
+            for (const participantState of participantStates) {
+              voiceStore.updateUserVoiceState(
+                participantState.userId,
+                participantState,
+              );
+            }
+          },
           onStateChange: (state) => {
             if (state.topologyState)
-              this.nativeP2pSession
-                ?.applyTopology(state.topologyState)
-                .catch((error) =>
-                  this._emit("error", { source: "native-p2p", error }),
-                );
+              this._handleNativeTopology(state.topologyState).catch(() => {});
             this._emit("state", state);
           },
           onP2pSignal: (data) => this.nativeP2pSession?.handleSignal(data),
@@ -211,6 +293,9 @@ export class NativeMediaEngine extends MediaEngine {
         });
         this.nativeP2pSession = new NativeP2pSession({
           invoke: (command, payload) => this._invoke(command, payload),
+          getAudioBitrate: this.getAudioBitrate,
+          getAudioStereo: this.getAudioStereo,
+          getVideoSettings: this.getVideoSettings,
           sendSignal: (data) =>
             this.nativeSession?.signaling?.send?.({
               type: "p2p-signal",
@@ -221,8 +306,10 @@ export class NativeMediaEngine extends MediaEngine {
           onRemoteTrack: () => this._syncNativeFeeds(),
           onRemoteTrackEnded: () => this._syncNativeFeeds(),
           onStateChange: () => this._emit("state", this.nativeP2pSession),
-          onError: (error) =>
-            this._emit("error", { source: "native-p2p", error }),
+          onError: (error) => {
+            this._reportNativeP2pFailure(error);
+            this._emit("error", { source: "native-p2p", error });
+          },
         });
         this.nativeActionHandler = (action) =>
           this.nativeSession?.handleNativeAction(action);
@@ -300,17 +387,46 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async leaveSession() {
-    const nativeLeave =
-      this.flags.nativeRtc && hasNativeCapability(this.flags)
-        ? this.nativeSession
-            ?.disconnect()
-            .catch(() => this._invoke("media_leave"))
-        : Promise.resolve();
-    const browserLeave = this.nativeOnly
-      ? Promise.resolve()
-      : this.browserEngine.leaveSession();
-    await Promise.allSettled([nativeLeave, browserLeave]);
-    this.activeDesktopCapture = null;
+    // Stop action pump FIRST to prevent polling during teardown
+    this._stopNativeActionPump();
+    // Unbind Tauri events AFTER leaving media session to ensure
+    // session can complete its teardown without callbacks interfering
+    // with the cleanup process
+    try {
+      if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
+        await this._invoke("media_leave").catch(() => {});
+      }
+    } catch {}
+    // Stop microphone capture - media_leave handles this atomically:
+    // it calls stop_microphone_capture AFTER clearing transports, which
+    // avoids a use-after-free where the producer is destroyed while still
+    // referencing the capture track.
+    if (!this.nativeOnly) {
+      await this.browserEngine.leaveSession().catch(() => {});
+    }
+    try {
+      // Stop signaling WebSocket AFTER leaving the media session to ensure
+      // the server receives the leave event before closing the WebSocket
+      this.nativeSession?.signaling?.stop?.();
+    } catch {}
+    await Promise.allSettled(
+      this.unlisten.splice(0).map((unlisten) => unlisten()),
+    );
+    this.nativeSession = null;
+    this.nativeP2pSession = null;
+    this.nativeActionHandler = null;
+    this.nativeReceiveEventHandler = null;
+    this.initialized = false;
+    this.flags.nativeBackendReady = false;
+    this.nativeProvider = "sfu";
+    this.nativeP2pFailureEpoch = null;
+    this.nativeTopologyKey = null;
+    this.activeScreenCapture = null;
+    this.activeSystemAudioCapture = null;
+    this.remoteVideoFeedsRef.value = new Map();
+    this.remoteAudioFeedsRef.value = new Map();
+    triggerRef(this.remoteVideoFeedsRef);
+    triggerRef(this.remoteAudioFeedsRef);
   }
 
   _usesNativeCapture(capability) {
@@ -332,6 +448,8 @@ export class NativeMediaEngine extends MediaEngine {
       const entry = {
         source: "audio",
         track: { kind: "audio" },
+        audioBitrate: this.getAudioBitrate?.("audio"),
+        audioStereo: this.getAudioStereo?.("audio"),
       };
       await this.nativeSession?.addSource(entry);
       await this.nativeP2pSession?.addSource(entry);
@@ -356,6 +474,7 @@ export class NativeMediaEngine extends MediaEngine {
       const entry = {
         source: "camera",
         track: { kind: "video" },
+        videoSettings: this.getVideoSettings?.("camera"),
       };
       await this.nativeSession?.addSource(entry);
       await this.nativeP2pSession?.addSource(entry);
@@ -367,7 +486,13 @@ export class NativeMediaEngine extends MediaEngine {
 
   async startScreenShare(options = {}) {
     const selection = options.captureSelection || null;
+    const combinedAudio = selection?.mode === "both";
     const sourceAware = isSourceAwareCaptureRequest(options);
+    if (options.explicitBrowserFallback && !selection) {
+      if (this.nativeOnly)
+        throw nativeOnlyError("browser screen share fallback");
+      return this.browserEngine.startScreenShare(options);
+    }
     const request = selection
       ? desktopCaptureRequest(selection, {
           operation: "screen-video",
@@ -388,20 +513,65 @@ export class NativeMediaEngine extends MediaEngine {
       return this.browserEngine.startScreenShare(options);
     }
     try {
-      const command = this.activeDesktopCapture
-        ? "media_replace_screen_share"
-        : "media_start_screen_share";
-      const result = await this._invoke(command, { request });
-      this.activeDesktopCapture = selection;
+      if (this.activeScreenCapture) await this.stopScreenShare();
+      if (combinedAudio && this.activeSystemAudioCapture) {
+        await this.stopSystemAudioProduction();
+      }
+      if (options.includeSystemAudio && !combinedAudio) {
+        await this.startSystemAudioProduction({
+          ...options,
+          captureSelection: selection,
+        });
+      }
+      const result = await this._invoke("media_start_screen_share", {
+        request,
+      });
+      this.activeScreenCapture = selection || {};
       const entry = {
         source: "screen",
         track: { kind: "video" },
-        captureSelection: selection,
+        captureSelection: request.captureSelection || selection,
+        videoSettings: this.getVideoSettings?.("screen"),
       };
       await this.nativeSession?.addSource(entry);
       await this.nativeP2pSession?.addSource(entry);
+      if (combinedAudio) {
+        this.activeSystemAudioCapture = {
+          ...(request.captureSelection || selection),
+          combinedWithScreen: true,
+        };
+        const audioEntry = {
+          source: "screen-audio",
+          track: { kind: "audio" },
+          captureSelection: request.captureSelection || selection,
+          audioBitrate: this.getAudioBitrate?.("screen-audio"),
+          audioStereo: this.getAudioStereo?.("screen-audio"),
+        };
+        await this.nativeSession?.addSource(audioEntry);
+        await this.nativeP2pSession?.addSource(audioEntry);
+      }
       return result;
     } catch (error) {
+      if (
+        options.includeSystemAudio &&
+        !combinedAudio &&
+        this.activeSystemAudioCapture
+      ) {
+        await this.stopSystemAudioProduction().catch(() => {});
+      }
+      if (combinedAudio) {
+        await this._invoke("media_stop_screen_share", {
+          source: selection?.source || null,
+        }).catch(() => {});
+        this.activeScreenCapture = null;
+        this.activeSystemAudioCapture = null;
+        this.nativeSession?.removeSource("screen");
+        this.nativeSession?.removeSource("screen-audio");
+        await this.nativeP2pSession?.removeSource("screen").catch(() => {});
+        await this.nativeP2pSession
+          ?.removeSource("screen-audio")
+          .catch(() => {});
+      }
       this.flags.nativeScreenShare = false;
       const failure = nativeCaptureFailure(error, {
         operation: "screen-video",
@@ -423,23 +593,38 @@ export class NativeMediaEngine extends MediaEngine {
       if (this.nativeOnly) throw nativeOnlyError("stop screen share");
       return this.browserEngine.stopScreenShare();
     }
+    let failure = null;
     try {
       await this._invoke("media_stop_screen_share", {
-        source: this.activeDesktopCapture?.source || null,
+        source: this.activeScreenCapture?.source || null,
       });
     } catch (error) {
-      if (this.nativeOnly) throw error;
-      await this.browserEngine.stopScreenShare();
-      this._emit("error", {
-        source: "native",
-        operation: "screen-stop",
-        error: nativeCaptureFailure(error, { operation: "screen-stop" }),
-      });
+      failure = error;
+      if (!this.nativeOnly) {
+        await this.browserEngine.stopScreenShare().catch(() => {});
+        this._emit("error", {
+          source: "native",
+          operation: "screen-stop",
+          error: nativeCaptureFailure(error, { operation: "screen-stop" }),
+        });
+      }
     } finally {
-      this.activeDesktopCapture = null;
+      this.activeScreenCapture = null;
       this.nativeSession?.removeSource("screen");
       await this.nativeP2pSession?.removeSource("screen");
     }
+    try {
+      if (this.activeSystemAudioCapture?.combinedWithScreen) {
+        this.activeSystemAudioCapture = null;
+        this.nativeSession?.removeSource("screen-audio");
+        await this.nativeP2pSession?.removeSource("screen-audio");
+      } else if (this.activeSystemAudioCapture) {
+        await this.stopSystemAudioProduction();
+      }
+    } catch (error) {
+      failure ||= error;
+    }
+    if (failure && this.nativeOnly) throw failure;
   }
 
   async handleSignal(message) {
@@ -558,9 +743,60 @@ export class NativeMediaEngine extends MediaEngine {
     };
   }
 
+  async _handleNativeTopology(topology = {}) {
+    if (!this.nativeP2pSession) return;
+    const mode = String(topology.mode || "idle");
+    const target = String(topology.target || "");
+    const topologyKey = `${mode}:${topology.epoch}:${target}:${topology.sourceRevision}`;
+    if (this.nativeTopologyKey === topologyKey) return;
+    this.nativeTopologyKey = topologyKey;
+    const direct = mode === "probing" || mode === "p2p" || target === "p2p";
+    const p2pTopology = {
+      ...topology,
+      mode: mode === "switching" && target === "p2p" ? "p2p" : mode,
+    };
+    try {
+      await this.nativeP2pSession.applyTopology(p2pTopology);
+      if (mode === "p2p") this.nativeProvider = "p2p";
+      if (mode === "sfu" || mode === "idle") this.nativeProvider = "sfu";
+      this._syncNativeFeeds();
+      if (mode === "switching" && (target === "p2p" || target === "sfu")) {
+        this.nativeSession?.signaling?.send?.({
+          type: "topology-ready",
+          data: {
+            epoch: topology.epoch,
+            target,
+            sourceRevision: topology.sourceRevision,
+          },
+        });
+      }
+    } catch (error) {
+      if (direct) this._reportNativeP2pFailure(error);
+      this._emit("error", { source: "native-p2p", error });
+      throw error;
+    }
+  }
+
+  _reportNativeP2pFailure(error) {
+    const topology = this.nativeSession?.topologyState;
+    const mode = String(topology?.mode || "");
+    const target = String(topology?.target || "");
+    if (!(mode === "probing" || mode === "p2p" || target === "p2p")) return;
+    const epoch = Number(topology?.epoch);
+    if (!Number.isFinite(epoch) || this.nativeP2pFailureEpoch === epoch) return;
+    this.nativeP2pFailureEpoch = epoch;
+    this.nativeSession?.signaling?.send?.({
+      type: "p2p-failed",
+      data: {
+        epoch,
+        reason: `native-direct-path-${error?.message || "failed"}`,
+      },
+    });
+  }
+
   async setTopology(topology) {
     if (!this.flags.nativeRtc || !hasNativeCapability(this.flags)) return;
-    await this.nativeP2pSession?.applyTopology(topology);
+    await this._handleNativeTopology(topology);
     await this._invoke("media_set_topology", { topology }).catch(() => {});
   }
 
@@ -600,7 +836,8 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get error() {
-    return (this.nativeSession || this.browserEngine).error;
+    const session = this.nativeSession || this.browserEngine;
+    return session.errorMessage ?? session.error ?? null;
   }
 
   get transportReady() {
@@ -716,7 +953,9 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get activeProvider() {
-    return (this.nativeSession || this.browserEngine).activeProvider;
+    return this.nativeSession
+      ? this.nativeProvider
+      : this.browserEngine.activeProvider;
   }
 
   get lastSentClientRtpCapabilities() {
@@ -735,6 +974,7 @@ export class NativeMediaEngine extends MediaEngine {
       await this.initialize();
       const input = { channelId: args[0] };
       if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
+        await this._configureNativeIceServers();
         phase = "native-connect";
         await this.nativeSession?.connect(input.channelId);
       } else if (this.nativeOnly) {
@@ -777,7 +1017,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   startAudioProduction(...args) {
-    if (canAttemptNativeCapture(this.flags)) {
+    if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return this.setMicrophoneEnabled(true);
     }
     if (this.nativeOnly) throw nativeOnlyError("microphone production");
@@ -785,7 +1025,7 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   stopAudioProduction(...args) {
-    if (canAttemptNativeCapture(this.flags)) {
+    if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return this.setMicrophoneEnabled(false);
     }
     if (this.nativeOnly) throw nativeOnlyError("microphone production stop");
@@ -820,6 +1060,13 @@ export class NativeMediaEngine extends MediaEngine {
   startSystemAudioProduction(...args) {
     const options = args[0] || {};
     const selection = options.captureSelection || null;
+    if (this.activeScreenCapture?.mode === "both")
+      return Promise.resolve(this.activeSystemAudioCapture);
+    if (options.explicitBrowserFallback && !selection) {
+      if (this.nativeOnly)
+        throw nativeOnlyError("browser system audio fallback");
+      return this.browserEngine.startSystemAudioProduction(...args);
+    }
     const request = selection
       ? desktopCaptureRequest(selection, {
           operation: "system-audio",
@@ -841,19 +1088,23 @@ export class NativeMediaEngine extends MediaEngine {
         );
       return this.browserEngine.startSystemAudioProduction(...args);
     }
-    const command = this.activeDesktopCapture
-      ? "media_replace_system_audio"
-      : "media_start_system_audio";
-    return this._invoke(command, { request })
-      .then((result) => {
-        this.activeDesktopCapture = selection;
-        return this.nativeSession
-          ?.addSource({
-            source: "screen-audio",
-            track: { kind: "audio" },
-            captureSelection: selection,
-          })
-          .then(() => result);
+    const replaceActiveCapture = this.activeSystemAudioCapture
+      ? this.stopSystemAudioProduction()
+      : Promise.resolve();
+    return replaceActiveCapture
+      .then(() => this._invoke("media_start_system_audio", { request }))
+      .then(async (result) => {
+        this.activeSystemAudioCapture = selection || {};
+        const entry = {
+          source: "screen-audio",
+          track: { kind: "audio" },
+          captureSelection: request.captureSelection || selection,
+          audioBitrate: this.getAudioBitrate?.("screen-audio"),
+          audioStereo: this.getAudioStereo?.("screen-audio"),
+        };
+        await this.nativeSession?.addSource(entry);
+        await this.nativeP2pSession?.addSource(entry);
+        return result;
       })
       .catch((error) => {
         this.flags.nativeScreenAudio = false;
@@ -875,7 +1126,7 @@ export class NativeMediaEngine extends MediaEngine {
   stopSystemAudioProduction(...args) {
     if (this._usesNativeCapture("nativeScreenAudio")) {
       return this._invoke("media_stop_system_audio", {
-        source: this.activeDesktopCapture?.source || null,
+        source: this.activeSystemAudioCapture?.source || null,
       })
         .catch((error) => {
           if (this.nativeOnly) throw error;
@@ -892,7 +1143,7 @@ export class NativeMediaEngine extends MediaEngine {
             );
         })
         .finally(() => {
-          this.activeDesktopCapture = null;
+          this.activeSystemAudioCapture = null;
           this.nativeSession?.removeSource("screen-audio");
           this.nativeP2pSession?.removeSource("screen-audio");
         });
@@ -902,28 +1153,55 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   setRemoteScreenReceiving(...args) {
-    if (this.nativeOnly) return this.nativeSession?.setRemoteReceiving(...args);
+    if (this.nativeOnly)
+      return this.nativeProvider === "p2p"
+        ? this.nativeP2pSession?.setRemoteReceiving(...args)
+        : this.nativeSession?.setRemoteReceiving(...args);
     return this.browserEngine.setRemoteScreenReceiving(...args);
   }
 
   setRemoteSystemAudioReceiving(...args) {
-    if (this.nativeOnly) return this.nativeSession?.setRemoteReceiving(...args);
+    if (this.nativeOnly)
+      return this.nativeProvider === "p2p"
+        ? this.nativeP2pSession?.setRemoteReceiving(...args)
+        : this.nativeSession?.setRemoteReceiving(...args);
     return this.browserEngine.setRemoteSystemAudioReceiving(...args);
   }
 
   setSharedAudioVolume(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("shared audio volume");
+    const normalized = Math.max(0, Math.min(100, Number(args[0]))) > 0;
+    if (this.nativeOnly) {
+      return Promise.allSettled([
+        this.nativeSession?.setSourceTransmission("screen-audio", normalized),
+        this.nativeP2pSession?.setSourceTransmission(
+          "screen-audio",
+          normalized,
+        ),
+      ]);
+    }
     return this.browserEngine.setSharedAudioVolume(...args);
   }
 
   setSystemAudioBitrate(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("system audio bitrate");
+    if (this.nativeOnly) {
+      const bitrate = Number(args[0]);
+      return Promise.allSettled([
+        this.nativeSession?.updateAudioBitrate("screen-audio", bitrate),
+        this.nativeP2pSession?.updateAudioBitrate("screen-audio", bitrate),
+      ]);
+    }
     return this.browserEngine.setSystemAudioBitrate(...args);
   }
 
   sendParticipantVoiceState(...args) {
-    if (this.nativeOnly)
-      return this.nativeSession?.sendParticipantVoiceState(...args);
+    if (
+      this.flags.nativeRtc &&
+      hasNativeCapability(this.flags) &&
+      this.nativeSession?.sendParticipantVoiceState
+    ) {
+      return this.nativeSession.sendParticipantVoiceState(...args);
+    }
+    if (this.nativeOnly) throw nativeOnlyError("participant voice state");
     return this.browserEngine.sendParticipantVoiceState(...args);
   }
 
@@ -949,7 +1227,10 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   ensureAudioElements(...args) {
-    if (this.nativeOnly) return Promise.resolve();
+    if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
+      return Promise.resolve();
+    }
+    if (this.nativeOnly) throw nativeOnlyError("audio elements");
     return this.browserEngine.ensureAudioElements(...args);
   }
 
@@ -1058,24 +1339,79 @@ export class NativeMediaEngine extends MediaEngine {
     return tauri.invoke(command, payload);
   }
 
+  async _configureNativeIceServers() {
+    const config = this.nativeConfig || {};
+    const configuredPath = String(config.apiPath || "/api").replace(/\/$/, "");
+    const serverUrl = String(config.serverUrl || "").replace(/\/$/, "");
+    const endpoint = /^https?:\/\//.test(configuredPath)
+      ? `${configuredPath}/config`
+      : `${serverUrl}${configuredPath}/config` || "/api/config";
+    if (!endpoint) return;
+    try {
+      const response = await fetch(endpoint, { credentials: "include" });
+      if (!response.ok) return;
+      const iceServers = await response.json();
+      if (Array.isArray(iceServers)) await this.setIceServers(iceServers);
+    } catch {}
+  }
+
+  async _loadSignalingToken(config) {
+    const server = String(config?.serverUrl || "").replace(/\/$/, "");
+    if (!server) return "";
+    try {
+      const tauri = await this._getTauri();
+      return (
+        (await tauri.invoke("get_credential", {
+          server,
+          key: "session_token",
+        })) || ""
+      );
+    } catch {
+      return "";
+    }
+  }
+
   _syncNativeFeeds() {
     if (!this.nativeSession) return;
-    this.remoteVideoFeedsRef.value = new Map([
-      ...this.nativeSession.remoteVideoFeeds,
-      ...(this.nativeP2pSession?.trackEntries
-        ? [...this.nativeP2pSession.trackEntries.values()]
-            .filter((entry) => entry.kind === "video" && !entry.closed)
-            .map((entry) => [entry.key, entry])
-        : []),
-    ]);
-    this.remoteAudioFeedsRef.value = new Map([
-      ...this.nativeSession.remoteAudioFeeds,
-      ...(this.nativeP2pSession?.trackEntries
-        ? [...this.nativeP2pSession.trackEntries.values()]
-            .filter((entry) => entry.kind === "audio" && !entry.closed)
-            .map((entry) => [entry.key, entry])
-        : []),
-    ]);
+    const nativeVideoFeeds = [...this.nativeSession.remoteVideoFeeds];
+    const nativeAudioFeeds = [...this.nativeSession.remoteAudioFeeds];
+    const p2pVideoFeeds =
+      this.nativeProvider === "p2p"
+        ? [...(this.nativeP2pSession?.trackEntries?.values() || [])].filter(
+            (entry) => entry.kind === "video" && !entry.closed,
+          )
+        : [];
+    const p2pAudioFeeds =
+      this.nativeProvider === "p2p"
+        ? [...(this.nativeP2pSession?.trackEntries?.values() || [])].filter(
+            (entry) => entry.kind === "audio" && !entry.closed,
+          )
+        : [];
+    const mergeFeeds = (nativeFeeds, p2pFeeds) => {
+      const merged = new Map();
+      for (const [key, entry] of nativeFeeds) {
+        merged.set(`${String(entry.userId)}:${String(entry.source)}`, [
+          key,
+          entry,
+        ]);
+      }
+      for (const entry of p2pFeeds) {
+        const logicalKey = `${String(entry.userId)}:${String(entry.source)}`;
+        const current = merged.get(logicalKey)?.[1];
+        if (current?.kind === "video" && current.frame && !entry.frame)
+          continue;
+        merged.set(logicalKey, [entry.key, entry]);
+      }
+      return new Map(merged.values());
+    };
+    this.remoteVideoFeedsRef.value = mergeFeeds(
+      nativeVideoFeeds,
+      p2pVideoFeeds,
+    );
+    this.remoteAudioFeedsRef.value = mergeFeeds(
+      nativeAudioFeeds,
+      p2pAudioFeeds,
+    );
     triggerRef(this.remoteVideoFeedsRef);
     triggerRef(this.remoteAudioFeedsRef);
   }
@@ -1091,15 +1427,11 @@ export class NativeMediaEngine extends MediaEngine {
     const pump = async () => {
       if (stopped || !this.initialized) return;
       let active = false;
+      let action = null;
       try {
-        const action = await this._invoke("media_poll_action");
+        action = await this._invoke("media_poll_action");
         active = Boolean(action?.kind || action?.state);
-        if (
-          action?.kind === 1 ||
-          action?.kind === 2 ||
-          action?.kind === 3 ||
-          action?.kind === 4
-        ) {
+        if (action?.kind || action?.state) {
           let params = null;
           if (typeof action.paramsJson === "string") {
             try {
@@ -1112,6 +1444,12 @@ export class NativeMediaEngine extends MediaEngine {
               });
             }
           }
+          let state = action.state;
+          if (typeof state === "string") {
+            try {
+              state = JSON.parse(state);
+            } catch {}
+          }
           const nativeAction = {
             ...action,
             type:
@@ -1119,16 +1457,20 @@ export class NativeMediaEngine extends MediaEngine {
                 ? "transport-connect"
                 : action.kind === 2
                   ? "produce"
-                  : "consumer-event",
+                  : action.kind === 3 || action.kind === 4
+                    ? "consumer-event"
+                    : "transport-state",
             params,
+            state,
           };
           this._emit("native-action", nativeAction);
           await this.nativeActionHandler?.(nativeAction);
-        } else if (action?.state) {
-          this._emit("ice-state", {
-            transportPtr: action.transportPtr,
-            state: action.state,
-          });
+          if (state) {
+            this._emit("ice-state", {
+              transportPtr: action.transportPtr,
+              state,
+            });
+          }
         }
         const receiveEvent = await this._invoke("media_poll_receive_event");
         active = active || Boolean(receiveEvent?.kind);
@@ -1137,12 +1479,6 @@ export class NativeMediaEngine extends MediaEngine {
           this._syncNativeFeeds();
           this._emit("native-receive-event", receiveEvent);
         }
-        if (Date.now() >= this.nativeCapabilityPollAt) {
-          this.nativeCapabilityPollAt = Date.now() + 500;
-          this._mergeNativeCapabilities(
-            await this._invoke("media_get_capabilities"),
-          );
-        }
       } catch (error) {
         if (!stopped) {
           this._emit("error", {
@@ -1150,6 +1486,17 @@ export class NativeMediaEngine extends MediaEngine {
             operation: "action-pump",
             error,
           });
+          if (action?.kind === 1) {
+            await this._invoke("media_fail_connect", {
+              transportPtr: action.transportPtr,
+              error: error?.message || "Native transport connection failed",
+            }).catch(() => {});
+          } else if (action?.kind === 2) {
+            await this._invoke("media_fail_produce", {
+              actionId: action.actionId,
+              error: error?.message || "Native producer creation failed",
+            }).catch(() => {});
+          }
         }
       }
       if (!stopped)

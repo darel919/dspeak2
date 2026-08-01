@@ -401,7 +401,10 @@
             </div>
 
             <!-- Fallback vertical list when not connected but server has inRoom info -->
-            <div v-else-if="channel.inRoom?.length" class="pl-8 pr-2 pb-2">
+            <div
+              v-else-if="getChannelParticipants(channel).length"
+              class="pl-8 pr-2 pb-2"
+            >
               <div class="flex flex-col gap-1 text-sm text-base-content/60">
                 <template
                   v-for="u in getChannelParticipants(channel)"
@@ -1005,10 +1008,13 @@ function getUserInitials(userId) {
     .slice(0, 2);
 }
 function getChannelParticipants(channel) {
-  return (channel.inRoom || []).map((userId) => ({
-    id: String(userId),
-    ...(channel.participantStates?.[String(userId)] || {}),
-  }));
+  const currentUserId = String(authStore.getUserData()?.id || "");
+  return (channel.inRoom || [])
+    .filter((userId) => String(userId) !== currentUserId)
+    .map((userId) => ({
+      id: String(userId),
+      ...(channel.participantStates?.[String(userId)] || {}),
+    }));
 }
 function getParticipantMediaStatusLabel(user) {
   const statuses = [];
