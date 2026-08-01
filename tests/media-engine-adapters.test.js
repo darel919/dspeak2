@@ -204,6 +204,82 @@ describe("MediaEngine adapters", () => {
     assert.deepEqual(calls, ["media_set_microphone"]);
   });
 
+  it("publishes native local video feeds through a reactive ref", () => {
+    const engine = new NativeMediaEngine({
+      flags: { nativeRtc: true },
+      nativeOnly: true,
+    });
+    engine.nativeSession = {
+      localVideoFeeds: new Map([
+        ["camera", { source: "camera", native: true, frame: null }],
+      ]),
+    };
+
+    engine._syncLocalFeeds();
+
+    assert.equal(engine.localVideoFeeds.value.get("camera").source, "camera");
+    assert.notEqual(
+      engine.localVideoFeeds.value,
+      engine.nativeSession.localVideoFeeds,
+    );
+  });
+
+  it("rebuilds native local video feeds from active sources", () => {
+    const engine = new NativeMediaEngine({
+      flags: { nativeRtc: true },
+      nativeOnly: true,
+    });
+    engine.nativeSession = {
+      localVideoFeeds: new Map(),
+      sources: new Map([["camera", { source: "camera", kind: "video" }]]),
+    };
+
+    engine._syncLocalFeeds();
+
+    assert.deepEqual(engine.localVideoFeeds.value.get("camera"), {
+      source: "camera",
+      producerId: "local:camera",
+      native: true,
+      frame: null,
+    });
+  });
+
+  it("detaches native microphone and camera tracks before stopping capture", async () => {
+    const calls = [];
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeMicrophone: true,
+        nativeCamera: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => calls.push(command),
+      },
+    });
+    engine.nativeSession = {
+      addSource: async () => {},
+      removeSource: async (source) => calls.push(["sfu-remove", source]),
+    };
+    engine.nativeP2pSession = {
+      addSource: async () => {},
+      removeSource: async (source) => calls.push(["p2p-remove", source]),
+    };
+
+    await engine.setMicrophoneEnabled(false);
+    await engine.setCameraEnabled(false);
+
+    assert.deepEqual(calls, [
+      ["sfu-remove", "audio"],
+      ["p2p-remove", "audio"],
+      "media_set_microphone",
+      ["sfu-remove", "camera"],
+      ["p2p-remove", "camera"],
+      "media_set_camera",
+    ]);
+  });
+
   it("NativeMediaEngine keeps screen video and system audio in parity", async () => {
     const calls = [];
     const nativeSession = {
@@ -250,12 +326,12 @@ describe("MediaEngine adapters", () => {
       "media_start_screen_share",
       ["sfu-add", "screen"],
       ["p2p-add", "screen"],
-      "media_stop_screen_share",
       ["sfu-remove", "screen"],
       ["p2p-remove", "screen"],
-      "media_stop_system_audio",
+      "media_stop_screen_share",
       ["sfu-remove", "screen-audio"],
       ["p2p-remove", "screen-audio"],
+      "media_stop_system_audio",
     ]);
   });
 
@@ -318,11 +394,11 @@ describe("MediaEngine adapters", () => {
       ["p2p-add", "screen"],
       ["sfu-add", "screen-audio"],
       ["p2p-add", "screen-audio"],
-      "media_stop_screen_share",
       ["sfu-remove", "screen"],
       ["p2p-remove", "screen"],
       ["sfu-remove", "screen-audio"],
       ["p2p-remove", "screen-audio"],
+      "media_stop_screen_share",
     ]);
   });
 

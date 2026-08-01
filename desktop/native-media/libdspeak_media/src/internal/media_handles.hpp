@@ -61,7 +61,10 @@ public:
     }
 
     void OnCapturedFrame(CVPixelBufferRef pixel_buffer, int64_t timestamp_ms) {
+        const bool camera = track_id_.find("camera") != std::string::npos;
         webrtc::VideoFrame frame = ConvertPixelBuffer(pixel_buffer, timestamp_ms);
+        const char* source = camera ? "camera" : "screen";
+        lib_dspeak_media_push_local_video_frame(source, frame);
         OnFrame(frame);
     }
 
@@ -95,7 +98,7 @@ private:
             webrtc::I420Buffer::Create(width, height);
 
         if (base_addr) {
-            libyuv::BGRAToI420(
+            libyuv::ARGBToI420(
                 static_cast<const uint8_t*>(base_addr),
                 bytes_per_row,
                 i420_buffer->MutableDataY(), i420_buffer->StrideY(),

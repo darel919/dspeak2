@@ -109,6 +109,77 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(calls[2][1].appData.encodings[0].maxFramerate, 60);
   });
 
+  it("attaches native local video frames to the camera feed", async () => {
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        if (command === "media_create_capture_producer")
+          return { id: `producer-${payload.source}` };
+        return undefined;
+      },
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport", handle: 21 };
+
+    await session.addSource({ source: "camera", track: { kind: "video" } });
+
+    assert.equal(
+      session.handleReceiveEvent({
+        kind: 5,
+        eventId: 12,
+        id: "camera",
+        payload: {
+          source: "camera",
+          width: 640,
+          height: 360,
+          pixelFormat: "rgba",
+        },
+        data: new Uint8Array([1, 2, 3, 4]),
+      }),
+      true,
+    );
+    assert.deepEqual(session.localVideoFeeds.get("camera").frame, {
+      source: "camera",
+      width: 640,
+      height: 360,
+      pixelFormat: "rgba",
+      data: new Uint8Array([1, 2, 3, 4]),
+      eventId: 12,
+    });
+  });
+
+  it("recreates a native local video feed if transport state cleared its map", async () => {
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        if (command === "media_create_capture_producer")
+          return { id: `producer-${payload.source}` };
+        return undefined;
+      },
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport", handle: 21 };
+
+    await session.addSource({ source: "camera", track: { kind: "video" } });
+    session.localVideoFeeds.clear();
+
+    assert.equal(
+      session.handleReceiveEvent({
+        kind: 5,
+        eventId: 13,
+        id: "camera",
+        payload: {
+          source: "camera",
+          width: 640,
+          height: 360,
+          pixelFormat: "rgba",
+        },
+        data: new Uint8Array([1, 2, 3, 4]),
+      }),
+      true,
+    );
+    assert.equal(session.localVideoFeeds.get("camera").native, true);
+    assert.equal(session.localVideoFeeds.get("camera").frame.eventId, 13);
+  });
+
   it("uses the shared audio and screen video producer policy", async () => {
     const calls = [];
     const session = new NativeMediasoupSfuSession({
@@ -138,6 +209,43 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(calls[1][1].appData.encodings[0].maxFramerate, 30);
     assert.equal(
       calls[1][1].appData.degradationPreference,
+      "maintain-resolution",
+    );
+  });
+
+  it("uses the selected native capture dimensions and cadence", async () => {
+    const calls = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        return { id: "producer-screen" };
+      },
+      getVideoSettings: () => ({
+        resolution: "720p",
+        frameRate: 30,
+        qualityPriority: "resolution",
+        maxBitrate: 2400000,
+      }),
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport", handle: 21 };
+
+    await session.addSource({
+      source: "screen",
+      track: { kind: "video" },
+      captureSelection: {
+        bounds: { width: 2560, height: 1440 },
+        video: { resolution: "original", frameRate: 60 },
+      },
+    });
+
+    assert.equal(calls[0][1].appData.encodings[0].maxFramerate, 60);
+    assert.equal(
+      calls[0][1].appData.encodings[0].scaleResolutionDownBy,
+      1.3333333333333333,
+    );
+    assert.equal(
+      calls[0][1].appData.degradationPreference,
       "maintain-resolution",
     );
   });
@@ -498,9 +606,6 @@ describe("NativeMediasoupSfuSession", () => {
         eventId: 9,
         id: "consumer-native",
         payload: {
-          consumerId: "consumer-native",
-          producerId: "producer-remote",
-          kind: "video",
           width: 2,
           height: 1,
         },

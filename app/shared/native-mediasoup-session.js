@@ -6,6 +6,7 @@ import {
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.js";
 import {
   buildVideoProduceOptions,
+  resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "./video-settings.js";
 
@@ -83,7 +84,10 @@ function nativeProducerAppData(entry, kind) {
     };
     return appData;
   }
-  const video = entry.videoSettings || entry.captureSelection?.video || {};
+  const video = resolveNativeCaptureVideoSettings(
+    entry.captureSelection,
+    entry.videoSettings || {},
+  );
   const resolution = VIDEO_RESOLUTIONS[video.resolution];
   const options = buildVideoProduceOptions({
     width: video.width || resolution?.width || 1920,
@@ -454,20 +458,60 @@ export class NativeMediasoupSfuSession {
       throw new Error("A native source identifier is required");
     const normalized = {
       ...entry,
+      kind:
+        entry.kind ||
+        (entry.source === "camera" || entry.source === "screen"
+          ? "video"
+          : "audio"),
       audioBitrate: entry.audioBitrate ?? this.getAudioBitrate?.(entry.source),
       audioStereo: entry.audioStereo ?? this.getAudioStereo?.(entry.source),
       videoSettings:
         entry.videoSettings || this.getVideoSettings?.(entry.source) || null,
     };
     this.sources.set(entry.source, normalized);
-    if (!this.sendTransport) return null;
-    return this._publishSource(normalized);
+    if (
+      normalized.kind === "video" &&
+      !this.localVideoFeeds.has(normalized.source)
+    ) {
+      this.localVideoFeeds.set(normalized.source, {
+        source: normalized.source,
+        producerId: `local:${normalized.source}`,
+        native: true,
+        frame: null,
+      });
+    }
+    if (!this.sendTransport) {
+      this._emitState();
+      return null;
+    }
+    const producer = await this._publishSource(normalized);
+    if (normalized.kind === "video") {
+      this.localVideoFeeds.set(normalized.source, {
+        source: normalized.source,
+        producerId: producer?.id || `local:${normalized.source}`,
+        native: true,
+        frame: null,
+      });
+    }
+    this._emitState();
+    return producer;
   }
 
   async _republishSources() {
     for (const entry of this.sources.values()) {
-      if (!this.producers.has(entry.source)) await this._publishSource(entry);
+      if (!this.producers.has(entry.source)) {
+        const producer = await this._publishSource(entry);
+        if (entry.kind === "video") {
+          this.localVideoFeeds.set(entry.source, {
+            source: entry.source,
+            producerId: producer?.id || `local:${entry.source}`,
+            native: true,
+            frame: null,
+          });
+        }
+      }
     }
+    this._emitState();
   }
 
   async _publishSource(entry) {
@@ -515,6 +559,7 @@ export class NativeMediasoupSfuSession {
   removeSource(source) {
     const entry = this.sources.get(source);
     this.sources.delete(source);
+    this.localVideoFeeds.delete(source);
     const producer = this.producers.get(source);
     if (producer) {
       this.producers.delete(source);
@@ -534,7 +579,7 @@ export class NativeMediasoupSfuSession {
     }
     this._sendSourceState();
     this._emitState();
-    return entry || null;
+    return this.producerRemovals.get(source) || Promise.resolve(entry || null);
   }
 
   async setSourceTransmission(source, enabled) {
@@ -796,16 +841,6 @@ export class NativeMediasoupSfuSession {
     return true;
   }
 
-  sendParticipantVoiceState(state = {}) {
-    return this.signaling?.send({
-      type: "participant-voice-state",
-      data: {
-        muted: Boolean(state.muted),
-        deafened: Boolean(state.deafened),
-      },
-    });
-  }
-
   _resolveConsumerControl(data, receiving) {
     const entry = this.consumers.get(data.consumerId);
     if (!entry) {
@@ -955,6 +990,30 @@ export class NativeMediasoupSfuSession {
 
   handleReceiveEvent(event) {
     const payload = event?.payload || {};
+    if (event?.kind === 5) {
+      const source = String(payload.source || event.id || "");
+      let feed = this.localVideoFeeds.get(source);
+      if (!feed && this.sources.get(source)?.kind === "video") {
+        feed = {
+          source,
+          producerId: `local:${source}`,
+          native: true,
+          frame: null,
+        };
+        this.localVideoFeeds.set(source, feed);
+      }
+      if (!feed || !event.data) return false;
+      this.localVideoFeeds.set(source, {
+        ...feed,
+        frame: {
+          ...payload,
+          data: event.data,
+          eventId: event.eventId,
+        },
+      });
+      this._emitState();
+      return true;
+    }
     const consumerId = event?.id || payload.consumerId;
     const entry = this.consumers.get(consumerId);
     if (!receiveEventMatches(entry, { ...payload, consumerId })) return false;
@@ -1076,6 +1135,7 @@ export class NativeMediasoupSfuSession {
     this.consumers.clear();
     this.remoteAudioFeeds.clear();
     this.remoteVideoFeeds.clear();
+    this.localVideoFeeds.clear();
     this.remoteReceiving.clear();
     this.producers.clear();
     this.requestedConsumers.clear();

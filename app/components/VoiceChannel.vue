@@ -730,6 +730,7 @@
 </template>
 
 <script setup>
+import { storeToRefs } from "pinia";
 import { useVoiceStore } from "~/stores/voice";
 import { useAuthStore } from "~/stores/auth";
 import { useSettingsStore } from "~/stores/settings";
@@ -746,6 +747,12 @@ const props = defineProps({
 });
 
 const voiceStore = useVoiceStore();
+const {
+  sfuComposable: mediaSessionRef,
+  localVideoFeeds: localVideoFeedsRef,
+  remoteVideoFeeds: remoteVideoFeedsRef,
+  remoteAudioFeeds: remoteAudioFeedsRef,
+} = storeToRefs(voiceStore);
 const authStore = useAuthStore();
 const identityStore = useIdentityStore();
 const channelsStore = useChannelsStore();
@@ -771,33 +778,46 @@ let tileFocusTimer = null;
 const connectedUsers = computed(() => {
   return voiceStore.getDisplayUsersArray();
 });
+const mediaFeedRevision = ref(0);
+watch(
+  () => mediaSessionRef.value,
+  (session, _, onCleanup) => {
+    mediaFeedRevision.value += 1;
+    const unsubscribe = session?.on?.("state", () => {
+      mediaFeedRevision.value += 1;
+    });
+    onCleanup(() => unsubscribe?.());
+  },
+  { immediate: true },
+);
 const videoFeeds = computed(() => {
+  mediaFeedRevision.value;
   const currentUser = authStore.getUserData?.();
   const currentUserId = currentUser?.id;
-  const local = Array.from(voiceStore.localVideoFeeds).map(
-    ([source, feed]) => ({
+  const sessionLocalFeeds = unref(mediaSessionRef.value?.localVideoFeeds);
+  const localFeeds = sessionLocalFeeds || localVideoFeedsRef.value;
+  const sessionRemoteFeeds = unref(mediaSessionRef.value?.remoteVideoFeeds);
+  const remoteFeeds = sessionRemoteFeeds || remoteVideoFeedsRef.value;
+  const local = Array.from(localFeeds).map(([source, feed]) => ({
+    ...feed,
+    source,
+    key: `local-${source}`,
+    userId: currentUserId ? String(currentUserId) : "local",
+    local: true,
+    label: "You",
+    avatar: userAvatarSource(currentUser || { id: currentUserId }),
+  }));
+  const remote = Array.from(remoteFeeds).map(([producerId, feed]) => {
+    const user = voiceStore.getUserById(feed.userId) || { id: feed.userId };
+    return {
       ...feed,
-      source,
-      key: `local-${source}`,
-      userId: currentUserId ? String(currentUserId) : "local",
-      local: true,
-      label: "You",
-      avatar: userAvatarSource(currentUser || { id: currentUserId }),
-    }),
-  );
-  const remote = Array.from(voiceStore.remoteVideoFeeds).map(
-    ([producerId, feed]) => {
-      const user = voiceStore.getUserById(feed.userId) || { id: feed.userId };
-      return {
-        ...feed,
-        source: feed.source,
-        key: producerId,
-        local: false,
-        label: getUserDisplayName(user),
-        avatar: userAvatarSource(user),
-      };
-    },
-  );
+      source: feed.source,
+      key: producerId,
+      local: false,
+      label: getUserDisplayName(user),
+      avatar: userAvatarSource(user),
+    };
+  });
   return [...local, ...remote].sort(
     (a, b) => Number(b.source === "screen") - Number(a.source === "screen"),
   );
@@ -926,11 +946,11 @@ watch(
 );
 const remoteSystemAudioShares = computed(() => {
   const screenOwners = new Set(
-    Array.from(voiceStore.remoteVideoFeeds)
+    Array.from(remoteVideoFeedsRef.value)
       .filter(([, feed]) => feed.source === "screen")
       .map(([, feed]) => String(feed.userId)),
   );
-  return Array.from(voiceStore.remoteAudioFeeds)
+  return Array.from(remoteAudioFeedsRef.value)
     .filter(
       ([, feed]) =>
         feed.source === "screen-audio" &&

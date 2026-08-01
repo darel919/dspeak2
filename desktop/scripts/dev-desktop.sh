@@ -16,4 +16,15 @@ if [[ -z "${NATIVE_MEDIA_ARTIFACT_DIR:-}" ]]; then
   exit 1
 fi
 
+LOCAL_MEDIA_BUILD="$ROOT_DIR/native-media/libdspeak_media/build"
+LOCAL_MEDIA_LIBRARY="$LOCAL_MEDIA_BUILD/libdspeak_media.a"
+ARTIFACT_MEDIA_LIBRARY="$NATIVE_MEDIA_ARTIFACT_DIR/lib/libdspeak_media.a"
+if [[ -f "$LOCAL_MEDIA_LIBRARY" && -f "$ARTIFACT_MEDIA_LIBRARY" ]] && \
+  find "$ROOT_DIR/native-media/libdspeak_media" -type f \
+    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
+    -newer "$ARTIFACT_MEDIA_LIBRARY" -print -quit | grep -q .; then
+  cmake --build "$LOCAL_MEDIA_BUILD" -j2
+  cp "$LOCAL_MEDIA_LIBRARY" "$ARTIFACT_MEDIA_LIBRARY"
+fi
+
 exec npx tauri dev "$@"

@@ -5,6 +5,7 @@
 #include <api/video/i420_buffer.h>
 #include <common_video/libyuv/include/webrtc_libyuv.h>
 #include <third_party/libyuv/include/libyuv/convert_argb.h>
+#include <third_party/libyuv/include/libyuv/scale.h>
 
 #include <algorithm>
 #include <atomic>
@@ -13,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <mutex>
 #include <utility>
 
@@ -38,7 +40,10 @@ std::mutex g_receive_event_mutex;
 std::deque<ReceiveEvent> g_receive_events;
 std::atomic<uint64_t> g_receive_event_id{1};
 std::atomic<bool> g_video_frame_logged{false};
+std::atomic<bool> g_local_video_frame_logged{false};
 constexpr size_t kMaxReceiveEvents = 96;
+constexpr int kLocalPreviewMaxWidth = 640;
+constexpr int kLocalPreviewMaxHeight = 360;
 
 char* duplicate_string(const char* value) {
     if (!value) return nullptr;
@@ -77,9 +82,10 @@ void push_event(lib_dspeak_media_receive_event_kind_t kind,
         event.data_len = data_len;
     }
     std::lock_guard<std::mutex> lock(g_receive_event_mutex);
-    if (kind == 2 && id) {
+    if ((kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME ||
+         kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME) && id) {
         for (auto it = g_receive_events.begin(); it != g_receive_events.end(); ++it) {
-            if (it->kind == 2 && it->id && std::strcmp(it->id, id) == 0) {
+            if (it->kind == kind && it->id && std::strcmp(it->id, id) == 0) {
                 release_event(*it);
                 g_receive_events.erase(it);
                 break;
@@ -352,13 +358,18 @@ void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
     if (!buffer) return;
     const int width = buffer->width();
     const int height = buffer->height();
-    if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return;
-    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
-    if (libyuv::I420ToRGBA(buffer->DataY(), buffer->StrideY(),
+    if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return;
+    const size_t width_size = static_cast<size_t>(width);
+    const size_t height_size = static_cast<size_t>(height);
+    if (width_size > std::numeric_limits<size_t>::max() / height_size / 4)
+        return;
+    std::vector<uint8_t> rgba(width_size * height_size * 4);
+    if (libyuv::I420ToABGR(buffer->DataY(), buffer->StrideY(),
                            buffer->DataU(), buffer->StrideU(),
                            buffer->DataV(), buffer->StrideV(),
                            rgba.data(), width * 4, width, height) != 0) return;
     json payload = {
+        {"consumerId", consumer_id_},
         {"width", width},
         {"height", height},
         {"timestampMs", frame.timestamp_us() / 1000},
@@ -374,6 +385,55 @@ void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
 
 void NativeReceiveVideoSink::SetEnabled(bool enabled) {
     enabled_ = enabled;
+}
+
+extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
+                                                          const webrtc::VideoFrame& frame) {
+    const auto input = frame.video_frame_buffer()->ToI420();
+    if (!input) return;
+    const int input_width = input->width();
+    const int input_height = input->height();
+    if (input_width <= 0 || input_height <= 0) return;
+
+    const double scale = std::min(
+        1.0,
+        std::min(static_cast<double>(kLocalPreviewMaxWidth) / input_width,
+                 static_cast<double>(kLocalPreviewMaxHeight) / input_height));
+    int width = std::max(2, static_cast<int>(input_width * scale) & ~1);
+    int height = std::max(2, static_cast<int>(input_height * scale) & ~1);
+    width = std::min(width, kLocalPreviewMaxWidth);
+    height = std::min(height, kLocalPreviewMaxHeight);
+
+    const auto scaled = webrtc::I420Buffer::Create(width, height);
+    if (libyuv::I420Scale(input->DataY(), input->StrideY(),
+                          input->DataU(), input->StrideU(),
+                          input->DataV(), input->StrideV(),
+                          input_width, input_height,
+                          scaled->MutableDataY(), scaled->StrideY(),
+                          scaled->MutableDataU(), scaled->StrideU(),
+                          scaled->MutableDataV(), scaled->StrideV(),
+                          width, height, libyuv::kFilterBox) != 0)
+        return;
+
+    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
+    if (libyuv::I420ToABGR(scaled->DataY(), scaled->StrideY(),
+                           scaled->DataU(), scaled->StrideU(),
+                           scaled->DataV(), scaled->StrideV(),
+                           rgba.data(), width * 4, width, height) != 0)
+        return;
+    push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME,
+               source,
+               {
+                   {"source", source ? source : ""},
+                   {"width", width},
+                   {"height", height},
+                   {"timestampMs", frame.timestamp_us() / 1000},
+                   {"pixelFormat", "rgba"},
+               },
+               rgba.data(), static_cast<uint32_t>(rgba.size()));
+    if (!g_local_video_frame_logged.exchange(true))
+        std::fprintf(stderr, "[dspeak:media] native local video frame source=%s size=%dx%d\n",
+                     source ? source : "", width, height);
 }
 
 extern "C" void lib_dspeak_media_push_receive_track_event(const char* event_name,

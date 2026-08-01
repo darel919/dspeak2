@@ -172,6 +172,48 @@ export function buildP2pVideoSenderOptions(options = {}) {
   };
 }
 
+export function resolveNativeCaptureVideoSettings(
+  captureSelection = null,
+  requestedSettings = {},
+) {
+  const captureVideo =
+    captureSelection?.video && typeof captureSelection.video === "object"
+      ? captureSelection.video
+      : {};
+  const bounds =
+    captureSelection?.bounds && typeof captureSelection.bounds === "object"
+      ? captureSelection.bounds
+      : {};
+  const positiveNumber = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  };
+  const width =
+    positiveNumber(captureVideo.width) ||
+    positiveNumber(requestedSettings.width) ||
+    positiveNumber(bounds.width);
+  const height =
+    positiveNumber(captureVideo.height) ||
+    positiveNumber(requestedSettings.height) ||
+    positiveNumber(bounds.height);
+  const frameRate =
+    positiveNumber(captureVideo.frameRate) ||
+    positiveNumber(requestedSettings.frameRate);
+  return {
+    ...requestedSettings,
+    ...captureVideo,
+    ...(width ? { width } : {}),
+    ...(height ? { height } : {}),
+    ...(frameRate ? { frameRate } : {}),
+    ...(requestedSettings.qualityPriority
+      ? { qualityPriority: requestedSettings.qualityPriority }
+      : {}),
+    ...(requestedSettings.maxBitrate
+      ? { maxBitrate: requestedSettings.maxBitrate }
+      : {}),
+  };
+}
+
 export function sortP2pVideoCodecPreferences(codecs = []) {
   const priorities = ["video/H264", "video/VP9", "video/VP8"];
   return [...codecs].sort((left, right) => {

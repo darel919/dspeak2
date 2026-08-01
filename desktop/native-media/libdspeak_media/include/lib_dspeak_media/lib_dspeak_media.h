@@ -46,6 +46,7 @@ typedef enum {
     LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME = 2,
     LIB_DSPEAK_MEDIA_RECEIVE_EVENT_TRACK_CLOSED = 3,
     LIB_DSPEAK_MEDIA_RECEIVE_EVENT_P2P = 4,
+    LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME = 5,
 } lib_dspeak_media_receive_event_kind_t;
 
 typedef struct {

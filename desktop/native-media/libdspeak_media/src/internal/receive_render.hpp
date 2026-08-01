@@ -2,6 +2,7 @@
 #define LIB_DSPEAK_MEDIA_INTERNAL_RECEIVE_RENDER_HPP_
 
 #include <cstdint>
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
@@ -45,7 +46,7 @@ public:
 
 private:
     std::string consumer_id_;
-    bool enabled_ = true;
+    std::atomic_bool enabled_{true};
 };
 
 extern "C" {
@@ -68,8 +69,10 @@ void lib_dspeak_media_push_receive_track_event(const char* event_name,
                                                const char* kind,
                                                const char* app_data_json);
 void lib_dspeak_media_push_receive_track_closed_event(const char* consumer_id,
-                                                      const char* producer_id,
-                                                      const char* kind);
+                                                       const char* producer_id,
+                                                       const char* kind);
+void lib_dspeak_media_push_local_video_frame(const char* source,
+                                             const webrtc::VideoFrame& frame);
 void lib_dspeak_media_push_p2p_event(uint64_t p2p_handle,
                                      const char* event_name,
                                      const char* track_id,

@@ -1,5 +1,6 @@
 import {
   buildP2pVideoSenderOptions,
+  resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "./video-settings.js";
 
@@ -119,6 +120,7 @@ export class NativeP2pSession {
         peer.sources.delete(key);
         peer.trackIds.delete(key);
         await this._syncAudioProfile(peer);
+        if (peer.offerCreated) this._requestOffer(peer);
       }),
     );
     this._emitState();
@@ -201,6 +203,7 @@ export class NativeP2pSession {
       this._sendSignal(peerId, {
         description: { type: "answer", sdp: answer },
       });
+      if (this.localPeerId > peer.peerId) this._requestOffer(peer);
       return true;
     }
     if (description.type === "answer") {
@@ -211,6 +214,7 @@ export class NativeP2pSession {
       peer.remoteDescriptionSet = true;
       peer.negotiationInFlight = false;
       await this._flushCandidates(peer);
+      if (peer.negotiationRequested) this._requestOffer(peer);
       return true;
     }
     return false;
@@ -290,6 +294,7 @@ export class NativeP2pSession {
       sourceByTrackId: new Map(),
       offerCreated: false,
       negotiationInFlight: false,
+      negotiationRequested: false,
       remoteDescriptionSet: false,
       pendingCandidates: [],
       healthOpen: false,
@@ -306,8 +311,16 @@ export class NativeP2pSession {
     for (const source of this.sources.values())
       await this._attachSource(peer, source);
     this._startCandidatePump(peer);
-    if (this.localPeerId && this.localPeerId < peerId)
-      await this._createOffer(peer);
+    if (this.localPeerId && this.localPeerId < peerId) {
+      peer.negotiationInFlight = true;
+      try {
+        await this._createOffer(peer);
+        peer.negotiationInFlight = false;
+      } catch (error) {
+        peer.negotiationInFlight = false;
+        throw error;
+      }
+    }
     return peer;
   }
 
@@ -330,10 +343,7 @@ export class NativeP2pSession {
         source.source,
         this._sourceParameters(source),
       );
-      if (peer.offerCreated && peer.remoteDescriptionSet) {
-        if (this.localPeerId < peer.peerId) this._requestOffer(peer);
-        else this._sendSignal(peer.peerId, { renegotiationNeeded: true });
-      }
+      if (peer.offerCreated) this._requestOffer(peer);
     }
   }
 
@@ -352,8 +362,10 @@ export class NativeP2pSession {
     if (Number.isFinite(bitrate) && bitrate > 0)
       parameters.maxBitrate = Math.floor(bitrate);
     if (source.kind === "video") {
-      const video =
-        source.videoSettings || source.captureSelection?.video || {};
+      const video = resolveNativeCaptureVideoSettings(
+        source.captureSelection,
+        source.videoSettings || {},
+      );
       const resolution = VIDEO_RESOLUTIONS[video.resolution];
       const options = buildP2pVideoSenderOptions({
         width: video.width || resolution?.width || 1920,
@@ -369,11 +381,6 @@ export class NativeP2pSession {
         parameters.scaleResolutionDownBy = encoding.scaleResolutionDownBy;
       }
     }
-    const frameRate = Number(
-      (source.videoSettings || source.captureSelection?.video)?.frameRate,
-    );
-    if (Number.isFinite(frameRate) && frameRate > 0)
-      parameters.maxFramerate = frameRate;
     return parameters;
   }
 
@@ -496,6 +503,15 @@ export class NativeP2pSession {
     });
     peer.offerCreated = true;
     this._sendSignal(peer.peerId, { description: { type: "offer", sdp } });
+    await Promise.all(
+      [...this.sources.values()].map((source) =>
+        this._setSourceParameters(
+          peer,
+          source.source,
+          this._sourceParameters(source),
+        ),
+      ),
+    );
   }
 
   _sendSignal(targetPeerId, signal) {
@@ -595,9 +611,7 @@ export class NativeP2pSession {
       return true;
     }
     if (eventName === "renegotiation-needed") {
-      if (!peer.offerCreated || !peer.remoteDescriptionSet) return true;
-      if (this.localPeerId < peer.peerId) this._requestOffer(peer);
-      else this._sendSignal(peer.peerId, { renegotiationNeeded: true });
+      this._requestOffer(peer);
       return true;
     }
     if (eventName === "track-removed") {
@@ -683,12 +697,26 @@ export class NativeP2pSession {
   }
 
   _requestOffer(peer) {
+    peer.negotiationRequested = true;
+    if (!peer.offerCreated || !peer.remoteDescriptionSet) return;
+    if (this.localPeerId >= peer.peerId) {
+      peer.negotiationRequested = false;
+      this._sendSignal(peer.peerId, { renegotiationNeeded: true });
+      return;
+    }
     if (peer.negotiationInFlight) return;
+    peer.negotiationRequested = false;
     peer.negotiationInFlight = true;
-    this._createOffer(peer).catch((error) => {
-      peer.negotiationInFlight = false;
-      this.onError?.(error);
-    });
+    this._createOffer(peer)
+      .then(() => {
+        peer.negotiationInFlight = false;
+        if (peer.negotiationRequested) this._requestOffer(peer);
+      })
+      .catch((error) => {
+        peer.negotiationInFlight = false;
+        peer.negotiationRequested = true;
+        this.onError?.(error);
+      });
   }
 
   async _closePeer(peerId) {

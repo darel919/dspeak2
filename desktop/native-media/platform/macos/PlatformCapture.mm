@@ -16,6 +16,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -98,6 +99,19 @@ static SCDisplay* display_for_application(NSArray<SCWindow*>* windows,
     return displays.firstObject;
 }
 
+static bool is_current_process(SCRunningApplication* application) {
+    return application && application.processID == getpid();
+}
+
+static NSArray<SCRunningApplication*>* current_process_exclusions(
+    SCShareableContent* content) {
+    NSMutableArray<SCRunningApplication*>* exclusions = [NSMutableArray array];
+    for (SCRunningApplication* application in content.applications) {
+        if (is_current_process(application)) [exclusions addObject:application];
+    }
+    return exclusions;
+}
+
 static NSDictionary* video_audio_capabilities(bool video, bool audio) {
     return @{
         @"video": @(video),
@@ -116,14 +130,15 @@ static NSDictionary* source_dictionary(NSString* source_id,
                                        NSNumber* display_id,
                                        CGRect bounds,
                                        bool video,
-                                       bool audio) {
+                                       bool audio,
+                                       bool self_excluded) {
     NSMutableDictionary* source = [NSMutableDictionary dictionaryWithDictionary:@{
         @"sourceId": source_id,
         @"sourceType": source_type,
         @"sourceKey": [NSString stringWithFormat:@"%@:%@", source_type, source_id],
         @"title": title ?: @"Untitled source",
         @"capabilities": video_audio_capabilities(video, audio),
-        @"selfExcluded": @YES,
+        @"selfExcluded": @(self_excluded),
         @"available": @YES,
     }];
     if (app_name) source[@"appName"] = app_name;
@@ -191,7 +206,8 @@ char* lib_dspeak_media_platform_capture_list_sources(void) {
                 @(display.displayID),
                 display.frame,
                 true,
-                audio_available)];
+                audio_available,
+                true)];
         }
 
         for (SCWindow* window in content.windows) {
@@ -199,6 +215,7 @@ char* lib_dspeak_media_platform_capture_list_sources(void) {
             SCDisplay* display = display_for_rect(displays, window.frame);
             if (!display) continue;
             SCRunningApplication* application = window.owningApplication;
+            if (is_current_process(application)) continue;
             NSString* title = window.title.length ? window.title : @"Untitled window";
             NSString* app_name = application.applicationName;
             NSString* app_id = application.bundleIdentifier;
@@ -211,11 +228,12 @@ char* lib_dspeak_media_platform_capture_list_sources(void) {
                 @(display.displayID),
                 window.frame,
                 true,
-                audio_available)];
+                audio_available,
+                true)];
         }
 
         for (SCRunningApplication* application in content.applications) {
-            if (!application.bundleIdentifier.length) continue;
+            if (!application.bundleIdentifier.length || is_current_process(application)) continue;
             SCDisplay* display = display_for_application(content.windows, displays, application);
             if (!display) continue;
             [sources addObject:source_dictionary(
@@ -229,7 +247,8 @@ char* lib_dspeak_media_platform_capture_list_sources(void) {
                 @(display.displayID),
                 display.frame,
                 true,
-                audio_available)];
+                audio_available,
+                true)];
         }
 
         if (audio_available && displays.count) {
@@ -243,6 +262,7 @@ char* lib_dspeak_media_platform_capture_list_sources(void) {
                 @(display.displayID),
                 display.frame,
                 false,
+                true,
                 true)];
         }
 
@@ -304,10 +324,13 @@ static SCContentFilter* filter_for_source(SCShareableContent* content,
     }
 
     if ([source_type isEqualToString:@"display"] || [source_type isEqualToString:@"system-audio"]) {
+        NSArray<SCRunningApplication*>* exclusions = current_process_exclusions(content);
         for (SCDisplay* display in content.displays) {
             NSString* candidate = [source_id_for_display(display.displayID) lowercaseString];
             if ([candidate isEqualToString:[source_id lowercaseString]] || [source_type isEqualToString:@"system-audio"]) {
-                return [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+                return [[SCContentFilter alloc] initWithDisplay:display
+                                         excludingApplications:exclusions
+                                                exceptingWindows:@[]];
             }
         }
     }
@@ -318,7 +341,7 @@ static SCContentFilter* filter_for_source(SCShareableContent* content,
                 NSString* candidate = source_id_for_application(application.bundleIdentifier,
                                                                  application.processID,
                                                                  display.displayID);
-                if ([candidate isEqualToString:source_id]) {
+                if ([[candidate lowercaseString] isEqualToString:[source_id lowercaseString]]) {
                     return [[SCContentFilter alloc] initWithDisplay:display
                                                includingApplications:@[application]
                                                     exceptingWindows:@[]];

@@ -191,7 +191,8 @@ pub(crate) fn validate_capture_request(
             "Stereo 48 kHz audio policy is required",
         )
     })?;
-    if audio.get("channels") != Some(&Value::Number(2.into()))
+    if audio.get("excludeSelfAudio") != Some(&Value::Bool(true))
+        || audio.get("channels") != Some(&Value::Number(2.into()))
         || audio.get("sampleRate") != Some(&Value::Number(48000.into()))
         || audio.get("stereo") != Some(&Value::Bool(true))
     {

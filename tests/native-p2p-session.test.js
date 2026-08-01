@@ -165,6 +165,114 @@ describe("NativeP2pSession", () => {
     );
   });
 
+  it("queues a native screen renegotiation until the initial answer arrives", async () => {
+    const messages = [];
+    const calls = [];
+    let offers = 0;
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 15 };
+        if (command === "media_p2p_add_track")
+          return { trackId: `${payload.source}_capture` };
+        if (command === "media_p2p_create_offer") {
+          offers += 1;
+          return `offer-${offers}`;
+        }
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 10,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    await session.addSource({ source: "screen", kind: "video" });
+
+    assert.equal(offers, 1);
+    assert.equal(
+      messages.filter((message) => message.signal?.description).length,
+      1,
+    );
+
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 10,
+      signal: { description: { type: "answer", sdp: "initial-answer" } },
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(offers, 2);
+    assert.ok(
+      messages.some(
+        (message) => message.signal?.description?.sdp === "offer-2",
+      ),
+    );
+    assert.ok(
+      calls.some(
+        ([command, payload]) =>
+          command === "media_p2p_add_track" && payload.source === "screen",
+      ),
+    );
+    assert.ok(
+      calls.some(
+        ([command, payload]) =>
+          command === "media_p2p_set_track_parameters" &&
+          payload.source === "screen",
+      ),
+    );
+  });
+
+  it("renegotiates a screen added after the initial native offer is answered", async () => {
+    const calls = [];
+    const messages = [];
+    let offers = 0;
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 16 };
+        if (command === "media_p2p_add_track")
+          return { trackId: `${payload.source}_capture` };
+        if (command === "media_p2p_create_offer") {
+          offers += 1;
+          return `offer-${offers}`;
+        }
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 11,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 11,
+      signal: { description: { type: "answer", sdp: "initial-answer" } },
+    });
+
+    await session.addSource({ source: "screen", kind: "video" });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(offers, 2);
+    assert.equal(
+      messages.filter((message) => message.signal?.description).length,
+      2,
+    );
+    assert.ok(
+      calls.some(
+        ([command, payload]) =>
+          command === "media_p2p_add_track" && payload.source === "screen",
+      ),
+    );
+  });
+
   it("maps native desktop capture track ids to screen sources", async () => {
     const tracks = [];
     const session = new NativeP2pSession({

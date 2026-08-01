@@ -241,6 +241,7 @@ static std::atomic<int> g_capture_error{0};
 static std::atomic<uint64_t> g_probe_video_frames{0};
 static std::atomic<uint64_t> g_probe_audio_frames{0};
 static std::atomic<bool> g_screen_frame_logged{false};
+static std::atomic<bool> g_camera_frame_logged{false};
 
 enum class CaptureRoute {
     kDesktop,
@@ -283,6 +284,12 @@ static void on_screen_frame(void* user_data, void* sample_buffer) {
         if (route == CaptureRoute::kDesktop &&
             !g_screen_frame_logged.exchange(true)) {
             std::fprintf(stderr, "[dspeak:media] native screen frame delivered %zux%zu\n",
+                         CVPixelBufferGetWidth(pixel_buffer),
+                         CVPixelBufferGetHeight(pixel_buffer));
+        }
+        if (route == CaptureRoute::kCamera &&
+            !g_camera_frame_logged.exchange(true)) {
+            std::fprintf(stderr, "[dspeak:media] native camera frame delivered %zux%zu\n",
                          CVPixelBufferGetWidth(pixel_buffer),
                          CVPixelBufferGetHeight(pixel_buffer));
         }

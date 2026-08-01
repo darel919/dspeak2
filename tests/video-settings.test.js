@@ -15,6 +15,7 @@ import {
   inspectH264ProfileCapabilities,
   normalizeVideoSettings,
   rankVideoCodecsByHardwarePreference,
+  resolveNativeCaptureVideoSettings,
   sortP2pVideoCodecPreferences,
   selectHardwarePreferredVideoCodec,
   selectPowerEfficientVideoCodec,
@@ -23,6 +24,30 @@ import {
   VIDEO_FRAME_RATE_MIN,
   VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN,
 } from "../app/shared/video-settings.js";
+
+test("native capture settings preserve the selected source dimensions", () => {
+  assert.deepEqual(
+    resolveNativeCaptureVideoSettings(
+      {
+        bounds: { width: 2560, height: 1440 },
+        video: { resolution: "original", frameRate: 60 },
+      },
+      {
+        frameRate: 30,
+        qualityPriority: "resolution",
+        maxBitrate: 2400000,
+      },
+    ),
+    {
+      resolution: "original",
+      width: 2560,
+      height: 1440,
+      frameRate: 60,
+      qualityPriority: "resolution",
+      maxBitrate: 2400000,
+    },
+  );
+});
 
 test("video frame rate is normalized to the nearest supported preset", () => {
   assert.equal(
