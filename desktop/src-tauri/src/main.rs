@@ -236,6 +236,13 @@ fn main() {
             media::media_start_system_audio,
             media::media_replace_system_audio,
             media::media_stop_system_audio,
+            media::media_restart_send_transport_ice,
+            media::media_restart_recv_transport_ice,
+            media::media_get_transport_stats,
+            media::media_get_producer_stats,
+            media::media_get_consumer_stats,
+            media::media_replace_producer_track,
+            media::media_set_consumer_jitter_buffer,
         ])
         .run(tauri::generate_context!());
 

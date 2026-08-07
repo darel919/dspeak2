@@ -9,6 +9,7 @@ dist
 .codex
 AGENTS.md
 IDEA.md
+.hermes
 
 # Node dependencies
 node_modules

@@ -236,4 +236,47 @@ extern "C" {
         handle: *mut lib_dspeak_media_p2p_handle_t,
         sdp_out: *mut *mut c_char,
     ) -> c_int;
+
+    /* ── SFU transport ICE restart ──────────────────────── */
+    pub fn lib_dspeak_media_send_transport_restart_ice(
+        transport: *mut lib_dspeak_media_send_transport_t,
+        sdp_out: *mut *mut c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_recv_transport_restart_ice(
+        transport: *mut lib_dspeak_media_recv_transport_t,
+        sdp_out: *mut *mut c_char,
+    ) -> c_int;
+
+    /* ── Stats collection ────────────────────────────────── */
+    pub fn lib_dspeak_media_send_transport_get_stats(
+        transport: *mut lib_dspeak_media_send_transport_t,
+    ) -> *mut c_char;
+    pub fn lib_dspeak_media_recv_transport_get_stats(
+        transport: *mut lib_dspeak_media_recv_transport_t,
+    ) -> *mut c_char;
+    pub fn lib_dspeak_media_producer_get_stats(
+        producer: *mut lib_dspeak_media_producer_t,
+    ) -> *mut c_char;
+    pub fn lib_dspeak_media_consumer_get_stats(
+        consumer: *mut lib_dspeak_media_consumer_t,
+    ) -> *mut c_char;
+
+    /* ── Producer replaceTrack ───────────────────────────── */
+    pub fn lib_dspeak_media_producer_replace_video_track(
+        producer: *mut lib_dspeak_media_producer_t,
+        track: *mut lib_dspeak_media_video_track_t,
+        error_out: *mut c_int,
+    ) -> c_int;
+    pub fn lib_dspeak_media_producer_replace_audio_track(
+        producer: *mut lib_dspeak_media_producer_t,
+        track: *mut lib_dspeak_media_audio_track_t,
+        error_out: *mut c_int,
+    ) -> c_int;
+
+    /* ── Jitter buffer configuration ─────────────────────── */
+    pub fn lib_dspeak_media_consumer_set_jitter_buffer(
+        consumer: *mut lib_dspeak_media_consumer_t,
+        min_delay_ms: c_int,
+        target_delay_ms: c_int,
+    ) -> c_int;
 }

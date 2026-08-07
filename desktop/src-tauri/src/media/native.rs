@@ -413,3 +413,122 @@ pub fn p2p_restart_ice(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Resul
     let result = unsafe { ffi::lib_dspeak_media_p2p_restart_ice(handle, &mut pointer) };
     p2p_sdp_result(result, pointer, "ICE restart")
 }
+
+/* ── SFU transport ICE restart ──────────────────────── */
+
+fn transport_ice_restart_result(
+    result: i32,
+    pointer: *mut std::ffi::c_char,
+    label: &str,
+) -> Result<serde_json::Value, String> {
+    if result != 0 || pointer.is_null() {
+        if !pointer.is_null() {
+            unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+        }
+        return Err(format!("native {label} ICE restart failed"));
+    }
+    let value = unsafe { CStr::from_ptr(pointer) }
+        .to_str()
+        .map(|s| {
+            serde_json::from_str::<serde_json::Value>(s)
+                .unwrap_or_else(|_| serde_json::Value::Null)
+        })
+        .map_err(|_| format!("native {label} ICE restart returned invalid UTF-8"));
+    unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+    value
+}
+
+pub fn send_transport_restart_ice(
+    transport: *mut ffi::lib_dspeak_media_send_transport_t,
+) -> Result<serde_json::Value, String> {
+    let mut pointer = ptr::null_mut();
+    let result = unsafe { ffi::lib_dspeak_media_send_transport_restart_ice(transport, &mut pointer) };
+    transport_ice_restart_result(result, pointer, "send transport")
+}
+
+pub fn recv_transport_restart_ice(
+    transport: *mut ffi::lib_dspeak_media_recv_transport_t,
+) -> Result<serde_json::Value, String> {
+    let mut pointer = ptr::null_mut();
+    let result = unsafe { ffi::lib_dspeak_media_recv_transport_restart_ice(transport, &mut pointer) };
+    transport_ice_restart_result(result, pointer, "recv transport")
+}
+
+/* ── Stats collection ────────────────────────────────── */
+
+pub fn send_transport_get_stats(
+    transport: *mut ffi::lib_dspeak_media_send_transport_t,
+) -> Result<String, String> {
+    let pointer = unsafe { ffi::lib_dspeak_media_send_transport_get_stats(transport) };
+    native_string(pointer, "send transport stats")
+}
+
+pub fn recv_transport_get_stats(
+    transport: *mut ffi::lib_dspeak_media_recv_transport_t,
+) -> Result<String, String> {
+    let pointer = unsafe { ffi::lib_dspeak_media_recv_transport_get_stats(transport) };
+    native_string(pointer, "recv transport stats")
+}
+
+pub fn producer_get_stats(
+    producer: *mut ffi::lib_dspeak_media_producer_t,
+) -> Result<String, String> {
+    let pointer = unsafe { ffi::lib_dspeak_media_producer_get_stats(producer) };
+    native_string(pointer, "producer stats")
+}
+
+pub fn consumer_get_stats(
+    consumer: *mut ffi::lib_dspeak_media_consumer_t,
+) -> Result<String, String> {
+    let pointer = unsafe { ffi::lib_dspeak_media_consumer_get_stats(consumer) };
+    native_string(pointer, "consumer stats")
+}
+
+/* ── Producer replaceTrack ───────────────────────────── */
+
+pub fn producer_replace_video_track(
+    producer: *mut ffi::lib_dspeak_media_producer_t,
+    track: *mut ffi::lib_dspeak_media_video_track_t,
+) -> Result<(), String> {
+    let mut error = 0;
+    let result = unsafe {
+        ffi::lib_dspeak_media_producer_replace_video_track(producer, track, &mut error)
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(format!("native producer video track replacement failed (error {error})"))
+    }
+}
+
+pub fn producer_replace_audio_track(
+    producer: *mut ffi::lib_dspeak_media_producer_t,
+    track: *mut ffi::lib_dspeak_media_audio_track_t,
+) -> Result<(), String> {
+    let mut error = 0;
+    let result = unsafe {
+        ffi::lib_dspeak_media_producer_replace_audio_track(producer, track, &mut error)
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(format!("native producer audio track replacement failed (error {error})"))
+    }
+}
+
+/* ── Jitter buffer configuration ─────────────────────── */
+
+pub fn consumer_set_jitter_buffer(
+    consumer: *mut ffi::lib_dspeak_media_consumer_t,
+    min_delay_ms: i32,
+    target_delay_ms: i32,
+) -> Result<(), String> {
+    let result = unsafe {
+        ffi::lib_dspeak_media_consumer_set_jitter_buffer(consumer, min_delay_ms, target_delay_ms)
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native consumer jitter buffer configuration failed".to_string())
+    }
+}

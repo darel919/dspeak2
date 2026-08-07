@@ -212,6 +212,38 @@ lib_dspeak_media_video_track_t* lib_dspeak_media_get_active_video_track(void);
 lib_dspeak_media_audio_track_t* lib_dspeak_media_get_active_audio_track(void);
 lib_dspeak_media_video_track_t* lib_dspeak_media_get_video_track(const char* source);
 lib_dspeak_media_audio_track_t* lib_dspeak_media_get_audio_track(const char* source);
+
+/* ── Transport ICE restart (SFU) ─────────────────────── */
+int lib_dspeak_media_send_transport_restart_ice(
+    lib_dspeak_media_send_transport_t* t, char** sdp_out);
+int lib_dspeak_media_recv_transport_restart_ice(
+    lib_dspeak_media_recv_transport_t* t, char** sdp_out);
+
+/* ── Stats collection ────────────────────────────────── */
+char* lib_dspeak_media_send_transport_get_stats(
+    lib_dspeak_media_send_transport_t* t);
+char* lib_dspeak_media_recv_transport_get_stats(
+    lib_dspeak_media_recv_transport_t* t);
+char* lib_dspeak_media_producer_get_stats(
+    lib_dspeak_media_producer_t* p);
+char* lib_dspeak_media_consumer_get_stats(
+    lib_dspeak_media_consumer_t* c);
+
+/* ── Producer replaceTrack ───────────────────────────── */
+int lib_dspeak_media_producer_replace_video_track(
+    lib_dspeak_media_producer_t* p,
+    lib_dspeak_media_video_track_t* track,
+    int* error_out);
+int lib_dspeak_media_producer_replace_audio_track(
+    lib_dspeak_media_producer_t* p,
+    lib_dspeak_media_audio_track_t* track,
+    int* error_out);
+
+/* ── Jitter buffer configuration ─────────────────────── */
+int lib_dspeak_media_consumer_set_jitter_buffer(
+    lib_dspeak_media_consumer_t* c,
+    int min_delay_ms,
+    int target_delay_ms);
 void lib_dspeak_media_destroy_video_track(lib_dspeak_media_video_track_t* t);
 
 /* Release a native audio track. */

@@ -410,7 +410,8 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
         config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
         apply_ice_servers(config, ice_servers_json);
 
-        auto* observer = new webrtc::RefCountedObject<P2pObserver>(h);
+        h->p2p_observer_raw = new P2pObserver(h);
+        auto* observer = h->p2p_observer_raw;
         auto result = h->factory->CreatePeerConnectionOrError(
             config, webrtc::PeerConnectionDependencies(observer));
         if (!result.ok()) {
@@ -464,6 +465,8 @@ extern "C" void lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h)
             h->audio_sinks.clear();
             h->video_sinks.clear();
             h->factory = nullptr;
+            delete h->p2p_observer_raw;
+            h->p2p_observer_raw = nullptr;
         };
         if (h->signaling_thread)
             h->signaling_thread->BlockingCall(destroy);

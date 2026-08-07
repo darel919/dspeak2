@@ -744,3 +744,151 @@ extern "C" const char* lib_dspeak_media_consumer_get_kind(
         return nullptr;
     }
 }
+
+/* ══════════════════════════════════════════════════════
+   New: Transport ICE restart (SFU)
+   ══════════════════════════════════════════════════════ */
+
+extern "C" int lib_dspeak_media_send_transport_restart_ice(
+    lib_dspeak_media_send_transport_t* t, char** sdp_out)
+{
+    if (sdp_out) *sdp_out = nullptr;
+    try {
+        if (!t || !t->transport) return -1;
+        t->transport->RestartIce(nlohmann::json());
+        return 0;
+    } catch (...) {
+        return -1;
+    }
+}
+
+extern "C" int lib_dspeak_media_recv_transport_restart_ice(
+    lib_dspeak_media_recv_transport_t* t, char** sdp_out)
+{
+    if (sdp_out) *sdp_out = nullptr;
+    try {
+        if (!t || !t->transport) return -1;
+        t->transport->RestartIce(nlohmann::json());
+        return 0;
+    } catch (...) {
+        return -1;
+    }
+}
+
+/* ══════════════════════════════════════════════════════
+   New: Stats collection
+   ══════════════════════════════════════════════════════ */
+
+extern "C" char* lib_dspeak_media_send_transport_get_stats(
+    lib_dspeak_media_send_transport_t* t)
+{
+    try {
+        if (!t || !t->transport) return nullptr;
+        auto stats = t->transport->GetStats();
+        return lib_dspeak_media_json_to_cstr(stats);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+extern "C" char* lib_dspeak_media_recv_transport_get_stats(
+    lib_dspeak_media_recv_transport_t* t)
+{
+    try {
+        if (!t || !t->transport) return nullptr;
+        auto stats = t->transport->GetStats();
+        return lib_dspeak_media_json_to_cstr(stats);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+extern "C" char* lib_dspeak_media_producer_get_stats(
+    lib_dspeak_media_producer_t* p)
+{
+    try {
+        if (!p) return nullptr;
+        auto* producer = reinterpret_cast<mediasoupclient::Producer*>(p);
+        auto stats = producer->GetStats();
+        return lib_dspeak_media_json_to_cstr(stats);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+extern "C" char* lib_dspeak_media_consumer_get_stats(
+    lib_dspeak_media_consumer_t* c)
+{
+    try {
+        if (!c || !c->consumer) return nullptr;
+        auto stats = c->consumer->GetStats();
+        return lib_dspeak_media_json_to_cstr(stats);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+/* ══════════════════════════════════════════════════════
+   New: Producer replaceTrack
+   ══════════════════════════════════════════════════════ */
+
+extern "C" int lib_dspeak_media_producer_replace_video_track(
+    lib_dspeak_media_producer_t* p,
+    lib_dspeak_media_video_track_t* track,
+    int* error_out)
+{
+    if (error_out) *error_out = 0;
+    try {
+        if (!p || !track || !track->track) {
+            if (error_out) *error_out = -1;
+            return -1;
+        }
+        auto* producer = reinterpret_cast<mediasoupclient::Producer*>(p);
+        producer->ReplaceTrack(track->track.get());
+        return 0;
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+}
+
+extern "C" int lib_dspeak_media_producer_replace_audio_track(
+    lib_dspeak_media_producer_t* p,
+    lib_dspeak_media_audio_track_t* track,
+    int* error_out)
+{
+    if (error_out) *error_out = 0;
+    try {
+        if (!p || !track || !track->track) {
+            if (error_out) *error_out = -1;
+            return -1;
+        }
+        auto* producer = reinterpret_cast<mediasoupclient::Producer*>(p);
+        producer->ReplaceTrack(track->track.get());
+        return 0;
+    } catch (...) {
+        if (error_out) *error_out = -1;
+        return -1;
+    }
+}
+
+/* ══════════════════════════════════════════════════════
+   New: Jitter buffer configuration
+   ══════════════════════════════════════════════════════ */
+
+extern "C" int lib_dspeak_media_consumer_set_jitter_buffer(
+    lib_dspeak_media_consumer_t* c,
+    int min_delay_ms,
+    int target_delay_ms)
+{
+    try {
+        if (!c || !c->consumer) return -1;
+        auto* receiver = c->consumer->GetRtpReceiver();
+        if (!receiver) return -1;
+        receiver->SetJitterBufferMinimumDelay(
+            static_cast<double>(min_delay_ms) / 1000.0);
+        return 0;
+    } catch (...) {
+        return -1;
+    }
+}

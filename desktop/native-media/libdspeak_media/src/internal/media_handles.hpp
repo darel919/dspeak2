@@ -281,6 +281,7 @@ struct lib_dspeak_media_p2p_handle {
     std::unique_ptr<P2pHealthDataChannelObserver> health_observer;
     std::vector<std::unique_ptr<NativeReceiveAudioSink>> audio_sinks;
     std::vector<std::unique_ptr<NativeReceiveVideoSink>> video_sinks;
+    webrtc::PeerConnectionObserver* p2p_observer_raw = nullptr;
 };
 
 using lib_dspeak_media_json = nlohmann::json;
