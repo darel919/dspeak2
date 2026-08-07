@@ -9,9 +9,8 @@ beforeEach(() => {
   process.env = {
     ...originalEnvironment,
     AUTH_PATH: "https://api.example.com/auth",
-    POCKETBASE_URL: "https://pocketbase.example.com",
-    PBASE_ADMIN_EMAIL: "admin@example.com",
-    PBASE_ADMIN_PASSWORD: "secret",
+    SUPABASE_URL: "https://project-ref.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
     DSPEAK_CSRF_SECRET: "test-secret-with-at-least-32-characters",
     DSPEAK_INGEST_AUTH_SECRET: "test-ingest-secret-with-at-least-32-characters",
     VAPID_PUBLIC_KEY: "public",

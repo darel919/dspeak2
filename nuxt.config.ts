@@ -217,14 +217,6 @@ export default defineNuxtConfig({
       },
 
   runtimeConfig: {
-    pocketbase: {
-      url: process.env.POCKETBASE_URL || "",
-      adminEmail: process.env.PBASE_ADMIN_EMAIL || "",
-      adminPassword: process.env.PBASE_ADMIN_PASSWORD || "",
-      vapidPublicKey:
-        process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY || "",
-      vapidPrivateKey: process.env.VAPID_PRIVKEY || "",
-    },
     mediasoup: {
       listenIp: process.env.MEDIASOUP_LISTEN_IP || "127.0.0.1",
       announcedAddress: process.env.MEDIASOUP_ANNOUNCED_ADDRESS || "",
@@ -248,7 +240,6 @@ export default defineNuxtConfig({
       ),
     },
     public: {
-      authPath: process.env.AUTH_PATH,
       websocketPath: "",
       baseApiPath: isDesktop
         ? desktopApiBasePath
@@ -261,6 +252,8 @@ export default defineNuxtConfig({
       appVersion: packageMetadata.version,
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,
+      supabaseUrl: process.env.SUPABASE_URL || "",
+      supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
     },
   },
 });

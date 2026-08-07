@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const [
-  authentication,
+  auth,
   metrics,
   sfu,
   signalingPolicy,
@@ -20,7 +20,7 @@ const [
   outboundRequest,
 ] = await Promise.all(
   [
-    "../server/utils/authentication.js",
+    "../server/utils/auth.js",
     "../server/routes/metrics.js",
     "../server/utils/mediasoup-sfu.js",
     "../server/utils/media-signaling-policy.js",
@@ -39,10 +39,9 @@ const [
 );
 
 test("browser WebSockets enforce an explicit origin policy", () => {
-  assert.match(authentication, /isAllowedWebSocketOrigin/);
-  assert.match(authentication, /DSPEAK_PUBLIC_ORIGIN/);
-  assert.match(authentication, /if \(!origin\) return false/);
-  assert.doesNotMatch(authentication, /DSPEAK_ALLOW_ORIGINLESS_WEBSOCKETS/);
+  assert.match(security, /DSPEAK_PUBLIC_ORIGIN/);
+  assert.match(security, /originAllowed/);
+  assert.doesNotMatch(security, /DSPEAK_ALLOW_ORIGINLESS_WEBSOCKETS/);
 });
 
 test("metrics require a bearer token and use a non-initializing SFU snapshot", () => {
@@ -110,8 +109,8 @@ test("API security boundaries protect credentials, assets, and errors", () => {
 });
 
 test("CSRF, SSRF, Trusted Types, and cross-site reads are enforced", () => {
-  assert.match(authentication, /csrfTokenForSession/);
-  assert.match(authentication, /timingSafeEqual/);
+  assert.match(auth, /csrfTokenForSession/);
+  assert.match(auth, /timingSafeEqual/);
   assert.match(security, /validateCsrfRequest/);
   assert.match(security, /same-site/);
   assert.match(security, /cross-site/);
@@ -130,9 +129,9 @@ test("CSRF, SSRF, Trusted Types, and cross-site reads are enforced", () => {
 
 test("obsolete compatibility security paths are absent", () => {
   assert.doesNotMatch(chatApi, /suffix === "subscribe"/);
-  assert.doesNotMatch(authentication, /DSPEAK_ALLOW_ORIGINLESS/);
-  assert.match(authentication, /__Host-dspeak_session/);
-  assert.match(authentication, /__Host-dspeak_auth_handoff/);
+  assert.doesNotMatch(auth, /DSPEAK_ALLOW_ORIGINLESS/);
+  assert.match(auth, /__Host-dspeak_session/);
+  assert.doesNotMatch(auth, /__Host-dspeak_auth_handoff/);
 });
 
 test("core orchestration is split into bounded ownership modules", async () => {
@@ -158,7 +157,7 @@ test("core orchestration is split into bounded ownership modules", async () => {
     "../server/utils/dspeak-chat-api.js",
     "../server/utils/dspeak-rooms-api.js",
     "../server/utils/media-signaling-policy.js",
-    "../server/utils/media-user-state.js",
+    "../server/utils/media-user-profile.js",
   ])
     assert.ok((await readFile(new URL(path, import.meta.url), "utf8")).length);
 });

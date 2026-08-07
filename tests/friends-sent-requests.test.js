@@ -37,7 +37,7 @@ test("resending an existing outgoing request returns its canonical pending recor
   );
   assert.match(
     managerSource,
-    /if \(existing\.status === "pending"\)[\s\S]{0,700}status: existing\.status/,
+    /existingFriendship\.status === "pending"[\s\S]{0,700}status: existingFriendship\.status/,
   );
 });
 
@@ -53,25 +53,22 @@ test("a failed Sent refresh preserves confirmed requests and exposes the error",
 });
 
 test("Sent request avatars use the protected same-origin asset path", () => {
-  assert.match(
-    managerSource,
-    /avatar: sameOriginAvatarPath\(req\.expand\.recipient\)/,
-  );
+  assert.match(managerSource, /avatar: sameOriginAvatarPath\(recipient\)/);
   assert.match(
     pageSource,
     /<ProfileAvatar[\s\S]{0,180}:src="req\.recipient\?\.avatar"/,
   );
 });
 
-test("Sent persistence lookup avoids the failing compound PocketBase filter", () => {
+test("Sent persistence lookup uses Drizzle queries", () => {
   assert.match(
     managerSource,
-    /getSentFriendRequests[\s\S]{0,500}filter: pb\.filter\("requester = \{:userId\}"/,
+    /getSentFriendRequests[\s\S]{0,500}from\(friends\)/,
   );
-  assert.match(
-    managerSource,
-    /getSentFriendRequests[\s\S]{0,1200}\.filter\(\(req\) => req\.status === "pending"\)/,
-  );
+  assert.match(managerSource, /eq\(friends\.status, "pending"\)/);
+  assert.match(managerSource, /sameOriginAvatarPath\(recipient\)/);
+  assert.doesNotMatch(managerSource, /PocketBase/);
+  assert.doesNotMatch(managerSource, /getBoundedList/);
 });
 
 test("room member rows do not display friend request status", () => {

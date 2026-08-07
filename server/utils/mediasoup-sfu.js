@@ -1,5 +1,4 @@
 import * as mediasoup from "mediasoup";
-import { usePocketBaseAdmin } from "./pocketbase";
 import {
   buildPublicIceCandidates,
   buildWebRtcListenInfos,
@@ -41,7 +40,15 @@ import {
 import { requireRoomMember } from "./room-authorization.js";
 import { enforceIdentifierRateLimit } from "./rate-limit.js";
 import { publishVoicePresence } from "./voice-presence";
-import { authenticateWebSocketRequest } from "./authentication";
+import { authenticateWebSocketRequest } from "./auth";
+import {
+  getChannelById,
+  getRoomById,
+  getRoomAccess,
+} from "./room-authorization.js";
+import { db } from "../db/client.js";
+import { profiles } from "../db/schema/index.js";
+import { eq } from "drizzle-orm";
 import {
   consumeSignalingToken,
   createSignalingBudget,
@@ -769,23 +776,33 @@ export async function openSfuPeer(peer) {
   const { userId, deviceId } = authentication;
   enforceIdentifierRateLimit("sfu-websocket-open", userId, 30, 60 * 1000);
 
-  const pb = await usePocketBaseAdmin();
-  const channel = await pb
-    .collection("dspeak_rooms_channels")
-    .getOne(channelId);
-  if (!channel.isMedia) {
+  const channel = await getChannelById(channelId);
+  if (!channel || !["voice", "stage"].includes(channel.type)) {
     peer.close(1008, "Channel is not a media channel");
     return;
   }
-  const backendRoom = await pb.collection("dspeak_rooms").getOne(channel.room);
-  await requireRoomMember(pb, backendRoom, userId);
-  const profile = mediaUserProfile(await pb.collection("users").getOne(userId));
+  const backendRoom = await getRoomById(String(channel.roomId));
+  if (!backendRoom) {
+    peer.close(1008, "Room not found");
+    return;
+  }
+  if (!(await getRoomAccess(backendRoom, userId)).member) {
+    peer.close(1008, "Access denied to this room");
+    return;
+  }
+  const profile = mediaUserProfile(
+    await db.select().from(profiles).where(eq(profiles.id, userId)).limit(1),
+  );
+  if (!profile) {
+    peer.close(1008, "Profile not found");
+    return;
+  }
   if (isMediaPeerClosed(peer)) return;
 
   const state = await getState();
   if (isMediaPeerClosed(peer)) return;
   const room = await acquireRoom(state, channelId);
-  room.backendRoomId = String(channel.room);
+  room.backendRoomId = String(channel.roomId);
   try {
     if (isMediaPeerClosed(peer)) {
       releaseRoomReservation(room);

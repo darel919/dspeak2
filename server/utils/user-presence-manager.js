@@ -1,5 +1,3 @@
-import { usePocketBaseAdmin } from "./pocketbase.js";
-
 const presenceStateKey = Symbol.for("dspeak.user-presence");
 
 function getPresenceState() {
@@ -71,7 +69,6 @@ export function touchUserActivity(userId) {
 export async function checkAndTransitionIdleUsers() {
   const state = getPresenceState();
   const now = Date.now();
-  const pb = await usePocketBaseAdmin().catch(() => null);
 
   for (const [userId, lastActive] of state.lastActivity) {
     const record = state.statuses.get(userId);
@@ -83,15 +80,6 @@ export async function checkAndTransitionIdleUsers() {
     if (now - lastActive >= idleTimeout) {
       record.status = "idle";
       record.updatedAt = new Date().toISOString();
-      if (pb) {
-        try {
-          await pb.collection("users").update(userId, {
-            presence_status: "idle",
-          });
-        } catch {
-          // Noop
-        }
-      }
     }
   }
 }

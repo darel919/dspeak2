@@ -1,10 +1,13 @@
-import { requireAuthenticatedUser } from "../../../utils/authentication.js";
-import { usePocketBaseAdmin } from "../../../utils/pocketbase.js";
-import { getBoundedList } from "../../../utils/pocketbase-query.js";
+import { requireAuthenticatedUser } from "../../../utils/auth.js";
+import { db } from "../../../db/client.js";
+import {
+  notifications,
+  notificationPreferences,
+} from "../../../db/schema/index.js";
+import { eq, and, desc, gte, isNull, count } from "drizzle-orm";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
-  const pb = await usePocketBaseAdmin();
 
   if (getMethod(event) !== "GET") {
     throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
@@ -13,42 +16,36 @@ export default defineEventHandler(async (event) => {
   const since = getQuery(event).since || null;
   const limit = Math.min(Number(getQuery(event).limit) || 100, 200);
 
-  const filterParts = [`recipient = '${userId}'`];
+  const conditions = [eq(notifications.userId, userId)];
   if (since) {
-    filterParts.push(`created >= '${since}'`);
+    conditions.push(gte(notifications.createdAt, new Date(since)));
   }
 
-  const notifications = await getBoundedList(
-    pb,
-    "dspeak_notifications",
-    {
-      filter: filterParts.join(" && "),
-      sort: "-created",
-    },
-    limit,
-  );
+  const notificationsList = await db
+    .select()
+    .from(notifications)
+    .where(and(...conditions))
+    .orderBy(desc(notifications.createdAt))
+    .limit(limit);
 
-  const unreadResult = await pb
-    .collection("dspeak_notifications")
-    .getList(1, 1, {
-      filter: `recipient = '${userId}' && read_at = null`,
-      fields: "id",
-    })
-    .catch(() => ({ totalItems: 0 }));
+  const unreadResult = await db
+    .select({ count: count() })
+    .from(notifications)
+    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
 
   return {
-    items: notifications.map((n) => ({
+    items: notificationsList.map((n) => ({
       id: n.id,
       type: n.type || "message",
       title: n.title || "",
       body: n.body || "",
-      room: n.room || null,
-      channel: n.channel || null,
-      message: n.message || null,
-      actor: n.actor || null,
-      read_at: n.read_at || null,
-      created: n.created,
+      room: n.roomId || null,
+      channel: n.channelId || null,
+      message: n.messageId || null,
+      actor: n.actorId || null,
+      read_at: n.readAt || null,
+      created: n.createdAt,
     })),
-    unreadCount: unreadResult.totalItems || 0,
+    unreadCount: unreadResult[0]?.count || 0,
   };
 });

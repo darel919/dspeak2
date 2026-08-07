@@ -4,10 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 const desktopDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(desktopDir, "..");
-const apiBasePath =
-  process.env.VITE_DSPEAK_API_PATH ||
-  process.env.AUTH_PATH?.replace(/\/auth\/?$/, "") ||
-  "";
+const apiBasePath = process.env.VITE_DSPEAK_API_PATH || "";
 
 export default defineNuxtConfig({
   ssr: false,
@@ -51,7 +48,6 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      authPath: process.env.AUTH_PATH,
       websocketPath: "",
       baseApiPath: apiBasePath,
       sfuPath: process.env.VITE_DSPEAK_SFU_PATH || "",

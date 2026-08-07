@@ -1,179 +1,188 @@
-import { usePocketBaseAdmin } from "./pocketbase.js";
-import { getBoundedList } from "./pocketbase-query.js";
+import { db } from "../db/client.js";
+import { friends, profiles } from "../db/schema/index.js";
+import { eq, and, or, desc, asc } from "drizzle-orm";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
+import { publicDisplayName } from "../../shared/user-profile.js";
 
 export async function getFriendsList(userId) {
-  const pb = await usePocketBaseAdmin();
-  let friendships;
-  try {
-    friendships = await getBoundedList(pb, "dspeak_friends", {
-      filter: pb.filter(
-        "(requester = {:userId} || recipient = {:userId}) && status = 'accepted'",
-        { userId },
-      ),
-      expand: "requester,recipient",
-    });
-  } catch (error) {
-    return [];
-  }
+  const friendships = await db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.userId, userId), eq(friends.status, "accepted")))
+    .orderBy(desc(friends.createdAt));
 
-  const friends = [];
-  for (const friendship of friendships) {
-    const friendId =
-      String(friendship.requester) === String(userId)
-        ? String(friendship.recipient)
-        : String(friendship.requester);
+  const friendIds = friendships.map((f) => f.friendId);
+  if (friendIds.length === 0) return [];
 
-    const profile =
-      String(friendship.requester) === String(userId)
-        ? friendship.expand?.recipient
-        : friendship.expand?.requester;
+  const friendProfiles = await db
+    .select()
+    .from(profiles)
+    .where(inArray(profiles.id, friendIds));
 
-    if (profile) {
-      friends.push({
-        id: friendId,
-        name: profile.name || profile.username || "",
-        display_name: profile.display_name || "",
-        handle: profile.handle || "",
-        avatar: profile.avatar || "",
-        online: Boolean(profile.online),
-        presence_status: profile.presence_status || "offline",
-        friendshipId: friendship.id,
-        createdAt: friendship.created,
-      });
-    }
-  }
+  const profileMap = new Map(friendProfiles.map((p) => [p.id, p]));
 
-  return friends;
+  return friendships.map((friendship) => {
+    const profile = profileMap.get(friendship.friendId);
+    return {
+      id: friendship.friendId,
+      name: profile ? publicDisplayName(profile) : "",
+      display_name: profile?.displayName || "",
+      handle: profile?.username || "",
+      avatar: profile ? sameOriginAvatarPath(profile) : "",
+      online: false,
+      presence_status: "offline",
+      friendshipId: friendship.id,
+      createdAt: friendship.createdAt,
+    };
+  });
 }
 
 export async function getFriendRequests(userId, status = "pending") {
-  const pb = await usePocketBaseAdmin();
-  let requests;
-  try {
-    requests = await getBoundedList(pb, "dspeak_friends", {
-      filter: pb.filter("recipient = {:userId} && status = {:status}", {
-        userId,
-        status,
-      }),
-      expand: "requester",
-      sort: "-created",
-    });
-  } catch (error) {
-    return [];
-  }
+  const requests = await db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.friendId, userId), eq(friends.status, status)))
+    .orderBy(desc(friends.createdAt));
 
-  return requests.map((req) => ({
-    id: req.id,
-    requesterId: String(req.requester),
-    requester: req.expand?.requester
-      ? {
-          id: req.expand.requester.id,
-          name:
-            req.expand.requester.name || req.expand.requester.username || "",
-          display_name: req.expand.requester.display_name || "",
-          handle: req.expand.requester.handle || "",
-          avatar: req.expand.requester.avatar || "",
-        }
-      : null,
-    status: req.status,
-    createdAt: req.created,
-  }));
+  const requesterIds = [...new Set(requests.map((r) => r.userId))];
+  const requesterProfiles = await db
+    .select()
+    .from(profiles)
+    .where(inArray(profiles.id, requesterIds));
+
+  const requesterMap = new Map(requesterProfiles.map((p) => [p.id, p]));
+
+  return requests.map((req) => {
+    const requester = requesterMap.get(req.userId);
+    return {
+      id: req.id,
+      requesterId: req.userId,
+      requester: requester
+        ? {
+            id: requester.id,
+            name: publicDisplayName(requester),
+            display_name: requester.displayName || "",
+            handle: requester.username || "",
+            avatar: sameOriginAvatarPath(requester),
+          }
+        : null,
+      status: req.status,
+      createdAt: req.createdAt,
+    };
+  });
 }
 
 export async function sendFriendRequest(requesterId, recipientHandle) {
-  const pb = await usePocketBaseAdmin();
+  const recipient = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.username, recipientHandle))
+    .limit(1);
 
-  const recipient = await pb
-    .collection("users")
-    .getFirstListItem(
-      pb.filter("handle = {:handle}", { handle: recipientHandle }),
-    )
-    .catch(() => null);
-
-  if (!recipient) {
+  if (!recipient[0]) {
     throw new Error("User not found");
   }
 
-  if (String(recipient.id) === String(requesterId)) {
+  const recipientId = recipient[0].id;
+
+  if (String(recipientId) === String(requesterId)) {
     throw new Error("Cannot add yourself as a friend");
   }
 
-  const existing = await pb
-    .collection("dspeak_friends")
-    .getList(1, 1, {
-      filter: pb.filter(
-        "(requester = {:user1} || recipient = {:user1}) && (requester = {:user2} || recipient = {:user2})",
-        { user1: requesterId, user2: recipient.id },
+  const existing = await db
+    .select()
+    .from(friends)
+    .where(
+      or(
+        and(eq(friends.userId, requesterId), eq(friends.friendId, recipientId)),
+        and(eq(friends.userId, recipientId), eq(friends.friendId, requesterId)),
       ),
-    })
-    .then((r) => r.items[0] || null)
-    .catch(() => null);
+    )
+    .limit(1);
 
-  if (existing) {
-    if (existing.status === "accepted") {
+  if (existing.length > 0) {
+    const existingFriendship = existing[0];
+    if (existingFriendship.status === "accepted") {
       throw new Error("Already friends with this user");
     }
-    if (existing.status === "pending") {
-      const isRequester = String(existing.requester) === String(requesterId);
+    if (existingFriendship.status === "pending") {
+      const isRequester =
+        String(existingFriendship.userId) === String(requesterId);
       if (!isRequester) {
-        await respondToFriendRequest(existing.id, requesterId, true);
-        return { id: existing.id, status: "accepted", accepted: true };
+        await respondToFriendRequest(existingFriendship.id, requesterId, true);
+        return {
+          id: existingFriendship.id,
+          status: "accepted",
+          accepted: true,
+        };
       }
       return {
-        id: existing.id,
-        recipientId: recipient.id,
+        id: existingFriendship.id,
+        recipientId,
         recipient: {
-          id: recipient.id,
-          name: recipient.name || recipient.username || "",
-          handle: recipient.handle || "",
-          avatar: recipient.avatar || "",
+          id: recipientId,
+          name: publicDisplayName(recipient[0]),
+          handle: recipient[0].username || "",
+          avatar: sameOriginAvatarPath(recipient[0]),
         },
-        status: existing.status,
-        createdAt: existing.created,
+        status: existingFriendship.status,
+        createdAt: existingFriendship.createdAt,
       };
     }
-    if (existing.status === "blocked") {
+    if (existingFriendship.status === "blocked") {
       throw new Error("Unable to send friend request");
     }
   }
 
-  const request = await pb.collection("dspeak_friends").create({
-    requester: requesterId,
-    recipient: recipient.id,
-    status: "pending",
-  });
+  const result = await db
+    .insert(friends)
+    .values({
+      userId: requesterId,
+      friendId: recipientId,
+      status: "pending",
+    })
+    .returning();
+
+  const request = result[0];
 
   return {
     id: request.id,
-    recipientId: recipient.id,
+    recipientId,
     recipient: {
-      id: recipient.id,
-      name: recipient.name || recipient.username || "",
-      handle: recipient.handle || "",
-      avatar: recipient.avatar || "",
+      id: recipientId,
+      name: publicDisplayName(recipient[0]),
+      handle: recipient[0].username || "",
+      avatar: sameOriginAvatarPath(recipient[0]),
     },
     status: request.status,
-    createdAt: request.created,
+    createdAt: request.createdAt,
   };
 }
 
 export async function respondToFriendRequest(requestId, userId, accept) {
-  const pb = await usePocketBaseAdmin();
-  const request = await pb.collection("dspeak_friends").getOne(requestId);
+  const request = await db
+    .select()
+    .from(friends)
+    .where(eq(friends.id, requestId))
+    .limit(1);
 
-  if (String(request.recipient) !== String(userId)) {
+  if (!request[0]) {
+    throw new Error("Friend request not found");
+  }
+
+  if (String(request[0].friendId) !== String(userId)) {
     throw new Error("Not authorized to respond to this request");
   }
 
-  if (request.status !== "pending") {
+  if (request[0].status !== "pending") {
     throw new Error("Friend request is no longer pending");
   }
 
   const newStatus = accept ? "accepted" : "rejected";
-  await pb
-    .collection("dspeak_friends")
-    .update(requestId, { status: newStatus });
+  await db
+    .update(friends)
+    .set({ status: newStatus })
+    .where(eq(friends.id, requestId));
 
   return {
     id: requestId,
@@ -182,235 +191,244 @@ export async function respondToFriendRequest(requestId, userId, accept) {
 }
 
 export async function getFriendshipStatus(userId, otherUserId) {
-  const pb = await usePocketBaseAdmin();
-
   if (String(userId) === String(otherUserId)) {
     return { status: "self" };
   }
 
-  try {
-    const friendship = await pb
-      .collection("dspeak_friends")
-      .getFirstListItem(
-        pb.filter(
-          "(requester = {:user1} || recipient = {:user1}) && (requester = {:user2} || recipient = {:user2})",
-          { user1: userId, user2: otherUserId },
-        ),
-      )
-      .catch(() => null);
+  const friendship = await db
+    .select()
+    .from(friends)
+    .where(
+      or(
+        and(eq(friends.userId, userId), eq(friends.friendId, otherUserId)),
+        and(eq(friends.userId, otherUserId), eq(friends.friendId, userId)),
+      ),
+    )
+    .limit(1);
 
-    if (!friendship) {
-      return { status: "none" };
-    }
-
-    if (friendship.status === "accepted") {
-      return { status: "friends", friendshipId: friendship.id };
-    }
-
-    if (friendship.status === "pending") {
-      const isRequester = String(friendship.requester) === String(userId);
-      return {
-        status: isRequester ? "request-sent" : "request-received",
-        friendshipId: friendship.id,
-      };
-    }
-
-    if (friendship.status === "blocked") {
-      return { status: "blocked" };
-    }
-
-    return { status: "none" };
-  } catch (error) {
+  if (friendship.length === 0) {
     return { status: "none" };
   }
+
+  const f = friendship[0];
+
+  if (f.status === "accepted") {
+    return { status: "friends", friendshipId: f.id };
+  }
+
+  if (f.status === "pending") {
+    const isRequester = String(f.userId) === String(userId);
+    return {
+      status: isRequester ? "request-sent" : "request-received",
+      friendshipId: f.id,
+    };
+  }
+
+  if (f.status === "blocked") {
+    return { status: "blocked" };
+  }
+
+  return { status: "none" };
 }
 
 export async function getMutualFriends(userId, otherUserId) {
-  const pb = await usePocketBaseAdmin();
+  const userFriendships = await db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.userId, userId), eq(friends.status, "accepted")));
 
-  try {
-    const userFriendships = await getBoundedList(pb, "dspeak_friends", {
-      filter: pb.filter(
-        "(requester = {:userId} || recipient = {:userId}) && status = 'accepted'",
-        { userId },
-      ),
-      expand: "requester,recipient",
-    });
+  const otherFriendships = await db
+    .select()
+    .from(friends)
+    .where(
+      and(eq(friends.userId, otherUserId), eq(friends.status, "accepted")),
+    );
 
-    const otherFriendships = await getBoundedList(pb, "dspeak_friends", {
-      filter: pb.filter(
-        "(requester = {:userId} || recipient = {:userId}) && status = 'accepted'",
-        { userId: otherUserId },
-      ),
-      expand: "requester,recipient",
-    });
+  const userFriendIds = new Set(
+    userFriendships
+      .map((f) => f.friendId)
+      .filter((id) => String(id) !== String(otherUserId)),
+  );
 
-    const userFriendIds = new Set();
-    for (const f of userFriendships) {
-      const friendId =
-        String(f.requester) === String(userId)
-          ? String(f.recipient)
-          : String(f.requester);
-      if (friendId !== String(otherUserId)) {
-        userFriendIds.add(friendId);
-      }
-    }
+  const mutualFriendIds = otherFriendships
+    .map((f) => f.friendId)
+    .filter((id) => userFriendIds.has(id));
 
-    const mutual = [];
-    for (const f of otherFriendships) {
-      const friendId =
-        String(f.requester) === String(otherUserId)
-          ? String(f.recipient)
-          : String(f.requester);
-      if (userFriendIds.has(friendId)) {
-        const profile =
-          String(f.requester) === String(otherUserId)
-            ? f.expand?.recipient
-            : f.expand?.requester;
-        if (profile) {
-          mutual.push({
-            id: friendId,
-            name: profile.name || profile.username || "",
-            display_name: profile.display_name || "",
-            handle: profile.handle || "",
-            avatar: profile.avatar || "",
-            online: Boolean(profile.online),
-            presence_status: profile.presence_status || "offline",
-          });
-        }
-      }
-    }
+  if (mutualFriendIds.length === 0) return [];
 
-    return mutual;
-  } catch (error) {
-    return [];
-  }
+  const mutualProfiles = await db
+    .select()
+    .from(profiles)
+    .where(inArray(profiles.id, mutualFriendIds));
+
+  const profileMap = new Map(mutualProfiles.map((p) => [p.id, p]));
+
+  return mutualFriendIds.map((id) => {
+    const profile = profileMap.get(id);
+    return {
+      id,
+      name: profile ? publicDisplayName(profile) : "",
+      display_name: profile?.displayName || "",
+      handle: profile?.username || "",
+      avatar: profile ? sameOriginAvatarPath(profile) : "",
+      online: false,
+      presence_status: "offline",
+    };
+  });
 }
 
 export async function sendFriendRequestById(requesterId, recipientId) {
-  const pb = await usePocketBaseAdmin();
-
   if (String(requesterId) === String(recipientId)) {
     throw new Error("Cannot add yourself as a friend");
   }
 
-  const recipient = await pb
-    .collection("users")
-    .getOne(recipientId)
-    .catch(() => null);
+  const recipient = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.id, recipientId))
+    .limit(1);
 
-  if (!recipient) {
+  if (!recipient[0]) {
     throw new Error("User not found");
   }
 
-  const existing = await pb
-    .collection("dspeak_friends")
-    .getList(1, 1, {
-      filter: pb.filter(
-        "(requester = {:user1} || recipient = {:user1}) && (requester = {:user2} || recipient = {:user2})",
-        { user1: requesterId, user2: recipient.id },
+  const existing = await db
+    .select()
+    .from(friends)
+    .where(
+      or(
+        and(eq(friends.userId, requesterId), eq(friends.friendId, recipientId)),
+        and(eq(friends.userId, recipientId), eq(friends.friendId, requesterId)),
       ),
-    })
-    .then((r) => r.items[0] || null)
-    .catch(() => null);
+    )
+    .limit(1);
 
-  if (existing) {
-    if (existing.status === "accepted") {
+  if (existing.length > 0) {
+    const existingFriendship = existing[0];
+    if (existingFriendship.status === "accepted") {
       throw new Error("Already friends with this user");
     }
-    if (existing.status === "pending") {
-      const isRequester = String(existing.requester) === String(requesterId);
+    if (existingFriendship.status === "pending") {
+      const isRequester =
+        String(existingFriendship.userId) === String(requesterId);
       if (isRequester) {
         throw new Error("Friend request already sent");
       }
-      await respondToFriendRequest(existing.id, requesterId, true);
-      return { id: existing.id, status: "accepted", accepted: true };
+      await respondToFriendRequest(existingFriendship.id, requesterId, true);
+      return { id: existingFriendship.id, status: "accepted", accepted: true };
     }
-    if (existing.status === "blocked") {
+    if (existingFriendship.status === "blocked") {
       throw new Error("Unable to send friend request");
     }
   }
 
-  const request = await pb.collection("dspeak_friends").create({
-    requester: requesterId,
-    recipient: recipient.id,
-    status: "pending",
-  });
+  const result = await db
+    .insert(friends)
+    .values({
+      userId: requesterId,
+      friendId: recipientId,
+      status: "pending",
+    })
+    .returning();
+
+  const request = result[0];
 
   return {
     id: request.id,
-    recipientId: recipient.id,
+    recipientId,
     recipient: {
-      id: recipient.id,
-      name: recipient.name || recipient.username || "",
-      handle: recipient.handle || "",
-      avatar: recipient.avatar || "",
+      id: recipientId,
+      name: publicDisplayName(recipient[0]),
+      handle: recipient[0].username || "",
+      avatar: sameOriginAvatarPath(recipient[0]),
     },
     status: request.status,
-    createdAt: request.created,
+    createdAt: request.createdAt,
   };
 }
 
 export async function getSentFriendRequests(userId) {
-  const pb = await usePocketBaseAdmin();
-  const requests = await getBoundedList(pb, "dspeak_friends", {
-    filter: pb.filter("requester = {:userId}", { userId }),
-    expand: "recipient",
-    sort: "-created",
-  });
+  const requests = await db
+    .select()
+    .from(friends)
+    .where(and(eq(friends.userId, userId), eq(friends.status, "pending")))
+    .orderBy(desc(friends.createdAt));
 
-  return requests
-    .filter((req) => req.status === "pending")
-    .map((req) => ({
+  const recipientIds = [...new Set(requests.map((r) => r.friendId))];
+  const recipientProfiles = await db
+    .select()
+    .from(profiles)
+    .where(inArray(profiles.id, recipientIds));
+
+  const recipientMap = new Map(recipientProfiles.map((p) => [p.id, p]));
+
+  return requests.map((req) => {
+    const recipient = recipientMap.get(req.friendId);
+    return {
       id: req.id,
-      recipientId: String(req.recipient),
-      recipient: req.expand?.recipient
+      recipientId: req.friendId,
+      recipient: recipient
         ? {
-            id: req.expand.recipient.id,
-            name:
-              req.expand.recipient.name || req.expand.recipient.username || "",
-            display_name: req.expand.recipient.display_name || "",
-            handle: req.expand.recipient.handle || "",
-            avatar: sameOriginAvatarPath(req.expand.recipient) || "",
+            id: recipient.id,
+            name: publicDisplayName(recipient),
+            display_name: recipient.displayName || "",
+            handle: recipient.username || "",
+            avatar: sameOriginAvatarPath(recipient),
           }
         : null,
       status: req.status,
-      createdAt: req.created,
-    }));
+      createdAt: req.createdAt,
+    };
+  });
 }
 
 export async function cancelFriendRequest(requestId, userId) {
-  const pb = await usePocketBaseAdmin();
-  const request = await pb.collection("dspeak_friends").getOne(requestId);
+  const request = await db
+    .select()
+    .from(friends)
+    .where(eq(friends.id, requestId))
+    .limit(1);
 
-  if (String(request.requester) !== String(userId)) {
+  if (!request[0]) {
+    throw new Error("Friend request not found");
+  }
+
+  if (String(request[0].userId) !== String(userId)) {
     throw new Error("Not authorized to cancel this request");
   }
 
-  if (request.status !== "pending") {
+  if (request[0].status !== "pending") {
     throw new Error("Friend request is no longer pending");
   }
 
-  await pb.collection("dspeak_friends").delete(requestId);
+  await db.delete(friends).where(eq(friends.id, requestId));
   return { success: true };
 }
 
 export async function removeFriend(userId, friendId) {
-  const pb = await usePocketBaseAdmin();
-  const friendship = await pb
-    .collection("dspeak_friends")
-    .getFirstListItem(
-      pb.filter(
-        "((requester = {:user1} && recipient = {:user2}) || (requester = {:user2} && recipient = {:user1})) && status = 'accepted'",
-        { user1: userId, user2: friendId },
+  const friendship = await db
+    .select()
+    .from(friends)
+    .where(
+      or(
+        and(
+          eq(friends.userId, userId),
+          eq(friends.friendId, friendId),
+          eq(friends.status, "accepted"),
+        ),
+        and(
+          eq(friends.userId, friendId),
+          eq(friends.friendId, userId),
+          eq(friends.status, "accepted"),
+        ),
       ),
     )
-    .catch(() => null);
+    .limit(1);
 
-  if (!friendship) {
+  if (!friendship[0]) {
     throw new Error("Friendship not found");
   }
 
-  await pb.collection("dspeak_friends").delete(friendship.id);
+  await db.delete(friends).where(eq(friends.id, friendship[0].id));
   return { success: true };
 }

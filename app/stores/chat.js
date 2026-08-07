@@ -29,12 +29,17 @@ import {
 } from "~~/shared/channel-policy.js";
 import { debugLog } from "../shared/debug";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import {
+  bindSupabaseSession,
+  getSupabaseClient,
+} from "../utils/supabase-client.js";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
   const loading = ref(false);
   const error = ref(null);
   const ws = ref(null);
+  const realtimeChannel = ref(null);
   const connected = ref(false);
   const connecting = ref(false);
   const intentionalDisconnect = ref(false);
@@ -244,18 +249,31 @@ export const useChatStore = defineStore("chat", () => {
     window.addEventListener("offline", handleBrowserOffline);
   }
 
-  function closeActiveSocket() {
-    if (!ws.value) return;
-    const socket = ws.value;
-    ws.value = null;
-    socket.onopen = null;
-    socket.onmessage = null;
-    socket.onerror = null;
-    socket.onclose = null;
+  function closeActiveTransport() {
+    const channel = realtimeChannel.value;
+    realtimeChannel.value = null;
+    if (ws.value) {
+      const socket = ws.value;
+      ws.value = null;
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onerror = null;
+      socket.onclose = null;
+      try {
+        socket.close();
+      } catch (socketError) {
+        console.warn("[ChatStore] Unable to close chat socket:", socketError);
+      }
+      return;
+    }
+    if (!channel) return;
     try {
-      socket.close();
+      channel.unsubscribe().then(() => {});
     } catch (socketError) {
-      console.warn("[ChatStore] Unable to close chat socket:", socketError);
+      console.warn(
+        "[ChatStore] Unable to unsubscribe realtime channel:",
+        socketError,
+      );
     }
   }
 
@@ -278,7 +296,7 @@ export const useChatStore = defineStore("chat", () => {
       clearInterval(pingInterval);
       pingInterval = null;
     }
-    closeActiveSocket();
+    closeActiveTransport();
   }
 
   function handleBrowserOnline() {
@@ -325,6 +343,39 @@ export const useChatStore = defineStore("chat", () => {
       navigator.serviceWorker.controller
     ) {
       navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
+    }
+  }
+
+  function scheduleReconnect() {
+    if (
+      !intentionalDisconnect.value &&
+      !reconnectTimer &&
+      currentChannelId.value
+    ) {
+      backoffAttempts = Math.min(backoffAttempts + 1, 10);
+
+      const baseDelay = Math.min(
+        30000,
+        1000 * Math.pow(2, Math.max(0, backoffAttempts - 1)),
+      );
+
+      const jitter = 0.8 + Math.random() * 0.4;
+      const delay = Math.round(baseDelay * jitter);
+      debugLog(
+        `[ChatStore] Scheduling reconnect in ${delay}ms (attempt ${backoffAttempts})`,
+      );
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!connected.value && currentChannelId.value) {
+          debugLog("[ChatStore] Attempting to reconnect...");
+          connectToChannel(
+            currentChannelId.value,
+            currentChannelName.value,
+            currentRoomId.value,
+            true,
+          );
+        }
+      }, delay);
     }
   }
 
@@ -434,149 +485,157 @@ export const useChatStore = defineStore("chat", () => {
         return;
       }
 
-      const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-      const websocketPath = config.public.websocketPath || `${origin}/api`;
-      const wsUrl = `${websocketPath}/chat/socket?channelId=${encodeURIComponent(channelId)}`;
-      const socket = new WebSocket(wsUrl);
-      ws.value = socket;
+      if (hasTauriRuntimeMarker()) {
+        const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+        const websocketPath = config.public.websocketPath || `${origin}/api`;
+        const wsUrl = `${websocketPath}/chat/socket?channelId=${encodeURIComponent(channelId)}`;
+        const socket = new WebSocket(wsUrl);
+        ws.value = socket;
 
-      socket.onopen = () => {
-        if (
-          socket !== ws.value ||
-          generation !== connectionGeneration ||
-          currentChannelId.value !== channelId
-        ) {
-          socket.close();
-          return;
-        }
-        connecting.value = false;
-        connected.value = true;
-        intentionalDisconnect.value = false;
-        debugLog(`[ChatStore] Connected to channel ${channelId}`);
+        socket.onopen = () => {
+          if (
+            socket !== ws.value ||
+            generation !== connectionGeneration ||
+            currentChannelId.value !== channelId
+          ) {
+            socket.close();
+            return;
+          }
+          connecting.value = false;
+          connected.value = true;
+          intentionalDisconnect.value = false;
+          debugLog(`[ChatStore] Connected to channel ${channelId}`);
 
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
-        backoffAttempts = 0;
-
-        if (pingInterval) clearInterval(pingInterval);
-        pingInterval = setInterval(() => {
-          sendPing();
-        }, 30000);
-      };
-
-      socket.onmessage = (event) => {
-        if (
-          socket === ws.value &&
-          generation === connectionGeneration &&
-          currentChannelId.value === channelId
-        ) {
-          handleWebSocketMessage(event);
-        }
-      };
-
-      const recentCloses = [];
-
-      socket.onclose = (event) => {
-        if (
-          socket !== ws.value ||
-          generation !== connectionGeneration ||
-          currentChannelId.value !== channelId
-        ) {
-          return;
-        }
-        connecting.value = false;
-        connected.value = false;
-        if (!navigator.onLine) {
-          handleBrowserOffline();
-          return;
-        }
-        try {
-          debugLog("[ChatStore] WebSocket connection closed", {
-            code: event?.code,
-            reason: event?.reason,
-          });
-        } catch (e) {
-          debugLog("[ChatStore] WebSocket connection closed");
-        }
-
-        recentCloses.push(Date.now());
-        const cutoff = Date.now() - 30000;
-        while (recentCloses.length && recentCloses[0] < cutoff)
-          recentCloses.shift();
-        if (recentCloses.length > 3) {
-          console.warn(
-            "[ChatStore] Multiple closes detected in short time:",
-            recentCloses.length,
-          );
-
-          backoffAttempts = Math.min(backoffAttempts + 2, 20);
-        }
-
-        if (pingInterval) {
-          clearInterval(pingInterval);
-          pingInterval = null;
-        }
-
-        if (
-          event &&
-          (event.code === 1011 ||
-            (event.reason &&
-              typeof event.reason === "string" &&
-              event.reason.toLowerCase().includes("verify")))
-        ) {
-          console.error(
-            "[ChatStore] Server rejected channel access - aborting reconnect",
-            { code: event.code, reason: event.reason },
-          );
-          error.value = "Failed to verify channel access";
-          intentionalDisconnect.value = true;
-          return;
-        }
-
-        if (
-          !intentionalDisconnect.value &&
-          !reconnectTimer &&
-          currentChannelId.value
-        ) {
-          backoffAttempts = Math.min(backoffAttempts + 1, 10);
-
-          const baseDelay = Math.min(
-            30000,
-            1000 * Math.pow(2, Math.max(0, backoffAttempts - 1)),
-          );
-
-          const jitter = 0.8 + Math.random() * 0.4;
-          const delay = Math.round(baseDelay * jitter);
-          debugLog(
-            `[ChatStore] Scheduling reconnect in ${delay}ms (attempt ${backoffAttempts})`,
-          );
-          reconnectTimer = setTimeout(() => {
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
             reconnectTimer = null;
-            if (!connected.value && currentChannelId.value) {
-              debugLog("[ChatStore] Attempting to reconnect...");
-              connectToChannel(
-                currentChannelId.value,
-                currentChannelName.value,
-                currentRoomId.value,
-                true,
-              );
-            }
-          }, delay);
-        }
-      };
+          }
+          backoffAttempts = 0;
 
-      socket.onerror = (socketError) => {
-        if (socket !== ws.value || generation !== connectionGeneration) return;
-        connecting.value = false;
-        if (!navigator.onLine) {
-          handleBrowserOffline();
-          return;
+          if (pingInterval) clearInterval(pingInterval);
+          pingInterval = setInterval(() => {
+            sendPing();
+          }, 30000);
+        };
+
+        socket.onmessage = (event) => {
+          if (
+            socket === ws.value &&
+            generation === connectionGeneration &&
+            currentChannelId.value === channelId
+          ) {
+            handleWebSocketMessage(event);
+          }
+        };
+
+        socket.onclose = (event) => {
+          if (
+            socket !== ws.value ||
+            generation !== connectionGeneration ||
+            currentChannelId.value !== channelId
+          ) {
+            return;
+          }
+          connecting.value = false;
+          connected.value = false;
+          if (!navigator.onLine) {
+            handleBrowserOffline();
+            return;
+          }
+          try {
+            debugLog("[ChatStore] WebSocket connection closed", {
+              code: event?.code,
+              reason: event?.reason,
+            });
+          } catch (e) {
+            debugLog("[ChatStore] WebSocket connection closed");
+          }
+
+          if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
+          }
+
+          scheduleReconnect();
+        };
+
+        socket.onerror = (socketError) => {
+          if (socket !== ws.value || generation !== connectionGeneration)
+            return;
+          connecting.value = false;
+          if (!navigator.onLine) {
+            handleBrowserOffline();
+            return;
+          }
+          console.error("[ChatStore] WebSocket error:", socketError);
+          error.value = "Unable to connect to real-time chat";
+        };
+      } else {
+        const supabaseClient = getSupabaseClient();
+        if (!supabaseClient) {
+          throw new Error("Supabase Realtime is not configured");
         }
-        console.error("[ChatStore] WebSocket error:", socketError);
-        error.value = "Unable to connect to real-time chat";
-      };
+        if (realtimeChannel.value) {
+          closeActiveTransport();
+        }
+        const authStore = useAuthStore();
+        const storedUser = authStore.getUserData();
+        if (storedUser) {
+          const storedAccess = sessionStorage.getItem("sb_access_token");
+          if (storedAccess) {
+            await bindSupabaseSession(
+              storedAccess,
+              sessionStorage.getItem("sb_refresh_token") || "",
+            ).catch(() => false);
+          }
+        }
+        const supabaseChannel = supabaseClient.channel(`chat:${channelId}`);
+        realtimeChannel.value = supabaseChannel;
+
+        supabaseChannel
+          .on("broadcast", { event: "message" }, (payload) => {
+            if (
+              realtimeChannel.value === supabaseChannel &&
+              generation === connectionGeneration &&
+              currentChannelId.value === channelId
+            ) {
+              handleWebSocketMessage({ data: JSON.stringify(payload) });
+            }
+          })
+          .subscribe((status, err) => {
+            if (realtimeChannel.value !== supabaseChannel) {
+              return;
+            }
+            if (status === "SUBSCRIBED" || status === "SYNCED") {
+              if (
+                generation !== connectionGeneration ||
+                currentChannelId.value !== channelId
+              ) {
+                return;
+              }
+              connecting.value = false;
+              connected.value = true;
+              intentionalDisconnect.value = false;
+              debugLog(`[ChatStore] Connected to channel ${channelId}`);
+              if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+              }
+              backoffAttempts = 0;
+              return;
+            }
+            if (status === "CHANNEL_ERROR" || status === "CLOSED") {
+              connecting.value = false;
+              connected.value = false;
+              if (!navigator.onLine) {
+                handleBrowserOffline();
+                return;
+              }
+              error.value = "Unable to connect to real-time chat";
+              scheduleReconnect();
+            }
+          });
+      }
 
       if (typeof window !== "undefined") {
         try {
@@ -620,11 +679,11 @@ export const useChatStore = defineStore("chat", () => {
     if (invalidateGeneration) connectionGeneration += 1;
     intentionalDisconnect.value = !!intentional;
 
-    if (ws.value) {
+    if (ws.value || realtimeChannel.value) {
       try {
-        closeActiveSocket();
+        closeActiveTransport();
       } catch (e) {
-        console.warn("[ChatStore] Error closing WebSocket cleanly:", e);
+        console.warn("[ChatStore] Error closing chat transport cleanly:", e);
       }
     }
     if (pingInterval) {

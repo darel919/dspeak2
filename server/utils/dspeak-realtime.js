@@ -1,5 +1,29 @@
 const stateKey = Symbol.for("dspeak.realtime");
 
+let realtimePublisher = null;
+
+async function publishToRealtime(topic, message) {
+  if (!realtimePublisher) {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return;
+    }
+    try {
+      const { supabaseAdmin } = await import("../auth/supabase.js");
+      if (!supabaseAdmin) return;
+      realtimePublisher = supabaseAdmin;
+    } catch {
+      return;
+    }
+  }
+  try {
+    realtimePublisher
+      .channel(topic)
+      .send({ type: "broadcast", event: "message", payload: message })
+      .then(() => {})
+      .catch(() => {});
+  } catch {}
+}
+
 function getState() {
   if (!globalThis[stateKey])
     globalThis[stateKey] = {
@@ -60,6 +84,7 @@ export function removeGlobalSubscriber(peer) {
 }
 
 export function broadcastGlobally(message) {
+  publishToRealtime("global", message);
   const payload = JSON.stringify(message);
   for (const peer of getState().global) {
     try {
@@ -84,6 +109,7 @@ export function removeUserSubscriber(userId, peer) {
 }
 
 export function broadcastToUser(userId, message) {
+  publishToRealtime(`notify:${String(userId)}`, message);
   const payload = JSON.stringify(message);
   for (const peer of getState().users.get(String(userId)) || []) {
     try {
@@ -112,6 +138,7 @@ export function getChannelSubscribers(channelId) {
 }
 
 export function broadcastToChannel(channelId, message, excludedPeer = null) {
+  publishToRealtime(`chat:${String(channelId)}`, message);
   const payload = JSON.stringify(message);
   for (const peer of getChannelSubscribers(channelId)) {
     if (peer === excludedPeer) continue;

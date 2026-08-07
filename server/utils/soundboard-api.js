@@ -9,17 +9,21 @@ import {
   broadcastVoiceChannelEvent,
   isActiveVoiceParticipant,
 } from "./mediasoup-sfu.js";
-import { usePocketBaseAdmin } from "./pocketbase.js";
+import { db } from "../db/client.js";
 import {
-  requireRoomMember,
-  requireRoomPermission,
-} from "./room-authorization.js";
+  rooms,
+  channels,
+  roomSoundboards,
+  roomMemberships,
+  roomRoles,
+  membershipRoles,
+} from "../db/schema/index.js";
+import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import {
   convertSoundboardIcon,
   convertSoundboardSource,
 } from "./soundboard-conversion.js";
-import { requireAuthenticatedUser } from "./authentication.js";
-import { getBoundedList } from "./pocketbase-query.js";
+import { requireAuthenticatedUser } from "./auth.js";
 import { enforceRateLimit } from "./rate-limit.js";
 
 const uploadLocks = new Map();
@@ -33,65 +37,134 @@ function withRoomUploadLock(roomId, operation) {
   });
 }
 
-async function context(pb, roomId, userId, permission = null) {
+async function getRoomAccess(roomId, userId) {
+  const room = await db
+    .select()
+    .from(rooms)
+    .where(eq(rooms.id, roomId))
+    .limit(1);
+  if (!room[0]) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Room not found",
+    });
+  }
+
+  const isOwner = String(room[0].ownerId) === String(userId);
+
+  const membership = await db
+    .select({
+      id: roomMemberships.id,
+      userId: roomMemberships.userId,
+      roomId: roomMemberships.roomId,
+      roleId: membershipRoles.roleId,
+      roleName: roomRoles.name,
+      roleColor: roomRoles.color,
+      rolePosition: roomRoles.position,
+      rolePermissions: roomRoles.permissions,
+      roleSystem: roomRoles.system,
+      roleIsDefault: roomRoles.isDefault,
+    })
+    .from(roomMemberships)
+    .leftJoin(
+      membershipRoles,
+      eq(membershipRoles.membershipId, roomMemberships.id),
+    )
+    .leftJoin(roomRoles, eq(roomRoles.id, membershipRoles.roleId))
+    .where(
+      and(
+        eq(roomMemberships.roomId, roomId),
+        eq(roomMemberships.userId, userId),
+      ),
+    );
+
+  const roles = membership
+    .filter((m) => m.roleId)
+    .map((m) => ({
+      id: m.roleId,
+      name: m.roleName,
+      color: m.roleColor,
+      position: m.rolePosition,
+      permissions: m.rolePermissions,
+      system: m.roleSystem,
+      isDefault: m.roleIsDefault,
+    }));
+
+  const { getEffectivePermissions } =
+    await import("../../shared/room-policy.js");
+  const permissions = getEffectivePermissions(roles, isOwner);
+
+  return { room: room[0], permissions, isOwner };
+}
+
+async function context(roomId, userId, permission = null) {
   if (!roomId)
     throw createError({
       statusCode: 400,
       statusMessage: "Room ID is required",
     });
-  const room = await pb.collection("dspeak_rooms").getOne(roomId);
-  if (permission) await requireRoomPermission(pb, room, userId, permission);
-  else await requireRoomMember(pb, room, userId);
+  const { room, permissions } = await getRoomAccess(roomId, userId);
+  if (permission && !permissions.includes(permission))
+    throw createError({
+      statusCode: 403,
+      statusMessage: `Missing room permission: ${permission}`,
+    });
   return room;
 }
 
-async function clipContext(pb, clipId, userId, permission = null) {
+async function clipContext(clipId, userId, permission = null) {
   if (!clipId)
     throw createError({
       statusCode: 400,
       statusMessage: "Soundboard clip ID is required",
     });
-  const clip = await pb.collection("dspeak_room_soundboards").getOne(clipId, {
-    expand: "uploader",
-  });
-  const room = await context(pb, clip.room, userId, permission);
-  return { clip, room };
+  const clip = await db
+    .select()
+    .from(roomSoundboards)
+    .where(eq(roomSoundboards.id, clipId))
+    .limit(1);
+  if (!clip[0])
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Soundboard clip not found",
+    });
+  const room = await context(clip[0].roomId, userId, permission);
+  return { clip: clip[0], room };
 }
 
-async function requireClipManager(pb, clip, userId) {
-  const room = await pb.collection("dspeak_rooms").getOne(clip.room);
-  const access = await requireRoomMember(pb, room, userId);
-  if (!canManageSoundboardClip(clip, userId, access.permissions))
+async function requireClipManager(clip, userId) {
+  const { permissions } = await getRoomAccess(clip.roomId, userId);
+  if (!canManageSoundboardClip(clip, userId, permissions))
     throw createError({
       statusCode: 403,
       statusMessage:
         "Only the uploader or a room soundboard manager can manage this clip",
     });
-  return access;
 }
 
-async function listClips(pb, roomId, userId) {
-  const room = await context(pb, roomId, userId);
-  const access = await requireRoomMember(pb, room, userId);
-  const canManageRoom = access.permissions.includes("room.manage_soundboard");
-  const records = await getBoundedList(pb, "dspeak_room_soundboards", {
-    filter: pb.filter("room = {:room}", { room: roomId }),
-    sort: "display_order,created",
-    expand: "uploader",
-  });
+async function listClips(roomId, userId) {
+  const room = await context(roomId, userId);
+  const { permissions } = await getRoomAccess(roomId, userId);
+  const canManageRoom = permissions.includes("room.manage_soundboard");
+  const records = await db
+    .select()
+    .from(roomSoundboards)
+    .where(eq(roomSoundboards.roomId, roomId))
+    .orderBy(asc(roomSoundboards.displayOrder), asc(roomSoundboards.createdAt));
+
   return {
     canManageRoom,
     clips: records.map((record) => ({
       ...presentSoundboardClip(record),
-      canManage: canManageSoundboardClip(record, userId, access.permissions),
+      canManage: canManageSoundboardClip(record, userId, permissions),
     })),
   };
 }
 
-async function uploadClip(event, pb, userId) {
+async function uploadClip(event, userId) {
   const form = await readFormData(event);
   const roomId = String(form.get("roomId") || "");
-  await context(pb, roomId, userId);
+  await context(roomId, userId);
   const source = form.get("media");
   const iconImage = form.get("iconImage");
   const metadata = normalizeSoundboardMetadata(
@@ -103,15 +176,14 @@ async function uploadClip(event, pb, userId) {
       statusMessage: "Clip title is required",
     });
   return withRoomUploadLock(roomId, async () => {
-    const existing = await getBoundedList(
-      pb,
-      "dspeak_room_soundboards",
-      {
-        filter: pb.filter("room = {:room}", { room: roomId }),
-        fields: "id,display_order",
-      },
-      SOUNDBOARD_MAX_CLIPS_PER_ROOM,
-    );
+    const existing = await db
+      .select({
+        id: roomSoundboards.id,
+        displayOrder: roomSoundboards.displayOrder,
+      })
+      .from(roomSoundboards)
+      .where(eq(roomSoundboards.roomId, roomId))
+      .limit(SOUNDBOARD_MAX_CLIPS_PER_ROOM);
     if (!metadata.icon && !(iconImage instanceof File && iconImage.size))
       throw createError({
         statusCode: 400,
@@ -127,42 +199,40 @@ async function uploadClip(event, pb, userId) {
       iconImage instanceof File && iconImage.size
         ? await convertSoundboardIcon(iconImage)
         : null;
-    const payload = new FormData();
-    payload.set("room", roomId);
-    payload.set("uploader", userId);
-    payload.set("title", metadata.title);
-    payload.set("category", metadata.category);
-    payload.set("icon", metadata.icon);
-    payload.set("duration", String(converted.duration));
-    payload.set("display_order", String(existing.length));
-    payload.set("enabled", "true");
-    payload.set(
-      "media",
-      new File([converted.bytes], "soundboard.ogg", { type: "audio/ogg" }),
-    );
-    if (convertedIcon)
-      payload.set(
-        "icon_image",
-        new File([convertedIcon], "soundboard.ico", {
-          type: "image/x-icon",
-        }),
-      );
-    const created = await pb
-      .collection("dspeak_room_soundboards")
-      .create(payload, { expand: "uploader" });
-    await broadcastLibraryUpdate(pb, roomId);
+
+    const result = await db
+      .insert(roomSoundboards)
+      .values({
+        roomId,
+        uploaderId: userId,
+        title: metadata.title,
+        category: metadata.category,
+        icon: metadata.icon,
+        iconImageKey: convertedIcon
+          ? `soundboards/${roomId}/icons/${crypto.randomUUID()}.ico`
+          : null,
+        duration: converted.duration,
+        displayOrder: existing.length,
+        enabled: true,
+      })
+      .returning();
+
+    const created = result[0];
+
+    await broadcastLibraryUpdate(roomId);
     setResponseStatus(event, 201);
     return presentSoundboardClip(created);
   });
 }
 
-async function broadcastLibraryUpdate(pb, roomId) {
-  const channels = await getBoundedList(pb, "dspeak_rooms_channels", {
-    filter: pb.filter("room = {:room} && isMedia = true", { room: roomId }),
-    fields: "id",
-  });
+async function broadcastLibraryUpdate(roomId) {
+  const mediaChannels = await db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(and(eq(channels.roomId, roomId), eq(channels.isMedia, true)));
+
   await Promise.all(
-    channels.map((channel) =>
+    mediaChannels.map((channel) =>
       broadcastVoiceChannelEvent(channel.id, "soundboard-library-updated", {
         roomId: String(roomId),
       }),
@@ -170,13 +240,13 @@ async function broadcastLibraryUpdate(pb, roomId) {
   );
 }
 
-async function updateClip(event, pb, userId) {
+async function updateClip(event, userId) {
   const contentType = getHeader(event, "content-type") || "";
   const body = contentType.includes("multipart/form-data")
     ? Object.fromEntries((await readFormData(event)).entries())
     : (await readBody(event)) || {};
-  const { clip } = await clipContext(pb, body.id, userId);
-  await requireClipManager(pb, clip, userId);
+  const { clip } = await clipContext(body.id, userId);
+  await requireClipManager(clip, userId);
   const update = {};
   if (body.title !== undefined) {
     update.title = normalizeSoundboardText(body.title, 48);
@@ -198,7 +268,7 @@ async function updateClip(event, pb, userId) {
   if (
     body.icon !== undefined &&
     !update.icon &&
-    !clip.icon_image &&
+    !clip.iconImageKey &&
     !convertedIcon
   )
     throw createError({
@@ -208,83 +278,75 @@ async function updateClip(event, pb, userId) {
   if (body.enabled !== undefined)
     update.enabled = body.enabled === true || body.enabled === "true";
   if (body.order !== undefined)
-    update.display_order = Math.max(0, Math.floor(Number(body.order) || 0));
-  let updatePayload = update;
+    update.displayOrder = Math.max(0, Math.floor(Number(body.order) || 0));
+
   if (convertedIcon) {
-    updatePayload = new FormData();
-    for (const [key, value] of Object.entries(update))
-      updatePayload.set(key, String(value));
-    updatePayload.set(
-      "icon_image",
-      new File([convertedIcon], "soundboard.ico", { type: "image/x-icon" }),
-    );
+    update.iconImageKey = `soundboards/${clip.roomId}/icons/${crypto.randomUUID()}.ico`;
   }
-  const updated = await pb
-    .collection("dspeak_room_soundboards")
-    .update(clip.id, updatePayload, {
-      expand: "uploader",
-    });
-  await broadcastLibraryUpdate(pb, clip.room);
+
+  const result = await db
+    .update(roomSoundboards)
+    .set({ ...update, updatedAt: new Date() })
+    .where(eq(roomSoundboards.id, clip.id))
+    .returning();
+
+  const updated = result[0];
+
+  await broadcastLibraryUpdate(clip.roomId);
   return presentSoundboardClip(updated);
 }
 
-async function deleteClip(pb, userId, clipId) {
-  const { clip } = await clipContext(pb, clipId, userId);
-  await requireClipManager(pb, clip, userId);
-  await pb.collection("dspeak_room_soundboards").delete(clip.id);
-  await broadcastLibraryUpdate(pb, clip.room);
+async function deleteClip(userId, clipId) {
+  const { clip } = await clipContext(clipId, userId);
+  await requireClipManager(clip, userId);
+  await db.delete(roomSoundboards).where(eq(roomSoundboards.id, clip.id));
+  await broadcastLibraryUpdate(clip.roomId);
   return { success: true };
 }
 
-async function media(event, pb, userId, clipId) {
-  const { clip } = await clipContext(pb, clipId, userId);
-  if (!clip.media)
+async function media(event, userId, clipId) {
+  const { clip } = await clipContext(clipId, userId);
+  if (!clip.mediaKey)
     throw createError({
       statusCode: 404,
       statusMessage: "Soundboard media not found",
     });
-  const response = await fetch(pb.files.getURL(clip, clip.media));
-  if (!response.ok)
-    throw createError({
-      statusCode: response.status,
-      statusMessage: "Failed to load soundboard media",
-    });
-  setHeader(event, "Cache-Control", "private, no-store");
-  setHeader(event, "Content-Type", "audio/ogg");
-  setHeader(event, "Content-Disposition", "inline");
-  return sendWebResponse(event, response);
+  const { createDownloadUrl } = await import("../storage/r2.js");
+  const url = await createDownloadUrl(clip.mediaKey);
+  return sendRedirect(event, url, 302);
 }
 
-async function iconMedia(event, pb, userId, clipId) {
-  const { clip } = await clipContext(pb, clipId, userId);
-  if (!clip.icon_image)
+async function iconMedia(event, userId, clipId) {
+  const { clip } = await clipContext(clipId, userId);
+  if (!clip.iconImageKey)
     throw createError({
       statusCode: 404,
       statusMessage: "Soundboard icon not found",
     });
-  const response = await fetch(pb.files.getURL(clip, clip.icon_image));
-  if (!response.ok)
-    throw createError({
-      statusCode: response.status,
-      statusMessage: "Failed to load soundboard icon",
-    });
-  setHeader(event, "Cache-Control", "private, no-store");
-  setHeader(event, "Content-Type", "image/x-icon");
-  return sendWebResponse(event, response);
+  const { createDownloadUrl } = await import("../storage/r2.js");
+  const url = await createDownloadUrl(clip.iconImageKey);
+  return sendRedirect(event, url, 302);
 }
 
-async function trigger(pb, userId, body) {
-  const { clip } = await clipContext(pb, body.id, userId);
+async function trigger(userId, body) {
+  const { clip } = await clipContext(body.id, userId);
   if (!clip.enabled)
     throw createError({
       statusCode: 409,
       statusMessage: "This soundboard clip is disabled",
     });
   const channelId = String(body.channelId || "");
-  const channel = await pb
-    .collection("dspeak_rooms_channels")
-    .getOne(channelId);
-  if (!channel.isMedia || String(channel.room) !== String(clip.room))
+  const channel = await db
+    .select()
+    .from(channels)
+    .where(eq(channels.id, channelId))
+    .limit(1);
+  if (!channel[0])
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Channel not found",
+    });
+  if (!channel[0].isMedia || String(channel[0].roomId) !== String(clip.roomId))
     throw createError({
       statusCode: 403,
       statusMessage:
@@ -301,7 +363,7 @@ async function trigger(pb, userId, body) {
     clipTitle: clip.title,
     clipIcon: clip.icon || "🔊",
     duration: Number(clip.duration) || 0,
-    roomId: String(clip.room),
+    roomId: String(clip.roomId),
     channelId,
     triggeredBy: String(userId),
   });
@@ -309,7 +371,6 @@ async function trigger(pb, userId, body) {
 }
 
 export async function handleSoundboardApi(event, suffix = "") {
-  const pb = await usePocketBaseAdmin();
   const userId = await requireAuthenticatedUser(event);
   const method = event.method;
   const query = getQuery(event);
@@ -324,17 +385,17 @@ export async function handleSoundboardApi(event, suffix = "") {
       60 * 60 * 1000,
     );
   if (!suffix && method === "GET")
-    return listClips(pb, String(query.roomId || ""), userId);
-  if (!suffix && method === "POST") return uploadClip(event, pb, userId);
-  if (!suffix && method === "PUT") return updateClip(event, pb, userId);
+    return listClips(String(query.roomId || ""), userId);
+  if (!suffix && method === "POST") return uploadClip(event, userId);
+  if (!suffix && method === "PUT") return updateClip(event, userId);
   if (!suffix && method === "DELETE")
-    return deleteClip(pb, userId, String(query.id || ""));
+    return deleteClip(userId, String(query.id || ""));
   if (suffix === "media" && method === "GET")
-    return media(event, pb, userId, String(query.id || ""));
+    return media(event, userId, String(query.id || ""));
   if (suffix === "icon" && method === "GET")
-    return iconMedia(event, pb, userId, String(query.id || ""));
+    return iconMedia(event, userId, String(query.id || ""));
   if (suffix === "trigger" && method === "POST")
-    return trigger(pb, userId, (await readBody(event)) || {});
+    return trigger(userId, (await readBody(event)) || {});
   throw createError({
     statusCode: 405,
     statusMessage: "Soundboard method not allowed",

@@ -1,0 +1,148 @@
+import { supabase } from "../auth/supabase.js";
+
+let channels = new Map();
+
+export function getRealtimeChannel(channelName, options = {}) {
+  const key = `${channelName}:${JSON.stringify(options)}`;
+  if (channels.has(key)) {
+    return channels.get(key);
+  }
+
+  const channel = supabase.channel(channelName, {
+    config: {
+      broadcast: { self: false },
+      presence: { key: options.userId },
+    },
+  });
+
+  channels.set(key, channel);
+  return channel;
+}
+
+export function subscribeToChat(channelId, userId, callbacks) {
+  const channel = getRealtimeChannel(`chat:${channelId}`, { userId });
+
+  if (callbacks.onMessage) {
+    channel.on("broadcast", { event: "message" }, (payload) =>
+      callbacks.onMessage(payload),
+    );
+  }
+
+  if (callbacks.onTyping) {
+    channel.on("broadcast", { event: "typing" }, (payload) =>
+      callbacks.onTyping(payload),
+    );
+  }
+
+  if (callbacks.onReaction) {
+    channel.on("broadcast", { event: "reaction" }, (payload) =>
+      callbacks.onReaction(payload),
+    );
+  }
+
+  if (callbacks.onPresence) {
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState();
+      callbacks.onPresence(state);
+    });
+
+    channel.on("presence", { event: "join" }, ({ key, newPresences }) => {
+      callbacks.onPresenceJoin?.(key, newPresences);
+    });
+
+    channel.on("presence", { event: "leave" }, ({ key, leftPresences }) => {
+      callbacks.onPresenceLeave?.(key, leftPresences);
+    });
+  }
+
+  channel.subscribe(async (status) => {
+    if (status === "SUBSCRIBED") {
+      if (callbacks.onSubscribed) callbacks.onSubscribed();
+    } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+      if (callbacks.onError) callbacks.onError(status);
+    }
+  });
+
+  return {
+    channel,
+    sendMessage: (message) =>
+      channel.send({ type: "broadcast", event: "message", payload: message }),
+    sendTyping: (typing) =>
+      channel.send({ type: "broadcast", event: "typing", payload: typing }),
+    sendReaction: (reaction) =>
+      channel.send({ type: "broadcast", event: "reaction", payload: reaction }),
+    trackPresence: (presence) => channel.track(presence),
+    untrackPresence: () => channel.untrack(),
+    unsubscribe: () => {
+      channel.unsubscribe();
+      channels.delete(key);
+    },
+  };
+}
+
+export function subscribeToNotifications(userId, callbacks) {
+  const channel = getRealtimeChannel(`notifications:${userId}`, { userId });
+
+  if (callbacks.onNotification) {
+    channel.on("broadcast", { event: "notification" }, (payload) =>
+      callbacks.onNotification(payload),
+    );
+  }
+
+  channel.subscribe(async (status) => {
+    if (status === "SUBSCRIBED" && callbacks.onSubscribed)
+      callbacks.onSubscribed();
+    if (
+      (status === "CLOSED" || status === "CHANNEL_ERROR") &&
+      callbacks.onError
+    )
+      callbacks.onError(status);
+  });
+
+  return {
+    channel,
+    unsubscribe: () => {
+      channel.unsubscribe();
+      channels.delete(`notifications:${userId}:{"userId":"${userId}"}`);
+    },
+  };
+}
+
+export async function broadcastChatMessage(channelId, message) {
+  const channel = supabase.channel(`chat:${channelId}`);
+  return channel.send({
+    type: "broadcast",
+    event: "message",
+    payload: message,
+  });
+}
+
+export async function broadcastTyping(
+  channelId,
+  { userId, username, isTyping },
+) {
+  const channel = supabase.channel(`chat:${channelId}`);
+  return channel.send({
+    type: "broadcast",
+    event: "typing",
+    payload: { userId, username, isTyping },
+  });
+}
+
+export async function broadcastReaction(channelId, reaction) {
+  const channel = supabase.channel(`chat:${channelId}`);
+  return channel.send({
+    type: "broadcast",
+    event: "reaction",
+    payload: reaction,
+  });
+}
+
+export async function broadcastNotification(userId, notification) {
+  const channel = supabase.channel(`notifications:${userId}`);
+  return channel.send({
+    type: "broadcast",
+    event: "notification",
+    payload: notification,
+  });
+}

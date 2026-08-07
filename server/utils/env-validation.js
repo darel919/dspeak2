@@ -2,9 +2,8 @@ import { isIP } from "node:net";
 
 const requiredVariables = [
   "AUTH_PATH",
-  "POCKETBASE_URL",
-  "PBASE_ADMIN_EMAIL",
-  "PBASE_ADMIN_PASSWORD",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
   "DSPEAK_CSRF_SECRET",
   "VAPID_PRIVKEY",
   "VAPID_SUBJECT",
@@ -112,20 +111,20 @@ export async function validateRuntimeEnvironment() {
       "DSPEAK_INGEST_AUTH_SECRET must contain at least 32 characters",
     );
 
-  let pocketBaseUrl;
+  let supabaseUrl;
   let authUrl;
   let vapidSubject;
   try {
-    pocketBaseUrl = new URL(process.env.POCKETBASE_URL);
+    supabaseUrl = new URL(process.env.SUPABASE_URL);
     authUrl = new URL(process.env.AUTH_PATH);
     vapidSubject = new URL(process.env.VAPID_SUBJECT);
   } catch {
     throw new Error(
-      "POCKETBASE_URL, AUTH_PATH, and VAPID_SUBJECT must be valid absolute URLs",
+      "SUPABASE_URL, AUTH_PATH, and VAPID_SUBJECT must be valid absolute URLs",
     );
   }
-  if (!["http:", "https:"].includes(pocketBaseUrl.protocol)) {
-    throw new Error("POCKETBASE_URL must use http or https");
+  if (!["http:", "https:"].includes(supabaseUrl.protocol)) {
+    throw new Error("SUPABASE_URL must use http or https");
   }
   if (!["http:", "https:"].includes(authUrl.protocol)) {
     throw new Error("AUTH_PATH must use http or https");
@@ -219,7 +218,7 @@ export async function validateRuntimeEnvironment() {
   }
 
   return {
-    pocketBaseUrl: pocketBaseUrl.toString(),
+    supabaseUrl: supabaseUrl.toString(),
     authUrl: authUrl.toString(),
     listenIp,
     announcedAddress,

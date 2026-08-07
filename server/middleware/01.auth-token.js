@@ -8,19 +8,17 @@ export default defineEventHandler(async (event) => {
   if (!token) return;
 
   try {
-    const authUrl = useRuntimeConfig().public.authPath?.replace(
-      /\/auth\/?$/,
-      "",
-    );
-    if (!authUrl) return;
-
-    const response = await $fetch(`${authUrl}/auth/verify`, {
-      method: "POST",
-      body: { token },
-    });
-
-    if (response?.user) {
-      event.context.user = response.user;
+    const { verifyAccessToken } = await import("../auth/middleware.js");
+    const payload = await verifyAccessToken(token);
+    const { profileRepository } =
+      await import("../db/repositories/profiles.js");
+    const profile = await profileRepository.findById(payload.sub);
+    if (profile) {
+      event.context.user = {
+        id: profile.id,
+        email: profile.email || payload.email,
+        role: payload.role,
+      };
       event.context.token = token;
     }
   } catch {}

@@ -1,21 +1,20 @@
-import { usePocketBaseAdmin } from "../../utils/pocketbase";
+import { authenticateWebSocketRequest } from "../../../utils/auth.js";
 import {
   addGlobalSubscriber,
   removeGlobalSubscriber,
   broadcastGlobally,
-} from "../../utils/dspeak-realtime";
-import { authenticateWebSocketRequest } from "../../utils/authentication";
+} from "../../../utils/dspeak-realtime.js";
 import {
   enforceIdentifierRateLimit,
   resolveWebSocketClientIp,
-} from "../../utils/rate-limit.js";
+} from "../../../utils/rate-limit.js";
 import {
   setUserPresence,
   getUserPresence,
   touchUserActivity,
   checkAndTransitionIdleUsers,
   setUserOfflineOnDisconnect,
-} from "../../utils/user-presence-manager.js";
+} from "../../../utils/user-presence-manager.js";
 
 const users = new Map();
 const userPlatforms = new Map();
@@ -27,9 +26,6 @@ function startIdleCheck() {
     checkAndTransitionIdleUsers().catch(() => {});
     for (const userId of users.values()) {
       const presence = getUserPresence(userId);
-      globalThis.dispatchEvent
-        ? globalThis.dispatchEvent(new CustomEvent("dspeak:presence-check"))
-        : null;
       broadcastGlobally({
         type: "status_updated",
         data: { userId, ...presence },
@@ -67,36 +63,21 @@ export default defineWebSocketHandler({
     users.set(peer.id, userId);
     addGlobalSubscriber(peer);
 
-    try {
-      const pb = await usePocketBaseAdmin();
-      const userRecord = await pb
-        .collection("users")
-        .getOne(userId, { fields: "id,presence_status" })
-        .catch(() => null);
+    const savedStatus = "online";
+    setUserPresence(userId, savedStatus, { isManualOverride: false });
 
-      const savedStatus = userRecord?.presence_status || "online";
-      setUserPresence(userId, savedStatus, { isManualOverride: false });
-      await pb.collection("users").update(userId, {
-        online: true,
-        presence_status: savedStatus,
-      });
+    broadcastGlobally({
+      type: "status_updated",
+      data: {
+        userId,
+        status: savedStatus,
+        updatedAt: new Date().toISOString(),
+        isManualOverride: false,
+        platform: userPlatforms.get(userId) || "web",
+      },
+    });
 
-      broadcastGlobally({
-        type: "status_updated",
-        data: {
-          userId,
-          status: savedStatus,
-          updatedAt: new Date().toISOString(),
-          isManualOverride: false,
-          platform: userPlatforms.get(userId) || "web",
-        },
-      });
-
-      startIdleCheck();
-    } catch (error) {
-      console.error("[Presence] failed to set user online", error);
-      peer.close(1011, "Presence unavailable");
-    }
+    startIdleCheck();
   },
 
   async message(peer, message) {
@@ -135,12 +116,6 @@ export default defineWebSocketHandler({
           isManualOverride,
         });
 
-        const pb = await usePocketBaseAdmin();
-        await pb
-          .collection("users")
-          .update(userId, { presence_status: newStatus })
-          .catch(() => {});
-
         broadcastGlobally({
           type: "status_updated",
           data: {
@@ -176,15 +151,6 @@ export default defineWebSocketHandler({
     if ([...users.values()].some((value) => value === userId)) return;
 
     setUserOfflineOnDisconnect(userId);
-
-    const pb = await usePocketBaseAdmin();
-    await pb
-      .collection("users")
-      .update(userId, {
-        online: false,
-        presence_status: "offline",
-      })
-      .catch(() => {});
 
     broadcastGlobally({
       type: "status_updated",

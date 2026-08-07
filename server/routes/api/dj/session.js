@@ -1,6 +1,9 @@
-import { requireAuthenticatedUser } from "../../../utils/authentication.js";
-import { requireRoomMember } from "../../../utils/room-authorization.js";
-import { usePocketBaseAdmin } from "../../../utils/pocketbase.js";
+import { requireAuthenticatedUser } from "../../../utils/auth.js";
+import {
+  requireRoomMember,
+  getChannelById,
+  getRoomById,
+} from "../../../utils/room-authorization.js";
 import { isActiveVoiceParticipant } from "../../../utils/mediasoup-sfu.js";
 import { enforceIdentifierRateLimit } from "../../../utils/rate-limit.js";
 import {
@@ -22,16 +25,21 @@ export default defineEventHandler(async (event) => {
         statusCode: 400,
         statusMessage: "channelId is required",
       });
-    const pb = await usePocketBaseAdmin();
-    const channel = await pb
-      .collection("dspeak_rooms_channels")
-      .getOne(channelId, { fields: "id,room,isMedia" });
-    if (!channel.isMedia)
+    const channel = await getChannelById(channelId);
+    if (!channel)
+      throw createError({
+        statusCode: 404,
+        statusMessage: "Channel not found",
+      });
+    if (!["voice", "stage"].includes(channel.type))
       throw createError({
         statusCode: 400,
         statusMessage: "DJ Mode requires a voice channel",
       });
-    await requireRoomMember(pb, { id: channel.room }, userId);
+    const room = await getRoomById(channel.roomId);
+    if (!room)
+      throw createError({ statusCode: 404, statusMessage: "Room not found" });
+    await requireRoomMember(room, userId);
     if (!(await isActiveVoiceParticipant(channelId, userId)))
       throw createError({
         statusCode: 409,
@@ -66,8 +74,5 @@ export default defineEventHandler(async (event) => {
     return { success: true };
   }
 
-  throw createError({
-    statusCode: 405,
-    statusMessage: "Method not allowed",
-  });
+  throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
 });

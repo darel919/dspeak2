@@ -63,8 +63,7 @@ export function useMediaEngine(sessionOrFactory, options = {}) {
       typeof useRuntimeConfig === "function" ? useRuntimeConfig() : {};
     const publicConfig = runtimeConfig?.public || {};
     const serverUrl =
-      publicConfig.baseApiPath ||
-      String(publicConfig.authPath || "").replace(/\/auth\/?$/, "");
+      publicConfig.baseApiPath || import.meta.env?.VITE_DSPEAK_API_PATH || "";
     return new NativeMediaEngine({
       flags: resolveNativeMediaFlags({ nativeRtc: true, ...options.flags }),
       tauri: options.tauri,

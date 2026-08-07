@@ -1,14 +1,16 @@
-import { requireAuthenticatedUser } from "../../utils/authentication.js";
+import { requireAuthenticatedUser } from "../../../utils/auth.js";
 import {
   requireRoomMember,
   requireRoomPermission,
-} from "../../utils/room-authorization.js";
-import { usePocketBaseAdmin } from "../../utils/pocketbase.js";
-import { getChannelSubscribers } from "../../utils/dspeak-realtime.js";
+  getChannelById,
+  updateChannel,
+  getRoomById,
+} from "../../../utils/room-authorization.js";
+import { getChannelSubscribers } from "../../../utils/dspeak-realtime.js";
 import {
   normalizeChannelPolicy,
   normalizeSlowMode,
-} from "../../../shared/channel-policy.js";
+} from "../../../../shared/channel-policy.js";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
@@ -23,19 +25,26 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    const pb = await usePocketBaseAdmin();
-    const channel = await pb
-      .collection("dspeak_rooms_channels")
-      .getOne(channelId, {
-        fields: "id,name,room,policy,slow_mode",
+    const channel = await getChannelById(channelId);
+    if (!channel) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: "Channel not found",
       });
-    await requireRoomMember(pb, { id: channel.room }, userId);
+    }
+
+    const room = await getRoomById(channel.roomId);
+    if (!room) {
+      throw createError({ statusCode: 404, statusMessage: "Room not found" });
+    }
+
+    await requireRoomMember(room, userId);
 
     return {
       id: channel.id,
       name: channel.name,
       policy: channel.policy || "free",
-      slow_mode: channel.slow_mode || 0,
+      slow_mode: channel.slowMode || 0,
     };
   }
 
@@ -50,37 +59,38 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    const pb = await usePocketBaseAdmin();
-    const channel = await pb
-      .collection("dspeak_rooms_channels")
-      .getOne(channelId, {
-        fields: "id,room,policy,slow_mode",
+    const channel = await getChannelById(channelId);
+    if (!channel) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: "Channel not found",
       });
+    }
 
-    await requireRoomPermission(
-      pb,
-      { id: channel.room },
-      userId,
-      "channel.update",
-    );
+    const room = await getRoomById(channel.roomId);
+    if (!room) {
+      throw createError({ statusCode: 404, statusMessage: "Room not found" });
+    }
+
+    await requireRoomPermission(room, userId, "channel.update");
 
     const updateData = {};
     if (policy !== undefined) {
       updateData.policy = normalizeChannelPolicy(policy);
     }
     if (slowMode !== undefined) {
-      updateData.slow_mode = normalizeSlowMode(slowMode);
+      updateData.slowMode = normalizeSlowMode(slowMode);
     }
 
     if (Object.keys(updateData).length === 0) {
       return {
         id: channelId,
         policy: channel.policy,
-        slow_mode: channel.slow_mode,
+        slow_mode: channel.slowMode || 0,
       };
     }
 
-    await pb.collection("dspeak_rooms_channels").update(channelId, updateData);
+    await updateChannel(channelId, updateData);
 
     const subscribers = getChannelSubscribers(channelId);
     const message = JSON.stringify({
@@ -99,7 +109,7 @@ export default defineEventHandler(async (event) => {
     return {
       id: channelId,
       policy: updateData.policy || channel.policy,
-      slow_mode: updateData.slow_mode || channel.slow_mode || 0,
+      slow_mode: updateData.slowMode || channel.slowMode || 0,
     };
   }
 

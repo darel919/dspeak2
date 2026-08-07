@@ -5,14 +5,20 @@ import {
   removeChannelSubscriber,
   removeUserSubscriber,
   setDeviceViewingChannel,
-} from "../../../utils/dspeak-realtime";
-import { usePocketBaseAdmin } from "../../../utils/pocketbase";
-import { authenticateWebSocketRequest } from "../../../utils/authentication";
+} from "../../../utils/dspeak-realtime.js";
+import { authenticateWebSocketRequest } from "../../../utils/auth.js";
+import { db } from "../../../db/client.js";
+import { channels } from "../../../db/schema/index.js";
+import { eq } from "drizzle-orm";
 import {
   enforceIdentifierRateLimit,
   resolveWebSocketClientIp,
 } from "../../../utils/rate-limit.js";
-import { requireRoomMember } from "../../../utils/room-authorization.js";
+import {
+  requireRoomMember,
+  getChannelById,
+  getRoomById,
+} from "../../../utils/room-authorization.js";
 
 const sessions = new Map();
 
@@ -32,17 +38,21 @@ export default defineWebSocketHandler({
       const url = new URL(peer.request.url);
       const channelId = url.searchParams.get("channelId");
       const authentication = await authenticateWebSocketRequest(peer.request);
-      if (!channelId || !authentication)
+      if (!channelId || !authentication) {
         return peer.close(1008, "Authentication and channel ID are required");
+      }
       const { userId, deviceId } = authentication;
       enforceIdentifierRateLimit("chat-websocket-open", userId, 30, 60 * 1000);
 
-      const pb = await usePocketBaseAdmin();
-      const channel = await pb
-        .collection("dspeak_rooms_channels")
-        .getOne(channelId);
-      const room = await pb.collection("dspeak_rooms").getOne(channel.room);
-      await requireRoomMember(pb, room, userId);
+      const channel = await getChannelById(channelId);
+      if (!channel) {
+        return peer.close(1008, "Channel not found");
+      }
+      const room = await getRoomById(channel.roomId);
+      if (!room) {
+        return peer.close(1008, "Room not found");
+      }
+      await requireRoomMember(room, userId);
 
       sessions.set(peer.id, {
         userId,
@@ -60,9 +70,10 @@ export default defineWebSocketHandler({
           ? current
           : [...current, userId];
         if (inRoom.length !== current.length) {
-          await pb
-            .collection("dspeak_rooms_channels")
-            .update(channelId, { inRoom });
+          await db
+            .update(channels)
+            .set({ inRoom })
+            .where(eq(channels.id, channelId));
         }
         send(peer, "connected", {
           channelId,
@@ -74,11 +85,11 @@ export default defineWebSocketHandler({
           data: { userId, channelId },
         });
         broadcastToChannel(channelId, { type: "currentlyInChannel", inRoom });
-        if (channel.policy || channel.slow_mode) {
+        if (channel.policy || channel.slowMode) {
           send(peer, "channel_policy_updated", {
             channelId,
             policy: channel.policy || "free",
-            slow_mode: channel.slow_mode || 0,
+            slow_mode: channel.slowMode || 0,
           });
         }
       } else {
@@ -131,24 +142,24 @@ export default defineWebSocketHandler({
     sessions.delete(peer.id);
     try {
       if (!session.isMedia) {
-        const pb = await usePocketBaseAdmin();
-        const channel = await pb
-          .collection("dspeak_rooms_channels")
-          .getOne(session.channelId);
-        const inRoom = (channel.inRoom || [])
-          .map(String)
-          .filter((id) => id !== String(session.userId));
-        await pb
-          .collection("dspeak_rooms_channels")
-          .update(session.channelId, { inRoom });
-        broadcastToChannel(session.channelId, {
-          type: "user_left",
-          data: session,
-        });
-        broadcastToChannel(session.channelId, {
-          type: "currentlyInChannel",
-          inRoom,
-        });
+        const channel = await getChannelById(session.channelId);
+        if (channel) {
+          const inRoom = (channel.inRoom || [])
+            .map(String)
+            .filter((id) => id !== String(session.userId));
+          await db
+            .update(channels)
+            .set({ inRoom })
+            .where(eq(channels.id, session.channelId));
+          broadcastToChannel(session.channelId, {
+            type: "user_left",
+            data: session,
+          });
+          broadcastToChannel(session.channelId, {
+            type: "currentlyInChannel",
+            inRoom,
+          });
+        }
       }
     } catch (error) {
       console.error("[Chat WebSocket] close cleanup failed", error);

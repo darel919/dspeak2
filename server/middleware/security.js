@@ -1,10 +1,6 @@
-import { validateCsrfRequest } from "../utils/authentication.js";
+import { validateCsrfRequest } from "../utils/auth.js";
 
-const csrfExemptPaths = new Set([
-  "/api/security/csp-report",
-  "/api/session/handoff/start",
-  "/api/session/handoff/exchange",
-]);
+const csrfExemptPaths = new Set(["/api/security/csp-report"]);
 
 export default defineEventHandler(async (event) => {
   const path = getRequestURL(event).pathname;

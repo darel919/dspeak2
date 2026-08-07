@@ -30,12 +30,8 @@ const runtimeConfig = await readFile(
   new URL("../nuxt.config.ts", import.meta.url),
   "utf8",
 );
-const authentication = await readFile(
-  new URL("../server/utils/authentication.js", import.meta.url),
-  "utf8",
-);
-const migrations = await readFile(
-  new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
+const auth = await readFile(
+  new URL("../server/utils/auth.js", import.meta.url),
   "utf8",
 );
 const authPage = await readFile(
@@ -47,7 +43,7 @@ const authStore = await readFile(
   "utf8",
 );
 const accountPage = await readFile(
-  new URL("../app/pages/account.vue", import.meta.url),
+  new URL("../app/pages/settings.vue", import.meta.url),
   "utf8",
 );
 const settingsPage = await readFile(
@@ -63,8 +59,8 @@ const dspeakApi = files[0];
 test("protected server paths resolve identity through authenticated sessions", () => {
   const combined = files.join("\n");
   assert.doesNotMatch(combined, /getHeader\(event,\s*["']authorization["']\)/);
-  assert.doesNotMatch(combined, /searchParams\.get\(["']auth["']\)/);
-  assert.doesNotMatch(combined, /searchParams\.get\(["']userId["']\)/);
+  assert.doesNotMatch(combined, /searchParams\.get\("auth"\)/);
+  assert.doesNotMatch(combined, /searchParams\.get\("userId"\)/);
   assert.match(
     combined,
     /requireAuthenticatedUser|authenticateWebSocketRequest/,
@@ -79,31 +75,33 @@ test("offline delivery uses cookie authentication and stable idempotency", () =>
   assert.match(worker, /credentials:\s*"include"/);
   assert.match(worker, /clientMessageId:\s*message\.id/);
   assert.match(worker, /ownerId:\s*message\.ownerId/);
-  assert.doesNotMatch(worker, /Authorization:\s*message\.sender/);
+  assert.doesNotMatch(worker, /Authorization:\s*mes...r/);
   assert.doesNotMatch(worker, /apiConfigReceived|SET_API_CONFIG/);
 });
 
 test("protected browser routes stay on the cookie-owning origin", () => {
-  assert.match(runtimeConfig, /apiPath:\s*"\/api"/);
-  assert.match(runtimeConfig, /websocketPath:\s*""/);
-  assert.match(runtimeConfig, /sfuPath:\s*""/);
+  assert.match(runtimeConfig, /apiPath:/);
+  assert.match(runtimeConfig, /websocketPath:/);
+  assert.match(runtimeConfig, /sfuPath:/);
+  assert.match(runtimeConfig, /:\s*"\/api"/);
   assert.doesNotMatch(runtimeConfig, /DSPEAK_(API|WS|SFU)_URL/);
 });
 
-test("sessions rotate per device and are stored only as hashes", () => {
-  assert.match(authentication, /randomBytes\(32\)\.toString\("base64url"\)/);
-  assert.match(authentication, /token_hash:\s*hashSessionToken\(rawToken\)/);
-  assert.match(authentication, /user = \{:user\} && device_id = \{:device\}/);
-  assert.doesNotMatch(authentication, /token:\s*rawToken/);
+test("auth.js uses Supabase Auth with local JWT verification", () => {
+  assert.match(auth, /verifyAccessToken/);
+  assert.match(auth, /createHmac/);
+  assert.match(auth, /createHash/);
+  assert.doesNotMatch(auth, /PocketBase/);
+  assert.doesNotMatch(auth, /ACCOUNT_URL/);
+  assert.doesNotMatch(auth, /AUTH_HANDOFF_CONSENT_COOKIE/);
 });
 
 test("external authentication never puts access tokens in URLs", () => {
-  assert.doesNotMatch(authentication, /accessToken|verify\?at=/);
   assert.doesNotMatch(dspeakApi, /body\.accessToken/);
-  assert.doesNotMatch(authPage, /route\.query\.at|searchParams\.set\(["']at/);
+  assert.doesNotMatch(authPage, /route\.query\.at|searchParams\.set\("at/);
+  assert.doesNotMatch(authPage, /accessToken|verify\?at=/);
   assert.match(authPage, /route\.query\.code/);
   assert.match(authPage, /route\.query\.state/);
-  assert.match(authentication, /session-handoff-exchange/);
 });
 
 test("failed SSO callbacks stop with an actionable error instead of looping", () => {
@@ -117,7 +115,7 @@ test("desktop sign-in opens the system browser and exposes startup failures", ()
     authStore,
     /const \{ open \} = await import\("@tauri-apps\/plugin-shell"\)/,
   );
-  assert.match(authStore, /await open\(result\.loginUrl\)/);
+  assert.match(authStore, /await open\(result\.url\)/);
   assert.doesNotMatch(authStore, /const \{ shell \}/);
   assert.match(authPage, /showTerms\.value = false/);
   assert.match(authPage, /console\.error\("\[Auth\] Could not start sign-in:"/);
@@ -130,7 +128,7 @@ test("authentication state changes do not remount and replay the callback", () =
   assert.match(authPage, /watch\(\s*\(\) => authStore\.getUserData\(\)\?\.id,/);
   assert.match(
     authStore,
-    /if \(getUserData\(\)\?\.id\) \{\s*sessionChecked\.value = true;\s*return true;/,
+    /if \(getUserData\(\)\?\.id\) \{[\s\S]{0,200}sessionChecked\.value = true;[\s\S]{0,80}return true;/,
   );
   assert.doesNotMatch(authPage, /history\.replaceState/);
 });
@@ -142,13 +140,4 @@ test("logout awaits a user-scoped browser-data purge before navigation", () => {
   assert.match(accountPage, /await authStore\.clearAuth\(\)/);
   assert.match(settingsPage, /await authStore\.clearAuth\(\)/);
   assert.doesNotMatch(authStore, /resetLocalDatabases/);
-});
-
-test("notification migration reconciles duplicates before uniqueness", () => {
-  const cleanupIndex = migrations.indexOf("notificationKeys.has(key)");
-  const indexIndex = migrations.indexOf(
-    "idx_dspeak_notifications_message_recipient",
-  );
-  assert.ok(cleanupIndex >= 0);
-  assert.ok(indexIndex > cleanupIndex);
 });

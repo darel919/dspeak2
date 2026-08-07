@@ -57,6 +57,7 @@ export function normalizeMediaPolicy(value = {}) {
       value.sharedAudioKbps,
       MEDIA_POLICY_LIMITS.sharedAudioKbps,
     ),
+    connectionMode: normalizeConnectionMode(value.connectionMode),
     revision: Math.max(1, Math.floor(Number(value.revision) || 1)),
     updatedAt: value.updatedAt || null,
   };
@@ -91,9 +92,26 @@ export function validateMediaPolicy(value = {}) {
   return { valid: true, value: normalizeMediaPolicy(value) };
 }
 
-function readPolicyNumber(value, limits) {
+export function readPolicyNumber(value, limits) {
   const number = Number(value);
   return Number.isFinite(number) && number >= limits.min && number <= limits.max
     ? Math.round(number)
     : limits.default;
+}
+
+export const ConnectionMode = Object.freeze({
+  AUTO: "auto",
+  DIRECT: "direct",
+});
+
+export const DEFAULT_CONNECTION_MODE = ConnectionMode.AUTO;
+
+export function normalizeConnectionMode(value) {
+  if (value === ConnectionMode.AUTO || value === ConnectionMode.DIRECT)
+    return value;
+  return DEFAULT_CONNECTION_MODE;
+}
+
+export function validateConnectionMode(value) {
+  return value === ConnectionMode.AUTO || value === ConnectionMode.DIRECT;
 }

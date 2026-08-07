@@ -13,6 +13,7 @@ test("missing media policy fields receive current defaults", () => {
     cameraKbps: 1500,
     screenKbps: 4000,
     sharedAudioKbps: 128,
+    connectionMode: "auto",
     revision: 1,
     updatedAt: null,
   });

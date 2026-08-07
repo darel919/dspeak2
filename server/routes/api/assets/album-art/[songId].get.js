@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { usePocketBaseAdmin } from "../../../../utils/pocketbase.js";
+import { assetsRepository } from "../../../../db/repositories/assets.js";
 
 const ALBUM_ART_DIR = "data/album-art";
 
@@ -10,16 +10,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "songId is required" });
   }
 
-  const pb = await usePocketBaseAdmin();
-
-  let song;
-  try {
-    song = await pb.collection("dspeak_lib_song").getOne(songId);
-  } catch (error) {
-    if (error?.status === 404 || error?.response?.status === 404) {
-      throw createError({ statusCode: 404, statusMessage: "Song not found" });
-    }
-    throw error;
+  const song = await assetsRepository.getSong(songId);
+  if (!song) {
+    throw createError({ statusCode: 404, statusMessage: "Song not found" });
   }
 
   const filePath = join(ALBUM_ART_DIR, `${songId}.jpg`);
@@ -30,8 +23,10 @@ export default defineEventHandler(async (event) => {
     setHeader(event, "Content-Type", "image/jpeg");
     return imageBuffer;
   } catch {
-    if (song.itunes_artwork_url) {
-      return sendRedirect(event, song.itunes_artwork_url, 302);
+    if (song.artworkKey) {
+      const { createDownloadUrl } = await import("../../../../storage/r2.js");
+      const url = await createDownloadUrl(song.artworkKey);
+      return sendRedirect(event, url, 302);
     }
     throw createError({
       statusCode: 404,

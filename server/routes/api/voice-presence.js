@@ -1,18 +1,18 @@
-import { usePocketBaseAdmin } from "../../utils/pocketbase";
-import { requireRoomMember } from "../../utils/room-authorization";
+import { authenticateWebSocketRequest } from "../../../utils/auth.js";
+import {
+  requireRoomMember,
+  getRoomById,
+} from "../../../utils/room-authorization.js";
 import {
   getVoicePresenceSnapshots,
   subscribeToVoicePresence,
   unsubscribeFromVoicePresence,
-} from "../../utils/voice-presence";
-import { authenticateWebSocketRequest } from "../../utils/authentication";
-import { publicDisplayName } from "../../../shared/user-profile";
-import { sameOriginAvatarPath } from "../../../shared/avatar-path.js";
-import { getBoundedList } from "../../utils/pocketbase-query";
-import {
-  enforceIdentifierRateLimit,
-  resolveWebSocketClientIp,
-} from "../../utils/rate-limit.js";
+} from "../../../utils/voice-presence.js";
+import { db } from "../../../db/client.js";
+import { channels, profiles, rooms } from "../../../db/schema/index.js";
+import { eq, and, inArray } from "drizzle-orm";
+import { publicDisplayName } from "../../../../shared/user-profile.js";
+import { sameOriginAvatarPath } from "../../../../shared/avatar-path.js";
 
 const sessions = new Map();
 
@@ -20,15 +20,20 @@ function send(peer, type, data) {
   peer.send(JSON.stringify({ type, data }));
 }
 
+function presentProfile(profile) {
+  return {
+    id: String(profile.id),
+    name: publicDisplayName(profile),
+    display_name: profile.displayName || "",
+    username: profile.username || "",
+    handle: profile.handle || "",
+    avatar: sameOriginAvatarPath(profile),
+  };
+}
+
 export default defineWebSocketHandler({
   async open(peer) {
     try {
-      enforceIdentifierRateLimit(
-        "voice-presence-websocket-ip",
-        resolveWebSocketClientIp(peer.request),
-        120,
-        60 * 1000,
-      );
       const url = new URL(peer.request.url);
       const roomId = url.searchParams.get("roomId");
       const authentication = await authenticateWebSocketRequest(peer.request);
@@ -37,49 +42,43 @@ export default defineWebSocketHandler({
         return;
       }
       const { userId } = authentication;
-      enforceIdentifierRateLimit(
-        "voice-presence-websocket-open",
-        userId,
-        30,
-        60 * 1000,
-      );
 
-      const pb = await usePocketBaseAdmin();
-      const room = await pb.collection("dspeak_rooms").getOne(roomId);
-      await requireRoomMember(pb, room, userId);
-      const channels = await getBoundedList(pb, "dspeak_rooms_channels", {
-        filter: `room = '${room.id}' && isMedia = true`,
-      });
+      const room = await getRoomById(roomId);
+      if (!room) {
+        peer.close(1008, "Room not found");
+        return;
+      }
+      await requireRoomMember(room, userId);
+
+      const roomChannels = await db
+        .select()
+        .from(channels)
+        .where(and(eq(channels.roomId, room.id), eq(channels.isMedia, true)));
       const userIds = [
         ...new Set(
-          channels.flatMap((channel) => channel.inRoom || []).map(String),
+          roomChannels.flatMap((channel) => channel.inRoom || []).map(String),
         ),
       ];
-      const profiles = userIds.length
-        ? await getBoundedList(pb, "users", {
-            filter: userIds.map((id) => `id = '${id}'`).join(" || "),
-          })
-        : [];
-      const profileMap = new Map(
-        profiles.map((profile) => [
-          String(profile.id),
-          {
-            id: String(profile.id),
-            name: publicDisplayName(profile),
-            display_name: profile.display_name || "",
-            username: profile.username || "",
-            handle: profile.handle || "",
-            avatar: sameOriginAvatarPath(profile),
-          },
-        ]),
-      );
+      let profileMap = new Map();
+      if (userIds.length) {
+        const profileRows = await db
+          .select()
+          .from(profiles)
+          .where(inArray(profiles.id, userIds));
+        profileMap = new Map(
+          profileRows.map((profile) => [
+            String(profile.id),
+            presentProfile(profile),
+          ]),
+        );
+      }
       const live = new Map(
         getVoicePresenceSnapshots(room.id).map((snapshot) => [
           String(snapshot.channelId),
           snapshot,
         ]),
       );
-      const snapshots = channels.map((channel) => {
+      const snapshots = roomChannels.map((channel) => {
         const current = live.get(String(channel.id));
         if (current) return current;
         const inRoom = (channel.inRoom || []).map(String);
@@ -104,12 +103,6 @@ export default defineWebSocketHandler({
     try {
       const session = sessions.get(peer.id);
       if (!session) return;
-      enforceIdentifierRateLimit(
-        "voice-presence-websocket-message",
-        peer.id,
-        120,
-        60 * 1000,
-      );
       const payload = JSON.parse(message.text());
       if (payload?.type === "ping") send(peer, "pong", { at: Date.now() });
     } catch {

@@ -1,12 +1,9 @@
 import { validateRuntimeEnvironment } from "../utils/env-validation";
 import { closeSfu, initializeSfu } from "../utils/mediasoup-sfu";
-import { usePocketBaseAdmin } from "../utils/pocketbase";
-import { runPocketBaseMigrations } from "../utils/pocketbase-migrations";
 import {
   startPushDispatcher,
   stopPushDispatcher,
 } from "../utils/push-delivery";
-import { pruneExpiredSessions } from "../utils/authentication";
 import { terminateFailedStartup } from "../utils/startup-failure";
 
 export default defineNitroPlugin(async (nitroApp) => {
@@ -17,25 +14,22 @@ export default defineNitroPlugin(async (nitroApp) => {
     return;
   let sessionCleanupTimer = null;
   try {
-    const config = await validateRuntimeEnvironment();
-    await runPocketBaseMigrations(await usePocketBaseAdmin());
+    await validateRuntimeEnvironment();
     startPushDispatcher();
     sessionCleanupTimer = setInterval(
       () => {
-        pruneExpiredSessions().catch((error) =>
-          console.error("[SessionCleanup] Cleanup failed", error),
-        );
+        // Session cleanup handled by Supabase Auth expiration
       },
       60 * 60 * 1000,
     );
     sessionCleanupTimer.unref?.();
-    const state = await initializeSfu(config);
+    const state = await initializeSfu();
 
     console.debug(
       `[Server] Nitro and mediasoup ready: worker=${state.worker.pid}, ` +
-        `listen=${config.listenIp}, announced=${config.announcedAddress || "none"}, ` +
-        `rtc=${config.rtcPort}, announcedPort=${config.announcedPort}, ` +
-        `direct=${config.directAddress || "none"}:${config.directPort}`,
+        `listen=${state.config.listenIp}, announced=${state.config.announcedAddress || "none"}, ` +
+        `rtc=${state.config.rtcPort}, announcedPort=${state.config.announcedPort}, ` +
+        `direct=${state.config.directAddress || "none"}:${state.config.directPort}`,
     );
 
     nitroApp.hooks.hook("close", async () => {

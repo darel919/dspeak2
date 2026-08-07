@@ -1,4 +1,4 @@
-import { requireAuthenticatedUser } from "../../../utils/authentication.js";
+import { requireAuthenticatedUser } from "../../../utils/auth.js";
 import {
   getFriendsList,
   getFriendRequests,
