@@ -64,13 +64,14 @@ export function useMediaEngine(sessionOrFactory, options = {}) {
       voiceStore: options.voiceStore || null,
       settingsStore: options.settingsStore || null,
       channelsStore: options.channelsStore || null,
+      onQoe: options.onQoe,
     });
   }
   const session =
     typeof sessionOrFactory === "function"
       ? sessionOrFactory()
       : sessionOrFactory;
-  return new BrowserMediaEngine(session);
+  return new BrowserMediaEngine(session, { onQoe: options.onQoe });
 }
 
 export { isTauriRuntime };

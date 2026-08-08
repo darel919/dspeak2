@@ -160,3 +160,89 @@ test("media worker shutdown closes only the SFU provider", () => {
   assert.equal(socketClosed, true);
   assert.equal(p2pClosed, false);
 });
+
+test("route commits preserve the authoritative route epoch and mode", () => {
+  const handlers = new Map();
+  const queued = [];
+  setupMediaMessageHandlers({
+    ensureP2p: () => null,
+    getHeartbeatSequence: () => 0,
+    getLastHeartbeatAckSequence: () => 0,
+    getSfu: () => null,
+    getSocket: () => null,
+    lastInRoom: { value: [] },
+    participantSfuRoundTripTimes: { value: {} },
+    queueTopology: (data) => queued.push(data),
+    registerHandler: (type, handler) => handlers.set(type, handler),
+    remoteProducersCount: { value: 0 },
+    setHeartbeatAck: () => {},
+    setLocalPeerId: () => {},
+    sfuProducerIds: () => [],
+    syncConnectedUsers: () => {},
+    voiceStore: {
+      updateUserVoiceState: () => {},
+      upsertUserProfile: () => {},
+    },
+  });
+
+  handlers.get("route-commit")({
+    route: {
+      kind: "sfu",
+      provider: "mediasoup",
+      epoch: 9,
+      sourceRevision: 3,
+    },
+    mode: "sfu",
+  });
+
+  assert.deepEqual(queued[0], {
+    route: {
+      kind: "sfu",
+      provider: "mediasoup",
+      epoch: 9,
+      sourceRevision: 3,
+    },
+    mode: "sfu",
+    kind: "sfu",
+    provider: "mediasoup",
+    epoch: 9,
+    sourceRevision: 3,
+  });
+});
+
+test("P2P qualification acknowledgements retain their message kind", () => {
+  const handlers = new Map();
+  const acknowledgements = [];
+  setupMediaMessageHandlers({
+    ensureP2p: () => null,
+    getHeartbeatSequence: () => 0,
+    getLastHeartbeatAckSequence: () => 0,
+    getSfu: () => null,
+    getSocket: () => null,
+    lastInRoom: { value: [] },
+    onP2pQualification: (data) => acknowledgements.push(data),
+    participantSfuRoundTripTimes: { value: {} },
+    queueTopology: () => {},
+    registerHandler: (type, handler) => handlers.set(type, handler),
+    remoteProducersCount: { value: 0 },
+    setHeartbeatAck: () => {},
+    setLocalPeerId: () => {},
+    sfuProducerIds: () => [],
+    syncConnectedUsers: () => {},
+    voiceStore: {
+      updateUserVoiceState: () => {},
+      upsertUserProfile: () => {},
+    },
+  });
+
+  handlers.get("p2p-qualified")({ epoch: 5, acknowledged: true });
+  handlers.get("p2p-failed")({ epoch: 5, reason: "timeout" });
+
+  assert.deepEqual(
+    acknowledgements.map(({ type, failed }) => ({ type, failed })),
+    [
+      { type: "p2p-qualified", failed: undefined },
+      { type: "p2p-failed", failed: true },
+    ],
+  );
+});

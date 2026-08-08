@@ -60,6 +60,10 @@ export default defineEventHandler(async (event) => {
 
   const mediaControlUrl =
     process.env.MEDIA_CONTROL_URL || "https://media-control.example.com";
+  const websocketUrl = new URL(mediaControlUrl);
+  websocketUrl.searchParams.set("channelId", channelId);
+  if (websocketUrl.protocol === "http:") websocketUrl.protocol = "ws:";
+  if (websocketUrl.protocol === "https:") websocketUrl.protocol = "wss:";
   const requestedDeviceId = String(body.deviceId || "").trim();
   const deviceId = requestedDeviceId || randomUUID();
   if (deviceId.length > 160 || !/^[A-Za-z0-9._:-]+$/.test(deviceId)) {
@@ -78,6 +82,8 @@ export default defineEventHandler(async (event) => {
 
   return {
     mediaControlUrl,
+    websocketUrl: websocketUrl.toString(),
+    controlWebsocketUrl: websocketUrl.toString(),
     protocolVersion: 919,
     ticket,
     deviceId,

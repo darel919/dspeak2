@@ -1,5 +1,9 @@
 import { unref } from "vue";
 import { MediaEngine } from "../../shared/media/contracts.js";
+import {
+  createMediaQoeReport,
+  mediaQoePathsFromStats,
+} from "../../shared/media-qoe.js";
 
 const BROWSER_CAPABILITIES = Object.freeze({
   microphone: "browser",
@@ -13,7 +17,7 @@ const BROWSER_CAPABILITIES = Object.freeze({
 });
 
 export class BrowserMediaEngine extends MediaEngine {
-  constructor(session) {
+  constructor(session, { onQoe } = {}) {
     super();
     if (!session)
       throw new TypeError("BrowserMediaEngine requires a media session");
@@ -23,10 +27,17 @@ export class BrowserMediaEngine extends MediaEngine {
     this.microphoneEnabled = false;
     this.cameraEnabled = false;
     this.screenSharing = false;
+    this.onQoe = onQoe;
+    this.qoeTimer = null;
   }
 
   async initialize() {
+    if (this.initialized) return;
     this.initialized = true;
+    this.qoeTimer = setInterval(() => {
+      this.getStats().catch(() => {});
+    }, 5000);
+    this.qoeTimer?.unref?.();
   }
 
   async joinSession(input) {
@@ -35,6 +46,8 @@ export class BrowserMediaEngine extends MediaEngine {
   }
 
   async leaveSession() {
+    if (this.qoeTimer) clearInterval(this.qoeTimer);
+    this.qoeTimer = null;
     await this.session.disconnect();
     this.microphoneEnabled = false;
     this.cameraEnabled = false;
@@ -83,6 +96,14 @@ export class BrowserMediaEngine extends MediaEngine {
 
   async getStats() {
     const snapshot = await this.session.getWebRTCStatsSnapshot();
+    const report = createMediaQoeReport({
+      provider: unref(this.session.activeProvider) || "sfu",
+      epoch: unref(this.session.topologyState)?.epoch || 0,
+      paths: mediaQoePathsFromStats(snapshot),
+      sampledAt: snapshot.timestamp,
+    });
+    if (report.paths.length) this.onQoe?.(report);
+    this.listeners.get("qoe")?.forEach((callback) => callback(report));
     return {
       ...snapshot,
       engine: "browser",
@@ -108,6 +129,8 @@ export class BrowserMediaEngine extends MediaEngine {
     await this.leaveSession();
     this.listeners.clear();
     this.initialized = false;
+    if (this.qoeTimer) clearInterval(this.qoeTimer);
+    this.qoeTimer = null;
   }
 
   getState() {

@@ -1143,8 +1143,8 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "profiles_id_users_id_fk": {
-          "name": "profiles_id_users_id_fk",
+        "profiles_id_auth_users_id_fk": {
+          "name": "profiles_id_auth_users_id_fk",
           "tableFrom": "profiles",
           "tableTo": "users",
           "columnsFrom": ["id"],

@@ -8,13 +8,6 @@
       "when": 1786138676627,
       "tag": "0000_modern_lake",
       "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1786197192000,
-      "tag": "0001_profiles_auth_user",
-      "breakpoints": true
     }
   ]
 }

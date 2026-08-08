@@ -175,6 +175,7 @@ export class NativeMediasoupSfuSession {
     this.protocolUpdateRequired = false;
     this.lifecycle = null;
     this.activeProvider = null;
+    this.selectedProvider = "mediasoup";
     this.playbackState = "native";
     this.localVideoFeeds = new Map();
     this.remoteVideoFeeds = new Map();
@@ -284,6 +285,36 @@ export class NativeMediasoupSfuSession {
       this.topologyState = { ...data, localPeerId: this.localPeerId };
       this._emitState();
     });
+    this.messageHandlers.set("route-commit", (data) => {
+      const route = data?.route || data;
+      this.topologyState = {
+        ...this.topologyState,
+        ...route,
+        route,
+        epoch: Number(route?.epoch) || 0,
+        sourceRevision: Number(route?.sourceRevision) || 0,
+        localPeerId: this.localPeerId,
+      };
+      this._emitState();
+    });
+    this.messageHandlers.set("provider-failure", (data) => {
+      if (data?.provider === this.selectedProvider) {
+        this.mediaConnectionState = "recovering";
+        this.connectionPhase = "reconnecting";
+        this._emitState();
+      }
+    });
+    this.messageHandlers.set("provider-draining", (data) => {
+      const failure = {
+        provider: "mediasoup",
+        epoch: Number(this.topologyState?.epoch) || 0,
+        reason: data?.reason || "provider-draining",
+      };
+      this.signaling?.send?.({ type: "provider-failure", data: failure });
+      this.mediaConnectionState = "recovering";
+      this.connectionPhase = "reconnecting";
+      this._emitState();
+    });
     this.messageHandlers.set("heartbeat-ack", (data) => {
       this._acknowledgeHeartbeat(data);
     });
@@ -317,10 +348,25 @@ export class NativeMediasoupSfuSession {
     return this.readyPromise || undefined;
   }
 
-  configureControl({ websocketUrl, ticket, mediaSessionId }) {
-    this.buildUrl = () => websocketUrl;
-    this.controlTicket = ticket;
-    this.mediaSessionId = mediaSessionId;
+  configureControl(config = {}) {
+    const endpoint =
+      config.websocketUrl ||
+      config.controlWebsocketUrl ||
+      config.mediaControlUrl;
+    const channelId = config.channelId || this.channelId;
+    if (!endpoint) throw new Error("Media control websocket URL is missing");
+    this.buildUrl = () => {
+      const url = new URL(
+        endpoint,
+        globalThis.window?.location?.href || "http://localhost",
+      );
+      if (channelId) url.searchParams.set("channelId", channelId);
+      if (url.protocol === "http:") url.protocol = "ws:";
+      if (url.protocol === "https:") url.protocol = "wss:";
+      return url.toString();
+    };
+    this.controlTicket = config.ticket;
+    this.mediaSessionId = config.mediaSessionId;
   }
 
   async _handleProviderTicket(data) {

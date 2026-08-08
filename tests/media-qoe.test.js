@@ -1,12 +1,37 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  createMediaQoeReport,
+  mediaQoePathsFromStats,
   normalizeMediaPathMetrics,
   rankRouteCandidates,
   shouldMigrateForQoe,
 } from "../shared/media-qoe.js";
 
 describe("media QoE routing", () => {
+  it("builds a normalized report from browser transport stats", () => {
+    const report = createMediaQoeReport({
+      provider: "mediasoup",
+      epoch: 4,
+      paths: mediaQoePathsFromStats({
+        transports: [
+          {
+            id: "send",
+            rttMs: 0.08,
+            inboundAudio: { jitter: 0.004 },
+            candidatePair: { packetLoss: 1 },
+          },
+        ],
+      }),
+    });
+
+    assert.equal(report.provider, "mediasoup");
+    assert.equal(report.epoch, 4);
+    assert.equal(report.paths[0].rttMs, 80);
+    assert.equal(report.paths[0].jitterMs, 4);
+    assert.equal(report.paths[0].packetLossPercent, 1);
+  });
+
   it("normalizes WebRTC seconds and fractions into provider-neutral metrics", () => {
     assert.deepEqual(
       normalizeMediaPathMetrics({

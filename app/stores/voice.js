@@ -41,6 +41,7 @@ export const useVoiceStore = defineStore("voice", () => {
   const systemAudioSharing = ref(false);
   const broadcastAudioSharing = ref(false);
   const djSession = ref(null);
+  const p2pQualification = ref(null);
   const settingsStore = useSettingsStore();
   const channelsStore = useChannelsStore();
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
@@ -91,6 +92,10 @@ export const useVoiceStore = defineStore("voice", () => {
   let mediaSessionError = null;
   let djStatusTimer = null;
   const soundboardActivityTimers = new Map();
+
+  function setP2pQualification(value) {
+    p2pQualification.value = value || null;
+  }
 
   function clearSoundboardActivity(userId, expectedActivity = null) {
     const normalizedUserId = String(userId);
@@ -305,6 +310,7 @@ export const useVoiceStore = defineStore("voice", () => {
       systemAudioSharing.value = false;
       broadcastAudioSharing.value = false;
       djSession.value = null;
+      p2pQualification.value = null;
       if (wasConnected) playSystemSound("voice-leave", settingsStore);
       cameraToggleGeneration += 1;
     }
@@ -909,6 +915,7 @@ export const useVoiceStore = defineStore("voice", () => {
     systemAudioSharing,
     broadcastAudioSharing,
     djSession,
+    p2pQualification,
     sharedAudioVolume,
     sharedAudioStats,
     sharedAudioAttenuation,
@@ -930,6 +937,7 @@ export const useVoiceStore = defineStore("voice", () => {
     startBroadcast,
     stopBroadcast,
     toggleBroadcast,
+    setP2pQualification,
     setSharedAudioVolume,
     setSystemAudioBitrate,
     addConnectedUser,

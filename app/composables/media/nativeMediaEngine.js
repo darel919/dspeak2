@@ -12,6 +12,10 @@ import { mediaSignalingUrl } from "../../shared/media-signaling-socket.js";
 import { getDeviceId } from "../../shared/device-identity.js";
 import { getAudioBitrateBps } from "../../shared/voice-transport.js";
 import { resolveRequestedVideoSettings } from "../../shared/video-settings.js";
+import {
+  createMediaQoeReport,
+  mediaQoePathsFromStats,
+} from "../../shared/media-qoe.js";
 
 const NATIVE_ACTION_POLL_IDLE_MS = 100;
 const NATIVE_ACTION_POLL_ACTIVE_MS = 5;
@@ -166,6 +170,7 @@ export class NativeMediaEngine extends MediaEngine {
     getAudioBitrate,
     getAudioStereo,
     getVideoSettings,
+    onQoe,
   } = {}) {
     super();
     if (!browserEngine && !nativeOnly) {
@@ -225,6 +230,9 @@ export class NativeMediaEngine extends MediaEngine {
     this.nativeProvider = "sfu";
     this.nativeP2pFailureEpoch = null;
     this.nativeTopologyKey = null;
+    this.onQoe = onQoe;
+    this.qoeTimer = null;
+    this.nativeAuthToken = "";
   }
 
   async initialize(config = {}) {
@@ -240,6 +248,7 @@ export class NativeMediaEngine extends MediaEngine {
         });
         this._mergeNativeCapabilities(nativeState?.capabilities);
         const signalingToken = await this._loadSignalingToken(resolvedConfig);
+        this.nativeAuthToken = signalingToken;
         this.nativeSession = new NativeMediasoupSfuSession({
           invoke: (command, payload) => this._invoke(command, payload),
           getAudioBitrate: this.getAudioBitrate,
@@ -334,6 +343,10 @@ export class NativeMediaEngine extends MediaEngine {
     if (!this.nativeOnly) await this.browserEngine.initialize(config);
     this.initialized = true;
     if (this.flags.nativeRtc) this._startNativeActionPump();
+    this.qoeTimer = setInterval(() => {
+      this.getStats().catch(() => {});
+    }, 5000);
+    this.qoeTimer?.unref?.();
   }
 
   async setMicrophoneDevice(deviceId) {
@@ -395,6 +408,8 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async leaveSession() {
+    if (this.qoeTimer) clearInterval(this.qoeTimer);
+    this.qoeTimer = null;
     // Stop action pump FIRST to prevent polling during teardown
     this._stopNativeActionPump();
     // Unbind Tauri events AFTER leaving media session to ensure
@@ -705,10 +720,27 @@ export class NativeMediaEngine extends MediaEngine {
       if (this.nativeOnly) throw nativeOnlyError("statistics");
       return this.browserEngine.getStats();
     }
-    return this._invoke("media_get_stats").catch((error) => {
-      if (this.nativeOnly) throw error;
-      return this.browserEngine.getStats();
+    return this._invoke("media_get_stats")
+      .then((stats) => {
+        this._emitQoe(stats);
+        return stats;
+      })
+      .catch((error) => {
+        if (this.nativeOnly) throw error;
+        return this.browserEngine.getStats();
+      });
+  }
+
+  _emitQoe(stats) {
+    const report = createMediaQoeReport({
+      provider: this.nativeProvider === "p2p" ? "p2p" : "mediasoup",
+      epoch: this.nativeSession?.topologyState?.epoch || 0,
+      paths: mediaQoePathsFromStats(stats),
+      sampledAt: stats?.sampledAt,
     });
+    if (!report.paths.length) return;
+    this.onQoe?.(report);
+    this._emit("qoe", report);
   }
 
   /**
@@ -1435,7 +1467,12 @@ export class NativeMediaEngine extends MediaEngine {
       {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(this.nativeAuthToken
+            ? { Authorization: `Bearer ${this.nativeAuthToken}` }
+            : {}),
+        },
         body: JSON.stringify({
           roomId,
           channelId,
@@ -1445,7 +1482,10 @@ export class NativeMediaEngine extends MediaEngine {
       },
     );
     if (!response.ok) throw new Error("Media control bootstrap failed");
-    this.nativeSession?.configureControl(await response.json());
+    this.nativeSession?.configureControl({
+      ...(await response.json()),
+      channelId,
+    });
   }
 
   async _loadSignalingToken(config) {

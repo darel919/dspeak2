@@ -475,6 +475,8 @@ export function useHybridMediaSession() {
           protocolState.value = signaling.getProtocolState();
       },
       onAttenuationState: attenuationReporter.receive,
+      onProviderFailure: handleProviderFailure,
+      onP2pQualification: handleP2pQualification,
       onProviderTicket: async (data) => {
         if (!data?.provider) return;
         if (Number(data.epoch) < highestQueuedEpoch) return;
@@ -499,7 +501,19 @@ export function useHybridMediaSession() {
         providerSocket?.close();
         providerSocket = new MediasoupProviderSocket({
           onMessage: (type, payload) =>
-            messageHandlers.get(type)?.(payload || {}),
+            type === "provider-draining"
+              ? (() => {
+                  const failure = {
+                    provider: data.provider,
+                    epoch: data.epoch,
+                    reason: payload?.reason || "provider-draining",
+                  };
+                  providerSocket?.close();
+                  providerSocket = null;
+                  handleProviderFailure(failure);
+                  send({ type: "provider-failure", data: failure });
+                })()
+              : messageHandlers.get(type)?.(payload || {}),
           onFailure: (providerError) => {
             error.value = providerError;
             send({
@@ -581,6 +595,40 @@ export function useHybridMediaSession() {
       },
     });
     return p2pMesh;
+  }
+
+  function handleProviderFailure(data = {}) {
+    if (!data.provider) return;
+    const activeProviderMatches =
+      activeProvider === "sfu" && data.provider === selectedSfuProvider;
+    if (!activeProviderMatches) return;
+    mediaConnectionState.value = "recovering";
+    transportReady.value = false;
+    iceConnectedBoth.value = false;
+    handoff.retire("sfu");
+    sfu?.closeMedia();
+    setConnectionPhase("reconnecting", {
+      topologyEpoch: Number(data.epoch) || topologyState.value.epoch,
+      reason: data.reason || "provider-failure",
+    });
+  }
+
+  function handleP2pQualification(data = {}) {
+    const epoch = Number(data.epoch);
+    if (!Number.isSafeInteger(epoch) || epoch < topologyState.value.epoch)
+      return;
+    topologyState.value = {
+      ...topologyState.value,
+      qualification: {
+        acknowledged: data.acknowledged === true,
+        failed: data.type === "p2p-failed" || data.failed === true,
+        reason: data.reason || null,
+        epoch,
+      },
+    };
+    voiceStore.setP2pQualification?.(data);
+    if (data.failed === true || data.type === "p2p-failed")
+      mediaConnectionState.value = "recovering";
   }
   function queueTopology(data) {
     setConnectionPhase("topology-selecting", {
@@ -871,8 +919,8 @@ export function useHybridMediaSession() {
     });
     transportReady.value = false;
     iceConnectedBoth.value = false;
-    mediaConnectionState.value = "failed";
-    setConnectionPhase("failed", { reason });
+    mediaConnectionState.value = "recovering";
+    setConnectionPhase("reconnecting", { reason });
     console.warn(
       `[Media] SFU failure reported for topology epoch ${epoch}: ${reason}`,
     );
