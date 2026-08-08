@@ -34,6 +34,25 @@ const auth = await readFile(
   new URL("../server/utils/auth.js", import.meta.url),
   "utf8",
 );
+const supabaseAuth = await readFile(
+  new URL("../server/auth/supabase.js", import.meta.url),
+  "utf8",
+);
+const oauthCallback = await readFile(
+  new URL("../server/routes/api/auth/callback.get.js", import.meta.url),
+  "utf8",
+);
+const oauthCallbackSession = await readFile(
+  new URL(
+    "../server/routes/api/auth/callback-session.post.js",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const securityMiddleware = await readFile(
+  new URL("../server/middleware/security.js", import.meta.url),
+  "utf8",
+);
 const authPage = await readFile(
   new URL("../app/pages/auth.vue", import.meta.url),
   "utf8",
@@ -71,6 +90,14 @@ test("client API calls do not send user identifiers as authorization", () => {
   assert.doesNotMatch(applicationSources.join("\n"), /Authorization\s*:/);
 });
 
+test("browser push registration uses the registered push-subscriptions route", () => {
+  const notificationsStore = applicationSources[3];
+  assert.match(notificationsStore, /apiPath}\/push-subscriptions/);
+  assert.doesNotMatch(notificationsStore, /chat\/subscribe\/global/);
+  assert.match(notificationsStore, /enable: true/);
+  assert.match(notificationsStore, /enable: false/);
+});
+
 test("offline delivery uses cookie authentication and stable idempotency", () => {
   assert.match(worker, /credentials:\s*"include"/);
   assert.match(worker, /clientMessageId:\s*message\.id/);
@@ -93,6 +120,69 @@ test("auth.js uses Supabase Auth with local JWT verification", () => {
   assert.match(auth, /setCookie\(event, SESSION_COOKIE, accessToken/);
 
   assert.doesNotMatch(auth, /ACCOUNT_URL/);
+});
+
+test("server OAuth uses PKCE so callbacks receive a query code", () => {
+  assert.match(supabaseAuth, /flowType:\s*["']pkce["']/);
+  assert.match(authPage, /route\.query\.code/);
+  assert.doesNotMatch(authPage, /provider_refresh_token/);
+});
+
+test("web OAuth redirects before profile provisioning can block callback navigation", () => {
+  assert.match(oauthCallback, /createPendingOAuthSession\(session\)/);
+  assert.doesNotMatch(
+    oauthCallback,
+    /profileRepository|getOrCreateOnFirstLogin/,
+  );
+  assert.match(oauthCallbackSession, /provisionOAuthProfile\(session\.user\)/);
+});
+
+test("OAuth code exchange has a bounded provider wait", async () => {
+  const exchange = await readFile(
+    new URL("../server/auth/oauth-exchange.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(exchange, /oauthExchangeTimeoutMs = 20_000/);
+  assert.match(exchange, /Promise\.race/);
+});
+
+test("OAuth profile provisioning has a bounded database wait", async () => {
+  const profile = await readFile(
+    new URL("../server/auth/oauth-profile.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(profile, /profileProvisioningTimeoutMs = 15_000/);
+  assert.match(profile, /Promise\.race/);
+});
+
+test("client session restoration targets the registered auth session route", () => {
+  assert.match(authStore, /apiPath}\/auth\/session/);
+  assert.doesNotMatch(authStore, /apiPath}\/session/);
+});
+
+test("OAuth callback accepts the external provider navigation", () => {
+  assert.match(securityMiddleware, /oauthCallbackPaths/);
+  assert.match(securityMiddleware, /oauthCallbackPaths\.has\(path\)/);
+  assert.match(securityMiddleware, /["']\/api\/auth\/callback["']/);
+});
+
+test("one-time browser OAuth handoff bypasses only CSRF token validation", () => {
+  assert.match(securityMiddleware, /csrfExemptPaths/);
+  assert.match(securityMiddleware, /["']\/api\/auth\/callback-session["']/);
+  assert.match(securityMiddleware, /["']\/api\/auth\/session["']/);
+  assert.match(authStore, /callback-session/);
+});
+
+test("server OAuth stores PKCE state in a short-lived HTTP-only cookie", async () => {
+  const supabaseSource = await readFile(
+    new URL("../server/auth/supabase.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(supabaseSource, /createOAuthSupabaseClient/);
+  assert.match(supabaseSource, /httpOnly: true/);
+  assert.match(supabaseSource, /sameSite: "lax"/);
+  assert.match(supabaseSource, /maxAge: 600/);
+  assert.match(supabaseSource, /storageKey: oauthStorageKey/);
 });
 
 test("external authentication never puts access tokens in URLs", () => {

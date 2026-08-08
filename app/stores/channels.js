@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { debugLog } from "../shared/debug";
+import { closeSocketOnPageHide } from "../shared/socket-lifecycle";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import {
@@ -569,6 +570,7 @@ export const useChannelsStore = defineStore("channels", () => {
     const socket = new WebSocket(
       `${absoluteBase}/voice-presence?roomId=${encodeURIComponent(normalizedRoomId)}`,
     );
+    closeSocketOnPageHide(socket);
     const connection = existing || {
       socket: null,
       reconnectTimer: null,

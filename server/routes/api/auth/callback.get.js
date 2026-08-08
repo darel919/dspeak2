@@ -1,6 +1,6 @@
-import { supabase } from "../../../auth/supabase.js";
-import { profileRepository } from "../../../db/repositories/profiles.js";
+import { createOAuthSupabaseClient } from "../../../auth/supabase.js";
 import { createPendingOAuthSession } from "../../../auth/pending-oauth-session.js";
+import { exchangeOAuthCode } from "../../../auth/oauth-exchange.js";
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -13,23 +13,20 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  const { client, clearStorage } = createOAuthSupabaseClient(event);
+  let data;
+  let error;
+  try {
+    ({ data, error } = await exchangeOAuthCode(client, code));
+  } finally {
+    await clearStorage();
+  }
 
   if (error) {
     throw createError({ statusCode: 400, statusMessage: error.message });
   }
 
-  const user = data.user;
   const session = data.session;
-
-  if (user) {
-    await profileRepository.getOrCreateOnFirstLogin(user.id, {
-      email: user.email,
-      username: user.user_metadata?.user_name || user.user_metadata?.name,
-      displayName: user.user_metadata?.full_name || user.user_metadata?.name,
-      avatarKey: null,
-    });
-  }
 
   const pendingCode = createPendingOAuthSession(session);
   return sendRedirect(event, `/auth?code=${encodeURIComponent(pendingCode)}`);

@@ -1,4 +1,4 @@
-import { supabase } from "../../../auth/supabase.js";
+import { createOAuthSupabaseClient } from "../../../auth/supabase.js";
 
 export default defineEventHandler(async (event) => {
   const publicOrigin =
@@ -17,7 +17,8 @@ export default defineEventHandler(async (event) => {
     } catch {}
   }
 
-  const { data, error } = await supabase.auth.signInWithOAuth({
+  const { client } = createOAuthSupabaseClient(event);
+  const { data, error } = await client.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo,

@@ -381,6 +381,7 @@ export function usePwaUpdate() {
     startupFinished,
     startupUpdateStatus,
     runStartupUpdate,
+    checkForUpdate,
     startActiveMonitoring,
     activateUpdate,
   };

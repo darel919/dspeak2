@@ -1,6 +1,7 @@
-import { supabase } from "../../../auth/supabase.js";
+import { createOAuthSupabaseClient } from "../../../auth/supabase.js";
 import { createPendingOAuthSession } from "../../../auth/pending-oauth-session.js";
-import { profileRepository } from "../../../db/repositories/profiles.js";
+import { exchangeOAuthCode } from "../../../auth/oauth-exchange.js";
+import { provisionOAuthProfile } from "../../../auth/oauth-profile.js";
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
@@ -11,21 +12,21 @@ export default defineEventHandler(async (event) => {
       statusMessage: "Missing authorization code",
     });
 
-  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  const { client, clearStorage } = createOAuthSupabaseClient(event);
+  let data;
+  let error;
+  try {
+    ({ data, error } = await exchangeOAuthCode(client, code));
+  } finally {
+    await clearStorage();
+  }
   if (error || !data.session || !data.user)
     throw createError({
       statusCode: 401,
       statusMessage: error?.message || "Invalid authorization code",
     });
 
-  await profileRepository.getOrCreateOnFirstLogin(data.user.id, {
-    email: data.user.email,
-    username:
-      data.user.user_metadata?.user_name || data.user.user_metadata?.name,
-    displayName:
-      data.user.user_metadata?.full_name || data.user.user_metadata?.name,
-    avatarKey: null,
-  });
+  await provisionOAuthProfile(data.user);
 
   return { code: createPendingOAuthSession(data.session) };
 });

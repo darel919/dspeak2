@@ -39,7 +39,7 @@ test("startup updates activate automatically before application bootstrap", () =
   assert.match(nuxtConfig, /registerType: "prompt"/);
   assert.doesNotMatch(serviceWorker, /\.then\(\(\) => self\.skipWaiting/);
   assert.match(serviceWorker, /event\.data\.type === "SKIP_WAITING"/);
-  assert.match(init, /await runStartupUpdate\(\)/);
+  assert.match(init, /runStartupUpdate\(\)/);
   assert.match(init, /Starting dSpeak…/);
   assert.doesNotMatch(init, /Checking for updates/);
   assert.match(updateCoordinator, /activateWaitingWorker\("startup"\)/);
@@ -182,6 +182,6 @@ test("tabs already controlled by an activated update require one reload", () => 
 });
 
 test("settings displays the package application version", () => {
-  assert.match(nuxtConfig, /appVersion: packageMetadata\.version/);
+  assert.match(nuxtConfig, /appVersion: buildIdentity\.version/);
   assert.match(settings, /dSpeak v\{\{ appVersion \}\}/);
 });

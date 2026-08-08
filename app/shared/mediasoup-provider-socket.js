@@ -1,4 +1,5 @@
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.js";
+import { closeSocketOnPageHide } from "./socket-lifecycle.js";
 
 export class MediasoupProviderSocket {
   constructor({ onMessage, onFailure }) {
@@ -13,6 +14,7 @@ export class MediasoupProviderSocket {
     this.ready = new Promise((resolve, reject) => {
       const socket = new WebSocket(signalingUrl);
       this.socket = socket;
+      closeSocketOnPageHide(socket);
       const timer = setTimeout(() => {
         socket.close(4000, "Provider handshake timed out");
         reject(new Error("Media provider handshake timed out"));

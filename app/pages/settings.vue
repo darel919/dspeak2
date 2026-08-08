@@ -988,7 +988,11 @@
           <footer
             class="mt-8 border-t border-base-300 pt-4 text-center text-xs text-base-content/45"
           >
-            dSpeak v{{ appVersion }}
+            <span>dSpeak v{{ appVersion }}</span>
+            <span v-if="appBuild.shortCommit" class="block">
+              commit {{ appBuild.shortCommit
+              }}<span v-if="appBuild.branch"> · {{ appBuild.branch }}</span>
+            </span>
           </footer>
         </div>
       </main>
@@ -1181,6 +1185,7 @@ const videoQualitySections = computed(() => [
 
 const config = useRuntimeConfig();
 const appVersion = config.public.appVersion;
+const appBuild = config.public.appBuild || {};
 const { getAvatarUrl } = useChatUtils();
 const toast = useToast();
 

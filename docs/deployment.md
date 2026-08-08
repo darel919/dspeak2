@@ -15,6 +15,41 @@ This runbook describes the current production layout: Nuxt/Nitro on Vercel, Supa
 
 Do not run mediasoup inside the main application container or Vercel function. Do not route media topology through Supabase Realtime. The Worker Durable Object is the authoritative owner of live media state.
 
+## Service setup order
+
+These are separate deployments, not one shared application dependency tree:
+
+1. Create Supabase and apply the checked-in Drizzle migrations with `npx drizzle-kit migrate` using `DIRECT_DATABASE_URL`.
+2. Install and configure this Nuxt application with `bun install`.
+3. Check out `dspeak-media-control` beside this repository, run `npm install`, configure `.dev.vars` and Wrangler secrets, then deploy its Worker and Durable Object bindings.
+4. Set this application's `MEDIA_CONTROL_URL` and matching media-ticket private key.
+5. Configure Cloudflare R2 and Realtime/TURN.
+6. Deploy the optional `dspeak-sfu` checkout separately when self-hosted fallback is enabled.
+
+`dspeak-media-control` is not installed by the main application's Bun
+dependencies. Its setup and tests are run from its own checkout:
+
+```bash
+cd ../dspeak-media-control
+npm install
+cp .env.example .dev.vars
+npm test
+npm run deploy
+```
+
+Set these Worker secrets with Wrangler before deployment:
+
+```bash
+wrangler secret put MEDIA_TICKET_PUBLIC_KEY
+wrangler secret put PROVIDER_TICKET_PRIVATE_KEY
+wrangler secret put PROVIDER_TICKET_PUBLIC_KEY
+wrangler secret put MEDIA_CONTROL_ADMIN_TOKEN
+```
+
+The main app and Worker share the media-ticket keypair: the app keeps the
+private key and the Worker keeps the public key. The Worker and optional
+`dspeak-sfu` use a separate provider-ticket keypair. See [Media tickets](media-tickets.md).
+
 ## Required application configuration
 
 Use `.env.example` as the canonical inventory. At minimum, configure:
@@ -24,6 +59,9 @@ DSPEAK_PUBLIC_ORIGIN=https://app.example.com
 DSPEAK_METRICS_TOKEN=<long-random-secret>
 DSPEAK_CSRF_SECRET=<at-least-32-random-characters>
 DSPEAK_CRON_SECRET=<long-random-secret>
+DSPEAK_UPDATE_REPOSITORY=darel919/dspeak2
+DSPEAK_UPDATE_BRANCH=next
+DSPEAK_GITHUB_TOKEN=<optional-server-only-token>
 
 SUPABASE_URL=https://project-ref.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
@@ -73,6 +111,11 @@ Schedule authenticated cleanup and reconciliation calls with `DSPEAK_CRON_SECRET
 
 Deploy `dspeak-media-control` as a separate Cloudflare Worker with a Durable Object namespace. Configure its media-ticket public key to match this application's `MEDIA_TICKET_PRIVATE_KEY`, and configure its own independent provider-ticket keypair for communication with media providers.
 
+If the optional self-hosted provider is enabled, replace the example
+`DSPEAK_SFU_SIGNALING_URL` in the Worker configuration with the real `wss://`
+endpoint before deploying and register the provider through the authenticated
+registry endpoint.
+
 The browser flow is:
 
 1. Call `POST /api/media/bootstrap` with a Supabase bearer token.
@@ -107,6 +150,23 @@ Set the application variables in Vercel and deploy the generated Nitro output. P
 ## Desktop releases
 
 The Tauri client is distributed separately. A `v*` tag runs the native-media and desktop workflows and publishes platform installers. The desktop WebView connects to the same application, Supabase, and media-control services as the browser. Desktop builds require a complete prebuilt native media bundle; see [Desktop CI build](native-media/ci-desktop-build.md).
+
+The application embeds its build commit and checks `/api/update` at startup
+and while a client remains visible and online. The endpoint compares the client and deployed commits with
+`DSPEAK_UPDATE_REPOSITORY` at `DSPEAK_UPDATE_BRANCH`, then reports the commits
+and files that are ahead. A web client only offers a refresh when the deployed
+server build is newer. A Tauri client shows repository commits even when a
+desktop package has not been published yet.
+
+Tauri package updates require one signing keypair that must never be replaced
+after the first public release. Generate it with the Tauri CLI, keep the
+private key in the GitHub `TAURI_SIGNING_PRIVATE_KEY` secret, and provide the
+matching public key through `DSPEAK_TAURI_PUBLIC_KEY`. The workflow also reads
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` when the key is protected. The release job
+creates signed updater bundles and `latest.json`; without these secrets it
+intentionally refuses to create a release build that claims to support
+automatic updates. Existing desktop binaries built before the signing key and
+manifest are configured require one manual installer update.
 
 ## Production checks
 

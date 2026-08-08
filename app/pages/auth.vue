@@ -249,8 +249,16 @@ onMounted(async () => {
   await runtimeStore.initialize();
   const callbackCode = String(route.query.code || "");
   if (callbackCode) {
-    await authStore.completeWebSignIn(callbackCode);
-    await router.replace("/auth");
+    try {
+      await authStore.completeWebSignIn(callbackCode);
+      await router.replace("/auth");
+    } catch (error) {
+      console.error("[Auth] Could not complete web sign-in:", error);
+      status.value = "failed";
+      failureMessage.value =
+        "The completed browser sign-in could not be transferred to dSpeak. Start sign-in again.";
+      return;
+    }
   }
   if (await finishAuthentication()) return;
 

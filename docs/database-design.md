@@ -4,7 +4,18 @@ dSpeak stores durable application data in Supabase PostgreSQL. Nitro uses Drizzl
 
 ## Schema and migrations
 
-The canonical schema is defined in `server/db/schema/index.js`. Drizzle migrations are generated under `drizzle/` and applied to PostgreSQL with `DATABASE_URL`; operators should use a direct database connection for migration and administrative work rather than a transaction-pooled runtime connection.
+The canonical schema is defined in `server/db/schema/index.js`. Drizzle migrations are checked in under `drizzle/` and applied with `npx drizzle-kit migrate`. The project config prefers `DIRECT_DATABASE_URL` for this command; use a direct Supabase PostgreSQL connection rather than the transaction-pooled runtime connection.
+
+```bash
+npx drizzle-kit check
+npx drizzle-kit migrate
+```
+
+`DIRECT_DATABASE_URL` must point to the Supabase direct database endpoint, normally port `5432`. `DATABASE_URL` remains the runtime fallback and normally uses Supavisor transaction pooling on port `6543`.
+
+The persistent Nitro server uses a small runtime connection pool so background push maintenance cannot block authentication or normal API requests. `DATABASE_POOL_MAX` defaults to `10`; `DIRECT_DATABASE_POOL_MAX` defaults to `2` for migrations and direct transactions.
+
+The initial migration creates the dSpeak policy on Supabase Realtime's managed `realtime.messages` table but does not change that table's ownership or RLS setting. Supabase owns that infrastructure table and supplies its RLS configuration; the migration only manages the dSpeak policy.
 
 Schema changes must be represented by a checked-in migration. Back up the database before production migrations, apply migrations before routing traffic to a new release, and verify both the migration result and application health.
 

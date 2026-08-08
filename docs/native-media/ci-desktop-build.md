@@ -53,8 +53,12 @@ available the job fails with a clear message: run `native-media.yml` first.
 | Linux    | `ubuntu-24.04` | `dspeak-linux-x64`   | `.deb`, `.rpm`, `.AppImage` |
 | Windows  | `windows-2022` | `dspeak-windows-x64` | `.msi`, NSIS `.exe`         |
 
-On `v*` tags the `release` job downloads all three bundles and publishes them
-under the version tag with auto-generated release notes.
+On `v*` tags the `release` job downloads all three bundles, generates the
+signed Tauri updater manifest, and publishes the installers and `latest.json`
+under the version tag with auto-generated release notes. Release builds require
+the `DSPEAK_TAURI_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY`, and optional
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub secrets. The same signing keypair
+must be retained for the lifetime of the installed desktop clients.
 
 ## Prerequisites and notes
 

@@ -29,6 +29,7 @@ import {
 } from "~~/shared/channel-policy.js";
 import { debugLog } from "../shared/debug";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import { closeSocketOnPageHide } from "../shared/socket-lifecycle";
 import { getSupabaseClient } from "../utils/supabase-client.js";
 
 export const useChatStore = defineStore("chat", () => {
@@ -488,6 +489,7 @@ export const useChatStore = defineStore("chat", () => {
         const wsUrl = `${websocketPath}/chat/socket?channelId=${encodeURIComponent(channelId)}`;
         const socket = new WebSocket(wsUrl);
         ws.value = socket;
+        closeSocketOnPageHide(socket);
 
         socket.onopen = () => {
           if (

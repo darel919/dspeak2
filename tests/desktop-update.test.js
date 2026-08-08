@@ -18,6 +18,8 @@ test("desktop updater does not query release updates during dev startup", () => 
     update,
     /if \(!runtimeStore\.isTauri \|\| isDesktopDevelopment\(\)\)/,
   );
+  assert.match(update, /startMonitoring\(\)/);
+  assert.match(update, /60 \* 60 \* 1000/);
 });
 
 test("desktop update prompt can be dismissed after an install error", () => {

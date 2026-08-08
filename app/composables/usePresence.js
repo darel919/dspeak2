@@ -5,6 +5,7 @@ import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { debugLog } from "../shared/debug";
+import { closeSocketOnPageHide } from "../shared/socket-lifecycle";
 
 export function usePresence(userId) {
   const status = ref("disconnected");
@@ -73,6 +74,7 @@ export function usePresence(userId) {
     debugLog("[usePresence] Connecting to:", wsUrl);
     const socket = new WebSocket(wsUrl);
     ws = socket;
+    closeSocketOnPageHide(socket);
     socket.onmessage = receiveMessage;
     socket.onopen = () => {
       if (socket !== ws) {

@@ -1,6 +1,7 @@
 import { useRuntimeStore } from "~/stores/runtime";
 
 const DESKTOP_UPDATE_STATE = "desktop-update-state";
+const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
 async function getTauriInvoke() {
   const { invoke } = await import("@tauri-apps/api/core");
@@ -28,12 +29,15 @@ export function useDesktopUpdate() {
   const installing = computed(() => state.value.status === "installing");
   const updateAvailable = computed(() => Boolean(state.value.update));
   const completed = computed(() => state.value.status === "complete");
+  let request = null;
 
-  async function runStartupUpdate() {
+  async function checkForUpdate() {
     if (!runtimeStore.isTauri || isDesktopDevelopment()) {
       state.value.status = "complete";
       return null;
     }
+    if (request) return request;
+    if (state.value.status === "installing") return state.value.update;
 
     state.value = {
       ...state.value,
@@ -41,24 +45,64 @@ export function useDesktopUpdate() {
       error: null,
     };
 
-    try {
+    request = (async () => {
       const invoke = await getTauriInvoke();
       const update = await invoke("check_for_updates");
+      const previousVersion = state.value.update?.version;
       state.value = {
         ...state.value,
         status: "complete",
         update: update || null,
-        deferred: false,
+        deferred:
+          update && previousVersion !== update.version
+            ? false
+            : state.value.deferred,
       };
       return update || null;
-    } catch (error) {
-      state.value = {
-        ...state.value,
-        status: "error",
-        error,
-      };
+    })()
+      .catch((error) => {
+        state.value = {
+          ...state.value,
+          status: "error",
+          error,
+        };
+        return null;
+      })
+      .finally(() => {
+        request = null;
+      });
+    return request;
+  }
+
+  async function runStartupUpdate() {
+    if (!runtimeStore.isTauri || isDesktopDevelopment()) {
+      state.value.status = "complete";
       return null;
     }
+    return checkForUpdate();
+  }
+
+  function startMonitoring() {
+    if (!runtimeStore.isTauri || isDesktopDevelopment()) return () => {};
+
+    const checkWhenAvailable = () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine) return;
+      void checkForUpdate();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") checkWhenAvailable();
+    };
+    const handleOnline = () => checkWhenAvailable();
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("online", handleOnline);
+    const interval = window.setInterval(checkWhenAvailable, UPDATE_INTERVAL_MS);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("online", handleOnline);
+      window.clearInterval(interval);
+    };
   }
 
   async function installUpdate() {
@@ -105,6 +149,7 @@ export function useDesktopUpdate() {
     deferred: computed(() => state.value.deferred),
     completed,
     runStartupUpdate,
+    startMonitoring,
     installUpdate,
     deferUpdate,
   };

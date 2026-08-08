@@ -272,7 +272,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
           applicationServerKey: urlBase64ToUint8Array(vapidKey),
         }));
       const response = await fetch(
-        `${config.public.apiPath}/chat/subscribe/global`,
+        `${config.public.apiPath}/push-subscriptions`,
         {
           method: "POST",
           credentials: "include",
@@ -280,7 +280,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
             "Content-Type": "application/json",
             ...deviceHeaders(),
           },
-          body: JSON.stringify({ subscription: pushSubscription.toJSON() }),
+          body: JSON.stringify({
+            subscription: pushSubscription.toJSON(),
+            enable: true,
+          }),
         },
       );
       if (!response.ok)
@@ -306,15 +309,18 @@ export const useNotificationsStore = defineStore("notifications", () => {
       const userData = useAuthStore().getUserData();
       if (!userData?.id) throw new Error("User not authenticated");
       const response = await fetch(
-        `${config.public.apiPath}/chat/subscribe/global`,
+        `${config.public.apiPath}/push-subscriptions`,
         {
-          method: "DELETE",
+          method: "POST",
           credentials: "include",
           headers: {
             "Content-Type": "application/json",
             ...deviceHeaders(),
           },
-          body: JSON.stringify({ subscription: subscription.value.toJSON() }),
+          body: JSON.stringify({
+            subscription: subscription.value.toJSON(),
+            enable: false,
+          }),
         },
       );
       if (!response.ok)

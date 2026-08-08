@@ -24,19 +24,19 @@ If you modify dSpeak and run a modified version on a publicly accessible network
 
 ## Runtime architecture
 
-| Layer                     | Responsibility                                                                 |
-| ------------------------- | ------------------------------------------------------------------------------ |
-| `app/`                    | Vue interface, Pinia state, browser capture, and media playback                |
-| `server/routes/`          | Nitro HTTP endpoints (Vercel)                                                  |
-| `server/utils/`           | Reusable server logic, authorization, media bootstrap                          |
-| `server/db/`              | Drizzle ORM, PostgreSQL schema, repositories (Supabase)                        |
-| `server/auth/`            | Supabase Auth (Google OAuth only), JWT verification                            |
-| `server/storage/`         | Cloudflare R2 file storage abstraction                                         |
-| `services/media-control/` | Cloudflare Worker + Durable Objects (media control plane, topology)            |
-| `desktop/`                | Tauri 2 shell, Rust commands, and the `libdspeak_media` C++ shim               |
-| `dspeak-sfu/`             | **Separate project:** ElysiaJS + mediasoup SFU provider (self-hosted fallback) |
-| Supabase                  | Auth (Google OAuth), PostgreSQL, Realtime (app events only)                    |
-| Cloudflare                | R2 (files), Durable Objects (media control), Realtime SFU/TURN, Workers        |
+| Layer                      | Responsibility                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| `app/`                     | Vue interface, Pinia state, browser capture, and media playback                       |
+| `server/routes/`           | Nitro HTTP endpoints (Vercel)                                                         |
+| `server/utils/`            | Reusable server logic, authorization, media bootstrap                                 |
+| `server/db/`               | Drizzle ORM, PostgreSQL schema, repositories (Supabase)                               |
+| `server/auth/`             | Supabase Auth (Google OAuth only), JWT verification                                   |
+| `server/storage/`          | Cloudflare R2 file storage abstraction                                                |
+| `../dspeak-media-control/` | Separate Cloudflare Worker + Durable Objects checkout (media control plane, topology) |
+| `desktop/`                 | Tauri 2 shell, Rust commands, and the `libdspeak_media` C++ shim                      |
+| `dspeak-sfu/`              | **Separate project:** ElysiaJS + mediasoup SFU provider (self-hosted fallback)        |
+| Supabase                   | Auth (Google OAuth), PostgreSQL, Realtime (app events only)                           |
+| Cloudflare                 | R2 (files), Durable Objects (media control), Realtime SFU/TURN, Workers               |
 
 The web application runs on Vercel (serverless-compatible). Persistent media control lives on Cloudflare Workers/Durable Objects with WebSocket hibernation. The self-hosted mediasoup provider is a fully independent `dspeak-sfu` project that can be deployed separately (Coolify, Docker, etc.) and communicates via signed short-lived provider tickets — no shared database or process.
 
@@ -68,6 +68,7 @@ The authoritative media topology coordinator is a **Cloudflare Durable Object pe
 - A prebuilt native media bundle (`NATIVE_MEDIA_ARTIFACT_DIR`) to build the desktop client with native WebRTC media
 - Supabase project (PostgreSQL, Auth, Realtime)
 - Cloudflare account (Workers, Durable Objects, R2, Realtime SFU/TURN)
+- The sibling `dspeak-media-control` checkout for media control WebSockets and Durable Objects
 - FFmpeg and ffprobe when running outside Docker
 - A public IPv4 or IPv6 route for production WebRTC traffic (for self-hosted mediasoup)
 
@@ -126,6 +127,30 @@ DSPEAK_SFU_METRICS_TOKEN=provider-metrics-token
 
 See `dspeak-sfu/.env.example` in the sibling project.
 
+### Related service checkouts
+
+The main `bun install` does not install or run the media control Worker. Voice
+sessions require `dspeak-media-control` to be checked out and deployed
+separately. The optional self-hosted provider is a third independent checkout.
+
+```bash
+cd ..
+git clone <dspeak-media-control-repository-url> dspeak-media-control
+git clone <dspeak-sfu-repository-url> dspeak-sfu
+
+cd dspeak-media-control
+npm install
+cp .env.example .dev.vars
+# edit .dev.vars, then configure Cloudflare secrets with wrangler
+npm test
+npm run dev
+```
+
+For production, deploy the Worker with `npm run deploy` after setting its
+Durable Object bindings and secrets. Deploy `dspeak-sfu` separately only when
+self-hosted mediasoup fallback is enabled; its setup is documented in that
+checkout's `README.md` and `docs/deployment.md`.
+
 ## Production build
 
 ```bash
@@ -157,12 +182,21 @@ bun run build:desktop
 
 Builds the Tauri app for the host platform. Version-tagged releases are built for macOS, Linux, and Windows by the [desktop CI build](docs/native-media/ci-desktop-build.md), which publishes the installers to a GitHub Release; installed clients update through the updater endpoint configured in `desktop/src-tauri/tauri.conf.json`.
 
+Every web and desktop build embeds its package version, source commit, source
+branch, repository, and build time. The public `/api/update` endpoint compares
+that identity with `DSPEAK_UPDATE_BRANCH` and returns the pending commits and
+changed files. Set `DSPEAK_UPDATE_REPOSITORY` and `DSPEAK_UPDATE_BRANCH` when
+the deployed app tracks a repository or branch other than the defaults in
+`.env.example`. `DSPEAK_GITHUB_TOKEN` is optional and must remain server-only;
+it raises the GitHub API quota for private or high-traffic deployments.
+
 ## Operational endpoints
 
 | Path                   | Purpose                                          |
 | ---------------------- | ------------------------------------------------ |
 | `/health`              | Application health                               |
 | `/metrics`             | Bearer-protected Prometheus metrics              |
+| `/api/update`          | Public commit and pending-change comparison      |
 | `/api/media/bootstrap` | Media join bootstrap (issues short-lived ticket) |
 | `/api/files/prepare`   | Prepare direct-to-R2 upload                      |
 | `/api/files/commit`    | Commit upload, record metadata                   |

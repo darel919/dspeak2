@@ -1,10 +1,47 @@
 import tailwindcss from "@tailwindcss/vite";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import packageMetadata from "./package.json" with { type: "json" };
+import { createBuildIdentity } from "./shared/app-build.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 const isDesktop = process.env.DSPEAK_DESKTOP === "1";
 const desktopApiBasePath = process.env.VITE_DSPEAK_API_PATH || "";
+
+function gitValue(args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function resolveBuildIdentity() {
+  const commit =
+    process.env.DSPEAK_BUILD_COMMIT ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.GITHUB_SHA ||
+    gitValue(["rev-parse", "--verify", "HEAD"]);
+  const branch =
+    process.env.DSPEAK_BUILD_BRANCH ||
+    process.env.VERCEL_GIT_COMMIT_REF ||
+    process.env.GITHUB_REF_NAME ||
+    gitValue(["symbolic-ref", "--short", "-q", "HEAD"]);
+  return createBuildIdentity({
+    version: packageMetadata.version,
+    commit,
+    branch,
+    builtAt: process.env.DSPEAK_BUILD_TIME || new Date().toISOString(),
+    repository: process.env.DSPEAK_UPDATE_REPOSITORY,
+    updateBranch: process.env.DSPEAK_UPDATE_BRANCH,
+  });
+}
+
+const buildIdentity = resolveBuildIdentity();
 
 const connectSources = [process.env.MEDIA_CONTROL_URL, process.env.SUPABASE_URL]
   .filter(Boolean)
@@ -210,7 +247,8 @@ export default defineNuxtConfig({
         isDesktop && process.env.VITE_DSPEAK_API_PATH
           ? `${process.env.VITE_DSPEAK_API_PATH.replace(/\/$/, "")}/api`
           : "/api",
-      appVersion: packageMetadata.version,
+      appVersion: buildIdentity.version,
+      appBuild: buildIdentity,
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,
       supabaseUrl: process.env.SUPABASE_URL || "",

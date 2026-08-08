@@ -1,4 +1,5 @@
 import { consumePendingOAuthSession } from "../../../auth/pending-oauth-session.js";
+import { provisionOAuthProfile } from "../../../auth/oauth-profile.js";
 
 export default defineEventHandler(async (event) => {
   setHeader(event, "Cache-Control", "no-store");
@@ -17,6 +18,7 @@ export default defineEventHandler(async (event) => {
       statusMessage: "Callback session expired or was already used",
     });
   }
+  await provisionOAuthProfile(session.user);
   return {
     accessToken: session.access_token,
     refreshToken: session.refresh_token,

@@ -564,12 +564,17 @@ async fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let updater = create_updater(&app)?;
     match updater.check().await {
         Ok(Some(update)) => Ok(Some(UpdateInfo {
             version: update.version,
             date: update.date.map(|d| d.to_string()),
             body: update.body,
+            commit: update
+                .raw_json
+                .get("commit")
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string()),
         })),
         Ok(None) => Ok(None),
         Err(e) => Err(e.to_string()),
@@ -578,14 +583,24 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, 
 
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let updater = create_updater(&app)?;
     if let Some(update) = updater.check().await.map_err(|e| e.to_string())? {
         update
             .download_and_install(|_chunk, _total| {}, || {})
             .await
             .map_err(|e| e.to_string())?;
+        app.restart();
     }
     Ok(())
+}
+
+fn create_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    let builder = if let Some(public_key) = option_env!("DSPEAK_TAURI_PUBLIC_KEY") {
+        app.updater_builder().pubkey(public_key)
+    } else {
+        app.updater_builder()
+    };
+    builder.build().map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -593,6 +608,7 @@ struct UpdateInfo {
     version: String,
     date: Option<String>,
     body: Option<String>,
+    commit: Option<String>,
 }
 
 #[tauri::command]

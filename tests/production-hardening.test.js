@@ -35,11 +35,23 @@ const [
     "../server/infrastructure/network/outbound-request.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
+const databaseClient = await readFile(
+  new URL("../server/db/client.js", import.meta.url),
+  "utf8",
+);
 
 test("browser WebSockets enforce an explicit origin policy", () => {
   assert.match(security, /DSPEAK_PUBLIC_ORIGIN/);
   assert.match(security, /originAllowed/);
   assert.doesNotMatch(security, /DSPEAK_ALLOW_ORIGINLESS_WEBSOCKETS/);
+});
+
+test("same-origin API reads retry once with the active Supabase bearer after cookie auth fails", () => {
+  assert.match(browserSecurityFetch, /retryWithSupabaseBearer/);
+  assert.match(browserSecurityFetch, /response\.status !== 401/);
+  assert.match(browserSecurityFetch, /url\.pathname\.startsWith\("\/api\/"\)/);
+  assert.match(browserSecurityFetch, /Authorization/);
+  assert.match(browserSecurityFetch, /retryableMethods/);
 });
 
 test("metrics require a bearer token and proxy the standalone SFU snapshot", () => {
@@ -77,6 +89,12 @@ test("production CSP enforcement and cached health reads are explicit", () => {
   const cachedMetricsReader = pushDelivery.slice(
     pushDelivery.indexOf("export function getPushMetrics"),
   );
+});
+
+test("runtime database work has independent capacity from background maintenance", () => {
+  assert.match(databaseClient, /DATABASE_POOL_MAX/);
+  assert.match(databaseClient, /max: poolSize\("DATABASE_POOL_MAX", 10\)/);
+  assert.match(databaseClient, /DIRECT_DATABASE_POOL_MAX/);
 });
 
 test("API security boundaries protect credentials, assets, and errors", () => {

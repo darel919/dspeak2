@@ -159,6 +159,8 @@ CREATE TABLE "push_subscriptions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX "push_subscriptions_user_id_endpoint_unique" ON "push_subscriptions" USING btree ("user_id","endpoint");
+--> statement-breakpoint
 CREATE TABLE "room_audit_log" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"room_id" uuid NOT NULL,
@@ -366,8 +368,6 @@ BEGIN
   END IF;
 END
 $$;
---> statement-breakpoint
-ALTER TABLE realtime.messages ENABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 DROP POLICY IF EXISTS "dspeak_realtime_read" ON realtime.messages;
 --> statement-breakpoint

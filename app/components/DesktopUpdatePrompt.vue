@@ -13,16 +13,28 @@
         <div class="min-w-0 flex-1">
           <h2 class="font-semibold">A dSpeak update is ready</h2>
           <p v-if="status === 'installed'" class="text-sm text-base-content/70">
-            Restart dSpeak to finish installing the update.
+            dSpeak will restart to finish installing the update.
           </p>
           <p v-else-if="status === 'error'" class="text-sm text-error">
             We couldn’t install the update. You can try again later.
           </p>
-          <p v-else class="text-sm text-base-content/70">
+          <p v-else-if="updateAvailable" class="text-sm text-base-content/70">
             Version {{ update?.version || "latest" }} is ready to install.
           </p>
+          <p v-else class="text-sm text-base-content/70">
+            Repository changes are ahead, but a desktop package has not been
+            published yet.
+          </p>
+          <UpdateDetails
+            :snapshot="repositorySnapshot"
+            :current-build="currentBuild"
+            :package-update="update"
+          />
         </div>
-        <div v-if="status !== 'installed'" class="flex shrink-0 gap-2">
+        <div
+          v-if="status !== 'installed' && updateAvailable"
+          class="flex shrink-0 gap-2"
+        >
           <button
             class="btn btn-sm btn-primary"
             type="button"
@@ -45,6 +57,15 @@
             Later
           </button>
         </div>
+        <div v-else-if="repositoryUpdateAvailable" class="shrink-0">
+          <button
+            class="btn btn-sm btn-ghost"
+            type="button"
+            @click="deferUpdate"
+          >
+            Later
+          </button>
+        </div>
       </div>
     </aside>
   </Transition>
@@ -60,11 +81,17 @@ const {
   installUpdate,
   deferUpdate,
 } = useDesktopUpdate();
+const {
+  snapshot: repositorySnapshot,
+  currentBuild,
+  updateAvailable: repositoryUpdateAvailable,
+} = useRepositoryUpdate();
 
 const visible = computed(
   () =>
     !deferred.value &&
     (updateAvailable.value ||
+      repositoryUpdateAvailable.value ||
       status.value === "installed" ||
       status.value === "error"),
 );

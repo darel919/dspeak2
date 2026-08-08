@@ -19,7 +19,7 @@ export const useAuthStore = defineStore("auths", () => {
     const result = client.auth.onAuthStateChange((event, session) => {
       if (!session?.access_token) return;
       if (event !== "SIGNED_IN" && event !== "TOKEN_REFRESHED") return;
-      fetch(`${config.public.apiPath}/session`, {
+      fetch(`${config.public.apiPath}/auth/session`, {
         method: "POST",
         credentials: "include",
         headers: deviceHeaders({
@@ -106,7 +106,7 @@ export const useAuthStore = defineStore("auths", () => {
       const sessionResult = await supabaseClient?.auth.getSession();
       const accessToken = sessionResult?.data?.session?.access_token;
       if (!accessToken) return false;
-      const response = await fetch(`${config.public.apiPath}/session`, {
+      const response = await fetch(`${config.public.apiPath}/auth/session`, {
         method: "POST",
         credentials: "include",
         headers: deviceHeaders({

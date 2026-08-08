@@ -8,7 +8,6 @@ import {
   integer,
   jsonb,
   uniqueIndex,
-  foreignKey,
   primaryKey,
 } from "drizzle-orm/pg-core";
 
@@ -399,18 +398,26 @@ export const roomAuditLog = pgTable("room_audit_log", {
     .notNull(),
 });
 
-export const pushSubscriptions = pgTable("push_subscriptions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => profiles.id, { onDelete: "cascade" }),
-  endpoint: text("endpoint").notNull(),
-  p256dh: text("p256dh").notNull(),
-  auth: text("auth").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userEndpointUnique: uniqueIndex(
+      "push_subscriptions_user_id_endpoint_unique",
+    ).on(table.userId, table.endpoint),
+  }),
+);
 
 export const pushJobs = pgTable("push_jobs", {
   id: uuid("id").primaryKey().defaultRandom(),

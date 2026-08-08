@@ -387,7 +387,9 @@ export async function dispatchPushJobs() {
       for (const job of jobs) await deliverJob(job);
       await refreshPushMetrics();
     } catch (error) {
-      if (!handleMissingRelation(error)) throw error;
+      if (!handleMissingRelation(error)) {
+        console.error("[PushDispatcher] Database operation failed", error);
+      }
     }
   } finally {
     state.running = false;

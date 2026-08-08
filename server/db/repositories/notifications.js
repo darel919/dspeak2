@@ -6,7 +6,7 @@ import {
   pushSubscriptions,
   pushJobs,
 } from "../schema/index.js";
-import { eq, and, desc, asc, lt } from "drizzle-orm";
+import { eq, and, desc, asc, lt, count } from "drizzle-orm";
 
 export class NotificationRepository {
   async createNotification({ userId, type, title, body, data }) {

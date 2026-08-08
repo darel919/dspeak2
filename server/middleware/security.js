@@ -1,6 +1,11 @@
 import { validateCsrfRequest } from "../utils/auth.js";
 
-const csrfExemptPaths = new Set(["/api/security/csp-report"]);
+const csrfExemptPaths = new Set([
+  "/api/security/csp-report",
+  "/api/auth/callback-session",
+  "/api/auth/session",
+]);
+const oauthCallbackPaths = new Set(["/api/auth/callback"]);
 
 export default defineEventHandler(async (event) => {
   const path = getRequestURL(event).pathname;
@@ -15,7 +20,8 @@ export default defineEventHandler(async (event) => {
     const fetchSite = getHeader(event, "sec-fetch-site");
     if (
       ["same-site", "cross-site"].includes(fetchSite) &&
-      ["GET", "HEAD"].includes(event.method)
+      ["GET", "HEAD"].includes(event.method) &&
+      !oauthCallbackPaths.has(path)
     )
       throw createError({
         statusCode: 403,

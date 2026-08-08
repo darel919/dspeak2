@@ -1,3 +1,5 @@
+import { closeSocketOnPageHide } from "./socket-lifecycle.js";
+
 export function mediaSignalingUrl(
   configuredPath,
   channelId,
@@ -136,6 +138,7 @@ export function createMediaSignalingSocket({
         return;
       }
       socket = candidate;
+      closeSocketOnPageHide(candidate);
       const timeout = setTimeout(() => {
         candidate.close(4000, "Media signaling connection timed out");
         pendingReady = null;

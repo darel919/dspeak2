@@ -11,6 +11,7 @@ import {
   PRESENCE_LABELS,
 } from "~~/shared/presence-status.js";
 import { deviceHeaders } from "~/shared/device-identity";
+import { closeSocketOnPageHide } from "~/shared/socket-lifecycle";
 
 function detectPlatform(isTauri) {
   if (typeof window === "undefined" || !isTauri) return "web";
@@ -87,6 +88,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
 
     const socket = new WebSocket(wsUrl);
     presenceWs = socket;
+    closeSocketOnPageHide(socket);
 
     socket.onopen = () => {
       if (socket !== presenceWs) return socket.close();

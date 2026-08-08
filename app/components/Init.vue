@@ -72,10 +72,15 @@ const desktopRuntime = computed(
 );
 const isBootstrapping = ref(true);
 const { runStartupUpdate } = usePwaUpdate();
-const { runStartupUpdate: runDesktopStartupUpdate } = useDesktopUpdate();
+const {
+  runStartupUpdate: runDesktopStartupUpdate,
+  startMonitoring: startDesktopUpdateMonitoring,
+} = useDesktopUpdate();
+const { checkForUpdate: checkRepositoryUpdate } = useRepositoryUpdate();
 const startupReadiness = createStartupReadiness({
   onPending() {},
 });
+let stopDesktopUpdateMonitoring = null;
 provide(STARTUP_READINESS_KEY, startupReadiness);
 
 const isAuthenticated = computed(() => {
@@ -122,8 +127,10 @@ onMounted(async () => {
         startupStatus.value = desktopRuntime.value
           ? "Looking for desktop updates…"
           : "Looking for updates…";
-        if (desktopRuntime.value) await runDesktopStartupUpdate();
-        else await runStartupUpdate();
+        await Promise.all([
+          desktopRuntime.value ? runDesktopStartupUpdate() : runStartupUpdate(),
+          checkRepositoryUpdate(),
+        ]);
         if (!isAuthPage.value) {
           startupPhase = "authentication";
           startupStatus.value = "Restoring your session…";
@@ -156,6 +163,8 @@ onMounted(async () => {
     startupReadiness.seal();
     isBootstrapping.value = false;
     startupComplete.value = true;
+    if (desktopRuntime.value)
+      stopDesktopUpdateMonitoring = startDesktopUpdateMonitoring();
     void signalDesktopReady();
   }
 });
@@ -171,6 +180,7 @@ async function signalDesktopReady() {
 }
 
 onUnmounted(() => {
+  stopDesktopUpdateMonitoring?.();
   disconnectPresence();
   destroyIdle();
   destroyKeyboardShortcuts();
