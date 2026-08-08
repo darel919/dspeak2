@@ -229,7 +229,9 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function handleServiceWorkerControllerChange() {
-    navigator.serviceWorker.controller?.postMessage({ type: "FORCE_SYNC" });
+    navigator.serviceWorker.controller?.postMessage({
+      type: "FLUSH_CHAT_QUEUE",
+    });
   }
 
   if (process.client) {
@@ -313,7 +315,7 @@ export const useChatStore = defineStore("chat", () => {
       setTimeout(() => {
         requestBackgroundSync();
         navigator.serviceWorker.controller?.postMessage({
-          type: "FORCE_SYNC",
+          type: "FLUSH_CHAT_QUEUE",
         });
       }, 500);
     }
@@ -328,7 +330,7 @@ export const useChatStore = defineStore("chat", () => {
       return;
     try {
       const registration = await navigator.serviceWorker.ready;
-      await registration.sync.register("chat-sync");
+      await registration.sync.register("chat-sync-v2");
     } catch (syncError) {
       debugLog("[ChatStore] Background Sync unavailable:", syncError);
     }
@@ -340,7 +342,9 @@ export const useChatStore = defineStore("chat", () => {
       "serviceWorker" in navigator &&
       navigator.serviceWorker.controller
     ) {
-      navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
+      navigator.serviceWorker.controller.postMessage({
+        type: "FLUSH_CHAT_QUEUE",
+      });
     }
   }
 

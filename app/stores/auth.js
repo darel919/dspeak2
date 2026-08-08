@@ -18,7 +18,7 @@ export const useAuthStore = defineStore("auths", () => {
     if (!client || supabaseAuthSubscription) return;
     const result = client.auth.onAuthStateChange((event, session) => {
       if (!session?.access_token) return;
-      if (event !== "SIGNED_IN" && event !== "TOKEN_REFRESHED") return;
+      if (event !== "TOKEN_REFRESHED") return;
       fetch(`${config.public.apiPath}/auth/session`, {
         method: "POST",
         credentials: "include",
@@ -60,7 +60,9 @@ export const useAuthStore = defineStore("auths", () => {
       val?.user?.user_metadata?.id &&
       navigator.serviceWorker?.controller
     ) {
-      navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
+      navigator.serviceWorker.controller.postMessage({
+        type: "FLUSH_CHAT_QUEUE",
+      });
     }
   }
 
@@ -115,7 +117,6 @@ export const useAuthStore = defineStore("auths", () => {
       });
       if (!response.ok) return false;
       setUser(await response.json());
-      await restoreDesktopNotificationSession().catch(() => false);
       return true;
     } catch {
       return false;
@@ -162,7 +163,6 @@ export const useAuthStore = defineStore("auths", () => {
 
   async function ensureSession() {
     if (getUserData()?.id) {
-      await restoreDesktopNotificationSession().catch(() => false);
       sessionChecked.value = true;
       return true;
     }

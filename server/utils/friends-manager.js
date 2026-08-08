@@ -1,6 +1,6 @@
 import { db } from "../db/client.js";
 import { friends, profiles } from "../db/schema/index.js";
-import { eq, and, or, desc, asc } from "drizzle-orm";
+import { eq, and, or, desc, asc, inArray } from "drizzle-orm";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 import { publicDisplayName } from "../../shared/user-profile.js";
 

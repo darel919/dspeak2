@@ -11,6 +11,8 @@ test("notification publishers and subscribers share the notify topic contract", 
   ]);
 
   assert.match(dspeakRealtime, /`notify:\$\{String\(userId\)\}`/);
+  assert.match(dspeakRealtime, /\.httpSend\("message", message\)/);
+  assert.doesNotMatch(dspeakRealtime, /channel\s*\.send\(/);
   assert.match(supabaseRealtime, /`notify:\$\{normalizedUserId\}`/);
   assert.match(supabaseRealtime, /`notify:\$\{String\(userId\)\}`/);
   assert.doesNotMatch(supabaseRealtime, /`notifications:/);

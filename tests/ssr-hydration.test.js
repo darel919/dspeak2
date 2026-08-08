@@ -27,10 +27,14 @@ const authMiddleware = await readFile(
   new URL("../app/middleware/auth.global.js", import.meta.url),
   "utf8",
 );
+const authPage = await readFile(
+  new URL("../app/pages/auth.vue", import.meta.url),
+  "utf8",
+);
 
 test("persistent layout keeps NuxtPage mounted behind global route auth", () => {
   assert.match(app, /<NuxtLayout>[\s\S]*<NuxtPage \/>/);
-  assert.match(init, /v-if="startupComplete \|\| isAuthPage"/);
+  assert.match(init, /v-show="startupComplete \|\| isAuthPage"/);
   assert.doesNotMatch(init, /<div v-else>/);
   assert.doesNotMatch(init, /v-if="canMountPage"/);
   assert.match(
@@ -46,6 +50,8 @@ test("persistent layout keeps NuxtPage mounted behind global route auth", () => 
     authStore,
     /if \(sessionCheckPromise\) return sessionCheckPromise/,
   );
+  assert.match(init, /userData && !isAuthPage\.value/);
+  assert.match(authPage, /await authStore\.clearAuth\(false\);/);
 });
 
 test("Pinia state remains writable during SSR hydration", () => {

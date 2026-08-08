@@ -71,17 +71,23 @@
               <div class="flex items-center gap-4 sm:gap-5">
                 <div class="avatar shrink-0">
                   <div class="w-16 bg-base-200 ring-2 ring-base-100 sm:w-20">
-                    <img :src="profileAvatarPreview" alt="" />
+                    <ProfileAvatar
+                      :src="profileAvatarPreview"
+                      :name="
+                        profileDisplayName || profile?.name || profile?.email
+                      "
+                      class="size-full"
+                    />
                   </div>
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="mb-1 flex flex-wrap items-center gap-2">
                     <h2 class="truncate text-lg font-bold sm:text-xl">
-                      {{ profileDisplayName || profile.name }}
+                      {{ profileDisplayName || profile?.name }}
                     </h2>
                   </div>
                   <p class="truncate text-sm text-base-content/60">
-                    {{ profile.email }}
+                    {{ profile?.email }}
                   </p>
                   <p
                     v-if="profileHandle"
@@ -127,9 +133,11 @@
                       aria-label="Choose a new profile picture"
                       @click="openAvatarPicker"
                     >
-                      <img
+                      <ProfileAvatar
                         :src="profileAvatarPreview"
-                        alt="Current profile picture"
+                        :name="
+                          profileDisplayName || profile?.name || profile?.email
+                        "
                         class="size-28 object-cover sm:size-32"
                       />
                       <span
@@ -1002,11 +1010,12 @@
 
 <script setup>
 import NotificationSettings from "../components/NotificationSettings.vue";
+import ProfileAvatar from "../components/ProfileAvatar.vue";
 import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { useVoiceStore } from "../stores/voice";
 import { useRuntimeConfig } from "#app";
-import { useChatUtils } from "../composables/useChatUtils";
+
 import { useToast } from "../composables/useToast";
 import {
   SYSTEM_AUDIO_BITRATE_OPTIONS,
@@ -1186,7 +1195,6 @@ const videoQualitySections = computed(() => [
 const config = useRuntimeConfig();
 const appVersion = config.public.appVersion;
 const appBuild = config.public.appBuild || {};
-const { getAvatarUrl } = useChatUtils();
 const toast = useToast();
 
 const exporting = ref(false);
@@ -1205,7 +1213,6 @@ const profile = computed(() => {
   if (!user) return null;
   return {
     ...user,
-    avatar: getAvatarUrl(user.avatar),
   };
 });
 const profileDisplayName = ref("");

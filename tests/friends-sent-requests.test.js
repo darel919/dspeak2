@@ -63,6 +63,10 @@ test("Sent request avatars use the protected same-origin asset path", () => {
 test("Sent persistence lookup uses Drizzle queries", () => {
   assert.match(
     managerSource,
+    /import \{[^}]*inArray[^}]*\} from "drizzle-orm";/,
+  );
+  assert.match(
+    managerSource,
     /getSentFriendRequests[\s\S]{0,500}from\(friends\)/,
   );
   assert.match(managerSource, /eq\(friends\.status, "pending"\)/);

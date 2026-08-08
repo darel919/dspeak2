@@ -25,6 +25,8 @@ for (const character of PRECACHE_SIGNATURE) {
 }
 const PRECACHE_NAME = `dspeak-precache-${(precacheHash >>> 0).toString(16)}`;
 const PAGE_CACHE_NAME = `dspeak-pages-${(precacheHash >>> 0).toString(16)}`;
+const AUTH_SESSION_URL = "/api/auth/session";
+const CHAT_MESSAGE_URL = "/api/chat/message";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -170,7 +172,7 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 self.addEventListener("sync", (event) => {
-  if (event.tag === "chat-sync") {
+  if (event.tag === "chat-sync-v2") {
     event.waitUntil(flushChatQueue());
   }
 });
@@ -178,7 +180,7 @@ self.addEventListener("sync", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") {
     event.waitUntil(self.skipWaiting());
-  } else if (event.data && event.data.type === "FORCE_SYNC") {
+  } else if (event.data && event.data.type === "FLUSH_CHAT_QUEUE") {
     event.waitUntil(flushChatQueue());
   } else if (event.data && event.data.type === "PING") {
     event.source.postMessage({
@@ -196,7 +198,7 @@ self.addEventListener("message", (event) => {
 });
 
 async function flushChatQueue() {
-  const sessionResponse = await fetch("/api/session", {
+  const sessionResponse = await fetch(AUTH_SESSION_URL, {
     credentials: "include",
     cache: "no-store",
   });
@@ -206,7 +208,7 @@ async function flushChatQueue() {
   const messages = await getQueuedMessages();
   for (const message of messages) {
     try {
-      const response = await fetch("/api/chat/message", {
+      const response = await fetch(CHAT_MESSAGE_URL, {
         method: "POST",
         credentials: "include",
         headers: {

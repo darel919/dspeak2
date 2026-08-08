@@ -14,7 +14,6 @@ import {
   getActiveConnectionLabel,
   isConnectionPending,
 } from "../shared/connection-quality";
-import { useChatUtils } from "../composables/useChatUtils";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
 
 const authStore = useAuthStore();
@@ -28,10 +27,9 @@ const runtimeStore = useRuntimeStore();
 const route = useRoute();
 const router = useRouter();
 const config = useRuntimeConfig();
-const { getAvatarUrl } = useChatUtils();
 
 const profile = computed(() => authStore.getUserData());
-const profileAvatar = computed(() => getAvatarUrl(profile.value?.avatar));
+const profileAvatar = computed(() => profile.value?.avatar || "");
 const broadcastDialogOpen = ref(false);
 const capturePickerOpen = ref(false);
 const presenceStatus = inject("presenceStatus", ref(null));

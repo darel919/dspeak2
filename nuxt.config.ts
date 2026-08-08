@@ -189,6 +189,9 @@ export default defineNuxtConfig({
     externals: {
       inline: [resolve("shared")],
     },
+    experimental: {
+      websocket: true,
+    },
   },
 
   pwa: isDesktop

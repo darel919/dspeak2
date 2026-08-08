@@ -43,12 +43,15 @@ test("orphaned pending messages are removed locally after server deletion", () =
 test("connectivity recovery reconnects chat and flushes the queue", () => {
   assert.match(chatStore, /addEventListener\("online", handleBrowserOnline\)/);
   assert.match(chatStore, /connectToChannel\([\s\S]*true,/);
-  assert.match(chatStore, /type: "FORCE_SYNC"/);
+  assert.match(chatStore, /type: "FLUSH_CHAT_QUEUE"/);
 });
 
 test("denied Background Sync registration is handled", () => {
   assert.match(chatStore, /async function requestBackgroundSync/);
-  assert.match(chatStore, /await registration\.sync\.register\("chat-sync"\)/);
+  assert.match(
+    chatStore,
+    /await registration\.sync\.register\("chat-sync-v2"\)/,
+  );
   assert.match(
     chatStore,
     /debugLog\("\[ChatStore\] Background Sync unavailable:", syncError\)/,

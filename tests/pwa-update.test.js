@@ -159,6 +159,20 @@ test("service worker responses cannot be reused across deployments", () => {
   assert.match(nuxtConfig, /"Cloudflare-CDN-Cache-Control": "no-store"/);
 });
 
+test("service worker queue replay uses the current auth and chat APIs", () => {
+  assert.ok(
+    serviceWorker.includes('const AUTH_SESSION_URL = "/api/auth/session"'),
+  );
+  assert.ok(
+    serviceWorker.includes('const CHAT_MESSAGE_URL = "/api/chat/message"'),
+  );
+  assert.ok(!serviceWorker.includes('fetch("/api/session"'));
+  assert.ok(serviceWorker.includes("fetch(AUTH_SESSION_URL"));
+  assert.ok(serviceWorker.includes("fetch(CHAT_MESSAGE_URL"));
+  assert.ok(serviceWorker.includes('event.data.type === "FLUSH_CHAT_QUEUE"'));
+  assert.ok(!serviceWorker.includes('event.data.type === "FORCE_SYNC"'));
+});
+
 test("only the application-owned service worker registrar is enabled", () => {
   assert.match(nuxtConfig, /registerPlugin: false/);
   assert.doesNotMatch(

@@ -36,7 +36,7 @@ import {
 } from "../../shared/room-invite.js";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.js";
 import { publicDisplayName } from "../../shared/user-profile.js";
-import { createDownloadUrl } from "../storage/r2.js";
+import { createDownloadUrl, deleteObject, putObject } from "../storage/r2.js";
 import { enforceRateLimit } from "./rate-limit.js";
 
 function requireValue(value, message) {
@@ -53,6 +53,76 @@ function structuredValue(value, fallback = {}) {
   } catch {
     return fallback;
   }
+}
+
+async function parseBody(event) {
+  const contentType = getHeader(event, "content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const form = await readFormData(event);
+    return Object.fromEntries(form.entries());
+  }
+  return (await readBody(event)) || {};
+}
+
+async function validateRoomImage(file, limit, label) {
+  if (!(file instanceof File) || !file.size) return;
+  if (file.size > limit)
+    throw createError({
+      statusCode: 413,
+      statusMessage: `${label} exceeds the upload limit`,
+    });
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+    throw createError({
+      statusCode: 415,
+      statusMessage: `${label} must be JPEG, PNG, or WebP`,
+    });
+  const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  const png = bytes.slice(0, 8).join(",") === "137,80,78,71,13,10,26,10";
+  const webp =
+    String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+    String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+  if (!(jpeg || png || webp))
+    throw createError({
+      statusCode: 415,
+      statusMessage: `${label} is invalid`,
+    });
+}
+
+async function replaceRoomImage(roomId, type, file) {
+  if (!(file instanceof File) || !file.size) return;
+  const limit = type === "header" ? 5 * 1024 * 1024 : 2 * 1024 * 1024;
+  const label = type === "header" ? "Room header" : "Room picture";
+  await validateRoomImage(file, limit, label);
+  const previous = await db
+    .select({ r2Key: roomImages.r2Key })
+    .from(roomImages)
+    .where(and(eq(roomImages.roomId, roomId), eq(roomImages.type, type)));
+  const r2Key = `rooms/${roomId}/${type}/${crypto.randomUUID()}`;
+  await putObject(r2Key, file, file.type, file.size);
+  try {
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(roomImages)
+        .where(and(eq(roomImages.roomId, roomId), eq(roomImages.type, type)));
+      await tx.insert(roomImages).values({
+        roomId,
+        type,
+        r2Key,
+        mimeType: file.type,
+        size: file.size,
+      });
+    });
+  } catch (error) {
+    await deleteObject(r2Key).catch(() => {});
+    throw error;
+  }
+  await Promise.all(
+    previous
+      .map((image) => image.r2Key)
+      .filter((key) => key && key !== r2Key)
+      .map((key) => deleteObject(key).catch(() => {})),
+  );
 }
 
 function presentProfile(profile) {
@@ -87,24 +157,27 @@ function presentChannel(channel, roomId) {
 }
 
 async function roomDetails(room, userId = null) {
-  const roomChannels = await db
-    .select()
-    .from(channels)
-    .where(eq(channels.roomId, room.id))
-    .orderBy(asc(channels.position));
-  const memberships = await db
-    .select({
-      id: roomMemberships.id,
-      userId: roomMemberships.userId,
-      joinedAt: roomMemberships.joinedAt,
-      roleId: membershipRoles.roleId,
-    })
-    .from(roomMemberships)
-    .leftJoin(
-      membershipRoles,
-      eq(membershipRoles.membershipId, roomMemberships.id),
-    )
-    .where(eq(roomMemberships.roomId, room.id));
+  const [roomChannels, memberships, imageRows] = await Promise.all([
+    db
+      .select()
+      .from(channels)
+      .where(eq(channels.roomId, room.id))
+      .orderBy(asc(channels.position)),
+    db
+      .select({
+        id: roomMemberships.id,
+        userId: roomMemberships.userId,
+        joinedAt: roomMemberships.joinedAt,
+        roleId: membershipRoles.roleId,
+      })
+      .from(roomMemberships)
+      .leftJoin(
+        membershipRoles,
+        eq(membershipRoles.membershipId, roomMemberships.id),
+      )
+      .where(eq(roomMemberships.roomId, room.id)),
+    db.select().from(roomImages).where(eq(roomImages.roomId, room.id)),
+  ]);
 
   const memberIds = [
     ...new Set(memberships.map((m) => String(m.userId))).filter(Boolean),
@@ -117,6 +190,7 @@ async function roomDetails(room, userId = null) {
       .where(inArray(profiles.id, memberIds));
   }
   const profileById = new Map(memberProfiles.map((p) => [String(p.id), p]));
+  const imageByType = new Map(imageRows.map((image) => [image.type, image]));
 
   const roles = memberships
     .map((m) => ({
@@ -147,11 +221,15 @@ async function roomDetails(room, userId = null) {
     desc: room.description || "",
     created: room.createdAt?.toISOString?.() || room.createdAt,
     updated: room.updatedAt?.toISOString?.() || room.updatedAt,
-    picture: null,
-    headerImage: null,
-    accent: normalizeRoomAccent(undefined),
-    attenuation: normalizeAttenuation(undefined),
-    owner: presentProfile(undefined),
+    picture: imageByType.has("profile")
+      ? `/api/room/profile?id=${encodeURIComponent(room.id)}`
+      : null,
+    headerImage: imageByType.has("header")
+      ? `/api/room/header?id=${encodeURIComponent(room.id)}`
+      : null,
+    accent: normalizeRoomAccent(room.accent),
+    attenuation: normalizeAttenuation(room.attenuation),
+    owner: presentProfile(profileById.get(String(room.ownerId))),
     members: memberships
       .map((m) => {
         const profile = profileById.get(String(m.userId));
@@ -178,7 +256,7 @@ async function roomDetails(room, userId = null) {
 
 async function handleRoomRoles(event, roomId, userId) {
   const method = event.method;
-  const body = method === "GET" ? {} : (await readBody(event)) || {};
+  const body = method === "GET" ? {} : await parseBody(event);
   const room = await getRoomById(roomId);
   if (!room)
     throw createError({ statusCode: 404, statusMessage: "Room not found" });
@@ -371,7 +449,7 @@ async function handleRooms(event, suffix) {
     return Promise.all(myRooms.map((room) => roomDetails(room, userId)));
   }
 
-  const body = method === "GET" ? {} : (await readBody(event)) || {};
+  const body = method === "GET" ? {} : await parseBody(event);
 
   if (suffix === "invites" && method === "POST") {
     const room = await getRoomById(
@@ -536,16 +614,35 @@ async function handleRooms(event, suffix) {
     );
     if (!room)
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
-    if (body.name || body.desc !== undefined)
+    const hasPicture = body.picture instanceof File && body.picture.size;
+    const hasHeaderImage =
+      body.headerImage instanceof File && body.headerImage.size;
+    if (body.name || body.desc !== undefined || hasPicture || hasHeaderImage)
       await requireRoomPermission(room, userId, "room.update_identity");
+    if (body.accent !== undefined || body.attenuation !== undefined)
+      await requireRoomPermission(room, userId, "room.update_theme");
     const update = {};
     if (body.name) update.name = body.name;
     if (body.desc !== undefined) update.description = body.desc;
+    if (body.accent !== undefined)
+      update.accent = normalizeRoomAccent(body.accent);
+    if (body.attenuation !== undefined)
+      update.attenuation = normalizeAttenuation(
+        structuredValue(body.attenuation),
+      );
     if (Object.keys(update).length) {
+      update.updatedAt = new Date();
       await db.update(rooms).set(update).where(eq(rooms.id, room.id));
     }
-    const data = { id: room.id, accent: normalizeRoomAccent(body.accent) };
-    data.attenuation = normalizeAttenuation(structuredValue(body.attenuation));
+    await replaceRoomImage(room.id, "profile", body.picture);
+    await replaceRoomImage(room.id, "header", body.headerImage);
+    const data = {
+      id: room.id,
+      accent: normalizeRoomAccent(update.accent ?? room.accent),
+    };
+    data.attenuation = normalizeAttenuation(
+      update.attenuation ?? room.attenuation,
+    );
     broadcastGlobally({ type: "room_updated", data });
     return roomDetails({ ...room, ...update }, userId);
   }

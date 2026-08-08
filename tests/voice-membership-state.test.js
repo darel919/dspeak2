@@ -85,7 +85,7 @@ test("desktop uses one visible startup loader before the app shell mounts", asyn
 
   assert.match(source, /<StartupLoader[\s\S]*:visible="true"/);
   assert.match(source, /Starting dSpeak…/);
-  assert.match(source, /<div v-if="startupComplete \|\| isAuthPage">/);
+  assert.match(source, /<div v-show="startupComplete \|\| isAuthPage">/);
 });
 
 test("desktop uses the visible main window for startup", async () => {

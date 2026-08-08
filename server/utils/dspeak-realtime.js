@@ -16,11 +16,13 @@ async function publishToRealtime(topic, message) {
     }
   }
   try {
-    realtimePublisher
-      .channel(topic)
-      .send({ type: "broadcast", event: "message", payload: message })
-      .then(() => {})
-      .catch(() => {});
+    const channel = realtimePublisher.channel(topic);
+    channel
+      .httpSend("message", message)
+      .catch(() => {})
+      .finally(() => {
+        realtimePublisher.removeChannel(channel).catch(() => {});
+      });
   } catch {}
 }
 

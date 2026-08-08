@@ -114,7 +114,7 @@ const status = ref("working");
 const showTerms = ref(false);
 const termsAccepted = ref(false);
 const failureMessage = ref("");
-let completingAuthentication = false;
+let completionPromise = null;
 
 let loginUrl = "";
 let signInTimeout;
@@ -218,40 +218,35 @@ function cancelSignIn() {
 }
 
 async function finishAuthentication() {
-  if (completingAuthentication || !authStore.getUserData()?.id) return false;
-  completingAuthentication = true;
-  try {
-    await roomsStore.fetchRooms();
-    const redirectUrl = readStorage("redirectAfterAuth");
-    if (redirectUrl) removeStorage("redirectAfterAuth");
-    await router.replace(internalRedirect(redirectUrl));
-    return true;
-  } catch {
-    completingAuthentication = false;
-    status.value = "failed";
-    failureMessage.value =
-      "Your session is ready, but dSpeak could not open the requested page. Please try again.";
-    return false;
-  }
-}
-
-watch(
-  () => authStore.getUserData()?.id,
-  async (userId) => {
-    if (userId && route.path === "/auth") {
-      clearSignInTimeout();
-      await finishAuthentication();
+  if (completionPromise) return completionPromise;
+  if (!authStore.getUserData()?.id) return false;
+  completionPromise = (async () => {
+    try {
+      await roomsStore.fetchRooms();
+      const redirectUrl = readStorage("redirectAfterAuth");
+      if (redirectUrl) removeStorage("redirectAfterAuth");
+      await router.replace(internalRedirect(redirectUrl));
+      return true;
+    } catch {
+      completionPromise = null;
+      status.value = "failed";
+      failureMessage.value =
+        "Your session is ready, but dSpeak could not open the requested page. Please try again.";
+      return false;
     }
-  },
-);
+  })();
+  return completionPromise;
+}
 
 onMounted(async () => {
   await runtimeStore.initialize();
   const callbackCode = String(route.query.code || "");
   if (callbackCode) {
     try {
-      await authStore.completeWebSignIn(callbackCode);
-      await router.replace("/auth");
+      const completed = await authStore.completeWebSignIn(callbackCode);
+      if (!completed) throw new Error("Session restoration failed");
+      await finishAuthentication();
+      return;
     } catch (error) {
       console.error("[Auth] Could not complete web sign-in:", error);
       status.value = "failed";
@@ -267,6 +262,7 @@ onMounted(async () => {
     return;
   }
 
+  await authStore.clearAuth(false);
   status.value = "idle";
   showTerms.value = true;
 });

@@ -29,7 +29,7 @@
         </div>
       </div>
     </div>
-    <div v-if="startupComplete || isAuthPage">
+    <div v-show="startupComplete || isAuthPage">
       <NotificationWarning
         v-if="authChecked && !isAuthPage && shouldShowNotificationWarning"
       />
@@ -83,12 +83,12 @@ const startupReadiness = createStartupReadiness({
 let stopDesktopUpdateMonitoring = null;
 provide(STARTUP_READINESS_KEY, startupReadiness);
 
+const isAuthPage = computed(() => route.path === "/auth");
 const isAuthenticated = computed(() => {
   const userData = authStore.getUserData();
-  return Boolean(authChecked.value && userData);
+  return Boolean(authChecked.value && userData && !isAuthPage.value);
 });
 
-const isAuthPage = computed(() => route.path === "/auth");
 const { isSupported, permission, isEnabled } = useNotifications();
 useDeepLinkAuth();
 

@@ -158,6 +158,8 @@ test("OAuth profile provisioning has a bounded database wait", async () => {
 test("client session restoration targets the registered auth session route", () => {
   assert.match(authStore, /apiPath}\/auth\/session/);
   assert.doesNotMatch(authStore, /apiPath}\/session/);
+  assert.doesNotMatch(authStore, /event !== "SIGNED_IN"/);
+  assert.doesNotMatch(authStore, /restoreDesktopNotificationSession/);
 });
 
 test("OAuth callback accepts the external provider navigation", () => {
@@ -212,9 +214,13 @@ test("desktop sign-in opens the system browser and exposes startup failures", ()
 
 test("authentication state changes do not remount and replay the callback", () => {
   assert.equal(defaultLayout.match(/<slot\s*\/>/g)?.length, 1);
-  assert.match(authPage, /await router\.replace\("\/auth"\)/);
+  assert.match(
+    authPage,
+    /const completed = await authStore\.completeWebSignIn\(callbackCode\);[\s\S]*if \(!completed\) throw new Error[\s\S]*await finishAuthentication\(\);[\s\S]*return;/,
+  );
+  assert.doesNotMatch(authPage, /router\.replace\("\/auth"\)/);
   assert.match(authPage, /async function finishAuthentication\(\)/);
-  assert.match(authPage, /watch\(\s*\(\) => authStore\.getUserData\(\)\?\.id,/);
+  assert.match(authPage, /if \(completionPromise\) return completionPromise/);
   assert.match(
     authStore,
     /if \(getUserData\(\)\?\.id\) \{[\s\S]{0,200}sessionChecked\.value = true;[\s\S]{0,80}return true;/,

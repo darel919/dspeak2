@@ -861,6 +861,7 @@ watch(
 );
 async function saveBranding() {
   saving.value = true;
+  error.value = "";
   try {
     await roomsStore.updateRoom(roomId.value, {
       name: form.name,
@@ -868,7 +869,11 @@ async function saveBranding() {
       picture: picture.value,
       headerImage: headerImage.value,
     });
+    picture.value = null;
+    headerImage.value = null;
     await load();
+  } catch (cause) {
+    error.value = cause.message || "Could not save room settings.";
   } finally {
     saving.value = false;
   }

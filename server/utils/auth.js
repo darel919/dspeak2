@@ -21,7 +21,7 @@ function csrfTokenForSession(userId) {
     .digest("base64url");
 }
 
-function exposeCsrfToken(event, userId) {
+export function exposeCsrfToken(event, userId) {
   setHeader(event, "X-dSpeak-CSRF-Token", csrfTokenForSession(userId));
 }
 
