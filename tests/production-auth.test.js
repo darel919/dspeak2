@@ -9,7 +9,7 @@ const files = await Promise.all(
     "../server/routes/api/chat/socket.js",
     "../server/routes/api/presence.js",
     "../server/routes/api/voice-presence.js",
-    "../server/utils/mediasoup-sfu.js",
+    "../server/utils/media-control-admin.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
 const applicationSources = await Promise.all(
@@ -82,7 +82,7 @@ test("offline delivery uses cookie authentication and stable idempotency", () =>
 test("protected browser routes stay on the cookie-owning origin", () => {
   assert.match(runtimeConfig, /apiPath:/);
   assert.match(runtimeConfig, /websocketPath:/);
-  assert.match(runtimeConfig, /sfuPath:/);
+  assert.doesNotMatch(runtimeConfig, /sfuPath:/);
   assert.match(runtimeConfig, /:\s*"\/api"/);
   assert.doesNotMatch(runtimeConfig, /DSPEAK_(API|WS|SFU)_URL/);
 });
@@ -90,10 +90,9 @@ test("protected browser routes stay on the cookie-owning origin", () => {
 test("auth.js uses Supabase Auth with local JWT verification", () => {
   assert.match(auth, /verifyAccessToken/);
   assert.match(auth, /createHmac/);
-  assert.match(auth, /createHash/);
-  assert.doesNotMatch(auth, /PocketBase/);
+  assert.match(auth, /setCookie\(event, SESSION_COOKIE, accessToken/);
+
   assert.doesNotMatch(auth, /ACCOUNT_URL/);
-  assert.doesNotMatch(auth, /AUTH_HANDOFF_CONSENT_COOKIE/);
 });
 
 test("external authentication never puts access tokens in URLs", () => {
@@ -101,7 +100,7 @@ test("external authentication never puts access tokens in URLs", () => {
   assert.doesNotMatch(authPage, /route\.query\.at|searchParams\.set\("at/);
   assert.doesNotMatch(authPage, /accessToken|verify\?at=/);
   assert.match(authPage, /route\.query\.code/);
-  assert.match(authPage, /route\.query\.state/);
+  assert.match(authPage, /completeWebSignIn/);
 });
 
 test("failed SSO callbacks stop with an actionable error instead of looping", () => {

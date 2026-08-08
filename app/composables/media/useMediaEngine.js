@@ -44,18 +44,6 @@ export function resolveNativeMediaFlags(overrides = {}) {
   };
 }
 
-function resolveSfuPath() {
-  if (typeof useRuntimeConfig === "function") {
-    try {
-      const rc = useRuntimeConfig();
-      if (rc?.public?.sfuPath) return rc.public.sfuPath;
-    } catch {
-      // useRuntimeConfig unavailable (test environment)
-    }
-  }
-  return import.meta.env?.VITE_DSPEAK_SFU_PATH || "";
-}
-
 export function useMediaEngine(sessionOrFactory, options = {}) {
   const tauriRuntime = options.isTauri ?? isTauriRuntime();
   if (tauriRuntime) {
@@ -68,7 +56,6 @@ export function useMediaEngine(sessionOrFactory, options = {}) {
       flags: resolveNativeMediaFlags({ nativeRtc: true, ...options.flags }),
       tauri: options.tauri,
       nativeConfig: {
-        signalingPath: resolveSfuPath(),
         serverUrl,
         apiPath: publicConfig.apiPath || "/api",
         ...options.nativeConfig,

@@ -1,9 +1,15 @@
-import { isIP } from "node:net";
-
 const requiredVariables = [
-  "AUTH_PATH",
+  "DATABASE_URL",
   "SUPABASE_URL",
+  "SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "MEDIA_CONTROL_URL",
+  "MEDIA_CONTROL_ADMIN_TOKEN",
+  "MEDIA_TICKET_PRIVATE_KEY",
+  "R2_ACCOUNT_ID",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_BUCKET_NAME",
   "DSPEAK_CSRF_SECRET",
   "VAPID_PRIVKEY",
   "VAPID_SUBJECT",
@@ -18,65 +24,6 @@ function readPort(name, fallback) {
   return value;
 }
 
-function readBitrate(name, fallback) {
-  const value = Number(process.env[name] || fallback);
-  if (!Number.isSafeInteger(value) || value < 30_000) {
-    throw new Error(`${name} must be an integer of at least 30000 bps`);
-  }
-  return value;
-}
-
-const defaultAddressDiscoveryUrl = "https://api6.ipify.org";
-
-function isPublicIpv6(value) {
-  if (isIP(value) !== 6) return false;
-
-  const normalized = value.toLowerCase();
-  const isGlobalUnicast =
-    normalized.startsWith("2") || normalized.startsWith("3");
-  const isDocumentationRange = normalized.startsWith("2001:db8:");
-  return isGlobalUnicast && !isDocumentationRange;
-}
-
-async function discoverAnnouncedAddress() {
-  const discoveryUrl =
-    process.env.MEDIASOUP_ANNOUNCED_ADDRESS_URL?.trim() ||
-    defaultAddressDiscoveryUrl;
-  let url;
-  try {
-    url = new URL(discoveryUrl);
-  } catch {
-    throw new Error(
-      "MEDIASOUP_ANNOUNCED_ADDRESS_URL must be a valid absolute URL",
-    );
-  }
-  if (url.protocol !== "https:") {
-    throw new Error("MEDIASOUP_ANNOUNCED_ADDRESS_URL must use https");
-  }
-
-  let response;
-  try {
-    response = await fetch(url, { signal: AbortSignal.timeout(5000) });
-  } catch (error) {
-    throw new Error(
-      `Unable to auto-discover the public IPv6 address from ${url.origin}: ${error.message}`,
-    );
-  }
-  if (!response.ok) {
-    throw new Error(
-      `Public IPv6 discovery returned HTTP ${response.status} from ${url.origin}`,
-    );
-  }
-
-  const address = (await response.text()).trim();
-  if (!isPublicIpv6(address)) {
-    throw new Error(
-      `Public IPv6 discovery returned ${JSON.stringify(address)}; expected a globally routable IPv6 address`,
-    );
-  }
-  return address;
-}
-
 export async function validateRuntimeEnvironment() {
   const environmentRequiredVariables =
     process.env.NODE_ENV === "production"
@@ -84,7 +31,7 @@ export async function validateRuntimeEnvironment() {
           ...requiredVariables,
           "DSPEAK_PUBLIC_ORIGIN",
           "DSPEAK_METRICS_TOKEN",
-          "DSPEAK_INGEST_AUTH_SECRET",
+          "DSPEAK_CRON_SECRET",
         ]
       : requiredVariables;
   const missing = environmentRequiredVariables.filter(
@@ -103,34 +50,20 @@ export async function validateRuntimeEnvironment() {
   }
   if (process.env.DSPEAK_CSRF_SECRET.trim().length < 32)
     throw new Error("DSPEAK_CSRF_SECRET must contain at least 32 characters");
-  if (
-    process.env.DSPEAK_INGEST_AUTH_SECRET &&
-    process.env.DSPEAK_INGEST_AUTH_SECRET.trim().length < 32
-  )
-    throw new Error(
-      "DSPEAK_INGEST_AUTH_SECRET must contain at least 32 characters",
-    );
 
   let supabaseUrl;
-  let authUrl;
   let vapidSubject;
   try {
     supabaseUrl = new URL(process.env.SUPABASE_URL);
-    authUrl = new URL(process.env.AUTH_PATH);
     vapidSubject = new URL(process.env.VAPID_SUBJECT);
   } catch {
     throw new Error(
-      "SUPABASE_URL, AUTH_PATH, and VAPID_SUBJECT must be valid absolute URLs",
+      "SUPABASE_URL and VAPID_SUBJECT must be valid absolute URLs",
     );
   }
   if (!["http:", "https:"].includes(supabaseUrl.protocol)) {
     throw new Error("SUPABASE_URL must use http or https");
   }
-  if (!["http:", "https:"].includes(authUrl.protocol)) {
-    throw new Error("AUTH_PATH must use http or https");
-  }
-  if (process.env.NODE_ENV === "production" && authUrl.protocol !== "https:")
-    throw new Error("AUTH_PATH must use https in production");
   if (!["https:", "mailto:"].includes(vapidSubject.protocol)) {
     throw new Error("VAPID_SUBJECT must use https or mailto");
   }
@@ -147,29 +80,6 @@ export async function validateRuntimeEnvironment() {
       throw new Error(
         "DSPEAK_PUBLIC_ORIGIN must be an HTTPS origin without a path; development may use an HTTP loopback origin",
       );
-  }
-
-  const rtcPort = readPort("MEDIASOUP_RTC_PORT", 40000);
-  readPort("DSPEAK_INGEST_LISTEN_PORT", 9999);
-  readPort("DSPEAK_INGEST_FALLBACK_PORT", 9999);
-  const announcedPort = process.env.MEDIASOUP_ANNOUNCED_PORT?.trim()
-    ? readPort("MEDIASOUP_ANNOUNCED_PORT", rtcPort)
-    : rtcPort;
-  const directPort = process.env.MEDIASOUP_DIRECT_PORT?.trim()
-    ? readPort("MEDIASOUP_DIRECT_PORT", rtcPort)
-    : rtcPort;
-  const maxClientOutgoingBitrate = readBitrate(
-    "MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE",
-    4_500_000,
-  );
-  const maxServerOutgoingBitrate = readBitrate(
-    "MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE",
-    40_000_000,
-  );
-  if (maxClientOutgoingBitrate > maxServerOutgoingBitrate) {
-    throw new Error(
-      "MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE cannot exceed MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE",
-    );
   }
 
   const turnHost = process.env.DSPEAK_RTC_DOMAIN?.trim();
@@ -193,40 +103,32 @@ export async function validateRuntimeEnvironment() {
       );
     }
     readPort("TURN_PORT", 3478);
+    readPort("TURN_TLS_PORT", 5349);
   }
 
-  const listenIp = process.env.MEDIASOUP_LISTEN_IP?.trim() || "127.0.0.1";
-  let announcedAddress = process.env.MEDIASOUP_ANNOUNCED_ADDRESS?.trim();
-  if (announcedAddress?.toLowerCase() === "auto") {
-    announcedAddress = await discoverAnnouncedAddress();
+  const cloudflareTurnKeyId = process.env.CLOUDFLARE_TURN_KEY_ID?.trim();
+  const cloudflareTurnApiToken = process.env.CLOUDFLARE_TURN_API_TOKEN?.trim();
+  if (Boolean(cloudflareTurnKeyId) !== Boolean(cloudflareTurnApiToken)) {
+    throw new Error(
+      "CLOUDFLARE_TURN_KEY_ID and CLOUDFLARE_TURN_API_TOKEN must be configured together",
+    );
   }
-  let directAddress = process.env.MEDIASOUP_DIRECT_ADDRESS?.trim();
-  if (directAddress?.toLowerCase() === "auto") {
-    try {
-      directAddress = await discoverAnnouncedAddress();
-    } catch (error) {
-      directAddress = undefined;
-      console.warn(
-        `[Server] Direct IPv6 discovery unavailable; continuing with fallback RTC only: ${error.message}`,
+  if (cloudflareTurnKeyId) {
+    const credentialTtl = Number(
+      process.env.CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS || 86400,
+    );
+    if (
+      !Number.isSafeInteger(credentialTtl) ||
+      credentialTtl < 300 ||
+      credentialTtl > 86400
+    ) {
+      throw new Error(
+        "CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 86400",
       );
     }
-  }
-  if ((listenIp === "0.0.0.0" || listenIp === "::") && !announcedAddress) {
-    throw new Error(
-      'MEDIASOUP_ANNOUNCED_ADDRESS must be a public address, DNS-only hostname, or "auto" when MEDIASOUP_LISTEN_IP binds to all interfaces',
-    );
   }
 
   return {
     supabaseUrl: supabaseUrl.toString(),
-    authUrl: authUrl.toString(),
-    listenIp,
-    announcedAddress,
-    rtcPort,
-    announcedPort,
-    directAddress,
-    directPort,
-    maxClientOutgoingBitrate,
-    maxServerOutgoingBitrate,
   };
 }

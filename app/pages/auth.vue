@@ -115,7 +115,7 @@ const showTerms = ref(false);
 const termsAccepted = ref(false);
 const failureMessage = ref("");
 let completingAuthentication = false;
-let processingHandoff = false;
+
 let loginUrl = "";
 let signInTimeout;
 
@@ -238,7 +238,7 @@ async function finishAuthentication() {
 watch(
   () => authStore.getUserData()?.id,
   async (userId) => {
-    if (userId && !processingHandoff && route.path === "/auth") {
+    if (userId && route.path === "/auth") {
       clearSignInTimeout();
       await finishAuthentication();
     }
@@ -247,28 +247,14 @@ watch(
 
 onMounted(async () => {
   await runtimeStore.initialize();
-  const code = route.query.code;
-  const state = route.query.state;
-
-  if (code && state) {
-    processingHandoff = true;
+  const callbackCode = String(route.query.code || "");
+  if (callbackCode) {
+    await authStore.completeWebSignIn(callbackCode);
     await router.replace("/auth");
-    const valid = await authStore.exchangeHandoff(code, state);
-    processingHandoff = false;
-    if (valid) {
-      await finishAuthentication();
-      return;
-    }
-    await authStore.clearAuth(false);
-    status.value = "failed";
-    failureMessage.value =
-      "The identity service rejected this sign-in. Try again, and contact the administrator if the problem continues.";
-    return;
   }
-
   if (await finishAuthentication()) return;
 
-  if (!code && !state && (await authStore.restoreSession())) {
+  if (await authStore.restoreSession()) {
     await finishAuthentication();
     return;
   }

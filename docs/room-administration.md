@@ -5,12 +5,10 @@ notifications, user identity, stream attenuation, and room soundboards.
 
 ## Migration behavior
 
-During startup, Nitro authenticates to PocketBase as the configured administrator
-and runs pending migrations before mediasoup starts. Completed migration names
-are stored in `dspeak_migrations`.
-
-Migrations are idempotent. If one fails, application startup stops; restarting
-retries the incomplete collection or backfill operation.
+Room administration data lives in Supabase PostgreSQL. Schema changes are
+checked-in Drizzle migrations under `drizzle/` and are applied before a release
+serves traffic. A failed migration blocks the release rather than leaving the
+application on a partial schema.
 
 ## Room and channel fields
 
@@ -62,9 +60,8 @@ membership before broadcasting the participant change.
 
 Members with `channel.moderate_voice` can move a currently connected,
 lower-ranked participant to another voice channel in the same room or disconnect
-that participant from voice. The SFU validates live presence and role hierarchy,
-closes the existing media session, and instructs the affected client to join the
-selected destination when moving. The room owner, the acting member, and members
+that participant from voice. Nitro validates membership and role hierarchy, then the external media-control
+Durable Object closes or moves the live media session. The room owner, the acting member, and members
 at or above the actor's highest role cannot be targeted.
 
 ## Invite links and audit history
@@ -95,8 +92,8 @@ the user, room, mode, and nullable push and sound overrides; `(user, room)` is
 unique.
 
 Creating a message writes durable notification records and emits
-`notification_created` to connected user sockets. Web Push is optional; the
-PocketBase notification record remains the source of truth.
+`notification_created` through Supabase Realtime. Web Push is optional; the
+PostgreSQL notification record remains the source of truth.
 
 ## User identity
 

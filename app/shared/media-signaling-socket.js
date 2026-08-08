@@ -32,6 +32,7 @@ export function closeMediaSignalingForRecovery(socket) {
 
 export function createMediaSignalingSocket({
   buildHeartbeatData,
+  buildClientHelloData,
   buildUrl,
   connectionTimeoutMs,
   defaultHeartbeatIntervalMs,
@@ -47,12 +48,14 @@ export function createMediaSignalingSocket({
   reconnectBaseDelayMs = 500,
   reconnectJitterMs = 250,
   reconnectMaxDelayMs = 10000,
+  reconnectMaxElapsedMs = 120000,
 }) {
   let socket = null;
   let pendingReady = null;
   let heartbeatTimer = null;
   let reconnectTimer = null;
   let reconnectAttempt = 0;
+  let reconnectStartedAt = 0;
   let heartbeatSequence = 0;
   let lastHeartbeatAckSequence = 0;
   let lastHeartbeatAckAt = 0;
@@ -214,6 +217,7 @@ export function createMediaSignalingSocket({
       data: {
         protocolVersion: protocol.version,
         contractRevision: protocol.contractRevision,
+        ...buildClientHelloData?.({ mediaSessionId: data.mediaSessionId }),
         mediaSessionId: data.mediaSessionId,
       },
     });
@@ -226,6 +230,7 @@ export function createMediaSignalingSocket({
     stopReconnect();
     pendingReady = null;
     reconnectAttempt = 0;
+    reconnectStartedAt = 0;
     startHeartbeat();
     pending.resolve();
     return true;
@@ -233,6 +238,11 @@ export function createMediaSignalingSocket({
 
   function scheduleReconnect() {
     if (reconnectTimer || isIntentionalClose()) return;
+    if (!reconnectStartedAt) reconnectStartedAt = Date.now();
+    if (Date.now() - reconnectStartedAt >= reconnectMaxElapsedMs) {
+      reportError(new Error("Media control recovery window expired"));
+      return;
+    }
     const delay =
       Math.min(
         reconnectMaxDelayMs,

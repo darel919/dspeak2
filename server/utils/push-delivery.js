@@ -45,6 +45,7 @@ function getState() {
       timer: null,
       running: false,
       configured: false,
+      databaseUnavailable: false,
       lastCleanupAt: 0,
       metricsSnapshot: {
         pending: 0,
@@ -71,6 +72,21 @@ function configureWebPush() {
   if (!publicKey || !privateKey) return false;
   webpush.setVapidDetails(process.env.VAPID_SUBJECT, publicKey, privateKey);
   state.configured = true;
+  return true;
+}
+
+function handleMissingRelation(error) {
+  const message = [error?.message, error?.cause?.message, String(error)]
+    .filter(Boolean)
+    .join(" ");
+  if (!/relation ".+" does not exist/.test(message)) return false;
+  const state = getState();
+  state.databaseUnavailable = true;
+  state.metricsSnapshot = {
+    ...state.metricsSnapshot,
+    checkedAt: new Date().toISOString(),
+    available: false,
+  };
   return true;
 }
 
@@ -354,25 +370,25 @@ async function pruneCompletedJobs() {
 
 export async function dispatchPushJobs() {
   const state = getState();
-  if (state.running || !configureWebPush()) return;
+  if (state.running || state.databaseUnavailable || !configureWebPush()) return;
   state.running = true;
   try {
-    await pruneCompletedJobs().catch((error) =>
-      console.error("[PushDispatcher] Retention cleanup failed", error),
-    );
-    const now = new Date();
-    const jobs = await db
-      .select()
-      .from(pushJobs)
-      .where(
-        and(eq(pushJobs.status, "pending"), lt(pushJobs.scheduledFor, now)),
-      )
-      .orderBy(pushJobs.scheduledFor)
-      .limit(dispatchBatchSize);
-    for (const job of jobs) await deliverJob(job);
-    await refreshPushMetrics().catch((error) =>
-      console.error("[PushDispatcher] Metrics refresh failed", error),
-    );
+    try {
+      await pruneCompletedJobs();
+      const now = new Date();
+      const jobs = await db
+        .select()
+        .from(pushJobs)
+        .where(
+          and(eq(pushJobs.status, "pending"), lt(pushJobs.scheduledFor, now)),
+        )
+        .orderBy(pushJobs.scheduledFor)
+        .limit(dispatchBatchSize);
+      for (const job of jobs) await deliverJob(job);
+      await refreshPushMetrics();
+    } catch (error) {
+      if (!handleMissingRelation(error)) throw error;
+    }
   } finally {
     state.running = false;
   }

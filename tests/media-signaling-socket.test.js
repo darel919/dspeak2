@@ -106,6 +106,50 @@ test("media signaling connection attempts are single-flight", async () => {
   }
 });
 
+test("media signaling includes a control ticket in the hello payload", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  try {
+    const signaling = harness({
+      buildClientHelloData: ({ mediaSessionId }) => ({
+        mediaSessionId,
+        ticket: "control-ticket",
+      }),
+    });
+    const opening = signaling.open();
+    const candidate = FakeWebSocket.instances[0];
+    candidate.readyState = FakeWebSocket.OPEN;
+
+    assert.equal(
+      signaling.acceptServerHello({
+        protocolVersion: 919,
+        contractRevision: 2,
+        mediaSessionId: "session-1",
+        heartbeatIntervalMs: 30000,
+        heartbeatTimeoutMs: 90000,
+        serverTime: Date.now(),
+      }),
+      true,
+    );
+
+    assert.deepEqual(JSON.parse(candidate.lastMessage), {
+      type: "hello919",
+      data: {
+        mediaSessionId: "session-1",
+        ticket: "control-ticket",
+        protocolVersion: 919,
+        contractRevision: 2,
+      },
+    });
+    candidate.onclose({ code: 4000, reason: "test" });
+    await assert.rejects(opening, /connection closed/);
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 test("media signaling errors close through the owned socket lifecycle", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket;

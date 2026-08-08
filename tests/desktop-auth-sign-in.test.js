@@ -14,10 +14,7 @@ const desktopCallback = await readFile(
   new URL("../app/composables/useDeepLinkAuth.js", import.meta.url),
   "utf8",
 );
-const useDesktopSource = await readFile(
-  new URL("../app/composables/useDesktopAuth.js", import.meta.url),
-  "utf8",
-);
+
 const tauriMain = await readFile(
   new URL("../desktop/src-tauri/src/main.rs", import.meta.url),
   "utf8",
@@ -43,10 +40,11 @@ test("desktop sign-in uses Supabase OAuth PKCE flow", () => {
   assert.match(authPage, /authStore\.completePendingDesktopSignIn\(\)/);
 });
 
-test("desktop sign-in registers native credentials and background notifications without exposing browser cookies", () => {
+test("desktop sign-in registers native callbacks and background notifications without exposing browser cookies", () => {
   assert.match(tauriMain, /register_background_notifications/);
   assert.match(tauriMain, /set_background_notifications_enabled/);
-  assert.match(useDesktopSource, /set_credential/);
+  assert.match(desktopCallback, /get_pending_oauth_callback/);
+  assert.match(authStore, /completeDesktopSignIn/);
   assert.doesNotMatch(authStore, /document\.cookie/);
 });
 
@@ -62,10 +60,7 @@ test("desktop sign-in provides a recoverable browser waiting state", () => {
 });
 
 test("web sign-in finishes after exchanging the callback", () => {
-  assert.match(
-    authPage,
-    /if \(valid\) \{\s+await finishAuthentication\(\);\s+return;/,
-  );
+  assert.match(authPage, /await authStore\.restoreSession\(\)/);
   assert.doesNotMatch(
     authPage,
     /window\.location\.replace\([\s\S]*tauri:\/\/callback/,

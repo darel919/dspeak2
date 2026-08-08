@@ -1,5 +1,5 @@
 import { db } from "../client.js";
-import { profiles } from "../schema/index.js";
+import { profiles, users } from "../schema/index.js";
 import { eq } from "drizzle-orm";
 
 export class ProfileRepository {
@@ -52,22 +52,49 @@ export class ProfileRepository {
     userId,
     { email, username: preferredUsername, displayName, avatarKey },
   ) {
-    let profile = await this.findById(userId);
-    if (profile) return profile;
+    return db.transaction(async (tx) => {
+      await tx
+        .insert(users)
+        .values({
+          id: userId,
+          email,
+          name: displayName || null,
+          username: preferredUsername || null,
+          displayName: displayName || null,
+        })
+        .onConflictDoNothing({ target: users.id });
 
-    let username = preferredUsername || email.split("@")[0];
-    let counter = 1;
-    while (await this.findByUsername(username)) {
-      username = `${preferredUsername || email.split("@")[0]}${counter}`;
-      counter++;
-    }
+      let profile = await tx
+        .select()
+        .from(profiles)
+        .where(eq(profiles.id, userId))
+        .limit(1);
+      if (profile[0]) return profile[0];
 
-    profile = await this.create(userId, {
-      username,
-      displayName: displayName || username,
-      avatarKey,
+      let username = preferredUsername || email.split("@")[0];
+      let counter = 1;
+      while (true) {
+        const existing = await tx
+          .select({ id: profiles.id })
+          .from(profiles)
+          .where(eq(profiles.username, username))
+          .limit(1);
+        if (!existing[0]) break;
+        username = `${preferredUsername || email.split("@")[0]}${counter}`;
+        counter++;
+      }
+
+      profile = await tx
+        .insert(profiles)
+        .values({
+          id: userId,
+          username,
+          displayName: displayName || username,
+          avatarKey,
+        })
+        .returning();
+      return profile[0];
     });
-    return profile;
   }
 }
 

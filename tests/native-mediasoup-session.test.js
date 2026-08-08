@@ -21,11 +21,23 @@ function createSocketHarness() {
       this.url = url;
       this.readyState = 0;
       this.sent = [];
+      this.listeners = new Map();
       sockets.push(this);
       queueMicrotask(() => {
         this.readyState = FakeWebSocket.OPEN;
-        this.onopen?.();
+        this.dispatch("open");
       });
+    }
+
+    addEventListener(type, listener) {
+      const listeners = this.listeners.get(type) || [];
+      listeners.push(listener);
+      this.listeners.set(type, listeners);
+    }
+
+    dispatch(type, event = {}) {
+      this[`on${type}`]?.(event);
+      for (const listener of this.listeners.get(type) || []) listener(event);
     }
 
     send(payload) {
@@ -34,11 +46,11 @@ function createSocketHarness() {
 
     close(code = 1000, reason = "") {
       this.readyState = FakeWebSocket.CLOSED;
-      this.onclose?.({ code, reason });
+      this.dispatch("close", { code, reason, wasClean: code === 1000 });
     }
 
     receive(message) {
-      this.onmessage?.({ data: JSON.stringify(message) });
+      this.dispatch("message", { data: JSON.stringify(message) });
     }
   }
   return { FakeWebSocket, sockets };
@@ -107,6 +119,32 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(session.producers.get("screen").kind, "video");
     assert.equal(calls[0][1].appData.encodings[0].priority, "high");
     assert.equal(calls[2][1].appData.encodings[0].maxFramerate, 60);
+  });
+
+  it("passes the provider signaling URL under the provider socket contract", async () => {
+    const previousWebSocket = globalThis.WebSocket;
+    const harness = createSocketHarness();
+    globalThis.WebSocket = harness.FakeWebSocket;
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.signaling = { send: () => true };
+    session._startNegotiation = async () => undefined;
+
+    try {
+      const pending = session._handleProviderTicket({
+        provider: "mediasoup",
+        signalingUrl: "wss://sfu.example.com/v1/ws",
+        ticket: "ticket",
+      });
+      await new Promise((resolve) => queueMicrotask(resolve));
+      harness.sockets[0].receive({ type: "hi919" });
+      await pending;
+      assert.equal(harness.sockets[0].url, "wss://sfu.example.com/v1/ws");
+    } finally {
+      session.providerSignaling?.close();
+      globalThis.WebSocket = previousWebSocket;
+    }
   });
 
   it("attaches native local video frames to the camera feed", async () => {
@@ -369,7 +407,7 @@ describe("NativeMediasoupSfuSession", () => {
     await session.disconnect();
   });
 
-  it("tears down native media before renegotiating after signaling loss", async () => {
+  it("keeps native media alive across transient signaling loss", async () => {
     let releaseTeardown;
     const teardown = new Promise((resolve) => {
       releaseTeardown = resolve;
@@ -392,11 +430,12 @@ describe("NativeMediasoupSfuSession", () => {
 
     session._handleSignalingClose({ code: 1006, reason: "connection lost" });
     await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(calls, ["media_leave"]);
+    assert.deepEqual(calls, []);
+    assert.equal(session.mediaConnectionState, "recovering");
 
     const negotiation = session._startNegotiation();
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(findMessage({ sent }, "get-rtp-capabilities"), undefined);
+    assert.ok(findMessage({ sent }, "get-rtp-capabilities"));
 
     releaseTeardown();
     await new Promise((resolve) => setImmediate(resolve));

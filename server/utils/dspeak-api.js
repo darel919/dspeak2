@@ -29,7 +29,7 @@ import {
   isActiveVoiceParticipant,
   moderateVoiceParticipant,
   updateActiveUserProfile,
-} from "./mediasoup-sfu";
+} from "./media-control-admin.js";
 import {
   ensureRoomMembership,
   presentRoomAccess,
@@ -71,6 +71,7 @@ import {
 import { getVoicePresenceSnapshots } from "./voice-presence.js";
 import { getRoomById, getChannelById } from "./room-authorization.js";
 import { eq, and, inArray, asc, desc } from "drizzle-orm";
+import { updateProfileAvatar } from "./profile-avatar-storage.js";
 
 function noop() {}
 
@@ -302,12 +303,10 @@ const handleRooms = createRoomsApiHandler({
   canManageMember,
   createError,
   decodeInvitePayload,
-  deleteMatchingRecords,
   disconnectVoiceParticipant,
   encodeInvitePayload,
   ensureRoomMembership,
   enforceRateLimit,
-  getBoundedList,
   getQuery,
   normalizeAttenuation,
   normalizeMediaPolicy,
@@ -328,7 +327,6 @@ const handleRooms = createRoomsApiHandler({
   setHeader,
   setResponseStatus,
   structuredValue,
-  usePocketBaseAdmin: noop,
   validateInviteExpiry,
   validateRoomImage,
 });
@@ -694,7 +692,6 @@ const handleChat = createChatApiHandler({
   requireValue,
   sendPushTest,
   setResponseStatus,
-  usePocketBaseAdmin: noop,
   pushAllowedHosts: configuredOutboundHosts(
     process.env.DSPEAK_PUSH_ALLOWED_HOSTS,
   ),
@@ -749,17 +746,9 @@ async function handleProfile(event, suffix) {
         statusCode: 400,
         statusMessage: "No profile changes provided",
       });
+    let updated;
     try {
-      const result = await db
-        .update(profiles)
-        .set({ ...update, updatedAt: new Date() })
-        .where(eq(profiles.id, userId))
-        .returning();
-      const updated = result[0];
-      const publicProfile = presentPublicProfile(updated);
-      await updateActiveUserProfile(publicProfile);
-      broadcastGlobally({ type: "profile_updated", data: publicProfile });
-      return presentUser(updated);
+      updated = await updateProfileAvatar({ db, userId, body, update });
     } catch (error) {
       if (error?.message?.includes("unique"))
         throw createError({
@@ -768,6 +757,10 @@ async function handleProfile(event, suffix) {
         });
       throw error;
     }
+    const publicProfile = presentPublicProfile(updated);
+    await updateActiveUserProfile(publicProfile);
+    broadcastGlobally({ type: "profile_updated", data: publicProfile });
+    return presentUser(updated);
   }
 
   if (suffix === "nicknames" && event.method === "GET") {
@@ -939,7 +932,9 @@ export async function handleDspeakApi(event) {
           statusCode: 403,
           statusMessage: "User profile not found",
         });
-      return createIceServers();
+      const query = getQuery(event);
+      const connectionMode = query.connectionMode || "auto";
+      return createIceServers(process.env, Date.now(), { connectionMode });
     }
     if (domain === "room") return await handleRooms(event, suffix);
     if (domain === "channel") return await handleChannels(event, suffix);

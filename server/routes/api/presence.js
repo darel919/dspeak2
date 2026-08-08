@@ -1,20 +1,20 @@
-import { authenticateWebSocketRequest } from "../../../utils/auth.js";
+import { authenticateWebSocketRequest } from "../../utils/auth.js";
 import {
   addGlobalSubscriber,
   removeGlobalSubscriber,
   broadcastGlobally,
-} from "../../../utils/dspeak-realtime.js";
+} from "../../utils/dspeak-realtime.js";
 import {
   enforceIdentifierRateLimit,
   resolveWebSocketClientIp,
-} from "../../../utils/rate-limit.js";
+} from "../../utils/rate-limit.js";
 import {
   setUserPresence,
   getUserPresence,
   touchUserActivity,
   checkAndTransitionIdleUsers,
   setUserOfflineOnDisconnect,
-} from "../../../utils/user-presence-manager.js";
+} from "../../utils/user-presence-manager.js";
 
 const users = new Map();
 const userPlatforms = new Map();

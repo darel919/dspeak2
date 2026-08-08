@@ -9,11 +9,10 @@ export function useDeepLinkAuth() {
 
   async function exchangeCallback(payload) {
     const code = payload?.code;
-    const state = payload?.state;
-    if (!code || !state) return false;
+    if (!code) return false;
 
     try {
-      return await authStore.exchangeHandoff(code, state);
+      return await authStore.completeDesktopSignIn(code);
     } catch (error) {
       console.error("[DesktopAuth] Failed to exchange callback:", error);
       return false;

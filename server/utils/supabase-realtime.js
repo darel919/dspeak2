@@ -1,4 +1,6 @@
-import { supabase } from "../auth/supabase.js";
+import { supabase, supabaseAdmin } from "../auth/supabase.js";
+
+const realtimeClient = supabaseAdmin || supabase;
 
 let channels = new Map();
 
@@ -8,8 +10,9 @@ export function getRealtimeChannel(channelName, options = {}) {
     return channels.get(key);
   }
 
-  const channel = supabase.channel(channelName, {
+  const channel = realtimeClient.channel(channelName, {
     config: {
+      private: true,
       broadcast: { self: false },
       presence: { key: options.userId },
     },
@@ -81,7 +84,10 @@ export function subscribeToChat(channelId, userId, callbacks) {
 }
 
 export function subscribeToNotifications(userId, callbacks) {
-  const channel = getRealtimeChannel(`notifications:${userId}`, { userId });
+  const normalizedUserId = String(userId);
+  const topic = `notify:${normalizedUserId}`;
+  const options = { userId: normalizedUserId };
+  const channel = getRealtimeChannel(topic, options);
 
   if (callbacks.onNotification) {
     channel.on("broadcast", { event: "notification" }, (payload) =>
@@ -103,13 +109,13 @@ export function subscribeToNotifications(userId, callbacks) {
     channel,
     unsubscribe: () => {
       channel.unsubscribe();
-      channels.delete(`notifications:${userId}:{"userId":"${userId}"}`);
+      channels.delete(`${topic}:${JSON.stringify(options)}`);
     },
   };
 }
 
 export async function broadcastChatMessage(channelId, message) {
-  const channel = supabase.channel(`chat:${channelId}`);
+  const channel = realtimeClient.channel(`chat:${channelId}`);
   return channel.send({
     type: "broadcast",
     event: "message",
@@ -121,7 +127,7 @@ export async function broadcastTyping(
   channelId,
   { userId, username, isTyping },
 ) {
-  const channel = supabase.channel(`chat:${channelId}`);
+  const channel = realtimeClient.channel(`chat:${channelId}`);
   return channel.send({
     type: "broadcast",
     event: "typing",
@@ -130,7 +136,7 @@ export async function broadcastTyping(
 }
 
 export async function broadcastReaction(channelId, reaction) {
-  const channel = supabase.channel(`chat:${channelId}`);
+  const channel = realtimeClient.channel(`chat:${channelId}`);
   return channel.send({
     type: "broadcast",
     event: "reaction",
@@ -139,7 +145,7 @@ export async function broadcastReaction(channelId, reaction) {
 }
 
 export async function broadcastNotification(userId, notification) {
-  const channel = supabase.channel(`notifications:${userId}`);
+  const channel = realtimeClient.channel(`notify:${String(userId)}`);
   return channel.send({
     type: "broadcast",
     event: "notification",

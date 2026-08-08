@@ -11,6 +11,10 @@ import {
   getReconnectDelayMs,
   getActiveMediaDirections,
 } from "#shared/media-metrics.js";
+import {
+  getAudioCodecPolicy,
+  toMediasoupProducerOptions,
+} from "#shared/audio-codec-policy.js";
 
 export {
   mapPeerRoundTripTimes,
@@ -23,26 +27,13 @@ export {
 };
 
 export function buildVoiceProducerOptions(track, maxBitrate, stereo = false) {
+  const policy = getAudioCodecPolicy("microphone", stereo);
   const bitrate = Number(maxBitrate);
-  return {
-    track,
-    encodings: [
-      {
-        ...(Number.isFinite(bitrate) && bitrate > 0
-          ? { maxBitrate: Math.floor(bitrate) }
-          : {}),
-        priority: "high",
-        networkPriority: "high",
-      },
-    ],
-    codecOptions: {
-      opusDtx: false,
-      opusFec: true,
-      opusNack: true,
-      opusStereo: stereo,
-      opusPtime: 10,
-    },
-  };
+  const producerOptions = toMediasoupProducerOptions(policy, track);
+  if (Number.isFinite(bitrate) && bitrate > 0) {
+    producerOptions.encodings[0].maxBitrate = Math.floor(bitrate);
+  }
+  return producerOptions;
 }
 
 export function getAudioBitrateBps(

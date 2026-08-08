@@ -1,16 +1,16 @@
-import { requireAuthenticatedUser } from "../../../utils/auth.js";
+import { requireAuthenticatedUser } from "../../utils/auth.js";
 import {
   requireRoomMember,
   requireRoomPermission,
   getChannelById,
   updateChannel,
   getRoomById,
-} from "../../../utils/room-authorization.js";
-import { getChannelSubscribers } from "../../../utils/dspeak-realtime.js";
+} from "../../utils/room-authorization.js";
+import { getChannelSubscribers } from "../../utils/dspeak-realtime.js";
 import {
   normalizeChannelPolicy,
   normalizeSlowMode,
-} from "../../../../shared/channel-policy.js";
+} from "../../../shared/channel-policy.js";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);

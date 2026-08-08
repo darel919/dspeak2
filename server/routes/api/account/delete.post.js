@@ -1,12 +1,12 @@
 import { requireAuthenticatedUser } from "../../../utils/auth.js";
-import { db } from "../../../db/client.js";
+import { withTransaction } from "../../../db/transactions.js";
 import {
   users,
+  profiles,
   rooms,
   channels,
   roomMemberships,
   membershipRoles,
-  roomRoles,
   messages,
   messageReactions,
   messageRevisions,
@@ -26,7 +26,7 @@ import {
 } from "../../../db/schema/index.js";
 import { eq, and, or, inArray, sql } from "drizzle-orm";
 import { enforceRateLimit } from "../../../utils/rate-limit.js";
-import { disconnectVoiceParticipant } from "../../../utils/mediasoup-sfu.js";
+import { supabaseAdmin } from "../../../auth/supabase.js";
 
 const accountDeletionLocksKey = Symbol.for("dspeak.account-deletion-locks");
 
@@ -37,27 +37,13 @@ function accountDeletionLocks() {
   return globalThis[accountDeletionLocksKey];
 }
 
-async function deleteAccount(userId) {
-  await db.delete(users).where(eq(users.id, userId));
-  await db.delete(roomMemberships).where(eq(roomMemberships.userId, userId));
-  await db
-    .delete(membershipRoles)
-    .where(
-      inArray(
-        membershipRoles.membershipId,
-        db
-          .select({ id: roomMemberships.id })
-          .from(roomMemberships)
-          .where(eq(roomMemberships.userId, userId)),
-      ),
-    );
-
-  const ownedRooms = await db
+async function deleteAccount(tx, userId) {
+  const ownedRooms = await tx
     .select({ id: rooms.id })
     .from(rooms)
     .where(eq(rooms.ownerId, userId));
   for (const room of ownedRooms) {
-    const otherMembers = await db
+    const otherMembers = await tx
       .select({ userId: roomMemberships.userId })
       .from(roomMemberships)
       .where(
@@ -68,74 +54,103 @@ async function deleteAccount(userId) {
       )
       .limit(1);
     if (otherMembers.length > 0) {
-      await db
+      await tx
         .update(rooms)
         .set({ ownerId: otherMembers[0].userId })
         .where(eq(rooms.id, room.id));
     } else {
-      await db.delete(rooms).where(eq(rooms.id, room.id));
+      await tx.delete(rooms).where(eq(rooms.id, room.id));
     }
   }
 
-  await db.delete(channels).where(eq(channels.ownerId, userId));
+  await tx
+    .delete(membershipRoles)
+    .where(
+      inArray(
+        membershipRoles.membershipId,
+        tx
+          .select({ id: roomMemberships.id })
+          .from(roomMemberships)
+          .where(eq(roomMemberships.userId, userId)),
+      ),
+    );
+  await tx.delete(roomMemberships).where(eq(roomMemberships.userId, userId));
 
-  await db
+  await tx
+    .update(channels)
+    .set({ ownerId: null })
+    .where(eq(channels.ownerId, userId));
+  await tx
     .update(channels)
     .set({ inRoom: sql`array_remove(${channels.inRoom}, ${userId})` })
     .where(sql`${channels.inRoom} @> ARRAY[${userId}]::uuid[]`);
 
-  await db
+  await tx
     .update(messages)
     .set({ content: "[deleted]" })
     .where(eq(messages.authorId, userId));
-
-  await db
+  await tx
     .update(messages)
-    .set({ readBy: sql`array_remove(${messages.readBy}, ${userId})` })
-    .where(sql`${messages.readBy} @> ARRAY[${userId}]::uuid[]`);
+    .set({ readBy: sql`${messages.readBy} - ${userId}` })
+    .where(sql`${messages.readBy} @> ${JSON.stringify([userId])}::jsonb`);
 
-  await db
+  await tx
     .delete(notificationPreferences)
     .where(eq(notificationPreferences.userId, userId));
-  await db
+  await tx
     .delete(roomNotificationPreferences)
     .where(eq(roomNotificationPreferences.userId, userId));
-  await db
+  await tx.delete(pushJobs).where(eq(pushJobs.recipientId, userId));
+  await tx
     .delete(pushSubscriptions)
     .where(eq(pushSubscriptions.userId, userId));
-  await db.delete(bookmarks).where(eq(bookmarks.userId, userId));
-  await db.delete(userNicknames).where(eq(userNicknames.setById, userId));
-  await db
+  await tx.delete(bookmarks).where(eq(bookmarks.userId, userId));
+  await tx
+    .delete(userNicknames)
+    .where(
+      or(eq(userNicknames.userId, userId), eq(userNicknames.setById, userId)),
+    );
+  await tx
     .delete(friends)
     .where(or(eq(friends.userId, userId), eq(friends.friendId, userId)));
-  await db.delete(messageReactions).where(eq(messageReactions.userId, userId));
-  await db
+  await tx.delete(messageReactions).where(eq(messageReactions.userId, userId));
+  await tx
     .delete(messageRevisions)
     .where(eq(messageRevisions.editorId, userId));
-  await db.delete(notifications).where(eq(notifications.userId, userId));
-  await db.delete(pushJobs).where(eq(pushJobs.recipientId, userId));
-  await db
+  await tx.delete(notifications).where(eq(notifications.userId, userId));
+  await tx
     .delete(roomSoundboards)
     .where(eq(roomSoundboards.createdById, userId));
-  await db.delete(chatFiles).where(eq(chatFiles.uploaderId, userId));
-  await db.delete(pinnedMessages).where(eq(pinnedMessages.pinnedById, userId));
-  await db.delete(roomInvites).where(eq(roomInvites.inviterId, userId));
-  await db.delete(roomAuditLog).where(eq(roomAuditLog.actorId, userId));
+  await tx.delete(chatFiles).where(eq(chatFiles.uploaderId, userId));
+  await tx.delete(pinnedMessages).where(eq(pinnedMessages.pinnedById, userId));
+  await tx
+    .delete(roomInvites)
+    .where(
+      or(eq(roomInvites.inviterId, userId), eq(roomInvites.inviteeId, userId)),
+    );
+  await tx.delete(roomAuditLog).where(eq(roomAuditLog.actorId, userId));
 
-  await disconnectVoiceParticipant(userId, userId);
-
-  await db
+  const deletedUsername = `deleted_${userId}`;
+  const updatedAt = new Date();
+  await tx
+    .update(profiles)
+    .set({
+      username: deletedUsername,
+      displayName: "",
+      avatarKey: null,
+      updatedAt,
+    })
+    .where(eq(profiles.id, userId));
+  await tx
     .update(users)
     .set({
       name: "[deleted]",
-      username: `deleted_${userId.slice(0, 8)}`,
+      username: deletedUsername,
       displayName: "",
-      email: "",
-      updatedAt: new Date(),
+      email: `deleted+${userId}@deleted.invalid`,
+      updatedAt,
     })
     .where(eq(users.id, userId));
-
-  return { success: true };
 }
 
 export default defineEventHandler(async (event) => {
@@ -152,7 +167,19 @@ export default defineEventHandler(async (event) => {
 
   locks.add(userId);
   try {
-    return await deleteAccount(userId);
+    await withTransaction((tx) => deleteAccount(tx, userId));
+    if (!supabaseAdmin)
+      throw createError({
+        statusCode: 503,
+        statusMessage: "Account deletion is unavailable",
+      });
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (error)
+      throw createError({
+        statusCode: 502,
+        statusMessage: "Application data was deleted but Auth deletion failed",
+      });
+    return { success: true };
   } finally {
     locks.delete(userId);
   }

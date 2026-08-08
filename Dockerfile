@@ -25,8 +25,6 @@ FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
-ENV MEDIASOUP_LISTEN_IP=0.0.0.0
-ENV MEDIASOUP_ANNOUNCED_ADDRESS=auto
 
 WORKDIR /app
 COPY --from=ffmpeg --chmod=0555 /ffmpeg /ffprobe /usr/local/bin/

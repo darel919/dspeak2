@@ -67,7 +67,7 @@ test("Sent persistence lookup uses Drizzle queries", () => {
   );
   assert.match(managerSource, /eq\(friends\.status, "pending"\)/);
   assert.match(managerSource, /sameOriginAvatarPath\(recipient\)/);
-  assert.doesNotMatch(managerSource, /PocketBase/);
+
   assert.doesNotMatch(managerSource, /getBoundedList/);
 });
 

@@ -4,7 +4,7 @@ import {
   userNicknames,
   roomInvites,
   roomAuditLog,
-} from "../db/schema/index.js";
+} from "../schema/index.js";
 import { eq, and, desc, asc, or } from "drizzle-orm";
 
 export class SocialRepository {

@@ -29,10 +29,7 @@ import {
 } from "~~/shared/channel-policy.js";
 import { debugLog } from "../shared/debug";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
-import {
-  bindSupabaseSession,
-  getSupabaseClient,
-} from "../utils/supabase-client.js";
+import { getSupabaseClient } from "../utils/supabase-client.js";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
@@ -578,18 +575,13 @@ export const useChatStore = defineStore("chat", () => {
         if (realtimeChannel.value) {
           closeActiveTransport();
         }
-        const authStore = useAuthStore();
-        const storedUser = authStore.getUserData();
-        if (storedUser) {
-          const storedAccess = sessionStorage.getItem("sb_access_token");
-          if (storedAccess) {
-            await bindSupabaseSession(
-              storedAccess,
-              sessionStorage.getItem("sb_refresh_token") || "",
-            ).catch(() => false);
-          }
-        }
-        const supabaseChannel = supabaseClient.channel(`chat:${channelId}`);
+        const sessionResult = await supabaseClient.auth.getSession();
+        const accessToken = sessionResult.data.session?.access_token;
+        if (!accessToken) throw new Error("Supabase session is unavailable");
+        supabaseClient.realtime.setAuth(accessToken);
+        const supabaseChannel = supabaseClient.channel(`chat:${channelId}`, {
+          config: { private: true },
+        });
         realtimeChannel.value = supabaseChannel;
 
         supabaseChannel

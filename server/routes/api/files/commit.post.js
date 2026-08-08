@@ -6,6 +6,11 @@ import {
   roomImages,
   soundboards,
 } from "../../../db/schema/index.js";
+import { getObjectMetadata, validateUpload } from "../../../storage/r2.js";
+import {
+  channelRepository,
+  membershipRepository,
+} from "../../../db/repositories/rooms.js";
 import { eq } from "drizzle-orm";
 
 export default defineEventHandler(async (event) => {
@@ -22,8 +27,67 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  // Verify the object exists in R2 (would be done via HEAD request in production)
-  // For now, we trust the client and record metadata
+  if (!metadata || typeof metadata !== "object")
+    throw createError({
+      statusCode: 400,
+      statusMessage: "File metadata is required",
+    });
+  let objectMetadata;
+  try {
+    objectMetadata = await getObjectMetadata(key);
+  } catch {
+    throw createError({
+      statusCode: 409,
+      statusMessage: "Uploaded object is not available",
+    });
+  }
+  const validation = validateUpload(type, metadata.mimeType, metadata.size);
+  if (!validation.valid)
+    throw createError({ statusCode: 400, statusMessage: validation.error });
+  if (
+    objectMetadata.contentLength !== Number(metadata.size) ||
+    objectMetadata.contentType !== String(metadata.mimeType).toLowerCase()
+  )
+    throw createError({
+      statusCode: 409,
+      statusMessage: "Uploaded object metadata does not match",
+    });
+
+  if (["room-profile", "room-header", "soundboard"].includes(type)) {
+    const membership = await membershipRepository.findByRoomAndUser(
+      metadata.roomId,
+      user.id,
+    );
+    if (!membership)
+      throw createError({
+        statusCode: 403,
+        statusMessage: "Room access is required",
+      });
+  }
+  if (type === "chat") {
+    const channel = await channelRepository.findById(metadata.channelId);
+    const membership = channel
+      ? await membershipRepository.findByRoomAndUser(channel.roomId, user.id)
+      : null;
+    if (!membership)
+      throw createError({
+        statusCode: 403,
+        statusMessage: "Channel access is required",
+      });
+  }
+
+  const expectedPrefix = {
+    avatar: `avatars/${user.id}/`,
+    "room-profile": `rooms/${metadata.roomId}/profile/`,
+    "room-header": `rooms/${metadata.roomId}/headers/`,
+    chat: `chat/${metadata.channelId}/`,
+    soundboard: `soundboards/${metadata.roomId}/`,
+  }[type];
+  if (!expectedPrefix || !key.startsWith(expectedPrefix))
+    throw createError({
+      statusCode: 403,
+      statusMessage: "File key is not authorized",
+    });
 
   let result;
   switch (type) {
@@ -41,14 +105,15 @@ export default defineEventHandler(async (event) => {
         .returning();
       break;
     }
-    case "room-profile": {
+    case "room-profile":
+    case "room-header": {
       const { roomId, objectId } = metadata;
       result = await db
         .insert(roomImages)
         .values({
           id: objectId,
           roomId,
-          type: "profile",
+          type: type === "room-header" ? "header" : "profile",
           r2Key: key,
           mimeType: metadata.mimeType,
           size: metadata.size,

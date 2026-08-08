@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
-import { deviceHeaders, getDeviceId } from "~/shared/device-identity";
+import { deviceHeaders } from "~/shared/device-identity";
 import { purgeUserLocalData } from "~/utils/idb";
 import { useRoomsStore } from "./rooms";
 import { useChatStore } from "./chat";
@@ -12,6 +12,23 @@ export const useAuthStore = defineStore("auths", () => {
   const config = useRuntimeConfig();
   const runtimeStore = useRuntimeStore();
   let sessionCheckPromise = null;
+  let supabaseAuthSubscription = null;
+
+  function bridgeSupabaseSession(client) {
+    if (!client || supabaseAuthSubscription) return;
+    const result = client.auth.onAuthStateChange((event, session) => {
+      if (!session?.access_token) return;
+      if (event !== "SIGNED_IN" && event !== "TOKEN_REFRESHED") return;
+      fetch(`${config.public.apiPath}/session`, {
+        method: "POST",
+        credentials: "include",
+        headers: deviceHeaders({
+          Authorization: `Bearer ${session.access_token}`,
+        }),
+      }).catch(() => {});
+    });
+    supabaseAuthSubscription = result.data.subscription;
+  }
 
   function writeStorage(key, value) {
     if (!import.meta.client) return;
@@ -49,6 +66,11 @@ export const useAuthStore = defineStore("auths", () => {
 
   async function beginExternalSignIn(termsAccepted = false) {
     const isDesktop = runtimeStore.isTauri;
+    let desktopRedirect = "";
+    if (isDesktop) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      desktopRedirect = await invoke("get_oauth_callback_url");
+    }
 
     const response = await fetch(`${config.public.apiPath}/auth/google`, {
       method: "GET",
@@ -56,6 +78,7 @@ export const useAuthStore = defineStore("auths", () => {
       headers: deviceHeaders({
         "Content-Type": "application/json",
         ...(isDesktop ? { "X-Desktop-App": "true" } : {}),
+        ...(desktopRedirect ? { "X-Desktop-Redirect": desktopRedirect } : {}),
       }),
     });
 
@@ -74,12 +97,21 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function restoreSession() {
-    const { captureSupabaseSession } = await import("~/utils/supabase-client");
+    const { captureSupabaseSession, getSupabaseClient } =
+      await import("~/utils/supabase-client");
     await captureSupabaseSession().catch(() => null);
     try {
+      const supabaseClient = getSupabaseClient();
+      bridgeSupabaseSession(supabaseClient);
+      const sessionResult = await supabaseClient?.auth.getSession();
+      const accessToken = sessionResult?.data?.session?.access_token;
+      if (!accessToken) return false;
       const response = await fetch(`${config.public.apiPath}/session`, {
+        method: "POST",
         credentials: "include",
-        headers: deviceHeaders(),
+        headers: deviceHeaders({
+          Authorization: `Bearer ${accessToken}`,
+        }),
       });
       if (!response.ok) return false;
       setUser(await response.json());
@@ -88,6 +120,44 @@ export const useAuthStore = defineStore("auths", () => {
     } catch {
       return false;
     }
+  }
+
+  async function completeWebSignIn(code) {
+    const tokens = await $fetch(
+      `${config.public.apiPath}/auth/callback-session`,
+      {
+        method: "POST",
+        body: { code },
+      },
+    );
+    const { getSupabaseClient } = await import("~/utils/supabase-client");
+    const client = getSupabaseClient();
+    if (!client) throw new Error("Supabase client is not configured");
+    const { error } = await client.auth.setSession({
+      access_token: tokens.accessToken,
+      refresh_token: tokens.refreshToken,
+    });
+    if (error) throw error;
+    return restoreSession();
+  }
+
+  async function completeDesktopSignIn(code) {
+    const result = await $fetch(
+      `${config.public.apiPath}/auth/desktop-callback-session`,
+      {
+        method: "POST",
+        body: { code },
+      },
+    );
+    return completeWebSignIn(result.code);
+  }
+
+  async function completePendingDesktopSignIn() {
+    if (!runtimeStore.isTauri) return false;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const pending = await invoke("get_pending_oauth_callback");
+    if (!pending?.code) return false;
+    return completeDesktopSignIn(pending.code);
   }
 
   async function ensureSession() {
@@ -125,6 +195,13 @@ export const useAuthStore = defineStore("auths", () => {
             headers: deviceHeaders(),
           }).catch(() => {})
         : Promise.resolve();
+    const supabaseCleanup = import.meta.client
+      ? import("~/utils/supabase-client")
+          .then(({ getSupabaseClient }) =>
+            getSupabaseClient()?.auth.signOut({ scope: "local" }),
+          )
+          .catch(() => {})
+      : Promise.resolve();
 
     setUser(null);
     const nativeCleanup = runtimeStore.isTauri
@@ -151,7 +228,7 @@ export const useAuthStore = defineStore("auths", () => {
       .catch((error) => {
         console.warn("[Auth] Could not purge user browser data:", error);
       });
-    await Promise.all([revocation, cleanup, nativeCleanup]);
+    await Promise.all([revocation, cleanup, nativeCleanup, supabaseCleanup]);
   }
 
   function getUserData() {
@@ -177,6 +254,10 @@ export const useAuthStore = defineStore("auths", () => {
     beginExternalSignIn,
     ensureSession,
     clearAuth,
+    restoreSession,
+    completeWebSignIn,
+    completeDesktopSignIn,
+    completePendingDesktopSignIn,
     getUserData,
     updateUserData,
   };

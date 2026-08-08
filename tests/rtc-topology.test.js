@@ -20,7 +20,6 @@ import {
   collectPeerConnectionStats,
   collectVideoRtpStats,
 } from "../app/shared/rtc-media-stats.js";
-import { validP2pSignal } from "../server/utils/p2p-signal.js";
 
 test("P2P participant limit accepts only two through four devices", () => {
   assert.equal(isP2pParticipantCount(1), false);
@@ -218,34 +217,6 @@ test("P2P remote feed identity remains stable across replacement tracks", () => 
     p2pRemoteFeedKey("peer-1", "camera"),
     p2pRemoteFeedKey("peer-1", "screen"),
   );
-});
-
-test("P2P signaling accepts explicit source removal and rejects unknown sources", () => {
-  assert.equal(validP2pSignal({ sourceRemoved: { source: "camera" } }), true);
-  assert.equal(
-    validP2pSignal({ sourceRemoved: { source: "broadcast-audio" } }),
-    true,
-  );
-  assert.equal(validP2pSignal({ sourceRemoved: { source: "unknown" } }), false);
-  assert.equal(validP2pSignal({ sourceRestored: { source: "camera" } }), true);
-  assert.equal(
-    validP2pSignal({ sourceRestored: { source: "unknown" } }),
-    false,
-  );
-  assert.equal(
-    validP2pSignal({
-      sourceReceiving: { source: "screen", receiving: false },
-    }),
-    true,
-  );
-  assert.equal(
-    validP2pSignal({
-      sourceReceiving: { source: "screen", receiving: "false" },
-    }),
-    false,
-  );
-  assert.equal(validP2pSignal({ renegotiationNeeded: true }), true);
-  assert.equal(validP2pSignal({ renegotiationNeeded: false }), false);
 });
 
 test("P2P media readiness requires every expected RTP direction to flow", async () => {

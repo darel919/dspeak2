@@ -1,5 +1,6 @@
 import { supabase } from "../../../auth/supabase.js";
 import { profileRepository } from "../../../db/repositories/profiles.js";
+import { createPendingOAuthSession } from "../../../auth/pending-oauth-session.js";
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -30,8 +31,6 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const config = useRuntimeConfig();
-  const redirectUrl = `${config.public.appUrl}/#access_token=${encodeURIComponent(session.access_token)}&refresh_token=${encodeURIComponent(session.refresh_token)}`;
-
-  return sendRedirect(event, redirectUrl);
+  const pendingCode = createPendingOAuthSession(session);
+  return sendRedirect(event, `/auth?code=${encodeURIComponent(pendingCode)}`);
 });

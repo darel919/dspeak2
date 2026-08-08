@@ -5,7 +5,7 @@ import {
   streamPlayLog,
   avatars,
   roomImages,
-} from "../db/schema/index.js";
+} from "../schema/index.js";
 import { eq, and, desc, asc } from "drizzle-orm";
 
 export class AssetsRepository {

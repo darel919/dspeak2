@@ -1,5 +1,6 @@
 import {
   pgTable,
+  pgSchema,
   uuid,
   text,
   timestamp,
@@ -11,10 +12,15 @@ import {
   primaryKey,
 } from "drizzle-orm/pg-core";
 
+const authSchema = pgSchema("auth");
+const authUsers = authSchema.table("users", {
+  id: uuid("id").primaryKey(),
+});
+
 export const profiles = pgTable("profiles", {
   id: uuid("id")
     .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
+    .references(() => authUsers.id, { onDelete: "cascade" }),
   username: text("username").notNull().unique(),
   displayName: text("display_name"),
   avatarKey: text("avatar_key"),
@@ -30,6 +36,9 @@ export const users = pgTable("users", {
   id: uuid("id").primaryKey(),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
+  name: text("name"),
+  username: text("username").unique(),
+  displayName: text("display_name"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -43,6 +52,8 @@ export const rooms = pgTable("rooms", {
   name: text("name").notNull(),
   description: text("description"),
   imageKey: text("image_key"),
+  accent: text("accent"),
+  attenuation: jsonb("attenuation").$type().default({}).notNull(),
   ownerId: uuid("owner_id")
     .notNull()
     .references(() => profiles.id, { onDelete: "restrict" }),
@@ -64,6 +75,11 @@ export const channels = pgTable("channels", {
     .default("voice")
     .notNull(),
   position: integer("position").default(0).notNull(),
+  mediaPolicy: jsonb("media_policy").$type().default({}).notNull(),
+  ownerId: uuid("owner_id").references(() => profiles.id, {
+    onDelete: "set null",
+  }),
+  inRoom: uuid("in_room").array().default([]).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -81,6 +97,8 @@ export const roomRoles = pgTable("room_roles", {
   color: text("color"),
   position: integer("position").default(0).notNull(),
   permissions: jsonb("permissions").$type().default([]).notNull(),
+  system: boolean("system").default(false).notNull(),
+  isDefault: boolean("is_default").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -160,6 +178,9 @@ export const messageRevisions = pgTable("message_revisions", {
   editedAt: timestamp("edited_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
+  editorId: uuid("editor_id")
+    .notNull()
+    .references(() => profiles.id, { onDelete: "cascade" }),
 });
 
 export const messageReactions = pgTable(
@@ -396,6 +417,9 @@ export const pushJobs = pgTable("push_jobs", {
   subscriptionId: uuid("subscription_id")
     .notNull()
     .references(() => pushSubscriptions.id, { onDelete: "cascade" }),
+  recipientId: uuid("recipient_id")
+    .notNull()
+    .references(() => profiles.id, { onDelete: "cascade" }),
   payload: text("payload").notNull(),
   status: text("status", { enum: ["pending", "sent", "failed"] })
     .default("pending")

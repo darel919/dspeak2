@@ -2,7 +2,9 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -28,7 +30,7 @@ export function generateObjectKey(type, identifiers) {
     case "room-header":
       return `rooms/${roomId}/headers/${objectId}`;
     case "chat":
-      return `chat/${channelId}/${messageId}/${objectId}`;
+      return `chat/${channelId}/${messageId || "pending"}/${objectId}`;
     case "soundboard":
       return `soundboards/${roomId}/${objectId}`;
     case "album-art":
@@ -54,6 +56,17 @@ export async function createUploadUrl(
   return { uploadUrl, key, expiresIn: 3600 };
 }
 
+export async function putObject(key, body, contentType, contentLength) {
+  const command = new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+    ...(contentLength == null ? {} : { ContentLength: contentLength }),
+  });
+  await r2Client.send(command);
+}
+
 export async function createDownloadUrl(key, expiresIn = 3600) {
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
   return getSignedUrl(r2Client, command, { expiresIn });
@@ -64,14 +77,46 @@ export async function deleteObject(key) {
   await r2Client.send(command);
 }
 
+export async function listObjects(prefix) {
+  const objects = [];
+  let continuationToken;
+  do {
+    const result = await r2Client.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    );
+    for (const object of result.Contents || [])
+      if (object.Key)
+        objects.push({
+          key: object.Key,
+          lastModified: object.LastModified || null,
+        });
+    continuationToken = result.IsTruncated
+      ? result.NextContinuationToken
+      : undefined;
+  } while (continuationToken);
+  return objects;
+}
+
 export async function objectExists(key) {
   try {
-    const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
-    await r2Client.send(command);
+    await getObjectMetadata(key);
     return true;
   } catch {
     return false;
   }
+}
+
+export async function getObjectMetadata(key) {
+  const command = new HeadObjectCommand({ Bucket: BUCKET, Key: key });
+  const result = await r2Client.send(command);
+  return {
+    contentLength: Number(result.ContentLength),
+    contentType: String(result.ContentType || "").toLowerCase(),
+  };
 }
 
 export const R2ObjectType = {
@@ -114,7 +159,11 @@ export function validateUpload(
       error: `MIME type ${mimeType} not allowed for ${type}`,
     };
   }
-  if (size > maxSizeBytes) {
+  const normalizedSize = Number(size);
+  if (!Number.isSafeInteger(normalizedSize) || normalizedSize <= 0) {
+    return { valid: false, error: "File size must be a positive integer" };
+  }
+  if (normalizedSize > maxSizeBytes) {
     return { valid: false, error: `File size exceeds ${maxSizeBytes} bytes` };
   }
   return { valid: true };

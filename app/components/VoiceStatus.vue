@@ -101,6 +101,7 @@ const connectionLabel = computed(() => {
   if (state === "ready-no-active-media") return "Connected";
   if (state === "playback-blocked") return "Playback needs attention";
   if (state === "reconnecting") return "Media reconnecting";
+  if (state === "recovering") return "Recovering media…";
   if (state === "transport-connecting") return "Transport connecting";
   return "Voice session ready";
 });

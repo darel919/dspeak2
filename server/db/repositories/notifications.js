@@ -5,7 +5,7 @@ import {
   roomNotificationPreferences,
   pushSubscriptions,
   pushJobs,
-} from "../db/schema/index.js";
+} from "../schema/index.js";
 import { eq, and, desc, asc, lt } from "drizzle-orm";
 
 export class NotificationRepository {

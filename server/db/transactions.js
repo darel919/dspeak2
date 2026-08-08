@@ -1,4 +1,4 @@
-import { runtimeClient, directClient } from "../client.js";
+import { runtimeClient, directClient } from "./client.js";
 
 export async function withTransaction(fn) {
   return runtimeClient.begin(async (tx) => {

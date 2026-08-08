@@ -9,6 +9,7 @@ import {
 import { NativeMediasoupSfuSession } from "../../shared/native-mediasoup-session.js";
 import { NativeP2pSession } from "../../shared/native-p2p-session.js";
 import { mediaSignalingUrl } from "../../shared/media-signaling-socket.js";
+import { getDeviceId } from "../../shared/device-identity.js";
 import { getAudioBitrateBps } from "../../shared/voice-transport.js";
 import { resolveRequestedVideoSettings } from "../../shared/video-settings.js";
 
@@ -366,6 +367,7 @@ export class NativeMediaEngine extends MediaEngine {
     try {
       await this.initialize();
       if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
+        await this._configureNativeControl(input.channelId || input);
         phase = "native-connect";
         await this.nativeSession?.connect(input.channelId || input);
       } else if (this.nativeOnly) {
@@ -1017,6 +1019,7 @@ export class NativeMediaEngine extends MediaEngine {
       const input = { channelId: args[0] };
       if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
         await this._configureNativeIceServers();
+        await this._configureNativeControl(input.channelId);
         phase = "native-connect";
         await this.nativeSession?.connect(input.channelId);
       } else if (this.nativeOnly) {
@@ -1401,9 +1404,13 @@ export class NativeMediaEngine extends MediaEngine {
     const config = this.nativeConfig || {};
     const configuredPath = String(config.apiPath || "/api").replace(/\/$/, "");
     const serverUrl = String(config.serverUrl || "").replace(/\/$/, "");
+    const connectionMode =
+      channelMediaPolicy(this.channelsStore, this.voiceStore)?.connectionMode ||
+      "auto";
     const endpoint = /^https?:\/\//.test(configuredPath)
-      ? `${configuredPath}/config`
-      : `${serverUrl}${configuredPath}/config` || "/api/config";
+      ? `${configuredPath}/config?connectionMode=${encodeURIComponent(connectionMode)}`
+      : `${serverUrl}${configuredPath}/config?connectionMode=${encodeURIComponent(connectionMode)}` ||
+        "/api/config";
     if (!endpoint) return;
     try {
       const response = await fetch(endpoint, { credentials: "include" });
@@ -1411,6 +1418,34 @@ export class NativeMediaEngine extends MediaEngine {
       const iceServers = await response.json();
       if (Array.isArray(iceServers)) await this.setIceServers(iceServers);
     } catch {}
+  }
+
+  async _configureNativeControl(channelId) {
+    if (!this.channelsStore) return;
+    const config = this.nativeConfig || {};
+    const configuredPath = String(config.apiPath || "/api").replace(/\/$/, "");
+    const serverUrl = String(config.serverUrl || "").replace(/\/$/, "");
+    const roomId = String(this.channelsStore?.loadedRoomId || "");
+    if (!roomId) throw new Error("Room ID is required for media bootstrap");
+    const connectionMode =
+      channelMediaPolicy(this.channelsStore, this.voiceStore)?.connectionMode ||
+      "auto";
+    const response = await fetch(
+      `${serverUrl}${configuredPath}/media/bootstrap`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId,
+          channelId,
+          connectionMode,
+          deviceId: getDeviceId(),
+        }),
+      },
+    );
+    if (!response.ok) throw new Error("Media control bootstrap failed");
+    this.nativeSession?.configureControl(await response.json());
   }
 
   async _loadSignalingToken(config) {

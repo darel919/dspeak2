@@ -2,6 +2,8 @@ import { computed, readonly, ref, watch } from "vue";
 import { useRuntimeConfig } from "#app";
 import { MediaCaptureManager } from "~/shared/media-capture.js";
 import { MediasoupClientSession } from "~/shared/mediasoup-client-session.js";
+import { MediasoupProviderSocket } from "~/shared/mediasoup-provider-socket.js";
+import { CloudflareRealtimeSession } from "~/shared/cloudflare-realtime-session.js";
 import { NativeP2pMesh } from "~/shared/native-p2p.js";
 import { RemoteMediaRegistry } from "~/shared/remote-media-registry.js";
 import { RemoteMediaHandoff } from "~/shared/remote-media-handoff.js";
@@ -12,8 +14,15 @@ import {
 import { createLocalAudioEngine } from "~/shared/local-audio-engine.js";
 import { registerEchoWarning } from "~/shared/echo-warning.js";
 import {
+  buildMediaControlSocketUrl,
+  getMediaControlBootstrap,
+  getOrCreateDeviceId,
+} from "~/shared/media-control-client.js";
+import {
   closeMediaProviders,
   closeMediaSessionTransports,
+  handleMediaSignalingClose,
+  resetMediaTelemetryState,
 } from "~/shared/media-session-cleanup.js";
 import {
   createMediaGeneration,
@@ -27,7 +36,6 @@ import {
   closeMediaSignalingForRecovery,
   createMediaSignalingSocket,
   dispatchMediaSignalingMessage,
-  mediaSignalingUrl,
 } from "~/shared/media-signaling-socket.js";
 import { createMediaSourceController } from "~/shared/media-source-controller.js";
 import { bindMediaVisibility } from "~/shared/media-visibility.js";
@@ -68,6 +76,7 @@ import {
 } from "~~/server/utils/media-transition.js";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "~~/shared/media-signaling-protocol.js";
 import { useAuthStore } from "~/stores/auth";
+import { getSupabaseClient } from "~/utils/supabase-client";
 import { useChannelsStore } from "~/stores/channels";
 import { useSettingsStore } from "~/stores/settings";
 import { useRoomsStore } from "~/stores/rooms";
@@ -104,6 +113,7 @@ export function useHybridMediaSession() {
   const attenuationReports = ref(new Map());
   const peerRoundTripTimes = ref({});
   const peerConnectionMetrics = ref({});
+  const mediaPathMetrics = ref([]);
   const sfuRoundTripTime = ref(null);
   const currentJitterBufferConfig = ref({ minDelayMs: 0, targetDelayMs: 20 });
   const participantSfuRoundTripTimes = ref({});
@@ -117,10 +127,15 @@ export function useHybridMediaSession() {
   const messageHandlers = new Map();
   const localSources = new Map();
   let channelId = null;
+  let mediaControlSocketUrl = null;
+  let mediaControlTicket = null;
   let localPeerId = null;
   let iceServers = [];
   let p2pMesh = null;
   let sfu = null;
+  let providerSocket = null;
+  let selectedSfuProvider = "mediasoup";
+  const pendingCloudflarePublications = [];
   let activeProvider = null;
   let intentionalClose = false;
   let topologyWaiter = null;
@@ -132,6 +147,7 @@ export function useHybridMediaSession() {
   let latestTopologyKey = null;
   let reportedSfuFailureEpoch = null;
   let preparedTransition = null;
+  const providerTicketWaiters = new Map();
   const rtpStatsSamples = new Map();
   const lifecycleState = createMediaLifecycleState();
   const mediaGeneration = createMediaGeneration();
@@ -144,12 +160,21 @@ export function useHybridMediaSession() {
     voiceStore,
   });
   const signaling = createMediaSignalingSocket({
+    buildClientHelloData: ({ mediaSessionId }) => ({
+      mediaSessionId,
+      providerCapabilities: ["cloudflare-realtime", "mediasoup"],
+      ...(mediaControlTicket ? { ticket: mediaControlTicket } : {}),
+    }),
     buildHeartbeatData: (sequence) => ({
       sequence,
       topologyEpoch: topologyState.value.epoch,
       sourceRevision: topologyState.value.sourceRevision || 0,
     }),
-    buildUrl: () => mediaSignalingUrl(runtimeConfig.public.sfuPath, channelId),
+    buildUrl: () => {
+      if (!mediaControlSocketUrl)
+        throw new Error("Media control bootstrap is required");
+      return mediaControlSocketUrl;
+    },
     connectionTimeoutMs: MEDIA_TIMING.connectionTimeoutMs,
     defaultHeartbeatIntervalMs: MEDIA_TIMING.heartbeatIntervalMs,
     defaultHeartbeatTimeoutMs: MEDIA_TIMING.heartbeatTimeoutMs,
@@ -170,7 +195,15 @@ export function useHybridMediaSession() {
         reason: error.value,
       });
     },
-    onReconnect: () => setConnectionPhase("reconnecting"),
+    onReconnect: () => {
+      setConnectionPhase("reconnecting");
+      if (mediaConnectionState.value === "recovering") {
+        const live = activeProvider === "sfu" ? sfu : p2pMesh;
+        mediaConnectionState.value = live
+          ? "media-flowing"
+          : "ready-no-active-media";
+      }
+    },
     protocol: MEDIA_SIGNALING_CLIENT_PROTOCOL,
   });
   const joinReady = computed(() =>
@@ -291,15 +324,44 @@ export function useHybridMediaSession() {
     intentionalClose = false;
     protocolUpdateRequired.value = false;
     channelId = nextChannelId;
+    mediaControlSocketUrl = null;
+    mediaControlTicket = null;
     error.value = null;
     lifecycleState.reset();
     setConnectionPhase("socket-connecting");
+    const channelPolicy =
+      channelsStore.getChannelById(nextChannelId)?.mediaPolicy;
+    const connectionMode = channelPolicy?.connectionMode || "auto";
+    const supabaseClient = getSupabaseClient();
+    const sessionResult = await supabaseClient?.auth.getSession();
+    const accessToken = sessionResult?.data?.session?.access_token;
     const nextIceServers = await $fetch(
-      `${runtimeConfig.public.apiPath}/config`,
+      `${runtimeConfig.public.apiPath}/config?connectionMode=${encodeURIComponent(connectionMode)}`,
+      accessToken
+        ? { headers: { Authorization: `Bearer ${accessToken}` } }
+        : undefined,
     );
     if (!Array.isArray(nextIceServers))
       throw new Error("The ICE server configuration is invalid");
     iceServers = nextIceServers;
+    const controlUrl = runtimeConfig.public.mediaControlUrl;
+    if (controlUrl) {
+      const deviceId = getOrCreateDeviceId();
+      const bootstrap = await getMediaControlBootstrap({
+        accessToken,
+        baseApiPath: runtimeConfig.public.apiPath,
+        channelId: nextChannelId,
+        connectionMode,
+        deviceId,
+        roomId: voiceStore.currentRoomId,
+      });
+      mediaControlSocketUrl = buildMediaControlSocketUrl({
+        mediaControlUrl: bootstrap.mediaControlUrl || controlUrl,
+        channelId: nextChannelId,
+        ticket: bootstrap.ticket,
+      });
+      mediaControlTicket = bootstrap.ticket;
+    }
     setupHandlers();
     await openSocket();
     await waitForInitialTopology();
@@ -314,31 +376,49 @@ export function useHybridMediaSession() {
     connected.value = false;
     protocolState.value = null;
     if (intentionalClose) return;
-    if (protocolRejected)
+    if (protocolRejected) {
       topologyWaiter?.(
         new Error(event.reason || "Media signaling protocol was rejected"),
       );
-    closeMediaProviders({
-      getP2pMesh: () => p2pMesh,
-      getSfu: () => sfu,
-      handoff,
+    }
+    handleMediaSignalingClose({
+      closeProviders: () =>
+        closeMediaProviders({
+          getP2pMesh: () => p2pMesh,
+          getSfu: () => sfu,
+          handoff,
+        }),
+      mediaConnectionState,
+      protocolRejected,
+      resetTelemetry: () =>
+        resetMediaTelemetryState({
+          mediaPathMetrics,
+          peerRoundTripTimes,
+          peerConnectionMetrics,
+          sfuRoundTripTime,
+          participantSfuRoundTripTimes,
+          remoteProducersCount,
+          iceConnectedBoth,
+        }),
+      resetMediaState: () => {
+        p2pMesh = null;
+        sfu = null;
+        setActiveProvider(null);
+        activeProvider = null;
+        transportReady.value = false;
+        iceConnectedBoth.value = false;
+        resetTopologySequencing();
+        setConnectionPhase("failed", {
+          code: event.code,
+          reason: event.reason || "protocol-rejected",
+        });
+      },
+      onRecovering: () =>
+        setConnectionPhase("reconnecting", {
+          code: event.code,
+          reason: event.reason || "signaling-closed",
+        }),
     });
-    p2pMesh = null;
-    sfu = null;
-    setActiveProvider(null);
-    transportReady.value = false;
-    iceConnectedBoth.value = false;
-    remoteProducersCount.value = 0;
-    peerRoundTripTimes.value = {};
-    peerConnectionMetrics.value = {};
-    sfuRoundTripTime.value = null;
-    participantSfuRoundTripTimes.value = {};
-    resetTopologySequencing();
-    if (!protocolRejected)
-      setConnectionPhase("reconnecting", {
-        code: event.code,
-        reason: event.reason || "signaling-closed",
-      });
   }
   function waitForInitialTopology() {
     return waitForInitialMediaTopology({
@@ -352,6 +432,8 @@ export function useHybridMediaSession() {
   function resetTopologySequencing(reason = "reconnecting") {
     mediaGeneration.retire();
     preparedTransition = null;
+    for (const resolve of providerTicketWaiters.values()) resolve(false);
+    providerTicketWaiters.clear();
     reportedSfuFailureEpoch = null;
     localPeerId = null;
     lastP2pEdges = [];
@@ -393,6 +475,51 @@ export function useHybridMediaSession() {
           protocolState.value = signaling.getProtocolState();
       },
       onAttenuationState: attenuationReporter.receive,
+      onProviderTicket: async (data) => {
+        if (!data?.provider) return;
+        if (Number(data.epoch) < highestQueuedEpoch) return;
+        selectedSfuProvider = data.provider;
+        providerTicketWaiters.get(Number(data.epoch))?.(true);
+        providerTicketWaiters.delete(Number(data.epoch));
+        sfu?.closeMedia();
+        sfu = null;
+        if (data.provider === "cloudflare-realtime") {
+          providerSocket?.close();
+          providerSocket = null;
+          await ensureSfu().initialize();
+          for (const publication of pendingCloudflarePublications.splice(0))
+            await sfu.handle("cloudflare-publication-available", publication);
+          send({
+            type: "provider-ready",
+            data: { provider: data.provider, epoch: data.epoch },
+          });
+          return;
+        }
+        if (data.provider !== "mediasoup" || !data.signalingUrl) return;
+        providerSocket?.close();
+        providerSocket = new MediasoupProviderSocket({
+          onMessage: (type, payload) =>
+            messageHandlers.get(type)?.(payload || {}),
+          onFailure: (providerError) => {
+            error.value = providerError;
+            send({
+              type: "provider-failure",
+              data: {
+                provider: "mediasoup",
+                epoch: data.epoch,
+                reason: providerError.message,
+              },
+            });
+          },
+        });
+        await providerSocket.connect(data);
+        providerTicketWaiters.get(Number(data.epoch))?.(true);
+        providerTicketWaiters.delete(Number(data.epoch));
+        send({
+          type: "provider-ready",
+          data: { provider: "mediasoup", epoch: data.epoch },
+        });
+      },
       setHeartbeatAck: signaling.acknowledgeHeartbeat,
       setLocalPeerId: (peerId) => {
         localPeerId = peerId;
@@ -401,6 +528,14 @@ export function useHybridMediaSession() {
       syncConnectedUsers,
       voiceStore,
     });
+    messageHandlers.set("cloudflare-response", (data) =>
+      sfu?.handle("cloudflare-response", data),
+    );
+    messageHandlers.set("cloudflare-publication-available", (data) =>
+      sfu
+        ? sfu.handle("cloudflare-publication-available", data)
+        : pendingCloudflarePublications.push(data),
+    );
   }
   function ensureP2p() {
     if (p2pMesh || typeof RTCPeerConnection === "undefined") return p2pMesh;
@@ -408,7 +543,7 @@ export function useHybridMediaSession() {
       iceServers,
       sendSignal: (payload) => {
         if (payload.type === "ready")
-          return send({ type: "p2p-ready", data: payload });
+          return send({ type: "p2p-qualified", data: payload });
         return send({ type: "p2p-signal", data: payload });
       },
       onRemoteTrack: (entry) =>
@@ -477,8 +612,12 @@ export function useHybridMediaSession() {
   }
   function ensureSfu() {
     if (sfu) return sfu;
-    sfu = new MediasoupClientSession({
-      send,
+    const SessionClass =
+      selectedSfuProvider === "cloudflare-realtime"
+        ? CloudflareRealtimeSession
+        : MediasoupClientSession;
+    sfu = new SessionClass({
+      send: (message) => providerSocket?.send(message) || send(message),
       iceServers,
       onRemoteTrack: (entry) => handoff.stage(entry, activeProvider),
       onRemoteTrackEnded: (entry) => handoff.remove(entry),
@@ -597,6 +736,8 @@ export function useHybridMediaSession() {
       displayMode:
         data.mode === "probing" && previousProvider ? "switching" : null,
     };
+    if (data.mode === "sfu" && data.provider)
+      selectedSfuProvider = data.provider;
     handoff.pruneExpectedFeeds(topologyState.value.peers, localPeerId);
     attenuationReporter.prune();
     topologyWaiter?.();
@@ -614,6 +755,7 @@ export function useHybridMediaSession() {
       remoteProducersCount.value = 0;
       peerRoundTripTimes.value = {};
       peerConnectionMetrics.value = {};
+      mediaPathMetrics.value = [];
       sfuRoundTripTime.value = null;
       currentJitterBufferConfig.value = { minDelayMs: 0, targetDelayMs: 20 };
       participantSfuRoundTripTimes.value = {};
@@ -652,6 +794,7 @@ export function useHybridMediaSession() {
       return;
     }
     if (data.mode === "switching") {
+      mediaConnectionState.value = "recovering";
       await prepareTransition(data, generation);
       return;
     }
@@ -722,7 +865,10 @@ export function useHybridMediaSession() {
     const epoch = topologyState.value.epoch;
     if (reportedSfuFailureEpoch === epoch) return;
     reportedSfuFailureEpoch = epoch;
-    send({ type: "sfu-failed", data: { epoch, reason } });
+    send({
+      type: "provider-failure",
+      data: { provider: selectedSfuProvider, epoch, reason },
+    });
     transportReady.value = false;
     iceConnectedBoth.value = false;
     mediaConnectionState.value = "failed";
@@ -746,6 +892,17 @@ export function useHybridMediaSession() {
         );
         await waitForRemoteTracks("p2p", data);
       } else if (data.target === "sfu") {
+        if (data.targetProvider === "cloudflare-realtime") {
+          selectedSfuProvider = data.targetProvider;
+          providerSocket?.close();
+          providerSocket = null;
+          if (sfu) {
+            sfu.closeMedia();
+            sfu = null;
+          }
+        } else if (!sfu || selectedSfuProvider !== data.targetProvider) {
+          await waitForProviderTicket(data.epoch, data.targetProvider);
+        }
         destinationSfu = ensureSfu();
         if (activeProvider === "sfu") destinationSfu.closeMedia();
         await destinationSfu.initialize();
@@ -788,6 +945,20 @@ export function useHybridMediaSession() {
         `[Media] ${data.target?.toUpperCase() || "Unknown"} handoff preparation failed: ${transitionError.message}`,
       );
     }
+  }
+  function waitForProviderTicket(epoch, provider) {
+    if (sfu && selectedSfuProvider === provider) return Promise.resolve(true);
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        providerTicketWaiters.delete(Number(epoch));
+        reject(new Error(`Provider ${provider} ticket timed out`));
+      }, MEDIA_TIMING.connectionTimeoutMs);
+      providerTicketWaiters.set(Number(epoch), (ready) => {
+        clearTimeout(timeout);
+        if (ready) resolve(true);
+        else reject(new Error("Provider ticket cancelled"));
+      });
+    });
   }
   async function activateP2p(data, generation) {
     const mesh = ensureP2p();
@@ -899,6 +1070,7 @@ export function useHybridMediaSession() {
     getSfu: () => sfu,
     mapPeerConnectionMetrics,
     mapPeerRoundTripTimes,
+    mediaPathMetrics,
     participantSfuRoundTripTimes,
     peerConnectionMetrics,
     peerRoundTripTimes,
@@ -961,6 +1133,7 @@ export function useHybridMediaSession() {
   } = createHybridMediaDiagnostics({
     collectRtpStats,
     getActiveProvider: () => activeProvider,
+    getActiveRouteProvider: () => selectedSfuProvider,
     getP2pMesh: () => p2pMesh,
     getRequestedVideoSettings,
     getSfu: () => sfu,
@@ -973,6 +1146,7 @@ export function useHybridMediaSession() {
     send,
     sfuRoundTripTime,
     topologyGraph,
+    topologyState,
     updateP2pStats,
     rtpStatsSamples,
     getLifecycle: lifecycleState.snapshot,
@@ -1054,6 +1228,8 @@ export function useHybridMediaSession() {
       handoff,
       socket: signaling.getSocket(),
     });
+    providerSocket?.close();
+    providerSocket = null;
     p2pMesh = null;
     sfu = null;
     setActiveProvider(null);
@@ -1069,6 +1245,7 @@ export function useHybridMediaSession() {
     lastP2pEdges = [];
     peerRoundTripTimes.value = {};
     peerConnectionMetrics.value = {};
+    mediaPathMetrics.value = [];
     sfuRoundTripTime.value = null;
     participantSfuRoundTripTimes.value = {};
     refreshPublicMaps();
@@ -1099,6 +1276,7 @@ export function useHybridMediaSession() {
     sharedAudioDucking: readonly(sharedAudioDucking),
     peerRoundTripTimes: readonly(peerRoundTripTimes),
     peerConnectionMetrics: readonly(peerConnectionMetrics),
+    mediaPathMetrics: readonly(mediaPathMetrics),
     sfuRoundTripTime: readonly(sfuRoundTripTime),
     participantSfuRoundTripTimes: readonly(participantSfuRoundTripTimes),
     remoteProducersCount,

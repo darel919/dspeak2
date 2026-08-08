@@ -1,9 +1,4 @@
-import {
-  createHash,
-  createHmac,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { readBody } from "h3";
 import { verifyAccessToken } from "../auth/middleware.js";
 import { profileRepository } from "../db/repositories/profiles.js";
@@ -60,8 +55,13 @@ function isDesktopClientRequest(event) {
   );
 }
 
-export async function persistAuthenticatedSession(event, userId, deviceId) {
-  if (!userId || !deviceId) {
+export async function persistAuthenticatedSession(
+  event,
+  userId,
+  deviceId,
+  accessToken,
+) {
+  if (!userId || !deviceId || !accessToken) {
     throw createError({
       statusCode: 400,
       statusMessage: "User identity and device ID are required",
@@ -82,20 +82,15 @@ export async function persistAuthenticatedSession(event, userId, deviceId) {
     });
   }
 
-  const rawToken = randomBytes(32).toString("base64url");
-  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-
-  event.context.sessionToken = rawToken;
-  event.context.sessionTokenHash = tokenHash;
+  event.context.sessionToken = accessToken;
   event.context.userId = userId;
   event.context.deviceId = deviceId;
 
-  setCookie(event, SESSION_COOKIE, rawToken, sessionCookieOptions());
+  setCookie(event, SESSION_COOKIE, accessToken, sessionCookieOptions());
   exposeCsrfToken(event, userId);
 
   return {
     user: { user_metadata: publicUserMetadata(profile) },
-    desktopToken: rawToken,
   };
 }
 
@@ -182,7 +177,10 @@ export async function authenticateWebSocketRequest(request) {
     if (!profile) return null;
     return {
       userId: String(profile.id),
-      deviceId: request.headers?.get?.("x-device-id") || "unknown",
+      deviceId:
+        request.headers?.get?.("x-device-id") ||
+        request.headers?.get?.("x-dspeak-device") ||
+        "unknown",
     };
   } catch {
     return null;

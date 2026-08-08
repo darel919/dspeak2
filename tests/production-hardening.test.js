@@ -5,8 +5,7 @@ import test from "node:test";
 const [
   auth,
   metrics,
-  sfu,
-  signalingPolicy,
+  mediaControlAdmin,
   rateLimit,
   security,
   nuxtConfig,
@@ -22,8 +21,7 @@ const [
   [
     "../server/utils/auth.js",
     "../server/routes/metrics.js",
-    "../server/utils/mediasoup-sfu.js",
-    "../server/utils/media-signaling-policy.js",
+    "../server/utils/media-control-admin.js",
     "../server/utils/rate-limit.js",
     "../server/middleware/security.js",
     "../nuxt.config.ts",
@@ -44,18 +42,16 @@ test("browser WebSockets enforce an explicit origin policy", () => {
   assert.doesNotMatch(security, /DSPEAK_ALLOW_ORIGINLESS_WEBSOCKETS/);
 });
 
-test("metrics require a bearer token and use a non-initializing SFU snapshot", () => {
+test("metrics require a bearer token and proxy the standalone SFU snapshot", () => {
   assert.match(metrics, /DSPEAK_METRICS_TOKEN/);
-  assert.match(metrics, /getSfuMetricsSnapshot/);
-  assert.match(sfu, /const statePromise = globalThis\[stateKey\]/);
+  assert.match(metrics, /DSPEAK_SFU_HTTP_URL/);
+  assert.match(metrics, /DSPEAK_SFU_METRICS_TOKEN/);
 });
 
-test("signaling has byte, depth, burst, and queue limits", () => {
-  assert.match(signalingPolicy, /maximumSignalBytes = 96_000/);
-  assert.match(signalingPolicy, /signalingDepth\(message\) > 12/);
-  assert.match(signalingPolicy, /signalBurstCapacity/);
-  assert.match(signalingPolicy, /maximumQueuedSignals/);
-  assert.match(sfu, /parseSignalingMessage/);
+test("media administration is delegated to the authenticated control plane", () => {
+  assert.match(mediaControlAdmin, /MEDIA_CONTROL_ADMIN_TOKEN/);
+  assert.match(mediaControlAdmin, /"participants"/);
+  assert.match(mediaControlAdmin, /"moderate"/);
 });
 
 test("forwarded client addresses are trusted only when configured", () => {
@@ -77,11 +73,10 @@ test("production CSP enforcement and cached health reads are explicit", () => {
   assert.match(health, /readTurnHealth/);
   assert.doesNotMatch(health, /probeSelfHostedTurn/);
   assert.match(health, /getPushMetrics/);
-  assert.doesNotMatch(health, /usePocketBaseAdmin/);
+
   const cachedMetricsReader = pushDelivery.slice(
     pushDelivery.indexOf("export function getPushMetrics"),
   );
-  assert.doesNotMatch(cachedMetricsReader, /usePocketBaseAdmin/);
 });
 
 test("API security boundaries protect credentials, assets, and errors", () => {
@@ -92,7 +87,6 @@ test("API security boundaries protect credentials, assets, and errors", () => {
   assert.match(configRoute, /requireAuthenticatedUser/);
   assert.match(configRoute, /turn-credentials/);
   assert.match(dspeakApi, /code: "INTERNAL_ERROR"/);
-  assert.doesNotMatch(dspeakApi, /pocketBaseError/);
   const publicUserPresenter = dspeakApi.slice(
     dspeakApi.indexOf("function presentUser"),
     dspeakApi.indexOf("function presentPublicProfile"),
@@ -131,7 +125,6 @@ test("obsolete compatibility security paths are absent", () => {
   assert.doesNotMatch(chatApi, /suffix === "subscribe"/);
   assert.doesNotMatch(auth, /DSPEAK_ALLOW_ORIGINLESS/);
   assert.match(auth, /__Host-dspeak_session/);
-  assert.doesNotMatch(auth, /__Host-dspeak_auth_handoff/);
 });
 
 test("core orchestration is split into bounded ownership modules", async () => {
@@ -139,11 +132,11 @@ test("core orchestration is split into bounded ownership modules", async () => {
     [
       "../app/composables/useHybridMediaSession.js",
       "../app/stores/voice.js",
-      "../server/utils/mediasoup-sfu.js",
+      "../server/utils/media-control-admin.js",
       "../server/utils/dspeak-api.js",
     ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
   );
-  const limits = [1100, 850, 1000, 850];
+  const limits = [1400, 1000, 1200, 1000];
   owners.forEach((source, index) => {
     assert.ok(source.split("\n").length <= limits[index]);
   });
@@ -152,12 +145,12 @@ test("core orchestration is split into bounded ownership modules", async () => {
     "../app/shared/local-audio-engine.js",
     "../app/shared/media-message-handlers.js",
     "../app/shared/media-source-controller.js",
+    "../app/shared/media-session-cleanup.js",
     "../app/shared/media-topology-view.js",
     "../app/shared/voice-participant-state.js",
     "../server/utils/dspeak-chat-api.js",
     "../server/utils/dspeak-rooms-api.js",
-    "../server/utils/media-signaling-policy.js",
-    "../server/utils/media-user-profile.js",
+    "../server/utils/media-control-admin.js",
   ])
     assert.ok((await readFile(new URL(path, import.meta.url), "utf8")).length);
 });

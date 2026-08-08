@@ -1,13 +1,28 @@
-import { supabase, verifyAccessToken } from "../../../auth/supabase.js";
-import { membershipRepository } from "../../../db/repositories/rooms.js";
+import {
+  channelRepository,
+  membershipRepository,
+} from "../../../db/repositories/rooms.js";
 import { requireAuth } from "../../../auth/middleware.js";
+import { SignJWT, importPKCS8 } from "jose";
+import { randomUUID } from "node:crypto";
+
+let privateKeyCache = null;
+
+async function getSigningKey() {
+  if (privateKeyCache) return privateKeyCache;
+  const privateKeyB64 = process.env.MEDIA_TICKET_PRIVATE_KEY;
+  if (!privateKeyB64) throw new Error("MEDIA_TICKET_PRIVATE_KEY not set");
+  const privateKey = await importPKCS8(atob(privateKeyB64), "Ed25519");
+  privateKeyCache = privateKey;
+  return privateKey;
+}
 
 export default defineEventHandler(async (event) => {
   await requireAuth(event);
   const user = event.context.user;
 
   const body = await readBody(event);
-  const { channelId, roomId, connectionMode } = body;
+  const { channelId, roomId } = body;
 
   if (!channelId || !roomId) {
     throw createError({
@@ -27,35 +42,72 @@ export default defineEventHandler(async (event) => {
     });
   }
 
+  const channel = await channelRepository.findById(channelId);
+  if (!channel || channel.roomId !== roomId || channel.type !== "voice") {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Voice channel not found in room",
+    });
+  }
+
+  const connectionMode = body.connectionMode || "auto";
+  if (!new Set(["auto", "direct"]).has(connectionMode)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Invalid connection mode",
+    });
+  }
+
   const mediaControlUrl =
     process.env.MEDIA_CONTROL_URL || "https://media-control.example.com";
+  const requestedDeviceId = String(body.deviceId || "").trim();
+  const deviceId = requestedDeviceId || randomUUID();
+  if (deviceId.length > 160 || !/^[A-Za-z0-9._:-]+$/.test(deviceId)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Invalid device ID",
+    });
+  }
   const ticket = await generateMediaTicket(
     user.id,
     channelId,
     roomId,
-    connectionMode || "auto",
+    connectionMode,
+    deviceId,
   );
 
   return {
     mediaControlUrl,
-    protocolVersion: 2,
+    protocolVersion: 919,
     ticket,
+    deviceId,
     expiresIn: 120,
   };
 });
 
-async function generateMediaTicket(userId, channelId, roomId, connectionMode) {
-  const jose = await import("jose");
-  const secret = new TextEncoder().encode(process.env.MEDIA_TICKET_SECRET);
-  const token = await new jose.SignJWT({
+async function generateMediaTicket(
+  userId,
+  channelId,
+  roomId,
+  connectionMode,
+  deviceId,
+) {
+  const key = await getSigningKey();
+  const issuer = process.env.MEDIA_CONTROL_ISSUER || "dspeak-media-control";
+  const token = await new SignJWT({
     sub: userId,
+    deviceId,
     channelId,
     roomId,
     connectionMode,
+    routeEpoch: 0,
   })
-    .setProtectedHeader({ alg: "HS256" })
+    .setProtectedHeader({ alg: "EdDSA", typ: "JWT" })
+    .setIssuer(issuer)
+    .setAudience("dspeak-media-control")
     .setIssuedAt()
     .setExpirationTime("2m")
-    .sign(secret);
+    .setJti(randomUUID())
+    .sign(key);
   return token;
 }

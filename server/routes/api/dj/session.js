@@ -4,7 +4,7 @@ import {
   getChannelById,
   getRoomById,
 } from "../../../utils/room-authorization.js";
-import { isActiveVoiceParticipant } from "../../../utils/mediasoup-sfu.js";
+import { isActiveVoiceParticipant } from "../../../utils/media-control-admin.js";
 import { enforceIdentifierRateLimit } from "../../../utils/rate-limit.js";
 import {
   closeDjSession,

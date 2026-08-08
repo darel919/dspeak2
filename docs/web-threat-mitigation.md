@@ -14,8 +14,8 @@ the following:
 
 The browser fetch boundary learns the current token from authenticated response
 headers and adds it to same-origin mutations. The service worker refreshes the
-token before replaying queued messages. Authentication handoff endpoints use
-their one-time state value and exact-origin enforcement before a session exists.
+token before replaying queued messages. Supabase Auth owns OAuth state, callback,
+and session refresh handling.
 CSP reports carry no authenticated mutation and are exempt from the token.
 
 Never mutate state from `GET`, `HEAD`, or `OPTIONS` routes. New browser request
@@ -41,15 +41,15 @@ escalation, uses a read-only root filesystem, and grants only a bounded,
 non-executable temporary filesystem. The deployment firewall must deny access
 from the application container to loopback services, link-local networks, cloud
 metadata addresses, container control sockets, private control planes, and
-databases other than the configured PocketBase service.
+databases and internal control planes.
 
 Docker Compose cannot express hostname-based outbound firewall rules. Apply
 egress policy in the host firewall, container platform, or an allowlisting HTTPS
 proxy. Required destinations are:
 
-- the configured authentication origin
-- the configured PocketBase origin
-- the configured mediasoup address-discovery origin when automatic discovery is
+- the configured Supabase origin
+- the configured R2 endpoint
+- the configured media-control and standalone provider origins
   enabled
 - approved Web Push provider origins
 - DNS resolvers and certificate infrastructure required by the deployment

@@ -1,134 +1,69 @@
 # Production readiness
 
-This document is the release gate for dSpeak. A successful build is necessary,
-but it does not prove that background delivery, public networking, or browser
-installation works in the deployed environment.
+This document is the release gate for dSpeak. A successful build does not prove authentication, database policies, object storage, push delivery, media control, TURN, or real-browser media paths.
+
+## Authentication
+
+dSpeak uses Supabase Auth with Google OAuth. Supabase owns the OAuth redirect, session persistence, and token refresh lifecycle. The browser sends the Supabase access token as a bearer token to protected Nitro APIs and media bootstrap. Nitro validates the asymmetric JWT locally through the Supabase JWKS and derives identity only from verified claims.
+
+Never put access or refresh tokens in URLs, logs, analytics events, or offline message payloads.
+
+Production Supabase configuration must:
+
+- enable Google OAuth and disable unused sign-in methods;
+- allow only the intended `https://app.example.com/auth` redirect;
+- use asymmetric JWT signing supported by the local verifier;
+- enforce RLS on client-observable tables and private Realtime topics; and
+- keep the service-role key out of the browser.
+
+## Data and storage
+
+Apply checked-in Drizzle migrations to Supabase PostgreSQL before routing traffic to a release that requires them. Back up the database before production schema changes and verify foreign keys, unique indexes, RLS policies, and Realtime authorization afterward.
+
+Cloudflare R2 stores upload bytes. PostgreSQL stores object keys, ownership, and authorization metadata. Exercise prepare, upload, commit, protected read, abandoned-upload cleanup, and unreferenced-object reconciliation. Permanent R2 credentials must never reach a client.
 
 ## Background notifications
 
-dSpeak uses standards-based Web Push. The server persists one subscription per
-installed browser device and creates durable delivery jobs when a message is
-accepted. A process-owned dispatcher retries transient provider failures with
-backoff, expires jobs after 24 hours, and disables endpoints rejected with HTTP
-404 or 410.
+dSpeak uses standards-based Web Push. The server persists device subscriptions and retryable delivery jobs in PostgreSQL. Provider failures, retry age, expired endpoints, and queue growth must be visible through authenticated metrics.
 
-Periodic Background Sync is intentionally not part of notification delivery.
-Web Push wakes the installed service worker for a push event even when no dSpeak
-window is open. Periodic Sync is browser-scheduled, inconsistently supported,
-and unsuitable for timely message delivery.
+Keep VAPID keys stable across releases. Rotating them invalidates existing subscriptions. On iPhone and iPad, test from an installed Home Screen application with notification permission granted.
 
-The service worker displays the notification and opens the exact room and
-channel when it is clicked. The server suppresses delivery to the sending user
-and to a recipient device that is actively viewing the channel. Other devices
-for the same recipient still receive the push.
+## Media control and providers
 
-On iPhone and iPad, the user must add dSpeak to the Home Screen and grant
-notification permission from the installed application. Closing the installed
-application does not disable an active Web Push subscription, but operating
-system policy, Focus modes, battery controls, and a force-disabled application
-can still delay or suppress presentation.
+The main app does not run mediasoup or own a persistent media WebSocket. `dspeak-media-control` Durable Objects own channel membership, route epochs, P2P signaling, provider health, and route commits. Cloudflare Realtime/TURN provide managed SFU and relay paths; standalone `dspeak-sfu` is an optional independent provider.
 
-## Authentication and offline delivery
+Before release, verify:
 
-dSpeak creates a random state value and enters the DWS Account broker. After
-OAuth, the broker returns only a two-minute, callback-bound, single-use code.
-The Nitro server validates the state and exchanges that code server-to-server
-for the allowlisted user profile. The external access token remains in the
-authentication API's host-only HttpOnly cookie and never reaches dSpeak.
-
-Nitro then creates a random, server-stored dSpeak session. Only its SHA-256 hash
-is stored in PocketBase. The browser receives the opaque session token in a
-Secure, HttpOnly, SameSite=Strict cookie and never stores authentication
-credentials in local storage or an offline queue.
-
-Protected HTTP and WebSocket endpoints are same-origin. The server derives the
-user and device from the session; request bodies and query strings are not an
-identity authority. Creating a new session rotates the previous session for the
-same user and device.
-
-Offline outgoing messages contain a stable client message ID and owner ID. The
-owner ID keeps one user's local queue separate from another; the server still
-authenticates from the cookie and rejects an owner mismatch. The message
-uniqueness constraint makes page retries and service-worker retries idempotent.
-Background Sync is a progressive enhancement. Reconnection, controller
-activation, and an explicit retry also flush the queue.
+- media bootstrap accepts a valid Supabase bearer token and rejects expired tokens, non-members, and mismatched rooms or channels;
+- app-to-control-plane media tickets expire after two minutes and use the correct Ed25519 keypair;
+- provider tickets use the separate control-plane keypair;
+- direct P2P, Cloudflare TURN, Cloudflare Realtime SFU, and configured `dspeak-sfu` routes work from external networks;
+- control-plane state survives a standalone provider failure and selects another eligible route; and
+- stale epochs, duplicate participants, and incompatible protocol revisions fail closed.
 
 ## Required configuration
 
-Production requires:
+Production requires the Supabase, database, R2, media-control, media-ticket, Cloudflare TURN, VAPID, metrics, CSRF, and cron variables listed in `.env.example`. If the optional standalone provider is enabled, configure its URL and metrics token in the app and follow the provider's own deployment runbook.
 
-- `POCKETBASE_URL`, `POCKETBASE_EMAIL`, and `POCKETBASE_PASSWORD`
-- `AUTH_PATH`
-- `DSPEAK_PUBLIC_ORIGIN` and `DSPEAK_METRICS_TOKEN`
-- `VAPID_PUBLIC_KEY`, `VAPID_PRIVKEY`, and `VAPID_SUBJECT`
-- the media, TURN, DNS, and firewall configuration in
-  [Deployment](deployment.md)
-
-Keep VAPID keys stable across releases. Rotating them invalidates existing push
-subscriptions and requires every device to subscribe again. `VAPID_SUBJECT`
-must be a monitored `mailto:` or HTTPS contact URI.
-
-The startup migration creates `dspeak_sessions`,
-`dspeak_push_subscriptions`, and `dspeak_push_jobs`, adds stable message client
-IDs, and reconciles historical duplicate message notifications before applying
-their uniqueness constraint. Back up PocketBase before the first production
-deployment and verify the migration records after startup.
+Secrets must be independently generated and scoped. In particular, do not reuse `MEDIA_TICKET_PRIVATE_KEY` as the control plane's provider-ticket private key.
 
 ## Operational checks
 
-The browser handoff contract consumes one-time codes through
-`POST <AUTH_PATH>/handoff/exchange`; codes are bound to the exact
-`DSPEAK_PUBLIC_ORIGIN/auth` callback. The identity service also accepts
-`POST <AUTH_PATH>/verify` with an access token in an `Authorization: Bearer`
-header for trusted server integrations. It must never accept or log a token as a
-query value. dSpeak rejects browser WebSocket and state-changing HTTP origins
-that do not match `DSPEAK_PUBLIC_ORIGIN`. Originless HTTP and WebSocket clients
-are not supported.
-
-`/health` reports the oldest queued push delivery and cached subsystem health.
-`/metrics` requires `Authorization: Bearer <DSPEAK_METRICS_TOKEN>` and exposes
-push deliveries, retries, failures, expiry, active
-subscriptions, pending jobs, and oldest pending age. Alert when pending age
-continues growing or failures increase without deliveries.
-
-Production sessions use host-bound secure cookies and rotate their random
-tokens after twenty-four hours with a short in-process grace window for
-concurrent requests. TURN credentials require an authenticated session, are
-rate-limited, and default to a fifteen-minute lifetime.
+`/health` must report application readiness without attempting to initialize an embedded media worker. `/metrics` requires `Authorization: Bearer <DSPEAK_METRICS_TOKEN>` and must not expose user IDs, room IDs, tokens, ICE credentials, or object-store secrets.
 
 Before release:
 
 1. Run `bun install --frozen-lockfile`.
-2. Run `bun audit`, `bun run format:check`, `bun run test`, and
-   `bun run build`.
-3. Back up PocketBase and start the built server against the target migration
-   environment.
-4. Validate the enforced per-response nonce policy and browser flows in
-   [Content Security Policy](content-security-policy.md).
-5. Confirm `/health` and authenticated `/metrics`, then restart the server with
-   pending push and offline-message work and confirm that processing resumes.
-6. Build and start the Docker Compose deployment and probe its public HTTP,
-   WebSocket, RTP, and TURN paths.
+2. Run `bun audit`, `bun run format:check`, `bun run test`, and `bun run build`.
+3. Back up Supabase PostgreSQL, apply Drizzle migrations, and verify RLS and Realtime policies.
+4. Validate the browser flows in [Content Security Policy](content-security-policy.md) and [Web threat mitigation](web-threat-mitigation.md).
+5. Confirm `/health` and authenticated `/metrics` on `https://app.example.com`.
+6. Exercise R2 upload commit, download authorization, cleanup, and reconciliation.
+7. Run the external-network media matrix in [Hybrid media topology](hybrid-media-topology.md).
+8. Restart or redeploy each independent service and confirm recovery without cross-service state corruption.
 
 ## Deployed device matrix
 
-The release is not declared production-ready until all of these pass on the
-deployed HTTPS origin:
+The release is not production-ready until sign-in, token refresh, chat Realtime, uploads, notifications, and media pass on supported desktop and mobile browsers and the Tauri client. For every platform, include logout, expired-token behavior, offline send/reconnect, push unsubscribe, relay-only media, provider failure, and stale subscription cleanup.
 
-| Platform               | Install and subscribe | App closed push | Exact click target | Preference and unsubscribe |
-| ---------------------- | --------------------- | --------------- | ------------------ | -------------------------- |
-| Chromium desktop       | Required              | Required        | Required           | Required                   |
-| Chromium Android       | Required              | Required        | Required           | Required                   |
-| Firefox desktop        | Required              | Required        | Required           | Required                   |
-| Firefox Android        | Required              | Required        | Required           | Required                   |
-| Safari macOS           | Required              | Required        | Required           | Required                   |
-| iOS/iPadOS Home Screen | Required              | Required        | Required           | Required                   |
-
-For each row, also verify message preview privacy, mentions-only mode, muted
-mode, sender exclusion, active-device suppression, another-device delivery, a
-real push test, logout, expired session behavior, offline send/reconnect, and a
-stale subscription cleanup.
-
-Local unit tests cannot prove push-provider delivery, operating-system
-presentation, installed-PWA policy, reverse-proxy cookie behavior, public
-firewalls, or device-specific notification controls.
+Local unit tests cannot prove OAuth redirect configuration, RLS behavior in the hosted project, push-provider delivery, operating-system presentation, hardware capture, public firewalls, TURN allocation, or real SFU reachability.

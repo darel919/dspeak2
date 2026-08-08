@@ -308,7 +308,6 @@ test("odd overview tiles center the final participant in the grid", async () => 
 
 test("voice channel indicators show participant avatars and media status", async () => {
   const source = await readFile("app/components/ChannelList.vue", "utf8");
-  const server = await readFile("server/utils/mediasoup-sfu.js", "utf8");
   assert.match(source, /getUserAvatar\(u\.id \|\| u\)/);
   assert.match(source, /u\.speaking[\s\S]*font-medium text-base-content/);
   assert.match(source, /text-base-content\/70/);
@@ -320,8 +319,6 @@ test("voice channel indicators show participant avatars and media status", async
   assert.match(source, /lucide:screen-share/);
   assert.match(source, /getChannelParticipants\(channel\)/);
   assert.match(source, /channel\.participantStates/);
-  assert.match(server, /cameraEnabled: session\.sources\.has\("camera"\)/);
-  assert.match(server, /screenSharing: session\.sources\.has\("screen"\)/);
 });
 
 test("room rail tooltips preview connected voice participants", async () => {

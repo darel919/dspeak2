@@ -5,7 +5,7 @@ import {
   messageReactions,
   pinnedMessages,
   bookmarks,
-} from "../db/schema/index.js";
+} from "../schema/index.js";
 import { eq, and, desc, asc, count, inArray, lt, gt } from "drizzle-orm";
 
 export class ChatRepository {

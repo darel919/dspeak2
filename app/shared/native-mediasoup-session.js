@@ -3,6 +3,7 @@ import {
   dispatchMediaSignalingMessage,
   mediaSignalingUrl,
 } from "./media-signaling-socket.js";
+import { MediasoupProviderSocket } from "./mediasoup-provider-socket.js";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.js";
 import {
   buildVideoProduceOptions,
@@ -150,6 +151,9 @@ export class NativeMediasoupSfuSession {
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
     this.signaling = null;
+    this.providerSignaling = null;
+    this.controlTicket = "";
+    this.mediaSessionId = "";
     this.messageHandlers = new Map();
     this.pending = new Map();
     this.pendingProduce = new Map();
@@ -233,7 +237,11 @@ export class NativeMediasoupSfuSession {
       this.onCurrentlyInChannel?.(data);
       this._resolveConnect();
       this._emitState();
-      this._startNegotiation().catch((error) => this._fail(error));
+      if (!this.controlTicket)
+        this._startNegotiation().catch((error) => this._fail(error));
+    });
+    this.messageHandlers.set("provider-ticket", (data) => {
+      this._handleProviderTicket(data).catch((error) => this._fail(error));
     });
     this.messageHandlers.set("rtp-capabilities", (data) =>
       this._handleRtpCapabilities(data),
@@ -309,6 +317,41 @@ export class NativeMediasoupSfuSession {
     return this.readyPromise || undefined;
   }
 
+  configureControl({ websocketUrl, ticket, mediaSessionId }) {
+    this.buildUrl = () => websocketUrl;
+    this.controlTicket = ticket;
+    this.mediaSessionId = mediaSessionId;
+  }
+
+  async _handleProviderTicket(data) {
+    if (data?.provider === "cloudflare-realtime") {
+      this.signaling?.send({
+        type: "provider-failure",
+        data: {
+          provider: data.provider,
+          epoch: data.epoch,
+          reason: "native-provider-unsupported",
+        },
+      });
+      return;
+    }
+    this.providerSignaling?.close();
+    this.providerSignaling = new MediasoupProviderSocket({
+      onMessage: (type, payload) =>
+        this.messageHandlers.get(type)?.(payload || {}),
+      onFailure: (error) => this._fail(error),
+    });
+    await this.providerSignaling.connect({
+      signalingUrl: data.signalingUrl,
+      ticket: data.ticket,
+    });
+    await this._startNegotiation();
+    this.signaling?.send({
+      type: "provider-ready",
+      data: { provider: data.provider, epoch: data.epoch },
+    });
+  }
+
   _createSignaling() {
     this.signaling?.stop?.();
     this.signaling = createMediaSignalingSocket({
@@ -318,6 +361,13 @@ export class NativeMediasoupSfuSession {
         sourceRevision: Number(this.topologyState?.sourceRevision) || 0,
       }),
       buildUrl: () => this.buildUrl(this.channelId),
+      buildClientHelloData: () => ({
+        protocolVersion: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
+        contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
+        mediaSessionId: this.mediaSessionId,
+        providerCapabilities: ["mediasoup"],
+        ticket: this.controlTicket,
+      }),
       connectionTimeoutMs: this.requestTimeoutMs,
       defaultHeartbeatIntervalMs: 5000,
       defaultHeartbeatTimeoutMs: 20000,
@@ -1110,6 +1160,8 @@ export class NativeMediasoupSfuSession {
     this.closed = true;
     this.connected = false;
     this.signaling?.stop?.();
+    this.providerSignaling?.close();
+    this.providerSignaling = null;
     this._closeMedia(false);
     await this._beginNativeTeardown();
     this.connectionPhase = "closed";
@@ -1163,16 +1215,20 @@ export class NativeMediasoupSfuSession {
     this.connected = false;
     this.protocolState = null;
     if (this.intentionalClose) return;
-    this._closeMedia(false);
-    this._beginNativeTeardown();
-    this.connectionPhase = "reconnecting";
-    this.mediaConnectionState = "disconnected";
-    this._emitState();
     if (event?.code === MEDIA_SIGNALING_CLIENT_PROTOCOL.closeCode) {
+      // Contract mismatch: teardown native media and surface the error.
+      this._closeMedia(false);
+      this._beginNativeTeardown();
       const error = new Error(event.reason || "Media client update required");
       error.code = "MEDIA_PROTOCOL_UPDATE_REQUIRED";
       this._fail(error);
+      return;
     }
+    // Transient control-plane disconnect: native transports, producers,
+    // and consumers stay live. Only the signaling socket reconnects.
+    this.connectionPhase = "reconnecting";
+    this.mediaConnectionState = "recovering";
+    this._emitState();
   }
 
   _acknowledgeHeartbeat(data) {
@@ -1221,8 +1277,10 @@ export class NativeMediasoupSfuSession {
   }
 
   sendOrThrow(message, label) {
-    if (!this.signaling?.send(message))
-      throw new Error(`${label} signaling unavailable`);
+    const sent =
+      this.providerSignaling?.send(message) ||
+      (!this.controlTicket && this.signaling?.send(message));
+    if (!sent) throw new Error(`${label} signaling unavailable`);
   }
 
   requestId(operation) {

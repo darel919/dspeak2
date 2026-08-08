@@ -112,3 +112,51 @@ test("listener attenuation acknowledgements reach the session owner", () => {
   assert.equal(reports.length, 1);
   assert.equal(reports[0].fromPeerId, "listener-1");
 });
+
+test("media worker shutdown closes only the SFU provider", () => {
+  const handlers = new Map();
+  let p2pClosed = false;
+  let sfuClosed = false;
+  let socketClosed = false;
+  const p2p = {
+    closeAll: () => {
+      p2pClosed = true;
+    },
+  };
+  const sfu = {
+    close: () => {
+      sfuClosed = true;
+    },
+  };
+
+  setupMediaMessageHandlers({
+    ensureP2p: () => p2p,
+    getHeartbeatSequence: () => 0,
+    getLastHeartbeatAckSequence: () => 0,
+    getSfu: () => sfu,
+    getSocket: () => ({
+      close: () => {
+        socketClosed = true;
+      },
+    }),
+    lastInRoom: { value: [] },
+    participantSfuRoundTripTimes: { value: {} },
+    queueTopology: () => {},
+    registerHandler: (type, handler) => handlers.set(type, handler),
+    remoteProducersCount: { value: 0 },
+    setHeartbeatAck: () => {},
+    setLocalPeerId: () => {},
+    sfuProducerIds: () => [],
+    syncConnectedUsers: () => {},
+    voiceStore: {
+      updateUserVoiceState: () => {},
+      upsertUserProfile: () => {},
+    },
+  });
+
+  handlers.get("server-shutdown")();
+
+  assert.equal(sfuClosed, true);
+  assert.equal(socketClosed, true);
+  assert.equal(p2pClosed, false);
+});

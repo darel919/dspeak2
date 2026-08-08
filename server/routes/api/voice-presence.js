@@ -1,18 +1,18 @@
-import { authenticateWebSocketRequest } from "../../../utils/auth.js";
+import { authenticateWebSocketRequest } from "../../utils/auth.js";
 import {
   requireRoomMember,
   getRoomById,
-} from "../../../utils/room-authorization.js";
+} from "../../utils/room-authorization.js";
 import {
   getVoicePresenceSnapshots,
   subscribeToVoicePresence,
   unsubscribeFromVoicePresence,
-} from "../../../utils/voice-presence.js";
-import { db } from "../../../db/client.js";
-import { channels, profiles, rooms } from "../../../db/schema/index.js";
+} from "../../utils/voice-presence.js";
+import { db } from "../../db/client.js";
+import { channels, profiles, rooms } from "../../db/schema/index.js";
 import { eq, and, inArray } from "drizzle-orm";
-import { publicDisplayName } from "../../../../shared/user-profile.js";
-import { sameOriginAvatarPath } from "../../../../shared/avatar-path.js";
+import { publicDisplayName } from "../../../shared/user-profile.js";
+import { sameOriginAvatarPath } from "../../../shared/avatar-path.js";
 
 const sessions = new Map();
 

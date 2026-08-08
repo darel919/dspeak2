@@ -26,6 +26,7 @@ import {
 } from "../../shared/channel-policy.js";
 import { messageContainsBroadcastMention } from "../../shared/notification-policy.js";
 import { cacheUploadedFile, getCachedFile } from "./upload-cache.js";
+import { deleteObject, putObject } from "../storage/r2.js";
 
 export function createChatApiHandler(dependencies) {
   const {
@@ -50,7 +51,7 @@ export function createChatApiHandler(dependencies) {
     requireValue,
     sendPushTest,
     setResponseStatus,
-    usePocketBaseAdmin,
+
     pushAllowedHosts,
   } = dependencies;
 
@@ -878,18 +879,26 @@ export function createChatApiHandler(dependencies) {
       if (!room)
         throw createError({ statusCode: 404, statusMessage: "Room not found" });
       await requireRoomMember(room, userId);
-      const record = await db
-        .insert(chatFiles)
-        .values({
-          id: randomUUID(),
-          channelId,
-          uploaderId: userId,
-          fileName: file.name,
-          mimeType: file.type,
-          size: file.size,
-          r2Key: `upload-${randomUUID()}`,
-        })
-        .returning();
+      const r2Key = `chat/${channelId}/legacy/${randomUUID()}`;
+      let record;
+      try {
+        await putObject(r2Key, file, file.type, file.size);
+        record = await db
+          .insert(chatFiles)
+          .values({
+            id: randomUUID(),
+            channelId,
+            uploaderId: userId,
+            fileName: file.name,
+            mimeType: file.type,
+            size: file.size,
+            r2Key,
+          })
+          .returning();
+      } catch (error) {
+        await deleteObject(r2Key).catch(() => {});
+        throw error;
+      }
       const verifiedId = record[0].id;
       cacheUploadedFile(userId, {
         id: verifiedId,

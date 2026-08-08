@@ -12,6 +12,7 @@ import {
   P2PPath,
   SFUProvider,
 } from "../shared/media-route.js";
+import { shouldAcceptTopologyEvent } from "../server/utils/media-transition.js";
 
 describe("media-route contracts", () => {
   describe("validateRouteForMode", () => {
@@ -141,6 +142,21 @@ describe("media-route contracts", () => {
       assert.equal(normalized.concealedAudioRatio, null);
     });
 
+    it("converts explicit WebRTC seconds and loss fractions", () => {
+      const normalized = normalizeMediaPathMetrics({
+        routeId: "r1",
+        peerOrProvider: "p1",
+        rttSeconds: 0.05,
+        jitterSeconds: 0.005,
+        jitterBufferDelaySeconds: 0.03,
+        packetLossFraction: 0.01,
+      });
+      assert.equal(normalized.rttMs, 50);
+      assert.equal(normalized.jitterMs, 5);
+      assert.equal(normalized.jitterBufferDelayMs, 30);
+      assert.equal(normalized.packetLossPercent, 1);
+    });
+
     it("defaults sampledAt to now if missing", () => {
       const before = Date.now();
       const normalized = normalizeMediaPathMetrics({
@@ -151,6 +167,28 @@ describe("media-route contracts", () => {
       assert.ok(
         normalized.sampledAt >= before && normalized.sampledAt <= after,
       );
+    });
+  });
+
+  describe("stale route overwrite guard", () => {
+    it("rejects a stale epoch before it can overwrite a newer route", () => {
+      const newest = createSFURoute(SFUProvider.MEDIASOUP, 5, 2, "test");
+      const stale = createP2PRoute(P2PPath.DIRECT, 3, 1, "stale");
+      assert.equal(
+        compareRouteEpoch(stale, newest),
+        -1,
+        "stale route orders below the newest route",
+      );
+      assert.equal(
+        shouldAcceptTopologyEvent(stale, newest.epoch),
+        false,
+        "stale event must not overwrite a newer committed route",
+      );
+    });
+
+    it("accepts an equal-epoch event with the same sourceRevision", () => {
+      const current = createLocalRoute(1, 1, "test");
+      assert.equal(shouldAcceptTopologyEvent(current, current.epoch), true);
     });
   });
 });

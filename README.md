@@ -106,19 +106,18 @@ DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:6543/pos
 DIRECT_DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:5432/postgres
 
 # Cloudflare
-MEDIA_CONTROL_URL=https://media-control.your-domain.workers.dev
-MEDIA_TICKET_SECRET=long-random-secret-for-media-tickets
+MEDIA_CONTROL_URL=https://media-control.example.com
+MEDIA_CONTROL_ISSUER=dspeak-media-control
+MEDIA_CONTROL_ADMIN_TOKEN=long-random-secret
+MEDIA_TICKET_PRIVATE_KEY=base64-encoded-ed25519-pkcs8-private-key
 R2_ACCOUNT_ID=your-account-id
 R2_ACCESS_KEY_ID=your-r2-access-key
 R2_SECRET_ACCESS_KEY=your-r2-secret-key
 R2_BUCKET_NAME=dspeak
 
-# Self-hosted mediasoup (optional, dspeak-sfu project)
-# MEDIASOUP_LISTEN_IP=0.0.0.0
-# MEDIASOUP_RTC_PORT=40000
-# MEDIASOUP_ANNOUNCED_ADDRESS=auto
-# MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE=4500000
-# MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE=40000000
+# Optional standalone dspeak-sfu provider
+DSPEAK_SFU_HTTP_URL=https://sfu.example.com
+DSPEAK_SFU_METRICS_TOKEN=provider-metrics-token
 ```
 
 `DATABASE_URL` uses Supavisor transaction mode (port 6543) for Vercel/serverless. `DIRECT_DATABASE_URL` is for migrations/admin (port 5432).
@@ -167,9 +166,6 @@ Builds the Tauri app for the host platform. Version-tagged releases are built fo
 | `/api/media/bootstrap` | Media join bootstrap (issues short-lived ticket) |
 | `/api/files/prepare`   | Prepare direct-to-R2 upload                      |
 | `/api/files/commit`    | Commit upload, record metadata                   |
-| `/api/auth/google`     | Initiate Google OAuth                            |
-| `/api/auth/callback`   | OAuth callback                                   |
-| `/api/auth/logout`     | Sign out                                         |
 | `/api/presence`        | Presence WebSocket (Supabase Realtime)           |
 | `/api/chat/socket`     | Realtime chat WebSocket (Supabase Realtime)      |
 | `/api/room/*`          | Room management                                  |
@@ -177,9 +173,9 @@ Builds the Tauri app for the host platform. Version-tagged releases are built fo
 | `/api/chat/*`          | Messages, read state, push subscriptions         |
 | `/api/soundboard/*`    | Protected room soundboard operations and media   |
 
-Media control WebSocket: `wss://media-control.your-domain.workers.dev/v1/ws` (per-channel Durable Object)
+Media control WebSocket: `wss://media-control.example.com/media-control/<channelId>` (per-channel Durable Object)
 
-Self-hosted mediasoup SFU: `wss://sfu.your-domain.com/v1/ws` (separate `dspeak-sfu` deployment)
+Self-hosted mediasoup SFU: `wss://sfu.example.com/v1/ws` (separate `dspeak-sfu` deployment)
 
 Protected application APIs and WebSockets use Supabase access tokens (validated locally via JWKS). Session cookies are not used for media control.
 
@@ -211,7 +207,6 @@ Media releases also require the real-browser and external-network checks in [Hyb
 - Asymmetric JWT verification (ES256 preferred) for all API authorization — no per-request Supabase Auth calls.
 - Short-lived media tickets (60-120s) signed by dSpeak, verified by Cloudflare DO and `dspeak-sfu` locally.
 - R2: no permanent write credentials in client; short-lived signed upload URLs; random object IDs.
-- PocketBase administrator credentials are no longer used (PocketBase removed).
 - VAPID private keys, TURN shared secrets, Cloudflare app secrets must never reach the browser.
 - The self-hosted SFU RTC hostname must be DNS-only; an HTTP proxy cannot carry mediasoup RTP.
 - RLS enabled on all client-observable Supabase tables and Realtime topics.

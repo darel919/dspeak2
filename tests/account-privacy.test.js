@@ -19,17 +19,29 @@ test("account export reads complete records with Drizzle repositories", () => {
   assert.match(exportRoute, /from\(notifications\)/);
   assert.match(exportRoute, /pushJobs/);
   assert.doesNotMatch(exportRoute, /getFullList/);
-  assert.doesNotMatch(exportRoute, /PocketBase/);
 });
 
 test("account deletion preserves required message senders and uses Drizzle", () => {
   assert.match(deleteRoute, /content: "\[deleted\]"/);
   assert.doesNotMatch(deleteRoute, /sender:\s*null/);
-  assert.match(deleteRoute, /disconnectVoiceParticipant/);
+  assert.match(deleteRoute, /deleteUser\(userId\)/);
   assert.match(deleteRoute, /accountDeletionLocks/);
-  assert.match(deleteRoute, /await db\.delete/);
-  assert.doesNotMatch(deleteRoute, /PocketBase/);
-  assert.doesNotMatch(deleteRoute, /usePocketBaseAdmin/);
+  assert.match(deleteRoute, /withTransaction/);
+  assert.match(deleteRoute, /async function deleteAccount\(tx, userId\)/);
+  assert.ok(
+    deleteRoute.indexOf("await withTransaction") <
+      deleteRoute.indexOf("deleteUser(userId)"),
+  );
+  assert.doesNotMatch(deleteRoute, /delete\(users\)/);
+  assert.doesNotMatch(deleteRoute, /await db\.(?:delete|update|select)/);
+  assert.ok(
+    deleteRoute.indexOf("const ownedRooms") <
+      deleteRoute.indexOf("delete(roomMemberships)"),
+  );
+  assert.ok(
+    deleteRoute.indexOf("delete(membershipRoles)") <
+      deleteRoute.indexOf("delete(roomMemberships)"),
+  );
 });
 
 test("legal Markdown links reject executable URL schemes", () => {
@@ -39,7 +51,6 @@ test("legal Markdown links reject executable URL schemes", () => {
 
 test("auth.js uses Supabase Auth with local JWT verification", () => {
   assert.match(auth, /verifyAccessToken/);
-  assert.doesNotMatch(auth, /PocketBase/);
+
   assert.doesNotMatch(auth, /ACCOUNT_URL/);
-  assert.doesNotMatch(auth, /AUTH_HANDOFF_CONSENT_COOKIE/);
 });

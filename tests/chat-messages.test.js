@@ -216,18 +216,12 @@ test("chat uploads are associated with messages and abandoned files are removabl
     new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
     "utf8",
   );
-  const migration = readFileSync(
-    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
-    "utf8",
-  );
+
   const input = readFileSync(
     new URL("../app/components/Chat/ChatInput.vue", import.meta.url),
     "utf8",
   );
-  assert.match(
-    migration,
-    /field\("message", "relation"[\s\S]*?cascadeDelete: true/,
-  );
+
   assert.match(api, /suffix === "upload" && event\.method === "DELETE"/);
   assert.match(api, /messageId[\s\S]*?Image is already attached to a message/);
   assert.match(

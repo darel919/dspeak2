@@ -407,7 +407,7 @@ fn get_oauth_callback_url(state: tauri::State<OAuthState>) -> Result<String, Str
 
 #[tauri::command]
 fn get_pending_oauth_callback(state: tauri::State<OAuthState>) -> Option<OAuthCallback> {
-    state.pending_callback.lock().unwrap().clone()
+    state.pending_callback.lock().unwrap().take()
 }
 
 async fn start_oauth_callback_server(

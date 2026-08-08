@@ -5,10 +5,8 @@ import {
   presentSoundboardClip,
   SOUNDBOARD_MAX_CLIPS_PER_ROOM,
 } from "../../shared/soundboard.js";
-import {
-  broadcastVoiceChannelEvent,
-  isActiveVoiceParticipant,
-} from "./mediasoup-sfu.js";
+import { isActiveVoiceParticipant } from "./media-control-admin.js";
+import { broadcastToChannel } from "./dspeak-realtime.js";
 import { db } from "../db/client.js";
 import {
   rooms,
@@ -27,6 +25,10 @@ import { requireAuthenticatedUser } from "./auth.js";
 import { enforceRateLimit } from "./rate-limit.js";
 
 const uploadLocks = new Map();
+
+function broadcastVoiceChannelEvent(channelId, type, data) {
+  return broadcastToChannel(channelId, { type, data });
+}
 
 function withRoomUploadLock(roomId, operation) {
   const previous = uploadLocks.get(roomId) || Promise.resolve();

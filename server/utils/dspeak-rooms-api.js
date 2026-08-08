@@ -27,7 +27,7 @@ import {
 import { getRoomById } from "./room-authorization.js";
 import { requireAuthenticatedUser } from "./auth.js";
 import { broadcastToChannel, broadcastGlobally } from "./dspeak-realtime.js";
-import { disconnectVoiceParticipant } from "./mediasoup-sfu.js";
+import { disconnectVoiceParticipant } from "./media-control-admin.js";
 import { normalizeMediaPolicy } from "../../shared/media-policy.js";
 import {
   encodeInvitePayload,

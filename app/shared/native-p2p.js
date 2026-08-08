@@ -1101,6 +1101,20 @@ export class NativeP2pMesh {
         type: "ready",
         epoch: this.epoch,
         qualifiedPeerIds: qualified.map((state) => state.peerId),
+        candidateReports: qualified.map((state) => ({
+          peerId: state.peerId,
+          localCandidateType: state.selectedPair?.local?.candidateType || null,
+          remoteCandidateType:
+            state.selectedPair?.remote?.candidateType || null,
+          rttMs:
+            state.selectedPair?.currentRoundTripTime == null
+              ? null
+              : state.selectedPair.currentRoundTripTime * 1000,
+          protocol:
+            state.selectedPair?.local?.protocol ||
+            state.selectedPair?.remote?.protocol ||
+            null,
+        })),
       })
     )
       this.readyReported = false;

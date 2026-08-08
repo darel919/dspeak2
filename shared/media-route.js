@@ -138,24 +138,37 @@ export function createSFURoute(provider, epoch, sourceRevision, reason) {
  * @returns {MediaPathMetrics}
  */
 export function normalizeMediaPathMetrics(raw) {
+  const numberOrNull = (value) => {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+  const milliseconds = (millisecondsValue, secondsValue) => {
+    const seconds = numberOrNull(secondsValue);
+    if (seconds != null) return seconds * 1000;
+    return numberOrNull(millisecondsValue);
+  };
+  const packetLossFraction = numberOrNull(raw.packetLossFraction);
+  const packetLossPercent =
+    packetLossFraction != null
+      ? packetLossFraction * 100
+      : numberOrNull(raw.packetLossPercent);
+  const sampledAt = numberOrNull(raw.sampledAt);
   return {
     routeId: String(raw.routeId || ""),
     peerOrProvider: String(raw.peerOrProvider || ""),
-    rttMs: raw.rttMs != null ? Number(raw.rttMs) : null,
-    jitterMs: raw.jitterMs != null ? Number(raw.jitterMs) : null,
-    packetLossPercent:
-      raw.packetLossPercent != null ? Number(raw.packetLossPercent) : null,
-    jitterBufferDelayMs:
-      raw.jitterBufferDelayMs != null ? Number(raw.jitterBufferDelayMs) : null,
-    availableOutgoingBitrate:
-      raw.availableOutgoingBitrate != null
-        ? Number(raw.availableOutgoingBitrate)
-        : null,
-    concealedAudioRatio:
-      raw.concealedAudioRatio != null ? Number(raw.concealedAudioRatio) : null,
+    rttMs: milliseconds(raw.rttMs, raw.rttSeconds),
+    jitterMs: milliseconds(raw.jitterMs, raw.jitterSeconds),
+    packetLossPercent,
+    jitterBufferDelayMs: milliseconds(
+      raw.jitterBufferDelayMs,
+      raw.jitterBufferDelaySeconds,
+    ),
+    availableOutgoingBitrate: numberOrNull(raw.availableOutgoingBitrate),
+    concealedAudioRatio: numberOrNull(raw.concealedAudioRatio),
     candidateType: raw.candidateType || undefined,
     protocol: raw.protocol || undefined,
-    sampledAt: Number(raw.sampledAt || Date.now()),
+    sampledAt: sampledAt ?? Date.now(),
   };
 }
 

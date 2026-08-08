@@ -1,5 +1,5 @@
-import { requireAuthenticatedUser } from "../../../utils/auth.js";
-import { notificationRepository } from "../../../db/repositories/notifications.js";
+import { requireAuthenticatedUser } from "../../utils/auth.js";
+import { notificationRepository } from "../../db/repositories/notifications.js";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);

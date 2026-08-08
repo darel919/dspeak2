@@ -1,4 +1,4 @@
-import { supabase, verifyJWTLocally } from "./supabase.js";
+import { createLocalJWKSet, jwtVerify } from "jose";
 
 let cachedJWKS = null;
 let jwksFetchedAt = 0;
@@ -25,11 +25,8 @@ async function getJWKS() {
 
 export async function verifyAccessToken(token) {
   const jwks = await getJWKS();
-  const jose = await import("jose");
-  const keySet = jose.createRemoteJWKSet(
-    new URL(`${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`),
-  );
-  const { payload } = await jose.jwtVerify(token, keySet, {
+  const keySet = createLocalJWKSet(jwks);
+  const { payload } = await jwtVerify(token, keySet, {
     issuer: `${process.env.SUPABASE_URL}/auth/v1`,
     audience: "authenticated",
   });

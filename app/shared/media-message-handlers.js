@@ -17,6 +17,7 @@ export function setupMediaMessageHandlers({
   onServerConnected,
   onServerHello,
   onAttenuationState,
+  onProviderTicket,
 }) {
   registerHandler("hi919", onServerHello);
   registerHandler("connected", (data) => {
@@ -31,6 +32,10 @@ export function setupMediaMessageHandlers({
       queueTopology(data.topology);
   });
   registerHandler("topology-state", queueTopology);
+  registerHandler("error919", (data) => {
+    throw new Error(data?.error || "Media control error");
+  });
+  registerHandler("provider-ticket", onProviderTicket);
   registerHandler("attenuation-state", onAttenuationState);
   registerHandler("p2p-signal", async (data) => {
     const mesh = ensureP2p();
@@ -75,7 +80,12 @@ export function setupMediaMessageHandlers({
         [data.userId]: Number(data.rttMs),
       };
   });
-  registerHandler("server-shutdown", () => getSocket()?.close());
+  registerHandler("server-shutdown", () => {
+    try {
+      getSfu()?.close();
+    } catch {}
+    getSocket()?.close();
+  });
   for (const type of [
     "voice-moderation",
     "soundboard-triggered",

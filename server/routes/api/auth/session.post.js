@@ -26,8 +26,11 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 401, statusMessage: "User not found" });
     }
 
-    const deviceId = getHeader(event, "x-device-id") || "unknown";
-    return persistAuthenticatedSession(event, profile.id, deviceId);
+    const deviceId =
+      getHeader(event, "x-device-id") ||
+      getHeader(event, "x-dspeak-device") ||
+      "unknown";
+    return persistAuthenticatedSession(event, profile.id, deviceId, token);
   } catch (error) {
     throw createError({
       statusCode: 401,

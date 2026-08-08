@@ -7,47 +7,30 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3000
-
-      AUTH_PATH: ${AUTH_PATH:-}
       DSPEAK_PUBLIC_ORIGIN: ${DSPEAK_PUBLIC_ORIGIN:-}
       DSPEAK_TRUST_PROXY: ${DSPEAK_TRUST_PROXY:-true}
       DSPEAK_METRICS_TOKEN: ${DSPEAK_METRICS_TOKEN:-}
       DSPEAK_CSRF_SECRET: ${DSPEAK_CSRF_SECRET:-}
       DSPEAK_PUSH_ALLOWED_HOSTS: ${DSPEAK_PUSH_ALLOWED_HOSTS:-}
-      POCKETBASE_URL: ${POCKETBASE_URL:-}
-      PBASE_ADMIN_EMAIL: ${PBASE_ADMIN_EMAIL:-}
-      PBASE_ADMIN_PASSWORD: ${PBASE_ADMIN_PASSWORD:-}
+      DATABASE_URL: ${DATABASE_URL:?Set the Supabase Postgres connection string}
+      SUPABASE_URL: ${SUPABASE_URL:?Set the Supabase project URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set the Supabase anonymous key}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set the Supabase service role key}
+      MEDIA_CONTROL_URL: ${MEDIA_CONTROL_URL:?Set the media-control Worker URL}
+      MEDIA_CONTROL_ADMIN_TOKEN: ${MEDIA_CONTROL_ADMIN_TOKEN:?Set the media-control admin token}
 
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PUBKEY: ${VAPID_PUBKEY:-}
       VAPID_PRIVKEY: ${VAPID_PRIVKEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
 
-      MEDIASOUP_LISTEN_IP: ${MEDIASOUP_LISTEN_IP:-0.0.0.0}
-      MEDIASOUP_ANNOUNCED_ADDRESS: ${MEDIASOUP_ANNOUNCED_ADDRESS:-auto}
-      MEDIASOUP_ANNOUNCED_ADDRESS_URL: ${MEDIASOUP_ANNOUNCED_ADDRESS_URL:-https://api6.ipify.org}
-      MEDIASOUP_RTC_PORT: ${MEDIASOUP_RTC_PORT:-40000}
-      MEDIASOUP_ANNOUNCED_PORT: ${MEDIASOUP_ANNOUNCED_PORT:-}
-      MEDIASOUP_DIRECT_ADDRESS: ${MEDIASOUP_DIRECT_ADDRESS:-rtc.dspeak.example.com}
-      MEDIASOUP_DIRECT_PORT: ${MEDIASOUP_DIRECT_PORT:-}
-      MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE: ${MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE:-4500000}
-      MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE: ${MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE:-40000000}
-
       DSPEAK_RTC_DOMAIN: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.example.com}
-      DSPEAK_LIVE_DOMAIN: ${DSPEAK_LIVE_DOMAIN:-live.dspeak.example.com}
-      DSPEAK_INGEST_LISTEN_PORT: ${DSPEAK_INGEST_LISTEN_PORT:-9999}
-      DSPEAK_INGEST_FALLBACK_DOMAIN: ${DSPEAK_INGEST_FALLBACK_DOMAIN:-live4.dspeak.example.com}
-      DSPEAK_INGEST_FALLBACK_PORT: ${DSPEAK_INGEST_FALLBACK_PORT:-5627}
-      DSPEAK_INGEST_AUTH_SECRET: ${DSPEAK_INGEST_AUTH_SECRET:?Generate a strong DJ ingest authentication secret}
       TURN_PORT: ${TURN_PORT:-3478}
       TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
       TURN_CREDENTIAL_TTL_SECONDS: ${TURN_CREDENTIAL_TTL_SECONDS:-900}
       DSPEAK_OPUS_BITRATE_DEFAULT: ${DSPEAK_OPUS_BITRATE_DEFAULT:-128}
     ports:
       - "${DSPEAK_HTTP_PORT:-31100}:3000/tcp"
-      - "${MEDIASOUP_RTC_PORT:-40000}:${MEDIASOUP_RTC_PORT:-40000}/udp"
-      - "${MEDIASOUP_RTC_PORT:-40000}:${MEDIASOUP_RTC_PORT:-40000}/tcp"
-      - "${DSPEAK_INGEST_LISTEN_PORT:-9999}:${DSPEAK_INGEST_LISTEN_PORT:-9999}/udp"
     healthcheck:
       test:
         - CMD
@@ -129,34 +112,12 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  playit-agent:
-    image: ghcr.io/playit-cloud/playit-agent:latest
-    environment:
-      SECRET_KEY: ${PLAYIT_SECRET_KEY:?Create a Docker agent in Playit and set PLAYIT_SECRET_KEY}
-    network_mode: service:dspeak
-    depends_on:
-      dspeak:
-        condition: service_healthy
-    restart: unless-stopped
-
-  dj-ingest:
-    build:
-      context: .
-      dockerfile: ops/mediamtx/Dockerfile
-    network_mode: service:dspeak
-    environment:
-      MTX_AUTHHTTPADDRESS: http://127.0.0.1:3000/api/dj/ingest-auth?secret=${DSPEAK_INGEST_AUTH_SECRET:?Generate a strong DJ ingest authentication secret}
-    depends_on:
-      dspeak:
-        condition: service_healthy
-    restart: unless-stopped
-
   cloudflare-ddns:
     image: favonia/cloudflare-ddns:1
     network_mode: host
     environment:
       CLOUDFLARE_API_TOKEN: ${DSPEAK_CLOUDFLARE_API_TOKEN:?Create a Cloudflare token with Zone DNS Edit access}
-      IP6_DOMAINS: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.example.com},${DSPEAK_LIVE_DOMAIN:-live.dspeak.example.com}
+      IP6_DOMAINS: ${DSPEAK_RTC_DOMAIN:-rtc.dspeak.example.com}
       IP4_PROVIDER: none
       IP6_PROVIDER: ${DSPEAK_DDNS_IP6_PROVIDER:-local.iface:ens3}
       PROXIED: "false"
