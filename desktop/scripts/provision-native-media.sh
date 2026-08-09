@@ -274,7 +274,7 @@ repository_from_origin() {
       repository="${remote#ssh://git@github.com/}"
       ;;
     *)
-      repository="darel919/dspeak2"
+      repository="darel919/dspeak"
       ;;
   esac
   printf '%s\n' "$repository"
