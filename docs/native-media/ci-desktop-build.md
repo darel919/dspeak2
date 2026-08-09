@@ -60,6 +60,11 @@ the `DSPEAK_TAURI_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY`, and optional
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub secrets. The same signing keypair
 must be retained for the lifetime of the installed desktop clients.
 
+The release tag must match the canonical root `package.json` version. CI runs
+`bun run release:sync` and `bun run release:check` before building. For local
+Tauri builds, run `bun run release:sync` after a version bump to verify that
+`tauri.conf.json`, `Cargo.toml`, and the lockfiles are synchronized.
+
 ## Prerequisites and notes
 
 - `native-media.yml` must have produced a successful bundle for the platform

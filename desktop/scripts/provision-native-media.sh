@@ -6,10 +6,14 @@ PROJECT_ROOT="$(cd "$DESKTOP_ROOT/.." && pwd)"
 
 NATIVE_MEDIA_ARTIFACT_DIR="${NATIVE_MEDIA_ARTIFACT_DIR:-$DESKTOP_ROOT/native-media/bundle}"
 NATIVE_MEDIA_BUILD_DIR="${NATIVE_MEDIA_BUILD_DIR:-$DESKTOP_ROOT/native-media/build}"
-NATIVE_MEDIA_PROVISION_MODE="${NATIVE_MEDIA_PROVISION_MODE:-auto}"
+NATIVE_MEDIA_PROVISION_MODE="${NATIVE_MEDIA_PROVISION_MODE:-download}"
 NATIVE_MEDIA_ARTIFACT_ARCHIVE="${NATIVE_MEDIA_ARTIFACT_ARCHIVE:-}"
 NATIVE_MEDIA_ARTIFACT_URL="${NATIVE_MEDIA_ARTIFACT_URL:-}"
 NATIVE_MEDIA_ARTIFACT_SHA256="${NATIVE_MEDIA_ARTIFACT_SHA256:-}"
+NATIVE_MEDIA_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
+LIBWEBRTC_ARTIFACT_ARCHIVE="${LIBWEBRTC_ARTIFACT_ARCHIVE:-}"
+LIBWEBRTC_ARTIFACT_URL="${LIBWEBRTC_ARTIFACT_URL:-}"
+LIBWEBRTC_ARTIFACT_SHA256="${LIBWEBRTC_ARTIFACT_SHA256:-0e09ccab9cf35071c5731c962b0862a3000f68eda9aa3c563b2832997942cff0}"
 WEBRTC_REVISION="${WEBRTC_REVISION:-m140}"
 WEBRTC_BRANCH="${WEBRTC_BRANCH:-branch-heads/7339}"
 WEBRTC_GN_ARGS="${WEBRTC_GN_ARGS:-is_debug=false is_component_build=false is_clang=true rtc_include_tests=false rtc_use_h264=true treat_warnings_as_errors=false use_rtti=true}"
@@ -54,9 +58,11 @@ bundle_is_complete() {
   [[ -d "$bundle/include" ]] &&
     [[ -f "$bundle/include/json.hpp" ]] &&
     native_library_exists "$bundle" dspeak_media &&
+    native_shim_library_is_valid "$bundle" &&
     native_library_exists "$bundle" mediasoupclient &&
     native_library_exists "$bundle" sdptransform &&
-    native_library_exists "$bundle" webrtc
+    native_library_exists "$bundle" webrtc &&
+    bundle_architecture_is_valid "$bundle"
 }
 
 native_library_exists() {
@@ -68,6 +74,19 @@ native_library_exists() {
       ;;
     *)
       [[ -f "$bundle/lib/lib${library}.a" ]]
+      ;;
+  esac
+}
+
+native_shim_library_is_valid() {
+  local bundle="$1"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      return 0
+      ;;
+    *)
+      command -v nm >/dev/null 2>&1 || return 1
+      nm -g "$bundle/lib/libdspeak_media.a" 2>/dev/null | grep 'lib_dspeak_media_initialize' >/dev/null
       ;;
   esac
 }
@@ -98,6 +117,12 @@ bundle_missing_items() {
     native_library_exists "$bundle" mediasoupclient || missing+=("lib/libmediasoupclient.a")
     native_library_exists "$bundle" sdptransform || missing+=("lib/libsdptransform.a")
     native_library_exists "$bundle" webrtc || missing+=("lib/libwebrtc.a")
+  fi
+  if native_library_exists "$bundle" dspeak_media && ! native_shim_library_is_valid "$bundle"; then
+    missing+=("a valid libdspeak_media archive")
+  fi
+  if [[ "$(uname -s)" == Darwin ]] && ! bundle_architecture_is_valid "$bundle"; then
+    missing+=("native libraries for the selected architecture")
   fi
   printf '%s' "${missing[*]}"
 }
@@ -141,12 +166,33 @@ install_bundle() {
 }
 
 native_platform() {
+  if [[ -n "$NATIVE_MEDIA_TARGET_TRIPLE" ]]; then
+    case "$NATIVE_MEDIA_TARGET_TRIPLE" in
+      aarch64-apple-darwin|arm64-apple-darwin)
+        printf '%s\n' "macos-arm64"
+        return
+        ;;
+      x86_64-unknown-linux-gnu|x86_64-unknown-linux-musl)
+        printf '%s\n' "linux-x64"
+        return
+        ;;
+      x86_64-pc-windows-msvc)
+        printf '%s\n' "windows-x64"
+        return
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  fi
+
+  native_host_platform
+}
+
+native_host_platform() {
   case "$(uname -s):$(uname -m)" in
     Darwin:arm64)
       printf '%s\n' "macos-arm64"
-      ;;
-    Darwin:x86_64)
-      printf '%s\n' "macos-x64"
       ;;
     Linux:x86_64|Linux:amd64)
       printf '%s\n' "linux-x64"
@@ -160,12 +206,50 @@ native_platform() {
   esac
 }
 
+native_target_arch() {
+  case "$(native_platform)" in
+    macos-arm64)
+      printf '%s\n' "arm64"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+bundle_architecture_is_valid() {
+  local bundle="$1"
+  local platform
+  local expected_arch
+  local library
+  local path
+  local info
+
+  platform="$(native_platform 2>/dev/null || true)"
+  case "$platform" in
+    macos-arm64)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  command -v lipo >/dev/null 2>&1 || return 1
+  expected_arch="$(native_target_arch)"
+  for library in dspeak_media mediasoupclient sdptransform webrtc; do
+    path="$bundle/lib/lib${library}.a"
+    [[ -f "$path" ]] || continue
+    info="$(lipo -info "$path" 2>/dev/null)" || return 1
+    [[ "$info" == *"$expected_arch"* ]] || return 1
+  done
+}
+
 native_target_cpu() {
   case "$1" in
     macos-arm64)
       printf '%s\n' "arm64"
       ;;
-    macos-x64|linux-x64|windows-x64)
+    linux-x64|windows-x64)
       printf '%s\n' "x64"
       ;;
     *)
@@ -203,6 +287,102 @@ default_artifact_url() {
   local artifact_name="${NATIVE_MEDIA_ARTIFACT_NAME:-lib-dspeak-media-$platform.tar.gz}"
   printf 'https://github.com/%s/releases/download/%s/%s\n' \
     "$repository" "$release_tag" "$artifact_name"
+}
+
+default_libwebrtc_artifact_url() {
+  local platform="$1"
+  case "$platform" in
+    macos-arm64)
+      printf 'https://github.com/versatica/libmediasoupclient/releases/download/webrtc-%s/libwebrtc-%s.tar.gz\n' \
+        "$WEBRTC_REVISION" "$platform"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+download_libwebrtc_dependency() {
+  local source_bundle="$1"
+  local platform
+  local archive
+  local url
+  local temp_root
+  local extract_root
+  local package_root
+  local actual_sha256
+
+  if [[ -f "$source_bundle/lib/libwebrtc.a" && -d "$source_bundle/include" ]]; then
+    return 0
+  fi
+
+  platform="$(native_platform)"
+  if [[ -n "$LIBWEBRTC_ARTIFACT_ARCHIVE" ]]; then
+    archive="$(resolve_path "$LIBWEBRTC_ARTIFACT_ARCHIVE")"
+    if [[ ! -f "$archive" ]]; then
+      fail "Configured libwebrtc archive does not exist: $archive"
+    fi
+    url="file://$archive"
+  elif [[ -n "$LIBWEBRTC_ARTIFACT_URL" ]]; then
+    url="$LIBWEBRTC_ARTIFACT_URL"
+    archive=""
+  elif ! url="$(default_libwebrtc_artifact_url "$platform")"; then
+    return 1
+  else
+    archive=""
+  fi
+
+  temp_root="$(mktemp -d "${TMPDIR:-/tmp}/dspeak-libwebrtc.XXXXXX")"
+  if [[ -z "$archive" ]]; then
+    archive="$temp_root/libwebrtc.tar.gz"
+    printf 'Downloading prebuilt libwebrtc dependency from %s\n' "$url"
+    if ! curl --fail --location --retry 3 --retry-delay 2 --connect-timeout 30 \
+      --output "$archive" "$url"; then
+      rm -rf -- "$temp_root"
+      fail "Unable to download the prebuilt libwebrtc dependency. Set LIBWEBRTC_ARTIFACT_ARCHIVE or LIBWEBRTC_ARTIFACT_URL to a matching archive."
+    fi
+  else
+    cp "$archive" "$temp_root/libwebrtc.tar.gz"
+    archive="$temp_root/libwebrtc.tar.gz"
+  fi
+
+  if [[ -n "$LIBWEBRTC_ARTIFACT_SHA256" ]]; then
+    actual_sha256="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
+    if [[ "$actual_sha256" != "$LIBWEBRTC_ARTIFACT_SHA256" ]]; then
+      rm -rf -- "$temp_root"
+      fail "libwebrtc archive checksum mismatch. Expected $LIBWEBRTC_ARTIFACT_SHA256, got $actual_sha256."
+    fi
+  fi
+
+  extract_root="$temp_root/extracted"
+  mkdir -p "$extract_root"
+  if ! tar -xzf "$archive" -C "$extract_root"; then
+    rm -rf -- "$temp_root"
+    fail "libwebrtc archive could not be extracted."
+  fi
+  package_root="$extract_root/artifact"
+  [[ -d "$package_root" ]] || package_root="$extract_root"
+  [[ -f "$package_root/libwebrtc.a" ]] || {
+    rm -rf -- "$temp_root"
+    fail "libwebrtc archive is missing libwebrtc.a."
+  }
+  [[ -f "$package_root/include.tar.gz" || -d "$package_root/include" ]] || {
+    rm -rf -- "$temp_root"
+    fail "libwebrtc archive is missing its headers."
+  }
+
+  mkdir -p "$source_bundle/lib" "$source_bundle/include"
+  cp "$package_root/libwebrtc.a" "$source_bundle/lib/libwebrtc.a"
+  if [[ -f "$package_root/include.tar.gz" ]]; then
+    tar -xzf "$package_root/include.tar.gz" -C "$source_bundle/include"
+  else
+    cp -R "$package_root/include/." "$source_bundle/include/"
+  fi
+  rm -rf -- "$temp_root"
+  bundle_is_complete "$source_bundle" 2>/dev/null || {
+    [[ -d "$source_bundle/include" && -f "$source_bundle/lib/libwebrtc.a" ]] ||
+      fail "Extracted libwebrtc dependency is incomplete."
+  }
 }
 
 run_webrtc_fetch() {
@@ -378,6 +558,8 @@ build_bundle_from_source() {
   local source_bundle
   local shim_build
   local shim_library
+  local stub_source
+  local stub_object
   local gn_args
 
   if ! platform="$(native_platform)"; then
@@ -385,6 +567,15 @@ build_bundle_from_source() {
   fi
   if ! target_cpu="$(native_target_cpu "$platform")"; then
     fail "No WebRTC target CPU is configured for $platform."
+  fi
+  if [[ -n "$NATIVE_MEDIA_TARGET_TRIPLE" ]]; then
+    local host_platform
+    if ! host_platform="$(native_host_platform)"; then
+      fail "Unable to determine the host platform for the requested target $NATIVE_MEDIA_TARGET_TRIPLE."
+    fi
+    if [[ "$host_platform" != "$platform" ]]; then
+      fail "Cross-architecture source provisioning is unsupported. Download the prebuilt $platform bundle instead."
+    fi
   fi
 
   provision_root="$NATIVE_MEDIA_BUILD_DIR/provision"
@@ -395,39 +586,44 @@ build_bundle_from_source() {
     install_bundle "$source_bundle"
     return
   fi
-  webrtc_source="$(clone_or_update_webrtc "$provision_root")"
-  webrtc_output="$webrtc_source/out/$WEBRTC_REVISION"
-  gn_args="$WEBRTC_GN_ARGS"
-  if [[ "$gn_args" != *target_cpu* ]]; then
-    gn_args="$gn_args target_cpu=\"$target_cpu\""
-  fi
-  printf 'Configuring WebRTC for %s\n' "$target_cpu"
-  (cd "$webrtc_source" && gn gen "$webrtc_output" --args="$gn_args")
-  printf 'Building WebRTC; this can take a long time on the first run\n'
-  ninja -C "$webrtc_output"
-  if [[ "$platform" == windows-x64 ]]; then
-    webrtc_library="$(find "$webrtc_output" -type f \( -name 'libwebrtc.lib' -o -name 'webrtc.lib' \) -print -quit)"
-  else
-    webrtc_library="$webrtc_output/obj/libwebrtc.a"
-  fi
-  [[ -f "$webrtc_library" ]] || fail "WebRTC build did not produce $webrtc_library"
+  if ! download_libwebrtc_dependency "$source_bundle"; then
+    webrtc_source="$(clone_or_update_webrtc "$provision_root")"
+    webrtc_output="$webrtc_source/out/$WEBRTC_REVISION"
+    gn_args="$WEBRTC_GN_ARGS"
+    if [[ "$gn_args" != *target_cpu* ]]; then
+      gn_args="$gn_args target_cpu=\"$target_cpu\""
+    fi
+    printf 'Configuring WebRTC for %s\n' "$target_cpu"
+    (cd "$webrtc_source" && gn gen "$webrtc_output" --args="$gn_args")
+    printf 'Building WebRTC; this can take a long time on the first run\n'
+    ninja -C "$webrtc_output"
+    if [[ "$platform" == windows-x64 ]]; then
+      webrtc_library="$(find "$webrtc_output" -type f \( -name 'libwebrtc.lib' -o -name 'webrtc.lib' \) -print -quit)"
+    else
+      webrtc_library="$webrtc_output/obj/libwebrtc.a"
+    fi
+    [[ -f "$webrtc_library" ]] || fail "WebRTC build did not produce $webrtc_library"
 
-  mkdir -p "$source_bundle/lib" "$source_bundle/include"
-  if [[ "$platform" == windows-x64 ]]; then
-    cp "$webrtc_library" "$source_bundle/lib/webrtc.lib"
+    mkdir -p "$source_bundle/lib" "$source_bundle/include"
+    if [[ "$platform" == windows-x64 ]]; then
+      cp "$webrtc_library" "$source_bundle/lib/webrtc.lib"
+    else
+      cp "$webrtc_library" "$source_bundle/lib/libwebrtc.a"
+    fi
+    (
+      cd "$webrtc_source"
+      find . -name '*.h' ! -path "./out/$WEBRTC_REVISION/*" -print | tar -cf - -T -
+    ) | tar -xf - -C "$source_bundle/include"
   else
-    cp "$webrtc_library" "$source_bundle/lib/libwebrtc.a"
+    printf 'Using the prebuilt libwebrtc dependency for %s\n' "$platform"
   fi
-  (
-    cd "$webrtc_source"
-    find . -name '*.h' ! -path "./out/$WEBRTC_REVISION/*" -print | tar -cf - -T -
-  ) | tar -xf - -C "$source_bundle/include"
 
   mediasoup_source="$(clone_or_update_libmediasoupclient "$provision_root")"
   mediasoup_build="$mediasoup_source/build"
   printf 'Configuring libmediasoupclient\n'
   cmake -S "$mediasoup_source" -B "$mediasoup_build" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
     -DLIBWEBRTC_BINARY_PATH="$source_bundle/lib" \
     -DMEDIASOUPCLIENT_BUILD_TESTS=OFF \
@@ -460,10 +656,19 @@ build_bundle_from_source() {
   fi
 
   shim_build="$DESKTOP_ROOT/native-media/libdspeak_media/build"
+  if [[ "$platform" != windows-x64 && ! -f "$source_bundle/lib/libdspeak_media.a" ]]; then
+    mkdir -p "$shim_build"
+    stub_source="$shim_build/dspeak_media_bootstrap.c"
+    stub_object="$shim_build/dspeak_media_bootstrap.o"
+    printf 'void dspeak_media_bootstrap(void) {}\n' > "$stub_source"
+    cc -c "$stub_source" -o "$stub_object"
+    ar rcs "$source_bundle/lib/libdspeak_media.a" "$stub_object"
+  fi
   printf 'Building the dSpeak native media shim\n'
   env NATIVE_MEDIA_ARTIFACT_DIR="$source_bundle" NATIVE_MEDIA_BUILD_DIR="$mediasoup_build" \
     cmake -S "$DESKTOP_ROOT/native-media/libdspeak_media" -B "$shim_build" \
-      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   cmake --build "$shim_build" --config Release --parallel
   if [[ "$platform" == windows-x64 ]]; then
     shim_library="$(find "$shim_build" -type f \( -name 'dspeak_media.lib' -o -name 'libdspeak_media.lib' \) -print -quit)"
@@ -480,7 +685,7 @@ build_bundle_from_source() {
 provision_bundle() {
   case "$NATIVE_MEDIA_PROVISION_MODE" in
     download)
-      download_bundle || fail "Native media download provisioning failed. Set NATIVE_MEDIA_ARTIFACT_URL or use NATIVE_MEDIA_PROVISION_MODE=source."
+      download_bundle || fail "Native media download provisioning failed. Set NATIVE_MEDIA_ARTIFACT_URL or NATIVE_MEDIA_ARTIFACT_ARCHIVE, or explicitly use NATIVE_MEDIA_PROVISION_MODE=source only on a machine with sufficient disk space."
       ;;
     source)
       build_bundle_from_source
@@ -489,8 +694,7 @@ provision_bundle() {
       if download_bundle; then
         return
       fi
-      printf '%s\n' 'No usable prebuilt native media archive was available; falling back to the pinned local source build.' >&2
-      build_bundle_from_source
+      fail 'No usable prebuilt native media archive was available. Automatic source builds are disabled; set NATIVE_MEDIA_PROVISION_MODE=source explicitly only on a machine with sufficient disk space.'
       ;;
     *)
       fail "NATIVE_MEDIA_PROVISION_MODE must be auto, download, or source."
@@ -501,6 +705,15 @@ provision_bundle() {
 NATIVE_MEDIA_ARTIFACT_DIR="$(resolve_path "$NATIVE_MEDIA_ARTIFACT_DIR")"
 NATIVE_MEDIA_BUILD_DIR="$(resolve_path "$NATIVE_MEDIA_BUILD_DIR")"
 export NATIVE_MEDIA_ARTIFACT_DIR NATIVE_MEDIA_BUILD_DIR
+
+if ! detected_platform="$(native_platform)"; then
+  fail "Unable to determine a native media target for ${NATIVE_MEDIA_TARGET_TRIPLE:-$(uname -s)/$(uname -m)}."
+fi
+if [[ -n "$NATIVE_MEDIA_TARGET_TRIPLE" ]]; then
+  printf 'Native media target: %s (%s)\n' "$detected_platform" "$NATIVE_MEDIA_TARGET_TRIPLE"
+else
+  printf 'Native media target: %s (%s/%s)\n' "$detected_platform" "$(uname -s)" "$(uname -m)"
+fi
 
 if [[ -L "$NATIVE_MEDIA_ARTIFACT_DIR" || ( -e "$NATIVE_MEDIA_ARTIFACT_DIR" && ! -d "$NATIVE_MEDIA_ARTIFACT_DIR" ) ]]; then
   fail "NATIVE_MEDIA_ARTIFACT_DIR must be a directory: $NATIVE_MEDIA_ARTIFACT_DIR"

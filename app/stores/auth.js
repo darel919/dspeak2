@@ -11,6 +11,9 @@ export const useAuthStore = defineStore("auths", () => {
   const runtimeStore = useRuntimeStore();
   let sessionCheckPromise = null;
   let supabaseAuthSubscription = null;
+  let desktopCallbackPromise = null;
+  let desktopCallbackCode = "";
+  let completedDesktopCallbackCode = "";
 
   function bridgeSupabaseSession(client) {
     if (!client || supabaseAuthSubscription) return;
@@ -126,6 +129,7 @@ export const useAuthStore = defineStore("auths", () => {
       `${config.public.apiPath}/auth/callback-session`,
       {
         method: "POST",
+        credentials: "include",
         body: { code },
       },
     );
@@ -141,14 +145,34 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function completeDesktopSignIn(code) {
-    const result = await $fetch(
-      `${config.public.apiPath}/auth/desktop-callback-session`,
-      {
-        method: "POST",
-        body: { code },
-      },
-    );
-    return completeWebSignIn(result.code);
+    const callbackCode = String(code || "");
+    if (!callbackCode) throw new Error("Missing desktop authorization code");
+    if (completedDesktopCallbackCode === callbackCode) return true;
+    if (desktopCallbackPromise && desktopCallbackCode === callbackCode)
+      return desktopCallbackPromise;
+
+    desktopCallbackCode = callbackCode;
+    const request = (async () => {
+      const result = await $fetch(
+        `${config.public.apiPath}/auth/desktop-callback-session`,
+        {
+          method: "POST",
+          credentials: "include",
+          body: { code: callbackCode },
+        },
+      );
+      const completed = await completeWebSignIn(result.code);
+      if (completed) completedDesktopCallbackCode = callbackCode;
+      return completed;
+    })();
+    desktopCallbackPromise = request;
+    const clearRequest = () => {
+      if (desktopCallbackPromise !== request) return;
+      desktopCallbackPromise = null;
+      desktopCallbackCode = "";
+    };
+    request.then(clearRequest, clearRequest);
+    return request;
   }
 
   async function completePendingDesktopSignIn() {

@@ -11,6 +11,8 @@ EXTERNAL_PROVISION_MODE="${NATIVE_MEDIA_PROVISION_MODE:-}"
 EXTERNAL_ARTIFACT_ARCHIVE="${NATIVE_MEDIA_ARTIFACT_ARCHIVE:-}"
 EXTERNAL_ARTIFACT_URL="${NATIVE_MEDIA_ARTIFACT_URL:-}"
 EXTERNAL_ARTIFACT_SHA256="${NATIVE_MEDIA_ARTIFACT_SHA256:-}"
+EXTERNAL_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
+TAURI_ARGS=("$@")
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a
@@ -24,6 +26,24 @@ fi
 [[ -n "$EXTERNAL_ARTIFACT_ARCHIVE" ]] && NATIVE_MEDIA_ARTIFACT_ARCHIVE="$EXTERNAL_ARTIFACT_ARCHIVE"
 [[ -n "$EXTERNAL_ARTIFACT_URL" ]] && NATIVE_MEDIA_ARTIFACT_URL="$EXTERNAL_ARTIFACT_URL"
 [[ -n "$EXTERNAL_ARTIFACT_SHA256" ]] && NATIVE_MEDIA_ARTIFACT_SHA256="$EXTERNAL_ARTIFACT_SHA256"
+[[ -n "$EXTERNAL_TARGET_TRIPLE" ]] && NATIVE_MEDIA_TARGET_TRIPLE="$EXTERNAL_TARGET_TRIPLE"
+
+if [[ -z "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]]; then
+  for ((argument_index = 0; argument_index < ${#TAURI_ARGS[@]}; argument_index++)); do
+    case "${TAURI_ARGS[$argument_index]}" in
+      --target=*)
+        NATIVE_MEDIA_TARGET_TRIPLE="${TAURI_ARGS[$argument_index]#--target=}"
+        ;;
+      --target)
+        next_argument_index=$((argument_index + 1))
+        if ((next_argument_index < ${#TAURI_ARGS[@]})); then
+          NATIVE_MEDIA_TARGET_TRIPLE="${TAURI_ARGS[$next_argument_index]}"
+        fi
+        ;;
+    esac
+    [[ -n "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]] && break
+  done
+fi
 
 NATIVE_MEDIA_ARTIFACT_DIR="${NATIVE_MEDIA_ARTIFACT_DIR:-$ROOT_DIR/native-media/bundle}"
 NATIVE_MEDIA_BUILD_DIR="${NATIVE_MEDIA_BUILD_DIR:-$ROOT_DIR/native-media/build}"
@@ -35,6 +55,8 @@ if [[ "$NATIVE_MEDIA_BUILD_DIR" != /* ]]; then
   NATIVE_MEDIA_BUILD_DIR="$PROJECT_ROOT/$NATIVE_MEDIA_BUILD_DIR"
 fi
 export NATIVE_MEDIA_ARTIFACT_DIR NATIVE_MEDIA_BUILD_DIR
+NATIVE_MEDIA_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
+export NATIVE_MEDIA_TARGET_TRIPLE
 
 bash "$ROOT_DIR/scripts/provision-native-media.sh"
 
@@ -49,4 +71,5 @@ if [[ -f "$LOCAL_MEDIA_LIBRARY" && -f "$ARTIFACT_MEDIA_LIBRARY" ]] && \
   cp "$LOCAL_MEDIA_LIBRARY" "$ARTIFACT_MEDIA_LIBRARY"
 fi
 
+cd "$ROOT_DIR"
 exec npx tauri dev "$@"

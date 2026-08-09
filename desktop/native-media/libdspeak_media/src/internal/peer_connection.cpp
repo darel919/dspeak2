@@ -373,7 +373,7 @@ public:
     std::future<std::string> GetFuture() { return promise_.get_future(); }
 
     void OnStatsDelivered(
-        const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report) override {
+        const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report) override {
         promise_.set_value(report ? report->ToJson() : "{}");
     }
 
@@ -743,7 +743,7 @@ extern "C" char* lib_dspeak_media_p2p_get_stats(lib_dspeak_media_p2p_handle_t* h
 {
     if (!h || !h->pc || !h->signaling_thread || h->closed) return nullptr;
     try {
-        auto observer = rtc::make_ref_counted<P2pStatsObserver>();
+        auto observer = webrtc::make_ref_counted<P2pStatsObserver>();
         auto future = observer->GetFuture();
         h->signaling_thread->BlockingCall([h, observer] {
             h->pc->GetStats(observer.get());

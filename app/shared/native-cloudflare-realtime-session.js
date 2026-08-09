@@ -23,15 +23,50 @@ function sourceKind(entry) {
   );
 }
 
-function midForTrack(sdp, trackId, kind) {
-  const sections = String(sdp || "").split(/(?=m=)/g);
-  for (const section of sections) {
-    if (!section.startsWith(`m=${kind}`)) continue;
-    if (!section.includes(String(trackId))) continue;
-    const mid = section.match(/(?:^|\r?\n)a=mid:([^\r\n]+)/);
-    if (mid?.[1]) return mid[1].trim();
-  }
-  return null;
+function mediaSections(sdp, kind) {
+  return String(sdp || "")
+    .split(/(?=m=)/g)
+    .filter((section) => section.startsWith(`m=${kind} `));
+}
+
+function sectionMid(section) {
+  const match = section.match(/(?:^|\r?\n)a=mid:([^\r\n]+)/);
+  return match?.[1]?.trim() || null;
+}
+
+function sectionContainsTrack(section, trackId) {
+  const expectedTrackId = String(trackId);
+  return section.split(/\r?\n/).some((line) => {
+    if (!line.startsWith("a=msid:")) return false;
+    return line
+      .slice("a=msid:".length)
+      .trim()
+      .split(/\s+/)
+      .includes(expectedTrackId);
+  });
+}
+
+function sectionSendsMedia(section) {
+  return /(?:^|\r?\n)a=(?:sendrecv|sendonly)(?:\r?\n|$)/.test(section);
+}
+
+function midForTrack(sdp, trackId, kind, usedMids = new Set()) {
+  const sections = mediaSections(sdp, kind)
+    .map((section) => ({
+      section,
+      mid: sectionMid(section),
+    }))
+    .filter(({ mid }) => mid && !usedMids.has(mid));
+  const exact = sections.find(({ section }) =>
+    sectionContainsTrack(section, trackId),
+  );
+  if (exact) return exact.mid;
+  const sending = sections.filter(
+    ({ section }) =>
+      sectionSendsMedia(section) &&
+      !/(?:^|\r?\n)a=inactive(?:\r?\n|$)/.test(section),
+  );
+  return sending[0]?.mid || null;
 }
 
 function nativeFlowForTrack(value, type, entry) {
@@ -257,7 +292,12 @@ export class NativeCloudflareRealtimeSession {
       p2pHandle: this.handle,
     });
     this._assertCurrent(generation);
-    const mid = midForTrack(offer, trackId, kind);
+    const usedMids = new Set(
+      [...this.producers.values()]
+        .map((producer) => producer.mid)
+        .filter(Boolean),
+    );
+    const mid = midForTrack(offer, trackId, kind, usedMids);
     if (!mid)
       throw new Error(`Native Cloudflare ${source} transceiver MID is missing`);
     const trackName = requestIdentifier();

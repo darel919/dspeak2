@@ -131,6 +131,10 @@ test("auth.js uses Supabase Auth with local JWT verification", () => {
   assert.doesNotMatch(auth, /ACCOUNT_URL/);
 });
 
+test("valid bearer-authenticated requests do not need cookie CSRF state", () => {
+  assert.match(auth, /if \(event\.context\.authToken\) return true;/);
+});
+
 test("server OAuth uses PKCE so callbacks receive a query code", () => {
   assert.match(supabaseAuth, /flowType:\s*["']pkce["']/);
   assert.match(authPage, /route\.query\.code/);

@@ -46,9 +46,17 @@ bun run dev:desktop
 The `dev:desktop` wrapper loads `desktop/native-media/dependencies.env`
 automatically, creates `desktop/native-media/bundle` when needed, and validates
 all native libraries before launching Tauri. An explicit environment variable
-overrides the local file. Set `NATIVE_MEDIA_PROVISION_MODE=download` to require
-a prebuilt archive or `NATIVE_MEDIA_PROVISION_MODE=source` to skip the archive
-lookup.
+overrides the local file. `NATIVE_MEDIA_PROVISION_MODE=download` is the safe
+default and requires a prebuilt archive. Set
+`NATIVE_MEDIA_PROVISION_MODE=source` explicitly to allow the multi-gigabyte
+local build. On macOS arm64, the source path uses the pinned prebuilt libwebrtc
+archive from the libmediasoupclient release and only builds libmediasoupclient,
+libsdptransform, and the dSpeak shim locally. `auto` is download-only and never
+enables a source fallback.
+Development automatically selects the native bundle from the Tauri
+`--target` value when supplied, otherwise from the architecture of the running
+dev process. The supported targets are macOS arm64 and Windows x64. macOS
+static libraries are checked with `lipo` before they are accepted.
 
 The web application does not use this variable and continues to use browser
 WebRTC.

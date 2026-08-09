@@ -38,6 +38,11 @@ test("desktop sign-in uses Supabase OAuth PKCE flow", () => {
   assert.match(authStore, /\/auth\/google/);
   assert.match(authStore, /X-Desktop-App/);
   assert.match(authPage, /authStore\.completePendingDesktopSignIn\(\)/);
+  assert.match(
+    authStore,
+    /desktop-callback-session[\s\S]*credentials: "include"/,
+  );
+  assert.match(authStore, /completedDesktopCallbackCode/);
 });
 
 test("desktop sign-in registers native callbacks and background notifications without exposing browser cookies", () => {
@@ -57,6 +62,16 @@ test("desktop sign-in provides a recoverable browser waiting state", () => {
   assert.match(authPage, /180_000/);
   assert.match(authPage, /Sign-in was not completed/);
   assert.match(authStore, /return \{ isDesktop, loginUrl: result\.url \}/);
+});
+
+test("desktop sign-in polls for the native callback while waiting", () => {
+  assert.match(authPage, /function startSignInPolling\(\)/);
+  assert.match(
+    authPage,
+    /setInterval\(\(\) => void checkSignIn\(false\), 1000\)/,
+  );
+  assert.match(authPage, /if \(signInCheckInFlight\) return/);
+  assert.match(authPage, /clearSignInPolling\(\)/);
 });
 
 test("web sign-in finishes after exchanging the callback", () => {

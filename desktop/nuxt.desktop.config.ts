@@ -85,6 +85,8 @@ export default defineNuxtConfig({
       apiPath: process.env.VITE_DSPEAK_API_PATH
         ? `${process.env.VITE_DSPEAK_API_PATH.replace(/\/$/, "")}/api`
         : "/api",
+      supabaseUrl: process.env.SUPABASE_URL || "",
+      supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
       appVersion: buildIdentity.version,
       appBuild: buildIdentity,
       VAPID_PUBLIC_KEY:

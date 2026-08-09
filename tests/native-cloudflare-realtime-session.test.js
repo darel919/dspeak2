@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NativeCloudflareRealtimeSession } from "../app/shared/native-cloudflare-realtime-session.js";
 
-function localOffer(trackId, kind = "audio") {
+function localOffer(trackId, kind = "audio", includeTrackId = true) {
   return [
     "v=0",
     "o=- 1 1 IN IP4 127.0.0.1",
@@ -10,7 +10,8 @@ function localOffer(trackId, kind = "audio") {
     "t=0 0",
     `m=${kind} 9 UDP/TLS/RTP/SAVPF 111`,
     "a=mid:0",
-    `a=msid:stream0 ${trackId}`,
+    "a=sendrecv",
+    ...(includeTrackId ? [`a=msid:stream0 ${trackId}`] : []),
     "",
   ].join("\r\n");
 }
@@ -145,5 +146,46 @@ describe("NativeCloudflareRealtimeSession", () => {
     await session.closeMedia();
     assert.equal(session.handle, null);
     assert.ok(calls.some(([command]) => command === "media_p2p_destroy"));
+  });
+
+  it("uses the sending media section when native SDP omits the track msid", async () => {
+    const calls = [];
+    let session;
+    const invoke = async (command) => {
+      calls.push(command);
+      if (command === "media_p2p_create") return { handle: 8 };
+      if (command === "media_p2p_poll_ice_candidate") return null;
+      if (command === "media_p2p_add_track") return { trackId: "native-audio" };
+      if (command === "media_p2p_create_offer")
+        return localOffer("native-audio", "audio", false);
+      return {};
+    };
+    const send = (message) => {
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation, body } = message.data;
+      const result =
+        operation === "new-session"
+          ? { sessionId: "native-session" }
+          : body?.tracks?.[0]?.location === "local"
+            ? { sessionDescription: { type: "answer", sdp: "answer" } }
+            : {};
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", { requestId, result }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({
+      invoke,
+      send,
+      sources: new Map(),
+      producers: new Map(),
+      consumers: new Map(),
+    });
+
+    await session.addSource({ source: "audio", kind: "audio" });
+
+    assert.equal(session.producers.get("audio").mid, "0");
+    assert.ok(calls.includes("media_p2p_create_offer"));
+    await session.closeMedia();
   });
 });

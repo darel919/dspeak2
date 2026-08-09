@@ -46,12 +46,17 @@ test("browser WebSockets enforce an explicit origin policy", () => {
   assert.doesNotMatch(security, /DSPEAK_ALLOW_ORIGINLESS_WEBSOCKETS/);
 });
 
-test("same-origin API reads retry once with the active Supabase bearer after cookie auth fails", () => {
+test("configured API reads retry once with the active Supabase bearer after cookie auth fails", () => {
   assert.match(browserSecurityFetch, /retryWithSupabaseBearer/);
+  assert.match(browserSecurityFetch, /resolveApiRequestTarget/);
+  assert.match(browserSecurityFetch, /isConfiguredApiRequest/);
   assert.match(browserSecurityFetch, /response\.status !== 401/);
-  assert.match(browserSecurityFetch, /url\.pathname\.startsWith\("\/api\/"\)/);
   assert.match(browserSecurityFetch, /Authorization/);
   assert.match(browserSecurityFetch, /retryableMethods/);
+  assert.doesNotMatch(
+    browserSecurityFetch,
+    /response\.status === 401\)\s*csrfToken = ""/,
+  );
 });
 
 test("metrics require a bearer token and proxy the standalone SFU snapshot", () => {

@@ -195,14 +195,17 @@ export async function leaveSession(engine) {
   if (engine.qoeTimer) clearInterval(engine.qoeTimer);
   engine.qoeTimer = null;
   engine._stopNativeActionPump();
+  const nativeSession = engine.nativeSession;
   try {
-    if (engine.flags.nativeRtc && hasNativeCapability(engine.flags))
-      await engine._invoke("media_leave").catch(() => {});
+    if (engine.flags.nativeRtc && hasNativeCapability(engine.flags)) {
+      if (nativeSession?.disconnect) await nativeSession.disconnect();
+      else await engine._invoke("media_leave").catch(() => {});
+    }
   } catch {}
   if (!engine.nativeOnly)
     await engine.browserEngine.leaveSession().catch(() => {});
   try {
-    engine.nativeSession?.signaling?.stop?.();
+    nativeSession?.signaling?.stop?.();
   } catch {}
   await Promise.allSettled(
     engine.unlisten.splice(0).map((unlisten) => unlisten()),

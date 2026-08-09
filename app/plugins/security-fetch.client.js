@@ -1,3 +1,8 @@
+import {
+  isConfiguredApiRequest,
+  resolveApiRequestTarget,
+} from "../shared/api-request-target.js";
+
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const retryableMethods = new Set(["GET", "HEAD", "OPTIONS"]);
 let bearerTokenRequest = null;
@@ -9,11 +14,11 @@ async function retryWithSupabaseBearer(
   response,
   url,
   method,
+  apiTarget,
 ) {
   if (
     response.status !== 401 ||
-    url.origin !== window.location.origin ||
-    !url.pathname.startsWith("/api/") ||
+    !isConfiguredApiRequest(url, apiTarget) ||
     (!retryableMethods.has(method) && typeof options.body !== "string")
   )
     return response;
@@ -43,6 +48,11 @@ async function retryWithSupabaseBearer(
 
 export default defineNuxtPlugin(() => {
   const nativeFetch = globalThis.fetch.bind(globalThis);
+  const runtimeConfig = useRuntimeConfig();
+  const apiTarget = resolveApiRequestTarget(
+    runtimeConfig.public?.apiPath,
+    window.location.origin,
+  );
   let csrfToken = "";
 
   globalThis.fetch = async (input, init = {}) => {
@@ -52,7 +62,7 @@ export default defineNuxtPlugin(() => {
       init.method || request?.method || "GET",
     ).toUpperCase();
     const options = { ...init };
-    if (url.origin === window.location.origin && mutatingMethods.has(method)) {
+    if (isConfiguredApiRequest(url, apiTarget) && mutatingMethods.has(method)) {
       const headers = new Headers(request?.headers || undefined);
       new Headers(init.headers || undefined).forEach((value, name) =>
         headers.set(name, value),
@@ -68,10 +78,10 @@ export default defineNuxtPlugin(() => {
       response,
       url,
       method,
+      apiTarget,
     );
     const nextToken = response.headers.get("X-dSpeak-CSRF-Token");
     if (nextToken) csrfToken = nextToken;
-    if (response.status === 401) csrfToken = "";
     return response;
   };
 });

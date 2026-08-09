@@ -1,5 +1,7 @@
 <template>
-  <VitePwaManifest v-if="showPwaManifest" />
+  <Head v-if="showPwaManifest">
+    <link rel="manifest" href="/manifest.webmanifest" />
+  </Head>
   <NuxtLayout>
     <NuxtLoadingIndicator />
     <NuxtPage />

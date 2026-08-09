@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nice/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "dSpeak",
-  "version": "2.7.0-alpha12",
+  "version": "3.0.0-alpha1",
   "identifier": "com.dspeak.desktop",
   "build": {
     "frontendDist": "../.output/public",

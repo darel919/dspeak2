@@ -173,13 +173,21 @@ export async function configureNativeIceServers(engine) {
   const connectionMode =
     channelMediaPolicy(engine.channelsStore, engine.voiceStore)
       ?.connectionMode || "auto";
+  const accessToken = await loadSignalingToken(engine, config);
+  if (accessToken) engine.nativeAuthToken = accessToken;
+  const authToken = accessToken || engine.nativeAuthToken;
   const endpoint = /^https?:\/\//.test(configuredPath)
     ? `${configuredPath}/config?connectionMode=${encodeURIComponent(connectionMode)}`
     : `${serverUrl}${configuredPath}/config?connectionMode=${encodeURIComponent(connectionMode)}` ||
       "/api/config";
   if (!endpoint) return;
   try {
-    const response = await fetch(endpoint, { credentials: "include" });
+    const response = await fetch(endpoint, {
+      credentials: "include",
+      ...(authToken
+        ? { headers: { Authorization: `Bearer ${authToken}` } }
+        : {}),
+    });
     if (!response.ok) return;
     const iceServers = await response.json();
     if (Array.isArray(iceServers)) await setIceServers(engine, iceServers);
@@ -190,6 +198,9 @@ export async function configureNativeControl(engine, channelId, roomId) {
   const config = engine.nativeConfig || {};
   const configuredPath = String(config.apiPath || "/api").replace(/\/$/, "");
   const serverUrl = String(config.serverUrl || "").replace(/\/$/, "");
+  const accessToken = await loadSignalingToken(engine, config);
+  if (accessToken) engine.nativeAuthToken = accessToken;
+  const authToken = accessToken || engine.nativeAuthToken;
   const derivedRoomId = engine.channelsStore
     ? resolveChannelRoomId(engine.channelsStore.getChannelById?.(channelId)) ||
       String(engine.channelsStore.loadedRoomId || "")
@@ -202,43 +213,41 @@ export async function configureNativeControl(engine, channelId, roomId) {
   const connectionMode =
     channelMediaPolicy(engine.channelsStore, engine.voiceStore)
       ?.connectionMode || "auto";
-  const response = await fetch(
-    `${serverUrl}${configuredPath}/media/bootstrap`,
-    {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...(engine.nativeAuthToken
-          ? { Authorization: `Bearer ${engine.nativeAuthToken}` }
-          : {}),
-      },
-      body: JSON.stringify({
-        roomId: resolvedRoomId,
-        channelId,
-        connectionMode,
-        deviceId: getDeviceId(),
-      }),
+  const bootstrapEndpoint = /^https?:\/\//.test(configuredPath)
+    ? `${configuredPath}/media/bootstrap`
+    : `${serverUrl}${configuredPath}/media/bootstrap`;
+  const response = await fetch(bootstrapEndpoint, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },
-  );
-  if (!response.ok) throw new Error("Media control bootstrap failed");
+    body: JSON.stringify({
+      roomId: resolvedRoomId,
+      channelId,
+      connectionMode,
+      deviceId: getDeviceId(),
+    }),
+  });
+  if (!response.ok) {
+    const error = new Error(
+      `Media control bootstrap failed: ${response.status}`,
+    );
+    error.status = response.status;
+    throw error;
+  }
   engine.nativeSession?.configureControl({
     ...(await response.json()),
     channelId,
   });
 }
 
-export async function loadSignalingToken(engine, config) {
-  const server = String(config?.serverUrl || "").replace(/\/$/, "");
-  if (!server) return "";
+export async function loadSignalingToken() {
   try {
-    const tauri = await getTauri(engine);
-    return (
-      (await tauri.invoke("get_credential", {
-        server,
-        key: "session_token",
-      })) || ""
-    );
+    const { getSupabaseClient } = await import("../../utils/supabase-client");
+    const sessionResult = await getSupabaseClient()?.auth.getSession();
+    return sessionResult?.data?.session?.access_token || "";
   } catch {
     return "";
   }

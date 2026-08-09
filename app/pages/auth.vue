@@ -126,6 +126,8 @@ let completionPromise = null;
 
 let loginUrl = "";
 let signInTimeout;
+let signInPoll;
+let signInCheckInFlight = false;
 
 function clearSignInTimeout() {
   if (!signInTimeout) return;
@@ -133,10 +135,22 @@ function clearSignInTimeout() {
   signInTimeout = undefined;
 }
 
+function clearSignInPolling() {
+  if (!signInPoll) return;
+  clearInterval(signInPoll);
+  signInPoll = undefined;
+}
+
+function startSignInPolling() {
+  clearSignInPolling();
+  signInPoll = setInterval(() => void checkSignIn(false), 1000);
+}
+
 function startSignInTimeout() {
   clearSignInTimeout();
   signInTimeout = setTimeout(() => {
     if (status.value !== "waiting") return;
+    clearSignInPolling();
     status.value = "failed";
     failureMessage.value =
       "Sign-in was not completed. The browser may have been closed. Try again when you're ready.";
@@ -181,6 +195,7 @@ async function startSignIn() {
       loginUrl = result.loginUrl;
       status.value = "waiting";
       startSignInTimeout();
+      startSignInPolling();
     }
   } catch (error) {
     console.error("[Auth] Could not start sign-in:", error);
@@ -197,29 +212,41 @@ async function reopenBrowser() {
   startSignInTimeout();
 }
 
-async function checkSignIn() {
-  status.value = "working";
+async function checkSignIn(manual = true) {
+  if (status.value !== "waiting") return;
+  if (signInCheckInFlight) return;
+  signInCheckInFlight = true;
+  if (manual) status.value = "working";
   try {
     const completed =
       authStore.getUserData()?.id ||
       (await authStore.completePendingDesktopSignIn()) ||
-      (await authStore.restoreSession());
+      (manual && (await authStore.restoreSession()));
     if (completed) {
       clearSignInTimeout();
+      clearSignInPolling();
       await finishAuthentication();
       return;
     }
-    status.value = "waiting";
+    if (manual) status.value = "waiting";
   } catch (error) {
+    if (!manual) {
+      console.warn("[Auth] Automatic desktop sign-in check failed:", error);
+      return;
+    }
     console.error("[Auth] Could not complete desktop sign-in:", error);
+    clearSignInPolling();
     status.value = "failed";
     failureMessage.value =
       "The completed browser sign-in could not be transferred to dSpeak. Start sign-in again.";
+  } finally {
+    signInCheckInFlight = false;
   }
 }
 
 function cancelSignIn() {
   clearSignInTimeout();
+  clearSignInPolling();
   loginUrl = "";
   status.value = "idle";
   showTerms.value = true;
@@ -275,5 +302,8 @@ onMounted(async () => {
   showTerms.value = true;
 });
 
-onUnmounted(clearSignInTimeout);
+onUnmounted(() => {
+  clearSignInTimeout();
+  clearSignInPolling();
+});
 </script>

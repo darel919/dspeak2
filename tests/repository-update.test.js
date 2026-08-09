@@ -24,6 +24,7 @@ const [
   workflow,
   manifestScript,
   settings,
+  releaseVersionScript,
 ] = await Promise.all(
   [
     "../shared/app-build.js",
@@ -41,6 +42,7 @@ const [
     "../.github/workflows/desktop-build.yml",
     "../scripts/create-tauri-update-manifest.mjs",
     "../app/pages/settings.vue",
+    "../scripts/sync-release-version.mjs",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
 
@@ -133,11 +135,17 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.match(workflow, /Configure signed updater artifacts/);
   assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(workflow, /create-tauri-update-manifest\.mjs/);
+  assert.match(workflow, /release:check/);
+  assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
   assert.match(workflow, /\.AppImage\.sig/);
   assert.match(workflow, /\.nsis\.zip\.sig/);
   assert.match(manifestScript, /platforms/);
+  assert.match(manifestScript, /packageMetadata/);
+  assert.match(manifestScript, /releaseVersionFromTag/);
   assert.match(manifestScript, /commit/);
   assert.match(manifestScript, /signature/);
+  assert.match(releaseVersionScript, /normalizeVersion/);
+  assert.match(releaseVersionScript, /findVersionMismatches/);
 });

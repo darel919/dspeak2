@@ -101,6 +101,8 @@ export async function persistAuthenticatedSession(
 }
 
 export async function validateCsrfRequest(event) {
+  if (event.context.authToken) return true;
+
   const token = getCookie(event, SESSION_COOKIE);
   if (!token) return true;
 

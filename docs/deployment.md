@@ -151,6 +151,8 @@ Set the application variables in Vercel and deploy the generated Nitro output. P
 
 The Tauri client is distributed separately. A `v*` tag runs the native-media and desktop workflows and publishes platform installers. The desktop WebView connects to the same application, Supabase, and media-control services as the browser. Desktop builds require a complete prebuilt native media bundle; see [Desktop CI build](native-media/ci-desktop-build.md).
 
+The root `package.json` version is the canonical application release version. Release CI runs `bun run release:sync` so the Tauri configuration, Rust package metadata, and lockfiles carry the same version, then runs `bun run release:check` and rejects a tag unless `v<version>` matches the canonical package version. For local Tauri builds, run `bun run release:sync` after changing the package version. The build and updater manifest are produced from that exact tagged commit.
+
 The application embeds its build commit and checks `/api/update` at startup
 and while a client remains visible and online. The endpoint compares the client and deployed commits with
 `DSPEAK_UPDATE_REPOSITORY` at `DSPEAK_UPDATE_BRANCH`, then reports the commits
