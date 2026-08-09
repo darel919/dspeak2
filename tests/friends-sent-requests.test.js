@@ -18,6 +18,10 @@ const memberListSource = await readFile(
   new URL("../app/components/MemberList.vue", import.meta.url),
   "utf8",
 );
+const routeSource = await readFile(
+  new URL("../server/routes/api/friends/index.js", import.meta.url),
+  "utf8",
+);
 
 test("sending a friend request immediately adds the canonical request to Sent", () => {
   assert.match(
@@ -39,6 +43,22 @@ test("resending an existing outgoing request returns its canonical pending recor
     managerSource,
     /existingFriendship\.status === "pending"[\s\S]{0,700}status: existingFriendship\.status/,
   );
+});
+
+test("declining a request removes the row so it can be sent again", () => {
+  assert.match(
+    managerSource,
+    /if \(accept\)[\s\S]{0,220}else await db\.delete\(friends\)/,
+  );
+  assert.match(
+    managerSource,
+    /existingFriendship\.status === "rejected"[\s\S]{0,140}delete\(friends\)/,
+  );
+});
+
+test("friend response parsing does not treat the string false as acceptance", () => {
+  assert.match(routeSource, /accept === true \|\| accept === "true"/);
+  assert.doesNotMatch(routeSource, /Boolean\(accept\)/);
 });
 
 test("a failed Sent refresh preserves confirmed requests and exposes the error", () => {

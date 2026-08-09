@@ -5,6 +5,7 @@ import {
   chatFiles,
   librarySongs,
   roomImages,
+  roomSoundboards,
   soundboards,
 } from "../../../db/schema/index.js";
 import { deleteObject, listObjects } from "../../../storage/r2.js";
@@ -32,6 +33,16 @@ async function isCommitted(key) {
       .select({ id: soundboards.id })
       .from(soundboards)
       .where(eq(soundboards.audioKey, key))
+      .limit(1),
+    db
+      .select({ id: roomSoundboards.id })
+      .from(roomSoundboards)
+      .where(eq(roomSoundboards.audioKey, key))
+      .limit(1),
+    db
+      .select({ id: roomSoundboards.id })
+      .from(roomSoundboards)
+      .where(eq(roomSoundboards.iconImageKey, key))
       .limit(1),
     db
       .select({ id: librarySongs.id })

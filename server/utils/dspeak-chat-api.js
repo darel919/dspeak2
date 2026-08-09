@@ -15,6 +15,7 @@ import {
   roomNotificationPreferences,
   pushSubscriptions,
   chatFiles,
+  rooms,
 } from "../db/schema/index.js";
 import { getRoomById, getChannelById } from "./room-authorization.js";
 import {
@@ -24,9 +25,12 @@ import {
   normalizeSlowMode,
   slowModeRemainingMs,
 } from "../../shared/channel-policy.js";
-import { messageContainsBroadcastMention } from "../../shared/notification-policy.js";
+import {
+  messageContainsBroadcastMention,
+  notificationModeFromRecord,
+} from "../../shared/notification-policy.js";
 import { cacheUploadedFile, getCachedFile } from "./upload-cache.js";
-import { deleteObject, putObject } from "../storage/r2.js";
+import { createDownloadUrl, deleteObject, putObject } from "../storage/r2.js";
 
 export function createChatApiHandler(dependencies) {
   const {
@@ -80,12 +84,59 @@ export function createChatApiHandler(dependencies) {
       created: message.createdAt,
       updated: message.updatedAt,
       edited_at: null,
-      client_id: null,
-      read_by: [],
-      attachments: parseAttachments(message),
+      client_id: message.clientId || null,
+      read_by: Array.isArray(message.readBy) ? message.readBy : [],
+      attachments: files.map((file) => ({
+        id: file.id,
+        url: `/api/assets/chat-file?id=${encodeURIComponent(file.id)}`,
+        name: file.fileName,
+        size: file.size,
+        mime_type: file.mimeType,
+      })),
       reply_to: message.replyToId || null,
       pinned: false,
     };
+  }
+
+  function presentNotificationPreferences(row) {
+    if (!row)
+      return {
+        mode: "all",
+        push: false,
+        sound: true,
+        previews: true,
+        attenuation_override: { mode: "room", reductionPercent: 65 },
+      };
+    return {
+      ...row,
+      mode: notificationModeFromRecord(row),
+      push: row.push === true,
+      sound: row.sound !== false,
+      previews: row.previews !== false,
+      attenuation_override: { mode: "room", reductionPercent: 65 },
+    };
+  }
+
+  function presentRoomNotificationPreferences(row, roomId) {
+    return row
+      ? {
+          ...row,
+          room: roomId,
+          mode: row.allMessages ? "all" : row.mentions ? "mentions" : "muted",
+          push: null,
+          sound: null,
+        }
+      : { room: roomId, mode: "all", push: null, sound: null };
+  }
+
+  function parseNotificationData(value) {
+    if (!value) return {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
   }
 
   async function validateReplyTarget(replyTo, channelId) {
@@ -190,20 +241,21 @@ export function createChatApiHandler(dependencies) {
         perPage: 100,
         totalItems: items.length,
         totalPages: 1,
-        items: items.map((item) => ({
-          id: item.id,
-          type: item.type,
-          title: item.title || "",
-          body: item.body || "",
-          read_at: item.read ? item.createdAt : null,
-          created: item.createdAt,
-          actor: null,
-          room: null,
-          channel: null,
-          message: item.data
-            ? { id: JSON.parse(item.data).messageId || null }
-            : null,
-        })),
+        items: items.map((item) => {
+          const data = parseNotificationData(item.data);
+          return {
+            id: item.id,
+            type: item.type,
+            title: item.title || "",
+            body: item.body || "",
+            read_at: item.read ? item.createdAt : null,
+            created: item.createdAt,
+            actor: null,
+            room: null,
+            channel: null,
+            message: item.data ? { id: data.messageId || null } : null,
+          };
+        }),
       };
     }
     if (suffix === "notifications/read" && event.method === "POST") {
@@ -299,43 +351,32 @@ export function createChatApiHandler(dependencies) {
         .where(eq(notificationPreferences.userId, userId))
         .limit(1);
       if (event.method === "GET")
-        return (
-          existing[0] || {
-            mode: "all",
-            push: false,
-            sound: true,
-            previews: true,
-            attenuation_override: { mode: "room", reductionPercent: 65 },
-          }
-        );
+        return presentNotificationPreferences(existing[0]);
       if (event.method === "PUT") {
         const data = {
           userId,
-          allMessages: ["all", "mentions", "muted"].includes(body.mode)
-            ? body.mode === "all"
-            : false,
-          mentions: body.mode !== "muted",
+          allMessages: body.mode === "all",
+          mentions: body.mode === "all" || body.mode === "mentions",
+          push: body.push === true,
+          sound: body.sound !== false,
+          previews: body.previews !== false,
         };
-        if (existing[0])
-          await db
-            .update(notificationPreferences)
-            .set(data)
-            .where(eq(notificationPreferences.id, existing[0].id));
-        else await db.insert(notificationPreferences).values(data);
-        return (
-          existing[0] || {
-            id: undefined,
-            userId,
-            mode:
-              body.mode && ["all", "mentions", "muted"].includes(body.mode)
-                ? body.mode
-                : "all",
-            push: Boolean(body.push),
-            sound: body.sound !== false,
-            previews: body.previews !== false,
-            ...data,
-          }
-        );
+        const result = existing[0]
+          ? await db
+              .update(notificationPreferences)
+              .set(data)
+              .where(eq(notificationPreferences.id, existing[0].id))
+          : await db.insert(notificationPreferences).values(data);
+        const updated =
+          result?.[0] ||
+          (
+            await db
+              .select()
+              .from(notificationPreferences)
+              .where(eq(notificationPreferences.userId, userId))
+              .limit(1)
+          )[0];
+        return presentNotificationPreferences(updated);
       }
     }
     if (suffix === "room-notification-preferences") {
@@ -358,9 +399,7 @@ export function createChatApiHandler(dependencies) {
         )
         .limit(1);
       if (event.method === "GET")
-        return (
-          existing[0] || { room: roomId, mode: "all", push: null, sound: null }
-        );
+        return presentRoomNotificationPreferences(existing[0], roomId);
       if (event.method === "PUT") {
         const mode = ["all", "mentions", "muted"].includes(body.mode)
           ? body.mode
@@ -371,13 +410,27 @@ export function createChatApiHandler(dependencies) {
           allMessages: mode === "all",
           mentions: mode === "all" || mode === "mentions",
         };
-        if (existing[0])
-          await db
-            .update(roomNotificationPreferences)
-            .set(data)
-            .where(eq(roomNotificationPreferences.id, existing[0].id));
-        else await db.insert(roomNotificationPreferences).values(data);
-        return existing[0] || { room: roomId, mode, push: null, sound: null };
+        const result = existing[0]
+          ? await db
+              .update(roomNotificationPreferences)
+              .set(data)
+              .where(eq(roomNotificationPreferences.id, existing[0].id))
+          : await db.insert(roomNotificationPreferences).values(data);
+        const updated =
+          result?.[0] ||
+          (
+            await db
+              .select()
+              .from(roomNotificationPreferences)
+              .where(
+                and(
+                  eq(roomNotificationPreferences.roomId, roomId),
+                  eq(roomNotificationPreferences.userId, userId),
+                ),
+              )
+              .limit(1)
+          )[0];
+        return presentRoomNotificationPreferences(updated, roomId);
       }
     }
     throw createError({
@@ -488,7 +541,7 @@ export function createChatApiHandler(dependencies) {
           statusCode: 400,
           statusMessage: "Message content or an image is required",
         });
-      if (!hasContent || body.content.length > 4000)
+      if (hasContent && body.content.length > 4000)
         throw createError({
           statusCode: 400,
           statusMessage: "Message content must be at most 4000 characters",
@@ -530,7 +583,7 @@ export function createChatApiHandler(dependencies) {
           statusMessage: "Cannot send text messages to a media channel",
         });
       const canSend = canSendInChannel({
-        channelPolicy: normalizeChannelPolicy(channel.type),
+        channelPolicy: normalizeChannelPolicy(channel.policy),
         isModeratorOrAbove:
           access.isOwner || access.permissions?.includes("message.moderate"),
         hasSendPermission: access.permissions?.includes("message.send"),
@@ -603,7 +656,7 @@ export function createChatApiHandler(dependencies) {
           authorId: userId,
           content,
           replyToId: replyTo,
-          clientId: null,
+          clientId,
         })
         .onConflictDoNothing()
         .returning();
@@ -621,7 +674,13 @@ export function createChatApiHandler(dependencies) {
             await db
               .select()
               .from(messages)
-              .where(eq(messages.channelId, channel.id))
+              .where(
+                and(
+                  eq(messages.channelId, channel.id),
+                  eq(messages.authorId, userId),
+                  eq(messages.clientId, clientId),
+                ),
+              )
               .orderBy(desc(messages.createdAt))
               .limit(1)
               .then((r) => r[0]),
@@ -722,6 +781,7 @@ export function createChatApiHandler(dependencies) {
           messageId: target.id,
           content: nextContent,
           editedAt,
+          editorId: userId,
         });
         const updated = await db
           .update(messages)
@@ -813,6 +873,16 @@ export function createChatApiHandler(dependencies) {
             continue;
           }
           await requireRoomMember(room, userId);
+          await db
+            .update(messages)
+            .set({
+              readBy: sql`CASE
+                WHEN COALESCE(${messages.readBy}, '[]'::jsonb) ? ${userId}
+                  THEN COALESCE(${messages.readBy}, '[]'::jsonb)
+                ELSE COALESCE(${messages.readBy}, '[]'::jsonb) || jsonb_build_array(${userId})
+              END`,
+            })
+            .where(eq(messages.id, messageId));
           results.push({ messageId, status: "marked_as_read" });
         } catch (error) {
           results.push({
@@ -1430,11 +1500,13 @@ export function createChatApiHandler(dependencies) {
       );
       if (!searchQ && !hasFilters) return { messages: [], total: 0 };
       const conditions = [eq(messages.channelId, channelId)];
+      if (query.has === "attachment")
+        conditions.push(
+          sql`exists (select 1 from chat_files f where f.message_id = ${messages.id})`,
+        );
+      if (query.has === "link")
+        conditions.push(sql`${messages.content} ~* ${"(https?://|www\\.)"}`);
       if (searchQ) {
-        if (query.has === "attachment")
-          conditions.push(
-            sql`exists (select 1 from chat_files f where f.message_id = ${messages.id})`,
-          );
         conditions.push(ilike(messages.content, `%${searchQ}%`));
       }
       if (query.author) {
@@ -1451,7 +1523,7 @@ export function createChatApiHandler(dependencies) {
         if (!Number.isFinite(timestamp))
           throw createError({
             statusCode: 400,
-            statusMessage: `Invalid ${name} date`,
+            statusMessage: "Invalid before date",
           });
         conditions.push(lt(messages.createdAt, new Date(timestamp)));
       }

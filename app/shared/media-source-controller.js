@@ -47,6 +47,18 @@ export function createMediaSourceController({
         `[Media] Video adaptation failed: ${adaptationError?.message || adaptationError}`,
       ),
   });
+  function removeSfuSource(source) {
+    const reportError = (sourceError) => {
+      if (sourceError?.code === "MEDIA_SESSION_CLOSED") return;
+      error.value =
+        sourceError?.message || `Unable to stop ${source} publication`;
+    };
+    try {
+      Promise.resolve(getSfu()?.removeSource(source)).catch(reportError);
+    } catch (sourceError) {
+      reportError(sourceError);
+    }
+  }
   async function publishSource(sourceEntry) {
     const entry =
       sourceEntry.source === "screen-audio"
@@ -113,7 +125,7 @@ export function createMediaSourceController({
         ]);
       } else {
         await Promise.allSettled([getP2pMesh()?.unpublishSource(entry.source)]);
-        getSfu()?.removeSource(entry.source);
+        removeSfuSource(entry.source);
         if (entry.source === "screen-audio") stopSharedAudioMeter();
       }
       if (
@@ -179,7 +191,7 @@ export function createMediaSourceController({
         error.value =
           sourceError?.message || `Unable to stop ${entry.source} publication`;
       });
-    getSfu()?.removeSource(entry.source);
+    removeSfuSource(entry.source);
     localVideoFeeds.value.delete(entry.source);
     localVideoFeeds.value = new Map(localVideoFeeds.value);
     if (entry.source === "screen") adaptiveVideo.stop();

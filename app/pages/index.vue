@@ -1,21 +1,20 @@
 <template>
   <section
     v-if="!isAuthenticated"
-    class="metro-standalone min-h-screen bg-base-100 px-6 py-16 sm:px-12 lg:px-20"
+    class="metro-standalone min-h-screen bg-base-100"
+    style="padding: clamp(1.5rem, 4vw, 3rem)"
   >
-    <div class="mx-auto flex min-h-[70dvh] max-w-6xl items-center">
+    <div class="metro-page-content flex min-h-[70dvh] items-center">
       <div class="max-w-3xl">
         <p class="mb-4 text-sm font-semibold text-primary">dSpeak</p>
-        <h1 class="metro-title max-w-2xl text-5xl sm:text-7xl">
+        <h1 class="metro-title max-w-2xl">
           Conversation, without the clutter.
         </h1>
-        <p
-          class="mt-8 max-w-xl text-lg leading-relaxed text-base-content/70 sm:text-xl"
-        >
+        <p class="metro-description mt-8 text-lg">
           Step into a room, find your people, and move naturally between
           messages, voice, and video.
         </p>
-        <NuxtLink to="/auth" class="btn btn-primary btn-lg mt-10">
+        <NuxtLink to="/auth" class="metro-btn mt-10 inline-flex">
           Sign in to dSpeak
           <Icon name="lucide:arrow-right" class="size-5" aria-hidden="true" />
         </NuxtLink>
@@ -90,9 +89,7 @@
               </div>
             </div>
             <main v-else class="home-workspace flex-1 overflow-y-auto">
-              <div
-                class="mx-auto w-full max-w-7xl px-8 py-12 lg:px-16 lg:py-16"
-              >
+              <div class="metro-page-content py-12 lg:py-16">
                 <header class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
                   <div>
                     <p class="mb-3 text-sm font-semibold text-primary">
@@ -131,7 +128,7 @@
                     </div>
                     <NuxtLink
                       to="/room/create"
-                      class="metro-transition hidden min-h-11 items-center gap-2 px-3 text-sm font-semibold text-primary hover:bg-base-200 sm:flex"
+                      class="metro-btn metro-btn--secondary hidden min-h-11 items-center gap-2 px-3 text-sm font-semibold sm:flex"
                     >
                       Create a room
                       <Icon
@@ -152,13 +149,13 @@
                       :key="index"
                       class="h-44 bg-base-200 p-6"
                     >
-                      <div class="metro-skeleton size-12"></div>
-                      <div class="metro-skeleton mt-7 h-5 w-2/3"></div>
+                      <div class="metro-skeleton size-12" />
+                      <div class="metro-skeleton mt-7 h-5 w-2/3" />
                     </div>
                   </div>
                   <div
                     v-else-if="roomsStore.error && !roomsStore.rooms.length"
-                    class="metro-status border-error bg-error/5 text-error"
+                    class="metro-status metro-status--error"
                     role="alert"
                   >
                     <Icon
@@ -175,7 +172,7 @@
                       </p>
                       <button
                         type="button"
-                        class="btn btn-sm mt-4"
+                        class="metro-btn mt-4"
                         @click="roomsStore.fetchRooms()"
                       >
                         Try again
@@ -463,3 +460,120 @@ watch(
   { immediate: true },
 );
 </script>
+
+<style scoped>
+.home-workspace {
+  background: var(--color-base-100);
+}
+
+.home-room-grid {
+  display: grid;
+  gap: 1px;
+  background: var(--color-base-300);
+}
+
+@media (min-width: 640px) {
+  .home-room-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .home-room-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.home-room-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 11rem;
+  padding: 1.5rem;
+  background: var(--color-base-200);
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+.home-room-tile:hover {
+  background: var(--color-base-300);
+}
+
+.home-room-tile:focus-visible {
+  outline: 2px solid var(--metro-accent);
+  outline-offset: -2px;
+}
+
+.metro-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--metro-space-2);
+  min-height: var(--metro-control-size);
+  padding: 0 var(--metro-space-4);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--metro-accent);
+  color: var(--metro-accent-content);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  transition:
+    background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1),
+    opacity 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+  text-decoration: none;
+}
+
+.metro-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.metro-btn:active:not(:disabled) {
+  opacity: 1;
+  transform: scale(0.98);
+}
+
+.metro-btn:focus-visible {
+  outline: 2px solid var(--metro-accent);
+  outline-offset: 2px;
+}
+
+.metro-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.metro-btn--secondary {
+  background: transparent;
+  color: var(--color-primary);
+}
+
+.metro-btn--secondary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-primary) 10%, transparent);
+}
+
+.metro-status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--metro-space-3);
+  padding: var(--metro-space-3) var(--metro-space-4);
+  border: 1px solid var(--metro-border);
+  background: var(--color-base-100);
+}
+
+.metro-status--error {
+  border-color: var(--color-error);
+  background: color-mix(in oklab, var(--color-error) 8%, var(--color-base-100));
+  color: var(--color-error-content);
+}
+
+.metro-skeleton {
+  background: color-mix(
+    in oklab,
+    var(--color-base-content) 12%,
+    var(--color-base-100)
+  );
+}
+</style>

@@ -146,10 +146,16 @@ export class NotificationRepository {
       .where(eq(pushSubscriptions.userId, userId));
   }
 
-  async createPushJob({ subscriptionId, payload, scheduledFor }) {
+  async createPushJob({ subscriptionId, recipientId, payload, scheduledFor }) {
     const result = await db
       .insert(pushJobs)
-      .values({ subscriptionId, payload, scheduledFor, status: "pending" })
+      .values({
+        subscriptionId,
+        recipientId,
+        payload,
+        scheduledFor,
+        status: "pending",
+      })
       .returning();
     return result[0];
   }

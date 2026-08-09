@@ -80,24 +80,22 @@ class NotificationManager {
     }
   }
 
-  showMessageNotification(message, roomName) {
-    try {
-      const userDataRaw = localStorage.getItem("userData");
-      if (userDataRaw) {
-        const userData = JSON.parse(userDataRaw);
-        const senderId =
-          message.sender && typeof message.sender === "object"
-            ? message.sender.id
-            : message.sender;
-        if (userData && userData.id && senderId && senderId === userData.id) {
-          return null;
-        }
+  showMessageNotification(message, roomName, currentUserId) {
+    let storedUserData = null;
+    if (!currentUserId) {
+      try {
+        const userDataRaw = localStorage.getItem("userData");
+        storedUserData = userDataRaw ? JSON.parse(userDataRaw) : null;
+      } catch (e) {
+        console.warn("[NotificationManager] Could not read stored user id:", e);
       }
-    } catch (e) {
-      console.warn(
-        "[NotificationManager] Could not check user id for notification:",
-        e,
-      );
+    }
+
+    const viewerId = currentUserId || storedUserData?.id;
+    const sender = message?.sender;
+    const senderId = sender && typeof sender === "object" ? sender.id : sender;
+    if (viewerId && senderId && String(senderId) === String(viewerId)) {
+      return null;
     }
 
     if (!this.isEnabled) {

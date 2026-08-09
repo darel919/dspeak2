@@ -5,7 +5,7 @@ import {
   roomInvites,
   roomAuditLog,
 } from "../schema/index.js";
-import { eq, and, desc, asc, or } from "drizzle-orm";
+import { eq, and, desc, or, isNull, lt } from "drizzle-orm";
 
 export class SocialRepository {
   async findFriendship(userId, friendId) {
@@ -150,7 +150,7 @@ export class SocialRepository {
     const result = await db
       .update(roomInvites)
       .set({ inviteeId, usedAt: new Date() })
-      .where(and(eq(roomInvites.code, code), eq(roomInvites.usedAt, null)))
+      .where(and(eq(roomInvites.code, code), isNull(roomInvites.usedAt)))
       .returning();
     return result[0];
   }

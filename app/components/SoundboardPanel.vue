@@ -11,7 +11,7 @@
       :class="
         compact
           ? 'voice-dock-button metro-transition'
-          : 'btn btn-sm btn-outline'
+          : 'metro-btn metro-btn--sm btn-outline'
       "
       :data-label="compact ? 'Soundboard' : undefined"
       aria-label="Open soundboard"
@@ -19,7 +19,7 @@
     >
       <Icon name="lucide:audio-lines" class="size-5" />
       <span v-if="!compact">Soundboard</span>
-      <span v-if="!compact" class="badge badge-sm">{{
+      <span v-if="!compact" class="metro-badge metro-badge--sm">{{
         enabledClips.length
       }}</span>
     </button>
@@ -40,9 +40,7 @@
         tabindex="-1"
       >
         <header class="flex items-center gap-3 border-b border-base-300 p-4">
-          <label
-            class="input input-bordered flex flex-1 items-center gap-2 bg-base-100"
-          >
+          <label class="metro-input flex flex-1 items-center gap-2 bg-base-100">
             <Icon name="lucide:search" class="size-5 text-base-content/55" />
             <input
               v-model="search"
@@ -53,7 +51,7 @@
           </label>
           <button
             type="button"
-            class="btn btn-square btn-ghost"
+            class="metro-icon-btn metro-icon-btn--ghost"
             title="Soundboard volume"
             @click="showVolume = !showVolume"
           >
@@ -61,7 +59,7 @@
           </button>
           <button
             type="button"
-            class="btn btn-square btn-ghost"
+            class="metro-icon-btn metro-icon-btn--ghost"
             aria-label="Close soundboard"
             @click="open = false"
           >
@@ -75,7 +73,7 @@
         >
           <span>Room volume</span>
           <input
-            class="range range-primary range-sm flex-1"
+            class="metro-range range-sm flex-1"
             type="range"
             aria-label="Room soundboard volume"
             min="0"
@@ -91,7 +89,7 @@
           <output class="w-12 text-right">{{ roomVolume }}%</output>
           <button
             v-if="hasRoomOverride"
-            class="btn btn-xs btn-ghost"
+            class="metro-btn metro-btn--xs btn-ghost"
             @click="settingsStore.setRoomSoundboardVolume(roomId, null)"
           >
             Use global
@@ -105,7 +103,7 @@
             </h2>
             <button
               type="button"
-              class="btn btn-primary btn-sm"
+              class="metro-btn metro-btn--sm"
               @click="showUpload = true"
             >
               <Icon name="lucide:plus" class="size-4" />Add sound
@@ -113,9 +111,9 @@
           </div>
 
           <div v-if="store.loading" class="py-10 text-center">
-            <span class="loading loading-spinner"></span>
+            <span class="metro-spinner"></span>
           </div>
-          <div v-else-if="store.error" class="alert alert-error">
+          <div v-else-if="store.error" class="metro-status metro-status--error">
             {{ store.error }}
           </div>
           <div v-else-if="groupedClips.length" class="space-y-5">
@@ -150,7 +148,7 @@
                   <button
                     v-if="clip.canManage"
                     type="button"
-                    class="btn btn-square btn-ghost btn-xs mr-2 opacity-70 group-hover:opacity-100"
+                    class="metro-icon-btn metro-icon-btn--ghost btn-xs mr-2 opacity-70 group-hover:opacity-100"
                     :aria-label="`Manage ${clip.title}`"
                     @click="editClip(clip)"
                   >
@@ -187,7 +185,7 @@
           ><span>Sound name</span
           ><input
             v-model="editing.title"
-            class="input input-bordered"
+            class="metro-input"
             maxlength="48"
             required
         /></label>
@@ -195,7 +193,7 @@
           ><span>Category</span
           ><input
             v-model="editing.category"
-            class="input input-bordered"
+            class="metro-input"
             maxlength="32"
             required
         /></label>
@@ -203,7 +201,7 @@
           ><span>Emoji</span
           ><input
             v-model="editing.icon"
-            class="input input-bordered"
+            class="metro-input"
             maxlength="16"
             :placeholder="
               editing.hasIconImage
@@ -214,7 +212,7 @@
         <label class="grid gap-1 text-sm"
           ><span>Replace icon image</span
           ><input
-            class="file-input file-input-bordered"
+            class="metro-input"
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif"
             @change="editingIconImage = $event.target.files?.[0] || null"
@@ -224,18 +222,22 @@
           ><input
             v-model="editing.enabled"
             type="checkbox"
-            class="toggle toggle-primary"
+            class="metro-toggle"
         /></label>
         <p class="text-xs text-base-content/55">
           Uploaded by {{ editing.uploader?.name || "Room member" }}
         </p>
         <div class="flex gap-2">
-          <button class="btn btn-primary">Save</button
-          ><button type="button" class="btn btn-ghost" @click="editing = null">
+          <button class="metro-btn">Save</button
+          ><button
+            type="button"
+            class="metro-btn metro-btn--ghost"
+            @click="editing = null"
+          >
             Cancel</button
           ><button
             type="button"
-            class="btn btn-error btn-outline ml-auto"
+            class="metro-btn metro-btn--error btn-outline ml-auto"
             @click="removeEditing"
           >
             Delete

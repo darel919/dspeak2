@@ -1,3 +1,5 @@
+import { closeMediaProviderSafely } from "./media-session-cleanup.js";
+
 export function setupMediaMessageHandlers({
   getHeartbeatSequence,
   getLastHeartbeatAckSequence,
@@ -97,9 +99,7 @@ export function setupMediaMessageHandlers({
       };
   });
   registerHandler("server-shutdown", () => {
-    try {
-      getSfu()?.close();
-    } catch {}
+    void closeMediaProviderSafely(getSfu(), "SFU");
     getSocket()?.close();
   });
   for (const type of [

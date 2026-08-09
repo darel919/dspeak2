@@ -1,9 +1,10 @@
-import { validateRuntimeEnvironment } from "../utils/env-validation";
+import { validateRuntimeEnvironment } from "../utils/env-validation.js";
 import {
   startPushDispatcher,
   stopPushDispatcher,
-} from "../utils/push-delivery";
-import { terminateFailedStartup } from "../utils/startup-failure";
+} from "../utils/push-delivery.js";
+import { terminateFailedStartup } from "../utils/startup-failure.js";
+import { isPersistentEnvironment } from "../../shared/runtime-mode.js";
 
 export default defineNitroPlugin(async (nitroApp) => {
   if (
@@ -13,7 +14,9 @@ export default defineNitroPlugin(async (nitroApp) => {
     return;
   try {
     await validateRuntimeEnvironment();
-    startPushDispatcher();
+    if (isPersistentEnvironment()) {
+      startPushDispatcher();
+    }
     nitroApp.hooks.hook("close", () => {
       stopPushDispatcher();
     });

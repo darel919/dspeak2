@@ -41,6 +41,15 @@ USING (
       AND substring(topic FROM 8) = auth.uid()::text
     )
     OR (
+      topic LIKE 'room:%'
+      AND EXISTS (
+        SELECT 1
+        FROM public.room_memberships rm
+        WHERE rm.room_id::text = substring(topic FROM 6)
+          AND rm.user_id = auth.uid()
+      )
+    )
+    OR (
       topic LIKE 'chat:%'
       AND EXISTS (
         SELECT 1

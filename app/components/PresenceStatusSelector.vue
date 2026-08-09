@@ -104,7 +104,7 @@
         </p>
         <input
           id="presence-idle-timeout"
-          class="range range-primary mt-3 w-full"
+          class="metro-range mt-3 w-full"
           type="range"
           min="60"
           max="3600"

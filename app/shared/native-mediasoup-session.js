@@ -1164,18 +1164,22 @@ export class NativeMediasoupSfuSession {
       !sendRequired || this.transportStates.get("send") === "connected";
     const receiveConnected =
       !receiveRequired || this.transportStates.get("recv") === "connected";
+    const mediaReady = sendConnected && receiveConnected;
     return {
-      ready: Boolean(this.sendTransport && this.recvTransport),
+      ready:
+        this.connected &&
+        Boolean(this.sendTransport && this.recvTransport) &&
+        mediaReady,
       sendRequired,
       receiveRequired,
       send: this.transportStates.get("send") || "new",
       recv: this.transportStates.get("recv") || "new",
-      mediaReady: sendConnected && receiveConnected,
+      mediaReady,
     };
   }
 
   get joinReady() {
-    return this.connected && Boolean(this.sendTransport && this.recvTransport);
+    return this.connectionState().ready;
   }
 
   get transportReady() {

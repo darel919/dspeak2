@@ -1,7 +1,7 @@
 <template>
-  <div v-if="isSupported && showStatus" class="alert alert-info">
+  <div v-if="isSupported && showStatus" class="metro-status metro-status--info">
     <div class="flex items-center gap-2">
-      <div v-if="loading" class="loading loading-spinner loading-sm"></div>
+      <div v-if="loading" class="metro-spinner metro-spinner--sm"></div>
       <Icon name="lucide:bell" v-else class="h-5 w-5" />
 
       <div class="flex-1">
@@ -17,7 +17,7 @@
         <button
           v-if="!isSubscribed && !loading"
           @click="handleSubscribe"
-          class="btn btn-sm btn-primary"
+          class="metro-btn metro-btn--sm btn-primary"
         >
           Enable Push
         </button>
@@ -25,14 +25,14 @@
         <button
           v-if="isSubscribed && !loading"
           @click="handleUnsubscribe"
-          class="btn btn-sm btn-outline"
+          class="metro-btn metro-btn--sm btn-outline"
         >
           Disable Push
         </button>
 
         <button
           @click="showStatus = false"
-          class="btn btn-sm btn-ghost btn-square"
+          class="metro-btn metro-btn--sm btn-ghost btn-square"
           aria-label="Dismiss push notification status"
         >
           <Icon name="lucide:x" class="h-4 w-4" />

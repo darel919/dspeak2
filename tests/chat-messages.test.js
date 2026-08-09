@@ -178,7 +178,10 @@ test("chat messages preserve attachment and thread metadata end to end", () => {
     "utf8",
   );
 
-  assert.match(api, /attachments: parseAttachments\(message\),\s+reply_to:/);
+  assert.match(
+    api,
+    /attachments: files\.map\(\(file\) => \(\{[\s\S]*?reply_to:/,
+  );
   assert.match(api, /const hasContent = typeof body\.content === "string"/);
   assert.match(api, /validateMessageAttachments\(/);
   assert.match(api, /validateReplyTarget\(/);
@@ -480,7 +483,7 @@ test("message images and thread layout remain keyboard and reflow accessible", (
     message,
     /<button[\s\S]*?:aria-label="`Open image: \$\{att\.name/,
   );
-  assert.match(message, /object-contain/);
+  assert.match(message, /metro-message-attachment-img/);
   assert.match(sidebar, /fixed inset-0[\s\S]*?md:static/);
   assert.match(window, /flex-1 min-w-0 flex flex-col/);
 });
@@ -491,9 +494,9 @@ test("message reactions and thread link share one compact footer row", () => {
     "utf8",
   );
 
-  assert.match(message, /class="chat-footer message-engagement"/);
-  assert.match(message, /class="message-reactions/);
-  assert.match(message, /class="message-thread-link/);
+  assert.match(message, /class="metro-message-engagement"/);
+  assert.match(message, /class="metro-message-engagement[\s\S]*?metro-react/);
+  assert.match(message, /class="metro-thread-link/);
   assert.doesNotMatch(message, /class="chat-footer mt-1 flex flex-wrap gap-1"/);
   assert.doesNotMatch(message, /class="chat-footer mt-1 flex min-h-11/);
 });

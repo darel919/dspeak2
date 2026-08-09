@@ -192,20 +192,28 @@ it raises the GitHub API quota for private or high-traffic deployments.
 
 ## Operational endpoints
 
-| Path                   | Purpose                                          |
-| ---------------------- | ------------------------------------------------ |
-| `/health`              | Application health                               |
-| `/metrics`             | Bearer-protected Prometheus metrics              |
-| `/api/update`          | Public commit and pending-change comparison      |
-| `/api/media/bootstrap` | Media join bootstrap (issues short-lived ticket) |
-| `/api/files/prepare`   | Prepare direct-to-R2 upload                      |
-| `/api/files/commit`    | Commit upload, record metadata                   |
-| `/api/presence`        | Presence WebSocket (Supabase Realtime)           |
-| `/api/chat/socket`     | Realtime chat WebSocket (Supabase Realtime)      |
-| `/api/room/*`          | Room management                                  |
-| `/api/channel/*`       | Text and media channels                          |
-| `/api/chat/*`          | Messages, read state, push subscriptions         |
-| `/api/soundboard/*`    | Protected room soundboard operations and media   |
+| Path                   | Purpose                                             |
+| ---------------------- | --------------------------------------------------- |
+| `/health`              | Application health                                  |
+| `/metrics`             | Bearer-protected Prometheus metrics                 |
+| `/api/update`          | Public commit and pending-change comparison         |
+| `/api/media/bootstrap` | Media join bootstrap (issues short-lived ticket)    |
+| `/api/files/prepare`   | Prepare direct-to-R2 upload                         |
+| `/api/files/commit`    | Commit upload, record metadata                      |
+| `/api/presence`        | Presence status snapshot, update, activity, offline |
+| `/api/chat/*`          | Messages, read state, push subscriptions            |
+| `/api/room/*`          | Room management                                     |
+| `/api/channel/*`       | Text and media channels                             |
+| `/api/soundboard/*`    | Protected room soundboard operations and media      |
+
+Realtime application events (chat messages, presence, voice presence, room and
+profile updates, notifications) are delivered over Supabase Realtime, not Nitro
+WebSockets. Clients subscribe to reserved topics `global`, `chat:<channelId>`,
+`room:<roomId>`, and `notify:<userId>` with their Supabase access token; the
+server publishes with the service role. Client writes are limited to the
+`chat:%` topic by row-level security. Presence status and channel join/leave
+are persisted through the `/api/presence` and `/api/channel/join|leave`
+endpoints.
 
 Media control WebSocket: `wss://media-control.example.com/media-control/<channelId>` (per-channel Durable Object)
 

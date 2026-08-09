@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="chatStore.offline"
-    class="alert border border-info/25 bg-info/10 text-base-content"
+    class="metro-status metro-status--info border border-info/25 bg-info/10 text-base-content"
     role="status"
     aria-live="polite"
   >

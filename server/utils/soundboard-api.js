@@ -8,21 +8,21 @@ import {
 import { isActiveVoiceParticipant } from "./media-control-admin.js";
 import { broadcastToChannel } from "./dspeak-realtime.js";
 import { db } from "../db/client.js";
-import {
-  rooms,
-  channels,
-  roomSoundboards,
-  roomMemberships,
-  roomRoles,
-  membershipRoles,
-} from "../db/schema/index.js";
-import { eq, and, desc, asc, inArray } from "drizzle-orm";
+import { channels, roomSoundboards } from "../db/schema/index.js";
+import { eq, and, asc, inArray } from "drizzle-orm";
 import {
   convertSoundboardIcon,
   convertSoundboardSource,
 } from "./soundboard-conversion.js";
 import { requireAuthenticatedUser } from "./auth.js";
 import { enforceRateLimit } from "./rate-limit.js";
+import { putObject } from "../storage/r2.js";
+import {
+  getRoomAccess,
+  getRoomById,
+  requireRoomMember,
+  requireRoomPermission,
+} from "./room-authorization.js";
 
 const uploadLocks = new Map();
 
@@ -39,78 +39,23 @@ function withRoomUploadLock(roomId, operation) {
   });
 }
 
-async function getRoomAccess(roomId, userId) {
-  const room = await db
-    .select()
-    .from(rooms)
-    .where(eq(rooms.id, roomId))
-    .limit(1);
-  if (!room[0]) {
-    throw createError({
-      statusCode: 404,
-      statusMessage: "Room not found",
-    });
-  }
-
-  const isOwner = String(room[0].ownerId) === String(userId);
-
-  const membership = await db
-    .select({
-      id: roomMemberships.id,
-      userId: roomMemberships.userId,
-      roomId: roomMemberships.roomId,
-      roleId: membershipRoles.roleId,
-      roleName: roomRoles.name,
-      roleColor: roomRoles.color,
-      rolePosition: roomRoles.position,
-      rolePermissions: roomRoles.permissions,
-      roleSystem: roomRoles.system,
-      roleIsDefault: roomRoles.isDefault,
-    })
-    .from(roomMemberships)
-    .leftJoin(
-      membershipRoles,
-      eq(membershipRoles.membershipId, roomMemberships.id),
-    )
-    .leftJoin(roomRoles, eq(roomRoles.id, membershipRoles.roleId))
-    .where(
-      and(
-        eq(roomMemberships.roomId, roomId),
-        eq(roomMemberships.userId, userId),
-      ),
-    );
-
-  const roles = membership
-    .filter((m) => m.roleId)
-    .map((m) => ({
-      id: m.roleId,
-      name: m.roleName,
-      color: m.roleColor,
-      position: m.rolePosition,
-      permissions: m.rolePermissions,
-      system: m.roleSystem,
-      isDefault: m.roleIsDefault,
-    }));
-
-  const { getEffectivePermissions } =
-    await import("../../shared/room-policy.js");
-  const permissions = getEffectivePermissions(roles, isOwner);
-
-  return { room: room[0], permissions, isOwner };
-}
-
 async function context(roomId, userId, permission = null) {
   if (!roomId)
     throw createError({
       statusCode: 400,
       statusMessage: "Room ID is required",
     });
-  const { room, permissions } = await getRoomAccess(roomId, userId);
-  if (permission && !permissions.includes(permission))
+  const room = await getRoomById(roomId);
+  if (!room)
     throw createError({
-      statusCode: 403,
-      statusMessage: `Missing room permission: ${permission}`,
+      statusCode: 404,
+      statusMessage: "Room not found",
     });
+  if (permission) {
+    await requireRoomPermission(room, userId, permission);
+  } else {
+    await requireRoomMember(room, userId);
+  }
   return room;
 }
 
@@ -134,8 +79,8 @@ async function clipContext(clipId, userId, permission = null) {
   return { clip: clip[0], room };
 }
 
-async function requireClipManager(clip, userId) {
-  const { permissions } = await getRoomAccess(clip.roomId, userId);
+async function requireClipManager(clip, room, userId) {
+  const { permissions } = await getRoomAccess(room, userId);
   if (!canManageSoundboardClip(clip, userId, permissions))
     throw createError({
       statusCode: 403,
@@ -146,7 +91,7 @@ async function requireClipManager(clip, userId) {
 
 async function listClips(roomId, userId) {
   const room = await context(roomId, userId);
-  const { permissions } = await getRoomAccess(roomId, userId);
+  const { permissions } = await getRoomAccess(room, userId);
   const canManageRoom = permissions.includes("room.manage_soundboard");
   const records = await db
     .select()
@@ -166,7 +111,7 @@ async function listClips(roomId, userId) {
 async function uploadClip(event, userId) {
   const form = await readFormData(event);
   const roomId = String(form.get("roomId") || "");
-  await context(roomId, userId);
+  await context(roomId, userId, "room.manage_soundboard");
   const source = form.get("media");
   const iconImage = form.get("iconImage");
   const metadata = normalizeSoundboardMetadata(
@@ -202,20 +147,37 @@ async function uploadClip(event, userId) {
         ? await convertSoundboardIcon(iconImage)
         : null;
 
+    const audioKey = `soundboards/${roomId}/${crypto.randomUUID()}.ogg`;
+    await putObject(
+      audioKey,
+      converted.bytes,
+      "audio/ogg",
+      converted.bytes.length,
+    );
+    const iconImageKey = convertedIcon
+      ? `soundboards/${roomId}/icons/${crypto.randomUUID()}.ico`
+      : null;
+    if (convertedIcon)
+      await putObject(
+        iconImageKey,
+        convertedIcon,
+        "image/x-icon",
+        convertedIcon.length,
+      );
+
     const result = await db
       .insert(roomSoundboards)
       .values({
         roomId,
-        uploaderId: userId,
-        title: metadata.title,
+        name: metadata.title,
+        audioKey,
         category: metadata.category,
         icon: metadata.icon,
-        iconImageKey: convertedIcon
-          ? `soundboards/${roomId}/icons/${crypto.randomUUID()}.ico`
-          : null,
+        iconImageKey,
         duration: converted.duration,
         displayOrder: existing.length,
-        enabled: true,
+        enabled: metadata.enabled,
+        createdById: userId,
       })
       .returning();
 
@@ -231,7 +193,12 @@ async function broadcastLibraryUpdate(roomId) {
   const mediaChannels = await db
     .select({ id: channels.id })
     .from(channels)
-    .where(and(eq(channels.roomId, roomId), eq(channels.isMedia, true)));
+    .where(
+      and(
+        eq(channels.roomId, roomId),
+        inArray(channels.type, ["voice", "stage"]),
+      ),
+    );
 
   await Promise.all(
     mediaChannels.map((channel) =>
@@ -247,12 +214,12 @@ async function updateClip(event, userId) {
   const body = contentType.includes("multipart/form-data")
     ? Object.fromEntries((await readFormData(event)).entries())
     : (await readBody(event)) || {};
-  const { clip } = await clipContext(body.id, userId);
-  await requireClipManager(clip, userId);
+  const { clip, room } = await clipContext(body.id, userId);
+  await requireClipManager(clip, room, userId);
   const update = {};
   if (body.title !== undefined) {
-    update.title = normalizeSoundboardText(body.title, 48);
-    if (!update.title)
+    update.name = normalizeSoundboardText(body.title, 48);
+    if (!update.name)
       throw createError({
         statusCode: 400,
         statusMessage: "Clip title is required",
@@ -284,11 +251,17 @@ async function updateClip(event, userId) {
 
   if (convertedIcon) {
     update.iconImageKey = `soundboards/${clip.roomId}/icons/${crypto.randomUUID()}.ico`;
+    await putObject(
+      update.iconImageKey,
+      convertedIcon,
+      "image/x-icon",
+      convertedIcon.length,
+    );
   }
 
   const result = await db
     .update(roomSoundboards)
-    .set({ ...update, updatedAt: new Date() })
+    .set(update)
     .where(eq(roomSoundboards.id, clip.id))
     .returning();
 
@@ -299,8 +272,8 @@ async function updateClip(event, userId) {
 }
 
 async function deleteClip(userId, clipId) {
-  const { clip } = await clipContext(clipId, userId);
-  await requireClipManager(clip, userId);
+  const { clip, room } = await clipContext(clipId, userId);
+  await requireClipManager(clip, room, userId);
   await db.delete(roomSoundboards).where(eq(roomSoundboards.id, clip.id));
   await broadcastLibraryUpdate(clip.roomId);
   return { success: true };
@@ -308,13 +281,13 @@ async function deleteClip(userId, clipId) {
 
 async function media(event, userId, clipId) {
   const { clip } = await clipContext(clipId, userId);
-  if (!clip.mediaKey)
+  if (!clip.audioKey)
     throw createError({
       statusCode: 404,
       statusMessage: "Soundboard media not found",
     });
   const { createDownloadUrl } = await import("../storage/r2.js");
-  const url = await createDownloadUrl(clip.mediaKey);
+  const url = await createDownloadUrl(clip.audioKey);
   return sendRedirect(event, url, 302);
 }
 
@@ -348,7 +321,10 @@ async function trigger(userId, body) {
       statusCode: 404,
       statusMessage: "Channel not found",
     });
-  if (!channel[0].isMedia || String(channel[0].roomId) !== String(clip.roomId))
+  if (
+    !["voice", "stage"].includes(channel[0].type) ||
+    String(channel[0].roomId) !== String(clip.roomId)
+  )
     throw createError({
       statusCode: 403,
       statusMessage:
@@ -362,7 +338,7 @@ async function trigger(userId, body) {
   await broadcastVoiceChannelEvent(channelId, "soundboard-triggered", {
     activityId: crypto.randomUUID(),
     clipId: clip.id,
-    clipTitle: clip.title,
+    clipTitle: clip.name,
     clipIcon: clip.icon || "🔊",
     duration: Number(clip.duration) || 0,
     roomId: String(clip.roomId),

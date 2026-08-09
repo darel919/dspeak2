@@ -23,7 +23,7 @@
             </h2>
           </div>
           <button
-            class="btn btn-ghost btn-square btn-sm"
+            class="metro-icon-btn metro-icon-btn--ghost btn-sm"
             aria-label="Close"
             @click="close"
           >
@@ -44,10 +44,7 @@
           </p>
           <label class="grid gap-2">
             <span class="font-medium">Link expires in</span>
-            <select
-              v-model.number="expirySeconds"
-              class="select select-bordered w-full"
-            >
+            <select v-model.number="expirySeconds" class="metro-select w-full">
               <option
                 v-for="option in INVITE_EXPIRY_OPTIONS"
                 :key="option.seconds"
@@ -61,24 +58,28 @@
             <span class="font-medium">Invite link</span>
             <div class="flex gap-2">
               <input
-                class="input input-bordered min-w-0 flex-1"
+                class="metro-input min-w-0 flex-1"
                 readonly
                 aria-label="Generated invite link"
                 :value="generatedLink"
               />
-              <button type="button" class="btn btn-primary" @click="copyLink">
+              <button type="button" class="metro-btn" @click="copyLink">
                 Copy
               </button>
             </div>
           </div>
           <p v-if="failure" class="text-sm text-error">{{ failure }}</p>
           <div class="flex justify-end gap-2">
-            <button type="button" class="btn btn-ghost" @click="close">
+            <button
+              type="button"
+              class="metro-btn metro-btn--ghost"
+              @click="close"
+            >
               Close
             </button>
             <button
               v-if="!generatedLink"
-              class="btn btn-primary"
+              class="metro-btn"
               :disabled="creating"
             >
               {{ creating ? "Creating…" : "Create link" }}

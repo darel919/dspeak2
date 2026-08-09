@@ -31,9 +31,9 @@ test("the application error surface owns invalid and unauthorized links", () => 
   assert.match(errorPage, /clearError\(\{ redirect: "\/" \}\)/);
 });
 
-test("global navigation errors can tear down an opening presence socket", () => {
-  assert.match(presence, /const socket = new WebSocket\(wsUrl\)/);
-  assert.match(presence, /socket\.onerror/);
-  assert.match(presence, /socket\.close\(\)/);
-  assert.doesNotMatch(presence, /ws\.onerror[\s\S]*ws\.close\(\)/);
+test("global presence channel teardown is idempotent and owned by the composable scope", () => {
+  assert.match(presence, /openRealtimeChannel\("global"/);
+  assert.match(presence, /closeChannel/);
+  assert.match(presence, /onScopeDispose\(\(\) => \{/);
+  assert.doesNotMatch(presence, /new WebSocket/);
 });

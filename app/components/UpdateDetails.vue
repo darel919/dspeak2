@@ -16,7 +16,7 @@
         Package v{{ packageUpdate.version || "latest" }} is ready to install.
       </p>
       <button
-        class="link link-info text-xs"
+        class="metro-link text-xs"
         type="button"
         :aria-expanded="expanded"
         @click="expanded = !expanded"

@@ -28,8 +28,8 @@
         <div class="flex shrink-0 flex-wrap justify-end gap-2">
           <button
             v-if="issue.canReset"
-            class="btn btn-sm"
-            :class="resetConfirmation ? 'btn-error' : 'btn-ghost'"
+            class="metro-btn metro-btn--sm"
+            :class="resetConfirmation ? 'metro-btn--error' : 'metro-btn--ghost'"
             :disabled="working"
             @click="handleReset"
           >
@@ -37,21 +37,18 @@
           </button>
           <button
             v-if="issue.severity !== 'fatal'"
-            class="btn btn-sm btn-ghost"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             :disabled="working"
             @click="dismiss"
           >
             Continue online
           </button>
           <button
-            class="btn btn-sm btn-primary"
+            class="metro-btn metro-btn--sm btn-primary"
             :disabled="working"
             @click="refresh"
           >
-            <span
-              v-if="working"
-              class="loading loading-spinner loading-xs"
-            ></span>
+            <span v-if="working" class="metro-spinner metro-spinner--xs"></span>
             Refresh
           </button>
         </div>

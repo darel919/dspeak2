@@ -49,7 +49,7 @@
         </div>
         <button
           type="button"
-          class="btn btn-sm btn-outline"
+          class="metro-btn metro-btn--sm btn-outline"
           @click="enablePreview"
         >
           Show preview
@@ -68,7 +68,7 @@
         </div>
         <button
           type="button"
-          class="btn btn-primary btn-sm"
+          class="metro-btn metro-btn--sm"
           @click="$emit('start-receiving')"
         >
           Start screen share
@@ -101,7 +101,7 @@
       <button
         v-if="isFullscreen"
         type="button"
-        class="btn btn-circle btn-sm absolute right-3 top-3 border-white/30 bg-black/70 text-white hover:bg-black/90"
+        class="metro-btn metro-btn--circle btn-sm absolute right-3 top-3 border-white/30 bg-black/70 text-white hover:bg-black/90"
         title="Exit fullscreen"
         aria-label="Exit fullscreen"
         @click.stop="exitFullscreen"
@@ -111,7 +111,7 @@
       <button
         v-if="source === 'screen' && !local && receiving && !isFullscreen"
         type="button"
-        class="btn btn-sm absolute right-3 top-3 bg-black/70 text-white hover:bg-black/90"
+        class="metro-btn metro-btn--sm absolute right-3 top-3 bg-black/70 text-white hover:bg-black/90"
         @click.stop="$emit('stop-receiving')"
       >
         <Icon name="lucide:monitor-off" class="size-4" />

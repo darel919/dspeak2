@@ -9,14 +9,14 @@
       </div>
       <button
         type="button"
-        class="btn btn-primary btn-sm"
+        class="metro-btn metro-btn--sm"
         @click="showUpload = true"
       >
         <Icon name="lucide:plus" class="size-4" />Add sound
       </button>
     </div>
-    <div v-if="store.loading" class="loading loading-spinner"></div>
-    <div v-else-if="store.error" class="alert alert-error">
+    <div v-if="store.loading" class="metro-spinner"></div>
+    <div v-else-if="store.error" class="metro-status metro-status--error">
       {{ store.error }}
     </div>
     <div
@@ -31,7 +31,7 @@
       >
         <input
           v-model="clip.icon"
-          class="input input-bordered text-center"
+          class="metro-input text-center"
           maxlength="16"
           aria-label="Clip emoji or icon"
         />
@@ -39,7 +39,7 @@
           ><span>Title</span
           ><input
             v-model="clip.title"
-            class="input input-bordered"
+            class="metro-input"
             maxlength="48"
             required
         /></label>
@@ -47,7 +47,7 @@
           ><span>Category</span
           ><input
             v-model="clip.category"
-            class="input input-bordered"
+            class="metro-input"
             maxlength="32"
             required
         /></label>
@@ -55,13 +55,13 @@
           ><input
             v-model="clip.enabled"
             type="checkbox"
-            class="toggle toggle-primary"
+            class="metro-toggle"
           />Enabled</label
         >
         <div class="flex flex-wrap gap-1">
           <button
             type="button"
-            class="btn btn-square btn-sm"
+            class="metro-btn metro-btn--square btn-sm"
             :disabled="index === 0"
             aria-label="Move clip up"
             @click="move(clip, index - 1)"
@@ -70,17 +70,17 @@
           </button>
           <button
             type="button"
-            class="btn btn-square btn-sm"
+            class="metro-btn metro-btn--square btn-sm"
             :disabled="index === drafts.length - 1"
             aria-label="Move clip down"
             @click="move(clip, index + 1)"
           >
             <Icon name="lucide:arrow-down" />
           </button>
-          <button class="btn btn-primary btn-sm">Save</button>
+          <button class="metro-btn metro-btn--sm">Save</button>
           <button
             type="button"
-            class="btn btn-error btn-outline btn-sm"
+            class="metro-btn metro-btn--error btn-outline btn-sm"
             @click="remove(clip)"
           >
             Delete

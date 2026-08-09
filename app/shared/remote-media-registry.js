@@ -45,6 +45,7 @@ export class RemoteMediaRegistry {
     this.participantAudio = new Map();
     this.receivingPreferences = new Map();
     this.audioContext = null;
+    this.audioContextToken = 0;
     this.voiceDetectionTimer = null;
     this.externalSpeakingUsers = new Set();
   }
@@ -196,12 +197,21 @@ export class RemoteMediaRegistry {
     this.speakingUsers.clear();
     this.externalSpeakingUsers.clear();
     this.stopVoiceDetectionScheduler();
-    this.audioContext
-      ?.close()
-      .catch((error) =>
-        this.publishPlaybackState(null, "context-close-failed", error),
-      );
+    const context = this.audioContext;
+    const contextToken = this.audioContextToken;
     this.audioContext = null;
+    this.audioContextToken += 1;
+    if (context) {
+      try {
+        Promise.resolve(context.close()).catch((error) => {
+          if (this.audioContextToken === contextToken + 1 && !this.audioContext)
+            this.publishPlaybackState(null, "context-close-failed", error);
+        });
+      } catch (error) {
+        if (this.audioContextToken === contextToken + 1 && !this.audioContext)
+          this.publishPlaybackState(null, "context-close-failed", error);
+      }
+    }
   }
 
   createAudioElement(entry, staged) {
@@ -246,6 +256,8 @@ export class RemoteMediaRegistry {
       resumeAttempt: 0,
       resumePromise: null,
       resumeTimer: null,
+      closed: false,
+      resumeGeneration: 0,
     };
     this.participantAudio.set(normalizedUserId, graph);
     return graph;
@@ -256,15 +268,29 @@ export class RemoteMediaRegistry {
     const AudioContextConstructor =
       window.AudioContext || window.webkitAudioContext;
     if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
-    this.audioContext = new AudioContextConstructor();
+    const context = new AudioContextConstructor();
+    const contextToken = this.audioContextToken + 1;
+    this.audioContextToken = contextToken;
+    this.audioContext = context;
     const sinkId = this.getOutputDevice();
-    if (sinkId && typeof this.audioContext.setSinkId === "function")
-      this.audioContext
-        .setSinkId(sinkId)
-        .catch((error) =>
-          this.recoverOutputDevice(this.audioContext, null, error),
-        );
-    return this.audioContext;
+    if (sinkId && typeof context.setSinkId === "function") {
+      try {
+        Promise.resolve(context.setSinkId(sinkId)).catch((error) => {
+          if (
+            this.audioContext === context &&
+            this.audioContextToken === contextToken
+          )
+            void this.recoverOutputDevice(context, null, error);
+        });
+      } catch (error) {
+        if (
+          this.audioContext === context &&
+          this.audioContextToken === contextToken
+        )
+          void this.recoverOutputDevice(context, null, error);
+      }
+    }
+    return context;
   }
 
   async preparePlayback() {
@@ -393,30 +419,60 @@ export class RemoteMediaRegistry {
   }
 
   async resumeGraph(graph) {
+    if (graph.closed || !graph.tracks.size) return false;
     if (graph.resumePromise) return graph.resumePromise;
-    graph.resumePromise = this.performGraphResume(graph).finally(() => {
-      graph.resumePromise = null;
+    const generation = graph.resumeGeneration;
+    const promise = this.performGraphResume(graph, generation);
+    const trackedPromise = promise.finally(() => {
+      if (graph.resumePromise === trackedPromise) graph.resumePromise = null;
     });
-    return graph.resumePromise;
+    graph.resumePromise = trackedPromise;
+    return trackedPromise;
   }
 
-  async performGraphResume(graph) {
+  isGraphActive(graph, generation) {
+    return (
+      !graph.closed &&
+      graph.resumeGeneration === generation &&
+      graph.tracks.size > 0
+    );
+  }
+
+  async performGraphResume(graph, generation) {
     try {
-      await this.audioContext.resume();
+      if (!this.isGraphActive(graph, generation)) return false;
+      await graph.context.resume();
+      if (!this.isGraphActive(graph, generation)) return false;
       await Promise.all(
-        [...graph.tracks.values()].map((track) => {
+        [...graph.tracks.entries()].map(([key, track]) => {
+          if (
+            !this.isGraphActive(graph, generation) ||
+            graph.tracks.get(key) !== track
+          )
+            return true;
           const streamTrack = track.audio.srcObject?.getAudioTracks?.()[0];
           if (streamTrack !== track.entry.track)
             track.audio.srcObject = new MediaStream([track.entry.track]);
-          return track.audio.play();
+          return Promise.resolve()
+            .then(() => track.audio.play())
+            .catch((error) => {
+              if (
+                !this.isGraphActive(graph, generation) ||
+                graph.tracks.get(key) !== track
+              )
+                return true;
+              throw error;
+            });
         }),
       );
+      if (!this.isGraphActive(graph, generation)) return false;
       graph.resumeAttempt = 0;
       clearTimeout(graph.resumeTimer);
       graph.resumeTimer = null;
       this.publishPlaybackState(graph.userId, "ready");
       return true;
     } catch (error) {
+      if (!this.isGraphActive(graph, generation)) return false;
       this.publishPlaybackState(graph.userId, "blocked", error);
       this.scheduleGraphResume(graph);
       return false;
@@ -425,6 +481,7 @@ export class RemoteMediaRegistry {
 
   scheduleGraphResume(graph) {
     if (
+      graph.closed ||
       graph.resumeTimer ||
       !graph.tracks.size ||
       this.isDeafened() ||
@@ -435,8 +492,8 @@ export class RemoteMediaRegistry {
     graph.resumeAttempt = Math.min(graph.resumeAttempt + 1, 4);
     graph.resumeTimer = setTimeout(() => {
       graph.resumeTimer = null;
-      if (!graph.tracks.size) return;
-      this.resumeGraph(graph);
+      if (graph.closed || !graph.tracks.size) return;
+      void this.resumeGraph(graph);
     }, delay);
     graph.resumeTimer?.unref?.();
   }
@@ -455,26 +512,49 @@ export class RemoteMediaRegistry {
   }
 
   publishPlaybackState(userId, state, error = null) {
-    this.onPlaybackState?.({
-      userId: userId === null ? null : String(userId),
-      state,
-      error:
-        error instanceof Error
-          ? { name: error.name, message: error.message }
-          : null,
-    });
+    try {
+      const result = this.onPlaybackState?.({
+        userId: userId === null ? null : String(userId),
+        state,
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : null,
+      });
+      result?.catch?.((callbackError) => {
+        console.warn("[Media] playback-state observer failed", callbackError);
+      });
+    } catch (callbackError) {
+      console.warn("[Media] playback-state observer failed", callbackError);
+    }
+  }
+
+  disposeAudioTrack(track) {
+    try {
+      track.source.disconnect();
+    } catch {}
+    try {
+      track.gain.disconnect();
+    } catch {}
+    try {
+      track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
+    } catch {}
+    try {
+      track.audio.pause();
+    } catch {}
+    try {
+      track.audio.srcObject = null;
+    } catch {}
+    try {
+      track.audio.remove();
+    } catch {}
   }
 
   removeAudioTrack(entry) {
     const graph = this.participantAudio.get(String(entry.userId));
     const track = graph?.tracks.get(entry.key);
     if (!graph || !track) return;
-    track.source.disconnect();
-    track.gain.disconnect();
-    track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
-    track.audio.pause();
-    track.audio.srcObject = null;
-    track.audio.remove();
+    this.disposeAudioTrack(track);
     graph.tracks.delete(entry.key);
     if (!graph.tracks.size) {
       this.closeGraph(graph);
@@ -483,17 +563,12 @@ export class RemoteMediaRegistry {
   }
 
   closeGraph(graph) {
+    graph.closed = true;
+    graph.resumeGeneration += 1;
     clearTimeout(graph.resumeTimer);
     graph.resumeTimer = null;
     graph.resumePromise = null;
-    for (const track of graph.tracks.values()) {
-      track.source.disconnect();
-      track.gain.disconnect();
-      track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
-      track.audio.pause();
-      track.audio.srcObject = null;
-      track.audio.remove();
-    }
+    for (const track of graph.tracks.values()) this.disposeAudioTrack(track);
     graph.tracks.clear();
   }
 
@@ -527,7 +602,18 @@ export class RemoteMediaRegistry {
       this.startVoiceDetectionScheduler();
     } catch (error) {
       this.publishPlaybackState(entry.userId, "analysis-unavailable", error);
-      this.onSpeaking(entry.userId, false);
+      this.notifySpeaking(entry.userId, false);
+    }
+  }
+
+  notifySpeaking(userId, speaking) {
+    try {
+      const result = this.onSpeaking?.(userId, speaking);
+      result?.catch?.((error) => {
+        console.warn("[Media] speaking observer failed", error);
+      });
+    } catch (error) {
+      console.warn("[Media] speaking observer failed", error);
     }
   }
 
@@ -536,35 +622,62 @@ export class RemoteMediaRegistry {
     const sample = () => {
       this.voiceDetectionTimer = null;
       for (const detector of this.voiceDetectors.values()) {
-        const playbackTrack = this.participantAudio
-          .get(String(detector.userId))
-          ?.tracks.get(detector.key);
-        if (!playbackTrack?.active || playbackTrack.entry.receiving === false)
-          continue;
-        detector.analyser.getByteTimeDomainData(detector.samples);
-        const levelDb = byteTimeDomainLevelDb(detector.samples);
-        const sensitivity = this.getAttenuation?.()?.sensitivity || "standard";
-        const thresholdOffset =
-          sensitivity === "relaxed" ? 5 : sensitivity === "responsive" ? -3 : 0;
-        const requiredSamples =
-          sensitivity === "relaxed" ? 5 : sensitivity === "responsive" ? 1 : 2;
-        if (levelDb >= REMOTE_VOICE_ACTIVITY_THRESHOLD_DB + thresholdOffset) {
-          detector.quietSamples = 0;
-          detector.activeSamples += 1;
-          if (!detector.speaking && detector.activeSamples >= requiredSamples) {
-            detector.speaking = true;
-            this.speakingUsers.add(String(detector.userId));
-            this.onSpeaking(detector.userId, true);
+        if (detector.analysisFailed) continue;
+        try {
+          const playbackTrack = this.participantAudio
+            .get(String(detector.userId))
+            ?.tracks.get(detector.key);
+          if (!playbackTrack?.active || playbackTrack.entry.receiving === false)
+            continue;
+          detector.analyser.getByteTimeDomainData(detector.samples);
+          const levelDb = byteTimeDomainLevelDb(detector.samples);
+          const sensitivity =
+            this.getAttenuation?.()?.sensitivity || "standard";
+          const thresholdOffset =
+            sensitivity === "relaxed"
+              ? 5
+              : sensitivity === "responsive"
+                ? -3
+                : 0;
+          const requiredSamples =
+            sensitivity === "relaxed"
+              ? 5
+              : sensitivity === "responsive"
+                ? 1
+                : 2;
+          if (levelDb >= REMOTE_VOICE_ACTIVITY_THRESHOLD_DB + thresholdOffset) {
+            detector.quietSamples = 0;
+            detector.activeSamples += 1;
+            if (
+              !detector.speaking &&
+              detector.activeSamples >= requiredSamples
+            ) {
+              detector.speaking = true;
+              this.speakingUsers.add(String(detector.userId));
+              this.notifySpeaking(detector.userId, true);
+              this.applyAttenuation();
+            }
+          } else if (detector.speaking && ++detector.quietSamples >= 6) {
+            detector.activeSamples = 0;
+            detector.speaking = false;
+            this.speakingUsers.delete(String(detector.userId));
+            this.notifySpeaking(detector.userId, false);
             this.applyAttenuation();
+          } else {
+            detector.activeSamples = 0;
           }
-        } else if (detector.speaking && ++detector.quietSamples >= 6) {
+        } catch (error) {
+          detector.analysisFailed = true;
           detector.activeSamples = 0;
+          detector.quietSamples = 0;
           detector.speaking = false;
           this.speakingUsers.delete(String(detector.userId));
-          this.onSpeaking(detector.userId, false);
-          this.applyAttenuation();
-        } else {
-          detector.activeSamples = 0;
+          this.publishPlaybackState(
+            detector.userId,
+            "analysis-unavailable",
+            error,
+          );
+          this.notifySpeaking(detector.userId, false);
         }
       }
       if (this.voiceDetectors.size)
@@ -586,9 +699,13 @@ export class RemoteMediaRegistry {
   stopVoiceDetection(key) {
     const detector = this.voiceDetectors.get(key);
     if (!detector) return;
-    detector.source.disconnect();
-    detector.analyser.disconnect();
-    this.onSpeaking(detector.userId, false);
+    try {
+      detector.source.disconnect();
+    } catch {}
+    try {
+      detector.analyser.disconnect();
+    } catch {}
+    this.notifySpeaking(detector.userId, false);
     this.speakingUsers.delete(String(detector.userId));
     this.applyAttenuation();
     this.voiceDetectors.delete(key);

@@ -22,7 +22,7 @@
         </div>
         <button
           type="button"
-          class="btn btn-square btn-ghost btn-sm"
+          class="metro-icon-btn metro-icon-btn--ghost btn-sm"
           aria-label="Close DJ Mode panel"
           @click="emit('close')"
         >
@@ -76,7 +76,7 @@
           >
             <span
               v-if="status === 'connecting'"
-              class="loading loading-spinner loading-xs text-warning"
+              class="metro-spinner metro-spinner--xs text-warning"
             ></span>
             <span
               v-else
@@ -109,7 +109,7 @@
               }}</code>
               <button
                 type="button"
-                class="btn btn-square btn-ghost rounded-none"
+                class="metro-icon-btn metro-icon-btn--ghost rounded-none"
                 aria-label="Copy direct SRT destination"
                 @click="copyUrl(djSession.directUrl, 'direct')"
               >
@@ -134,7 +134,7 @@
               }}</code>
               <button
                 type="button"
-                class="btn btn-square btn-ghost rounded-none"
+                class="metro-icon-btn metro-icon-btn--ghost rounded-none"
                 aria-label="Copy fallback SRT destination"
                 @click="copyUrl(djSession.fallbackUrl, 'fallback')"
               >
@@ -164,13 +164,13 @@
         <button
           v-if="!djSession"
           type="button"
-          class="btn btn-primary btn-sm"
+          class="metro-btn metro-btn--sm"
           :disabled="connecting"
           @click.stop="startBroadcast()"
         >
           <span
             v-if="connecting"
-            class="loading loading-spinner loading-xs"
+            class="metro-spinner metro-spinner--xs"
           ></span>
           <Icon v-else name="lucide:plug-zap" class="size-4" />
           Prepare VLC connection
@@ -178,7 +178,7 @@
         <button
           v-else
           type="button"
-          class="btn btn-error btn-sm"
+          class="metro-btn metro-btn--error metro-btn--sm"
           @click="stopBroadcast"
         >
           <Icon name="lucide:square" class="size-4" />

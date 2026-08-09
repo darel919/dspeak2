@@ -23,6 +23,11 @@ import {
   friends,
   roomInvites,
   roomAuditLog,
+  profiles,
+  avatars,
+  librarySongs,
+  soundboards,
+  streamPlayLog,
 } from "../../../db/schema/index.js";
 import { eq, and, or, desc, inArray, sql } from "drizzle-orm";
 import { enforceRateLimit } from "../../../utils/rate-limit.js";
@@ -33,6 +38,8 @@ export default defineEventHandler(async (event) => {
 
   const [
     user,
+    profile,
+    avatarsList,
     roomsList,
     memberships,
     channelsList,
@@ -47,6 +54,9 @@ export default defineEventHandler(async (event) => {
     pushSubscriptionsList,
     pushJobsList,
     soundboards,
+    legacySoundboards,
+    librarySongsList,
+    streamPlayLogList,
     chatFilesList,
     pinnedMessagesList,
     bookmarksList,
@@ -55,6 +65,8 @@ export default defineEventHandler(async (event) => {
     auditLogs,
   ] = await Promise.all([
     db.select().from(users).where(eq(users.id, userId)).limit(1),
+    db.select().from(profiles).where(eq(profiles.id, userId)).limit(1),
+    db.select().from(avatars).where(eq(avatars.userId, userId)),
     db.select().from(rooms).where(eq(rooms.ownerId, userId)),
     db.select().from(roomMemberships).where(eq(roomMemberships.userId, userId)),
     db.select().from(channels).where(eq(channels.ownerId, userId)),
@@ -66,7 +78,7 @@ export default defineEventHandler(async (event) => {
     db
       .select()
       .from(messages)
-      .where(sql`${messages.readBy} @> ARRAY[${userId}]::uuid[]`)
+      .where(sql`${messages.readBy} ? ${userId}`)
       .orderBy(desc(messages.createdAt)),
     db
       .select()
@@ -99,6 +111,9 @@ export default defineEventHandler(async (event) => {
       .select()
       .from(roomSoundboards)
       .where(eq(roomSoundboards.createdById, userId)),
+    db.select().from(soundboards).where(eq(soundboards.createdById, userId)),
+    db.select().from(librarySongs).where(eq(librarySongs.addedById, userId)),
+    db.select().from(streamPlayLog).where(eq(streamPlayLog.playedById, userId)),
     db.select().from(chatFiles).where(eq(chatFiles.uploaderId, userId)),
     db
       .select()
@@ -129,6 +144,8 @@ export default defineEventHandler(async (event) => {
   return {
     exportedAt: new Date().toISOString(),
     user: user[0] || null,
+    profile: profile[0] || null,
+    avatars: avatarsList,
     rooms: roomsList,
     memberships,
     channels: channelsList,
@@ -143,6 +160,9 @@ export default defineEventHandler(async (event) => {
     pushSubscriptions: pushSubscriptionsList,
     pushJobs: pushJobsList,
     soundboards,
+    legacySoundboards,
+    librarySongs: librarySongsList,
+    streamPlayLog: streamPlayLogList,
     chatFiles: chatFilesList,
     pinnedMessages: pinnedMessagesList,
     bookmarks: bookmarksList,

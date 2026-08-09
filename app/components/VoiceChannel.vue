@@ -23,7 +23,7 @@
         <button
           v-if="voiceStore.protocolUpdateRequired"
           type="button"
-          class="btn btn-warning btn-sm"
+          class="metro-btn metro-btn--warning btn-sm"
           @click="reloadForMediaUpdate"
         >
           <Icon name="lucide:refresh-cw" />
@@ -33,7 +33,7 @@
           v-else-if="voiceStore.connecting && !voiceStore.connected"
           class="voice-connecting-status flex items-center gap-2 text-sm"
         >
-          <span class="loading loading-spinner loading-sm"></span>
+          <span class="metro-spinner metro-spinner--sm"></span>
           <span class="hidden sm:inline">{{ connectionPhaseLabel }}</span>
         </div>
         <span
@@ -66,7 +66,7 @@
         <button
           v-if="!voiceStore.connected"
           type="button"
-          class="btn btn-primary mt-5"
+          class="metro-btn metro-btn--primary mt-5"
           @click="joinThisChannel"
         >
           Join voice channel
@@ -94,8 +94,12 @@
           </p>
         </div>
         <button
-          class="btn btn-sm shrink-0"
-          :class="share.receiving === false ? 'btn-primary' : 'btn-ghost'"
+          class="metro-btn metro-btn--sm shrink-0"
+          :class="
+            share.receiving === false
+              ? 'metro-btn--secondary'
+              : 'metro-btn--ghost'
+          "
           type="button"
           @click="setSystemAudioReceiving(share, share.receiving === false)"
         >
@@ -127,12 +131,15 @@
           </p>
         </div>
         <div class="flex gap-2">
-          <button @click="switchToThisChannel" class="btn btn-sm btn-info">
+          <button
+            @click="switchToThisChannel"
+            class="metro-btn metro-btn--sm btn-info"
+          >
             Switch Here
           </button>
           <button
             @click="navigateToCurrentChannel"
-            class="btn btn-sm btn-outline"
+            class="metro-btn metro-btn--sm btn-outline"
           >
             Go Back
           </button>
@@ -214,7 +221,7 @@
                 aria-hidden="true"
               ></div>
               <button
-                class="btn btn-ghost btn-square btn-sm absolute right-2 top-2 z-10 text-white"
+                class="metro-icon-btn metro-icon-btn--ghost btn-sm absolute right-2 top-2 z-10 text-white"
                 type="button"
                 :aria-label="`Adjust DJ and voice volume for ${tile.broadcast.label}`"
                 @click.stop="
@@ -280,7 +287,7 @@
             >
               <button
                 v-if="!isLocalUser(tile.user)"
-                class="btn btn-ghost btn-square btn-sm absolute right-2 top-2 z-10 opacity-70 hover:opacity-100 focus-visible:opacity-100"
+                class="metro-icon-btn metro-icon-btn--ghost btn-sm absolute right-2 top-2 z-10 opacity-70 hover:opacity-100 focus-visible:opacity-100"
                 type="button"
                 :aria-label="`Adjust volume for ${getUserDisplayName(tile.user)}`"
                 @click.stop="openVolumeMenu(tile.user, $event.currentTarget)"
@@ -390,7 +397,7 @@
               </h4>
             </div>
             <button
-              class="btn btn-ghost btn-square btn-sm shrink-0"
+              class="metro-icon-btn metro-icon-btn--ghost btn-sm shrink-0"
               type="button"
               aria-label="Close volume settings"
               @click="closeVolumeMenu"
@@ -415,7 +422,7 @@
               </div>
               <input
                 id="participant-voice-volume"
-                class="range range-primary w-full"
+                class="metro-range w-full"
                 type="range"
                 min="0"
                 max="2"
@@ -449,7 +456,7 @@
               </div>
               <input
                 id="participant-screen-volume"
-                class="range range-secondary w-full"
+                class="metro-range w-full"
                 type="range"
                 min="0"
                 max="2"
@@ -486,7 +493,7 @@
               </div>
               <input
                 id="participant-broadcast-volume"
-                class="range range-primary w-full"
+                class="metro-range w-full"
                 type="range"
                 min="0"
                 max="2"
@@ -690,7 +697,7 @@
           </label>
           <input
             id="shared-audio-volume"
-            class="range range-primary range-xs w-full"
+            class="metro-range range-xs w-full"
             type="range"
             min="0"
             max="100"

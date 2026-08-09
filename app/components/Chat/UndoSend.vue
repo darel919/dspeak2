@@ -9,7 +9,7 @@
       <Icon name="lucide:check-circle" class="h-5 w-5 text-success" />
       <span class="min-w-0 flex-1 text-sm font-semibold">Message sent</span>
       <button
-        class="btn btn-primary min-h-11"
+        class="metro-btn metro-btn--primary min-h-11"
         :disabled="actionPending"
         @click="handleUndo"
       >

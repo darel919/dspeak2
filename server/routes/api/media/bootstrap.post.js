@@ -43,7 +43,11 @@ export default defineEventHandler(async (event) => {
   }
 
   const channel = await channelRepository.findById(channelId);
-  if (!channel || channel.roomId !== roomId || channel.type !== "voice") {
+  if (
+    !channel ||
+    String(channel.roomId) !== String(roomId) ||
+    !["voice", "stage"].includes(channel.type)
+  ) {
     throw createError({
       statusCode: 404,
       statusMessage: "Voice channel not found in room",

@@ -1,13 +1,13 @@
 import { requireAuth } from "../../../auth/middleware.js";
-import {
-  createUploadUrl,
-  validateUpload,
-  R2ObjectType,
-} from "../../../storage/r2.js";
+import { createUploadUrl, validateUpload } from "../../../storage/r2.js";
 import {
   channelRepository,
   membershipRepository,
 } from "../../../db/repositories/rooms.js";
+import {
+  getRoomById,
+  requireRoomPermission,
+} from "../../../utils/room-authorization.js";
 import { createUploadCleanupToken } from "../../../storage/upload-cleanup-token.js";
 
 export default defineEventHandler(async (event) => {
@@ -29,18 +29,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: validation.error });
   }
 
-  if (
-    ["room-profile", "room-header", "soundboard", "album-art"].includes(type)
-  ) {
-    const membership = await membershipRepository.findByRoomAndUser(
-      identifiers.roomId,
+  if (["room-profile", "room-header", "soundboard"].includes(type)) {
+    const room = await getRoomById(identifiers.roomId);
+    if (!room)
+      throw createError({ statusCode: 404, statusMessage: "Room not found" });
+    await requireRoomPermission(
+      room,
       user.id,
+      type === "soundboard" ? "room.manage_soundboard" : "room.update_identity",
     );
-    if (!membership)
-      throw createError({
-        statusCode: 403,
-        statusMessage: "Room access is required",
-      });
   }
   if (type === "chat") {
     const channel = await channelRepository.findById(identifiers.channelId);

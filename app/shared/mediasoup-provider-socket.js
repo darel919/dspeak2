@@ -14,51 +14,77 @@ export class MediasoupProviderSocket {
     this.ready = new Promise((resolve, reject) => {
       const socket = new WebSocket(signalingUrl);
       this.socket = socket;
+      let failureReported = false;
       closeSocketOnPageHide(socket);
+      const reportFailure = (error) => {
+        if (failureReported) return;
+        failureReported = true;
+        try {
+          Promise.resolve(this.onFailure?.(error)).catch(() => {});
+        } catch {}
+      };
       const timer = setTimeout(() => {
-        socket.close(4000, "Provider handshake timed out");
-        reject(new Error("Media provider handshake timed out"));
+        const error = new Error("Media provider handshake timed out");
+        reportFailure(error);
+        socket.close(4000, error.message);
+        reject(error);
       }, 8000);
       socket.addEventListener("open", () => {
-        socket.send(
-          JSON.stringify({
-            type: "hello919",
-            protocolRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
-            ticket,
-          }),
-        );
-      });
-      socket.addEventListener("message", async (event) => {
-        let message;
         try {
-          message = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-        if (message.type === "hi919") {
+          socket.send(
+            JSON.stringify({
+              type: "hello919",
+              protocolRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
+              ticket,
+            }),
+          );
+        } catch (error) {
           clearTimeout(timer);
-          resolve();
-          return;
+          reportFailure(error);
+          reject(error);
+          if (this.socket === socket && socket.readyState < WebSocket.CLOSING)
+            socket.close(1011, "Provider handshake failed");
         }
-        if (message.type === "connected") return;
-        if (message.type === "error919") {
-          const error = new Error(message.error || "Media provider error");
-          this.onFailure?.(error);
-          return;
-        }
-        await this.onMessage?.(message.type, message.data || message);
+      });
+      socket.addEventListener("message", (event) => {
+        void (async () => {
+          let message;
+          try {
+            message = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          if (message.type === "hi919") {
+            clearTimeout(timer);
+            resolve();
+            return;
+          }
+          if (message.type === "connected") return;
+          if (message.type === "error919") {
+            const error = new Error(message.error || "Media provider error");
+            reportFailure(error);
+            return;
+          }
+          await this.onMessage?.(message.type, message.data || message);
+        })().catch((error) => {
+          reportFailure(error);
+          if (this.socket === socket && socket.readyState < WebSocket.CLOSING)
+            socket.close(1011, "Provider message handling failed");
+        });
       });
       socket.addEventListener("close", (event) => {
         clearTimeout(timer);
         if (this.socket === socket) this.socket = null;
         if (!event.wasClean)
-          this.onFailure?.(
+          reportFailure(
             new Error(event.reason || "Media provider disconnected"),
           );
       });
       socket.addEventListener("error", () => {
         clearTimeout(timer);
-        reject(new Error("Media provider connection failed"));
+        const error = new Error("Media provider connection failed");
+        reportFailure(error);
+        reject(error);
       });
     });
     return this.ready;
@@ -66,8 +92,12 @@ export class MediasoupProviderSocket {
 
   send(message) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
-    this.socket.send(JSON.stringify(message));
-    return true;
+    try {
+      this.socket.send(JSON.stringify(message));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   close() {

@@ -8,6 +8,62 @@
       "when": 1786138676627,
       "tag": "0000_modern_lake",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786254667545,
+      "tag": "0001_abandoned_texas_twister",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786254878382,
+      "tag": "0002_lean_gladiator",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786254878383,
+      "tag": "0003_repair_default_room_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786257053412,
+      "tag": "0004_greedy_queen_noir",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786259152075,
+      "tag": "0005_notification_delivery_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786259619194,
+      "tag": "0006_account_profile_tombstones",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786260811206,
+      "tag": "0007_soundboard_fractional_duration",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786261990179,
+      "tag": "0008_user_presence_realtime",
+      "breakpoints": true
     }
   ]
 }

@@ -38,7 +38,7 @@ The remaining directives allow only the resource classes dSpeak uses:
 
 - same-origin application, manifest, font, and form resources
 - same-origin images and connections
-- same-origin WebSockets
+- same-origin WebSockets and the configured Supabase realtime and media origins
 - blob URLs for workers and browser media
 - no frames, embedded objects, framing ancestors, or script attributes
 
@@ -65,8 +65,8 @@ After each production build:
 3. Confirm the nonce in `script-src` matches every rendered `<script nonce>`.
 4. Load the page in a fresh Chromium, Firefox, and Safari session and confirm
    there are no CSP violations.
-5. Exercise authentication, PWA update, image upload/display, chat WebSockets,
-   presence WebSockets, voice, camera, screen share, soundboards, and push
+5. Exercise authentication, PWA update, image upload/display, Supabase realtime
+   chat and presence, voice, camera, screen share, soundboards, and push
    subscription.
 
 The local build and Chromium smoke test validate header generation and initial

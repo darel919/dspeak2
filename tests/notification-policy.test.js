@@ -5,13 +5,10 @@ import {
   messageContainsBroadcastMention,
   messageMentionsHandle,
   notificationBody,
+  notificationModeFromRecord,
   resolveNotificationPreference,
+  isChannelViewer,
 } from "../shared/notification-policy.js";
-import {
-  isDeviceViewingChannel,
-  isUserViewingChannel,
-  setDeviceViewingChannel,
-} from "../server/utils/dspeak-realtime.js";
 
 test("room notification preferences override only explicit room values", () => {
   assert.deepEqual(
@@ -23,6 +20,39 @@ test("room notification preferences override only explicit room values", () => {
       mode: "all",
       push: true,
       sound: true,
+      previews: false,
+    },
+  );
+});
+
+test("database notification flags resolve to the API notification contract", () => {
+  assert.equal(
+    notificationModeFromRecord({ allMessages: true, mentions: false }),
+    "all",
+  );
+  assert.equal(
+    notificationModeFromRecord({ allMessages: false, mentions: true }),
+    "mentions",
+  );
+  assert.equal(
+    notificationModeFromRecord({ allMessages: false, mentions: false }),
+    "muted",
+  );
+  assert.deepEqual(
+    resolveNotificationPreference(
+      {
+        allMessages: false,
+        mentions: true,
+        push: true,
+        sound: false,
+        previews: false,
+      },
+      null,
+    ),
+    {
+      mode: "mentions",
+      push: true,
+      sound: false,
       previews: false,
     },
   );
@@ -105,22 +135,9 @@ test("disabled previews never expose sender or message content", () => {
   );
 });
 
-test("active-channel suppression is reference counted per device", () => {
-  setDeviceViewingChannel("policy-user", "policy-device", "channel-one");
-  setDeviceViewingChannel("policy-user", "policy-device", "channel-one");
-  assert.equal(
-    isDeviceViewingChannel("policy-user", "policy-device", "channel-one"),
-    true,
-  );
-  setDeviceViewingChannel("policy-user", "policy-device", "channel-one", false);
-  assert.equal(
-    isDeviceViewingChannel("policy-user", "policy-device", "channel-one"),
-    true,
-  );
-  setDeviceViewingChannel("policy-user", "policy-device", "channel-one", false);
-  assert.equal(
-    isDeviceViewingChannel("policy-user", "policy-device", "channel-one"),
-    false,
-  );
-  assert.equal(isUserViewingChannel("policy-user", "channel-one"), false);
+test("here mentions target the persisted channel inRoom members", () => {
+  assert.equal(isChannelViewer(["user-a", "user-b"], "user-a"), true);
+  assert.equal(isChannelViewer(["user-a", "user-b"], "user-c"), false);
+  assert.equal(isChannelViewer(null, "user-a"), false);
+  assert.equal(isChannelViewer(["user-a"], "user-a"), true);
 });

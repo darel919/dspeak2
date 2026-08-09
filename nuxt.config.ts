@@ -161,6 +161,24 @@ export default defineNuxtConfig({
   },
 
   routeRules: {
+    "/": {
+      prerender: true,
+    },
+    "/auth": {
+      ssr: false,
+    },
+    "/settings": {
+      ssr: false,
+    },
+    "/friends": {
+      ssr: false,
+    },
+    "/join/**": {
+      ssr: false,
+    },
+    "/room/**": {
+      ssr: false,
+    },
     "/**": {
       headers: isProduction
         ? {
@@ -178,10 +196,10 @@ export default defineNuxtConfig({
   },
 
   icon: {
-    provider: "server",
-    serverBundle: {
-      collections: ["lucide"],
-    },
+    provider: isDesktop ? "server" : "client",
+    ...(isDesktop
+      ? { serverBundle: { collections: ["lucide"] } }
+      : { clientBundle: { collections: ["lucide"] } }),
   },
 
   nitro: {
@@ -242,7 +260,6 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      websocketPath: "",
       baseApiPath: isDesktop ? desktopApiBasePath : "",
 
       mediaControlUrl: process.env.MEDIA_CONTROL_URL || "",

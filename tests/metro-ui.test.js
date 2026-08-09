@@ -123,6 +123,109 @@ test("channel creation and editing use bounded Metro command layouts", async () 
   assert.doesNotMatch(source, />Save Changes</);
 });
 
+test("channel action menus stay hidden until their trigger is active", async () => {
+  const source = await readFile("app/components/ChannelList.vue", "utf8");
+  const css = await readFile("app/assets/app.css", "utf8");
+  assert.match(source, /relative flex w-full flex-col items-center/);
+  assert.match(source, /metro-menu absolute right-0 top-full/);
+  assert.match(css, /\.dropdown\.absolute\s*\{\s*position: absolute;/);
+  assert.match(css, /\.metro-menu \{[\s\S]*?visibility: hidden/);
+  assert.match(css, /\.dropdown:hover > \.metro-menu/);
+  assert.match(css, /\.dropdown:focus-within > \.metro-menu/);
+});
+
+test("voice overflow menus keep their trigger in the top bar", async () => {
+  const source = await readFile("app/components/Navbar.vue", "utf8");
+  assert.match(
+    source,
+    /<details\s+v-if="voiceStore\.connected"[\s\S]*?class="metro-call-menu"/,
+  );
+  assert.match(
+    source,
+    /\.metro-call-menu\s*\{\s*position: relative;\s*flex: none;\s*\}/,
+  );
+  assert.match(
+    source,
+    /\.metro-call-menu-content\s*\{[\s\S]*?position: absolute;[\s\S]*?top: calc\(100% \+ var\(--metro-space-3\)\)[\s\S]*?right: 0;/,
+  );
+  assert.doesNotMatch(source, /\.metro-call-menu\s*\{\s*position: absolute;/);
+});
+
+test("message action menus use Metro-sized rows and bounded scrolling", async () => {
+  const source = await readFile(
+    "app/components/Chat/MessageActions.vue",
+    "utf8",
+  );
+  const css = await readFile("app/assets/app.css", "utf8");
+  assert.match(source, /metro-message-actions-menu/);
+  assert.match(
+    css,
+    /\.metro-message-actions-menu\s*\{[\s\S]*?max-height: min\(28rem, calc\(100dvh - 6rem\)\)[\s\S]*?overflow-y: auto/,
+  );
+  assert.match(
+    css,
+    /\.metro-message-actions-menu > li\[role="none"\] > button\s*\{[\s\S]*?display: flex/,
+  );
+  assert.match(
+    css,
+    /\.metro-message-actions-menu > li\[role="none"\] > button\s*\{[\s\S]*?gap: var\(--metro-space-3\)/,
+  );
+  assert.match(
+    css,
+    /\.metro-message-actions-menu > li\[role="none"\] > button\s*\{[\s\S]*?min-height: 2.75rem/,
+  );
+  assert.match(css, /\.metro-message-actions-menu > li\[role="separator"\]/);
+});
+
+test("chat message metadata keeps its action menu in the chat column", async () => {
+  const source = await readFile("app/components/Chat/ChatMessage.vue", "utf8");
+  assert.match(
+    source,
+    /\.metro-message-meta\s*\{[\s\S]*?display: flex[\s\S]*?align-items: center/,
+  );
+  assert.doesNotMatch(source, /\.metro-message-header\s*\{/);
+});
+
+test("missing member avatars use identity fallbacks instead of the dSpeak logo", async () => {
+  const source = await readFile("app/components/MemberList.vue", "utf8");
+  const chatUtils = await readFile("app/composables/useChatUtils.js", "utf8");
+  const onlineMembers = await readFile(
+    "app/components/OnlineMembers.vue",
+    "utf8",
+  );
+  const details = await readFile(
+    "app/components/Chat/MessageDetailsModal.vue",
+    "utf8",
+  );
+  assert.match(source, /<ProfileAvatar/);
+  assert.match(onlineMembers, /<ProfileAvatar/);
+  assert.doesNotMatch(
+    source + chatUtils + onlineMembers + details,
+    /favicon-32x32\.png/,
+  );
+});
+
+test("self-message notification guards normalize sender IDs", async () => {
+  const chat = await readFile("app/stores/chat.js", "utf8");
+  const manager = await readFile("app/utils/notificationManager.js", "utf8");
+  const store = await readFile("app/stores/notifications.js", "utf8");
+  const delivery = await readFile("server/utils/push-delivery.js", "utf8");
+  assert.match(
+    chat,
+    /const senderId = message\?\.sender\?\.id \|\| message\?\.sender;/,
+  );
+  assert.match(chat, /String\(senderId\) === String\(userData\.id\)/);
+  assert.match(
+    manager,
+    /const viewerId = currentUserId \|\| storedUserData\?\.id/,
+  );
+  assert.match(manager, /String\(senderId\) === String\(viewerId\)/);
+  assert.match(chat, /currentChannelName\.value,\s+userData\?\.id/);
+  assert.match(store, /String\(senderId\) === String\(currentUserId\)/);
+  assert.match(delivery, /\.filter\(\(id\) => id !== String\(senderId\)\)/);
+  assert.match(delivery, /senderId: String\(message\.authorId/);
+});
+
 test("room settings opens the full administration route", async () => {
   const source = await readFile("app/components/ChannelList.vue", "utf8");
   assert.match(
@@ -156,7 +259,7 @@ test("room branding places the banner in navigation and the avatar above the roo
   assert.match(navbar, /background-repeat: no-repeat/);
   assert.match(navbar, /background-size: cover/);
   assert.match(navbar, /<Transition name="room-banner">/);
-  assert.match(navbar, /\.room-navbar \{/);
+  assert.match(navbar, /\.metro-navbar \{/);
   assert.match(navbar, /\.room-banner-enter-active/);
   assert.match(layout, /'authenticated-shell': authenticated/);
   assert.match(
@@ -334,8 +437,9 @@ test("room rail tooltips preview connected voice participants", async () => {
   assert.match(channels, /const voicePresenceConnections = new Map\(\)/);
   assert.match(
     channels,
-    /applyVoicePresence\(payload\.data, normalizedRoomId\)/,
+    /applyVoicePresence\(message\.data, normalizedRoomId\)/,
   );
+  assert.match(channels, /openRealtimeChannel\(`room:\$\{normalizedRoomId\}`/);
   assert.match(channels, /function syncVoicePresenceRooms\(roomIds\)/);
 });
 
@@ -380,7 +484,8 @@ test("account settings update the public dSpeak profile", async () => {
 test("settings volume sliders consistently use the active accent", async () => {
   const source = await readFile("app/pages/settings.vue", "utf8");
   assert.doesNotMatch(source, /range-secondary/);
-  assert.equal(source.match(/range range-primary/g)?.length, 3);
+  assert.doesNotMatch(source, /range range-primary/);
+  assert.equal((source.match(/metro-range/g) || []).length, 3);
 });
 
 test("voice settings provide a local microphone listen-back check", async () => {
@@ -397,7 +502,7 @@ test("room administration uses explicit responsive form layouts", async () => {
   const source = await readFile("app/pages/room/[roomId]/settings.vue", "utf8");
   assert.doesNotMatch(source, /class="form-control/);
   assert.match(source, /lg:grid-cols-\[220px_minmax\(0,1fr\)\]/);
-  assert.match(source, /file-input file-input-bordered w-full min-w-0/);
+  assert.match(source, /metro-input w-full min-w-0/);
   assert.match(source, /1920 × 192 px \(10:1\) recommended/);
   assert.match(source, /Keep important content\s+centered/);
 });

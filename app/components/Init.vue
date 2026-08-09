@@ -22,7 +22,7 @@
           aria-live="polite"
         >
           <span
-            class="loading loading-spinner loading-sm text-hero"
+            class="metro-spinner metro-spinner--sm text-hero"
             aria-hidden="true"
           ></span>
           <span>{{ startupStatus }}</span>

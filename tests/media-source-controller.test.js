@@ -5,6 +5,7 @@ import { createMediaSourceController } from "../app/shared/media-source-controll
 function controller(overrides = {}) {
   const localSources = new Map();
   const localVideoFeeds = { value: new Map() };
+  const error = { value: null };
   const sent = [];
   const failures = [];
   const meteredSources = [];
@@ -13,7 +14,7 @@ function controller(overrides = {}) {
     capture: { stop() {} },
     connected: { value: true },
     createSharedAudioSource: async (entry) => entry,
-    error: { value: null },
+    error,
     getActiveProvider: () => "sfu",
     getIntentionalClose: () => false,
     getP2pMesh: () => null,
@@ -36,6 +37,7 @@ function controller(overrides = {}) {
   });
   return {
     failures,
+    error,
     instance,
     localSources,
     localVideoFeeds,
@@ -44,6 +46,28 @@ function controller(overrides = {}) {
     stoppedMeter: () => stoppedMeter,
   };
 }
+
+test("SFU source removal absorbs an expected session cancellation", async () => {
+  const harness = controller({
+    getSfu: () => ({
+      removeSource: async () => {
+        const error = new Error("Cloudflare session closed");
+        error.code = "MEDIA_SESSION_CLOSED";
+        throw error;
+      },
+    }),
+  });
+  const entry = {
+    source: "audio",
+    track: { id: "microphone" },
+  };
+  harness.localSources.set(entry.source, entry);
+
+  harness.instance.removeSource(entry);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.error.value, null);
+});
 
 test("failed SFU publication never advertises a local source", async () => {
   const harness = controller({

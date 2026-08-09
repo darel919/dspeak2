@@ -6,7 +6,7 @@ import {
   updateChannel,
   getRoomById,
 } from "../../utils/room-authorization.js";
-import { getChannelSubscribers } from "../../utils/dspeak-realtime.js";
+import { broadcastToChannel } from "../../utils/dspeak-realtime.js";
 import {
   normalizeChannelPolicy,
   normalizeSlowMode,
@@ -92,24 +92,18 @@ export default defineEventHandler(async (event) => {
 
     await updateChannel(channelId, updateData);
 
-    const subscribers = getChannelSubscribers(channelId);
-    const message = JSON.stringify({
+    broadcastToChannel(channelId, {
       type: "channel_policy_updated",
       data: {
         channelId,
         ...updateData,
       },
     });
-    for (const peer of subscribers) {
-      try {
-        peer.send(message);
-      } catch {}
-    }
 
     return {
       id: channelId,
-      policy: updateData.policy || channel.policy,
-      slow_mode: updateData.slowMode || channel.slowMode || 0,
+      policy: updateData.policy ?? channel.policy ?? "free",
+      slow_mode: updateData.slowMode ?? channel.slowMode ?? 0,
     };
   }
 

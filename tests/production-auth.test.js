@@ -6,9 +6,6 @@ const files = await Promise.all(
   [
     "../server/utils/dspeak-api.js",
     "../server/utils/soundboard-api.js",
-    "../server/routes/api/chat/socket.js",
-    "../server/routes/api/presence.js",
-    "../server/routes/api/voice-presence.js",
     "../server/utils/media-control-admin.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
@@ -108,7 +105,7 @@ test("offline delivery uses cookie authentication and stable idempotency", () =>
 
 test("protected browser routes stay on the cookie-owning origin", () => {
   assert.match(runtimeConfig, /apiPath:/);
-  assert.match(runtimeConfig, /websocketPath:/);
+  assert.doesNotMatch(runtimeConfig, /websocketPath:/);
   assert.doesNotMatch(runtimeConfig, /sfuPath:/);
   assert.match(runtimeConfig, /:\s*"\/api"/);
   assert.doesNotMatch(runtimeConfig, /DSPEAK_(API|WS|SFU)_URL/);

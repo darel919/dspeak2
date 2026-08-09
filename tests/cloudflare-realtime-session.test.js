@@ -1,0 +1,151 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { CloudflareRealtimeSession } from "../app/shared/cloudflare-realtime-session.js";
+
+function session() {
+  return new CloudflareRealtimeSession({ send() {}, iceServers: [] });
+}
+
+function report(type, bytesField, bytes, timestamp) {
+  return new Map([["rtp", { type, [bytesField]: bytes, timestamp }]]);
+}
+
+test("Cloudflare SFU readiness requires every expected RTP flow", async () => {
+  const client = session();
+  client.peerConnection = { connectionState: "connected" };
+  let outboundBytes = 100;
+  let inboundBytes = 200;
+  let timestamp = 1000;
+  client.producers.set("audio", {
+    source: "audio",
+    sender: {
+      id: "sender-1",
+      getStats: async () =>
+        report("outbound-rtp", "bytesSent", outboundBytes, timestamp),
+    },
+  });
+  client.consumers.set("consumer-1", {
+    trackName: "track-1",
+    receiver: {
+      id: "receiver-1",
+      getStats: async () =>
+        report("inbound-rtp", "bytesReceived", inboundBytes, timestamp),
+    },
+  });
+
+  assert.equal(client.expectedInboundFlowCount(), 1);
+  assert.equal((await client.mediaReadiness(1)).ready, false);
+  outboundBytes += 10;
+  inboundBytes += 10;
+  timestamp += 100;
+  assert.equal((await client.mediaReadiness(1)).ready, true);
+  timestamp += 100;
+  assert.equal((await client.mediaReadiness(1)).ready, false);
+});
+
+class FakePeerConnection {
+  constructor() {
+    this.connectionState = "new";
+    this.listeners = new Map();
+  }
+
+  addEventListener(type, listener) {
+    this.listeners.set(type, listener);
+  }
+
+  close() {
+    this.connectionState = "closed";
+  }
+}
+
+test("Cloudflare drains publications received before session initialization", async () => {
+  const previousPeerConnection = globalThis.RTCPeerConnection;
+  globalThis.RTCPeerConnection = FakePeerConnection;
+  const requests = [];
+  let client;
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      const request = message.data;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId: request.requestId,
+          result:
+            request.operation === "new-session"
+              ? { sessionId: "cloudflare-session" }
+              : {
+                  tracks: [
+                    {
+                      trackName: request.body.tracks[0].trackName,
+                      mid: "remote-mid",
+                    },
+                  ],
+                },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+  });
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "publisher-session",
+    peerId: "peer-remote",
+    userId: "user-remote",
+    source: "audio",
+  };
+
+  try {
+    await client.handle("cloudflare-publication-available", publication);
+    await client.initialize();
+    assert.equal(
+      requests.filter((entry) => entry.data.operation === "tracks-new").length,
+      1,
+    );
+    assert.equal(client.remoteByMid.get("remote-mid"), publication);
+  } finally {
+    client.closeMedia();
+    globalThis.RTCPeerConnection = previousPeerConnection;
+  }
+});
+
+test("Cloudflare drops a subscription that closes while negotiation is pending", async () => {
+  const requests = [];
+  const client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = new FakePeerConnection();
+  client.sessionId = "cloudflare-session";
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "publisher-session",
+    peerId: "peer-remote",
+    userId: "user-remote",
+    source: "audio",
+  };
+
+  const subscription = client.handle(
+    "cloudflare-publication-available",
+    publication,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  const request = requests[0];
+  await client.handle("cloudflare-publication-available", {
+    ...publication,
+    closed: true,
+  });
+  await client.handle("cloudflare-response", {
+    requestId: request.data.requestId,
+    result: {
+      tracks: [{ trackName: publication.trackName, mid: "late-mid" }],
+    },
+  });
+  await subscription;
+
+  assert.equal(client.remoteByMid.has("late-mid"), false);
+  client.closeMedia();
+});

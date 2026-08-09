@@ -286,7 +286,7 @@ function safeHref(value) {
             :href="safeHref(node.href)"
             target="_blank"
             rel="noopener noreferrer"
-            class="link link-primary"
+            class="metro-link"
             >{{ node.text }}</a
           >
           <span v-else-if="node.type === 'image'">{{ node.alt }}</span>
@@ -323,7 +323,7 @@ function safeHref(value) {
               :href="node.href"
               target="_blank"
               rel="noopener noreferrer"
-              class="link link-primary"
+              class="metro-link"
               >{{ node.text }}</a
             >
             <span v-else>{{ node.content }}</span>
@@ -349,7 +349,7 @@ function safeHref(value) {
               :href="node.href"
               target="_blank"
               rel="noopener noreferrer"
-              class="link link-primary"
+              class="metro-link"
               >{{ node.text }}</a
             >
             <span v-else>{{ node.content }}</span>
@@ -376,7 +376,7 @@ function safeHref(value) {
                   :href="n.href"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="link link-primary"
+                  class="metro-link"
                   >{{ n.text }}</a
                 >
                 <span v-else>{{ n.content }}</span>
@@ -404,7 +404,7 @@ function safeHref(value) {
               :href="node.href"
               target="_blank"
               rel="noopener noreferrer"
-              class="link link-primary"
+              class="metro-link"
               >{{ node.text }}</a
             >
             <span v-else>{{ node.content }}</span>

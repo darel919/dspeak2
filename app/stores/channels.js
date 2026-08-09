@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
 import { debugLog } from "../shared/debug";
-import { closeSocketOnPageHide } from "../shared/socket-lifecycle";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
+import { openRealtimeChannel } from "../shared/realtime-channel.js";
 import {
   normalizeChannelPolicy,
   normalizeSlowMode,
@@ -344,6 +344,8 @@ export const useChannelsStore = defineStore("channels", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/channel/leave`, {
         method: "POST",
+        credentials: "include",
+        keepalive: true,
         headers: {
           "Content-Type": "application/json",
         },
@@ -547,10 +549,8 @@ export const useChannelsStore = defineStore("channels", () => {
       if (!connection) continue;
       connection.intentionalClose = true;
       if (connection.reconnectTimer) clearTimeout(connection.reconnectTimer);
-      if (connection.heartbeatTimer) clearInterval(connection.heartbeatTimer);
       voicePresenceConnections.delete(normalizedRoomId);
-      if (connection.socket && connection.socket.readyState < WebSocket.CLOSING)
-        connection.socket.close(1000);
+      connection.close?.();
     }
   }
 
@@ -558,61 +558,46 @@ export const useChannelsStore = defineStore("channels", () => {
     if (!import.meta.client || !roomId) return;
     const normalizedRoomId = String(roomId);
     const existing = voicePresenceConnections.get(normalizedRoomId);
-    if (existing?.socket?.readyState <= WebSocket.OPEN) return;
-    const userId = useAuthStore().getUserData()?.id;
-    if (!userId) return;
-    const base = config.public.apiPath
-      .replace(/^http/, "ws")
-      .replace(/\/$/, "");
-    const absoluteBase = base.startsWith("ws")
-      ? base
-      : `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${base}`;
-    const socket = new WebSocket(
-      `${absoluteBase}/voice-presence?roomId=${encodeURIComponent(normalizedRoomId)}`,
-    );
-    closeSocketOnPageHide(socket);
+    if (existing?.channel) return;
     const connection = existing || {
-      socket: null,
+      channel: null,
       reconnectTimer: null,
       reconnectAttempt: 0,
-      heartbeatTimer: null,
       intentionalClose: false,
     };
-    connection.socket = socket;
     connection.intentionalClose = false;
     voicePresenceConnections.set(normalizedRoomId, connection);
-    socket.addEventListener("open", () => {
-      if (connection.socket !== socket) return;
-      connection.reconnectAttempt = 0;
-      connection.heartbeatTimer = setInterval(() => {
-        if (socket.readyState === WebSocket.OPEN)
-          socket.send(JSON.stringify({ type: "ping" }));
-      }, 20000);
-    });
-    socket.addEventListener("message", (event) => {
-      if (connection.socket !== socket) return;
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload.type === "voice-presence")
-          applyVoicePresence(payload.data, normalizedRoomId);
-        if (payload.type === "voice-presence-snapshot")
-          for (const snapshot of payload.data?.channels || [])
-            applyVoicePresence(snapshot, normalizedRoomId);
-      } catch (error) {
-        console.warn("[ChannelsStore] Invalid voice presence update", error);
+    openRealtimeChannel(`room:${normalizedRoomId}`, {
+      onMessage: (message) => {
+        if (message?.type === "voice-presence") {
+          applyVoicePresence(message.data, normalizedRoomId);
+        }
+      },
+      onSubscribe: () => {
+        connection.reconnectAttempt = 0;
+      },
+      onError: (err, status) => {
+        console.warn(
+          "[ChannelsStore] Voice presence channel error:",
+          err,
+          status,
+        );
+        connection.channel = null;
+        if (connection.intentionalClose) return;
+        const delay = Math.min(15000, 500 * 2 ** connection.reconnectAttempt++);
+        connection.reconnectTimer = setTimeout(
+          () => connectVoicePresence(normalizedRoomId),
+          delay + Math.floor(Math.random() * 250),
+        );
+      },
+    }).then((handle) => {
+      if (!handle) return;
+      if (connection.intentionalClose) {
+        handle.close();
+        return;
       }
-    });
-    socket.addEventListener("close", () => {
-      if (connection.socket !== socket) return;
-      connection.socket = null;
-      if (connection.heartbeatTimer) clearInterval(connection.heartbeatTimer);
-      connection.heartbeatTimer = null;
-      if (connection.intentionalClose) return;
-      const delay = Math.min(15000, 500 * 2 ** connection.reconnectAttempt++);
-      connection.reconnectTimer = setTimeout(
-        () => connectVoicePresence(normalizedRoomId),
-        delay + Math.floor(Math.random() * 250),
-      );
+      connection.channel = handle.channel;
+      connection.close = handle.close;
     });
   }
 

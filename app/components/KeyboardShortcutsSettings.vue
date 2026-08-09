@@ -41,9 +41,11 @@
               </kbd>
               <button
                 type="button"
-                class="btn btn-sm"
+                class="metro-btn metro-btn--sm"
                 :class="
-                  recordingId === shortcut.id ? 'btn-primary' : 'btn-outline'
+                  recordingId === shortcut.id
+                    ? 'metro-btn--secondary'
+                    : 'metro-btn--ghost'
                 "
                 :aria-label="`Change shortcut for ${shortcut.label}`"
                 @click="startRecording(shortcut.id)"
@@ -53,7 +55,7 @@
               <button
                 v-if="shortcut.custom"
                 type="button"
-                class="btn btn-ghost btn-sm"
+                class="metro-btn metro-btn--ghost metro-btn--sm"
                 :aria-label="`Reset ${shortcut.label} to default`"
                 @click="resetShortcut(shortcut.id)"
               >

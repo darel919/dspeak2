@@ -1,10 +1,7 @@
 import { requireAuthenticatedUser } from "../../../utils/auth.js";
 import { db } from "../../../db/client.js";
-import {
-  notifications,
-  notificationPreferences,
-} from "../../../db/schema/index.js";
-import { eq, and, desc, gte, isNull, count } from "drizzle-orm";
+import { notifications } from "../../../db/schema/index.js";
+import { eq, and, desc, gte, count } from "drizzle-orm";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
@@ -13,13 +10,20 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
   }
 
-  const since = getQuery(event).since || null;
-  const limit = Math.min(Number(getQuery(event).limit) || 100, 200);
+  const query = getQuery(event);
+  const since = query.since ? new Date(String(query.since)) : null;
+  if (since && !Number.isFinite(since.getTime()))
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Invalid since date",
+    });
+  const requestedLimit = Number(query.limit);
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.max(1, Math.min(requestedLimit, 200))
+    : 100;
 
   const conditions = [eq(notifications.userId, userId)];
-  if (since) {
-    conditions.push(gte(notifications.createdAt, new Date(since)));
-  }
+  if (since) conditions.push(gte(notifications.createdAt, since));
 
   const notificationsList = await db
     .select()
@@ -31,21 +35,26 @@ export default defineEventHandler(async (event) => {
   const unreadResult = await db
     .select({ count: count() })
     .from(notifications)
-    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+    .where(
+      and(eq(notifications.userId, userId), eq(notifications.read, false)),
+    );
 
   return {
-    items: notificationsList.map((n) => ({
-      id: n.id,
-      type: n.type || "message",
-      title: n.title || "",
-      body: n.body || "",
-      room: n.roomId || null,
-      channel: n.channelId || null,
-      message: n.messageId || null,
-      actor: n.actorId || null,
-      read_at: n.readAt || null,
-      created: n.createdAt,
-    })),
+    items: notificationsList.map((n) => {
+      let data = {};
+      try {
+        data = n.data ? JSON.parse(n.data) : {};
+      } catch {}
+      return {
+        id: n.id,
+        type: n.type || "message",
+        title: n.title || "",
+        body: n.body || "",
+        ...data,
+        read_at: n.read ? n.createdAt : null,
+        created: n.createdAt,
+      };
+    }),
     unreadCount: unreadResult[0]?.count || 0,
   };
 });

@@ -51,6 +51,7 @@ auth.users
 | `friends`, `user_nicknames`                                                  | Social relationships and room-scoped nicknames                                  |
 | `room_invites`, `room_audit_log`                                             | Expiring invites and administrative history                                     |
 | `notifications`, `notification_preferences`, `room_notification_preferences` | Durable notification state and user preferences                                 |
+| `user_presence`                                                              | Latest presence status, last activity time, platform, and manual override       |
 | `push_subscriptions`, `push_jobs`                                            | Device Web Push subscriptions and retryable delivery work                       |
 | `room_soundboards`, `soundboards`, `chat_files`                              | R2 object metadata and ownership; file bytes are not stored in PostgreSQL       |
 
@@ -58,7 +59,7 @@ auth.users
 
 - Room deletion cascades through room-owned channels, memberships, roles, invites, preferences, and media metadata where the schema declares a cascading foreign key.
 - Channel deletion cascades through messages and channel-owned metadata.
-- Supabase Auth user deletion cascades to the linked application profile and profile-owned records according to their foreign-key policy.
+- Supabase Auth user deletion leaves an anonymized application profile tombstone so historical messages and audit references remain valid after the login identity is removed. Profile-owned transient records are explicitly cleaned in the account deletion transaction.
 - Historical records use restrictive or nullable references where preserving content or audit context is required.
 - `room_memberships` is the authorization source for room access; role assignments are normalized through `membership_roles`.
 
@@ -68,4 +69,4 @@ PostgreSQL unique indexes enforce invariants such as one membership per room and
 
 RLS must remain enabled on client-observable tables and Supabase Realtime topics. Nitro validates Supabase access tokens locally through JWKS, then enforces room membership, role hierarchy, and endpoint-specific permissions before privileged reads or writes. The Supabase service-role key, database credentials, R2 credentials, and signing keys must remain server-only.
 
-Supabase Realtime carries normal application events such as chat, typing, presence, and notifications. Media membership, signaling, route epochs, and provider selection belong to the external `dspeak-media-control` Worker, not PostgreSQL or Realtime.
+Supabase Realtime carries normal application events such as chat, typing, presence, and notifications. Clients subscribe to the `global`, `chat:<channelId>`, `room:<roomId>`, and `notify:<userId>` topics; the server publishes with the service role and clients may write only to the RLS-protected `chat:%` topic. Presence status is persisted to `user_presence` through `/api/presence` (with activity heartbeats and an offline beacon), and idle sweep marks stale rows offline when clients vanish. Media membership, signaling, route epochs, and provider selection belong to the external `dspeak-media-control` Worker, not PostgreSQL or Realtime.

@@ -19,13 +19,13 @@
           />
         </div>
         <button
-          class="btn btn-sm btn-primary"
+          class="metro-btn metro-btn--sm btn-primary"
           :disabled="isRefreshing"
           @click="refreshUpdate"
         >
           <span
             v-if="isRefreshing"
-            class="loading loading-spinner loading-xs"
+            class="metro-spinner metro-spinner--xs"
           ></span>
           {{ isRefreshing ? "Restarting…" : "Restart now" }}
         </button>

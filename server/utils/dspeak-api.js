@@ -5,6 +5,10 @@ import {
   validateMediaPolicy,
 } from "../../shared/media-policy.js";
 import {
+  normalizeChannelPolicy,
+  normalizeSlowMode,
+} from "../../shared/channel-policy.js";
+import {
   canManageMember,
   canModerateVoiceMember,
   normalizeAttenuation,
@@ -20,10 +24,11 @@ import {
 import {
   broadcastGlobally,
   broadcastToChannel,
+  broadcastToRoom,
   broadcastToUser,
-} from "./dspeak-realtime";
-import { persistMessageNotifications, sendPushTest } from "./push-delivery";
-import { requireAuthenticatedUser } from "./auth";
+} from "./dspeak-realtime.js";
+import { persistMessageNotifications, sendPushTest } from "./push-delivery.js";
+import { requireAuthenticatedUser } from "./auth.js";
 import {
   disconnectVoiceParticipant,
   isActiveVoiceParticipant,
@@ -38,8 +43,9 @@ import {
   requireRoomMember,
   requireRoomPermission,
   seedRoomRoles,
-} from "./room-authorization";
-import { handleSoundboardApi } from "./soundboard-api";
+} from "./room-authorization.js";
+import { handleSoundboardApi } from "./soundboard-api.js";
+import { handleAssets } from "./dspeak-assets-api.js";
 import {
   decodeInvitePayload,
   encodeInvitePayload,
@@ -64,12 +70,9 @@ import {
   membershipRoles,
   profiles,
   userNicknames,
-  avatars,
   roomImages,
-  chatFiles,
 } from "../db/schema/index.js";
-import { getVoicePresenceSnapshots } from "./voice-presence.js";
-import { getRoomById, getChannelById } from "./room-authorization.js";
+import { getRoomById } from "./room-authorization.js";
 import { eq, and, inArray, asc, desc } from "drizzle-orm";
 import { updateProfileAvatar } from "./profile-avatar-storage.js";
 
@@ -142,7 +145,7 @@ async function validateRoomImage(file, limit, label, allowGif = false) {
     });
 }
 
-async function ensureMember(pb, room, userId) {
+async function ensureMember(room, userId) {
   return requireRoomMember(room, userId);
 }
 
@@ -176,10 +179,7 @@ function presentPublicProfile(user) {
 function presentChannel(channel) {
   const mediaPolicy = normalizeMediaPolicy(channel.mediaPolicy);
   const isMedia = ["voice", "stage"].includes(channel.type);
-  const inRoom = getVoicePresenceSnapshots(channel.roomId)
-    .filter((snapshot) => String(snapshot.channelId) === String(channel.id))
-    .flatMap((snapshot) => snapshot.inRoom || [])
-    .map(String);
+  const inRoom = (channel.inRoom || []).map(String);
   return {
     id: channel.id,
     name: channel.name,
@@ -191,8 +191,8 @@ function presentChannel(channel) {
     updated: channel.updatedAt,
     owner: null,
     room: channel.roomId,
-    policy: "free",
-    slow_mode: 0,
+    policy: channel.policy || "free",
+    slow_mode: channel.slowMode || 0,
   };
 }
 
@@ -350,7 +350,7 @@ async function handleChannels(event, suffix) {
     const room = await getRoomById(channel.roomId);
     if (!room)
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
-    await ensureMember(null, room, userId);
+    await ensureMember(room, userId);
     return presentChannel(channel);
   }
 
@@ -359,7 +359,7 @@ async function handleChannels(event, suffix) {
     const room = await getRoomById(roomId);
     if (!room)
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
-    await ensureMember(null, room, userId);
+    await ensureMember(room, userId);
     const channelRows = await db
       .select()
       .from(channels)
@@ -493,7 +493,9 @@ async function handleChannels(event, suffix) {
       .values({
         roomId: room.id,
         name: String(body.name).trim(),
-        type: body.isMedia ? "voice" : "text",
+        description: body.desc ? String(body.desc) : "",
+        type:
+          body.isMedia === true || body.isMedia === "true" ? "voice" : "text",
         position,
       })
       .returning();
@@ -527,6 +529,10 @@ async function handleChannels(event, suffix) {
     const update = { updatedAt: new Date() };
     if (body.name) update.name = String(body.name).trim();
     if (body.desc !== undefined) update.description = String(body.desc);
+    if (body.policy !== undefined)
+      update.policy = normalizeChannelPolicy(body.policy);
+    if (body.slowMode !== undefined)
+      update.slowMode = normalizeSlowMode(body.slowMode);
     if (body.mediaPolicy && ["voice", "stage"].includes(channel.type)) {
       await requireRoomPermission(room, userId, "channel.manage_media_policy");
       const validation = validateMediaPolicy(body.mediaPolicy);
@@ -620,20 +626,57 @@ async function handleChannels(event, suffix) {
     const room = await getRoomById(channel.roomId);
     if (!room)
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
-    await ensureMember(null, room, userId);
-    const members = new Set(
-      getVoicePresenceSnapshots(channel.roomId)
-        .filter((snapshot) => String(snapshot.channelId) === String(channel.id))
-        .flatMap((snapshot) => snapshot.inRoom || [])
-        .map(String),
-    );
-    if (suffix === "join") members.add(String(userId));
-    else {
-      members.delete(String(userId));
-      await disconnectVoiceParticipant(channel.id, String(userId));
+    await ensureMember(room, userId);
+    const current = (channel.inRoom || []).map(String);
+    const normalizedUserId = String(userId);
+    const joined = current.includes(normalizedUserId);
+    const nextInRoom =
+      suffix === "join"
+        ? joined
+          ? current
+          : [...current, normalizedUserId]
+        : current.filter((id) => id !== normalizedUserId);
+    await db
+      .update(channels)
+      .set({ inRoom: nextInRoom })
+      .where(eq(channels.id, channel.id));
+    const inRoom = nextInRoom;
+    const isMediaChannel = ["voice", "stage"].includes(channel.type);
+    if (suffix === "leave" && isMediaChannel) {
+      try {
+        await disconnectVoiceParticipant(channel.id, String(userId));
+      } catch (providerError) {
+        console.error(
+          "[ChannelJoin] Media provider disconnect failed",
+          providerError,
+        );
+      }
     }
-    const inRoom = [...members];
+    let voiceProfiles = [];
+    if (inRoom.length) {
+      try {
+        const profileRows = await db
+          .select()
+          .from(profiles)
+          .where(inArray(profiles.id, inRoom));
+        voiceProfiles = profileRows.map(presentUser).filter(Boolean);
+      } catch (profileError) {
+        console.error(
+          "[ChannelJoin] Unable to load voice presence profiles",
+          profileError,
+        );
+      }
+    }
     broadcastToChannel(channel.id, { type: "currentlyInChannel", inRoom });
+    broadcastToRoom(room.id, {
+      type: "voice-presence",
+      data: {
+        channelId: String(channel.id),
+        inRoom,
+        profiles: voiceProfiles,
+        participantStates: [],
+      },
+    });
     return {
       message: `Successfully ${suffix === "join" ? "joined" : "left"} the channel`,
     };
@@ -785,6 +828,10 @@ async function handleProfile(event, suffix) {
       String(body.roomId || "").trim(),
       "Room ID is required",
     );
+    const room = await getRoomById(roomId);
+    if (!room)
+      throw createError({ statusCode: 404, statusMessage: "Room not found" });
+    await requireRoomMember(room, userId);
     const target = await db
       .select({ id: profiles.id })
       .from(profiles)
@@ -792,6 +839,21 @@ async function handleProfile(event, suffix) {
       .limit(1);
     if (!target[0])
       throw createError({ statusCode: 404, statusMessage: "User not found" });
+    const targetMembership = await db
+      .select({ id: roomMemberships.id })
+      .from(roomMemberships)
+      .where(
+        and(
+          eq(roomMemberships.roomId, roomId),
+          eq(roomMemberships.userId, targetUserId),
+        ),
+      )
+      .limit(1);
+    if (!targetMembership[0])
+      throw createError({
+        statusCode: 404,
+        statusMessage: "User is not a member of this room",
+      });
     let nickname;
     try {
       nickname = normalizeNickname(body.nickname);
@@ -831,81 +893,6 @@ async function handleProfile(event, suffix) {
   throw createError({
     statusCode: 404,
     statusMessage: "Profile endpoint not found",
-  });
-}
-
-async function handleAssets(event, suffix) {
-  if (event.method !== "GET")
-    throw createError({
-      statusCode: 404,
-      statusMessage: "Asset endpoint not found",
-    });
-
-  const authenticatedUserId = await requireAuthenticatedUser(event);
-  const query = getQuery(event);
-
-  if (suffix === "chat-file") {
-    const fileId = requireValue(query.id, "Chat file ID is required");
-    const fileRows = await db
-      .select()
-      .from(chatFiles)
-      .where(eq(chatFiles.id, fileId))
-      .limit(1);
-    const file = fileRows[0];
-    if (!file)
-      throw createError({
-        statusCode: 404,
-        statusMessage: "Chat file not found",
-      });
-    const channel = await getChannelById(file.channelId);
-    if (!channel)
-      throw createError({
-        statusCode: 404,
-        statusMessage: "Channel not found",
-      });
-    const room = await getRoomById(channel.roomId);
-    if (!room)
-      throw createError({ statusCode: 404, statusMessage: "Room not found" });
-    await requireRoomMember(room, authenticatedUserId);
-    const url = await createDownloadUrl(file.r2Key);
-    setHeader(event, "Cache-Control", "private, max-age=604800, immutable");
-    setHeader(
-      event,
-      "Content-Type",
-      file.mimeType || "application/octet-stream",
-    );
-    setHeader(event, "X-Content-Type-Options", "nosniff");
-    return sendRedirect(event, url, 302);
-  }
-
-  if (suffix === "avatar") {
-    const targetUserId = requireValue(query.userId, "User ID is required");
-    const requestedFileName = requireValue(
-      query.fileName,
-      "Avatar filename is required",
-    );
-    const avatarRows = await db
-      .select()
-      .from(avatars)
-      .where(eq(avatars.userId, targetUserId))
-      .orderBy(desc(avatars.createdAt))
-      .limit(1);
-    const avatar = avatarRows[0];
-    if (!avatar || avatar.r2Key !== requestedFileName)
-      throw createError({
-        statusCode: 404,
-        statusMessage: "Avatar not found",
-      });
-    const url = await createDownloadUrl(avatar.r2Key);
-    setHeader(event, "Cache-Control", "private, max-age=604800, immutable");
-    setHeader(event, "Content-Type", avatar.mimeType || "image/jpeg");
-    setHeader(event, "X-Content-Type-Options", "nosniff");
-    return sendRedirect(event, url, 302);
-  }
-
-  throw createError({
-    statusCode: 404,
-    statusMessage: "Asset endpoint not found",
   });
 }
 
@@ -977,6 +964,7 @@ export async function handleDspeakApi(event) {
       statusCode: 500,
       statusMessage: "Internal Server Error",
       data: { code: "INTERNAL_ERROR", requestId },
+      stack: "",
     });
   }
 }

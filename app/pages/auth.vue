@@ -4,7 +4,7 @@
   >
     <div class="w-full max-w-lg">
       <template v-if="status === 'working'">
-        <div class="loading loading-spinner loading-lg text-primary"></div>
+        <div class="metro-spinner loading-lg text-primary"></div>
         <h1 class="mt-5 text-2xl font-semibold">Authenticating…</h1>
         <p class="mt-2 text-base-content/65">
           Verifying your account and preparing your dSpeak session.
@@ -20,13 +20,21 @@
           can open it again.
         </p>
         <div class="mt-6 flex flex-wrap gap-3">
-          <button class="btn btn-primary" type="button" @click="checkSignIn">
+          <button class="metro-btn" type="button" @click="checkSignIn">
             I've finished signing in
           </button>
-          <button class="btn btn-ghost" type="button" @click="reopenBrowser">
+          <button
+            class="metro-btn metro-btn--ghost"
+            type="button"
+            @click="reopenBrowser"
+          >
             Open browser again
           </button>
-          <button class="btn btn-ghost" type="button" @click="cancelSignIn">
+          <button
+            class="metro-btn metro-btn--ghost"
+            type="button"
+            @click="cancelSignIn"
+          >
             Cancel
           </button>
         </div>
@@ -42,13 +50,13 @@
           <label class="flex cursor-pointer items-start gap-3">
             <input
               v-model="termsAccepted"
-              class="checkbox checkbox-primary mt-0.5"
+              class="metro-checkbox mt-0.5"
               type="checkbox"
             />
             <span class="text-sm leading-relaxed">
               I have read and agree to the
               <a
-                class="link link-primary"
+                class="metro-link"
                 href="/terms"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -57,7 +65,7 @@
               </a>
               and
               <a
-                class="link link-primary"
+                class="metro-link"
                 href="/privacy"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -69,14 +77,16 @@
         </div>
         <div class="mt-6 flex flex-wrap gap-3">
           <button
-            class="btn btn-primary"
+            class="metro-btn"
             type="button"
             :disabled="!termsAccepted"
             @click="startSignIn"
           >
             Sign in
           </button>
-          <NuxtLink class="btn btn-ghost" to="/">Return home</NuxtLink>
+          <NuxtLink class="metro-btn metro-btn--ghost" to="/"
+            >Return home</NuxtLink
+          >
         </div>
       </template>
       <template v-else>
@@ -86,14 +96,12 @@
         </h1>
         <p class="mt-3 text-base-content/70">{{ failureMessage }}</p>
         <div class="mt-6 flex flex-wrap gap-3">
-          <button
-            class="btn btn-primary"
-            type="button"
-            @click="showTerms = true"
-          >
+          <button class="metro-btn" type="button" @click="showTerms = true">
             Try sign-in again
           </button>
-          <NuxtLink class="btn btn-ghost" to="/">Return home</NuxtLink>
+          <NuxtLink class="metro-btn metro-btn--ghost" to="/"
+            >Return home</NuxtLink
+          >
         </div>
       </template>
     </div>

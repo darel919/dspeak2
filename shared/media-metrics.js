@@ -189,6 +189,6 @@ export function getActiveMediaDirections(
 import {
   getConnectionQualityBars,
   getConnectionQualityLabel,
-} from "../app/shared/connection-quality.js";
+} from "./connection-quality.js";
 
 export { getConnectionQualityBars, getConnectionQualityLabel };

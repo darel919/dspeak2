@@ -10,7 +10,7 @@
           <h2 class="text-2xl font-light">Search messages</h2>
         </div>
         <button
-          class="btn btn-ghost btn-square h-11 min-h-11 w-11 min-w-11"
+          class="metro-icon-btn metro-icon-btn--ghost h-11 min-h-11 w-11 min-w-11"
           @click="$emit('close')"
           aria-label="Close search"
         >
@@ -28,7 +28,7 @@
           type="search"
           aria-label="Search messages"
           placeholder="Search messages"
-          class="input input-bordered h-11 w-full pl-10 focus-visible:outline-2 focus-visible:outline-primary"
+          class="metro-input h-11 w-full pl-10 focus-visible:outline-2 focus-visible:outline-primary"
           autocomplete="off"
           @keydown.enter="doSearch"
         />
@@ -37,7 +37,7 @@
       <div class="mt-3 grid grid-cols-2 gap-2">
         <select
           v-model="filters.author"
-          class="select select-bordered h-11 min-h-11 min-w-0 w-full focus-visible:outline-2 focus-visible:outline-primary"
+          class="metro-select h-11 min-h-11 min-w-0 w-full focus-visible:outline-2 focus-visible:outline-primary"
           aria-label="Filter by author"
         >
           <option value="">All authors</option>
@@ -47,7 +47,7 @@
         </select>
         <select
           v-model="filters.has"
-          class="select select-bordered h-11 min-h-11 min-w-0 w-full focus-visible:outline-2 focus-visible:outline-primary"
+          class="metro-select h-11 min-h-11 min-w-0 w-full focus-visible:outline-2 focus-visible:outline-primary"
           aria-label="Filter by content type"
         >
           <option value="">Any content</option>
@@ -75,7 +75,7 @@
         class="flex min-h-24 items-center justify-center"
         aria-live="polite"
       >
-        <span class="loading loading-spinner loading-sm text-primary"></span>
+        <span class="metro-spinner metro-spinner--sm text-primary"></span>
         <span class="sr-only">Searching messages</span>
       </div>
 

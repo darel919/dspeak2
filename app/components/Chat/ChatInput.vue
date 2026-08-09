@@ -19,7 +19,7 @@
             getReplyPreview()
           }}</span>
           <button
-            class="btn btn-ghost btn-xs btn-square"
+            class="metro-btn metro-btn--ghost btn-xs btn-square"
             aria-label="Cancel reply"
             @click="$emit('cancel-reply')"
           >
@@ -53,7 +53,7 @@
               />
               <button
                 type="button"
-                class="btn btn-error btn-sm btn-square absolute right-1 top-1 h-8 min-h-8 opacity-90"
+                class="metro-btn metro-btn--error btn-sm btn-square absolute right-1 top-1 h-8 min-h-8 opacity-90"
                 aria-label="Remove image"
                 @click="removeImage(index)"
               >
@@ -72,7 +72,7 @@
                 aria-live="polite"
               >
                 <span
-                  class="loading loading-spinner loading-sm text-primary"
+                  class="metro-spinner metro-spinner--sm text-primary"
                 ></span>
                 <span class="sr-only">Uploading {{ img.file.name }}</span>
               </div>
@@ -88,7 +88,7 @@
           <div class="dropdown dropdown-top">
             <button
               type="button"
-              class="btn btn-ghost btn-sm btn-square"
+              class="metro-btn metro-btn--ghost btn-sm btn-square"
               @click="toggleEmojiPicker"
               aria-label="Add emoji"
             >
@@ -96,7 +96,7 @@
             </button>
             <div
               v-if="showEmojiPicker"
-              class="dropdown-content z-50"
+              class="metro-pane z-50"
               style="
                 position: absolute;
                 bottom: 100%;
@@ -110,7 +110,7 @@
 
           <button
             type="button"
-            class="btn btn-ghost btn-sm btn-square"
+            class="metro-btn metro-btn--ghost btn-sm btn-square"
             @click="openFilePicker"
             aria-label="Upload image"
           >
@@ -127,7 +127,7 @@
                   ? 'Write a message to send when you’re back online…'
                   : 'Type a message…'
               "
-              class="textarea textarea-bordered min-h-[2.5rem] max-h-[6.5rem] w-full resize-none overflow-y-auto pr-8"
+              class="metro-input min-h-[2.5rem] max-h-[6.5rem] w-full resize-none overflow-y-auto pr-8"
               @input="handleTextareaInput"
               @focus="handleFocus"
               @blur="handleBlur"
@@ -141,16 +141,13 @@
           </div>
           <button
             type="submit"
-            class="btn btn-primary"
+            class="metro-btn"
             aria-label="Send message"
             :disabled="
               (!messageText.trim() && pendingImages.length === 0) || sending
             "
           >
-            <span
-              v-if="sending"
-              class="loading loading-spinner loading-xs"
-            ></span>
+            <span v-if="sending" class="metro-spinner metro-spinner--xs"></span>
             <Icon v-else name="lucide:send" class="size-6" />
           </button>
         </form>

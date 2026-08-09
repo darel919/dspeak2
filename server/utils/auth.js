@@ -41,7 +41,7 @@ function publicUserMetadata(user) {
     name: user.name || "",
     username: user.username || "",
     display_name: user.displayName || "",
-    handle: user.handle || "",
+    handle: user.username || user.handle || "",
     avatar: sameOriginAvatarPath(user),
   };
 }
@@ -142,47 +142,4 @@ export async function requireAuthenticatedUser(event) {
 export async function revokeAuthenticatedSession(event) {
   deleteCookie(event, SESSION_COOKIE, sessionCookieOptions(0));
   return { success: true };
-}
-
-export async function authenticateWebSocketRequest(request) {
-  const cookieHeader =
-    request.headers?.get?.("cookie") ||
-    request.headers?.cookie ||
-    request.headers?.getHeader?.("cookie") ||
-    "";
-  let token = "";
-  for (const part of cookieHeader.split(";")) {
-    const [key, ...value] = part.trim().split("=");
-    if (key === SESSION_COOKIE) {
-      try {
-        token = decodeURIComponent(value.join("="));
-        break;
-      } catch {
-        token = "";
-        break;
-      }
-    }
-  }
-
-  if (!token) {
-    const requestUrl = new URL(request.url);
-    token = requestUrl.searchParams.get("accessToken") || "";
-  }
-
-  if (!token) return null;
-
-  try {
-    const payload = await verifyAccessToken(token);
-    const profile = await profileRepository.findById(payload.sub);
-    if (!profile) return null;
-    return {
-      userId: String(profile.id),
-      deviceId:
-        request.headers?.get?.("x-device-id") ||
-        request.headers?.get?.("x-dspeak-device") ||
-        "unknown",
-    };
-  } catch {
-    return null;
-  }
 }

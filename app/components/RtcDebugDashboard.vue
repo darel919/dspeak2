@@ -520,8 +520,7 @@
         </section>
       </template>
       <div v-else-if="voiceStore.connected" class="rtc-loading">
-        <span class="loading loading-spinner" /> Collecting the first RTC
-        sample…
+        <span class="metro-spinner" /> Collecting the first RTC sample…
       </div>
     </main>
   </div>

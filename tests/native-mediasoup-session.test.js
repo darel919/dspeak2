@@ -606,6 +606,27 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(session.mediaConnectionState, "transport-connecting");
   });
 
+  it("does not report native media readiness before required transports connect", () => {
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.connected = true;
+    session.closed = false;
+    session.sendTransport = { id: "send" };
+    session.recvTransport = { id: "recv" };
+    session.sources.set("audio", {});
+    session.consumers.set("remote-audio", {});
+
+    assert.equal(session.connectionState().ready, false);
+    assert.equal(session.joinReady, false);
+
+    session.transportStates.set("send", "connected");
+    session.transportStates.set("recv", "connected");
+
+    assert.equal(session.connectionState().ready, true);
+    assert.equal(session.joinReady, true);
+  });
+
   it("correlates receive frames and closes the exact native consumer", async () => {
     const calls = [];
     const ended = [];

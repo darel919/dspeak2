@@ -13,14 +13,34 @@ export function closeMediaSessionTransports({
 export function closeMediaProviders({ getP2pMesh, getSfu, handoff }) {
   handoff.clear();
   try {
-    getP2pMesh()?.closeAll();
+    void closeMediaProviderSafely(getP2pMesh(), "P2P");
   } catch (error) {
     console.warn("[Media] failed to close P2P provider", error);
   }
   try {
-    getSfu()?.close();
+    void closeMediaProviderSafely(getSfu(), "SFU");
   } catch (error) {
     console.warn("[Media] failed to close SFU provider", error);
+  }
+}
+
+export function closeMediaProvider(provider) {
+  if (!provider) return;
+  if (typeof provider.closeMedia === "function") {
+    return provider.closeMedia();
+  }
+  if (typeof provider.closeAll === "function") return provider.closeAll();
+  return provider.close?.();
+}
+
+export async function closeMediaProviderSafely(provider, label = "media") {
+  if (!provider) return true;
+  try {
+    await closeMediaProvider(provider);
+    return true;
+  } catch (error) {
+    console.warn(`[Media] failed to close ${label} provider`, error);
+    return false;
   }
 }
 

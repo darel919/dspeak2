@@ -8,6 +8,9 @@ import { playSystemSound } from "~/shared/system-sounds.js";
 import { isFatalClientError } from "~/shared/fatal-client-error.js";
 import { voiceJoinErrorMessage } from "~/shared/voice-errors.js";
 import { STORAGE_KEYS } from "~/const/storage.js";
+import { resolveChannelRoomId } from "~/shared/media/channel-room.js";
+import { createVoicePageLifecycle } from "~/shared/voice-page-lifecycle.js";
+import { createRemoteReceivingHandlers } from "~/shared/voice-remote-receiving.js";
 import { resolveVoicePreferences } from "~/shared/voice-preferences.js";
 import { createVoiceParticipantState } from "~/shared/voice-participant-state.js";
 import { waitForVoiceTransportReady } from "~/shared/voice-join-readiness.js";
@@ -24,6 +27,10 @@ export const useVoiceStore = defineStore("voice", () => {
   const currentChannelId = ref(null);
   const currentRoomId = ref(null);
   const connectedUsers = ref(new Map());
+  const pageLifecycle = createVoicePageLifecycle({
+    getChannelId: () => currentChannelId.value,
+    leaveChannel: (channelId) => channelsStore.leaveChannel(channelId),
+  });
 
   const userVolumes = skipHydrate(ref({}));
   const trackVolumes = skipHydrate(ref({}));
@@ -266,12 +273,12 @@ export const useVoiceStore = defineStore("voice", () => {
   function setCurrentChannel(channelId) {
     currentChannelId.value = channelId;
     const channel = channelId ? channelsStore.getChannelById(channelId) : null;
-    currentRoomId.value =
-      channel?.room || channel?.room_id || channel?.roomId || null;
+    currentRoomId.value = resolveChannelRoomId(channel);
   }
 
   async function leaveVoiceChannel(cancelPendingJoin = true) {
     const wasConnected = connected.value;
+    const leavingChannelId = currentChannelId.value;
     if (cancelPendingJoin) joinGeneration += 1;
     const session = sfuComposable.value;
     if (djSession.value) await stopBroadcast().catch(() => {});
@@ -296,6 +303,10 @@ export const useVoiceStore = defineStore("voice", () => {
 
       setCurrentChannel(null);
       currentRoomId.value = null;
+      if (leavingChannelId) {
+        channelsStore.leaveChannel(leavingChannelId).catch(() => {});
+      }
+      pageLifecycle.unregister();
       for (const timer of soundboardActivityTimers.values())
         clearTimeout(timer);
       soundboardActivityTimers.clear();
@@ -495,7 +506,10 @@ export const useVoiceStore = defineStore("voice", () => {
       await session.prepareAudioPlayback?.();
       ensureCurrentJoin();
 
-      await session.connect(channelId);
+      const joiningRoomId = resolveChannelRoomId(
+        channelsStore.getChannelById(channelId),
+      );
+      await session.connect(channelId, { roomId: joiningRoomId });
       ensureCurrentJoin();
       setCurrentChannel(channelId);
       restorePersistedVoiceState();
@@ -538,6 +552,8 @@ export const useVoiceStore = defineStore("voice", () => {
           screenSharing: screenSharing.value,
         });
       }
+      channelsStore.joinChannel(channelId).catch(() => {});
+      pageLifecycle.register();
       session.sendParticipantVoiceState?.();
       await session.ensureAudioElements?.();
       playSystemSound("voice-join", settingsStore);
@@ -569,7 +585,7 @@ export const useVoiceStore = defineStore("voice", () => {
     if (!connected.value) {
       micMuted.value = !micMuted.value;
       if (!micMuted.value) deafened.value = false;
-      return;
+      return true;
     }
 
     try {
@@ -596,17 +612,13 @@ export const useVoiceStore = defineStore("voice", () => {
           throw err;
         }
       } else {
-        try {
-          if (sfuComposable.value.stopAudioProduction) {
-            await sfuComposable.value.stopAudioProduction();
-          }
-        } catch (_) {
-          /* noop */
-        }
+        await sfuComposable.value.stopAudioProduction?.();
         micMuted.value = true;
         sfuComposable.value.sendParticipantVoiceState?.();
       }
+      return true;
     } catch (err) {
+      if (err?.code === "MEDIA_SESSION_CLOSED") return false;
       console.error("[VoiceStore] Error toggling microphone:", err);
       error.value = err?.message || String(err);
       if (typeof window !== "undefined") {
@@ -614,6 +626,7 @@ export const useVoiceStore = defineStore("voice", () => {
         const { error: showError } = useToast();
         showError(`Microphone error: ${error.value}`);
       }
+      return false;
     }
   }
 
@@ -621,16 +634,27 @@ export const useVoiceStore = defineStore("voice", () => {
     if (!connected.value) {
       deafened.value = !deafened.value;
       if (deafened.value) micMuted.value = true;
-      return;
+      return true;
     }
 
-    deafened.value = !deafened.value;
-    if (deafened.value && !micMuted.value) {
-      await toggleMic();
-    }
-    sfuComposable.value?.sendParticipantVoiceState?.();
+    try {
+      const nextDeafened = !deafened.value;
+      deafened.value = nextDeafened;
+      if (nextDeafened && !micMuted.value) {
+        const muted = await toggleMic();
+        if (!muted) {
+          deafened.value = false;
+          return false;
+        }
+      }
+      sfuComposable.value?.sendParticipantVoiceState?.();
 
-    sfuComposable.value?.ensureAudioElements?.();
+      await sfuComposable.value?.ensureAudioElements?.();
+      return true;
+    } catch (err) {
+      error.value = err?.message || "Unable to update deafen state";
+      return false;
+    }
   }
 
   async function toggleCamera() {
@@ -638,19 +662,19 @@ export const useVoiceStore = defineStore("voice", () => {
     const session = sfuComposable.value;
     const generation = ++cameraToggleGeneration;
     const enable = !cameraEnabled.value;
-    cameraEnabled.value = enable;
+    const previous = cameraEnabled.value;
     try {
-      if (!enable) {
-        session.stopVideoProduction("camera");
-      } else {
+      if (enable) {
         await session.startVideoProduction("camera");
-      }
+      } else await session.stopVideoProduction("camera");
       if (generation !== cameraToggleGeneration) return;
+      cameraEnabled.value = enable;
       error.value = null;
     } catch (err) {
       if (generation !== cameraToggleGeneration) return;
-      cameraEnabled.value = false;
-      if (err?.code === "MEDIA_START_CANCELLED") return;
+      cameraEnabled.value = previous;
+      if (["MEDIA_START_CANCELLED", "MEDIA_SESSION_CLOSED"].includes(err?.code))
+        return;
       error.value = err?.message || "Unable to access the camera";
       throw err;
     }
@@ -658,11 +682,15 @@ export const useVoiceStore = defineStore("voice", () => {
 
   async function toggleScreenShare(captureSelection = null, options = {}) {
     if (!connected.value || !sfuComposable.value) return;
+    const previousSharing = Boolean(
+      screenSharing.value ||
+      unref(sfuComposable.value.localVideoFeeds)?.has?.("screen"),
+    );
     try {
       const session = sfuComposable.value;
       const currentLocalVideoFeeds = unref(session.localVideoFeeds);
       if (currentLocalVideoFeeds?.has?.("screen")) {
-        session.stopVideoProduction("screen");
+        await session.stopVideoProduction("screen");
         screenSharing.value = false;
       } else {
         screenSharing.value = false;
@@ -689,28 +717,18 @@ export const useVoiceStore = defineStore("voice", () => {
     } catch (err) {
       if (err?.name !== "NotAllowedError")
         error.value = err?.message || "Unable to share the screen";
-      screenSharing.value = false;
+      screenSharing.value = Boolean(previousSharing);
+      if (err?.code === "MEDIA_SESSION_CLOSED") return;
       throw err;
     }
   }
 
-  function setRemoteScreenReceiving(feedKey, receiving) {
-    return Boolean(
-      sfuComposable.value?.setRemoteScreenReceiving?.(feedKey, receiving),
-    );
-  }
-
-  function setRemoteSystemAudioReceiving(feedKey, receiving) {
-    return Boolean(
-      sfuComposable.value?.setRemoteSystemAudioReceiving?.(feedKey, receiving),
-    );
-  }
-
   async function toggleSystemAudioShare(captureSelection = null, options = {}) {
     if (!connected.value || !sfuComposable.value) return;
+    const previousSharing = systemAudioSharing.value;
     try {
       if (systemAudioSharing.value) {
-        sfuComposable.value.stopSystemAudioProduction();
+        await sfuComposable.value.stopSystemAudioProduction();
         systemAudioSharing.value = false;
       } else {
         const confirmed = captureSelection
@@ -746,7 +764,9 @@ export const useVoiceStore = defineStore("voice", () => {
     } catch (err) {
       if (err?.name !== "NotAllowedError")
         error.value = err?.message || "Unable to share system audio";
-      systemAudioSharing.value = false;
+      if (typeof previousSharing !== "undefined")
+        systemAudioSharing.value = previousSharing;
+      if (err?.code === "MEDIA_SESSION_CLOSED") return;
       throw err;
     }
   }
@@ -853,6 +873,10 @@ export const useVoiceStore = defineStore("voice", () => {
     }
     return { ok: true };
   }
+  const remoteReceiving = createRemoteReceivingHandlers({
+    getSession: () => sfuComposable.value,
+    onError: (message) => (error.value = message),
+  });
   if (typeof window !== "undefined") {
     const roomsStore = useRoomsStore();
     watch(
@@ -931,8 +955,7 @@ export const useVoiceStore = defineStore("voice", () => {
     toggleDeafen,
     toggleCamera,
     toggleScreenShare,
-    setRemoteScreenReceiving,
-    setRemoteSystemAudioReceiving,
+    ...remoteReceiving,
     toggleSystemAudioShare,
     startBroadcast,
     stopBroadcast,

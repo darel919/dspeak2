@@ -29,14 +29,12 @@ import {
 } from "~~/shared/channel-policy.js";
 import { debugLog } from "../shared/debug";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
-import { closeSocketOnPageHide } from "../shared/socket-lifecycle";
 import { getSupabaseClient } from "../utils/supabase-client.js";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
   const loading = ref(false);
   const error = ref(null);
-  const ws = ref(null);
   const realtimeChannel = ref(null);
   const connected = ref(false);
   const connecting = ref(false);
@@ -52,7 +50,6 @@ export const useChatStore = defineStore("chat", () => {
   const config = useRuntimeConfig();
   let reconnectTimer = null;
   let backoffAttempts = 0;
-  let pingInterval = null;
   let connectionGeneration = 0;
   let activeFetchController = null;
   let readFlushTimer = null;
@@ -60,6 +57,7 @@ export const useChatStore = defineStore("chat", () => {
   let pendingReadHydration = null;
   let pendingReadPersistence = Promise.resolve();
   let localDataGeneration = 0;
+  let pageHideRemoveListener = null;
   const pendingReadIds = new Set();
   const channelMessages = new Map();
   const pendingChannelPreparations = new Map();
@@ -252,20 +250,6 @@ export const useChatStore = defineStore("chat", () => {
   function closeActiveTransport() {
     const channel = realtimeChannel.value;
     realtimeChannel.value = null;
-    if (ws.value) {
-      const socket = ws.value;
-      ws.value = null;
-      socket.onopen = null;
-      socket.onmessage = null;
-      socket.onerror = null;
-      socket.onclose = null;
-      try {
-        socket.close();
-      } catch (socketError) {
-        console.warn("[ChatStore] Unable to close chat socket:", socketError);
-      }
-      return;
-    }
     if (!channel) return;
     try {
       channel.unsubscribe().then(() => {});
@@ -275,6 +259,35 @@ export const useChatStore = defineStore("chat", () => {
         socketError,
       );
     }
+  }
+
+  function joinChannelMembership(channelId) {
+    if (!import.meta.client || !channelId) return;
+    useChannelsStore()
+      .joinChannel(channelId)
+      .catch((joinError) => {
+        debugLog("[ChatStore] Failed to join channel membership:", joinError);
+      });
+    registerPageHideLeave();
+  }
+
+  function registerPageHideLeave() {
+    if (!import.meta.client || pageHideRemoveListener) return;
+    const handlePageHide = () => {
+      leaveChannelMembership(currentChannelId.value);
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    pageHideRemoveListener = () =>
+      window.removeEventListener("pagehide", handlePageHide);
+  }
+
+  function leaveChannelMembership(channelId) {
+    if (!import.meta.client || !channelId) return;
+    useChannelsStore()
+      .leaveChannel(channelId)
+      .catch((leaveError) => {
+        debugLog("[ChatStore] Failed to leave channel membership:", leaveError);
+      });
   }
 
   function handleBrowserOffline() {
@@ -291,10 +304,6 @@ export const useChatStore = defineStore("chat", () => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
-    }
-    if (pingInterval) {
-      clearInterval(pingInterval);
-      pingInterval = null;
     }
     closeActiveTransport();
   }
@@ -487,153 +496,66 @@ export const useChatStore = defineStore("chat", () => {
         return;
       }
 
-      if (hasTauriRuntimeMarker()) {
-        const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-        const websocketPath = config.public.websocketPath || `${origin}/api`;
-        const wsUrl = `${websocketPath}/chat/socket?channelId=${encodeURIComponent(channelId)}`;
-        const socket = new WebSocket(wsUrl);
-        ws.value = socket;
-        closeSocketOnPageHide(socket);
+      const supabaseClient = getSupabaseClient();
+      if (!supabaseClient) {
+        throw new Error("Supabase Realtime is not configured");
+      }
+      if (realtimeChannel.value) {
+        closeActiveTransport();
+      }
+      const sessionResult = await supabaseClient.auth.getSession();
+      const accessToken = sessionResult.data.session?.access_token;
+      if (!accessToken) throw new Error("Supabase session is unavailable");
+      supabaseClient.realtime.setAuth(accessToken);
+      const supabaseChannel = supabaseClient.channel(`chat:${channelId}`, {
+        config: { private: true },
+      });
+      realtimeChannel.value = supabaseChannel;
 
-        socket.onopen = () => {
+      supabaseChannel
+        .on("broadcast", { event: "message" }, (payload) => {
           if (
-            socket !== ws.value ||
-            generation !== connectionGeneration ||
-            currentChannelId.value !== channelId
-          ) {
-            socket.close();
-            return;
-          }
-          connecting.value = false;
-          connected.value = true;
-          intentionalDisconnect.value = false;
-          debugLog(`[ChatStore] Connected to channel ${channelId}`);
-
-          if (reconnectTimer) {
-            clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-          }
-          backoffAttempts = 0;
-
-          if (pingInterval) clearInterval(pingInterval);
-          pingInterval = setInterval(() => {
-            sendPing();
-          }, 30000);
-        };
-
-        socket.onmessage = (event) => {
-          if (
-            socket === ws.value &&
+            realtimeChannel.value === supabaseChannel &&
             generation === connectionGeneration &&
             currentChannelId.value === channelId
           ) {
-            handleWebSocketMessage(event);
+            handleWebSocketMessage({ data: JSON.stringify(payload?.payload) });
           }
-        };
-
-        socket.onclose = (event) => {
-          if (
-            socket !== ws.value ||
-            generation !== connectionGeneration ||
-            currentChannelId.value !== channelId
-          ) {
+        })
+        .subscribe((status, err) => {
+          if (realtimeChannel.value !== supabaseChannel) {
             return;
           }
-          connecting.value = false;
-          connected.value = false;
-          if (!navigator.onLine) {
-            handleBrowserOffline();
-            return;
-          }
-          try {
-            debugLog("[ChatStore] WebSocket connection closed", {
-              code: event?.code,
-              reason: event?.reason,
-            });
-          } catch (e) {
-            debugLog("[ChatStore] WebSocket connection closed");
-          }
-
-          if (pingInterval) {
-            clearInterval(pingInterval);
-            pingInterval = null;
-          }
-
-          scheduleReconnect();
-        };
-
-        socket.onerror = (socketError) => {
-          if (socket !== ws.value || generation !== connectionGeneration)
-            return;
-          connecting.value = false;
-          if (!navigator.onLine) {
-            handleBrowserOffline();
-            return;
-          }
-          console.error("[ChatStore] WebSocket error:", socketError);
-          error.value = "Unable to connect to real-time chat";
-        };
-      } else {
-        const supabaseClient = getSupabaseClient();
-        if (!supabaseClient) {
-          throw new Error("Supabase Realtime is not configured");
-        }
-        if (realtimeChannel.value) {
-          closeActiveTransport();
-        }
-        const sessionResult = await supabaseClient.auth.getSession();
-        const accessToken = sessionResult.data.session?.access_token;
-        if (!accessToken) throw new Error("Supabase session is unavailable");
-        supabaseClient.realtime.setAuth(accessToken);
-        const supabaseChannel = supabaseClient.channel(`chat:${channelId}`, {
-          config: { private: true },
-        });
-        realtimeChannel.value = supabaseChannel;
-
-        supabaseChannel
-          .on("broadcast", { event: "message" }, (payload) => {
+          if (status === "SUBSCRIBED" || status === "SYNCED") {
             if (
-              realtimeChannel.value === supabaseChannel &&
-              generation === connectionGeneration &&
-              currentChannelId.value === channelId
+              generation !== connectionGeneration ||
+              currentChannelId.value !== channelId
             ) {
-              handleWebSocketMessage({ data: JSON.stringify(payload) });
-            }
-          })
-          .subscribe((status, err) => {
-            if (realtimeChannel.value !== supabaseChannel) {
               return;
             }
-            if (status === "SUBSCRIBED" || status === "SYNCED") {
-              if (
-                generation !== connectionGeneration ||
-                currentChannelId.value !== channelId
-              ) {
-                return;
-              }
-              connecting.value = false;
-              connected.value = true;
-              intentionalDisconnect.value = false;
-              debugLog(`[ChatStore] Connected to channel ${channelId}`);
-              if (reconnectTimer) {
-                clearTimeout(reconnectTimer);
-                reconnectTimer = null;
-              }
-              backoffAttempts = 0;
+            connecting.value = false;
+            connected.value = true;
+            intentionalDisconnect.value = false;
+            debugLog(`[ChatStore] Connected to channel ${channelId}`);
+            if (reconnectTimer) {
+              clearTimeout(reconnectTimer);
+              reconnectTimer = null;
+            }
+            backoffAttempts = 0;
+            joinChannelMembership(channelId);
+            return;
+          }
+          if (status === "CHANNEL_ERROR" || status === "CLOSED") {
+            connecting.value = false;
+            connected.value = false;
+            if (!navigator.onLine) {
+              handleBrowserOffline();
               return;
             }
-            if (status === "CHANNEL_ERROR" || status === "CLOSED") {
-              connecting.value = false;
-              connected.value = false;
-              if (!navigator.onLine) {
-                handleBrowserOffline();
-                return;
-              }
-              error.value = "Unable to connect to real-time chat";
-              scheduleReconnect();
-            }
-          });
-      }
+            error.value = "Unable to connect to real-time chat";
+            scheduleReconnect();
+          }
+        });
 
       if (typeof window !== "undefined") {
         try {
@@ -677,16 +599,13 @@ export const useChatStore = defineStore("chat", () => {
     if (invalidateGeneration) connectionGeneration += 1;
     intentionalDisconnect.value = !!intentional;
 
-    if (ws.value || realtimeChannel.value) {
+    const leavingChannelId = currentChannelId.value;
+    if (realtimeChannel.value) {
       try {
         closeActiveTransport();
       } catch (e) {
         console.warn("[ChatStore] Error closing chat transport cleanly:", e);
       }
-    }
-    if (pingInterval) {
-      clearInterval(pingInterval);
-      pingInterval = null;
     }
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -695,6 +614,13 @@ export const useChatStore = defineStore("chat", () => {
     if (activeFetchController) {
       activeFetchController.abort();
       activeFetchController = null;
+    }
+    if (leavingChannelId) {
+      leaveChannelMembership(leavingChannelId);
+    }
+    if (pageHideRemoveListener) {
+      pageHideRemoveListener();
+      pageHideRemoveListener = null;
     }
 
     connecting.value = false;
@@ -1197,7 +1123,7 @@ export const useChatStore = defineStore("chat", () => {
         }
       }
       await persistPendingReadIds(userData.id);
-      useChannelsStore().fetchUnreadCounts();
+      await channelsStore.getUnreadCounts();
     })()
       .catch((readError) => {
         console.error("[ChatStore] Unable to update read state:", readError);
@@ -1220,24 +1146,27 @@ export const useChatStore = defineStore("chat", () => {
       isTyping,
       connected: connected.value,
     });
-    if (ws.value && connected.value) {
-      const message = {
-        type: "typing",
-        isTyping,
-      };
-      ws.value.send(JSON.stringify(message));
+    if (realtimeChannel.value && connected.value) {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
+      realtimeChannel.value
+        .send({
+          type: "broadcast",
+          event: "message",
+          payload: {
+            type: "user_typing",
+            data: {
+              userId: userData?.id,
+              channelId: currentChannelId.value,
+              isTyping,
+            },
+          },
+        })
+        .catch((typingError) => {
+          debugLog("[ChatStore] Typing broadcast failed:", typingError);
+        });
     } else {
       debugLog("[ChatStore] Cannot send typing indicator - not connected");
-    }
-  }
-
-  function sendPing() {
-    if (ws.value && connected.value) {
-      ws.value.send(
-        JSON.stringify({
-          type: "ping",
-        }),
-      );
     }
   }
 
@@ -1400,7 +1329,12 @@ export const useChatStore = defineStore("chat", () => {
       const authStore = useAuthStore();
       const userData = authStore.getUserData();
 
-      if (userData && message.sender.id === userData.id) {
+      const senderId = message?.sender?.id || message?.sender;
+      if (
+        userData?.id &&
+        senderId &&
+        String(senderId) === String(userData.id)
+      ) {
         debugLog("[ChatStore] Skipping notification for own message");
         return;
       }
@@ -1434,6 +1368,7 @@ export const useChatStore = defineStore("chat", () => {
         const notification = notificationManager.showMessageNotification(
           message,
           currentChannelName.value,
+          userData?.id,
         );
 
         if (notification) {
@@ -1603,7 +1538,6 @@ export const useChatStore = defineStore("chat", () => {
     fetchMessageHistory,
     markMessageAsRead,
     sendTypingIndicator,
-    sendPing,
     fetchBookmarks,
     fetchPinned,
     searchMessages,

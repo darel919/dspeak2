@@ -1,269 +1,89 @@
 <template>
-  <div class="flex items-center">
-    <!-- Rooms Dropdown/Horizontal List -->
-    <div class="flex items-center transition-all duration-300 ease-in-out">
-      <!-- Collapsed State: Dropdown -->
-      <div
-        v-if="isCollapsed"
-        class="dropdown dropdown-right"
-        style="z-index: 1000"
+  <div class="room-list">
+    <div class="metro-toolbar">
+      <h2 class="metro-section-title">Rooms</h2>
+      <div class="flex-auto" />
+      <button
+        class="metro-btn"
+        @click="showCreateModal = true"
+        aria-label="Create room"
+      >
+        <Icon name="lucide:plus" class="size-4" />
+        <span class="hidden sm:inline">Create room</span>
+      </button>
+    </div>
+
+    <div
+      v-if="roomsStore.loading && !roomsStore.rooms.length"
+      class="metro-skeleton-loading"
+    >
+      <div v-for="i in 3" :key="i" class="metro-skeleton h-12 w-full" />
+    </div>
+
+    <ul v-else-if="roomsStore.rooms.length" class="room-list-items" role="list">
+      <li
+        v-for="room in roomsStore.rooms"
+        :key="room.id"
+        class="room-list-item"
       >
         <button
-          tabindex="0"
-          class="btn btn-ghost btn-sm flex items-center gap-2"
-          :class="{ 'btn-active': selectedRoom }"
-        >
-          <span class="text-sm font-medium">Rooms</span>
-          <Icon name="lucide:chevron-down" class="w-4 h-4" />
-        </button>
-        <div
-          class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-80 max-h-96 overflow-y-auto"
-        >
-          <!-- Loading State -->
-          <div v-if="roomsStore.loading" class="p-2">
-            <div class="space-y-2">
-              <div v-for="i in 3" :key="i" class="animate-pulse">
-                <div class="flex items-center gap-3 p-2">
-                  <div class="w-8 h-8 bg-base-300 rounded-full"></div>
-                  <div class="flex-1">
-                    <div class="h-3 bg-base-300 rounded w-3/4 mb-1"></div>
-                    <div class="h-2 bg-base-300 rounded w-1/2"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- Error State -->
-          <div v-else-if="roomsStore.error" class="p-2">
-            <div class="alert alert-error alert-sm">
-              <Icon
-                name="lucide:circle-x"
-                class="stroke-current shrink-0 h-4 w-4"
-              />
-              <span class="text-xs">{{ roomsStore.error }}</span>
-            </div>
-          </div>
-          <!-- Rooms List -->
-          <div v-else-if="roomsStore.rooms.length > 0">
-            <li v-for="room in roomsStore.rooms" :key="room.id">
-              <button
-                type="button"
-                @click="navigateToRoom(room)"
-                class="flex w-full items-center gap-3 p-2 text-left"
-                :class="{ active: modelValue === room.id }"
-              >
-                <div class="avatar placeholder">
-                  <template v-if="getRoomPictureUrl(room)">
-                    <img
-                      :src="getRoomPictureUrl(room)"
-                      class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover"
-                      :alt="room.name"
-                    />
-                  </template>
-                  <template v-else>
-                    <div
-                      class="w-12 h-12 rounded-full bg-primary text-primary-content text-sm flex items-center justify-center"
-                    >
-                      <span>{{ room.name.charAt(0).toUpperCase() }}</span>
-                    </div>
-                  </template>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center justify-between">
-                    <span class="text-sm font-medium truncate">{{
-                      room.name
-                    }}</span>
-                    <div
-                      v-if="hasActivity(room)"
-                      class="w-2 h-2 bg-accent rounded-full"
-                    ></div>
-                  </div>
-                  <p class="text-xs text-base-content/60 truncate">
-                    {{ room.desc || `${room.members.length} members` }}
-                  </p>
-                </div>
-              </button>
-            </li>
-            <div class="divider my-1"></div>
-            <li>
-              <button
-                type="button"
-                class="text-sm"
-                @click="showJoinModal = true"
-              >
-                <Icon name="lucide:link" class="w-4 h-4" />Join Room
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                class="text-sm"
-                @click="showCreateModal = true"
-              >
-                <Icon name="lucide:plus" class="w-4 h-4" />Create Room
-              </button>
-            </li>
-          </div>
-          <!-- Empty State -->
-          <div v-else class="p-4 text-center">
-            <div class="text-base-content/50 text-sm">
-              <p>No rooms found</p>
-              <div class="mt-2 space-y-1">
-                <button
-                  @click="showJoinModal = true"
-                  class="btn btn-xs btn-ghost"
-                >
-                  Join Room
-                </button>
-                <button
-                  @click="showCreateModal = true"
-                  class="btn btn-xs btn-ghost"
-                >
-                  Create Room
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- Expanded State: Only Room Icons -->
-      <div v-else class="flex items-center gap-3">
-        <button
-          v-for="room in visibleRooms"
-          :key="room.id"
+          class="room-list-item-button"
+          :class="{
+            'room-list-item-button--active': props.modelValue === room.id,
+          }"
           @click="navigateToRoom(room)"
-          class="relative group"
-          :class="
-            modelValue === room.id
-              ? 'opacity-100'
-              : 'opacity-60 hover:opacity-100'
-          "
-          :title="room.name"
+          :aria-current="props.modelValue === room.id ? 'page' : undefined"
         >
-          <div class="avatar placeholder">
-            <template v-if="getRoomPictureUrl(room)">
-              <img
-                :src="getRoomPictureUrl(room)"
-                class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover transition-all"
-                :class="
-                  modelValue === room.id
-                    ? 'ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
-                    : 'ring-1 ring-base-content/30 group-hover:ring-base-content/60'
-                "
-                :alt="room.name"
-              />
-            </template>
-            <template v-else>
-              <div
-                class="w-12 h-12 rounded-full text-xs font-semibold transition-all flex items-center justify-center"
-                :class="
-                  modelValue === room.id
-                    ? 'bg-primary text-primary-content ring-2 ring-primary ring-offset-2 ring-offset-[var(--navbar-surface)]'
-                    : 'bg-base-200 text-base-content ring-1 ring-base-content/30 group-hover:ring-base-content/60 hover:bg-primary hover:text-primary-content'
-                "
-              >
-                <span>{{ room.name.charAt(0).toUpperCase() }}</span>
-              </div>
-            </template>
+          <span class="room-list-item-indicator" aria-hidden="true" />
+          <div class="room-list-item-content">
+            <span class="room-list-item-name">{{ room.name }}</span>
+            <span v-if="room.desc" class="room-list-item-desc">{{
+              room.desc
+            }}</span>
+            <span v-else class="room-list-item-desc"
+              >{{ room.members?.length || 0 }} members</span
+            >
           </div>
           <div
             v-if="hasActivity(room)"
-            class="absolute -top-1 -right-1 w-3 h-3 bg-accent rounded-full"
-          ></div>
+            class="room-list-item-activity"
+            aria-label="Activity"
+          />
         </button>
-        <!-- More Rooms Dropdown (if there are too many) -->
-        <div
-          v-if="hiddenRooms.length > 0"
-          class="dropdown dropdown-end"
-          style="z-index: 1000"
+      </li>
+    </ul>
+
+    <div v-else class="room-list-empty">
+      <p class="metro-caption">No rooms yet</p>
+      <div class="metro-toolbar mt-4">
+        <button
+          class="metro-btn metro-btn--ghost"
+          @click="showJoinModal = true"
         >
-          <button
-            tabindex="0"
-            class="btn btn-ghost btn-xs btn-circle"
-            aria-label="More rooms"
-          >
-            <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
-          </button>
-          <div
-            class="dropdown-content z-[1000] menu p-2 shadow bg-base-100 text-base-content rounded-box w-64"
-          >
-            <li v-for="room in hiddenRooms" :key="room.id">
-              <button
-                type="button"
-                @click="navigateToRoom(room)"
-                class="flex w-full items-center gap-2 text-left text-sm"
-                :class="{ active: modelValue === room.id }"
-              >
-                <div class="avatar placeholder">
-                  <template v-if="getRoomPictureUrl(room)">
-                    <img
-                      :src="getRoomPictureUrl(room)"
-                      class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover"
-                      :alt="room.name"
-                    />
-                  </template>
-                  <template v-else>
-                    <div
-                      class="w-6 h-6 rounded-full bg-primary text-primary-content text-xs flex items-center justify-center"
-                    >
-                      <span>{{ room.name.charAt(0).toUpperCase() }}</span>
-                    </div>
-                  </template>
-                </div>
-                <span class="truncate">{{ room.name }}</span>
-                <div
-                  v-if="hasActivity(room)"
-                  class="w-2 h-2 bg-accent rounded-full ml-auto"
-                ></div>
-              </button>
-            </li>
-          </div>
-        </div>
-        <!-- Action Buttons -->
-        <div class="flex items-center gap-1 ml-2 pl-2 border-l border-base-300">
-          <button
-            @click="showJoinModal = true"
-            class="btn btn-ghost btn-xs btn-circle"
-            title="Join Room"
-          >
-            <Icon name="lucide:link" class="w-4 h-4" />
-          </button>
-          <button
-            @click="showCreateModal = true"
-            class="btn btn-ghost btn-xs btn-circle"
-            title="Create Room"
-          >
-            <Icon name="lucide:plus" class="w-4 h-4" />
-          </button>
-        </div>
+          <Icon name="lucide:link" class="size-4" /> Join room
+        </button>
+        <button class="metro-btn" @click="showCreateModal = true">
+          <Icon name="lucide:plus" class="size-4" /> Create room
+        </button>
       </div>
-      <!-- Toggle Button -->
-      <button
-        @click="toggleCollapse"
-        class="btn btn-ghost btn-xs btn-circle ml-2"
-        :title="isCollapsed ? 'Show Room Icons' : 'Show Rooms Menu'"
-      >
-        <Icon name="lucide:chevron-right" v-if="isCollapsed" class="w-4 h-4" />
-        <Icon name="lucide:chevron-left" v-else class="w-4 h-4" />
-      </button>
     </div>
 
     <!-- Join Room Modal -->
     <div
       v-if="showJoinModal"
-      class="modal modal-open"
+      class="metro-modal modal-open"
       role="dialog"
       aria-modal="true"
       aria-labelledby="join-room-title"
     >
-      <div class="modal-box">
-        <h3 id="join-room-title" class="font-bold text-lg mb-4">Join Room</h3>
-        <p class="text-base-content/70 mb-4">
+      <div class="metro-flyout metro-flyout">
+        <h3 id="join-room-title" class="metro-section-title mb-4">Join Room</h3>
+        <p class="metro-body mb-4">
           Enter a room ID or paste a join link to join a room.
         </p>
         <div class="form-control">
           <label class="label">
-            <span class="label-text">Room ID or Join Link</span>
+            <span class="label-text metro-body">Room ID or Join Link</span>
           </label>
           <input
             v-model="joinInput"
@@ -271,27 +91,32 @@
             type="text"
             aria-label="Room ID or join link"
             placeholder="Enter room ID or paste join link..."
-            class="input input-bordered w-full"
+            class="metro-input w-full"
             @keyup.enter="handleJoinSubmit"
           />
         </div>
-        <div v-if="joinError" class="alert alert-error mt-4">
+        <div
+          v-if="joinError"
+          class="metro-status metro-status--error mt-4"
+          role="alert"
+        >
           <Icon
-            name="lucide:circle-x"
-            class="stroke-current shrink-0 h-6 w-6"
+            name="lucide:circle-alert"
+            class="size-5 shrink-0"
+            aria-hidden="true"
           />
           <span>{{ joinError }}</span>
         </div>
-        <div class="modal-action">
+        <div class="metro-toolbar mt-4 justify-end">
           <button
-            class="btn btn-ghost"
+            class="metro-btn metro-btn--ghost"
             @click="closeJoinModal"
             :disabled="joiningRoom"
           >
             Cancel
           </button>
           <button
-            class="btn btn-primary"
+            class="metro-btn"
             @click="handleJoinSubmit"
             :disabled="!joinInput.trim() || joiningRoom"
             :class="{ loading: joiningRoom }"
@@ -300,24 +125,24 @@
           </button>
         </div>
       </div>
-      <div class="modal-backdrop" @click="closeJoinModal"></div>
+      <div class="modal-backdrop" @click="closeJoinModal" />
     </div>
 
     <!-- Create Room Modal -->
     <div
       v-if="showCreateModal"
-      class="modal modal-open"
+      class="metro-modal modal-open"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-room-title"
     >
-      <div class="modal-box">
-        <h3 id="create-room-title" class="font-bold text-lg mb-4">
+      <div class="metro-flyout metro-flyout">
+        <h3 id="create-room-title" class="metro-section-title mb-4">
           Create Room
         </h3>
         <div class="form-control mb-4">
           <label class="label">
-            <span class="label-text"
+            <span class="label-text metro-body"
               >Room Name <span class="text-error">*</span></span
             >
           </label>
@@ -327,40 +152,49 @@
             type="text"
             aria-label="Room name"
             placeholder="Enter room name..."
-            class="input input-bordered w-full"
+            class="metro-input w-full"
             @keyup.enter="handleCreateSubmit"
+            required
+            minlength="2"
+            maxlength="32"
           />
         </div>
         <div class="form-control mb-4">
           <label class="label">
-            <span class="label-text">Description</span>
+            <span class="label-text metro-body">Description</span>
           </label>
           <input
             v-model="createDesc"
             type="text"
             aria-label="Room description"
             placeholder="Optional description..."
-            class="input input-bordered w-full"
+            class="metro-input w-full"
             @keyup.enter="handleCreateSubmit"
+            maxlength="200"
           />
         </div>
-        <div v-if="createError" class="alert alert-error mb-4">
+        <div
+          v-if="createError"
+          class="metro-status metro-status--error mb-4"
+          role="alert"
+        >
           <Icon
-            name="lucide:circle-x"
-            class="stroke-current shrink-0 h-6 w-6"
+            name="lucide:circle-alert"
+            class="size-5 shrink-0"
+            aria-hidden="true"
           />
           <span>{{ createError }}</span>
         </div>
-        <div class="modal-action">
+        <div class="metro-toolbar justify-end">
           <button
-            class="btn btn-ghost"
+            class="metro-btn metro-btn--ghost"
             @click="closeCreateModal"
             :disabled="creatingRoom"
           >
             Cancel
           </button>
           <button
-            class="btn btn-primary"
+            class="metro-btn"
             @click="handleCreateSubmit"
             :disabled="!createName.trim() || creatingRoom"
             :class="{ loading: creatingRoom }"
@@ -369,82 +203,12 @@
           </button>
         </div>
       </div>
-      <div class="modal-backdrop" @click="closeCreateModal"></div>
+      <div class="modal-backdrop" @click="closeCreateModal" />
     </div>
 
-    <!-- Collapsed State Context Menu -->
-    <div v-if="isCollapsed" class="absolute top-16 left-2 z-50">
-      <div class="dropdown dropdown-right">
-        <button
-          tabindex="0"
-          class="btn btn-circle btn-ghost btn-xs opacity-0 hover:opacity-100 transition-opacity"
-          @click="showContextMenu = !showContextMenu"
-          title="Room Actions"
-        >
-          <Icon name="lucide:ellipsis-vertical" class="w-4 h-4" />
-        </button>
-        <div
-          class="dropdown-content z-[1] menu p-2 shadow bg-base-100 text-base-content rounded-box w-52"
-        >
-          <li>
-            <button type="button" @click="showJoinModal = true">
-              Join Room
-            </button>
-          </li>
-          <li>
-            <button type="button" @click="showCreateModal = true">
-              Create Room
-            </button>
-          </li>
-          <li>
-            <button
-              type="button"
-              @click="inviteDialog?.open(selectedRoom)"
-              :class="{ disabled: !selectedRoom }"
-            >
-              Copy Invite Link
-            </button>
-          </li>
-        </div>
-      </div>
-    </div>
+    <RoomInviteDialog ref="inviteDialog" />
   </div>
-  <RoomInviteDialog ref="inviteDialog" />
 </template>
-
-<style scoped>
-.transition-all {
-  transition-property: all;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 300ms;
-}
-
-.w-16 {
-  width: 4rem;
-}
-
-.w-72 {
-  width: 18rem;
-}
-
-.group:hover .group-hover\:opacity-100 {
-  opacity: 1;
-}
-
-@keyframes pulse-soft {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
-.bg-accent {
-  animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-</style>
 
 <script setup>
 import { MAX_VISIBLE_ROOMS } from "../const/ui";
@@ -469,23 +233,6 @@ const authStore = useAuthStore();
 const router = useRouter();
 const { success, error } = useToast();
 
-const isCollapsed = ref(true);
-const showContextMenu = ref(false);
-
-const selectedRoom = computed(() =>
-  roomsStore.rooms.find((r) => r.id === props.modelValue),
-);
-
-const visibleRooms = computed(() =>
-  roomsStore.rooms.slice(0, MAX_VISIBLE_ROOMS),
-);
-
-const hiddenRooms = computed(() =>
-  roomsStore.rooms.length > MAX_VISIBLE_ROOMS
-    ? roomsStore.rooms.slice(MAX_VISIBLE_ROOMS)
-    : [],
-);
-
 const showJoinModal = ref(false);
 const joinInput = ref("");
 const joinError = ref(null);
@@ -499,21 +246,6 @@ const creatingRoom = ref(false);
 
 const joinInputRef = ref(null);
 const createNameRef = ref(null);
-
-function toggleCollapse() {
-  isCollapsed.value = !isCollapsed.value;
-
-  localStorage.setItem("roomListCollapsed", isCollapsed.value.toString());
-}
-
-onMounted(() => {
-  const stored = localStorage.getItem("roomListCollapsed");
-  if (stored !== null) {
-    isCollapsed.value = stored === "true";
-  } else {
-    isCollapsed.value = true;
-  }
-});
 
 function hasActivity(room) {
   if (!room.members || !Array.isArray(room.members)) return false;
@@ -625,10 +357,6 @@ async function handleCreateSubmit() {
   }
 }
 
-function refreshRooms() {
-  roomsStore.fetchRooms?.();
-}
-
 async function navigateToRoom(r) {
   if (props.modelValue !== r.id) {
     emit("update:modelValue", r.id);
@@ -648,3 +376,428 @@ async function navigateToRoom(r) {
   }
 }
 </script>
+
+<style scoped>
+.room-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.metro-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--metro-space-2);
+  min-height: var(--metro-control-size);
+  flex-wrap: wrap;
+}
+
+.metro-section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.metro-body {
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.metro-caption {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--metro-muted);
+}
+
+.metro-description {
+  max-width: 60ch;
+  color: var(--metro-muted);
+  line-height: 1.5;
+}
+
+.metro-skeleton {
+  background: color-mix(
+    in oklab,
+    var(--color-base-content) 12%,
+    var(--color-base-100)
+  );
+}
+
+.metro-skeleton-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--metro-space-2);
+  padding: var(--metro-space-4);
+}
+
+.room-list-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.room-list-item {
+  border-top: 1px solid var(--metro-border);
+}
+
+.room-list-item:first-child {
+  border-top: none;
+}
+
+.room-list-item-button {
+  display: flex;
+  align-items: center;
+  gap: var(--metro-space-3);
+  width: 100%;
+  padding: var(--metro-space-3) var(--metro-space-4);
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+.room-list-item-button:hover {
+  background: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+}
+
+.room-list-item-button:focus-visible {
+  outline: 2px solid var(--metro-accent);
+  outline-offset: -2px;
+  background: color-mix(in oklab, var(--metro-accent) 12%, transparent);
+}
+
+.room-list-item-button--active {
+  background: color-mix(in oklab, var(--metro-accent) 10%, transparent);
+}
+
+.room-list-item-button--active:hover {
+  background: color-mix(in oklab, var(--metro-accent) 16%, transparent);
+}
+
+.room-list-item-indicator {
+  width: 4px;
+  height: 24px;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.room-list-item-button--active .room-list-item-indicator {
+  background: var(--metro-accent);
+}
+
+.room-list-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.room-list-item-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-base-content);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-list-item-button--active .room-list-item-name {
+  color: var(--metro-accent);
+}
+
+.room-list-item-desc {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--metro-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-list-item-activity {
+  width: 8px;
+  height: 8px;
+  background: var(--metro-accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: metro-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-list-item-activity {
+    animation: none;
+  }
+}
+
+@keyframes metro-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.room-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--metro-space-8) var(--metro-space-4);
+  text-align: center;
+  flex: 1;
+}
+
+.metro-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--metro-space-2);
+  min-height: var(--metro-control-size);
+  padding: 0 var(--metro-space-4);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--metro-accent);
+  color: var(--metro-accent-content);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  transition:
+    background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1),
+    opacity 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+.metro-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.metro-btn:active:not(:disabled) {
+  opacity: 1;
+  transform: scale(0.98);
+}
+
+.metro-btn:focus-visible {
+  outline: 2px solid var(--metro-accent);
+  outline-offset: 2px;
+}
+
+.metro-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.metro-btn--ghost {
+  background: transparent;
+  color: var(--color-base-content);
+}
+
+.metro-btn--ghost:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+}
+
+.metro-btn.loading {
+  position: relative;
+  color: transparent;
+}
+
+.metro-btn.loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: metro-spin 0.6s linear infinite;
+}
+
+@keyframes metro-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.metro-flyout {
+  border: 1px solid var(--metro-border);
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  box-shadow: var(--metro-overlay-shadow);
+  border-radius: 0;
+}
+
+.metro-status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--metro-space-3);
+  padding: var(--metro-space-3) var(--metro-space-4);
+  border: 1px solid var(--metro-border);
+  background: var(--color-base-100);
+}
+
+.metro-status--error {
+  border-color: var(--color-error);
+  background: color-mix(in oklab, var(--color-error) 8%, var(--color-base-100));
+  color: var(--color-error-content);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--metro-space-4);
+}
+
+.modal-box {
+  width: 100%;
+  max-width: 400px;
+  padding: var(--metro-space-6);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 50%);
+}
+
+.form-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--metro-space-1);
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--metro-space-1);
+}
+
+.label-text {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.input {
+  min-height: var(--metro-control-size);
+  padding: 0 var(--metro-space-3);
+  font: inherit;
+  background: var(--color-base-100);
+  border: 1px solid var(--metro-border);
+  border-radius: 0;
+  color: var(--color-base-content);
+  transition:
+    border-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1),
+    box-shadow 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--metro-accent);
+  box-shadow: 0 0 0 2px
+    color-mix(in oklab, var(--metro-accent) 20%, transparent);
+}
+
+.input-bordered {
+  border: 1px solid var(--metro-border);
+}
+
+.mt-4 {
+  margin-top: var(--metro-space-4);
+}
+.mb-4 {
+  margin-bottom: var(--metro-space-4);
+}
+.mt-2 {
+  margin-top: var(--metro-space-2);
+}
+.mb-2 {
+  margin-bottom: var(--metro-space-2);
+}
+.mt-1 {
+  margin-top: var(--metro-space-1);
+}
+.mb-1 {
+  margin-bottom: var(--metro-space-1);
+}
+.justify-end {
+  justify-content: flex-end;
+}
+.hidden {
+  display: none;
+}
+.sm\\:inline {
+  display: none;
+}
+@media (min-width: 640px) {
+  .sm\\:inline {
+    display: inline;
+  }
+}
+.w-full {
+  width: 100%;
+}
+.flex {
+  display: flex;
+}
+.flex-auto {
+  flex: 1 1 auto;
+}
+.items-center {
+  align-items: center;
+}
+.gap-2 {
+  gap: var(--metro-space-2);
+}
+.gap-3 {
+  gap: var(--metro-space-3);
+}
+.gap-4 {
+  gap: var(--metro-space-4);
+}
+.flex-col {
+  flex-direction: column;
+}
+.flex-row {
+  flex-direction: row;
+}
+.flex-wrap {
+  flex-wrap: wrap;
+}
+.min-h-11 {
+  min-height: var(--metro-control-size);
+}
+.size-4 {
+  width: 1rem;
+  height: 1rem;
+}
+.size-5 {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.shrink-0 {
+  flex-shrink: 0;
+}
+.text-error {
+  color: var(--color-error);
+}
+.text-base-content {
+  color: var(--color-base-content);
+}
+</style>

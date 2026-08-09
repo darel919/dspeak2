@@ -8,13 +8,15 @@
           </p>
           <h1 class="metro-title">{{ room?.name || "Room" }}</h1>
         </div>
-        <NuxtLink :to="`/room/${roomId}`" class="btn btn-ghost">
+        <NuxtLink :to="`/room/${roomId}`" class="metro-btn metro-btn--ghost">
           <Icon name="lucide:arrow-left" class="size-4" />Back to room
         </NuxtLink>
       </header>
 
-      <div v-if="loading" class="loading loading-spinner loading-lg"></div>
-      <div v-else-if="error" class="alert alert-error">{{ error }}</div>
+      <div v-if="loading" class="metro-spinner loading-lg"></div>
+      <div v-else-if="error" class="metro-status metro-status--error">
+        {{ error }}
+      </div>
       <div v-else class="grid gap-8 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav
           class="grid content-start gap-1 border-b border-base-300 pb-5 lg:border-b-0 lg:pb-0"
@@ -49,7 +51,7 @@
               <span class="font-medium">Room name</span>
               <input
                 v-model="form.name"
-                class="input input-bordered w-full"
+                class="metro-input w-full"
                 maxlength="80"
                 required
               />
@@ -58,7 +60,7 @@
               <span class="font-medium">Description</span>
               <textarea
                 v-model="form.desc"
-                class="textarea textarea-bordered min-h-28 w-full"
+                class="metro-input min-h-28 w-full"
                 maxlength="500"
               ></textarea>
             </label>
@@ -67,7 +69,7 @@
                 <span class="font-medium">Square room picture</span>
                 <input
                   type="file"
-                  class="file-input file-input-bordered w-full min-w-0"
+                  class="metro-input w-full min-w-0"
                   accept="image/jpeg,image/png,image/webp"
                   @change="picture = $event.target.files[0]"
                 />
@@ -79,7 +81,7 @@
                 <span class="font-medium">Wide room header</span>
                 <input
                   type="file"
-                  class="file-input file-input-bordered w-full min-w-0"
+                  class="metro-input w-full min-w-0"
                   accept="image/jpeg,image/png,image/webp"
                   @change="headerImage = $event.target.files[0]"
                 />
@@ -110,7 +112,7 @@
                 </button>
               </div>
             </fieldset>
-            <button class="btn btn-primary" :disabled="saving">
+            <button class="metro-btn" :disabled="saving">
               {{ saving ? "Saving…" : "Save room" }}
             </button>
           </form>
@@ -138,7 +140,7 @@
               <input
                 v-model="form.attenuation.enabled"
                 type="checkbox"
-                class="toggle toggle-primary"
+                class="metro-toggle"
               />
             </label>
             <fieldset
@@ -155,7 +157,7 @@
                 type="range"
                 min="0"
                 max="100"
-                class="range range-primary"
+                class="metro-range"
                 aria-label="Shared audio volume while someone speaks"
                 :aria-valuetext="`${sharedAudioDuringSpeech}% volume`"
               />
@@ -264,7 +266,7 @@
               <button
                 v-if="attenuationSaveState === 'error'"
                 type="button"
-                class="btn btn-ghost btn-sm"
+                class="metro-btn metro-btn--ghost metro-btn--sm"
                 @click="queueAttenuationSave(0)"
               >
                 Retry
@@ -283,7 +285,7 @@
               <button
                 v-if="hasPermission('room.manage_roles')"
                 type="button"
-                class="btn btn-primary"
+                class="metro-btn"
                 @click="startRole"
               >
                 New role
@@ -436,7 +438,7 @@
                   </div>
                   <button
                     type="button"
-                    class="btn btn-ghost btn-square btn-sm"
+                    class="metro-icon-btn metro-icon-btn--ghost btn-sm"
                     aria-label="Close role editor"
                     @click="closeRoleForm"
                   >
@@ -448,13 +450,13 @@
                     ><span class="font-medium">Role name</span
                     ><input
                       v-model="roleForm.name"
-                      class="input input-bordered w-full"
+                      class="metro-input w-full"
                       required /></label
                   ><label class="grid gap-2"
                     ><span class="font-medium">Hierarchy position</span
                     ><input
                       v-model.number="roleForm.position"
-                      class="input input-bordered w-full"
+                      class="metro-input w-full"
                       type="number"
                       min="1"
                       required
@@ -472,7 +474,7 @@
                       ><input
                         v-model="roleForm.permissions"
                         type="checkbox"
-                        class="checkbox checkbox-primary mt-0.5"
+                        class="metro-checkbox mt-0.5"
                         :value="permission.value"
                       /><span
                         ><strong class="block">{{ permission.label }}</strong
@@ -484,18 +486,18 @@
                   </div>
                 </fieldset>
                 <div class="mt-6 flex flex-wrap gap-2">
-                  <button class="btn btn-primary" :disabled="savingRole">
+                  <button class="metro-btn" :disabled="savingRole">
                     {{ savingRole ? "Saving…" : "Save role" }}</button
                   ><button
                     type="button"
-                    class="btn btn-ghost"
+                    class="metro-btn metro-btn--ghost"
                     @click="closeRoleForm"
                   >
                     Cancel</button
                   ><button
                     v-if="roleForm.id && !roleForm.system"
                     type="button"
-                    class="btn btn-error sm:ml-auto"
+                    class="metro-btn metro-btn--error sm:ml-auto"
                     :disabled="savingRole"
                     @click="deleteRole"
                   >
@@ -516,7 +518,7 @@
                 Invite creation and invite-based joins for this room.
               </p>
             </div>
-            <div v-if="auditLoading" class="loading loading-spinner"></div>
+            <div v-if="auditLoading" class="metro-spinner"></div>
             <div
               v-else-if="!auditEvents.length"
               class="border-y border-base-300 py-6 text-base-content/60"

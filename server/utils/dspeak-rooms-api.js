@@ -98,7 +98,8 @@ async function replaceRoomImage(roomId, type, file) {
     .select({ r2Key: roomImages.r2Key })
     .from(roomImages)
     .where(and(eq(roomImages.roomId, roomId), eq(roomImages.type, type)));
-  const r2Key = `rooms/${roomId}/${type}/${crypto.randomUUID()}`;
+  const keyType = type === "header" ? "headers" : "profile";
+  const r2Key = `rooms/${roomId}/${keyType}/${crypto.randomUUID()}`;
   await putObject(r2Key, file, file.type, file.size);
   try {
     await db.transaction(async (tx) => {
@@ -132,7 +133,7 @@ function presentProfile(profile) {
     name: publicDisplayName(profile),
     display_name: profile.displayName || "",
     username: profile.username || "",
-    handle: profile.handle || "",
+    handle: profile.username || profile.handle || "",
     online: false,
     avatar: sameOriginAvatarPath(profile),
   };
@@ -143,16 +144,16 @@ function presentChannel(channel, roomId) {
   return {
     id: channel.id,
     name: channel.name,
-    desc: "",
+    desc: channel.description || "",
     isMedia,
-    mediaPolicy: normalizeMediaPolicy(),
+    mediaPolicy: normalizeMediaPolicy(channel.mediaPolicy),
     inRoom: [],
     created: channel.createdAt?.toISOString?.() || channel.createdAt,
     updated: channel.updatedAt?.toISOString?.() || channel.updatedAt,
     owner: null,
     room: String(roomId),
-    policy: "free",
-    slow_mode: 0,
+    policy: channel.policy || "free",
+    slow_mode: channel.slowMode || 0,
   };
 }
 
@@ -169,19 +170,25 @@ async function roomDetails(room, userId = null) {
         userId: roomMemberships.userId,
         joinedAt: roomMemberships.joinedAt,
         roleId: membershipRoles.roleId,
+        roleName: roomRoles.name,
+        roleColor: roomRoles.color,
+        rolePosition: roomRoles.position,
+        roleSystem: roomRoles.system,
+        roleIsDefault: roomRoles.isDefault,
       })
       .from(roomMemberships)
       .leftJoin(
         membershipRoles,
         eq(membershipRoles.membershipId, roomMemberships.id),
       )
+      .leftJoin(roomRoles, eq(roomRoles.id, membershipRoles.roleId))
       .where(eq(roomMemberships.roomId, room.id)),
     db.select().from(roomImages).where(eq(roomImages.roomId, room.id)),
   ]);
 
   const memberIds = [
-    ...new Set(memberships.map((m) => String(m.userId))).filter(Boolean),
-  ];
+    ...new Set(memberships.map((m) => String(m.userId))),
+  ].filter(Boolean);
   let memberProfiles = [];
   if (memberIds.length) {
     memberProfiles = await db
@@ -197,6 +204,11 @@ async function roomDetails(room, userId = null) {
       membershipId: String(m.id),
       userId: String(m.userId),
       roleId: m.roleId ? String(m.roleId) : null,
+      name: m.roleName || "",
+      color: m.roleColor || "",
+      position: m.rolePosition || 0,
+      system: Boolean(m.roleSystem),
+      isDefault: Boolean(m.roleIsDefault),
       joined_at: m.joinedAt,
     }))
     .filter((m) => m.roleId);
@@ -238,11 +250,11 @@ async function roomDetails(room, userId = null) {
           .filter((r) => String(r.userId) === String(m.userId))
           .map((r) => ({
             id: r.roleId,
-            name: "",
-            color: "",
-            position: 0,
-            system: false,
-            isDefault: false,
+            name: r.name,
+            color: r.color,
+            position: r.position,
+            system: Boolean(r.system),
+            isDefault: Boolean(r.isDefault),
           }));
         return { ...presentProfile(profile), roles: memberRoles };
       })
@@ -262,17 +274,59 @@ async function handleRoomRoles(event, roomId, userId) {
     throw createError({ statusCode: 404, statusMessage: "Room not found" });
 
   if (method === "GET") {
+    await requireRoomMember(room, userId);
     const roleRows = await db
       .select()
       .from(roomRoles)
       .where(eq(roomRoles.roomId, roomId))
       .orderBy(desc(roomRoles.position));
-    return { roles: roleRows, memberships: [] };
+    const membershipRows = await db
+      .select({
+        id: roomMemberships.id,
+        userId: roomMemberships.userId,
+        roleId: membershipRoles.roleId,
+      })
+      .from(roomMemberships)
+      .leftJoin(
+        membershipRoles,
+        eq(membershipRoles.membershipId, roomMemberships.id),
+      )
+      .where(eq(roomMemberships.roomId, roomId));
+    const membershipById = new Map();
+    for (const row of membershipRows) {
+      const key = String(row.id);
+      const membership = membershipById.get(key) || {
+        id: row.id,
+        userId: row.userId,
+        roles: [],
+      };
+      if (row.roleId) membership.roles.push(String(row.roleId));
+      membershipById.set(key, membership);
+    }
+    return { roles: roleRows, memberships: [...membershipById.values()] };
   }
 
   if (method === "POST" && body.action === "assign") {
     await requireRoleManagement(room, userId, null);
-    const membershipId = body.membershipId;
+    const membershipId = requireValue(
+      body.membershipId,
+      "Membership ID is required",
+    );
+    const membership = await db
+      .select({ id: roomMemberships.id })
+      .from(roomMemberships)
+      .where(
+        and(
+          eq(roomMemberships.id, membershipId),
+          eq(roomMemberships.roomId, room.id),
+        ),
+      )
+      .limit(1);
+    if (!membership[0])
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Membership must belong to this room",
+      });
     const roleIds = [
       ...new Set((Array.isArray(body.roleIds) ? body.roleIds : []).map(String)),
     ];
@@ -292,13 +346,14 @@ async function handleRoomRoles(event, roomId, userId) {
         statusCode: 400,
         statusMessage: "Assigned roles must belong to this room",
       });
-    await db
-      .delete(membershipRoles)
-      .where(eq(membershipRoles.membershipId, membershipId));
-    if (roleIds.length)
-      await db
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(membershipRoles)
+        .where(eq(membershipRoles.membershipId, membershipId));
+      await tx
         .insert(membershipRoles)
         .values(roleIds.map((roleId) => ({ membershipId, roleId })));
+    });
     return { success: true };
   }
 
@@ -328,7 +383,7 @@ async function handleRoomRoles(event, roomId, userId) {
   const role = await db
     .select()
     .from(roomRoles)
-    .where(eq(roomRoles.id, roleId))
+    .where(and(eq(roomRoles.id, roleId), eq(roomRoles.roomId, room.id)))
     .limit(1);
   if (!role[0])
     throw createError({ statusCode: 404, statusMessage: "Role not found" });
@@ -520,7 +575,7 @@ async function handleRooms(event, suffix) {
       id: r.id,
       action: r.action,
       occurredAt: r.createdAt,
-      details: r.metadata ? JSON.parse(r.metadata) : {},
+      details: structuredValue(r.metadata),
       actor: null,
       subject: null,
     }));
@@ -577,33 +632,37 @@ async function handleRooms(event, suffix) {
   }
 
   if (!suffix && method === "POST") {
-    requireValue(body.name, "Name is required for creating new room.");
-    const room = await db
-      .insert(rooms)
-      .values({
-        name: body.name,
-        description: body.desc || "",
-        ownerId: userId,
-      })
-      .returning();
-    const created = room[0];
-    await seedRoomRoles(created, userId);
-    const general = await db
-      .insert(channels)
-      .values({
-        roomId: created.id,
-        name: "general",
-        type: "text",
-        position: 0,
-      })
-      .returning();
-    await db.insert(channels).values({
-      roomId: created.id,
-      name: "voice",
-      type: "voice",
-      position: 1,
+    const name = String(body.name || "").trim();
+    requireValue(name, "Name is required for creating new room.");
+    const created = await db.transaction(async (tx) => {
+      const room = await tx
+        .insert(rooms)
+        .values({
+          name,
+          description: body.desc || "",
+          ownerId: userId,
+        })
+        .returning();
+      const nextRoom = room[0];
+      await seedRoomRoles(nextRoom, userId, tx);
+      await tx.insert(channels).values([
+        {
+          roomId: nextRoom.id,
+          name: "general",
+          description: "",
+          type: "text",
+          position: 0,
+        },
+        {
+          roomId: nextRoom.id,
+          name: "voice",
+          description: "",
+          type: "voice",
+          position: 1,
+        },
+      ]);
+      return nextRoom;
     });
-    await db.insert(roomMemberships).values({ roomId: created.id, userId });
     setResponseStatus(event, 201);
     return roomDetails(created, userId);
   }

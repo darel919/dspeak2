@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "unique_channel_author_client" ON "messages" USING btree ("channel_id","author_id","client_id");

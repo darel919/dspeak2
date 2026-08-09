@@ -27,7 +27,7 @@
 
     <a
       v-else-if="token.type === 'link' && safeHref(token.href)"
-      class="link link-primary"
+      class="metro-link"
       :href="safeHref(token.href)"
       rel="noopener noreferrer"
       target="_blank"

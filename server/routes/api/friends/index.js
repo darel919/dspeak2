@@ -53,7 +53,11 @@ export default defineEventHandler(async (event) => {
       }
 
       if (action === "respond" && requestId) {
-        return await respondToFriendRequest(requestId, userId, Boolean(accept));
+        return await respondToFriendRequest(
+          requestId,
+          userId,
+          accept === true || accept === "true",
+        );
       }
 
       if (action === "cancel" && requestId) {

@@ -22,7 +22,10 @@ import {
   bookmarks,
   friends,
   roomInvites,
-  roomAuditLog,
+  avatars,
+  librarySongs,
+  soundboards,
+  streamPlayLog,
 } from "../../../db/schema/index.js";
 import { eq, and, or, inArray, sql } from "drizzle-orm";
 import { enforceRateLimit } from "../../../utils/rate-limit.js";
@@ -121,6 +124,10 @@ async function deleteAccount(tx, userId) {
   await tx
     .delete(roomSoundboards)
     .where(eq(roomSoundboards.createdById, userId));
+  await tx.delete(soundboards).where(eq(soundboards.createdById, userId));
+  await tx.delete(librarySongs).where(eq(librarySongs.addedById, userId));
+  await tx.delete(streamPlayLog).where(eq(streamPlayLog.playedById, userId));
+  await tx.delete(avatars).where(eq(avatars.userId, userId));
   await tx.delete(chatFiles).where(eq(chatFiles.uploaderId, userId));
   await tx.delete(pinnedMessages).where(eq(pinnedMessages.pinnedById, userId));
   await tx
@@ -128,8 +135,6 @@ async function deleteAccount(tx, userId) {
     .where(
       or(eq(roomInvites.inviterId, userId), eq(roomInvites.inviteeId, userId)),
     );
-  await tx.delete(roomAuditLog).where(eq(roomAuditLog.actorId, userId));
-
   const deletedUsername = `deleted_${userId}`;
   const updatedAt = new Date();
   await tx

@@ -281,8 +281,8 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.lastReceivedConsumerParams;
   }
 
-  connect(channelId) {
-    return this.session.connect(channelId);
+  connect(channelId, options) {
+    return this.session.connect(channelId, options);
   }
 
   disconnect() {

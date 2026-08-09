@@ -16,6 +16,7 @@ import {
   createMediaQoeReport,
   mediaQoePathsFromStats,
 } from "../../shared/media-qoe.js";
+import { resolveChannelRoomId } from "../../shared/media/channel-room.js";
 
 const NATIVE_ACTION_POLL_IDLE_MS = 100;
 const NATIVE_ACTION_POLL_ACTIVE_MS = 5;
@@ -380,7 +381,10 @@ export class NativeMediaEngine extends MediaEngine {
     try {
       await this.initialize();
       if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
-        await this._configureNativeControl(input.channelId || input);
+        await this._configureNativeControl(
+          input.channelId || input,
+          input?.roomId,
+        );
         phase = "native-connect";
         await this.nativeSession?.connect(input.channelId || input);
       } else if (this.nativeOnly) {
@@ -1048,10 +1052,10 @@ export class NativeMediaEngine extends MediaEngine {
     let phase = "initialize";
     try {
       await this.initialize();
-      const input = { channelId: args[0] };
+      const input = { channelId: args[0], roomId: args[1]?.roomId };
       if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
         await this._configureNativeIceServers();
-        await this._configureNativeControl(input.channelId);
+        await this._configureNativeControl(input.channelId, input.roomId);
         phase = "native-connect";
         await this.nativeSession?.connect(input.channelId);
       } else if (this.nativeOnly) {
@@ -1452,13 +1456,19 @@ export class NativeMediaEngine extends MediaEngine {
     } catch {}
   }
 
-  async _configureNativeControl(channelId) {
-    if (!this.channelsStore) return;
+  async _configureNativeControl(channelId, roomId) {
     const config = this.nativeConfig || {};
     const configuredPath = String(config.apiPath || "/api").replace(/\/$/, "");
     const serverUrl = String(config.serverUrl || "").replace(/\/$/, "");
-    const roomId = String(this.channelsStore?.loadedRoomId || "");
-    if (!roomId) throw new Error("Room ID is required for media bootstrap");
+    const derivedRoomId = this.channelsStore
+      ? resolveChannelRoomId(this.channelsStore.getChannelById?.(channelId)) ||
+        String(this.channelsStore.loadedRoomId || "")
+      : "";
+    const resolvedRoomId = roomId || derivedRoomId;
+    if (!resolvedRoomId) {
+      if (!this.channelsStore) return;
+      throw new Error("Room ID is required for media bootstrap");
+    }
     const connectionMode =
       channelMediaPolicy(this.channelsStore, this.voiceStore)?.connectionMode ||
       "auto";
@@ -1474,7 +1484,7 @@ export class NativeMediaEngine extends MediaEngine {
             : {}),
         },
         body: JSON.stringify({
-          roomId,
+          roomId: resolvedRoomId,
           channelId,
           connectionMode,
           deviceId: getDeviceId(),

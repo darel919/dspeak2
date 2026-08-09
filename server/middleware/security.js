@@ -6,6 +6,7 @@ const csrfExemptPaths = new Set([
   "/api/auth/session",
 ]);
 const oauthCallbackPaths = new Set(["/api/auth/callback"]);
+const internalCronPaths = new Set(["/api/internal/push-dispatch"]);
 
 export default defineEventHandler(async (event) => {
   const path = getRequestURL(event).pathname;
@@ -21,7 +22,8 @@ export default defineEventHandler(async (event) => {
     if (
       ["same-site", "cross-site"].includes(fetchSite) &&
       ["GET", "HEAD"].includes(event.method) &&
-      !oauthCallbackPaths.has(path)
+      !oauthCallbackPaths.has(path) &&
+      !internalCronPaths.has(path)
     )
       throw createError({
         statusCode: 403,
@@ -31,7 +33,8 @@ export default defineEventHandler(async (event) => {
   if (
     path.startsWith("/api") &&
     !["GET", "HEAD", "OPTIONS"].includes(event.method) &&
-    !internalIngestAuth
+    !internalIngestAuth &&
+    !internalCronPaths.has(path)
   ) {
     const fetchSite = getHeader(event, "sec-fetch-site");
     const origin = getHeader(event, "origin");

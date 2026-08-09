@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { closeMediaProviders } from "../app/shared/media-session-cleanup.js";
+import {
+  closeMediaProvider,
+  closeMediaProviders,
+  closeMediaProviderSafely,
+} from "../app/shared/media-session-cleanup.js";
 
 test("remote media clears even when provider shutdown throws", () => {
   const operations = [];
@@ -29,4 +33,36 @@ test("remote media clears even when provider shutdown throws", () => {
     console.warn = originalWarn;
   }
   assert.deepEqual(operations, ["clear", "p2p", "sfu"]);
+});
+
+test("browser SFU shutdown uses closeMedia before the native fallback", () => {
+  const operations = [];
+  closeMediaProvider({
+    closeMedia() {
+      operations.push("close-media");
+    },
+    close() {
+      operations.push("close");
+    },
+  });
+  assert.deepEqual(operations, ["close-media"]);
+});
+
+test("safe provider shutdown consumes asynchronous close failures", async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await assert.doesNotReject(
+      closeMediaProviderSafely(
+        {
+          closeMedia: async () => {
+            throw new Error("close failed");
+          },
+        },
+        "SFU",
+      ),
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
 });

@@ -4,12 +4,9 @@ import {
   messageContainsBroadcastMention,
   notificationBody,
   resolveNotificationPreference,
+  isChannelViewer,
 } from "../../shared/notification-policy.js";
 import { publicDisplayName } from "../../shared/user-profile.js";
-import {
-  isDeviceViewingChannel,
-  isUserViewingChannel,
-} from "./dspeak-realtime.js";
 import { db } from "../db/client.js";
 import {
   notifications,
@@ -91,6 +88,12 @@ function handleMissingRelation(error) {
 }
 
 async function createMessageNotification(userId, message, channel, room, body) {
+  const notificationData = JSON.stringify({
+    messageId: message.id,
+    channelId: channel.id,
+    roomId: room.id,
+    senderId: String(message.authorId || message.sender?.id || ""),
+  });
   const existing = await db
     .select({ id: notifications.id })
     .from(notifications)
@@ -98,7 +101,7 @@ async function createMessageNotification(userId, message, channel, room, body) {
       and(
         eq(notifications.userId, userId),
         eq(notifications.type, "message"),
-        eq(notifications.data, `{"messageId":"${message.id}"}`),
+        eq(notifications.data, notificationData),
       ),
     )
     .limit(1);
@@ -111,11 +114,7 @@ async function createMessageNotification(userId, message, channel, room, body) {
         type: "message",
         title: `#${channel.name} · ${room.name}`,
         body,
-        data: JSON.stringify({
-          messageId: message.id,
-          channelId: channel.id,
-          roomId: room.id,
-        }),
+        data: notificationData,
       })
       .returning();
     return result[0];
@@ -144,26 +143,28 @@ export async function persistMessageNotifications({
   if (!recipientIds.length)
     return { notifications: 0, jobs: 0, recipients: [] };
 
-  const [profileRows, prefRows, roomPrefRows, subRows] = await Promise.all([
-    db.select().from(profiles).where(inArray(profiles.id, recipientIds)),
-    db
-      .select()
-      .from(notificationPreferences)
-      .where(inArray(notificationPreferences.userId, recipientIds)),
-    db
-      .select()
-      .from(roomNotificationPreferences)
-      .where(
-        and(
-          eq(roomNotificationPreferences.roomId, room.id),
-          inArray(roomNotificationPreferences.userId, recipientIds),
+  const [profileRows, prefRows, roomPrefRows, subRows, senderProfileRows] =
+    await Promise.all([
+      db.select().from(profiles).where(inArray(profiles.id, recipientIds)),
+      db
+        .select()
+        .from(notificationPreferences)
+        .where(inArray(notificationPreferences.userId, recipientIds)),
+      db
+        .select()
+        .from(roomNotificationPreferences)
+        .where(
+          and(
+            eq(roomNotificationPreferences.roomId, room.id),
+            inArray(roomNotificationPreferences.userId, recipientIds),
+          ),
         ),
-      ),
-    db
-      .select()
-      .from(pushSubscriptions)
-      .where(inArray(pushSubscriptions.userId, recipientIds)),
-  ]);
+      db
+        .select()
+        .from(pushSubscriptions)
+        .where(inArray(pushSubscriptions.userId, recipientIds)),
+      db.select().from(profiles).where(eq(profiles.id, senderId)).limit(1),
+    ]);
 
   const profilesById = new Map(profileRows.map((p) => [p.id, p]));
   const globalPreferencesByUser = new Map(
@@ -179,7 +180,7 @@ export async function persistMessageNotifications({
     userSubscriptions.push(subscription);
     subscriptionsByUser.set(String(subscription.userId), userSubscriptions);
   }
-  const senderName = publicDisplayName(senderId);
+  const senderName = publicDisplayName(senderProfileRows[0]);
   const mentionsEveryone = messageContainsBroadcastMention(
     message.content,
     "everyone",
@@ -200,7 +201,7 @@ export async function persistMessageNotifications({
         recipientHandle: profilesById.get(recipientId)?.username,
         broadcastMention:
           mentionsEveryone ||
-          (mentionsHere && isUserViewingChannel(recipientId, channel.id)),
+          (mentionsHere && isChannelViewer(channel.inRoom, recipientId)),
       })
     ) {
       continue;
@@ -227,6 +228,7 @@ export async function persistMessageNotifications({
         messageId: message.id,
         roomId: String(room.id),
         channelId: String(channel.id),
+        senderId: String(message.authorId || message.sender?.id || ""),
       },
     };
     for (const subscription of subscriptionsByUser.get(recipientId) || []) {
@@ -234,6 +236,7 @@ export async function persistMessageNotifications({
         .insert(pushJobs)
         .values({
           subscriptionId: subscription.id,
+          recipientId,
           payload: JSON.stringify(payload),
           status: "pending",
           attempts: 0,
@@ -370,8 +373,10 @@ async function pruneCompletedJobs() {
 
 export async function dispatchPushJobs() {
   const state = getState();
-  if (state.running || state.databaseUnavailable || !configureWebPush()) return;
+  if (state.running || state.databaseUnavailable || !configureWebPush())
+    return 0;
   state.running = true;
+  let dispatchedCount = 0;
   try {
     try {
       await pruneCompletedJobs();
@@ -384,6 +389,7 @@ export async function dispatchPushJobs() {
         )
         .orderBy(pushJobs.scheduledFor)
         .limit(dispatchBatchSize);
+      dispatchedCount = jobs.length;
       for (const job of jobs) await deliverJob(job);
       await refreshPushMetrics();
     } catch (error) {
@@ -394,36 +400,35 @@ export async function dispatchPushJobs() {
   } finally {
     state.running = false;
   }
+  return dispatchedCount;
 }
 
-export async function sendPushTest(userId, deviceId) {
+export async function sendPushTest(userId) {
   if (!configureWebPush()) throw new Error("Web Push is not configured");
-  const subscription = await db
+  const subscriptions = await db
     .select()
     .from(pushSubscriptions)
-    .where(
-      and(
-        eq(pushSubscriptions.userId, userId),
-        eq(pushSubscriptions.endpoint, deviceId),
+    .where(eq(pushSubscriptions.userId, userId));
+  if (!subscriptions.length) throw new Error("Subscription not found");
+  await Promise.all(
+    subscriptions.map((subscription) =>
+      webpush.sendNotification(
+        {
+          endpoint: subscription.endpoint,
+          keys: {
+            p256dh: subscription.p256dh,
+            auth: subscription.auth,
+          },
+        },
+        JSON.stringify({
+          title: "dSpeak push test",
+          body: "Background push delivery is working.",
+          tag: `push-test-${Date.now()}`,
+          data: { test: true },
+        }),
+        { TTL: 300 },
       ),
-    )
-    .limit(1);
-  if (!subscription[0]) throw new Error("Subscription not found");
-  await webpush.sendNotification(
-    {
-      endpoint: subscription[0].endpoint,
-      keys: {
-        p256dh: subscription[0].p256dh,
-        auth: subscription[0].auth,
-      },
-    },
-    JSON.stringify({
-      title: "dSpeak push test",
-      body: "Background push delivery is working.",
-      tag: `push-test-${Date.now()}`,
-      data: { test: true },
-    }),
-    { TTL: 300 },
+    ),
   );
   return { success: true };
 }

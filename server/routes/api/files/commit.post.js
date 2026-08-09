@@ -3,6 +3,8 @@ import { db } from "../../../db/client.js";
 import {
   chatFiles,
   avatars,
+  messages,
+  profiles,
   roomImages,
   soundboards,
 } from "../../../db/schema/index.js";
@@ -11,7 +13,11 @@ import {
   channelRepository,
   membershipRepository,
 } from "../../../db/repositories/rooms.js";
-import { eq } from "drizzle-orm";
+import {
+  getRoomById,
+  requireRoomPermission,
+} from "../../../utils/room-authorization.js";
+import { and, eq } from "drizzle-orm";
 
 export default defineEventHandler(async (event) => {
   await requireAuth(event);
@@ -54,15 +60,14 @@ export default defineEventHandler(async (event) => {
     });
 
   if (["room-profile", "room-header", "soundboard"].includes(type)) {
-    const membership = await membershipRepository.findByRoomAndUser(
-      metadata.roomId,
+    const room = await getRoomById(metadata.roomId);
+    if (!room)
+      throw createError({ statusCode: 404, statusMessage: "Room not found" });
+    await requireRoomPermission(
+      room,
       user.id,
+      type === "soundboard" ? "room.manage_soundboard" : "room.update_identity",
     );
-    if (!membership)
-      throw createError({
-        statusCode: 403,
-        statusMessage: "Room access is required",
-      });
   }
   if (type === "chat") {
     const channel = await channelRepository.findById(metadata.channelId);
@@ -74,6 +79,39 @@ export default defineEventHandler(async (event) => {
         statusCode: 403,
         statusMessage: "Channel access is required",
       });
+    if (metadata.messageId != null) {
+      const messageId = String(metadata.messageId);
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          messageId,
+        )
+      )
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Invalid message ID",
+        });
+      const message = await db
+        .select({ id: messages.id, authorId: messages.authorId })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.id, messageId),
+            eq(messages.channelId, metadata.channelId),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!message)
+        throw createError({
+          statusCode: 400,
+          statusMessage: "Message attachment target was not found",
+        });
+      if (String(message.authorId) !== String(user.id))
+        throw createError({
+          statusCode: 403,
+          statusMessage: "Only the message author can attach this file",
+        });
+    }
   }
 
   const expectedPrefix = {
@@ -93,16 +131,29 @@ export default defineEventHandler(async (event) => {
   switch (type) {
     case "avatar": {
       const { objectId } = metadata;
-      result = await db
-        .insert(avatars)
-        .values({
-          id: objectId,
-          userId: user.id,
-          r2Key: key,
-          mimeType: metadata.mimeType,
-          size: metadata.size,
-        })
-        .returning();
+      result = await db.transaction(async (tx) => {
+        const avatarResult = await tx
+          .insert(avatars)
+          .values({
+            id: objectId,
+            userId: user.id,
+            r2Key: key,
+            mimeType: metadata.mimeType,
+            size: metadata.size,
+          })
+          .returning();
+        const profileResult = await tx
+          .update(profiles)
+          .set({ avatarKey: key, updatedAt: new Date() })
+          .where(eq(profiles.id, user.id))
+          .returning({ id: profiles.id });
+        if (!profileResult[0])
+          throw createError({
+            statusCode: 409,
+            statusMessage: "User profile was not found",
+          });
+        return avatarResult;
+      });
       break;
     }
     case "room-profile":
@@ -128,7 +179,7 @@ export default defineEventHandler(async (event) => {
         .values({
           id: objectId,
           channelId,
-          messageId,
+          messageId: messageId || null,
           uploaderId: user.id,
           fileName: metadata.fileName,
           mimeType: metadata.mimeType,

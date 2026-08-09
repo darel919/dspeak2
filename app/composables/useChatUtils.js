@@ -94,10 +94,11 @@ export const useChatUtils = () => {
   }
 
   /**
-   * Get avatar URL with fallback
+   * Get the protected avatar URL when a profile has one.
+   * Missing avatars are rendered as initials by the caller.
    */
   function getAvatarUrl(avatarPath) {
-    return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
+    return profileAssetUrl(avatarPath) || "";
   }
 
   /**

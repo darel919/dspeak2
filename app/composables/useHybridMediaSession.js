@@ -1,4 +1,4 @@
-import { computed, readonly, ref, watch } from "vue";
+import { computed, getCurrentScope, readonly, ref, watch } from "vue";
 import { useRuntimeConfig } from "#app";
 import { MediaCaptureManager } from "~/shared/media-capture.js";
 import { MediasoupClientSession } from "~/shared/mediasoup-client-session.js";
@@ -18,8 +18,10 @@ import {
   getMediaControlBootstrap,
   getOrCreateDeviceId,
 } from "~/shared/media-control-client.js";
+import { resolveChannelRoomId } from "~/shared/media/channel-room.js";
 import {
   closeMediaProviders,
+  closeMediaProviderSafely,
   closeMediaSessionTransports,
   handleMediaSignalingClose,
   resetMediaTelemetryState,
@@ -264,7 +266,11 @@ export function useHybridMediaSession() {
     },
     onEffectiveGain: (state) => attenuationReporter.report(state),
   });
-  if (import.meta.client) onScopeDispose(bindMediaVisibility(registry));
+  let disposeVisibility = null;
+  if (import.meta.client) {
+    disposeVisibility = bindMediaVisibility(registry);
+    if (getCurrentScope()) onScopeDispose(disposeVisibility);
+  }
   const attenuationReporter = createMediaAttenuationReporter({
     getLocalPeerId: () => localPeerId,
     getPeers: () => topologyState.value.peers,
@@ -319,7 +325,7 @@ export function useHybridMediaSession() {
   function send(message) {
     return signaling.send(message);
   }
-  async function connect(nextChannelId) {
+  async function connect(nextChannelId, options = {}) {
     if (connected.value && channelId === nextChannelId) return;
     intentionalClose = false;
     protocolUpdateRequired.value = false;
@@ -329,9 +335,13 @@ export function useHybridMediaSession() {
     error.value = null;
     lifecycleState.reset();
     setConnectionPhase("socket-connecting");
-    const channelPolicy =
-      channelsStore.getChannelById(nextChannelId)?.mediaPolicy;
+    const channel = channelsStore.getChannelById(nextChannelId);
+    const channelPolicy = channel?.mediaPolicy;
     const connectionMode = channelPolicy?.connectionMode || "auto";
+    const roomId =
+      options.roomId ||
+      voiceStore.currentRoomId ||
+      resolveChannelRoomId(channel);
     const supabaseClient = getSupabaseClient();
     const sessionResult = await supabaseClient?.auth.getSession();
     const accessToken = sessionResult?.data?.session?.access_token;
@@ -353,7 +363,7 @@ export function useHybridMediaSession() {
         channelId: nextChannelId,
         connectionMode,
         deviceId,
-        roomId: voiceStore.currentRoomId,
+        roomId,
       });
       mediaControlSocketUrl = buildMediaControlSocketUrl({
         mediaControlUrl: bootstrap.mediaControlUrl || controlUrl,
@@ -483,8 +493,7 @@ export function useHybridMediaSession() {
         selectedSfuProvider = data.provider;
         providerTicketWaiters.get(Number(data.epoch))?.(true);
         providerTicketWaiters.delete(Number(data.epoch));
-        sfu?.closeMedia();
-        sfu = null;
+        await closeSfuSafely();
         if (data.provider === "cloudflare-realtime") {
           providerSocket?.close();
           providerSocket = null;
@@ -606,7 +615,7 @@ export function useHybridMediaSession() {
     transportReady.value = false;
     iceConnectedBoth.value = false;
     handoff.retire("sfu");
-    sfu?.closeMedia();
+    void closeSfuSafely();
     setConnectionPhase("reconnecting", {
       topologyEpoch: Number(data.epoch) || topologyState.value.epoch,
       reason: data.reason || "provider-failure",
@@ -692,6 +701,16 @@ export function useHybridMediaSession() {
       getVideoSettings: getRequestedVideoSettings,
     });
     return sfu;
+  }
+  async function closeP2pSafely() {
+    const provider = p2pMesh;
+    p2pMesh = null;
+    await closeMediaProviderSafely(provider, "P2P");
+  }
+  async function closeSfuSafely() {
+    const provider = sfu;
+    sfu = null;
+    await closeMediaProviderSafely(provider, "SFU");
   }
   function getRequestedVideoSettings(source) {
     const policy = voiceStore.currentChannelId
@@ -795,10 +814,9 @@ export function useHybridMediaSession() {
     }
     if (data.mode === "idle") {
       setActiveProvider(null);
-      p2pMesh?.closeAll();
-      p2pMesh = null;
-      sfu?.closeMedia();
       handoff.clear();
+      await closeP2pSafely();
+      await closeSfuSafely();
       preparedTransition = null;
       remoteProducersCount.value = 0;
       peerRoundTripTimes.value = {};
@@ -862,8 +880,7 @@ export function useHybridMediaSession() {
       );
       mediaGeneration.assert(generation);
     } else if (data.mode === "sfu") {
-      p2pMesh?.closeAll();
-      p2pMesh = null;
+      await closeP2pSafely();
       handoff.retire("p2p");
     }
     const readiness =
@@ -944,15 +961,15 @@ export function useHybridMediaSession() {
           selectedSfuProvider = data.targetProvider;
           providerSocket?.close();
           providerSocket = null;
-          if (sfu) {
-            sfu.closeMedia();
-            sfu = null;
-          }
+          await closeSfuSafely();
         } else if (!sfu || selectedSfuProvider !== data.targetProvider) {
           await waitForProviderTicket(data.epoch, data.targetProvider);
         }
         destinationSfu = ensureSfu();
-        if (activeProvider === "sfu") destinationSfu.closeMedia();
+        if (activeProvider === "sfu") {
+          await closeSfuSafely();
+          destinationSfu = ensureSfu();
+        }
         await destinationSfu.initialize();
         for (const entry of localSources.values())
           await destinationSfu.addSource(entry);
@@ -978,7 +995,8 @@ export function useHybridMediaSession() {
       refreshTopologyGraph();
     } catch (transitionError) {
       preparedTransition = null;
-      if (destinationSfu && destinationSfu === sfu) destinationSfu.closeMedia();
+      if (destinationSfu && destinationSfu === sfu) await closeSfuSafely();
+      if (transitionError?.code === "MEDIA_SESSION_CLOSED") return;
       if (topologyEventKey(data) !== latestTopologyKey) return;
       send({
         type: "topology-failed",
@@ -1024,7 +1042,7 @@ export function useHybridMediaSession() {
     sfuRoundTripTime.value = null;
     participantSfuRoundTripTimes.value = {};
     handoff.retire("sfu");
-    sfu?.closeMedia();
+    await closeSfuSafely();
     transportReady.value = true;
     iceConnectedBoth.value = true;
     setRouteConnectionState("media-flowing");
@@ -1054,8 +1072,7 @@ export function useHybridMediaSession() {
     setActiveProvider("sfu");
     reportedSfuFailureEpoch = null;
     handoff.retire("p2p");
-    p2pMesh?.closeAll();
-    p2pMesh = null;
+    await closeP2pSafely();
     transportReady.value = true;
     const readiness = session.connectionState();
     iceConnectedBoth.value =
@@ -1264,6 +1281,8 @@ export function useHybridMediaSession() {
     intentionalClose = true;
     topologyWaiter?.(new Error("Media signaling connection stopped"));
     channelId = null;
+    disposeVisibility?.();
+    disposeVisibility = null;
     signaling.stop();
     stopLocalVoiceDetection();
     stopSharedAudioMeter();

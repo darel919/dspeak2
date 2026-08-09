@@ -22,9 +22,9 @@
       v-if="!authenticated"
       class="fixed bottom-0 left-0 right-0 z-40 border-t border-base-300 bg-base-100 px-4 py-2 text-center text-xs text-base-content/50"
     >
-      <NuxtLink class="link link-hover" to="/privacy">Privacy</NuxtLink>
+      <NuxtLink class="metro-link" to="/privacy">Privacy</NuxtLink>
       <span class="mx-2">·</span>
-      <NuxtLink class="link link-hover" to="/terms">Terms</NuxtLink>
+      <NuxtLink class="metro-link" to="/terms">Terms</NuxtLink>
     </footer>
   </Init>
 </template>

@@ -423,3 +423,78 @@ test("a transient first playback failure schedules recovery", async () => {
   assert.equal(scheduled, graph);
   assert.equal(graph.resumePromise, null);
 });
+
+test("a stale audio context close cannot report after a new context is created", async () => {
+  const originalWindow = globalThis.window;
+  const closeControls = [];
+  const states = [];
+  class DeferredCloseAudioContext extends FakeAudioContext {
+    close() {
+      return new Promise((resolve, reject) =>
+        closeControls.push({ reject, resolve }),
+      );
+    }
+  }
+  globalThis.window = { AudioContext: DeferredCloseAudioContext };
+
+  try {
+    const registry = createRegistry({
+      onPlaybackState: (state) => states.push(state),
+    });
+    registry.getAudioContext();
+    registry.clear();
+    registry.getAudioContext();
+    closeControls[0].reject(new Error("old context close failed"));
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      states.some((state) => state.state === "context-close-failed"),
+      false,
+    );
+    registry.clear();
+    closeControls[1].resolve();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("a graph teardown cancels an in-flight playback resume", async () => {
+  const resumeControls = [];
+  const states = [];
+  const context = new FakeAudioContext();
+  context.resume = () =>
+    new Promise((resolve) => resumeControls.push({ resolve }));
+  const registry = createRegistry({
+    onPlaybackState: (state) => states.push(state),
+  });
+  registry.audioContext = context;
+  const track = {
+    audio: {
+      pause() {},
+      play: () => Promise.resolve(),
+      remove() {},
+      srcObject: null,
+    },
+    entry: { key: "remote:user:audio", track: {} },
+    gain: { disconnect() {} },
+    source: { disconnect() {} },
+  };
+  const graph = {
+    closed: false,
+    context,
+    resumeAttempt: 0,
+    resumeGeneration: 0,
+    resumePromise: null,
+    resumeTimer: null,
+    tracks: new Map([["remote:user:audio", track]]),
+    userId: "user",
+  };
+  registry.participantAudio.set("user", graph);
+
+  const pendingResume = registry.resumeGraph(graph);
+  registry.closeGraph(graph);
+  resumeControls[0].resolve();
+
+  assert.equal(await pendingResume, false);
+  assert.equal(states.length, 0);
+});

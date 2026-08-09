@@ -132,6 +132,9 @@ export async function sendFriendRequest(requesterId, recipientHandle) {
     if (existingFriendship.status === "blocked") {
       throw new Error("Unable to send friend request");
     }
+    if (existingFriendship.status === "rejected") {
+      await db.delete(friends).where(eq(friends.id, existingFriendship.id));
+    }
   }
 
   const result = await db
@@ -179,10 +182,12 @@ export async function respondToFriendRequest(requestId, userId, accept) {
   }
 
   const newStatus = accept ? "accepted" : "rejected";
-  await db
-    .update(friends)
-    .set({ status: newStatus })
-    .where(eq(friends.id, requestId));
+  if (accept)
+    await db
+      .update(friends)
+      .set({ status: newStatus })
+      .where(eq(friends.id, requestId));
+  else await db.delete(friends).where(eq(friends.id, requestId));
 
   return {
     id: requestId,
@@ -319,6 +324,9 @@ export async function sendFriendRequestById(requesterId, recipientId) {
     }
     if (existingFriendship.status === "blocked") {
       throw new Error("Unable to send friend request");
+    }
+    if (existingFriendship.status === "rejected") {
+      await db.delete(friends).where(eq(friends.id, existingFriendship.id));
     }
   }
 

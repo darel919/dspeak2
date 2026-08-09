@@ -33,7 +33,7 @@
           </div>
           <button
             type="button"
-            class="btn btn-ghost btn-square btn-sm"
+            class="metro-icon-btn metro-icon-btn--ghost btn-sm"
             aria-label="Close capture picker"
             @click="close"
           >
@@ -53,9 +53,7 @@
             class="grid min-h-64 place-items-center border border-base-content/10 bg-base-200/30"
           >
             <div class="text-center">
-              <span
-                class="loading loading-spinner loading-md text-primary"
-              ></span>
+              <span class="metro-spinner metro-spinner--md text-primary"></span>
               <p class="mt-3 text-sm text-base-content/60">
                 Finding available sources…
               </p>
@@ -76,7 +74,7 @@
                 <p class="mt-1 text-sm text-base-content/65">{{ failure }}</p>
                 <button
                   type="button"
-                  class="btn btn-primary btn-sm mt-4"
+                  class="metro-btn metro-btn--sm mt-4"
                   @click="useBrowserFallback"
                 >
                   Use browser capture instead
@@ -101,7 +99,7 @@
               </p>
               <button
                 type="button"
-                class="btn btn-ghost btn-sm mt-4"
+                class="metro-btn metro-btn--ghost btn-sm mt-4"
                 @click="loadSources"
               >
                 Refresh sources
@@ -115,8 +113,12 @@
                 v-for="tab in visibleTabs"
                 :key="tab.value"
                 type="button"
-                class="btn btn-sm"
-                :class="filter === tab.value ? 'btn-primary' : 'btn-ghost'"
+                class="metro-btn metro-btn--sm"
+                :class="
+                  filter === tab.value
+                    ? 'metro-btn--secondary'
+                    : 'metro-btn--ghost'
+                "
                 @click="filter = tab.value"
               >
                 <Icon :name="tab.icon" class="size-4" />
@@ -206,12 +208,16 @@
                     dSpeak self-audio exclusion.
                   </p>
                 </div>
-                <div class="join shrink-0" aria-label="Share media">
+                <div class="flex gap-0 shrink-0" aria-label="Share media">
                   <button
                     v-if="selectedSource.capabilities.video"
                     type="button"
-                    class="btn btn-sm join-item"
-                    :class="mode === 'video' ? 'btn-primary' : 'btn-ghost'"
+                    class="metro-btn metro-btn--sm join-item"
+                    :class="
+                      mode === 'video'
+                        ? 'metro-btn--secondary'
+                        : 'metro-btn--ghost'
+                    "
                     @click="mode = 'video'"
                   >
                     <Icon name="lucide:video" class="size-4" /> Video
@@ -219,8 +225,12 @@
                   <button
                     v-if="selectedSource.capabilities.audio"
                     type="button"
-                    class="btn btn-sm join-item"
-                    :class="mode === 'audio' ? 'btn-primary' : 'btn-ghost'"
+                    class="metro-btn metro-btn--sm join-item"
+                    :class="
+                      mode === 'audio'
+                        ? 'metro-btn--secondary'
+                        : 'metro-btn--ghost'
+                    "
                     @click="mode = 'audio'"
                   >
                     <Icon name="lucide:volume-2" class="size-4" /> Audio
@@ -231,8 +241,12 @@
                       selectedSource.capabilities.audio
                     "
                     type="button"
-                    class="btn btn-sm join-item"
-                    :class="mode === 'both' ? 'btn-primary' : 'btn-ghost'"
+                    class="metro-btn metro-btn--sm join-item"
+                    :class="
+                      mode === 'both'
+                        ? 'metro-btn--secondary'
+                        : 'metro-btn--ghost'
+                    "
                     @click="mode = 'both'"
                   >
                     <Icon name="lucide:layers-2" class="size-4" /> Both
@@ -251,12 +265,16 @@
             excluded
           </p>
           <div class="flex gap-2">
-            <button type="button" class="btn btn-ghost" @click="close">
+            <button
+              type="button"
+              class="metro-btn metro-btn--ghost"
+              @click="close"
+            >
               Cancel
             </button>
             <button
               type="button"
-              class="btn btn-primary"
+              class="metro-btn"
               :disabled="!selectedSource || !mode || loading"
               @click="select"
             >

@@ -71,13 +71,10 @@ test("server avatar paths always use the same-origin proxy", () => {
 
 test("avatar proxy serves protected assets via presigned R2 URLs", () => {
   const source = readFileSync(
-    new URL("../server/utils/dspeak-api.js", import.meta.url),
+    new URL("../server/utils/dspeak-assets-api.js", import.meta.url),
     "utf8",
   );
-  const avatarHandler = source.slice(
-    source.indexOf("handleAssets"),
-    source.indexOf("export async function handleDspeakApi"),
-  );
+  const avatarHandler = source;
 
   assert.doesNotMatch(avatarHandler, /pb\.files\.getURL/);
   assert.doesNotMatch(avatarHandler, /collectionId/);

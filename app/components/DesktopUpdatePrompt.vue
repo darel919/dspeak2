@@ -36,20 +36,20 @@
           class="flex shrink-0 gap-2"
         >
           <button
-            class="btn btn-sm btn-primary"
+            class="metro-btn metro-btn--sm btn-primary"
             type="button"
             :disabled="installing"
             @click="installUpdate"
           >
             <span
               v-if="installing"
-              class="loading loading-spinner loading-xs"
+              class="metro-spinner metro-spinner--xs"
               aria-hidden="true"
             ></span>
             {{ installing ? "Installing…" : "Update now" }}
           </button>
           <button
-            class="btn btn-sm btn-ghost"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             type="button"
             :disabled="installing"
             @click="deferUpdate"
@@ -59,7 +59,7 @@
         </div>
         <div v-else-if="repositoryUpdateAvailable" class="shrink-0">
           <button
-            class="btn btn-sm btn-ghost"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             type="button"
             @click="deferUpdate"
           >

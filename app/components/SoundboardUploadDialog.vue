@@ -22,7 +22,7 @@
         </div>
         <button
           type="button"
-          class="btn btn-square btn-sm btn-ghost"
+          class="metro-btn metro-btn--square btn-sm btn-ghost"
           aria-label="Close upload"
           :disabled="store.uploading"
           @click="cancel"
@@ -61,7 +61,7 @@
                 }}
               </span>
             </span>
-            <span class="btn btn-sm btn-outline">{{
+            <span class="metro-btn metro-btn--sm btn-outline">{{
               file ? "Replace" : "Browse"
             }}</span>
           </label>
@@ -81,7 +81,7 @@
             <span class="font-medium">Sound name</span>
             <input
               v-model="title"
-              class="input input-bordered w-full"
+              class="metro-input w-full"
               maxlength="48"
               placeholder="e.g. Air horn"
               required
@@ -96,7 +96,7 @@
             >
             <input
               v-model="category"
-              class="input input-bordered w-full"
+              class="metro-input w-full"
               maxlength="32"
               placeholder="General"
             />
@@ -115,7 +115,7 @@
               <span class="sr-only">Emoji</span>
               <input
                 v-model="icon"
-                class="input input-bordered w-full text-center text-xl"
+                class="metro-input w-full text-center text-xl"
                 maxlength="16"
                 placeholder="🔊"
                 aria-label="Sound emoji"
@@ -148,7 +148,11 @@
           </div>
         </section>
 
-        <div v-if="error" class="alert alert-error py-3 text-sm" role="alert">
+        <div
+          v-if="error"
+          class="metro-status metro-status--error py-3 text-sm"
+          role="alert"
+        >
           <Icon name="lucide:circle-alert" class="size-5 shrink-0" />
           <span>{{ error }}</span>
         </div>
@@ -159,19 +163,19 @@
       >
         <button
           type="button"
-          class="btn btn-ghost"
+          class="metro-btn metro-btn--ghost"
           :disabled="store.uploading"
           @click="cancel"
         >
           Cancel
         </button>
         <button
-          class="btn btn-primary min-w-32"
+          class="metro-btn metro-btn--primary min-w-32"
           :disabled="store.uploading || !file || !title.trim()"
         >
           <span
             v-if="store.uploading"
-            class="loading loading-spinner loading-sm"
+            class="metro-spinner metro-spinner--sm"
           ></span>
           <Icon v-else name="lucide:upload" class="size-4" />
           {{ store.uploading ? "Uploading…" : "Add sound" }}

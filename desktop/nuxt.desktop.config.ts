@@ -80,7 +80,6 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      websocketPath: "",
       baseApiPath: apiBasePath,
       sfuPath: process.env.VITE_DSPEAK_SFU_PATH || "",
       apiPath: process.env.VITE_DSPEAK_API_PATH

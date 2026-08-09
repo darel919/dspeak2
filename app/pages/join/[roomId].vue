@@ -7,7 +7,7 @@
     >
       <!-- Loading state -->
       <div v-if="loading" class="space-y-4">
-        <div class="loading loading-spinner loading-lg mx-auto"></div>
+        <div class="metro-spinner loading-lg mx-auto"></div>
         <h1 class="text-3xl font-light">{{ loadingMessage }}</h1>
         <p class="text-base-content/70">Please wait...</p>
       </div>
@@ -24,7 +24,7 @@
         <p class="text-sm text-base-content/55">
           This invitation expires {{ formatDate(invite.expiresAt) }}.
         </p>
-        <button class="btn btn-primary" @click="attemptJoin">Join room</button>
+        <button class="metro-btn" @click="attemptJoin">Join room</button>
       </div>
 
       <!-- Success state -->
@@ -38,11 +38,11 @@
           members.
         </p>
         <div class="mt-6 flex flex-wrap justify-center gap-2">
-          <button @click="goToRoom" class="btn btn-primary">
+          <button @click="goToRoom" class="metro-btn">
             <Icon name="lucide:message-circle" class="h-5 w-5" />
             Go to Room
           </button>
-          <button @click="goToHome" class="btn btn-ghost">
+          <button @click="goToHome" class="metro-btn metro-btn--ghost">
             <Icon name="lucide:house" class="h-5 w-5" />
             Home
           </button>
@@ -57,11 +57,11 @@
         <h1 class="text-3xl font-light text-error">Unable to Join Room</h1>
         <p class="text-base-content/70">{{ error }}</p>
         <div class="mt-6 flex flex-wrap justify-center gap-2">
-          <button @click="retryJoin" class="btn btn-primary">
+          <button @click="retryJoin" class="metro-btn">
             <Icon name="lucide:refresh-cw" class="h-5 w-5" />
             Try Again
           </button>
-          <button @click="goToHome" class="btn btn-ghost">
+          <button @click="goToHome" class="metro-btn metro-btn--ghost">
             <Icon name="lucide:house" class="h-5 w-5" />
             Home
           </button>
@@ -82,7 +82,7 @@
           again.
         </p>
         <div class="mt-6 flex flex-wrap justify-center gap-2">
-          <button @click="goToHome" class="btn btn-primary">
+          <button @click="goToHome" class="metro-btn">
             <Icon name="lucide:house" class="h-5 w-5" />
             Go to Home
           </button>

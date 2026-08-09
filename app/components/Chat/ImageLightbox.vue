@@ -11,7 +11,7 @@
     <button
       ref="closeButtonRef"
       type="button"
-      class="btn btn-ghost btn-square absolute right-4 top-4 z-10 min-h-11 min-w-11 border border-white/40 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      class="metro-icon-btn metro-icon-btn--ghost absolute right-4 top-4 z-10 min-h-11 min-w-11 border border-white/40 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
       @click="close"
       aria-label="Close lightbox"
     >
@@ -21,7 +21,7 @@
     <button
       v-if="images.length > 1"
       type="button"
-      class="btn btn-ghost btn-square absolute left-4 top-1/2 z-10 min-h-11 min-w-11 -translate-y-1/2 border border-white/40 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      class="metro-icon-btn metro-icon-btn--ghost absolute left-4 top-1/2 z-10 min-h-11 min-w-11 -translate-y-1/2 border border-white/40 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
       @click="prevImage"
       aria-label="Previous image"
     >
@@ -31,7 +31,7 @@
     <button
       v-if="images.length > 1"
       type="button"
-      class="btn btn-ghost btn-square absolute right-4 top-1/2 z-10 min-h-11 min-w-11 -translate-y-1/2 border border-white/40 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      class="metro-icon-btn metro-icon-btn--ghost absolute right-4 top-1/2 z-10 min-h-11 min-w-11 -translate-y-1/2 border border-white/40 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
       @click="nextImage"
       aria-label="Next image"
     >

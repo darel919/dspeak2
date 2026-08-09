@@ -5,6 +5,8 @@ import notificationManager from "~/utils/notificationManager";
 import { deviceHeaders, getDeviceId } from "~/shared/device-identity";
 import { useAuthStore } from "./auth";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import { debugLog } from "../shared/debug";
+import { openRealtimeChannel } from "../shared/realtime-channel.js";
 
 export const useNotificationsStore = defineStore("notifications", () => {
   const notificationSupported = ref(false);
@@ -24,6 +26,12 @@ export const useNotificationsStore = defineStore("notifications", () => {
   });
   const config = useRuntimeConfig();
   let initialization = null;
+  let notificationsChannel = null;
+  let closeNotificationsChannel = null;
+  let notificationsReconnectTimer = null;
+  let notificationsReconnectAttempts = 0;
+  let stopAuthWatcher = null;
+  const MAX_REALTIME_RECONNECT_ATTEMPTS = 10;
 
   function syncNotificationState() {
     if (!import.meta.client) return;
@@ -60,10 +68,82 @@ export const useNotificationsStore = defineStore("notifications", () => {
         }
         await getExistingSubscription();
         await Promise.allSettled([fetchInbox(), fetchPreferences()]);
+        watchUserIdForRealtime();
       })();
     }
     await initialization;
   }
+
+  function watchUserIdForRealtime() {
+    if (stopAuthWatcher) return;
+    const authStore = useAuthStore();
+    stopAuthWatcher = watch(
+      () => authStore.getUserData()?.id,
+      (userId) => {
+        if (userId) connectRealtime(userId);
+        else disconnectRealtime();
+      },
+      { immediate: true },
+    );
+  }
+
+  async function connectRealtime(userId) {
+    if (!import.meta.client || !userId) return;
+    if (notificationsChannel) return;
+    const normalizedUserId = String(userId);
+    openRealtimeChannel(`notify:${normalizedUserId}`, {
+      onMessage: (message) => receiveRealtime(message),
+      onSubscribe: () => {
+        notificationsReconnectAttempts = 0;
+        if (notificationsReconnectTimer) {
+          clearTimeout(notificationsReconnectTimer);
+          notificationsReconnectTimer = null;
+        }
+      },
+      onError: (err, status) => {
+        debugLog("[Notifications] Realtime channel error:", err, status);
+        notificationsChannel = null;
+        closeNotificationsChannel = null;
+        if (notificationsReconnectAttempts >= MAX_REALTIME_RECONNECT_ATTEMPTS) {
+          debugLog("[Notifications] Realtime reconnect attempts exhausted");
+          return;
+        }
+        const delay =
+          1000 * 2 ** notificationsReconnectAttempts +
+          Math.floor(Math.random() * 250);
+        notificationsReconnectAttempts += 1;
+        notificationsReconnectTimer = setTimeout(
+          () => connectRealtime(normalizedUserId),
+          delay,
+        );
+      },
+    }).then((handle) => {
+      if (!handle) return;
+      if (!useAuthStore().getUserData()?.id) {
+        handle.close();
+        return;
+      }
+      notificationsChannel = handle.channel;
+      closeNotificationsChannel = handle.close;
+    });
+  }
+
+  function disconnectRealtime() {
+    if (notificationsReconnectTimer) {
+      clearTimeout(notificationsReconnectTimer);
+      notificationsReconnectTimer = null;
+    }
+    if (closeNotificationsChannel) {
+      closeNotificationsChannel();
+      closeNotificationsChannel = null;
+    }
+    notificationsChannel = null;
+  }
+
+  onScopeDispose(() => {
+    stopAuthWatcher?.();
+    disconnectRealtime();
+  });
 
   async function authenticatedFetch(path, options = {}) {
     const userData = useAuthStore().getUserData();
@@ -128,6 +208,15 @@ export const useNotificationsStore = defineStore("notifications", () => {
 
   function receiveRealtime(message) {
     if (message?.type === "notification_created" && message.data) {
+      const senderId = message.data.senderId;
+      const currentUserId = useAuthStore().getUserData()?.id;
+      if (
+        senderId &&
+        currentUserId &&
+        String(senderId) === String(currentUserId)
+      ) {
+        return;
+      }
       inbox.value = [message.data, ...inbox.value];
       if (preferences.value.push && preferences.value.mode !== "none") {
         void showNotification(message.data.title || "dSpeak Notification", {
@@ -385,6 +474,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
     preferences,
     unreadCount,
     initialize,
+    connectRealtime,
+    disconnectRealtime,
     requestPermission,
     setEnabled,
     showNotification,

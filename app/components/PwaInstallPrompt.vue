@@ -24,19 +24,20 @@
       </div>
     </div>
     <div class="mt-4 flex justify-end gap-2">
-      <button class="btn btn-ghost btn-sm" type="button" @click="dismiss">
+      <button
+        class="metro-btn metro-btn--ghost metro-btn--sm"
+        type="button"
+        @click="dismiss"
+      >
         Not now
       </button>
       <button
-        class="btn btn-primary btn-sm"
+        class="metro-btn metro-btn--sm"
         type="button"
         :disabled="installing"
         @click="install"
       >
-        <span
-          v-if="installing"
-          class="loading loading-spinner loading-xs"
-        ></span>
+        <span v-if="installing" class="metro-spinner metro-spinner--xs"></span>
         {{ installing ? "Opening…" : "Install" }}
       </button>
     </div>

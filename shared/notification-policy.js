@@ -2,6 +2,20 @@ export function normalizeNotificationMode(value, fallback = "all") {
   return ["all", "mentions", "muted"].includes(value) ? value : fallback;
 }
 
+export function notificationModeFromRecord(value, fallback = "all") {
+  if (!value) return fallback;
+  if (["all", "mentions", "muted"].includes(value.mode)) return value.mode;
+  if (value.muteUntil && Date.parse(value.muteUntil) > Date.now())
+    return "muted";
+  if (value.allMessages === true) return "all";
+  if (value.mentions === true) return "mentions";
+  return "muted";
+}
+
+export function isChannelViewer(inRoom, userId) {
+  return (inRoom || []).map(String).includes(String(userId));
+}
+
 export function messageMentionsHandle(content, handle) {
   const normalizedHandle = String(handle || "")
     .trim()
@@ -29,11 +43,11 @@ export function resolveNotificationPreference(
 ) {
   const globalValue = globalPreference || {};
   const roomValue = roomPreference || {};
+  const globalMode = notificationModeFromRecord(globalPreference);
   return {
-    mode: normalizeNotificationMode(
-      roomValue.mode,
-      normalizeNotificationMode(globalValue.mode),
-    ),
+    mode: roomPreference
+      ? notificationModeFromRecord(roomPreference, globalMode)
+      : globalMode,
     push:
       typeof roomValue.push === "boolean"
         ? roomValue.push

@@ -36,7 +36,6 @@
     "@tauri-apps/plugin-window-state": "^2.4.1",
     "@vite-pwa/nuxt": "1.1.1",
     "daisyui": "^5.7.16",
-    "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.8",
     "marked": "^18.0.9",
@@ -65,6 +64,7 @@
   },
   "devDependencies": {
     "axe-core": "^4.13.0",
+    "drizzle-kit": "^0.31.10",
     "fake-indexeddb": "^6.2.5",
     "patch-package": "8.0.1",
     "prettier": "3.9.6",

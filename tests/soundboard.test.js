@@ -59,7 +59,7 @@ test("soundboard presentation exposes only the protected media route", () => {
 test("soundboard triggers carry server-owned player attribution", async () => {
   const source = await readFile("server/utils/soundboard-api.js", "utf8");
   assert.match(source, /triggeredBy: String\(userId\)/);
-  assert.match(source, /clipTitle: clip\.title/);
+  assert.match(source, /clipTitle: clip\.name/);
   assert.match(source, /duration: Number\(clip\.duration\)/);
   assert.match(source, /activityId: crypto\.randomUUID\(\)/);
 });

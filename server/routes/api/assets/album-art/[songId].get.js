@@ -4,13 +4,50 @@ import { assetsRepository } from "../../../../db/repositories/assets.js";
 
 const ALBUM_ART_DIR = "data/album-art";
 
+const SONG_CACHE_TTL_MS = 3_600_000;
+const SONG_CACHE_MAX = 500;
+const songCache = new Map();
+
+function evictExpiredSongs() {
+  const now = Date.now();
+  for (const [key, entry] of songCache) {
+    if (entry.expiresAt <= now) songCache.delete(key);
+  }
+}
+
+function cacheSong(songId, song) {
+  if (songCache.size >= SONG_CACHE_MAX) evictExpiredSongs();
+  if (songCache.size >= SONG_CACHE_MAX) {
+    const oldest = songCache.keys().next().value;
+    songCache.delete(oldest);
+  }
+  songCache.set(songId, {
+    value: song,
+    expiresAt: Date.now() + SONG_CACHE_TTL_MS,
+  });
+}
+
+function getCachedSong(songId) {
+  const entry = songCache.get(songId);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    songCache.delete(songId);
+    return undefined;
+  }
+  return entry.value;
+}
+
 export default defineEventHandler(async (event) => {
   const songId = getRouterParam(event, "songId");
   if (!songId) {
     throw createError({ statusCode: 400, statusMessage: "songId is required" });
   }
 
-  const song = await assetsRepository.getSong(songId);
+  let song = getCachedSong(songId);
+  if (song === undefined) {
+    song = await assetsRepository.getSong(songId);
+    cacheSong(songId, song);
+  }
   if (!song) {
     throw createError({ statusCode: 404, statusMessage: "Song not found" });
   }

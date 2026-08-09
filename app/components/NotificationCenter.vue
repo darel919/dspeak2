@@ -1,7 +1,7 @@
 <template>
   <details ref="dropdownRef" class="dropdown dropdown-end relative z-30">
     <summary
-      class="btn btn-square btn-ghost btn-sm relative"
+      class="metro-icon-btn metro-icon-btn--ghost btn-sm relative"
       aria-label="Notifications"
     >
       <Icon name="lucide:bell" class="size-5" />
@@ -21,14 +21,14 @@
         <div class="flex items-center gap-1">
           <button
             v-if="store.inbox.length"
-            class="btn btn-ghost btn-xs"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             @click="dismissAll"
           >
             Dismiss all
           </button>
           <button
             v-if="store.unreadCount"
-            class="btn btn-ghost btn-xs"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             @click="store.markRead()"
           >
             Mark all read
@@ -92,14 +92,14 @@
               >
             </div>
             <button
-              class="btn btn-primary btn-xs"
+              class="metro-btn metro-btn--primary btn-xs"
               :disabled="handlingRequest[req.id]"
               @click="acceptFriendRequest(req)"
             >
               Accept
             </button>
             <button
-              class="btn btn-ghost btn-xs"
+              class="metro-btn metro-btn--ghost metro-btn--sm"
               aria-label="Decline friend request"
               :disabled="handlingRequest[req.id]"
               @click="declineFriendRequest(req)"
