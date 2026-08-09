@@ -25,35 +25,38 @@ export function normalizeSoundboardMetadata(value = {}) {
 
 export function canManageSoundboardClip(clip, userId, permissions = []) {
   return (
-    String(clip?.uploader || clip?.uploaderId || "") === String(userId || "") ||
-    permissions.includes("room.manage_soundboard")
+    String(clip?.uploader || clip?.uploaderId || clip?.createdById || "") ===
+      String(userId || "") || permissions.includes("room.manage_soundboard")
   );
 }
 
 export function presentSoundboardClip(record, apiPath = "/api") {
+  const roomId = record.roomId ?? record.room;
+  const uploaderId = record.createdById ?? record.uploaderId ?? record.uploader;
+  const iconImageKey = record.iconImageKey ?? record.icon_image;
   return {
     id: record.id,
-    roomId: String(record.room),
-    uploaderId: String(record.uploader),
+    roomId: String(roomId),
+    uploaderId: String(uploaderId),
     uploader: record.expand?.uploader
       ? {
           id: record.expand.uploader.id,
           name: publicDisplayName(record.expand.uploader),
         }
       : null,
-    title: record.title,
+    title: record.title ?? record.name,
     category: record.category || "General",
     icon: record.icon || "🔊",
-    hasIconImage: Boolean(record.icon_image),
-    iconImageUrl: record.icon_image
+    hasIconImage: Boolean(iconImageKey),
+    iconImageUrl: iconImageKey
       ? `${apiPath}/soundboard/icon?id=${encodeURIComponent(record.id)}`
       : null,
     duration: Number(record.duration) || 0,
-    order: Number(record.display_order) || 0,
-    enabled: Boolean(record.enabled),
+    order: Number(record.displayOrder ?? record.display_order) || 0,
+    enabled: record.enabled !== false,
     mediaUrl: `${apiPath}/soundboard/media?id=${encodeURIComponent(record.id)}`,
-    created: record.created,
-    updated: record.updated,
+    created: record.createdAt ?? record.created,
+    updated: record.updatedAt ?? record.updated,
   };
 }
 import { publicDisplayName } from "./user-profile.js";

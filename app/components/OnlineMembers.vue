@@ -21,9 +21,10 @@
         >
           <div class="avatar avatar-online">
             <div class="w-10 rounded-full">
-              <img
-                :src="getAvatarUrl(identityStore.profileFor(member).avatar)"
-                :alt="identityStore.displayName(member)"
+              <ProfileAvatar
+                :src="identityStore.profileFor(member).avatar"
+                :name="identityStore.displayName(member)"
+                class="size-10 rounded-full"
               />
             </div>
           </div>
@@ -42,7 +43,7 @@
         </div>
       </div>
 
-      <div class="divider"></div>
+      <div class="border-t border-base-300"></div>
 
       <div class="text-xs text-base-content/50 text-center">
         {{ onlineMembers.length }} of {{ totalMembers }} members online
@@ -53,7 +54,6 @@
 
 <script setup>
 import { useIdentityStore } from "../stores/identity";
-import { profileAssetUrl } from "../shared/profile-assets.js";
 
 const props = defineProps({
   onlineMembers: {
@@ -67,8 +67,4 @@ const props = defineProps({
 });
 
 const identityStore = useIdentityStore();
-
-function getAvatarUrl(avatarPath) {
-  return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
-}
 </script>

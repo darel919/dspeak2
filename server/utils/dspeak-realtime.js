@@ -1,124 +1,51 @@
-const stateKey = Symbol.for("dspeak.realtime");
+let realtimePublisher = null;
+let publisherOverride = null;
+const cachedChannels = new Map();
 
-function getState() {
-  if (!globalThis[stateKey])
-    globalThis[stateKey] = {
-      channels: new Map(),
-      users: new Map(),
-      global: new Set(),
-      deviceChannels: new Map(),
-    };
-  return globalThis[stateKey];
-}
-
-function deviceChannelKey(userId, deviceId) {
-  return `${String(userId)}:${String(deviceId)}`;
-}
-
-export function setDeviceViewingChannel(
-  userId,
-  deviceId,
-  channelId,
-  active = true,
-) {
-  if (!userId || !deviceId || !channelId) return;
-  const state = getState();
-  const key = deviceChannelKey(userId, deviceId);
-  const channels = state.deviceChannels.get(key) || new Map();
-  const normalizedChannelId = String(channelId);
-  const count = channels.get(normalizedChannelId) || 0;
-  if (active) channels.set(normalizedChannelId, count + 1);
-  else if (count > 1) channels.set(normalizedChannelId, count - 1);
-  else channels.delete(normalizedChannelId);
-  if (channels.size) state.deviceChannels.set(key, channels);
-  else state.deviceChannels.delete(key);
-}
-
-export function isDeviceViewingChannel(userId, deviceId, channelId) {
-  if (!userId || !deviceId || !channelId) return false;
-  return (
-    getState()
-      .deviceChannels.get(deviceChannelKey(userId, deviceId))
-      ?.has(String(channelId)) === true
-  );
-}
-
-export function isUserViewingChannel(userId, channelId) {
-  const prefix = `${String(userId)}:`;
-  for (const [key, channels] of getState().deviceChannels) {
-    if (key.startsWith(prefix) && channels.has(String(channelId))) return true;
+async function loadPublisher() {
+  if (publisherOverride) return publisherOverride;
+  if (realtimePublisher) return realtimePublisher;
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return null;
   }
-  return false;
+  const { supabaseAdmin } = await import("../auth/supabase.js");
+  if (!supabaseAdmin) return null;
+  realtimePublisher = supabaseAdmin;
+  return realtimePublisher;
 }
 
-export function addGlobalSubscriber(peer) {
-  getState().global.add(peer);
+export function setRealtimePublisherForTests(publisher) {
+  publisherOverride = publisher;
+  cachedChannels.clear();
 }
 
-export function removeGlobalSubscriber(peer) {
-  getState().global.delete(peer);
+export async function publishToRealtime(topic, message) {
+  const publisher = await loadPublisher();
+  if (!publisher) return;
+  let channel = cachedChannels.get(topic);
+  if (!channel) {
+    channel = publisher.channel(topic, { config: { private: true } });
+    cachedChannels.set(topic, channel);
+  }
+  try {
+    await channel.httpSend("message", message);
+  } catch {
+    cachedChannels.delete(topic);
+  }
 }
 
 export function broadcastGlobally(message) {
-  const payload = JSON.stringify(message);
-  for (const peer of getState().global) {
-    try {
-      peer.send(payload);
-    } catch {
-      removeGlobalSubscriber(peer);
-    }
-  }
-}
-
-export function addUserSubscriber(userId, peer) {
-  const state = getState();
-  if (!state.users.has(userId)) state.users.set(userId, new Set());
-  state.users.get(userId).add(peer);
-}
-
-export function removeUserSubscriber(userId, peer) {
-  const subscribers = getState().users.get(userId);
-  if (!subscribers) return;
-  subscribers.delete(peer);
-  if (!subscribers.size) getState().users.delete(userId);
+  return publishToRealtime("global", message);
 }
 
 export function broadcastToUser(userId, message) {
-  const payload = JSON.stringify(message);
-  for (const peer of getState().users.get(String(userId)) || []) {
-    try {
-      peer.send(payload);
-    } catch {
-      removeUserSubscriber(String(userId), peer);
-    }
-  }
+  return publishToRealtime(`notify:${String(userId)}`, message);
 }
 
-export function addChannelSubscriber(channelId, peer) {
-  const state = getState();
-  if (!state.channels.has(channelId)) state.channels.set(channelId, new Set());
-  state.channels.get(channelId).add(peer);
+export function broadcastToChannel(channelId, message) {
+  return publishToRealtime(`chat:${String(channelId)}`, message);
 }
 
-export function removeChannelSubscriber(channelId, peer) {
-  const subscribers = getState().channels.get(channelId);
-  if (!subscribers) return;
-  subscribers.delete(peer);
-  if (subscribers.size === 0) getState().channels.delete(channelId);
-}
-
-export function getChannelSubscribers(channelId) {
-  return getState().channels.get(channelId) || new Set();
-}
-
-export function broadcastToChannel(channelId, message, excludedPeer = null) {
-  const payload = JSON.stringify(message);
-  for (const peer of getChannelSubscribers(channelId)) {
-    if (peer === excludedPeer) continue;
-    try {
-      peer.send(payload);
-    } catch {
-      removeChannelSubscriber(channelId, peer);
-    }
-  }
+export function broadcastToRoom(roomId, message) {
+  return publishToRealtime(`room:${String(roomId)}`, message);
 }

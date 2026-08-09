@@ -41,7 +41,7 @@
           <div
             v-for="(result, index) in testResults"
             :key="index"
-            class="alert alert-sm"
+            class="metro-status metro-status--info text-xs"
             :class="{
               'alert-success': result.type === 'success',
               'alert-error': result.type === 'error',
@@ -56,11 +56,11 @@
       </div>
 
       <!-- Test Controls -->
-      <div class="card-actions justify-between">
-        <div class="join">
+      <div class="flex justify-between">
+        <div class="flex">
           <button
             @click="runBasicTests"
-            class="btn btn-sm join-item"
+            class="metro-btn metro-btn--sm join-item"
             :disabled="running"
           >
             Basic Tests
@@ -68,7 +68,7 @@
 
           <button
             @click="testSubscription"
-            class="btn btn-sm join-item"
+            class="metro-btn metro-btn--sm join-item"
             :disabled="running || !pushSub.isSupported.value"
           >
             Test Subscription
@@ -76,21 +76,24 @@
 
           <button
             @click="testNotification"
-            class="btn btn-sm join-item"
+            class="metro-btn metro-btn--sm join-item"
             :disabled="running || !pushSub.isSubscribed.value"
           >
             Test Push
           </button>
         </div>
 
-        <button @click="clearResults" class="btn btn-sm btn-ghost">
+        <button
+          @click="clearResults"
+          class="metro-btn metro-btn--ghost metro-btn--sm"
+        >
           Clear
         </button>
       </div>
 
       <div
         v-if="running"
-        class="loading loading-spinner loading-md self-center"
+        class="metro-spinner metro-spinner--md self-center"
       ></div>
     </div>
   </section>

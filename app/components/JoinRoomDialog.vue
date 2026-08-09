@@ -2,12 +2,12 @@
   <Teleport to="body">
     <div
       v-if="isOpen"
-      class="modal modal-open"
+      class="metro-modal modal-open"
       role="dialog"
       aria-modal="true"
       aria-labelledby="join-room-dialog-title"
     >
-      <div class="modal-box">
+      <div class="metro-flyout">
         <h3 id="join-room-dialog-title" class="mb-4 text-lg font-bold">
           Join Room
         </h3>
@@ -21,20 +21,24 @@
             v-model="joinInput"
             type="text"
             placeholder="Enter room ID or paste join link..."
-            class="input input-bordered w-full"
+            class="metro-input w-full"
             @keyup.enter="joinRoom"
           />
         </label>
-        <div v-if="joinError" class="alert alert-error mt-4">
+        <div v-if="joinError" class="metro-status metro-status--error mt-4">
           <Icon name="lucide:circle-x" class="size-6 shrink-0 stroke-current" />
           <span>{{ joinError }}</span>
         </div>
-        <div class="modal-action">
-          <button class="btn btn-ghost" :disabled="joining" @click="close">
+        <div class="flex justify-end gap-3">
+          <button
+            class="metro-btn metro-btn--ghost"
+            :disabled="joining"
+            @click="close"
+          >
             Cancel
           </button>
           <button
-            class="btn btn-primary"
+            class="metro-btn"
             :disabled="!joinInput.trim() || joining"
             @click="joinRoom"
           >

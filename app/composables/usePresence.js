@@ -1,33 +1,29 @@
-import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "../stores/auth";
 import { useIdentityStore } from "../stores/identity";
 import { useRoomsStore } from "../stores/rooms";
-import { useVoiceStore } from "../stores/voice";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { debugLog } from "../shared/debug";
+import { openRealtimeChannel } from "../shared/realtime-channel.js";
 
 export function usePresence(userId) {
   const status = ref("disconnected");
-  let ws = null;
-  let retryCount = 0;
-  let retryTimer = null;
-  let pingInterval = null;
+  let closeChannel = null;
   let stopUserWatcher = null;
   let intentionallyDisconnected = false;
-  const config = useRuntimeConfig();
   const authStore = useAuthStore();
   const identityStore = useIdentityStore();
   const roomsStore = useRoomsStore();
-  const voiceStore = useVoiceStore();
   const presenceStatusStore = usePresenceStatusStore();
+  let voiceStorePromise = null;
 
-  function receiveMessage(event) {
-    let message;
-    try {
-      message = JSON.parse(event.data);
-    } catch {
-      return;
-    }
+  function loadVoiceStore() {
+    voiceStorePromise ||= import("../stores/voice").then(({ useVoiceStore }) =>
+      useVoiceStore(),
+    );
+    return voiceStorePromise;
+  }
+
+  function receiveMessage(message) {
     if (message?.type === "room_updated" && message.data?.id) {
       roomsStore.applyRealtimeRoomUpdate(message.data);
       return;
@@ -55,7 +51,9 @@ export function usePresence(userId) {
     if (message?.type !== "profile_updated" || !message.data?.id) return;
     const profile = message.data;
     identityStore.upsertPublicProfile(profile);
-    voiceStore.upsertUserProfile(profile);
+    void loadVoiceStore()
+      .then((voiceStore) => voiceStore.upsertUserProfile(profile))
+      .catch((error) => debugLog("[usePresence] Profile update failed", error));
     if (String(authStore.getUserData()?.id) === String(profile.id)) {
       authStore.updateUserData(profile);
     }
@@ -67,63 +65,38 @@ export function usePresence(userId) {
       return;
     }
     intentionallyDisconnected = false;
-    const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-    const base = config.public.websocketPath || `${origin}/api`;
-    const wsUrl = `${base}/presence`;
-    debugLog("[usePresence] Connecting to:", wsUrl);
-    const socket = new WebSocket(wsUrl);
-    ws = socket;
-    socket.onmessage = receiveMessage;
-    socket.onopen = () => {
-      if (socket !== ws) {
-        socket.close();
+    debugLog("[usePresence] Subscribing to global presence channel");
+    openRealtimeChannel("global", {
+      onMessage: receiveMessage,
+      onSubscribe: () => {
+        debugLog("[usePresence] Global channel subscribed");
+        status.value = "connected";
+        presenceStatusStore.connectionStatus = "connected";
+      },
+      onError: (err, channelStatus) => {
+        debugLog("[usePresence] Global channel error:", err, channelStatus);
+        status.value = "disconnected";
+        presenceStatusStore.connectionStatus = "disconnected";
+        closeChannel = null;
+      },
+    }).then((handle) => {
+      if (!handle) return;
+      if (intentionallyDisconnected) {
+        handle.close();
         return;
       }
-      debugLog("[usePresence] Connected successfully");
-      status.value = "connected";
-      presenceStatusStore.connectionStatus = "connected";
-      retryCount = 0;
-      clearTimeout(retryTimer);
-
-      if (pingInterval) clearInterval(pingInterval);
-      pingInterval = setInterval(() => {
-        if (ws && ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: "ping" }));
-        }
-      }, 30000);
-    };
-    socket.onclose = () => {
-      if (socket !== ws && !intentionallyDisconnected) return;
-      debugLog("[usePresence] Connection closed, retry count:", retryCount);
-      status.value = "disconnected";
-      presenceStatusStore.connectionStatus = "disconnected";
-      if (pingInterval) {
-        clearInterval(pingInterval);
-        pingInterval = null;
-      }
-      if (!intentionallyDisconnected && retryCount < 10) {
-        retryCount++;
-        retryTimer = setTimeout(() => connect(id), 2000);
-      } else {
-        status.value = "permanently-disconnected";
-      }
-    };
-    socket.onerror = (error) => {
-      debugLog("[usePresence] WebSocket error:", error);
-      socket.close();
-    };
+      closeChannel = handle.close;
+    });
   }
+
   function disconnect() {
     intentionallyDisconnected = true;
-    clearTimeout(retryTimer);
-    retryTimer = null;
-    if (ws) ws.close();
-    if (pingInterval) {
-      clearInterval(pingInterval);
-      pingInterval = null;
+    if (closeChannel) {
+      closeChannel();
+      closeChannel = null;
     }
-    ws = null;
-    retryCount = 0;
+    status.value = "disconnected";
+    presenceStatusStore.connectionStatus = "disconnected";
   }
 
   if (isRef(userId)) {

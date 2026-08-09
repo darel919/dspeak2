@@ -22,7 +22,7 @@
       <p class="mt-5 max-w-xl text-base text-base-content/70 sm:text-lg">
         {{ message }}
       </p>
-      <button class="btn btn-primary mt-10" @click="returnToWorkspace">
+      <button class="metro-btn mt-10" @click="returnToWorkspace">
         Back to your workspace
       </button>
     </div>

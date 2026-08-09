@@ -36,6 +36,21 @@ describe("automatic presence", () => {
     assert.doesNotMatch(idleDetection, /setStatus\("idle"\)/);
   });
 
+  it("keeps persisted presence state through Pinia SSR hydration", () => {
+    const store = readFileSync(
+      new URL("../app/stores/presenceStatus.js", import.meta.url),
+      "utf8",
+    );
+    assert.match(store, /defineStore, skipHydrate/);
+    assert.match(store, /const presenceOverride = skipHydrate\(/);
+    assert.match(store, /const idleTimeout = skipHydrate\(/);
+    assert.match(store, /const effectiveStatus = skipHydrate\(/);
+    assert.match(
+      store,
+      /resolveAutomaticPresence\(presenceOverride\.value, "online"\)/,
+    );
+  });
+
   it("registers long-lived client composables while the component scope is active", () => {
     const init = readFileSync(
       new URL("../app/components/Init.vue", import.meta.url),

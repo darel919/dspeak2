@@ -1,66 +1,37 @@
 # Backend migration
 
-dSpeak now owns the browser application, API, chat, presence, and mediasoup SFU
-in one Nuxt and Nitro process. This document records the production boundaries
-left by the previous multi-service deployment.
+dSpeak uses independently scalable managed and edge services. This document records the current production boundaries.
 
-## API migration from `dws-backend`
+## Current ownership
 
-| Previous responsibility      | Current owner                      |
-| ---------------------------- | ---------------------------------- |
-| Room, channel, and chat APIs | `server/utils/dspeak-api.js`       |
-| Realtime chat                | `server/routes/api/chat/socket.js` |
-| Presence                     | `server/routes/api/presence.js`    |
-| Media presence updates       | `server/utils/mediasoup-sfu.js`    |
-| Privileged PocketBase access | `server/utils/pocketbase.js`       |
+| Responsibility                                      | Current owner                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------------- |
+| Browser application and HTTP APIs                   | Nuxt 4 + Nitro on Vercel                                            |
+| Authentication                                      | Supabase Auth with Google OAuth                                     |
+| Durable application data                            | Supabase PostgreSQL through Drizzle ORM                             |
+| Chat, typing, presence, and notification events     | Supabase Realtime                                                   |
+| Uploaded file bytes                                 | Cloudflare R2                                                       |
+| File metadata and authorization                     | PostgreSQL and Nitro APIs                                           |
+| Media membership, signaling, topology, and failover | External `dspeak-media-control` Cloudflare Worker + Durable Objects |
+| Managed SFU and relay                               | Cloudflare Realtime and Cloudflare TURN                             |
+| Optional self-hosted SFU                            | Standalone `dspeak-sfu` service                                     |
 
-The application-owned PocketBase collections are:
+The PostgreSQL schema lives in `server/db/schema/index.js`, with checked-in Drizzle migrations under `drizzle/`.
 
-- `dspeak_rooms`
-- `dspeak_rooms_channels`
-- `dspeak_messages`
-- `dspeak_users_state`
-- `users`
+## Authentication migration
 
-Production authentication, delivery, and offline idempotency add:
+The browser signs in directly with Supabase Auth's Google provider. Supabase owns the OAuth callback and session refresh lifecycle. The browser presents the Supabase access token to protected Nitro APIs; Nitro validates the asymmetric JWT locally through the project's JWKS and derives the user identity from the verified token.
 
-- `dspeak_sessions`
-- `dspeak_push_subscriptions`
-- `dspeak_push_jobs`
-- `dspeak_message_revisions`
+Media bootstrap uses the Supabase access token rather than a custom application session.
 
-Message edits use append-only revisions. The original content is revision one,
-every accepted edit creates the next revision, and `dspeak_messages.edited_at`
-drives the public edited indicator independently from read-receipt updates.
-Message authors may edit or unsend their own persisted messages. Room owners and
-roles with `message.moderate` may delete other members' messages and inspect
-revision history.
+## Media migration
 
-The obsolete `dspeak_webpush` and `dspeak_webpush_global` collections are
-deleted by `20260725_remove_obsolete_push_collections_v1`. Current clients use
-only device-scoped subscriptions.
+The main Nuxt/Nitro application does not own mediasoup workers, routers, transports, producers, consumers, or a persistent media WebSocket. `POST /api/media/bootstrap` authorizes room access and signs a short-lived media ticket. The client then connects to the URL returned by that endpoint.
 
-Room administration adds roles, memberships, branding, media policy,
-notifications, identities, and soundboards. Nitro applies these migrations at
-startup. See [Room administration contract](room-administration.md).
+A per-channel Durable Object in `dspeak-media-control` owns participant membership, route epochs, P2P signaling relay, provider health, and route commit state. It can select direct P2P, P2P through Cloudflare TURN, Cloudflare Realtime SFU, or the optional standalone `dspeak-sfu` provider. Provider tickets are separate from the app-to-control-plane ticket; see [Media tickets](media-tickets.md).
 
-## SFU migration from `dspeak2-sfu-master`
-
-The `/socket` endpoint now owns media signaling. It validates channel access and
-membership, updates media presence, creates mediasoup transports and consumers,
-maintains producer ownership, handles keepalive messages, and releases media
-resources on disconnect. `/metrics` exposes bounded Prometheus-compatible SFU
-gauges.
-
-The former interop WebSocket no longer exists. It connected two
-separate services; the equivalent operations are now in-process calls.
+The standalone `dspeak-sfu` deployment is an independent failure domain. It has no shared process or database with the main app and communicates with the control plane through short-lived signed provider tickets.
 
 ## Production runtime
 
-Use the Nitro Node server preset and a persistent process. Stateless serverless
-and edge deployments are incompatible with process-owned mediasoup workers,
-routers, transports, producers, consumers, and WebSockets.
-
-Run one dSpeak instance. Multiple instances require router piping plus a shared
-signaling and state backplane. The Nitro HTTP/WebSocket port and configured
-WebRTC TCP/UDP ports must be reachable from clients.
+The web/API deployment is serverless-compatible and may scale independently on Vercel. Persistent WebSockets and media topology state remain in Cloudflare Durable Objects. Supabase, R2, `dspeak-media-control`, Cloudflare Realtime/TURN, and any `dspeak-sfu` deployment are configured and monitored as separate services.

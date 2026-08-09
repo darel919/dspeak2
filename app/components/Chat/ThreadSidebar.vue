@@ -17,7 +17,7 @@
           <h2 class="text-xl font-light">{{ threadTitle }}</h2>
         </div>
         <button
-          class="btn btn-ghost btn-square h-11 min-h-11 w-11 min-w-11"
+          class="metro-icon-btn metro-icon-btn--ghost h-11 min-h-11 w-11 min-w-11"
           @click="close"
           aria-label="Close thread"
         >
@@ -26,7 +26,7 @@
       </div>
 
       <div v-if="loading" class="flex justify-center py-8 flex-1">
-        <span class="loading loading-spinner"></span>
+        <span class="metro-spinner"></span>
       </div>
 
       <template v-else-if="threadParent">
@@ -137,19 +137,19 @@
               type="text"
               aria-label="Reply in thread"
               placeholder="Reply in thread..."
-              class="input input-bordered h-11 min-h-11 min-w-0 flex-1"
+              class="metro-input h-11 min-h-11 min-w-0 flex-1"
               maxlength="4000"
               autocomplete="off"
             />
             <button
               type="submit"
-              class="btn btn-primary btn-square h-11 min-h-11 w-11 min-w-11"
+              class="metro-btn metro-btn--primary btn-square h-11 min-h-11 w-11 min-w-11"
               :disabled="!replyText.trim() || sending"
               aria-label="Send reply"
             >
               <span
                 v-if="sending"
-                class="loading loading-spinner loading-xs"
+                class="metro-spinner metro-spinner--xs"
               ></span>
               <Icon v-else name="lucide:send" class="h-4 w-4" />
             </button>
@@ -171,6 +171,7 @@
 import { useChatStore } from "../../stores/chat";
 import { useRuntimeConfig } from "#app";
 import { stripMarkdown } from "../../shared/markdown-parser";
+import { profileAssetUrl } from "../../shared/profile-assets";
 import MessageActions from "./MessageActions.vue";
 
 const props = defineProps({
@@ -266,18 +267,8 @@ watch(
   },
 );
 
-const pbUrl = computed(() => {
-  return config.public.pbUrl || "";
-});
-
 function getAvatarUrl(avatar) {
-  if (!avatar)
-    return `${pbUrl.value}/api/files/_pb_users_auth_/unknown/avatar.png`;
-  if (avatar.startsWith("http")) return avatar;
-  if (avatar.startsWith("/")) return avatar;
-  if (avatar.startsWith("_"))
-    return `${pbUrl.value}/api/files/_pb_users_auth_/${avatar}`;
-  return avatar;
+  return profileAssetUrl(avatar) || "";
 }
 
 function formatTime(iso) {

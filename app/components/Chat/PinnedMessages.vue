@@ -1,13 +1,13 @@
 <template>
   <div
     v-if="visible"
-    class="modal modal-open"
+    class="metro-modal modal-open"
     role="dialog"
     aria-modal="true"
     aria-labelledby="pinned-messages-title"
     @click.self="close"
   >
-    <div class="modal-box max-w-lg">
+    <div class="metro-flyout max-w-lg">
       <h3
         id="pinned-messages-title"
         class="text-lg font-bold flex items-center gap-2"
@@ -17,7 +17,7 @@
       </h3>
 
       <div v-if="loading" class="mt-4 flex justify-center">
-        <span class="loading loading-spinner"></span>
+        <span class="metro-spinner"></span>
       </div>
 
       <div
@@ -57,8 +57,8 @@
         </div>
       </div>
 
-      <div class="modal-action">
-        <button class="btn" @click="close">Close</button>
+      <div class="flex justify-end gap-3">
+        <button class="metro-btn" @click="close">Close</button>
       </div>
     </div>
   </div>

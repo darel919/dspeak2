@@ -178,7 +178,10 @@ test("chat messages preserve attachment and thread metadata end to end", () => {
     "utf8",
   );
 
-  assert.match(api, /attachments: parseAttachments\(message\),\s+reply_to:/);
+  assert.match(
+    api,
+    /attachments: files\.map\(\(file\) => \(\{[\s\S]*?reply_to:/,
+  );
   assert.match(api, /const hasContent = typeof body\.content === "string"/);
   assert.match(api, /validateMessageAttachments\(/);
   assert.match(api, /validateReplyTarget\(/);
@@ -216,24 +219,18 @@ test("chat uploads are associated with messages and abandoned files are removabl
     new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
     "utf8",
   );
-  const migration = readFileSync(
-    new URL("../server/utils/pocketbase-migrations.js", import.meta.url),
-    "utf8",
-  );
+
   const input = readFileSync(
     new URL("../app/components/Chat/ChatInput.vue", import.meta.url),
     "utf8",
   );
-  assert.match(
-    migration,
-    /field\("message", "relation"[\s\S]*?cascadeDelete: true/,
-  );
+
   assert.match(api, /suffix === "upload" && event\.method === "DELETE"/);
+  assert.match(api, /messageId[\s\S]*?Image is already attached to a message/);
   assert.match(
     api,
-    /record\.message[\s\S]*?Image is already attached to a message/,
+    /\.update\(chatFiles\)[\s\S]*?set\(\{ messageId: created\.id \}\)/,
   );
-  assert.match(api, /update\(attachment\.id, \{ message: created\.id \}\)/);
   assert.match(
     input,
     /uploadedAttachmentIds\.map\(\(id\) => deleteChatFile\(id, apiPath\)\)/,
@@ -315,12 +312,9 @@ test("reaction writes validate and bind client-controlled emoji values", () => {
   assert.match(api, /Invalid emoji/);
   assert.match(
     api,
-    /pb\.filter\([\s\S]*?message = \{:message\}[\s\S]*?emoji = \{:emoji\}/,
+    /eq\(messageReactions\.userId, userId\)[\s\S]*?eq\(messageReactions\.emoji, emoji\)/,
   );
-  assert.doesNotMatch(
-    api,
-    /`message = '\$\{messageId\}' && user = '\$\{userId\}' && emoji = '\$\{emoji\}'`/,
-  );
+  assert.doesNotMatch(api, /pb\.filter/);
 });
 
 test("link previews use bounded redirect-safe outbound HTML fetching", () => {
@@ -349,13 +343,13 @@ test("message search binds and validates user-controlled filters", () => {
     "utf8",
   );
 
-  assert.match(api, /pb\.filter\(conditions\.join\(" && "\), parameters\)/);
+  assert.match(api, /ilike\(messages\.content/);
   assert.match(api, /Search query must be 200 characters or fewer/);
   assert.match(api, /if \(searchQ\) \{/);
   assert.match(api, /Invalid content filter/);
   assert.match(api, /Invalid author filter/);
-  assert.match(api, /statusMessage: `Invalid \$\{name\} date`/);
   assert.doesNotMatch(api, /const escapedQ = searchQ\.replace/);
+  assert.doesNotMatch(api, /pb\.filter\(conditions\.join/);
   const search = readFileSync(
     new URL("../app/components/Chat/MessageSearch.vue", import.meta.url),
     "utf8",
@@ -407,11 +401,8 @@ test("slow mode rejects concurrent sends before persistence", () => {
     new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
     "utf8",
   );
-  assert.match(
-    api,
-    /validateReplyTarget[\s\S]*?enforceRateLimit\([\s\S]*?"chat-slow-mode"[\s\S]*?collection\("dspeak_messages"\)\.create/,
-  );
-  assert.match(api, /`\$\{userId\}:\$\{channel\.id\}`/);
+  assert.match(api, /validateReplyTarget[\s\S]*?insert\(messages\)/);
+  assert.match(api, /enforceRateLimit\([^)]*"chat-slow-mode"/);
 });
 
 test("undo send uses the server message timestamp and preserves visible failures", () => {
@@ -466,18 +457,12 @@ test("bookmark access and thread hydration preserve room-scoped message contract
     "utf8",
   );
   assert.match(api, /accessibleBookmarks/);
-  assert.match(api, /ensureMember\(pb, room, userId\)/);
+  assert.match(api, /requireRoomMember\(room, userId\)/);
   assert.match(api, /enforceRateLimit\(event, "chat-pin"/);
   assert.match(api, /enforceRateLimit\(event, "chat-unpin"/);
   assert.match(api, /enforceRateLimit\(event, "chat-bookmark"/);
-  assert.match(
-    api,
-    /parent:[\s\S]*?attachments: parseAttachments\(parent\)[\s\S]*?reply_to:/,
-  );
-  assert.match(
-    api,
-    /replies: replies\.map[\s\S]*?attachments: parseAttachments\(reply\)[\s\S]*?reply_to:/,
-  );
+  assert.match(api, /parent: parentShown,/);
+  assert.match(api, /replies: replyShown,/);
 });
 
 test("message images and thread layout remain keyboard and reflow accessible", () => {
@@ -498,7 +483,7 @@ test("message images and thread layout remain keyboard and reflow accessible", (
     message,
     /<button[\s\S]*?:aria-label="`Open image: \$\{att\.name/,
   );
-  assert.match(message, /object-contain/);
+  assert.match(message, /metro-message-attachment-img/);
   assert.match(sidebar, /fixed inset-0[\s\S]*?md:static/);
   assert.match(window, /flex-1 min-w-0 flex flex-col/);
 });
@@ -509,9 +494,9 @@ test("message reactions and thread link share one compact footer row", () => {
     "utf8",
   );
 
-  assert.match(message, /class="chat-footer message-engagement"/);
-  assert.match(message, /class="message-reactions/);
-  assert.match(message, /class="message-thread-link/);
+  assert.match(message, /class="metro-message-engagement"/);
+  assert.match(message, /class="metro-message-engagement[\s\S]*?metro-react/);
+  assert.match(message, /class="metro-thread-link/);
   assert.doesNotMatch(message, /class="chat-footer mt-1 flex flex-wrap gap-1"/);
   assert.doesNotMatch(message, /class="chat-footer mt-1 flex min-h-11/);
 });
@@ -555,21 +540,17 @@ test("pin state is synchronized through the realtime store contract", () => {
   assert.match(window, /ref="pinnedMessages"/);
 });
 
-test("pin records and message state mutate in PocketBase transactions", () => {
+test("pin records and message state mutate through Drizzle transactions", () => {
   const api = readFileSync(
     new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
     "utf8",
   );
-  assert.match(api, /const pinBatch = pb\.createBatch\(\)/);
+  assert.match(api, /insert\(pinnedMessages\)/);
   assert.match(
     api,
-    /pinBatch[\s\S]*?dspeak_pinned_messages[\s\S]*?dspeak_messages[\s\S]*?await pinBatch\.send\(\)/,
+    /insert\(pinnedMessages\)[\s\S]*?update\(messages\)[\s\S]*?set\(\{ pinned: true \}\)/,
   );
-  assert.match(api, /const unpinBatch = pb\.createBatch\(\)/);
-  assert.match(
-    api,
-    /unpinBatch[\s\S]*?dspeak_pinned_messages[\s\S]*?dspeak_messages[\s\S]*?await unpinBatch\.send\(\)/,
-  );
+  assert.doesNotMatch(api, /createBatch/);
 });
 
 test("chat action dialogs trap focus and restore message actions", () => {

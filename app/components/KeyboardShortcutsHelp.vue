@@ -15,7 +15,7 @@
         >
           <h2 class="text-lg font-bold">Keyboard shortcuts</h2>
           <button
-            class="btn btn-ghost btn-sm"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             aria-label="Close"
             @click="close"
           >

@@ -12,6 +12,7 @@ function sfuHandoff({
   readiness,
   shouldReceive,
   tracksReady = true,
+  includeMediaReadiness = true,
 }) {
   const inboundFlowCount = expectedInboundFlowCount ?? expectedSources.length;
   const peers = [
@@ -23,7 +24,7 @@ function sfuHandoff({
     getLocalPeerId: () => "local",
     getSfu: () => ({
       expectedInboundFlowCount: () => inboundFlowCount,
-      mediaReadiness: readiness,
+      ...(includeMediaReadiness ? { mediaReadiness: readiness } : {}),
       ...(shouldReceive ? { shouldReceive } : {}),
     }),
     handoff: {
@@ -123,6 +124,18 @@ test("SFU handoff does not accept staged tracks without RTP flow", async () => {
       }),
     }),
     /outbound 0\/1, inbound 0\/1/,
+  );
+});
+
+test("SFU handoff reports a missing readiness contract instead of throwing", async () => {
+  await assert.rejects(
+    sfuHandoff({
+      expectedSources: ["audio"],
+      localSourceCount: 0,
+      includeMediaReadiness: false,
+      readiness: null,
+    }),
+    /SFU media did not become ready.*readiness unavailable/,
   );
 });
 

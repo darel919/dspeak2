@@ -1,166 +1,161 @@
-import { requireAuthenticatedUser } from "../../../utils/authentication.js";
-import { usePocketBaseAdmin } from "../../../utils/pocketbase.js";
-import { deleteMatchingRecords } from "../../../utils/pocketbase-query.js";
-import { disconnectVoiceParticipant } from "../../../utils/mediasoup-sfu.js";
+import { requireAuthenticatedUser } from "../../../utils/auth.js";
+import { withTransaction } from "../../../db/transactions.js";
+import {
+  users,
+  profiles,
+  rooms,
+  channels,
+  roomMemberships,
+  membershipRoles,
+  messages,
+  messageReactions,
+  messageRevisions,
+  userNicknames,
+  notifications,
+  notificationPreferences,
+  roomNotificationPreferences,
+  pushSubscriptions,
+  pushJobs,
+  roomSoundboards,
+  chatFiles,
+  pinnedMessages,
+  bookmarks,
+  friends,
+  roomInvites,
+  avatars,
+  librarySongs,
+  soundboards,
+  streamPlayLog,
+} from "../../../db/schema/index.js";
+import { eq, and, or, inArray, sql } from "drizzle-orm";
 import { enforceRateLimit } from "../../../utils/rate-limit.js";
+import { supabaseAdmin } from "../../../auth/supabase.js";
 
 const accountDeletionLocksKey = Symbol.for("dspeak.account-deletion-locks");
 
 function accountDeletionLocks() {
-  if (!globalThis[accountDeletionLocksKey])
+  if (!globalThis[accountDeletionLocksKey]) {
     globalThis[accountDeletionLocksKey] = new Set();
+  }
   return globalThis[accountDeletionLocksKey];
 }
 
-async function deleteUserRecords(pb, collection, fieldName, userId) {
-  return deleteMatchingRecords(
-    pb,
-    collection,
-    pb.filter(`${fieldName} = {:user}`, { user: userId }),
-  );
-}
-
-async function deleteAccount(pb, userId) {
-  const voiceStates = await pb.collection("dspeak_users_state").getFullList({
-    filter: pb.filter("user = {:user}", { user: userId }),
-    fields: "id,connected",
-  });
-  await Promise.all(
-    voiceStates.map(async (voiceState) => {
-      if (voiceState.connected)
-        await disconnectVoiceParticipant(voiceState.connected, userId);
-      await pb.collection("dspeak_users_state").delete(voiceState.id);
-    }),
-  );
-
-  const ownedRooms = await pb.collection("dspeak_rooms").getFullList({
-    filter: pb.filter("owner = {:user}", { user: userId }),
-    fields: "id",
-  });
-
-  await deleteUserRecords(pb, "dspeak_room_memberships", "user", userId);
-
+async function deleteAccount(tx, userId) {
+  const ownedRooms = await tx
+    .select({ id: rooms.id })
+    .from(rooms)
+    .where(eq(rooms.ownerId, userId));
   for (const room of ownedRooms) {
-    const otherMembers = await pb
-      .collection("dspeak_room_memberships")
-      .getList(1, 1, {
-        filter: pb.filter("room = {:room} && user != {:user}", {
-          room: room.id,
-          user: userId,
-        }),
-        fields: "user",
-      });
-    if (otherMembers.items[0]?.user) {
-      await pb.collection("dspeak_rooms").update(room.id, {
-        owner: otherMembers.items[0].user,
-      });
+    const otherMembers = await tx
+      .select({ userId: roomMemberships.userId })
+      .from(roomMemberships)
+      .where(
+        and(
+          eq(roomMemberships.roomId, room.id),
+          sql`${roomMemberships.userId} != ${userId}`,
+        ),
+      )
+      .limit(1);
+    if (otherMembers.length > 0) {
+      await tx
+        .update(rooms)
+        .set({ ownerId: otherMembers[0].userId })
+        .where(eq(rooms.id, room.id));
     } else {
-      await pb.collection("dspeak_rooms").delete(room.id);
+      await tx.delete(rooms).where(eq(rooms.id, room.id));
     }
   }
 
-  const ownedChannels = await pb
-    .collection("dspeak_rooms_channels")
-    .getFullList({
-      filter: pb.filter("owner = {:user}", { user: userId }),
-      fields: "id,room",
-    });
-  for (const channel of ownedChannels) {
-    try {
-      const room = await pb.collection("dspeak_rooms").getOne(channel.room, {
-        fields: "owner",
-      });
-      if (room.owner !== userId)
-        await pb.collection("dspeak_rooms_channels").update(channel.id, {
-          owner: room.owner,
-        });
-    } catch (error) {
-      if (error?.status !== 404 && error?.response?.status !== 404) throw error;
-    }
-  }
+  await tx
+    .delete(membershipRoles)
+    .where(
+      inArray(
+        membershipRoles.membershipId,
+        tx
+          .select({ id: roomMemberships.id })
+          .from(roomMemberships)
+          .where(eq(roomMemberships.userId, userId)),
+      ),
+    );
+  await tx.delete(roomMemberships).where(eq(roomMemberships.userId, userId));
 
-  const channelsWithPresence = await pb
-    .collection("dspeak_rooms_channels")
-    .getFullList({
-      filter: pb.filter("inRoom = {:user}", { user: userId }),
-      fields: "id,inRoom",
-    });
-  await Promise.all(
-    channelsWithPresence.map((channel) =>
-      pb.collection("dspeak_rooms_channels").update(channel.id, {
-        inRoom: (channel.inRoom || []).filter(
-          (participantId) => String(participantId) !== String(userId),
-        ),
-      }),
-    ),
-  );
+  await tx
+    .update(channels)
+    .set({ ownerId: null })
+    .where(eq(channels.ownerId, userId));
+  await tx
+    .update(channels)
+    .set({ inRoom: sql`array_remove(${channels.inRoom}, ${userId})` })
+    .where(sql`${channels.inRoom} @> ARRAY[${userId}]::uuid[]`);
 
-  const messages = await pb.collection("dspeak_messages").getFullList({
-    filter: pb.filter("sender = {:user}", { user: userId }),
-    fields: "id",
-  });
-  await Promise.all(
-    messages.map((message) =>
-      pb.collection("dspeak_messages").update(message.id, {
-        content: "[deleted]",
-      }),
-    ),
-  );
+  await tx
+    .update(messages)
+    .set({ content: "[deleted]" })
+    .where(eq(messages.authorId, userId));
+  await tx
+    .update(messages)
+    .set({ readBy: sql`${messages.readBy} - ${userId}` })
+    .where(sql`${messages.readBy} @> ${JSON.stringify([userId])}::jsonb`);
 
-  const readReceipts = await pb.collection("dspeak_messages").getFullList({
-    filter: pb.filter("read_by ?= {:user}", { user: userId }),
-    fields: "id,read_by",
-  });
-  await Promise.all(
-    readReceipts.map((message) =>
-      pb.collection("dspeak_messages").update(message.id, {
-        read_by: (message.read_by || []).filter(
-          (readerId) => String(readerId) !== String(userId),
-        ),
-      }),
-    ),
-  );
-
-  await deleteUserRecords(
-    pb,
-    "dspeak_notification_preferences",
-    "user",
-    userId,
-  );
-  await deleteUserRecords(
-    pb,
-    "dspeak_room_notification_preferences",
-    "user",
-    userId,
-  );
-  await deleteUserRecords(pb, "dspeak_push_subscriptions", "user", userId);
-  await deleteUserRecords(pb, "dspeak_bookmarks", "user", userId);
-  await deleteUserRecords(pb, "dspeak_user_nicknames", "owner", userId);
-  await deleteUserRecords(pb, "dspeak_friends", "requester", userId);
-  await deleteUserRecords(pb, "dspeak_friends", "recipient", userId);
-  await deleteUserRecords(pb, "dspeak_message_reactions", "user", userId);
-  await deleteUserRecords(pb, "dspeak_message_revisions", "editor", userId);
-  await deleteUserRecords(pb, "dspeak_notifications", "recipient", userId);
-  await deleteUserRecords(pb, "dspeak_push_jobs", "recipient", userId);
-  await deleteUserRecords(pb, "dspeak_room_soundboards", "uploader", userId);
-  await deleteUserRecords(pb, "dspeak_chat_files", "uploader", userId);
-  await deleteUserRecords(pb, "dspeak_pinned_messages", "pinned_by", userId);
-  await deleteUserRecords(pb, "dspeak_room_invites", "created_by", userId);
-
-  await pb.collection("users").update(userId, {
-    name: "[deleted]",
-    username: `deleted_${userId.slice(0, 8)}`,
-    display_name: "",
-    handle: "",
-    avatar: "",
-    email: "",
-    online: false,
-    presence_status: "offline",
-    deleted_at: new Date().toISOString(),
-  });
-
-  await deleteUserRecords(pb, "dspeak_sessions", "user", userId);
-  return { success: true };
+  await tx
+    .delete(notificationPreferences)
+    .where(eq(notificationPreferences.userId, userId));
+  await tx
+    .delete(roomNotificationPreferences)
+    .where(eq(roomNotificationPreferences.userId, userId));
+  await tx.delete(pushJobs).where(eq(pushJobs.recipientId, userId));
+  await tx
+    .delete(pushSubscriptions)
+    .where(eq(pushSubscriptions.userId, userId));
+  await tx.delete(bookmarks).where(eq(bookmarks.userId, userId));
+  await tx
+    .delete(userNicknames)
+    .where(
+      or(eq(userNicknames.userId, userId), eq(userNicknames.setById, userId)),
+    );
+  await tx
+    .delete(friends)
+    .where(or(eq(friends.userId, userId), eq(friends.friendId, userId)));
+  await tx.delete(messageReactions).where(eq(messageReactions.userId, userId));
+  await tx
+    .delete(messageRevisions)
+    .where(eq(messageRevisions.editorId, userId));
+  await tx.delete(notifications).where(eq(notifications.userId, userId));
+  await tx
+    .delete(roomSoundboards)
+    .where(eq(roomSoundboards.createdById, userId));
+  await tx.delete(soundboards).where(eq(soundboards.createdById, userId));
+  await tx.delete(librarySongs).where(eq(librarySongs.addedById, userId));
+  await tx.delete(streamPlayLog).where(eq(streamPlayLog.playedById, userId));
+  await tx.delete(avatars).where(eq(avatars.userId, userId));
+  await tx.delete(chatFiles).where(eq(chatFiles.uploaderId, userId));
+  await tx.delete(pinnedMessages).where(eq(pinnedMessages.pinnedById, userId));
+  await tx
+    .delete(roomInvites)
+    .where(
+      or(eq(roomInvites.inviterId, userId), eq(roomInvites.inviteeId, userId)),
+    );
+  const deletedUsername = `deleted_${userId}`;
+  const updatedAt = new Date();
+  await tx
+    .update(profiles)
+    .set({
+      username: deletedUsername,
+      displayName: "",
+      avatarKey: null,
+      updatedAt,
+    })
+    .where(eq(profiles.id, userId));
+  await tx
+    .update(users)
+    .set({
+      name: "[deleted]",
+      username: deletedUsername,
+      displayName: "",
+      email: `deleted+${userId}@deleted.invalid`,
+      updatedAt,
+    })
+    .where(eq(users.id, userId));
 }
 
 export default defineEventHandler(async (event) => {
@@ -168,15 +163,28 @@ export default defineEventHandler(async (event) => {
   enforceRateLimit(event, "account-delete", userId, 3, 60 * 60 * 1000);
 
   const locks = accountDeletionLocks();
-  if (locks.has(userId))
+  if (locks.has(userId)) {
     throw createError({
       statusCode: 409,
       statusMessage: "Account deletion is already in progress",
     });
+  }
 
   locks.add(userId);
   try {
-    return await deleteAccount(await usePocketBaseAdmin(), userId);
+    await withTransaction((tx) => deleteAccount(tx, userId));
+    if (!supabaseAdmin)
+      throw createError({
+        statusCode: 503,
+        statusMessage: "Account deletion is unavailable",
+      });
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (error)
+      throw createError({
+        statusCode: 502,
+        statusMessage: "Application data was deleted but Auth deletion failed",
+      });
+    return { success: true };
   } finally {
     locks.delete(userId);
   }

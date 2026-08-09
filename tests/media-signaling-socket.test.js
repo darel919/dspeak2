@@ -65,6 +65,18 @@ test("media signaling URL preserves the configured endpoint and channel", () => 
   );
 });
 
+test("media signaling URL carries a desktop access token without dropping endpoint parameters", () => {
+  assert.equal(
+    mediaSignalingUrl(
+      "wss://voice.example/socket?region=one",
+      "room one",
+      { protocol: "https:", host: "voice.example" },
+      "desktop token",
+    ),
+    "wss://voice.example/socket?region=one&channelId=room+one&accessToken=desktop+token",
+  );
+});
+
 test("media signaling recovery closes the poisoned socket", () => {
   const socket = new FakeWebSocket("wss://example.test/socket");
   closeMediaSignalingForRecovery(socket);
@@ -88,6 +100,50 @@ test("media signaling connection attempts are single-flight", async () => {
     const candidate = FakeWebSocket.instances[0];
     candidate.onclose({ code: 4000, reason: "test" });
     await assert.rejects(first, /connection closed/);
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("media signaling includes a control ticket in the hello payload", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  try {
+    const signaling = harness({
+      buildClientHelloData: ({ mediaSessionId }) => ({
+        mediaSessionId,
+        ticket: "control-ticket",
+      }),
+    });
+    const opening = signaling.open();
+    const candidate = FakeWebSocket.instances[0];
+    candidate.readyState = FakeWebSocket.OPEN;
+
+    assert.equal(
+      signaling.acceptServerHello({
+        protocolVersion: 919,
+        contractRevision: 2,
+        mediaSessionId: "session-1",
+        heartbeatIntervalMs: 30000,
+        heartbeatTimeoutMs: 90000,
+        serverTime: Date.now(),
+      }),
+      true,
+    );
+
+    assert.deepEqual(JSON.parse(candidate.lastMessage), {
+      type: "hello919",
+      data: {
+        mediaSessionId: "session-1",
+        ticket: "control-ticket",
+        protocolVersion: 919,
+        contractRevision: 2,
+      },
+    });
+    candidate.onclose({ code: 4000, reason: "test" });
+    await assert.rejects(opening, /connection closed/);
     signaling.stop();
   } finally {
     globalThis.WebSocket = originalWebSocket;

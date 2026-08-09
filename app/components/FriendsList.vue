@@ -5,7 +5,7 @@
     @toggle="handleDropdownToggle"
   >
     <summary
-      class="btn btn-square btn-ghost btn-sm relative"
+      class="metro-icon-btn metro-icon-btn--ghost btn-sm relative"
       aria-label="Friends"
     >
       <Icon name="lucide:users" class="size-5" />
@@ -22,20 +22,23 @@
         class="flex items-center justify-between border-b border-base-300 p-3"
       >
         <div class="flex items-center gap-1">
-          <NuxtLink to="/friends" class="btn btn-ghost btn-xs">
+          <NuxtLink
+            to="/friends"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
+          >
             Friends
           </NuxtLink>
           <button
             v-if="friendRequests.length"
-            class="btn btn-ghost btn-xs"
-            :class="friendsView === 'incoming' && 'btn-active'"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
+            :class="friendsView === 'incoming' && 'metro-btn--secondary'"
             @click="friendsView = 'incoming'"
           >
             Incoming ({{ friendRequests.length }})
           </button>
         </div>
         <button
-          class="btn btn-ghost btn-xs"
+          class="metro-btn metro-btn--ghost metro-btn--sm"
           type="button"
           aria-label="Add friend"
           @click="navigateToAddFriend"
@@ -77,14 +80,14 @@
             >
           </div>
           <button
-            class="btn btn-primary btn-sm"
+            class="metro-btn metro-btn--sm"
             @click="acceptRequest(req.id)"
             aria-label="Accept friend request from {{ req.username }}"
           >
             Accept
           </button>
           <button
-            class="btn btn-ghost btn-sm"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             @click="declineRequest(req.id)"
             aria-label="Decline friend request from {{ req.username }}"
           >
@@ -130,7 +133,7 @@
           </div>
           <button
             v-if="friend.online && friend.presence_status !== 'offline'"
-            class="btn btn-ghost btn-xs"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
             title="Join friend"
             @click="joinFriendRoom(friend)"
           >

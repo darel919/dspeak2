@@ -17,7 +17,7 @@
           </div>
           <button
             type="button"
-            class="btn btn-ghost btn-sm lg:hidden"
+            class="metro-btn metro-btn--ghost btn-sm lg:hidden"
             aria-label="Close settings"
             @click="goBack"
           >
@@ -48,7 +48,7 @@
         </nav>
         <button
           type="button"
-          class="btn btn-ghost btn-sm mt-5 hidden w-full justify-start gap-2 lg:flex"
+          class="metro-btn metro-btn--ghost btn-sm mt-5 hidden w-full justify-start gap-2 lg:flex"
           @click="goBack"
         >
           <Icon name="lucide:arrow-left" class="size-4" />Back
@@ -71,17 +71,23 @@
               <div class="flex items-center gap-4 sm:gap-5">
                 <div class="avatar shrink-0">
                   <div class="w-16 bg-base-200 ring-2 ring-base-100 sm:w-20">
-                    <img :src="profileAvatarPreview" alt="" />
+                    <ProfileAvatar
+                      :src="profileAvatarPreview"
+                      :name="
+                        profileDisplayName || profile?.name || profile?.email
+                      "
+                      class="size-full"
+                    />
                   </div>
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="mb-1 flex flex-wrap items-center gap-2">
                     <h2 class="truncate text-lg font-bold sm:text-xl">
-                      {{ profileDisplayName || profile.name }}
+                      {{ profileDisplayName || profile?.name }}
                     </h2>
                   </div>
                   <p class="truncate text-sm text-base-content/60">
-                    {{ profile.email }}
+                    {{ profile?.email }}
                   </p>
                   <p
                     v-if="profileHandle"
@@ -127,9 +133,11 @@
                       aria-label="Choose a new profile picture"
                       @click="openAvatarPicker"
                     >
-                      <img
+                      <ProfileAvatar
                         :src="profileAvatarPreview"
-                        alt="Current profile picture"
+                        :name="
+                          profileDisplayName || profile?.name || profile?.email
+                        "
                         class="size-28 object-cover sm:size-32"
                       />
                       <span
@@ -155,7 +163,7 @@
                       <span class="text-sm font-semibold">Display name</span>
                       <input
                         v-model="profileDisplayName"
-                        class="input input-bordered w-full bg-base-100 focus:outline-primary"
+                        class="metro-input w-full bg-base-100 focus:outline-primary"
                         type="text"
                         minlength="2"
                         maxlength="32"
@@ -169,7 +177,7 @@
                     <label class="grid gap-2">
                       <span class="text-sm font-semibold">Username</span>
                       <div
-                        class="input input-bordered flex w-full items-center gap-2 bg-base-100 focus-within:outline-2 focus-within:outline-primary"
+                        class="metro-input flex w-full items-center gap-2 bg-base-100 focus-within:outline-2 focus-within:outline-primary"
                       >
                         <span class="font-semibold text-base-content/35"
                           >@</span
@@ -218,13 +226,13 @@
                   Changes apply across every room.
                 </span>
                 <button
-                  class="btn btn-primary sm:min-w-36"
+                  class="metro-btn sm:min-w-36"
                   type="submit"
                   :disabled="profileSaving"
                 >
                   <span
                     v-if="profileSaving"
-                    class="loading loading-spinner loading-xs"
+                    class="metro-spinner metro-spinner--xs"
                   ></span>
                   <Icon v-else name="lucide:save" class="size-4" />
                   {{ profileSaving ? "Saving…" : "Save changes" }}
@@ -242,7 +250,7 @@
               </div>
               <button
                 type="button"
-                class="btn btn-error btn-outline"
+                class="metro-btn metro-btn--error"
                 @click="handleLogout"
               >
                 <Icon name="lucide:log-out" class="size-4" />Log out
@@ -260,14 +268,14 @@
                 </p>
               </div>
               <button
-                class="btn btn-primary"
+                class="metro-btn"
                 :disabled="exporting"
                 :aria-busy="exporting"
                 @click="handleExport"
               >
                 <span
                   v-if="exporting"
-                  class="loading loading-spinner loading-sm"
+                  class="metro-spinner metro-spinner--sm"
                 />
                 <span v-else>
                   <Icon name="lucide:download" class="size-4 mr-2" />Export data
@@ -288,15 +296,12 @@
                 </p>
               </div>
               <button
-                class="btn btn-error"
+                class="metro-btn metro-btn--error"
                 :disabled="deleting"
                 :aria-busy="deleting"
                 @click="confirmDelete = true"
               >
-                <span
-                  v-if="deleting"
-                  class="loading loading-spinner loading-sm"
-                />
+                <span v-if="deleting" class="metro-spinner metro-spinner--sm" />
                 <span v-else>
                   <Icon name="lucide:trash-2" class="size-4 mr-2" />Delete
                   account
@@ -331,18 +336,21 @@
                 remain. You cannot undo this action.
               </p>
               <div class="mt-6 flex gap-3 justify-end">
-                <button class="btn btn-ghost" @click="confirmDelete = false">
+                <button
+                  class="metro-btn metro-btn--ghost"
+                  @click="confirmDelete = false"
+                >
                   Cancel
                 </button>
                 <button
-                  class="btn btn-error"
+                  class="metro-btn metro-btn--error"
                   :disabled="deleting"
                   :aria-busy="deleting"
                   @click="handleDelete"
                 >
                   <span
                     v-if="deleting"
-                    class="loading loading-spinner loading-sm"
+                    class="metro-spinner metro-spinner--sm"
                   />
                   <span v-else>Yes, delete my account</span>
                 </button>
@@ -361,13 +369,13 @@
                 </div>
                 <button
                   type="button"
-                  class="btn btn-sm btn-ghost"
+                  class="metro-btn metro-btn--ghost metro-btn--sm"
                   :disabled="devicesLoading"
                   @click="refreshDevices"
                 >
                   <span
                     v-if="devicesLoading"
-                    class="loading loading-spinner loading-xs"
+                    class="metro-spinner metro-spinner--xs"
                   ></span
                   ><Icon
                     v-else
@@ -384,7 +392,7 @@
                   </span>
                   <select
                     v-model="selectedDeviceId"
-                    class="select select-bordered w-full bg-base-100"
+                    class="metro-select w-full bg-base-100"
                     :disabled="devicesLoading || !devices.length"
                     @change="onDeviceChange"
                   >
@@ -420,8 +428,8 @@
                     </div>
                     <button
                       type="button"
-                      class="btn min-w-36"
-                      :class="micCheckRecording ? 'btn-error' : 'btn-primary'"
+                      class="metro-btn min-w-36"
+                      :class="micCheckRecording ? 'metro-btn--error' : ''"
                       :disabled="
                         microphonePreviewLoading ||
                         (!microphonePreviewReady && !micCheckRecording)
@@ -430,7 +438,7 @@
                     >
                       <span
                         v-if="microphonePreviewLoading"
-                        class="loading loading-spinner loading-xs"
+                        class="metro-spinner metro-spinner--xs"
                       ></span>
                       <Icon
                         v-else
@@ -457,7 +465,7 @@
                         class="flex items-center gap-2 text-sm font-semibold"
                       >
                         <span
-                          class="size-2.5 rounded-full"
+                          class="size-2.5"
                           :class="microphonePreviewStatusClass"
                         ></span>
                         {{ microphonePreviewStatus }}
@@ -512,7 +520,7 @@
                     ></audio>
                     <button
                       type="button"
-                      class="btn btn-sm btn-ghost"
+                      class="metro-btn metro-btn--ghost metro-btn--sm"
                       @click="clearMicCheck"
                     >
                       <Icon name="lucide:trash-2" class="size-4" />
@@ -542,7 +550,7 @@
                 <button
                   v-if="microphonePreviewError"
                   type="button"
-                  class="btn btn-sm btn-outline"
+                  class="metro-btn metro-btn--secondary metro-btn--sm"
                   @click="startMicrophonePreview"
                 >
                   <Icon name="lucide:refresh-cw" class="size-4" />Try again
@@ -563,7 +571,7 @@
                       >Off for HD audio</span
                     ><input
                       type="checkbox"
-                      class="toggle toggle-primary"
+                      class="metro-toggle"
                       :checked="microphoneGate.enabled && !hdAudioEnabled"
                       :disabled="hdAudioEnabled"
                       @change="
@@ -581,7 +589,7 @@
                     ></span
                   ><input
                     type="checkbox"
-                    class="toggle toggle-primary"
+                    class="metro-toggle"
                     :checked="microphoneGate.automatic"
                     @change="setAutomaticGate($event.target.checked)"
                 /></label>
@@ -599,7 +607,7 @@
                       {{ microphoneGate.thresholdDb }} dB</small
                     ></span
                   ><input
-                    class="range range-primary w-full max-w-md"
+                    class="metro-range w-full max-w-md"
                     type="range"
                     min="-60"
                     max="-20"
@@ -621,7 +629,7 @@
                       >Unavailable</span
                     ><input
                       type="checkbox"
-                      class="toggle toggle-primary"
+                      class="metro-toggle"
                       :checked="audio[option.key]"
                       :disabled="!supported[option.key]"
                       @change="
@@ -634,13 +642,13 @@
               >
                 <button
                   type="button"
-                  class="btn btn-primary btn-sm"
+                  class="metro-btn metro-btn--sm"
                   :disabled="applyBusy || !voiceStore.connected"
                   @click="applyAudioSettings"
                 >
                   <span
                     v-if="applyBusy"
-                    class="loading loading-spinner loading-xs"
+                    class="metro-spinner metro-spinner--xs"
                   ></span
                   >Apply to current call</button
                 ><span class="text-xs text-base-content/60">{{
@@ -664,7 +672,7 @@
                     ><Icon name="lucide:volume-2" />Speakers</span
                   ><select
                     v-model="selectedOutputId"
-                    class="select select-bordered w-full max-w-md"
+                    class="metro-select w-full max-w-md"
                     :disabled="
                       devicesLoading || !outputDevices.length || !canSetSinkId
                     "
@@ -685,7 +693,7 @@
                     ><Icon name="lucide:video" />Camera</span
                   ><select
                     v-model="selectedCameraId"
-                    class="select select-bordered w-full max-w-md"
+                    class="metro-select w-full max-w-md"
                     :disabled="devicesLoading || !videoDevices.length"
                     @change="onCameraDeviceChange"
                   >
@@ -736,7 +744,7 @@
                       class="mb-1.5 text-xs font-semibold text-base-content/65"
                       >Resolution</span
                     ><select
-                      class="select select-bordered w-full bg-base-100"
+                      class="metro-select w-full bg-base-100"
                       :value="video.settings.resolution"
                       @change="video.setResolution($event.target.value)"
                     >
@@ -754,7 +762,7 @@
                       class="mb-1.5 text-xs font-semibold text-base-content/65"
                       >Frame rate</span
                     ><select
-                      class="select select-bordered w-full bg-base-100"
+                      class="metro-select w-full bg-base-100"
                       :value="video.settings.frameRate"
                       @change="video.setFrameRate($event.target.value)"
                     >
@@ -772,7 +780,7 @@
                       class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-base-content/60"
                       >Quality priority</span
                     ><select
-                      class="select select-bordered w-full bg-base-100"
+                      class="metro-select w-full bg-base-100"
                       :value="video.settings.qualityPriority"
                       @change="video.setQualityPriority($event.target.value)"
                     >
@@ -803,7 +811,7 @@
                   <h2>Soundboard playback</h2>
                   <p>Set the default volume used across rooms.</p>
                 </div>
-                <span class="badge badge-outline"
+                <span class="metro-badge metro-badge--ghost"
                   >{{ settingsStore.soundboardVolume }}%</span
                 >
               </div>
@@ -814,7 +822,7 @@
                     >Rooms can override this from their soundboard.</small
                   ></span
                 ><input
-                  class="range range-primary w-full max-w-xs"
+                  class="metro-range w-full max-w-xs"
                   type="range"
                   min="0"
                   max="100"
@@ -833,7 +841,7 @@
                 </div>
                 <button
                   type="button"
-                  class="btn btn-sm btn-outline"
+                  class="metro-btn metro-btn--secondary metro-btn--sm"
                   @click="previewSystemSound"
                 >
                   Preview
@@ -843,7 +851,7 @@
                 <label class="settings-row"
                   ><span><strong class="block text-sm">Theme</strong></span
                   ><select
-                    class="select select-bordered w-full max-w-xs capitalize"
+                    class="metro-select w-full max-w-xs capitalize"
                     :value="settingsStore.systemSoundTheme"
                     @change="
                       settingsStore.setSystemSoundTheme($event.target.value)
@@ -863,7 +871,7 @@
                     ><strong class="block text-sm">Volume</strong
                     ><small>{{ settingsStore.systemSoundVolume }}%</small></span
                   ><input
-                    class="range range-primary w-full max-w-xs"
+                    class="metro-range w-full max-w-xs"
                     type="range"
                     min="0"
                     max="100"
@@ -880,7 +888,7 @@
                     ></span
                   ><input
                     type="checkbox"
-                    class="toggle toggle-primary"
+                    class="metro-toggle"
                     :checked="settingsStore.systemSoundsMuted"
                     @change="
                       settingsStore.setSystemSoundsMuted($event.target.checked)
@@ -897,7 +905,9 @@
                     Choose the preferred Opus quality ceiling for system audio.
                   </p>
                 </div>
-                <span v-if="voiceStore.connected" class="badge badge-outline"
+                <span
+                  v-if="voiceStore.connected"
+                  class="metro-badge metro-badge--ghost"
                   >Effective
                   {{ voiceStore.effectiveSystemAudioBitrate }} kbps</span
                 >
@@ -909,7 +919,7 @@
                     >The voice channel's own limit still takes priority.</small
                   ></span
                 ><select
-                  class="select select-bordered w-full max-w-xs"
+                  class="metro-select w-full max-w-xs"
                   :value="systemAudioBitrate"
                   @change="setSystemAudioBitrate($event.target.value)"
                 >
@@ -937,11 +947,11 @@
                 <button
                   v-for="mode in ['system', 'light', 'dark']"
                   :key="mode"
-                  class="btn capitalize"
+                  class="metro-btn capitalize"
                   :class="
                     settingsStore.appearance.surfaceMode === mode
-                      ? 'btn-primary'
-                      : 'btn-outline'
+                      ? 'metro-btn--secondary'
+                      : 'metro-btn--ghost'
                   "
                   @click="settingsStore.setAppearance({ surfaceMode: mode })"
                 >
@@ -988,7 +998,11 @@
           <footer
             class="mt-8 border-t border-base-300 pt-4 text-center text-xs text-base-content/45"
           >
-            dSpeak v{{ appVersion }}
+            <span>dSpeak v{{ appVersion }}</span>
+            <span v-if="appBuild.shortCommit" class="block">
+              commit {{ appBuild.shortCommit
+              }}<span v-if="appBuild.branch"> · {{ appBuild.branch }}</span>
+            </span>
           </footer>
         </div>
       </main>
@@ -998,11 +1012,12 @@
 
 <script setup>
 import NotificationSettings from "../components/NotificationSettings.vue";
+import ProfileAvatar from "../components/ProfileAvatar.vue";
 import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { useVoiceStore } from "../stores/voice";
 import { useRuntimeConfig } from "#app";
-import { useChatUtils } from "../composables/useChatUtils";
+
 import { useToast } from "../composables/useToast";
 import {
   SYSTEM_AUDIO_BITRATE_OPTIONS,
@@ -1181,7 +1196,7 @@ const videoQualitySections = computed(() => [
 
 const config = useRuntimeConfig();
 const appVersion = config.public.appVersion;
-const { getAvatarUrl } = useChatUtils();
+const appBuild = config.public.appBuild || {};
 const toast = useToast();
 
 const exporting = ref(false);
@@ -1200,7 +1215,6 @@ const profile = computed(() => {
   if (!user) return null;
   return {
     ...user,
-    avatar: getAvatarUrl(user.avatar),
   };
 });
 const profileDisplayName = ref("");

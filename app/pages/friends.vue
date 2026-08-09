@@ -10,7 +10,11 @@
           <Icon name="lucide:users" class="size-5 text-primary" />
           Friends
         </h1>
-        <button type="button" class="btn btn-ghost btn-sm" @click="goBack">
+        <button
+          type="button"
+          class="metro-btn metro-btn--ghost metro-btn--sm"
+          @click="goBack"
+        >
           <Icon name="lucide:arrow-left" class="size-4" />
           Back
         </button>
@@ -33,8 +37,8 @@
           {{ tab.label }}
           <span
             v-if="tab.count"
-            class="badge badge-sm"
-            :class="tab.badgeClass || 'badge-ghost'"
+            class="metro-badge metro-badge--sm"
+            :class="tab.badgeClass || 'metro-badge--ghost'"
           >
             {{ tab.count }}
           </span>
@@ -89,14 +93,14 @@
             <div class="flex items-center gap-2">
               <button
                 v-if="friend.online && friend.presence_status !== 'offline'"
-                class="btn btn-ghost btn-sm"
+                class="metro-btn metro-btn--ghost metro-btn--sm"
                 title="Join friend"
                 @click="joinFriendRoom(friend)"
               >
                 <Icon name="lucide:arrow-right" class="size-4" />
               </button>
               <button
-                class="btn btn-ghost btn-sm text-error"
+                class="metro-btn metro-btn--ghost btn-sm text-error"
                 title="Remove friend"
                 @click="removeFriend(friend)"
               >
@@ -146,13 +150,14 @@
               </span>
             </div>
             <button
-              class="btn btn-primary btn-sm"
+              class="metro-btn metro-btn--sm"
               @click="acceptRequest(req.id)"
             >
               Accept
             </button>
             <button
-              class="btn btn-ghost btn-sm"
+              class="metro-btn metro-btn--ghost metro-btn--sm"
+              aria-label="Decline friend request"
               @click="declineRequest(req.id)"
             >
               <Icon name="lucide:x" class="size-4" />
@@ -194,7 +199,7 @@
             </div>
             <span class="text-xs text-base-content/40">Pending</span>
             <button
-              class="btn btn-ghost btn-sm text-error"
+              class="metro-btn metro-btn--ghost btn-sm text-error"
               title="Cancel request"
               @click="cancelSentRequest(req.id)"
             >
@@ -225,19 +230,20 @@
             <form class="flex items-center gap-2" @submit.prevent="addFriend">
               <input
                 v-model="friendHandle"
-                class="input input-bordered flex-1 bg-base-100"
+                class="metro-input flex-1 bg-base-100"
                 type="text"
                 placeholder="@username"
+                aria-label="Friend username"
                 required
               />
               <button
-                class="btn btn-primary"
+                class="metro-btn"
                 type="submit"
                 :disabled="addingFriend || !friendHandle.trim()"
               >
                 <span
                   v-if="addingFriend"
-                  class="loading loading-spinner loading-xs"
+                  class="metro-spinner metro-spinner--xs"
                 ></span>
                 <span v-else>Send request</span>
               </button>
@@ -291,21 +297,21 @@ const tabs = computed(() => [
     label: "All friends",
     icon: "lucide:users",
     count: friends.value.length,
-    badgeClass: "badge-ghost",
+    badgeClass: "metro-badge--ghost",
   },
   {
     id: "incoming",
     label: "Incoming",
     icon: "lucide:user-plus",
     count: friendRequests.value.length,
-    badgeClass: "badge-warning",
+    badgeClass: "metro-badge--warning",
   },
   {
     id: "sent",
     label: "Sent",
     icon: "lucide:send",
     count: sentRequests.value.length,
-    badgeClass: "badge-ghost",
+    badgeClass: "metro-badge--ghost",
   },
   { id: "add", label: "Add friend", icon: "lucide:user-round-plus" },
 ]);

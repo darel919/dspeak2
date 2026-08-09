@@ -1,45 +1,56 @@
 {
   "name": "dspeak",
-  "version": "2.7.0-alpha12",
+  "version": "3.0.0-alpha1",
   "author": "darelisme",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
-    "audit:accessibility": "node scripts/accessibility-audit.mjs",
+    "build:web": "npx nuxi generate",
+    "build:desktop": "cd desktop && npx tauri build",
+    "dev:desktop": "cd desktop && bash scripts/dev-desktop.sh",
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown",
-    "generate": "nuxt generate",
-    "preview": "nuxt preview",
-    "smoke:p2p-browser": "bun scripts/p2p-browser-smoke.mjs",
-    "start": "node --env-file=.env .output/server/index.mjs",
+    "postinstall": "patch-package",
+    "release:check": "node scripts/sync-release-version.mjs --check",
+    "release:sync": "node scripts/sync-release-version.mjs --write",
     "test": "node --test tests/*.test.js",
-    "postinstall": "nuxt prepare"
+    "benchmark:audio": "node scripts/audio-codec-benchmark.mjs"
+  },
+  "imports": {
+    "#shared/*": "./shared/*"
   },
   "dependencies": {
-    "@iconify-json/lucide": "^1.2.119",
-    "@nuxt/icon": "^2.3.1",
+    "@aws-sdk/client-s3": "^3.1106.0",
+    "@aws-sdk/s3-request-presigner": "^3.1106.0",
+    "@iconify-json/lucide": "^1.2.122",
+    "@nuxt/icon": "^2.4.1",
     "@pinia/nuxt": "^1.0.1",
+    "@supabase/supabase-js": "^2.112.2",
     "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-deep-link": "^2.4.9",
+    "@tauri-apps/plugin-global-shortcut": "^2.3.2",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "@tauri-apps/plugin-window-state": "^2.4.1",
     "@vite-pwa/nuxt": "1.1.1",
-    "daisyui": "^5.7.1",
-    "marked": "^18.0.7",
-    "mediasoup": "^3.22.0",
+    "daisyui": "^5.7.16",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.8",
+    "marked": "^18.0.9",
     "mediasoup-client": "^3.21.0",
-    "nuxt": "^4.5.0",
+    "nuxt": "^4.5.2",
     "nuxt-security": "^2.6.0",
     "pinia": "^4.0.2",
-    "pocketbase": "^0.27.0",
+    "postgres": "^3.4.9",
     "tailwindcss": "^4.3.3",
-    "vue": "^3.5.40",
+    "vue": "^3.5.41",
     "vue-router": "^5.2.0",
-    "web-push": "3.6.7",
-    "ws": "^8.18.0"
+    "web-push": "3.6.7"
   },
-  "trustedDependencies": [
-    "mediasoup"
-  ],
   "overrides": {
     "@babel/plugin-transform-modules-systemjs": "7.29.7",
     "ajv": "8.20.0",
@@ -54,9 +65,11 @@
     "tar": "7.5.22"
   },
   "devDependencies": {
-    "axe-core": "^4.12.1",
+    "axe-core": "^4.13.0",
+    "drizzle-kit": "^0.31.10",
     "fake-indexeddb": "^6.2.5",
+    "patch-package": "8.0.1",
     "prettier": "3.9.6",
-    "puppeteer": "^25.3.0"
+    "puppeteer": "^25.5.0"
   }
 }

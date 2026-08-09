@@ -90,6 +90,7 @@ export function buildVideoProduceOptions({
   frameRate,
   screen = false,
   qualityPriority = "framerate",
+  maxBitrate: requestedMaxBitrate,
 } = {}) {
   const pixels =
     Math.max(1, Number(width) || 1280) * Math.max(1, Number(height) || 720);
@@ -98,10 +99,18 @@ export function buildVideoProduceOptions({
     Math.max(VIDEO_FRAME_RATE_MIN, Number(frameRate) || 30),
   );
   const bitsPerPixel = screen ? 0.06 : 0.05;
-  const maxBitrate = Math.min(
+  const calculatedMaxBitrate = Math.min(
     SFU_VIDEO_MAX_BITRATE,
     Math.max(2_000_000, Math.round(pixels * fps * bitsPerPixel)),
   );
+  const configuredMaxBitrate = Number(requestedMaxBitrate);
+  const maxBitrate =
+    Number.isFinite(configuredMaxBitrate) && configuredMaxBitrate > 0
+      ? Math.min(
+          SFU_VIDEO_MAX_BITRATE,
+          Math.max(100_000, Math.floor(configuredMaxBitrate)),
+        )
+      : calculatedMaxBitrate;
   const scaleResolutionDownBy = Math.max(
     1,
     (Number(width) || 1280) / SFU_VIDEO_MAX_WIDTH,
@@ -141,10 +150,18 @@ export function buildP2pVideoSenderOptions(options = {}) {
     Math.max(VIDEO_FRAME_RATE_MIN, Number(options.frameRate) || 30),
   );
   const bitsPerPixel = options.screen ? 0.065 : 0.055;
-  const maxBitrate = Math.min(
+  const calculatedMaxBitrate = Math.min(
     P2P_VIDEO_MAX_BITRATE,
     Math.max(2_000_000, Math.round(pixels * fps * bitsPerPixel)),
   );
+  const configuredMaxBitrate = Number(options.maxBitrate);
+  const maxBitrate =
+    Number.isFinite(configuredMaxBitrate) && configuredMaxBitrate > 0
+      ? Math.min(
+          P2P_VIDEO_MAX_BITRATE,
+          Math.max(100_000, Math.floor(configuredMaxBitrate)),
+        )
+      : calculatedMaxBitrate;
   return {
     ...settings,
     encodings: settings.encodings.map((encoding) => ({
@@ -152,6 +169,48 @@ export function buildP2pVideoSenderOptions(options = {}) {
       maxBitrate,
       scaleResolutionDownBy: 1,
     })),
+  };
+}
+
+export function resolveNativeCaptureVideoSettings(
+  captureSelection = null,
+  requestedSettings = {},
+) {
+  const captureVideo =
+    captureSelection?.video && typeof captureSelection.video === "object"
+      ? captureSelection.video
+      : {};
+  const bounds =
+    captureSelection?.bounds && typeof captureSelection.bounds === "object"
+      ? captureSelection.bounds
+      : {};
+  const positiveNumber = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  };
+  const width =
+    positiveNumber(captureVideo.width) ||
+    positiveNumber(requestedSettings.width) ||
+    positiveNumber(bounds.width);
+  const height =
+    positiveNumber(captureVideo.height) ||
+    positiveNumber(requestedSettings.height) ||
+    positiveNumber(bounds.height);
+  const frameRate =
+    positiveNumber(captureVideo.frameRate) ||
+    positiveNumber(requestedSettings.frameRate);
+  return {
+    ...requestedSettings,
+    ...captureVideo,
+    ...(width ? { width } : {}),
+    ...(height ? { height } : {}),
+    ...(frameRate ? { frameRate } : {}),
+    ...(requestedSettings.qualityPriority
+      ? { qualityPriority: requestedSettings.qualityPriority }
+      : {}),
+    ...(requestedSettings.maxBitrate
+      ? { maxBitrate: requestedSettings.maxBitrate }
+      : {}),
   };
 }
 

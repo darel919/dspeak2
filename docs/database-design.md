@@ -1,109 +1,72 @@
 # Database design
 
-PocketBase is dSpeak's persistent data store. Nitro is the only application
-component that uses privileged PocketBase credentials; browser clients use the
-authenticated Nitro API.
+dSpeak stores durable application data in Supabase PostgreSQL. Nitro uses Drizzle ORM and server-only database credentials for privileged operations. Browser clients authenticate with Supabase Auth and receive authorized application data through Nitro APIs or RLS-protected Supabase Realtime channels.
 
-## Initialization and migration
+## Schema and migrations
 
-Nitro runs `runPocketBaseMigrations` before starting the media runtime. The
-initializer supports both an existing deployment and a new PocketBase instance:
+The canonical schema is defined in `server/db/schema/index.js`. Drizzle migrations are checked in under `drizzle/` and applied with `npx drizzle-kit migrate`. The project config prefers `DIRECT_DATABASE_URL` for this command; use a direct Supabase PostgreSQL connection rather than the transaction-pooled runtime connection.
 
-1. Create or reconcile the `dspeak_migrations` ledger.
-2. Detect whether any required dSpeak collection is absent.
-3. Create the foundational auth, room, channel, message, push, and voice-state
-   collections in dependency order.
-4. Apply the feature migrations and record each completed migration.
-5. If a required collection was removed after its migration was recorded,
-   replay the idempotent schema operations to repair the current schema and its
-   relation collection IDs.
+```bash
+npx drizzle-kit check
+npx drizzle-kit migrate
+```
 
-Existing fields are merged by name. Indexes are merged by their normalized
-uniqueness, table, columns, and predicate so a generated PocketBase index and a
-named dSpeak index cannot duplicate the same constraint. Field IDs are retained
-when a field is updated so PocketBase data remains attached to the same schema
-field. PocketBase-owned system fields retain their complete server-provided
-definitions, and server-managed indexes are left out of collection updates
-unless a migration adds an index. Multi-value relation fields are not assigned
-SQL indexes.
-Startup fails if authentication, schema creation, repair, or data backfill
-fails. The application never continues against a known partial schema.
+`DIRECT_DATABASE_URL` must point to the Supabase direct database endpoint, normally port `5432`. `DATABASE_URL` remains the runtime fallback and normally uses Supavisor transaction pooling on port `6543`.
 
-The initializer does not create the first PocketBase superuser. Operators must
-create that account and configure `POCKETBASE_URL`, `PBASE_ADMIN_EMAIL`, and
-`PBASE_ADMIN_PASSWORD` before Nitro starts.
+The persistent Nitro server uses a small runtime connection pool so background push maintenance cannot block authentication or normal API requests. `DATABASE_POOL_MAX` defaults to `10`; `DIRECT_DATABASE_POOL_MAX` defaults to `2` for migrations and direct transactions.
+
+The initial migration creates the dSpeak policy on Supabase Realtime's managed `realtime.messages` table but does not change that table's ownership or RLS setting. Supabase owns that infrastructure table and supplies its RLS configuration; the migration only manages the dSpeak policy.
+
+Schema changes must be represented by a checked-in migration. Back up the database before production migrations, apply migrations before routing traffic to a new release, and verify both the migration result and application health.
 
 ## Relationship map
 
 ```text
-users
-├── dspeak_sessions
-├── dspeak_user_nicknames
-├── dspeak_notification_preferences
-├── dspeak_push_subscriptions ── dspeak_push_jobs
-├── dspeak_rooms (owner)
-│   ├── dspeak_rooms_channels
-│   │   ├── dspeak_messages
-│   │   │   ├── dspeak_message_revisions
-│   │   │   ├── dspeak_notifications
-│   │   │   └── dspeak_push_jobs
-│   │   └── dspeak_users_state
-│   ├── dspeak_room_roles ── dspeak_room_memberships
-│   ├── dspeak_room_invites ── dspeak_room_audit_log
-│   ├── dspeak_room_soundboards
-│   └── dspeak_room_notification_preferences
+auth.users
+└── profiles
+    ├── rooms (owner)
+    │   ├── channels
+    │   │   ├── messages ── message_revisions / message_reactions
+    │   │   ├── pinned_messages
+    │   │   └── chat_files
+    │   ├── room_roles ── membership_roles
+    │   ├── room_memberships
+    │   ├── room_invites ── room_audit_log
+    │   ├── room_soundboards / soundboards
+    │   └── room_notification_preferences
+    ├── friends / user_nicknames
+    ├── notifications / notification_preferences
+    └── push_subscriptions ── push_jobs
 ```
 
-## Collection catalog
+## Core tables
 
-| Collection                             | Purpose                                                                | Principal relationships                                                          |
-| -------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `users`                                | Auth identity and public profile                                       | Owns rooms, messages, memberships, preferences, sessions, and media state        |
-| `dspeak_rooms`                         | Room identity, branding, and attenuation policy                        | `owner` → users; `channels` → `dspeak_rooms_channels`                            |
-| `dspeak_rooms_channels`                | Text or media channel and current voice occupancy                      | `room` → rooms; `owner`, `inRoom` → users                                        |
-| `dspeak_messages`                      | Current chat message and sender-only read state                        | `room_channel` → channels; `sender`, `read_by` → users                           |
-| `dspeak_message_revisions`             | Append-only message edit history                                       | `message` → messages; `editor` → users                                           |
-| `dspeak_room_roles`                    | Ordered room roles and permission arrays                               | `room` → rooms                                                                   |
-| `dspeak_room_memberships`              | Canonical room membership and assigned roles                           | `room` → rooms; `user` → users; `roles` → room roles                             |
-| `dspeak_room_invites`                  | Expiring room invite records                                           | `room` → rooms; `created_by` → users                                             |
-| `dspeak_room_audit_log`                | Room administration audit events                                       | `room` → rooms; optional `actor`, `subject` → users; optional `invite` → invites |
-| `dspeak_user_nicknames`                | Per-viewer nickname overrides                                          | `owner`, `target` → users                                                        |
-| `dspeak_room_soundboards`              | Room-scoped converted audio clips and presentation data                | `room` → rooms; `uploader` → users                                               |
-| `dspeak_notifications`                 | Durable in-application notification records                            | Recipient/actor users with optional room, channel, and message context           |
-| `dspeak_notification_preferences`      | Global notification, push, preview, sound, and attenuation preferences | `user` → users                                                                   |
-| `dspeak_room_notification_preferences` | Per-room notification overrides                                        | `user` → users; `room` → rooms                                                   |
-| `dspeak_push_subscriptions`            | Device-scoped Web Push endpoints and delivery health                   | `user` → users                                                                   |
-| `dspeak_push_jobs`                     | Durable, retryable Web Push work                                       | `recipient` → users; `subscription` → subscriptions; `message` → messages        |
-| `dspeak_sessions`                      | Hashed application sessions                                            | `user` → users                                                                   |
-| `dspeak_users_state`                   | Current persisted voice-control state                                  | `user` → users; `connected` → channels                                           |
-| `dspeak_migrations`                    | Applied migration ledger                                               | No application relation                                                          |
+| Table                                                                        | Purpose                                                                         |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `profiles`                                                                   | Public application profile linked to a Supabase Auth user                       |
+| `rooms`, `channels`                                                          | Room identity, ownership, channel ordering, media policy, and current occupancy |
+| `room_roles`, `room_memberships`, `membership_roles`                         | Membership and role-based authorization                                         |
+| `messages`, `message_revisions`, `message_reactions`                         | Chat content, edit history, and reactions                                       |
+| `pinned_messages`, `bookmarks`                                               | Shared pins and private saved messages                                          |
+| `friends`, `user_nicknames`                                                  | Social relationships and room-scoped nicknames                                  |
+| `room_invites`, `room_audit_log`                                             | Expiring invites and administrative history                                     |
+| `notifications`, `notification_preferences`, `room_notification_preferences` | Durable notification state and user preferences                                 |
+| `user_presence`                                                              | Latest presence status, last activity time, platform, and manual override       |
+| `push_subscriptions`, `push_jobs`                                            | Device Web Push subscriptions and retryable delivery work                       |
+| `room_soundboards`, `soundboards`, `chat_files`                              | R2 object metadata and ownership; file bytes are not stored in PostgreSQL       |
 
 ## Ownership and deletion
 
-- Room deletion cascades through room-owned channels and the feature records
-  explicitly configured with cascading room relations.
-- Channel deletion cascades through messages and active persisted voice state.
-- User deletion cascades through sessions, memberships, preferences, push
-  subscriptions, and voice state. Historical author, actor, editor, and
-  uploader relations do not cascade where preserving content or audit history
-  is required.
-- `dspeak_room_memberships` is the authorization source. The `members` field on
-  `dspeak_rooms` remains for the established room API and realtime contract and
-  is updated with the membership record.
-- Secrets are not stored in these collections. Session tokens are stored only
-  as SHA-256 hashes; VAPID private keys and PocketBase superuser credentials
-  remain runtime configuration.
+- Room deletion cascades through room-owned channels, memberships, roles, invites, preferences, and media metadata where the schema declares a cascading foreign key.
+- Channel deletion cascades through messages and channel-owned metadata.
+- Supabase Auth user deletion leaves an anonymized application profile tombstone so historical messages and audit references remain valid after the login identity is removed. Profile-owned transient records are explicitly cleaned in the account deletion transaction.
+- Historical records use restrictive or nullable references where preserving content or audit context is required.
+- `room_memberships` is the authorization source for room access; role assignments are normalized through `membership_roles`.
 
-## Integrity and access patterns
+## Integrity and access
 
-The schema enforces unique session tokens, one session per user/device, one
-membership per room/user, unique role names within a room, unique message
-client IDs per sender, ordered revision numbers per message, unique push
-endpoints and job deduplication keys, and one active voice-state record per
-user. Compound indexes cover room/channel listing, message history, unread
-notifications, push dispatch, expiration, and audit history.
+PostgreSQL unique indexes enforce invariants such as one membership per room and user, unique usernames, unique message reactions per user and emoji, and unique room notification preferences. Foreign keys enforce ownership and deletion behavior.
 
-All application collections use administrator-only PocketBase rules by default.
-Authorization is enforced by Nitro from the authenticated session, room
-membership, role hierarchy, and explicit permissions before records are read or
-mutated.
+RLS must remain enabled on client-observable tables and Supabase Realtime topics. Nitro validates Supabase access tokens locally through JWKS, then enforces room membership, role hierarchy, and endpoint-specific permissions before privileged reads or writes. The Supabase service-role key, database credentials, R2 credentials, and signing keys must remain server-only.
+
+Supabase Realtime carries normal application events such as chat, typing, presence, and notifications. Clients subscribe to the `global`, `chat:<channelId>`, `room:<roomId>`, and `notify:<userId>` topics; the server publishes with the service role and clients may write only to the RLS-protected `chat:%` topic. Presence status is persisted to `user_presence` through `/api/presence` (with activity heartbeats and an offline beacon), and idle sweep marks stale rows offline when clients vanish. Media membership, signaling, route epochs, and provider selection belong to the external `dspeak-media-control` Worker, not PostgreSQL or Realtime.

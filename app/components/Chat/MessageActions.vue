@@ -4,7 +4,7 @@
       ref="triggerRef"
       data-message-actions-trigger
       type="button"
-      class="btn btn-square btn-ghost min-h-11 min-w-11"
+      class="metro-icon-btn metro-icon-btn--ghost min-h-11 min-w-11"
       aria-label="Message actions"
       aria-haspopup="menu"
       :aria-expanded="isOpen"
@@ -17,7 +17,7 @@
     <ul
       v-if="isOpen"
       ref="menuRef"
-      class="menu absolute right-0 top-full z-30 w-52 border border-base-300 bg-base-100 p-2"
+      class="metro-pane metro-message-actions-menu absolute right-0 top-full z-30 w-52 border border-base-300 bg-base-100 p-2"
       role="menu"
       aria-label="Message actions"
       @click="closeMenu(false)"
@@ -82,7 +82,7 @@
         </button>
       </li>
 
-      <li class="divider my-1" role="separator"></li>
+      <li class="my-1 border-t border-base-300" role="separator"></li>
 
       <li role="none">
         <button role="menuitem" @click="handleViewDetails">

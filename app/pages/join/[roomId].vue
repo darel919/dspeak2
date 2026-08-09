@@ -7,7 +7,7 @@
     >
       <!-- Loading state -->
       <div v-if="loading" class="space-y-4">
-        <div class="loading loading-spinner loading-lg mx-auto"></div>
+        <div class="metro-spinner loading-lg mx-auto"></div>
         <h1 class="text-3xl font-light">{{ loadingMessage }}</h1>
         <p class="text-base-content/70">Please wait...</p>
       </div>
@@ -17,14 +17,22 @@
         <h1 class="text-3xl font-light">
           You are invited to {{ invite.room.name }}
         </h1>
-        <p class="text-base-content/70">
+        <p v-if="invite.invitedBy" class="text-base-content/70">
           <strong>{{ publicDisplayName(invite.invitedBy) }}</strong>
           invited you on {{ formatDate(invite.createdAt) }}.
+        </p>
+        <p v-else class="text-base-content/70">
+          You have been invited to join this room.
         </p>
         <p class="text-sm text-base-content/55">
           This invitation expires {{ formatDate(invite.expiresAt) }}.
         </p>
-        <button class="btn btn-primary" @click="attemptJoin">Join room</button>
+        <p v-if="!isAuthenticated" class="text-sm text-base-content/65">
+          Sign in to accept the invitation and join the room.
+        </p>
+        <button class="metro-btn" @click="attemptJoin">
+          {{ isAuthenticated ? "Accept invite" : "Sign in to accept" }}
+        </button>
       </div>
 
       <!-- Success state -->
@@ -38,11 +46,11 @@
           members.
         </p>
         <div class="mt-6 flex flex-wrap justify-center gap-2">
-          <button @click="goToRoom" class="btn btn-primary">
+          <button @click="goToRoom" class="metro-btn">
             <Icon name="lucide:message-circle" class="h-5 w-5" />
             Go to Room
           </button>
-          <button @click="goToHome" class="btn btn-ghost">
+          <button @click="goToHome" class="metro-btn metro-btn--ghost">
             <Icon name="lucide:house" class="h-5 w-5" />
             Home
           </button>
@@ -57,11 +65,11 @@
         <h1 class="text-3xl font-light text-error">Unable to Join Room</h1>
         <p class="text-base-content/70">{{ error }}</p>
         <div class="mt-6 flex flex-wrap justify-center gap-2">
-          <button @click="retryJoin" class="btn btn-primary">
+          <button @click="retryJoin" class="metro-btn">
             <Icon name="lucide:refresh-cw" class="h-5 w-5" />
             Try Again
           </button>
-          <button @click="goToHome" class="btn btn-ghost">
+          <button @click="goToHome" class="metro-btn metro-btn--ghost">
             <Icon name="lucide:house" class="h-5 w-5" />
             Home
           </button>
@@ -82,7 +90,7 @@
           again.
         </p>
         <div class="mt-6 flex flex-wrap justify-center gap-2">
-          <button @click="goToHome" class="btn btn-primary">
+          <button @click="goToHome" class="metro-btn">
             <Icon name="lucide:house" class="h-5 w-5" />
             Go to Home
           </button>
@@ -114,26 +122,24 @@ const joinSuccess = ref(false);
 const error = ref(null);
 const initialized = ref(false);
 const invite = ref(null);
+const isAuthenticated = computed(() => Boolean(authStore.getUserData()?.id));
+const pendingInviteJoinKey = "pendingInviteJoin";
 
 onMounted(async () => {
   await loadInvite();
   initialized.value = true;
+  if (invite.value && isAuthenticated.value && consumePendingInviteJoin())
+    await attemptJoin();
 });
 
 async function loadInvite() {
   loading.value = true;
+  error.value = null;
   try {
     const config = useRuntimeConfig();
     invite.value = await $fetch(`${config.public.apiPath}/room/invites`, {
       query: { token: inviteToken.value },
     });
-    await checkAuthentication();
-    if (!authStore.getUserData()?.id) {
-      loadingMessage.value = "Redirecting to login...";
-      sessionStorage.setItem("redirectAfterAuth", window.location.href);
-      await router.push("/auth");
-      return;
-    }
   } catch (cause) {
     error.value =
       cause.data?.statusMessage || cause.message || "Invalid invite link";
@@ -162,16 +168,13 @@ async function attemptJoin() {
   joinSuccess.value = false;
 
   try {
-    const userData = authStore.getUserData();
+    const authenticated = await checkAuthentication();
 
-    if (!userData || !userData.id) {
-      loadingMessage.value = "Redirecting to login...";
-
-      const currentUrl = window.location.href;
-      sessionStorage.setItem("redirectAfterAuth", currentUrl);
-      setTimeout(() => {
-        router.push("/auth");
-      }, 1500);
+    if (!authenticated || !authStore.getUserData()?.id) {
+      loadingMessage.value = "Opening sign-in...";
+      sessionStorage.setItem("redirectAfterAuth", window.location.href);
+      sessionStorage.setItem(pendingInviteJoinKey, inviteToken.value);
+      await router.push("/auth");
       return;
     }
 
@@ -190,6 +193,18 @@ async function attemptJoin() {
 
 function retryJoin() {
   attemptJoin();
+}
+
+function consumePendingInviteJoin() {
+  try {
+    if (sessionStorage.getItem(pendingInviteJoinKey) !== inviteToken.value)
+      return false;
+    sessionStorage.removeItem(pendingInviteJoinKey);
+    return true;
+  } catch (cause) {
+    console.warn("[JoinRoom] Could not restore pending invite join:", cause);
+    return false;
+  }
 }
 
 function goToRoom() {

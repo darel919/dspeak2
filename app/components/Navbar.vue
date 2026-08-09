@@ -1,4 +1,460 @@
+<template>
+  <header class="metro-navbar" style="height: var(--navbar-height)">
+    <Transition name="room-banner">
+      <div
+        v-if="roomBannerUrl"
+        class="room-banner pointer-events-none absolute inset-y-0 left-0 right-0 md:left-[72px]"
+        :style="roomBannerStyle"
+        aria-hidden="true"
+      >
+        <div class="room-banner-shade absolute inset-0" />
+      </div>
+    </Transition>
+
+    <div class="metro-navbar-content">
+      <div class="metro-navbar-start">
+        <NuxtLink to="/" class="metro-navbar-brand" aria-label="dSpeak home">
+          <img
+            class="pointer-events-none size-11 select-none"
+            src="/assets/logo/logo_96.png"
+            alt=""
+          />
+        </NuxtLink>
+      </div>
+
+      <div class="metro-navbar-end">
+        <div
+          v-if="connectionWarning"
+          class="metro-status metro-status--warning"
+          role="status"
+        >
+          <Icon name="lucide:wifi-off" class="size-4" />
+          <span class="hidden sm:inline">{{ connectionWarning }}</span>
+        </div>
+
+        <FriendsList />
+        <NotificationCenter />
+
+        <section
+          v-if="profile"
+          class="metro-call-dock"
+          :class="{ 'metro-call-dock--connected': voiceStore.connected }"
+          aria-label="Voice call controls"
+        >
+          <div v-if="voiceStore.connected" class="metro-call-channel">
+            <span class="metro-status-dot" aria-hidden="true" />
+            <div class="metro-call-channel-info">
+              <button
+                class="metro-call-channel-link"
+                type="button"
+                title="Return to the active voice channel"
+                @click="navigateToVoiceChannel"
+              >
+                {{ currentVoiceChannel?.name || "Voice channel" }}
+              </button>
+              <div class="metro-call-connection">
+                <button
+                  class="metro-call-connection-link"
+                  type="button"
+                  :title="`${signalTooltip} • Open connection statistics`"
+                  aria-label="Open connection statistics"
+                  @click="rtcSummaryVisible = true"
+                >
+                  <span
+                    class="metro-signal-bars"
+                    :class="{
+                      'metro-signal-bars--pending': signalIsConnecting,
+                    }"
+                    aria-hidden="true"
+                  >
+                    <span
+                      v-for="level in 4"
+                      :key="level"
+                      class="metro-signal-bar"
+                      :class="[barClass(level), signalColorClass]"
+                      :style="{ height: `${3 + level * 1.5}px` }"
+                    />
+                  </span>
+                  <span>{{ signalLabel }}</span>
+                </button>
+                <span v-if="elapsedText" aria-hidden="true">·</span>
+                <span v-if="elapsedText" class="tabular-nums">{{
+                  elapsedText
+                }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="voiceStore.connected"
+            class="metro-divider hidden lg:block"
+          />
+
+          <div
+            v-if="voiceStore.connected"
+            class="hidden items-center gap-1 lg:flex"
+          >
+            <MediaSettingsContextMenu kind="camera">
+              <button
+                class="metro-call-icon"
+                type="button"
+                :class="{ 'metro-call-icon--active': voiceStore.cameraEnabled }"
+                :aria-pressed="voiceStore.cameraEnabled"
+                :aria-label="
+                  voiceStore.cameraEnabled
+                    ? 'Turn camera off'
+                    : 'Turn camera on'
+                "
+                :title="
+                  voiceStore.cameraEnabled
+                    ? 'Turn camera off'
+                    : 'Turn camera on'
+                "
+                @click="voiceStore.toggleCamera"
+              >
+                <Icon
+                  :name="
+                    voiceStore.cameraEnabled
+                      ? 'lucide:video'
+                      : 'lucide:video-off'
+                  "
+                  class="size-4"
+                />
+              </button>
+            </MediaSettingsContextMenu>
+            <button
+              class="metro-call-icon"
+              type="button"
+              :class="{ 'metro-call-icon--active': voiceStore.screenSharing }"
+              :aria-pressed="voiceStore.screenSharing"
+              :aria-label="
+                voiceStore.screenSharing
+                  ? 'Stop sharing screen'
+                  : 'Share screen'
+              "
+              :title="
+                voiceStore.screenSharing
+                  ? 'Stop sharing screen'
+                  : 'Share screen'
+              "
+              @click="requestScreenShare"
+            >
+              <Icon name="lucide:monitor-up" class="size-4" />
+            </button>
+          </div>
+
+          <div
+            v-if="voiceStore.connected"
+            class="metro-divider hidden sm:block"
+          />
+
+          <div class="flex items-center gap-1">
+            <MediaSettingsContextMenu kind="microphone">
+              <button
+                class="metro-call-icon"
+                type="button"
+                :class="{ 'metro-call-icon--danger': voiceStore.micMuted }"
+                :disabled="micUnavailable"
+                :aria-pressed="voiceStore.micMuted"
+                :aria-label="
+                  voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
+                "
+                :title="
+                  voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
+                "
+                @click="voiceStore.toggleMic"
+              >
+                <Icon
+                  :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'"
+                  class="size-4"
+                />
+              </button>
+            </MediaSettingsContextMenu>
+            <button
+              class="metro-call-icon"
+              type="button"
+              :class="{ 'metro-call-icon--danger': voiceStore.deafened }"
+              :disabled="voiceStore.connecting"
+              :aria-pressed="voiceStore.deafened"
+              :aria-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
+              :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
+              @click="voiceStore.toggleDeafen"
+            >
+              <Icon
+                :name="
+                  voiceStore.deafened ? 'lucide:volume-x' : 'lucide:headphones'
+                "
+                class="size-4"
+              />
+            </button>
+            <button
+              v-if="voiceStore.connected"
+              class="metro-call-icon metro-call-icon--danger"
+              type="button"
+              aria-label="Leave voice channel"
+              title="Leave voice channel"
+              @click="voiceStore.leaveVoiceChannel"
+            >
+              <Icon name="lucide:phone-off" class="size-4" />
+            </button>
+          </div>
+
+          <details
+            v-if="voiceStore.connected"
+            ref="callMenu"
+            class="metro-call-menu"
+            @toggle="syncCallMenuState"
+          >
+            <summary
+              class="metro-call-icon"
+              aria-label="More call controls"
+              title="More call controls"
+              :aria-expanded="callMenuOpen"
+            >
+              <Icon name="lucide:ellipsis" class="size-5" />
+            </summary>
+            <div class="metro-call-menu-content">
+              <p class="metro-menu-heading">Media</p>
+              <button
+                class="metro-menu-row lg:hidden"
+                type="button"
+                @click="voiceStore.toggleCamera"
+              >
+                <Icon
+                  :name="
+                    voiceStore.cameraEnabled
+                      ? 'lucide:video-off'
+                      : 'lucide:video'
+                  "
+                />
+                <span>{{
+                  voiceStore.cameraEnabled
+                    ? "Turn camera off"
+                    : "Turn camera on"
+                }}</span>
+              </button>
+              <button
+                class="metro-menu-row lg:hidden"
+                type="button"
+                @click="requestScreenShare"
+              >
+                <Icon name="lucide:monitor-up" />
+                <span>{{
+                  voiceStore.screenSharing
+                    ? "Stop screen sharing"
+                    : "Share screen"
+                }}</span>
+              </button>
+              <button
+                class="metro-menu-row sm:hidden"
+                type="button"
+                @click="voiceStore.toggleDeafen"
+              >
+                <Icon
+                  :name="
+                    voiceStore.deafened ? 'lucide:volume-2' : 'lucide:volume-x'
+                  "
+                />
+                <span>{{ voiceStore.deafened ? "Undeafen" : "Deafen" }}</span>
+              </button>
+              <button
+                class="metro-menu-row"
+                type="button"
+                @click="voiceStore.toggleSystemAudioShare"
+              >
+                <Icon name="lucide:volume-2" />
+                <span>{{
+                  voiceStore.systemAudioSharing
+                    ? "Stop system audio"
+                    : "Share system audio only"
+                }}</span>
+              </button>
+              <button
+                class="metro-menu-row"
+                type="button"
+                :class="{ 'text-warning': voiceStore.broadcastAudioSharing }"
+                @click="showBroadcastDialog"
+              >
+                <Icon name="lucide:radio" />
+                <span>Broadcast</span>
+                <span class="ml-auto text-xs font-semibold">{{
+                  voiceStore.broadcastAudioSharing ? "Live" : "Off"
+                }}</span>
+              </button>
+
+              <div
+                v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
+                class="metro-audio-share-panel"
+              >
+                <label
+                  for="shared-audio-volume"
+                  class="flex items-center justify-between text-xs font-medium"
+                >
+                  <span>Shared audio volume</span>
+                  <span>{{ voiceStore.sharedAudioVolume }}%</span>
+                </label>
+                <input
+                  id="shared-audio-volume"
+                  class="metro-range mt-2 w-full"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  :value="voiceStore.sharedAudioVolume"
+                  @input="voiceStore.setSharedAudioVolume($event.target.value)"
+                />
+                <div
+                  class="mt-2 flex items-center gap-2 text-xs"
+                  aria-live="polite"
+                >
+                  <span class="font-medium">
+                    {{
+                      voiceStore.sharedAudioAttenuation.active
+                        ? "Speech priority active"
+                        : "Effective"
+                    }}
+                  </span>
+                  <progress
+                    class="metro-progress h-1.5 flex-1"
+                    max="100"
+                    :value="
+                      Math.round(
+                        (voiceStore.sharedAudioVolume *
+                          voiceStore.sharedAudioAttenuation.effectivePercent) /
+                          100,
+                      )
+                    "
+                  ></progress>
+                  <span class="tabular-nums">
+                    {{
+                      Math.round(
+                        (voiceStore.sharedAudioVolume *
+                          voiceStore.sharedAudioAttenuation.effectivePercent) /
+                          100,
+                      )
+                    }}%
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-base-content/60">
+                  {{ voiceStore.sharedAudioAttenuation.reportingListeners }}/{{
+                    voiceStore.sharedAudioAttenuation.expectedListeners
+                  }}
+                  listeners confirmed
+                </p>
+                <div
+                  class="mt-2 flex items-center gap-2 text-xs text-base-content/60"
+                >
+                  <progress
+                    class="metro-progress h-1.5 flex-1"
+                    :class="
+                      voiceStore.sharedAudioStats.dbfs >= -12
+                        ? 'metro-progress--error'
+                        : 'metro-progress--success'
+                    "
+                    max="1"
+                    :value="voiceStore.sharedAudioStats.level"
+                  ></progress>
+                  <span
+                    >{{
+                      voiceStore.sharedAudioStats.kbps.toFixed(1)
+                    }}
+                    kbps</span
+                  >
+                </div>
+              </div>
+
+              <div class="metro-menu-separator" />
+              <p class="metro-menu-heading">Connection</p>
+              <button
+                class="metro-menu-row"
+                type="button"
+                @click="rtcSummaryVisible = !rtcSummaryVisible"
+              >
+                <span
+                  class="metro-signal-bars"
+                  :class="{ 'metro-signal-bars--pending': signalIsConnecting }"
+                  aria-hidden="true"
+                >
+                  <span
+                    v-for="level in 5"
+                    :key="level"
+                    class="metro-signal-bar"
+                    :class="[barClass(level), signalColorClass]"
+                    :style="{ height: `${5 + level * 2}px` }"
+                  />
+                </span>
+                <span>{{ signalLabel }}</span>
+                <span
+                  v-if="lastRttMs != null"
+                  class="ml-auto text-xs text-base-content/60"
+                  >{{ activeRouteLabel }} · {{ Math.round(lastRttMs) }} ms</span
+                >
+              </button>
+              <button
+                class="metro-menu-row"
+                type="button"
+                @click="router.push('/rtc-debug')"
+              >
+                <Icon
+                  :name="
+                    screenShareFpsLow
+                      ? 'lucide:triangle-alert'
+                      : 'lucide:activity'
+                  "
+                  :class="screenShareFpsLow && 'text-warning'"
+                />
+                <span>Connection details</span>
+              </button>
+              <div
+                v-if="outboundVideoLabels.length"
+                class="px-3 pb-2 text-xs text-base-content/60"
+              >
+                <span
+                  v-for="(quality, index) in outboundVideoLabels"
+                  :key="quality.source"
+                >
+                  {{ index ? " · " : ""
+                  }}{{ quality.source === "screen" ? "Share" : "Camera" }}
+                  {{ quality.text }}
+                </span>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <div
+          v-if="profile && voiceStore.connecting"
+          class="metro-connection-warning"
+        >
+          <span class="metro-spinner metro-spinner--xs" />
+          <span>Connecting…</span>
+        </div>
+
+        <PresenceStatusSelector
+          v-if="profile"
+          :profile="profile"
+          :profile-avatar="profileAvatar"
+          :avatar-status-class="avatarStatusClass"
+          :voice-connected="voiceStore.connected"
+        />
+      </div>
+    </div>
+  </header>
+  <DesktopCapturePicker
+    v-if="capturePickerOpen"
+    :open="capturePickerOpen"
+    @close="closeCapturePicker"
+    @select="selectDesktopCapture"
+    @fallback="useBrowserCaptureFallback"
+  />
+  <BroadcastSetupDialog
+    v-if="broadcastDialogOpen"
+    @close="broadcastDialogOpen = false"
+  />
+</template>
+
 <script setup>
+import { defineAsyncComponent } from "vue";
 import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
@@ -6,13 +462,19 @@ import { useChannelsStore } from "../stores/channels";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
-import BroadcastSetupDialog from "./BroadcastSetupDialog.vue";
+import { useRuntimeStore } from "../stores/runtime";
+const BroadcastSetupDialog = defineAsyncComponent(
+  () => import("./BroadcastSetupDialog.vue"),
+);
+const DesktopCapturePicker = defineAsyncComponent(
+  () => import("./DesktopCapturePicker.vue"),
+);
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
 import {
   getActiveConnectionLabel,
   isConnectionPending,
 } from "../shared/connection-quality";
-import { useChatUtils } from "../composables/useChatUtils";
+import { getDesktopCaptureApi } from "../shared/desktop-capture";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
@@ -21,14 +483,15 @@ const chatStore = useChatStore();
 const channelsStore = useChannelsStore();
 const settingsStore = useSettingsStore();
 const rtcStatsStore = useRtcStatsStore();
+const runtimeStore = useRuntimeStore();
 const route = useRoute();
 const router = useRouter();
 const config = useRuntimeConfig();
-const { getAvatarUrl } = useChatUtils();
 
 const profile = computed(() => authStore.getUserData());
-const profileAvatar = computed(() => getAvatarUrl(profile.value?.avatar));
+const profileAvatar = computed(() => profile.value?.avatar || "");
 const broadcastDialogOpen = ref(false);
+const capturePickerOpen = ref(false);
 const presenceStatus = inject("presenceStatus", ref(null));
 const rtcSummaryVisible = useState("rtc-summary-visible", () => false);
 const callMenu = ref(null);
@@ -207,6 +670,44 @@ function showBroadcastDialog() {
   broadcastDialogOpen.value = true;
 }
 
+async function requestScreenShare() {
+  try {
+    if (voiceStore.screenSharing) {
+      await voiceStore.toggleScreenShare();
+      return;
+    }
+    if (runtimeStore.isTauri || (await getDesktopCaptureApi())) {
+      capturePickerOpen.value = true;
+      return;
+    }
+    await voiceStore.toggleScreenShare();
+  } catch (error) {
+    console.error("[Navbar] Screen share error:", error);
+  }
+}
+
+async function selectDesktopCapture(selection) {
+  capturePickerOpen.value = false;
+  try {
+    await voiceStore.toggleScreenShare(selection);
+  } catch (error) {
+    console.error("[Navbar] Screen share selection error:", error);
+  }
+}
+
+async function useBrowserCaptureFallback() {
+  capturePickerOpen.value = false;
+  try {
+    await voiceStore.toggleScreenShare(null, { explicitBrowserFallback: true });
+  } catch (error) {
+    console.error("[Navbar] Browser screen share fallback error:", error);
+  }
+}
+
+function closeCapturePicker() {
+  capturePickerOpen.value = false;
+}
+
 function barClass(level) {
   if (signalIsConnecting.value) return "";
   return signalLevel.value >= level ? "" : "opacity-25";
@@ -252,460 +753,76 @@ onBeforeUnmount(() => {
 });
 </script>
 
-<template>
-  <header
-    class="navbar navbar-surface room-navbar fixed top-0 left-0 z-50 w-full gap-3 px-3 sm:px-4"
-    style="height: var(--navbar-height)"
-  >
-    <Transition name="room-banner">
-      <div
-        v-if="roomBannerUrl"
-        class="room-banner pointer-events-none absolute inset-y-0 left-0 right-0 md:left-[72px]"
-        :style="roomBannerStyle"
-        aria-hidden="true"
-      >
-        <div class="room-banner-shade absolute inset-0"></div>
-      </div>
-    </Transition>
-
-    <div class="relative z-10 flex min-w-0 items-center gap-3">
-      <NuxtLink
-        to="/"
-        class="shrink-0 focus-visible:outline-2 focus-visible:outline-primary"
-        aria-label="dSpeak home"
-      >
-        <img
-          class="pointer-events-none size-11 select-none"
-          src="/assets/logo/logo_96.png"
-          alt=""
-        />
-      </NuxtLink>
-    </div>
-
-    <div class="relative z-10 ml-auto flex min-w-0 items-center gap-2">
-      <div
-        v-if="connectionWarning"
-        class="flex items-center gap-2 text-xs font-semibold text-warning"
-        role="status"
-      >
-        <Icon name="lucide:wifi-off" class="size-4" />
-        <span class="hidden sm:inline">{{ connectionWarning }}</span>
-      </div>
-
-      <FriendsList />
-      <NotificationCenter />
-      <section
-        v-if="profile"
-        class="call-dock"
-        :class="voiceStore.connected && 'call-dock-connected'"
-        aria-label="Voice call controls"
-      >
-        <div v-if="voiceStore.connected" class="call-channel">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span class="min-w-0 text-left">
-            <button
-              class="channel-link block max-w-full truncate text-sm font-semibold"
-              type="button"
-              title="Return to the active voice channel"
-              @click="navigateToVoiceChannel"
-            >
-              {{ currentVoiceChannel?.name || "Voice channel" }}
-            </button>
-            <span
-              class="flex items-center gap-1.5 text-xs text-base-content/60"
-            >
-              <button
-                class="connection-summary-link inline-flex items-center gap-1"
-                type="button"
-                :title="`${signalTooltip} • Open connection statistics`"
-                aria-label="Open connection statistics"
-                @click="rtcSummaryVisible = true"
-              >
-                <span
-                  class="flex items-end gap-px"
-                  :class="{ 'connection-signal-pending': signalIsConnecting }"
-                  aria-hidden="true"
-                >
-                  <span
-                    v-for="level in 4"
-                    :key="level"
-                    class="w-0.5 rounded-sm"
-                    :class="[barClass(level), signalColorClass]"
-                    :style="{ height: `${3 + level * 1.5}px` }"
-                  ></span>
-                </span>
-                <span>{{ signalLabel }}</span>
-              </button>
-              <span v-if="elapsedText" aria-hidden="true">·</span>
-              <span v-if="elapsedText" class="tabular-nums">{{
-                elapsedText
-              }}</span>
-            </span>
-          </span>
-        </div>
-
-        <div
-          v-if="voiceStore.connected"
-          class="call-divider hidden lg:block"
-        ></div>
-
-        <div
-          v-if="voiceStore.connected"
-          class="hidden items-center gap-1 lg:flex"
-        >
-          <MediaSettingsContextMenu kind="camera">
-            <button
-              class="call-icon"
-              type="button"
-              :class="voiceStore.cameraEnabled && 'call-icon-active'"
-              :aria-pressed="voiceStore.cameraEnabled"
-              :aria-label="
-                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
-              "
-              :title="
-                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
-              "
-              @click="voiceStore.toggleCamera"
-            >
-              <Icon
-                :name="
-                  voiceStore.cameraEnabled ? 'lucide:video' : 'lucide:video-off'
-                "
-                class="size-4"
-              />
-            </button>
-          </MediaSettingsContextMenu>
-          <button
-            class="call-icon"
-            type="button"
-            :class="voiceStore.screenSharing && 'call-icon-active'"
-            :aria-pressed="voiceStore.screenSharing"
-            :aria-label="
-              voiceStore.screenSharing ? 'Stop sharing screen' : 'Share screen'
-            "
-            :title="
-              voiceStore.screenSharing ? 'Stop sharing screen' : 'Share screen'
-            "
-            @click="voiceStore.toggleScreenShare"
-          >
-            <Icon name="lucide:monitor-up" class="size-4" />
-          </button>
-        </div>
-
-        <div
-          v-if="voiceStore.connected"
-          class="call-divider hidden sm:block"
-        ></div>
-
-        <div class="flex items-center gap-1">
-          <MediaSettingsContextMenu kind="microphone">
-            <button
-              class="call-icon"
-              type="button"
-              :class="voiceStore.micMuted && 'call-icon-danger'"
-              :disabled="micUnavailable"
-              :aria-pressed="voiceStore.micMuted"
-              :aria-label="
-                voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
-              "
-              :title="
-                voiceStore.micMuted ? 'Unmute microphone' : 'Mute microphone'
-              "
-              @click="voiceStore.toggleMic"
-            >
-              <Icon
-                :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'"
-                class="size-4"
-              />
-            </button>
-          </MediaSettingsContextMenu>
-          <button
-            class="call-icon"
-            type="button"
-            :class="voiceStore.deafened && 'call-icon-danger'"
-            :disabled="voiceStore.connecting"
-            :aria-pressed="voiceStore.deafened"
-            :aria-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
-            :title="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
-            @click="voiceStore.toggleDeafen"
-          >
-            <Icon
-              :name="
-                voiceStore.deafened ? 'lucide:volume-x' : 'lucide:headphones'
-              "
-              class="size-4"
-            />
-          </button>
-          <button
-            v-if="voiceStore.connected"
-            class="call-icon call-icon-danger"
-            type="button"
-            aria-label="Leave voice channel"
-            title="Leave voice channel"
-            @click="voiceStore.leaveVoiceChannel"
-          >
-            <Icon name="lucide:phone-off" class="size-4" />
-          </button>
-        </div>
-
-        <details
-          v-if="voiceStore.connected"
-          ref="callMenu"
-          class="dropdown dropdown-end"
-          @toggle="syncCallMenuState"
-        >
-          <summary
-            class="call-icon"
-            aria-label="More call controls"
-            title="More call controls"
-            :aria-expanded="callMenuOpen"
-          >
-            <Icon name="lucide:ellipsis" class="size-5" />
-          </summary>
-          <div class="dropdown-content call-menu z-10 mt-3 w-72">
-            <p class="menu-heading">Media</p>
-            <button
-              class="menu-row lg:hidden"
-              type="button"
-              @click="voiceStore.toggleCamera"
-            >
-              <Icon
-                :name="
-                  voiceStore.cameraEnabled ? 'lucide:video-off' : 'lucide:video'
-                "
-              />
-              <span>{{
-                voiceStore.cameraEnabled ? "Turn camera off" : "Turn camera on"
-              }}</span>
-            </button>
-            <button
-              class="menu-row lg:hidden"
-              type="button"
-              @click="voiceStore.toggleScreenShare"
-            >
-              <Icon name="lucide:monitor-up" />
-              <span>{{
-                voiceStore.screenSharing
-                  ? "Stop screen sharing"
-                  : "Share screen"
-              }}</span>
-            </button>
-            <button
-              class="menu-row sm:hidden"
-              type="button"
-              @click="voiceStore.toggleDeafen"
-            >
-              <Icon
-                :name="
-                  voiceStore.deafened ? 'lucide:volume-2' : 'lucide:volume-x'
-                "
-              />
-              <span>{{ voiceStore.deafened ? "Undeafen" : "Deafen" }}</span>
-            </button>
-            <button
-              class="menu-row"
-              type="button"
-              @click="voiceStore.toggleSystemAudioShare"
-            >
-              <Icon name="lucide:volume-2" />
-              <span>{{
-                voiceStore.systemAudioSharing
-                  ? "Stop system audio"
-                  : "Share system audio only"
-              }}</span>
-            </button>
-            <button
-              class="menu-row"
-              type="button"
-              :class="voiceStore.broadcastAudioSharing && 'text-warning'"
-              @click="showBroadcastDialog"
-            >
-              <Icon name="lucide:radio" />
-              <span>Broadcast</span>
-              <span class="ml-auto text-xs font-semibold">{{
-                voiceStore.broadcastAudioSharing ? "Live" : "Off"
-              }}</span>
-            </button>
-
-            <div
-              v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
-              class="audio-share-panel"
-            >
-              <label
-                for="shared-audio-volume"
-                class="flex items-center justify-between text-xs font-medium"
-              >
-                <span>Shared audio volume</span>
-                <span>{{ voiceStore.sharedAudioVolume }}%</span>
-              </label>
-              <input
-                id="shared-audio-volume"
-                class="range range-primary range-xs mt-2 w-full"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                :value="voiceStore.sharedAudioVolume"
-                @input="voiceStore.setSharedAudioVolume($event.target.value)"
-              />
-              <div
-                class="mt-2 flex items-center gap-2 text-xs"
-                aria-live="polite"
-              >
-                <span class="font-medium">
-                  {{
-                    voiceStore.sharedAudioAttenuation.active
-                      ? "Speech priority active"
-                      : "Effective"
-                  }}
-                </span>
-                <progress
-                  class="progress progress-primary h-1.5 flex-1"
-                  max="100"
-                  :value="
-                    Math.round(
-                      (voiceStore.sharedAudioVolume *
-                        voiceStore.sharedAudioAttenuation.effectivePercent) /
-                        100,
-                    )
-                  "
-                ></progress>
-                <span class="tabular-nums">
-                  {{
-                    Math.round(
-                      (voiceStore.sharedAudioVolume *
-                        voiceStore.sharedAudioAttenuation.effectivePercent) /
-                        100,
-                    )
-                  }}%
-                </span>
-              </div>
-              <p class="mt-1 text-xs text-base-content/60">
-                {{ voiceStore.sharedAudioAttenuation.reportingListeners }}/{{
-                  voiceStore.sharedAudioAttenuation.expectedListeners
-                }}
-                listeners confirmed
-              </p>
-              <div
-                class="mt-2 flex items-center gap-2 text-xs text-base-content/60"
-              >
-                <progress
-                  class="progress h-1.5 flex-1"
-                  :class="
-                    voiceStore.sharedAudioStats.dbfs >= -12
-                      ? 'progress-error'
-                      : 'progress-success'
-                  "
-                  max="1"
-                  :value="voiceStore.sharedAudioStats.level"
-                ></progress>
-                <span
-                  >{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span
-                >
-              </div>
-            </div>
-
-            <div class="menu-separator"></div>
-            <p class="menu-heading">Connection</p>
-            <button
-              class="menu-row"
-              type="button"
-              @click="rtcSummaryVisible = !rtcSummaryVisible"
-            >
-              <span
-                class="flex items-end gap-0.5"
-                :class="{ 'connection-signal-pending': signalIsConnecting }"
-                aria-hidden="true"
-              >
-                <span
-                  v-for="level in 5"
-                  :key="level"
-                  class="w-1 rounded-sm"
-                  :class="[barClass(level), signalColorClass]"
-                  :style="{ height: `${5 + level * 2}px` }"
-                ></span>
-              </span>
-              <span>{{ signalLabel }}</span>
-              <span
-                v-if="lastRttMs != null"
-                class="ml-auto text-xs text-base-content/60"
-                >{{ activeRouteLabel }} · {{ Math.round(lastRttMs) }} ms</span
-              >
-            </button>
-            <button
-              class="menu-row"
-              type="button"
-              @click="router.push('/rtc-debug')"
-            >
-              <Icon
-                :name="
-                  screenShareFpsLow
-                    ? 'lucide:triangle-alert'
-                    : 'lucide:activity'
-                "
-                :class="screenShareFpsLow && 'text-warning'"
-              />
-              <span>Connection details</span>
-            </button>
-            <div
-              v-if="outboundVideoLabels.length"
-              class="px-3 pb-2 text-xs text-base-content/60"
-            >
-              <span
-                v-for="(quality, index) in outboundVideoLabels"
-                :key="quality.source"
-              >
-                {{ index ? " · " : ""
-                }}{{ quality.source === "screen" ? "Share" : "Camera" }}
-                {{ quality.text }}
-              </span>
-            </div>
-          </div>
-        </details>
-      </section>
-
-      <div v-if="profile && voiceStore.connecting" class="connection-warning">
-        <span class="loading loading-spinner loading-xs"></span>
-        <span>Connecting…</span>
-      </div>
-
-      <PresenceStatusSelector
-        v-if="profile"
-        :profile="profile"
-        :profile-avatar="profileAvatar"
-        :avatar-status-class="avatarStatusClass"
-        :voice-connected="voiceStore.connected"
-      />
-    </div>
-  </header>
-  <BroadcastSetupDialog
-    v-if="broadcastDialogOpen"
-    @close="broadcastDialogOpen = false"
-  />
-</template>
-
 <style scoped>
-.call-dock {
+.metro-navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  width: 100%;
   display: flex;
-  min-width: 0;
   align-items: center;
-  gap: 0.375rem;
-  border: 1px solid
-    color-mix(in oklab, var(--color-base-content) 14%, transparent);
-  background: var(--color-base-100);
-  padding: 0.3rem;
+  gap: var(--metro-space-3);
+  padding: 0 var(--metro-space-3);
+  padding-inline-end: var(--metro-space-4);
+  background: var(--navbar-surface);
+  border-bottom: 1px solid var(--metro-border);
 }
 
-.call-dock-connected {
-  border-color: color-mix(in oklab, var(--color-success) 40%, transparent);
-  background: color-mix(
-    in oklab,
-    var(--color-success) 9%,
-    var(--color-base-100)
-  );
+@media (min-width: 640px) {
+  .metro-navbar {
+    padding-inline: var(--metro-space-4);
+  }
+}
+
+.metro-navbar-content {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--metro-space-3);
+}
+
+.metro-navbar-start {
+  display: flex;
+  align-items: center;
+  gap: var(--metro-space-3);
+  flex-shrink: 0;
+}
+
+.metro-navbar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--metro-space-2);
+  margin-left: auto;
+  min-width: 0;
+}
+
+.metro-navbar-brand {
+  display: flex;
+  align-items: center;
+}
+
+.room-banner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+@media (min-width: 768px) {
+  .room-banner {
+    left: 72px;
+  }
 }
 
 .room-banner-shade {
+  position: absolute;
+  inset: 0;
   background: linear-gradient(
     90deg,
     var(--navbar-surface),
@@ -717,14 +834,8 @@ onBeforeUnmount(() => {
   );
 }
 
-.room-banner {
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-}
-
 @media (prefers-reduced-motion: no-preference) {
-  .room-navbar {
+  .metro-navbar {
     transition: height 240ms cubic-bezier(0.1, 0.9, 0.2, 1);
   }
 
@@ -739,45 +850,109 @@ onBeforeUnmount(() => {
   }
 }
 
-.call-channel {
+.metro-call-dock {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--metro-space-1);
+  border: 1px solid var(--metro-border);
+  background: var(--color-base-100);
+  padding: var(--metro-space-1);
+}
+
+.metro-call-dock--connected {
+  border-color: color-mix(in oklab, var(--color-success) 40%, transparent);
+  background: color-mix(
+    in oklab,
+    var(--color-success) 9%,
+    var(--color-base-100)
+  );
+}
+
+.metro-call-channel {
   display: flex;
   min-width: 0;
   max-width: 15rem;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.25rem 0.55rem;
+  gap: var(--metro-space-2);
+  padding: var(--metro-space-1) var(--metro-space-2);
   transition: background-color 150ms ease;
 }
 
-.channel-link:hover,
-.channel-link:focus-visible,
-.connection-summary-link:hover,
-.connection-summary-link:focus-visible {
-  text-decoration: underline;
-  text-underline-offset: 0.18em;
-  outline: none;
-}
-
-.status-dot {
+.metro-status-dot {
   width: 0.55rem;
   height: 0.55rem;
   flex: none;
-  border-radius: 999px;
   background: var(--color-success);
   box-shadow: 0 0 0 4px
     color-mix(in oklab, var(--color-success) 15%, transparent);
 }
 
-.connection-signal-pending > span {
-  animation: connection-signal-alert 800ms steps(1, end) infinite;
+.metro-call-channel-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-@keyframes connection-signal-alert {
+.metro-call-channel-link {
+  display: block;
+  max-width: 100%;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.metro-call-channel-link:hover,
+.metro-call-channel-link:focus-visible,
+.metro-call-connection-link:hover,
+.metro-call-connection-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  outline: none;
+}
+
+.metro-call-connection {
+  display: flex;
+  align-items: center;
+  gap: var(--metro-space-1);
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+}
+
+.metro-call-connection-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.metro-signal-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.metro-signal-bars--pending .metro-signal-bar {
+  animation: metro-signal-alert 800ms steps(1, end) infinite;
+}
+
+@keyframes metro-signal-alert {
   0%,
   49% {
     background-color: var(--color-warning);
   }
-
   50%,
   100% {
     background-color: var(--color-error);
@@ -785,132 +960,218 @@ onBeforeUnmount(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .connection-signal-pending > span {
+  .metro-signal-bars--pending .metro-signal-bar {
     animation: none;
     background-color: var(--color-warning);
   }
 }
 
-.call-divider {
-  width: 1px;
-  height: 1.75rem;
-  background: color-mix(in oklab, var(--color-base-content) 14%, transparent);
+.metro-signal-bar {
+  width: 0.125rem;
+  border-radius: 0.125rem;
 }
 
-.call-icon {
+.metro-divider {
+  width: 1px;
+  height: 1.75rem;
+  background: var(--metro-border);
+}
+
+.metro-call-icon {
   display: inline-flex;
   width: 2.25rem;
   height: 2.25rem;
   flex: none;
-  cursor: pointer;
-  list-style: none;
   align-items: center;
   justify-content: center;
   color: color-mix(in oklab, var(--color-base-content) 78%, transparent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
   transition:
     background-color 150ms ease,
-    color 150ms ease,
-    transform 150ms ease;
+    color 150ms ease;
 }
 
-.call-icon::-webkit-details-marker {
+.metro-call-icon::-webkit-details-marker {
   display: none;
 }
-.call-icon:hover,
-.call-icon:focus-visible {
+
+.metro-call-icon:hover,
+.metro-call-icon:focus-visible {
   background: color-mix(in oklab, var(--color-base-content) 10%, transparent);
   color: var(--color-base-content);
   outline: none;
 }
-.call-icon:active {
+
+.metro-call-icon:active {
   transform: scale(0.94);
 }
-.call-icon:disabled {
+
+.metro-call-icon:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
-.call-icon-active {
-  background: var(--color-primary);
-  color: var(--color-primary-content);
+
+.metro-call-icon--active {
+  background: var(--metro-accent);
+  color: var(--metro-accent-content);
 }
-.call-icon-danger {
+
+.metro-call-icon--danger {
   background: color-mix(in oklab, var(--color-error) 18%, transparent);
   color: var(--color-error);
 }
-.call-icon-danger:hover,
-.call-icon-danger:focus-visible {
+
+.metro-call-icon--danger:hover,
+.metro-call-icon--danger:focus-visible {
   background: var(--color-error);
   color: var(--color-error-content);
 }
 
-.call-menu {
-  overflow: hidden;
-  border: 1px solid
-    color-mix(in oklab, var(--color-base-content) 14%, transparent);
-  background: var(--color-base-100);
-  padding: 0.45rem;
-  color: var(--color-base-content);
-  box-shadow: 0 16px 40px color-mix(in oklab, black 25%, transparent);
+.metro-call-menu {
+  position: relative;
+  flex: none;
 }
 
-.menu-heading {
-  padding: 0.35rem 0.75rem;
+.metro-call-menu-content {
+  position: absolute;
+  top: calc(100% + var(--metro-space-3));
+  right: 0;
+  z-index: 10;
+  width: 18rem;
+  border: 1px solid var(--metro-border);
+  background: var(--color-base-100);
+  padding: var(--metro-space-2);
+  color: var(--color-base-content);
+  box-shadow: var(--metro-overlay-shadow);
+}
+
+.metro-menu-heading {
+  padding: var(--metro-space-1) var(--metro-space-3);
   color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.menu-row {
+
+.metro-menu-row {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 0.75rem;
-  border-radius: 0.6rem;
-  padding: 0.6rem 0.75rem;
+  gap: var(--metro-space-3);
+  padding: var(--metro-space-2) var(--metro-space-3);
   text-align: left;
   font-size: 0.875rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
 }
-.menu-row :deep(svg) {
+
+.metro-menu-row :deep(svg) {
   width: 1rem;
   height: 1rem;
   flex: none;
 }
-.menu-row:hover,
-.menu-row:focus-visible {
+
+.metro-menu-row:hover,
+.metro-menu-row:focus-visible {
   background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
   outline: none;
 }
-.menu-separator {
+
+.metro-menu-separator {
   height: 1px;
-  margin: 0.4rem;
-  background: color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  margin: var(--metro-space-1) var(--metro-space-2);
+  background: var(--metro-border);
 }
-.audio-share-panel {
-  margin: 0.35rem;
-  border-radius: 0.65rem;
+
+.metro-audio-share-panel {
+  margin: var(--metro-space-1);
+  padding: var(--metro-space-3);
   background: color-mix(in oklab, var(--color-base-content) 6%, transparent);
-  padding: 0.75rem;
 }
-.connection-warning {
+
+.metro-range {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--metro-border);
+  border-radius: 0;
+}
+
+.metro-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--metro-accent);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.metro-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--metro-accent);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.metro-progress {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--metro-border);
+  border-radius: 0;
+}
+
+.metro-progress::-webkit-progress-bar {
+  background: var(--metro-border);
+}
+
+.metro-progress::-webkit-progress-value {
+  background: var(--metro-accent);
+}
+
+.metro-progress::-moz-progress-bar {
+  background: var(--metro-accent);
+}
+
+.metro-progress--error::-webkit-progress-value {
+  background: var(--color-error);
+}
+
+.metro-progress--error::-moz-progress-bar {
+  background: var(--color-error);
+}
+
+.metro-progress--success::-webkit-progress-value {
+  background: var(--color-success);
+}
+
+.metro-progress--success::-moz-progress-bar {
+  background: var(--color-success);
+}
+
+.metro-connection-warning {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  border: 1px solid var(--color-warning);
-  border-radius: 0.7rem;
+  gap: var(--metro-space-2);
+  padding: var(--metro-space-2) var(--metro-space-3);
   background: var(--color-warning);
-  padding: 0.55rem 0.75rem;
   color: var(--color-warning-content);
   font-size: 0.8rem;
   font-weight: 600;
 }
 
 @media (max-width: 639px) {
-  .call-channel {
+  .metro-call-channel {
     max-width: 8.5rem;
   }
-  .call-dock {
-    gap: 0.2rem;
+  .metro-call-dock {
+    gap: var(--metro-space-1);
   }
 }
 </style>

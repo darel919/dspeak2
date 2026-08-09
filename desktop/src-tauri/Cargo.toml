@@ -1,0 +1,28 @@
+[package]
+name = "dspeak-desktop"
+version = "3.0.0-alpha1"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-keyring-store = "0.2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
+tokio = { version = "1", features = ["rt", "time", "macros", "net"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+axum = "0.7"
+base64 = "0.22"
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+native_rtc = []

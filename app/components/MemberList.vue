@@ -39,10 +39,10 @@
             "
             style="overflow: visible; margin-bottom: 4px"
           >
-            <img
-              :src="getAvatarUrl(identityStore.profileFor(member).avatar)"
-              alt=""
-              class="block rounded-full"
+            <ProfileAvatar
+              :src="identityStore.profileFor(member).avatar"
+              :name="memberDisplayName(member)"
+              class="block size-9 rounded-full"
             />
             <span
               v-if="
@@ -73,6 +73,16 @@
             <span class="truncate text-sm font-bold">{{
               memberDisplayName(member)
             }}</span>
+            <span
+              v-if="memberPlatform(member)"
+              :title="platformLabel(memberPlatform(member))"
+              class="opacity-40 group-hover:opacity-70 transition-opacity"
+            >
+              <Icon
+                :name="platformIcon(memberPlatform(member))"
+                class="w-3.5 h-3.5"
+              />
+            </span>
             <span v-if="isOwner(member)" class="ml-1" title="Room Owner">
               <Icon name="lucide:shield-alert" class="w-4 h-4 text-accent" />
             </span>
@@ -93,12 +103,10 @@
         <div class="h-16 bg-primary/20"></div>
         <div class="px-4 pb-4">
           <div class="-mt-8 mb-3 w-fit rounded-full bg-base-200 p-1">
-            <img
-              :src="
-                getAvatarUrl(identityStore.profileFor(profileCardUser).avatar)
-              "
-              alt=""
-              class="size-16 rounded-full object-cover"
+            <ProfileAvatar
+              :src="identityStore.profileFor(profileCardUser).avatar"
+              :name="memberDisplayName(profileCardUser)"
+              class="size-16 rounded-full"
             />
           </div>
           <div class="text-lg font-bold">
@@ -120,7 +128,7 @@
               <span
                 v-for="role in memberRoles(profileCardUser)"
                 :key="role.id || role.name"
-                class="badge badge-outline"
+                class="metro-badge metro-badge--ghost"
               >
                 {{ role.name }}
               </span>
@@ -145,7 +153,7 @@
               <span
                 v-for="mf in mutualFriends.slice(0, 10)"
                 :key="mf.id"
-                class="badge badge-ghost gap-1"
+                class="metro-badge metro-badge--ghost gap-1"
               >
                 <span
                   class="size-3 rounded-full"
@@ -193,17 +201,11 @@
         @contextmenu.prevent.stop
       >
         <div class="flex items-center gap-3 border-b border-base-300 px-3 py-3">
-          <div class="avatar shrink-0">
-            <div class="size-9 overflow-hidden rounded-full bg-base-300">
-              <img
-                :src="
-                  getAvatarUrl(identityStore.profileFor(memberMenuUser).avatar)
-                "
-                :alt="memberDisplayName(memberMenuUser)"
-                class="size-full object-cover"
-              />
-            </div>
-          </div>
+          <ProfileAvatar
+            :src="identityStore.profileFor(memberMenuUser).avatar"
+            :name="memberDisplayName(memberMenuUser)"
+            class="size-9 rounded-full"
+          />
           <div class="min-w-0 flex-1">
             <div class="truncate text-sm font-semibold">
               {{ memberDisplayName(memberMenuUser) }}
@@ -370,7 +372,7 @@
               v-model="nicknameDraft"
               type="text"
               maxlength="32"
-              class="input input-bordered w-full"
+              class="metro-input w-full"
               placeholder="Enter a nickname"
               autocomplete="off"
             />
@@ -388,7 +390,7 @@
             <button
               v-if="identityStore.nicknameFor(nicknameDialogUser.id)"
               type="button"
-              class="btn btn-ghost text-error"
+              class="metro-btn metro-btn--ghost metro-btn--error-text"
               :disabled="nicknameSaving"
               @click="clearMemberNickname"
             >
@@ -398,7 +400,7 @@
             <div class="flex gap-3">
               <button
                 type="button"
-                class="btn btn-ghost"
+                class="metro-btn metro-btn--ghost"
                 :disabled="nicknameSaving"
                 @click="closeNicknameDialog"
               >
@@ -406,7 +408,7 @@
               </button>
               <button
                 type="submit"
-                class="btn btn-primary min-w-24"
+                class="metro-btn min-w-24"
                 :disabled="nicknameSaving || !nicknameChanged"
               >
                 {{ nicknameSaving ? "Saving…" : "Save" }}
@@ -421,10 +423,10 @@
 
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
+import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { canManageMember } from "~~/shared/room-policy.js";
 import { publicFullName } from "~~/shared/user-profile.js";
 import { MEMBER_STATUS_ORDER, VIEWPORT_PADDING_PX } from "../const/ui";
-import { profileAssetUrl } from "../shared/profile-assets.js";
 const roomsStore = useRoomsStore();
 const memberMenuUser = ref(null);
 const memberMenuElement = ref(null);
@@ -713,10 +715,6 @@ const onlineMembersCount = computed(() => {
   ).length;
 });
 
-function getAvatarUrl(avatarPath) {
-  return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
-}
-
 function isOwner(member) {
   return props.room?.owner?.id === member.id;
 }
@@ -742,6 +740,33 @@ function memberPresenceLabel(member) {
     offline: "Offline",
     unknown: "Status unavailable while offline",
   }[getMemberPresenceStatus(member)];
+}
+
+function memberPlatform(member) {
+  const store = usePresenceStatusStore();
+  return store.trackedUsers.get(String(member.id))?.platform;
+}
+
+function platformIcon(platform) {
+  const icons = {
+    web: "lucide:globe",
+    macos: "lucide:apple",
+    windows: "lucide:monitor",
+    linux: "lucide:terminal",
+    desktop: "lucide:monitor",
+  };
+  return icons[platform] || "lucide:smartphone";
+}
+
+function platformLabel(platform) {
+  const labels = {
+    web: "Browser",
+    macos: "macOS",
+    windows: "Windows",
+    linux: "Linux",
+    desktop: "Desktop",
+  };
+  return labels[platform] || platform;
 }
 
 function isSelf(member) {

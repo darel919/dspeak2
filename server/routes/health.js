@@ -1,5 +1,5 @@
-import { readTurnHealth } from "../utils/turn-health";
-import { getPushMetrics } from "../utils/push-delivery";
+import { readTurnHealth } from "../utils/turn-health.js";
+import { getPushMetrics } from "../utils/push-delivery.js";
 
 export default defineEventHandler(async () => {
   const turn = readTurnHealth();

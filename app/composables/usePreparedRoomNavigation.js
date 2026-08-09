@@ -1,6 +1,8 @@
 import { useChannelsStore } from "../stores/channels";
 import { useChatStore } from "../stores/chat";
 
+const BACKGROUND_PREFETCH_LIMIT = 2;
+
 export function usePreparedRoomNavigation() {
   const channelsStore = useChannelsStore();
   const chatStore = useChatStore();
@@ -41,8 +43,9 @@ export function usePreparedRoomNavigation() {
       return;
     }
     const generation = ++backgroundGeneration;
+    const candidates = rooms.slice(0, BACKGROUND_PREFETCH_LIMIT);
     const run = async () => {
-      for (const room of rooms) {
+      for (const room of candidates) {
         if (generation !== backgroundGeneration) return;
         await prefetchRoom(room, { allChannels: false });
       }

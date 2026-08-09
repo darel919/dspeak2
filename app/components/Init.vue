@@ -1,7 +1,12 @@
 <template>
   <div>
+    <StartupLoader
+      v-if="desktopRuntime && !startupComplete && !isAuthPage"
+      :visible="true"
+      :status="startupStatus"
+    />
     <div
-      v-if="!startupComplete && !isAuthPage"
+      v-else-if="!desktopRuntime && !startupComplete && !isAuthPage"
       class="metro-standalone flex min-h-screen items-center bg-base-100 px-6 py-12 sm:px-12"
     >
       <div class="w-full max-w-3xl">
@@ -17,7 +22,7 @@
           aria-live="polite"
         >
           <span
-            class="loading loading-spinner loading-sm text-hero"
+            class="metro-spinner metro-spinner--sm text-hero"
             aria-hidden="true"
           ></span>
           <span>{{ startupStatus }}</span>
@@ -39,43 +44,53 @@ import { useRoomsStore } from "../stores/rooms";
 import { useIdentityStore } from "../stores/identity";
 import { useNotifications } from "../composables/useNotifications";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
+import { useRuntimeStore } from "../stores/runtime";
 import { useIdleDetection } from "../composables/useIdleDetection";
 import { useGlobalKeyboardShortcuts } from "../composables/useGlobalKeyboardShortcuts";
 import NotificationWarning from "./NotificationWarning.vue";
 import { usePresence } from "../composables/usePresence.js";
+import { useDeepLinkAuth } from "../composables/useDeepLinkAuth";
 import startupLogo from "../assets/logo/logo_96.png";
 import { debugLog } from "../shared/debug";
 import {
   createStartupReadiness,
   STARTUP_READINESS_KEY,
 } from "../shared/startup-readiness";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const identityStore = useIdentityStore();
+const runtimeStore = useRuntimeStore();
 const route = useRoute();
 const authChecked = ref(false);
 const startupComplete = ref(false);
-const startupStatus = ref("Checking authentication…");
+const startupStatus = ref("Starting dSpeak…");
+const STARTUP_TIMEOUT_MS = 15000;
+const desktopRuntime = computed(
+  () => runtimeStore.isTauri || hasTauriRuntimeMarker(),
+);
 const isBootstrapping = ref(true);
-const waitingForPageReadiness = ref(false);
-const { runStartupUpdate, startupUpdateStatus } = usePwaUpdate();
+const { runStartupUpdate } = usePwaUpdate();
+const {
+  runStartupUpdate: runDesktopStartupUpdate,
+  startMonitoring: startDesktopUpdateMonitoring,
+} = useDesktopUpdate();
+const { checkForUpdate: checkRepositoryUpdate } = useRepositoryUpdate();
 const startupReadiness = createStartupReadiness({
-  onPending(status) {
-    if (waitingForPageReadiness.value && status) {
-      startupStatus.value = status;
-    }
-  },
+  onPending() {},
 });
+let stopDesktopUpdateMonitoring = null;
 provide(STARTUP_READINESS_KEY, startupReadiness);
 
+const isAuthPage = computed(() => route.path === "/auth");
 const isAuthenticated = computed(() => {
   const userData = authStore.getUserData();
-  return Boolean(authChecked.value && userData);
+  return Boolean(authChecked.value && userData && !isAuthPage.value);
 });
 
-const isAuthPage = computed(() => route.path === "/auth");
 const { isSupported, permission, isEnabled } = useNotifications();
+useDeepLinkAuth();
 
 const shouldShowNotificationWarning = computed(() => {
   if (!isSupported.value) return false;
@@ -98,39 +113,79 @@ const { init: initIdle, destroy: destroyIdle } = useIdleDetection();
 const { init: initKeyboardShortcuts, destroy: destroyKeyboardShortcuts } =
   useGlobalKeyboardShortcuts();
 
-watch(startupUpdateStatus, (status) => {
-  if (status === "checking") startupStatus.value = "Checking for updates…";
-  if (status === "updating") startupStatus.value = "Updating dSpeak…";
-});
-
 onMounted(async () => {
+  let startupTimeoutId;
+  let startupPhase = "runtime detection";
   try {
-    await runStartupUpdate();
-    if (!isAuthPage.value) {
-      startupStatus.value = "Checking authentication…";
-      await checkAuth();
-      if (authChecked.value) {
-        startupStatus.value = "Preparing your workspace…";
-        const presenceStatusStore = usePresenceStatusStore();
-        presenceStatusStore.init();
-        initIdle();
-        initKeyboardShortcuts();
-      }
-    } else {
-      authChecked.value = true;
-    }
-    waitingForPageReadiness.value = true;
-    startupStatus.value =
-      startupReadiness.status() || "Preparing your workspace…";
-    await startupReadiness.waitForIdle(nextTick);
+    await Promise.race([
+      (async () => {
+        startupStatus.value = "Preparing desktop runtime…";
+        await runtimeStore.initialize();
+        startupPhase = desktopRuntime.value
+          ? "desktop update check"
+          : "authentication";
+        startupStatus.value = desktopRuntime.value
+          ? "Looking for desktop updates…"
+          : "Restoring your session…";
+        if (desktopRuntime.value) {
+          await Promise.all([
+            runDesktopStartupUpdate(),
+            checkRepositoryUpdate(),
+          ]);
+        } else {
+          void checkRepositoryUpdate();
+        }
+        if (!isAuthPage.value) {
+          startupPhase = "authentication";
+          startupStatus.value = "Restoring your session…";
+          await checkAuth();
+          if (authChecked.value) {
+            const presenceStatusStore = usePresenceStatusStore();
+            presenceStatusStore.init();
+            initIdle();
+            initKeyboardShortcuts();
+          }
+        } else {
+          authChecked.value = true;
+        }
+        startupPhase = "page readiness";
+        startupStatus.value = "Loading your workspace…";
+        await startupReadiness.waitForIdle(nextTick);
+      })(),
+      new Promise((_, reject) => {
+        startupTimeoutId = window.setTimeout(() => {
+          reject(new Error(`Startup timed out during ${startupPhase}.`));
+        }, STARTUP_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    debugLog("[Init] Startup did not complete:", error);
+    startupStatus.value = "Continuing without optional startup tasks…";
+    authChecked.value = true;
   } finally {
+    window.clearTimeout(startupTimeoutId);
     startupReadiness.seal();
     isBootstrapping.value = false;
     startupComplete.value = true;
+    if (desktopRuntime.value)
+      stopDesktopUpdateMonitoring = startDesktopUpdateMonitoring();
+    else void runStartupUpdate();
+    void signalDesktopReady();
   }
 });
 
+async function signalDesktopReady() {
+  if (!import.meta.client || !desktopRuntime.value) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("desktop_ready");
+  } catch (error) {
+    debugLog("[Init] Failed to reveal desktop window:", error);
+  }
+}
+
 onUnmounted(() => {
+  stopDesktopUpdateMonitoring?.();
   disconnectPresence();
   destroyIdle();
   destroyKeyboardShortcuts();
@@ -155,14 +210,15 @@ async function checkAuth() {
 
   const restored = await authStore.ensureSession();
   if (restored) {
-    startupStatus.value = "Loading your rooms…";
     await roomsStore.fetchRooms();
     await identityStore.loadNicknames();
     authChecked.value = true;
     return;
   }
 
-  await authStore.clearAuth(false);
+  void authStore.clearAuth(false).catch((error) => {
+    debugLog("[Init] Failed to clear an anonymous session:", error);
+  });
   authChecked.value = true;
 }
 </script>

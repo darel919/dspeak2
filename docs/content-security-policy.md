@@ -38,15 +38,14 @@ The remaining directives allow only the resource classes dSpeak uses:
 
 - same-origin application, manifest, font, and form resources
 - same-origin images and connections
-- same-origin WebSockets
+- same-origin WebSockets and the configured Supabase realtime and media origins
 - blob URLs for workers and browser media
 - no frames, embedded objects, framing ancestors, or script attributes
 
-Account avatar metadata is normalized to the authenticated same-origin
-`/api/assets/avatar` endpoint before it reaches an image element. The endpoint
-validates the requested filename against the user's current PocketBase record
-and fetches only from the configured PocketBase file store. Do not add the
-account API or arbitrary image hosts to `img-src`.
+Account avatar metadata is normalized to an authenticated application asset
+endpoint before it reaches an image element. Nitro validates the R2 object key
+against PostgreSQL ownership metadata and returns only authorized content. Do
+not add arbitrary object-storage or image hosts to `img-src`.
 
 The Permissions Policy restricts camera, microphone, display capture,
 fullscreen, autoplay, and screen wake lock to dSpeak's own origin and disables
@@ -66,8 +65,8 @@ After each production build:
 3. Confirm the nonce in `script-src` matches every rendered `<script nonce>`.
 4. Load the page in a fresh Chromium, Firefox, and Safari session and confirm
    there are no CSP violations.
-5. Exercise authentication, PWA update, image upload/display, chat WebSockets,
-   presence WebSockets, voice, camera, screen share, soundboards, and push
+5. Exercise authentication, PWA update, image upload/display, Supabase realtime
+   chat and presence, voice, camera, screen share, soundboards, and push
    subscription.
 
 The local build and Chromium smoke test validate header generation and initial

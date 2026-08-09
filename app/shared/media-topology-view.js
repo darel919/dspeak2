@@ -1,3 +1,5 @@
+import { normalizeMediaPathMetrics } from "#shared/media-route.js";
+
 export function createMediaTopologyView({
   activeProvider,
   addressFamily,
@@ -9,6 +11,7 @@ export function createMediaTopologyView({
   getSfu,
   mapPeerConnectionMetrics,
   mapPeerRoundTripTimes,
+  mediaPathMetrics,
   participantSfuRoundTripTimes,
   peerConnectionMetrics,
   peerRoundTripTimes,
@@ -37,6 +40,25 @@ export function createMediaTopologyView({
       edges,
       topologyState.value.peers,
     );
+    // Emit the plan's MediaPathMetrics contract per edge so SLO telemetry
+    // can consume normalized units (ms, percent) plus candidate details.
+    if (mediaPathMetrics)
+      mediaPathMetrics.value = edges
+        .filter((edge) => edge?.peerId)
+        .map((edge) =>
+          normalizeMediaPathMetrics({
+            routeId: `p2p:${String(edge.peerId)}`,
+            peerOrProvider: String(edge.peerId),
+            rttMs: edge.rtt,
+            jitterMs: edge.jitter == null ? null : edge.jitter * 1000,
+            packetLossPercent: edge.packetLoss,
+            jitterBufferDelayMs: edge.jitterBufferDelayMs,
+            availableOutgoingBitrate: edge.availableOutgoingBitrate,
+            concealedAudioRatio: edge.concealedAudioRatio,
+            candidateType: edge.candidatePair?.local?.candidateType,
+            protocol: edge.candidatePair?.local?.protocol,
+          }),
+        );
     refreshTopologyGraph();
   }
 

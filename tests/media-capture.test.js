@@ -74,6 +74,34 @@ test("system audio start waits for processed publication", async () => {
   assert.equal((await starting).track.id, "processed");
 });
 
+test("screen capture requests the browser picker before publication work", async () => {
+  const calls = [];
+  const track = fakeTrack("captured-screen");
+  const stream = {
+    getAudioTracks: () => [],
+    getVideoTracks: () => [track],
+    getTracks: () => [track],
+  };
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      getDisplayMedia(constraints) {
+        calls.push(constraints);
+        return Promise.resolve(stream);
+      },
+    },
+    getSettings: () => ({
+      screenVideo: { frameRate: 30, qualityPriority: "framerate" },
+    }),
+    onSource: () => Promise.resolve({ source: "screen", track }),
+    onSourceEnded() {},
+  });
+
+  const starting = manager.startVideo("screen");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].video.frameRate.max, 30);
+  await starting;
+});
+
 test("failed selected microphone falls back without losing its identity", async () => {
   const expectedStream = { id: "default-stream" };
   const calls = [];
@@ -133,6 +161,9 @@ function fakeTrack(id) {
     readyState: "live",
     addEventListener(type, handler) {
       listeners.set(type, handler);
+    },
+    applyConstraints() {
+      return Promise.resolve();
     },
     stop() {
       if (this.readyState === "ended") return;

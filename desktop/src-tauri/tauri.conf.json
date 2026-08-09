@@ -1,0 +1,56 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nice/tauri/dev/crates/tauri-cli/schema.json",
+  "productName": "dSpeak",
+  "version": "3.0.0-alpha1",
+  "identifier": "com.dspeak.desktop",
+  "build": {
+    "frontendDist": "../.output/public",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "cd .. && DSPEAK_DESKTOP=1 npm run dev",
+    "beforeBuildCommand": "cd .. && NITRO_PRESET=static DSPEAK_DESKTOP=1 npx nuxi generate && rm -rf desktop/.output && cp -R .output desktop/.output"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "dSpeak",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deepLink": {
+      "schemes": [
+        {
+          "scheme": "tauri"
+        }
+      ]
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/darel919/dspeak2/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    },
+    "notification": null
+  }
+}

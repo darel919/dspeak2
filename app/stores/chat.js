@@ -28,12 +28,14 @@ import {
   slowModeRemainingMs,
 } from "~~/shared/channel-policy.js";
 import { debugLog } from "../shared/debug";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import { getSupabaseClient } from "../utils/supabase-client.js";
 
 export const useChatStore = defineStore("chat", () => {
   const messages = ref([]);
   const loading = ref(false);
   const error = ref(null);
-  const ws = ref(null);
+  const realtimeChannel = ref(null);
   const connected = ref(false);
   const connecting = ref(false);
   const intentionalDisconnect = ref(false);
@@ -48,7 +50,6 @@ export const useChatStore = defineStore("chat", () => {
   const config = useRuntimeConfig();
   let reconnectTimer = null;
   let backoffAttempts = 0;
-  let pingInterval = null;
   let connectionGeneration = 0;
   let activeFetchController = null;
   let readFlushTimer = null;
@@ -56,6 +57,7 @@ export const useChatStore = defineStore("chat", () => {
   let pendingReadHydration = null;
   let pendingReadPersistence = Promise.resolve();
   let localDataGeneration = 0;
+  let pageHideRemoveListener = null;
   const pendingReadIds = new Set();
   const channelMessages = new Map();
   const pendingChannelPreparations = new Map();
@@ -123,7 +125,7 @@ export const useChatStore = defineStore("chat", () => {
         );
         if (preparationGeneration !== localDataGeneration) return false;
         if (cached && Array.isArray(cached.messages)) {
-          channelMessages.set(normalizedChannelId, cached.messages);
+          setChannelMessages(normalizedChannelId, cached.messages);
         }
       } catch (cacheError) {
         console.warn(
@@ -134,7 +136,7 @@ export const useChatStore = defineStore("chat", () => {
 
       if (!navigator.onLine) {
         if (!channelMessages.has(normalizedChannelId)) {
-          channelMessages.set(normalizedChannelId, []);
+          setChannelMessages(normalizedChannelId, []);
         }
         channelPreparedAt.set(normalizedChannelId, Date.now());
         return true;
@@ -164,7 +166,7 @@ export const useChatStore = defineStore("chat", () => {
           serverMessages,
           channelMessages.get(normalizedChannelId) || [],
         );
-        channelMessages.set(normalizedChannelId, preparedMessages);
+        setChannelMessages(normalizedChannelId, preparedMessages);
         channelPreparedAt.set(normalizedChannelId, Date.now());
         cacheChannelMessages(
           userData.id,
@@ -225,7 +227,9 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function handleServiceWorkerControllerChange() {
-    navigator.serviceWorker.controller?.postMessage({ type: "FORCE_SYNC" });
+    navigator.serviceWorker.controller?.postMessage({
+      type: "FLUSH_CHAT_QUEUE",
+    });
   }
 
   if (process.client) {
@@ -243,19 +247,47 @@ export const useChatStore = defineStore("chat", () => {
     window.addEventListener("offline", handleBrowserOffline);
   }
 
-  function closeActiveSocket() {
-    if (!ws.value) return;
-    const socket = ws.value;
-    ws.value = null;
-    socket.onopen = null;
-    socket.onmessage = null;
-    socket.onerror = null;
-    socket.onclose = null;
+  function closeActiveTransport() {
+    const channel = realtimeChannel.value;
+    realtimeChannel.value = null;
+    if (!channel) return;
     try {
-      socket.close();
+      channel.unsubscribe().then(() => {});
     } catch (socketError) {
-      console.warn("[ChatStore] Unable to close chat socket:", socketError);
+      console.warn(
+        "[ChatStore] Unable to unsubscribe realtime channel:",
+        socketError,
+      );
     }
+  }
+
+  function joinChannelMembership(channelId) {
+    if (!import.meta.client || !channelId) return;
+    useChannelsStore()
+      .joinChannel(channelId)
+      .catch((joinError) => {
+        debugLog("[ChatStore] Failed to join channel membership:", joinError);
+      });
+    registerPageHideLeave();
+  }
+
+  function registerPageHideLeave() {
+    if (!import.meta.client || pageHideRemoveListener) return;
+    const handlePageHide = () => {
+      leaveChannelMembership(currentChannelId.value);
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    pageHideRemoveListener = () =>
+      window.removeEventListener("pagehide", handlePageHide);
+  }
+
+  function leaveChannelMembership(channelId) {
+    if (!import.meta.client || !channelId) return;
+    useChannelsStore()
+      .leaveChannel(channelId)
+      .catch((leaveError) => {
+        debugLog("[ChatStore] Failed to leave channel membership:", leaveError);
+      });
   }
 
   function handleBrowserOffline() {
@@ -273,11 +305,7 @@ export const useChatStore = defineStore("chat", () => {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
-    if (pingInterval) {
-      clearInterval(pingInterval);
-      pingInterval = null;
-    }
-    closeActiveSocket();
+    closeActiveTransport();
   }
 
   function handleBrowserOnline() {
@@ -296,25 +324,69 @@ export const useChatStore = defineStore("chat", () => {
       setTimeout(() => {
         requestBackgroundSync();
         navigator.serviceWorker.controller?.postMessage({
-          type: "FORCE_SYNC",
+          type: "FLUSH_CHAT_QUEUE",
         });
       }, 500);
     }
   }
 
   async function requestBackgroundSync() {
-    if (!("serviceWorker" in navigator) || !("SyncManager" in window)) return;
+    if (
+      hasTauriRuntimeMarker() ||
+      !("serviceWorker" in navigator) ||
+      !("SyncManager" in window)
+    )
+      return;
     try {
       const registration = await navigator.serviceWorker.ready;
-      await registration.sync.register("chat-sync");
+      await registration.sync.register("chat-sync-v2");
     } catch (syncError) {
       debugLog("[ChatStore] Background Sync unavailable:", syncError);
     }
   }
 
   function triggerManualSync() {
-    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({ type: "FORCE_SYNC" });
+    if (
+      !hasTauriRuntimeMarker() &&
+      "serviceWorker" in navigator &&
+      navigator.serviceWorker.controller
+    ) {
+      navigator.serviceWorker.controller.postMessage({
+        type: "FLUSH_CHAT_QUEUE",
+      });
+    }
+  }
+
+  function scheduleReconnect() {
+    if (
+      !intentionalDisconnect.value &&
+      !reconnectTimer &&
+      currentChannelId.value
+    ) {
+      backoffAttempts = Math.min(backoffAttempts + 1, 10);
+
+      const baseDelay = Math.min(
+        30000,
+        1000 * Math.pow(2, Math.max(0, backoffAttempts - 1)),
+      );
+
+      const jitter = 0.8 + Math.random() * 0.4;
+      const delay = Math.round(baseDelay * jitter);
+      debugLog(
+        `[ChatStore] Scheduling reconnect in ${delay}ms (attempt ${backoffAttempts})`,
+      );
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!connected.value && currentChannelId.value) {
+          debugLog("[ChatStore] Attempting to reconnect...");
+          connectToChannel(
+            currentChannelId.value,
+            currentChannelName.value,
+            currentRoomId.value,
+            true,
+          );
+        }
+      }, delay);
     }
   }
 
@@ -393,8 +465,11 @@ export const useChatStore = defineStore("chat", () => {
             return;
           }
           if (cached && Array.isArray(cached.messages)) {
-            channelMessages.set(channelId, cached.messages);
-            messages.value = cached.messages;
+            messages.value = setChannelMessages(
+              channelId,
+              cached.messages,
+              true,
+            );
             loading.value = false;
           }
         } catch (cacheError) {
@@ -407,7 +482,7 @@ export const useChatStore = defineStore("chat", () => {
 
       if (!navigator.onLine) {
         offline.value = true;
-        channelMessages.set(channelId, messages.value);
+        setChannelMessages(channelId, messages.value, true);
         loading.value = false;
         connecting.value = false;
         return;
@@ -424,149 +499,66 @@ export const useChatStore = defineStore("chat", () => {
         return;
       }
 
-      const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-      const websocketPath = config.public.websocketPath || `${origin}/api`;
-      const wsUrl = `${websocketPath}/chat/socket?channelId=${encodeURIComponent(channelId)}`;
-      const socket = new WebSocket(wsUrl);
-      ws.value = socket;
+      const supabaseClient = getSupabaseClient();
+      if (!supabaseClient) {
+        throw new Error("Supabase Realtime is not configured");
+      }
+      if (realtimeChannel.value) {
+        closeActiveTransport();
+      }
+      const sessionResult = await supabaseClient.auth.getSession();
+      const accessToken = sessionResult.data.session?.access_token;
+      if (!accessToken) throw new Error("Supabase session is unavailable");
+      supabaseClient.realtime.setAuth(accessToken);
+      const supabaseChannel = supabaseClient.channel(`chat:${channelId}`, {
+        config: { private: true },
+      });
+      realtimeChannel.value = supabaseChannel;
 
-      socket.onopen = () => {
-        if (
-          socket !== ws.value ||
-          generation !== connectionGeneration ||
-          currentChannelId.value !== channelId
-        ) {
-          socket.close();
-          return;
-        }
-        connecting.value = false;
-        connected.value = true;
-        intentionalDisconnect.value = false;
-        debugLog(`[ChatStore] Connected to channel ${channelId}`);
-
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
-        backoffAttempts = 0;
-
-        if (pingInterval) clearInterval(pingInterval);
-        pingInterval = setInterval(() => {
-          sendPing();
-        }, 30000);
-      };
-
-      socket.onmessage = (event) => {
-        if (
-          socket === ws.value &&
-          generation === connectionGeneration &&
-          currentChannelId.value === channelId
-        ) {
-          handleWebSocketMessage(event);
-        }
-      };
-
-      const recentCloses = [];
-
-      socket.onclose = (event) => {
-        if (
-          socket !== ws.value ||
-          generation !== connectionGeneration ||
-          currentChannelId.value !== channelId
-        ) {
-          return;
-        }
-        connecting.value = false;
-        connected.value = false;
-        if (!navigator.onLine) {
-          handleBrowserOffline();
-          return;
-        }
-        try {
-          debugLog("[ChatStore] WebSocket connection closed", {
-            code: event?.code,
-            reason: event?.reason,
-          });
-        } catch (e) {
-          debugLog("[ChatStore] WebSocket connection closed");
-        }
-
-        recentCloses.push(Date.now());
-        const cutoff = Date.now() - 30000;
-        while (recentCloses.length && recentCloses[0] < cutoff)
-          recentCloses.shift();
-        if (recentCloses.length > 3) {
-          console.warn(
-            "[ChatStore] Multiple closes detected in short time:",
-            recentCloses.length,
-          );
-
-          backoffAttempts = Math.min(backoffAttempts + 2, 20);
-        }
-
-        if (pingInterval) {
-          clearInterval(pingInterval);
-          pingInterval = null;
-        }
-
-        if (
-          event &&
-          (event.code === 1011 ||
-            (event.reason &&
-              typeof event.reason === "string" &&
-              event.reason.toLowerCase().includes("verify")))
-        ) {
-          console.error(
-            "[ChatStore] Server rejected channel access - aborting reconnect",
-            { code: event.code, reason: event.reason },
-          );
-          error.value = "Failed to verify channel access";
-          intentionalDisconnect.value = true;
-          return;
-        }
-
-        if (
-          !intentionalDisconnect.value &&
-          !reconnectTimer &&
-          currentChannelId.value
-        ) {
-          backoffAttempts = Math.min(backoffAttempts + 1, 10);
-
-          const baseDelay = Math.min(
-            30000,
-            1000 * Math.pow(2, Math.max(0, backoffAttempts - 1)),
-          );
-
-          const jitter = 0.8 + Math.random() * 0.4;
-          const delay = Math.round(baseDelay * jitter);
-          debugLog(
-            `[ChatStore] Scheduling reconnect in ${delay}ms (attempt ${backoffAttempts})`,
-          );
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            if (!connected.value && currentChannelId.value) {
-              debugLog("[ChatStore] Attempting to reconnect...");
-              connectToChannel(
-                currentChannelId.value,
-                currentChannelName.value,
-                currentRoomId.value,
-                true,
-              );
+      supabaseChannel
+        .on("broadcast", { event: "message" }, (payload) => {
+          if (
+            realtimeChannel.value === supabaseChannel &&
+            generation === connectionGeneration &&
+            currentChannelId.value === channelId
+          ) {
+            handleWebSocketMessage({ data: JSON.stringify(payload?.payload) });
+          }
+        })
+        .subscribe((status, err) => {
+          if (realtimeChannel.value !== supabaseChannel) {
+            return;
+          }
+          if (status === "SUBSCRIBED" || status === "SYNCED") {
+            if (
+              generation !== connectionGeneration ||
+              currentChannelId.value !== channelId
+            ) {
+              return;
             }
-          }, delay);
-        }
-      };
-
-      socket.onerror = (socketError) => {
-        if (socket !== ws.value || generation !== connectionGeneration) return;
-        connecting.value = false;
-        if (!navigator.onLine) {
-          handleBrowserOffline();
-          return;
-        }
-        console.error("[ChatStore] WebSocket error:", socketError);
-        error.value = "Unable to connect to real-time chat";
-      };
+            connecting.value = false;
+            connected.value = true;
+            intentionalDisconnect.value = false;
+            debugLog(`[ChatStore] Connected to channel ${channelId}`);
+            if (reconnectTimer) {
+              clearTimeout(reconnectTimer);
+              reconnectTimer = null;
+            }
+            backoffAttempts = 0;
+            joinChannelMembership(channelId);
+            return;
+          }
+          if (status === "CHANNEL_ERROR" || status === "CLOSED") {
+            connecting.value = false;
+            connected.value = false;
+            if (!navigator.onLine) {
+              handleBrowserOffline();
+              return;
+            }
+            error.value = "Unable to connect to real-time chat";
+            scheduleReconnect();
+          }
+        });
 
       if (typeof window !== "undefined") {
         try {
@@ -610,16 +602,13 @@ export const useChatStore = defineStore("chat", () => {
     if (invalidateGeneration) connectionGeneration += 1;
     intentionalDisconnect.value = !!intentional;
 
-    if (ws.value) {
+    const leavingChannelId = currentChannelId.value;
+    if (realtimeChannel.value) {
       try {
-        closeActiveSocket();
+        closeActiveTransport();
       } catch (e) {
-        console.warn("[ChatStore] Error closing WebSocket cleanly:", e);
+        console.warn("[ChatStore] Error closing chat transport cleanly:", e);
       }
-    }
-    if (pingInterval) {
-      clearInterval(pingInterval);
-      pingInterval = null;
     }
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -628,6 +617,13 @@ export const useChatStore = defineStore("chat", () => {
     if (activeFetchController) {
       activeFetchController.abort();
       activeFetchController = null;
+    }
+    if (leavingChannelId) {
+      leaveChannelMembership(leavingChannelId);
+    }
+    if (pageHideRemoveListener) {
+      pageHideRemoveListener();
+      pageHideRemoveListener = null;
     }
 
     connecting.value = false;
@@ -1130,7 +1126,7 @@ export const useChatStore = defineStore("chat", () => {
         }
       }
       await persistPendingReadIds(userData.id);
-      useChannelsStore().fetchUnreadCounts();
+      await channelsStore.getUnreadCounts();
     })()
       .catch((readError) => {
         console.error("[ChatStore] Unable to update read state:", readError);
@@ -1153,24 +1149,27 @@ export const useChatStore = defineStore("chat", () => {
       isTyping,
       connected: connected.value,
     });
-    if (ws.value && connected.value) {
-      const message = {
-        type: "typing",
-        isTyping,
-      };
-      ws.value.send(JSON.stringify(message));
+    if (realtimeChannel.value && connected.value) {
+      const authStore = useAuthStore();
+      const userData = authStore.getUserData();
+      realtimeChannel.value
+        .send({
+          type: "broadcast",
+          event: "message",
+          payload: {
+            type: "user_typing",
+            data: {
+              userId: userData?.id,
+              channelId: currentChannelId.value,
+              isTyping,
+            },
+          },
+        })
+        .catch((typingError) => {
+          debugLog("[ChatStore] Typing broadcast failed:", typingError);
+        });
     } else {
       debugLog("[ChatStore] Cannot send typing indicator - not connected");
-    }
-  }
-
-  function sendPing() {
-    if (ws.value && connected.value) {
-      ws.value.send(
-        JSON.stringify({
-          type: "ping",
-        }),
-      );
     }
   }
 
@@ -1333,7 +1332,12 @@ export const useChatStore = defineStore("chat", () => {
       const authStore = useAuthStore();
       const userData = authStore.getUserData();
 
-      if (userData && message.sender.id === userData.id) {
+      const senderId = message?.sender?.id || message?.sender;
+      if (
+        userData?.id &&
+        senderId &&
+        String(senderId) === String(userData.id)
+      ) {
         debugLog("[ChatStore] Skipping notification for own message");
         return;
       }
@@ -1367,6 +1371,7 @@ export const useChatStore = defineStore("chat", () => {
         const notification = notificationManager.showMessageNotification(
           message,
           currentChannelName.value,
+          userData?.id,
         );
 
         if (notification) {
@@ -1395,12 +1400,16 @@ export const useChatStore = defineStore("chat", () => {
   function handleBackgroundSyncSuccess(pendingId) {
     const authStore = useAuthStore();
     const userId = authStore.getUserData()?.id;
-    for (const [channelId, cachedMessages] of channelMessages) {
+    for (const [channelId, cachedMessages] of [...channelMessages]) {
       const nextMessages = cachedMessages.filter(
         (message) => message.id !== pendingId,
       );
       if (nextMessages.length === cachedMessages.length) continue;
-      channelMessages.set(channelId, nextMessages);
+      setChannelMessages(
+        channelId,
+        nextMessages,
+        String(currentChannelId.value) === String(channelId),
+      );
       if (currentChannelId.value === channelId) {
         messages.value = nextMessages;
       }
@@ -1536,7 +1545,6 @@ export const useChatStore = defineStore("chat", () => {
     fetchMessageHistory,
     markMessageAsRead,
     sendTypingIndicator,
-    sendPing,
     fetchBookmarks,
     fetchPinned,
     searchMessages,

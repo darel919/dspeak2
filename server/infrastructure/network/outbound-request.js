@@ -230,6 +230,86 @@ export async function fetchPublicHtml(value, options = {}) {
   return fetchPage(value, maxRedirects);
 }
 
+export async function fetchPublicBytes(value, options = {}) {
+  const maxBytes = options.maxBytes || 5 * 1024 * 1024;
+  const maxRedirects = options.maxRedirects ?? 3;
+  const timeoutMs = options.timeoutMs || 5000;
+  const fetchBytes = async (target, redirectsRemaining) => {
+    const url = await assertSafeOutboundUrl(target);
+    return new Promise((resolve, reject) => {
+      const outbound = request(
+        url,
+        {
+          agent: createPublicHttpsAgent(),
+          headers: { Accept: "image/*", "User-Agent": "dSpeak/1.0" },
+          method: "GET",
+          timeout: timeoutMs,
+        },
+        (response) => {
+          const status = response.statusCode || 0;
+          if ([301, 302, 303, 307, 308].includes(status)) {
+            const location = response.headers.location;
+            response.resume();
+            if (!location || redirectsRemaining <= 0) {
+              reject(new Error("Outbound redirect limit exceeded"));
+              return;
+            }
+            fetchBytes(
+              new URL(location, url).href,
+              redirectsRemaining - 1,
+            ).then(resolve, reject);
+            return;
+          }
+          if (status < 200 || status >= 300) {
+            response.resume();
+            reject(new Error(`Outbound request failed with status ${status}`));
+            return;
+          }
+          const contentType = String(response.headers["content-type"] || "")
+            .split(";", 1)[0]
+            .trim()
+            .toLowerCase();
+          if (!contentType.startsWith("image/")) {
+            response.resume();
+            reject(new Error("Outbound response is not an image"));
+            return;
+          }
+          const contentLength = Number(response.headers["content-length"] || 0);
+          if (contentLength > maxBytes) {
+            response.resume();
+            reject(new Error("Outbound response is too large"));
+            return;
+          }
+          const chunks = [];
+          let totalBytes = 0;
+          response.on("data", (chunk) => {
+            totalBytes += chunk.length;
+            if (totalBytes > maxBytes) {
+              response.destroy(new Error("Outbound response is too large"));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          response.on("end", () =>
+            resolve({
+              body: Buffer.concat(chunks),
+              contentType,
+              url: url.href,
+            }),
+          );
+          response.on("error", reject);
+        },
+      );
+      outbound.on("timeout", () =>
+        outbound.destroy(new Error("Outbound request timed out")),
+      );
+      outbound.on("error", reject);
+      outbound.end();
+    });
+  };
+  return fetchBytes(value, maxRedirects);
+}
+
 export function configuredOutboundHosts(value) {
   return String(value || "")
     .split(",")

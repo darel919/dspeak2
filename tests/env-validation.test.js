@@ -8,21 +8,24 @@ const originalFetch = globalThis.fetch;
 beforeEach(() => {
   process.env = {
     ...originalEnvironment,
-    AUTH_PATH: "https://api.example.com/auth",
-    POCKETBASE_URL: "https://pocketbase.example.com",
-    PBASE_ADMIN_EMAIL: "admin@example.com",
-    PBASE_ADMIN_PASSWORD: "secret",
+    DATABASE_URL: "postgresql://postgres:password@db.example.com/postgres",
+    SUPABASE_URL: "https://project-ref.supabase.co",
+    SUPABASE_ANON_KEY: "anon-key",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+    MEDIA_CONTROL_URL: "https://media-control.example.com",
+    MEDIA_CONTROL_ADMIN_TOKEN: "admin-token",
+    MEDIA_TICKET_PRIVATE_KEY: "private-key",
+    R2_ACCOUNT_ID: "account-id",
+    R2_ACCESS_KEY_ID: "access-key",
+    R2_SECRET_ACCESS_KEY: "secret-key",
+    R2_BUCKET_NAME: "bucket",
     DSPEAK_CSRF_SECRET: "test-secret-with-at-least-32-characters",
-    DSPEAK_INGEST_AUTH_SECRET: "test-ingest-secret-with-at-least-32-characters",
+
     VAPID_PUBLIC_KEY: "public",
     VAPID_PUBKEY: "public",
     VAPID_PRIVKEY: "private",
     VAPID_SUBJECT: "mailto:operator@example.com",
     DSPEAK_PUBLIC_ORIGIN: "https://app.example.com",
-    MEDIASOUP_LISTEN_IP: "0.0.0.0",
-    MEDIASOUP_ANNOUNCED_ADDRESS: "auto",
-    MEDIASOUP_RTC_PORT: "40000",
-    MEDIASOUP_ANNOUNCED_PORT: "45678",
   };
 });
 
@@ -31,56 +34,9 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test("auto-discovers a globally routable IPv6 address", async () => {
-  globalThis.fetch = async () => new Response("2404:c0:ba03:9eb::10\n");
-
-  const config = await validateRuntimeEnvironment();
-
-  assert.equal(config.announcedAddress, "2404:c0:ba03:9eb::10");
-  assert.equal(config.rtcPort, 40000);
-  assert.equal(config.announcedPort, 45678);
-  assert.equal(config.maxClientOutgoingBitrate, 4_500_000);
-  assert.equal(config.maxServerOutgoingBitrate, 40_000_000);
-});
-
-test("rejects an SFU per-client limit above the global server budget", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
-  process.env.MEDIASOUP_MAX_CLIENT_OUTGOING_BITRATE = "41000000";
-  process.env.MEDIASOUP_MAX_SERVER_OUTGOING_BITRATE = "40000000";
-
-  await assert.rejects(validateRuntimeEnvironment(), /cannot exceed/);
-});
-
-test("rejects IPv4 returned by automatic discovery", async () => {
-  globalThis.fetch = async () => new Response("203.0.113.10");
-
-  await assert.rejects(
-    validateRuntimeEnvironment(),
-    /expected a globally routable IPv6 address/,
-  );
-});
-
-test("rejects reserved IPv6 returned by automatic discovery", async () => {
-  globalThis.fetch = async () => new Response("2001:db8::10");
-
-  await assert.rejects(
-    validateRuntimeEnvironment(),
-    /expected a globally routable IPv6 address/,
-  );
-});
-
-test("keeps a DNS-only hostname override unchanged", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
-
-  const config = await validateRuntimeEnvironment();
-
-  assert.equal(config.announcedAddress, "rtc.dspeak.example.com");
-});
-
 test("development accepts an exact HTTP loopback public origin", async () => {
   process.env.NODE_ENV = "development";
   process.env.DSPEAK_PUBLIC_ORIGIN = "http://localhost:3000";
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
 
   await assert.doesNotReject(validateRuntimeEnvironment());
 });
@@ -89,13 +45,12 @@ test("production rejects an HTTP loopback public origin", async () => {
   process.env.NODE_ENV = "production";
   process.env.DSPEAK_PUBLIC_ORIGIN = "http://localhost:3000";
   process.env.DSPEAK_METRICS_TOKEN = "metrics-secret";
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
+  process.env.DSPEAK_CRON_SECRET = "cron-secret";
 
   await assert.rejects(validateRuntimeEnvironment(), /must be an HTTPS origin/);
 });
 
 test("requires a VAPID subject", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
   delete process.env.VAPID_SUBJECT;
 
   await assert.rejects(
@@ -105,7 +60,6 @@ test("requires a VAPID subject", async () => {
 });
 
 test("rejects a VAPID subject without a URL scheme", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
   process.env.VAPID_SUBJECT = "operator@example.com";
 
   await assert.rejects(
@@ -115,7 +69,6 @@ test("rejects a VAPID subject without a URL scheme", async () => {
 });
 
 test("rejects an unsupported VAPID subject protocol", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
   process.env.VAPID_SUBJECT = "http://operator.example.com";
 
   await assert.rejects(
@@ -125,14 +78,12 @@ test("rejects an unsupported VAPID subject protocol", async () => {
 });
 
 test("accepts an HTTPS VAPID subject", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
   process.env.VAPID_SUBJECT = "https://operator.example.com/push-contact";
 
   await assert.doesNotReject(validateRuntimeEnvironment());
 });
 
 test("requires the shared RTC hostname when TURN is enabled", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
   delete process.env.DSPEAK_RTC_DOMAIN;
   process.env.TURN_SHARED_SECRET = "test-secret";
 
@@ -143,7 +94,6 @@ test("requires the shared RTC hostname when TURN is enabled", async () => {
 });
 
 test("rejects unsafe TURN credential lifetimes", async () => {
-  process.env.MEDIASOUP_ANNOUNCED_ADDRESS = "rtc.dspeak.example.com";
   process.env.DSPEAK_RTC_DOMAIN = "rtc.dspeak.example.com";
   process.env.TURN_SHARED_SECRET = "test-secret";
   process.env.TURN_CREDENTIAL_TTL_SECONDS = "60";

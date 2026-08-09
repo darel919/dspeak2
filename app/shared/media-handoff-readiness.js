@@ -1,3 +1,5 @@
+import { mediaDebug } from "./media-debug.js";
+
 export function waitForMediaHandoff({
   getLatestTopologyKey,
   getLocalPeerId,
@@ -13,6 +15,11 @@ export function waitForMediaHandoff({
   topologyState,
 }) {
   const startedAt = Date.now();
+  mediaDebug("handoff.wait-start", {
+    provider,
+    epoch: topology?.epoch,
+    sourceRevision: topology?.sourceRevision,
+  });
   if (provider === "sfu") {
     return waitForSfuHandoff({
       getLatestTopologyKey,
@@ -78,26 +85,49 @@ function waitForSfuHandoff({
         localPeerId,
         sfu,
       );
-      const readiness = tracksReady
-        ? await sfu
-            ?.mediaReadiness(sfu?.expectedInboundFlowCount?.() ?? expected)
-            .catch((error) => ({ ready: false, error: error.message }))
-        : null;
+      let readiness = null;
+      if (tracksReady) {
+        try {
+          if (typeof sfu?.mediaReadiness !== "function")
+            throw new Error("SFU media readiness unavailable");
+          readiness = await sfu.mediaReadiness(
+            sfu?.expectedInboundFlowCount?.() ?? expected,
+          );
+        } catch (error) {
+          readiness = { ready: false, error: error.message };
+        }
+      }
       if (tracksReady && readiness?.ready === true) {
+        mediaDebug("handoff.ready", {
+          provider: "sfu",
+          epoch: topology?.epoch,
+          outbound: readiness.outboundFlowing,
+          inbound: readiness.inboundFlowing,
+        });
         resolve();
         return;
       }
       if (Date.now() - startedAt >= timeoutMs) {
+        const readinessReason = readiness?.error
+          ? `, reason ${readiness.error}`
+          : "";
         reject(
           new Error(
-            `SFU media did not become ready for handoff (tracks ${handoff.count("sfu")}/${expectedSfu}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expectedSfu})`,
+            `SFU media did not become ready for handoff (tracks ${handoff.count("sfu")}/${expectedSfu}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expectedSfu}${readinessReason})`,
           ),
         );
+        mediaDebug("handoff.timeout", {
+          provider: "sfu",
+          epoch: topology?.epoch,
+          tracks: handoff.count("sfu"),
+          expected: expectedSfu,
+          readiness,
+        });
         return;
       }
-      setTimeout(poll, pollIntervalMs);
+      setTimeout(() => void poll().catch(reject), pollIntervalMs);
     };
-    poll();
+    void poll().catch(reject);
   });
 }
 
@@ -132,6 +162,11 @@ function waitForP2pHandoff({
         (expected === 0 && localSources.size === 0)
       ) {
         resolve();
+        mediaDebug("handoff.ready", {
+          provider: "p2p",
+          epoch: topology?.epoch,
+          tracks: handoff.count("p2p"),
+        });
         return;
       }
       if (Date.now() - startedAt >= timeoutMs) {
@@ -140,9 +175,15 @@ function waitForP2pHandoff({
             `P2P media did not become ready for handoff (tracks ${handoff.count("p2p")}/${expected}, mesh ready ${mediaReady ? "yes" : "no"})`,
           ),
         );
+        mediaDebug("handoff.timeout", {
+          provider: "p2p",
+          epoch: topology?.epoch,
+          tracks: handoff.count("p2p"),
+          expected,
+        });
         return;
       }
-      setTimeout(poll, 200);
+      setTimeout(() => void Promise.resolve().then(poll).catch(reject), 200);
     };
     poll();
   });

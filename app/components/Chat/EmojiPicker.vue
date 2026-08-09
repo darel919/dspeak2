@@ -8,7 +8,7 @@
         type="text"
         aria-label="Search emojis"
         placeholder="Search emojis..."
-        class="input input-bordered min-h-11 w-full"
+        class="metro-input min-h-11 w-full"
         autocomplete="off"
       />
     </div>
@@ -18,7 +18,7 @@
         <button
           v-for="emoji in QUICK_REACTIONS"
           :key="emoji"
-          class="btn btn-ghost btn-square min-h-11 min-w-11 text-lg hover:bg-base-300"
+          class="metro-icon-btn metro-icon-btn--ghost min-h-11 min-w-11 text-lg hover:bg-base-300"
           @click="$emit('select', emoji)"
           :aria-label="'Add reaction ' + emoji"
         >
@@ -34,7 +34,7 @@
       <button
         v-for="cat in categories"
         :key="cat.id"
-        class="btn btn-ghost btn-square min-h-11 min-w-11"
+        class="metro-icon-btn metro-icon-btn--ghost min-h-11 min-w-11"
         :class="{ 'bg-base-300': activeCategory === cat.id }"
         @click="activeCategory = cat.id"
         :aria-label="cat.name"
@@ -56,7 +56,7 @@
           <button
             v-for="item in searchResults"
             :key="item.emoji"
-            class="btn btn-ghost btn-square min-h-11 min-w-11 text-lg hover:bg-base-300"
+            class="metro-icon-btn metro-icon-btn--ghost min-h-11 min-w-11 text-lg hover:bg-base-300"
             @click="selectEmoji(item)"
             :aria-label="item.name"
           >
@@ -81,7 +81,7 @@
             <button
               v-for="item in cat.emojis"
               :key="item.emoji"
-              class="btn btn-ghost btn-square min-h-11 min-w-11 text-lg hover:bg-base-300"
+              class="metro-icon-btn metro-icon-btn--ghost min-h-11 min-w-11 text-lg hover:bg-base-300"
               @click="selectEmoji(item)"
               :aria-label="item.name"
             >

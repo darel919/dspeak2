@@ -4,6 +4,9 @@ import { STORAGE_KEYS } from "~/const/storage";
 import notificationManager from "~/utils/notificationManager";
 import { deviceHeaders, getDeviceId } from "~/shared/device-identity";
 import { useAuthStore } from "./auth";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import { debugLog } from "../shared/debug";
+import { openRealtimeChannel } from "../shared/realtime-channel.js";
 
 export const useNotificationsStore = defineStore("notifications", () => {
   const notificationSupported = ref(false);
@@ -23,16 +26,27 @@ export const useNotificationsStore = defineStore("notifications", () => {
   });
   const config = useRuntimeConfig();
   let initialization = null;
+  let notificationsChannel = null;
+  let closeNotificationsChannel = null;
+  let notificationsReconnectTimer = null;
+  let notificationsReconnectAttempts = 0;
+  let stopAuthWatcher = null;
+  const MAX_REALTIME_RECONNECT_ATTEMPTS = 10;
 
   function syncNotificationState() {
     if (!import.meta.client) return;
-    notificationSupported.value = notificationManager.isSupported;
-    permission.value = notificationManager.permission;
+    const native = hasTauriRuntimeMarker();
+    notificationSupported.value = native || notificationManager.isSupported;
+    permission.value = native ? "granted" : notificationManager.permission;
     isEnabled.value = notificationManager.isEnabled;
   }
 
   function checkPushSupport() {
     if (!import.meta.client) return false;
+    if (hasTauriRuntimeMarker()) {
+      pushSupported.value = false;
+      return false;
+    }
     pushSupported.value =
       "Notification" in window &&
       "serviceWorker" in navigator &&
@@ -42,16 +56,95 @@ export const useNotificationsStore = defineStore("notifications", () => {
 
   async function initialize() {
     if (!import.meta.client) return;
+    if (!useAuthStore().getUserData()?.id) return;
     if (!initialization) {
       initialization = (async () => {
         notificationManager.init();
         syncNotificationState();
+        if (hasTauriRuntimeMarker()) {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("set_background_notifications_enabled", {
+            enabled: notificationManager.isEnabled,
+          });
+        }
         await getExistingSubscription();
         await Promise.allSettled([fetchInbox(), fetchPreferences()]);
+        watchUserIdForRealtime();
       })();
     }
     await initialization;
   }
+
+  function watchUserIdForRealtime() {
+    if (stopAuthWatcher) return;
+    const authStore = useAuthStore();
+    stopAuthWatcher = watch(
+      () => authStore.getUserData()?.id,
+      (userId) => {
+        if (userId) connectRealtime(userId);
+        else disconnectRealtime();
+      },
+      { immediate: true },
+    );
+  }
+
+  async function connectRealtime(userId) {
+    if (!import.meta.client || !userId) return;
+    if (notificationsChannel) return;
+    const normalizedUserId = String(userId);
+    openRealtimeChannel(`notify:${normalizedUserId}`, {
+      onMessage: (message) => receiveRealtime(message),
+      onSubscribe: () => {
+        notificationsReconnectAttempts = 0;
+        if (notificationsReconnectTimer) {
+          clearTimeout(notificationsReconnectTimer);
+          notificationsReconnectTimer = null;
+        }
+      },
+      onError: (err, status) => {
+        debugLog("[Notifications] Realtime channel error:", err, status);
+        notificationsChannel = null;
+        closeNotificationsChannel = null;
+        if (notificationsReconnectAttempts >= MAX_REALTIME_RECONNECT_ATTEMPTS) {
+          debugLog("[Notifications] Realtime reconnect attempts exhausted");
+          return;
+        }
+        const delay =
+          1000 * 2 ** notificationsReconnectAttempts +
+          Math.floor(Math.random() * 250);
+        notificationsReconnectAttempts += 1;
+        notificationsReconnectTimer = setTimeout(
+          () => connectRealtime(normalizedUserId),
+          delay,
+        );
+      },
+    }).then((handle) => {
+      if (!handle) return;
+      if (!useAuthStore().getUserData()?.id) {
+        handle.close();
+        return;
+      }
+      notificationsChannel = handle.channel;
+      closeNotificationsChannel = handle.close;
+    });
+  }
+
+  function disconnectRealtime() {
+    if (notificationsReconnectTimer) {
+      clearTimeout(notificationsReconnectTimer);
+      notificationsReconnectTimer = null;
+    }
+    if (closeNotificationsChannel) {
+      closeNotificationsChannel();
+      closeNotificationsChannel = null;
+    }
+    notificationsChannel = null;
+  }
+
+  onScopeDispose(() => {
+    stopAuthWatcher?.();
+    disconnectRealtime();
+  });
 
   async function authenticatedFetch(path, options = {}) {
     const userData = useAuthStore().getUserData();
@@ -115,8 +208,28 @@ export const useNotificationsStore = defineStore("notifications", () => {
   }
 
   function receiveRealtime(message) {
-    if (message?.type === "notification_created" && message.data)
+    if (message?.type === "notification_created" && message.data) {
+      const senderId = message.data.senderId;
+      const currentUserId = useAuthStore().getUserData()?.id;
+      if (
+        senderId &&
+        currentUserId &&
+        String(senderId) === String(currentUserId)
+      ) {
+        return;
+      }
       inbox.value = [message.data, ...inbox.value];
+      if (preferences.value.push && preferences.value.mode !== "none") {
+        void showNotification(message.data.title || "dSpeak Notification", {
+          body:
+            message.data.body ||
+            message.data.content ||
+            "You have a new notification.",
+          tag: message.data.id ? `notification-${message.data.id}` : undefined,
+          data: message.data.data || {},
+        });
+      }
+    }
     if (message?.type === "notifications_changed")
       fetchInbox().catch((cause) => {
         error.value = cause.message;
@@ -135,23 +248,67 @@ export const useNotificationsStore = defineStore("notifications", () => {
   );
 
   async function requestPermission() {
+    if (import.meta.client && hasTauriRuntimeMarker()) {
+      permission.value = "granted";
+      return true;
+    }
     const result = await notificationManager.requestPermission();
     syncNotificationState();
     return result;
   }
 
   async function setEnabled(enabled) {
+    if (import.meta.client && hasTauriRuntimeMarker()) {
+      notificationManager.isEnabled = enabled;
+      localStorage.setItem(
+        STORAGE_KEYS.notificationsEnabled,
+        JSON.stringify(Boolean(enabled)),
+      );
+      syncNotificationState();
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("set_background_notifications_enabled", {
+        enabled: Boolean(enabled),
+      });
+      return Boolean(enabled);
+    }
     const result = await notificationManager.setEnabled(enabled);
     syncNotificationState();
     return result;
   }
 
   function showNotification(title, options = {}) {
+    if (import.meta.client && hasTauriRuntimeMarker()) {
+      if (!notificationManager.isEnabled) return null;
+      return import("@tauri-apps/api/core")
+        .then(({ invoke }) =>
+          invoke("show_notification", {
+            title: String(title),
+            body: String(options.body || ""),
+          }),
+        )
+        .catch((cause) => {
+          error.value = cause instanceof Error ? cause.message : String(cause);
+          return null;
+        });
+    }
     return notificationManager.showNotification(title, options);
   }
 
   function showMessageNotification(message, roomName) {
-    return notificationManager.showMessageNotification(message, roomName);
+    const title = roomName ? `New message in ${roomName}` : "New message";
+    const senderName =
+      typeof message?.sender === "object"
+        ? message.sender.name
+        : message?.sender || "Someone";
+    const content = String(message?.content || "");
+    return showNotification(title, {
+      body: `${senderName}: ${content}`.slice(0, 100),
+      tag: message?.id ? `message-${message.id}` : undefined,
+      data: {
+        messageId: message?.id,
+        roomId: message?.roomId || null,
+      },
+    });
   }
 
   function shouldShowNotification() {
@@ -205,7 +362,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
           applicationServerKey: urlBase64ToUint8Array(vapidKey),
         }));
       const response = await fetch(
-        `${config.public.apiPath}/chat/subscribe/global`,
+        `${config.public.apiPath}/push-subscriptions`,
         {
           method: "POST",
           credentials: "include",
@@ -213,7 +370,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
             "Content-Type": "application/json",
             ...deviceHeaders(),
           },
-          body: JSON.stringify({ subscription: pushSubscription.toJSON() }),
+          body: JSON.stringify({
+            subscription: pushSubscription.toJSON(),
+            enable: true,
+          }),
         },
       );
       if (!response.ok)
@@ -239,15 +399,18 @@ export const useNotificationsStore = defineStore("notifications", () => {
       const userData = useAuthStore().getUserData();
       if (!userData?.id) throw new Error("User not authenticated");
       const response = await fetch(
-        `${config.public.apiPath}/chat/subscribe/global`,
+        `${config.public.apiPath}/push-subscriptions`,
         {
-          method: "DELETE",
+          method: "POST",
           credentials: "include",
           headers: {
             "Content-Type": "application/json",
             ...deviceHeaders(),
           },
-          body: JSON.stringify({ subscription: subscription.value.toJSON() }),
+          body: JSON.stringify({
+            subscription: subscription.value.toJSON(),
+            enable: false,
+          }),
         },
       );
       if (!response.ok)
@@ -312,6 +475,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
     preferences,
     unreadCount,
     initialize,
+    connectRealtime,
+    disconnectRealtime,
     requestPermission,
     setEnabled,
     showNotification,

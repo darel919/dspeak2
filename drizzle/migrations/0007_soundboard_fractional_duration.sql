@@ -1,0 +1,1 @@
+ALTER TABLE "room_soundboards" ALTER COLUMN "duration" SET DATA TYPE real;

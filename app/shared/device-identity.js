@@ -23,6 +23,6 @@ export function getDeviceId() {
 export function deviceHeaders(headers = {}) {
   return {
     ...headers,
-    "X-DSpeak-Device": getDeviceId(),
+    "X-Device-Id": getDeviceId(),
   };
 }

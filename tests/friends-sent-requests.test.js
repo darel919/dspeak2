@@ -18,6 +18,10 @@ const memberListSource = await readFile(
   new URL("../app/components/MemberList.vue", import.meta.url),
   "utf8",
 );
+const routeSource = await readFile(
+  new URL("../server/routes/api/friends/index.js", import.meta.url),
+  "utf8",
+);
 
 test("sending a friend request immediately adds the canonical request to Sent", () => {
   assert.match(
@@ -37,8 +41,24 @@ test("resending an existing outgoing request returns its canonical pending recor
   );
   assert.match(
     managerSource,
-    /if \(existing\.status === "pending"\)[\s\S]{0,700}status: existing\.status/,
+    /existingFriendship\.status === "pending"[\s\S]{0,700}status: existingFriendship\.status/,
   );
+});
+
+test("declining a request removes the row so it can be sent again", () => {
+  assert.match(
+    managerSource,
+    /if \(accept\)[\s\S]{0,220}else await db\.delete\(friends\)/,
+  );
+  assert.match(
+    managerSource,
+    /existingFriendship\.status === "rejected"[\s\S]{0,140}delete\(friends\)/,
+  );
+});
+
+test("friend response parsing does not treat the string false as acceptance", () => {
+  assert.match(routeSource, /accept === true \|\| accept === "true"/);
+  assert.doesNotMatch(routeSource, /Boolean\(accept\)/);
 });
 
 test("a failed Sent refresh preserves confirmed requests and exposes the error", () => {
@@ -53,25 +73,26 @@ test("a failed Sent refresh preserves confirmed requests and exposes the error",
 });
 
 test("Sent request avatars use the protected same-origin asset path", () => {
-  assert.match(
-    managerSource,
-    /avatar: sameOriginAvatarPath\(req\.expand\.recipient\)/,
-  );
+  assert.match(managerSource, /avatar: sameOriginAvatarPath\(recipient\)/);
   assert.match(
     pageSource,
     /<ProfileAvatar[\s\S]{0,180}:src="req\.recipient\?\.avatar"/,
   );
 });
 
-test("Sent persistence lookup avoids the failing compound PocketBase filter", () => {
+test("Sent persistence lookup uses Drizzle queries", () => {
   assert.match(
     managerSource,
-    /getSentFriendRequests[\s\S]{0,500}filter: pb\.filter\("requester = \{:userId\}"/,
+    /import \{[^}]*inArray[^}]*\} from "drizzle-orm";/,
   );
   assert.match(
     managerSource,
-    /getSentFriendRequests[\s\S]{0,1200}\.filter\(\(req\) => req\.status === "pending"\)/,
+    /getSentFriendRequests[\s\S]{0,500}from\(friends\)/,
   );
+  assert.match(managerSource, /eq\(friends\.status, "pending"\)/);
+  assert.match(managerSource, /sameOriginAvatarPath\(recipient\)/);
+
+  assert.doesNotMatch(managerSource, /getBoundedList/);
 });
 
 test("room member rows do not display friend request status", () => {

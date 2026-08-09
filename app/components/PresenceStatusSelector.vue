@@ -27,7 +27,11 @@
         <span
           class="size-10 overflow-hidden rounded-full ring-1 ring-base-content/15"
         >
-          <img :src="profileAvatar" alt="" />
+          <ProfileAvatar
+            :src="profileAvatar"
+            :name="profile.display_name || profile.name || profile.email"
+            class="size-full"
+          />
         </span>
         <span
           v-if="voiceConnected"
@@ -100,7 +104,7 @@
         </p>
         <input
           id="presence-idle-timeout"
-          class="range range-primary mt-3 w-full"
+          class="metro-range mt-3 w-full"
           type="range"
           min="60"
           max="3600"
@@ -131,6 +135,7 @@
 
 <script setup>
 import { usePresenceStatusStore } from "../stores/presenceStatus";
+import ProfileAvatar from "./ProfileAvatar.vue";
 import {
   PRESENCE_STATUSES,
   PRESENCE_LABELS,

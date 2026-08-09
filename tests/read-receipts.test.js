@@ -51,7 +51,7 @@ test("the server bounds read batches and aggregates unread counts in one query",
   );
   assert.match(api, /ids\.length > 200/);
   assert.match(api, /const channelById = new Map/);
-  assert.match(api, /fields: "room_channel,read_by"/);
+  assert.match(api, /NOT \(\$\{messages\.readBy\}/);
 });
 
 test("read receipt status is only rendered for the message sender", async () => {

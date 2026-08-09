@@ -163,6 +163,10 @@ export function createVoiceParticipantState({
     triggerRef(connectedUsers);
   }
 
+  function clearUserDirectory() {
+    userDirectory.value = new Map();
+  }
+
   return {
     addConnectedUser,
     getConnectedUsersArray,
@@ -170,6 +174,7 @@ export function createVoiceParticipantState({
     getTrackVolume,
     getUserById: (userId) => connectedUsers.value.get(String(userId)),
     getUserProfile: (userId) => userDirectory.value.get(String(userId)),
+    clearUserDirectory,
     getUserVolume,
     isUserConnected: (userId) => connectedUsers.value.has(String(userId)),
     removeConnectedUser,

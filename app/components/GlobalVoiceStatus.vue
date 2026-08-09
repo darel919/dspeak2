@@ -14,11 +14,11 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <span :class="['badge badge-sm', healthBadge]">{{
+          <span :class="['metro-badge metro-badge--sm', healthBadge]">{{
             healthLabel
           }}</span>
           <button
-            class="btn btn-ghost btn-xs btn-circle"
+            class="metro-icon-btn metro-icon-btn--ghost metro-icon-btn--sm"
             title="Close connection summary"
             aria-label="Close connection summary"
             @click="visible = false"
@@ -58,7 +58,10 @@
       </p>
 
       <div class="mt-3 border-t border-base-content/10 pt-3">
-        <button class="btn btn-neutral btn-sm w-full" @click="openDebug">
+        <button
+          class="metro-btn metro-btn--neutral btn-sm w-full"
+          @click="openDebug"
+        >
           <Icon name="lucide:bug" /> Debug
         </button>
       </div>
@@ -108,17 +111,17 @@ const healthBadge = computed(() => {
     healthLabel.value === "Connection issue" ||
     healthLabel.value === "Playback blocked"
   )
-    return "badge-error";
+    return "metro-badge--error";
   if (
     healthLabel.value === "Reconnecting" ||
     healthLabel.value === "Selecting media route" ||
     healthLabel.value === "Transport connecting"
   )
-    return "badge-warning";
-  if (!rtcStats.metrics.connected) return "badge-success";
-  if (rtcStats.metrics.score >= 4) return "badge-success";
-  if (rtcStats.metrics.score >= 2) return "badge-warning";
-  return "badge-error";
+    return "metro-badge--warning";
+  if (!rtcStats.metrics.connected) return "metro-badge--success";
+  if (rtcStats.metrics.score >= 4) return "metro-badge--success";
+  if (rtcStats.metrics.score >= 2) return "metro-badge--warning";
+  return "metro-badge--error";
 });
 const routeLabel = computed(
   () =>

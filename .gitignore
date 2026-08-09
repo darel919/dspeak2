@@ -4,11 +4,12 @@
 .nuxt
 .nitro
 .cache
-.github
+.github/copilot-instructions.md
 dist
 .codex
 AGENTS.md
 IDEA.md
+.hermes
 
 # Node dependencies
 node_modules
@@ -23,7 +24,13 @@ logs
 .fleet
 .idea
 
+# Native/Rust generated outputs
+/desktop/native-media/libdspeak_media/build/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+
 # Local env files
 .env
 .env.*
 !.env.example
+/desktop/native-media/dependencies.env

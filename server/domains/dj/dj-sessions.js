@@ -1,6 +1,5 @@
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createDjBroadcastProducer } from "../../utils/mediasoup-sfu.js";
 import { registerDjParticipantDisconnectedHandler } from "./dj-lifecycle.js";
 
 const SESSION_TTL_MS = 15 * 60 * 1000;
@@ -8,6 +7,10 @@ const ACTIVE_SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 const PUBLISHER_RECOVERY_MS = 20 * 1000;
 const BRIDGE_RETRY_MS = 1000;
 const stateKey = Symbol.for("dspeak.dj.sessions");
+
+async function createDjBroadcastProducer() {
+  throw new Error("DJ media ingest is unavailable with the external SFU");
+}
 
 function state() {
   if (!globalThis[stateKey])

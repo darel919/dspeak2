@@ -1,0 +1,248 @@
+# Build the dSpeak desktop app (Tauri) for macOS, Linux, and Windows.
+#
+# The desktop build links against a prebuilt native media bundle (libwebrtc +
+# libmediasoupclient + the dSpeak shim). That bundle is produced by the
+# "Native Media Artifacts" workflow, so this workflow chains off it:
+#
+#   1. Push a v* tag (or run native-media.yml manually).
+#   2. native-media.yml finishes -> this workflow runs automatically and
+#      downloads the fresh lib-dspeak-media-<platform> artifact from that run.
+#   3. On a v* tag, the built installers are published to a GitHub Release at
+#      that tag. Manual dispatch builds are uploaded as run artifacts only.
+#
+# If no successful native-media run is found (manual dispatch on a fresh repo),
+# the bundle is pulled from the durable "webrtc-m140" release instead.
+
+name: Build Desktop App
+
+on:
+  workflow_run:
+    workflows: ["Native Media Artifacts"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-build-${{ github.workflow }}-${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  desktop:
+    name: Build dSpeak Desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: self-hosted
+            artifact: dspeak-macos-arm64
+            native_artifact: lib-dspeak-media-macos-arm64
+            upload_pattern: |
+              desktop/src-tauri/target/release/bundle/dmg/*.dmg
+              desktop/src-tauri/target/release/bundle/macos/*.app
+              desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+              desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            artifact: dspeak-linux-x64
+            native_artifact: lib-dspeak-media-linux-x64
+            upload_pattern: |
+              desktop/src-tauri/target/release/bundle/deb/*.deb
+              desktop/src-tauri/target/release/bundle/rpm/*.rpm
+              desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+              desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
+          - platform: windows-x64
+            runner: windows-2022
+            artifact: dspeak-windows-x64
+            native_artifact: lib-dspeak-media-windows-x64
+            upload_pattern: |
+              desktop/src-tauri/target/release/bundle/msi/*.msi
+              desktop/src-tauri/target/release/bundle/nsis/*.exe
+              desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip
+              desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Resolve native media source
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "run_id=${{ github.event.workflow_run.id }}" >> "$GITHUB_OUTPUT"
+          else
+            run_id="$(gh run list --workflow native-media.yml --limit 30 \
+              --json databaseId,conclusion,event \
+              --jq 'map(select(.conclusion == "success"))[0].databaseId // empty')"
+            echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download native media bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-bundle" "$RUNNER_TEMP/native-extract"
+          run_id="${{ steps.resolve.outputs.run_id }}"
+          if [[ -n "${run_id}" ]]; then
+            if ! gh run download "${run_id}" -n "${{ matrix.native_artifact }}" -D "$RUNNER_TEMP/native-bundle"; then
+              echo "::error::Native media artifact '${{ matrix.native_artifact }}' is missing from run ${run_id}. Run native-media.yml first." >&2
+              exit 1
+            fi
+          elif ! gh release download webrtc-m140 -p "${{ matrix.native_artifact }}.tar.gz" -D "$RUNNER_TEMP/native-bundle" --clobber; then
+            echo "::error::No successful native media run and no webrtc-m140 release asset available. Run native-media.yml first." >&2
+            exit 1
+          fi
+
+      - name: Extract native media bundle
+        run: |
+          find "$RUNNER_TEMP/native-bundle" -name '*.tar.gz' -exec tar xzf {} -C "$RUNNER_TEMP/native-extract" \;
+          echo "NATIVE_MEDIA_ARTIFACT_DIR=$RUNNER_TEMP/native-extract/artifact" >> "$GITHUB_ENV"
+
+      - name: Verify native media bundle
+        run: |
+          ART="$RUNNER_TEMP/native-extract/artifact"
+          missing=()
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            for lib in dspeak_media mediasoupclient sdptransform webrtc; do
+              [[ -f "$ART/lib/${lib}.lib" || -f "$ART/lib/lib${lib}.lib" ]] || missing+=("${lib}")
+            done
+          else
+            for lib in dspeak_media mediasoupclient sdptransform webrtc; do
+              [[ -f "$ART/lib/lib${lib}.a" ]] || missing+=("${lib}")
+            done
+          fi
+          [[ -d "$ART/include" ]] || missing+=("include")
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            echo "::error::Incomplete native media bundle at ${ART}; missing: ${missing[*]}" >&2
+            exit 1
+          fi
+          echo "Native media bundle OK: ${ART}"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1"
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libfuse2t64 \
+            rpm \
+            patchelf \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            build-essential
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Synchronize release version
+        run: bun run release:sync
+
+      - name: Verify synchronized release version
+        run: bun run release:check
+
+      - name: Verify release tag version
+        if: github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v')
+        env:
+          DSPEAK_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: bun run release:check
+
+      - name: Configure signed updater artifacts
+        if: github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v')
+        env:
+          DSPEAK_TAURI_PUBLIC_KEY: ${{ secrets.DSPEAK_TAURI_PUBLIC_KEY }}
+        run: |
+          test -n "$DSPEAK_TAURI_PUBLIC_KEY"
+          node -e 'const fs = require("node:fs"); const path = "desktop/src-tauri/tauri.conf.json"; const config = JSON.parse(fs.readFileSync(path, "utf8")); config.bundle.createUpdaterArtifacts = true; config.plugins.updater.pubkey = process.env.DSPEAK_TAURI_PUBLIC_KEY; fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);'
+
+      - name: Build dSpeak Desktop
+        env:
+          NATIVE_MEDIA_ARTIFACT_DIR: ${{ runner.temp }}/native-extract/artifact
+          DSPEAK_TAURI_PUBLIC_KEY: ${{ secrets.DSPEAK_TAURI_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bun run build:desktop
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.upload_pattern }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: desktop
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Synchronize release version
+        run: node scripts/sync-release-version.mjs --write
+
+      - name: Verify release tag version
+        env:
+          DSPEAK_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: node scripts/sync-release-version.mjs --check
+
+      - name: Download app bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          pattern: dspeak-*
+          merge-multiple: true
+
+      - name: Create updater manifest
+        env:
+          DSPEAK_RELEASE_ASSET_DIR: release-assets
+          DSPEAK_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+          DSPEAK_RELEASE_VERSION: ${{ github.event.workflow_run.head_branch }}
+          DSPEAK_RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha }}
+          DSPEAK_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: node scripts/create-tauri-update-manifest.mjs
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.workflow_run.head_branch }}
+          files: release-assets/**
+          generate_release_notes: true

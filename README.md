@@ -1,76 +1,80 @@
 # dSpeak
 
-dSpeak is a self-hosted communication platform for text chat, presence, voice,
-video, screen sharing, soundboards, and notifications. It runs as one long-lived
-Nuxt and Nitro application. PocketBase stores persistent data; native WebRTC and
-mediasoup carry realtime media.
+dSpeak is a communication platform for text chat, presence, voice, video, screen sharing, soundboards, and notifications. It runs as a Nuxt 4 + Nitro application deployed on Vercel with persistent media control on Cloudflare Workers/Durable Objects.
+
+The same interface is also shipped as a Tauri desktop client for macOS, Linux, and Windows. The desktop app renders the Nuxt frontend in a WebView and replaces browser capture and playback with a native C++ media engine (libwebrtc and libmediasoupclient).
 
 ## License
 
-dSpeak is free software released under the
-[GNU Affero General Public License version 3 (AGPL-3.0)](LICENSE).
-You can use, modify, and distribute it under the terms of that license.
+dSpeak is free software released under the [GNU Affero General Public License version 3 (AGPL-3.0)](LICENSE). You can use, modify, and distribute it under the terms of that license.
 
-If you modify dSpeak and run a modified version on a publicly accessible
-network service, you must make the modified source code available to all users
-who interact with it, as required by section 13 of the AGPL-3.0.
+If you modify dSpeak and run a modified version on a publicly accessible network service, you must make the modified source code available to all users who interact with it, as required by section 13 of the AGPL-3.0.
 
 ## What dSpeak provides
 
 - Rooms with text, voice, camera, screen sharing, and shared audio
+- Native desktop apps for macOS, Linux, and Windows (Tauri) with a C++ media engine for capture, SFU, P2P, and playback
 - Room roles, branding, media policies, notifications, and member nicknames
 - Protected room soundboards and personal system-sound settings
-- Direct WebRTC for two participants and optional mesh for three or four
-- Automatic mediasoup SFU routing when direct media is unavailable or unsafe
-- IPv6-first SFU connectivity with Playit IPv4 and TURN fallbacks
+- **Connection modes:** `Auto` (system chooses best route) or `Direct` (P2P only, no relay/SFU fallback)
+- **Auto routing:** direct P2P, P2P via TURN relay, Cloudflare Realtime SFU, or self-hosted mediasoup fallback
+- Self-hosted mediasoup runs as a separate `dspeak-sfu` service (independent failure domain)
+- IPv6-first media with Cloudflare TURN and optional self-hosted Coturn/Playit fallbacks
 - RTC diagnostics, health checks, and Prometheus-compatible metrics
-- Same-origin HTTP and WebSocket endpoints by default
 
 ## Runtime architecture
 
-dSpeak is a Nuxt 4 monolith:
+| Layer                      | Responsibility                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| `app/`                     | Vue interface, Pinia state, browser capture, and media playback                       |
+| `server/routes/`           | Nitro HTTP endpoints (Vercel)                                                         |
+| `server/utils/`            | Reusable server logic, authorization, media bootstrap                                 |
+| `server/db/`               | Drizzle ORM, PostgreSQL schema, repositories (Supabase)                               |
+| `server/auth/`             | Supabase Auth (Google OAuth only), JWT verification                                   |
+| `server/storage/`          | Cloudflare R2 file storage abstraction                                                |
+| `../dspeak-media-control/` | Separate Cloudflare Worker + Durable Objects checkout (media control plane, topology) |
+| `desktop/`                 | Tauri 2 shell, Rust commands, and the `libdspeak_media` C++ shim                      |
+| `dspeak-sfu/`              | **Separate project:** ElysiaJS + mediasoup SFU provider (self-hosted fallback)        |
+| Supabase                   | Auth (Google OAuth), PostgreSQL, Realtime (app events only)                           |
+| Cloudflare                 | R2 (files), Durable Objects (media control), Realtime SFU/TURN, Workers               |
 
-| Layer            | Responsibility                                                        |
-| ---------------- | --------------------------------------------------------------------- |
-| `app/`           | Vue interface, Pinia state, browser capture, and media playback       |
-| `server/routes/` | Nitro HTTP and WebSocket endpoints                                    |
-| `server/utils/`  | PocketBase access, authorization, migrations, and media orchestration |
-| PocketBase       | Persistent users, rooms, messages, policies, and notifications        |
-| mediasoup        | Process-owned SFU workers, routers, transports, and RTP forwarding    |
+The web application runs on Vercel (serverless-compatible). Persistent media control lives on Cloudflare Workers/Durable Objects with WebSocket hibernation. The self-hosted mediasoup provider is a fully independent `dspeak-sfu` project that can be deployed separately (Coolify, Docker, etc.) and communicates via signed short-lived provider tickets — no shared database or process.
 
-The application must run as a persistent Node.js process. Serverless and edge
-runtimes are unsupported because WebSockets and mediasoup resources live in
-process memory. Run one application instance unless a distributed signaling
-backplane and mediasoup router piping have been implemented.
+The desktop client (`desktop/`) renders the same Nuxt interface in a Tauri WebView. Rust (`desktop/src-tauri/`) owns the window lifecycle, deep links, notifications, autostart, global shortcuts, and auto-updates. A prebuilt native media bundle (`NATIVE_MEDIA_ARTIFACT_DIR`) supplies capture, SFU, P2P, and playback instead of browser WebRTC. See the [native media build boundary](desktop/native-media/README.md).
 
 ## Media routing
 
-Every call starts on the SFU so participants have a reliable media path. dSpeak
-may then move the whole room to a verified direct route without restarting local
-capture.
+Two user-facing connection modes:
 
-| Participants | Preferred stable route                                  |
-| ------------ | ------------------------------------------------------- |
-| 1            | mediasoup SFU                                           |
-| 2            | Direct WebRTC after qualification                       |
-| 3–4          | SFU, with a full mesh upgrade when every edge qualifies |
-| 5 or more    | mediasoup SFU                                           |
+- **Auto (default):** System selects the best viable route per room — direct P2P, P2P via Cloudflare TURN relay, Cloudflare Realtime SFU, or self-hosted mediasoup fallback. Route selection minimizes the worst participant's practical voice experience (latency, jitter, packet loss).
+- **Direct:** Force native/direct P2P only. STUN allowed. TURN relay, Cloudflare SFU, and mediasoup explicitly disabled. If any required direct pair cannot connect, a clear connection error is shown.
 
-The current route remains active until every client confirms the replacement.
-Membership changes and unhealthy direct connections return the room to the SFU.
-See [Hybrid media topology](docs/hybrid-media-topology.md) for timing, health,
-handoff, bitrate, and recovery details.
+Auto route eligibility (benchmark-gated starting values):
+
+| Scenario            | Max participants |
+| ------------------- | ---------------- |
+| Direct audio only   | 12               |
+| Direct with video   | 4                |
+| Auto P2P audio only | 8                |
+| Auto P2P with video | 4                |
+
+The authoritative media topology coordinator is a **Cloudflare Durable Object per channel** (`MediaRoomDO`). It owns live participant membership, active route/epoch, P2P signaling relay, provider health, and route commit state. Supabase Realtime handles normal app events (chat, typing, notifications) only — never media topology.
 
 ## Requirements
 
 - Bun for installation, development, testing, and builds
-- Node.js 24 for the production server
-- PocketBase with an administrator account available to Nitro
+- Node.js 22+ for the production server
+- Rust stable toolchain with the Tauri CLI to build the desktop client
+- Native media build tools and a first-run bundle provision for desktop development
+- Supabase project (PostgreSQL, Auth, Realtime)
+- Cloudflare account (Workers, Durable Objects, R2, Realtime SFU/TURN)
+- The sibling `dspeak-media-control` checkout for media control WebSockets and Durable Objects
 - FFmpeg and ffprobe when running outside Docker
-- A public IPv4 or IPv6 route for production WebRTC traffic
+- A public IPv4 or IPv6 route for production WebRTC traffic (for self-hosted mediasoup)
 
-Docker includes FFmpeg and ffprobe. A non-container host must provide both tools
-on `PATH` for soundboard conversion.
+Docker includes FFmpeg and ffprobe. A non-container host must provide both tools on `PATH` for soundboard conversion.
+
+Desktop builds need Rust and a complete native media bundle. `dev:desktop` provisions the ignored local bundle automatically on first run; production builds still consume a prebuilt bundle and never download dependencies at application startup. See [desktop/native-media/README.md](desktop/native-media/README.md).
 
 ## Local development
 
@@ -82,27 +86,69 @@ bun run dev
 
 The development server listens on `http://localhost:3000`.
 
-At minimum, configure the authentication service and PocketBase connection:
+### Desktop client
 
-```dotenv
-AUTH_PATH=https://api.example.com/auth
-DSPEAK_PUBLIC_ORIGIN=https://app.example.com
-DSPEAK_METRICS_TOKEN=replace-with-a-long-random-secret
-POCKETBASE_URL=https://pocketbase.example.com
-PBASE_ADMIN_EMAIL=admin@example.com
-PBASE_ADMIN_PASSWORD=replace-this-value
+```bash
+cp desktop/native-media/dependencies.env.example desktop/native-media/dependencies.env
+bun run dev:desktop
 ```
 
-`AUTH_PATH` is server-only and must expose the DWS one-time handoff endpoints.
-`DSPEAK_PUBLIC_ORIGIN` must be the exact browser origin; the generated
-authentication callback is `<DSPEAK_PUBLIC_ORIGIN>/auth`.
+`dev:desktop` loads `desktop/native-media/dependencies.env`, provisions and validates a complete native media bundle when the ignored directory is empty, and launches the Tauri shell against the dev server. The web application keeps using browser WebRTC and does not require the bundle. See the [native media build boundary](desktop/native-media/README.md).
 
-Nitro applies pending PocketBase migrations during startup. A migration failure
-stops the application so it cannot run against a partially updated schema.
-The initializer can prepare a fresh PocketBase instance and repairs a missing
-required collection on a later startup. See the
-[database design](docs/database-design.md) for the collection model and
-initialization contract.
+### Environment variables (web/API)
+
+```dotenv
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:6543/postgres?pgbouncer=true
+DIRECT_DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:5432/postgres
+
+# Cloudflare
+MEDIA_CONTROL_URL=https://media-control.example.com
+MEDIA_CONTROL_ISSUER=dspeak-media-control
+MEDIA_CONTROL_ADMIN_TOKEN=long-random-secret
+MEDIA_TICKET_PRIVATE_KEY=base64-encoded-ed25519-pkcs8-private-key
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY_ID=your-r2-access-key
+R2_SECRET_ACCESS_KEY=your-r2-secret-key
+R2_BUCKET_NAME=dspeak
+
+# Optional standalone dspeak-sfu provider
+DSPEAK_SFU_HTTP_URL=https://sfu.example.com
+DSPEAK_SFU_METRICS_TOKEN=provider-metrics-token
+```
+
+`DATABASE_URL` uses Supavisor transaction mode (port 6543) for Vercel/serverless. `DIRECT_DATABASE_URL` is for migrations/admin (port 5432).
+
+### Environment variables (dspeak-sfu)
+
+See `dspeak-sfu/.env.example` in the sibling project.
+
+### Related service checkouts
+
+The main `bun install` does not install or run the media control Worker. Voice
+sessions require `dspeak-media-control` to be checked out and deployed
+separately. The optional self-hosted provider is a third independent checkout.
+
+```bash
+cd ..
+git clone <dspeak-media-control-repository-url> dspeak-media-control
+git clone <dspeak-sfu-repository-url> dspeak-sfu
+
+cd dspeak-media-control
+npm install
+cp .env.example .dev.vars
+# edit .dev.vars, then configure Cloudflare secrets with wrangler
+npm test
+npm run dev
+```
+
+For production, deploy the Worker with `npm run deploy` after setting its
+Durable Object bindings and secrets. Deploy `dspeak-sfu` separately only when
+self-hosted mediasoup fallback is enabled; its setup is documented in that
+checkout's `README.md` and `docs/deployment.md`.
 
 ## Production build
 
@@ -113,31 +159,66 @@ bun run build
 bun run start
 ```
 
-`bun run start` loads `.env` and starts `.output/server/index.mjs`. The default
-container setup exposes Nitro on host port `31100` and mediasoup on TCP and UDP
-port `40000`.
+`bun run start` loads `.env` and starts `.output/server/index.mjs`.
 
-For the complete Coolify, Docker Compose, DNS, firewall, Playit, and TURN setup,
-follow the [deployment runbook](docs/deployment.md). Do not expose a production
-instance until the runbook's external connectivity checks pass.
+### Deploy targets
+
+| Component        | Platform                             | Notes                                              |
+| ---------------- | ------------------------------------ | -------------------------------------------------- |
+| Web/API (Nuxt)   | Vercel                               | Serverless, no persistent WebSockets               |
+| Media control    | Cloudflare Workers + Durable Objects | Hibernating WebSockets, SQLite-backed DOs          |
+| File storage     | Cloudflare R2                        | Direct-to-R2 uploads, signed URLs                  |
+| Auth/DB/Realtime | Supabase                             | Google OAuth only, PostgreSQL, private channels    |
+| Self-hosted SFU  | Coolify / Docker / bare metal        | Independent `dspeak-sfu` project, fixed port 40000 |
+
+For the complete Coolify, Docker Compose, DNS, firewall, and TURN setup, follow the [deployment runbook](docs/deployment.md). Do not expose a production instance until the runbook's external connectivity checks pass.
+
+### Desktop client
+
+```bash
+bun run build:desktop
+```
+
+Builds the Tauri app for the host platform. Version-tagged releases are built for macOS, Linux, and Windows by the [desktop CI build](docs/native-media/ci-desktop-build.md), which publishes the installers to a GitHub Release; installed clients update through the updater endpoint configured in `desktop/src-tauri/tauri.conf.json`.
+
+Every web and desktop build embeds its package version, source commit, source
+branch, repository, and build time. The public `/api/update` endpoint compares
+that identity with `DSPEAK_UPDATE_BRANCH` and returns the pending commits and
+changed files. Set `DSPEAK_UPDATE_REPOSITORY` and `DSPEAK_UPDATE_BRANCH` when
+the deployed app tracks a repository or branch other than the defaults in
+`.env.example`. `DSPEAK_GITHUB_TOKEN` is optional and must remain server-only;
+it raises the GitHub API quota for private or high-traffic deployments.
 
 ## Operational endpoints
 
-| Path                | Purpose                                        |
-| ------------------- | ---------------------------------------------- |
-| `/health`           | Application and configured TURN health         |
-| `/metrics`          | Bearer-protected Prometheus media metrics      |
-| `/socket`           | Media signaling WebSocket                      |
-| `/api/presence`     | Presence WebSocket                             |
-| `/api/chat/socket`  | Realtime chat WebSocket                        |
-| `/api/room/*`       | Room management                                |
-| `/api/channel/*`    | Text and media channels                        |
-| `/api/chat/*`       | Messages, read state, and push subscriptions   |
-| `/api/soundboard/*` | Protected room soundboard operations and media |
+| Path                   | Purpose                                             |
+| ---------------------- | --------------------------------------------------- |
+| `/health`              | Application health                                  |
+| `/metrics`             | Bearer-protected Prometheus metrics                 |
+| `/api/update`          | Public commit and pending-change comparison         |
+| `/api/media/bootstrap` | Media join bootstrap (issues short-lived ticket)    |
+| `/api/files/prepare`   | Prepare direct-to-R2 upload                         |
+| `/api/files/commit`    | Commit upload, record metadata                      |
+| `/api/presence`        | Presence status snapshot, update, activity, offline |
+| `/api/chat/*`          | Messages, read state, push subscriptions            |
+| `/api/room/*`          | Room management                                     |
+| `/api/channel/*`       | Text and media channels                             |
+| `/api/soundboard/*`    | Protected room soundboard operations and media      |
 
-Protected application APIs and WebSockets are same-origin so the server-owned
-HttpOnly session is used consistently. Follow the
-[production readiness gate](docs/production-readiness.md) before release.
+Realtime application events (chat messages, presence, voice presence, room and
+profile updates, notifications) are delivered over Supabase Realtime, not Nitro
+WebSockets. Clients subscribe to reserved topics `global`, `chat:<channelId>`,
+`room:<roomId>`, and `notify:<userId>` with their Supabase access token; the
+server publishes with the service role. Client writes are limited to the
+`chat:%` topic by row-level security. Presence status and channel join/leave
+are persisted through the `/api/presence` and `/api/channel/join|leave`
+endpoints.
+
+Media control WebSocket: `wss://media-control.example.com/media-control/<channelId>` (per-channel Durable Object)
+
+Self-hosted mediasoup SFU: `wss://sfu.example.com/v1/ws` (separate `dspeak-sfu` deployment)
+
+Protected application APIs and WebSockets use Supabase access tokens (validated locally via JWKS). Session cookies are not used for media control.
 
 ## Verification
 
@@ -154,27 +235,28 @@ After deployment, verify the production process and its public routes:
 
 ```bash
 curl --fail https://app.example.com/health
-curl --fail -H "Authorization: Bearer $DSPEAK_METRICS_TOKEN" \
-  https://app.example.com/metrics
+curl --fail -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+  https://app.example.com/api/media/bootstrap \
+  -d '{"channelId":"...","roomId":"..."}'
 ```
 
-Media releases also require the real-browser and external-network checks in
-[Hybrid media topology](docs/hybrid-media-topology.md) and
-[Deployment](docs/deployment.md). Unit tests cannot prove browser ICE behavior,
-hardware capture, firewall rules, or public IPv4 and IPv6 reachability.
+Media releases also require the real-browser and external-network checks in [Hybrid media topology](docs/hybrid-media-topology.md) and [Deployment](docs/deployment.md). Unit tests cannot prove browser ICE behavior, hardware capture, firewall rules, or public IPv4 and IPv6 reachability.
 
 ## Security boundaries
 
-- PocketBase administrator credentials remain server-only.
-- Nitro validates authentication, room membership, and authorization.
-- Soundboard files and icons are served through membership-protected endpoints.
-- WebSocket messages are authenticated and validated before changing state.
-- VAPID private keys and TURN shared secrets must never reach the browser.
-- The RTC hostname must be DNS-only; an HTTP proxy cannot carry mediasoup RTP.
+- Supabase Auth: Google OAuth only (scopes: openid, email, profile). Email/password, magic links, phone, anonymous disabled.
+- Asymmetric JWT verification (ES256 preferred) for all API authorization — no per-request Supabase Auth calls.
+- Short-lived media tickets (60-120s) signed by dSpeak, verified by Cloudflare DO and `dspeak-sfu` locally.
+- R2: no permanent write credentials in client; short-lived signed upload URLs; random object IDs.
+- VAPID private keys, TURN shared secrets, Cloudflare app secrets must never reach the browser.
+- The self-hosted SFU RTC hostname must be DNS-only; an HTTP proxy cannot carry mediasoup RTP.
+- RLS enabled on all client-observable Supabase tables and Realtime topics.
 
 ## Documentation
 
 - [Deployment runbook](docs/deployment.md)
+- [Desktop CI build runbook](docs/native-media/ci-desktop-build.md)
+- [Native media build boundary](desktop/native-media/README.md)
 - [Hybrid media topology](docs/hybrid-media-topology.md)
 - [Room administration contract](docs/room-administration.md)
 - [Chat cache and room switching](docs/chat-cache.md)

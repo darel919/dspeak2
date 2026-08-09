@@ -13,12 +13,12 @@
           dSpeak uses a session cookie to keep you signed in. This cookie is
           strictly necessary for the application to function. No tracking or
           analytics cookies are used.
-          <NuxtLink class="link link-primary whitespace-nowrap" to="/privacy"
+          <NuxtLink class="metro-link whitespace-nowrap" to="/privacy"
             >Learn more</NuxtLink
           >.
         </p>
         <button
-          class="btn btn-primary btn-sm shrink-0"
+          class="metro-btn metro-btn--sm shrink-0"
           type="button"
           @click="dismiss"
         >

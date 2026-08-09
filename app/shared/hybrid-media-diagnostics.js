@@ -1,6 +1,7 @@
 export function createHybridMediaDiagnostics({
   collectRtpStats,
   getActiveProvider,
+  getActiveRouteProvider,
   getP2pMesh,
   getRequestedVideoSettings,
   getLifecycle,
@@ -16,6 +17,7 @@ export function createHybridMediaDiagnostics({
   send,
   sfuRoundTripTime,
   topologyGraph,
+  topologyState,
   updateP2pStats,
   rtpStatsSamples,
 }) {
@@ -30,25 +32,95 @@ export function createHybridMediaDiagnostics({
     const activeProvider = getActiveProvider();
     const p2pMesh = getP2pMesh();
     const sfu = getSfu();
+    let p2pEdges = [];
     if (activeProvider === "p2p" && p2pMesh) {
       const edges = await p2pMesh.getSnapshot().catch(() => null);
-      if (edges) updateP2pStats(edges);
+      if (edges) {
+        p2pEdges = edges;
+        updateP2pStats(edges);
+      }
     }
-    const transports =
+    const rawTransports =
       activeProvider === "sfu"
         ? (await sfu?.stats()) || []
         : (await p2pMesh?.stats()) || [];
+    const transports = (Array.isArray(rawTransports) ? rawTransports : [])
+      .filter(Boolean)
+      .map((transport) => ({
+        ...transport,
+        pcStates: {
+          connectionState: transport.pcStates?.connectionState || "unknown",
+          iceConnectionState:
+            transport.pcStates?.iceConnectionState || "unknown",
+          signalingState: transport.pcStates?.signalingState || "unknown",
+        },
+      }));
     const pair =
       activeProvider === "sfu"
         ? transports.find((transport) => transport.candidatePair)
             ?.candidatePair || null
         : null;
+    const providerRttMs = transports.find((transport) =>
+      Number.isFinite(Number(transport.rttMs)),
+    )?.rttMs;
     sfuRoundTripTime.value =
-      pair?.currentRoundTripTime == null
-        ? null
-        : pair.currentRoundTripTime * 1000;
-    if (sfuRoundTripTime.value != null)
+      providerRttMs != null
+        ? providerRttMs
+        : pair?.currentRoundTripTime == null
+          ? null
+          : pair.currentRoundTripTime * 1000;
+    if (activeProvider === "sfu" && sfuRoundTripTime.value != null)
       send({ type: "client-sfu-rtt", data: { rttMs: sfuRoundTripTime.value } });
+    const paths =
+      activeProvider === "p2p"
+        ? p2pEdges.map((edge) => ({
+            peerOrProvider: edge.peerId,
+            rttMs: edge.rtt,
+            jitterMs: edge.jitter,
+            packetLossPercent: edge.packetLoss,
+            availableOutgoingBitrate: edge.bitrate,
+            candidateType: edge.candidatePair?.local?.candidateType || null,
+            protocol: edge.network,
+          }))
+        : transports.map((transport) => ({
+            peerOrProvider: transport.id || "sfu",
+            rttMs:
+              transport.rttMs ?? transport.candidatePair?.currentRoundTripTime,
+            jitterMs: transport.jitterMs ?? transport.inboundAudio?.jitter,
+            packetLossPercent:
+              transport.packetLossPercent ??
+              transport.candidatePair?.packetLoss,
+            fractionLost: transport.remoteInboundAudio?.fractionLost,
+            jitterBufferDelayMs:
+              transport.jitterBufferDelayMs ??
+              transport.inboundAudio?.jitterBufferDelay ??
+              null,
+            availableOutgoingBitrate:
+              transport.availableOutgoingBitrate ??
+              transport.candidatePair?.availableOutgoingBitrate ??
+              null,
+            candidateType:
+              transport.candidateType ||
+              transport.candidatePair?.local?.candidateType ||
+              null,
+            protocol:
+              transport.protocol ||
+              transport.candidatePair?.local?.protocol ||
+              null,
+          }));
+    if (paths.length)
+      send({
+        type: "media-qoe",
+        data: {
+          provider:
+            activeProvider === "sfu"
+              ? getActiveRouteProvider?.() || "sfu"
+              : activeProvider,
+          epoch: Number(topologyState.value?.epoch) || 0,
+          sampledAt: Date.now(),
+          paths,
+        },
+      });
     refreshTopologyGraph(pair);
     return {
       timestamp: Date.now(),

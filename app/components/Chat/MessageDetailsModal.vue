@@ -1,18 +1,18 @@
 <template>
   <div
     v-if="show"
-    class="modal modal-open"
+    class="metro-modal modal-open"
     role="dialog"
     aria-modal="true"
     aria-labelledby="message-details-title"
   >
-    <div class="modal-box">
+    <div class="metro-flyout">
       <div class="flex justify-between items-center mb-4">
         <h3 id="message-details-title" class="font-bold text-lg">
           Message Details
         </h3>
         <button
-          class="btn btn-sm btn-circle btn-ghost"
+          class="metro-btn metro-btn--sm btn-circle btn-ghost"
           aria-label="Close message details"
           @click="$emit('close')"
         >
@@ -28,7 +28,7 @@
             <div class="space-y-2">
               <div class="flex items-center gap-2 mb-2">
                 <span class="text-sm text-base-content/60">Total reads:</span>
-                <div class="badge badge-primary text-base">
+                <div class="metro-badge metro-badge--accent text-base">
                   {{ message.read_by ? message.read_by.length : 0 }}
                 </div>
               </div>
@@ -117,12 +117,15 @@
         </section>
       </div>
 
-      <div class="modal-action">
-        <button @click="copyDetails" class="btn btn-outline btn-sm">
+      <div class="flex justify-end gap-3">
+        <button
+          @click="copyDetails"
+          class="metro-btn metro-btn--outline btn-sm"
+        >
           <Icon name="lucide:copy" class="h-4 w-4" />
           Copy Details
         </button>
-        <button @click="$emit('close')" class="btn btn-primary btn-sm">
+        <button @click="$emit('close')" class="metro-btn metro-btn--sm">
           Close
         </button>
       </div>
@@ -167,7 +170,7 @@ function formatFullDate(dateString) {
 }
 
 function getAvatarUrl(avatarPath) {
-  return profileAssetUrl(avatarPath) || "/favicon-32x32.png";
+  return profileAssetUrl(avatarPath) || "";
 }
 
 async function copyDetails() {

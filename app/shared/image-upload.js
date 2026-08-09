@@ -37,25 +37,7 @@ export function getImageDimensions(file) {
   });
 }
 
-export async function uploadChatFile(
-  file,
-  channelId,
-  apiPath,
-  dimensions = {},
-) {
-  const path = apiPath || "/api";
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("channelId", channelId);
-  formData.append("width", String(dimensions.width || 0));
-  formData.append("height", String(dimensions.height || 0));
-
-  const response = await fetch(`${path}/chat/upload`, {
-    method: "POST",
-    credentials: "include",
-    body: formData,
-  });
-
+async function parseJsonResponse(response) {
   const responseText = await response.text();
   let result;
   try {
@@ -66,9 +48,94 @@ export async function uploadChatFile(
   if (!response.ok) {
     const message =
       result?.message || `Upload failed with status ${response.status}`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   return result;
+}
+
+export async function uploadChatFile(
+  file,
+  channelId,
+  apiPath,
+  dimensions = {},
+) {
+  const path = apiPath || "/api";
+  const objectId = crypto.randomUUID();
+
+  const prepare = await fetch(`${path}/files/prepare`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "chat",
+      identifiers: {
+        channelId,
+        objectId,
+      },
+      mimeType: file.type,
+      size: file.size,
+    }),
+  });
+  const { uploadUrl, key, cleanupToken } = await parseJsonResponse(prepare);
+
+  const putResponse = await fetch(uploadUrl, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!putResponse.ok) {
+    throw new Error(`R2 upload failed with status ${putResponse.status}`);
+  }
+
+  let record;
+  try {
+    const commit = await fetch(`${path}/files/commit`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "chat",
+        key,
+        metadata: {
+          channelId,
+          objectId,
+          fileName: file.name,
+          mimeType: file.type,
+          size: file.size,
+          width: dimensions.width || 0,
+          height: dimensions.height || 0,
+        },
+      }),
+    });
+    record = await parseJsonResponse(commit);
+  } catch (error) {
+    await cleanupPreparedUpload(cleanupToken, path);
+    throw error;
+  }
+
+  return {
+    id: record.record.id,
+    url: `/api/assets/chat-file?id=${encodeURIComponent(record.record.id)}`,
+    name: record.record.fileName || file.name,
+    size: record.record.size,
+    mime_type: record.record.mimeType,
+    width: dimensions.width || 0,
+    height: dimensions.height || 0,
+  };
+}
+
+async function cleanupPreparedUpload(cleanupToken, path) {
+  try {
+    await fetch(`${path}/files/cleanup`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cleanupToken }),
+    });
+  } catch {}
 }
 
 export async function deleteChatFile(fileId, apiPath) {

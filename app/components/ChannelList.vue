@@ -2,7 +2,7 @@
   <div class="flex flex-col h-full bg-base-200">
     <!-- Channel list header -->
     <div class="border-base-300 p-4">
-      <div class="relative flex flex-col items-center gap-3">
+      <div class="relative flex w-full flex-col items-center gap-3">
         <div
           class="grid size-20 place-items-center overflow-hidden bg-base-300"
         >
@@ -23,13 +23,13 @@
           <button
             ref="roomActionsButton"
             tabindex="0"
-            class="btn btn-ghost btn-sm btn-circle"
+            class="metro-icon-btn metro-icon-btn--ghost"
             aria-label="Room actions"
           >
             <Icon name="lucide:ellipsis-vertical" class="h-5 w-5" />
           </button>
           <ul
-            class="dropdown-content z-[1] menu w-52 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
+            class="metro-pane metro-menu absolute right-0 top-full z-[1] mt-1 w-52 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
           >
             <li v-if="hasPermission('channel.create')">
               <button type="button" @click="openCreateModal">
@@ -111,7 +111,7 @@
               <span class="flex-1 truncate text-sm">{{ channel.name }}</span>
               <span
                 v-if="getUnreadCount(channel.id)"
-                class="badge badge-primary badge-sm"
+                class="metro-badge metro-badge--accent"
               >
                 {{ getUnreadCount(channel.id) }}
               </span>
@@ -120,13 +120,13 @@
             <div class="dropdown dropdown-end" @click.stop>
               <button
                 tabindex="0"
-                class="btn btn-ghost btn-xs btn-circle"
+                class="metro-icon-btn metro-icon-btn--ghost h-8 w-8"
                 :aria-label="`Actions for ${channel.name}`"
               >
                 <Icon name="lucide:ellipsis-vertical" class="h-3 w-3" />
               </button>
               <ul
-                class="dropdown-content z-[1] menu w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
+                class="metro-pane metro-menu absolute right-0 top-full z-[1] mt-1 w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
               >
                 <li v-if="canEditChannel(channel)">
                   <button type="button" @click="editChannel(channel)">
@@ -197,7 +197,7 @@
                   class="flex items-center gap-1"
                 >
                   <div
-                    class="w-2 h-2 bg-success rounded-full animate-pulse"
+                    class="w-2 h-2 bg-success animate-pulse"
                     title="Connected to voice"
                   ></div>
                 </div>
@@ -208,13 +208,13 @@
                 <div class="dropdown dropdown-end" @click.stop>
                   <button
                     tabindex="0"
-                    class="btn btn-ghost btn-xs btn-circle"
+                    class="metro-icon-btn metro-icon-btn--ghost h-8 w-8"
                     :aria-label="`Actions for ${channel.name}`"
                   >
                     <Icon name="lucide:ellipsis-vertical" class="h-3 w-3" />
                   </button>
                   <ul
-                    class="dropdown-content z-[1] menu w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
+                    class="metro-pane metro-menu absolute right-0 top-full z-[1] mt-1 w-44 border border-base-300 bg-base-100 p-2 text-base-content shadow-lg"
                   >
                     <li v-if="canEditChannel(channel)">
                       <button type="button" @click="editChannel(channel)">
@@ -245,7 +245,7 @@
             >
               <div class="flex flex-col gap-1">
                 <template
-                  v-for="u in voiceStore.getDisplayUsersArray()"
+                  v-for="u in getConnectedChannelParticipants(channel)"
                   :key="u.id || u"
                 >
                   <div
@@ -259,7 +259,7 @@
                       :class="u.speaking ? 'avatar-online' : ''"
                     >
                       <ProfileAvatar
-                        class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
+                        class="h-7 w-7 overflow-hidden bg-base-300 text-[10px] font-semibold text-base-content"
                         :src="getUserAvatar(u.id || u)"
                         :name="getUserName(u.id || u)"
                       />
@@ -338,7 +338,7 @@
                         ></span>
                       </button>
                       <div
-                        class="dropdown-content z-[20] mt-1 w-56 border border-base-300 bg-base-100 p-3 text-base-content shadow-xl"
+                        class="metro-pane metro-menu absolute right-0 top-full z-[20] mt-1 w-56 border border-base-300 bg-base-100 p-3 text-base-content shadow-xl"
                       >
                         <div class="truncate text-sm font-semibold">
                           {{ getUserName(u.id || u) }}
@@ -401,7 +401,10 @@
             </div>
 
             <!-- Fallback vertical list when not connected but server has inRoom info -->
-            <div v-else-if="channel.inRoom?.length" class="pl-8 pr-2 pb-2">
+            <div
+              v-else-if="getChannelParticipants(channel).length"
+              class="pl-8 pr-2 pb-2"
+            >
               <div class="flex flex-col gap-1 text-sm text-base-content/60">
                 <template
                   v-for="u in getChannelParticipants(channel)"
@@ -415,7 +418,7 @@
                   >
                     <div class="avatar placeholder shrink-0">
                       <ProfileAvatar
-                        class="h-7 w-7 overflow-hidden rounded-full bg-base-300 text-[10px] font-semibold text-base-content"
+                        class="h-7 w-7 overflow-hidden bg-base-300 text-[10px] font-semibold text-base-content"
                         :src="getUserAvatar(u.id)"
                         :name="getUserName(u.id)"
                       />
@@ -522,7 +525,7 @@
         </label>
         <input
           id="channel-user-volume"
-          class="range range-primary mt-2 w-full"
+          class="metro-range mt-2 w-full"
           type="range"
           min="0"
           max="2"
@@ -563,7 +566,7 @@
     <div
       v-if="showCreateChannel"
       ref="createModalElement"
-      class="modal modal-open px-3 py-4 sm:px-6"
+      class="metro-modal modal-open px-3 py-4 sm:px-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-channel-title"
@@ -571,7 +574,7 @@
       @keydown.tab="trapModalFocus($event, createModalElement)"
     >
       <section
-        class="modal-box flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
+        class="metro-flyout flex max-h-[92dvh] w-full max-w-xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
       >
         <header
           class="flex items-start justify-between gap-6 border-b border-base-300 px-5 py-5 sm:px-7"
@@ -584,7 +587,7 @@
           </div>
           <button
             type="button"
-            class="btn btn-square btn-ghost shrink-0"
+            class="metro-icon-btn metro-icon-btn--ghost shrink-0"
             aria-label="Close channel creator"
             @click="closeCreateModal"
           >
@@ -606,7 +609,7 @@
                 v-model="newChannelName"
                 type="text"
                 placeholder="channel-name"
-                class="input input-bordered w-full"
+                class="metro-input w-full"
                 required
               />
             </label>
@@ -616,7 +619,7 @@
               <textarea
                 v-model="newChannelDesc"
                 placeholder="What will people use this channel for?"
-                class="textarea textarea-bordered min-h-24 w-full"
+                class="metro-input min-h-24 w-full"
                 rows="3"
               ></textarea>
               <small class="text-base-content/60">Optional</small>
@@ -635,7 +638,7 @@
                     v-model="newChannelType"
                     type="radio"
                     value="text"
-                    class="radio radio-primary"
+                    class="metro-radio"
                   />
                   <span>
                     <strong class="block">Text</strong>
@@ -650,7 +653,7 @@
                     v-model="newChannelType"
                     type="radio"
                     value="voice"
-                    class="radio radio-primary"
+                    class="metro-radio"
                   />
                   <span>
                     <strong class="block">Voice</strong>
@@ -672,7 +675,7 @@
                 type="range"
                 min="32"
                 max="96"
-                class="range range-primary w-full"
+                class="metro-range w-full"
                 step="1"
               />
               <span
@@ -690,14 +693,14 @@
           >
             <button
               type="button"
-              class="btn btn-ghost"
+              class="metro-btn metro-btn--ghost"
               @click="closeCreateModal"
             >
               Cancel
             </button>
             <button
               type="submit"
-              class="btn btn-primary"
+              class="metro-btn"
               :disabled="!newChannelName.trim()"
             >
               Create channel
@@ -710,7 +713,7 @@
     <div
       v-if="showEditChannel"
       ref="editModalElement"
-      class="modal modal-open px-3 py-4 sm:px-6"
+      class="metro-modal modal-open px-3 py-4 sm:px-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="edit-channel-title"
@@ -718,7 +721,7 @@
       @keydown.tab="trapModalFocus($event, editModalElement)"
     >
       <section
-        class="modal-box flex max-h-[min(92dvh,56rem)] w-full max-w-2xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
+        class="metro-flyout flex max-h-[min(92dvh,56rem)] w-full max-w-2xl flex-col overflow-hidden border border-base-300 bg-base-100 p-0"
       >
         <header
           class="flex shrink-0 items-start justify-between gap-6 border-b border-base-300 px-5 py-5 sm:px-7"
@@ -733,7 +736,7 @@
           </div>
           <button
             type="button"
-            class="btn btn-square btn-ghost shrink-0"
+            class="metro-icon-btn metro-icon-btn--ghost shrink-0"
             aria-label="Close channel settings"
             @click="closeEditModal"
           >
@@ -757,7 +760,7 @@
                     ref="editChannelNameInput"
                     v-model="editingChannel.name"
                     type="text"
-                    class="input input-bordered w-full"
+                    class="metro-input w-full"
                     required
                   />
                 </label>
@@ -765,7 +768,7 @@
                   <span class="text-sm font-semibold">Description</span>
                   <textarea
                     v-model="editingChannel.desc"
-                    class="textarea textarea-bordered min-h-24 w-full"
+                    class="metro-input min-h-24 w-full"
                     rows="3"
                   ></textarea>
                 </label>
@@ -795,7 +798,7 @@
                   </span>
                   <select
                     v-model="editingMessagePolicy"
-                    class="select select-bordered w-full bg-base-100"
+                    class="metro-select w-full bg-base-100"
                   >
                     <option
                       v-for="option in CHANNEL_POLICY_OPTIONS"
@@ -817,7 +820,7 @@
                   </span>
                   <select
                     v-model.number="editingSlowMode"
-                    class="select select-bordered w-full bg-base-100"
+                    class="metro-select w-full bg-base-100"
                   >
                     <option
                       v-for="option in SLOW_MODE_OPTIONS"
@@ -857,7 +860,7 @@
                 <input
                   v-model="editingChannelPolicy.hdAudio"
                   type="checkbox"
-                  class="toggle toggle-primary shrink-0"
+                  class="metro-toggle shrink-0"
                   @change="applyHdAudioRange"
                 />
               </label>
@@ -890,7 +893,7 @@
                         :id="`channel-policy-${field.key}`"
                         v-model.number="editingChannelPolicy[field.key]"
                         type="range"
-                        class="range range-primary flex-1"
+                        class="metro-range flex-1"
                         :aria-label="field.label"
                         :min="field.min"
                         :max="field.max"
@@ -898,7 +901,7 @@
                         required
                       />
                       <label
-                        class="input input-bordered flex w-28 shrink-0 items-center gap-1 px-2"
+                        class="metro-input flex w-28 shrink-0 items-center gap-1 px-2"
                       >
                         <input
                           v-model.number="editingChannelPolicy[field.key]"
@@ -959,10 +962,14 @@
           <footer
             class="flex shrink-0 flex-col-reverse gap-2 border-t border-base-300 bg-base-100 px-5 py-4 sm:flex-row sm:justify-end sm:px-7"
           >
-            <button type="button" class="btn btn-ghost" @click="closeEditModal">
+            <button
+              type="button"
+              class="metro-btn metro-btn--ghost"
+              @click="closeEditModal"
+            >
               Cancel
             </button>
-            <button type="submit" class="btn btn-primary">Save channel</button>
+            <button type="submit" class="metro-btn">Save channel</button>
           </footer>
         </form>
       </section>
@@ -1005,10 +1012,26 @@ function getUserInitials(userId) {
     .slice(0, 2);
 }
 function getChannelParticipants(channel) {
-  return (channel.inRoom || []).map((userId) => ({
-    id: String(userId),
-    ...(channel.participantStates?.[String(userId)] || {}),
-  }));
+  const currentUserId = String(authStore.getUserData()?.id || "");
+  return (channel.inRoom || [])
+    .filter((userId) => String(userId) !== currentUserId)
+    .map((userId) => ({
+      id: String(userId),
+      ...(channel.participantStates?.[String(userId)] || {}),
+    }));
+}
+function getConnectedChannelParticipants(channel) {
+  const connectedUsers = new Map(
+    voiceStore.getDisplayUsersArray().map((user) => [String(user.id), user]),
+  );
+  return (channel.inRoom || []).map((userId) => {
+    const normalizedUserId = String(userId);
+    return {
+      ...(connectedUsers.get(normalizedUserId) || {}),
+      ...(channel.participantStates?.[normalizedUserId] || {}),
+      id: normalizedUserId,
+    };
+  });
 }
 function getParticipantMediaStatusLabel(user) {
   const statuses = [];

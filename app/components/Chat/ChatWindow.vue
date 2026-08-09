@@ -10,7 +10,7 @@
             <button
               v-if="showBackButton"
               @click="$emit('back')"
-              class="btn btn-ghost btn-sm btn-circle md:hidden"
+              class="metro-icon-btn md:hidden"
               aria-label="Back to channels"
             >
               <Icon name="lucide:chevron-left" class="h-5 w-5" />
@@ -21,11 +21,11 @@
             >
               <span
                 v-if="channel?.isMedia"
-                class="badge badge-warning badge-sm rounded-xs"
-                >Voice Channel</span
+                class="metro-badge metro-badge--warning"
+                >Voice channel</span
               >
-              <span v-else class="badge badge-info badge-sm rounded-xs"
-                >Text Channel</span
+              <span v-else class="metro-badge metro-badge--info"
+                >Text channel</span
               >
               <h1
                 class="font-semibold text-md"
@@ -41,7 +41,7 @@
 
           <div class="flex items-center gap-2">
             <button
-              class="btn btn-ghost btn-sm btn-square"
+              class="metro-icon-btn"
               @click="showSearch = !showSearch"
               :title="'Search messages'"
             >
@@ -49,7 +49,7 @@
             </button>
 
             <button
-              class="btn btn-ghost btn-sm btn-square"
+              class="metro-icon-btn"
               @click="showPinned = true"
               :title="'Pinned messages'"
             >
@@ -57,7 +57,7 @@
             </button>
 
             <button
-              class="btn btn-ghost btn-sm btn-square"
+              class="metro-icon-btn"
               @click="showBookmarks = true"
               :title="'Saved messages'"
             >
@@ -66,7 +66,7 @@
 
             <div
               v-if="onlineUsers?.length > 0"
-              class="badge badge-ghost badge-sm"
+              class="text-sm text-base-content/60"
             >
               {{ onlineUsers.length }} online
             </div>
@@ -104,12 +104,12 @@
           v-if="loading && messages.length === 0"
           class="flex justify-center py-8"
         >
-          <div class="loading loading-spinner loading-lg"></div>
+          <div class="metro-spinner loading-lg"></div>
         </div>
 
         <div
           v-else-if="error && !offline && messages.length === 0"
-          class="alert alert-error"
+          class="metro-status metro-status--error"
         >
           <Icon
             name="lucide:circle-x"
@@ -119,7 +119,10 @@
             <h3 class="font-bold">Error loading messages</h3>
             <div class="text-xs">{{ error }}</div>
           </div>
-          <button class="btn btn-sm btn-outline" @click="refreshMessages">
+          <button
+            class="metro-btn metro-btn--sm btn-outline"
+            @click="refreshMessages"
+          >
             Retry
           </button>
         </div>
@@ -139,7 +142,7 @@
           <button
             v-if="hiddenMessageCount > 0"
             type="button"
-            class="btn btn-ghost btn-sm mx-auto flex"
+            class="metro-btn metro-btn--ghost btn-sm mx-auto flex"
             @click="showOlderMessages"
           >
             Show {{ Math.min(MESSAGE_WINDOW_STEP, hiddenMessageCount) }} older
@@ -171,7 +174,7 @@
         <div v-if="showScrollButton" class="fixed bottom-20 right-6 z-10">
           <button
             @click="scrollToBottom"
-            class="btn btn-circle btn-primary shadow-lg"
+            class="metro-icon-btn metro-icon-btn--primary"
             aria-label="Scroll to the latest message"
           >
             <Icon name="lucide:arrow-down" class="h-5 w-5" />
@@ -221,16 +224,16 @@
           <textarea
             ref="actionFirstControl"
             v-model="editContent"
-            class="textarea textarea-bordered mt-4 h-32 w-full"
+            class="metro-input mt-4 h-32 w-full"
             maxlength="4000"
             aria-label="Message content"
           ></textarea>
           <p v-if="actionError" class="mt-2 text-sm text-error" role="alert">
             {{ actionError }}
           </p>
-          <div class="modal-action">
+          <div class="flex justify-end gap-3">
             <button
-              class="btn btn-ghost"
+              class="metro-btn metro-btn--ghost"
               :disabled="actionPending"
               @click="closeAction"
             >
@@ -238,7 +241,7 @@
             </button>
             <button
               type="button"
-              class="btn btn-primary min-h-11"
+              class="metro-btn metro-btn--primary min-h-11"
               :disabled="actionPending || !editContent.trim()"
               @click="saveMessageEdit"
             >
@@ -275,11 +278,11 @@
           <p v-if="actionError" class="mt-2 text-sm text-error" role="alert">
             {{ actionError }}
           </p>
-          <div class="modal-action">
+          <div class="flex justify-end gap-3">
             <button
               ref="actionFirstControl"
               type="button"
-              class="btn btn-ghost min-h-11"
+              class="metro-btn metro-btn--ghost min-h-11"
               :disabled="actionPending"
               @click="closeAction"
             >
@@ -287,7 +290,7 @@
             </button>
             <button
               type="button"
-              class="btn btn-error min-h-11"
+              class="metro-btn metro-btn--error min-h-11"
               :disabled="actionPending"
               @click="confirmDeleteMessage"
             >
@@ -314,7 +317,7 @@
             Revision history
           </h3>
           <div v-if="historyLoading" class="mt-4 flex justify-center">
-            <span class="loading loading-spinner"></span>
+            <span class="metro-spinner"></span>
           </div>
           <p v-else-if="actionError" class="mt-4 text-error" role="alert">
             {{ actionError }}
@@ -341,11 +344,11 @@
               </p>
             </li>
           </ol>
-          <div class="modal-action">
+          <div class="flex justify-end gap-3">
             <button
               ref="actionFirstControl"
               type="button"
-              class="btn btn-primary min-h-11"
+              class="metro-btn metro-btn--primary min-h-11"
               @click="closeAction"
             >
               Close
@@ -380,7 +383,7 @@
         class="hidden md:flex flex-col w-[260px] min-w-[260px] border-l border-base-300 bg-base-100 h-full relative"
       >
         <button
-          class="absolute top-2 right-2 btn btn-xs btn-circle btn-ghost z-10"
+          class="absolute top-2 right-2 metro-icon-btn metro-icon-btn--ghost metro-icon-btn--sm z-10"
           @click="toggleMemberList"
           :title="'Hide member list'"
         >
@@ -397,7 +400,7 @@
 
     <button
       v-if="!showMemberList && !showThreadSidebar"
-      class="hidden md:flex fixed right-4 top-24 z-30 btn btn-circle btn-primary btn-sm shadow-lg"
+      class="hidden md:flex fixed right-4 top-24 z-30 metro-icon-btn metro-icon-btn--primary"
       @click="toggleMemberList"
       :title="'Show member list'"
     >

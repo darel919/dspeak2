@@ -51,4 +51,14 @@ describe("startup readiness", () => {
 
     assert.equal(readiness.status(), "Loading once…");
   });
+
+  it("times out when a startup task never releases", async () => {
+    const readiness = createStartupReadiness();
+    readiness.hold("Preparing secure media…");
+
+    await assert.rejects(
+      readiness.waitForIdle(undefined, { timeoutMs: 5 }),
+      /Startup readiness timed out with 1 pending task\(s\): Preparing secure media…/,
+    );
+  });
 });

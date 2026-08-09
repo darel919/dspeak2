@@ -1,8 +1,10 @@
 import { watch } from "vue";
 import { registerServiceWorker } from "../shared/service-worker-registration.js";
+import { isDesktopClient } from "../shared/desktop-capture.js";
 
 export default defineNuxtPlugin(async (nuxtApp) => {
   if (!("serviceWorker" in navigator)) return;
+  if (await isDesktopClient()) return;
 
   try {
     await registerServiceWorker();

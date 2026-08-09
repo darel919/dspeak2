@@ -18,7 +18,7 @@
             </small>
           </span>
           <select
-            class="select select-bordered w-full max-w-xs bg-base-100"
+            class="metro-select w-full max-w-xs bg-base-100"
             :value="currentPolicy"
             :disabled="saving"
             @change="setPolicy($event.target.value)"
@@ -42,7 +42,7 @@
             </small>
           </span>
           <select
-            class="select select-bordered w-full max-w-xs bg-base-100"
+            class="metro-select w-full max-w-xs bg-base-100"
             :value="currentSlowMode"
             :disabled="saving"
             @change="setSlowMode(Number($event.target.value))"
@@ -70,8 +70,12 @@
       <div
         class="flex items-center justify-end gap-3 border-t border-base-300 bg-base-200/25 px-5 py-3"
       >
-        <button class="btn btn-primary btn-sm" :disabled="saving" @click="save">
-          <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+        <button
+          class="metro-btn metro-btn--sm"
+          :disabled="saving"
+          @click="save"
+        >
+          <span v-if="saving" class="metro-spinner metro-spinner--xs"></span>
           <span v-else>Save</span>
         </button>
       </div>

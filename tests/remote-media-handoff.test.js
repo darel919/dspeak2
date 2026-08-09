@@ -209,7 +209,7 @@ test("a preparing screen feed is exposed as a paused viewer prompt", () => {
 });
 
 test("resolved participant identity replaces a staged peer-ID alias", () => {
-  const { handoff } = harness();
+  const { handoff, calls } = harness();
   const track = { id: "screen-track" };
   handoff.stage(
     {
@@ -235,6 +235,12 @@ test("resolved participant identity replaces a staged peer-ID alias", () => {
 
   assert.equal(handoff.count("p2p"), 1);
   assert.equal([...handoff.entries("p2p")][0].key, "remote:user-1:screen");
+  assert.equal(
+    calls.some(
+      (call) => call[0] === "remove" && call[1] === "remote:peer-1:screen",
+    ),
+    true,
+  );
 });
 
 test("an inactive staged track ending cannot remove the active provider feed", () => {

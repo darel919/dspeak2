@@ -1,1 +1,0 @@
-This is dSpeak, a peer to peer communcation software which you should use to hangout with your friends. dSpeak prioritize quality so no one would experience random disconnects while talking to their friends

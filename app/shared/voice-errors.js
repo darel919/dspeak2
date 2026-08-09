@@ -6,7 +6,22 @@ const USER_SAFE_VOICE_JOIN_MESSAGES = new Set([
   "Microphone permission is required to join the room",
 ]);
 
-export function voiceJoinErrorMessage(error) {
+const USER_SAFE_VOICE_ERROR_CODES = new Map([
+  [
+    "DIRECT_MEDIA_UNAVAILABLE",
+    "Direct voice connection could not be established.",
+  ],
+  [
+    "DIRECT_PARTICIPANT_LIMIT_EXCEEDED",
+    "Direct mode does not support this many participants.",
+  ],
+  [
+    "MEDIA_PROVIDER_UNAVAILABLE",
+    "Voice media providers are temporarily unavailable.",
+  ],
+]);
+
+export function voiceJoinErrorMessage(error, { includeDetails = false } = {}) {
   const message =
     typeof error === "string"
       ? error
@@ -14,7 +29,10 @@ export function voiceJoinErrorMessage(error) {
         ? error.message
         : error?.message;
 
-  return USER_SAFE_VOICE_JOIN_MESSAGES.has(message)
-    ? message
-    : VOICE_CONNECTION_ERROR_MESSAGE;
+  if (USER_SAFE_VOICE_JOIN_MESSAGES.has(message)) return message;
+  const code = error?.code || error?.cause?.code;
+  if (USER_SAFE_VOICE_ERROR_CODES.has(code))
+    return USER_SAFE_VOICE_ERROR_CODES.get(code);
+  if (includeDetails && message) return `Voice connection failed: ${message}`;
+  return VOICE_CONNECTION_ERROR_MESSAGE;
 }

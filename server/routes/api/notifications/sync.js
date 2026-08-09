@@ -1,54 +1,61 @@
-import { requireAuthenticatedUser } from "../../../utils/authentication.js";
-import { usePocketBaseAdmin } from "../../../utils/pocketbase.js";
-import { getBoundedList } from "../../../utils/pocketbase-query.js";
+import { requireAuthenticatedUser } from "../../../utils/auth.js";
+import { db } from "../../../db/client.js";
+import { notifications } from "../../../db/schema/index.js";
+import { eq, and, desc, gte, count } from "drizzle-orm";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
-  const pb = await usePocketBaseAdmin();
 
   if (getMethod(event) !== "GET") {
     throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
   }
 
-  const since = getQuery(event).since || null;
-  const limit = Math.min(Number(getQuery(event).limit) || 100, 200);
+  const query = getQuery(event);
+  const since = query.since ? new Date(String(query.since)) : null;
+  if (since && !Number.isFinite(since.getTime()))
+    throw createError({
+      statusCode: 400,
+      statusMessage: "Invalid since date",
+    });
+  const requestedLimit = Number(query.limit);
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.max(1, Math.min(requestedLimit, 200))
+    : 100;
 
-  const filterParts = [`recipient = '${userId}'`];
-  if (since) {
-    filterParts.push(`created >= '${since}'`);
-  }
+  const conditions = [eq(notifications.userId, userId)];
+  if (since) conditions.push(gte(notifications.createdAt, since));
 
-  const notifications = await getBoundedList(
-    pb,
-    "dspeak_notifications",
-    {
-      filter: filterParts.join(" && "),
-      sort: "-created",
-    },
-    limit,
-  );
-
-  const unreadResult = await pb
-    .collection("dspeak_notifications")
-    .getList(1, 1, {
-      filter: `recipient = '${userId}' && read_at = null`,
-      fields: "id",
-    })
-    .catch(() => ({ totalItems: 0 }));
+  const [notificationsList, unreadResult] = await Promise.all([
+    db
+      .select()
+      .from(notifications)
+      .where(and(...conditions))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit),
+    db
+      .select({ count: count() })
+      .from(notifications)
+      .where(
+        and(eq(notifications.userId, userId), eq(notifications.read, false)),
+      ),
+  ]);
 
   return {
-    items: notifications.map((n) => ({
-      id: n.id,
-      type: n.type || "message",
-      title: n.title || "",
-      body: n.body || "",
-      room: n.room || null,
-      channel: n.channel || null,
-      message: n.message || null,
-      actor: n.actor || null,
-      read_at: n.read_at || null,
-      created: n.created,
-    })),
-    unreadCount: unreadResult.totalItems || 0,
+    items: notificationsList.map((n) => {
+      let data = {};
+      try {
+        data = n.data ? JSON.parse(n.data) : {};
+      } catch {}
+      return {
+        id: n.id,
+        type: n.type || "message",
+        title: n.title || "",
+        body: n.body || "",
+        ...data,
+        read_at: n.read ? n.createdAt : null,
+        created: n.createdAt,
+      };
+    }),
+    unreadCount: unreadResult[0]?.count || 0,
   };
 });

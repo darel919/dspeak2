@@ -1,8 +1,41 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { usePocketBaseAdmin } from "../../../../utils/pocketbase.js";
+import { assetsRepository } from "../../../../db/repositories/assets.js";
 
 const ALBUM_ART_DIR = "data/album-art";
+
+const SONG_CACHE_TTL_MS = 3_600_000;
+const SONG_CACHE_MAX = 500;
+const songCache = new Map();
+
+function evictExpiredSongs() {
+  const now = Date.now();
+  for (const [key, entry] of songCache) {
+    if (entry.expiresAt <= now) songCache.delete(key);
+  }
+}
+
+function cacheSong(songId, song) {
+  if (songCache.size >= SONG_CACHE_MAX) evictExpiredSongs();
+  if (songCache.size >= SONG_CACHE_MAX) {
+    const oldest = songCache.keys().next().value;
+    songCache.delete(oldest);
+  }
+  songCache.set(songId, {
+    value: song,
+    expiresAt: Date.now() + SONG_CACHE_TTL_MS,
+  });
+}
+
+function getCachedSong(songId) {
+  const entry = songCache.get(songId);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    songCache.delete(songId);
+    return undefined;
+  }
+  return entry.value;
+}
 
 export default defineEventHandler(async (event) => {
   const songId = getRouterParam(event, "songId");
@@ -10,16 +43,13 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "songId is required" });
   }
 
-  const pb = await usePocketBaseAdmin();
-
-  let song;
-  try {
-    song = await pb.collection("dspeak_lib_song").getOne(songId);
-  } catch (error) {
-    if (error?.status === 404 || error?.response?.status === 404) {
-      throw createError({ statusCode: 404, statusMessage: "Song not found" });
-    }
-    throw error;
+  let song = getCachedSong(songId);
+  if (song === undefined) {
+    song = await assetsRepository.getSong(songId);
+    cacheSong(songId, song);
+  }
+  if (!song) {
+    throw createError({ statusCode: 404, statusMessage: "Song not found" });
   }
 
   const filePath = join(ALBUM_ART_DIR, `${songId}.jpg`);
@@ -30,8 +60,10 @@ export default defineEventHandler(async (event) => {
     setHeader(event, "Content-Type", "image/jpeg");
     return imageBuffer;
   } catch {
-    if (song.itunes_artwork_url) {
-      return sendRedirect(event, song.itunes_artwork_url, 302);
+    if (song.artworkKey) {
+      const { createDownloadUrl } = await import("../../../../storage/r2.js");
+      const url = await createDownloadUrl(song.artworkKey);
+      return sendRedirect(event, url, 302);
     }
     throw createError({
       statusCode: 404,

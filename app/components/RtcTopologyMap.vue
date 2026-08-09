@@ -13,7 +13,7 @@
         </div>
       </div>
       <span
-        class="badge badge-sm shrink-0 whitespace-nowrap"
+        class="metro-badge metro-badge--sm shrink-0 whitespace-nowrap"
         :class="badgeClass"
         >{{ topology.label }}</span
       >
@@ -101,6 +101,8 @@
 </template>
 
 <script setup>
+import { formatTopologyReason } from "~/shared/rtc-topology";
+
 const props = defineProps({
   topology: {
     type: Object,
@@ -116,7 +118,7 @@ const summary = computed(() => {
     props.nodes.filter((node) => node.role === "local" || node.role === "peer")
       .length;
   const reason = props.topology.reason
-    ? `, ${String(props.topology.reason).replaceAll("-", " ")}`
+    ? `, ${formatTopologyReason(props.topology.reason)}`
     : "";
   return `${props.topology.label || "Connecting"} with ${count} device${count === 1 ? "" : "s"}${reason}`;
 });
@@ -125,11 +127,11 @@ const badgeClass = computed(() => {
     props.topology.mode === "p2p-direct" ||
     props.topology.mode === "p2p-mesh"
   )
-    return "badge-success";
-  if (props.topology.mode === "sfu") return "badge-info";
+    return "metro-badge--success";
+  if (props.topology.mode === "sfu") return "metro-badge--info";
   if (props.topology.mode === "switching" || props.topology.mode === "probing")
-    return "badge-warning";
-  return "badge-ghost";
+    return "metro-badge--warning";
+  return "metro-badge--ghost";
 });
 const renderedNodes = computed(() => {
   const participants = props.nodes.filter(

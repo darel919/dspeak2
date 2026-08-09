@@ -22,7 +22,13 @@ export async function waitForVoiceTransportReady({
   timeoutMs = 15000,
   wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
 }) {
-  const deadline = now() + timeoutMs;
+  const startedAt = now();
+  const resolveTimeoutMs = () => {
+    const value =
+      typeof timeoutMs === "function" ? timeoutMs() : Number(timeoutMs);
+    return Number.isFinite(value) && value > 0 ? value : 15000;
+  };
+  let deadline = startedAt + resolveTimeoutMs();
   while (now() < deadline) {
     if (!isCurrent()) {
       const error = new Error("Voice connection was cancelled");
@@ -30,8 +36,10 @@ export async function waitForVoiceTransportReady({
       throw error;
     }
     const sessionError = getError();
-    if (sessionError) throw new Error(sessionError);
+    if (sessionError)
+      throw new Error(sessionError?.message || String(sessionError));
     if (isReady()) return;
+    deadline = Math.max(deadline, startedAt + resolveTimeoutMs());
     await wait(pollIntervalMs);
   }
   throw new Error("Call Failed: Media transport timed out");

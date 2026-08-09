@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
+ENV_FILE="$ROOT_DIR/native-media/dependencies.env"
+
+EXTERNAL_ARTIFACT_DIR="${NATIVE_MEDIA_ARTIFACT_DIR:-}"
+EXTERNAL_BUILD_DIR="${NATIVE_MEDIA_BUILD_DIR:-}"
+EXTERNAL_PROVISION_MODE="${NATIVE_MEDIA_PROVISION_MODE:-}"
+EXTERNAL_ARTIFACT_ARCHIVE="${NATIVE_MEDIA_ARTIFACT_ARCHIVE:-}"
+EXTERNAL_ARTIFACT_URL="${NATIVE_MEDIA_ARTIFACT_URL:-}"
+EXTERNAL_ARTIFACT_SHA256="${NATIVE_MEDIA_ARTIFACT_SHA256:-}"
+EXTERNAL_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
+TAURI_ARGS=("$@")
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
+[[ -n "$EXTERNAL_ARTIFACT_DIR" ]] && NATIVE_MEDIA_ARTIFACT_DIR="$EXTERNAL_ARTIFACT_DIR"
+[[ -n "$EXTERNAL_BUILD_DIR" ]] && NATIVE_MEDIA_BUILD_DIR="$EXTERNAL_BUILD_DIR"
+[[ -n "$EXTERNAL_PROVISION_MODE" ]] && NATIVE_MEDIA_PROVISION_MODE="$EXTERNAL_PROVISION_MODE"
+[[ -n "$EXTERNAL_ARTIFACT_ARCHIVE" ]] && NATIVE_MEDIA_ARTIFACT_ARCHIVE="$EXTERNAL_ARTIFACT_ARCHIVE"
+[[ -n "$EXTERNAL_ARTIFACT_URL" ]] && NATIVE_MEDIA_ARTIFACT_URL="$EXTERNAL_ARTIFACT_URL"
+[[ -n "$EXTERNAL_ARTIFACT_SHA256" ]] && NATIVE_MEDIA_ARTIFACT_SHA256="$EXTERNAL_ARTIFACT_SHA256"
+[[ -n "$EXTERNAL_TARGET_TRIPLE" ]] && NATIVE_MEDIA_TARGET_TRIPLE="$EXTERNAL_TARGET_TRIPLE"
+
+if [[ -z "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]]; then
+  for ((argument_index = 0; argument_index < ${#TAURI_ARGS[@]}; argument_index++)); do
+    case "${TAURI_ARGS[$argument_index]}" in
+      --target=*)
+        NATIVE_MEDIA_TARGET_TRIPLE="${TAURI_ARGS[$argument_index]#--target=}"
+        ;;
+      --target)
+        next_argument_index=$((argument_index + 1))
+        if ((next_argument_index < ${#TAURI_ARGS[@]})); then
+          NATIVE_MEDIA_TARGET_TRIPLE="${TAURI_ARGS[$next_argument_index]}"
+        fi
+        ;;
+    esac
+    [[ -n "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]] && break
+  done
+fi
+
+NATIVE_MEDIA_ARTIFACT_DIR="${NATIVE_MEDIA_ARTIFACT_DIR:-$ROOT_DIR/native-media/bundle}"
+NATIVE_MEDIA_BUILD_DIR="${NATIVE_MEDIA_BUILD_DIR:-$ROOT_DIR/native-media/build}"
+
+if [[ "$NATIVE_MEDIA_ARTIFACT_DIR" != /* ]]; then
+  NATIVE_MEDIA_ARTIFACT_DIR="$PROJECT_ROOT/$NATIVE_MEDIA_ARTIFACT_DIR"
+fi
+if [[ "$NATIVE_MEDIA_BUILD_DIR" != /* ]]; then
+  NATIVE_MEDIA_BUILD_DIR="$PROJECT_ROOT/$NATIVE_MEDIA_BUILD_DIR"
+fi
+export NATIVE_MEDIA_ARTIFACT_DIR NATIVE_MEDIA_BUILD_DIR
+NATIVE_MEDIA_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
+export NATIVE_MEDIA_TARGET_TRIPLE
+
+bash "$ROOT_DIR/scripts/provision-native-media.sh"
+
+LOCAL_MEDIA_BUILD="$ROOT_DIR/native-media/libdspeak_media/build"
+LOCAL_MEDIA_LIBRARY="$LOCAL_MEDIA_BUILD/libdspeak_media.a"
+ARTIFACT_MEDIA_LIBRARY="$NATIVE_MEDIA_ARTIFACT_DIR/lib/libdspeak_media.a"
+if [[ -f "$LOCAL_MEDIA_LIBRARY" && -f "$ARTIFACT_MEDIA_LIBRARY" ]] && \
+  find "$ROOT_DIR/native-media/libdspeak_media" -type f \
+    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
+    -newer "$ARTIFACT_MEDIA_LIBRARY" -print -quit | grep -q .; then
+  cmake --build "$LOCAL_MEDIA_BUILD" -j2
+  cp "$LOCAL_MEDIA_LIBRARY" "$ARTIFACT_MEDIA_LIBRARY"
+fi
+
+cd "$ROOT_DIR"
+exec npx tauri dev "$@"

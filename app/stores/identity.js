@@ -9,6 +9,7 @@ export const useIdentityStore = defineStore("identity", () => {
   const loadedForUserId = ref(null);
   const config = useRuntimeConfig();
   const authStore = useAuthStore();
+  let nicknamesRequest = null;
 
   function request(path, options = {}) {
     const userId = authStore.getUserData()?.id;
@@ -21,6 +22,16 @@ export const useIdentityStore = defineStore("identity", () => {
   }
 
   async function loadNicknames() {
+    if (nicknamesRequest) return nicknamesRequest;
+    nicknamesRequest = loadIdentity();
+    try {
+      return await nicknamesRequest;
+    } finally {
+      nicknamesRequest = null;
+    }
+  }
+
+  async function loadIdentity() {
     const userId = authStore.getUserData()?.id;
     if (!userId) {
       nicknames.value = {};
@@ -69,6 +80,12 @@ export const useIdentityStore = defineStore("identity", () => {
     return nicknameFor(user?.id) || publicDisplayName(profileFor(user));
   }
 
+  function clearIdentity() {
+    nicknames.value = {};
+    publicProfiles.value = new Map();
+    loadedForUserId.value = null;
+  }
+
   return {
     nicknames,
     loadedForUserId,
@@ -78,5 +95,6 @@ export const useIdentityStore = defineStore("identity", () => {
     upsertPublicProfile,
     profileFor,
     displayName,
+    clearIdentity,
   };
 });

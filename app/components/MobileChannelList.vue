@@ -4,7 +4,7 @@
     <div class="border-b border-base-300 p-4">
       <div class="flex items-center gap-3">
         <button
-          class="btn btn-square btn-ghost min-h-11 min-w-11"
+          class="metro-icon-btn metro-icon-btn--ghost"
           aria-label="Back to rooms"
           @click="$emit('back')"
         >
@@ -61,12 +61,12 @@
 
             <!-- Unread indicator or online count -->
             <div class="flex-shrink-0">
-              <div
+              <span
                 v-if="channel.inRoom?.length"
-                class="badge badge-ghost badge-sm"
+                class="metro-badge metro-badge--ghost"
               >
                 {{ channel.inRoom.length }}
-              </div>
+              </span>
             </div>
           </button>
         </div>
@@ -112,13 +112,13 @@
 
             <!-- Voice channel specific indicators -->
             <div class="flex-shrink-0">
-              <div
+              <span
                 v-if="channel.inRoom?.length"
-                class="badge badge-success badge-sm"
+                class="metro-badge metro-badge--success"
               >
                 <Icon name="lucide:volume-2" class="size-3" />
                 {{ channel.inRoom.length }}
-              </div>
+              </span>
             </div>
           </button>
         </div>

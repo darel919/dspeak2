@@ -22,7 +22,7 @@
 
       <!-- Error State -->
       <div v-else-if="roomsStore.error" class="p-4">
-        <div class="alert alert-error alert-sm">
+        <div class="metro-status metro-status--error">
           <Icon
             name="lucide:circle-x"
             class="stroke-current shrink-0 h-6 w-6"
@@ -44,18 +44,18 @@
           ]"
           @click="selectRoom(room)"
         >
-          <!-- Room Avatar -->
+          <!-- Room Avatar (square, Metro) -->
           <div class="avatar placeholder">
             <template v-if="getRoomPictureUrl(room)">
               <img
                 :src="getRoomPictureUrl(room)"
-                class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] rounded-full object-cover"
+                class="w-12 h-12 min-w-[3rem] min-h-[3rem] max-w-[3rem] max-h-[3rem] object-cover"
                 :alt="room.name"
               />
             </template>
             <template v-else>
               <div
-                class="w-12 h-12 rounded-full text-sm font-semibold"
+                class="w-12 h-12 text-sm font-semibold"
                 :class="[
                   selectedRoomId === room.id
                     ? 'bg-primary-content text-primary'
@@ -83,10 +83,7 @@
           </div>
 
           <!-- Activity indicator -->
-          <div
-            v-if="hasActivity(room)"
-            class="w-3 h-3 bg-accent rounded-full"
-          ></div>
+          <div v-if="hasActivity(room)" class="w-3 h-3 bg-accent"></div>
         </button>
       </div>
 
@@ -103,15 +100,12 @@
           Join or create a room to get started
         </p>
         <div class="space-y-2">
-          <button
-            @click="showJoinModal = true"
-            class="btn btn-sm btn-primary w-full"
-          >
+          <button @click="showJoinModal = true" class="metro-btn w-full">
             Join Room
           </button>
           <button
             @click="showCreateModal = true"
-            class="btn btn-sm btn-outline w-full"
+            class="metro-btn metro-btn--ghost w-full"
           >
             Create Room
           </button>
@@ -124,7 +118,7 @@
       <div class="flex gap-2">
         <button
           @click="showJoinModal = true"
-          class="btn btn-sm btn-ghost flex-1"
+          class="metro-btn metro-btn--ghost flex-1"
           title="Join room"
         >
           <Icon name="lucide:link" class="h-4 w-4" />
@@ -132,7 +126,7 @@
         </button>
         <button
           @click="showCreateModal = true"
-          class="btn btn-sm btn-ghost flex-1"
+          class="metro-btn metro-btn--ghost flex-1"
           title="Create room"
         >
           <Icon name="lucide:plus" class="h-4 w-4" />
@@ -144,74 +138,71 @@
     <!-- Join Room Modal -->
     <div
       v-if="showJoinModal"
-      class="modal modal-open"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="mobile-join-room-title"
     >
-      <div class="modal-box">
+      <div class="metro-flyout w-full max-w-md p-6">
         <h3 id="mobile-join-room-title" class="font-bold text-lg mb-4">
           Join Room
         </h3>
         <p class="text-base-content/70 mb-4">
           Paste an invite link to join a room.
         </p>
-        <div class="form-control mb-4">
+        <div class="mb-4">
           <input
             v-model="joinInput"
             ref="joinInputRef"
             type="text"
             aria-label="Invite link"
             placeholder="Invite link..."
-            class="input input-bordered w-full"
+            class="metro-input w-full"
             @keyup.enter="handleJoinSubmit"
           />
         </div>
-        <div v-if="joinError" class="alert alert-error alert-sm mb-4">
+        <div v-if="joinError" class="metro-status metro-status--error mb-4">
           <Icon
             name="lucide:circle-x"
             class="stroke-current shrink-0 h-6 w-6"
           />
           <span>{{ joinError }}</span>
         </div>
-        <div class="modal-action">
+        <div class="flex justify-end gap-2">
           <button
-            class="btn btn-ghost"
+            class="metro-btn metro-btn--ghost"
             @click="closeJoinModal"
             :disabled="joiningRoom"
           >
             Cancel
           </button>
           <button
-            class="btn btn-primary"
+            class="metro-btn"
             @click="handleJoinSubmit"
             :disabled="!joinInput.trim() || joiningRoom"
-            :class="{ loading: joiningRoom }"
+            :class="{ 'is-loading': joiningRoom }"
           >
             {{ joiningRoom ? "Joining..." : "Join Room" }}
           </button>
         </div>
       </div>
-      <div class="modal-backdrop" @click="closeJoinModal"></div>
     </div>
 
     <!-- Create Room Modal -->
     <div
       v-if="showCreateModal"
-      class="modal modal-open"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="mobile-create-room-title"
     >
-      <div class="modal-box">
+      <div class="metro-flyout w-full max-w-md p-6">
         <h3 id="mobile-create-room-title" class="font-bold text-lg mb-4">
           Create Room
         </h3>
-        <div class="form-control mb-4">
-          <label class="label">
-            <span class="label-text"
-              >Room Name <span class="text-error">*</span></span
-            >
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">
+            Room Name <span class="text-error">*</span>
           </label>
           <input
             v-model="createName"
@@ -219,49 +210,46 @@
             type="text"
             aria-label="Room name"
             placeholder="Enter room name..."
-            class="input input-bordered w-full"
+            class="metro-input w-full"
             @keyup.enter="handleCreateSubmit"
           />
         </div>
-        <div class="form-control mb-4">
-          <label class="label">
-            <span class="label-text">Description</span>
-          </label>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">Description</label>
           <input
             v-model="createDesc"
             type="text"
             aria-label="Room description"
             placeholder="Optional description..."
-            class="input input-bordered w-full"
+            class="metro-input w-full"
             @keyup.enter="handleCreateSubmit"
           />
         </div>
-        <div v-if="createError" class="alert alert-error alert-sm mb-4">
+        <div v-if="createError" class="metro-status metro-status--error mb-4">
           <Icon
             name="lucide:circle-x"
             class="stroke-current shrink-0 h-6 w-6"
           />
           <span>{{ createError }}</span>
         </div>
-        <div class="modal-action">
+        <div class="flex justify-end gap-2">
           <button
-            class="btn btn-ghost"
+            class="metro-btn metro-btn--ghost"
             @click="closeCreateModal"
             :disabled="creatingRoom"
           >
             Cancel
           </button>
           <button
-            class="btn btn-primary"
+            class="metro-btn"
             @click="handleCreateSubmit"
             :disabled="!createName.trim() || creatingRoom"
-            :class="{ loading: creatingRoom }"
+            :class="{ 'is-loading': creatingRoom }"
           >
             {{ creatingRoom ? "Creating..." : "Create Room" }}
           </button>
         </div>
       </div>
-      <div class="modal-backdrop" @click="closeCreateModal"></div>
     </div>
   </div>
 </template>

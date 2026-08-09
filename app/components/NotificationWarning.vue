@@ -16,10 +16,16 @@
     </div>
 
     <div class="flex-none">
-      <button @click="openBrowserSettings" class="btn btn-sm btn-error">
+      <button
+        @click="openBrowserSettings"
+        class="metro-btn metro-btn--sm btn-error"
+      >
         Help
       </button>
-      <button @click="dismissWarning" class="btn btn-sm btn-ghost ml-2">
+      <button
+        @click="dismissWarning"
+        class="metro-btn metro-btn--sm btn-ghost ml-2"
+      >
         Dismiss
       </button>
     </div>

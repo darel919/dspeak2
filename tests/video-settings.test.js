@@ -15,6 +15,7 @@ import {
   inspectH264ProfileCapabilities,
   normalizeVideoSettings,
   rankVideoCodecsByHardwarePreference,
+  resolveNativeCaptureVideoSettings,
   sortP2pVideoCodecPreferences,
   selectHardwarePreferredVideoCodec,
   selectPowerEfficientVideoCodec,
@@ -23,6 +24,30 @@ import {
   VIDEO_FRAME_RATE_MIN,
   VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN,
 } from "../app/shared/video-settings.js";
+
+test("native capture settings preserve the selected source dimensions", () => {
+  assert.deepEqual(
+    resolveNativeCaptureVideoSettings(
+      {
+        bounds: { width: 2560, height: 1440 },
+        video: { resolution: "original", frameRate: 60 },
+      },
+      {
+        frameRate: 30,
+        qualityPriority: "resolution",
+        maxBitrate: 2400000,
+      },
+    ),
+    {
+      resolution: "original",
+      width: 2560,
+      height: 1440,
+      frameRate: 60,
+      qualityPriority: "resolution",
+      maxBitrate: 2400000,
+    },
+  );
+});
 
 test("video frame rate is normalized to the nearest supported preset", () => {
   assert.equal(
@@ -107,6 +132,17 @@ test("SFU screen-share production is capped at 4.5 Mbps, 1080p, and 60 FPS", () 
   assert.equal(options.degradationPreference, "maintain-framerate");
 });
 
+test("room screen bitrate limits the initial SFU video encoding", () => {
+  const options = buildVideoProduceOptions({
+    width: 1920,
+    height: 1080,
+    frameRate: 60,
+    screen: true,
+    maxBitrate: 1_200_001,
+  });
+  assert.equal(options.encodings[0].maxBitrate, 1_200_001);
+});
+
 test("P2P video uses the resolution and frame-rate bitrate ceiling at full capture resolution", () => {
   const options = buildP2pVideoSenderOptions({
     width: 1920,
@@ -118,6 +154,17 @@ test("P2P video uses the resolution and frame-rate bitrate ceiling at full captu
   assert.equal(options.encodings[0].maxFramerate, 60);
   assert.equal(options.encodings[0].scaleResolutionDownBy, 1);
   assert.equal(options.degradationPreference, "maintain-framerate");
+});
+
+test("room screen bitrate limits the initial P2P video encoding", () => {
+  const options = buildP2pVideoSenderOptions({
+    width: 1920,
+    height: 1080,
+    frameRate: 60,
+    screen: true,
+    maxBitrate: 1_200_001,
+  });
+  assert.equal(options.encodings[0].maxBitrate, 1_200_001);
 });
 
 test("P2P screen-share bitrate falls with the configured frame rate", () => {

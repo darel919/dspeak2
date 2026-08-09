@@ -2,7 +2,7 @@
   <section class="min-h-screen-minus-navbar bg-base-100 px-6 py-12 lg:px-14">
     <div class="mx-auto max-w-5xl">
       <button
-        class="btn btn-ghost mb-10 px-0"
+        class="metro-btn metro-btn--ghost mb-10 px-0"
         type="button"
         @click="router.back()"
       >
@@ -31,7 +31,7 @@
             <span class="mb-2 block text-sm font-semibold">Room name</span>
             <input
               v-model="roomName"
-              class="input input-bordered w-full bg-base-100"
+              class="metro-input w-full bg-base-100"
               required
               maxlength="80"
               placeholder="Design team"
@@ -46,7 +46,7 @@
             >
             <textarea
               v-model="roomDesc"
-              class="textarea textarea-bordered min-h-28 w-full bg-base-100"
+              class="metro-input min-h-28 w-full bg-base-100"
               maxlength="500"
               placeholder="What is this room for?"
             ></textarea>
@@ -58,11 +58,11 @@
           >
             {{ error }}
           </p>
-          <button class="btn btn-primary mt-7 w-full" :disabled="loading">
-            <span
-              v-if="loading"
-              class="loading loading-spinner loading-xs"
-            ></span>
+          <button
+            class="metro-btn metro-btn--primary mt-7 w-full"
+            :disabled="loading"
+          >
+            <span v-if="loading" class="metro-spinner metro-spinner--xs"></span>
             {{ loading ? "Creating room…" : "Create room" }}
           </button>
         </form>

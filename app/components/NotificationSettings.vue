@@ -13,11 +13,7 @@
           ><small
             >Choose which room messages create inbox notifications.</small
           ></span
-        ><select
-          v-model="draft.mode"
-          class="select select-bordered"
-          @change="save"
-        >
+        ><select v-model="draft.mode" class="metro-select" @change="save">
           <option value="all">All messages</option>
           <option value="mentions">Mentions only</option>
           <option value="muted">Muted</option>
@@ -32,7 +28,7 @@
         ><input
           v-model="draft.sound"
           type="checkbox"
-          class="toggle toggle-primary"
+          class="metro-toggle"
           @change="save"
       /></label>
       <label class="settings-toggle-row"
@@ -44,7 +40,7 @@
         ><input
           v-model="draft.previews"
           type="checkbox"
-          class="toggle toggle-primary"
+          class="metro-toggle"
           @change="save"
       /></label>
     </section>
@@ -60,7 +56,7 @@
       <div class="flex flex-wrap gap-2 p-5">
         <button
           v-if="!store.isSubscribed"
-          class="btn btn-primary"
+          class="metro-btn"
           :disabled="store.loading || !store.pushSupported"
           @click="enablePush"
         >
@@ -68,14 +64,14 @@
         </button>
         <button
           v-else
-          class="btn btn-error"
+          class="metro-btn metro-btn--error"
           :disabled="store.loading"
           @click="disablePush"
         >
           Disable push
         </button>
         <button
-          class="btn btn-outline"
+          class="metro-btn metro-btn--secondary"
           :disabled="store.permission !== 'granted'"
           @click="testPush"
         >
@@ -104,7 +100,7 @@
         ><span><strong>Behavior</strong></span
         ><select
           v-model="attenuation.mode"
-          class="select select-bordered"
+          class="metro-select"
           @change="saveAttenuation"
         >
           <option value="room">Use room default</option>
@@ -121,7 +117,7 @@
           type="range"
           min="0"
           max="100"
-          class="range range-primary max-w-xs"
+          class="metro-range max-w-xs"
           @change="saveAttenuation"
       /></label>
     </section>

@@ -4,6 +4,7 @@ import {
   addressFamily,
   buildTopologyGraph,
   classifyTopology,
+  formatTopologyReason,
   isP2pParticipantCount,
 } from "../app/shared/rtc-topology.js";
 import {
@@ -20,13 +21,23 @@ import {
   collectPeerConnectionStats,
   collectVideoRtpStats,
 } from "../app/shared/rtc-media-stats.js";
-import { validP2pSignal } from "../server/utils/p2p-signal.js";
 
 test("P2P participant limit accepts only two through four devices", () => {
   assert.equal(isP2pParticipantCount(1), false);
   assert.equal(isP2pParticipantCount(2), true);
   assert.equal(isP2pParticipantCount(4), true);
   assert.equal(isP2pParticipantCount(5), false);
+});
+
+test("topology reasons explain recovered providers instead of exposing cooldown state", () => {
+  assert.equal(
+    formatTopologyReason("provider-cooldown-expired"),
+    "Recovered after provider cooldown",
+  );
+  assert.equal(
+    formatTopologyReason("provider-transition"),
+    "Active media path",
+  );
 });
 
 test("topology classification distinguishes direct, mesh, and IPv4 SFU", () => {
@@ -217,32 +228,6 @@ test("P2P remote feed identity remains stable across replacement tracks", () => 
   assert.notEqual(
     p2pRemoteFeedKey("peer-1", "camera"),
     p2pRemoteFeedKey("peer-1", "screen"),
-  );
-});
-
-test("P2P signaling accepts explicit source removal and rejects unknown sources", () => {
-  assert.equal(validP2pSignal({ sourceRemoved: { source: "camera" } }), true);
-  assert.equal(
-    validP2pSignal({ sourceRemoved: { source: "broadcast-audio" } }),
-    true,
-  );
-  assert.equal(validP2pSignal({ sourceRemoved: { source: "unknown" } }), false);
-  assert.equal(validP2pSignal({ sourceRestored: { source: "camera" } }), true);
-  assert.equal(
-    validP2pSignal({ sourceRestored: { source: "unknown" } }),
-    false,
-  );
-  assert.equal(
-    validP2pSignal({
-      sourceReceiving: { source: "screen", receiving: false },
-    }),
-    true,
-  );
-  assert.equal(
-    validP2pSignal({
-      sourceReceiving: { source: "screen", receiving: "false" },
-    }),
-    false,
   );
 });
 

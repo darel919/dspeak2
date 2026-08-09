@@ -1,219 +1,44 @@
-import { P2P_QUALIFICATION_TIMEOUT_MS } from "./rtc-topology.js";
 import {
   collectPeerConnectionDiagnosticStats,
   collectPeerConnectionStats,
 } from "./rtc-media-stats.js";
 import { applyRtpSenderSettings } from "./rtp-sender-settings.js";
-import { sortP2pVideoCodecPreferences } from "./video-settings.js";
-
-export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
-export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 8000;
-export const P2P_DISCONNECT_GRACE_MS = 8000;
-export const P2P_ICE_RESTART_TIMEOUT_MS = 12000;
-
-export function p2pActiveLivenessTimeoutMs(connectionCount) {
-  return Math.max(
-    10000,
-    P2P_ACTIVE_HEALTH_TIMEOUT_MS -
-      Math.max(0, Number(connectionCount) - 1) * 5000,
-  );
-}
-
-export function isP2pLivenessExpired(lastProgressAt, now, timeoutMs) {
-  return (
-    Number.isFinite(lastProgressAt) &&
-    Number.isFinite(now) &&
-    now - lastProgressAt >= timeoutMs
-  );
-}
-
-export function requiresP2pLiveness(mode, readyReported) {
-  return mode === "p2p" || (mode === "probing" && readyReported);
-}
-
-export function countEnabledP2pSources(sources, receiving = new Map()) {
-  return [...(sources || [])].filter(
-    (source) => receiving.get(String(source)) !== false,
-  ).length;
-}
-
-export function p2pRemoteFeedKey(peerId, source) {
-  return `p2p:${String(peerId)}:${String(source || "media")}`;
-}
-
-export function applyOpusAudioProfile(sdp, stereo = true) {
-  if (!sdp) return sdp;
-  return String(sdp)
-    .split(/(?=m=)/)
-    .map((section) => {
-      if (!section.startsWith("m=audio ")) return section;
-      const match = section.match(/^a=rtpmap:(\d+) opus\/48000\/2\r?$/im);
-      if (!match) return section;
-      const payloadType = match[1];
-      const required = {
-        stereo: stereo ? "1" : "0",
-        "sprop-stereo": stereo ? "1" : "0",
-        useinbandfec: "1",
-        usedtx: "0",
-        minptime: "10",
-      };
-      const fmtpPattern = new RegExp(
-        `^a=fmtp:${payloadType} ([^\\r\\n]*)`,
-        "im",
-      );
-      const fmtp = section.match(fmtpPattern);
-      const parameters = new Map(
-        (fmtp?.[1] || "")
-          .split(";")
-          .filter(Boolean)
-          .map((value) => {
-            const [key, ...rest] = value.trim().split("=");
-            return [key, rest.join("=")];
-          }),
-      );
-      for (const [key, value] of Object.entries(required))
-        parameters.set(key, value);
-      const nextFmtp = `a=fmtp:${payloadType} ${[...parameters].map(([key, value]) => `${key}=${value}`).join(";")}`;
-      section = fmtp
-        ? section.replace(fmtpPattern, nextFmtp)
-        : section.replace(match[0], `${match[0]}\r\n${nextFmtp}`);
-      return /^a=ptime:/im.test(section)
-        ? section.replace(/^a=ptime:[^\r\n]*/im, "a=ptime:10")
-        : `${section.replace(/\s*$/, "")}\r\na=ptime:10\r\n`;
-    })
-    .join("");
-}
-
-export function applyP2pVideoCodecPreferences(pc) {
-  const capabilities =
-    globalThis.RTCRtpReceiver?.getCapabilities?.("video")?.codecs ||
-    globalThis.RTCRtpSender?.getCapabilities?.("video")?.codecs;
-  if (!capabilities?.length) return false;
-  const preferences = sortP2pVideoCodecPreferences(capabilities);
-  let applied = false;
-  for (const transceiver of pc.getTransceivers?.() || []) {
-    const kind =
-      transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind;
-    if (kind !== "video" || !transceiver.setCodecPreferences) continue;
-    transceiver.setCodecPreferences(preferences);
-    applied = true;
-  }
-  return applied;
-}
-
-function directIceServers(servers) {
-  return (Array.isArray(servers) ? servers : []).flatMap((server) => {
-    const urls = (
-      Array.isArray(server.urls) ? server.urls : [server.urls]
-    ).filter(
-      (url) => typeof url === "string" && url.toLowerCase().startsWith("stun:"),
-    );
-    if (!urls.length) return [];
-    return [{ urls: Array.isArray(server.urls) ? urls : urls[0] }];
-  });
-}
-
-async function selectedPairSnapshot(pc, suppliedReport = null) {
-  const report = suppliedReport || (await pc.getStats());
-  const byId = new Map();
-  report.forEach((stat) => byId.set(stat.id, stat));
-  let pair = null;
-  let transport = null;
-  report.forEach((stat) => {
-    if (stat.type === "transport" && stat.selectedCandidatePairId)
-      transport = stat;
-  });
-  if (transport) pair = byId.get(transport.selectedCandidatePairId) || null;
-  if (!pair) {
-    report.forEach((stat) => {
-      if (
-        stat.type === "candidate-pair" &&
-        stat.state === "succeeded" &&
-        stat.nominated
-      )
-        pair = stat;
-    });
-  }
-  if (!pair) return null;
-  const local = byId.get(pair.localCandidateId) || null;
-  const remote = byId.get(pair.remoteCandidateId) || null;
-  return {
-    id: pair.id,
-    state: pair.state,
-    nominated: !!pair.nominated,
-    currentRoundTripTime: pair.currentRoundTripTime ?? null,
-    availableOutgoingBitrate: pair.availableOutgoingBitrate ?? null,
-    bytesSent: pair.bytesSent ?? null,
-    bytesReceived: pair.bytesReceived ?? null,
-    packetsSent: pair.packetsSent ?? null,
-    packetsReceived: pair.packetsReceived ?? null,
-    local: local
-      ? {
-          address: local.address || local.ip || null,
-          protocol: local.protocol || null,
-          candidateType: local.candidateType || null,
-        }
-      : null,
-    remote: remote
-      ? {
-          address: remote.address || remote.ip || null,
-          protocol: remote.protocol || null,
-          candidateType: remote.candidateType || null,
-        }
-      : null,
-  };
-}
-
-async function hasRequiredMediaFlow(pc, outboundCount, inboundCount) {
-  if (outboundCount === 0 && inboundCount === 0) return true;
-  const flow = await mediaFlowSnapshot(pc);
-  return (
-    flow.outboundCount >= outboundCount && flow.inboundCount >= inboundCount
-  );
-}
-
-async function mediaFlowSnapshot(pc, suppliedReport = null) {
-  const report = suppliedReport || (await pc.getStats());
-  let flowingOutbound = 0;
-  let flowingInbound = 0;
-  let outboundBytes = 0;
-  let inboundBytes = 0;
-  report.forEach((stat) => {
-    if (
-      stat.type === "outbound-rtp" &&
-      !stat.isRemote &&
-      Number(stat.bytesSent) > 0
-    ) {
-      flowingOutbound += 1;
-      outboundBytes += Number(stat.bytesSent);
-    }
-    if (
-      stat.type === "inbound-rtp" &&
-      !stat.isRemote &&
-      Number(stat.bytesReceived) > 0
-    ) {
-      flowingInbound += 1;
-      inboundBytes += Number(stat.bytesReceived);
-    }
-  });
-  return {
-    outboundCount: flowingOutbound,
-    inboundCount: flowingInbound,
-    outboundBytes,
-    inboundBytes,
-  };
-}
-
-function isViableP2pPair(pair) {
-  return (
-    !!pair &&
-    pair.state === "succeeded" &&
-    !!pair.local?.candidateType &&
-    !!pair.remote?.candidateType &&
-    pair.local.candidateType !== "relay" &&
-    pair.remote.candidateType !== "relay"
-  );
-}
+import {
+  P2P_ACTIVE_HEALTH_TIMEOUT_MS,
+  P2P_ICE_RESTART_TIMEOUT_MS,
+  P2P_DISCONNECT_GRACE_MS,
+  P2P_STABILITY_LIVENESS_TIMEOUT_MS,
+  applyOpusAudioProfile,
+  applyP2pVideoCodecPreferences,
+  countEnabledP2pSources,
+  directIceServers,
+  hasRequiredMediaFlow,
+  isP2pLivenessExpired,
+  isViableP2pPair,
+  mediaFlowSnapshot,
+  p2pActiveLivenessTimeoutMs,
+  p2pRemoteFeedKey,
+  requiresP2pLiveness,
+  selectedPairSnapshot,
+} from "./native-p2p-common.js";
+import {
+  applyPeerSignal,
+  enqueuePeerSignaling,
+  receiveSignal,
+  retryPeerNegotiation,
+  schedulePeerNegotiation,
+  sendControl,
+  signal,
+} from "./native-p2p-signaling.js";
+import {
+  bindHealthChannel,
+  checkQualification,
+  handleConnectionState,
+  handleIceState,
+  startHealthChecks,
+  startQualificationTimeout,
+  stopHealthChecks,
+} from "./native-p2p-health.js";
 
 export class NativeP2pMesh {
   constructor({
@@ -401,307 +226,44 @@ export class NativeP2pMesh {
     return state;
   }
 
-  signal(targetPeerId, signal) {
-    return this.sendControl(
-      { targetPeerId, epoch: this.epoch, signal },
-      "signaling-unavailable",
-    );
+  signal(targetPeerId, signalPayload) {
+    return signal(this, targetPeerId, signalPayload);
   }
 
   sendControl(payload, failureReason = "signaling-unavailable") {
-    try {
-      const delivered = this.sendSignal(payload);
-      if (delivered === false) this.fail(failureReason);
-      return delivered !== false;
-    } catch (error) {
-      this.fail("signaling-send-failed", error);
-      return false;
-    }
+    return sendControl(this, payload, failureReason);
   }
 
   enqueuePeerSignaling(state, operation, phase = "signal") {
-    const previous = state.signalingOperation || Promise.resolve();
-    const current = previous
-      .catch(() => {})
-      .then(async () => {
-        state.signalingPhase = phase;
-        try {
-          return await operation();
-        } finally {
-          if (state.signalingPhase === phase) state.signalingPhase = null;
-        }
-      });
-    state.signalingOperation = current;
-    return current.finally(() => {
-      if (state.signalingOperation === current) state.signalingOperation = null;
-    });
+    return enqueuePeerSignaling(this, state, operation, phase);
   }
 
   schedulePeerNegotiation(state) {
-    state.negotiationRequested = true;
-    clearTimeout(state.negotiationTimer);
-    state.negotiationTimer = null;
-    return this.enqueuePeerSignaling(
-      state,
-      async () => {
-        if (!state.negotiationRequested) return false;
-        if (state.pc.signalingState !== "stable") {
-          this.retryPeerNegotiation(state);
-          return false;
-        }
-        state.negotiationRequested = false;
-        state.makingOffer = true;
-        try {
-          applyP2pVideoCodecPreferences(state.pc);
-          const offer = await state.pc.createOffer();
-          await state.pc.setLocalDescription({
-            type: offer.type,
-            sdp: applyOpusAudioProfile(offer.sdp, this.usesStereoAudio()),
-          });
-          this.signal(state.peerId, { description: state.pc.localDescription });
-          await this.configureStateSenders(state);
-          return true;
-        } finally {
-          state.makingOffer = false;
-        }
-      },
-      "negotiation",
-    ).catch((error) => {
-      this.fail("negotiation-failed", error);
-      return false;
-    });
+    return schedulePeerNegotiation(this, state);
   }
 
   retryPeerNegotiation(state) {
-    if (state.negotiationTimer || !state.negotiationRequested) return;
-    state.negotiationTimer = setTimeout(() => {
-      state.negotiationTimer = null;
-      if (state.negotiationRequested && state.pc.connectionState !== "closed")
-        this.schedulePeerNegotiation(state);
-    }, 50);
+    return retryPeerNegotiation(this, state);
   }
 
-  async receiveSignal({ fromPeerId, epoch, signal }) {
-    if (Number(epoch) !== this.epoch || !signal) return;
-    const state =
-      this.connections.get(String(fromPeerId)) ||
-      this.ensureConnection(String(fromPeerId), String(fromPeerId));
-    return this.enqueuePeerSignaling(
-      state,
-      () => this.applyPeerSignal(state, signal),
-      `remote-${Object.keys(signal)[0] || "signal"}`,
-    ).finally(() => {
-      if (state.negotiationRequested && state.pc.signalingState === "stable")
-        this.schedulePeerNegotiation(state);
-    });
+  async receiveSignal(payload) {
+    return receiveSignal(this, payload);
   }
 
   async applyPeerSignal(state, signal) {
-    const pc = state.pc;
-    if (signal.source) {
-      const source = String(signal.source.source || "");
-      const trackId = String(signal.source.trackId || "");
-      this.remoteSources.set(`${state.peerId}:${trackId}`, source);
-      let current = [...state.remoteTracks.values()].find(
-        (entry) => String(entry.track?.id) === trackId,
-      );
-      if (!current) {
-        const expectedKind =
-          source === "camera" || source === "screen" ? "video" : "audio";
-        const genericTracks = [...state.remoteTracks.values()].filter(
-          (entry) =>
-            entry.source === expectedKind && entry.track?.kind === expectedKind,
-        );
-        if (genericTracks.length === 1) current = genericTracks[0];
-      }
-      if (current && current.source !== source) {
-        state.remoteTracks.delete(current.source);
-        this.onRemoteTrackEnded(current);
-        current.source = source;
-        current.key = p2pRemoteFeedKey(state.peerId, source);
-        state.remoteTracks.set(source, current);
-        this.onRemoteTrack(current);
-      }
-      return;
-    }
-    if (signal.sourceRemoved) {
-      const source = String(signal.sourceRemoved.source || "");
-      state.retiredRemoteTracks ||= new Map();
-      for (const [key, mappedSource] of this.remoteSources) {
-        if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
-          this.remoteSources.delete(key);
-      }
-      const current = state.remoteTracks.get(source);
-      state.remoteTracks.delete(source);
-      if (current) state.retiredRemoteTracks.set(source, current);
-      this.onRemoteTrackEnded(
-        current || {
-          key: p2pRemoteFeedKey(state.peerId, source),
-          peerId: state.peerId,
-          userId: state.userId,
-          source,
-        },
-      );
-      return;
-    }
-    if (signal.sourceRestored) {
-      const source = String(signal.sourceRestored.source || "");
-      state.retiredRemoteTracks ||= new Map();
-      const entry =
-        state.remoteTracks.get(source) || state.retiredRemoteTracks.get(source);
-      if (entry?.track.readyState === "live") {
-        state.retiredRemoteTracks.delete(source);
-        state.remoteTracks.set(source, entry);
-        this.onRemoteTrack(entry);
-      }
-      return;
-    }
-    if (signal.sourceReceiving) {
-      const source = String(signal.sourceReceiving.source || "");
-      await this.setSenderReceiving(
-        state,
-        source,
-        signal.sourceReceiving.receiving,
-      );
-      return;
-    }
-    if (signal.description) {
-      state.signalingStep = "description-start";
-      const readyForOffer =
-        !state.makingOffer &&
-        (pc.signalingState === "stable" || state.settingRemoteAnswer);
-      const collision = signal.description.type === "offer" && !readyForOffer;
-      state.ignoreOffer = !state.polite && collision;
-      if (state.ignoreOffer) return;
-      state.settingRemoteAnswer = signal.description.type === "answer";
-      try {
-        if (collision && state.polite) {
-          state.signalingStep = "rollback";
-          await pc.setLocalDescription({ type: "rollback" });
-          state.signalingStep = "remote-description";
-          await pc.setRemoteDescription(signal.description);
-        } else {
-          state.signalingStep = "remote-description";
-          await pc.setRemoteDescription(signal.description);
-        }
-        applyP2pVideoCodecPreferences(pc);
-      } finally {
-        state.settingRemoteAnswer = false;
-      }
-      state.signalingStep = "candidates";
-      for (const candidate of state.candidates.splice(0))
-        await pc.addIceCandidate(candidate);
-      if (signal.description.type === "offer") {
-        state.signalingStep = "answer";
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription({
-          type: answer.type,
-          sdp: applyOpusAudioProfile(answer.sdp, this.usesStereoAudio()),
-        });
-        this.signal(state.peerId, { description: pc.localDescription });
-      }
-      state.signalingStep = "sender-configuration";
-      await this.configureStateSenders(state).catch((error) =>
-        this.fail("sender-configuration-failed", error),
-      );
-      state.signalingStep = null;
-      return;
-    }
-    if (signal.candidate) {
-      if (!pc.remoteDescription) {
-        state.candidates.push(signal.candidate);
-        return;
-      }
-      try {
-        await pc.addIceCandidate(signal.candidate);
-      } catch (error) {
-        if (!state.ignoreOffer) throw error;
-      }
-    }
+    return applyPeerSignal(this, state, signal);
   }
 
   bindHealthChannel(state, channel) {
-    state.channel = channel;
-    channel.onmessage = (event) => {
-      let message = null;
-      try {
-        message = JSON.parse(event.data);
-      } catch (_) {
-        return;
-      }
-      if (message.type === "health") {
-        state.healthReceived += 1;
-        state.lastHealthAt = performance.now();
-        if (channel.readyState === "open") {
-          try {
-            channel.send(
-              JSON.stringify({
-                type: "health-ack",
-                sequence: message.sequence,
-              }),
-            );
-          } catch (error) {
-            this.fail("health-channel-send-failed", error);
-          }
-        }
-      } else if (message.type === "health-ack") {
-        state.healthReceived += 1;
-        state.lastHealthAt = performance.now();
-      }
-    };
-    channel.onopen = () => this.checkQualification();
-    channel.onclose = () => {
-      if (requiresP2pLiveness(this.mode, this.readyReported))
-        this.fail("health-channel-closed");
-    };
+    return bindHealthChannel(this, state, channel);
   }
 
   handleConnectionState(state) {
-    const connectionState = state.pc.connectionState;
-    if (connectionState === "failed") this.fail("peer-connection-failed");
-    if (
-      connectionState === "closed" &&
-      requiresP2pLiveness(this.mode, this.readyReported)
-    )
-      this.fail("peer-connection-closed");
-    this.emitSnapshot();
+    return handleConnectionState(this, state);
   }
 
   handleIceState(state) {
-    if (state.pc.iceConnectionState === "disconnected") {
-      clearTimeout(state.disconnectTimer);
-      state.disconnectTimer = setTimeout(() => {
-        if (state.pc.iceConnectionState !== "disconnected") return;
-        if (!state.restarted) {
-          state.restarted = true;
-          try {
-            state.pc.restartIce();
-          } catch (error) {
-            this.fail("ice-restart-failed", error);
-            return;
-          }
-          state.disconnectTimer = setTimeout(() => {
-            if (
-              state.pc.iceConnectionState === "disconnected" ||
-              state.pc.iceConnectionState === "failed"
-            )
-              this.fail("ice-restart-timeout");
-          }, P2P_ICE_RESTART_TIMEOUT_MS);
-          return;
-        }
-        this.fail("ice-disconnected");
-      }, P2P_DISCONNECT_GRACE_MS);
-    } else {
-      clearTimeout(state.disconnectTimer);
-      state.disconnectTimer = null;
-      if (
-        state.pc.iceConnectionState === "connected" ||
-        state.pc.iceConnectionState === "completed"
-      )
-        state.restarted = false;
-    }
-    if (state.pc.iceConnectionState === "failed") this.fail("ice-failed");
-    this.emitSnapshot();
+    return handleIceState(this, state);
   }
 
   handleTrack(state, event) {
@@ -892,6 +454,8 @@ export class NativeP2pMesh {
       this.fail("sender-configuration-failed", error);
       throw error;
     }
+    if (state.pc.remoteDescription && state.pc.signalingState === "stable")
+      this.schedulePeerNegotiation(state);
     return sender;
   }
 
@@ -965,139 +529,19 @@ export class NativeP2pMesh {
   }
 
   startQualificationTimeout() {
-    clearTimeout(this.qualificationTimeout);
-    this.qualificationTimeout = setTimeout(() => {
-      if (!this.readyReported && this.mode === "probing")
-        this.fail("qualification-timeout");
-    }, P2P_QUALIFICATION_TIMEOUT_MS);
+    return startQualificationTimeout(this);
   }
 
   startHealthChecks() {
-    this.stopHealthChecks();
-    const runToken = this.healthRunToken;
-    let sequence = 0;
-    const run = async () => {
-      if (runToken !== this.healthRunToken || this.healthCheckRunning) return;
-      this.healthCheckRunning = true;
-      sequence += 1;
-      try {
-        for (const state of this.connections.values()) {
-          if (runToken !== this.healthRunToken) return;
-          const checkedAt = performance.now();
-          const requireLiveness = requiresP2pLiveness(
-            this.mode,
-            this.readyReported,
-          );
-          const healthTimeout =
-            this.mode === "probing"
-              ? P2P_STABILITY_LIVENESS_TIMEOUT_MS
-              : p2pActiveLivenessTimeoutMs(this.connections.size);
-          if (state.channel?.readyState === "open") {
-            try {
-              state.channel.send(
-                JSON.stringify({ type: "health", sequence, sentAt: checkedAt }),
-              );
-            } catch (error) {
-              this.fail("health-channel-send-failed", error);
-            }
-          }
-          if (
-            requireLiveness &&
-            isP2pLivenessExpired(state.lastHealthAt, checkedAt, healthTimeout)
-          )
-            this.fail("health-timeout");
-          try {
-            const report = await state.pc.getStats();
-            state.selectedPair = await selectedPairSnapshot(state.pc, report);
-            const flow = await mediaFlowSnapshot(state.pc, report);
-            const expectedOutboundSources = countEnabledP2pSources(
-              this.localSources.keys(),
-              new Map(
-                [...this.localSources.keys()].map((source) => [
-                  source,
-                  (state.sourceReceiving.get(source) ?? true) &&
-                    (this.sourceTransmission?.get(source) ?? true),
-                ]),
-              ),
-            );
-            const countsReady =
-              flow.outboundCount >= expectedOutboundSources &&
-              flow.inboundCount >= state.expectedRemoteSources;
-            const outboundNeeded = expectedOutboundSources > 0;
-            const inboundNeeded = state.expectedRemoteSources > 0;
-            const outboundProgressing =
-              !outboundNeeded ||
-              state.lastOutboundBytes == null ||
-              flow.outboundBytes > state.lastOutboundBytes;
-            const inboundProgressing =
-              !inboundNeeded ||
-              state.lastInboundBytes == null ||
-              flow.inboundBytes > state.lastInboundBytes;
-            if (outboundProgressing) state.lastOutboundProgressAt = checkedAt;
-            if (inboundProgressing) state.lastInboundProgressAt = checkedAt;
-            state.mediaReady =
-              this.mode === "probing"
-                ? countsReady && outboundProgressing && inboundProgressing
-                : outboundProgressing && inboundProgressing;
-            state.lastOutboundBytes = flow.outboundBytes;
-            state.lastInboundBytes = flow.inboundBytes;
-            if (state.selectedPair && !isViableP2pPair(state.selectedPair))
-              this.fail("relay-candidate-selected");
-          } catch (_) {
-            state.selectedPair = null;
-            state.mediaReady = false;
-          }
-        }
-        this.checkQualification();
-        this.emitSnapshot();
-      } finally {
-        if (runToken === this.healthRunToken) this.healthCheckRunning = false;
-      }
-    };
-    const execute = () =>
-      run().catch((error) => this.fail("health-check-failed", error));
-    execute();
-    this.healthInterval = setInterval(
-      execute,
-      this.mode === "probing" ? 250 : 1000,
-    );
+    return startHealthChecks(this);
   }
 
   stopHealthChecks() {
-    this.healthRunToken += 1;
-    this.healthCheckRunning = false;
-    if (this.healthInterval) clearInterval(this.healthInterval);
-    this.healthInterval = null;
-    clearTimeout(this.qualificationTimeout);
-    this.qualificationTimeout = null;
+    return stopHealthChecks(this);
   }
 
   checkQualification() {
-    if (
-      this.mode !== "probing" ||
-      this.readyReported ||
-      this.connections.size === 0
-    )
-      return;
-    const qualified = [...this.connections.values()].filter(
-      (state) =>
-        state.pc.connectionState === "connected" &&
-        state.channel?.readyState === "open" &&
-        state.healthReceived >= 3 &&
-        state.mediaReady &&
-        isViableP2pPair(state.selectedPair),
-    );
-    if (qualified.length !== this.connections.size) return;
-    this.readyReported = true;
-    clearTimeout(this.qualificationTimeout);
-    if (
-      !this.sendControl({
-        type: "ready",
-        epoch: this.epoch,
-        qualifiedPeerIds: qualified.map((state) => state.peerId),
-      })
-    )
-      this.readyReported = false;
+    return checkQualification(this);
   }
 
   async getSnapshot() {
@@ -1256,9 +700,20 @@ export class NativeP2pMesh {
 }
 
 export {
+  P2P_ACTIVE_HEALTH_TIMEOUT_MS,
+  P2P_DISCONNECT_GRACE_MS,
+  P2P_ICE_RESTART_TIMEOUT_MS,
+  P2P_STABILITY_LIVENESS_TIMEOUT_MS,
+  applyOpusAudioProfile,
+  applyP2pVideoCodecPreferences,
+  countEnabledP2pSources,
   directIceServers,
   hasRequiredMediaFlow,
+  isP2pLivenessExpired,
   isViableP2pPair,
   mediaFlowSnapshot,
+  p2pActiveLivenessTimeoutMs,
+  p2pRemoteFeedKey,
+  requiresP2pLiveness,
   selectedPairSnapshot,
 };

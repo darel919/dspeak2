@@ -1,4 +1,8 @@
 import { registerServiceWorker } from "../shared/service-worker-registration.js";
+import {
+  hasTauriRuntimeMarker,
+  isDesktopClient,
+} from "../shared/desktop-capture.js";
 
 const STARTUP_RESTART_GUARD = "dspeak-pwa-startup-restart";
 const INSTALL_WAIT_MS = 10000;
@@ -270,6 +274,10 @@ export function usePwaUpdate() {
   }
 
   async function runStartupUpdate() {
+    if (await isDesktopClient()) {
+      startupFinished.value = true;
+      return;
+    }
     if (
       import.meta.dev ||
       !import.meta.client ||
@@ -312,6 +320,7 @@ export function usePwaUpdate() {
     if (
       import.meta.dev ||
       !import.meta.client ||
+      hasTauriRuntimeMarker() ||
       !("serviceWorker" in navigator)
     )
       return () => {};
@@ -372,6 +381,7 @@ export function usePwaUpdate() {
     startupFinished,
     startupUpdateStatus,
     runStartupUpdate,
+    checkForUpdate,
     startActiveMonitoring,
     activateUpdate,
   };

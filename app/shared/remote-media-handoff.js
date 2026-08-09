@@ -69,12 +69,20 @@ export class RemoteMediaHandoff {
       key: remoteMediaFeedKey(entry),
     };
     const tracks = this.provider(normalized.provider);
+    const replaced = [];
     for (const [key, current] of tracks) {
       if (
         current.transportKey === normalized.transportKey &&
         key !== normalized.key
-      )
+      ) {
         tracks.delete(key);
+        replaced.push([key, current]);
+      }
+    }
+    for (const [key, current] of replaced) {
+      this.registry.remove(key, current);
+      if (!providers.some((provider) => this.provider(provider).has(key)))
+        this.registry.clearReceivingPreference?.(key);
     }
     tracks.set(normalized.key, normalized);
     const activeTracks = activeProvider ? this.provider(activeProvider) : null;

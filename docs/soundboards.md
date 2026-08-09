@@ -25,7 +25,8 @@ Production limits are fixed:
 Nitro runs `ffprobe` and `ffmpeg` with argument arrays. It strips video and
 metadata, downmixes to mono, resamples to 48 kHz, and creates a 24 kbps
 variable-bitrate Ogg Opus file. Temporary input and output files are removed on
-success and failure. PocketBase stores only the converted audio.
+success and failure. Cloudflare R2 stores the converted audio; PostgreSQL stores
+its object key and authorization metadata.
 
 JPEG, PNG, WebP, and GIF icons are scaled without distortion, padded to 64 by 64
 pixels, converted to ICO, and stored separately from their source images.
@@ -43,9 +44,9 @@ Updating, ordering, enabling, disabling, and deleting clips normally require
 migration. An uploader may update, disable, or delete their own clips without
 the room-wide permission.
 
-PocketBase file URLs are never exposed. Nitro checks membership before proxying
-audio or icon bytes and returns `Cache-Control: private, no-store`. Copying a
-media URL therefore does not bypass room authorization.
+R2 credentials and permanent object URLs are never exposed. Nitro checks
+membership before issuing protected access and returns private caching headers.
+Copying an application media URL therefore does not bypass room authorization.
 
 ## Trigger delivery
 
@@ -56,7 +57,7 @@ A trigger is accepted only when:
 - the clip belongs to the same room; and
 - the clip is available to that member.
 
-Accepted triggers use the process-owned media-signaling connection. Multiple
+Accepted triggers use the external media-control WebSocket. Multiple
 clips may overlap. The event includes authenticated player identity and clip
 display metadata. Participants see the clip name under the player for the
 clip's decoded duration.

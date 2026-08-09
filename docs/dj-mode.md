@@ -187,8 +187,8 @@ state. A signaling success response alone is not proof that audio is flowing.
 - `DSPEAK_INGEST_AUTH_SECRET` must contain an independent random secret of at
   least 32 characters. It authenticates MediaMTX's internal callback and must
   remain server-only.
-- Only one Nitro application instance is supported until distributed ownership,
-  router piping, and a shared state backplane are introduced.
+- Nitro may scale independently; persistent media ownership remains in the
+  external media-control Durable Objects and configured providers.
 - Health checks should report gateway readiness without creating a session.
 - Metrics must remain bounded and must not use user, room, channel, session, or
   producer identifiers as labels.

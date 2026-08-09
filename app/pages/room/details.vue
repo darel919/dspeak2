@@ -35,7 +35,7 @@
           </ul>
           <button
             v-if="isOwner"
-            class="btn btn-error mt-8"
+            class="metro-btn metro-btn--error mt-8"
             @click="deleteRoom"
             :disabled="deleting"
           >
@@ -44,7 +44,7 @@
         </div>
       </div>
       <div v-else class="mt-10 flex items-center gap-3" role="status">
-        <span class="loading loading-spinner loading-sm"></span>Loading room
+        <span class="metro-spinner metro-spinner--sm"></span>Loading room
         details…
       </div>
     </div>

@@ -4,7 +4,7 @@
       <div
         v-for="toast in toasts"
         :key="toast.id"
-        class="alert grid grid-cols-[auto_minmax(0,1fr)_auto] items-start"
+        class="metro-status grid grid-cols-[auto_minmax(0,1fr)_auto] items-start"
         :class="getToastClass(toast.type)"
         :role="toast.type === 'error' ? 'alert' : 'status'"
       >
@@ -13,7 +13,7 @@
           toast.message
         }}</span>
         <button
-          class="btn btn-sm btn-ghost"
+          class="metro-btn metro-btn--ghost metro-btn--sm"
           aria-label="Dismiss notification"
           @click="removeToast(toast.id)"
         >

@@ -1,7 +1,7 @@
 <template>
   <Transition name="update-prompt">
     <aside
-      v-if="updateAvailable"
+      v-if="!desktopRuntime && updateAvailable"
       class="fixed inset-x-4 bottom-4 z-[100] mx-auto max-w-xl"
       aria-live="assertive"
       aria-label="Application update available"
@@ -13,17 +13,21 @@
           <p class="text-sm">
             Restart when convenient to use the latest fixes and features.
           </p>
+          <UpdateDetails
+            :snapshot="repositorySnapshot"
+            :current-build="currentBuild"
+          />
         </div>
         <button
-          class="btn btn-sm btn-primary"
-          :disabled="refreshing"
-          @click="activateUpdate"
+          class="metro-btn metro-btn--sm btn-primary"
+          :disabled="isRefreshing"
+          @click="refreshUpdate"
         >
           <span
-            v-if="refreshing"
-            class="loading loading-spinner loading-xs"
+            v-if="isRefreshing"
+            class="metro-spinner metro-spinner--xs"
           ></span>
-          {{ refreshing ? "Restarting…" : "Restart now" }}
+          {{ isRefreshing ? "Restarting…" : "Restart now" }}
         </button>
       </div>
     </aside>
@@ -31,17 +35,63 @@
 </template>
 
 <script setup>
-const { updateAvailable, refreshing, startActiveMonitoring, activateUpdate } =
-  usePwaUpdate();
-let stopMonitoring = null;
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
 
-onMounted(() => {
-  stopMonitoring = startActiveMonitoring();
+const {
+  updateAvailable: pwaUpdateAvailable,
+  refreshing,
+  startActiveMonitoring,
+  activateUpdate,
+  checkForUpdate: checkPwaUpdate,
+} = usePwaUpdate();
+const {
+  status: repositoryStatus,
+  snapshot: repositorySnapshot,
+  currentBuild,
+  deployedUpdateAvailable,
+  checkForUpdate: checkRepositoryUpdate,
+  startMonitoring: startRepositoryMonitoring,
+} = useRepositoryUpdate();
+const runtimeStore = useRuntimeStore();
+const desktopRuntime = computed(
+  () => runtimeStore.isTauri || hasTauriRuntimeMarker(),
+);
+const updateAvailable = computed(
+  () => pwaUpdateAvailable.value || deployedUpdateAvailable.value,
+);
+const repositoryRefreshing = ref(false);
+const isRefreshing = computed(
+  () => refreshing.value || repositoryRefreshing.value,
+);
+let stopPwaMonitoring = null;
+let stopRepositoryMonitoring = null;
+
+onMounted(async () => {
+  stopPwaMonitoring = startActiveMonitoring();
+  stopRepositoryMonitoring = startRepositoryMonitoring();
+  if (["idle", "error"].includes(repositoryStatus.value))
+    await checkRepositoryUpdate();
 });
 
 onBeforeUnmount(() => {
-  stopMonitoring?.();
+  stopPwaMonitoring?.();
+  stopRepositoryMonitoring?.();
 });
+
+async function refreshUpdate() {
+  if (isRefreshing.value) return;
+  repositoryRefreshing.value = true;
+  try {
+    await checkPwaUpdate();
+    if (pwaUpdateAvailable.value) {
+      await activateUpdate();
+      return;
+    }
+    window.location.reload();
+  } finally {
+    repositoryRefreshing.value = false;
+  }
+}
 </script>
 
 <style scoped>

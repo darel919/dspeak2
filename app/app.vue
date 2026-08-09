@@ -1,11 +1,14 @@
 <template>
-  <VitePwaManifest />
+  <Head v-if="showPwaManifest">
+    <link rel="manifest" href="/manifest.webmanifest" />
+  </Head>
   <NuxtLayout>
     <NuxtLoadingIndicator />
     <NuxtPage />
-    <GlobalVoiceStatus />
+    <GlobalVoiceStatus v-if="showGlobalVoiceStatus" />
     <PwaInstallPrompt />
     <PwaUpdatePrompt />
+    <DesktopUpdatePrompt />
     <DatabaseHealthPrompt />
     <FatalErrorPrompt />
     <CookieConsent />
@@ -13,10 +16,20 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from "vue";
+import { hasTauriRuntimeMarker } from "./shared/desktop-capture.js";
+
+const GlobalVoiceStatus = defineAsyncComponent(
+  () => import("./components/GlobalVoiceStatus.vue"),
+);
+const authStore = useAuthStore();
+
+const showPwaManifest = !import.meta.client || !hasTauriRuntimeMarker();
+const showGlobalVoiceStatus = computed(() => Boolean(authStore.getUserData()));
+
 useAppearance();
 useContextualTitle();
 useCallWakeLock();
-const voiceStore = useVoiceStore();
 const toast = useToast();
 
 function preventBrowserContextMenu(event) {
@@ -26,6 +39,8 @@ function preventBrowserContextMenu(event) {
 async function handleVoiceModeration(event) {
   const action = event.detail?.action;
   const targetChannelId = event.detail?.targetChannelId;
+  const { useVoiceStore } = await import("./stores/voice");
+  const voiceStore = useVoiceStore();
   await voiceStore.leaveVoiceChannel();
   if (action === "move" && targetChannelId) {
     try {

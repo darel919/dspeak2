@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 import {
-  COMMUNITY_TURN_SERVERS,
   PUBLIC_STUN_SERVERS,
+  createCloudflareTurnServers,
   createIceServers,
   createTurnCredentials,
 } from "../server/const/ice-servers.js";
@@ -24,7 +24,7 @@ test("TURN credentials use the Coturn REST timestamp and HMAC contract", () => {
   );
 });
 
-test("self-hosted TURN is ordered before public STUN and community TURN", () => {
+test("self-hosted TURN is ordered after public STUN without community relays", () => {
   const servers = createIceServers(
     {
       DSPEAK_RTC_DOMAIN: "rtc.example.com",
@@ -32,21 +32,61 @@ test("self-hosted TURN is ordered before public STUN and community TURN", () => 
       TURN_CREDENTIAL_TTL_SECONDS: "600",
     },
     1_700_000_000_000,
+    { connectionMode: "auto" },
   );
-  assert.match(servers[0].urls[0], /^stun:rtc\.example\.com/);
-  assert.match(servers[0].urls[1], /^turn:rtc\.example\.com/);
-  assert.equal(servers[1], PUBLIC_STUN_SERVERS[0]);
-  assert.equal(servers.at(-1), COMMUNITY_TURN_SERVERS.at(-1));
+  assert.equal(servers[0], PUBLIC_STUN_SERVERS[0]);
+  assert.equal(servers[1], PUBLIC_STUN_SERVERS[1]);
+  assert.equal(servers[2], PUBLIC_STUN_SERVERS[2]);
+  assert.match(servers[3].urls[0], /^stun:rtc\.example\.com/);
+  assert.match(servers[3].urls[1], /^turn:rtc\.example\.com/);
+  assert.equal(servers.length, PUBLIC_STUN_SERVERS.length + 1);
 });
 
-test("community fallbacks remain when self-hosted TURN is disabled", () => {
-  const servers = createIceServers({});
-  assert.deepEqual(
-    servers.slice(0, PUBLIC_STUN_SERVERS.length),
-    PUBLIC_STUN_SERVERS,
+test("TURN is excluded in direct mode", () => {
+  const servers = createIceServers(
+    {
+      DSPEAK_RTC_DOMAIN: "rtc.example.com",
+      TURN_SHARED_SECRET: "test-secret",
+      TURN_CREDENTIAL_TTL_SECONDS: "600",
+    },
+    1_700_000_000_000,
+    { connectionMode: "direct" },
   );
-  assert.deepEqual(
-    servers.slice(PUBLIC_STUN_SERVERS.length),
-    COMMUNITY_TURN_SERVERS,
+  assert.deepEqual(servers, PUBLIC_STUN_SERVERS);
+});
+
+test("Cloudflare TURN credentials are generated server-side", async () => {
+  let request;
+  const servers = await createCloudflareTurnServers(
+    {
+      CLOUDFLARE_TURN_KEY_ID: "key-id",
+      CLOUDFLARE_TURN_API_TOKEN: "api-token",
+      CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS: "3600",
+    },
+    async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        async json() {
+          return {
+            iceServers: [
+              {
+                urls: ["turn:turn.cloudflare.com:3478?transport=udp"],
+                username: "temporary-user",
+                credential: "temporary-credential",
+              },
+            ],
+          };
+        },
+      };
+    },
   );
+  assert.match(
+    request.url,
+    /\/turn\/keys\/key-id\/credentials\/generate-ice-servers$/,
+  );
+  assert.equal(request.options.headers.Authorization, "Bearer api-token");
+  assert.deepEqual(JSON.parse(request.options.body), { ttl: 3600 });
+  assert.equal(servers.length, 1);
+  assert.equal(servers[0].username, "temporary-user");
 });

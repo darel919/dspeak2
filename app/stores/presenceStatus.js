@@ -1,6 +1,7 @@
-import { defineStore } from "pinia";
+import { defineStore, skipHydrate } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
+import { useRuntimeStore } from "./runtime";
 import { STORAGE_KEYS } from "~/const/storage";
 import {
   normalizePresenceStatus,
@@ -9,28 +10,48 @@ import {
   DEFAULT_IDLE_TIMEOUT_MS,
   PRESENCE_LABELS,
 } from "~~/shared/presence-status.js";
-import { deviceHeaders } from "~/shared/device-identity";
+import { debugLog } from "../shared/debug";
+import { openRealtimeChannel } from "../shared/realtime-channel.js";
+
+function detectPlatform(isTauri) {
+  if (typeof window === "undefined" || !isTauri) return "web";
+  if (isTauri) {
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes("mac")) return "macos";
+    if (ua.includes("win")) return "windows";
+    if (ua.includes("linux")) return "linux";
+    return "desktop";
+  }
+  return "web";
+}
 
 export const usePresenceStatusStore = defineStore("presenceStatus", () => {
-  const presenceOverride = ref(
-    loadPersisted(STORAGE_KEYS.presenceOverride, null),
+  const runtimeStore = useRuntimeStore();
+  const presenceOverride = skipHydrate(
+    ref(loadPersisted(STORAGE_KEYS.presenceOverride, null)),
   );
-  const idleTimeout = ref(
-    normalizeIdleTimeout(
-      loadPersisted(STORAGE_KEYS.idleTimeout, DEFAULT_IDLE_TIMEOUT_MS),
+  const idleTimeout = skipHydrate(
+    ref(
+      normalizeIdleTimeout(
+        loadPersisted(STORAGE_KEYS.idleTimeout, DEFAULT_IDLE_TIMEOUT_MS),
+      ),
     ),
   );
-  const effectiveStatus = ref("offline");
+  const effectiveStatus = skipHydrate(
+    ref(resolveAutomaticPresence(presenceOverride.value, "online")),
+  );
   const connectionStatus = ref("disconnected");
   const trackedUsers = ref(new Map());
   const onlineUsersList = ref([]);
 
   const config = useRuntimeConfig();
   let activityTimer = null;
-  let idleCheckInterval = null;
-  let presenceWs = null;
+  let presenceChannel = null;
+  let closePresenceChannel = null;
   let intentDisconnect = false;
   let reconnectAttempts = 0;
+  let reconnectTimer = null;
+  let removePageHideListener = null;
   const MAX_RECONNECT_ATTEMPTS = 10;
   const BASE_RECONNECT_DELAY = 1000;
 
@@ -59,84 +80,167 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     } catch {}
   }
 
+  async function postPresence(payload) {
+    if (!import.meta.client) return;
+    try {
+      await fetch(`${config.public.apiPath}/presence`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      debugLog("[Presence] Status request failed");
+    }
+  }
+
+  async function postActivity() {
+    if (!import.meta.client) return;
+    try {
+      await fetch(`${config.public.apiPath}/presence/activity`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    } catch {}
+  }
+
+  async function postOffline() {
+    if (!import.meta.client) return;
+    try {
+      await fetch(`${config.public.apiPath}/presence/offline`, {
+        method: "POST",
+        credentials: "include",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    } catch {}
+  }
+
+  async function fetchOnlineSnapshot() {
+    if (!import.meta.client) return;
+    try {
+      const response = await fetch(`${config.public.apiPath}/presence`, {
+        credentials: "include",
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (Array.isArray(data.users)) {
+        onlineUsersList.value = data.users;
+        for (const entry of data.users) {
+          if (entry.userId) {
+            updateUserStatus({
+              userId: entry.userId,
+              status: entry.status,
+              updatedAt: entry.updatedAt,
+              isManualOverride: entry.isManualOverride,
+              platform: entry.platform,
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+
   function connect() {
     if (!import.meta.client) return;
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     if (!userData?.id) return;
-    if (presenceWs && presenceWs.readyState === WebSocket.OPEN) return;
+    if (presenceChannel) return;
 
     intentDisconnect = false;
-    const origin = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-    const base = config.public.websocketPath || `${origin}/api`;
-    const wsUrl = `${base}/presence`;
-
-    const socket = new WebSocket(wsUrl);
-    presenceWs = socket;
-
-    socket.onopen = () => {
-      if (socket !== presenceWs) return socket.close();
-      reconnectAttempts = 0;
-      connectionStatus.value = "connected";
-      effectiveStatus.value = normalizePresenceStatus(
-        presenceOverride.value || "online",
-      );
-      socket.send(
-        JSON.stringify({
-          type: "status",
+    openRealtimeChannel("global", {
+      onMessage: (message) => {
+        if (message?.type === "status_updated" && message.data) {
+          updateUserStatus(message.data);
+        }
+      },
+      onSubscribe: () => {
+        if (intentDisconnect || !presenceChannel) return;
+        reconnectAttempts = 0;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        connectionStatus.value = "connected";
+        effectiveStatus.value = normalizePresenceStatus(
+          presenceOverride.value || "online",
+        );
+        const platform = detectPlatform(runtimeStore.isTauri);
+        postPresence({
           status: effectiveStatus.value,
           manual: Boolean(presenceOverride.value),
-          idleTimeoutMs: idleTimeout.value,
           timestamp: new Date().toISOString(),
-        }),
-      );
-      startActivityTracking();
-    };
-
-    socket.onmessage = (event) => {
-      if (socket !== presenceWs) return;
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "status_updated" && data.data) {
-          updateUserStatus(data.data);
-        }
-        if (data.type === "online_users" && Array.isArray(data.data)) {
-          onlineUsersList.value = data.data;
-        }
-      } catch {}
-    };
-
-    socket.onclose = () => {
-      if (socket !== presenceWs && !intentDisconnect) return;
-      connectionStatus.value = "disconnected";
-      stopActivityTracking();
-      if (!intentDisconnect) {
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          const delay =
-            BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts) +
-            Math.random() * 1000;
-          reconnectAttempts++;
-          setTimeout(() => connect(), delay);
-        } else {
-          console.warn("[Presence] Max reconnect attempts reached, giving up");
-        }
+          platform,
+        });
+        startActivityTracking();
+        registerPageHideOffline();
+        fetchOnlineSnapshot();
+      },
+      onError: (err, status) => {
+        if (intentDisconnect) return;
+        debugLog("[Presence] Realtime channel error:", err, status);
+        handleChannelDown();
+      },
+    }).then((handle) => {
+      if (!handle) return;
+      if (intentDisconnect) {
+        handle.close();
+        return;
       }
-    };
+      presenceChannel = handle.channel;
+      closePresenceChannel = handle.close;
+    });
+  }
 
-    socket.onerror = () => {
-      socket.close();
-    };
+  function handleChannelDown() {
+    if (intentDisconnect) return;
+    connectionStatus.value = "disconnected";
+    stopActivityTracking();
+    removePageHideListener?.();
+    removePageHideListener = null;
+    presenceChannel = null;
+    closePresenceChannel = null;
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn("[Presence] Max reconnect attempts reached, giving up");
+      return;
+    }
+    const delay =
+      BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts) +
+      Math.random() * 1000;
+    reconnectAttempts++;
+    reconnectTimer = setTimeout(() => connect(), delay);
   }
 
   function disconnect() {
     intentDisconnect = true;
-    reconnectAttempts = 0;
-    stopActivityTracking();
-    if (presenceWs) {
-      presenceWs.onclose = null;
-      presenceWs.close();
-      presenceWs = null;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
+    stopActivityTracking();
+    removePageHideListener?.();
+    removePageHideListener = null;
+    if (closePresenceChannel) {
+      closePresenceChannel();
+      closePresenceChannel = null;
+    }
+    presenceChannel = null;
+    connectionStatus.value = "disconnected";
+    postOffline();
+  }
+
+  function registerPageHideOffline() {
+    if (!import.meta.client || removePageHideListener) return;
+    const handlePageHide = () => {
+      if (!intentDisconnect) postOffline();
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    removePageHideListener = () =>
+      window.removeEventListener("pagehide", handlePageHide);
   }
 
   function startActivityTracking() {
@@ -172,24 +276,27 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
       }
       activityTimer = null;
     }
-    if (idleCheckInterval) {
-      clearInterval(idleCheckInterval);
-      idleCheckInterval = null;
-    }
   }
 
   function sendActivity() {
-    if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
-      presenceWs.send(JSON.stringify({ type: "activity" }));
+    if (connectionStatus.value === "connected") {
+      postActivity();
     }
   }
 
-  function updateUserStatus({ userId, status, updatedAt, isManualOverride }) {
+  function updateUserStatus({
+    userId,
+    status,
+    updatedAt,
+    isManualOverride,
+    platform,
+  }) {
     if (!userId) return;
     trackedUsers.value.set(String(userId), {
       status: normalizePresenceStatus(status),
       updatedAt,
       isManualOverride: Boolean(isManualOverride),
+      platform: platform || "web",
     });
     trackedUsers.value = new Map(trackedUsers.value);
   }
@@ -205,17 +312,12 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
   }
 
   function sendStatus(status, manual) {
-    if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
-      presenceWs.send(
-        JSON.stringify({
-          type: "status",
-          status,
-          manual,
-          idleTimeoutMs: idleTimeout.value,
-          timestamp: new Date().toISOString(),
-        }),
-      );
-    }
+    postPresence({
+      status,
+      manual,
+      timestamp: new Date().toISOString(),
+      platform: detectPlatform(runtimeStore.isTauri),
+    });
   }
 
   function setStatus(status) {
@@ -238,9 +340,12 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
   }
 
   function requestOnlineUsers() {
-    if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
-      presenceWs.send(JSON.stringify({ type: "request_online_users" }));
-    }
+    fetchOnlineSnapshot();
+  }
+
+  function clearUsers() {
+    trackedUsers.value = new Map();
+    onlineUsersList.value = [];
   }
 
   function init() {
@@ -283,5 +388,6 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     getUserStatus,
     updateUserStatus,
     requestOnlineUsers,
+    clearUsers,
   };
 });

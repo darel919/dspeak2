@@ -47,7 +47,7 @@
         <span v-else>{{ room.name?.slice(0, 2).toUpperCase() }}</span>
         <span
           v-if="openingRoomId === String(room.id)"
-          class="loading loading-spinner loading-sm absolute"
+          class="metro-spinner metro-spinner--sm absolute"
         ></span>
         <span
           v-if="roomUnread(room.id)"
@@ -111,7 +111,7 @@
       class="grid w-full justify-items-center gap-1 border-t border-base-300 px-2 py-2"
     >
       <button
-        class="btn btn-square btn-ghost size-12 min-h-12"
+        class="metro-icon-btn metro-icon-btn--ghost size-12 min-h-12"
         title="Join room"
         @click="joinRoomDialog?.open()"
       >
@@ -119,7 +119,7 @@
       </button>
       <NuxtLink
         to="/room/create"
-        class="btn btn-square btn-primary size-12 min-h-12"
+        class="metro-btn metro-btn--square btn-primary size-12 min-h-12"
         :class="
           route.path === '/room/create' &&
           'outline outline-2 outline-offset-2 outline-primary'
@@ -318,20 +318,29 @@ async function showRoomTooltip(room, event) {
     top: `${bounds.top + bounds.height / 2}px`,
     transform: "translateY(-50%)",
   };
+  const roomIds = [];
+  if (activeRoomId.value) roomIds.push(activeRoomId.value);
+  if (room?.id) roomIds.push(String(room.id));
+  channelsStore.syncVoicePresenceRooms([...new Set(roomIds)]);
   prefetchRoom(room, { allChannels: true });
 }
 
 watch(
-  () => roomsStore.rooms,
-  (rooms) => {
+  [() => roomsStore.rooms, activeRoomId],
+  ([rooms]) => {
     prefetchRooms(rooms);
-    channelsStore.syncVoicePresenceRooms(rooms.map((room) => room.id));
+    channelsStore.syncVoicePresenceRooms(
+      activeRoomId.value ? [activeRoomId.value] : [],
+    );
   },
   { immediate: true },
 );
 
 function hideRoomTooltip() {
   tooltipRoom.value = null;
+  channelsStore.syncVoicePresenceRooms(
+    activeRoomId.value ? [activeRoomId.value] : [],
+  );
 }
 
 function openSelectedRoom() {

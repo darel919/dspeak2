@@ -8,7 +8,7 @@
     <button
       v-if="playbackBlocked"
       type="button"
-      class="btn btn-xs btn-warning"
+      class="metro-btn metro-btn--xs btn-warning"
       @click="retryPlayback"
     >
       Enable audio
@@ -63,8 +63,10 @@
         <button
           @click="voiceStore.toggleMic"
           :class="[
-            'btn btn-xs btn-circle',
-            voiceStore.micMuted ? 'btn-error' : 'btn-outline',
+            'metro-icon-btn metro-icon-btn--sm',
+            voiceStore.micMuted
+              ? 'metro-icon-btn--error'
+              : 'metro-icon-btn--ghost',
           ]"
           :title="voiceStore.micMuted ? 'Unmute' : 'Mute'"
         >
@@ -79,7 +81,7 @@
 
       <button
         @click="voiceStore.leaveVoiceChannel"
-        class="btn btn-xs btn-circle btn-error"
+        class="metro-btn metro-btn--xs btn-circle btn-error"
         title="Disconnect"
       >
         <Icon name="lucide:volume-x" class="w-3 h-3" />
@@ -101,6 +103,7 @@ const connectionLabel = computed(() => {
   if (state === "ready-no-active-media") return "Connected";
   if (state === "playback-blocked") return "Playback needs attention";
   if (state === "reconnecting") return "Media reconnecting";
+  if (state === "recovering") return "Recovering media…";
   if (state === "transport-connecting") return "Transport connecting";
   return "Voice session ready";
 });

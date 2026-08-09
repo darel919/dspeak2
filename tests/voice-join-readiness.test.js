@@ -70,6 +70,23 @@ test("voice transport readiness cannot remain pending forever", async () => {
   );
 });
 
+test("voice transport readiness can wait through provider recovery", async () => {
+  const clock = createClock();
+  let checks = 0;
+
+  await waitForVoiceTransportReady({
+    getError: () => null,
+    isCurrent: () => true,
+    isReady: () => ++checks === 5,
+    now: clock.now,
+    pollIntervalMs: 10,
+    timeoutMs: () => 60,
+    wait: clock.wait,
+  });
+
+  assert.equal(checks, 5);
+});
+
 test("an active healthy route remains usable during a topology switch", () => {
   assert.equal(
     hasUsableVoiceRoute({

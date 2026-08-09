@@ -2,73 +2,66 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [
-  authentication,
-  api,
-  migrations,
-  exportRoute,
-  deleteRoute,
-  inlineTokens,
-] = await Promise.all(
-  [
-    "../server/utils/authentication.js",
-    "../server/utils/dspeak-api.js",
-    "../server/utils/pocketbase-migrations.js",
-    "../server/routes/api/account/export.get.js",
-    "../server/routes/api/account/delete.post.js",
-    "../app/components/InlineTokens.vue",
-  ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
-);
+const [auth, exportRoute, deleteRoute, schema, inlineTokens] =
+  await Promise.all(
+    [
+      "../server/utils/auth.js",
+      "../server/routes/api/account/export.get.js",
+      "../server/routes/api/account/delete.post.js",
+      "../server/db/schema/index.js",
+      "../app/components/InlineTokens.vue",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
+  );
 
-test("external sign-in binds legal consent to the server-side handoff", () => {
-  assert.match(api, /body\.terms_accepted !== true/);
-  assert.match(authentication, /AUTH_HANDOFF_CONSENT_COOKIE/);
-  assert.match(authentication, /consentAccepted/);
-  assert.doesNotMatch(api, /Boolean\(body\.terms_accepted\)/);
-});
-
-test("legal consent has a repairable PocketBase schema migration", () => {
-  assert.match(migrations, /terms_accepted_at/);
-  assert.match(migrations, /20260728_legal_consent_v1/);
-});
-
-test("account export reads complete records with the managed field names", () => {
-  assert.match(exportRoute, /getFullList/);
+test("account export reads complete records with Drizzle repositories", () => {
+  assert.match(exportRoute, /db\.select/);
   assert.match(exportRoute, /account-export/);
   assert.match(exportRoute, /Cache-Control.*private, no-store/);
-  assert.match(exportRoute, /subject = \{:\w+\}/);
-  assert.match(exportRoute, /read_by \?= \{:\w+\}/);
-  assert.match(exportRoute, /readReceipts/);
-  assert.match(exportRoute, /fields:\s*\n\s*"id,name,desc,picture/);
-  assert.match(
-    exportRoute,
-    /fields:\s*\n\s*"id,uploader,room_channel,message,file/,
-  );
-  assert.match(exportRoute, /fields:\s*\n\s*"id,user,connected,muted,deafened/);
-  assert.doesNotMatch(exportRoute, /getList\(1,\s*(100|1000)/);
+  assert.match(exportRoute, /from\(messages\)/);
+  assert.match(exportRoute, /from\(notifications\)/);
+  assert.match(exportRoute, /pushJobs/);
+  assert.match(exportRoute, /from\(profiles\)/);
+  assert.match(exportRoute, /from\(librarySongs\)/);
+  assert.match(exportRoute, /from\(streamPlayLog\)/);
+  assert.doesNotMatch(exportRoute, /getFullList/);
 });
 
-test("account deletion preserves required message senders and delays session removal", () => {
+test("account deletion preserves required message senders and uses Drizzle", () => {
   assert.match(deleteRoute, /content: "\[deleted\]"/);
   assert.doesNotMatch(deleteRoute, /sender:\s*null/);
-  assert.match(deleteRoute, /disconnectVoiceParticipant/);
+  assert.match(deleteRoute, /deleteUser\(userId\)/);
   assert.match(deleteRoute, /accountDeletionLocks/);
-  assert.match(deleteRoute, /read_by \?= \{:\w+\}/);
-  assert.match(
-    deleteRoute,
-    /await deleteUserRecords\(pb, "dspeak_sessions", "user", userId\);/,
+  assert.match(deleteRoute, /withTransaction/);
+  assert.match(deleteRoute, /async function deleteAccount\(tx, userId\)/);
+  assert.match(deleteRoute, /delete\(avatars\)/);
+  assert.match(deleteRoute, /delete\(librarySongs\)/);
+  assert.match(deleteRoute, /delete\(streamPlayLog\)/);
+  assert.doesNotMatch(deleteRoute, /delete\(roomAuditLog\)/);
+  assert.ok(
+    deleteRoute.indexOf("await withTransaction") <
+      deleteRoute.indexOf("deleteUser(userId)"),
+  );
+  assert.doesNotMatch(deleteRoute, /delete\(users\)/);
+  assert.doesNotMatch(schema, /profiles[\s\S]*references\(\(\) => authUsers/);
+  assert.match(deleteRoute, /update\(profiles\)/);
+  assert.doesNotMatch(deleteRoute, /await db\.(?:delete|update|select)/);
+  assert.ok(
+    deleteRoute.indexOf("const ownedRooms") <
+      deleteRoute.indexOf("delete(roomMemberships)"),
   );
   assert.ok(
-    deleteRoute.indexOf('await deleteUserRecords(pb, "dspeak_sessions"') >
-      deleteRoute.indexOf('await pb.collection("users").update'),
-  );
-  assert.match(
-    deleteRoute,
-    /await deleteUserRecords\(pb, "dspeak_room_invites", "created_by", userId\);/,
+    deleteRoute.indexOf("delete(membershipRoles)") <
+      deleteRoute.indexOf("delete(roomMemberships)"),
   );
 });
 
 test("legal Markdown links reject executable URL schemes", () => {
   assert.match(inlineTokens, /\["http:", "https:", "mailto:"\]/);
   assert.match(inlineTokens, /new URL\(href, "https:\/\/dspeak\.invalid"\)/);
+});
+
+test("auth.js uses Supabase Auth with local JWT verification", () => {
+  assert.match(auth, /verifyAccessToken/);
+
+  assert.doesNotMatch(auth, /ACCOUNT_URL/);
 });
