@@ -52,8 +52,8 @@
         </div>
       </header>
 
-      <div v-if="lastError" class="rtc-alert">
-        <Icon name="lucide:triangle-alert" /> {{ lastError }}
+      <div v-if="lastError || copyError" class="rtc-alert">
+        <Icon name="lucide:triangle-alert" /> {{ copyError || lastError }}
       </div>
       <div v-if="!voiceStore.connected" class="rtc-empty-state">
         <div class="rtc-empty-icon"><Icon name="lucide:radio-tower" /></div>
@@ -206,8 +206,8 @@
             <div class="rtc-transport-title">
               <strong>{{ transport.kind }}</strong
               ><span
-                >{{ transport.pcStates.connectionState }} /
-                {{ transport.pcStates.iceConnectionState }}</span
+                >{{ transport.pcStates?.connectionState || "—" }} /
+                {{ transport.pcStates?.iceConnectionState || "—" }}</span
               >
             </div>
             <div class="rtc-detail-grid">
@@ -532,6 +532,8 @@ import { useChannelsStore } from "~/stores/channels";
 import { useRtcStatsStore } from "~/stores/rtc-stats";
 import { storeToRefs } from "pinia";
 import { getActiveConnectionLabel } from "~/shared/connection-quality";
+import { copyTextToClipboard } from "~/shared/copy-to-clipboard";
+import { formatTopologyReason } from "~/shared/rtc-topology";
 
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
@@ -540,6 +542,7 @@ const { snapshot, outbound, inbound, polling, lastError, history, metrics } =
   storeToRefs(rtcStats);
 const section = ref("overview");
 const copied = ref(false);
+const copyError = ref("");
 let copiedTimer = null;
 
 const navigation = [
@@ -592,7 +595,7 @@ const summaryMetrics = computed(() => [
   {
     label: "Route",
     value: formatRoute(snapshot.value?.topology?.mode),
-    hint: snapshot.value?.topology?.reason || "Active media path",
+    hint: formatTopologyReason(snapshot.value?.topology?.reason),
     icon: "lucide:route",
   },
   {
@@ -619,16 +622,24 @@ function togglePolling() {
   rtcStats.togglePolling();
 }
 async function copyReport() {
+  copied.value = false;
+  copyError.value = "";
   try {
     const report = await rtcStats.createDiagnosticReport();
-    await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+    const copiedReport = await copyTextToClipboard(
+      JSON.stringify(report, null, 2),
+    );
+    if (!copiedReport)
+      throw new Error(
+        "Clipboard access is unavailable. Allow clipboard access and try again.",
+      );
     copied.value = true;
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => {
       copied.value = false;
     }, 1600);
   } catch (error) {
-    lastError.value = error?.message || "The RTC report could not be copied.";
+    copyError.value = error?.message || "The RTC report could not be copied.";
   }
 }
 function formatRoute(value) {

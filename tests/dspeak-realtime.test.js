@@ -15,10 +15,11 @@ function createFakePublisher() {
   return {
     sent,
     channels,
-    channel(name) {
+    channel(name, options) {
       if (!channels.has(name)) {
         channels.set(name, {
           name,
+          options,
           httpSend: async (_event, payload) => {
             sent.push({ topic: name, payload });
           },
@@ -54,6 +55,9 @@ test("broadcast helpers publish to their reserved topics", async () => {
     { topic: "global", payload: globalEvent },
     { topic: "room:room-1", payload: roomEvent },
   ]);
+  assert.deepEqual(publisher.channels.get("room:room-1").options, {
+    config: { private: true },
+  });
 });
 
 test("publishToRealtime reuses one channel per topic", async () => {

@@ -1,0 +1,82 @@
+import { randomInt } from "node:crypto";
+
+const adjectives = [
+  "amber",
+  "brisk",
+  "bright",
+  "calm",
+  "clever",
+  "cobalt",
+  "cosmic",
+  "crimson",
+  "daring",
+  "dawn",
+  "eager",
+  "fierce",
+  "flying",
+  "gentle",
+  "golden",
+  "hidden",
+  "iron",
+  "jade",
+  "keen",
+  "lunar",
+  "mellow",
+  "neon",
+  "quiet",
+  "rapid",
+  "royal",
+  "silver",
+  "solar",
+  "steady",
+  "swift",
+  "teal",
+  "velvet",
+  "wild",
+  "wooden",
+  "zesty",
+];
+
+const nouns = [
+  "badger",
+  "bird",
+  "comet",
+  "coral",
+  "dove",
+  "eagle",
+  "falcon",
+  "feather",
+  "fish",
+  "fox",
+  "garden",
+  "glow",
+  "grain",
+  "harbor",
+  "island",
+  "jewel",
+  "koala",
+  "lion",
+  "maple",
+  "meadow",
+  "moon",
+  "otter",
+  "panda",
+  "pebble",
+  "pine",
+  "planet",
+  "river",
+  "rocket",
+  "stone",
+  "tiger",
+  "trout",
+  "willow",
+  "wolf",
+];
+
+function randomItem(values) {
+  return values[randomInt(values.length)];
+}
+
+export function generateRandomUsername() {
+  return `${randomItem(adjectives)}_${randomItem(nouns)}${randomInt(100, 1000)}`;
+}

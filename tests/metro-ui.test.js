@@ -432,9 +432,14 @@ test("room rail tooltips preview connected voice participants", async () => {
   assert.match(rail, /participant\.avatar/);
   assert.match(rail, /participant\.name/);
   assert.match(rail, /lucide:volume-2/);
+  assert.match(rail, /\[\s*\(\) => roomsStore\.rooms,\s*activeRoomId\s*\]/);
+  assert.match(rail, /roomIds\.push\(activeRoomId\.value\)/);
   assert.match(rail, /channelsStore\.syncVoicePresenceRooms/);
   assert.match(channels, /function getRoomChannels\(roomId\)/);
   assert.match(channels, /const voicePresenceConnections = new Map\(\)/);
+  assert.match(channels, /const voicePresenceSnapshots = new Map\(\)/);
+  assert.match(channels, /applyStoredVoicePresence\(normalizedRoomId\)/);
+  assert.match(channels, /existing\?\.connecting/);
   assert.match(
     channels,
     /applyVoicePresence\(message\.data, normalizedRoomId\)/,

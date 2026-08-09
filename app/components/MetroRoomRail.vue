@@ -322,10 +322,13 @@ async function showRoomTooltip(room, event) {
 }
 
 watch(
-  () => roomsStore.rooms,
-  (rooms) => {
+  [() => roomsStore.rooms, activeRoomId],
+  ([rooms]) => {
     prefetchRooms(rooms);
-    channelsStore.syncVoicePresenceRooms(rooms.map((room) => room.id));
+    const roomIds = rooms.map((room) => room.id);
+    if (activeRoomId.value && !roomIds.includes(activeRoomId.value))
+      roomIds.push(activeRoomId.value);
+    channelsStore.syncVoicePresenceRooms(roomIds);
   },
   { immediate: true },
 );

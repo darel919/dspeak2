@@ -74,7 +74,9 @@ with the invite record ID, creator, creation time, expiry, and room ID.
 `dspeak_room_invites` is the server-side source of truth. Join and preview
 requests compare every encoded field with the stored record and reject malformed,
 modified, missing, or expired links. New room membership requires a valid invite.
-The join screen names the inviter and room before the member accepts.
+The invite preview is available without an account; authentication is requested
+when the visitor accepts, and the pending invite is completed after sign-in. The
+join screen names the inviter and room before the member accepts.
 
 `dspeak_room_audit_log` records invite creation and successful invite-based
 joins. Room owners and roles with Manage invites or Manage members can view the

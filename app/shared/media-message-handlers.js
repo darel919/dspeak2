@@ -1,4 +1,5 @@
 import { closeMediaProviderSafely } from "./media-session-cleanup.js";
+import { mediaDebug } from "./media-debug.js";
 
 export function setupMediaMessageHandlers({
   getHeartbeatSequence,
@@ -21,8 +22,21 @@ export function setupMediaMessageHandlers({
   onAttenuationState,
   onProviderTicket,
   onProviderFailure,
+  onProviderRecovering,
   onP2pQualification,
 }) {
+  mediaDebug("control.handlers-installed", {
+    handlers: [
+      "hello919",
+      "connected",
+      "heartbeat-ack",
+      "topology-state",
+      "route-commit",
+      "provider-ticket",
+      "provider-failure",
+      "provider-recovering",
+    ],
+  });
   registerHandler("hi919", onServerHello);
   registerHandler("connected", (data) => {
     setLocalPeerId(String(data.peerId));
@@ -42,12 +56,31 @@ export function setupMediaMessageHandlers({
     ),
   );
   registerHandler("error919", (data) => {
+    mediaDebug("control.error", {
+      code: data?.code,
+      error: data?.error,
+    });
     const error = new Error(data?.error || "Media control error");
     if (data?.code) error.code = data.code;
     throw error;
   });
   registerHandler("provider-ticket", onProviderTicket);
-  registerHandler("provider-failure", onProviderFailure);
+  registerHandler("provider-failure", (data) => {
+    mediaDebug("control.provider-failure", {
+      provider: data?.provider,
+      epoch: data?.epoch,
+      reason: data?.reason,
+    });
+    return onProviderFailure?.(data);
+  });
+  registerHandler("provider-recovering", (data) => {
+    mediaDebug("control.provider-recovering", {
+      retryAt: data?.retryAt,
+      retryAfterMs: data?.retryAfterMs,
+      reason: data?.reason,
+    });
+    return onProviderRecovering?.(data);
+  });
   registerHandler("p2p-qualified", (data) =>
     onP2pQualification?.({ ...data, type: "p2p-qualified" }),
   );

@@ -246,3 +246,32 @@ test("P2P qualification acknowledgements retain their message kind", () => {
     ],
   );
 });
+
+test("provider recovery notifications reach the media session", () => {
+  const handlers = new Map();
+  const notifications = [];
+  setupMediaMessageHandlers({
+    ensureP2p: () => null,
+    getHeartbeatSequence: () => 0,
+    getLastHeartbeatAckSequence: () => 0,
+    getSfu: () => null,
+    getSocket: () => null,
+    lastInRoom: { value: [] },
+    onProviderRecovering: (data) => notifications.push(data),
+    participantSfuRoundTripTimes: { value: {} },
+    queueTopology: () => {},
+    registerHandler: (type, handler) => handlers.set(type, handler),
+    remoteProducersCount: { value: 0 },
+    setHeartbeatAck: () => {},
+    setLocalPeerId: () => {},
+    sfuProducerIds: () => [],
+    syncConnectedUsers: () => {},
+    voiceStore: {
+      updateUserVoiceState: () => {},
+      upsertUserProfile: () => {},
+    },
+  });
+
+  handlers.get("provider-recovering")({ retryAt: 1234 });
+  assert.deepEqual(notifications, [{ retryAt: 1234 }]);
+});

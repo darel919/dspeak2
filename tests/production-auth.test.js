@@ -58,6 +58,18 @@ const authStore = await readFile(
   new URL("../app/stores/auth.js", import.meta.url),
   "utf8",
 );
+const profilesRepository = await readFile(
+  new URL("../server/db/repositories/profiles.js", import.meta.url),
+  "utf8",
+);
+const randomUsername = await readFile(
+  new URL("../server/auth/random-username.js", import.meta.url),
+  "utf8",
+);
+const oauthProfile = await readFile(
+  new URL("../server/auth/oauth-profile.js", import.meta.url),
+  "utf8",
+);
 const accountPage = await readFile(
   new URL("../app/pages/settings.vue", import.meta.url),
   "utf8",
@@ -150,6 +162,25 @@ test("OAuth profile provisioning has a bounded database wait", async () => {
   );
   assert.match(profile, /profileProvisioningTimeoutMs = 15_000/);
   assert.match(profile, /Promise\.race/);
+});
+
+test("OAuth first login allocates usernames across account and profile records", () => {
+  assert.match(profilesRepository, /from\(users\)/);
+  assert.match(profilesRepository, /users_username_unique/);
+  assert.match(profilesRepository, /profiles_username_unique/);
+  assert.match(profilesRepository, /usernameRetryLimit/);
+  assert.match(profilesRepository, /generateRandomUsername/);
+  assert.doesNotMatch(profilesRepository, /preferredUsername/);
+  assert.doesNotMatch(oauthProfile, /username:\s*user\.user_metadata/);
+  assert.match(randomUsername, /randomInt\(100, 1000\)/);
+  assert.match(
+    randomUsername,
+    /\$\{randomItem\(adjectives\)\}_\$\{randomItem\(nouns\)\}/,
+  );
+  assert.match(
+    profilesRepository,
+    /username,[\s\S]*onConflictDoNothing\(\{ target: users\.id \}\)/,
+  );
 });
 
 test("client session restoration targets the registered auth session route", () => {

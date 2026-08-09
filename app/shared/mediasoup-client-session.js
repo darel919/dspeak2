@@ -2,9 +2,24 @@ import { Device } from "mediasoup-client";
 import { buildVideoProduceOptions } from "./video-settings.js";
 import { buildVoiceProducerOptions } from "./voice-transport.js";
 import {
-  collectPeerConnectionDiagnosticStats,
-  collectPeerConnectionStats,
-} from "./rtc-media-stats.js";
+  collectMediasoupDiagnosticStats,
+  collectMediasoupStats,
+  expectedMediasoupInboundFlowCount,
+  mediasoupMediaReadiness,
+} from "./mediasoup-client-diagnostics.js";
+import {
+  handleMediasoupTransportRecovery,
+  restartMediasoupTransportIce,
+} from "./mediasoup-client-recovery.js";
+import {
+  closeMediasoupConsumerByProducer,
+  handleMediasoupServerError,
+  setMediasoupConsumerReceiving,
+} from "./mediasoup-client-consumer-control.js";
+import {
+  getMediasoupConnectionState,
+  handleMediasoupTransportState,
+} from "./mediasoup-client-transport-state.js";
 
 function waitFor(map, key, timeoutMs, label) {
   return new Promise((resolve, reject) => {
@@ -347,6 +362,10 @@ export class MediasoupClientSession {
     return `${operation}-${this.nextRequestSequence}`;
   }
 
+  waitForPending(requestId, label, timeoutMs = this.requestTimeoutMs) {
+    return waitFor(this.pending, requestId, timeoutMs, label);
+  }
+
   sendOrThrow(message, label) {
     if (this.send(message) === false)
       throw new Error(`${label} signaling unavailable`);
@@ -361,121 +380,19 @@ export class MediasoupClientSession {
   }
 
   connectionState() {
-    const sendRequired = this.sources.size > 0;
-    const receiveRequired =
-      this.consumers.size > 0 || this.requestedConsumers.size > 0;
-    const sendConnected =
-      !sendRequired || this.transportStates.get("send") === "connected";
-    const receiveConnected =
-      !receiveRequired || this.transportStates.get("recv") === "connected";
-    return {
-      ready: sendConnected && receiveConnected,
-      sendRequired,
-      receiveRequired,
-      send: this.transportStates.get("send") || "new",
-      recv: this.transportStates.get("recv") || "new",
-    };
+    return getMediasoupConnectionState(this);
   }
 
   handleServerTransportState(data) {
-    const direction = data?.direction;
-    if (direction !== "send" && direction !== "recv") return false;
-    const state = data.state === "completed" ? "connected" : data.state;
-    if (
-      ![
-        "new",
-        "connecting",
-        "connected",
-        "disconnected",
-        "failed",
-        "closed",
-      ].includes(state)
-    )
-      return false;
-    this.transportStates.set(direction, state);
-    const summary = this.connectionState();
-    this.onStateChange?.(direction, state, summary);
-    this.handleTransportRecovery(direction, state);
-    return true;
+    return handleMediasoupTransportState(this, data);
   }
 
   handleTransportRecovery(direction, state) {
-    clearTimeout(this.recoveryTimers.get(direction));
-    this.recoveryTimers.delete(direction);
-    if (state === "connected") {
-      this.recoveryAttempts.delete(direction);
-      return;
-    }
-    if (state !== "disconnected" && state !== "failed") return;
-    const delay = state === "disconnected" ? 3000 : 0;
-    const timer = setTimeout(() => {
-      this.recoveryTimers.delete(direction);
-      this.restartTransportIce(direction).catch(() =>
-        this.onStateChange?.(direction, "failed", this.connectionState()),
-      );
-    }, delay);
-    this.recoveryTimers.set(direction, timer);
+    return handleMediasoupTransportRecovery(this, direction, state);
   }
 
   restartTransportIce(direction) {
-    const active = this.recoveryOperations.get(direction);
-    if (active) return active;
-    const operation = this.performTransportIceRestart(direction).finally(() => {
-      if (this.recoveryOperations.get(direction) === operation)
-        this.recoveryOperations.delete(direction);
-    });
-    this.recoveryOperations.set(direction, operation);
-    return operation;
-  }
-
-  async performTransportIceRestart(direction) {
-    const attempts = this.recoveryAttempts.get(direction) || 0;
-    if (attempts >= 1) throw new Error("SFU ICE recovery was exhausted");
-    const transport =
-      direction === "send" ? this.sendTransport : this.recvTransport;
-    if (!transport || transport.closed)
-      throw new Error("SFU transport is unavailable for ICE recovery");
-    this.recoveryAttempts.set(direction, attempts + 1);
-    const requestId = this.requestId("restart-ice");
-    const response = waitFor(
-      this.pending,
-      requestId,
-      this.requestTimeoutMs,
-      `SFU ${direction} ICE restart`,
-    );
-    try {
-      this.sendOrThrow(
-        {
-          type: "restart-ice",
-          data: { requestId, transportId: transport.id },
-        },
-        `SFU ${direction} ICE restart`,
-      );
-    } catch (error) {
-      this.pending.get(requestId)?.reject(error);
-    }
-    const iceParameters = await response;
-    const current =
-      direction === "send" ? this.sendTransport : this.recvTransport;
-    if (current !== transport || transport.closed)
-      throw new Error("SFU transport changed during ICE recovery");
-    if (this.transportStates.get(direction) === "connected") return true;
-    await transport.restartIce({ iceParameters });
-    clearTimeout(this.recoveryTimers.get(direction));
-    const validationTimer = setTimeout(() => {
-      this.recoveryTimers.delete(direction);
-      const current =
-        direction === "send" ? this.sendTransport : this.recvTransport;
-      if (
-        current !== transport ||
-        this.transportStates.get(direction) === "connected"
-      )
-        return;
-      this.transportStates.set(direction, "failed");
-      this.onStateChange?.(direction, "failed", this.connectionState());
-    }, this.recoveryTimeoutMs);
-    this.recoveryTimers.set(direction, validationTimer);
-    return true;
+    return restartMediasoupTransportIce(this, direction);
   }
 
   async addSource(entry) {
@@ -782,204 +699,31 @@ export class MediasoupClientSession {
   }
 
   async setConsumerReceiving(entry, receiving) {
-    const desired = Boolean(receiving);
-    entry.desiredReceiving = desired;
-    entry.receivingRevision = (entry.receivingRevision || 0) + 1;
-    const revision = entry.receivingRevision;
-    const operation = desired ? "resume-consumer" : "pause-consumer";
-    let lastError = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const requestId = this.requestId(operation);
-      const acknowledgement = waitFor(
-        this.pending,
-        requestId,
-        this.consumerControlTimeoutMs,
-        `SFU ${desired ? "consumer resume" : "consumer pause"}`,
-      );
-      try {
-        this.sendOrThrow(
-          {
-            type: operation,
-            data: { consumerId: entry.consumer.id, requestId, revision },
-          },
-          `SFU ${desired ? "consumer resume" : "consumer pause"}`,
-        );
-      } catch (error) {
-        this.pending.get(requestId)?.reject(error);
-      }
-      try {
-        const result = await acknowledgement;
-        if (result?.consumerClosed) {
-          if (entry.receivingRevision === revision) {
-            entry.track.enabled = false;
-            entry.receiving = false;
-          }
-          return false;
-        }
-        if (entry.receivingRevision !== revision) return false;
-        entry.track.enabled = desired;
-        entry.receiving = desired;
-        return true;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    if (entry.receivingRevision === revision) {
-      entry.track.enabled = false;
-      entry.receiving = false;
-    }
-    this.onStateChange?.("consumer", "failed", this.connectionState());
-    throw lastError;
+    return setMediasoupConsumerReceiving(this, entry, receiving);
   }
 
   closeConsumerByProducer(producerId) {
-    this.requestedConsumers.delete(producerId);
-    this.consumerRetryAttempts.delete(producerId);
-    clearTimeout(this.consumerRetryTimers.get(producerId));
-    this.consumerRetryTimers.delete(producerId);
-    const match = [...this.consumers.values()].find(
-      (entry) => entry.producerId === producerId,
-    );
-    if (!match) return;
-    match.consumer.close();
-    match.close();
+    return closeMediasoupConsumerByProducer(this, producerId);
   }
 
   handleServerError(data) {
-    const error = new Error(data?.message || "SFU signaling request failed");
-    if (data?.requestId) {
-      this.pendingProduce.get(data.requestId)?.reject(error);
-      this.pending.get(data.requestId)?.reject(error);
-    }
-    if (data?.requestType === "consume" && data.producerId) {
-      this.requestedConsumers.delete(data.producerId);
-      this.pendingConsumers.delete(data.producerId);
-      const attempts = this.consumerRetryAttempts.get(data.producerId) || 0;
-      if (!this.closed && attempts < 2) {
-        this.consumerRetryAttempts.set(data.producerId, attempts + 1);
-        const delay = this.consumerRetryDelayMs * 2 ** attempts;
-        const timer = setTimeout(() => {
-          this.consumerRetryTimers.delete(data.producerId);
-          this.requestConsumer(data.producerId);
-        }, delay);
-        this.consumerRetryTimers.set(data.producerId, timer);
-      }
-    }
-    if (data?.requestType === "connect-transport" && data.transportId) {
-      this.pending.get(data.requestId)?.reject(error);
-    }
-    if (
-      [
-        "get-rtp-capabilities",
-        "client-rtp-capabilities",
-        "create-transport",
-      ].includes(data?.requestType)
-    ) {
-      this.readyReject?.(error);
-      this.resetReadiness();
-    }
+    return handleMediasoupServerError(this, data);
   }
 
   async stats() {
-    const transports = [];
-    for (const [kind, transport] of [
-      ["send", this.sendTransport],
-      ["recv", this.recvTransport],
-    ]) {
-      const pc = transport?._handler?._pc;
-      if (!pc) continue;
-      transports.push(await collectPeerConnectionStats(pc, kind));
-    }
-    return transports;
+    return collectMediasoupStats(this);
   }
 
   async diagnosticStats() {
-    const transports = [];
-    for (const [kind, transport] of [
-      ["send", this.sendTransport],
-      ["recv", this.recvTransport],
-    ]) {
-      const pc = transport?._handler?._pc;
-      if (!pc) continue;
-      transports.push(await collectPeerConnectionDiagnosticStats(pc, kind));
-    }
-    return transports;
+    return collectMediasoupDiagnosticStats(this);
   }
 
   expectedInboundFlowCount() {
-    return [...this.consumers.values()].filter((entry) =>
-      this.shouldReceive(entry.userId, entry.source),
-    ).length;
+    return expectedMediasoupInboundFlowCount(this);
   }
 
   async mediaReadiness(expectedInbound) {
-    const outboundExpected = this.sources.size;
-    const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
-    if (!this.sendTransport || !this.recvTransport) {
-      return {
-        ready: false,
-        outboundExpected,
-        outboundFlowing: 0,
-        inboundExpected,
-        inboundFlowing: 0,
-      };
-    }
-    const sampleFlow = (key, report, type, field) => {
-      if (!report) return false;
-      const stat = [...report.values()].find(
-        (candidate) => candidate.type === type,
-      );
-      if (!stat) return false;
-      const bytes = Number(stat[field]);
-      const timestamp = Number(stat.timestamp);
-      if (!Number.isFinite(bytes) || !Number.isFinite(timestamp)) return false;
-      const previous = this.rtpSamples.get(key);
-      this.rtpSamples.set(key, { bytes, timestamp });
-      if (
-        !previous ||
-        timestamp <= previous.timestamp ||
-        bytes < previous.bytes
-      )
-        return false;
-      return bytes > previous.bytes;
-    };
-    const outboundChecks = [...this.producers.values()].map(async (entry) => {
-      const report = await entry.producer.getStats().catch(() => null);
-      return sampleFlow(
-        `out:${entry.producer.id}`,
-        report,
-        "outbound-rtp",
-        "bytesSent",
-      );
-    });
-    const inboundChecks = [...this.consumers.values()].map(async (entry) => {
-      const report = await entry.consumer.getStats().catch(() => null);
-      return (
-        entry.receiving === true &&
-        sampleFlow(
-          `in:${entry.consumer.id}`,
-          report,
-          "inbound-rtp",
-          "bytesReceived",
-        )
-      );
-    });
-    const [outboundResults, inboundResults] = await Promise.all([
-      Promise.all(outboundChecks),
-      Promise.all(inboundChecks),
-    ]);
-    const outboundFlowing = outboundResults.filter(Boolean).length;
-    const inboundFlowing = inboundResults.filter(Boolean).length;
-    return {
-      ready:
-        this.connectionState().ready &&
-        outboundFlowing >= outboundExpected &&
-        inboundFlowing >= inboundExpected,
-      outboundExpected,
-      outboundFlowing,
-      inboundExpected,
-      inboundFlowing,
-    };
+    return mediasoupMediaReadiness(this, expectedInbound);
   }
 
   closeMedia() {

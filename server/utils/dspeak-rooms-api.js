@@ -44,6 +44,22 @@ function requireValue(value, message) {
   return value;
 }
 
+function sameInstant(left, right) {
+  const leftTime = left instanceof Date ? left.getTime() : Date.parse(left);
+  const rightTime = Date.parse(right);
+  return Number.isFinite(leftTime) && leftTime === rightTime;
+}
+
+function inviteMatchesPayload(invite, payload) {
+  return (
+    String(invite.id) === String(payload.id) &&
+    String(invite.roomId) === String(payload.roomId) &&
+    String(invite.inviterId) === String(payload.createdBy) &&
+    sameInstant(invite.createdAt, payload.createdAt) &&
+    sameInstant(invite.expiresAt, payload.expiresAt)
+  );
+}
+
 function structuredValue(value, fallback = {}) {
   if (value && typeof value === "object") return value;
   if (typeof value !== "string") return fallback;
@@ -421,6 +437,49 @@ async function handleRoomRoles(event, roomId, userId) {
 async function handleRooms(event, suffix) {
   const method = event.method;
   const query = getQuery(event);
+
+  if (suffix === "invites" && method === "GET") {
+    enforceRateLimit(event, "room-invite-preview", null, 60, 60 * 1000);
+    const payload = decodeInvitePayload(String(query.token || ""));
+    if (!payload)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid invite link",
+      });
+    const invite = await db
+      .select()
+      .from(roomInvites)
+      .where(eq(roomInvites.id, payload.id))
+      .limit(1);
+    if (!invite[0] || !inviteMatchesPayload(invite[0], payload))
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid invite link",
+      });
+    if (Date.parse(invite[0].expiresAt) <= Date.now())
+      throw createError({
+        statusCode: 410,
+        statusMessage: "This invite link has expired",
+      });
+    const room = await getRoomById(invite[0].roomId);
+    if (!room)
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Invalid invite link",
+      });
+    const inviter = await db
+      .select()
+      .from(profiles)
+      .where(eq(profiles.id, invite[0].inviterId))
+      .limit(1);
+    return {
+      room: { id: invite[0].roomId, name: room.name || "" },
+      invitedBy: presentProfile(inviter[0]),
+      createdAt: invite[0].createdAt,
+      expiresAt: invite[0].expiresAt,
+    };
+  }
+
   const userId = await requireAuthenticatedUser(event);
 
   if (suffix === "roles")
@@ -457,37 +516,6 @@ async function handleRooms(event, suffix) {
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
     await requireRoomMember(room, userId);
     return roomDetails(room, userId);
-  }
-
-  if (suffix === "invites" && method === "GET") {
-    const payload = decodeInvitePayload(String(query.token || ""));
-    if (!payload)
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid invite link",
-      });
-    const invite = await db
-      .select()
-      .from(roomInvites)
-      .where(eq(roomInvites.id, payload.id))
-      .limit(1);
-    if (!invite[0])
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid invite link",
-      });
-    if (Date.parse(invite[0].expiresAt) <= Date.now())
-      throw createError({
-        statusCode: 410,
-        statusMessage: "This invite link has expired",
-      });
-    const room = await getRoomById(invite[0].roomId);
-    return {
-      room: { id: invite[0].roomId, name: room?.name || "" },
-      invitedBy: presentProfile(undefined),
-      createdAt: invite[0].createdAt,
-      expiresAt: invite[0].expiresAt,
-    };
   }
 
   if (!["GET", "HEAD"].includes(method))
@@ -759,8 +787,7 @@ async function handleRooms(event, suffix) {
           .limit(1);
         if (
           !invite[0] ||
-          String(invite[0].roomId) !== String(room.id) ||
-          String(invite[0].inviterId) !== String(payload.createdBy) ||
+          !inviteMatchesPayload(invite[0], payload) ||
           Date.parse(invite[0].expiresAt) <= Date.now()
         )
           throw createError({

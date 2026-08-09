@@ -1,5 +1,6 @@
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.js";
 import { closeSocketOnPageHide } from "./socket-lifecycle.js";
+import { mediaDebug } from "./media-debug.js";
 
 export class MediasoupProviderSocket {
   constructor({ onMessage, onFailure }) {
@@ -14,6 +15,7 @@ export class MediasoupProviderSocket {
     this.ready = new Promise((resolve, reject) => {
       const socket = new WebSocket(signalingUrl);
       this.socket = socket;
+      mediaDebug("mediasoup.socket-created", { signalingUrl });
       let failureReported = false;
       closeSocketOnPageHide(socket);
       const reportFailure = (error) => {
@@ -30,6 +32,7 @@ export class MediasoupProviderSocket {
         reject(error);
       }, 8000);
       socket.addEventListener("open", () => {
+        mediaDebug("mediasoup.socket-open");
         try {
           socket.send(
             JSON.stringify({
@@ -56,12 +59,14 @@ export class MediasoupProviderSocket {
           }
           if (message.type === "hi919") {
             clearTimeout(timer);
+            mediaDebug("mediasoup.handshake-ready");
             resolve();
             return;
           }
           if (message.type === "connected") return;
           if (message.type === "error919") {
             const error = new Error(message.error || "Media provider error");
+            mediaDebug("mediasoup.provider-error", { error });
             reportFailure(error);
             return;
           }
@@ -75,6 +80,11 @@ export class MediasoupProviderSocket {
       socket.addEventListener("close", (event) => {
         clearTimeout(timer);
         if (this.socket === socket) this.socket = null;
+        mediaDebug("mediasoup.socket-close", {
+          code: event.code,
+          reason: event.reason,
+          clean: event.wasClean,
+        });
         if (!event.wasClean)
           reportFailure(
             new Error(event.reason || "Media provider disconnected"),
@@ -83,6 +93,7 @@ export class MediasoupProviderSocket {
       socket.addEventListener("error", () => {
         clearTimeout(timer);
         const error = new Error("Media provider connection failed");
+        mediaDebug("mediasoup.socket-error", { error });
         reportFailure(error);
         reject(error);
       });

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("transient media route health does not clear voice membership", async () => {
-  const source = await readFile("app/stores/voice.js", "utf8");
+  const source = await readFile("app/shared/voice-media-actions.js", "utf8");
 
   assert.doesNotMatch(
     source,
@@ -35,6 +35,16 @@ test("disconnected channel fallback does not list the local user", async () => {
   );
 });
 
+test("connected voice rows follow the room presence snapshot", async () => {
+  const source = await readFile("app/components/ChannelList.vue", "utf8");
+
+  assert.match(source, /getConnectedChannelParticipants\(channel\)/);
+  assert.match(
+    source,
+    /function getConnectedChannelParticipants\(channel\)[\s\S]*channel\.inRoom \|\| \[\]\)\.map/,
+  );
+});
+
 test("connected empty voice channels render an explicit empty state", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
 
@@ -45,7 +55,7 @@ test("connected empty voice channels render an explicit empty state", async () =
 });
 
 test("joining voice inserts the local participant after media connects", async () => {
-  const source = await readFile("app/stores/voice.js", "utf8");
+  const source = await readFile("app/shared/voice-media-actions.js", "utf8");
 
   assert.match(
     source,
@@ -54,7 +64,7 @@ test("joining voice inserts the local participant after media connects", async (
 });
 
 test("native microphone permission failure keeps the voice session muted", async () => {
-  const source = await readFile("app/stores/voice.js", "utf8");
+  const source = await readFile("app/shared/voice-media-actions.js", "utf8");
 
   assert.match(
     source,
@@ -68,7 +78,7 @@ test("native microphone permission failure keeps the voice session muted", async
 
 test("native participant snapshots hydrate profiles before membership rendering", async () => {
   const source = await readFile(
-    "app/composables/media/nativeMediaEngine.js",
+    "app/composables/media/native-media-engine-session.js",
     "utf8",
   );
   const snapshot = source.slice(source.indexOf("onCurrentlyInChannel"));
@@ -113,7 +123,10 @@ test("desktop notifications honor the local enabled preference", async () => {
 });
 
 test("tray mode destroys the main webview and recreates it on demand", async () => {
-  const source = await readFile("desktop/src-tauri/src/main.rs", "utf8");
+  const source = await readFile(
+    "desktop/src-tauri/src/desktop/window.rs",
+    "utf8",
+  );
 
   assert.match(
     source,

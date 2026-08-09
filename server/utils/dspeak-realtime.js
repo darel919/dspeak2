@@ -24,7 +24,7 @@ export async function publishToRealtime(topic, message) {
   if (!publisher) return;
   let channel = cachedChannels.get(topic);
   if (!channel) {
-    channel = publisher.channel(topic);
+    channel = publisher.channel(topic, { config: { private: true } });
     cachedChannels.set(topic, channel);
   }
   try {
@@ -35,17 +35,17 @@ export async function publishToRealtime(topic, message) {
 }
 
 export function broadcastGlobally(message) {
-  publishToRealtime("global", message);
+  return publishToRealtime("global", message);
 }
 
 export function broadcastToUser(userId, message) {
-  publishToRealtime(`notify:${String(userId)}`, message);
+  return publishToRealtime(`notify:${String(userId)}`, message);
 }
 
 export function broadcastToChannel(channelId, message) {
-  publishToRealtime(`chat:${String(channelId)}`, message);
+  return publishToRealtime(`chat:${String(channelId)}`, message);
 }
 
 export function broadcastToRoom(roomId, message) {
-  publishToRealtime(`room:${String(roomId)}`, message);
+  return publishToRealtime(`room:${String(roomId)}`, message);
 }

@@ -13,6 +13,17 @@ export function addressFamily(address) {
   return "unknown";
 }
 
+export function formatTopologyReason(value) {
+  const reason = String(value || "");
+  if (!reason || reason === "provider-transition") return "Active media path";
+  if (reason.startsWith("provider-cooldown-"))
+    return "Recovered after provider cooldown";
+  if (reason.startsWith("provider-failed-"))
+    return "Recovered after provider failure";
+  if (reason.startsWith("p2p-failed-")) return "SFU fallback after P2P failure";
+  return reason.replaceAll("-", " ");
+}
+
 export function classifyTopology({
   mode,
   participantCount,

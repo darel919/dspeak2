@@ -667,16 +667,18 @@ async function handleChannels(event, suffix) {
         );
       }
     }
-    broadcastToChannel(channel.id, { type: "currentlyInChannel", inRoom });
-    broadcastToRoom(room.id, {
-      type: "voice-presence",
-      data: {
-        channelId: String(channel.id),
-        inRoom,
-        profiles: voiceProfiles,
-        participantStates: [],
-      },
-    });
+    await Promise.all([
+      broadcastToChannel(channel.id, { type: "currentlyInChannel", inRoom }),
+      broadcastToRoom(room.id, {
+        type: "voice-presence",
+        data: {
+          channelId: String(channel.id),
+          inRoom,
+          profiles: voiceProfiles,
+          participantStates: [],
+        },
+      }),
+    ]);
     return {
       message: `Successfully ${suffix === "join" ? "joined" : "left"} the channel`,
     };

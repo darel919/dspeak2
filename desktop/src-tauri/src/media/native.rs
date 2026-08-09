@@ -89,9 +89,8 @@ pub fn producer_set_parameters(
     parameters: &str,
 ) -> Result<(), String> {
     let parameters = CString::new(parameters).map_err(|error| error.to_string())?;
-    let result = unsafe {
-        ffi::lib_dspeak_media_producer_set_parameters(producer, parameters.as_ptr())
-    };
+    let result =
+        unsafe { ffi::lib_dspeak_media_producer_set_parameters(producer, parameters.as_ptr()) };
     if result == 0 {
         Ok(())
     } else {
@@ -430,8 +429,7 @@ fn transport_ice_restart_result(
     let value = unsafe { CStr::from_ptr(pointer) }
         .to_str()
         .map(|s| {
-            serde_json::from_str::<serde_json::Value>(s)
-                .unwrap_or_else(|_| serde_json::Value::Null)
+            serde_json::from_str::<serde_json::Value>(s).unwrap_or_else(|_| serde_json::Value::Null)
         })
         .map_err(|_| format!("native {label} ICE restart returned invalid UTF-8"));
     unsafe { ffi::lib_dspeak_media_free_string(pointer) };
@@ -442,7 +440,8 @@ pub fn send_transport_restart_ice(
     transport: *mut ffi::lib_dspeak_media_send_transport_t,
 ) -> Result<serde_json::Value, String> {
     let mut pointer = ptr::null_mut();
-    let result = unsafe { ffi::lib_dspeak_media_send_transport_restart_ice(transport, &mut pointer) };
+    let result =
+        unsafe { ffi::lib_dspeak_media_send_transport_restart_ice(transport, &mut pointer) };
     transport_ice_restart_result(result, pointer, "send transport")
 }
 
@@ -450,7 +449,8 @@ pub fn recv_transport_restart_ice(
     transport: *mut ffi::lib_dspeak_media_recv_transport_t,
 ) -> Result<serde_json::Value, String> {
     let mut pointer = ptr::null_mut();
-    let result = unsafe { ffi::lib_dspeak_media_recv_transport_restart_ice(transport, &mut pointer) };
+    let result =
+        unsafe { ffi::lib_dspeak_media_recv_transport_restart_ice(transport, &mut pointer) };
     transport_ice_restart_result(result, pointer, "recv transport")
 }
 
@@ -491,13 +491,14 @@ pub fn producer_replace_video_track(
     track: *mut ffi::lib_dspeak_media_video_track_t,
 ) -> Result<(), String> {
     let mut error = 0;
-    let result = unsafe {
-        ffi::lib_dspeak_media_producer_replace_video_track(producer, track, &mut error)
-    };
+    let result =
+        unsafe { ffi::lib_dspeak_media_producer_replace_video_track(producer, track, &mut error) };
     if result == 0 {
         Ok(())
     } else {
-        Err(format!("native producer video track replacement failed (error {error})"))
+        Err(format!(
+            "native producer video track replacement failed (error {error})"
+        ))
     }
 }
 
@@ -506,13 +507,14 @@ pub fn producer_replace_audio_track(
     track: *mut ffi::lib_dspeak_media_audio_track_t,
 ) -> Result<(), String> {
     let mut error = 0;
-    let result = unsafe {
-        ffi::lib_dspeak_media_producer_replace_audio_track(producer, track, &mut error)
-    };
+    let result =
+        unsafe { ffi::lib_dspeak_media_producer_replace_audio_track(producer, track, &mut error) };
     if result == 0 {
         Ok(())
     } else {
-        Err(format!("native producer audio track replacement failed (error {error})"))
+        Err(format!(
+            "native producer audio track replacement failed (error {error})"
+        ))
     }
 }
 

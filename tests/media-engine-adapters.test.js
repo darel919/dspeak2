@@ -53,32 +53,41 @@ describe("MediaEngine adapters", () => {
 
   it("uses adaptive native action polling instead of a fixed idle spin", async () => {
     const source = await readFile(
-      "app/composables/media/nativeMediaEngine.js",
+      "app/composables/media/native-media-engine-runtime.js",
+      "utf8",
+    );
+    const constants = await readFile(
+      "app/composables/media/native-media-engine-common.js",
       "utf8",
     );
 
-    assert.match(source, /NATIVE_ACTION_POLL_IDLE_MS = 100/);
-    assert.match(source, /NATIVE_ACTION_POLL_ACTIVE_MS = 5/);
+    assert.match(constants, /NATIVE_ACTION_POLL_IDLE_MS = 100/);
+    assert.match(constants, /NATIVE_ACTION_POLL_ACTIVE_MS = 5/);
     assert.match(
       source,
       /active \? NATIVE_ACTION_POLL_ACTIVE_MS : NATIVE_ACTION_POLL_IDLE_MS/,
     );
-    assert.match(source, /this\.nativeActionPump = \{/);
+    assert.match(source, /engine\.nativeActionPump = \{/);
     assert.doesNotMatch(source, /this\.nativeActionPump\.stop\s*=/);
     assert.doesNotMatch(source, /schedule\(10\)/);
   });
 
   it("does not probe browser microphone access before the Tauri factory", async () => {
-    const voiceStore = await readFile("app/stores/voice.js", "utf8");
-    const factoryImport = voiceStore.indexOf('"~/composables/useMediasoupSfu"');
-    const permissionProbe = voiceStore.indexOf(
+    const voiceActions = await readFile(
+      "app/shared/voice-media-actions.js",
+      "utf8",
+    );
+    const factoryImport = voiceActions.indexOf(
+      '"~/composables/useMediasoupSfu"',
+    );
+    const permissionProbe = voiceActions.indexOf(
       "await ensureMicrophonePermission();",
     );
 
     assert.ok(factoryImport >= 0);
     assert.ok(permissionProbe > factoryImport);
     assert.match(
-      voiceStore.slice(factoryImport, permissionProbe),
+      voiceActions.slice(factoryImport, permissionProbe),
       /if \(!isTauriRuntime\(\)\) \{/,
     );
   });

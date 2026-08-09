@@ -199,10 +199,7 @@ extern "C" {
         track_id: *const c_char,
         enabled: bool,
     ) -> c_int;
-    pub fn lib_dspeak_media_p2p_send_health(
-        handle: *mut c_void,
-        message: *const c_char,
-    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_send_health(handle: *mut c_void, message: *const c_char) -> c_int;
 
     pub fn lib_dspeak_media_p2p_create(
         ice_servers_json: *const c_char,

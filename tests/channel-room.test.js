@@ -36,7 +36,7 @@ describe("resolveChannelRoomId", () => {
 
 describe("voice join resolves the room before connecting", () => {
   it("resolves the room id from the channel before session.connect", async () => {
-    const source = await readFile("app/stores/voice.js", "utf8");
+    const source = await readFile("app/shared/voice-media-actions.js", "utf8");
     assert.match(
       source,
       /const joiningRoomId = resolveChannelRoomId\(\s*channelsStore\.getChannelById\(channelId\),\s*\);/,
@@ -60,15 +60,15 @@ describe("voice join resolves the room before connecting", () => {
 
   it("passes the resolved room id to the media bootstrap", async () => {
     const source = await readFile(
-      "app/composables/useHybridMediaSession.js",
+      "app/shared/hybrid-media-session-lifecycle.js",
       "utf8",
     );
     assert.match(
       source,
-      /const roomId =\s*options\.roomId \|\|\s*voiceStore\.currentRoomId \|\|\s*resolveChannelRoomId\(channel\);/,
+      /const roomId =\s*options\.roomId \|\| getRoomId\(\) \|\| channel\?\.room\?\.id \|\| null;/,
     );
     const bootstrapCall = source.indexOf(
-      "const bootstrap = await getMediaControlBootstrap(",
+      "const bootstrap = await mediaSessionSetup.getBootstrap(",
     );
     assert.ok(bootstrapCall >= 0);
     assert.match(source.slice(bootstrapCall, bootstrapCall + 400), /roomId,/);

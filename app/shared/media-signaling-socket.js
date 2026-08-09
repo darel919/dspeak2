@@ -1,4 +1,5 @@
 import { closeSocketOnPageHide } from "./socket-lifecycle.js";
+import { mediaDebug, shortMediaId } from "./media-debug.js";
 
 export function mediaSignalingUrl(
   configuredPath,
@@ -82,8 +83,13 @@ export function createMediaSignalingSocket({
     }
     try {
       socket.send(JSON.stringify(message));
+      mediaDebug("control.send", {
+        type: message?.type,
+        sequence: message?.data?.sequence,
+      });
       return true;
-    } catch {
+    } catch (error) {
+      mediaDebug("control.send-failed", { type: message?.type, error });
       socket.close(4000, "Media signaling send failed");
       return false;
     }
@@ -102,6 +108,10 @@ export function createMediaSignalingSocket({
       try {
         if (Date.now() - lastHeartbeatAckAt >= heartbeatTimeoutMs) {
           console.warn("[Media] signaling heartbeat acknowledgement timed out");
+          mediaDebug("control.heartbeat-timeout", {
+            sequence: heartbeatSequence,
+            lastAckSequence: lastHeartbeatAckSequence,
+          });
           socket?.close(4000, "Signaling heartbeat timed out");
           return;
         }
@@ -138,6 +148,10 @@ export function createMediaSignalingSocket({
         return;
       }
       socket = candidate;
+      mediaDebug("control.socket-created", {
+        reconnectAttempt,
+        reconnecting: reconnectAttempt > 0,
+      });
       closeSocketOnPageHide(candidate);
       const timeout = setTimeout(() => {
         candidate.close(4000, "Media signaling connection timed out");
@@ -148,6 +162,7 @@ export function createMediaSignalingSocket({
       pendingReady = { candidate, resolve, reject, timeout, promise: null };
       candidate.onopen = () => {
         if (socket !== candidate) return;
+        mediaDebug("control.socket-open");
         try {
           onOpen();
         } catch (error) {
@@ -158,6 +173,9 @@ export function createMediaSignalingSocket({
       candidate.onmessage = (event) => {
         if (socket !== candidate) return;
         try {
+          mediaDebug("control.message-received", {
+            bytes: typeof event.data === "string" ? event.data.length : null,
+          });
           handleMessage(event.data);
         } catch (error) {
           reportError(error);
@@ -186,6 +204,11 @@ export function createMediaSignalingSocket({
         socket = null;
         protocolState = null;
         stopHeartbeat();
+        mediaDebug("control.socket-close", {
+          code: event.code,
+          reason: event.reason,
+          protocolRejected: event.code === protocol.closeCode,
+        });
         const protocolRejected = event.code === protocol.closeCode;
         if (protocolRejected) {
           try {
@@ -213,6 +236,12 @@ export function createMediaSignalingSocket({
       return false;
     }
     protocolState = { ...data };
+    mediaDebug("control.server-hello", {
+      mediaSessionId: shortMediaId(data.mediaSessionId),
+      protocolVersion: data.protocolVersion,
+      contractRevision: data.contractRevision,
+      heartbeatIntervalMs: data.heartbeatIntervalMs,
+    });
     heartbeatIntervalMs = data.heartbeatIntervalMs;
     heartbeatTimeoutMs = data.heartbeatTimeoutMs;
     return send({
@@ -235,6 +264,9 @@ export function createMediaSignalingSocket({
     reconnectAttempt = 0;
     reconnectStartedAt = 0;
     startHeartbeat();
+    mediaDebug("control.ready", {
+      mediaSessionId: shortMediaId(protocolState?.mediaSessionId),
+    });
     pending.resolve();
     return true;
   }
@@ -252,6 +284,10 @@ export function createMediaSignalingSocket({
         reconnectBaseDelayMs * 2 ** reconnectAttempt,
       ) + Math.floor(Math.random() * reconnectJitterMs);
     reconnectAttempt += 1;
+    mediaDebug("control.reconnect-scheduled", {
+      attempt: reconnectAttempt,
+      delay,
+    });
     reconnectTimer = setTimeout(async () => {
       reconnectTimer = null;
       try {

@@ -40,10 +40,21 @@ export function createHybridMediaDiagnostics({
         updateP2pStats(edges);
       }
     }
-    const transports =
+    const rawTransports =
       activeProvider === "sfu"
         ? (await sfu?.stats()) || []
         : (await p2pMesh?.stats()) || [];
+    const transports = (Array.isArray(rawTransports) ? rawTransports : [])
+      .filter(Boolean)
+      .map((transport) => ({
+        ...transport,
+        pcStates: {
+          connectionState: transport.pcStates?.connectionState || "unknown",
+          iceConnectionState:
+            transport.pcStates?.iceConnectionState || "unknown",
+          signalingState: transport.pcStates?.signalingState || "unknown",
+        },
+      }));
     const pair =
       activeProvider === "sfu"
         ? transports.find((transport) => transport.candidatePair)
@@ -58,7 +69,7 @@ export function createHybridMediaDiagnostics({
         : pair?.currentRoundTripTime == null
           ? null
           : pair.currentRoundTripTime * 1000;
-    if (sfuRoundTripTime.value != null)
+    if (activeProvider === "sfu" && sfuRoundTripTime.value != null)
       send({ type: "client-sfu-rtt", data: { rttMs: sfuRoundTripTime.value } });
     const paths =
       activeProvider === "p2p"

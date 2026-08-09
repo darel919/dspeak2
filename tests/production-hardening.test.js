@@ -162,6 +162,7 @@ test("core orchestration is split into bounded ownership modules", async () => {
     "../app/shared/hybrid-media-diagnostics.js",
     "../app/shared/local-audio-engine.js",
     "../app/shared/media-message-handlers.js",
+    "../app/shared/media-provider-recovery.js",
     "../app/shared/media-source-controller.js",
     "../app/shared/media-session-cleanup.js",
     "../app/shared/media-topology-view.js",

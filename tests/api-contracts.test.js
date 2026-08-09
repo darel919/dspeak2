@@ -81,6 +81,7 @@ test("channel policy fields are represented in the database schema", () => {
 
 test("channel join and leave persist the inRoom column and announce it to the room", () => {
   assert.match(dspeakApi, /\.set\(\{ inRoom: nextInRoom \}\)/);
+  assert.match(dspeakApi, /await Promise\.all\(\[[\s\S]*broadcastToChannel/);
   assert.match(dspeakApi, /broadcastToRoom\(room\.id, \{/);
   assert.match(
     dspeakApi,

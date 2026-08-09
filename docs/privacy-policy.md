@@ -81,4 +81,4 @@ Operators may update this policy as services or legal requirements change. Mater
 
 ## 10. Contact
 
-Contact the instance operator using the details published at `https://app.example.com`.
+Contact the instance operator using the details published at `https://dspeak.darelisme.my.id`.

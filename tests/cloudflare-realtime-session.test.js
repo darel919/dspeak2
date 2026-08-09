@@ -43,6 +43,96 @@ test("Cloudflare SFU readiness requires every expected RTP flow", async () => {
   assert.equal((await client.mediaReadiness(1)).ready, false);
 });
 
+test("Cloudflare metrics expose the shared transport diagnostics contract", async () => {
+  const report = new Map([
+    [
+      "pair",
+      {
+        id: "pair",
+        type: "candidate-pair",
+        state: "succeeded",
+        nominated: true,
+        currentRoundTripTime: 0.04,
+        availableOutgoingBitrate: 96_000,
+        localCandidateId: "local",
+        remoteCandidateId: "remote",
+      },
+    ],
+    [
+      "local",
+      {
+        id: "local",
+        type: "local-candidate",
+        address: "192.0.2.10",
+        port: 5000,
+        protocol: "udp",
+        candidateType: "host",
+      },
+    ],
+    [
+      "remote",
+      {
+        id: "remote",
+        type: "remote-candidate",
+        address: "198.51.100.10",
+        port: 6000,
+        protocol: "udp",
+        candidateType: "srflx",
+      },
+    ],
+    [
+      "outbound",
+      {
+        id: "outbound",
+        type: "outbound-rtp",
+        kind: "audio",
+        packetsSent: 100,
+      },
+    ],
+    [
+      "remote-inbound",
+      {
+        id: "remote-inbound",
+        type: "remote-inbound-rtp",
+        kind: "audio",
+        fractionLost: 0.05,
+      },
+    ],
+    [
+      "inbound",
+      {
+        id: "inbound",
+        type: "inbound-rtp",
+        kind: "audio",
+        jitter: 0.004,
+      },
+    ],
+  ]);
+  const client = session();
+  client.peerConnection = {
+    connectionState: "connected",
+    iceConnectionState: "connected",
+    signalingState: "stable",
+    getStats: async () => report,
+  };
+  client.sessionId = "cloudflare-session";
+
+  const [stats] = await client.stats();
+
+  assert.deepEqual(stats.pcStates, {
+    connectionState: "connected",
+    iceConnectionState: "connected",
+    signalingState: "stable",
+  });
+  assert.equal(stats.candidatePair.currentRoundTripTime, 0.04);
+  assert.equal(stats.rttMs, 40);
+  assert.equal(stats.jitterMs, 4);
+  assert.equal(stats.packetLossPercent, 5);
+  assert.equal(stats.availableOutgoingBitrate, 96_000);
+  assert.equal(stats.candidateType, "host");
+  assert.equal(stats.protocol, "udp");
+});
+
 class FakePeerConnection {
   constructor() {
     this.connectionState = "new";

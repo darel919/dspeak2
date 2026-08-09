@@ -1,55 +1,39 @@
-import {
-  createMediaSignalingSocket,
-  dispatchMediaSignalingMessage,
-  mediaSignalingUrl,
-} from "./media-signaling-socket.js";
-import { MediasoupProviderSocket } from "./mediasoup-provider-socket.js";
+import { mediaSignalingUrl } from "./media-signaling-socket.js";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.js";
 import {
   buildVideoProduceOptions,
   resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "./video-settings.js";
-
-function waitFor(map, key, timeoutMs, label) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      map.delete(key);
-      reject(new Error(`${label} timed out`));
-    }, timeoutMs);
-    map.set(key, {
-      resolve(value) {
-        clearTimeout(timer);
-        map.delete(key);
-        resolve(value);
-      },
-      reject(error) {
-        clearTimeout(timer);
-        map.delete(key);
-        reject(error);
-      },
-    });
-  });
-}
-
-function asError(value, fallback) {
-  if (value instanceof Error) return value;
-  return new Error(value?.message || value || fallback);
-}
-
-function nativeRemoteFeedKey(userId, source, consumerId) {
-  const owner = userId == null ? consumerId : String(userId);
-  return `remote:${owner}:${String(source || "audio")}`;
-}
-
-function receiveEventMatches(entry, payload) {
-  if (!entry || !payload || payload.consumerId !== entry.consumerId)
-    return false;
-  if (payload.producerId && payload.producerId !== entry.producerId)
-    return false;
-  if (payload.kind && payload.kind !== entry.kind) return false;
-  return true;
-}
+import { asError } from "./native-mediasoup-utils.js";
+import {
+  configureControl,
+  connect,
+  createSignaling,
+  handleProviderTicket,
+  handleRtpCapabilities,
+  handleTransportParams,
+  resolveConnect,
+  startNegotiation,
+} from "./native-mediasoup-signaling.js";
+import {
+  closeConsumer,
+  closeConsumerByProducer,
+  createConsumer,
+  producersHasId,
+  requestConsumer,
+  resolveConsumerControl,
+  sendParticipantVoiceState,
+  setConsumerReceiving,
+  setConsumerVolume,
+  setRemoteReceiving,
+  shouldReceive,
+} from "./native-mediasoup-consumers.js";
+import {
+  handleNativeAction,
+  handleReceiveEvent,
+} from "./native-mediasoup-actions.js";
+import { installHandlers } from "./native-mediasoup-handlers.js";
 
 function nativeProducerAppData(entry, kind) {
   const appData = {
@@ -225,328 +209,39 @@ export class NativeMediasoupSfuSession {
   }
 
   _installHandlers() {
-    this.messageHandlers.set("hi919", (data) => {
-      if (this.signaling.acceptServerHello(data))
-        this.protocolState = this.signaling.getProtocolState();
-    });
-    this.messageHandlers.set("connected", (data) => {
-      this.connected = true;
-      this.localPeerId = String(data?.peerId || "");
-      this.closed = false;
-      this.connectionPhase = "signaling-ready";
-      this.signaling.markReady();
-      this.onCurrentlyInChannel?.(data);
-      this._resolveConnect();
-      this._emitState();
-      if (!this.controlTicket)
-        this._startNegotiation().catch((error) => this._fail(error));
-    });
-    this.messageHandlers.set("provider-ticket", (data) => {
-      this._handleProviderTicket(data).catch((error) => this._fail(error));
-    });
-    this.messageHandlers.set("rtp-capabilities", (data) =>
-      this._handleRtpCapabilities(data),
-    );
-    this.messageHandlers.set("transport-params", (data) =>
-      this._handleTransportParams(data),
-    );
-    this.messageHandlers.set("transport-connected", (data) => {
-      this.pending.get(data.requestId)?.resolve(data);
-    });
-    this.messageHandlers.set("producer-id", (data) => {
-      this.pendingProduce.get(data.requestId)?.resolve({ id: data.id });
-    });
-    this.messageHandlers.set("consumer-params", (data) =>
-      this._createConsumer(data),
-    );
-    this.messageHandlers.set("new-producer", (data) => {
-      this.requestConsumer(data.producerId);
-    });
-    this.messageHandlers.set("available-producers", (data) => {
-      for (const producerId of data?.producers || [])
-        this.requestConsumer(producerId);
-    });
-    this.messageHandlers.set("producer-closed", (data) => {
-      this.closeConsumerByProducer(data.producerId);
-    });
-    this.messageHandlers.set("consumer-resumed", (data) => {
-      this._resolveConsumerControl(data, true);
-    });
-    this.messageHandlers.set("consumer-paused", (data) => {
-      this._resolveConsumerControl(data, false);
-    });
-    this.messageHandlers.set("ice-restarted", (data) => {
-      this.pending.get(data.requestId)?.resolve(data.iceParameters);
-    });
-    this.messageHandlers.set("transport-state", (data) => {
-      this._handleTransportState(data);
-    });
-    this.messageHandlers.set("topology-state", (data) => {
-      this.topologyState = { ...data, localPeerId: this.localPeerId };
-      this._emitState();
-    });
-    this.messageHandlers.set("route-commit", (data) => {
-      const route = data?.route || data;
-      this.topologyState = {
-        ...this.topologyState,
-        ...route,
-        route,
-        epoch: Number(route?.epoch) || 0,
-        sourceRevision: Number(route?.sourceRevision) || 0,
-        localPeerId: this.localPeerId,
-      };
-      this._emitState();
-    });
-    this.messageHandlers.set("provider-failure", (data) => {
-      if (data?.provider === this.selectedProvider) {
-        this.mediaConnectionState = "recovering";
-        this.connectionPhase = "reconnecting";
-        this._emitState();
-      }
-    });
-    this.messageHandlers.set("provider-draining", (data) => {
-      const failure = {
-        provider: "mediasoup",
-        epoch: Number(this.topologyState?.epoch) || 0,
-        reason: data?.reason || "provider-draining",
-      };
-      this.signaling?.send?.({ type: "provider-failure", data: failure });
-      this.mediaConnectionState = "recovering";
-      this.connectionPhase = "reconnecting";
-      this._emitState();
-    });
-    this.messageHandlers.set("heartbeat-ack", (data) => {
-      this._acknowledgeHeartbeat(data);
-    });
-    this.messageHandlers.set("heartbeat-nack", (data) => {
-      this._acknowledgeHeartbeat(data);
-    });
-    this.messageHandlers.set("currentlyInChannel", (data) => {
-      this.lastInRoom = Array.isArray(data?.inRoom) ? data.inRoom : [];
-      this.onCurrentlyInChannel?.(data);
-    });
-    this.messageHandlers.set("error", (data) => this._handleServerError(data));
-    this.messageHandlers.set("p2p-signal", (data) => this.onP2pSignal?.(data));
+    return installHandlers(this);
   }
 
   async connect(channelId) {
-    if (!channelId) throw new Error("Channel ID is required");
-    if (this.connected && this.channelId === channelId && this.readyPromise)
-      return this.readyPromise;
-    this.channelId = channelId;
-    this.closed = false;
-    this.intentionalClose = false;
-    this.error = null;
-    this.connectionPhase = "socket-connecting";
-    this.connectPromise = new Promise((resolve, reject) => {
-      this.connectResolve = resolve;
-      this.connectReject = reject;
-    });
-    this._createSignaling();
-    await this.signaling.open();
-    await this.connectPromise;
-    return this.readyPromise || undefined;
+    return connect(this, channelId);
   }
 
   configureControl(config = {}) {
-    const endpoint =
-      config.websocketUrl ||
-      config.controlWebsocketUrl ||
-      config.mediaControlUrl;
-    const channelId = config.channelId || this.channelId;
-    if (!endpoint) throw new Error("Media control websocket URL is missing");
-    this.buildUrl = () => {
-      const url = new URL(
-        endpoint,
-        globalThis.window?.location?.href || "http://localhost",
-      );
-      if (channelId) url.searchParams.set("channelId", channelId);
-      if (url.protocol === "http:") url.protocol = "ws:";
-      if (url.protocol === "https:") url.protocol = "wss:";
-      return url.toString();
-    };
-    this.controlTicket = config.ticket;
-    this.mediaSessionId = config.mediaSessionId;
+    return configureControl(this, config);
   }
 
   async _handleProviderTicket(data) {
-    if (data?.provider === "cloudflare-realtime") {
-      this.signaling?.send({
-        type: "provider-failure",
-        data: {
-          provider: data.provider,
-          epoch: data.epoch,
-          reason: "native-provider-unsupported",
-        },
-      });
-      return;
-    }
-    this.providerSignaling?.close();
-    this.providerSignaling = new MediasoupProviderSocket({
-      onMessage: (type, payload) =>
-        this.messageHandlers.get(type)?.(payload || {}),
-      onFailure: (error) => this._fail(error),
-    });
-    await this.providerSignaling.connect({
-      signalingUrl: data.signalingUrl,
-      ticket: data.ticket,
-    });
-    await this._startNegotiation();
-    this.signaling?.send({
-      type: "provider-ready",
-      data: { provider: data.provider, epoch: data.epoch },
-    });
+    return handleProviderTicket(this, data);
   }
 
   _createSignaling() {
-    this.signaling?.stop?.();
-    this.signaling = createMediaSignalingSocket({
-      buildHeartbeatData: (sequence) => ({
-        sequence,
-        topologyEpoch: Number(this.topologyState?.epoch) || 0,
-        sourceRevision: Number(this.topologyState?.sourceRevision) || 0,
-      }),
-      buildUrl: () => this.buildUrl(this.channelId),
-      buildClientHelloData: () => ({
-        protocolVersion: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
-        contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
-        mediaSessionId: this.mediaSessionId,
-        providerCapabilities: ["mediasoup"],
-        ticket: this.controlTicket,
-      }),
-      connectionTimeoutMs: this.requestTimeoutMs,
-      defaultHeartbeatIntervalMs: 5000,
-      defaultHeartbeatTimeoutMs: 20000,
-      handleMessage: (raw) =>
-        dispatchMediaSignalingMessage(raw, {
-          getHandler: (type) => this.messageHandlers.get(type),
-          onFailure: (error) => this._fail(asError(error, "Signaling failed")),
-        }),
-      isIntentionalClose: () => this.intentionalClose,
-      onClose: (event) => this._handleSignalingClose(event),
-      onError: (error) => this._fail(error),
-      onOpen: () => {
-        this.connectionPhase = "protocol-negotiating";
-        this._emitState();
-      },
-      onProtocolRejected: (event) => {
-        const error = new Error(event.reason || "Media client update required");
-        error.code = "MEDIA_PROTOCOL_UPDATE_REQUIRED";
-        this._fail(error);
-      },
-      onReconnect: () => {
-        this.connectionPhase = "reconnecting";
-        this._emitState();
-      },
-      protocol: MEDIA_SIGNALING_CLIENT_PROTOCOL,
-      reconnectBaseDelayMs: 500,
-      reconnectJitterMs: 250,
-      reconnectMaxDelayMs: 10000,
-    });
+    return createSignaling(this);
   }
 
   _resolveConnect() {
-    this.connectResolve?.();
-    this.connectResolve = null;
-    this.connectReject = null;
+    return resolveConnect(this);
   }
 
   async _startNegotiation() {
-    if (this.readyPromise) return this.readyPromise;
-    await this.nativeTeardownPromise;
-    this.connectionPhase = "transport-connecting";
-    this.readyPromise = new Promise((resolve, reject) => {
-      this.readyResolve = resolve;
-      this.readyReject = reject;
-    });
-    this.initializationRequestId = this.requestId("initialize");
-    this.sendOrThrow(
-      {
-        type: "get-rtp-capabilities",
-        data: { requestId: this.initializationRequestId },
-      },
-      "SFU initialization",
-    );
-    return this.readyPromise;
+    return startNegotiation(this);
   }
 
   async _handleRtpCapabilities(data) {
-    if (data.requestId !== this.initializationRequestId) return false;
-    const routerCapabilities = { ...data };
-    delete routerCapabilities.requestId;
-    const device = await this.invoke("media_create_device", {
-      routerRtpCapabilities: JSON.stringify(routerCapabilities),
-    });
-    if (!device?.handle || !device.rtpCapabilities)
-      throw new Error("Native device negotiation returned no capabilities");
-    this.device = device;
-    this.lastSentClientRtpCapabilities = device.rtpCapabilities;
-    this.sendOrThrow(
-      {
-        type: "client-rtp-capabilities",
-        data: { rtpCapabilities: device.rtpCapabilities },
-      },
-      "SFU capability negotiation",
-    );
-    for (const direction of ["send", "recv"]) {
-      const requestId = this.requestId(`create-${direction}`);
-      this.pendingConsumers.set(requestId, direction);
-      this.sendOrThrow(
-        {
-          type: "create-transport",
-          data: { type: direction, requestId },
-        },
-        `SFU ${direction} transport creation`,
-      );
-    }
-    return true;
+    return handleRtpCapabilities(this, data);
   }
 
   async _handleTransportParams(data) {
-    const direction = data.direction;
-    if (direction !== "send" && direction !== "recv") return false;
-    const expected = [...this.pendingConsumers.entries()].find(
-      ([requestId, value]) =>
-        requestId === data.requestId && value === direction,
-    );
-    if (!expected) return false;
-    this.pendingConsumers.delete(data.requestId);
-    const result = await this.invoke(
-      direction === "send"
-        ? "media_create_send_transport"
-        : "media_create_recv_transport",
-      {
-        deviceHandle: this.device.handle,
-        id: data.id,
-        iceParameters: data.iceParameters,
-        iceCandidates: data.iceCandidates,
-        dtlsParameters: data.dtlsParameters,
-        appData: { direction },
-      },
-    );
-    if (!result?.handle)
-      throw new Error(`Native ${direction} transport was not created`);
-    const transport = {
-      ...data,
-      handle: result.handle,
-      direction,
-      closed: false,
-    };
-    if (direction === "send") this.sendTransport = transport;
-    else this.recvTransport = transport;
-    this.transportStates.set(direction, "new");
-    if (this.sendTransport && this.recvTransport) {
-      this.readyResolve?.();
-      this.readyResolve = null;
-      this.readyReject = null;
-      this.connectionPhase = "media-ready";
-      this.mediaConnectionState = "ready-no-active-media";
-      this._emitState();
-      await this._republishSources();
-      for (const producerId of [...this.requestedConsumers])
-        this.requestConsumer(producerId);
-    }
-    return true;
+    return handleTransportParams(this, data);
   }
 
   async addSource(entry) {
@@ -740,237 +435,52 @@ export class NativeMediasoupSfuSession {
   }
 
   requestConsumer(producerId) {
-    if (!producerId || this.producersHasId(producerId)) return false;
-    if (!this.recvTransport || !this.device) {
-      this.requestedConsumers.add(producerId);
-      return false;
-    }
-    if (
-      this.requestedConsumers.has(producerId) ||
-      [...this.consumers.values()].some(
-        (entry) => entry.producerId === producerId,
-      )
-    )
-      return false;
-    this.requestedConsumers.add(producerId);
-    const requestId = this.requestId("consume");
-    this.pendingConsumers.set(requestId, producerId);
-    this.sendOrThrow(
-      {
-        type: "consume",
-        data: {
-          requestId,
-          transportId: this.recvTransport.id,
-          producerId,
-          rtpCapabilities: this.lastSentClientRtpCapabilities,
-        },
-      },
-      "SFU consumer request",
-    );
-    return true;
+    return requestConsumer(this, producerId);
   }
 
   producersHasId(producerId) {
-    return [...this.producers.values()].some(
-      (entry) => entry.id === producerId,
-    );
+    return producersHasId(this, producerId);
   }
 
   async _createConsumer(data) {
-    this.requestedConsumers.delete(data.producerId);
-    this.lastReceivedConsumerParams = data;
-    const previousDirection = this.pendingNativeDirection;
-    this.pendingNativeDirection = "recv";
-    try {
-      const result = await this.invoke("media_consume", {
-        id: data.id,
-        producerId: data.producerId,
-        kind: data.kind,
-        rtpParameters: data.rtpParameters,
-        appData: { userId: data.userId, source: data.source },
-      });
-      const consumerId = result?.id || data.id;
-      const source = data.source || data.kind;
-      const feedKey = nativeRemoteFeedKey(data.userId, source, consumerId);
-      const previous = [...this.consumers.values()].find(
-        (candidate) => candidate.key === feedKey,
-      );
-      if (previous) this.closeConsumer(previous);
-      const entry = {
-        key: feedKey,
-        id: consumerId,
-        consumerId,
-        producerId: result?.producerId || data.producerId,
-        userId: data.userId,
-        source,
-        kind: result?.kind || data.kind,
-        track: null,
-        stream: null,
-        native: true,
-        playback: data.kind === "audio" ? "coreaudio" : "native-frame",
-        frame: null,
-        receiving: false,
-        desiredReceiving: false,
-        receivingRevision: 0,
-        closed: false,
-      };
-      this.consumers.set(entry.consumerId, entry);
-      if (entry.kind === "audio") this.remoteAudioFeeds.set(entry.key, entry);
-      if (entry.kind === "video") this.remoteVideoFeeds.set(entry.key, entry);
-      if (this.shouldReceive(entry.userId, entry.source))
-        await this.setConsumerReceiving(entry, true);
-      this.onRemoteTrack?.(entry);
-      this._emitState();
-      return entry;
-    } finally {
-      this.pendingNativeDirection = previousDirection;
-    }
+    return createConsumer(this, data);
   }
 
   setRemoteReceiving(userIdOrKey, sourceOrReceiving, receivingValue) {
-    if (
-      typeof sourceOrReceiving === "boolean" &&
-      receivingValue === undefined
-    ) {
-      const entry =
-        this.consumers.get(userIdOrKey) ||
-        this.remoteVideoFeeds.get(userIdOrKey) ||
-        this.remoteAudioFeeds.get(userIdOrKey);
-      return entry
-        ? this.setRemoteReceiving(entry.userId, entry.source, sourceOrReceiving)
-        : Promise.resolve(false);
-    }
-    const userId = userIdOrKey;
-    const source = sourceOrReceiving;
-    const receiving = receivingValue;
-    const pairedSources =
-      source === "screen" || source === "screen-audio"
-        ? ["screen", "screen-audio"]
-        : [source];
-    const operations = [];
-    for (const pairedSource of pairedSources) {
-      this.remoteReceiving.set(
-        `${String(userId)}:${String(pairedSource)}`,
-        Boolean(receiving),
-      );
-      for (const entry of this.consumers.values()) {
-        if (
-          String(entry.userId) === String(userId) &&
-          entry.source === pairedSource
-        )
-          operations.push(this.setConsumerReceiving(entry, receiving));
-      }
-    }
-    return Promise.all(operations);
+    return setRemoteReceiving(
+      this,
+      userIdOrKey,
+      sourceOrReceiving,
+      receivingValue,
+    );
   }
 
   shouldReceive(userId, source) {
-    const key = `${String(userId)}:${String(source)}`;
-    if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
-    return true;
+    return shouldReceive(this, userId, source);
   }
 
   setConsumerVolume(userId, source, volume) {
-    const normalized = Math.max(0, Math.min(2, Number(volume)));
-    const operations = [...this.consumers.values()]
-      .filter(
-        (entry) =>
-          String(entry.userId) === String(userId) &&
-          (!source || entry.source === source),
-      )
-      .map((entry) =>
-        this.invoke("media_set_consumer_volume", {
-          consumerId: entry.consumerId,
-          volume: normalized,
-        }),
-      );
-    return Promise.all(operations);
+    return setConsumerVolume(this, userId, source, volume);
   }
 
   sendParticipantVoiceState(state = {}) {
-    return this.signaling?.send?.({
-      type: "participant-voice-state",
-      data: {
-        muted: Boolean(state.muted),
-        deafened: Boolean(state.deafened),
-      },
-    });
+    return sendParticipantVoiceState(this, state);
   }
 
   async setConsumerReceiving(entry, receiving) {
-    if (!entry || entry.closed) return false;
-    const desired = Boolean(receiving);
-    entry.desiredReceiving = desired;
-    entry.receivingRevision = (entry.receivingRevision || 0) + 1;
-    const requestId = this.requestId(
-      desired ? "resume-consumer" : "pause-consumer",
-    );
-    const acknowledgement = waitFor(
-      this.pending,
-      requestId,
-      this.consumerControlTimeoutMs,
-      `SFU consumer ${desired ? "resume" : "pause"}`,
-    );
-    this.sendOrThrow(
-      {
-        type: desired ? "resume-consumer" : "pause-consumer",
-        data: {
-          consumerId: entry.consumerId,
-          requestId,
-          revision: entry.receivingRevision,
-        },
-      },
-      `SFU consumer ${desired ? "resume" : "pause"}`,
-    );
-    const result = await acknowledgement;
-    if (result?.consumerClosed) {
-      this.closeConsumer(entry);
-      return false;
-    }
-    await this.invoke("media_set_consumer_enabled", {
-      consumerId: entry.consumerId,
-      enabled: desired,
-    });
-    if (entry.closed) return false;
-    entry.receiving = desired;
-    this._emitState();
-    return true;
+    return setConsumerReceiving(this, entry, receiving);
   }
 
   _resolveConsumerControl(data, receiving) {
-    const entry = this.consumers.get(data.consumerId);
-    if (!entry) {
-      this.pending
-        .get(data.requestId)
-        ?.resolve({ ...data, consumerClosed: true });
-      return;
-    }
-    this.pending.get(data.requestId)?.resolve({ ...data, receiving });
+    return resolveConsumerControl(this, data, receiving);
   }
 
   closeConsumerByProducer(producerId) {
-    const entry = [...this.consumers.values()].find(
-      (candidate) => candidate.producerId === producerId,
-    );
-    if (entry) this.closeConsumer(entry);
+    return closeConsumerByProducer(this, producerId);
   }
 
   closeConsumer(entry, { releaseNative = true } = {}) {
-    if (!entry?.consumerId || entry.closed) return false;
-    entry.closed = true;
-    this.consumers.delete(entry.consumerId);
-    this.remoteAudioFeeds.delete(entry.key);
-    this.remoteVideoFeeds.delete(entry.key);
-    entry.receiving = false;
-    this.onRemoteTrackEnded?.(entry);
-    if (releaseNative)
-      this.invoke("media_close_consumer", {
-        consumerId: entry.consumerId,
-      }).catch((error) =>
-        this.onError?.(asError(error, "Native consumer close failed")),
-      );
-    this._emitState();
-    return true;
+    return closeConsumer(this, entry, { releaseNative });
   }
 
   async handle(type, data = {}) {
@@ -986,149 +496,11 @@ export class NativeMediasoupSfuSession {
   }
 
   async handleNativeAction(action) {
-    if (!action || this.closed) return false;
-    let params = action.params;
-    if (typeof params === "string") params = JSON.parse(params);
-    let state = action.state;
-    if (typeof state === "string") {
-      try {
-        state = JSON.parse(state);
-      } catch {}
-    }
-    const pointer = Number(action.transportPtr);
-    if (action.kind === 1) {
-      const direction =
-        params?.direction ||
-        this.transportPointers.get(pointer) ||
-        this.pendingNativeDirection;
-      const transport =
-        direction === "recv" ? this.recvTransport : this.sendTransport;
-      if (!direction || !transport)
-        throw new Error("Native transport direction is unknown");
-      this.transportPointers.set(pointer, direction);
-      const requestId = this.requestId("connect");
-      const acknowledgement = waitFor(
-        this.pending,
-        requestId,
-        this.requestTimeoutMs,
-        `SFU ${direction} transport connection`,
-      );
-      this.sendOrThrow(
-        {
-          type: "connect-transport",
-          data: {
-            requestId,
-            transportId: transport.id,
-            dtlsParameters: Object.fromEntries(
-              Object.entries(params || {}).filter(
-                ([key]) => key !== "direction",
-              ),
-            ),
-          },
-        },
-        `SFU ${direction} transport connection`,
-      );
-      await acknowledgement;
-      await this.invoke("media_complete_connect", { transportPtr: pointer });
-      return true;
-    }
-    if (action.kind === 2) {
-      const direction = this.transportPointers.get(pointer) || "send";
-      const transport =
-        direction === "recv" ? this.recvTransport : this.sendTransport;
-      if (!transport) throw new Error("Native send transport is unavailable");
-      this.transportPointers.set(pointer, direction);
-      const requestId = this.requestId("produce");
-      const acknowledgement = waitFor(
-        this.pendingProduce,
-        requestId,
-        this.requestTimeoutMs,
-        "SFU produce",
-      );
-      this.sendOrThrow(
-        {
-          type: "produce",
-          data: {
-            requestId,
-            transportId: transport.id,
-            kind: params?.kind,
-            rtpParameters: params?.rtpParameters,
-            appData: params?.appData,
-          },
-        },
-        "SFU producer publication",
-      );
-      const result = await acknowledgement;
-      await this.invoke("media_complete_produce", {
-        actionId: Number(action.actionId),
-        producerId: result.id,
-      });
-      return true;
-    }
-    if (action.kind === 3 || action.kind === 4) {
-      if (params?.event === "consumer-closed" && params.consumerId) {
-        this.closeConsumer(
-          this.consumers.get(params.consumerId) || {
-            consumerId: params.consumerId,
-            producerId: params.producerId,
-          },
-        );
-      }
-      return true;
-    }
-    if (state) {
-      const direction = this.transportPointers.get(pointer);
-      if (direction) this._handleTransportState({ direction, state });
-      return true;
-    }
-    return false;
+    return handleNativeAction(this, action);
   }
 
   handleReceiveEvent(event) {
-    const payload = event?.payload || {};
-    if (event?.kind === 5) {
-      const source = String(payload.source || event.id || "");
-      let feed = this.localVideoFeeds.get(source);
-      if (!feed && this.sources.get(source)?.kind === "video") {
-        feed = {
-          source,
-          producerId: `local:${source}`,
-          native: true,
-          frame: null,
-        };
-        this.localVideoFeeds.set(source, feed);
-      }
-      if (!feed || !event.data) return false;
-      this.localVideoFeeds.set(source, {
-        ...feed,
-        frame: {
-          ...payload,
-          data: event.data,
-          eventId: event.eventId,
-        },
-      });
-      this._emitState();
-      return true;
-    }
-    const consumerId = event?.id || payload.consumerId;
-    const entry = this.consumers.get(consumerId);
-    if (!receiveEventMatches(entry, { ...payload, consumerId })) return false;
-    if (event.kind === 1) return true;
-    if (event.kind === 2) {
-      if (entry.kind !== "video" || !event.data) return false;
-      const feed = this.remoteVideoFeeds.get(entry.key);
-      if (!feed) return false;
-      feed.frame = {
-        ...payload,
-        data: event.data,
-        eventId: event.eventId,
-      };
-      this.remoteVideoFeeds.set(entry.key, { ...feed });
-      this._emitState();
-      return true;
-    }
-    if (event.kind === 3) return this.closeConsumer(entry);
-    return false;
+    return handleReceiveEvent(this, event);
   }
 
   _handleTransportState(data) {

@@ -16,7 +16,7 @@ const desktopCallback = await readFile(
 );
 
 const tauriMain = await readFile(
-  new URL("../desktop/src-tauri/src/main.rs", import.meta.url),
+  new URL("../desktop/src-tauri/src/desktop/mod.rs", import.meta.url),
   "utf8",
 );
 

@@ -245,7 +245,7 @@
             >
               <div class="flex flex-col gap-1">
                 <template
-                  v-for="u in voiceStore.getDisplayUsersArray()"
+                  v-for="u in getConnectedChannelParticipants(channel)"
                   :key="u.id || u"
                 >
                   <div
@@ -1019,6 +1019,19 @@ function getChannelParticipants(channel) {
       id: String(userId),
       ...(channel.participantStates?.[String(userId)] || {}),
     }));
+}
+function getConnectedChannelParticipants(channel) {
+  const connectedUsers = new Map(
+    voiceStore.getDisplayUsersArray().map((user) => [String(user.id), user]),
+  );
+  return (channel.inRoom || []).map((userId) => {
+    const normalizedUserId = String(userId);
+    return {
+      ...(connectedUsers.get(normalizedUserId) || {}),
+      ...(channel.participantStates?.[normalizedUserId] || {}),
+      id: normalizedUserId,
+    };
+  });
 }
 function getParticipantMediaStatusLabel(user) {
   const statuses = [];

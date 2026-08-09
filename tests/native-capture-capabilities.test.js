@@ -31,7 +31,10 @@ const unsupportedLinux = {
 describe("native capture capability contract", () => {
   it("allows the first native microphone capture to establish health", async () => {
     const commands = await readFile(
-      new URL("../desktop/src-tauri/src/media/commands.rs", import.meta.url),
+      new URL(
+        "../desktop/src-tauri/src/media/command_capture.rs",
+        import.meta.url,
+      ),
       "utf8",
     );
     assert.doesNotMatch(

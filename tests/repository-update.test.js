@@ -37,7 +37,7 @@ const [
     "../app/components/PwaUpdatePrompt.vue",
     "../app/components/DesktopUpdatePrompt.vue",
     "../desktop/src-tauri/tauri.conf.json",
-    "../desktop/src-tauri/src/main.rs",
+    "../desktop/src-tauri/src/desktop/updates.rs",
     "../.github/workflows/desktop-build.yml",
     "../scripts/create-tauri-update-manifest.mjs",
     "../app/pages/settings.vue",

@@ -1,3 +1,5 @@
+import { mediaDebug } from "./media-debug.js";
+
 export function waitForMediaHandoff({
   getLatestTopologyKey,
   getLocalPeerId,
@@ -13,6 +15,11 @@ export function waitForMediaHandoff({
   topologyState,
 }) {
   const startedAt = Date.now();
+  mediaDebug("handoff.wait-start", {
+    provider,
+    epoch: topology?.epoch,
+    sourceRevision: topology?.sourceRevision,
+  });
   if (provider === "sfu") {
     return waitForSfuHandoff({
       getLatestTopologyKey,
@@ -91,6 +98,12 @@ function waitForSfuHandoff({
         }
       }
       if (tracksReady && readiness?.ready === true) {
+        mediaDebug("handoff.ready", {
+          provider: "sfu",
+          epoch: topology?.epoch,
+          outbound: readiness.outboundFlowing,
+          inbound: readiness.inboundFlowing,
+        });
         resolve();
         return;
       }
@@ -103,6 +116,13 @@ function waitForSfuHandoff({
             `SFU media did not become ready for handoff (tracks ${handoff.count("sfu")}/${expectedSfu}, outbound ${readiness?.outboundFlowing ?? 0}/${readiness?.outboundExpected ?? localSources.size}, inbound ${readiness?.inboundFlowing ?? 0}/${readiness?.inboundExpected ?? expectedSfu}${readinessReason})`,
           ),
         );
+        mediaDebug("handoff.timeout", {
+          provider: "sfu",
+          epoch: topology?.epoch,
+          tracks: handoff.count("sfu"),
+          expected: expectedSfu,
+          readiness,
+        });
         return;
       }
       setTimeout(() => void poll().catch(reject), pollIntervalMs);
@@ -142,6 +162,11 @@ function waitForP2pHandoff({
         (expected === 0 && localSources.size === 0)
       ) {
         resolve();
+        mediaDebug("handoff.ready", {
+          provider: "p2p",
+          epoch: topology?.epoch,
+          tracks: handoff.count("p2p"),
+        });
         return;
       }
       if (Date.now() - startedAt >= timeoutMs) {
@@ -150,6 +175,12 @@ function waitForP2pHandoff({
             `P2P media did not become ready for handoff (tracks ${handoff.count("p2p")}/${expected}, mesh ready ${mediaReady ? "yes" : "no"})`,
           ),
         );
+        mediaDebug("handoff.timeout", {
+          provider: "p2p",
+          epoch: topology?.epoch,
+          tracks: handoff.count("p2p"),
+          expected,
+        });
         return;
       }
       setTimeout(() => void Promise.resolve().then(poll).catch(reject), 200);

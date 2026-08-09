@@ -4,6 +4,7 @@ import {
   addressFamily,
   buildTopologyGraph,
   classifyTopology,
+  formatTopologyReason,
   isP2pParticipantCount,
 } from "../app/shared/rtc-topology.js";
 import {
@@ -26,6 +27,17 @@ test("P2P participant limit accepts only two through four devices", () => {
   assert.equal(isP2pParticipantCount(2), true);
   assert.equal(isP2pParticipantCount(4), true);
   assert.equal(isP2pParticipantCount(5), false);
+});
+
+test("topology reasons explain recovered providers instead of exposing cooldown state", () => {
+  assert.equal(
+    formatTopologyReason("provider-cooldown-expired"),
+    "Recovered after provider cooldown",
+  );
+  assert.equal(
+    formatTopologyReason("provider-transition"),
+    "Active media path",
+  );
 });
 
 test("topology classification distinguishes direct, mesh, and IPv4 SFU", () => {

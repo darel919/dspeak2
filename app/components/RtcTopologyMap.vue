@@ -101,6 +101,8 @@
 </template>
 
 <script setup>
+import { formatTopologyReason } from "~/shared/rtc-topology";
+
 const props = defineProps({
   topology: {
     type: Object,
@@ -116,7 +118,7 @@ const summary = computed(() => {
     props.nodes.filter((node) => node.role === "local" || node.role === "peer")
       .length;
   const reason = props.topology.reason
-    ? `, ${String(props.topology.reason).replaceAll("-", " ")}`
+    ? `, ${formatTopologyReason(props.topology.reason)}`
     : "";
   return `${props.topology.label || "Connecting"} with ${count} device${count === 1 ? "" : "s"}${reason}`;
 });

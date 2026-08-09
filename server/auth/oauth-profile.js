@@ -88,7 +88,6 @@ export async function provisionOAuthProfile(user) {
     const profile = await Promise.race([
       profileRepository.getOrCreateOnFirstLogin(user.id, {
         email,
-        username: user.user_metadata?.user_name || user.user_metadata?.name,
         displayName:
           user.user_metadata?.full_name || user.user_metadata?.name || email,
         avatarKey: null,

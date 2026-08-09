@@ -18,6 +18,7 @@ export const useChannelsStore = defineStore("channels", () => {
   const roomChannels = reactive(new Map());
   const pendingRoomRequests = new Map();
   const voicePresenceConnections = new Map();
+  const voicePresenceSnapshots = new Map();
   const channelPolicies = ref(new Map());
   const config = useRuntimeConfig();
 
@@ -31,6 +32,7 @@ export const useChannelsStore = defineStore("channels", () => {
     const force = options.force === true;
     if (!force && roomChannels.has(normalizedRoomId)) {
       const cachedChannels = roomChannels.get(normalizedRoomId);
+      applyStoredVoicePresence(normalizedRoomId);
       if (activate) activateRoomChannels(normalizedRoomId, cachedChannels);
       return cachedChannels;
     }
@@ -55,6 +57,7 @@ export const useChannelsStore = defineStore("channels", () => {
   function activateRoomChannels(roomId, nextChannels) {
     channels.value = nextChannels;
     loadedRoomId.value = String(roomId);
+    applyStoredVoicePresence(roomId);
   }
 
   function getRoomChannelById(roomId, channelId) {
@@ -97,6 +100,7 @@ export const useChannelsStore = defineStore("channels", () => {
       const data = await response.json();
       const nextChannels = Array.isArray(data) ? data : [];
       roomChannels.set(String(roomId), nextChannels);
+      applyStoredVoicePresence(roomId);
       debugLog("[ChannelsStore] Fetched channels:", nextChannels);
 
       return nextChannels;
@@ -501,12 +505,41 @@ export const useChannelsStore = defineStore("channels", () => {
     channels.value = [];
     loadedRoomId.value = null;
     roomChannels.clear();
+    voicePresenceSnapshots.clear();
     currentChannelId.value = null;
     error.value = null;
   }
 
-  function applyVoicePresence(snapshot, roomId = null) {
-    if (!snapshot?.channelId || !Array.isArray(snapshot.inRoom)) return false;
+  function storeVoicePresenceSnapshot(snapshot, roomId) {
+    const normalizedRoomId = String(roomId || "");
+    if (!normalizedRoomId) return;
+    let snapshots = voicePresenceSnapshots.get(normalizedRoomId);
+    if (!snapshots) {
+      snapshots = new Map();
+      voicePresenceSnapshots.set(normalizedRoomId, snapshots);
+    }
+    const channelId = String(snapshot.channelId);
+    snapshots.set(channelId, {
+      ...snapshot,
+      channelId,
+      inRoom: [...new Set(snapshot.inRoom.map(String))],
+      participantStates: Array.isArray(snapshot.participantStates)
+        ? snapshot.participantStates.map((state) => ({ ...state }))
+        : [],
+      profiles: Array.isArray(snapshot.profiles)
+        ? snapshot.profiles.map((profile) => ({ ...profile }))
+        : [],
+    });
+  }
+
+  function clearStoredVoicePresence(roomId, channelId) {
+    const snapshots = voicePresenceSnapshots.get(String(roomId || ""));
+    if (!snapshots) return;
+    snapshots.delete(String(channelId));
+    if (!snapshots.size) voicePresenceSnapshots.delete(String(roomId));
+  }
+
+  function applyVoicePresenceToChannel(snapshot, roomId = null) {
     const roomChannelList = roomId
       ? roomChannels.get(String(roomId)) || []
       : channels.value;
@@ -540,32 +573,75 @@ export const useChannelsStore = defineStore("channels", () => {
     return true;
   }
 
+  function applyStoredVoicePresence(roomId) {
+    const normalizedRoomId = String(roomId || "");
+    const snapshots = voicePresenceSnapshots.get(normalizedRoomId);
+    if (!snapshots) return;
+    for (const snapshot of snapshots.values())
+      applyVoicePresence(snapshot, normalizedRoomId);
+    if (!snapshots.size) voicePresenceSnapshots.delete(normalizedRoomId);
+  }
+
+  function applyVoicePresence(snapshot, roomId = null) {
+    if (!snapshot?.channelId || !Array.isArray(snapshot.inRoom)) return false;
+    const normalizedRoomId = String(roomId || loadedRoomId.value || "");
+    if (normalizedRoomId)
+      storeVoicePresenceSnapshot(snapshot, normalizedRoomId);
+    const applied = applyVoicePresenceToChannel(snapshot, roomId);
+    if (applied && normalizedRoomId)
+      clearStoredVoicePresence(normalizedRoomId, snapshot.channelId);
+    return applied;
+  }
+
   function disconnectVoicePresence(roomId = null) {
     const roomIds = roomId
       ? [String(roomId)]
-      : [...voicePresenceConnections.keys()];
+      : [
+          ...new Set([
+            ...voicePresenceConnections.keys(),
+            ...voicePresenceSnapshots.keys(),
+          ]),
+        ];
     for (const normalizedRoomId of roomIds) {
       const connection = voicePresenceConnections.get(normalizedRoomId);
+      voicePresenceSnapshots.delete(normalizedRoomId);
       if (!connection) continue;
       connection.intentionalClose = true;
+      connection.connecting = false;
       if (connection.reconnectTimer) clearTimeout(connection.reconnectTimer);
+      connection.reconnectTimer = null;
       voicePresenceConnections.delete(normalizedRoomId);
       connection.close?.();
     }
+  }
+
+  function scheduleVoicePresenceReconnect(normalizedRoomId, connection) {
+    if (connection.intentionalClose || connection.reconnectTimer) return;
+    const delay = Math.min(15000, 500 * 2 ** connection.reconnectAttempt++);
+    connection.reconnectTimer = setTimeout(
+      () => {
+        connection.reconnectTimer = null;
+        connectVoicePresence(normalizedRoomId);
+      },
+      delay + Math.floor(Math.random() * 250),
+    );
   }
 
   function connectVoicePresence(roomId) {
     if (!import.meta.client || !roomId) return;
     const normalizedRoomId = String(roomId);
     const existing = voicePresenceConnections.get(normalizedRoomId);
-    if (existing?.channel) return;
+    if (existing?.channel || existing?.connecting || existing?.reconnectTimer)
+      return;
     const connection = existing || {
       channel: null,
       reconnectTimer: null,
       reconnectAttempt: 0,
       intentionalClose: false,
+      connecting: false,
     };
     connection.intentionalClose = false;
+    connection.connecting = true;
     voicePresenceConnections.set(normalizedRoomId, connection);
     openRealtimeChannel(`room:${normalizedRoomId}`, {
       onMessage: (message) => {
@@ -583,22 +659,33 @@ export const useChannelsStore = defineStore("channels", () => {
           status,
         );
         connection.channel = null;
+        connection.connecting = false;
         if (connection.intentionalClose) return;
-        const delay = Math.min(15000, 500 * 2 ** connection.reconnectAttempt++);
-        connection.reconnectTimer = setTimeout(
-          () => connectVoicePresence(normalizedRoomId),
-          delay + Math.floor(Math.random() * 250),
-        );
+        scheduleVoicePresenceReconnect(normalizedRoomId, connection);
       },
-    }).then((handle) => {
-      if (!handle) return;
-      if (connection.intentionalClose) {
-        handle.close();
-        return;
-      }
-      connection.channel = handle.channel;
-      connection.close = handle.close;
-    });
+    })
+      .then((handle) => {
+        connection.connecting = false;
+        if (!handle) {
+          scheduleVoicePresenceReconnect(normalizedRoomId, connection);
+          return;
+        }
+        if (connection.intentionalClose) {
+          handle.close();
+          return;
+        }
+        connection.channel = handle.channel;
+        connection.close = handle.close;
+      })
+      .catch((err) => {
+        connection.connecting = false;
+        if (connection.intentionalClose) return;
+        console.warn(
+          "[ChannelsStore] Unable to open voice presence channel:",
+          err,
+        );
+        scheduleVoicePresenceReconnect(normalizedRoomId, connection);
+      });
   }
 
   function syncVoicePresenceRooms(roomIds) {

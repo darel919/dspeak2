@@ -1,5 +1,16 @@
 import { collectPeerConnectionStats } from "./rtc-media-stats.js";
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.js";
+import { mediaDebug, shortMediaId } from "./media-debug.js";
+
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function secondsToMilliseconds(value) {
+  const number = finiteOrNull(value);
+  return number == null ? null : number * 1000;
+}
 
 function deferred(timeoutMs, label) {
   let timer;
@@ -57,6 +68,7 @@ export class CloudflareRealtimeSession {
   initialize() {
     if (this.initializing) return this.initializing;
     const generation = this.sessionGeneration;
+    mediaDebug("cloudflare.initialize-start", { generation });
     const initializing = (async () => {
       this.peerConnection = new RTCPeerConnection({
         iceServers: this.iceServers,
@@ -96,11 +108,16 @@ export class CloudflareRealtimeSession {
       if (!result.sessionId)
         throw new Error("Cloudflare session ID is missing");
       this.sessionId = result.sessionId;
+      mediaDebug("cloudflare.session-created", {
+        generation,
+        sessionId: shortMediaId(this.sessionId),
+      });
       for (const publication of this.publications.values())
         await this.subscribe(publication, generation);
     })();
     this.initializing = initializing;
     initializing.catch(() => {
+      mediaDebug("cloudflare.initialize-failed", { generation });
       if (this.initializing === initializing) this.closeMedia();
     });
     return initializing;
@@ -108,6 +125,11 @@ export class CloudflareRealtimeSession {
 
   request(operation, body) {
     const requestId = crypto.randomUUID();
+    mediaDebug("cloudflare.request", {
+      operation,
+      requestId: shortMediaId(requestId),
+      hasBody: body != null,
+    });
     const waiting = deferred(8000, `Cloudflare ${operation}`);
     this.pending.set(requestId, waiting);
     let sent = false;
@@ -125,6 +147,10 @@ export class CloudflareRealtimeSession {
     if (!sent) {
       this.pending.delete(requestId);
       const error = new Error("Media control is unavailable");
+      mediaDebug("cloudflare.request-not-sent", {
+        operation,
+        requestId: shortMediaId(requestId),
+      });
       waiting.catch(() => {});
       waiting.reject(error);
       throw error;
@@ -157,6 +183,10 @@ export class CloudflareRealtimeSession {
       if (!waiting) return false;
       if (data.error) waiting.reject(new Error(data.error));
       else waiting.resolve(data.result || {});
+      mediaDebug("cloudflare.response", {
+        requestId: shortMediaId(data.requestId),
+        ok: !data.error,
+      });
       return true;
     }
     if (type === "cloudflare-publication-available") {
@@ -203,11 +233,14 @@ export class CloudflareRealtimeSession {
         entry.audioStereo === true,
       );
       const parameters = sender.getParameters();
-      parameters.encodings ||= [{}];
-      parameters.encodings[0].maxBitrate =
-        entry.audioBitrate || policy.maxBitrateBps;
-      parameters.encodings[0].priority = policy.priority;
-      parameters.encodings[0].networkPriority = policy.priority;
+      const encodings = Array.isArray(parameters.encodings)
+        ? parameters.encodings
+        : [];
+      if (!encodings[0] || typeof encodings[0] !== "object") encodings[0] = {};
+      parameters.encodings = encodings;
+      encodings[0].maxBitrate = entry.audioBitrate || policy.maxBitrateBps;
+      encodings[0].priority = policy.priority;
+      encodings[0].networkPriority = policy.priority;
       try {
         await sender.setParameters(parameters);
       } catch {}
@@ -373,18 +406,22 @@ export class CloudflareRealtimeSession {
   async getMetrics() {
     if (!this.peerConnection) return [];
     const stats = await collectPeerConnectionStats(this.peerConnection);
+    const candidatePair = stats.candidatePair;
+    const inboundAudio = stats.inboundAudio;
     return [
       {
+        ...stats,
         routeId: this.sessionId || "cloudflare-realtime",
         peerOrProvider: "cloudflare-realtime",
-        rttMs: stats.rttMs ?? null,
-        jitterMs: stats.jitterMs ?? null,
-        packetLossPercent: stats.packetLossPercent ?? null,
-        jitterBufferDelayMs: stats.jitterBufferDelayMs ?? null,
-        availableOutgoingBitrate: stats.availableOutgoingBitrate ?? null,
-        concealedAudioRatio: stats.concealedAudioRatio ?? null,
-        candidateType: stats.candidateType,
-        protocol: stats.protocol,
+        rttMs: secondsToMilliseconds(candidatePair?.currentRoundTripTime),
+        jitterMs: secondsToMilliseconds(inboundAudio?.jitter),
+        packetLossPercent: candidatePair?.packetLoss ?? null,
+        jitterBufferDelayMs: inboundAudio?.averageJitterBufferDelayMs ?? null,
+        availableOutgoingBitrate:
+          candidatePair?.availableOutgoingBitrate ?? null,
+        concealedAudioRatio: null,
+        candidateType: candidatePair?.local?.candidateType ?? null,
+        protocol: candidatePair?.local?.protocol ?? null,
         sampledAt: Date.now(),
       },
     ];
@@ -469,6 +506,12 @@ export class CloudflareRealtimeSession {
   }
 
   closeMedia() {
+    mediaDebug("cloudflare.session-close", {
+      sessionId: shortMediaId(this.sessionId),
+      generation: this.sessionGeneration,
+      producers: this.producers.size,
+      consumers: this.consumers.size,
+    });
     this.sessionGeneration += 1;
     const peerConnection = this.peerConnection;
     this.peerConnection = null;
