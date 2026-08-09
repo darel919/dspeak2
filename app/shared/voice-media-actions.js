@@ -14,6 +14,7 @@ export function createVoiceMediaActions({
   cameraEnabled,
   cameraToggleGenerationState,
   channelsStore,
+  clearUserDirectory,
   connected,
   connectedAt,
   connectedUsers,
@@ -89,6 +90,7 @@ export function createVoiceMediaActions({
         clearTimeout(timer);
       soundboardActivityTimers.clear();
       connectedUsers.value.clear();
+      clearUserDirectory?.();
       connecting.value = false;
       connected.value = false;
       connectedAt.value = null;
@@ -197,7 +199,7 @@ export function createVoiceMediaActions({
         ensureCurrentJoin();
       }
 
-      sfuComposable.value = useMediasoupSfu({
+      sfuComposable.value = await useMediasoupSfu({
         voiceStore: getVoiceStore(),
         settingsStore,
         channelsStore,

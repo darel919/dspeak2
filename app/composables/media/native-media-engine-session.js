@@ -129,12 +129,20 @@ export async function setMicrophoneDevice(engine, deviceId) {
     if (engine.nativeOnly) throw nativeOnlyError("microphone device");
     return engine.browserEngine.setMicrophoneDevice?.(deviceId);
   }
-  return engine
-    ._invoke("media_set_microphone_device", { deviceId })
-    .catch((error) => {
-      if (engine.nativeOnly) throw error;
-      return engine.browserEngine.setMicrophoneDevice?.(deviceId);
+  try {
+    const result = await engine._invoke("media_set_microphone_device", {
+      deviceId,
     });
+    const source = engine.nativeSession?.sources?.get("audio");
+    if (source) {
+      await engine.nativeSession.addSource({ ...source });
+      await engine.nativeP2pSession?.addSource({ ...source });
+    }
+    return result;
+  } catch (error) {
+    if (engine.nativeOnly) throw error;
+    return engine.browserEngine.setMicrophoneDevice?.(deviceId);
+  }
 }
 
 export async function setOutputDevice(engine, deviceId) {

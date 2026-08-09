@@ -123,14 +123,18 @@ onMounted(async () => {
         await runtimeStore.initialize();
         startupPhase = desktopRuntime.value
           ? "desktop update check"
-          : "update check";
+          : "authentication";
         startupStatus.value = desktopRuntime.value
           ? "Looking for desktop updates…"
-          : "Looking for updates…";
-        await Promise.all([
-          desktopRuntime.value ? runDesktopStartupUpdate() : runStartupUpdate(),
-          checkRepositoryUpdate(),
-        ]);
+          : "Restoring your session…";
+        if (desktopRuntime.value) {
+          await Promise.all([
+            runDesktopStartupUpdate(),
+            checkRepositoryUpdate(),
+          ]);
+        } else {
+          void checkRepositoryUpdate();
+        }
         if (!isAuthPage.value) {
           startupPhase = "authentication";
           startupStatus.value = "Restoring your session…";
@@ -165,6 +169,7 @@ onMounted(async () => {
     startupComplete.value = true;
     if (desktopRuntime.value)
       stopDesktopUpdateMonitoring = startDesktopUpdateMonitoring();
+    else void runStartupUpdate();
     void signalDesktopReady();
   }
 });

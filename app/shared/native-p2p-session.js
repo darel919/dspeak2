@@ -3,6 +3,15 @@ import {
   resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "./video-settings.js";
+import {
+  P2P_DISCONNECT_GRACE_MS,
+  P2P_ICE_RESTART_TIMEOUT_MS,
+} from "./native-p2p-common.js";
+import {
+  nativeRtpStat,
+  nativeRtpStatForTrack,
+  normalizeNativeTransportStats,
+} from "./native-mediasoup-diagnostics.js";
 
 function sourceFromTrackId(trackId, kind) {
   const value = String(trackId || "");
@@ -30,6 +39,8 @@ export class NativeP2pSession {
     getAudioBitrate,
     getAudioStereo,
     getVideoSettings,
+    disconnectGraceMs = P2P_DISCONNECT_GRACE_MS,
+    iceRestartTimeoutMs = P2P_ICE_RESTART_TIMEOUT_MS,
   } = {}) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeP2pSession requires invoke");
@@ -43,11 +54,15 @@ export class NativeP2pSession {
     this.getAudioBitrate = getAudioBitrate;
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
+    this.disconnectGraceMs = disconnectGraceMs;
+    this.iceRestartTimeoutMs = iceRestartTimeoutMs;
     this.peers = new Map();
     this.sources = new Map();
     this.sourceTransmission = new Map();
     this.remoteReceiving = new Map();
     this.trackEntries = new Map();
+    this.jitterBufferMinimumDelay = 0;
+    this.jitterBufferTargetDelay = 20;
     this.mode = "idle";
     this.epoch = 0;
     this.localPeerId = "";
@@ -80,6 +95,7 @@ export class NativeP2pSession {
 
   async addSource(entry) {
     if (!entry?.source) return false;
+    const previous = this.sources.get(String(entry.source));
     const normalized = {
       source: String(entry.source),
       kind:
@@ -95,8 +111,21 @@ export class NativeP2pSession {
         entry.videoSettings || this.getVideoSettings?.(entry.source) || null,
     };
     this.sources.set(normalized.source, normalized);
-    for (const peer of this.peers.values())
+    for (const peer of this.peers.values()) {
+      if (previous && peer.sources.has(normalized.source)) {
+        try {
+          await this.invoke("media_p2p_remove_track", {
+            p2pHandle: peer.handle,
+            source: normalized.source,
+          });
+        } catch (error) {
+          this.onError?.(error);
+        }
+        peer.sources.delete(normalized.source);
+        peer.trackIds.delete(normalized.source);
+      }
       await this._attachSource(peer, normalized);
+    }
     return true;
   }
 
@@ -301,6 +330,11 @@ export class NativeP2pSession {
       healthReceived: 0,
       healthSequence: 0,
       healthTimer: null,
+      disconnectTimer: null,
+      restartTimer: null,
+      iceState: 0,
+      restarted: false,
+      failureReported: false,
       readyReported: false,
       remoteSourceNames: new Set(
         (Array.isArray(sources) ? sources : []).map(String),
@@ -485,6 +519,174 @@ export class NativeP2pSession {
     });
   }
 
+  async setConsumerVolume(userId, source, volume) {
+    const normalized = Math.max(0, Math.min(2, Number(volume)));
+    const operations = [...this.trackEntries.values()]
+      .filter(
+        (entry) =>
+          entry.kind === "audio" &&
+          String(entry.userId) === String(userId) &&
+          (!source || entry.source === source),
+      )
+      .map((entry) =>
+        this.invoke("media_p2p_set_receive_volume", {
+          p2pHandle: entry.p2pHandle,
+          trackId: entry.trackId,
+          volume: normalized,
+        }),
+      );
+    await Promise.all(operations);
+    return operations.length > 0;
+  }
+
+  async _rawStats(peer) {
+    try {
+      return await this.invoke("media_p2p_get_stats", {
+        p2pHandle: peer.handle,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async stats() {
+    const results = [];
+    for (const peer of this.peers.values()) {
+      const raw = await this._rawStats(peer);
+      if (!raw) continue;
+      const state = peer.connected
+        ? "connected"
+        : peer.iceState === 4
+          ? "failed"
+          : "new";
+      results.push({
+        ...normalizeNativeTransportStats(raw, `p2p:${peer.peerId}`, state),
+        id: `p2p:${peer.peerId}`,
+        kind: "p2p",
+        routeId: peer.peerId,
+        peerOrProvider: peer.peerId,
+        sampledAt: Date.now(),
+      });
+    }
+    return results;
+  }
+
+  async diagnosticStats() {
+    return this.stats();
+  }
+
+  async getOutboundRtpStats() {
+    const results = [];
+    for (const peer of this.peers.values()) {
+      const raw = await this._rawStats(peer);
+      for (const source of peer.sources) {
+        const entry = this.sources.get(source);
+        results.push({
+          peerId: peer.peerId,
+          source,
+          kind: entry?.kind,
+          stats:
+            nativeRtpStatForTrack(raw, "outbound-rtp", {
+              kind: entry?.kind,
+              trackId: peer.trackIds.get(source),
+            }) || null,
+        });
+      }
+    }
+    return results;
+  }
+
+  async getInboundRtpStats() {
+    const results = [];
+    for (const peer of this.peers.values()) {
+      const raw = await this._rawStats(peer);
+      for (const entry of this.trackEntries.values()) {
+        if (entry.p2pHandle !== peer.handle) continue;
+        results.push({
+          peerId: peer.peerId,
+          consumerId: entry.key,
+          source: entry.source,
+          kind: entry.kind,
+          stats: nativeRtpStatForTrack(raw, "inbound-rtp", entry) || null,
+        });
+      }
+    }
+    return results;
+  }
+
+  async mediaReadiness(expectedInbound = this.trackEntries.size) {
+    let outboundExpected = 0;
+    let inboundExpected = 0;
+    let outboundFlowing = 0;
+    let inboundFlowing = 0;
+    for (const peer of this.peers.values()) {
+      const raw = await this._rawStats(peer);
+      const outbound = nativeRtpStat(raw, "outbound-rtp");
+      const inbound = nativeRtpStat(raw, "inbound-rtp");
+      outboundExpected += peer.sources.size;
+      inboundExpected += [...this.trackEntries.values()].filter(
+        (entry) => entry.p2pHandle === peer.handle && entry.receiving !== false,
+      ).length;
+      if (outbound?.bytesSent > 0) outboundFlowing += peer.sources.size;
+      if (inbound?.bytesReceived > 0)
+        inboundFlowing += [...this.trackEntries.values()].filter(
+          (entry) =>
+            entry.p2pHandle === peer.handle && entry.receiving !== false,
+        ).length;
+    }
+    const requiredInbound = Math.max(
+      0,
+      Number(expectedInbound) || inboundExpected,
+    );
+    return {
+      ready:
+        [...this.peers.values()].every((peer) => peer.connected) &&
+        outboundFlowing >= outboundExpected &&
+        inboundFlowing >= requiredInbound,
+      outboundExpected,
+      outboundFlowing,
+      inboundExpected: requiredInbound,
+      inboundFlowing,
+    };
+  }
+
+  get iceConnectedBoth() {
+    return (
+      this.peers.size > 0 &&
+      [...this.peers.values()].every((peer) => peer.connected)
+    );
+  }
+
+  _applyJitterBufferConfig(entry) {
+    if (!entry || entry.kind !== "audio" || !entry.trackId || !entry.p2pHandle)
+      return Promise.resolve(false);
+    return this.invoke("media_p2p_set_jitter_buffer", {
+      p2pHandle: entry.p2pHandle,
+      trackId: entry.trackId,
+      minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay || 0)),
+      targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay || 0)),
+    }).catch((error) => {
+      this.onError?.(error);
+      return false;
+    });
+  }
+
+  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 } = {}) {
+    this.jitterBufferMinimumDelay =
+      Number.isFinite(Number(minDelayMs)) && Number(minDelayMs) >= 0
+        ? Number(minDelayMs)
+        : 0;
+    this.jitterBufferTargetDelay =
+      Number.isFinite(Number(targetDelayMs)) && Number(targetDelayMs) >= 0
+        ? Number(targetDelayMs)
+        : 20;
+    return Promise.all(
+      [...this.trackEntries.values()].map((entry) =>
+        this._applyJitterBufferConfig(entry),
+      ),
+    );
+  }
+
   async _updateSourceParameters(source, parameters) {
     const normalizedSource = String(source || "");
     if (!Number.isFinite(parameters.maxBitrate) || parameters.maxBitrate <= 0)
@@ -563,7 +765,7 @@ export class NativeP2pSession {
     const eventName = String(payload.event || "");
     if (eventName === "ice-state") {
       const state = Number(payload.value);
-      peer.connected = state === 2 || state === 3;
+      this._handleIceState(peer, state);
       this._checkPeerQualification(peer);
       this._emitState();
       return true;
@@ -601,10 +803,12 @@ export class NativeP2pSession {
           this.remoteReceiving.get(`${String(peer.userId)}:${source}`) ?? true,
         closed: false,
         p2p: true,
+        p2pHandle: peer.handle,
       };
       const previous = this.trackEntries.get(trackId);
       if (previous) this.onRemoteTrackEnded?.(previous);
       this.trackEntries.set(trackId, entry);
+      this._applyJitterBufferConfig(entry);
       this.onRemoteTrack?.(entry);
       this._checkPeerQualification(peer);
       this._emitState();
@@ -625,6 +829,68 @@ export class NativeP2pSession {
       return true;
     }
     return true;
+  }
+
+  _handleIceState(peer, state) {
+    peer.iceState = state;
+    peer.connected = state === 2 || state === 3;
+    if (state === 5) {
+      clearTimeout(peer.disconnectTimer);
+      peer.disconnectTimer = setTimeout(() => {
+        peer.disconnectTimer = null;
+        if (!this.peers.has(peer.peerId) || peer.iceState !== 5) return;
+        if (peer.restarted) {
+          this._failPeer(peer, "ICE remained disconnected after restart");
+          return;
+        }
+        peer.restarted = true;
+        this._restartIce(peer).catch((error) =>
+          this._failPeer(peer, "ICE restart failed", error),
+        );
+      }, this.disconnectGraceMs);
+      peer.disconnectTimer.unref?.();
+    } else {
+      clearTimeout(peer.disconnectTimer);
+      peer.disconnectTimer = null;
+      if (state === 2 || state === 3) {
+        peer.restarted = false;
+        clearTimeout(peer.restartTimer);
+        peer.restartTimer = null;
+      }
+    }
+    if (state === 4) this._failPeer(peer, "ICE failed");
+    if (state === 6) this._failPeer(peer, "ICE connection closed");
+  }
+
+  async _restartIce(peer) {
+    const sdp = await this.invoke("media_p2p_restart_ice", {
+      p2pHandle: peer.handle,
+    });
+    if (!this.peers.has(peer.peerId) || !sdp) return false;
+    peer.negotiationInFlight = true;
+    peer.offerCreated = true;
+    this._sendSignal(peer.peerId, {
+      description: { type: "offer", sdp },
+    });
+    clearTimeout(peer.restartTimer);
+    peer.restartTimer = setTimeout(() => {
+      peer.restartTimer = null;
+      if (
+        this.peers.has(peer.peerId) &&
+        (peer.iceState === 4 || peer.iceState === 5)
+      )
+        this._failPeer(peer, "ICE restart timed out");
+    }, this.iceRestartTimeoutMs);
+    peer.restartTimer.unref?.();
+    return true;
+  }
+
+  _failPeer(peer, reason, cause) {
+    if (!peer || peer.failureReported) return;
+    peer.failureReported = true;
+    const error = new Error(`Native P2P ${reason}`);
+    if (cause) error.cause = cause;
+    this.onError?.(error);
   }
 
   _startHealthPump(peer) {
@@ -724,6 +990,8 @@ export class NativeP2pSession {
     if (!peer) return;
     this.peers.delete(peerId);
     if (peer.candidateTimer) clearTimeout(peer.candidateTimer);
+    clearTimeout(peer.disconnectTimer);
+    clearTimeout(peer.restartTimer);
     this._stopHealthPump(peer);
     for (const entry of [...this.trackEntries.values()]) {
       if (entry.userId !== peer.userId) continue;

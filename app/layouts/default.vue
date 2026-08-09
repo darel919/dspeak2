@@ -30,8 +30,14 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from "vue";
 import ToastContainer from "../components/ToastContainer.vue";
 import { useRoomsStore } from "../stores/rooms";
+
+const MetroRoomRail = defineAsyncComponent(
+  () => import("../components/MetroRoomRail.vue"),
+);
+const Navbar = defineAsyncComponent(() => import("../components/Navbar.vue"));
 
 const route = useRoute();
 const roomsStore = useRoomsStore();

@@ -441,6 +441,7 @@
     </div>
   </header>
   <DesktopCapturePicker
+    v-if="capturePickerOpen"
     :open="capturePickerOpen"
     @close="closeCapturePicker"
     @select="selectDesktopCapture"
@@ -453,6 +454,7 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from "vue";
 import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
@@ -461,8 +463,12 @@ import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
 import { useRuntimeStore } from "../stores/runtime";
-import BroadcastSetupDialog from "./BroadcastSetupDialog.vue";
-import DesktopCapturePicker from "./DesktopCapturePicker.vue";
+const BroadcastSetupDialog = defineAsyncComponent(
+  () => import("./BroadcastSetupDialog.vue"),
+);
+const DesktopCapturePicker = defineAsyncComponent(
+  () => import("./DesktopCapturePicker.vue"),
+);
 import { isScreenShareFpsBelowTarget } from "../shared/video-settings";
 import {
   getActiveConnectionLabel,

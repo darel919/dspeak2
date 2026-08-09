@@ -744,6 +744,12 @@ const permissionOptions = [
 const assignableRoles = computed(() =>
   roles.value.filter((role) => !role.system),
 );
+
+function membershipRoleDetails(membership, roleIds = membership.roles || []) {
+  const selectedRoleIds = new Set(roleIds.map(String));
+  return roles.value.filter((role) => selectedRoleIds.has(String(role.id)));
+}
+
 const highestRolePosition = computed(() => {
   if (room.value?.isOwner) return Number.POSITIVE_INFINITY;
   return Math.max(
@@ -805,8 +811,15 @@ async function load() {
       `/room/roles?roomId=${encodeURIComponent(roomId.value)}`,
     );
     roles.value = roleData.roles || [];
+    const memberById = new Map(
+      (room.value.members || []).map((member) => [String(member.id), member]),
+    );
     memberships.value = (roleData.memberships || []).map((membership) => ({
       ...membership,
+      expand: {
+        user: memberById.get(String(membership.userId)) || null,
+        roles: membershipRoleDetails(membership),
+      },
       roleSelection: (membership.roles || []).map(String),
       originalRoleSelection: (membership.roles || []).map(String),
       saving: false,
@@ -956,8 +969,12 @@ function canManageMembership(membership) {
   return room.value?.isOwner || targetPosition < highestRolePosition.value;
 }
 function membershipUserName(membership) {
-  const user = membership.expand?.user;
-  return user ? publicDisplayName(user) : membership.user;
+  const user =
+    membership.expand?.user ||
+    room.value?.members?.find(
+      (member) => String(member.id) === String(membership.userId),
+    );
+  return user ? publicDisplayName(user) : "Unknown member";
 }
 async function toggleMembershipRole(membership, roleId) {
   if (membership.saving) return;
@@ -985,11 +1002,10 @@ async function toggleMembershipRole(membership, roleId) {
       }),
     });
     membership.originalRoleSelection = [...nextSelection];
+    membership.roles = [...nextSelection];
     membership.expand = {
       ...membership.expand,
-      roles: roles.value.filter((role) =>
-        nextSelection.includes(String(role.id)),
-      ),
+      roles: membershipRoleDetails(membership, nextSelection),
     };
   } catch (cause) {
     membership.roleSelection = previousSelection;

@@ -20,8 +20,14 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const payload = await verifyAccessToken(token);
-    const profile = await profileRepository.findById(payload.sub);
+    const payload =
+      event.context.authToken === token && event.context.authPayload
+        ? event.context.authPayload
+        : await verifyAccessToken(token);
+    const profile =
+      event.context.authToken === token && event.context.authProfile
+        ? event.context.authProfile
+        : await profileRepository.findById(payload.sub);
     if (!profile) {
       throw createError({ statusCode: 401, statusMessage: "User not found" });
     }
@@ -30,7 +36,13 @@ export default defineEventHandler(async (event) => {
       getHeader(event, "x-device-id") ||
       getHeader(event, "x-dspeak-device") ||
       "unknown";
-    return persistAuthenticatedSession(event, profile.id, deviceId, token);
+    return persistAuthenticatedSession(
+      event,
+      profile.id,
+      deviceId,
+      token,
+      profile,
+    );
   } catch (error) {
     throw createError({
       statusCode: 401,

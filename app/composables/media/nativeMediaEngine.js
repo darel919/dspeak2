@@ -596,7 +596,9 @@ export class NativeMediaEngine extends MediaEngine {
   applyVolumeForUser(...args) {
     if (this.nativeOnly) {
       const [userId, volume] = args;
-      return this.nativeSession?.setConsumerVolume(userId, null, volume);
+      return this.nativeProvider === "p2p"
+        ? this.nativeP2pSession?.setConsumerVolume(userId, null, volume)
+        : this.nativeSession?.setConsumerVolume(userId, null, volume);
     }
     return this.browserEngine.applyVolumeForUser(...args);
   }
@@ -604,7 +606,9 @@ export class NativeMediaEngine extends MediaEngine {
   applyVolumeForTrack(...args) {
     if (this.nativeOnly) {
       const [userId, source, volume] = args;
-      return this.nativeSession?.setConsumerVolume(userId, source, volume);
+      return this.nativeProvider === "p2p"
+        ? this.nativeP2pSession?.setConsumerVolume(userId, source, volume)
+        : this.nativeSession?.setConsumerVolume(userId, source, volume);
     }
     return this.browserEngine.applyVolumeForTrack(...args);
   }
@@ -618,28 +622,64 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   getWebRTCStatsSnapshot(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("WebRTC statistics snapshot");
+    if (this.nativeOnly)
+      return (
+        (this.nativeProvider === "p2p"
+          ? this.nativeP2pSession?.stats?.()
+          : this.nativeSession?.stats?.()
+        )?.then((transports) => ({
+          timestamp: Date.now(),
+          engine: "native",
+          topology: this.nativeProvider === "p2p" ? "p2p" : "sfu",
+          transports,
+        })) || Promise.resolve({ timestamp: Date.now(), transports: [] })
+      );
     return this.browserEngine.getWebRTCStatsSnapshot(...args);
   }
 
   getOutboundRtpStats(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("outbound RTP statistics");
+    if (this.nativeOnly)
+      return this.nativeProvider === "p2p"
+        ? this.nativeP2pSession?.getOutboundRtpStats?.(...args) || []
+        : this.nativeSession?.getOutboundRtpStats?.(...args) || [];
     return this.browserEngine.getOutboundRtpStats(...args);
   }
 
   getInboundRtpStats(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("inbound RTP statistics");
+    if (this.nativeOnly)
+      return this.nativeProvider === "p2p"
+        ? this.nativeP2pSession?.getInboundRtpStats?.(...args) || []
+        : this.nativeSession?.getInboundRtpStats?.(...args) || [];
     return this.browserEngine.getInboundRtpStats(...args);
   }
 
   getWebRTCDiagnosticStats(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("WebRTC diagnostic statistics");
+    if (this.nativeOnly)
+      return this.nativeProvider === "p2p"
+        ? this.nativeP2pSession?.diagnosticStats?.(...args) || []
+        : this.nativeSession?.diagnosticStats?.(...args) || [];
     return this.browserEngine.getWebRTCDiagnosticStats(...args);
   }
 
   areTransportsIceConnected(...args) {
-    if (this.nativeOnly) throw nativeOnlyError("browser ICE transport state");
+    if (this.nativeOnly)
+      return Promise.resolve(
+        this.nativeProvider === "p2p"
+          ? this.nativeP2pSession?.iceConnectedBoth === true
+          : this.nativeSession?.iceConnectedBoth === true,
+      );
     return this.browserEngine.areTransportsIceConnected(...args);
+  }
+
+  setJitterBufferConfig(...args) {
+    if (this.nativeOnly) {
+      const config = args[0] || {};
+      return Promise.allSettled([
+        this.nativeSession?.setJitterBufferConfig?.(config),
+        this.nativeP2pSession?.setJitterBufferConfig?.(config),
+      ]);
+    }
+    return this.browserEngine.setJitterBufferConfig?.(...args);
   }
 
   getState() {

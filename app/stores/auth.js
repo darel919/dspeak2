@@ -2,8 +2,6 @@ import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { deviceHeaders } from "~/shared/device-identity";
 import { purgeUserLocalData } from "~/utils/idb";
-import { useRoomsStore } from "./rooms";
-import { useChatStore } from "./chat";
 import { useRuntimeStore } from "./runtime";
 
 export const useAuthStore = defineStore("auths", () => {
@@ -220,8 +218,28 @@ export const useAuthStore = defineStore("auths", () => {
     sessionChecked.value = true;
     removeStorage("token");
     removeStorage("userData");
-    useRoomsStore().clearRooms();
-    const chatCleanup = useChatStore().clearChat();
+    const chatCleanup = userId
+      ? Promise.all([
+          import("./rooms").then(({ useRoomsStore }) =>
+            useRoomsStore().clearRooms(),
+          ),
+          import("./channels").then(({ useChannelsStore }) =>
+            useChannelsStore().clearChannels(),
+          ),
+          import("./identity").then(({ useIdentityStore }) =>
+            useIdentityStore().clearIdentity(),
+          ),
+          import("./presenceStatus").then(({ usePresenceStatusStore }) =>
+            usePresenceStatusStore().clearUsers(),
+          ),
+          import("./voice").then(({ useVoiceStore }) =>
+            useVoiceStore().clearUserDirectory(),
+          ),
+          import("./chat").then(({ useChatStore }) =>
+            useChatStore().clearChat(),
+          ),
+        ]).then((results) => results[results.length - 1])
+      : Promise.resolve();
 
     const cleanup = chatCleanup
       .then(() => (userId ? purgeUserLocalData(userId) : undefined))

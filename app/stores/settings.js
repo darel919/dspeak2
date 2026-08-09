@@ -10,7 +10,6 @@ import {
   DEFAULT_MICROPHONE_GATE,
   normalizeMicrophoneGate,
 } from "~/shared/microphone-gate";
-import { useVoiceStore } from "~/stores/voice";
 import {
   boundedStorageMap,
   reportBrowserStorageMetric,
@@ -228,8 +227,9 @@ export const useSettingsStore = defineStore("settings", () => {
     persist("audioOutputDeviceId", outputDeviceId.value);
 
     if (typeof window !== "undefined") {
-      const voiceStore = useVoiceStore();
-      voiceStore.applyOutputDevice?.();
+      return import("./voice").then(({ useVoiceStore }) =>
+        useVoiceStore().applyOutputDevice?.(),
+      );
     }
   }
 

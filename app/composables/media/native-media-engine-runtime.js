@@ -11,10 +11,16 @@ import {
 } from "./native-media-engine-common.js";
 
 export async function handleNativeTopology(engine, topology = {}) {
-  if (!engine.nativeP2pSession) return;
   const mode = String(topology.mode || "idle");
   const target = String(topology.target || "");
-  const topologyKey = `${mode}:${topology.epoch}:${target}:${topology.sourceRevision}`;
+  const provider = String(
+    topology.provider ||
+      topology.targetProvider ||
+      topology.route?.provider ||
+      engine.nativeSession?.selectedProvider ||
+      "mediasoup",
+  );
+  const topologyKey = `${mode}:${topology.epoch}:${target}:${provider}:${topology.sourceRevision}`;
   if (engine.nativeTopologyKey === topologyKey) return;
   engine.nativeTopologyKey = topologyKey;
   const direct = mode === "probing" || mode === "p2p" || target === "p2p";
@@ -23,9 +29,26 @@ export async function handleNativeTopology(engine, topology = {}) {
     mode: mode === "switching" && target === "p2p" ? "p2p" : mode,
   };
   try {
-    await engine.nativeP2pSession.applyTopology(p2pTopology);
-    if (mode === "p2p") engine.nativeProvider = "p2p";
-    if (mode === "sfu" || mode === "idle") engine.nativeProvider = "sfu";
+    if (direct) {
+      await engine.nativeSession?.activateProvider?.("mediasoup");
+      await engine.nativeP2pSession?.applyTopology(p2pTopology);
+      if (mode === "p2p") engine.nativeProvider = "p2p";
+    } else {
+      await engine.nativeP2pSession?.applyTopology({
+        ...p2pTopology,
+        mode: "idle",
+      });
+      if (mode === "sfu" || target === "sfu") {
+        await engine.nativeSession?.activateProvider?.(provider);
+        if (mode === "switching" && target === "sfu")
+          await engine.nativeSession?.cloudflareSession?.waitForRemoteTracks?.(
+            topology,
+          );
+      } else if (mode === "idle") {
+        await engine.nativeSession?.activateProvider?.("mediasoup");
+      }
+      engine.nativeProvider = "sfu";
+    }
     engine._syncNativeFeeds();
     if (mode === "switching" && (target === "p2p" || target === "sfu")) {
       engine.nativeSession?.signaling?.send?.({

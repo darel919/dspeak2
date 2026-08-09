@@ -191,8 +191,22 @@ pub async fn media_set_ice_servers(
 
 #[tauri::command]
 pub async fn media_get_stats(store: State<'_, NativeMediaStore>) -> Result<Value, String> {
-    let _state = lock_state(&store)?;
-    Ok(serde_json::json!({}))
+    #[cfg(native_rtc)]
+    {
+        return super::command_stats::collect_media_stats(&store);
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _state = lock_state(&store)?;
+        Ok(serde_json::json!({
+            "engine": "native",
+            "topology": "sfu",
+            "sampledAt": 0,
+            "transports": [],
+            "producers": [],
+            "consumers": [],
+        }))
+    }
 }
 
 #[tauri::command]

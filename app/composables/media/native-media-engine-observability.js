@@ -7,6 +7,7 @@ import {
   hasNativeCapability,
   nativeOnlyError,
 } from "./native-media-engine-common.js";
+import { normalizeNativeStatsSnapshot } from "../../shared/native-mediasoup-diagnostics.js";
 
 export async function handleSignal(engine, message) {
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) {
@@ -44,11 +45,24 @@ export async function getStats(engine) {
     if (engine.nativeOnly) throw nativeOnlyError("statistics");
     return engine.browserEngine.getStats();
   }
-  return engine
-    ._invoke("media_get_stats")
+  const nativeStats =
+    engine.nativeProvider === "p2p"
+      ? engine.nativeP2pSession?.stats?.()
+      : engine.nativeSession?.stats?.();
+  return (nativeStats || engine._invoke("media_get_stats"))
     .then((stats) => {
-      emitQoe(engine, stats);
-      return stats;
+      const snapshot = normalizeNativeStatsSnapshot(
+        Array.isArray(stats)
+          ? {
+              timestamp: Date.now(),
+              engine: "native",
+              topology: engine.nativeProvider === "p2p" ? "p2p" : "sfu",
+              transports: stats,
+            }
+          : stats,
+      );
+      emitQoe(engine, snapshot);
+      return snapshot;
     })
     .catch((error) => {
       if (engine.nativeOnly) throw error;
@@ -58,7 +72,10 @@ export async function getStats(engine) {
 
 export function emitQoe(engine, stats) {
   const report = createMediaQoeReport({
-    provider: engine.nativeProvider === "p2p" ? "p2p" : "mediasoup",
+    provider:
+      engine.nativeProvider === "p2p"
+        ? "p2p"
+        : engine.nativeSession?.selectedProvider || "mediasoup",
     epoch: engine.nativeSession?.topologyState?.epoch || 0,
     paths: mediaQoePathsFromStats(stats),
     sampledAt: stats?.sampledAt,

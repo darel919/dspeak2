@@ -49,13 +49,10 @@ export function configureControl(session, config = {}) {
 
 export async function handleProviderTicket(session, data) {
   if (data?.provider === "cloudflare-realtime") {
+    await session.activateProvider("cloudflare-realtime");
     session.signaling?.send({
-      type: "provider-failure",
-      data: {
-        provider: data.provider,
-        epoch: data.epoch,
-        reason: "native-provider-unsupported",
-      },
+      type: "provider-ready",
+      data: { provider: data.provider, epoch: data.epoch },
     });
     return;
   }
@@ -89,7 +86,7 @@ export function createSignaling(session) {
       protocolVersion: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
       contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
       mediaSessionId: session.mediaSessionId,
-      providerCapabilities: ["mediasoup"],
+      providerCapabilities: ["cloudflare-realtime", "mediasoup"],
       ticket: session.controlTicket,
     }),
     connectionTimeoutMs: session.requestTimeoutMs,
@@ -137,45 +134,68 @@ export async function startNegotiation(session) {
     session.readyResolve = resolve;
     session.readyReject = reject;
   });
+  session.initializationTimer = setTimeout(() => {
+    const error = new Error("SFU initialization timed out");
+    session.rejectReadiness(error);
+    session._fail(error);
+  }, session.initializationTimeoutMs);
+  session.initializationTimer.unref?.();
   session.initializationRequestId = session.requestId("initialize");
-  session.sendOrThrow(
-    {
-      type: "get-rtp-capabilities",
-      data: { requestId: session.initializationRequestId },
-    },
-    "SFU initialization",
-  );
+  try {
+    session.sendOrThrow(
+      {
+        type: "get-rtp-capabilities",
+        data: { requestId: session.initializationRequestId },
+      },
+      "SFU initialization",
+    );
+  } catch (error) {
+    session.rejectReadiness(error);
+    throw error;
+  }
   return session.readyPromise;
 }
 
 export async function handleRtpCapabilities(session, data) {
   if (data.requestId !== session.initializationRequestId) return false;
+  const mediaRevision = session.mediaRevision;
   const routerCapabilities = { ...data };
   delete routerCapabilities.requestId;
   const device = await session.invoke("media_create_device", {
     routerRtpCapabilities: JSON.stringify(routerCapabilities),
   });
+  if (
+    session.closed ||
+    mediaRevision !== session.mediaRevision ||
+    data.requestId !== session.initializationRequestId
+  )
+    return false;
   if (!device?.handle || !device.rtpCapabilities)
     throw new Error("Native device negotiation returned no capabilities");
   session.device = device;
   session.lastSentClientRtpCapabilities = device.rtpCapabilities;
-  session.sendOrThrow(
-    {
-      type: "client-rtp-capabilities",
-      data: { rtpCapabilities: device.rtpCapabilities },
-    },
-    "SFU capability negotiation",
-  );
-  for (const direction of ["send", "recv"]) {
-    const requestId = session.requestId(`create-${direction}`);
-    session.pendingConsumers.set(requestId, direction);
+  try {
     session.sendOrThrow(
       {
-        type: "create-transport",
-        data: { type: direction, requestId },
+        type: "client-rtp-capabilities",
+        data: { rtpCapabilities: device.rtpCapabilities },
       },
-      `SFU ${direction} transport creation`,
+      "SFU capability negotiation",
     );
+    for (const direction of ["send", "recv"]) {
+      const requestId = session.requestId(`create-${direction}`);
+      session.transportRequestIds.set(direction, requestId);
+      session.sendOrThrow(
+        {
+          type: "create-transport",
+          data: { type: direction, requestId },
+        },
+        `SFU ${direction} transport creation`,
+      );
+    }
+  } catch (error) {
+    session.rejectReadiness(error);
+    throw error;
   }
   return true;
 }
@@ -183,11 +203,10 @@ export async function handleRtpCapabilities(session, data) {
 export async function handleTransportParams(session, data) {
   const direction = data.direction;
   if (direction !== "send" && direction !== "recv") return false;
-  const expected = [...session.pendingConsumers.entries()].find(
-    ([requestId, value]) => requestId === data.requestId && value === direction,
-  );
-  if (!expected) return false;
-  session.pendingConsumers.delete(data.requestId);
+  if (session.transportRequestIds.get(direction) !== data.requestId)
+    return false;
+  const mediaRevision = session.mediaRevision;
+  session.transportRequestIds.delete(direction);
   const result = await session.invoke(
     direction === "send"
       ? "media_create_send_transport"
@@ -201,6 +220,7 @@ export async function handleTransportParams(session, data) {
       appData: { direction },
     },
   );
+  if (session.closed || mediaRevision !== session.mediaRevision) return false;
   if (!result?.handle)
     throw new Error(`Native ${direction} transport was not created`);
   const transport = {
@@ -213,6 +233,8 @@ export async function handleTransportParams(session, data) {
   else session.recvTransport = transport;
   session.transportStates.set(direction, "new");
   if (session.sendTransport && session.recvTransport) {
+    clearTimeout(session.initializationTimer);
+    session.initializationTimer = null;
     session.readyResolve?.();
     session.readyResolve = null;
     session.readyReject = null;
@@ -220,7 +242,10 @@ export async function handleTransportParams(session, data) {
     session.mediaConnectionState = "ready-no-active-media";
     session._emitState();
     await session._republishSources();
-    for (const producerId of [...session.requestedConsumers])
+    for (const producerId of new Set([
+      ...session.pendingConsumers,
+      ...session.requestedConsumers,
+    ]))
       session.requestConsumer(producerId);
   }
   return true;

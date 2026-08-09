@@ -506,6 +506,8 @@ export const useChannelsStore = defineStore("channels", () => {
     loadedRoomId.value = null;
     roomChannels.clear();
     voicePresenceSnapshots.clear();
+    voiceProfiles.value = new Map();
+    channelPolicies.value = new Map();
     currentChannelId.value = null;
     error.value = null;
   }

@@ -475,14 +475,22 @@ extern "C" void lib_dspeak_media_push_p2p_event(uint64_t p2p_handle,
                                                  const char* track_id,
                                                  const char* kind,
                                                  const char* value) {
-    push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_P2P, track_id, {
+    json payload = {
         {"event", event_name ? event_name : "p2p-event"},
         {"handle", p2p_handle},
         {"trackId", track_id ? track_id : ""},
         {"kind", kind ? kind : ""},
         {"value", value ? value : ""},
         {"native", true},
-    });
+    };
+    if (value) {
+        try {
+            const auto metadata = json::parse(value);
+            if (metadata.is_object())
+                for (const auto& [key, item] : metadata.items()) payload[key] = item;
+        } catch (...) {}
+    }
+    push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_P2P, track_id, payload);
 }
 
 extern "C" lib_dspeak_media_receive_event_t lib_dspeak_media_poll_receive_event(void) {

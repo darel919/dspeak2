@@ -1,30 +1,39 @@
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
-import { useVoiceStore } from "../stores/voice";
 import { useAuthStore } from "../stores/auth";
 
 export function useGlobalKeyboardShortcuts() {
   const { register, setScope } = useKeyboardShortcuts();
-  const voiceStore = useVoiceStore();
   const authStore = useAuthStore();
   const router = useRouter();
   const route = useRoute();
 
   let cleanups = [];
+  let voiceStorePromise = null;
+
+  function loadVoiceStore() {
+    voiceStorePromise ||= import("../stores/voice").then(({ useVoiceStore }) =>
+      useVoiceStore(),
+    );
+    return voiceStorePromise;
+  }
+
+  function runVoiceAction(action) {
+    if (!authStore.getUserData()) return;
+    void loadVoiceStore()
+      .then(action)
+      .catch((error) => console.error("[Keyboard shortcuts]", error));
+  }
 
   function init() {
     if (!import.meta.client) return;
 
     cleanups = [
       register("toggle-mic", ["Mod+Shift+m"], () => {
-        if (authStore.getUserData()) {
-          voiceStore.toggleMic();
-        }
+        runVoiceAction((voiceStore) => voiceStore.toggleMic());
       }),
 
       register("toggle-deafen", ["Mod+Shift+d"], () => {
-        if (authStore.getUserData()) {
-          voiceStore.toggleDeafen();
-        }
+        runVoiceAction((voiceStore) => voiceStore.toggleDeafen());
       }),
 
       register("open-settings", ["Mod+,"], () => {

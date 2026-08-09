@@ -40,6 +40,8 @@
 #include <api/video_codecs/video_encoder_factory_template_open_h264_adapter.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
+#include <api/stats/rtc_stats_collector_callback.h>
+#include <api/stats/rtc_stats_report.h>
 #include <api/data_channel_interface.h>
 #include <api/scoped_refptr.h>
 #include <api/video/i420_buffer.h>
@@ -256,18 +258,24 @@ public:
         if (!track) return;
         const auto kind = track->kind();
         const auto track_id = track->id();
+        const auto mid = transceiver->mid().value_or("");
+        const auto metadata = json{{"mid", mid}}.dump();
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_), "track-added", track_id.c_str(), kind.c_str(), "");
+            reinterpret_cast<uint64_t>(handle_), "track-added", track_id.c_str(), kind.c_str(),
+            metadata.c_str());
         if (kind == "audio") {
+            handle_->audio_receivers[track_id] = transceiver->receiver();
             auto sink = std::make_unique<NativeReceiveAudioSink>(track_id);
             static_cast<webrtc::AudioTrackInterface*>(track.get())->AddSink(sink.get());
             sink->SetEnabled(true);
+            handle_->audio_sinks_by_id[track_id] = sink.get();
             handle_->audio_sinks.push_back(std::move(sink));
         } else if (kind == "video") {
             auto sink = std::make_unique<NativeReceiveVideoSink>(track_id);
             static_cast<webrtc::VideoTrackInterface*>(track.get())->AddOrUpdateSink(
                 sink.get(), webrtc::VideoSinkWants());
             sink->SetEnabled(true);
+            handle_->video_sinks_by_id[track_id] = sink.get();
             handle_->video_sinks.push_back(std::move(sink));
         }
     }
@@ -275,9 +283,43 @@ public:
     void OnRemoveTrack(
         webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver) override {
         if (!receiver || !receiver->track()) return;
+        const auto track = receiver->track();
+        const auto track_id = track->id();
+        if (track->kind() == "audio") {
+            const auto sink = handle_->audio_sinks_by_id.find(track_id);
+            if (sink != handle_->audio_sinks_by_id.end()) {
+                static_cast<webrtc::AudioTrackInterface*>(track.get())->RemoveSink(
+                    sink->second);
+                const auto* sink_ptr = sink->second;
+                handle_->audio_sinks_by_id.erase(sink);
+                handle_->audio_sinks.erase(
+                    std::remove_if(
+                        handle_->audio_sinks.begin(), handle_->audio_sinks.end(),
+                        [sink_ptr](const auto& candidate) {
+                            return candidate.get() == sink_ptr;
+                        }),
+                    handle_->audio_sinks.end());
+            }
+            handle_->audio_receivers.erase(track_id);
+        } else if (track->kind() == "video") {
+            const auto sink = handle_->video_sinks_by_id.find(track_id);
+            if (sink != handle_->video_sinks_by_id.end()) {
+                static_cast<webrtc::VideoTrackInterface*>(track.get())->RemoveSink(
+                    sink->second);
+                const auto* sink_ptr = sink->second;
+                handle_->video_sinks_by_id.erase(sink);
+                handle_->video_sinks.erase(
+                    std::remove_if(
+                        handle_->video_sinks.begin(), handle_->video_sinks.end(),
+                        [sink_ptr](const auto& candidate) {
+                            return candidate.get() == sink_ptr;
+                        }),
+                    handle_->video_sinks.end());
+            }
+        }
         lib_dspeak_media_push_p2p_event(
             reinterpret_cast<uint64_t>(handle_),
-            "track-removed", receiver->track()->id().c_str(), receiver->track()->kind().c_str(), "");
+            "track-removed", track_id.c_str(), track->kind().c_str(), "");
     }
 
     void OnRenegotiationNeeded() override {
@@ -322,6 +364,21 @@ public:
 
 private:
     std::promise<void> promise_;
+};
+
+class P2pStatsObserver : public webrtc::RTCStatsCollectorCallback {
+public:
+    P2pStatsObserver() : promise_(std::promise<std::string>()) {}
+
+    std::future<std::string> GetFuture() { return promise_.get_future(); }
+
+    void OnStatsDelivered(
+        const rtc::scoped_refptr<const webrtc::RTCStatsReport>& report) override {
+        promise_.set_value(report ? report->ToJson() : "{}");
+    }
+
+private:
+    std::promise<std::string> promise_;
 };
 
 void apply_ice_servers(
@@ -636,6 +693,25 @@ extern "C" int lib_dspeak_media_p2p_ice_connection_state(lib_dspeak_media_p2p_ha
     return 0;
 }
 
+extern "C" int lib_dspeak_media_p2p_set_jitter_buffer(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_id,
+    int min_delay_ms,
+    int target_delay_ms)
+{
+    (void)target_delay_ms;
+    if (!h || !h->signaling_thread || !track_id) return -1;
+    const std::string id = track_id;
+    const auto minimum_delay_ms = std::max(0, min_delay_ms);
+    return h->signaling_thread->BlockingCall([h, id, minimum_delay_ms] {
+        const auto receiver = h->audio_receivers.find(id);
+        if (receiver == h->audio_receivers.end() || !receiver->second) return -1;
+        receiver->second->SetJitterBufferMinimumDelay(
+            static_cast<double>(minimum_delay_ms) / 1000.0);
+        return 0;
+    });
+}
+
 extern "C" int lib_dspeak_media_p2p_restart_ice(lib_dspeak_media_p2p_handle_t* h, char** sdp_out)
 {
     if (!h || !h->pc || !sdp_out) return -1;
@@ -660,5 +736,21 @@ extern "C" int lib_dspeak_media_p2p_restart_ice(lib_dspeak_media_p2p_handle_t* h
         return 0;
     } catch (...) {
         return -1;
+    }
+}
+
+extern "C" char* lib_dspeak_media_p2p_get_stats(lib_dspeak_media_p2p_handle_t* h)
+{
+    if (!h || !h->pc || !h->signaling_thread || h->closed) return nullptr;
+    try {
+        auto observer = rtc::make_ref_counted<P2pStatsObserver>();
+        auto future = observer->GetFuture();
+        h->signaling_thread->BlockingCall([h, observer] {
+            h->pc->GetStats(observer.get());
+        });
+        const auto stats = future.get();
+        return lib_dspeak_media_strdup(stats.c_str());
+    } catch (...) {
+        return nullptr;
     }
 }

@@ -125,7 +125,7 @@ export const useChatStore = defineStore("chat", () => {
         );
         if (preparationGeneration !== localDataGeneration) return false;
         if (cached && Array.isArray(cached.messages)) {
-          channelMessages.set(normalizedChannelId, cached.messages);
+          setChannelMessages(normalizedChannelId, cached.messages);
         }
       } catch (cacheError) {
         console.warn(
@@ -136,7 +136,7 @@ export const useChatStore = defineStore("chat", () => {
 
       if (!navigator.onLine) {
         if (!channelMessages.has(normalizedChannelId)) {
-          channelMessages.set(normalizedChannelId, []);
+          setChannelMessages(normalizedChannelId, []);
         }
         channelPreparedAt.set(normalizedChannelId, Date.now());
         return true;
@@ -166,7 +166,7 @@ export const useChatStore = defineStore("chat", () => {
           serverMessages,
           channelMessages.get(normalizedChannelId) || [],
         );
-        channelMessages.set(normalizedChannelId, preparedMessages);
+        setChannelMessages(normalizedChannelId, preparedMessages);
         channelPreparedAt.set(normalizedChannelId, Date.now());
         cacheChannelMessages(
           userData.id,
@@ -465,8 +465,11 @@ export const useChatStore = defineStore("chat", () => {
             return;
           }
           if (cached && Array.isArray(cached.messages)) {
-            channelMessages.set(channelId, cached.messages);
-            messages.value = cached.messages;
+            messages.value = setChannelMessages(
+              channelId,
+              cached.messages,
+              true,
+            );
             loading.value = false;
           }
         } catch (cacheError) {
@@ -479,7 +482,7 @@ export const useChatStore = defineStore("chat", () => {
 
       if (!navigator.onLine) {
         offline.value = true;
-        channelMessages.set(channelId, messages.value);
+        setChannelMessages(channelId, messages.value, true);
         loading.value = false;
         connecting.value = false;
         return;
@@ -1397,12 +1400,16 @@ export const useChatStore = defineStore("chat", () => {
   function handleBackgroundSyncSuccess(pendingId) {
     const authStore = useAuthStore();
     const userId = authStore.getUserData()?.id;
-    for (const [channelId, cachedMessages] of channelMessages) {
+    for (const [channelId, cachedMessages] of [...channelMessages]) {
       const nextMessages = cachedMessages.filter(
         (message) => message.id !== pendingId,
       );
       if (nextMessages.length === cachedMessages.length) continue;
-      channelMessages.set(channelId, nextMessages);
+      setChannelMessages(
+        channelId,
+        nextMessages,
+        String(currentChannelId.value) === String(channelId),
+      );
       if (currentChannelId.value === channelId) {
         messages.value = nextMessages;
       }

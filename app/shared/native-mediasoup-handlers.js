@@ -49,6 +49,21 @@ export function installHandlers(session) {
   session.messageHandlers.set("consumer-paused", (data) => {
     session._resolveConsumerControl(data, false);
   });
+  session.messageHandlers.set("cloudflare-response", (data) =>
+    session.cloudflareSession?.handleMessage("cloudflare-response", data),
+  );
+  session.messageHandlers.set("cloudflare-publication-available", (data) => {
+    if (session.cloudflareSession && !session.cloudflareSession.closed)
+      return session.cloudflareSession.handleMessage(
+        "cloudflare-publication-available",
+        data,
+      );
+    const trackName = String(data?.trackName || "");
+    if (!trackName) return false;
+    if (data?.closed) session.pendingCloudflarePublications.delete(trackName);
+    else session.pendingCloudflarePublications.set(trackName, data);
+    return true;
+  });
   session.messageHandlers.set("ice-restarted", (data) => {
     session.pending.get(data.requestId)?.resolve(data.iceParameters);
   });
@@ -57,6 +72,9 @@ export function installHandlers(session) {
   });
   session.messageHandlers.set("topology-state", (data) => {
     session.topologyState = { ...data, localPeerId: session.localPeerId };
+    const provider =
+      data?.provider || data?.targetProvider || data?.route?.provider;
+    if (provider) session.selectedProvider = provider;
     session._emitState();
   });
   session.messageHandlers.set("route-commit", (data) => {
@@ -69,6 +87,8 @@ export function installHandlers(session) {
       sourceRevision: Number(route?.sourceRevision) || 0,
       localPeerId: session.localPeerId,
     };
+    const provider = route?.provider || data?.targetProvider;
+    if (provider) session.selectedProvider = provider;
     session._emitState();
   });
   session.messageHandlers.set("provider-failure", (data) => {

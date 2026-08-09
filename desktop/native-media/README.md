@@ -9,10 +9,11 @@ inputs:
   `b9602ba50477d9a22b673fc3e6b5abff16c02deb`;
 - C++20, CMake >= 3.14, Ninja, and Chromium `depot_tools`.
 
-Copy `dependencies.env.example` to an ignored local file and provide the
-platform-specific checkout/build paths. Do not commit WebRTC checkouts or
-static libraries: a complete checkout and build is multi-gigabyte and must be
-produced by CI or a separate developer provisioning step.
+Copy `dependencies.env.example` to an ignored local file. Do not commit WebRTC
+checkouts or static libraries: a complete checkout and build is multi-gigabyte.
+The `dev:desktop` wrapper provisions the ignored local bundle on its first run,
+using a pinned release archive when available and otherwise building from the
+pinned inputs in this file.
 
 ## Required artifacts
 
@@ -32,18 +33,22 @@ application startup.
 
 ## Development
 
-Desktop builds require `NATIVE_MEDIA_ARTIFACT_DIR` to point to the artifact
-bundle. A missing or incomplete bundle is a build error; desktop never silently
-switches to WebView WebRTC. For local development, create the ignored
-`dependencies.env` file from the example and set the artifact path:
+Production desktop builds require `NATIVE_MEDIA_ARTIFACT_DIR` to point to a
+complete artifact bundle. A missing or incomplete bundle is a build error;
+desktop never silently switches to WebView WebRTC. For local development, copy
+the ignored `dependencies.env` file from the example and run:
 
 ```sh
 cp desktop/native-media/dependencies.env.example desktop/native-media/dependencies.env
-NATIVE_MEDIA_ARTIFACT_DIR=/path/to/native-bundle bun run dev:desktop
+bun run dev:desktop
 ```
 
 The `dev:desktop` wrapper loads `desktop/native-media/dependencies.env`
-automatically. An explicit environment variable overrides the local file.
+automatically, creates `desktop/native-media/bundle` when needed, and validates
+all native libraries before launching Tauri. An explicit environment variable
+overrides the local file. Set `NATIVE_MEDIA_PROVISION_MODE=download` to require
+a prebuilt archive or `NATIVE_MEDIA_PROVISION_MODE=source` to skip the archive
+lookup.
 
 The web application does not use this variable and continues to use browser
 WebRTC.
@@ -55,6 +60,19 @@ VITE_DSPEAK_SFU_PATH=wss://app.example.com/socket bun run build:desktop
 ```
 
 When unset, development uses the current WebView origin and `/socket`.
+
+## Cloudflare Realtime SFU
+
+When the control plane selects Cloudflare Realtime, the native client uses the
+generic libwebrtc PeerConnection path and follows the same raw SDP lifecycle as
+the browser client: session creation, local and remote track negotiation,
+renegotiation, track closure, native receive rendering, and native RTP stats.
+No mediasoup signaling or mediasoup transport is used on that path.
+
+The current native artifact is a combined build, so it still links
+`libmediasoupclient` and `libsdptransform` for the self-hosted mediasoup path.
+Cloudflare does not remove the artifact or startup prerequisites until the
+native shim is split into separate Cloudflare-only and mediasoup builds.
 
 ## Runtime state
 

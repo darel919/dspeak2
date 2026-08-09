@@ -272,6 +272,7 @@ export const useVoiceStore = defineStore("voice", () => {
 
   const {
     addConnectedUser,
+    clearUserDirectory,
     getConnectedUsersArray,
     getDisplayUsersArray,
     getTrackVolume,
@@ -310,6 +311,7 @@ export const useVoiceStore = defineStore("voice", () => {
     cameraEnabled,
     cameraToggleGenerationState,
     channelsStore,
+    clearUserDirectory,
     connected,
     connectedAt,
     connectedUsers,
@@ -540,6 +542,7 @@ export const useVoiceStore = defineStore("voice", () => {
     updateUserVoiceState,
     showSoundboardActivity,
     clearSoundboardActivity,
+    clearUserDirectory,
     getConnectedUsersArray,
     getAuthenticatedUser: () => useAuthStore().getUserData(),
     getDisplayUsersArray,

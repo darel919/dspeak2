@@ -537,6 +537,9 @@ test("room role assignments use explicit role controls instead of a native multi
   assert.doesNotMatch(source, /<select[\s\S]*multiple/);
   assert.match(source, /toggleMembershipRole\(membership, role\.id\)/);
   assert.match(source, /membershipSystemRoles\(membership\)/);
+  assert.match(source, /const memberById = new Map/);
+  assert.match(source, /user: memberById\.get\(String\(membership\.userId\)\)/);
+  assert.match(source, /function membershipRoleDetails\(membership/);
   assert.match(source, /Changes apply immediately/);
   assert.match(source, /if \(!nextSelection\.length\)/);
   assert.doesNotMatch(source, /Save roles/);

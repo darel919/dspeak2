@@ -59,23 +59,7 @@ export function createChatApiHandler(dependencies) {
     pushAllowedHosts,
   } = dependencies;
 
-  async function presentMessage(message) {
-    const author = await db
-      .select()
-      .from(profiles)
-      .where(eq(profiles.id, message.authorId))
-      .limit(1);
-    const files = await db
-      .select()
-      .from(chatFiles)
-      .where(eq(chatFiles.messageId, message.id));
-    message.attachments = files.map((file) => ({
-      id: file.id,
-      url: `/api/assets/chat-file?id=${encodeURIComponent(file.id)}`,
-      name: file.fileName,
-      size: file.size,
-      mime_type: file.mimeType,
-    }));
+  function presentMessageRecord(message, author, files = []) {
     return {
       id: message.id,
       content: message.content,
@@ -96,6 +80,53 @@ export function createChatApiHandler(dependencies) {
       reply_to: message.replyToId || null,
       pinned: false,
     };
+  }
+
+  async function presentMessage(message) {
+    const [author, files] = await Promise.all([
+      db
+        .select()
+        .from(profiles)
+        .where(eq(profiles.id, message.authorId))
+        .limit(1),
+      db.select().from(chatFiles).where(eq(chatFiles.messageId, message.id)),
+    ]);
+    return presentMessageRecord(message, author[0], files);
+  }
+
+  async function presentMessages(rows) {
+    if (!rows.length) return [];
+    const authorIds = [
+      ...new Set(rows.map((row) => row.authorId).filter(Boolean)),
+    ];
+    const messageIds = rows.map((row) => row.id).filter(Boolean);
+    const [authors, files] = await Promise.all([
+      authorIds.length
+        ? db.select().from(profiles).where(inArray(profiles.id, authorIds))
+        : [],
+      messageIds.length
+        ? db
+            .select()
+            .from(chatFiles)
+            .where(inArray(chatFiles.messageId, messageIds))
+        : [],
+    ]);
+    const authorById = new Map(
+      authors.map((author) => [String(author.id), author]),
+    );
+    const filesByMessageId = new Map();
+    for (const file of files) {
+      const messageFiles = filesByMessageId.get(String(file.messageId)) || [];
+      messageFiles.push(file);
+      filesByMessageId.set(String(file.messageId), messageFiles);
+    }
+    return rows.map((row) =>
+      presentMessageRecord(
+        row,
+        authorById.get(String(row.authorId)),
+        filesByMessageId.get(String(row.id)) || [],
+      ),
+    );
   }
 
   function presentNotificationPreferences(row) {
@@ -467,7 +498,7 @@ export function createChatApiHandler(dependencies) {
         .where(inArray(rooms.id, roomIds));
       if (!roomRows.length) return [];
       const channelRows = await db
-        .select()
+        .select({ id: channels.id, roomId: channels.roomId })
         .from(channels)
         .where(
           inArray(
@@ -486,19 +517,23 @@ export function createChatApiHandler(dependencies) {
           },
         ]),
       );
-      const channelsIds = channelRows.map((c) => c.id);
-      const recent = await db
-        .select({ channelId: messages.channelId })
+      const channelsIds = channelRows.map((channel) => channel.id);
+      const unreadRows = await db
+        .select({
+          channelId: messages.channelId,
+          unreadCount: sql`count(*)`,
+        })
         .from(messages)
         .where(
           and(
             inArray(messages.channelId, channelsIds),
             sql`NOT (${messages.readBy}::jsonb ? ${userId})`,
           ),
-        );
-      for (const message of recent) {
-        const count = channelById.get(String(message.channelId));
-        if (count) count.unreadCount += 1;
+        )
+        .groupBy(messages.channelId);
+      for (const row of unreadRows) {
+        const channel = channelById.get(String(row.channelId));
+        if (channel) channel.unreadCount = Number(row.unreadCount) || 0;
       }
       return [...channelById.values()];
     }
@@ -524,7 +559,7 @@ export function createChatApiHandler(dependencies) {
         .where(eq(messages.channelId, channelId))
         .orderBy(desc(messages.createdAt))
         .limit(200);
-      return Promise.all(rows.reverse().map(presentMessage));
+      return presentMessages(rows.reverse());
     }
 
     const body = event.method === "GET" ? {} : await parseBody(event);
@@ -661,13 +696,16 @@ export function createChatApiHandler(dependencies) {
         .onConflictDoNothing()
         .returning();
       const created = createdRows[0];
-      if (created) {
-        for (const attachment of validatedAttachments)
-          await db
-            .update(chatFiles)
-            .set({ messageId: created.id })
-            .where(eq(chatFiles.id, attachment.id));
-      }
+      if (created && validatedAttachments.length)
+        await db
+          .update(chatFiles)
+          .set({ messageId: created.id })
+          .where(
+            inArray(
+              chatFiles.id,
+              validatedAttachments.map((attachment) => attachment.id),
+            ),
+          );
       const result = created
         ? await presentMessage(created)
         : await presentMessage(
@@ -1204,25 +1242,35 @@ export function createChatApiHandler(dependencies) {
         .from(pinnedMessages)
         .where(eq(pinnedMessages.channelId, channelId))
         .orderBy(desc(pinnedMessages.createdAt));
+      const pinnedMessageRows = pins.length
+        ? await db
+            .select()
+            .from(messages)
+            .where(
+              inArray(
+                messages.id,
+                pins.map((pin) => pin.messageId),
+              ),
+            )
+        : [];
+      const pinnedMessageById = new Map(
+        pinnedMessageRows.map((message) => [String(message.id), message]),
+      );
       const pined = [];
       for (const pin of pins) {
-        const message = await db
-          .select()
-          .from(messages)
-          .where(eq(messages.id, pin.messageId))
-          .limit(1);
+        const message = pinnedMessageById.get(String(pin.messageId));
         pined.push({
           id: pin.id,
           message: pin.messageId,
           pinned_by: presentUser({ id: pin.pinnedById }),
           pinned_at: pin.createdAt,
           expand: {
-            message: message[0]
+            message: message
               ? {
-                  id: message[0].id,
-                  content: message[0].content,
-                  created: message[0].createdAt,
-                  sender: presentUser({ id: message[0].authorId }),
+                  id: message.id,
+                  content: message.content,
+                  created: message.createdAt,
+                  sender: presentUser({ id: message.authorId }),
                 }
               : null,
             pinned_by: presentUser({ id: pin.pinnedById }),
@@ -1358,23 +1406,33 @@ export function createChatApiHandler(dependencies) {
         .from(bookmarks)
         .where(eq(bookmarks.userId, userId))
         .orderBy(desc(bookmarks.createdAt));
+      const bookmarkMessages = rows.length
+        ? await db
+            .select()
+            .from(messages)
+            .where(
+              inArray(
+                messages.id,
+                rows.map((bookmark) => bookmark.messageId),
+              ),
+            )
+        : [];
+      const bookmarkMessageById = new Map(
+        bookmarkMessages.map((message) => [String(message.id), message]),
+      );
       const accessibleBookmarks = [];
       const channelCache = new Map();
       const roomAccessCache = new Map();
       for (const bookmark of rows) {
-        const message = await db
-          .select()
-          .from(messages)
-          .where(eq(messages.id, bookmark.messageId))
-          .limit(1);
-        if (!message[0]) continue;
+        const message = bookmarkMessageById.get(String(bookmark.messageId));
+        if (!message) continue;
         try {
-          if (!channelCache.has(message[0].channelId))
+          if (!channelCache.has(message.channelId))
             channelCache.set(
-              message[0].channelId,
-              getChannelById(message[0].channelId),
+              message.channelId,
+              getChannelById(message.channelId),
             );
-          const channel = await channelCache.get(message[0].channelId);
+          const channel = await channelCache.get(message.channelId);
           if (!channel) continue;
           if (!roomAccessCache.has(channel.roomId))
             roomAccessCache.set(
@@ -1385,7 +1443,7 @@ export function createChatApiHandler(dependencies) {
               })(),
             );
           await roomAccessCache.get(channel.roomId);
-          accessibleBookmarks.push({ bookmark, message: message[0] });
+          accessibleBookmarks.push({ bookmark, message });
         } catch (error) {
           const status =
             error?.statusCode || error?.status || error?.response?.status;
@@ -1542,36 +1600,7 @@ export function createChatApiHandler(dependencies) {
         .where(and(...conditions))
         .orderBy(desc(messages.createdAt))
         .limit(50);
-      const results = [];
-      for (const row of rows) {
-        const author = await db
-          .select()
-          .from(profiles)
-          .where(eq(profiles.id, row.authorId))
-          .limit(1);
-        const files = await db
-          .select()
-          .from(chatFiles)
-          .where(eq(chatFiles.messageId, row.id));
-        results.push({
-          id: row.id,
-          content: row.content,
-          room_channel: row.channelId,
-          sender: presentUser(author[0], true),
-          created: row.createdAt,
-          updated: row.updatedAt,
-          edited_at: null,
-          attachments: files.map((file) => ({
-            id: file.id,
-            url: `/api/assets/chat-file?id=${encodeURIComponent(file.id)}`,
-            name: file.fileName,
-            size: file.size,
-            mime_type: file.mimeType,
-          })),
-          reply_to: row.replyToId || null,
-          pinned: false,
-        });
-      }
+      const results = await presentMessages(rows);
       return {
         messages: results,
         total: results.length,
@@ -1661,8 +1690,9 @@ export function createChatApiHandler(dependencies) {
         .from(messages)
         .where(eq(messages.replyToId, messageId))
         .orderBy(asc(messages.createdAt));
-      const parentShown = await presentMessage(parent[0]);
-      const replyShown = await Promise.all(replies.map(presentMessage));
+      const presented = await presentMessages([parent[0], ...replies]);
+      const parentShown = presented[0];
+      const replyShown = presented.slice(1);
       return {
         parent: parentShown,
         replies: replyShown,

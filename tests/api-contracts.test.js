@@ -54,6 +54,18 @@ test("default room roles use the repository's snake_case template contract", () 
   assert.match(roomAuth, /template\.isDefault \?\? template\.is_default/);
 });
 
+test("room role mutations resolve the room from their JSON body", () => {
+  const roleHandler = roomsApi.slice(
+    roomsApi.indexOf("async function handleRoomRoles"),
+    roomsApi.indexOf("async function handleRooms"),
+  );
+  assert.match(
+    roleHandler,
+    /const resolvedRoomId = requireValue\(\s*roomId \|\| body\.roomId,/,
+  );
+  assert.match(roleHandler, /getRoomById\(resolvedRoomId\)/);
+});
+
 test("room details filters the deduplicated member ID array, not the Set", () => {
   assert.match(roomsApi, /const memberIds = \[/);
   assert.match(roomsApi, /\.\.\.new Set\(memberships\.map\(/);

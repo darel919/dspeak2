@@ -167,6 +167,43 @@ pub fn p2p_set_receive_enabled(
     }
 }
 
+pub fn p2p_set_receive_volume(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    track_id: &str,
+    volume: f64,
+) -> Result<(), String> {
+    let track_id = CString::new(track_id).map_err(|error| error.to_string())?;
+    let result =
+        unsafe { ffi::lib_dspeak_media_p2p_set_receive_volume(handle, track_id.as_ptr(), volume) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P receive volume update failed".to_string())
+    }
+}
+
+pub fn p2p_set_jitter_buffer(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    track_id: &str,
+    min_delay_ms: i32,
+    target_delay_ms: i32,
+) -> Result<(), String> {
+    let track_id = CString::new(track_id).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_set_jitter_buffer(
+            handle,
+            track_id.as_ptr(),
+            min_delay_ms,
+            target_delay_ms,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P jitter buffer configuration failed".to_string())
+    }
+}
+
 pub fn p2p_send_health(
     handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
     message: &str,
@@ -413,45 +450,39 @@ pub fn p2p_restart_ice(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Resul
     p2p_sdp_result(result, pointer, "ICE restart")
 }
 
-/* ── SFU transport ICE restart ──────────────────────── */
-
-fn transport_ice_restart_result(
-    result: i32,
-    pointer: *mut std::ffi::c_char,
-    label: &str,
-) -> Result<serde_json::Value, String> {
-    if result != 0 || pointer.is_null() {
-        if !pointer.is_null() {
-            unsafe { ffi::lib_dspeak_media_free_string(pointer) };
-        }
-        return Err(format!("native {label} ICE restart failed"));
-    }
-    let value = unsafe { CStr::from_ptr(pointer) }
-        .to_str()
-        .map(|s| {
-            serde_json::from_str::<serde_json::Value>(s).unwrap_or_else(|_| serde_json::Value::Null)
-        })
-        .map_err(|_| format!("native {label} ICE restart returned invalid UTF-8"));
-    unsafe { ffi::lib_dspeak_media_free_string(pointer) };
-    value
+pub fn p2p_get_stats(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Result<String, String> {
+    let pointer = unsafe { ffi::lib_dspeak_media_p2p_get_stats(handle) };
+    native_string(pointer, "P2P stats")
 }
 
 pub fn send_transport_restart_ice(
     transport: *mut ffi::lib_dspeak_media_send_transport_t,
-) -> Result<serde_json::Value, String> {
-    let mut pointer = ptr::null_mut();
-    let result =
-        unsafe { ffi::lib_dspeak_media_send_transport_restart_ice(transport, &mut pointer) };
-    transport_ice_restart_result(result, pointer, "send transport")
+    ice_parameters: &serde_json::Value,
+) -> Result<(), String> {
+    let ice_parameters = CString::new(ice_parameters.to_string()).map_err(|e| e.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_send_transport_restart_ice(transport, ice_parameters.as_ptr())
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native send transport ICE restart failed".to_string())
+    }
 }
 
 pub fn recv_transport_restart_ice(
     transport: *mut ffi::lib_dspeak_media_recv_transport_t,
-) -> Result<serde_json::Value, String> {
-    let mut pointer = ptr::null_mut();
-    let result =
-        unsafe { ffi::lib_dspeak_media_recv_transport_restart_ice(transport, &mut pointer) };
-    transport_ice_restart_result(result, pointer, "recv transport")
+    ice_parameters: &serde_json::Value,
+) -> Result<(), String> {
+    let ice_parameters = CString::new(ice_parameters.to_string()).map_err(|e| e.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_recv_transport_restart_ice(transport, ice_parameters.as_ptr())
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native recv transport ICE restart failed".to_string())
+    }
 }
 
 /* ── Stats collection ────────────────────────────────── */

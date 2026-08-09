@@ -52,7 +52,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           mkdir -p webrtc-checkout && cd webrtc-checkout
-          fetch --nohooks webrtc
+          fetch --nohooks --no-history webrtc
 
       - name: Checkout pinned revision
         working-directory: ${{ runner.temp }}/webrtc-checkout/src

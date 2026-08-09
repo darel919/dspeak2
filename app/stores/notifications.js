@@ -56,6 +56,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
 
   async function initialize() {
     if (!import.meta.client) return;
+    if (!useAuthStore().getUserData()?.id) return;
     if (!initialization) {
       initialization = (async () => {
         notificationManager.init();

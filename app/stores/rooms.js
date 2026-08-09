@@ -8,6 +8,7 @@ export const useRoomsStore = defineStore("rooms", () => {
   const loading = ref(false);
   const error = ref(null);
   const config = useRuntimeConfig();
+  let roomsRequest = null;
 
   async function updateRoom(roomId, data) {
     const authStore = useAuthStore();
@@ -91,6 +92,16 @@ export const useRoomsStore = defineStore("rooms", () => {
     return data;
   }
   async function fetchRooms() {
+    if (roomsRequest) return roomsRequest;
+    roomsRequest = loadRooms();
+    try {
+      return await roomsRequest;
+    } finally {
+      roomsRequest = null;
+    }
+  }
+
+  async function loadRooms() {
     loading.value = true;
     error.value = null;
     try {

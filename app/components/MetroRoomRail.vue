@@ -318,6 +318,10 @@ async function showRoomTooltip(room, event) {
     top: `${bounds.top + bounds.height / 2}px`,
     transform: "translateY(-50%)",
   };
+  const roomIds = [];
+  if (activeRoomId.value) roomIds.push(activeRoomId.value);
+  if (room?.id) roomIds.push(String(room.id));
+  channelsStore.syncVoicePresenceRooms([...new Set(roomIds)]);
   prefetchRoom(room, { allChannels: true });
 }
 
@@ -325,16 +329,18 @@ watch(
   [() => roomsStore.rooms, activeRoomId],
   ([rooms]) => {
     prefetchRooms(rooms);
-    const roomIds = rooms.map((room) => room.id);
-    if (activeRoomId.value && !roomIds.includes(activeRoomId.value))
-      roomIds.push(activeRoomId.value);
-    channelsStore.syncVoicePresenceRooms(roomIds);
+    channelsStore.syncVoicePresenceRooms(
+      activeRoomId.value ? [activeRoomId.value] : [],
+    );
   },
   { immediate: true },
 );
 
 function hideRoomTooltip() {
   tooltipRoom.value = null;
+  channelsStore.syncVoicePresenceRooms(
+    activeRoomId.value ? [activeRoomId.value] : [],
+  );
 }
 
 function openSelectedRoom() {

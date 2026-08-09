@@ -14,6 +14,9 @@ export default defineEventHandler(async (event) => {
       await import("../db/repositories/profiles.js");
     const profile = await profileRepository.findById(payload.sub);
     if (profile) {
+      event.context.authToken = token;
+      event.context.authPayload = payload;
+      event.context.authProfile = profile;
       event.context.user = {
         id: profile.id,
         email: profile.email || payload.email,

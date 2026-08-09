@@ -5,7 +5,7 @@ import {
   resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "./video-settings.js";
-import { asError } from "./native-mediasoup-utils.js";
+import { asError, waitFor } from "./native-mediasoup-utils.js";
 import {
   configureControl,
   connect,
@@ -34,6 +34,17 @@ import {
   handleReceiveEvent,
 } from "./native-mediasoup-actions.js";
 import { installHandlers } from "./native-mediasoup-handlers.js";
+import {
+  handleNativeMediasoupTransportRecovery,
+  restartNativeMediasoupTransportIce,
+} from "./native-mediasoup-recovery.js";
+import {
+  nativeFlowing,
+  nativeRtpStat,
+  nativeRtpStatForTrack,
+  normalizeNativeTransportStats,
+} from "./native-mediasoup-diagnostics.js";
+import { NativeCloudflareRealtimeSession } from "./native-cloudflare-realtime-session.js";
 
 function nativeProducerAppData(entry, kind) {
   const appData = {
@@ -99,6 +110,9 @@ export class NativeMediasoupSfuSession {
     onCurrentlyInChannel,
     requestTimeoutMs = 8000,
     consumerControlTimeoutMs = 4000,
+    recoveryTimeoutMs = 5000,
+    consumerRetryDelayMs = 250,
+    initializationTimeoutMs = 10000,
     onRemoteTrack,
     onRemoteTrackEnded,
     onStateChange,
@@ -125,6 +139,9 @@ export class NativeMediasoupSfuSession {
         ));
     this.requestTimeoutMs = requestTimeoutMs;
     this.consumerControlTimeoutMs = consumerControlTimeoutMs;
+    this.recoveryTimeoutMs = recoveryTimeoutMs;
+    this.consumerRetryDelayMs = consumerRetryDelayMs;
+    this.initializationTimeoutMs = initializationTimeoutMs;
     this.onRemoteTrack = onRemoteTrack;
     this.onRemoteTrackEnded = onRemoteTrackEnded;
     this.onP2pSignal = onP2pSignal;
@@ -141,11 +158,15 @@ export class NativeMediasoupSfuSession {
     this.messageHandlers = new Map();
     this.pending = new Map();
     this.pendingProduce = new Map();
-    this.pendingConsumers = new Map();
+    this.pendingConsumers = new Set();
     this.requestedConsumers = new Set();
+    this.consumerRetryAttempts = new Map();
+    this.consumerRetryTimers = new Map();
     this.transportPointers = new Map();
     this.sources = new Map();
     this.producers = new Map();
+    this.sourcePublications = new Map();
+    this.pendingCloudflarePublications = new Map();
     this.sourceTransmission = new Map();
     this.producerRemovals = new Map();
     this.consumers = new Map();
@@ -201,6 +222,16 @@ export class NativeMediasoupSfuSession {
     this.sfuRoundTripTime = null;
     this.participantSfuRoundTripTimes = {};
     this.remoteReceiving = new Map();
+    this.jitterBufferMinimumDelay = 0;
+    this.jitterBufferTargetDelay = 20;
+    this.rtpSamples = new Map();
+    this.recoveryAttempts = new Map();
+    this.recoveryOperations = new Map();
+    this.recoveryTimers = new Map();
+    this.mediaRevision = 0;
+    this.initializationTimer = null;
+    this.transportRequestIds = new Map();
+    this.cloudflareSession = null;
     this._installHandlers();
   }
 
@@ -232,6 +263,77 @@ export class NativeMediasoupSfuSession {
     return resolveConnect(this);
   }
 
+  _createCloudflareSession() {
+    if (this.cloudflareSession) return this.cloudflareSession;
+    this.cloudflareSession = new NativeCloudflareRealtimeSession({
+      invoke: this.invoke,
+      send: (message) => this.signaling?.send?.(message),
+      onRemoteTrack: (entry) => {
+        this.onRemoteTrack?.(entry);
+        this._emitState();
+      },
+      onRemoteTrackEnded: (entry) => {
+        this.onRemoteTrackEnded?.(entry);
+        this._emitState();
+      },
+      onStateChange: () => {
+        const state = this.cloudflareSession?.connectionState?.();
+        this.mediaConnectionState = state?.ready
+          ? "media-flowing"
+          : state?.send === "failed"
+            ? "failed"
+            : "transport-connecting";
+        this._emitState();
+      },
+      onError: (error) => this.onError?.(error),
+      getAudioBitrate: this.getAudioBitrate,
+      getAudioStereo: this.getAudioStereo,
+      getVideoSettings: this.getVideoSettings,
+      requestTimeoutMs: this.requestTimeoutMs,
+      sources: this.sources,
+      producers: this.producers,
+      consumers: this.consumers,
+      sourceTransmission: this.sourceTransmission,
+      remoteReceiving: this.remoteReceiving,
+      localVideoFeeds: this.localVideoFeeds,
+      remoteVideoFeeds: this.remoteVideoFeeds,
+      remoteAudioFeeds: this.remoteAudioFeeds,
+    });
+    return this.cloudflareSession;
+  }
+
+  async activateProvider(provider) {
+    const nextProvider = String(provider || "mediasoup");
+    this.selectedProvider = nextProvider;
+    if (nextProvider === "cloudflare-realtime") {
+      if (this.sendTransport || this.recvTransport || this.device)
+        this._closeMedia(false);
+      const cloudflare = this._createCloudflareSession();
+      const wasInitialized = Boolean(cloudflare.sessionId);
+      await cloudflare.initialize();
+      for (const publication of this.pendingCloudflarePublications.values())
+        await cloudflare.handleMessage(
+          "cloudflare-publication-available",
+          publication,
+        );
+      this.pendingCloudflarePublications.clear();
+      if (!wasInitialized)
+        for (const entry of this.sources.values())
+          await cloudflare.addSource(entry);
+      this.transportStates.set("send", "connected");
+      this.transportStates.set("recv", "connected");
+      this.mediaConnectionState = "transport-connecting";
+      this._emitState();
+      return cloudflare;
+    }
+    if (this.cloudflareSession) {
+      await this.cloudflareSession.closeMedia();
+      this.cloudflareSession = null;
+      this.mediaConnectionState = "disconnected";
+    }
+    return null;
+  }
+
   async _startNegotiation() {
     return startNegotiation(this);
   }
@@ -247,6 +349,12 @@ export class NativeMediasoupSfuSession {
   async addSource(entry) {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
+    if (this.selectedProvider === "cloudflare-realtime") {
+      const cloudflare = this._createCloudflareSession();
+      return cloudflare.addSource(entry);
+    }
+    const previousSource = this.sources.get(entry.source);
+    const existing = this.producers.get(entry.source);
     const normalized = {
       ...entry,
       kind:
@@ -259,6 +367,30 @@ export class NativeMediasoupSfuSession {
       videoSettings:
         entry.videoSettings || this.getVideoSettings?.(entry.source) || null,
     };
+    if (existing) {
+      try {
+        await this.invoke("media_replace_producer_track", {
+          producerId: existing.id,
+          source: normalized.source,
+          kind: normalized.kind,
+        });
+      } catch (error) {
+        if (previousSource) this.sources.set(entry.source, previousSource);
+        throw error;
+      }
+      existing.entry = normalized;
+      this.sources.set(entry.source, normalized);
+      if (normalized.kind === "video")
+        this.localVideoFeeds.set(normalized.source, {
+          source: normalized.source,
+          producerId: existing.id || `local:${normalized.source}`,
+          native: true,
+          frame: null,
+        });
+      this._sendSourceState();
+      this._emitState();
+      return existing;
+    }
     this.sources.set(entry.source, normalized);
     if (
       normalized.kind === "video" &&
@@ -275,7 +407,18 @@ export class NativeMediasoupSfuSession {
       this._emitState();
       return null;
     }
-    const producer = await this._publishSource(normalized);
+    const previousFeed = this.localVideoFeeds.get(normalized.source);
+    let producer;
+    try {
+      producer = await this.publish(normalized);
+    } catch (error) {
+      if (previousSource) this.sources.set(entry.source, previousSource);
+      else this.sources.delete(entry.source);
+      if (previousFeed)
+        this.localVideoFeeds.set(normalized.source, previousFeed);
+      else this.localVideoFeeds.delete(normalized.source);
+      throw error;
+    }
     if (normalized.kind === "video") {
       this.localVideoFeeds.set(normalized.source, {
         source: normalized.source,
@@ -291,7 +434,7 @@ export class NativeMediasoupSfuSession {
   async _republishSources() {
     for (const entry of this.sources.values()) {
       if (!this.producers.has(entry.source)) {
-        const producer = await this._publishSource(entry);
+        const producer = await this.publish(entry);
         if (entry.kind === "video") {
           this.localVideoFeeds.set(entry.source, {
             source: entry.source,
@@ -305,10 +448,24 @@ export class NativeMediasoupSfuSession {
     this._emitState();
   }
 
+  async publish(entry) {
+    if (!this.sendTransport || this.producers.has(entry.source))
+      return this.producers.get(entry.source) || null;
+    const activePublication = this.sourcePublications.get(entry.source);
+    if (activePublication) return activePublication;
+    const publication = this._publishSource(entry).finally(() => {
+      if (this.sourcePublications.get(entry.source) === publication)
+        this.sourcePublications.delete(entry.source);
+    });
+    this.sourcePublications.set(entry.source, publication);
+    return publication;
+  }
+
   async _publishSource(entry) {
     await this.producerRemovals.get(entry.source);
     if (this.producers.has(entry.source))
       return this.producers.get(entry.source);
+    const mediaRevision = this.mediaRevision;
     const kind =
       entry.kind ||
       (entry.source === "camera" || entry.source === "screen"
@@ -331,6 +488,12 @@ export class NativeMediasoupSfuSession {
       };
       if (!producer.id)
         throw new Error("Native producer did not return an identifier");
+      if (this.closed || mediaRevision !== this.mediaRevision) {
+        await this.invoke("media_remove_capture_producer", {
+          source: entry.source,
+        }).catch(() => {});
+        return null;
+      }
       this.producers.set(entry.source, producer);
       if (this.sourceTransmission.get(entry.source) === false) {
         await this.invoke("media_set_producer_paused", {
@@ -348,6 +511,8 @@ export class NativeMediasoupSfuSession {
   }
 
   removeSource(source) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.removeSource(source);
     const entry = this.sources.get(source);
     this.sources.delete(source);
     this.localVideoFeeds.delete(source);
@@ -374,6 +539,8 @@ export class NativeMediasoupSfuSession {
   }
 
   async setSourceTransmission(source, enabled) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.setSourceTransmission(source, enabled);
     const normalizedSource = String(source || "");
     const nextEnabled = Boolean(enabled);
     this.sourceTransmission.set(normalizedSource, nextEnabled);
@@ -389,6 +556,8 @@ export class NativeMediasoupSfuSession {
   }
 
   async updateAudioBitrate(source, maxBitrate) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.updateAudioBitrate(source, maxBitrate);
     const producer = this.producers.get(String(source || ""));
     const bitrate = Number(maxBitrate);
     if (
@@ -404,12 +573,15 @@ export class NativeMediasoupSfuSession {
         maxBitrate: Math.floor(bitrate),
         priority: "high",
         networkPriority: "high",
+        dtx: false,
       },
     });
     return true;
   }
 
   async updateVideoBitrate(source, maxBitrate) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.updateVideoBitrate(source, maxBitrate);
     const producer = this.producers.get(String(source || ""));
     const bitrate = Number(maxBitrate);
     if (
@@ -447,6 +619,12 @@ export class NativeMediasoupSfuSession {
   }
 
   setRemoteReceiving(userIdOrKey, sourceOrReceiving, receivingValue) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.setRemoteReceiving(
+        userIdOrKey,
+        sourceOrReceiving,
+        receivingValue,
+      );
     return setRemoteReceiving(
       this,
       userIdOrKey,
@@ -460,15 +638,54 @@ export class NativeMediasoupSfuSession {
   }
 
   setConsumerVolume(userId, source, volume) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.setConsumerVolume(userId, source, volume);
     return setConsumerVolume(this, userId, source, volume);
   }
 
   sendParticipantVoiceState(state = {}) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.sendParticipantVoiceState(state);
     return sendParticipantVoiceState(this, state);
   }
 
   async setConsumerReceiving(entry, receiving) {
     return setConsumerReceiving(this, entry, receiving);
+  }
+
+  applyJitterBufferConfig(entry) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.applyJitterBufferConfig(entry);
+    if (!entry?.consumerId || entry.closed) return Promise.resolve(false);
+    return this.invoke("media_set_consumer_jitter_buffer", {
+      consumerId: entry.consumerId,
+      minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay || 0)),
+      targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay || 0)),
+    }).catch((error) => {
+      this.onError?.(asError(error, "Native jitter buffer update failed"));
+      return false;
+    });
+  }
+
+  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 } = {}) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.setJitterBufferConfig({
+        minDelayMs,
+        targetDelayMs,
+      });
+    this.jitterBufferMinimumDelay =
+      Number.isFinite(Number(minDelayMs)) && Number(minDelayMs) >= 0
+        ? Number(minDelayMs)
+        : 0;
+    this.jitterBufferTargetDelay =
+      Number.isFinite(Number(targetDelayMs)) && Number(targetDelayMs) >= 0
+        ? Number(targetDelayMs)
+        : 20;
+    return Promise.all(
+      [...this.consumers.values()].map((entry) =>
+        this.applyJitterBufferConfig(entry),
+      ),
+    );
   }
 
   _resolveConsumerControl(data, receiving) {
@@ -496,10 +713,12 @@ export class NativeMediasoupSfuSession {
   }
 
   async handleNativeAction(action) {
+    if (this.selectedProvider === "cloudflare-realtime") return false;
     return handleNativeAction(this, action);
   }
 
   handleReceiveEvent(event) {
+    if (this.cloudflareSession?.handleReceiveEvent(event)) return true;
     return handleReceiveEvent(this, event);
   }
 
@@ -526,12 +745,34 @@ export class NativeMediasoupSfuSession {
           ? "media-flowing"
           : "transport-connecting";
     this._emitState();
+    this.handleTransportRecovery(direction, state);
     return true;
   }
 
+  handleTransportRecovery(direction, state) {
+    return handleNativeMediasoupTransportRecovery(this, direction, state);
+  }
+
+  restartTransportIce(direction) {
+    return restartNativeMediasoupTransportIce(this, direction);
+  }
+
   connectionState() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return (
+        this.cloudflareSession?.connectionState?.() || {
+          ready: false,
+          sendRequired: this.sources.size > 0,
+          receiveRequired: this.consumers.size > 0,
+          send: "new",
+          recv: "new",
+        }
+      );
     const sendRequired = this.sources.size > 0;
-    const receiveRequired = this.consumers.size > 0;
+    const receiveRequired =
+      this.consumers.size > 0 ||
+      this.requestedConsumers.size > 0 ||
+      this.pendingConsumers.size > 0;
     const sendConnected =
       !sendRequired || this.transportStates.get("send") === "connected";
     const receiveConnected =
@@ -555,10 +796,16 @@ export class NativeMediasoupSfuSession {
   }
 
   get transportReady() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return Boolean(
+        this.cloudflareSession?.handle && this.cloudflareSession?.sessionId,
+      );
     return Boolean(this.sendTransport && this.recvTransport);
   }
 
   get iceConnectedBoth() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.connectionState?.().ready === true;
     return (
       this.transportStates.get("send") === "connected" &&
       this.transportStates.get("recv") === "connected"
@@ -575,6 +822,183 @@ export class NativeMediasoupSfuSession {
 
   getState() {
     return this.mediaConnectionState;
+  }
+
+  waitForPending(requestId, label, timeoutMs = this.requestTimeoutMs) {
+    return waitFor(this.pending, requestId, timeoutMs, label);
+  }
+
+  async stats() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.stats?.() || [];
+    const transports = [];
+    for (const direction of ["send", "recv"]) {
+      const transport =
+        direction === "send" ? this.sendTransport : this.recvTransport;
+      if (!transport) continue;
+      try {
+        const raw = await this.invoke("media_get_transport_stats", {
+          direction,
+        });
+        transports.push(
+          normalizeNativeTransportStats(
+            raw,
+            direction,
+            this.transportStates.get(direction) || "unknown",
+          ),
+        );
+      } catch (error) {
+        this.onError?.(asError(error, `Native ${direction} stats failed`));
+      }
+    }
+    return transports;
+  }
+
+  async diagnosticStats() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.diagnosticStats?.() || [];
+    return this.stats();
+  }
+
+  expectedInboundFlowCount() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.expectedInboundFlowCount?.() || 0;
+    return [...this.consumers.values()].filter((entry) =>
+      this.shouldReceive(entry.userId, entry.source),
+    ).length;
+  }
+
+  async mediaReadiness(expectedInbound) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return (
+        this.cloudflareSession?.mediaReadiness?.(expectedInbound) || {
+          ready: false,
+          outboundExpected: this.sources.size,
+          outboundFlowing: 0,
+          inboundExpected: Number(expectedInbound) || 0,
+          inboundFlowing: 0,
+        }
+      );
+    const outboundExpected = this.sources.size;
+    const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
+    if (!this.sendTransport || !this.recvTransport) {
+      return {
+        ready: false,
+        outboundExpected,
+        outboundFlowing: 0,
+        inboundExpected,
+        inboundFlowing: 0,
+      };
+    }
+    const sampleFlow = (key, report, type) => {
+      const current = nativeFlowing(report, type);
+      if (
+        !current ||
+        !Number.isFinite(current.bytes) ||
+        !Number.isFinite(current.timestamp)
+      )
+        return false;
+      const previous = this.rtpSamples.get(key);
+      this.rtpSamples.set(key, current);
+      if (
+        !previous ||
+        current.timestamp <= previous.timestamp ||
+        current.bytes < previous.bytes
+      )
+        return false;
+      return current.bytes > previous.bytes;
+    };
+    const outboundResults = await Promise.all(
+      [...this.producers.values()].map(async (entry) => {
+        try {
+          const report = await this.invoke("media_get_producer_stats", {
+            producerId: entry.id,
+          });
+          return sampleFlow(`out:${entry.id}`, report, "outbound-rtp");
+        } catch {
+          return false;
+        }
+      }),
+    );
+    const inboundResults = await Promise.all(
+      [...this.consumers.values()].map(async (entry) => {
+        if (!this.shouldReceive(entry.userId, entry.source)) return false;
+        try {
+          const report = await this.invoke("media_get_consumer_stats", {
+            consumerId: entry.consumerId,
+          });
+          return (
+            entry.receiving === true &&
+            sampleFlow(`in:${entry.consumerId}`, report, "inbound-rtp")
+          );
+        } catch {
+          return false;
+        }
+      }),
+    );
+    const outboundFlowing = outboundResults.filter(Boolean).length;
+    const inboundFlowing = inboundResults.filter(Boolean).length;
+    return {
+      ready:
+        this.connectionState().ready &&
+        outboundFlowing >= outboundExpected &&
+        inboundFlowing >= inboundExpected,
+      outboundExpected,
+      outboundFlowing,
+      inboundExpected,
+      inboundFlowing,
+    };
+  }
+
+  async getOutboundRtpStats() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.getOutboundRtpStats?.() || [];
+    const results = [];
+    for (const entry of this.sources.values()) {
+      const producer = this.producers.get(entry.source);
+      if (!producer) continue;
+      let report = null;
+      try {
+        report = await this.invoke("media_get_producer_stats", {
+          producerId: producer.id,
+        });
+      } catch {}
+      results.push({
+        source: entry.source,
+        kind: entry.kind,
+        stats:
+          nativeRtpStatForTrack(report, "outbound-rtp", {
+            kind: entry.kind,
+            trackId: producer.id,
+          }) || null,
+      });
+    }
+    return results;
+  }
+
+  async getInboundRtpStats() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.getInboundRtpStats?.() || [];
+    const results = [];
+    for (const entry of this.consumers.values()) {
+      let report = null;
+      try {
+        report = await this.invoke("media_get_consumer_stats", {
+          consumerId: entry.consumerId,
+        });
+      } catch {}
+      results.push({
+        consumerId: entry.key,
+        source: entry.source,
+        kind: entry.kind,
+        stats:
+          nativeRtpStatForTrack(report, "inbound-rtp", {
+            kind: entry.kind,
+            trackId: entry.consumerId,
+          }) || null,
+      });
+    }
+    return results;
   }
 
   async disconnect() {
@@ -596,6 +1020,23 @@ export class NativeMediasoupSfuSession {
   }
 
   _closeMedia(clearSources) {
+    this.mediaRevision += 1;
+    if (this.cloudflareSession) {
+      this.cloudflareSession.closeMedia();
+      this.cloudflareSession = null;
+    }
+    clearTimeout(this.initializationTimer);
+    this.initializationTimer = null;
+    for (const timer of this.recoveryTimers.values()) clearTimeout(timer);
+    this.recoveryTimers.clear();
+    this.recoveryAttempts.clear();
+    this.recoveryOperations.clear();
+    for (const timer of this.consumerRetryTimers.values()) clearTimeout(timer);
+    this.consumerRetryTimers.clear();
+    this.consumerRetryAttempts.clear();
+    this.sourcePublications.clear();
+    this.pendingCloudflarePublications.clear();
+    this.rtpSamples.clear();
     if (
       this.sendTransport ||
       this.recvTransport ||
@@ -614,6 +1055,7 @@ export class NativeMediasoupSfuSession {
     this.producers.clear();
     this.requestedConsumers.clear();
     this.pendingConsumers.clear();
+    this.transportRequestIds.clear();
     this.transportPointers.clear();
     this.sendTransport = null;
     this.recvTransport = null;
@@ -686,7 +1128,32 @@ export class NativeMediasoupSfuSession {
       this.pending.get(data.requestId)?.reject(error);
       this.pendingProduce.get(data.requestId)?.reject(error);
     }
-    this._fail(error);
+    if (data?.requestType === "consume" && data.producerId) {
+      this.requestedConsumers.delete(data.producerId);
+      this.pendingConsumers.delete(data.producerId);
+      const attempts = this.consumerRetryAttempts.get(data.producerId) || 0;
+      if (!this.closed && attempts < 2) {
+        this.consumerRetryAttempts.set(data.producerId, attempts + 1);
+        const delay = this.consumerRetryDelayMs * 2 ** attempts;
+        const timer = setTimeout(() => {
+          this.consumerRetryTimers.delete(data.producerId);
+          this.requestConsumer(data.producerId);
+        }, delay);
+        timer.unref?.();
+        this.consumerRetryTimers.set(data.producerId, timer);
+      }
+      return;
+    }
+    if (
+      [
+        "get-rtp-capabilities",
+        "client-rtp-capabilities",
+        "create-transport",
+      ].includes(data?.requestType)
+    ) {
+      this.rejectReadiness(error);
+      return;
+    }
   }
 
   _fail(error) {
@@ -708,6 +1175,23 @@ export class NativeMediasoupSfuSession {
   requestId(operation) {
     this.nextRequestSequence = (this.nextRequestSequence + 1) % 1_000_000_000;
     return `${operation}-${this.nextRequestSequence}`;
+  }
+
+  resetReadiness() {
+    this.readyPromise?.catch(() => {});
+    clearTimeout(this.initializationTimer);
+    this.initializationTimer = null;
+    this.readyPromise = null;
+    this.readyResolve = null;
+    this.readyReject = null;
+  }
+
+  rejectReadiness(error) {
+    const reject = this.readyReject;
+    this.initializationRequestId = null;
+    this.transportRequestIds.clear();
+    this.resetReadiness();
+    reject?.(error);
   }
 
   _emitState() {

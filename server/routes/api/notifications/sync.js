@@ -25,19 +25,20 @@ export default defineEventHandler(async (event) => {
   const conditions = [eq(notifications.userId, userId)];
   if (since) conditions.push(gte(notifications.createdAt, since));
 
-  const notificationsList = await db
-    .select()
-    .from(notifications)
-    .where(and(...conditions))
-    .orderBy(desc(notifications.createdAt))
-    .limit(limit);
-
-  const unreadResult = await db
-    .select({ count: count() })
-    .from(notifications)
-    .where(
-      and(eq(notifications.userId, userId), eq(notifications.read, false)),
-    );
+  const [notificationsList, unreadResult] = await Promise.all([
+    db
+      .select()
+      .from(notifications)
+      .where(and(...conditions))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit),
+    db
+      .select({ count: count() })
+      .from(notifications)
+      .where(
+        and(eq(notifications.userId, userId), eq(notifications.read, false)),
+      ),
+  ]);
 
   return {
     items: notificationsList.map((n) => {

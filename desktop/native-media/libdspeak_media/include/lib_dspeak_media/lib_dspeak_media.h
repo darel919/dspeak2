@@ -119,6 +119,15 @@ int lib_dspeak_media_p2p_set_receive_enabled(
     lib_dspeak_media_p2p_handle_t* h,
     const char* track_id,
     bool enabled);
+int lib_dspeak_media_p2p_set_receive_volume(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_id,
+    double volume);
+int lib_dspeak_media_p2p_set_jitter_buffer(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_id,
+    int min_delay_ms,
+    int target_delay_ms);
 int lib_dspeak_media_p2p_send_health(
     lib_dspeak_media_p2p_handle_t* h,
     const char* message);
@@ -171,6 +180,7 @@ int               lib_dspeak_media_p2p_add_ice_candidate(lib_dspeak_media_p2p_ha
 char*             lib_dspeak_media_p2p_poll_ice_candidate(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_ice_connection_state(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_restart_ice(lib_dspeak_media_p2p_handle_t* h, char** sdp_out);
+char*             lib_dspeak_media_p2p_get_stats(lib_dspeak_media_p2p_handle_t* h);
 
 /* ── Platform capture ───────────────────────────────── */
 /* Start screen capture for the given source identifier.
@@ -215,9 +225,9 @@ lib_dspeak_media_audio_track_t* lib_dspeak_media_get_audio_track(const char* sou
 
 /* ── Transport ICE restart (SFU) ─────────────────────── */
 int lib_dspeak_media_send_transport_restart_ice(
-    lib_dspeak_media_send_transport_t* t, char** sdp_out);
+    lib_dspeak_media_send_transport_t* t, const char* ice_parameters_json);
 int lib_dspeak_media_recv_transport_restart_ice(
-    lib_dspeak_media_recv_transport_t* t, char** sdp_out);
+    lib_dspeak_media_recv_transport_t* t, const char* ice_parameters_json);
 
 /* ── Stats collection ────────────────────────────────── */
 char* lib_dspeak_media_send_transport_get_stats(

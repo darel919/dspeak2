@@ -329,6 +329,55 @@ pub async fn media_p2p_set_receive_enabled(
 
 #[cfg(native_rtc)]
 #[tauri::command]
+pub async fn media_p2p_set_receive_volume(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    track_id: String,
+    volume: f64,
+) -> Result<(), String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    native::p2p_set_receive_volume(handle, &track_id, volume)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_get_stats(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+) -> Result<Value, String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    let stats = native::p2p_get_stats(handle)?;
+    serde_json::from_str(&stats)
+        .map_err(|error| format!("native P2P stats JSON is invalid: {error}"))
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_set_jitter_buffer(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    track_id: String,
+    min_delay_ms: i32,
+    target_delay_ms: i32,
+) -> Result<(), String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    native::p2p_set_jitter_buffer(handle, &track_id, min_delay_ms, target_delay_ms)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
 pub async fn media_p2p_send_health(
     store: State<'_, NativeMediaStore>,
     p2p_handle: u64,
@@ -347,6 +396,26 @@ pub async fn media_p2p_send_health(
 pub async fn media_p2p_create(
     _store: State<'_, NativeMediaStore>,
     _offerer: bool,
+) -> Result<Value, String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_set_receive_volume(
+    _store: State<'_, NativeMediaStore>,
+    _p2p_handle: u64,
+    _track_id: String,
+    _volume: f64,
+) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_get_stats(
+    _store: State<'_, NativeMediaStore>,
+    _p2p_handle: u64,
 ) -> Result<Value, String> {
     Err("native media backend not available".to_string())
 }
@@ -481,6 +550,18 @@ pub async fn media_p2p_set_receive_enabled(
     _p2p_handle: u64,
     _track_id: String,
     _enabled: bool,
+) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_set_jitter_buffer(
+    _store: State<'_, NativeMediaStore>,
+    _p2p_handle: u64,
+    _track_id: String,
+    _min_delay_ms: i32,
+    _target_delay_ms: i32,
 ) -> Result<(), String> {
     Err("native media backend not available".to_string())
 }

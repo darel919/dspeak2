@@ -1,5 +1,6 @@
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const retryableMethods = new Set(["GET", "HEAD", "OPTIONS"]);
+let bearerTokenRequest = null;
 
 async function retryWithSupabaseBearer(
   nativeFetch,
@@ -18,9 +19,16 @@ async function retryWithSupabaseBearer(
     return response;
 
   try {
-    const { getSupabaseClient } = await import("../utils/supabase-client");
-    const sessionResult = await getSupabaseClient()?.auth.getSession();
-    const accessToken = sessionResult?.data?.session?.access_token;
+    if (!bearerTokenRequest) {
+      bearerTokenRequest = import("../utils/supabase-client")
+        .then(({ getSupabaseClient }) => getSupabaseClient()?.auth.getSession())
+        .then((sessionResult) => sessionResult?.data?.session?.access_token)
+        .catch(() => null)
+        .finally(() => {
+          bearerTokenRequest = null;
+        });
+    }
+    const accessToken = await bearerTokenRequest;
     if (!accessToken) return response;
     const headers = new Headers(options.headers || undefined);
     if (input instanceof Request) {

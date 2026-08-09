@@ -142,11 +142,10 @@ export async function requireRoomPermission(room, userId, permission) {
 }
 
 export async function seedRoomRoles(room, ownerId, database = db) {
-  const createdRoles = [];
-  for (const template of DEFAULT_ROLE_TEMPLATES) {
-    const result = await database
-      .insert(roomRoles)
-      .values({
+  const createdRoles = await database
+    .insert(roomRoles)
+    .values(
+      DEFAULT_ROLE_TEMPLATES.map((template) => ({
         roomId: room.id,
         name: template.name,
         color: template.color,
@@ -154,10 +153,9 @@ export async function seedRoomRoles(room, ownerId, database = db) {
         permissions: template.permissions,
         system: template.system,
         isDefault: template.isDefault ?? template.is_default,
-      })
-      .returning();
-    createdRoles.push(result[0]);
-  }
+      })),
+    )
+    .returning();
   const ownerRole = createdRoles.find((role) => role.system);
   if (ownerRole) {
     const membership = await database

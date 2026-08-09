@@ -750,12 +750,11 @@ extern "C" const char* lib_dspeak_media_consumer_get_kind(
    ══════════════════════════════════════════════════════ */
 
 extern "C" int lib_dspeak_media_send_transport_restart_ice(
-    lib_dspeak_media_send_transport_t* t, char** sdp_out)
+    lib_dspeak_media_send_transport_t* t, const char* ice_parameters_json)
 {
-    if (sdp_out) *sdp_out = nullptr;
     try {
-        if (!t || !t->transport) return -1;
-        t->transport->RestartIce(nlohmann::json());
+        if (!t || !t->transport || !ice_parameters_json) return -1;
+        t->transport->RestartIce(lib_dspeak_media_json_arg(ice_parameters_json));
         return 0;
     } catch (...) {
         return -1;
@@ -763,12 +762,11 @@ extern "C" int lib_dspeak_media_send_transport_restart_ice(
 }
 
 extern "C" int lib_dspeak_media_recv_transport_restart_ice(
-    lib_dspeak_media_recv_transport_t* t, char** sdp_out)
+    lib_dspeak_media_recv_transport_t* t, const char* ice_parameters_json)
 {
-    if (sdp_out) *sdp_out = nullptr;
     try {
-        if (!t || !t->transport) return -1;
-        t->transport->RestartIce(nlohmann::json());
+        if (!t || !t->transport || !ice_parameters_json) return -1;
+        t->transport->RestartIce(lib_dspeak_media_json_arg(ice_parameters_json));
         return 0;
     } catch (...) {
         return -1;

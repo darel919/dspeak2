@@ -343,6 +343,11 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     fetchOnlineSnapshot();
   }
 
+  function clearUsers() {
+    trackedUsers.value = new Map();
+    onlineUsersList.value = [];
+  }
+
   function init() {
     if (!import.meta.client) return;
     const authStore = useAuthStore();
@@ -383,5 +388,6 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     getUserStatus,
     updateUserStatus,
     requestOnlineUsers,
+    clearUsers,
   };
 });

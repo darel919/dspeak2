@@ -65,7 +65,7 @@ The authoritative media topology coordinator is a **Cloudflare Durable Object pe
 - Bun for installation, development, testing, and builds
 - Node.js 22+ for the production server
 - Rust stable toolchain with the Tauri CLI to build the desktop client
-- A prebuilt native media bundle (`NATIVE_MEDIA_ARTIFACT_DIR`) to build the desktop client with native WebRTC media
+- Native media build tools and a first-run bundle provision for desktop development
 - Supabase project (PostgreSQL, Auth, Realtime)
 - Cloudflare account (Workers, Durable Objects, R2, Realtime SFU/TURN)
 - The sibling `dspeak-media-control` checkout for media control WebSockets and Durable Objects
@@ -74,7 +74,7 @@ The authoritative media topology coordinator is a **Cloudflare Durable Object pe
 
 Docker includes FFmpeg and ffprobe. A non-container host must provide both tools on `PATH` for soundboard conversion.
 
-Desktop builds need Rust and a complete native media bundle. The bundle is produced by CI or a separate provisioning step and is never downloaded at runtime; see [desktop/native-media/README.md](desktop/native-media/README.md).
+Desktop builds need Rust and a complete native media bundle. `dev:desktop` provisions the ignored local bundle automatically on first run; production builds still consume a prebuilt bundle and never download dependencies at application startup. See [desktop/native-media/README.md](desktop/native-media/README.md).
 
 ## Local development
 
@@ -90,11 +90,10 @@ The development server listens on `http://localhost:3000`.
 
 ```bash
 cp desktop/native-media/dependencies.env.example desktop/native-media/dependencies.env
-# set NATIVE_MEDIA_ARTIFACT_DIR to a complete native media bundle, then:
 bun run dev:desktop
 ```
 
-`dev:desktop` loads `desktop/native-media/dependencies.env`, requires a complete native media bundle (a missing one is a build error), and launches the Tauri shell against the dev server. The web application keeps using browser WebRTC and does not require the bundle. See the [native media build boundary](desktop/native-media/README.md).
+`dev:desktop` loads `desktop/native-media/dependencies.env`, provisions and validates a complete native media bundle when the ignored directory is empty, and launches the Tauri shell against the dev server. The web application keeps using browser WebRTC and does not require the bundle. See the [native media build boundary](desktop/native-media/README.md).
 
 ### Environment variables (web/API)
 

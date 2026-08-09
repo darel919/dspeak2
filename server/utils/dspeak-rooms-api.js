@@ -12,6 +12,8 @@ import {
 } from "../db/schema/index.js";
 import { eq, and, inArray, asc, desc } from "drizzle-orm";
 import {
+  getEffectivePermissions,
+  getHighestRolePosition,
   normalizeAttenuation,
   normalizeRoomAccent,
 } from "../../shared/room-policy.js";
@@ -22,7 +24,6 @@ import {
   requireRoomMember,
   requireRoomPermission,
   seedRoomRoles,
-  getRoomAccess,
 } from "./room-authorization.js";
 import { getRoomById } from "./room-authorization.js";
 import { requireAuthenticatedUser } from "./auth.js";
@@ -189,6 +190,7 @@ async function roomDetails(room, userId = null) {
         roleName: roomRoles.name,
         roleColor: roomRoles.color,
         rolePosition: roomRoles.position,
+        rolePermissions: roomRoles.permissions,
         roleSystem: roomRoles.system,
         roleIsDefault: roomRoles.isDefault,
       })
@@ -229,7 +231,44 @@ async function roomDetails(room, userId = null) {
     }))
     .filter((m) => m.roleId);
 
-  const access = userId ? await getRoomAccess(room, userId) : null;
+  const rolesByUserId = new Map();
+  for (const role of roles) {
+    const userRoles = rolesByUserId.get(role.userId) || [];
+    userRoles.push({
+      id: role.roleId,
+      name: role.name,
+      color: role.color,
+      position: role.position,
+      system: role.system,
+      isDefault: role.isDefault,
+    });
+    rolesByUserId.set(role.userId, userRoles);
+  }
+  const accessRoles = userId
+    ? memberships
+        .filter(
+          (membership) =>
+            String(membership.userId) === String(userId) && membership.roleId,
+        )
+        .map((membership) => ({
+          id: String(membership.roleId),
+          name: membership.roleName,
+          color: membership.roleColor,
+          position: membership.rolePosition,
+          permissions: membership.rolePermissions,
+          system: membership.roleSystem,
+          isDefault: membership.roleIsDefault,
+        }))
+    : [];
+  const isOwner = Boolean(userId && String(room.ownerId) === String(userId));
+  const access = userId
+    ? {
+        roles: accessRoles,
+        permissions: getEffectivePermissions(accessRoles, isOwner),
+        isOwner,
+        highestPosition: getHighestRolePosition(accessRoles, isOwner),
+      }
+    : null;
 
   const roleMemberships = await db
     .select({
@@ -262,16 +301,7 @@ async function roomDetails(room, userId = null) {
       .map((m) => {
         const profile = profileById.get(String(m.userId));
         if (!profile) return null;
-        const memberRoles = roles
-          .filter((r) => String(r.userId) === String(m.userId))
-          .map((r) => ({
-            id: r.roleId,
-            name: r.name,
-            color: r.color,
-            position: r.position,
-            system: Boolean(r.system),
-            isDefault: Boolean(r.isDefault),
-          }));
+        const memberRoles = rolesByUserId.get(String(m.userId)) || [];
         return { ...presentProfile(profile), roles: memberRoles };
       })
       .filter(Boolean),
@@ -285,7 +315,11 @@ async function roomDetails(room, userId = null) {
 async function handleRoomRoles(event, roomId, userId) {
   const method = event.method;
   const body = method === "GET" ? {} : await parseBody(event);
-  const room = await getRoomById(roomId);
+  const resolvedRoomId = requireValue(
+    roomId || body.roomId,
+    "Room ID is required",
+  );
+  const room = await getRoomById(resolvedRoomId);
   if (!room)
     throw createError({ statusCode: 404, statusMessage: "Room not found" });
 
@@ -294,7 +328,7 @@ async function handleRoomRoles(event, roomId, userId) {
     const roleRows = await db
       .select()
       .from(roomRoles)
-      .where(eq(roomRoles.roomId, roomId))
+      .where(eq(roomRoles.roomId, resolvedRoomId))
       .orderBy(desc(roomRoles.position));
     const membershipRows = await db
       .select({
@@ -307,7 +341,7 @@ async function handleRoomRoles(event, roomId, userId) {
         membershipRoles,
         eq(membershipRoles.membershipId, roomMemberships.id),
       )
-      .where(eq(roomMemberships.roomId, roomId));
+      .where(eq(roomMemberships.roomId, resolvedRoomId));
     const membershipById = new Map();
     for (const row of membershipRows) {
       const key = String(row.id);
@@ -354,7 +388,12 @@ async function handleRoomRoles(event, roomId, userId) {
     const roomRolesForRoom = await db
       .select({ id: roomRoles.id })
       .from(roomRoles)
-      .where(and(eq(roomRoles.roomId, roomId), inArray(roomRoles.id, roleIds)));
+      .where(
+        and(
+          eq(roomRoles.roomId, resolvedRoomId),
+          inArray(roomRoles.id, roleIds),
+        ),
+      );
     const validIds = new Set(roomRolesForRoom.map((r) => String(r.id)));
     const invalid = roleIds.filter((id) => !validIds.has(id));
     if (invalid.length)
@@ -384,7 +423,7 @@ async function handleRoomRoles(event, roomId, userId) {
     const result = await db
       .insert(roomRoles)
       .values({
-        roomId,
+        roomId: resolvedRoomId,
         name: requireValue(body.name, "Role name is required"),
         color: normalizeRoomAccent(body.color),
         position,
@@ -486,12 +525,12 @@ async function handleRooms(event, suffix) {
     return handleRoomRoles(event, query.roomId || query.id, userId);
 
   if (suffix === "profile" || suffix === "header") {
+    const imageUserId = await requireAuthenticatedUser(event);
     const id = requireValue(query.id, "Room ID is required");
     const room = await getRoomById(id);
     if (!room)
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
-    await requireAuthenticatedUser(event);
-    await requireRoomMember(room, userId);
+    await requireRoomMember(room, imageUserId);
     const type = suffix === "header" ? "header" : "profile";
     const row = await db
       .select()

@@ -766,6 +766,14 @@ describe("NativeMediasoupSfuSession", () => {
         { consumerId: "consumer-native", enabled: true },
       ],
       [
+        "media_set_consumer_jitter_buffer",
+        {
+          consumerId: "consumer-native",
+          minDelayMs: 0,
+          targetDelayMs: 20,
+        },
+      ],
+      [
         "media_set_consumer_volume",
         { consumerId: "consumer-native", volume: 0.4 },
       ],
@@ -824,5 +832,210 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(session.consumers.has("consumer-native"), false);
     await session.disconnect();
     assert.ok(calls.some(([command]) => command === "media_leave"));
+  });
+
+  it("replaces a live native producer track without recreating the producer", async () => {
+    const calls = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_create_capture_producer")
+          return { id: "producer-camera" };
+        return undefined;
+      },
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport" };
+
+    await session.addSource({
+      source: "camera",
+      track: { kind: "video" },
+      videoSettings: { width: 640, height: 360 },
+    });
+    const producer = await session.addSource({
+      source: "camera",
+      track: { kind: "video" },
+      videoSettings: { width: 1280, height: 720 },
+    });
+
+    assert.equal(producer.id, "producer-camera");
+    assert.deepEqual(
+      calls.map(([command]) => command),
+      ["media_create_capture_producer", "media_replace_producer_track"],
+    );
+    assert.equal(session.sources.get("camera").videoSettings.width, 1280);
+  });
+
+  it("deduplicates concurrent native source publication", async () => {
+    let resolveProducer;
+    let creates = 0;
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command) => {
+        if (command !== "media_create_capture_producer") return undefined;
+        creates += 1;
+        return new Promise((resolve) => {
+          resolveProducer = () => resolve({ id: "producer-audio" });
+        });
+      },
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport" };
+    const entry = { source: "audio", track: { kind: "audio" } };
+
+    const first = session.publish(entry);
+    const second = session.publish(entry);
+    await Promise.resolve();
+    resolveProducer();
+
+    assert.equal((await first).id, "producer-audio");
+    assert.equal((await second).id, "producer-audio");
+    assert.equal(creates, 1);
+  });
+
+  it("restarts a native transport with correlated server ICE parameters", async () => {
+    const calls = [];
+    const messages = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        return undefined;
+      },
+      recoveryTimeoutMs: 100,
+    });
+    session.closed = false;
+    session.sendTransport = { id: "send-transport", handle: 21 };
+    session.transportStates.set("send", "disconnected");
+    session.signaling = {
+      send(message) {
+        messages.push(message);
+        return true;
+      },
+    };
+
+    const first = session.restartTransportIce("send");
+    const second = session.restartTransportIce("send");
+    await new Promise((resolve) => setImmediate(resolve));
+    const request = messages.find((message) => message.type === "restart-ice");
+    assert.ok(request);
+    await session.handle("ice-restarted", {
+      requestId: request.data.requestId,
+      iceParameters: { usernameFragment: "next", password: "secret" },
+    });
+    await Promise.all([first, second]);
+
+    assert.deepEqual(calls, [
+      [
+        "media_restart_send_transport_ice",
+        {
+          iceParameters: {
+            usernameFragment: "next",
+            password: "secret",
+          },
+        },
+      ],
+    ]);
+    session._closeMedia(false);
+  });
+
+  it("retries a failed native consumer request without failing the session", async () => {
+    const messages = [];
+    const session = new NativeMediasoupSfuSession({
+      consumerRetryDelayMs: 0,
+      invoke: async () => undefined,
+    });
+    session.closed = false;
+    session.recvTransport = { id: "recv-transport" };
+    session.device = {};
+    session.signaling = {
+      send(message) {
+        messages.push(message);
+        return true;
+      },
+    };
+
+    session.requestConsumer("producer-remote");
+    const first = messages.at(-1);
+    await session.handle("error", {
+      requestType: "consume",
+      requestId: first.data.requestId,
+      producerId: "producer-remote",
+      message: "producer is not ready",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const consumeRequests = messages.filter(
+      (message) => message.type === "consume",
+    );
+    assert.equal(consumeRequests.length, 2);
+    assert.equal(session.error, null);
+    session._closeMedia(false);
+  });
+
+  it("reports native transport stats and requires increasing RTP bytes", async () => {
+    let timestamp = 1000;
+    let outboundBytes = 100;
+    let inboundBytes = 200;
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command) => {
+        if (command === "media_get_transport_stats")
+          return {
+            stats: [
+              {
+                type: "candidate-pair",
+                state: "succeeded",
+                currentRoundTripTime: 0.05,
+              },
+            ],
+          };
+        if (command === "media_get_producer_stats")
+          return {
+            stats: [
+              {
+                type: "outbound-rtp",
+                bytesSent: outboundBytes,
+                timestamp,
+              },
+            ],
+          };
+        if (command === "media_get_consumer_stats")
+          return {
+            stats: [
+              {
+                type: "inbound-rtp",
+                bytesReceived: inboundBytes,
+                timestamp,
+              },
+            ],
+          };
+        return undefined;
+      },
+    });
+    session.connected = true;
+    session.closed = false;
+    session.sendTransport = { id: "send-transport" };
+    session.recvTransport = { id: "recv-transport" };
+    session.transportStates.set("send", "connected");
+    session.transportStates.set("recv", "connected");
+    session.sources.set("audio", { source: "audio", kind: "audio" });
+    session.producers.set("audio", {
+      id: "producer-audio",
+      source: "audio",
+      kind: "audio",
+    });
+    session.consumers.set("consumer-audio", {
+      consumerId: "consumer-audio",
+      userId: "user-remote",
+      source: "audio",
+      receiving: true,
+    });
+
+    const transports = await session.stats();
+    assert.equal(transports[0].rttMs, 50);
+    assert.equal((await session.mediaReadiness(1)).ready, false);
+    outboundBytes += 10;
+    inboundBytes += 10;
+    timestamp += 100;
+    assert.equal((await session.mediaReadiness(1)).ready, true);
+    session._closeMedia(false);
   });
 });

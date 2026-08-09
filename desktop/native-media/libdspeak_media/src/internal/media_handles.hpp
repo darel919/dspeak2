@@ -9,6 +9,7 @@
 #include <mutex>
 #include <queue>
 #include <string>
+#include <map>
 #include <optional>
 #include <cstddef>
 #include <media/base/adapted_video_track_source.h>
@@ -281,6 +282,9 @@ struct lib_dspeak_media_p2p_handle {
     std::unique_ptr<P2pHealthDataChannelObserver> health_observer;
     std::vector<std::unique_ptr<NativeReceiveAudioSink>> audio_sinks;
     std::vector<std::unique_ptr<NativeReceiveVideoSink>> video_sinks;
+    std::map<std::string, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>> audio_receivers;
+    std::map<std::string, NativeReceiveAudioSink*> audio_sinks_by_id;
+    std::map<std::string, NativeReceiveVideoSink*> video_sinks_by_id;
     webrtc::PeerConnectionObserver* p2p_observer_raw = nullptr;
 };
 

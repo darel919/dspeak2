@@ -220,6 +220,25 @@ extern "C" int lib_dspeak_media_p2p_set_receive_enabled(
     }
 }
 
+extern "C" int lib_dspeak_media_p2p_set_receive_volume(
+    lib_dspeak_media_p2p_handle_t* handle,
+    const char* track_id,
+    double volume) {
+    try {
+        if (!handle || !handle->signaling_thread || !track_id) return -1;
+        const std::string expected_id(track_id);
+        const double normalized = std::max(0.0, std::min(2.0, volume));
+        return handle->signaling_thread->BlockingCall([handle, expected_id, normalized] {
+            const auto sink = handle->audio_sinks_by_id.find(expected_id);
+            if (sink == handle->audio_sinks_by_id.end() || !sink->second) return -1;
+            sink->second->SetVolume(normalized);
+            return 0;
+        });
+    } catch (...) {
+        return -1;
+    }
+}
+
 #if defined(__APPLE__)
 
 static std::mutex g_capture_mutex;

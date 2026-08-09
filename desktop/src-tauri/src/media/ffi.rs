@@ -199,6 +199,17 @@ extern "C" {
         track_id: *const c_char,
         enabled: bool,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_set_receive_volume(
+        handle: *mut c_void,
+        track_id: *const c_char,
+        volume: f64,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_set_jitter_buffer(
+        handle: *mut c_void,
+        track_id: *const c_char,
+        min_delay_ms: c_int,
+        target_delay_ms: c_int,
+    ) -> c_int;
     pub fn lib_dspeak_media_p2p_send_health(handle: *mut c_void, message: *const c_char) -> c_int;
 
     pub fn lib_dspeak_media_p2p_create(
@@ -233,15 +244,18 @@ extern "C" {
         handle: *mut lib_dspeak_media_p2p_handle_t,
         sdp_out: *mut *mut c_char,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_get_stats(
+        handle: *mut lib_dspeak_media_p2p_handle_t,
+    ) -> *mut c_char;
 
     /* ── SFU transport ICE restart ──────────────────────── */
     pub fn lib_dspeak_media_send_transport_restart_ice(
         transport: *mut lib_dspeak_media_send_transport_t,
-        sdp_out: *mut *mut c_char,
+        ice_parameters_json: *const c_char,
     ) -> c_int;
     pub fn lib_dspeak_media_recv_transport_restart_ice(
         transport: *mut lib_dspeak_media_recv_transport_t,
-        sdp_out: *mut *mut c_char,
+        ice_parameters_json: *const c_char,
     ) -> c_int;
 
     /* ── Stats collection ────────────────────────────────── */

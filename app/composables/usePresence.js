@@ -1,7 +1,6 @@
 import { useAuthStore } from "../stores/auth";
 import { useIdentityStore } from "../stores/identity";
 import { useRoomsStore } from "../stores/rooms";
-import { useVoiceStore } from "../stores/voice";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { debugLog } from "../shared/debug";
 import { openRealtimeChannel } from "../shared/realtime-channel.js";
@@ -14,8 +13,15 @@ export function usePresence(userId) {
   const authStore = useAuthStore();
   const identityStore = useIdentityStore();
   const roomsStore = useRoomsStore();
-  const voiceStore = useVoiceStore();
   const presenceStatusStore = usePresenceStatusStore();
+  let voiceStorePromise = null;
+
+  function loadVoiceStore() {
+    voiceStorePromise ||= import("../stores/voice").then(({ useVoiceStore }) =>
+      useVoiceStore(),
+    );
+    return voiceStorePromise;
+  }
 
   function receiveMessage(message) {
     if (message?.type === "room_updated" && message.data?.id) {
@@ -45,7 +51,9 @@ export function usePresence(userId) {
     if (message?.type !== "profile_updated" || !message.data?.id) return;
     const profile = message.data;
     identityStore.upsertPublicProfile(profile);
-    voiceStore.upsertUserProfile(profile);
+    void loadVoiceStore()
+      .then((voiceStore) => voiceStore.upsertUserProfile(profile))
+      .catch((error) => debugLog("[usePresence] Profile update failed", error));
     if (String(authStore.getUserData()?.id) === String(profile.id)) {
       authStore.updateUserData(profile);
     }

@@ -64,6 +64,13 @@
       "when": 1786261990179,
       "tag": "0008_user_presence_realtime",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786298743983,
+      "tag": "0009_access_path_indexes",
+      "breakpoints": true
     }
   ]
 }

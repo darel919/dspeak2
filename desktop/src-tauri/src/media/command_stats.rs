@@ -6,7 +6,89 @@ use super::{ffi, native};
 use serde_json::Value;
 #[cfg(native_rtc)]
 use std::ffi::{CStr, CString};
+#[cfg(native_rtc)]
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
+
+#[cfg(native_rtc)]
+fn parse_stats(value: String, label: &str) -> Result<Value, String> {
+    serde_json::from_str(&value).map_err(|error| format!("{label}: {error}"))
+}
+
+#[cfg(native_rtc)]
+pub(crate) fn collect_media_stats(store: &NativeMediaStore) -> Result<Value, String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let sampled_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let mut transports = Vec::new();
+    if !handles.send_transport.is_null() {
+        let stats = parse_stats(
+            native::send_transport_get_stats(handles.send_transport)?,
+            "native send transport stats",
+        )?;
+        transports.push(serde_json::json!({
+            "id": "send",
+            "kind": "send",
+            "stats": stats,
+        }));
+    }
+    if !handles.recv_transport.is_null() {
+        let stats = parse_stats(
+            native::recv_transport_get_stats(handles.recv_transport)?,
+            "native recv transport stats",
+        )?;
+        transports.push(serde_json::json!({
+            "id": "recv",
+            "kind": "recv",
+            "stats": stats,
+        }));
+    }
+    let mut producers = Vec::new();
+    for (source, producer) in &handles.producers {
+        let id = unsafe { ffi::lib_dspeak_media_producer_get_id(*producer) };
+        if id.is_null() {
+            continue;
+        }
+        let producer_id = unsafe { CStr::from_ptr(id) }.to_string_lossy().into_owned();
+        unsafe { ffi::lib_dspeak_media_free_string(id) };
+        let stats = parse_stats(
+            native::producer_get_stats(*producer)?,
+            "native producer stats",
+        )?;
+        producers.push(serde_json::json!({
+            "id": producer_id,
+            "source": source,
+            "stats": stats,
+        }));
+    }
+    let mut consumers = Vec::new();
+    for consumer in &handles.consumers {
+        let metadata = native::consumer_metadata(*consumer)?;
+        let stats = parse_stats(
+            native::consumer_get_stats(*consumer)?,
+            "native consumer stats",
+        )?;
+        consumers.push(serde_json::json!({
+            "id": metadata.0,
+            "producerId": metadata.1,
+            "kind": metadata.2,
+            "stats": stats,
+        }));
+    }
+    Ok(serde_json::json!({
+        "engine": "native",
+        "topology": "sfu",
+        "sampledAt": sampled_at,
+        "transports": transports,
+        "producers": producers,
+        "consumers": consumers,
+    }))
+}
 
 #[cfg(native_rtc)]
 fn producer_by_id(
@@ -35,6 +117,7 @@ fn producer_by_id(
 #[tauri::command]
 pub async fn media_restart_send_transport_ice(
     store: State<'_, NativeMediaStore>,
+    ice_parameters: Value,
 ) -> Result<Value, String> {
     let handles = store
         .handles
@@ -43,13 +126,15 @@ pub async fn media_restart_send_transport_ice(
     if handles.send_transport.is_null() {
         return Err("native send transport is not ready".to_string());
     }
-    native::send_transport_restart_ice(handles.send_transport)
+    native::send_transport_restart_ice(handles.send_transport, &ice_parameters)?;
+    Ok(serde_json::json!({ "restarted": true }))
 }
 
 #[cfg(native_rtc)]
 #[tauri::command]
 pub async fn media_restart_recv_transport_ice(
     store: State<'_, NativeMediaStore>,
+    ice_parameters: Value,
 ) -> Result<Value, String> {
     let handles = store
         .handles
@@ -58,7 +143,8 @@ pub async fn media_restart_recv_transport_ice(
     if handles.recv_transport.is_null() {
         return Err("native recv transport is not ready".to_string());
     }
-    native::recv_transport_restart_ice(handles.recv_transport)
+    native::recv_transport_restart_ice(handles.recv_transport, &ice_parameters)?;
+    Ok(serde_json::json!({ "restarted": true }))
 }
 
 #[cfg(native_rtc)]
@@ -176,6 +262,7 @@ pub async fn media_set_consumer_jitter_buffer(
 #[tauri::command]
 pub async fn media_restart_send_transport_ice(
     _store: State<'_, NativeMediaStore>,
+    _ice_parameters: Value,
 ) -> Result<Value, String> {
     Err("native media backend not available".to_string())
 }
@@ -184,6 +271,7 @@ pub async fn media_restart_send_transport_ice(
 #[tauri::command]
 pub async fn media_restart_recv_transport_ice(
     _store: State<'_, NativeMediaStore>,
+    _ice_parameters: Value,
 ) -> Result<Value, String> {
     Err("native media backend not available".to_string())
 }

@@ -302,16 +302,28 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from "vue";
 import { useRoomsStore } from "../stores/rooms";
 import { useChannelsStore } from "../stores/channels";
 import { useAuthStore } from "../stores/auth";
-import ChatWindow from "../components/Chat/ChatWindow.vue";
-import ChannelList from "../components/ChannelList.vue";
-import DesktopChannelSidebar from "../components/DesktopChannelSidebar.vue";
-import MobileRoomSidebar from "../components/MobileRoomSidebar.vue";
-import MobileChannelList from "../components/MobileChannelList.vue";
 import { MOBILE_BREAKPOINT_PX } from "../const/ui";
 import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
+
+const ChatWindow = defineAsyncComponent(
+  () => import("../components/Chat/ChatWindow.vue"),
+);
+const ChannelList = defineAsyncComponent(
+  () => import("../components/ChannelList.vue"),
+);
+const DesktopChannelSidebar = defineAsyncComponent(
+  () => import("../components/DesktopChannelSidebar.vue"),
+);
+const MobileRoomSidebar = defineAsyncComponent(
+  () => import("../components/MobileRoomSidebar.vue"),
+);
+const MobileChannelList = defineAsyncComponent(
+  () => import("../components/MobileChannelList.vue"),
+);
 
 const roomsStore = useRoomsStore();
 const channelsStore = useChannelsStore();

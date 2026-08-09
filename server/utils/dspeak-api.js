@@ -911,16 +911,6 @@ export async function handleDspeakApi(event) {
     if (domain === "config" && event.method === "GET") {
       const userId = await requireAuthenticatedUser(event);
       enforceRateLimit(event, "turn-credentials", userId, 12, 10 * 60 * 1000);
-      const profile = await db
-        .select()
-        .from(profiles)
-        .where(eq(profiles.id, userId))
-        .limit(1);
-      if (!profile[0])
-        throw createError({
-          statusCode: 403,
-          statusMessage: "User profile not found",
-        });
       const query = getQuery(event);
       const connectionMode = query.connectionMode || "auto";
       return createIceServers(process.env, Date.now(), { connectionMode });

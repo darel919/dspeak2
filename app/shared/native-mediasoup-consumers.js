@@ -7,9 +7,13 @@ import {
 export function requestConsumer(session, producerId) {
   if (!producerId || producersHasId(session, producerId)) return false;
   if (!session.recvTransport || !session.device) {
+    session.pendingConsumers.add(producerId);
     session.requestedConsumers.add(producerId);
     return false;
   }
+  clearTimeout(session.consumerRetryTimers.get(producerId));
+  session.consumerRetryTimers.delete(producerId);
+  session.pendingConsumers.delete(producerId);
   if (
     session.requestedConsumers.has(producerId) ||
     [...session.consumers.values()].some(
@@ -19,19 +23,23 @@ export function requestConsumer(session, producerId) {
     return false;
   session.requestedConsumers.add(producerId);
   const requestId = session.requestId("consume");
-  session.pendingConsumers.set(requestId, producerId);
-  session.sendOrThrow(
-    {
-      type: "consume",
-      data: {
-        requestId,
-        transportId: session.recvTransport.id,
-        producerId,
-        rtpCapabilities: session.lastSentClientRtpCapabilities,
+  try {
+    session.sendOrThrow(
+      {
+        type: "consume",
+        data: {
+          requestId,
+          transportId: session.recvTransport.id,
+          producerId,
+          rtpCapabilities: session.lastSentClientRtpCapabilities,
+        },
       },
-    },
-    "SFU consumer request",
-  );
+      "SFU consumer request",
+    );
+  } catch (_) {
+    session.requestedConsumers.delete(producerId);
+    session.pendingConsumers.add(producerId);
+  }
   return true;
 }
 
@@ -43,6 +51,12 @@ export function producersHasId(session, producerId) {
 
 export async function createConsumer(session, data) {
   session.requestedConsumers.delete(data.producerId);
+  session.pendingConsumers.delete(data.producerId);
+  session.consumerRetryAttempts.delete(data.producerId);
+  clearTimeout(session.consumerRetryTimers.get(data.producerId));
+  session.consumerRetryTimers.delete(data.producerId);
+  if (!session.recvTransport || session.consumers.has(data.id)) return null;
+  const mediaRevision = session.mediaRevision;
   session.lastReceivedConsumerParams = data;
   const previousDirection = session.pendingNativeDirection;
   session.pendingNativeDirection = "recv";
@@ -55,6 +69,14 @@ export async function createConsumer(session, data) {
       appData: { userId: data.userId, source: data.source },
     });
     const consumerId = result?.id || data.id;
+    if (session.closed || mediaRevision !== session.mediaRevision) {
+      await session
+        .invoke("media_close_consumer", {
+          consumerId,
+        })
+        .catch(() => {});
+      return null;
+    }
     const source = data.source || data.kind;
     const feedKey = nativeRemoteFeedKey(data.userId, source, consumerId);
     const previous = [...session.consumers.values()].find(
@@ -84,6 +106,7 @@ export async function createConsumer(session, data) {
     if (entry.kind === "video") session.remoteVideoFeeds.set(entry.key, entry);
     if (shouldReceive(session, entry.userId, entry.source))
       await setConsumerReceiving(session, entry, true);
+    await session.applyJitterBufferConfig(entry);
     session.onRemoteTrack?.(entry);
     session._emitState();
     return entry;
@@ -174,39 +197,60 @@ export async function setConsumerReceiving(session, entry, receiving) {
   const desired = Boolean(receiving);
   entry.desiredReceiving = desired;
   entry.receivingRevision = (entry.receivingRevision || 0) + 1;
+  const revision = entry.receivingRevision;
   const requestId = session.requestId(
     desired ? "resume-consumer" : "pause-consumer",
   );
-  const acknowledgement = waitFor(
-    session.pending,
-    requestId,
-    session.consumerControlTimeoutMs,
-    `SFU consumer ${desired ? "resume" : "pause"}`,
-  );
-  session.sendOrThrow(
-    {
-      type: desired ? "resume-consumer" : "pause-consumer",
-      data: {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const retryRequestId =
+      attempt === 0
+        ? requestId
+        : session.requestId(desired ? "resume-consumer" : "pause-consumer");
+    const acknowledgement = waitFor(
+      session.pending,
+      retryRequestId,
+      session.consumerControlTimeoutMs,
+      `SFU consumer ${desired ? "resume" : "pause"}`,
+    );
+    try {
+      session.sendOrThrow(
+        {
+          type: desired ? "resume-consumer" : "pause-consumer",
+          data: {
+            consumerId: entry.consumerId,
+            requestId: retryRequestId,
+            revision,
+          },
+        },
+        `SFU consumer ${desired ? "resume" : "pause"}`,
+      );
+    } catch (error) {
+      session.pending.get(retryRequestId)?.reject(error);
+    }
+    try {
+      const result = await acknowledgement;
+      if (result?.consumerClosed) {
+        if (entry.receivingRevision === revision) entry.receiving = false;
+        closeConsumer(session, entry);
+        return false;
+      }
+      if (entry.receivingRevision !== revision) return false;
+      await session.invoke("media_set_consumer_enabled", {
         consumerId: entry.consumerId,
-        requestId,
-        revision: entry.receivingRevision,
-      },
-    },
-    `SFU consumer ${desired ? "resume" : "pause"}`,
-  );
-  const result = await acknowledgement;
-  if (result?.consumerClosed) {
-    closeConsumer(session, entry);
-    return false;
+        enabled: desired,
+      });
+      if (entry.closed || entry.receivingRevision !== revision) return false;
+      entry.receiving = desired;
+      session._emitState();
+      return true;
+    } catch (error) {
+      lastError = error;
+    }
   }
-  await session.invoke("media_set_consumer_enabled", {
-    consumerId: entry.consumerId,
-    enabled: desired,
-  });
-  if (entry.closed) return false;
-  entry.receiving = desired;
+  if (entry.receivingRevision === revision) entry.receiving = false;
   session._emitState();
-  return true;
+  throw lastError;
 }
 
 export function resolveConsumerControl(session, data, receiving) {
@@ -221,6 +265,11 @@ export function resolveConsumerControl(session, data, receiving) {
 }
 
 export function closeConsumerByProducer(session, producerId) {
+  session.requestedConsumers.delete(producerId);
+  session.pendingConsumers.delete(producerId);
+  session.consumerRetryAttempts.delete(producerId);
+  clearTimeout(session.consumerRetryTimers.get(producerId));
+  session.consumerRetryTimers.delete(producerId);
   const entry = [...session.consumers.values()].find(
     (candidate) => candidate.producerId === producerId,
   );

@@ -7,6 +7,7 @@ import {
   integer,
   real,
   jsonb,
+  index,
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
@@ -57,50 +58,68 @@ export const rooms = pgTable("rooms", {
     .notNull(),
 });
 
-export const channels = pgTable("channels", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  roomId: uuid("room_id")
-    .notNull()
-    .references(() => rooms.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  description: text("description"),
-  type: text("type", { enum: ["voice", "text", "announcement", "stage"] })
-    .default("voice")
-    .notNull(),
-  position: integer("position").default(0).notNull(),
-  policy: text("policy").default("free").notNull(),
-  slowMode: integer("slow_mode").default(0).notNull(),
-  mediaPolicy: jsonb("media_policy").$type().default({}).notNull(),
-  ownerId: uuid("owner_id").references(() => profiles.id, {
-    onDelete: "set null",
+export const channels = pgTable(
+  "channels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    roomId: uuid("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    type: text("type", { enum: ["voice", "text", "announcement", "stage"] })
+      .default("voice")
+      .notNull(),
+    position: integer("position").default(0).notNull(),
+    policy: text("policy").default("free").notNull(),
+    slowMode: integer("slow_mode").default(0).notNull(),
+    mediaPolicy: jsonb("media_policy").$type().default({}).notNull(),
+    ownerId: uuid("owner_id").references(() => profiles.id, {
+      onDelete: "set null",
+    }),
+    inRoom: uuid("in_room").array().default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    roomPosition: index("channels_room_position").on(
+      table.roomId,
+      table.position,
+    ),
   }),
-  inRoom: uuid("in_room").array().default([]).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+);
 
-export const roomRoles = pgTable("room_roles", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  roomId: uuid("room_id")
-    .notNull()
-    .references(() => rooms.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  color: text("color"),
-  position: integer("position").default(0).notNull(),
-  permissions: jsonb("permissions").$type().default([]).notNull(),
-  system: boolean("system").default(false).notNull(),
-  isDefault: boolean("is_default").default(false).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const roomRoles = pgTable(
+  "room_roles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    roomId: uuid("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color"),
+    position: integer("position").default(0).notNull(),
+    permissions: jsonb("permissions").$type().default([]).notNull(),
+    system: boolean("system").default(false).notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    roomPosition: index("room_roles_room_position").on(
+      table.roomId,
+      table.position,
+    ),
+  }),
+);
 
 export const roomMemberships = pgTable(
   "room_memberships",
@@ -120,6 +139,10 @@ export const roomMemberships = pgTable(
     uniqueRoomUser: uniqueIndex("unique_room_user").on(
       table.roomId,
       table.userId,
+    ),
+    userRoom: index("room_memberships_user_room").on(
+      table.userId,
+      table.roomId,
     ),
   }),
 );
@@ -170,6 +193,14 @@ export const messages = pgTable(
       table.channelId,
       table.authorId,
       table.clientId,
+    ),
+    channelCreated: index("messages_channel_created").on(
+      table.channelId,
+      table.createdAt,
+    ),
+    replyCreated: index("messages_reply_created").on(
+      table.replyToId,
+      table.createdAt,
     ),
   }),
 );
@@ -234,6 +265,10 @@ export const pinnedMessages = pgTable(
       table.channelId,
       table.messageId,
     ),
+    channelCreated: index("pinned_messages_channel_created").on(
+      table.channelId,
+      table.createdAt,
+    ),
   }),
 );
 
@@ -255,6 +290,10 @@ export const bookmarks = pgTable(
     uniqueUserMessage: uniqueIndex("unique_user_message").on(
       table.userId,
       table.messageId,
+    ),
+    userCreated: index("bookmarks_user_created").on(
+      table.userId,
+      table.createdAt,
     ),
   }),
 );
@@ -284,20 +323,34 @@ export const friends = pgTable(
   }),
 );
 
-export const notifications = pgTable("notifications", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => profiles.id, { onDelete: "cascade" }),
-  type: text("type").notNull(),
-  title: text("title").notNull(),
-  body: text("body"),
-  data: text("data"),
-  read: boolean("read").default(false).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    data: text("data"),
+    read: boolean("read").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userCreated: index("notifications_user_created").on(
+      table.userId,
+      table.createdAt,
+    ),
+    userReadCreated: index("notifications_user_read_created").on(
+      table.userId,
+      table.read,
+      table.createdAt,
+    ),
+  }),
+);
 
 export const notificationPreferences = pgTable("notification_preferences", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -391,21 +444,30 @@ export const roomInvites = pgTable("room_invites", {
     .notNull(),
 });
 
-export const roomAuditLog = pgTable("room_audit_log", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  roomId: uuid("room_id")
-    .notNull()
-    .references(() => rooms.id, { onDelete: "cascade" }),
-  actorId: uuid("actor_id")
-    .notNull()
-    .references(() => profiles.id, { onDelete: "cascade" }),
-  action: text("action").notNull(),
-  targetId: uuid("target_id"),
-  metadata: text("metadata"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const roomAuditLog = pgTable(
+  "room_audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    roomId: uuid("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    targetId: uuid("target_id"),
+    metadata: text("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    roomCreated: index("room_audit_log_room_created").on(
+      table.roomId,
+      table.createdAt,
+    ),
+  }),
+);
 
 export const pushSubscriptions = pgTable(
   "push_subscriptions",
@@ -470,25 +532,35 @@ export const roomSoundboards = pgTable("room_soundboards", {
     .notNull(),
 });
 
-export const chatFiles = pgTable("chat_files", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  channelId: uuid("channel_id")
-    .notNull()
-    .references(() => channels.id, { onDelete: "cascade" }),
-  messageId: uuid("message_id").references(() => messages.id, {
-    onDelete: "set null",
+export const chatFiles = pgTable(
+  "chat_files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    uploaderId: uuid("uploader_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    size: integer("size").notNull(),
+    r2Key: text("r2_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    message: index("chat_files_message").on(table.messageId),
+    channelCreated: index("chat_files_channel_created").on(
+      table.channelId,
+      table.createdAt,
+    ),
   }),
-  uploaderId: uuid("uploader_id")
-    .notNull()
-    .references(() => profiles.id, { onDelete: "cascade" }),
-  fileName: text("file_name").notNull(),
-  mimeType: text("mime_type").notNull(),
-  size: integer("size").notNull(),
-  r2Key: text("r2_key").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+);
 
 export const librarySongs = pgTable("library_songs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -539,19 +611,29 @@ export const avatars = pgTable("avatars", {
     .notNull(),
 });
 
-export const roomImages = pgTable("room_images", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  roomId: uuid("room_id")
-    .notNull()
-    .references(() => rooms.id, { onDelete: "cascade" }),
-  type: text("type", { enum: ["profile", "header"] }).notNull(),
-  r2Key: text("r2_key").notNull(),
-  mimeType: text("mime_type").notNull(),
-  size: integer("size").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const roomImages = pgTable(
+  "room_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    roomId: uuid("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    type: text("type", { enum: ["profile", "header"] }).notNull(),
+    r2Key: text("r2_key").notNull(),
+    mimeType: text("mime_type").notNull(),
+    size: integer("size").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    roomTypeCreated: index("room_images_room_type_created").on(
+      table.roomId,
+      table.type,
+      table.createdAt,
+    ),
+  }),
+);
 
 export const soundboards = pgTable("soundboards", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -569,19 +651,28 @@ export const soundboards = pgTable("soundboards", {
     .notNull(),
 });
 
-export const userPresence = pgTable("user_presence", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => profiles.id, { onDelete: "cascade" }),
-  status: text("status", { enum: ["online", "idle", "dnd", "offline"] })
-    .default("offline")
-    .notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  lastActivityAt: timestamp("last_activity_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  isManualOverride: boolean("is_manual_override").default(false).notNull(),
-  platform: text("platform").default("web").notNull(),
-});
+export const userPresence = pgTable(
+  "user_presence",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["online", "idle", "dnd", "offline"] })
+      .default("offline")
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    isManualOverride: boolean("is_manual_override").default(false).notNull(),
+    platform: text("platform").default("web").notNull(),
+  },
+  (table) => ({
+    statusUpdated: index("user_presence_status_updated").on(
+      table.status,
+      table.updatedAt,
+    ),
+  }),
+);

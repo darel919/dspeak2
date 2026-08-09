@@ -1,31 +1,37 @@
 import { createLocalJWKSet, jwtVerify } from "jose";
 
 let cachedJWKS = null;
+let cachedKeySet = null;
 let jwksFetchedAt = 0;
+let jwksRequest = null;
 const JWKS_CACHE_TTL = 3600000;
 
 async function getJWKS() {
   const now = Date.now();
-  if (cachedJWKS && now - jwksFetchedAt < JWKS_CACHE_TTL) {
-    return cachedJWKS;
-  }
-  try {
-    const response = await fetch(
-      `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`,
-    );
-    if (!response.ok) throw new Error("Failed to fetch JWKS");
-    cachedJWKS = await response.json();
-    jwksFetchedAt = now;
-    return cachedJWKS;
-  } catch (error) {
-    if (cachedJWKS) return cachedJWKS;
-    throw error;
-  }
+  if (cachedKeySet && now - jwksFetchedAt < JWKS_CACHE_TTL) return cachedKeySet;
+  if (jwksRequest) return jwksRequest;
+  jwksRequest = (async () => {
+    try {
+      const response = await fetch(
+        `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`,
+      );
+      if (!response.ok) throw new Error("Failed to fetch JWKS");
+      cachedJWKS = await response.json();
+      cachedKeySet = createLocalJWKSet(cachedJWKS);
+      jwksFetchedAt = Date.now();
+      return cachedKeySet;
+    } catch (error) {
+      if (cachedKeySet) return cachedKeySet;
+      throw error;
+    } finally {
+      jwksRequest = null;
+    }
+  })();
+  return jwksRequest;
 }
 
 export async function verifyAccessToken(token) {
-  const jwks = await getJWKS();
-  const keySet = createLocalJWKSet(jwks);
+  const keySet = await getJWKS();
   const { payload } = await jwtVerify(token, keySet, {
     issuer: `${process.env.SUPABASE_URL}/auth/v1`,
     audience: "authenticated",

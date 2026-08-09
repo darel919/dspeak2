@@ -1,5 +1,6 @@
 const STATE_KEY = "repository-update-state";
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
+let sharedRequest = null;
 
 function normalizeCommit(value) {
   const normalized = String(value || "")
@@ -27,21 +28,19 @@ export function useRepositoryUpdate() {
   const updateAvailable = computed(
     () => deployedUpdateAvailable.value || sourceUpdateAvailable.value,
   );
-  let request = null;
-
   async function checkForUpdate() {
     if (!import.meta.client || import.meta.dev) {
       state.value.status = "complete";
       return null;
     }
-    if (request) return request;
+    if (sharedRequest) return sharedRequest;
 
     state.value = {
       ...state.value,
       status: "checking",
       error: null,
     };
-    request = (async () => {
+    sharedRequest = (async () => {
       const apiPath = String(config.public?.apiPath || "/api").replace(
         /\/$/,
         "",
@@ -73,9 +72,9 @@ export function useRepositoryUpdate() {
         return null;
       })
       .finally(() => {
-        request = null;
+        sharedRequest = null;
       });
-    return request;
+    return sharedRequest;
   }
 
   function startMonitoring() {

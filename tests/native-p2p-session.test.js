@@ -303,6 +303,91 @@ describe("NativeP2pSession", () => {
     assert.equal(tracks.at(-1).source, "screen");
   });
 
+  it("applies native jitter configuration to remote audio receivers", async () => {
+    const calls = [];
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 19 };
+        return null;
+      },
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 8,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    session.handleReceiveEvent({
+      kind: 4,
+      id: "microphone_capture",
+      payload: {
+        event: "track-added",
+        handle: 19,
+        trackId: "microphone_capture",
+        kind: "audio",
+      },
+    });
+
+    await session.setJitterBufferConfig({
+      minDelayMs: 50,
+      targetDelayMs: 80,
+    });
+
+    assert.deepEqual(calls.at(-1), [
+      "media_p2p_set_jitter_buffer",
+      {
+        p2pHandle: 19,
+        trackId: "microphone_capture",
+        minDelayMs: 50,
+        targetDelayMs: 80,
+      },
+    ]);
+  });
+
+  it("restarts a disconnected native peer once before reporting failure", async () => {
+    const calls = [];
+    const signals = [];
+    const errors = [];
+    const session = new NativeP2pSession({
+      disconnectGraceMs: 0,
+      iceRestartTimeoutMs: 100,
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 23 };
+        if (command === "media_p2p_restart_ice") return "restart-offer";
+        return null;
+      },
+      sendSignal: (payload) => signals.push(payload),
+      onError: (error) => errors.push(error),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 9,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    session.handleReceiveEvent({
+      kind: 4,
+      payload: { event: "ice-state", handle: 23, value: 5 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    assert.deepEqual(
+      calls.find(([command]) => command === "media_p2p_restart_ice"),
+      ["media_p2p_restart_ice", { p2pHandle: 23 }],
+    );
+    assert.deepEqual(signals.at(-1), {
+      targetPeerId: "peer-b",
+      epoch: 9,
+      signal: { description: { type: "offer", sdp: "restart-offer" } },
+    });
+    assert.equal(errors.length, 0);
+    await session.closeAll();
+  });
+
   it("qualifies a browser-compatible health channel before reporting readiness", async () => {
     const calls = [];
     const messages = [];

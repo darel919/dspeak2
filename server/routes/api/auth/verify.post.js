@@ -1,4 +1,3 @@
-import { supabase } from "../../../auth/supabase.js";
 import { verifyAccessToken } from "../../../auth/middleware.js";
 
 export default defineEventHandler(async (event) => {

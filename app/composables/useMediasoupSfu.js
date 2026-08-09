@@ -1,5 +1,4 @@
-import { useMediaEngine } from "./media/useMediaEngine.js";
-import { useHybridMediaSession } from "./useHybridMediaSession.js";
+import { createMediaEngine } from "./media/createMediaEngine.js";
 
 /**
  * Creates the application-facing media session.
@@ -11,9 +10,9 @@ import { useHybridMediaSession } from "./useHybridMediaSession.js";
  *   or a native compatibility engine in the Tauri runtime.
  */
 export function useMediasoupSfu(options = {}) {
-  return useMediaEngine(useHybridMediaSession, options);
+  return createMediaEngine(options);
 }
 
-export { isTauriRuntime } from "./media/useMediaEngine.js";
+export { isTauriRuntime } from "./media/media-runtime.js";
 
 export default useMediasoupSfu;

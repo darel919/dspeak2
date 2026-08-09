@@ -60,6 +60,7 @@ export async function persistAuthenticatedSession(
   userId,
   deviceId,
   accessToken,
+  profileOverride = null,
 ) {
   if (!userId || !deviceId || !accessToken) {
     throw createError({
@@ -74,7 +75,12 @@ export async function persistAuthenticatedSession(
     });
   }
 
-  const profile = await profileRepository.findById(userId);
+  const profile =
+    profileOverride ||
+    (event.context.authToken === accessToken
+      ? event.context.authProfile
+      : null) ||
+    (await profileRepository.findById(userId));
   if (!profile) {
     throw createError({
       statusCode: 403,
@@ -99,7 +105,8 @@ export async function validateCsrfRequest(event) {
   if (!token) return true;
 
   try {
-    const payload = await verifyAccessToken(token);
+    const payload = await verifiedPayloadForEvent(event, token);
+    if (!payload) return true;
     const supplied = getHeader(event, "x-dspeak-csrf-token") || "";
     const expected = csrfTokenForSession(payload.sub);
     return (
@@ -111,21 +118,45 @@ export async function validateCsrfRequest(event) {
   }
 }
 
+function verifiedPayloadForEvent(event, token) {
+  if (event.context.authToken === token && event.context.authPayload)
+    return Promise.resolve(event.context.authPayload);
+  if (
+    event.context.authVerification?.token === token &&
+    event.context.authVerification.promise
+  )
+    return event.context.authVerification.promise;
+  const promise = verifyAccessToken(token).catch(() => null);
+  event.context.authVerification = { token, promise };
+  return promise;
+}
+
 export async function getAuthenticatedSession(event) {
   const token = event.context.token || getCookie(event, SESSION_COOKIE);
   if (!token) return null;
 
-  try {
-    const payload = await verifyAccessToken(token);
-    const profile = await profileRepository.findById(payload.sub);
+  if (event.context.authSessionToken === token && event.context.authSession)
+    return event.context.authSession;
+  if (
+    event.context.authSessionToken === token &&
+    event.context.authSessionPromise
+  )
+    return event.context.authSessionPromise;
+
+  event.context.authSessionToken = token;
+  event.context.authSessionPromise = (async () => {
+    const payload = await verifiedPayloadForEvent(event, token);
+    if (!payload) return null;
+    const profile =
+      event.context.authToken === token && event.context.authProfile
+        ? event.context.authProfile
+        : await profileRepository.findById(payload.sub);
     if (!profile) return null;
-    return {
-      user: profile.id,
-      profile,
-    };
-  } catch {
-    return null;
-  }
+    const session = { user: profile.id, profile };
+    event.context.authSession = session;
+    return session;
+  })().catch(() => null);
+  return event.context.authSessionPromise;
 }
 
 export async function requireAuthenticatedUser(event) {
