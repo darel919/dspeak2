@@ -52,12 +52,12 @@ const targets = [
     pattern: /\.app\.tar\.gz$/i,
   },
   {
-    target: "linux-x86_64",
-    pattern: /\.AppImage$/,
+    target: "windows-x86_64",
+    pattern: /(?:x64|x86_64|amd64).*\.nsis\.zip$/i,
   },
   {
-    target: "windows-x86_64",
-    pattern: /\.nsis\.zip$/i,
+    target: "windows-aarch64",
+    pattern: /(?:arm64|aarch64).*\.nsis\.zip$/i,
   },
 ];
 

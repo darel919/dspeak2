@@ -139,13 +139,14 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
-  assert.match(workflow, /\.AppImage\.sig/);
   assert.match(workflow, /\.nsis\.zip\.sig/);
+  assert.match(workflow, /windows-arm64/);
   assert.match(manifestScript, /platforms/);
   assert.match(manifestScript, /packageMetadata/);
   assert.match(manifestScript, /releaseVersionFromTag/);
   assert.match(manifestScript, /commit/);
   assert.match(manifestScript, /signature/);
+  assert.match(manifestScript, /windows-aarch64/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);
 });

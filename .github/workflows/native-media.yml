@@ -38,6 +38,10 @@ jobs:
             runner: windows-2022
             target_triple: x86_64-pc-windows-msvc
             artifact: lib-dspeak-media-windows-x64
+          - platform: windows-arm64
+            runner: windows-11-arm
+            target_triple: aarch64-pc-windows-msvc
+            artifact: lib-dspeak-media-windows-arm64
     steps:
       - name: Checkout dSpeak
         uses: actions/checkout@v4

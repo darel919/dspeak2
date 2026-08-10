@@ -14,6 +14,7 @@ NATIVE_MEDIA_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
 LIBWEBRTC_ARTIFACT_ARCHIVE="${LIBWEBRTC_ARTIFACT_ARCHIVE:-}"
 LIBWEBRTC_ARTIFACT_URL="${LIBWEBRTC_ARTIFACT_URL:-}"
 LIBWEBRTC_ARTIFACT_SHA256="${LIBWEBRTC_ARTIFACT_SHA256:-0e09ccab9cf35071c5731c962b0862a3000f68eda9aa3c563b2832997942cff0}"
+DEPOT_TOOLS_COMMIT="${DEPOT_TOOLS_COMMIT:-eff5fce6114e3a78989e7f18dd9e8499d9e13240}"
 WEBRTC_REVISION="${WEBRTC_REVISION:-m140}"
 WEBRTC_BRANCH="${WEBRTC_BRANCH:-branch-heads/7339}"
 WEBRTC_GN_ARGS="${WEBRTC_GN_ARGS:-is_debug=false is_component_build=false is_clang=true rtc_include_tests=false rtc_use_h264=true treat_warnings_as_errors=false use_rtti=true}"
@@ -180,6 +181,10 @@ native_platform() {
         printf '%s\n' "windows-x64"
         return
         ;;
+      aarch64-pc-windows-msvc|arm64-pc-windows-msvc)
+        printf '%s\n' "windows-arm64"
+        return
+        ;;
       *)
         return 1
         ;;
@@ -197,8 +202,15 @@ native_host_platform() {
     Linux:x86_64|Linux:amd64)
       printf '%s\n' "linux-x64"
       ;;
-    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
-      printf '%s\n' "windows-x64"
+    MINGW*|MSYS*|CYGWIN*)
+      case "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}:$(uname -m)" in
+        ARM64:*|arm64:*|AARCH64:*|aarch64:*|*:arm64|*:aarch64)
+          printf '%s\n' "windows-arm64"
+          ;;
+        *)
+          printf '%s\n' "windows-x64"
+          ;;
+      esac
       ;;
     *)
       return 1
@@ -251,6 +263,20 @@ native_target_cpu() {
       ;;
     linux-x64|windows-x64)
       printf '%s\n' "x64"
+      ;;
+    windows-arm64)
+      printf '%s\n' "arm64"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+platform_uses_windows_libraries() {
+  case "$1" in
+    windows-x64|windows-arm64)
+      return 0
       ;;
     *)
       return 1
@@ -496,6 +522,13 @@ clone_or_update_webrtc() {
     printf 'Installing Chromium depot_tools in %s\n' "$depot_tools" >&2
     git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$depot_tools"
   fi
+  if [[ -n "$DEPOT_TOOLS_COMMIT" ]]; then
+    current_depot_tools_commit="$(git -C "$depot_tools" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "$current_depot_tools_commit" != "$DEPOT_TOOLS_COMMIT" ]]; then
+      git -C "$depot_tools" fetch --depth 1 origin "$DEPOT_TOOLS_COMMIT" >&2
+      git -C "$depot_tools" checkout --detach "$DEPOT_TOOLS_COMMIT" >&2
+    fi
+  fi
   export PATH="$depot_tools:$PATH"
 
   if [[ ! -d "$source/.git" && ! -f "$source/.git" ]]; then
@@ -597,7 +630,7 @@ build_bundle_from_source() {
     (cd "$webrtc_source" && gn gen "$webrtc_output" --args="$gn_args")
     printf 'Building WebRTC; this can take a long time on the first run\n'
     ninja -C "$webrtc_output"
-    if [[ "$platform" == windows-x64 ]]; then
+    if platform_uses_windows_libraries "$platform"; then
       webrtc_library="$(find "$webrtc_output" -type f \( -name 'libwebrtc.lib' -o -name 'webrtc.lib' \) -print -quit)"
     else
       webrtc_library="$webrtc_output/obj/libwebrtc.a"
@@ -605,7 +638,7 @@ build_bundle_from_source() {
     [[ -f "$webrtc_library" ]] || fail "WebRTC build did not produce $webrtc_library"
 
     mkdir -p "$source_bundle/lib" "$source_bundle/include"
-    if [[ "$platform" == windows-x64 ]]; then
+    if platform_uses_windows_libraries "$platform"; then
       cp "$webrtc_library" "$source_bundle/lib/webrtc.lib"
     else
       cp "$webrtc_library" "$source_bundle/lib/libwebrtc.a"
@@ -630,13 +663,13 @@ build_bundle_from_source() {
     -DMEDIASOUPCLIENT_BUILD_DEMO=OFF
   printf 'Building libmediasoupclient\n'
   cmake --build "$mediasoup_build" --config Release --parallel
-  if [[ "$platform" == windows-x64 ]]; then
+  if platform_uses_windows_libraries "$platform"; then
     mediasoup_library="$(find "$mediasoup_build" -type f \( -name 'mediasoupclient.lib' -o -name 'libmediasoupclient.lib' \) -print -quit)"
   else
     mediasoup_library="$(find "$mediasoup_build" -type f \( -name 'libmediasoupclient.a' -o -name 'mediasoupclient.a' \) -print -quit)"
   fi
   [[ -n "$mediasoup_library" ]] || fail "libmediasoupclient build did not produce a static library"
-  if [[ "$platform" == windows-x64 ]]; then
+  if platform_uses_windows_libraries "$platform"; then
     cp "$mediasoup_library" "$source_bundle/lib/mediasoupclient.lib"
   else
     cp "$mediasoup_library" "$source_bundle/lib/libmediasoupclient.a"
@@ -645,7 +678,7 @@ build_bundle_from_source() {
   json_header="$(find "$mediasoup_build" -type f -name json.hpp -print -quit)"
   [[ -n "$json_header" ]] || fail "libmediasoupclient build did not produce json.hpp"
   cp "$json_header" "$source_bundle/include/json.hpp"
-  if [[ "$platform" == windows-x64 ]]; then
+  if platform_uses_windows_libraries "$platform"; then
     sdp_library="$(find "$mediasoup_build" -type f \( -name 'sdptransform.lib' -o -name 'libsdptransform.lib' \) -print -quit)"
     [[ -n "$sdp_library" ]] || fail "libmediasoupclient build did not produce sdptransform.lib"
     cp "$sdp_library" "$source_bundle/lib/sdptransform.lib"
@@ -656,7 +689,7 @@ build_bundle_from_source() {
   fi
 
   shim_build="$DESKTOP_ROOT/native-media/libdspeak_media/build"
-  if [[ "$platform" != windows-x64 && ! -f "$source_bundle/lib/libdspeak_media.a" ]]; then
+  if ! platform_uses_windows_libraries "$platform" && [[ ! -f "$source_bundle/lib/libdspeak_media.a" ]]; then
     mkdir -p "$shim_build"
     stub_source="$shim_build/dspeak_media_bootstrap.c"
     stub_object="$shim_build/dspeak_media_bootstrap.o"
@@ -670,7 +703,7 @@ build_bundle_from_source() {
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   cmake --build "$shim_build" --config Release --parallel
-  if [[ "$platform" == windows-x64 ]]; then
+  if platform_uses_windows_libraries "$platform"; then
     shim_library="$(find "$shim_build" -type f \( -name 'dspeak_media.lib' -o -name 'libdspeak_media.lib' \) -print -quit)"
     [[ -n "$shim_library" ]] || fail "dSpeak native media shim build did not produce dspeak_media.lib"
     cp "$shim_library" "$source_bundle/lib/dspeak_media.lib"
