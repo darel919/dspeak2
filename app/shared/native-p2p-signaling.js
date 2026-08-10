@@ -91,14 +91,15 @@ export function retryPeerNegotiation(mesh, state) {
   }, 50);
 }
 
-export async function receiveSignal(
-  mesh,
-  { fromPeerId, epoch, signal: value },
-) {
-  if (Number(epoch) !== mesh.epoch || !value) return;
-  const state =
-    mesh.connections.get(String(fromPeerId)) ||
-    mesh.ensureConnection(String(fromPeerId), String(fromPeerId));
+export async function receiveSignal(mesh, payload) {
+  const { fromPeerId, epoch, signal: value } = payload || {};
+  const signalEpoch = Number(epoch);
+  if (!Number.isSafeInteger(signalEpoch) || !value) return false;
+  if (signalEpoch !== mesh.epoch || !mesh.connections.has(String(fromPeerId))) {
+    if (signalEpoch >= mesh.epoch) mesh.queuePendingSignal(payload);
+    return signalEpoch >= mesh.epoch;
+  }
+  const state = mesh.connections.get(String(fromPeerId));
   return enqueuePeerSignaling(
     mesh,
     state,

@@ -36,6 +36,39 @@ function sessionClosedError() {
   return error;
 }
 
+const ICE_GATHERING_TIMEOUT_MS = 3000;
+
+function waitForIceGatheringComplete(peerConnection) {
+  if (
+    !peerConnection ||
+    peerConnection.iceGatheringState == null ||
+    peerConnection.iceGatheringState === "complete" ||
+    typeof peerConnection.addEventListener !== "function"
+  )
+    return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer;
+    const finish = () => {
+      clearTimeout(timer);
+      peerConnection.removeEventListener?.("icegatheringstatechange", finish);
+      resolve();
+    };
+    peerConnection.addEventListener("icegatheringstatechange", finish);
+    timer = setTimeout(finish, ICE_GATHERING_TIMEOUT_MS);
+    if (peerConnection.iceGatheringState === "complete") finish();
+  });
+}
+
+async function getLocalSessionDescription(peerConnection) {
+  await waitForIceGatheringComplete(peerConnection);
+  const description = peerConnection.localDescription;
+  if (!description?.type || typeof description.sdp !== "string")
+    throw new Error(
+      "Cloudflare local WebRTC session description is unavailable",
+    );
+  return { type: description.type, sdp: description.sdp };
+}
+
 export class CloudflareRealtimeSession {
   constructor({
     send,
@@ -59,7 +92,8 @@ export class CloudflareRealtimeSession {
     this.remoteByMid = new Map();
     this.rtpSamples = new Map();
     this.subscriptionTasks = new Map();
-    this.subscriptionQueue = Promise.resolve();
+    this.negotiationQueue = Promise.resolve();
+    this.sourceOperations = new Map();
     this.sessionGeneration = 0;
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
@@ -79,10 +113,13 @@ export class CloudflareRealtimeSession {
         const entry = {
           provider: "sfu",
           participantId: publication.userId,
+          userId: publication.userId,
           peerId: publication.peerId,
           source: publication.source,
+          kind: event.track.kind,
           receiver: event.receiver,
           trackName: publication.trackName,
+          key: publication.trackName,
           track: event.track,
           stream: event.streams[0] || new MediaStream([event.track]),
         };
@@ -177,6 +214,12 @@ export class CloudflareRealtimeSession {
       throw sessionClosedError();
   }
 
+  enqueueNegotiation(operation) {
+    const task = this.negotiationQueue.then(operation);
+    this.negotiationQueue = task.catch(() => {});
+    return task;
+  }
+
   async handle(type, data) {
     if (type === "cloudflare-response") {
       const waiting = this.pending.get(data.requestId);
@@ -212,7 +255,28 @@ export class CloudflareRealtimeSession {
   }
 
   async addSource(entry) {
-    await this.initialize();
+    if (!entry?.source)
+      throw new Error("A media source identifier is required");
+    const source = String(entry.source);
+    return this.enqueueSourceOperation(source, async () => {
+      await this.initialize();
+      return this.enqueueNegotiation(() => this.addSourceInternal(entry));
+    });
+  }
+
+  enqueueSourceOperation(source, operation) {
+    const previous = this.sourceOperations.get(source) || Promise.resolve();
+    const task = previous.catch(() => {}).then(operation);
+    const tracked = task.finally(() => {
+      if (this.sourceOperations.get(source) === tracked)
+        this.sourceOperations.delete(source);
+    });
+    this.sourceOperations.set(source, tracked);
+    tracked.catch(() => {});
+    return tracked;
+  }
+
+  async addSourceInternal(entry) {
     const { generation, peerConnection } = this.currentSession();
     const current = this.producers.get(entry.source);
     if (current) {
@@ -221,66 +285,76 @@ export class CloudflareRealtimeSession {
       current.track = entry.track;
       return;
     }
-    const stream = entry.stream || new MediaStream([entry.track]);
-    const sender = peerConnection.addTrack(entry.track, stream);
-    if (
-      entry.track.kind === "audio" &&
-      sender.getParameters &&
-      sender.setParameters
-    ) {
-      const policy = getAudioCodecPolicy(
-        entry.source === "screen-audio" ? "shared-audio" : "microphone",
-        entry.audioStereo === true,
-      );
-      const parameters = sender.getParameters();
-      const encodings = Array.isArray(parameters.encodings)
-        ? parameters.encodings
-        : [];
-      if (!encodings[0] || typeof encodings[0] !== "object") encodings[0] = {};
-      parameters.encodings = encodings;
-      encodings[0].maxBitrate = entry.audioBitrate || policy.maxBitrateBps;
-      encodings[0].priority = policy.priority;
-      encodings[0].networkPriority = policy.priority;
-      try {
-        await sender.setParameters(parameters);
-      } catch {}
-    }
-    this.assertCurrentSession(peerConnection, generation);
-    const transceiver = peerConnection
-      .getTransceivers()
-      .find((candidate) => candidate.sender === sender);
-    const trackName = crypto.randomUUID();
-    const offer = await peerConnection.createOffer();
-    this.assertCurrentSession(peerConnection, generation);
-    await peerConnection.setLocalDescription(offer);
-    const result = await this.request("tracks-new", {
-      sessionDescription: {
-        type: peerConnection.localDescription.type,
-        sdp: peerConnection.localDescription.sdp,
-      },
-      tracks: [{ location: "local", mid: transceiver.mid, trackName }],
-    });
-    this.assertCurrentSession(peerConnection, generation);
-    if (result.sessionDescription)
-      await peerConnection.setRemoteDescription(result.sessionDescription);
-    this.assertCurrentSession(peerConnection, generation);
-    this.producers.set(entry.source, {
-      source: entry.source,
-      producer: sender,
-      sender,
-      track: entry.track,
-      trackName,
-      mid: transceiver.mid,
-    });
-    if (
-      !this.send({
-        type: "cloudflare-publication",
-        data: { trackName, source: entry.source },
-      })
-    ) {
-      this.producers.delete(entry.source);
-      peerConnection.removeTrack(sender);
-      throw new Error("Media control is unavailable");
+    let sender = null;
+    try {
+      const stream = entry.stream || new MediaStream([entry.track]);
+      sender = peerConnection.addTrack(entry.track, stream);
+      if (
+        entry.track.kind === "audio" &&
+        sender.getParameters &&
+        sender.setParameters
+      ) {
+        const policy = getAudioCodecPolicy(
+          entry.source === "screen-audio" ? "shared-audio" : "microphone",
+          entry.audioStereo === true,
+        );
+        const parameters = sender.getParameters();
+        const encodings = Array.isArray(parameters.encodings)
+          ? parameters.encodings
+          : [];
+        if (!encodings[0] || typeof encodings[0] !== "object")
+          encodings[0] = {};
+        parameters.encodings = encodings;
+        encodings[0].maxBitrate = entry.audioBitrate || policy.maxBitrateBps;
+        encodings[0].priority = policy.priority;
+        encodings[0].networkPriority = policy.priority;
+        try {
+          await sender.setParameters(parameters);
+        } catch {}
+      }
+      this.assertCurrentSession(peerConnection, generation);
+      const transceiver = peerConnection
+        .getTransceivers()
+        .find((candidate) => candidate.sender === sender);
+      const trackName = crypto.randomUUID();
+      const offer = await peerConnection.createOffer();
+      this.assertCurrentSession(peerConnection, generation);
+      await peerConnection.setLocalDescription(offer);
+      const mid = transceiver?.mid;
+      if (mid == null)
+        throw new Error("Cloudflare local media transceiver is unavailable");
+      const sessionDescription =
+        await getLocalSessionDescription(peerConnection);
+      const result = await this.request("tracks-new", {
+        sessionDescription,
+        tracks: [{ location: "local", mid, trackName }],
+      });
+      this.assertCurrentSession(peerConnection, generation);
+      if (result.sessionDescription)
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+      this.assertCurrentSession(peerConnection, generation);
+      this.producers.set(entry.source, {
+        source: entry.source,
+        producer: sender,
+        sender,
+        track: entry.track,
+        trackName,
+        mid,
+      });
+      if (
+        !this.send({
+          type: "cloudflare-publication",
+          data: { trackName, source: entry.source },
+        })
+      )
+        throw new Error("Media control is unavailable");
+    } catch (error) {
+      if (
+        this.peerConnection === peerConnection &&
+        this.sessionGeneration === generation
+      )
+        this.closeMedia();
+      throw error;
     }
   }
 
@@ -296,7 +370,7 @@ export class CloudflareRealtimeSession {
     if (this.consumers.has(trackName)) return;
     const existing = this.subscriptionTasks.get(trackName);
     if (existing) return existing;
-    const task = this.subscriptionQueue.then(() =>
+    const task = this.enqueueNegotiation(() =>
       this.subscribePublication(publication, generation),
     );
     const tracked = task.finally(() => {
@@ -304,7 +378,7 @@ export class CloudflareRealtimeSession {
         this.subscriptionTasks.delete(trackName);
     });
     this.subscriptionTasks.set(trackName, tracked);
-    this.subscriptionQueue = tracked.catch(() => {});
+    tracked.catch(() => {});
     return tracked;
   }
 
@@ -331,11 +405,12 @@ export class CloudflareRealtimeSession {
       (candidate) => candidate.trackName === trackName,
     );
     if (this.publications.get(trackName) !== publication) {
-      if (track?.mid) this.remoteByMid.delete(track.mid);
+      if (track?.mid != null) this.remoteByMid.delete(String(track.mid));
       return false;
     }
     this.assertCurrentSession(peerConnection, generation);
-    if (track?.mid) this.remoteByMid.set(track.mid, publication);
+    if (track?.mid != null)
+      this.remoteByMid.set(String(track.mid), publication);
     this.lastReceivedConsumerParams = result;
     if (result.sessionDescription?.type === "offer") {
       await peerConnection.setRemoteDescription(result.sessionDescription);
@@ -343,11 +418,10 @@ export class CloudflareRealtimeSession {
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
       this.assertCurrentSession(peerConnection, generation);
+      const sessionDescription =
+        await getLocalSessionDescription(peerConnection);
       await this.request("renegotiate", {
-        sessionDescription: {
-          type: peerConnection.localDescription.type,
-          sdp: peerConnection.localDescription.sdp,
-        },
+        sessionDescription,
       });
       this.assertCurrentSession(peerConnection, generation);
     } else if (result.sessionDescription) {
@@ -358,37 +432,56 @@ export class CloudflareRealtimeSession {
   }
 
   async removeSource(source) {
+    const key = String(source || "");
+    return this.enqueueSourceOperation(key, () =>
+      this.enqueueNegotiation(() => this.removeSourceInternal(key)),
+    );
+  }
+
+  async removeSourceInternal(source) {
     const current = this.producers.get(source);
     if (!current) return;
     const { generation, peerConnection } = this.currentSession();
     if (this.producers.get(source) !== current) return;
-    this.producers.delete(source);
-    peerConnection.removeTrack(current.sender);
-    const offer = await peerConnection.createOffer();
-    this.assertCurrentSession(peerConnection, generation);
-    await peerConnection.setLocalDescription(offer);
-    const result = await this.request("tracks-close", {
-      tracks: [{ mid: current.mid }],
-      sessionDescription: {
-        type: peerConnection.localDescription.type,
-        sdp: peerConnection.localDescription.sdp,
-      },
-      force: false,
-    });
-    this.assertCurrentSession(peerConnection, generation);
-    if (result.sessionDescription)
-      await peerConnection.setRemoteDescription(result.sessionDescription);
-    this.assertCurrentSession(peerConnection, generation);
-    this.send({
-      type: "cloudflare-publication",
-      data: { trackName: current.trackName, source, closed: true },
-    });
+    try {
+      peerConnection.removeTrack(current.sender);
+      const offer = await peerConnection.createOffer();
+      this.assertCurrentSession(peerConnection, generation);
+      await peerConnection.setLocalDescription(offer);
+      const sessionDescription =
+        await getLocalSessionDescription(peerConnection);
+      const result = await this.request("tracks-close", {
+        tracks: [{ mid: current.mid }],
+        sessionDescription,
+        force: false,
+      });
+      this.assertCurrentSession(peerConnection, generation);
+      if (result.sessionDescription)
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+      this.assertCurrentSession(peerConnection, generation);
+      this.producers.delete(source);
+      if (
+        !this.send({
+          type: "cloudflare-publication",
+          data: { trackName: current.trackName, source, closed: true },
+        })
+      )
+        throw new Error("Media control is unavailable");
+    } catch (error) {
+      if (
+        this.peerConnection === peerConnection &&
+        this.sessionGeneration === generation
+      )
+        this.closeMedia();
+      throw error;
+    }
   }
 
   setJitterBufferConfig() {}
 
   connectionState() {
-    const state = this.peerConnection?.connectionState;
+    const peerConnection = this.peerConnection;
+    const state = peerConnection?.connectionState;
     const ready = state === "connected";
     return {
       ready,
@@ -396,6 +489,10 @@ export class CloudflareRealtimeSession {
       recv: ready ? "connected" : state || "new",
       sendRequired: this.producers.size > 0,
       receiveRequired: this.publications.size > 0,
+      connectionState: state || "new",
+      iceConnectionState: peerConnection?.iceConnectionState || "new",
+      iceGatheringState: peerConnection?.iceGatheringState || "new",
+      signalingState: peerConnection?.signalingState || "new",
     };
   }
 
@@ -436,6 +533,7 @@ export class CloudflareRealtimeSession {
     const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
     if (!this.peerConnection) {
       return {
+        ...this.connectionState(),
         ready: false,
         outboundExpected,
         outboundFlowing: 0,
@@ -493,9 +591,11 @@ export class CloudflareRealtimeSession {
     ]);
     const outboundFlowing = outboundResults.filter(Boolean).length;
     const inboundFlowing = inboundResults.filter(Boolean).length;
+    const state = this.connectionState();
     return {
+      ...state,
       ready:
-        this.connectionState().ready &&
+        state.ready &&
         outboundFlowing >= outboundExpected &&
         inboundFlowing >= inboundExpected,
       outboundExpected,
@@ -543,7 +643,7 @@ export class CloudflareRealtimeSession {
     this.remoteByMid.clear();
     this.rtpSamples.clear();
     this.subscriptionTasks.clear();
-    this.subscriptionQueue = Promise.resolve();
+    this.negotiationQueue = Promise.resolve();
     const error = sessionClosedError();
     for (const waiting of this.pending.values()) {
       waiting.catch(() => {});

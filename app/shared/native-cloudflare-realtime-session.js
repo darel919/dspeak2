@@ -134,7 +134,8 @@ export class NativeCloudflareRealtimeSession {
     this.remoteByMid = new Map();
     this.pending = new Map();
     this.subscriptionTasks = new Map();
-    this.subscriptionQueue = Promise.resolve();
+    this.negotiationQueue = Promise.resolve();
+    this.sourceOperations = new Map();
     this.rtpSamples = new Map();
     this.handle = null;
     this.sessionId = null;
@@ -217,6 +218,12 @@ export class NativeCloudflareRealtimeSession {
     return waiting;
   }
 
+  enqueueNegotiation(operation) {
+    const task = this.negotiationQueue.then(operation);
+    this.negotiationQueue = task.catch(() => {});
+    return task;
+  }
+
   async handleMessage(type, data = {}) {
     if (this.closed) return false;
     if (type === "cloudflare-response") {
@@ -250,6 +257,41 @@ export class NativeCloudflareRealtimeSession {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     const source = String(entry.source);
+    return this.enqueueSourceOperation(source, async () => {
+      await this.initialize();
+      return this.enqueueNegotiation(async () => {
+        const generation = this.sessionGeneration;
+        try {
+          return await this.addSourceInternal(entry);
+        } catch (error) {
+          if (
+            this.handle &&
+            this.sessionGeneration === generation &&
+            !this.closed
+          )
+            this.closeMedia();
+          throw error;
+        }
+      });
+    });
+  }
+
+  enqueueSourceOperation(source, operation) {
+    const previous = this.sourceOperations.get(source) || Promise.resolve();
+    const task = previous.catch(() => {}).then(operation);
+    const tracked = task.finally(() => {
+      if (this.sourceOperations.get(source) === tracked)
+        this.sourceOperations.delete(source);
+    });
+    this.sourceOperations.set(source, tracked);
+    tracked.catch(() => {});
+    return tracked;
+  }
+
+  async addSourceInternal(entry) {
+    if (!entry?.source)
+      throw new Error("A native source identifier is required");
+    const source = String(entry.source);
     const kind = sourceKind(entry);
     const normalized = {
       ...entry,
@@ -261,7 +303,6 @@ export class NativeCloudflareRealtimeSession {
         entry.videoSettings || this.getVideoSettings?.(source) || null,
     };
     this.sources.set(source, normalized);
-    await this.initialize();
     const generation = this.sessionGeneration;
     this._assertCurrent(generation);
     const previous = this.producers.get(source);
@@ -346,39 +387,59 @@ export class NativeCloudflareRealtimeSession {
 
   async removeSource(source) {
     const key = String(source || "");
+    return this.enqueueSourceOperation(key, () =>
+      this.enqueueNegotiation(() => this.removeSourceInternal(key)),
+    );
+  }
+
+  async removeSourceInternal(source) {
+    const key = String(source || "");
     const current = this.producers.get(key);
     this.sources.delete(key);
     this.localVideoFeeds.delete(key);
     if (!current) return;
-    this.producers.delete(key);
-    if (!this.handle || !this.sessionId) return;
+    if (!this.handle || !this.sessionId) {
+      this.producers.delete(key);
+      return;
+    }
     const generation = this.sessionGeneration;
-    this._assertCurrent(generation);
-    await this.invoke("media_p2p_remove_track", {
-      p2pHandle: this.handle,
-      source: key,
-    });
-    this._assertCurrent(generation);
-    const offer = await this.invoke("media_p2p_create_offer", {
-      p2pHandle: this.handle,
-    });
-    this._assertCurrent(generation);
-    const response = await this.request("tracks-close", {
-      tracks: [{ mid: current.mid }],
-      sessionDescription: { type: "offer", sdp: offer },
-      force: false,
-    });
-    this._assertCurrent(generation);
-    if (response.sessionDescription)
-      await this.invoke("media_p2p_set_remote_description", {
-        p2pHandle: this.handle,
-        sdp: response.sessionDescription.sdp,
+    const handle = this.handle;
+    try {
+      this._assertCurrent(generation, handle);
+      await this.invoke("media_p2p_remove_track", {
+        p2pHandle: handle,
+        source: key,
       });
-    this._assertCurrent(generation);
-    this.send?.({
-      type: "cloudflare-publication",
-      data: { trackName: current.trackName, source: key, closed: true },
-    });
+      this._assertCurrent(generation, handle);
+      const offer = await this.invoke("media_p2p_create_offer", {
+        p2pHandle: handle,
+      });
+      this._assertCurrent(generation, handle);
+      const response = await this.request("tracks-close", {
+        tracks: [{ mid: current.mid }],
+        sessionDescription: { type: "offer", sdp: offer },
+        force: false,
+      });
+      this._assertCurrent(generation, handle);
+      if (response.sessionDescription)
+        await this.invoke("media_p2p_set_remote_description", {
+          p2pHandle: handle,
+          sdp: response.sessionDescription.sdp,
+        });
+      this._assertCurrent(generation, handle);
+      this.producers.delete(key);
+      if (
+        !this.send?.({
+          type: "cloudflare-publication",
+          data: { trackName: current.trackName, source: key, closed: true },
+        })
+      )
+        throw new Error("Media control is unavailable");
+    } catch (error) {
+      if (this.handle === handle && this.sessionGeneration === generation)
+        this.closeMedia();
+      throw error;
+    }
     this._emitState();
   }
 
@@ -394,7 +455,7 @@ export class NativeCloudflareRealtimeSession {
     if (this.consumers.has(trackName)) return true;
     const existing = this.subscriptionTasks.get(trackName);
     if (existing) return existing;
-    const task = this.subscriptionQueue.then(() =>
+    const task = this.enqueueNegotiation(() =>
       this._subscribePublication(publication, generation),
     );
     const tracked = task.finally(() => {
@@ -402,7 +463,7 @@ export class NativeCloudflareRealtimeSession {
         this.subscriptionTasks.delete(trackName);
     });
     this.subscriptionTasks.set(trackName, tracked);
-    this.subscriptionQueue = tracked.catch(() => {});
+    tracked.catch(() => {});
     return tracked;
   }
 
@@ -431,7 +492,8 @@ export class NativeCloudflareRealtimeSession {
     const track = response.tracks?.find(
       (candidate) => candidate.trackName === trackName,
     );
-    if (track?.mid) this.remoteByMid.set(track.mid, publication);
+    if (track?.mid != null)
+      this.remoteByMid.set(String(track.mid), publication);
     this.lastReceivedConsumerParams = response;
     if (response.sessionDescription?.type === "offer") {
       const answer = await this.invoke("media_p2p_create_answer", {
@@ -912,7 +974,7 @@ export class NativeCloudflareRealtimeSession {
     this.remoteAudioFeeds.clear();
     this.rtpSamples.clear();
     this.subscriptionTasks.clear();
-    this.subscriptionQueue = Promise.resolve();
+    this.negotiationQueue = Promise.resolve();
     const error = sessionClosedError();
     for (const waiting of this.pending.values()) {
       clearTimeout(waiting.timer);

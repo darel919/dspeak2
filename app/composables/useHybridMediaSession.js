@@ -205,7 +205,7 @@ export function useHybridMediaSession() {
         reason: error.value,
       });
     },
-    onReconnect: () => {
+    onReconnect: async () => {
       setConnectionPhase("reconnecting");
       if (mediaConnectionState.value === "recovering") {
         const live = activeProvider === "sfu" ? sfu : p2pMesh;
@@ -213,6 +213,7 @@ export function useHybridMediaSession() {
           ? "media-flowing"
           : "ready-no-active-media";
       }
+      await sessionLifecycle?.refreshControlTicket?.();
     },
     onFailure: (message) => sessionOperations.failSession(message),
     protocol: MEDIA_SIGNALING_CLIENT_PROTOCOL,
@@ -250,6 +251,7 @@ export function useHybridMediaSession() {
     getAttenuation,
     voiceStore,
     settingsStore,
+    getActiveProvider: () => activeProvider,
     getSfu: () => sfu,
     getP2pMesh: () => p2pMesh,
     error,

@@ -6,6 +6,7 @@ export function createHybridMediaRegistry({
   getAttenuation,
   voiceStore,
   settingsStore,
+  getActiveProvider,
   getSfu,
   getP2pMesh,
   error,
@@ -50,8 +51,16 @@ export function createHybridMediaRegistry({
         state === "ready" &&
         mediaConnectionState.value === "playback-blocked"
       ) {
-        const readiness = getSfu()?.connectionState();
-        mediaConnectionState.value = readiness?.ready
+        const provider = getActiveProvider();
+        const readiness =
+          provider === "p2p"
+            ? { ready: getP2pMesh()?.isMediaReady?.() === true }
+            : provider === "sfu"
+              ? getSfu()?.connectionState()
+              : null;
+        const ready = readiness?.ready === true;
+        iceConnectedBoth.value = ready;
+        mediaConnectionState.value = ready
           ? "media-flowing"
           : "transport-connecting";
       }

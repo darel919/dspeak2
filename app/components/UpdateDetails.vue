@@ -4,92 +4,71 @@
     class="mt-3 border-t border-base-content/10 pt-3 text-sm text-base-content/70"
     aria-label="Update details"
   >
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <p v-if="snapshot?.sourceUpdateAvailable">
-        {{ commitCountLabel }} ahead · latest
-        <code class="text-xs text-base-content">{{ latestCommit }}</code>
-      </p>
-      <p v-else-if="snapshot?.deployedUpdateAvailable">
-        A newer deployed build is available.
-      </p>
-      <p v-else-if="packageUpdate">
-        Package v{{ packageUpdate.version || "latest" }} is ready to install.
-      </p>
-      <button
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+      <h3 class="font-semibold text-base-content">What's changed</h3>
+      <a
+        v-if="changelogUrl"
         class="metro-link text-xs"
-        type="button"
-        :aria-expanded="expanded"
-        @click="expanded = !expanded"
+        :href="changelogUrl"
+        target="_blank"
+        rel="noreferrer"
       >
-        {{ expanded ? "Hide changes" : "View changes" }}
-      </button>
+        Full changelog
+      </a>
     </div>
 
-    <div v-if="expanded" class="mt-3 space-y-3">
-      <dl class="grid gap-1 sm:grid-cols-[auto_1fr] sm:gap-x-3">
-        <dt>Running</dt>
-        <dd>
-          <code class="text-xs text-base-content">{{ runningCommit }}</code>
-          <span v-if="currentBuild?.version" class="ml-2">
-            v{{ currentBuild.version }}
-          </span>
-        </dd>
-        <template v-if="snapshot">
-          <dt>Repository</dt>
-          <dd class="break-all">
-            {{ snapshot.repository }}/{{ snapshot.branch }}
-          </dd>
-        </template>
-        <template v-if="packageUpdate">
-          <dt>Package</dt>
-          <dd>
-            v{{ packageUpdate.version || "latest" }}
-            <span v-if="packageCommit">
-              · commit
-              <code class="text-xs text-base-content">{{ packageCommit }}</code>
-            </span>
-          </dd>
-        </template>
-      </dl>
-
-      <div v-if="commits.length">
-        <h3 class="font-semibold text-base-content">Commits</h3>
-        <ul class="mt-1 space-y-1">
-          <li v-for="commit in commits" :key="commit.sha" class="flex gap-2">
+    <ul v-if="visibleCommits.length" class="mt-2 space-y-2">
+      <li
+        v-for="commit in visibleCommits"
+        :key="commit.sha"
+        class="flex items-start gap-2"
+      >
+        <span class="mt-0.5 text-base-content/50" aria-hidden="true">•</span>
+        <div class="min-w-0 flex-1">
+          <p class="break-words text-base-content">
+            {{ commit.message || "Repository update" }}
+          </p>
+          <p class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
             <a
-              v-if="commit.url"
-              class="shrink-0 text-info underline"
+              v-if="commit.pullRequest?.url"
+              class="metro-link"
+              :href="commit.pullRequest.url"
+              target="_blank"
+              rel="noreferrer"
+            >
+              PR #{{ commit.pullRequest.number }}
+            </a>
+            <a
+              v-else-if="commit.url"
+              class="metro-link"
               :href="commit.url"
               target="_blank"
               rel="noreferrer"
             >
-              {{ commit.shortSha }}
+              Commit {{ commit.shortSha }}
             </a>
-            <code v-else class="shrink-0 text-xs text-base-content">
-              {{ commit.shortSha }}
-            </code>
-            <span class="min-w-0 truncate">{{ commit.message }}</span>
-          </li>
-        </ul>
-      </div>
-
-      <div v-if="files.length">
-        <h3 class="font-semibold text-base-content">
-          Files changed
-          <span class="font-normal">({{ fileCountLabel }})</span>
-        </h3>
-        <ul class="mt-1 space-y-1 font-mono text-xs">
-          <li v-for="file in files" :key="file.filename">
-            <span class="text-base-content">{{ file.filename }}</span>
-            <span class="ml-2 text-success">+{{ file.additions }}</span>
-            <span class="ml-1 text-error">-{{ file.deletions }}</span>
-          </li>
-        </ul>
-        <p v-if="snapshot.comparison?.filesTruncated" class="mt-1 text-xs">
-          Showing the first {{ files.length }} files.
-        </p>
-      </div>
-    </div>
+            <span v-if="commit.author">by {{ commit.author }}</span>
+          </p>
+        </div>
+      </li>
+    </ul>
+    <p
+      v-else-if="releaseNotes"
+      class="mt-2 whitespace-pre-line text-base-content"
+    >
+      {{ releaseNotes }}
+    </p>
+    <p v-else-if="latestCommit" class="mt-2 text-xs">
+      Latest commit
+      <code class="text-base-content">{{ latestCommit }}</code>
+    </p>
+    <p v-if="remainingCommitCount" class="mt-2 text-xs">
+      {{ remainingCommitCount }} more
+      {{ remainingCommitCount === 1 ? "commit" : "commits" }} in this update.
+    </p>
+    <p v-if="versionSummary" class="mt-2 text-xs">
+      {{ versionSummary }}
+    </p>
   </section>
 </template>
 
@@ -109,7 +88,6 @@ const props = defineProps({
   },
 });
 
-const expanded = ref(false);
 const hasUpdate = computed(
   () =>
     Boolean(props.snapshot?.sourceUpdateAvailable) ||
@@ -117,25 +95,24 @@ const hasUpdate = computed(
     Boolean(props.packageUpdate?.version),
 );
 const commits = computed(() => props.snapshot?.comparison?.commits || []);
-const files = computed(() => props.snapshot?.comparison?.files || []);
-const runningCommit = computed(
-  () =>
-    props.snapshot?.client?.shortCommit ||
-    props.currentBuild?.shortCommit ||
-    "unknown",
-);
-const latestCommit = computed(
-  () => props.snapshot?.latest?.shortSha || "unknown",
-);
-const packageCommit = computed(
-  () => props.packageUpdate?.commit?.slice(0, 7) || null,
-);
-const commitCountLabel = computed(() => {
-  const count = props.snapshot?.comparison?.aheadBy ?? commits.value.length;
-  return `${count} ${count === 1 ? "commit" : "commits"}`;
+const visibleCommits = computed(() => commits.value.slice(0, 5));
+const latestCommit = computed(() => props.snapshot?.latest?.shortSha || null);
+const changelogUrl = computed(() => props.snapshot?.comparison?.url || null);
+const releaseNotes = computed(() => {
+  const notes = String(props.packageUpdate?.body || "").trim();
+  return notes || null;
 });
-const fileCountLabel = computed(() => {
-  const count = props.snapshot?.comparison?.totalFiles ?? files.value.length;
-  return `${count} ${count === 1 ? "file" : "files"}`;
+const remainingCommitCount = computed(() => {
+  const total = props.snapshot?.comparison?.aheadBy ?? commits.value.length;
+  return Math.max(Number(total) - visibleCommits.value.length, 0);
+});
+const versionSummary = computed(() => {
+  const current = props.currentBuild?.version;
+  const next =
+    props.packageUpdate?.version || props.snapshot?.deployed?.version;
+  if (!current && !next) return null;
+  if (!current) return `Version ${next} is ready.`;
+  if (!next || current === next) return `Running version ${current}.`;
+  return `Version ${current} → ${next}.`;
 });
 </script>

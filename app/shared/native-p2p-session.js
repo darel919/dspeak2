@@ -68,6 +68,8 @@ export class NativeP2pSession {
     this.localPeerId = "";
     this.closed = false;
     this.operation = Promise.resolve();
+    this.pendingSignals = new Map();
+    this.pendingSignalLimit = 256;
   }
 
   async applyTopology(topology = {}) {
@@ -89,12 +91,17 @@ export class NativeP2pSession {
         if (!expected.has(peerId)) await this._closePeer(peerId);
       for (const [peerId, peer] of expected)
         await this._ensurePeer(peerId, peer.userId, peer.sources);
+      await this._flushPendingSignals();
       this._emitState();
     });
   }
 
   async addSource(entry) {
     if (!entry?.source) return false;
+    return this._enqueue(() => this.addSourceInternal(entry));
+  }
+
+  async addSourceInternal(entry) {
     const previous = this.sources.get(String(entry.source));
     const normalized = {
       source: String(entry.source),
@@ -130,6 +137,10 @@ export class NativeP2pSession {
   }
 
   async removeSource(source) {
+    return this._enqueue(() => this.removeSourceInternal(source));
+  }
+
+  async removeSourceInternal(source) {
     const key = String(source || "");
     this.sources.delete(key);
     await Promise.all(
@@ -156,10 +167,42 @@ export class NativeP2pSession {
   }
 
   async handleSignal(data = {}) {
+    const epoch = Number(data.epoch);
+    const peerId = asPeerId(data.fromPeerId);
+    if (!Number.isSafeInteger(epoch) || !data.signal) return false;
+    if (epoch < this.epoch) return false;
+    if (epoch > this.epoch || !this.peers.has(peerId)) {
+      this.queuePendingSignal(data);
+      return true;
+    }
+    return this._enqueue(() => this.handleSignalInternal(data));
+  }
+
+  queuePendingSignal(data) {
+    const epoch = Number(data?.epoch);
+    if (!Number.isSafeInteger(epoch) || epoch < this.epoch) return false;
+    const pending = this.pendingSignals.get(epoch) || [];
+    if (pending.length >= this.pendingSignalLimit) pending.shift();
+    pending.push(data);
+    this.pendingSignals.set(epoch, pending);
+    return true;
+  }
+
+  async _flushPendingSignals() {
+    const pending = this.pendingSignals.get(this.epoch);
+    if (!pending?.length) return;
+    this.pendingSignals.delete(this.epoch);
+    for (const data of pending)
+      if (this.peers.has(asPeerId(data.fromPeerId)))
+        await this.handleSignalInternal(data);
+  }
+
+  async handleSignalInternal(data = {}) {
     const peerId = asPeerId(data.fromPeerId);
     if (!peerId || Number(data.epoch) !== this.epoch || !data.signal)
       return false;
-    const peer = await this._ensurePeer(peerId, data.userId);
+    const peer = this.peers.get(peerId);
+    if (!peer) return false;
     const signal = data.signal;
     if (signal.source) {
       const trackId = String(signal.source.trackId || "");
@@ -281,6 +324,7 @@ export class NativeP2pSession {
   async closeAll() {
     for (const peerId of [...this.peers.keys()]) await this._closePeer(peerId);
     this.trackEntries.clear();
+    this.pendingSignals.clear();
     this._emitState();
   }
 

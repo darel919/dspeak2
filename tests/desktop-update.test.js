@@ -25,4 +25,5 @@ test("desktop updater does not query release updates during dev startup", () => 
 test("desktop update prompt can be dismissed after an install error", () => {
   assert.match(prompt, /!deferred\.value/);
   assert.match(prompt, /status\.value === "error"/);
+  assert.match(prompt, /desktopRuntime\.value &&/);
 });

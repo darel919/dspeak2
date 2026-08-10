@@ -134,6 +134,8 @@ describe("NativeMediasoupSfuSession", () => {
     try {
       const pending = session._handleProviderTicket({
         provider: "mediasoup",
+        epoch: 1,
+        sourceRevision: 0,
         signalingUrl: "wss://sfu.example.com/v1/ws",
         ticket: "ticket",
       });
@@ -145,6 +147,70 @@ describe("NativeMediasoupSfuSession", () => {
       session.providerSignaling?.close();
       globalThis.WebSocket = previousWebSocket;
     }
+  });
+
+  it("ignores provider tickets older than the current topology", async () => {
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.topologyState = { epoch: 4, sourceRevision: 2 };
+
+    const handled = await session._handleProviderTicket({
+      provider: "mediasoup",
+      epoch: 3,
+      sourceRevision: 2,
+      signalingUrl: "wss://sfu.example.com/v1/ws",
+      ticket: "stale-ticket",
+    });
+
+    assert.equal(handled, false);
+    assert.equal(session.providerSignaling, null);
+  });
+
+  it("reports a native Cloudflare activation failure to the control plane", async () => {
+    const messages = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.topologyState = { epoch: 4, sourceRevision: 2 };
+    session.activateProvider = async () => {
+      throw new Error("native Cloudflare unavailable");
+    };
+    session.signaling = {
+      send(message) {
+        messages.push(message);
+        return true;
+      },
+    };
+
+    await assert.rejects(
+      session._handleProviderTicket({
+        provider: "cloudflare-realtime",
+        epoch: 4,
+        sourceRevision: 2,
+      }),
+      /native Cloudflare unavailable/,
+    );
+
+    assert.equal(messages[0]?.type, "provider-failure");
+    assert.equal(messages[0]?.data.epoch, 4);
+    assert.equal(messages[0]?.data.sourceRevision, 2);
+  });
+
+  it("does not attribute a pending provider failure to the active SFU", () => {
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.activeSfuProvider = "cloudflare-realtime";
+    session.selectedProvider = "mediasoup";
+    session.messageHandlers.get("provider-failure")({
+      provider: "mediasoup",
+      epoch: 4,
+      reason: "pending-provider-failed",
+    });
+
+    assert.equal(session.mediaConnectionState, "disconnected");
+    assert.equal(session.connectionPhase, "idle");
   });
 
   it("attaches native local video frames to the camera feed", async () => {

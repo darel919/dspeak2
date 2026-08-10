@@ -7,7 +7,6 @@ export function hasUsableVoiceRoute({
   transportReady,
 }) {
   if (!signalingConnected) return false;
-  if (transportReady) return true;
   if (activeProvider === "p2p") return p2pReady === true;
   if (activeProvider === "sfu") return sfuReady === true;
   return topologyMode === "idle" && transportReady === true;

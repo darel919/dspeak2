@@ -81,23 +81,36 @@ function presentBuild(build) {
   };
 }
 
-function summarizeCommit(value) {
+function pullRequestFromMessage(message, repository) {
+  const match = String(message || "").match(
+    /(?:merge pull request\s+#|in\s+#|\(#)(\d{1,9})\b/i,
+  );
+  if (!match) return null;
+  return {
+    number: Number(match[1]),
+    url: `https://github.com/${repository}/pull/${match[1]}`,
+  };
+}
+
+function summarizeCommit(value, repository) {
   const commit = value && typeof value === "object" ? value : {};
   const details =
     commit.commit && typeof commit.commit === "object" ? commit.commit : {};
   const sha = normalizeCommit(commit.sha, { short: true });
   if (!sha) return null;
   const author = commit.author?.login || details.author?.name;
+  const message = boundedString(
+    String(details.message || "").split("\n", 1)[0],
+    240,
+  );
   return {
     sha,
     shortSha: sha.slice(0, 7),
-    message: boundedString(
-      String(details.message || "").split("\n", 1)[0],
-      240,
-    ),
+    message,
     author: boundedString(author, 120),
     date: boundedString(details.author?.date || commit.committer?.date, 80),
     url: safeGithubUrl(commit.html_url),
+    pullRequest: pullRequestFromMessage(message, repository),
   };
 }
 
@@ -115,15 +128,15 @@ function summarizeFile(value) {
   };
 }
 
-function summarizeLatest(value) {
-  return summarizeCommit(value);
+function summarizeLatest(value, repository) {
+  return summarizeCommit(value, repository);
 }
 
-function summarizeComparison(value) {
+function summarizeComparison(value, repository) {
   const comparison = value && typeof value === "object" ? value : {};
   const commits = Array.isArray(comparison.commits)
     ? comparison.commits
-        .map(summarizeCommit)
+        .map((commit) => summarizeCommit(commit, repository))
         .filter(Boolean)
         .slice(0, MAX_COMMITS)
     : [];
@@ -132,6 +145,7 @@ function summarizeComparison(value) {
     : [];
   return {
     status: boundedString(comparison.status, 40),
+    url: safeGithubUrl(comparison.html_url),
     aheadBy: Number.isFinite(Number(comparison.ahead_by))
       ? Number(comparison.ahead_by)
       : null,
@@ -208,7 +222,7 @@ async function queryRepositoryUpdate({
     repository,
     `commits/${encodeURIComponent(branch)}`,
   );
-  const latest = summarizeLatest(latestResponse);
+  const latest = summarizeLatest(latestResponse, repository);
   if (!latest)
     throw new Error("Repository update response did not include a commit");
 
@@ -220,7 +234,7 @@ async function queryRepositoryUpdate({
         repository,
         `compare/${encodeURIComponent(`${comparisonBase}...${branch}`)}`,
       );
-      comparison = summarizeComparison(comparisonResponse);
+      comparison = summarizeComparison(comparisonResponse, repository);
     } catch {
       comparison = null;
     }

@@ -39,9 +39,20 @@ export function topologyEventKey(event) {
   return `${Number(event.epoch)}:${event.mode}:${event.target || ""}:${Number(event.sourceRevision) || 0}`;
 }
 
-export function shouldAcceptTopologyEvent(event, highestQueuedEpoch) {
+export function shouldAcceptTopologyEvent(
+  event,
+  highestQueuedEpoch,
+  highestQueuedSourceRevision = 0,
+) {
   const epoch = Number(event.epoch);
-  return Number.isInteger(epoch) && epoch >= 0 && epoch >= highestQueuedEpoch;
+  const sourceRevision = Number(event.sourceRevision) || 0;
+  return (
+    Number.isInteger(epoch) &&
+    epoch >= 0 &&
+    (epoch > highestQueuedEpoch ||
+      (epoch === highestQueuedEpoch &&
+        sourceRevision >= highestQueuedSourceRevision))
+  );
 }
 
 export function matchesPreparedActivation(prepared, activation, target) {

@@ -10,7 +10,74 @@ import {
   hasNativeCapability,
 } from "./native-media-engine-common.js";
 
-export async function handleNativeTopology(engine, topology = {}) {
+const NATIVE_MEDIA_READINESS_TIMEOUT_MS = 10_000;
+const NATIVE_MEDIA_READINESS_POLL_MS = 100;
+
+function expectedInboundSources(topology, localPeerId) {
+  return (Array.isArray(topology.peers) ? topology.peers : [])
+    .filter((peer) => String(peer.peerId || "") !== String(localPeerId || ""))
+    .reduce(
+      (count, peer) =>
+        count + (Array.isArray(peer.sources) ? peer.sources.length : 0),
+      0,
+    );
+}
+
+function nativeTopologyKey(topology, provider) {
+  return `${String(topology.mode || "idle")}:${topology.epoch}:${String(topology.target || "")}:${provider}:${topology.sourceRevision}`;
+}
+
+function isCurrentNativeTopology(engine, topologyKey, generation) {
+  return (
+    engine.nativeTopologyKey === topologyKey &&
+    engine.nativeTopologyGeneration === generation
+  );
+}
+
+function assertCurrentNativeTopology(engine, topologyKey, generation) {
+  if (isCurrentNativeTopology(engine, topologyKey, generation)) return;
+  const error = new Error("Native topology operation was superseded");
+  error.code = "NATIVE_TOPOLOGY_SUPERSEDED";
+  throw error;
+}
+
+async function waitForNativeMediaReadiness(
+  engine,
+  topology,
+  provider,
+  topologyKey,
+  generation,
+) {
+  const mediaSession =
+    provider === "p2p" ? engine.nativeP2pSession : engine.nativeSession;
+  if (typeof mediaSession?.mediaReadiness !== "function") return true;
+  const localPeerId =
+    topology.localPeerId ||
+    mediaSession.localPeerId ||
+    engine.nativeSession?.localPeerId;
+  const topologyInbound = expectedInboundSources(topology, localPeerId);
+  const startedAt = Date.now();
+  let latest = null;
+  while (Date.now() - startedAt < NATIVE_MEDIA_READINESS_TIMEOUT_MS) {
+    assertCurrentNativeTopology(engine, topologyKey, generation);
+    const observedInbound = Number(
+      mediaSession.expectedInboundFlowCount?.() || 0,
+    );
+    latest = await mediaSession.mediaReadiness(
+      Math.max(topologyInbound, observedInbound),
+    );
+    assertCurrentNativeTopology(engine, topologyKey, generation);
+    if (latest?.ready === true) return latest;
+    await new Promise((resolve) =>
+      setTimeout(resolve, NATIVE_MEDIA_READINESS_POLL_MS),
+    );
+  }
+  throw new Error(
+    `Native ${provider} media did not become ready for handoff (outbound ${latest?.outboundFlowing || 0}/${latest?.outboundExpected || 0}, inbound ${latest?.inboundFlowing || 0}/${latest?.inboundExpected || topologyInbound})`,
+  );
+}
+
+export function handleNativeTopology(engine, topology = {}) {
   const mode = String(topology.mode || "idle");
   const target = String(topology.target || "");
   const provider = String(
@@ -20,35 +87,108 @@ export async function handleNativeTopology(engine, topology = {}) {
       engine.nativeSession?.selectedProvider ||
       "mediasoup",
   );
-  const topologyKey = `${mode}:${topology.epoch}:${target}:${provider}:${topology.sourceRevision}`;
-  if (engine.nativeTopologyKey === topologyKey) return;
+  const topologyKey = nativeTopologyKey(topology, provider);
+  if (engine.nativeTopologyKey === topologyKey)
+    return engine.nativeTopologyOperation || Promise.resolve();
+  const generation = (Number(engine.nativeTopologyGeneration) || 0) + 1;
+  engine.nativeTopologyGeneration = generation;
   engine.nativeTopologyKey = topologyKey;
+  const previousOperation = engine.nativeTopologyOperation || Promise.resolve();
+  const operation = previousOperation
+    .catch(() => {})
+    .then(() =>
+      applyNativeTopology(engine, topology, provider, topologyKey, generation),
+    );
+  const tracked = operation.finally(() => {
+    if (engine.nativeTopologyOperation === tracked)
+      engine.nativeTopologyOperation = null;
+  });
+  engine.nativeTopologyOperation = tracked;
+  tracked.catch(() => {});
+  return tracked;
+}
+
+async function applyNativeTopology(
+  engine,
+  topology,
+  provider,
+  topologyKey,
+  generation,
+) {
+  const mode = String(topology.mode || "idle");
+  const target = String(topology.target || "");
   const direct = mode === "probing" || mode === "p2p" || target === "p2p";
   const p2pTopology = {
     ...topology,
     mode: mode === "switching" && target === "p2p" ? "p2p" : mode,
   };
+  let fallbackActivationFailed = false;
   try {
+    assertCurrentNativeTopology(engine, topologyKey, generation);
     if (direct) {
-      await engine.nativeSession?.activateProvider?.("mediasoup");
+      if (
+        mode === "probing" &&
+        provider === "cloudflare-realtime" &&
+        !engine.nativeSession?.activeSfuProvider
+      ) {
+        try {
+          await engine.nativeSession?.activateProvider?.(provider);
+          assertCurrentNativeTopology(engine, topologyKey, generation);
+          await waitForNativeMediaReadiness(
+            engine,
+            topology,
+            "sfu",
+            topologyKey,
+            generation,
+          );
+        } catch (error) {
+          fallbackActivationFailed = true;
+          throw error;
+        }
+      }
       await engine.nativeP2pSession?.applyTopology(p2pTopology);
-      if (mode === "p2p") engine.nativeProvider = "p2p";
+      assertCurrentNativeTopology(engine, topologyKey, generation);
+      if (mode === "p2p") {
+        await engine.nativeSession?.activateProvider?.("mediasoup");
+        assertCurrentNativeTopology(engine, topologyKey, generation);
+        await waitForNativeMediaReadiness(
+          engine,
+          topology,
+          "p2p",
+          topologyKey,
+          generation,
+        );
+        engine.nativeProvider = "p2p";
+      } else if (mode === "switching" && target === "p2p")
+        await waitForNativeMediaReadiness(
+          engine,
+          topology,
+          "p2p",
+          topologyKey,
+          generation,
+        );
     } else {
       await engine.nativeP2pSession?.applyTopology({
         ...p2pTopology,
         mode: "idle",
       });
+      assertCurrentNativeTopology(engine, topologyKey, generation);
       if (mode === "sfu" || target === "sfu") {
         await engine.nativeSession?.activateProvider?.(provider);
-        if (mode === "switching" && target === "sfu")
-          await engine.nativeSession?.cloudflareSession?.waitForRemoteTracks?.(
-            topology,
-          );
+        assertCurrentNativeTopology(engine, topologyKey, generation);
+        await waitForNativeMediaReadiness(
+          engine,
+          topology,
+          "sfu",
+          topologyKey,
+          generation,
+        );
       } else if (mode === "idle") {
         await engine.nativeSession?.activateProvider?.("mediasoup");
       }
       engine.nativeProvider = "sfu";
     }
+    assertCurrentNativeTopology(engine, topologyKey, generation);
     engine._syncNativeFeeds();
     if (mode === "switching" && (target === "p2p" || target === "sfu")) {
       engine.nativeSession?.signaling?.send?.({
@@ -61,7 +201,40 @@ export async function handleNativeTopology(engine, topology = {}) {
       });
     }
   } catch (error) {
-    if (direct) reportNativeP2pFailure(engine, error);
+    if (
+      error?.code === "NATIVE_TOPOLOGY_SUPERSEDED" ||
+      !isCurrentNativeTopology(engine, topologyKey, generation)
+    )
+      return;
+    if (fallbackActivationFailed)
+      engine.nativeSession?.signaling?.send?.({
+        type: "provider-failure",
+        data: {
+          provider,
+          epoch: topology.epoch,
+          sourceRevision: topology.sourceRevision,
+          reason: error?.message || "native-sfu-fallback-failed",
+        },
+      });
+    else if (direct) reportNativeP2pFailure(engine, error);
+    else if (target === "sfu" || mode === "sfu")
+      engine.nativeSession?.signaling?.send?.({
+        type: mode === "switching" ? "topology-failed" : "provider-failure",
+        data:
+          mode === "switching"
+            ? {
+                epoch: topology.epoch,
+                target: "sfu",
+                sourceRevision: topology.sourceRevision,
+                reason: error?.message || "native-sfu-transition-failed",
+              }
+            : {
+                provider,
+                epoch: topology.epoch,
+                sourceRevision: topology.sourceRevision,
+                reason: error?.message || "native-sfu-activation-failed",
+              },
+      });
     engine._emit("error", { source: "native-p2p", error });
     throw error;
   }
@@ -87,6 +260,15 @@ export function reportNativeP2pFailure(engine, error) {
 export async function setTopology(engine, topology) {
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) return;
   await handleNativeTopology(engine, topology);
+  const provider = String(
+    topology.provider ||
+      topology.targetProvider ||
+      topology.route?.provider ||
+      engine.nativeSession?.selectedProvider ||
+      "mediasoup",
+  );
+  if (engine.nativeTopologyKey !== nativeTopologyKey(topology, provider))
+    return;
   await engine._invoke("media_set_topology", { topology }).catch(() => {});
 }
 
@@ -97,6 +279,11 @@ export async function setIceServers(engine, iceServers) {
 
 export async function shutdown(engine) {
   engine._stopNativeActionPump();
+  engine.nativeTopologyGeneration =
+    (Number(engine.nativeTopologyGeneration) || 0) + 1;
+  engine.nativeTopologyKey = null;
+  await engine.nativeTopologyOperation?.catch(() => {});
+  engine.nativeTopologyOperation = null;
   if (engine.flags.nativeRtc && hasNativeCapability(engine.flags)) {
     await engine.nativeSession?.disconnect().catch(() => undefined);
     await engine.nativeP2pSession?.shutdown().catch(() => undefined);

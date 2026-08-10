@@ -112,7 +112,7 @@ test("an active healthy route remains usable during a topology switch", () => {
   );
 });
 
-test("a prepared transport completes join while route selection continues", () => {
+test("a prepared transport is not reported as media-ready without an active route", () => {
   assert.equal(
     hasUsableVoiceRoute({
       activeProvider: null,
@@ -122,6 +122,6 @@ test("a prepared transport completes join while route selection continues", () =
       topologyMode: "switching",
       transportReady: true,
     }),
-    true,
+    false,
   );
 });

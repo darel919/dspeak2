@@ -173,6 +173,8 @@ export class NativeMediaEngine extends MediaEngine {
     this.nativeProvider = "sfu";
     this.nativeP2pFailureEpoch = null;
     this.nativeTopologyKey = null;
+    this.nativeTopologyGeneration = 0;
+    this.nativeTopologyOperation = null;
     this.onQoe = onQoe;
     this.qoeTimer = null;
     this.nativeAuthToken = "";

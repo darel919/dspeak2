@@ -75,6 +75,7 @@ export class MediasoupClientSession {
     this.sources = new Map();
     this.producers = new Map();
     this.sourcePublications = new Map();
+    this.sourceOperations = new Map();
     this.consumers = new Map();
     this.pending = new Map();
     this.pendingProduce = new Map();
@@ -138,17 +139,17 @@ export class MediasoupClientSession {
     if (this.closed) return false;
     if (type === "rtp-capabilities") {
       if (data.requestId !== this.initializationRequestId) return false;
-      const mediaRevision = this.mediaRevision;
-      this.device = new Device();
-      await this.device.load({ routerRtpCapabilities: data });
-      if (
-        this.closed ||
-        mediaRevision !== this.mediaRevision ||
-        data.requestId !== this.initializationRequestId
-      )
-        return false;
-      this.lastSentClientRtpCapabilities = this.device.rtpCapabilities;
       try {
+        const mediaRevision = this.mediaRevision;
+        this.device = new Device();
+        await this.device.load({ routerRtpCapabilities: data });
+        if (
+          this.closed ||
+          mediaRevision !== this.mediaRevision ||
+          data.requestId !== this.initializationRequestId
+        )
+          return false;
+        this.lastSentClientRtpCapabilities = this.device.rtpCapabilities;
         this.sendOrThrow(
           {
             type: "client-rtp-capabilities",
@@ -176,17 +177,22 @@ export class MediasoupClientSession {
     if (type === "transport-params") {
       if (this.transportRequestIds.get(data.direction) !== data.requestId)
         return false;
-      this.transportRequestIds.delete(data.direction);
-      this.createTransport(data);
-      if (this.sendTransport && this.recvTransport) {
-        clearTimeout(this.initializationTimer);
-        this.initializationTimer = null;
-        this.readyResolve?.();
-        this.readyResolve = null;
-        this.readyReject = null;
-        for (const entry of this.sources.values()) await this.publish(entry);
-        for (const producerId of [...this.pendingConsumers])
-          this.requestConsumer(producerId);
+      try {
+        this.transportRequestIds.delete(data.direction);
+        this.createTransport(data);
+        if (this.sendTransport && this.recvTransport) {
+          clearTimeout(this.initializationTimer);
+          this.initializationTimer = null;
+          this.readyResolve?.();
+          this.readyResolve = null;
+          this.readyReject = null;
+          for (const entry of this.sources.values()) await this.publish(entry);
+          for (const producerId of [...this.pendingConsumers])
+            this.requestConsumer(producerId);
+        }
+      } catch (error) {
+        this.rejectReadiness(error);
+        throw error;
       }
       return true;
     }
@@ -396,6 +402,27 @@ export class MediasoupClientSession {
   }
 
   async addSource(entry) {
+    if (!entry?.source)
+      throw new Error("A media source identifier is required");
+    const source = String(entry.source);
+    return this.enqueueSourceOperation(source, () =>
+      this.addSourceInternal(entry),
+    );
+  }
+
+  enqueueSourceOperation(source, operation) {
+    const previous = this.sourceOperations.get(source) || Promise.resolve();
+    const task = previous.catch(() => {}).then(operation);
+    const tracked = task.finally(() => {
+      if (this.sourceOperations.get(source) === tracked)
+        this.sourceOperations.delete(source);
+    });
+    this.sourceOperations.set(source, tracked);
+    tracked.catch(() => {});
+    return tracked;
+  }
+
+  async addSourceInternal(entry) {
     const previousSource = this.sources.get(entry.source);
     const existing = this.producers.get(entry.source);
     if (existing) {
@@ -510,17 +537,28 @@ export class MediasoupClientSession {
     return producer;
   }
 
-  removeSource(source) {
+  async removeSource(source) {
+    const key = String(source || "");
+    return this.enqueueSourceOperation(key, () =>
+      this.removeSourceInternal(key),
+    );
+  }
+
+  async removeSourceInternal(source) {
     this.sources.delete(source);
     const entry = this.producers.get(source);
     if (!entry) return;
     this.producers.delete(source);
-    this.send({
+    const sent = this.send({
       type: "close-producer",
       data: { producerId: entry.producer.id },
     });
     entry.producer.close();
     entry.track.stop();
+    if (sent === false) {
+      this.closeMedia();
+      throw new Error("Media control is unavailable");
+    }
   }
 
   async updateAudioBitrate(source, maxBitrate) {
@@ -647,8 +685,16 @@ export class MediasoupClientSession {
           this.jitterBufferTargetDelay ?? 20;
     } catch (_) {}
     this.applyJitterBufferConfig(entry);
-    if (this.shouldReceive(data.userId, entry.source))
-      await this.setConsumerReceiving(entry, true);
+    try {
+      if (this.shouldReceive(data.userId, entry.source))
+        await this.setConsumerReceiving(entry, true);
+    } catch (error) {
+      try {
+        consumer.close();
+      } catch {}
+      close();
+      throw error;
+    }
     this.onRemoteTrack?.(entry);
   }
 

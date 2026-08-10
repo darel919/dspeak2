@@ -78,6 +78,9 @@ export class NativeP2pMesh {
     this.healthRunToken = 0;
     this.senderOperations = new WeakMap();
     this.trackOperations = new WeakMap();
+    this.sourceOperations = new Map();
+    this.pendingSignals = new Map();
+    this.pendingSignalLimit = 256;
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
   }
@@ -90,6 +93,8 @@ export class NativeP2pMesh {
     this.epoch = Number(epoch) || 0;
     this.localPeerId = String(localPeerId || this.localPeerId || "");
     this.readyReported = false;
+    for (const pendingEpoch of this.pendingSignals.keys())
+      if (pendingEpoch < this.epoch) this.pendingSignals.delete(pendingEpoch);
     if (`${this.epoch}:${this.mode}` !== previousFailureKey)
       this.failureReportedKey = null;
     const expected = new Set(
@@ -118,11 +123,36 @@ export class NativeP2pMesh {
         this.resynchronizeEpoch(existingPeerIds);
       this.startHealthChecks();
       if (mode === "probing") this.startQualificationTimeout();
+      void this.flushPendingSignals();
     } else {
       this.stopHealthChecks();
       if (mode === "idle") this.closeAll();
     }
     this.emitSnapshot();
+  }
+
+  queuePendingSignal(payload) {
+    const epoch = Number(payload?.epoch);
+    if (!Number.isSafeInteger(epoch) || epoch < this.epoch) return false;
+    const pending = this.pendingSignals.get(epoch) || [];
+    if (pending.length >= this.pendingSignalLimit) pending.shift();
+    pending.push(payload);
+    this.pendingSignals.set(epoch, pending);
+    return true;
+  }
+
+  async flushPendingSignals() {
+    const pending = this.pendingSignals.get(this.epoch);
+    if (!pending?.length) return;
+    this.pendingSignals.delete(this.epoch);
+    for (const payload of pending) {
+      if (this.mode !== "probing" && this.mode !== "p2p") continue;
+      try {
+        await this.receiveSignal(payload);
+      } catch (error) {
+        this.fail("signaling-failed", error);
+      }
+    }
   }
 
   resynchronizeEpoch(peerIds = null) {
@@ -320,6 +350,26 @@ export class NativeP2pMesh {
   }
 
   async publishSource(source, track, stream) {
+    const key = String(source || "");
+    if (!key) throw new Error("A P2P source identifier is required");
+    return this.enqueueSourceOperation(key, () =>
+      this.publishSourceInternal(key, track, stream),
+    );
+  }
+
+  enqueueSourceOperation(source, operation) {
+    const previous = this.sourceOperations.get(source) || Promise.resolve();
+    const task = previous.catch(() => {}).then(operation);
+    const tracked = task.finally(() => {
+      if (this.sourceOperations.get(source) === tracked)
+        this.sourceOperations.delete(source);
+    });
+    this.sourceOperations.set(source, tracked);
+    tracked.catch(() => {});
+    return tracked;
+  }
+
+  async publishSourceInternal(source, track, stream) {
     this.localSources.set(source, { track, stream });
     await Promise.all(
       [...this.connections.values()].map((state) =>
@@ -470,6 +520,13 @@ export class NativeP2pMesh {
   }
 
   async unpublishSource(source) {
+    const key = String(source || "");
+    return this.enqueueSourceOperation(key, () =>
+      this.unpublishSourceInternal(key),
+    );
+  }
+
+  async unpublishSourceInternal(source) {
     this.localSources.delete(source);
     await Promise.all(
       [...this.connections.values()].map(async (state) => {
@@ -695,6 +752,7 @@ export class NativeP2pMesh {
     for (const peerId of [...this.connections.keys()])
       this.closeConnection(peerId);
     this.remoteSources.clear();
+    this.pendingSignals.clear();
     this.readyReported = false;
   }
 }
