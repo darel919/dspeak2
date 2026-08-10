@@ -130,28 +130,11 @@ export function createVoiceParticipantState({
   }
 
   function getDisplayUsersArray() {
-    const knownIds = new Set(userDirectory.value.keys());
-    const liveAudioIds = new Set();
-    if (typeof document !== "undefined")
-      document
-        .getElementById("webrtc-audio-global")
-        ?.querySelectorAll("audio")
-        .forEach((element) => {
-          const userId = element.getAttribute("data-user-id");
-          if (userId) liveAudioIds.add(userId);
-        });
     const result = [];
     const seen = new Set();
     for (const user of connectedUsers.value.values()) {
       const userId = String(user.id);
-      const isUuid =
-        /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(
-          userId,
-        );
-      if (
-        !seen.has(userId) &&
-        (knownIds.has(userId) || liveAudioIds.has(userId) || !isUuid)
-      ) {
+      if (!seen.has(userId)) {
         seen.add(userId);
         result.push(user);
       }

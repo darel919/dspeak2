@@ -21,6 +21,7 @@ function makeView(overrides = {}) {
       getP2pEdges: () => edges.value,
       getP2pMesh: () => null,
       getSfu: () => null,
+      getParticipantProfile: () => ({ display_name: "Remote user" }),
       mapPeerConnectionMetrics: () => state.peerConnectionMetrics.value,
       mapPeerRoundTripTimes: () => state.peerRoundTripTimes.value,
       mediaPathMetrics: state.mediaPathMetrics,
@@ -44,6 +45,7 @@ function makeView(overrides = {}) {
         addConnectedUser: () => {},
         removeConnectedUser: () => {},
         getConnectedUsersArray: () => [],
+        upsertUserProfile: () => {},
       },
       ...overrides,
     }),
@@ -91,5 +93,30 @@ describe("media-topology-view", () => {
     });
     fallback.view.updateP2pStats([{ peerId: "peer1", rtt: 50 }]);
     assert.strictEqual(fallback.state.mediaPathMetrics.value.length, 0);
+  });
+
+  it("synchronizes topology participant objects and hydrates their profiles", () => {
+    const added = [];
+    const profiles = [];
+    const removed = [];
+    const { view } = makeView({
+      voiceStore: {
+        isUserConnected: () => false,
+        addConnectedUser: (userId, user) => added.push([userId, user]),
+        removeConnectedUser: (userId) => removed.push(userId),
+        getConnectedUsersArray: () => [],
+        upsertUserProfile: (profile) => profiles.push(profile),
+      },
+    });
+
+    view.syncConnectedUsers([
+      { peerId: "peer-1", userId: "user-1", sources: ["audio"] },
+    ]);
+
+    assert.deepEqual(added, [
+      ["user-1", { display_name: "Remote user", id: "user-1" }],
+    ]);
+    assert.deepEqual(profiles, [{ display_name: "Remote user", id: "user-1" }]);
+    assert.deepEqual(removed, []);
   });
 });

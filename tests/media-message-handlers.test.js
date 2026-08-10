@@ -210,6 +210,40 @@ test("route commits preserve the authoritative route epoch and mode", () => {
   });
 });
 
+test("topology rosters synchronize participants without legacy presence events", () => {
+  const handlers = new Map();
+  const synchronized = [];
+  setupMediaMessageHandlers({
+    ensureP2p: () => null,
+    getHeartbeatSequence: () => 0,
+    getLastHeartbeatAckSequence: () => 0,
+    getSfu: () => null,
+    getSocket: () => null,
+    lastInRoom: { value: [] },
+    participantSfuRoundTripTimes: { value: {} },
+    queueTopology: () => {},
+    registerHandler: (type, handler) => handlers.set(type, handler),
+    remoteProducersCount: { value: 0 },
+    setHeartbeatAck: () => {},
+    setLocalPeerId: () => {},
+    sfuProducerIds: () => [],
+    syncConnectedUsers: (participants) => synchronized.push(participants),
+    voiceStore: {
+      updateUserVoiceState: () => {},
+      upsertUserProfile: () => {},
+    },
+  });
+
+  const peers = [
+    { peerId: "peer-local", userId: "user-local", sources: [] },
+    { peerId: "peer-remote", userId: "user-remote", sources: ["audio"] },
+  ];
+  handlers.get("topology-state")({ peers });
+  handlers.get("route-commit")({ participants: peers });
+
+  assert.deepEqual(synchronized, [peers, peers]);
+});
+
 test("P2P qualification acknowledgements retain their message kind", () => {
   const handlers = new Map();
   const acknowledgements = [];

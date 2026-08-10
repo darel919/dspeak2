@@ -46,15 +46,21 @@ export function setupMediaMessageHandlers({
     acknowledgeHeartbeat(data);
   });
   registerHandler("heartbeat-nack", (data) => {
-    if (acknowledgeHeartbeat(data) && data.topology)
+    if (acknowledgeHeartbeat(data) && data.topology) {
+      syncTopologyParticipants(data.topology);
       queueTopology(data.topology);
+    }
   });
-  registerHandler("topology-state", queueTopology);
-  registerHandler("route-commit", (data) =>
-    queueTopology(
+  registerHandler("topology-state", (data) => {
+    syncTopologyParticipants(data);
+    return queueTopology(data);
+  });
+  registerHandler("route-commit", (data) => {
+    syncTopologyParticipants(data);
+    return queueTopology(
       data.route ? { ...data, ...data.route, route: data.route } : data,
-    ),
-  );
+    );
+  });
   registerHandler("error919", (data) => {
     mediaDebug("control.error", {
       code: data?.code,
@@ -170,5 +176,14 @@ export function setupMediaMessageHandlers({
       return false;
     setHeartbeatAck(sequence, Date.now());
     return true;
+  }
+
+  function syncTopologyParticipants(data) {
+    const participants = Array.isArray(data?.peers)
+      ? data.peers
+      : Array.isArray(data?.participants)
+        ? data.participants
+        : null;
+    if (participants) syncConnectedUsers(participants);
   }
 }
