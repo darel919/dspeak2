@@ -92,16 +92,18 @@ export function installHandlers(session) {
     session._emitState();
   });
   session.messageHandlers.set("provider-failure", (data) => {
-    if (data?.provider === session.selectedProvider) {
+    if (data?.provider === session.activeSfuProvider) {
       session.mediaConnectionState = "recovering";
       session.connectionPhase = "reconnecting";
       session._emitState();
     }
   });
   session.messageHandlers.set("provider-draining", (data) => {
+    if (session.activeSfuProvider !== "mediasoup") return;
     const failure = {
       provider: "mediasoup",
       epoch: Number(session.topologyState?.epoch) || 0,
+      sourceRevision: Number(session.topologyState?.sourceRevision) || 0,
       reason: data?.reason || "provider-draining",
     };
     session.signaling?.send?.({ type: "provider-failure", data: failure });

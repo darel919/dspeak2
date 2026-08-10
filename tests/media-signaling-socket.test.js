@@ -334,7 +334,7 @@ test("a synchronous WebSocket construction failure schedules recovery", async ()
   }
 });
 
-test("a reconnect callback failure cannot stop socket recovery", async () => {
+test("a reconnect callback failure does not reopen with stale credentials", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket;
   resetFakeWebSocket();
@@ -358,7 +358,42 @@ test("a reconnect callback failure cannot stop socket recovery", async () => {
     await new Promise((resolve) => setTimeout(resolve, 8));
 
     assert.ok(errors.includes("UI reconnect callback failed"));
-    assert.ok(FakeWebSocket.instances.length >= 2);
+    assert.equal(FakeWebSocket.instances.length, 1);
+    intentionalClose = true;
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("media signaling waits for asynchronous reconnect preparation", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  const events = [];
+  let intentionalClose = false;
+  try {
+    const signaling = harness({
+      isIntentionalClose: () => intentionalClose,
+      onReconnect: async () => {
+        events.push("refresh-start");
+        await new Promise((resolve) => setTimeout(resolve, 3));
+        events.push("refresh-end");
+      },
+      reconnectBaseDelayMs: 1,
+      reconnectJitterMs: 0,
+      reconnectMaxDelayMs: 1,
+    });
+    const opening = signaling.open();
+    FakeWebSocket.instances[0].onclose({
+      code: 4000,
+      reason: "network changed",
+    });
+    await assert.rejects(opening, /connection closed/);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.deepEqual(events, ["refresh-start", "refresh-end"]);
+    assert.equal(FakeWebSocket.instances.length, 2);
     intentionalClose = true;
     signaling.stop();
   } finally {

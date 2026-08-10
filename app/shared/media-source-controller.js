@@ -52,6 +52,10 @@ export function createMediaSourceController({
       if (sourceError?.code === "MEDIA_SESSION_CLOSED") return;
       error.value =
         sourceError?.message || `Unable to stop ${source} publication`;
+      if (getActiveProvider() === "sfu" || topologyState.value.mode === "sfu")
+        reportSfuFailure(
+          `source-${source}-remove-failed-${sourceError?.message || "unknown"}`,
+        );
     };
     try {
       Promise.resolve(getSfu()?.removeSource(source)).catch(reportError);

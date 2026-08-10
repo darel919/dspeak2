@@ -1,34 +1,46 @@
 <template>
   <Transition name="update-prompt">
     <aside
-      v-if="!desktopRuntime && updateAvailable"
+      v-if="promptVisible"
       class="fixed inset-x-4 bottom-4 z-[100] mx-auto max-w-xl"
       aria-live="assertive"
       aria-label="Application update available"
     >
-      <div class="metro-status metro-flyout border-info bg-base-100 text-info">
+      <div
+        class="metro-status metro-flyout items-start border-info bg-base-100 text-info"
+      >
         <Icon name="lucide:refresh-cw" class="h-6 w-6 shrink-0" />
         <div class="min-w-0 flex-1">
-          <h2 class="font-semibold">A dSpeak update is ready</h2>
+          <h2 class="font-semibold">Update {{ updateVersion }} is ready</h2>
           <p class="text-sm">
-            Restart when convenient to use the latest fixes and features.
+            Refresh when convenient to load the latest fixes and features.
           </p>
           <UpdateDetails
             :snapshot="repositorySnapshot"
             :current-build="currentBuild"
           />
         </div>
-        <button
-          class="metro-btn metro-btn--sm btn-primary"
-          :disabled="isRefreshing"
-          @click="refreshUpdate"
-        >
-          <span
-            v-if="isRefreshing"
-            class="metro-spinner metro-spinner--xs"
-          ></span>
-          {{ isRefreshing ? "Restarting…" : "Restart now" }}
-        </button>
+        <div class="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <button
+            class="metro-btn metro-btn--ghost metro-btn--sm"
+            type="button"
+            @click="dismissUpdate"
+          >
+            Later
+          </button>
+          <button
+            class="metro-btn metro-btn--sm btn-primary"
+            type="button"
+            :disabled="isRefreshing"
+            @click="refreshUpdate"
+          >
+            <span
+              v-if="isRefreshing"
+              class="metro-spinner metro-spinner--xs"
+            ></span>
+            {{ isRefreshing ? "Refreshing…" : "Refresh" }}
+          </button>
+        </div>
       </div>
     </aside>
   </Transition>
@@ -58,6 +70,26 @@ const desktopRuntime = computed(
 );
 const updateAvailable = computed(
   () => pwaUpdateAvailable.value || deployedUpdateAvailable.value,
+);
+const dismissedIdentity = ref(null);
+const updateIdentity = computed(
+  () =>
+    repositorySnapshot.value?.deployed?.commit ||
+    repositorySnapshot.value?.latest?.sha ||
+    (pwaUpdateAvailable.value ? "service-worker" : null),
+);
+const promptVisible = computed(
+  () =>
+    !desktopRuntime.value &&
+    updateAvailable.value &&
+    dismissedIdentity.value !== updateIdentity.value,
+);
+const updateVersion = computed(
+  () =>
+    repositorySnapshot.value?.deployed?.version ||
+    repositorySnapshot.value?.latest?.shortSha ||
+    currentBuild.value?.version ||
+    "latest",
 );
 const repositoryRefreshing = ref(false);
 const isRefreshing = computed(
@@ -91,6 +123,10 @@ async function refreshUpdate() {
   } finally {
     repositoryRefreshing.value = false;
   }
+}
+
+function dismissUpdate() {
+  dismissedIdentity.value = updateIdentity.value;
 }
 </script>
 

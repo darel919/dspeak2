@@ -97,6 +97,8 @@ test("repository comparison reports deployment and source update states", () => 
   assert.match(repositoryUpdate, /commits\//);
   assert.match(repositoryUpdate, /compare\//);
   assert.match(repositoryUpdate, /aheadBy/);
+  assert.match(repositoryUpdate, /pullRequest/);
+  assert.match(repositoryUpdate, /html_url/);
   assert.match(repositoryUpdate, /filesTruncated/);
   assert.match(repositoryUpdate, /deployedUpdateAvailable/);
   assert.match(repositoryUpdate, /sourceUpdateAvailable/);
@@ -104,26 +106,27 @@ test("repository comparison reports deployment and source update states", () => 
   assert.match(repositoryUpdate, /AbortSignal\.timeout\(5000\)/);
 });
 
-test("startup and prompts expose pending commit and file details", () => {
+test("startup and prompts expose useful release details without file listings", () => {
   assert.match(init, /checkRepositoryUpdate/);
   assert.match(init, /Promise\.all/);
   assert.match(repositoryComposable, /apiPath/);
   assert.match(repositoryComposable, /\/update/);
   assert.match(repositoryComposable, /startMonitoring/);
   assert.match(repositoryComposable, /60 \* 60 \* 1000/);
-  assert.match(details, /View changes/);
-  assert.match(details, /Files changed/);
+  assert.match(details, /What's changed/);
+  assert.match(details, /Full changelog/);
+  assert.match(details, /pullRequest/);
+  assert.doesNotMatch(details, /Files changed/);
   assert.match(details, /packageUpdate/);
-  assert.match(details, /snapshot\.comparison/);
+  assert.match(details, /props\.snapshot\?\.comparison/);
   assert.match(pwaPrompt, /deployedUpdateAvailable/);
-  assert.match(pwaPrompt, /!desktopRuntime && updateAvailable/);
+  assert.match(pwaPrompt, /promptVisible/);
+  assert.match(pwaPrompt, /Refresh/);
+  assert.match(pwaPrompt, /Later/);
   assert.match(pwaPrompt, /window\.location\.reload/);
   assert.match(init, /startDesktopUpdateMonitoring/);
-  assert.match(desktopPrompt, /repositoryUpdateAvailable/);
-  assert.match(
-    desktopPrompt,
-    /desktop package has not been[\s\S]*published yet/,
-  );
+  assert.match(desktopPrompt, /desktopRuntime\.value &&/);
+  assert.doesNotMatch(desktopPrompt, /repositoryUpdateAvailable/);
 });
 
 test("desktop release updates are signed, published as latest.json, and restart after installation", () => {

@@ -44,6 +44,59 @@ class EmptyEncodingPeerConnection extends FakePeerConnection {
   }
 }
 
+class GatheringPeerConnection {
+  constructor() {
+    this.connectionState = "connected";
+    this.iceGatheringState = "gathering";
+    this.localDescription = null;
+    this.listeners = new Map();
+    this.sender = { id: "gathering-sender" };
+  }
+
+  addEventListener(type, listener) {
+    this.listeners.set(type, listener);
+  }
+
+  removeEventListener(type, listener) {
+    if (this.listeners.get(type) === listener) this.listeners.delete(type);
+  }
+
+  addTrack() {
+    return this.sender;
+  }
+
+  getTransceivers() {
+    return [{ sender: this.sender, mid: "audio-mid" }];
+  }
+
+  async createOffer() {
+    return { type: "offer", sdp: "offer-before-gathering" };
+  }
+
+  async setLocalDescription(description) {
+    this.localDescription = description;
+  }
+
+  async setRemoteDescription(description) {
+    this.remoteDescription = description;
+  }
+
+  completeIceGathering() {
+    this.iceGatheringState = "complete";
+    this.localDescription = {
+      ...this.localDescription,
+      sdp: "offer-after-gathering",
+    };
+    this.listeners.get("icegatheringstatechange")?.();
+  }
+
+  removeTrack() {}
+
+  close() {
+    this.connectionState = "closed";
+  }
+}
+
 test("Cloudflare session closure marks pending requests as cancellation", async () => {
   const client = new CloudflareRealtimeSession({
     send: () => true,
@@ -105,6 +158,51 @@ test("Cloudflare audio publication normalizes an empty encoding list", async () 
 
   assert.equal(client.peerConnection.parameters.encodings.length, 1);
   assert.equal(client.peerConnection.parameters.encodings[0].maxBitrate, 96000);
+  client.closeMedia();
+});
+
+test("Cloudflare waits for complete ICE before publishing a local offer", async () => {
+  const requests = [];
+  let client;
+  const peerConnection = new GatheringPeerConnection();
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      if (message.data.operation === "tracks-new")
+        queueMicrotask(() =>
+          client.handle("cloudflare-response", {
+            requestId: message.data.requestId,
+            result: {},
+          }),
+        );
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "cloudflare-session";
+  client.initializing = Promise.resolve();
+
+  const adding = client.addSource({
+    source: "audio",
+    track: { kind: "audio" },
+    stream: {},
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    requests.some((message) => message.data.operation === "tracks-new"),
+    false,
+  );
+
+  peerConnection.completeIceGathering();
+  await adding;
+  const request = requests.find(
+    (message) => message.data.operation === "tracks-new",
+  );
+  assert.equal(
+    request.data.body.sessionDescription.sdp,
+    "offer-after-gathering",
+  );
   client.closeMedia();
 });
 

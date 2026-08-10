@@ -76,6 +76,14 @@ test("topology keys distinguish source revisions and reject stale epochs", () =>
   );
   assert.equal(shouldAcceptTopologyEvent({ epoch: 3 }, 4), false);
   assert.equal(shouldAcceptTopologyEvent({ epoch: 4 }, 4), true);
+  assert.equal(
+    shouldAcceptTopologyEvent({ epoch: 4, sourceRevision: 1 }, 4, 2),
+    false,
+  );
+  assert.equal(
+    shouldAcceptTopologyEvent({ epoch: 4, sourceRevision: 2 }, 4, 2),
+    true,
+  );
 });
 
 test("client and server topology policies remain identical", () => {

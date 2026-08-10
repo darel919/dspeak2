@@ -48,29 +48,90 @@ export function configureControl(session, config = {}) {
 }
 
 export async function handleProviderTicket(session, data) {
-  if (data?.provider === "cloudflare-realtime") {
-    await session.activateProvider("cloudflare-realtime");
-    session.signaling?.send({
-      type: "provider-ready",
-      data: { provider: data.provider, epoch: data.epoch },
+  const sourceRevision = Number(
+    data?.sourceRevision ?? data?.route?.sourceRevision,
+  );
+  const epoch = Number(data?.epoch ?? data?.route?.epoch);
+  const currentEpoch = Number(session.topologyState?.epoch);
+  const currentSourceRevision = Number(session.topologyState?.sourceRevision);
+  const resolvedSourceRevision = Number.isFinite(sourceRevision)
+    ? sourceRevision
+    : Number.isFinite(currentSourceRevision)
+      ? currentSourceRevision
+      : 0;
+  if (
+    !Number.isSafeInteger(epoch) ||
+    (Number.isSafeInteger(currentEpoch) && epoch < currentEpoch) ||
+    (Number.isSafeInteger(currentSourceRevision) &&
+      resolvedSourceRevision < currentSourceRevision)
+  )
+    return false;
+  session.selectedProvider = data.provider;
+  let providerFailureNotified = false;
+  const notifyProviderFailure = (error) => {
+    if (providerFailureNotified) return;
+    providerFailureNotified = true;
+    session.signaling?.send?.({
+      type: "provider-failure",
+      data: {
+        provider: data.provider,
+        epoch,
+        sourceRevision: resolvedSourceRevision,
+        reason: error?.message || "Provider connection failed",
+      },
     });
+  };
+  if (data?.provider === "cloudflare-realtime") {
+    try {
+      await session.activateProvider("cloudflare-realtime");
+      if (
+        session.signaling?.send?.({
+          type: "provider-ready",
+          data: {
+            provider: data.provider,
+            epoch,
+            sourceRevision: resolvedSourceRevision,
+          },
+        }) === false
+      )
+        throw new Error("Media control signaling unavailable");
+    } catch (error) {
+      notifyProviderFailure(error);
+      throw error;
+    }
     return;
   }
-  session.providerSignaling?.close();
-  session.providerSignaling = new MediasoupProviderSocket({
-    onMessage: (type, payload) =>
-      session.messageHandlers.get(type)?.(payload || {}),
-    onFailure: (error) => session._fail(error),
-  });
-  await session.providerSignaling.connect({
-    signalingUrl: data.signalingUrl,
-    ticket: data.ticket,
-  });
-  await session._startNegotiation();
-  session.signaling?.send({
-    type: "provider-ready",
-    data: { provider: data.provider, epoch: data.epoch },
-  });
+  try {
+    session.providerSignaling?.close();
+    session.providerSignaling = new MediasoupProviderSocket({
+      onMessage: (type, payload) =>
+        session.messageHandlers.get(type)?.(payload || {}),
+      onFailure: (error) => {
+        notifyProviderFailure(error);
+        session._fail(error);
+      },
+    });
+    await session.providerSignaling.connect({
+      signalingUrl: data.signalingUrl,
+      ticket: data.ticket,
+    });
+    await session._startNegotiation();
+    session.activeSfuProvider = "mediasoup";
+    if (
+      session.signaling?.send?.({
+        type: "provider-ready",
+        data: {
+          provider: data.provider,
+          epoch,
+          sourceRevision: resolvedSourceRevision,
+        },
+      }) === false
+    )
+      throw new Error("Media control signaling unavailable");
+  } catch (error) {
+    notifyProviderFailure(error);
+    throw error;
+  }
 }
 
 export function createSignaling(session) {

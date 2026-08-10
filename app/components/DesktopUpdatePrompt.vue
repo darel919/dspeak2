@@ -21,10 +21,6 @@
           <p v-else-if="updateAvailable" class="text-sm text-base-content/70">
             Version {{ update?.version || "latest" }} is ready to install.
           </p>
-          <p v-else class="text-sm text-base-content/70">
-            Repository changes are ahead, but a desktop package has not been
-            published yet.
-          </p>
           <UpdateDetails
             :snapshot="repositorySnapshot"
             :current-build="currentBuild"
@@ -57,21 +53,14 @@
             Later
           </button>
         </div>
-        <div v-else-if="repositoryUpdateAvailable" class="shrink-0">
-          <button
-            class="metro-btn metro-btn--ghost metro-btn--sm"
-            type="button"
-            @click="deferUpdate"
-          >
-            Later
-          </button>
-        </div>
       </div>
     </aside>
   </Transition>
 </template>
 
 <script setup>
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+
 const {
   status,
   update,
@@ -81,17 +70,17 @@ const {
   installUpdate,
   deferUpdate,
 } = useDesktopUpdate();
-const {
-  snapshot: repositorySnapshot,
-  currentBuild,
-  updateAvailable: repositoryUpdateAvailable,
-} = useRepositoryUpdate();
+const { snapshot: repositorySnapshot, currentBuild } = useRepositoryUpdate();
+const runtimeStore = useRuntimeStore();
+const desktopRuntime = computed(
+  () => runtimeStore.isTauri || hasTauriRuntimeMarker(),
+);
 
 const visible = computed(
   () =>
+    desktopRuntime.value &&
     !deferred.value &&
     (updateAvailable.value ||
-      repositoryUpdateAvailable.value ||
       status.value === "installed" ||
       status.value === "error"),
 );

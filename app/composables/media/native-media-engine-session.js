@@ -219,6 +219,8 @@ export async function leaveSession(engine) {
   engine.nativeProvider = "sfu";
   engine.nativeP2pFailureEpoch = null;
   engine.nativeTopologyKey = null;
+  engine.nativeTopologyGeneration = 0;
+  engine.nativeTopologyOperation = null;
   engine.activeScreenCapture = null;
   engine.activeSystemAudioCapture = null;
   engine.localVideoFeedsRef.value = new Map();

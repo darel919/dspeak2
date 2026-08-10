@@ -291,9 +291,11 @@ export function createMediaSignalingSocket({
     reconnectTimer = setTimeout(async () => {
       reconnectTimer = null;
       try {
-        onReconnect();
+        await onReconnect?.();
       } catch (error) {
         reportError(error);
+        if (!isIntentionalClose()) scheduleReconnect();
+        return;
       }
       try {
         await open();

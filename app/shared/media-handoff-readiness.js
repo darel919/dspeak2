@@ -108,8 +108,15 @@ function waitForSfuHandoff({
         return;
       }
       if (Date.now() - startedAt >= timeoutMs) {
-        const readinessReason = readiness?.error
-          ? `, reason ${readiness.error}`
+        const readinessReasons = [];
+        if (readiness?.error)
+          readinessReasons.push(`reason ${readiness.error}`);
+        if (readiness?.connectionState || readiness?.iceConnectionState)
+          readinessReasons.push(
+            `transport ${readiness.connectionState || "unknown"}/${readiness.iceConnectionState || "unknown"}`,
+          );
+        const readinessReason = readinessReasons.length
+          ? `, ${readinessReasons.join(", ")}`
           : "";
         reject(
           new Error(

@@ -166,6 +166,7 @@ export class NativeMediasoupSfuSession {
     this.sources = new Map();
     this.producers = new Map();
     this.sourcePublications = new Map();
+    this.sourceOperations = new Map();
     this.pendingCloudflarePublications = new Map();
     this.sourceTransmission = new Map();
     this.producerRemovals = new Map();
@@ -180,6 +181,7 @@ export class NativeMediasoupSfuSession {
     this.protocolUpdateRequired = false;
     this.lifecycle = null;
     this.activeProvider = null;
+    this.activeSfuProvider = null;
     this.selectedProvider = "mediasoup";
     this.playbackState = "native";
     this.localVideoFeeds = new Map();
@@ -232,6 +234,7 @@ export class NativeMediasoupSfuSession {
     this.initializationTimer = null;
     this.transportRequestIds = new Map();
     this.cloudflareSession = null;
+    this.lastProviderFailureKey = null;
     this._installHandlers();
   }
 
@@ -283,6 +286,12 @@ export class NativeMediasoupSfuSession {
           : state?.send === "failed"
             ? "failed"
             : "transport-connecting";
+        if (state?.ready) this.lastProviderFailureKey = null;
+        if (
+          (state?.send === "failed" || state?.recv === "failed") &&
+          this.activeSfuProvider === "cloudflare-realtime"
+        )
+          this.reportProviderFailure("native-cloudflare-transport-failed");
         this._emitState();
       },
       onError: (error) => this.onError?.(error),
@@ -306,8 +315,10 @@ export class NativeMediasoupSfuSession {
     const nextProvider = String(provider || "mediasoup");
     this.selectedProvider = nextProvider;
     if (nextProvider === "cloudflare-realtime") {
-      if (this.sendTransport || this.recvTransport || this.device)
+      if (this.sendTransport || this.recvTransport || this.device) {
         this._closeMedia(false);
+        this.activeSfuProvider = null;
+      }
       const cloudflare = this._createCloudflareSession();
       const wasInitialized = Boolean(cloudflare.sessionId);
       await cloudflare.initialize();
@@ -323,6 +334,7 @@ export class NativeMediasoupSfuSession {
       this.transportStates.set("send", "connected");
       this.transportStates.set("recv", "connected");
       this.mediaConnectionState = "transport-connecting";
+      this.activeSfuProvider = "cloudflare-realtime";
       this._emitState();
       return cloudflare;
     }
@@ -331,6 +343,10 @@ export class NativeMediasoupSfuSession {
       this.cloudflareSession = null;
       this.mediaConnectionState = "disconnected";
     }
+    this.activeSfuProvider =
+      this.sendTransport || this.recvTransport || this.device
+        ? "mediasoup"
+        : null;
     return null;
   }
 
@@ -353,6 +369,27 @@ export class NativeMediasoupSfuSession {
       const cloudflare = this._createCloudflareSession();
       return cloudflare.addSource(entry);
     }
+    const source = String(entry.source);
+    return this.enqueueSourceOperation(source, () =>
+      this.addSourceInternal(entry),
+    );
+  }
+
+  enqueueSourceOperation(source, operation) {
+    const previous = this.sourceOperations.get(source) || Promise.resolve();
+    const task = previous.catch(() => {}).then(operation);
+    const tracked = task.finally(() => {
+      if (this.sourceOperations.get(source) === tracked)
+        this.sourceOperations.delete(source);
+    });
+    this.sourceOperations.set(source, tracked);
+    tracked.catch(() => {});
+    return tracked;
+  }
+
+  async addSourceInternal(entry) {
+    if (!entry?.source)
+      throw new Error("A native source identifier is required");
     const previousSource = this.sources.get(entry.source);
     const existing = this.producers.get(entry.source);
     const normalized = {
@@ -513,13 +550,20 @@ export class NativeMediasoupSfuSession {
   removeSource(source) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.removeSource(source);
+    const key = String(source || "");
+    return this.enqueueSourceOperation(key, () =>
+      this.removeSourceInternal(key),
+    );
+  }
+
+  removeSourceInternal(source) {
     const entry = this.sources.get(source);
     this.sources.delete(source);
     this.localVideoFeeds.delete(source);
     const producer = this.producers.get(source);
     if (producer) {
       this.producers.delete(source);
-      this.signaling?.send?.({
+      const sent = this.signaling?.send?.({
         type: "close-producer",
         data: { producerId: producer.id },
       });
@@ -532,6 +576,12 @@ export class NativeMediasoupSfuSession {
             this.producerRemovals.delete(source);
         });
       this.producerRemovals.set(source, removal);
+      if (sent === false) {
+        this._closeMedia(false);
+        return removal.then(() => {
+          throw new Error("Media control is unavailable");
+        });
+      }
     }
     this._sendSourceState();
     this._emitState();
@@ -744,6 +794,8 @@ export class NativeMediasoupSfuSession {
         : this.connectionState().ready
           ? "media-flowing"
           : "transport-connecting";
+    if (state === "failed" && this.activeSfuProvider === "mediasoup")
+      this.reportProviderFailure(`native-${direction}-transport-failed`);
     this._emitState();
     this.handleTransportRecovery(direction, state);
     return true;
@@ -1021,6 +1073,8 @@ export class NativeMediasoupSfuSession {
 
   _closeMedia(clearSources) {
     this.mediaRevision += 1;
+    this.activeSfuProvider = null;
+    this.lastProviderFailureKey = null;
     if (this.cloudflareSession) {
       this.cloudflareSession.closeMedia();
       this.cloudflareSession = null;
@@ -1170,6 +1224,22 @@ export class NativeMediasoupSfuSession {
       this.providerSignaling?.send(message) ||
       (!this.controlTicket && this.signaling?.send(message));
     if (!sent) throw new Error(`${label} signaling unavailable`);
+  }
+
+  reportProviderFailure(reason, provider = this.activeSfuProvider) {
+    if (!provider) return false;
+    const epoch = Number(this.topologyState?.epoch) || 0;
+    const sourceRevision = Number(this.topologyState?.sourceRevision) || 0;
+    const key = `${provider}:${epoch}:${sourceRevision}`;
+    if (this.lastProviderFailureKey === key) return false;
+    if (typeof this.signaling?.send !== "function") return false;
+    const sent = this.signaling.send({
+      type: "provider-failure",
+      data: { provider, epoch, sourceRevision, reason },
+    });
+    if (sent === false) return false;
+    this.lastProviderFailureKey = key;
+    return true;
   }
 
   requestId(operation) {

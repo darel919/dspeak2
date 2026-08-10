@@ -3,6 +3,50 @@ import { describe, it } from "node:test";
 import { NativeP2pSession } from "../app/shared/native-p2p-session.js";
 
 describe("NativeP2pSession", () => {
+  it("buffers an early signal until the matching peer is created", async () => {
+    const calls = [];
+    const messages = [];
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 11 };
+        if (command === "media_p2p_create_answer") return "native-answer";
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+    });
+
+    const signal = session.handleSignal({
+      fromPeerId: "peer-a",
+      epoch: 5,
+      signal: { description: { type: "offer", sdp: "browser-offer" } },
+    });
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 5,
+      localPeerId: "peer-z",
+      peers: [{ peerId: "peer-a", userId: "user-a" }],
+    });
+    assert.equal(await signal, true);
+    assert.deepEqual(
+      calls.find(([command]) => command === "media_p2p_create_answer"),
+      [
+        "media_p2p_create_answer",
+        { p2pHandle: 11, remoteSdp: "browser-offer" },
+      ],
+    );
+    assert.deepEqual(
+      messages.find(
+        (message) => message.signal?.description?.type === "answer",
+      ),
+      {
+        targetPeerId: "peer-a",
+        epoch: 5,
+        signal: { description: { type: "answer", sdp: "native-answer" } },
+      },
+    );
+  });
+
   it("attaches sources and relays native offer, ICE, and remote frames", async () => {
     const calls = [];
     const messages = [];

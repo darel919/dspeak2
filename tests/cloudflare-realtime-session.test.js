@@ -199,6 +199,71 @@ test("Cloudflare drains publications received before session initialization", as
   }
 });
 
+test("Cloudflare remote tracks retain the publication identity contract", async () => {
+  const previousPeerConnection = globalThis.RTCPeerConnection;
+  globalThis.RTCPeerConnection = FakePeerConnection;
+  let client;
+  let remoteEntry = null;
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      const request = message.data;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId: request.requestId,
+          result:
+            request.operation === "new-session"
+              ? { sessionId: "cloudflare-session" }
+              : {
+                  tracks: [
+                    {
+                      trackName: request.body.tracks[0].trackName,
+                      mid: "remote-mid",
+                    },
+                  ],
+                },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+    onRemoteTrack: (entry) => {
+      remoteEntry = entry;
+    },
+  });
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "publisher-session",
+    peerId: "peer-remote",
+    userId: "user-remote",
+    source: "audio",
+  };
+
+  try {
+    await client.handle("cloudflare-publication-available", publication);
+    await client.initialize();
+    const track = {
+      kind: "audio",
+      addEventListener() {},
+    };
+    client.peerConnection.listeners.get("track")({
+      transceiver: { mid: "remote-mid" },
+      receiver: { id: "receiver-1" },
+      track,
+      streams: [{}],
+    });
+
+    assert.equal(remoteEntry.userId, "user-remote");
+    assert.equal(remoteEntry.participantId, "user-remote");
+    assert.equal(remoteEntry.peerId, "peer-remote");
+    assert.equal(remoteEntry.kind, "audio");
+    assert.equal(remoteEntry.key, "remote-track");
+    assert.equal(remoteEntry.track, track);
+  } finally {
+    client.closeMedia();
+    globalThis.RTCPeerConnection = previousPeerConnection;
+  }
+});
+
 test("Cloudflare drops a subscription that closes while negotiation is pending", async () => {
   const requests = [];
   const client = new CloudflareRealtimeSession({
