@@ -400,6 +400,7 @@ export function useHybridMediaSession() {
     addressFamily,
     buildTopologyGraph,
     consumers,
+    getParticipantProfile: (userId) => channelsStore.getVoiceProfile(userId),
     getLocalPeerId: () => localPeerId,
     getP2pEdges: () => lastP2pEdges,
     getP2pMesh: () => p2pMesh,

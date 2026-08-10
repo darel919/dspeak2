@@ -5,6 +5,7 @@ export function createMediaTopologyView({
   addressFamily,
   buildTopologyGraph,
   consumers,
+  getParticipantProfile,
   getLocalPeerId,
   getP2pEdges,
   getP2pMesh,
@@ -21,11 +22,33 @@ export function createMediaTopologyView({
   topologyState,
   voiceStore,
 }) {
-  function syncConnectedUsers(userIds = []) {
-    const active = new Set(userIds.map(String));
-    for (const userId of active)
-      if (!voiceStore.isUserConnected(userId))
-        voiceStore.addConnectedUser(userId, { id: userId });
+  function syncConnectedUsers(participants = []) {
+    const entries = participants
+      .map((participant) =>
+        participant && typeof participant === "object"
+          ? participant
+          : { userId: participant },
+      )
+      .map((participant) => ({
+        ...participant,
+        userId: String(participant.userId || participant.id || ""),
+      }))
+      .filter((participant) => participant.userId);
+    const active = new Set(entries.map((participant) => participant.userId));
+    for (const participant of entries) {
+      const profile =
+        participant.profile || getParticipantProfile?.(participant.userId);
+      if (profile)
+        voiceStore.upsertUserProfile({
+          ...profile,
+          id: participant.userId,
+        });
+      if (!voiceStore.isUserConnected(participant.userId))
+        voiceStore.addConnectedUser(participant.userId, {
+          ...profile,
+          id: participant.userId,
+        });
+    }
     for (const user of voiceStore.getConnectedUsersArray())
       if (!active.has(String(user.id))) voiceStore.removeConnectedUser(user.id);
   }
