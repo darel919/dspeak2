@@ -203,7 +203,7 @@ native_host_platform() {
       printf '%s\n' "linux-x64"
       ;;
     MINGW*|MSYS*|CYGWIN*)
-      case "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}:$(uname -m)" in
+      case "${RUNNER_ARCH:-${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}}:$(uname -m)" in
         ARM64:*|arm64:*|AARCH64:*|aarch64:*|*:arm64|*:aarch64)
           printf '%s\n' "windows-arm64"
           ;;
@@ -520,14 +520,15 @@ clone_or_update_webrtc() {
       fail "depot_tools exists but fetch is missing: $depot_tools"
     fi
     printf 'Installing Chromium depot_tools in %s\n' "$depot_tools" >&2
-    git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$depot_tools"
+    git -c core.autocrlf=false clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$depot_tools"
   fi
   if [[ -n "$DEPOT_TOOLS_COMMIT" ]]; then
+    git -C "$depot_tools" config core.autocrlf false
     current_depot_tools_commit="$(git -C "$depot_tools" rev-parse HEAD 2>/dev/null || true)"
     if [[ "$current_depot_tools_commit" != "$DEPOT_TOOLS_COMMIT" ]]; then
       git -C "$depot_tools" fetch --depth 1 origin "$DEPOT_TOOLS_COMMIT" >&2
-      git -C "$depot_tools" checkout --detach "$DEPOT_TOOLS_COMMIT" >&2
     fi
+    git -C "$depot_tools" checkout --force --detach "$DEPOT_TOOLS_COMMIT" >&2
   fi
   export PATH="$depot_tools:$PATH"
 

@@ -199,10 +199,17 @@ export default defineNuxtConfig({
   },
 
   icon: {
-    provider: isDesktop ? "server" : "client",
+    provider: isDesktop ? "server" : "none",
+    fallbackToApi: false,
     ...(isDesktop
       ? { serverBundle: { collections: ["lucide"] } }
-      : { clientBundle: { collections: ["lucide"] } }),
+      : {
+          clientBundle: {
+            scan: {
+              globInclude: ["**/*.{vue,js,jsx,tsx,md,mdc,mdx,yml,yaml}"],
+            },
+          },
+        }),
   },
 
   nitro: {

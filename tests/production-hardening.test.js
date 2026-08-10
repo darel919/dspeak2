@@ -96,6 +96,21 @@ test("production CSP enforcement and cached health reads are explicit", () => {
   );
 });
 
+test("web icons are bundled locally without a runtime Iconify dependency", () => {
+  assert.match(nuxtConfig, /provider: isDesktop \? "server" : "none"/);
+  assert.match(nuxtConfig, /fallbackToApi: false/);
+  assert.match(
+    nuxtConfig,
+    /clientBundle: \{[\s\S]*scan: \{[\s\S]*globInclude:/,
+  );
+  assert.ok(
+    nuxtConfig.includes(
+      'globInclude: ["**/*.{vue,js,jsx,tsx,md,mdc,mdx,yml,yaml}"],',
+    ),
+  );
+  assert.doesNotMatch(nuxtConfig, /clientBundle: \{\s*collections:/);
+});
+
 test("runtime database work has independent capacity from background maintenance", () => {
   assert.match(databaseClient, /DATABASE_POOL_MAX/);
   assert.match(databaseClient, /max: poolSize\("DATABASE_POOL_MAX", 10\)/);
