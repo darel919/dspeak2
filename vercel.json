@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/internal/push-dispatch",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }

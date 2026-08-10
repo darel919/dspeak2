@@ -22,7 +22,7 @@ These are separate deployments, not one shared application dependency tree:
 1. Create Supabase and apply the checked-in Drizzle migrations with `npx drizzle-kit migrate` using `DIRECT_DATABASE_URL`.
 2. Install and configure this Nuxt application with `bun install`.
 3. Check out `dspeak-media-control` beside this repository, run `npm install`, configure `.dev.vars` and Wrangler secrets, then deploy its Worker and Durable Object bindings.
-4. Set this application's `MEDIA_CONTROL_URL` and matching media-ticket private key.
+4. Set this application's `CF_MEDIA_CONTROL_URL` and matching media-ticket private key.
 5. Configure Cloudflare R2 and Realtime/TURN.
 6. Deploy the optional `dspeak-sfu` checkout separately when self-hosted fallback is enabled.
 
@@ -61,29 +61,31 @@ DSPEAK_CSRF_SECRET=<at-least-32-random-characters>
 DSPEAK_CRON_SECRET=<long-random-secret>
 DSPEAK_UPDATE_REPOSITORY=darel919/dspeak2
 DSPEAK_UPDATE_BRANCH=next
-DSPEAK_GITHUB_TOKEN=<optional-server-only-token>
 
 SUPABASE_URL=https://project-ref.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 DATABASE_URL=postgresql://postgres:<password>@db.example.com:5432/postgres
 
-MEDIA_CONTROL_URL=https://media-control.example.com
-MEDIA_CONTROL_ISSUER=dspeak-media-control
-MEDIA_CONTROL_ADMIN_TOKEN=<long-random-secret>
-MEDIA_TICKET_PRIVATE_KEY=<base64-encoded-Ed25519-PKCS8-private-key>
+CF_MEDIA_CONTROL_URL=https://media-control.example.com
+CF_MEDIA_CONTROL_ISSUER=dspeak-media-control
+CF_MEDIA_CONTROL_ADMIN_TOKEN=<long-random-secret>
+CF_MEDIA_TICKET_PRIVATE_KEY=<base64-encoded-Ed25519-PKCS8-private-key>
 
-R2_ACCOUNT_ID=<account-id>
-R2_ACCESS_KEY_ID=<access-key-id>
-R2_SECRET_ACCESS_KEY=<secret-access-key>
-R2_BUCKET_NAME=dspeak
+CF_R2_ACCOUNT_ID=<account-id>
+CF_R2_ACCESS_KEY_ID=<access-key-id>
+CF_R2_SECRET_ACCESS_KEY=<secret-access-key>
+CF_R2_BUCKET_NAME=dspeak
 
-CLOUDFLARE_TURN_KEY_ID=<turn-key-id>
-CLOUDFLARE_TURN_API_TOKEN=<turn-api-token>
-CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS=86400
+DSPEAK_RTC_DOMAIN=rtc.example.com
+TURN_PORT=3478
+TURN_TLS_PORT=5349
+TURN_SHARED_SECRET=<long-random-secret>
+TURN_CREDENTIAL_TTL_SECONDS=900
 
-DSPEAK_SFU_HTTP_URL=https://sfu.example.com
-DSPEAK_SFU_METRICS_TOKEN=<provider-metrics-token>
+CF_TURN_APP_ID=<cloudflare-turn-app-id>
+CF_TURN_API_KEY=<cloudflare-turn-api-key>
+CF_TURN_CREDENTIAL_TTL_SECONDS=86400
 ```
 
 The Supabase service-role key, database URL, media ticket private key, media-control admin token, R2 secret, TURN token, metrics tokens, and VAPID private key must remain server-only. Use only the Supabase anon key in browser configuration.
@@ -109,7 +111,7 @@ Schedule authenticated cleanup and reconciliation calls with `DSPEAK_CRON_SECRET
 
 ## Media control, Realtime, and TURN
 
-Deploy `dspeak-media-control` as a separate Cloudflare Worker with a Durable Object namespace. Configure its media-ticket public key to match this application's `MEDIA_TICKET_PRIVATE_KEY`, and configure its own independent provider-ticket keypair for communication with media providers.
+Deploy `dspeak-media-control` as a separate Cloudflare Worker with a Durable Object namespace. Configure its media-ticket public key to match this application's `CF_MEDIA_TICKET_PRIVATE_KEY`, and configure its own independent provider-ticket keypair for communication with media providers. The Worker-side secret names, including `MEDIA_TICKET_PUBLIC_KEY` and `MEDIA_CONTROL_ADMIN_TOKEN`, remain part of that Worker checkout's contract.
 
 If the optional self-hosted provider is enabled, replace the example
 `DSPEAK_SFU_SIGNALING_URL` in the Worker configuration with the real `wss://`
@@ -146,6 +148,13 @@ bun run build
 ```
 
 Set the application variables in Vercel and deploy the generated Nitro output. Persistent media WebSockets do not terminate on Vercel; only HTTP APIs, including media bootstrap, run there.
+
+Vercel Hobby permits cron jobs no more frequently than once per day. The
+checked-in Vercel cron therefore runs the push dispatcher daily at 00:00 UTC.
+Use a Vercel plan with a more frequent cron allowance or an external scheduler
+calling `/api/internal/push-dispatch` with the `DSPEAK_CRON_SECRET` bearer token
+when push notifications must be delivered promptly. Persistent deployments
+run the in-process dispatcher instead.
 
 ## Desktop releases
 

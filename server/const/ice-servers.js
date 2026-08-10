@@ -77,22 +77,19 @@ export async function createCloudflareTurnServers(
   environment = process.env,
   fetchImplementation = fetch,
 ) {
-  const keyId = environment.CLOUDFLARE_TURN_KEY_ID?.trim();
-  const apiToken = environment.CLOUDFLARE_TURN_API_TOKEN?.trim();
-  if (!keyId || !apiToken) return [];
+  const appId = environment.CF_TURN_APP_ID?.trim();
+  const apiKey = environment.CF_TURN_API_KEY?.trim();
+  if (!appId || !apiKey) return [];
   const response = await fetchImplementation(
-    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`,
+    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(appId)}/credentials/generate-ice-servers`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiToken}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        ttl: positiveInteger(
-          environment.CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS,
-          86400,
-        ),
+        ttl: positiveInteger(environment.CF_TURN_CREDENTIAL_TTL_SECONDS, 86400),
       }),
     },
   );

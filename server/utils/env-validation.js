@@ -3,13 +3,13 @@ const requiredVariables = [
   "SUPABASE_URL",
   "SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
-  "MEDIA_CONTROL_URL",
-  "MEDIA_CONTROL_ADMIN_TOKEN",
-  "MEDIA_TICKET_PRIVATE_KEY",
-  "R2_ACCOUNT_ID",
-  "R2_ACCESS_KEY_ID",
-  "R2_SECRET_ACCESS_KEY",
-  "R2_BUCKET_NAME",
+  "CF_MEDIA_CONTROL_URL",
+  "CF_MEDIA_CONTROL_ADMIN_TOKEN",
+  "CF_MEDIA_TICKET_PRIVATE_KEY",
+  "CF_R2_ACCOUNT_ID",
+  "CF_R2_ACCESS_KEY_ID",
+  "CF_R2_SECRET_ACCESS_KEY",
+  "CF_R2_BUCKET_NAME",
   "DSPEAK_CSRF_SECRET",
   "VAPID_PRIVKEY",
   "VAPID_SUBJECT",
@@ -106,16 +106,16 @@ export async function validateRuntimeEnvironment() {
     readPort("TURN_TLS_PORT", 5349);
   }
 
-  const cloudflareTurnKeyId = process.env.CLOUDFLARE_TURN_KEY_ID?.trim();
-  const cloudflareTurnApiToken = process.env.CLOUDFLARE_TURN_API_TOKEN?.trim();
-  if (Boolean(cloudflareTurnKeyId) !== Boolean(cloudflareTurnApiToken)) {
+  const cloudflareTurnAppId = process.env.CF_TURN_APP_ID?.trim();
+  const cloudflareTurnApiKey = process.env.CF_TURN_API_KEY?.trim();
+  if (Boolean(cloudflareTurnAppId) !== Boolean(cloudflareTurnApiKey)) {
     throw new Error(
-      "CLOUDFLARE_TURN_KEY_ID and CLOUDFLARE_TURN_API_TOKEN must be configured together",
+      "CF_TURN_APP_ID and CF_TURN_API_KEY must be configured together",
     );
   }
-  if (cloudflareTurnKeyId) {
+  if (cloudflareTurnAppId) {
     const credentialTtl = Number(
-      process.env.CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS || 86400,
+      process.env.CF_TURN_CREDENTIAL_TTL_SECONDS || 86400,
     );
     if (
       !Number.isSafeInteger(credentialTtl) ||
@@ -123,7 +123,7 @@ export async function validateRuntimeEnvironment() {
       credentialTtl > 86400
     ) {
       throw new Error(
-        "CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 86400",
+        "CF_TURN_CREDENTIAL_TTL_SECONDS must be an integer between 300 and 86400",
       );
     }
   }

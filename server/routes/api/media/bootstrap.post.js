@@ -10,8 +10,8 @@ let privateKeyCache = null;
 
 async function getSigningKey() {
   if (privateKeyCache) return privateKeyCache;
-  const privateKeyB64 = process.env.MEDIA_TICKET_PRIVATE_KEY;
-  if (!privateKeyB64) throw new Error("MEDIA_TICKET_PRIVATE_KEY not set");
+  const privateKeyB64 = process.env.CF_MEDIA_TICKET_PRIVATE_KEY;
+  if (!privateKeyB64) throw new Error("CF_MEDIA_TICKET_PRIVATE_KEY not set");
   const privateKey = await importPKCS8(atob(privateKeyB64), "Ed25519");
   privateKeyCache = privateKey;
   return privateKey;
@@ -63,7 +63,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const mediaControlUrl =
-    process.env.MEDIA_CONTROL_URL || "https://media-control.example.com";
+    process.env.CF_MEDIA_CONTROL_URL || "https://media-control.example.com";
   const websocketUrl = new URL(mediaControlUrl);
   websocketUrl.searchParams.set("channelId", channelId);
   if (websocketUrl.protocol === "http:") websocketUrl.protocol = "ws:";
@@ -103,7 +103,7 @@ async function generateMediaTicket(
   deviceId,
 ) {
   const key = await getSigningKey();
-  const issuer = process.env.MEDIA_CONTROL_ISSUER || "dspeak-media-control";
+  const issuer = process.env.CF_MEDIA_CONTROL_ISSUER || "dspeak-media-control";
   const token = await new SignJWT({
     sub: userId,
     deviceId,

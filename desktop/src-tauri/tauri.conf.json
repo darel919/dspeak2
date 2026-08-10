@@ -47,7 +47,7 @@
     },
     "updater": {
       "endpoints": [
-        "https://github.com/darel919/dspeak2/releases/latest/download/latest.json"
+        "https://github.com/darel919/dspeak/releases/latest/download/latest.json"
       ],
       "pubkey": ""
     },

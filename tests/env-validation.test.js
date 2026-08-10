@@ -12,13 +12,13 @@ beforeEach(() => {
     SUPABASE_URL: "https://project-ref.supabase.co",
     SUPABASE_ANON_KEY: "anon-key",
     SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    MEDIA_CONTROL_URL: "https://media-control.example.com",
-    MEDIA_CONTROL_ADMIN_TOKEN: "admin-token",
-    MEDIA_TICKET_PRIVATE_KEY: "private-key",
-    R2_ACCOUNT_ID: "account-id",
-    R2_ACCESS_KEY_ID: "access-key",
-    R2_SECRET_ACCESS_KEY: "secret-key",
-    R2_BUCKET_NAME: "bucket",
+    CF_MEDIA_CONTROL_URL: "https://media-control.example.com",
+    CF_MEDIA_CONTROL_ADMIN_TOKEN: "admin-token",
+    CF_MEDIA_TICKET_PRIVATE_KEY: "private-key",
+    CF_R2_ACCOUNT_ID: "account-id",
+    CF_R2_ACCESS_KEY_ID: "access-key",
+    CF_R2_SECRET_ACCESS_KEY: "secret-key",
+    CF_R2_BUCKET_NAME: "bucket",
     DSPEAK_CSRF_SECRET: "test-secret-with-at-least-32-characters",
 
     VAPID_PUBLIC_KEY: "public",
@@ -81,6 +81,16 @@ test("accepts an HTTPS VAPID subject", async () => {
   process.env.VAPID_SUBJECT = "https://operator.example.com/push-contact";
 
   await assert.doesNotReject(validateRuntimeEnvironment());
+});
+
+test("requires Cloudflare TURN credentials together", async () => {
+  process.env.CF_TURN_APP_ID = "app-id";
+  delete process.env.CF_TURN_API_KEY;
+
+  await assert.rejects(
+    validateRuntimeEnvironment(),
+    /CF_TURN_APP_ID and CF_TURN_API_KEY must be configured together/,
+  );
 });
 
 test("requires the shared RTC hostname when TURN is enabled", async () => {

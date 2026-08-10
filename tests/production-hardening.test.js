@@ -66,7 +66,7 @@ test("metrics require a bearer token and proxy the standalone SFU snapshot", () 
 });
 
 test("media administration is delegated to the authenticated control plane", () => {
-  assert.match(mediaControlAdmin, /MEDIA_CONTROL_ADMIN_TOKEN/);
+  assert.match(mediaControlAdmin, /CF_MEDIA_CONTROL_ADMIN_TOKEN/);
   assert.match(mediaControlAdmin, /"participants"/);
   assert.match(mediaControlAdmin, /"moderate"/);
 });

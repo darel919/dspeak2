@@ -16,8 +16,14 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:?Set the Supabase project URL}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set the Supabase anonymous key}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set the Supabase service role key}
-      MEDIA_CONTROL_URL: ${MEDIA_CONTROL_URL:?Set the media-control Worker URL}
-      MEDIA_CONTROL_ADMIN_TOKEN: ${MEDIA_CONTROL_ADMIN_TOKEN:?Set the media-control admin token}
+      CF_MEDIA_CONTROL_URL: ${CF_MEDIA_CONTROL_URL:?Set the media-control Worker URL}
+      CF_MEDIA_CONTROL_ISSUER: ${CF_MEDIA_CONTROL_ISSUER:-dspeak-media-control}
+      CF_MEDIA_CONTROL_ADMIN_TOKEN: ${CF_MEDIA_CONTROL_ADMIN_TOKEN:?Set the media-control admin token}
+      CF_MEDIA_TICKET_PRIVATE_KEY: ${CF_MEDIA_TICKET_PRIVATE_KEY:?Set the media-ticket private key}
+      CF_R2_ACCOUNT_ID: ${CF_R2_ACCOUNT_ID:?Set the Cloudflare R2 account ID}
+      CF_R2_ACCESS_KEY_ID: ${CF_R2_ACCESS_KEY_ID:?Set the Cloudflare R2 access key ID}
+      CF_R2_SECRET_ACCESS_KEY: ${CF_R2_SECRET_ACCESS_KEY:?Set the Cloudflare R2 secret access key}
+      CF_R2_BUCKET_NAME: ${CF_R2_BUCKET_NAME:-dspeak}
 
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PUBKEY: ${VAPID_PUBKEY:-}

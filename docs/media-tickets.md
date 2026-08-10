@@ -6,7 +6,7 @@ the provider-ticket keypair (that belongs to `dspeak-media-control` and
 
 ## The one key you need here
 
-`MEDIA_TICKET_PRIVATE_KEY` — the **private half** of the media-ticket Ed25519
+`CF_MEDIA_TICKET_PRIVATE_KEY` — the **private half** of the media-ticket Ed25519
 keypair. It must match the public half that `dspeak-media-control` holds as
 `MEDIA_TICKET_PUBLIC_KEY`.
 
@@ -20,7 +20,7 @@ openssl genpkey -algorithm Ed25519 -out media-ticket-private.pem
 openssl pkey -in media-ticket-private.pem -pubout -out media-ticket-public.pem
 
 # dspeak (this repo) → set env:
-MEDIA_TICKET_PRIVATE_KEY="$(base64 -i media-ticket-private.pem)"
+CF_MEDIA_TICKET_PRIVATE_KEY="$(base64 -i media-ticket-private.pem)"
 
 # dspeak-media-control → set env:
 MEDIA_TICKET_PUBLIC_KEY="$(base64 -i media-ticket-public.pem)"
@@ -31,11 +31,11 @@ MEDIA_TICKET_PUBLIC_KEY="$(base64 -i media-ticket-public.pem)"
 
 ## Other env used here
 
-| Var                        | Purpose                                       | Default                             |
-| -------------------------- | --------------------------------------------- | ----------------------------------- |
-| `MEDIA_TICKET_PRIVATE_KEY` | sign media tickets (Ed25519 PKCS8 PEM base64) | — required                          |
-| `MEDIA_CONTROL_URL`        | returned to clients as the WebSocket URL      | `https://media-control.example.com` |
-| `MEDIA_CONTROL_ISSUER`     | issuer claim stamped into tickets             | `dspeak-media-control`              |
+| Var                           | Purpose                                       | Default                             |
+| ----------------------------- | --------------------------------------------- | ----------------------------------- |
+| `CF_MEDIA_TICKET_PRIVATE_KEY` | sign media tickets (Ed25519 PKCS8 PEM base64) | — required                          |
+| `CF_MEDIA_CONTROL_URL`        | returned to clients as the WebSocket URL      | `https://media-control.example.com` |
+| `CF_MEDIA_CONTROL_ISSUER`     | issuer claim stamped into tickets             | `dspeak-media-control`              |
 
 ## What the ticket carries
 
@@ -51,7 +51,7 @@ MEDIA_TICKET_PUBLIC_KEY="$(base64 -i media-ticket-public.pem)"
 ```
 
 Ticket claims: `sub` (user id), `channelId`, `roomId`, `connectionMode`,
-`routeEpoch: 0`, plus standard `iss` (`MEDIA_CONTROL_ISSUER`),
+`routeEpoch: 0`, plus standard `iss` (`CF_MEDIA_CONTROL_ISSUER`),
 `aud: "dspeak-media-control"`, `iat`, `exp` (2m).
 
 The client then connects to `mediaControlUrl` and sends the ticket as
@@ -60,7 +60,7 @@ The client then connects to `mediaControlUrl` and sends the ticket as
 
 ## Do NOT
 
-- Do not set `MEDIA_TICKET_PRIVATE_KEY` to `PROVIDER_TICKET_PRIVATE_KEY` from
+- Do not set `CF_MEDIA_TICKET_PRIVATE_KEY` to `PROVIDER_TICKET_PRIVATE_KEY` from
   dspeak-media-control. Different keypair, different audience — signatures
   would fail verification and auth breaks.
 - Do not use the old `MEDIA_TICKET_SECRET` symmetric secret (now dead).

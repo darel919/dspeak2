@@ -1,7 +1,7 @@
 # Desktop CI build runbook
 
-`desktop-build.yml` builds the dSpeak Tauri app for macOS (arm64), Linux (x64),
-and Windows (x64), then uploads the installers as run artifacts and, on version
+`desktop-build.yml` currently builds the dSpeak Tauri app for macOS (arm64) and
+Windows (x64), then uploads the installers as run artifacts and, on version
 tags, publishes them to a GitHub Release.
 
 ## Why this workflow exists
@@ -12,6 +12,12 @@ The Tauri build links against a prebuilt native media bundle (`libwebrtc` +
 `native-media.yml` workflow. Desktop builds must never fetch, `gclient`, or
 CMake anything at application build time, so this workflow consumes the bundle
 artifact produced upstream instead of rebuilding it.
+
+The native-media workflow currently targets macOS arm64 and Windows x64. It
+uses the same `desktop/scripts/provision-native-media.sh` provisioner used by
+`dev:desktop`. macOS uses the pinned libwebrtc archive published by
+libmediasoupclient; Windows builds libwebrtc from the pinned WebRTC sources
+because no Windows archive is available there.
 
 ## Trigger model
 
@@ -38,22 +44,19 @@ available the job fails with a clear message: run `native-media.yml` first.
 - Downloads and extracts the native bundle, then verifies
   `libdspeak_media`, `libmediasoupclient`, `libsdptransform`, `libwebrtc`, and
   `include/` are all present before building.
-- Installs the Rust stable toolchain, bun, and (Linux only) the Tauri v2 system
-  libraries: webkit2gtk-4.1, GTK3, libayatana-appindicator, librsvg, patchelf,
-  PipeWire/SPA, `rpm`, and FUSE (for AppImage tooling).
+- Installs the Rust stable toolchain and bun.
 - Installs root dependencies with `bun install --frozen-lockfile` and desktop
   dependencies with `npm ci` (the desktop package uses `package-lock.json`).
 - Runs `bun run build:desktop` with `NATIVE_MEDIA_ARTIFACT_DIR` set.
 
 ## Artifacts
 
-| Platform | Runner         | Bundle               | Installers                  |
-| -------- | -------------- | -------------------- | --------------------------- |
-| macOS    | `macos-15`     | `dspeak-macos-arm64` | `.dmg`, `.app`              |
-| Linux    | `ubuntu-24.04` | `dspeak-linux-x64`   | `.deb`, `.rpm`, `.AppImage` |
-| Windows  | `windows-2022` | `dspeak-windows-x64` | `.msi`, NSIS `.exe`         |
+| Platform | Runner                  | Bundle               | Installers          |
+| -------- | ----------------------- | -------------------- | ------------------- |
+| macOS    | `self-hosted` arm64 Mac | `dspeak-macos-arm64` | `.dmg`, `.app`      |
+| Windows  | `windows-2022`          | `dspeak-windows-x64` | `.msi`, NSIS `.exe` |
 
-On `v*` tags the `release` job downloads all three bundles, generates the
+On `v*` tags the `release` job downloads both bundles, generates the
 signed Tauri updater manifest, and publishes the installers and `latest.json`
 under the version tag with auto-generated release notes. Release builds require
 the `DSPEAK_TAURI_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY`, and optional
