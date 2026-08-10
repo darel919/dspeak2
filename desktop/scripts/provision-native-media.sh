@@ -514,6 +514,21 @@ clone_or_update_webrtc() {
   local depot_tools="$provision_root/depot_tools"
   local checkout="$provision_root/webrtc-checkout"
   local source="$checkout/src"
+  local git_config="$provision_root/gitconfig"
+  local git_cache="$provision_root/git-cache"
+
+  mkdir -p "$provision_root" "$git_cache"
+  if [[ ! -e "$git_config" ]]; then
+    : > "$git_config"
+  fi
+  if command -v cygpath >/dev/null 2>&1; then
+    git_config="$(cygpath -w "$git_config")"
+    git_cache="$(cygpath -w "$git_cache")"
+  fi
+  export GIT_CONFIG_GLOBAL="$git_config"
+  export GIT_CACHE_PATH="$git_cache"
+  git config --global core.autocrlf false
+  git config --global cache.cachepath "$git_cache"
 
   if [[ ! -x "$depot_tools/fetch" ]]; then
     if [[ -e "$depot_tools" ]]; then
