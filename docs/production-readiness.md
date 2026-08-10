@@ -45,7 +45,7 @@ Before release, verify:
 
 Production requires the Supabase, database, R2, media-control, media-ticket, Cloudflare TURN, VAPID, metrics, CSRF, and cron variables listed in `.env.example`. If the optional standalone provider is enabled, configure its URL and metrics token in the app and follow the provider's own deployment runbook.
 
-Secrets must be independently generated and scoped. In particular, do not reuse `MEDIA_TICKET_PRIVATE_KEY` as the control plane's provider-ticket private key.
+Secrets must be independently generated and scoped. In particular, do not reuse `CF_MEDIA_TICKET_PRIVATE_KEY` as the control plane's provider-ticket private key.
 
 ## Operational checks
 

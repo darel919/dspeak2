@@ -43,7 +43,10 @@ function resolveBuildIdentity() {
 
 const buildIdentity = resolveBuildIdentity();
 
-const connectSources = [process.env.MEDIA_CONTROL_URL, process.env.SUPABASE_URL]
+const connectSources = [
+  process.env.CF_MEDIA_CONTROL_URL,
+  process.env.SUPABASE_URL,
+]
   .filter(Boolean)
   .flatMap((value) => {
     try {
@@ -262,7 +265,7 @@ export default defineNuxtConfig({
     public: {
       baseApiPath: isDesktop ? desktopApiBasePath : "",
 
-      mediaControlUrl: process.env.MEDIA_CONTROL_URL || "",
+      mediaControlUrl: process.env.CF_MEDIA_CONTROL_URL || "",
       apiPath:
         isDesktop && process.env.VITE_DSPEAK_API_PATH
           ? `${process.env.VITE_DSPEAK_API_PATH.replace(/\/$/, "")}/api`

@@ -51,8 +51,9 @@ default and requires a prebuilt archive. Set
 `NATIVE_MEDIA_PROVISION_MODE=source` explicitly to allow the multi-gigabyte
 local build. On macOS arm64, the source path uses the pinned prebuilt libwebrtc
 archive from the libmediasoupclient release and only builds libmediasoupclient,
-libsdptransform, and the dSpeak shim locally. `auto` is download-only and never
-enables a source fallback.
+libsdptransform, and the dSpeak shim locally. On Windows x64, the source path
+builds libwebrtc from the pinned WebRTC checkout before building the remaining
+native libraries. `auto` is download-only and never enables a source fallback.
 Development automatically selects the native bundle from the Tauri
 `--target` value when supplied, otherwise from the architecture of the running
 dev process. The supported targets are macOS arm64 and Windows x64. macOS

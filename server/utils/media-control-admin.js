@@ -1,5 +1,5 @@
 function mediaControlUrl(channelId, action) {
-  const base = process.env.MEDIA_CONTROL_URL;
+  const base = process.env.CF_MEDIA_CONTROL_URL;
   if (!base) return null;
   return new URL(
     `/v1/room/${encodeURIComponent(channelId)}/${action}`,
@@ -9,7 +9,7 @@ function mediaControlUrl(channelId, action) {
 
 async function request(channelId, action, options = {}) {
   const url = mediaControlUrl(channelId, action);
-  const token = process.env.MEDIA_CONTROL_ADMIN_TOKEN;
+  const token = process.env.CF_MEDIA_CONTROL_ADMIN_TOKEN;
   if (!url || !token) return null;
   const response = await fetch(url, {
     ...options,

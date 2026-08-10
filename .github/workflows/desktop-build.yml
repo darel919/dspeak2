@@ -1,4 +1,4 @@
-# Build the dSpeak desktop app (Tauri) for macOS, Linux, and Windows.
+# Build the dSpeak desktop app (Tauri) for macOS and Windows.
 #
 # The desktop build links against a prebuilt native media bundle (libwebrtc +
 # libmediasoupclient + the dSpeak shim). That bundle is produced by the
@@ -52,15 +52,6 @@ jobs:
               desktop/src-tauri/target/release/bundle/macos/*.app
               desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
               desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-          - platform: linux-x64
-            runner: ubuntu-24.04
-            artifact: dspeak-linux-x64
-            native_artifact: lib-dspeak-media-linux-x64
-            upload_pattern: |
-              desktop/src-tauri/target/release/bundle/deb/*.deb
-              desktop/src-tauri/target/release/bundle/rpm/*.rpm
-              desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-              desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
           - platform: windows-x64
             runner: windows-2022
             artifact: dspeak-windows-x64
@@ -138,26 +129,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1"
-
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libjavascriptcoregtk-4.1-dev \
-            libsoup-3.0-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libxdo-dev \
-            libssl-dev \
-            libfuse2t64 \
-            rpm \
-            patchelf \
-            libpipewire-0.3-dev \
-            libspa-0.2-dev \
-            build-essential
 
       - name: Install root dependencies
         run: bun install --frozen-lockfile

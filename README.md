@@ -106,18 +106,14 @@ DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:6543/pos
 DIRECT_DATABASE_URL=postgresql://postgres:password@db.your-project.supabase.co:5432/postgres
 
 # Cloudflare
-MEDIA_CONTROL_URL=https://media-control.example.com
-MEDIA_CONTROL_ISSUER=dspeak-media-control
-MEDIA_CONTROL_ADMIN_TOKEN=long-random-secret
-MEDIA_TICKET_PRIVATE_KEY=base64-encoded-ed25519-pkcs8-private-key
-R2_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=your-r2-access-key
-R2_SECRET_ACCESS_KEY=your-r2-secret-key
-R2_BUCKET_NAME=dspeak
-
-# Optional standalone dspeak-sfu provider
-DSPEAK_SFU_HTTP_URL=https://sfu.example.com
-DSPEAK_SFU_METRICS_TOKEN=provider-metrics-token
+CF_MEDIA_CONTROL_URL=https://media-control.example.com
+CF_MEDIA_CONTROL_ISSUER=dspeak-media-control
+CF_MEDIA_CONTROL_ADMIN_TOKEN=long-random-secret
+CF_MEDIA_TICKET_PRIVATE_KEY=base64-encoded-ed25519-pkcs8-private-key
+CF_R2_ACCOUNT_ID=your-account-id
+CF_R2_ACCESS_KEY_ID=your-r2-access-key
+CF_R2_SECRET_ACCESS_KEY=your-r2-secret-key
+CF_R2_BUCKET_NAME=dspeak
 ```
 
 `DATABASE_URL` uses Supavisor transaction mode (port 6543) for Vercel/serverless. `DIRECT_DATABASE_URL` is for migrations/admin (port 5432).

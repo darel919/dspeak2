@@ -59,9 +59,9 @@ test("Cloudflare TURN credentials are generated server-side", async () => {
   let request;
   const servers = await createCloudflareTurnServers(
     {
-      CLOUDFLARE_TURN_KEY_ID: "key-id",
-      CLOUDFLARE_TURN_API_TOKEN: "api-token",
-      CLOUDFLARE_TURN_CREDENTIAL_TTL_SECONDS: "3600",
+      CF_TURN_APP_ID: "app-id",
+      CF_TURN_API_KEY: "api-key",
+      CF_TURN_CREDENTIAL_TTL_SECONDS: "3600",
     },
     async (url, options) => {
       request = { url, options };
@@ -83,9 +83,9 @@ test("Cloudflare TURN credentials are generated server-side", async () => {
   );
   assert.match(
     request.url,
-    /\/turn\/keys\/key-id\/credentials\/generate-ice-servers$/,
+    /\/turn\/keys\/app-id\/credentials\/generate-ice-servers$/,
   );
-  assert.equal(request.options.headers.Authorization, "Bearer api-token");
+  assert.equal(request.options.headers.Authorization, "Bearer api-key");
   assert.deepEqual(JSON.parse(request.options.body), { ttl: 3600 });
   assert.equal(servers.length, 1);
   assert.equal(servers[0].username, "temporary-user");
