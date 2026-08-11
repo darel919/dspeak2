@@ -185,7 +185,7 @@
 </template>
 
 <script setup>
-import { INVITE_EXPIRY_OPTIONS } from "~~/shared/room-invite.js";
+import { INVITE_EXPIRY_OPTIONS } from "~~/shared/room-invite.ts";
 import { storeToRefs } from "pinia";
 import { useDirectMessagesStore } from "../stores/directMessages";
 import { useFriendsStore } from "../stores/friends";

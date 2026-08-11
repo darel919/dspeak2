@@ -61,8 +61,8 @@
 </template>
 
 <script setup>
-import { publicDisplayName } from "~~/shared/user-profile.js";
-import { extractInviteLink } from "../../shared/room-invite-link.js";
+import { publicDisplayName } from "~~/shared/user-profile.ts";
+import { extractInviteLink } from "../../shared/room-invite-link.ts";
 import { useAuthStore } from "../../stores/auth";
 import { useRoomsStore } from "../../stores/rooms";
 

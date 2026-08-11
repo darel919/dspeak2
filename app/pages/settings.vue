@@ -1028,22 +1028,22 @@ import {
   VIDEO_FRAME_RATE_OPTIONS,
   VIDEO_RESOLUTION_OPTIONS,
 } from "../const/media";
-import { captureMicrophone } from "../shared/media-capture.js";
+import { captureMicrophone } from "../shared/media-capture.ts";
 import { debugLog } from "../shared/debug";
 import {
   automaticGateThreshold,
   createNoiseFloorEstimator,
   microphoneLevelDb,
   updateNoiseFloor,
-} from "../shared/microphone-gate.js";
+} from "../shared/microphone-gate.ts";
 import {
   ROOM_ACCENTS,
   ROOM_ACCENT_LIGHT_COLORS,
-} from "~~/shared/room-policy.js";
+} from "~~/shared/room-policy.ts";
 import {
   availableSystemSoundThemes,
   playSystemSound,
-} from "../shared/system-sounds.js";
+} from "../shared/system-sounds.ts";
 
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();

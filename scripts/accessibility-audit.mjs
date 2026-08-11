@@ -8,7 +8,7 @@ const baseUrl = process.env.ACCESSIBILITY_AUDIT_URL || "http://127.0.0.1:3000";
 const executablePath =
   process.env.PUPPETEER_EXECUTABLE_PATH ||
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
-const axePath = fileURLToPath(import.meta.resolve("axe-core/axe.min.js"));
+const axePath = fileURLToPath(import.meta.resolve("axe-core/axe.min.ts"));
 const profile = await mkdtemp(join(tmpdir(), "dspeak-a11y-"));
 const user = {
   id: "user-a",

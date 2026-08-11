@@ -267,7 +267,7 @@ import { useDirectMessagesStore } from "../stores/directMessages";
 import ProfileAvatar from "../components/ProfileAvatar.vue";
 import ChatMarkdownRenderer from "../components/Chat/MarkdownRenderer.vue";
 import InviteLinkCard from "../components/Chat/InviteLinkCard.vue";
-import { extractInviteLink } from "../shared/room-invite-link.js";
+import { extractInviteLink } from "../shared/room-invite-link.ts";
 
 const store = useDirectMessagesStore();
 const route = useRoute();

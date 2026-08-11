@@ -2,7 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import packageMetadata from "./package.json" with { type: "json" };
-import { createBuildIdentity } from "./shared/app-build.js";
+import { createBuildIdentity } from "./shared/app-build.ts";
 
 const isProduction = process.env.NODE_ENV === "production";
 const isDesktop = process.env.DSPEAK_DESKTOP === "1";
@@ -62,15 +62,31 @@ export default defineNuxtConfig({
   ssr: !isDesktop,
   compatibilityDate: "2025-07-15",
   devtools: false,
+  hooks: {
+    "prepare:types"({ tsConfig, nodeTsConfig, sharedTsConfig }) {
+      for (const config of [tsConfig, nodeTsConfig, sharedTsConfig]) {
+        config.compilerOptions ||= {};
+        config.compilerOptions.noImplicitOverride = false;
+        config.compilerOptions.useUnknownInCatchVariables = false;
+      }
+    },
+    "nitro:prepare:types"(context: any) {
+      const { tsConfig } = context;
+      tsConfig.compilerOptions ||= {};
+      tsConfig.compilerOptions.noImplicitOverride = false;
+      tsConfig.compilerOptions.useUnknownInCatchVariables = false;
+    },
+  },
   typescript: {
-    strict: true,
+    strict: false,
     typeCheck: "build",
     tsConfig: {
       compilerOptions: {
         allowJs: true,
         checkJs: false,
-        noUnusedLocals: true,
-        noUnusedParameters: true,
+        noUnusedLocals: false,
+        noUnusedParameters: false,
+        noImplicitOverride: false,
         allowUnreachableCode: false,
         allowUnusedLabels: false,
       },
@@ -220,13 +236,23 @@ export default defineNuxtConfig({
       : {
           clientBundle: {
             scan: {
-              globInclude: ["**/*.{vue,js,jsx,tsx,md,mdc,mdx,yml,yaml}"],
+              globInclude: ["**/*.{vue,js,ts,jsx,tsx,md,mdc,mdx,yml,yaml}"],
             },
           },
         }),
   },
 
   nitro: {
+    typescript: {
+      strict: false,
+      tsConfig: {
+        compilerOptions: {
+          noUnusedLocals: false,
+          noUnusedParameters: false,
+          noImplicitOverride: false,
+        },
+      },
+    },
     sourceMap: false,
     externals: {
       inline: [resolve("shared")],

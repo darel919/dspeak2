@@ -569,12 +569,12 @@
 </template>
 
 <script setup>
-import { publicDisplayName } from "~~/shared/user-profile.js";
+import { publicDisplayName } from "~~/shared/user-profile.ts";
 import {
   canAccessRoomAdministration,
   ROOM_ACCENTS,
   ROOM_ACCENT_LIGHT_COLORS,
-} from "~~/shared/room-policy.js";
+} from "~~/shared/room-policy.ts";
 import { useAuthStore } from "../../../stores/auth";
 import { useRoomsStore } from "../../../stores/rooms";
 import SoundboardAdmin from "../../../components/SoundboardAdmin.vue";

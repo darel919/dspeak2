@@ -130,7 +130,7 @@ import ProfileAvatar from "./ProfileAvatar.vue";
 import {
   PRESENCE_STATUSES,
   PRESENCE_LABELS,
-} from "~~/shared/presence-status.js";
+} from "~~/shared/presence-status.ts";
 
 defineProps({
   profile: { type: Object, required: true },

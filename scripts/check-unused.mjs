@@ -4,18 +4,18 @@ import ts from "typescript";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const targetFiles = [
-  "app/shared/cloudflare-realtime-session.js",
-  "app/shared/hybrid-media-topology-controller.js",
-  "app/shared/mediasoup-client-session.js",
-  "app/shared/native-cloudflare-realtime-session.js",
-  "app/shared/native-mediasoup-session.js",
-  "app/shared/native-p2p-session.js",
-  "app/shared/native-p2p.js",
-  "app/stores/chat.js",
-  "server/utils/dspeak-api.js",
-  "server/utils/dspeak-channel-api.js",
-  "server/utils/dspeak-chat-api.js",
-  "server/utils/dspeak-profile-api.js",
+  "app/shared/cloudflare-realtime-session.ts",
+  "app/shared/hybrid-media-topology-controller.ts",
+  "app/shared/mediasoup-client-session.ts",
+  "app/shared/native-cloudflare-realtime-session.ts",
+  "app/shared/native-mediasoup-session.ts",
+  "app/shared/native-p2p-session.ts",
+  "app/shared/native-p2p.ts",
+  "app/stores/chat.ts",
+  "server/utils/dspeak-api.ts",
+  "server/utils/dspeak-channel-api.ts",
+  "server/utils/dspeak-chat-api.ts",
+  "server/utils/dspeak-profile-api.ts",
 ];
 
 for (const directory of [
@@ -31,7 +31,7 @@ for (const directory of [
 ]) {
   const absoluteDirectory = resolve(projectRoot, directory);
   if (!existsSync(absoluteDirectory)) continue;
-  const entries = ts.sys.readDirectory(absoluteDirectory, [".js"], undefined, [
+  const entries = ts.sys.readDirectory(absoluteDirectory, [".ts"], undefined, [
     "**/*",
   ]);
   targetFiles.push(

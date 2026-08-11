@@ -198,7 +198,7 @@ async function setupPage(page, origin, peerId, remotePeerId) {
 
 try {
   const build = await Bun.build({
-    entrypoints: ["scripts/browser/p2p-smoke-entry.js"],
+    entrypoints: ["scripts/browser/p2p-smoke-entry.ts"],
     outdir: temporaryRoot,
     naming: "p2p-smoke.js",
     target: "browser",

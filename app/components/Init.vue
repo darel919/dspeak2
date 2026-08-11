@@ -48,7 +48,7 @@ import { useRuntimeStore } from "../stores/runtime";
 import { useIdleDetection } from "../composables/useIdleDetection";
 import { useGlobalKeyboardShortcuts } from "../composables/useGlobalKeyboardShortcuts";
 import NotificationWarning from "./NotificationWarning.vue";
-import { usePresence } from "../composables/usePresence.js";
+import { usePresence } from "../composables/usePresence.ts";
 import { useDeepLinkAuth } from "../composables/useDeepLinkAuth";
 import startupLogo from "../assets/logo/logo_96.png";
 import { debugLog } from "../shared/debug";
@@ -56,7 +56,7 @@ import {
   createStartupReadiness,
   STARTUP_READINESS_KEY,
 } from "../shared/startup-readiness";
-import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();

@@ -440,8 +440,8 @@
 <script setup>
 import { useRoomsStore } from "../stores/rooms";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
-import { canManageMember } from "~~/shared/room-policy.js";
-import { publicFullName } from "~~/shared/user-profile.js";
+import { canManageMember } from "~~/shared/room-policy.ts";
+import { publicFullName } from "~~/shared/user-profile.ts";
 import { MEMBER_STATUS_ORDER, VIEWPORT_PADDING_PX } from "../const/ui";
 const roomsStore = useRoomsStore();
 const memberMenuUser = ref(null);
