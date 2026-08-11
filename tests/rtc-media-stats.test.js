@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   calculateTransportBitrateBps,
   collectRtpStats,
+  findRtpStat,
 } from "../app/shared/rtc-media-stats.js";
 
 test("transport bitrate uses byte and RTC timestamp deltas", () => {
@@ -89,4 +90,47 @@ test("RTP statistics include inbound audio playout details", () => {
   assert.equal(stats.packetsLost, 2);
   assert.equal(stats.totalSamplesReceived, 48_000);
   assert.equal(stats.concealedSamples, 240);
+});
+
+test("matches RTP statistics to the requested media track", () => {
+  const report = new Map([
+    [
+      "audio-source",
+      {
+        id: "audio-source",
+        type: "media-source",
+        kind: "audio",
+        trackIdentifier: "audio-track",
+      },
+    ],
+    [
+      "audio-rtp",
+      {
+        id: "audio-rtp",
+        type: "outbound-rtp",
+        kind: "audio",
+        trackId: "audio-source",
+        bytesSent: 10,
+      },
+    ],
+    [
+      "screen-rtp",
+      {
+        id: "screen-rtp",
+        type: "outbound-rtp",
+        kind: "audio",
+        trackIdentifier: "screen-track",
+        bytesSent: 20,
+      },
+    ],
+  ]);
+
+  assert.equal(
+    findRtpStat(report, "outbound-rtp", {
+      trackId: "audio-track",
+      kind: "audio",
+    }).id,
+    "audio-rtp",
+  );
+  assert.equal(findRtpStat(report, "outbound-rtp", { kind: "audio" }), null);
 });

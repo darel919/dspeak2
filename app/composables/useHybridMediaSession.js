@@ -63,7 +63,6 @@ import {
   mapPeerRoundTripTimes,
 } from "~/shared/voice-transport.js";
 import {
-  matchesPreparedActivation,
   shouldAcceptTopologyEvent,
   topologyEventKey,
 } from "~~/server/utils/media-transition.js";
@@ -504,6 +503,7 @@ export function useHybridMediaSession() {
     clearAttenuation: attenuationReporter.clear,
     closeMediaSessionTransports,
     connected,
+    cancelConnect: () => sessionLifecycle?.cancel?.(),
     disposeVisibility: () => {
       disposeVisibility?.();
       disposeVisibility = null;
@@ -585,7 +585,6 @@ export function useHybridMediaSession() {
     mediaGeneration,
     mediaReadinessPollMs: MEDIA_TIMING.readinessPollMs,
     mediaHandoffTimeoutMs: MEDIA_TIMING.handoffTimeoutMs,
-    matchesPreparedActivation,
     onP2pQualification: (data) => voiceStore.setP2pQualification?.(data),
     onRemotePublication: () => pendingCloudflarePublications.splice(0),
     onTopologyStateUpdated: (data, nextTopologyState) => {

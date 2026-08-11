@@ -120,20 +120,42 @@ OSStatus render_audio(void* user_data,
     auto* output = static_cast<AudioOutput*>(user_data);
     if (!output || !io_data) return noErr;
     std::lock_guard<std::mutex> lock(output->mutex);
-    for (UInt32 buffer_index = 0; buffer_index < io_data->mNumberBuffers; ++buffer_index) {
-        auto& buffer = io_data->mBuffers[buffer_index];
+    if (!output->enabled) output->samples.clear();
+    const bool interleaved = io_data->mNumberBuffers == 1;
+    if (interleaved) {
+        auto& buffer = io_data->mBuffers[0];
         auto* destination = static_cast<float*>(buffer.mData);
-        if (!destination) continue;
+        if (!destination) return noErr;
         const UInt32 channels = buffer.mNumberChannels ? buffer.mNumberChannels : 2;
         for (UInt32 frame = 0; frame < frame_count; ++frame) {
             for (UInt32 channel = 0; channel < channels; ++channel) {
                 float value = 0.0f;
                 if (output->enabled && !output->samples.empty()) {
                     value = output->samples.front() * static_cast<float>(output->volume);
-                    if (channel + 1 >= channels) output->samples.pop_front();
+                    output->samples.pop_front();
                 }
                 destination[frame * channels + channel] = value;
             }
+        }
+        return noErr;
+    }
+    for (UInt32 frame = 0; frame < frame_count; ++frame) {
+        float left = 0.0f;
+        float right = 0.0f;
+        if (output->enabled && !output->samples.empty()) {
+            left = output->samples.front();
+            output->samples.pop_front();
+            right = output->samples.empty() ? left : output->samples.front();
+            if (!output->samples.empty()) output->samples.pop_front();
+        }
+        for (UInt32 buffer_index = 0; buffer_index < io_data->mNumberBuffers; ++buffer_index) {
+            auto& buffer = io_data->mBuffers[buffer_index];
+            auto* destination = static_cast<float*>(buffer.mData);
+            if (!destination) continue;
+            const UInt32 channels = buffer.mNumberChannels ? buffer.mNumberChannels : 1;
+            const float value = buffer_index == 0 ? left : right;
+            for (UInt32 channel = 0; channel < channels; ++channel)
+                destination[frame * channels + channel] = value;
         }
     }
     return noErr;
@@ -251,6 +273,7 @@ extern "C" void lib_dspeak_media_audio_output_set_enabled(void* value, bool enab
     if (!output) return;
     std::lock_guard<std::mutex> lock(output->mutex);
     output->enabled = enabled;
+    if (!enabled) output->samples.clear();
 #else
     (void)value;
     (void)enabled;
@@ -349,8 +372,8 @@ void NativeReceiveAudioSink::SetVolume(double volume) {
     lib_dspeak_media_audio_output_set_volume(output_, volume);
 }
 
-NativeReceiveVideoSink::NativeReceiveVideoSink(std::string consumer_id)
-    : consumer_id_(std::move(consumer_id)) {}
+NativeReceiveVideoSink::NativeReceiveVideoSink(std::string consumer_id, std::string handle)
+    : consumer_id_(std::move(consumer_id)), handle_(std::move(handle)) {}
 
 void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
     if (!enabled_) return;
@@ -364,7 +387,7 @@ void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
     if (width_size > std::numeric_limits<size_t>::max() / height_size / 4)
         return;
     std::vector<uint8_t> rgba(width_size * height_size * 4);
-    if (libyuv::I420ToABGR(buffer->DataY(), buffer->StrideY(),
+    if (libyuv::I420ToRGBA(buffer->DataY(), buffer->StrideY(),
                            buffer->DataU(), buffer->StrideU(),
                            buffer->DataV(), buffer->StrideV(),
                            rgba.data(), width * 4, width, height) != 0) return;
@@ -375,6 +398,7 @@ void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
         {"timestampMs", frame.timestamp_us() / 1000},
         {"pixelFormat", "rgba"},
     };
+    if (!handle_.empty()) payload["handle"] = handle_;
     push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME, consumer_id_.c_str(), payload, rgba.data(),
                static_cast<uint32_t>(rgba.size()));
     if (!g_video_frame_logged.exchange(true))
@@ -416,7 +440,7 @@ extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
         return;
 
     std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
-    if (libyuv::I420ToABGR(scaled->DataY(), scaled->StrideY(),
+    if (libyuv::I420ToRGBA(scaled->DataY(), scaled->StrideY(),
                            scaled->DataU(), scaled->StrideU(),
                            scaled->DataV(), scaled->StrideV(),
                            rgba.data(), width * 4, width, height) != 0)
@@ -434,6 +458,19 @@ extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
     if (!g_local_video_frame_logged.exchange(true))
         std::fprintf(stderr, "[dspeak:media] native local video frame source=%s size=%dx%d\n",
                      source ? source : "", width, height);
+}
+
+extern "C" void lib_dspeak_media_push_capture_error_event(const char* route,
+                                                             int error_code,
+                                                             const char* message) {
+    push_event(
+        LIB_DSPEAK_MEDIA_RECEIVE_EVENT_CAPTURE_ERROR,
+        route,
+        {
+            {"route", route ? route : ""},
+            {"errorCode", error_code},
+            {"message", message ? message : "Native capture failed"},
+        });
 }
 
 extern "C" void lib_dspeak_media_push_receive_track_event(const char* event_name,

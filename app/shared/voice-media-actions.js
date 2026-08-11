@@ -6,6 +6,7 @@ import { voiceJoinErrorMessage } from "./voice-errors.js";
 import { resolveChannelRoomId } from "./media/channel-room.js";
 import { resolveVoicePreferences } from "./voice-preferences.js";
 import { waitForVoiceTransportReady } from "./voice-join-readiness.js";
+import { waitForOutboundSourceFlow } from "./media-source-flow.js";
 import { STORAGE_KEYS } from "~/const/storage.js";
 
 export function createVoiceMediaActions({
@@ -44,10 +45,52 @@ export function createVoiceMediaActions({
   updateUserVoiceState,
   upsertUserProfile,
 }) {
+  let voiceToggleOperation = Promise.resolve();
+  let captureToggleOperation = Promise.resolve();
+
+  function enqueueVoiceToggle(operation) {
+    const task = voiceToggleOperation.catch(() => {}).then(operation);
+    voiceToggleOperation = task.catch(() => {});
+    return task;
+  }
+
+  function enqueueCaptureToggle(operation) {
+    const task = captureToggleOperation.catch(() => {}).then(operation);
+    captureToggleOperation = task.catch(() => {});
+    return task;
+  }
+
   function setCurrentChannel(channelId) {
     currentChannelId.value = channelId;
     const channel = channelId ? channelsStore.getChannelById(channelId) : null;
     currentRoomId.value = resolveChannelRoomId(channel);
+  }
+
+  function syncLocalVoiceState() {
+    const authenticatedUser = getAuthenticatedUser();
+    if (!authenticatedUser?.id) return;
+    updateUserVoiceState(authenticatedUser.id, {
+      muted: Boolean(micMuted.value),
+      deafened: Boolean(deafened.value),
+      cameraEnabled: Boolean(cameraEnabled.value),
+      screenSharing: Boolean(screenSharing.value),
+    });
+  }
+
+  function sendParticipantVoiceState() {
+    return sfuComposable.value?.sendParticipantVoiceState?.({
+      muted: Boolean(micMuted.value),
+      deafened: Boolean(deafened.value),
+    });
+  }
+
+  async function waitForAudioSourceFlow(session) {
+    if (typeof session?.getOutboundRtpStats !== "function") return true;
+    return waitForOutboundSourceFlow({
+      getStats: () => session.getOutboundRtpStats(),
+      source: "audio",
+      timeoutMs: session.getVoiceTransportTimeout?.() || 15000,
+    });
   }
 
   async function leaveVoiceChannel(cancelPendingJoin = true) {
@@ -242,6 +285,8 @@ export function createVoiceMediaActions({
         timeoutMs: () => session.getVoiceTransportTimeout?.() || 15_000,
       });
       ensureCurrentJoin();
+      if (!micMuted.value) await waitForAudioSourceFlow(session);
+      ensureCurrentJoin();
 
       connected.value = true;
       connectedAt.value = Date.now();
@@ -249,16 +294,11 @@ export function createVoiceMediaActions({
       if (authenticatedUser?.id) {
         upsertUserProfile(authenticatedUser);
         addConnectedUser(authenticatedUser.id, authenticatedUser);
-        updateUserVoiceState(authenticatedUser.id, {
-          muted: micMuted.value,
-          deafened: deafened.value,
-          cameraEnabled: cameraEnabled.value,
-          screenSharing: screenSharing.value,
-        });
       }
+      syncLocalVoiceState();
       joinChannel(channelId);
       pageLifecycle.register();
-      session.sendParticipantVoiceState?.();
+      sendParticipantVoiceState();
       await session.ensureAudioElements?.();
       playSystemSound("voice-join", settingsStore);
       mediaDebug("voice.join-ready", {
@@ -340,37 +380,51 @@ export function createVoiceMediaActions({
     }
   }
 
-  async function toggleMic() {
+  async function toggleMicInternal() {
     if (!connected.value) {
       micMuted.value = !micMuted.value;
       if (!micMuted.value) deafened.value = false;
+      syncLocalVoiceState();
       return true;
     }
+    const session = sfuComposable.value;
+    if (!session) return false;
     mediaDebug("voice.mic-toggle", { muted: micMuted.value });
     try {
       if (micMuted.value) {
         const start = Date.now();
         const waitMs = 5000;
         while (
-          !sfuComposable.value.transportReady &&
+          !Boolean(unref(session.transportReady)) &&
           Date.now() - start < waitMs
         )
           await new Promise((resolve) => setTimeout(resolve, 50));
-        if (!sfuComposable.value.transportReady)
+        if (!Boolean(unref(session.transportReady)))
           throw new Error("Voice transport not ready");
+        let started = false;
         try {
-          await sfuComposable.value.startAudioProduction();
+          const producer = await session.startAudioProduction();
+          if (!connected.value || sfuComposable.value !== session) return false;
+          if (producer?.track) producer.track.enabled = true;
+          started = true;
+          await waitForAudioSourceFlow(session);
+          if (!connected.value || sfuComposable.value !== session) return false;
           micMuted.value = false;
           deafened.value = false;
-          sfuComposable.value.sendParticipantVoiceState?.();
+          syncLocalVoiceState();
+          sendParticipantVoiceState();
         } catch (toggleError) {
+          if (started) await session.stopAudioProduction?.().catch(() => {});
           micMuted.value = true;
+          syncLocalVoiceState();
           throw toggleError;
         }
       } else {
-        await sfuComposable.value.stopAudioProduction?.();
+        await session.stopAudioProduction?.();
+        if (sfuComposable.value !== session) return false;
         micMuted.value = true;
-        sfuComposable.value.sendParticipantVoiceState?.();
+        syncLocalVoiceState();
+        sendParticipantVoiceState();
       }
       mediaDebug("voice.mic-toggle-complete", { muted: micMuted.value });
       return true;
@@ -387,23 +441,27 @@ export function createVoiceMediaActions({
     }
   }
 
-  async function toggleDeafen() {
+  async function toggleDeafenInternal() {
     if (!connected.value) {
       deafened.value = !deafened.value;
       if (deafened.value) micMuted.value = true;
+      syncLocalVoiceState();
       return true;
     }
     try {
       const nextDeafened = !deafened.value;
       deafened.value = nextDeafened;
       if (nextDeafened && !micMuted.value) {
-        const muted = await toggleMic();
+        const muted = await toggleMicInternal();
         if (!muted) {
           deafened.value = false;
+          syncLocalVoiceState();
+          sendParticipantVoiceState();
           return false;
         }
       }
-      sfuComposable.value?.sendParticipantVoiceState?.();
+      syncLocalVoiceState();
+      sendParticipantVoiceState();
       await sfuComposable.value?.ensureAudioElements?.();
       return true;
     } catch (toggleError) {
@@ -412,7 +470,7 @@ export function createVoiceMediaActions({
     }
   }
 
-  async function toggleCamera() {
+  async function toggleCameraInternal() {
     if (!connected.value || !sfuComposable.value) return;
     const session = sfuComposable.value;
     const generation = ++cameraToggleGenerationState.value;
@@ -423,10 +481,12 @@ export function createVoiceMediaActions({
       else await session.stopVideoProduction("camera");
       if (generation !== cameraToggleGenerationState.value) return;
       cameraEnabled.value = enable;
+      syncLocalVoiceState();
       error.value = null;
     } catch (toggleError) {
       if (generation !== cameraToggleGenerationState.value) return;
       cameraEnabled.value = previous;
+      syncLocalVoiceState();
       if (
         ["MEDIA_START_CANCELLED", "MEDIA_SESSION_CLOSED"].includes(
           toggleError?.code,
@@ -438,18 +498,25 @@ export function createVoiceMediaActions({
     }
   }
 
-  async function toggleScreenShare(captureSelection = null, options = {}) {
+  async function toggleScreenShareInternal(
+    captureSelection = null,
+    options = {},
+  ) {
     if (!connected.value || !sfuComposable.value) return;
     const previousSharing = Boolean(
       screenSharing.value ||
       unref(sfuComposable.value.localVideoFeeds)?.has?.("screen"),
     );
+    const previousSystemAudioSharing = Boolean(systemAudioSharing.value);
     try {
       const session = sfuComposable.value;
       const currentLocalVideoFeeds = unref(session.localVideoFeeds);
       if (currentLocalVideoFeeds?.has?.("screen")) {
         await session.stopVideoProduction("screen");
+        if (!connected.value || sfuComposable.value !== session) return;
         screenSharing.value = false;
+        systemAudioSharing.value = false;
+        syncLocalVoiceState();
       } else {
         screenSharing.value = false;
         const producer = await session.startVideoProduction("screen", {
@@ -461,10 +528,21 @@ export function createVoiceMediaActions({
             ? { roomBitrateBps: effectiveSystemAudioBitrate.value * 1000 }
             : {}),
         });
+        if (!connected.value || sfuComposable.value !== session) return;
         screenSharing.value = true;
+        if (
+          captureSelection?.mode === "both" ||
+          options.includeSystemAudio === true
+        )
+          systemAudioSharing.value = true;
+        syncLocalVoiceState();
         playSystemSound("screen-start", settingsStore);
         const handleScreenShareEnded = () => {
+          if (sfuComposable.value !== session) return;
           screenSharing.value = false;
+          systemAudioSharing.value = false;
+          syncLocalVoiceState();
+          sendParticipantVoiceState();
         };
         producer?.track?.addEventListener?.("ended", handleScreenShareEnded, {
           once: true,
@@ -476,17 +554,25 @@ export function createVoiceMediaActions({
       if (shareError?.name !== "NotAllowedError")
         error.value = shareError?.message || "Unable to share the screen";
       screenSharing.value = previousSharing;
+      systemAudioSharing.value = previousSystemAudioSharing;
+      syncLocalVoiceState();
+      sendParticipantVoiceState();
       if (shareError?.code === "MEDIA_SESSION_CLOSED") return;
       throw shareError;
     }
   }
 
-  async function toggleSystemAudioShare(captureSelection = null, options = {}) {
+  async function toggleSystemAudioShareInternal(
+    captureSelection = null,
+    options = {},
+  ) {
     if (!connected.value || !sfuComposable.value) return;
     const previousSharing = systemAudioSharing.value;
+    const session = sfuComposable.value;
     try {
       if (systemAudioSharing.value) {
-        await sfuComposable.value.stopSystemAudioProduction();
+        await session.stopSystemAudioProduction();
+        if (!connected.value || sfuComposable.value !== session) return;
         systemAudioSharing.value = false;
       } else {
         const confirmed = captureSelection
@@ -500,7 +586,7 @@ export function createVoiceMediaActions({
                 "Your screen video will not be shared—only the audio will be sent.",
             );
         if (!confirmed) return;
-        const producer = await sfuComposable.value.startSystemAudioProduction({
+        const producer = await session.startSystemAudioProduction({
           ...(captureSelection ? { captureSelection } : {}),
           ...(options.explicitBrowserFallback
             ? { explicitBrowserFallback: true }
@@ -509,9 +595,13 @@ export function createVoiceMediaActions({
             ? { roomBitrateBps: effectiveSystemAudioBitrate.value * 1000 }
             : {}),
         });
+        if (!connected.value || sfuComposable.value !== session) return;
         systemAudioSharing.value = true;
         const handleEnded = () => {
+          if (sfuComposable.value !== session) return;
           systemAudioSharing.value = false;
+          syncLocalVoiceState();
+          sendParticipantVoiceState();
         };
         producer?.track?.addEventListener?.("ended", handleEnded, {
           once: true,
@@ -523,9 +613,31 @@ export function createVoiceMediaActions({
       if (shareError?.name !== "NotAllowedError")
         error.value = shareError?.message || "Unable to share system audio";
       systemAudioSharing.value = previousSharing;
+      syncLocalVoiceState();
+      sendParticipantVoiceState();
       if (shareError?.code === "MEDIA_SESSION_CLOSED") return;
       throw shareError;
     }
+  }
+
+  function toggleMic() {
+    return enqueueVoiceToggle(toggleMicInternal);
+  }
+
+  function toggleDeafen() {
+    return enqueueVoiceToggle(toggleDeafenInternal);
+  }
+
+  function toggleCamera(...args) {
+    return enqueueCaptureToggle(() => toggleCameraInternal(...args));
+  }
+
+  function toggleScreenShare(...args) {
+    return enqueueCaptureToggle(() => toggleScreenShareInternal(...args));
+  }
+
+  function toggleSystemAudioShare(...args) {
+    return enqueueCaptureToggle(() => toggleSystemAudioShareInternal(...args));
   }
 
   return {

@@ -17,6 +17,8 @@ const [
   repositoryComposable,
   details,
   init,
+  app,
+  updatePrompt,
   pwaPrompt,
   desktopPrompt,
   tauriConfig,
@@ -35,6 +37,8 @@ const [
     "../app/composables/useRepositoryUpdate.js",
     "../app/components/UpdateDetails.vue",
     "../app/components/Init.vue",
+    "../app/app.vue",
+    "../app/components/UpdatePrompt.vue",
     "../app/components/PwaUpdatePrompt.vue",
     "../app/components/DesktopUpdatePrompt.vue",
     "../desktop/src-tauri/tauri.conf.json",
@@ -99,7 +103,10 @@ test("repository comparison reports deployment and source update states", () => 
   assert.match(repositoryUpdate, /aheadBy/);
   assert.match(repositoryUpdate, /pullRequest/);
   assert.match(repositoryUpdate, /html_url/);
-  assert.match(repositoryUpdate, /filesTruncated/);
+  assert.doesNotMatch(
+    repositoryUpdate,
+    /summarizeFile|filesTruncated|totalFiles/,
+  );
   assert.match(repositoryUpdate, /deployedUpdateAvailable/);
   assert.match(repositoryUpdate, /sourceUpdateAvailable/);
   assert.match(repositoryUpdate, /MAX_CACHE_ENTRIES = 12/);
@@ -125,6 +132,17 @@ test("startup and prompts expose useful release details without file listings", 
   assert.match(pwaPrompt, /Later/);
   assert.match(pwaPrompt, /window\.location\.reload/);
   assert.match(init, /startDesktopUpdateMonitoring/);
+  assert.match(app, /<UpdatePrompt \/>/);
+  assert.doesNotMatch(app, /<PwaUpdatePrompt \/>|<DesktopUpdatePrompt \/>/);
+  assert.match(
+    updatePrompt,
+    /PwaUpdatePrompt v-if="runtimeReady && !desktopRuntime"/,
+  );
+  assert.match(
+    updatePrompt,
+    /DesktopUpdatePrompt v-else-if="runtimeReady && desktopRuntime"/,
+  );
+  assert.match(updatePrompt, /runtimeStore\.initialize\(\)/);
   assert.match(desktopPrompt, /desktopRuntime\.value &&/);
   assert.doesNotMatch(desktopPrompt, /repositoryUpdateAvailable/);
 });

@@ -55,6 +55,8 @@ pub async fn media_create_capture_producer(
     handles.producers.insert(source.to_string(), producer);
     let id = unsafe { ffi::lib_dspeak_media_producer_get_id(producer) };
     if id.is_null() {
+        handles.producers.remove(source);
+        unsafe { ffi::lib_dspeak_media_destroy_producer(producer) };
         return Err("native producer did not return an identifier".to_string());
     }
     let producer_id = unsafe { CStr::from_ptr(id) }
@@ -62,7 +64,14 @@ pub async fn media_create_capture_producer(
         .map(str::to_owned)
         .map_err(|_| "native producer identifier is not UTF-8".to_string());
     unsafe { ffi::lib_dspeak_media_free_string(id) };
-    Ok(serde_json::json!({ "id": producer_id? }))
+    match producer_id {
+        Ok(producer_id) => Ok(serde_json::json!({ "id": producer_id })),
+        Err(error) => {
+            handles.producers.remove(source);
+            unsafe { ffi::lib_dspeak_media_destroy_producer(producer) };
+            Err(error)
+        }
+    }
 }
 
 #[cfg(native_rtc)]

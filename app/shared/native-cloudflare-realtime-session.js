@@ -1,9 +1,7 @@
 import { asError, nativeRemoteFeedKey } from "./native-mediasoup-utils.js";
 import {
   nativeFlowing,
-  nativeRtpStat,
   nativeRtpStatForTrack,
-  nativeStatsObjects,
   normalizeNativeTransportStats,
 } from "./native-mediasoup-diagnostics.js";
 
@@ -70,17 +68,8 @@ function midForTrack(sdp, trackId, kind, usedMids = new Set()) {
 }
 
 function nativeFlowForTrack(value, type, entry) {
-  const stats = nativeStatsObjects(value);
-  const matching = stats.find((stat) => {
-    if (stat.type !== type || stat.isRemote) return false;
-    const identifier = stat.trackIdentifier || stat.trackId || stat.mid;
-    return (
-      identifier && [entry.trackId, entry.mid].includes(String(identifier))
-    );
-  });
-  return matching
-    ? nativeFlowing([matching], type)
-    : nativeFlowing(value, type);
+  const stat = nativeRtpStatForTrack(value, type, entry);
+  return stat ? nativeFlowing([stat], type) : null;
 }
 
 function sessionClosedError() {
@@ -132,6 +121,7 @@ export class NativeCloudflareRealtimeSession {
     this.remoteAudioFeeds = remoteAudioFeeds;
     this.publications = new Map();
     this.remoteByMid = new Map();
+    this.pendingRemoteTrackEvents = new Map();
     this.pending = new Map();
     this.subscriptionTasks = new Map();
     this.negotiationQueue = Promise.resolve();
@@ -241,7 +231,10 @@ export class NativeCloudflareRealtimeSession {
     if (data.closed) {
       this.publications.delete(trackName);
       for (const [mid, publication] of this.remoteByMid) {
-        if (publication.trackName === trackName) this.remoteByMid.delete(mid);
+        if (publication.trackName === trackName) {
+          this.remoteByMid.delete(mid);
+          this.pendingRemoteTrackEvents.delete(mid);
+        }
       }
       const entry = this.consumers.get(trackName);
       if (entry) this._closeConsumer(entry);
@@ -313,6 +306,17 @@ export class NativeCloudflareRealtimeSession {
       });
       this._assertCurrent(generation);
       this.producers.delete(source);
+      if (
+        !this.send?.({
+          type: "cloudflare-publication",
+          data: {
+            trackName: previous.trackName,
+            source,
+            closed: true,
+          },
+        })
+      )
+        throw new Error("Media control is unavailable");
     }
     const trackResult = await this.invoke("media_p2p_add_track", {
       p2pHandle: this.handle,
@@ -494,6 +498,13 @@ export class NativeCloudflareRealtimeSession {
     );
     if (track?.mid != null)
       this.remoteByMid.set(String(track.mid), publication);
+    if (track?.mid != null) {
+      const mid = String(track.mid);
+      const pending = this.pendingRemoteTrackEvents.get(mid) || [];
+      this.pendingRemoteTrackEvents.delete(mid);
+      for (const queued of pending)
+        this._handleTrackAdded(queued.payload, queued.event);
+    }
     this.lastReceivedConsumerParams = response;
     if (response.sessionDescription?.type === "offer") {
       const answer = await this.invoke("media_p2p_create_answer", {
@@ -703,56 +714,8 @@ export class NativeCloudflareRealtimeSession {
         this._emitState();
         return true;
       }
+      if (name === "track-added") return this._handleTrackAdded(payload, event);
       const trackId = String(payload.trackId || event.id || "");
-      if (name === "track-added") {
-        const mid = String(payload.mid || "");
-        const publication = this.remoteByMid.get(mid);
-        if (!publication) {
-          this.onError?.(
-            new Error(
-              `Native Cloudflare track ${trackId} has no publication MID`,
-            ),
-          );
-          return true;
-        }
-        const kind = payload.kind === "video" ? "video" : "audio";
-        const entry = {
-          key: nativeRemoteFeedKey(
-            publication.userId,
-            publication.source || kind,
-            publication.trackName,
-          ),
-          id: trackId,
-          consumerId: publication.trackName,
-          producerId: publication.trackName,
-          trackId,
-          mid,
-          userId: publication.userId,
-          peerId: publication.peerId,
-          source: publication.source || kind,
-          kind,
-          trackName: publication.trackName,
-          provider: "sfu",
-          native: true,
-          playback: kind === "audio" ? "coreaudio" : "native-frame",
-          frame: null,
-          receiving:
-            this.remoteReceiving.get(
-              `${String(publication.userId)}:${String(publication.source || kind)}`,
-            ) !== false,
-          closed: false,
-          p2pHandle: this.handle,
-        };
-        const previous = this.consumers.get(publication.trackName);
-        if (previous) this._closeConsumer(previous);
-        this.consumers.set(publication.trackName, entry);
-        if (kind === "audio") this.remoteAudioFeeds.set(entry.key, entry);
-        else this.remoteVideoFeeds.set(entry.key, entry);
-        this.applyJitterBufferConfig(entry);
-        this.onRemoteTrack?.(entry);
-        this._emitState();
-        return true;
-      }
       if (name === "track-removed") {
         const entry = [...this.consumers.values()].find(
           (candidate) => candidate.trackId === trackId,
@@ -763,6 +726,8 @@ export class NativeCloudflareRealtimeSession {
       return true;
     }
     if (event.kind !== 2) return false;
+    if (eventHandle !== null && eventHandle !== String(this.handle))
+      return false;
     const trackId = String(event.id || payload.trackId || "");
     const entry = [...this.consumers.values()].find(
       (candidate) => candidate.trackId === trackId,
@@ -776,6 +741,70 @@ export class NativeCloudflareRealtimeSession {
       };
       this.remoteVideoFeeds.set(entry.key, { ...entry });
     }
+    this.onRemoteTrack?.(entry);
+    this._emitState();
+    return true;
+  }
+
+  _handleTrackAdded(payload = {}, event = {}) {
+    const trackId = String(payload.trackId || event.id || "");
+    const mid = String(payload.mid || "");
+    const publication = this.remoteByMid.get(mid);
+    if (!publication) {
+      if (mid) {
+        const current = this.pendingRemoteTrackEvents.get(mid) || [];
+        if (
+          !current.some(
+            (queued) =>
+              String(queued.payload?.trackId || queued.event?.id || "") ===
+              trackId,
+          )
+        )
+          current.push({ payload: { ...payload }, event: { ...event } });
+        this.pendingRemoteTrackEvents.set(mid, current);
+      } else
+        this.onError?.(
+          new Error(
+            `Native Cloudflare track ${trackId} has no publication MID`,
+          ),
+        );
+      return true;
+    }
+    const kind = payload.kind === "video" ? "video" : "audio";
+    const source = publication.source || kind;
+    const previous = this.consumers.get(publication.trackName);
+    if (previous?.trackId === trackId) return true;
+    if (previous) this._closeConsumer(previous);
+    const entry = {
+      key: nativeRemoteFeedKey(
+        publication.userId,
+        source,
+        publication.trackName,
+      ),
+      id: trackId,
+      consumerId: publication.trackName,
+      producerId: publication.trackName,
+      trackId,
+      mid,
+      userId: publication.userId,
+      peerId: publication.peerId,
+      source,
+      kind,
+      trackName: publication.trackName,
+      provider: "sfu",
+      native: true,
+      playback: kind === "audio" ? "coreaudio" : "native-frame",
+      frame: null,
+      receiving:
+        this.remoteReceiving.get(`${String(publication.userId)}:${source}`) !==
+        false,
+      closed: false,
+      p2pHandle: this.handle,
+    };
+    this.consumers.set(publication.trackName, entry);
+    if (kind === "audio") this.remoteAudioFeeds.set(entry.key, entry);
+    else this.remoteVideoFeeds.set(entry.key, entry);
+    this.applyJitterBufferConfig(entry);
     this.onRemoteTrack?.(entry);
     this._emitState();
     return true;
@@ -884,7 +913,9 @@ export class NativeCloudflareRealtimeSession {
   }
 
   async mediaReadiness(expectedInbound) {
-    const outboundEntries = [...this.producers.values()];
+    const outboundEntries = [...this.producers.values()].filter(
+      (entry) => this.sourceTransmission.get(entry.source) !== false,
+    );
     const inboundEntries = [...this.consumers.values()].filter(
       (entry) => entry.receiving !== false,
     );
@@ -956,20 +987,32 @@ export class NativeCloudflareRealtimeSession {
     this.handle = null;
     this.sessionId = null;
     this.initializing = null;
-    for (const entry of this.producers.values())
-      this.send?.({
-        type: "cloudflare-publication",
-        data: {
-          trackName: entry.trackName,
-          source: entry.source,
-          closed: true,
-        },
-      });
-    for (const entry of this.consumers.values()) this._closeConsumer(entry);
+    for (const entry of this.producers.values()) {
+      try {
+        this.send?.({
+          type: "cloudflare-publication",
+          data: {
+            trackName: entry.trackName,
+            source: entry.source,
+            closed: true,
+          },
+        });
+      } catch (error) {
+        this.onError?.(error);
+      }
+    }
+    for (const entry of this.consumers.values()) {
+      try {
+        this._closeConsumer(entry);
+      } catch (error) {
+        this.onError?.(error);
+      }
+    }
     this.producers.clear();
     this.consumers.clear();
     this.publications.clear();
     this.remoteByMid.clear();
+    this.pendingRemoteTrackEvents.clear();
     this.remoteVideoFeeds.clear();
     this.remoteAudioFeeds.clear();
     this.rtpSamples.clear();
@@ -1008,7 +1051,11 @@ export class NativeCloudflareRealtimeSession {
     this.consumers.delete(entry.consumerId || entry.trackName);
     this.remoteAudioFeeds.delete(entry.key);
     this.remoteVideoFeeds.delete(entry.key);
-    this.onRemoteTrackEnded?.(entry);
+    try {
+      this.onRemoteTrackEnded?.(entry);
+    } catch (error) {
+      this.onError?.(error);
+    }
   }
 
   _startCandidateDrain() {

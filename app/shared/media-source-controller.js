@@ -58,9 +58,18 @@ export function createMediaSourceController({
         );
     };
     try {
-      Promise.resolve(getSfu()?.removeSource(source)).catch(reportError);
+      return Promise.resolve(getSfu()?.removeSource(source)).catch(
+        (sourceError) => {
+          reportError(sourceError);
+          if (sourceError?.code === "MEDIA_SESSION_CLOSED") return false;
+          throw sourceError;
+        },
+      );
     } catch (sourceError) {
       reportError(sourceError);
+      if (sourceError?.code === "MEDIA_SESSION_CLOSED")
+        return Promise.resolve(false);
+      return Promise.reject(sourceError);
     }
   }
   async function publishSource(sourceEntry) {
@@ -68,6 +77,8 @@ export function createMediaSourceController({
       sourceEntry.source === "screen-audio"
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
+    if (entry.source === "audio" && voiceStore.micMuted)
+      entry.track.enabled = false;
     const previous = localSources.get(entry.source);
     const isVideo = entry.source === "camera" || entry.source === "screen";
     const previousVideoFeed = isVideo
@@ -128,8 +139,10 @@ export function createMediaSourceController({
           sfuRequired ? getSfu()?.addSource(previous) : null,
         ]);
       } else {
-        await Promise.allSettled([getP2pMesh()?.unpublishSource(entry.source)]);
-        removeSfuSource(entry.source);
+        await Promise.allSettled([
+          getP2pMesh()?.unpublishSource(entry.source),
+          removeSfuSource(entry.source),
+        ]);
         if (entry.source === "screen-audio") stopSharedAudioMeter();
       }
       if (
@@ -155,6 +168,8 @@ export function createMediaSourceController({
       throw sourceError;
     }
     localSources.set(entry.source, entry);
+    if (entry.source === "screen-audio" && entry.ownerSource === "screen")
+      voiceStore.systemAudioSharing = true;
     if (entry.captureTrack && entry.track !== entry.captureTrack)
       entry.track.addEventListener(
         "ended",
@@ -186,16 +201,32 @@ export function createMediaSourceController({
       publishedEntry?.track !== entry.track &&
       publishedEntry?.captureTrack !== entry.track
     )
-      return;
+      return Promise.resolve(false);
+    const pairedScreenAudio =
+      entry.source === "screen" ? localSources.get("screen-audio") : null;
     localSources.delete(entry.source);
+    if (entry.source === "audio" && unexpected) {
+      voiceStore.micMuted = true;
+      sendParticipantVoiceState({ muted: true });
+    }
+    if (entry.source === "screen") {
+      voiceStore.screenSharing = false;
+      if (pairedScreenAudio?.ownerSource === "screen")
+        voiceStore.systemAudioSharing = false;
+    }
+    if (entry.source === "screen-audio" && entry.ownerSource === "system-audio")
+      voiceStore.systemAudioSharing = false;
     if (entry.source === "audio") stopLocalVoiceDetection();
-    getP2pMesh()
-      ?.unpublishSource(entry.source)
-      .catch((sourceError) => {
-        error.value =
-          sourceError?.message || `Unable to stop ${entry.source} publication`;
-      });
-    removeSfuSource(entry.source);
+    const p2pRemoval = getP2pMesh()?.unpublishSource(entry.source);
+    const trackedP2pRemoval = p2pRemoval
+      ? Promise.resolve(p2pRemoval).catch((sourceError) => {
+          error.value =
+            sourceError?.message ||
+            `Unable to stop ${entry.source} publication`;
+          throw sourceError;
+        })
+      : Promise.resolve();
+    const sfuRemoval = removeSfuSource(entry.source);
     localVideoFeeds.value.delete(entry.source);
     localVideoFeeds.value = new Map(localVideoFeeds.value);
     if (entry.source === "screen") adaptiveVideo.stop();
@@ -210,12 +241,15 @@ export function createMediaSourceController({
       entry.source === "audio" &&
       connected.value &&
       !getIntentionalClose()
-    ) {
-      startAudioProduction().catch((captureError) => {
-        error.value =
-          captureError?.message || "Unable to restore microphone capture";
-      });
-    }
+    )
+      error.value = "Microphone capture ended. Click unmute to restore it.";
+    return Promise.allSettled([trackedP2pRemoval, sfuRemoval]).then(
+      (results) => {
+        const rejected = results.find((result) => result.status === "rejected");
+        if (rejected) throw rejected.reason;
+        return true;
+      },
+    );
   }
 
   function sendSourceState() {
@@ -225,12 +259,18 @@ export function createMediaSourceController({
     });
   }
 
-  function sendParticipantVoiceState() {
+  function sendParticipantVoiceState(state = {}) {
     return send({
       type: "participant-voice-state",
       data: {
-        muted: voiceStore.micMuted,
-        deafened: voiceStore.deafened,
+        muted:
+          typeof state.muted === "boolean"
+            ? state.muted
+            : Boolean(voiceStore.micMuted),
+        deafened:
+          typeof state.deafened === "boolean"
+            ? state.deafened
+            : Boolean(voiceStore.deafened),
       },
     });
   }

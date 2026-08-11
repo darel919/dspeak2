@@ -2,6 +2,46 @@ function finite(value) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
+function reportValues(report) {
+  if (!report) return [];
+  if (typeof report.values === "function") return [...report.values()];
+  if (Array.isArray(report)) return report;
+  if (typeof report === "object") return Object.values(report);
+  return [];
+}
+
+export function findRtpStat(report, type, { trackId, mid, kind } = {}) {
+  const values = reportValues(report);
+  const candidates = values.filter((stat) => {
+    if (stat?.type !== type || stat.isRemote) return false;
+    const statKind = stat.kind || stat.mediaType;
+    return !kind || !statKind || statKind === kind;
+  });
+  if (!candidates.length) return null;
+  const identifiers = new Set(
+    [trackId, mid].map((value) => String(value || "")).filter(Boolean),
+  );
+  if (identifiers.size) {
+    const byId = new Map(
+      values
+        .filter((stat) => stat?.id != null)
+        .map((stat) => [String(stat.id), stat]),
+    );
+    const match = candidates.find((stat) => {
+      const related =
+        stat.trackId == null ? null : byId.get(String(stat.trackId));
+      return [
+        stat.trackIdentifier,
+        stat.trackId,
+        stat.mid,
+        related?.trackIdentifier,
+      ].some((value) => identifiers.has(String(value || "")));
+    });
+    if (match) return match;
+  }
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function deltaRate(current, previous, elapsedMs, multiplier = 1) {
   if (
     current == null ||
@@ -39,16 +79,9 @@ export function collectRtpStats(
   previous = null,
   expectedKind = null,
 ) {
-  const values = [...report.values()];
   const type = direction === "outbound" ? "outbound-rtp" : "inbound-rtp";
-  const rtp = values.find(
-    (stat) =>
-      stat.type === type &&
-      !stat.isRemote &&
-      (!expectedKind ||
-        stat.kind === expectedKind ||
-        stat.mediaType === expectedKind),
-  );
+  const values = reportValues(report);
+  const rtp = findRtpStat(report, type, { kind: expectedKind });
   if (!rtp) return { stats: null, sample: previous };
 
   const codec = values.find((stat) => stat.id === rtp.codecId);

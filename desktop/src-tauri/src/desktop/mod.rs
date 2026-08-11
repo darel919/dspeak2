@@ -133,6 +133,7 @@ pub(crate) fn run() {
             media::media_join,
             media::media_leave,
             media::media_shutdown,
+            media::media_close_sfu,
             media::media_set_topology,
             media::media_set_ice_servers,
             media::media_handle_signal,

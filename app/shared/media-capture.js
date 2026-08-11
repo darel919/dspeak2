@@ -7,7 +7,7 @@ import {
 import {
   DESKTOP_CAPTURE_ERROR_CODES,
   DesktopCaptureError,
-  assertDesktopCaptureSelection,
+  assertDesktopCaptureMode,
 } from "./desktop-capture.js";
 
 export function audioConstraints(settings, stereo = false) {
@@ -53,10 +53,15 @@ export async function captureMicrophone({
     const stream = await mediaDevices.getUserMedia({
       audio: audioConstraints({ ...settings, micDeviceId: null }, stereo),
     });
-    await onFallback?.({
-      failedDeviceId: settings.micDeviceId,
-      error,
-    });
+    try {
+      await onFallback?.({
+        failedDeviceId: settings.micDeviceId,
+        error,
+      });
+    } catch (callbackError) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw callbackError;
+    }
     return { stream, fallback: true };
   }
 }
@@ -114,17 +119,29 @@ export class MediaCaptureManager {
       onFallback: this.onMicrophoneFallback,
     });
     const stream = result.stream;
-    this.microphoneFallback = result.fallback;
-    if (wasFallback && !result.fallback)
-      await this.onMicrophoneRestored?.({ deviceId: settings.micDeviceId });
     const track = stream.getAudioTracks()[0];
+    if (!track) {
+      for (const streamTrack of stream.getTracks()) streamTrack.stop();
+      throw new Error("Microphone capture returned no audio track");
+    }
+    const previousFallback = this.microphoneFallback;
+    try {
+      this.microphoneFallback = result.fallback;
+      if (wasFallback && !result.fallback)
+        await this.onMicrophoneRestored?.({ deviceId: settings.micDeviceId });
+    } catch (error) {
+      this.microphoneFallback = previousFallback;
+      stream.getTracks().forEach((streamTrack) => streamTrack.stop());
+      throw error;
+    }
     track.contentHint = "speech";
     const entry = this.register("audio", stream, track);
     try {
       const published = await entry.publication;
       return published?.track ? published : entry;
     } catch (error) {
-      if (this.sources.get("audio") === entry) this.stop("audio");
+      if (this.sources.get("audio") === entry)
+        await this.stop("audio").catch(() => {});
       throw error;
     }
   }
@@ -147,6 +164,7 @@ export class MediaCaptureManager {
       current,
       result.stream,
     );
+    if (!replacement) return null;
     this.microphoneFallback = result.fallback;
     if (result.fallback)
       await this.onMicrophoneFallback?.(fallbackDetails || {});
@@ -309,8 +327,13 @@ export class MediaCaptureManager {
   async startVideo(source, options = {}) {
     if (source !== "camera" && source !== "screen")
       throw new Error("Unsupported video source");
+    const screen = source === "screen";
     if (source === "screen" && options.captureSelection) {
-      assertDesktopCaptureSelection(options.captureSelection, "screen-video");
+      assertDesktopCaptureMode(
+        options.captureSelection,
+        ["video", "both"],
+        "screen-video",
+      );
       if (!options.explicitBrowserFallback)
         throw new DesktopCaptureError(
           "The selected desktop source requires native capture; choose browser capture explicitly to use the browser picker.",
@@ -322,10 +345,20 @@ export class MediaCaptureManager {
     }
     const existing = this.sources.get(source);
     if (existing) return existing;
+    if (screen) {
+      const audioEntry = this.sources.get("screen-audio");
+      if (audioEntry?.ownerSource === "system-audio")
+        throw new DesktopCaptureError(
+          "Stop the standalone system-audio capture before starting screen share.",
+          {
+            code: DESKTOP_CAPTURE_ERROR_CODES.SOURCE_CONFLICT,
+            operation: "screen-video",
+          },
+        );
+    }
     const generation = (this.sourceGenerations.get(source) || 0) + 1;
     this.sourceGenerations.set(source, generation);
     const settings = this.getSettings();
-    const screen = source === "screen";
     const videoSettings = screen ? settings.screenVideo : settings.cameraVideo;
     const constraints = buildVideoConstraints(videoSettings, {
       display: screen,
@@ -352,7 +385,7 @@ export class MediaCaptureManager {
       throw new Error(`No ${source} video track is available`);
     }
     const trackConstraints = screen
-      ? buildVideoConstraints(videoSettings, { display: false })
+      ? buildVideoConstraints(videoSettings, { display: true })
       : constraints;
     try {
       await track.applyConstraints(trackConstraints);
@@ -387,9 +420,11 @@ export class MediaCaptureManager {
       }
       return publishedEntry;
     } catch (error) {
-      if (this.sources.get(source)?.stream === stream) this.stop(source);
+      if (this.sources.get(source)?.stream === stream)
+        await this.stop(source).catch(() => {});
       const audioEntry = this.sources.get("screen-audio");
-      if (audioEntry?.stream === stream) this.stop("screen-audio");
+      if (audioEntry?.stream === stream)
+        await this.stop("screen-audio").catch(() => {});
       stream.getTracks().forEach((candidate) => candidate.stop());
       throw error;
     }
@@ -403,9 +438,22 @@ export class MediaCaptureManager {
 
   async startSystemAudio(options = {}) {
     const existing = this.sources.get("screen-audio");
-    if (existing) return existing;
+    if (existing) {
+      if (existing.ownerSource === "system-audio") return existing;
+      throw new DesktopCaptureError(
+        "System audio is already owned by the active screen-share capture.",
+        {
+          code: DESKTOP_CAPTURE_ERROR_CODES.SOURCE_CONFLICT,
+          operation: "system-audio",
+        },
+      );
+    }
     if (options.captureSelection) {
-      assertDesktopCaptureSelection(options.captureSelection, "system-audio");
+      assertDesktopCaptureMode(
+        options.captureSelection,
+        ["audio", "both"],
+        "system-audio",
+      );
       if (!options.explicitBrowserFallback)
         throw new DesktopCaptureError(
           "The selected desktop source requires native capture; choose browser capture explicitly to use the browser picker.",
@@ -439,7 +487,8 @@ export class MediaCaptureManager {
       const published = await entry.publication;
       return published?.track ? published : entry;
     } catch (error) {
-      if (this.sources.get("screen-audio") === entry) this.stop("screen-audio");
+      if (this.sources.get("screen-audio") === entry)
+        await this.stop("screen-audio").catch(() => {});
       throw error;
     }
   }
@@ -454,7 +503,14 @@ export class MediaCaptureManager {
       () => {
         if (this.sources.get(source)?.track !== track) return;
         this.sources.delete(source);
-        this.onSourceEnded?.(entry, { unexpected: true });
+        if (source === "screen") {
+          const audio = this.sources.get("screen-audio");
+          if (audio?.ownerSource === "screen")
+            void this.stop("screen-audio").catch(() => {});
+        }
+        Promise.resolve(
+          this.onSourceEnded?.(entry, { unexpected: true }),
+        ).catch(() => {});
       },
       { once: true },
     );
@@ -472,7 +528,7 @@ export class MediaCaptureManager {
       (this.sourceGenerations.get(source) || 0) + 1,
     );
     const entry = this.sources.get(source);
-    if (!entry) return;
+    if (!entry) return Promise.resolve(false);
     this.sources.delete(source);
     entry.track.stop();
     const sharedStreamStillUsed = [...this.sources.values()].some(
@@ -480,16 +536,20 @@ export class MediaCaptureManager {
     );
     if (!sharedStreamStillUsed)
       entry.stream.getTracks().forEach((track) => track.stop());
-    this.onSourceEnded?.(entry);
+    const removal = Promise.resolve(this.onSourceEnded?.(entry));
     if (source === "audio") this.microphoneFallback = false;
     if (source === "screen") {
       const audio = this.sources.get("screen-audio");
-      if (audio?.ownerSource === "screen") this.stop("screen-audio");
+      if (audio?.ownerSource === "screen")
+        return Promise.all([removal, this.stop("screen-audio")]);
     }
+    return removal;
   }
 
   stopAll() {
-    for (const source of [...this.sources.keys()]) this.stop(source);
+    return Promise.allSettled(
+      [...this.sources.keys()].map((source) => this.stop(source)),
+    );
   }
 }
 

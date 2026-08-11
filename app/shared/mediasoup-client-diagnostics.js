@@ -1,6 +1,7 @@
 import {
   collectPeerConnectionDiagnosticStats,
   collectPeerConnectionStats,
+  findRtpStat,
 } from "./rtc-media-stats.js";
 
 export async function collectMediasoupStats(session) {
@@ -36,7 +37,10 @@ export function expectedMediasoupInboundFlowCount(session) {
 }
 
 export async function mediasoupMediaReadiness(session, expectedInbound) {
-  const outboundExpected = session.sources.size;
+  const outboundEntries = [...session.producers.values()].filter(
+    (entry) => session.sourceTransmission?.get(entry.source) !== false,
+  );
+  const outboundExpected = outboundEntries.length;
   const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
   if (!session.sendTransport || !session.recvTransport) {
     return {
@@ -47,11 +51,13 @@ export async function mediasoupMediaReadiness(session, expectedInbound) {
       inboundFlowing: 0,
     };
   }
-  const sampleFlow = (key, report, type, field) => {
+  const sampleFlow = (key, report, type, field, track, mid) => {
     if (!report) return false;
-    const stat = [...report.values()].find(
-      (candidate) => candidate.type === type,
-    );
+    const stat = findRtpStat(report, type, {
+      trackId: track?.id,
+      mid,
+      kind: track?.kind,
+    });
     if (!stat) return false;
     const bytes = Number(stat[field]);
     const timestamp = Number(stat.timestamp);
@@ -62,13 +68,15 @@ export async function mediasoupMediaReadiness(session, expectedInbound) {
       return false;
     return bytes > previous.bytes;
   };
-  const outboundChecks = [...session.producers.values()].map(async (entry) => {
+  const outboundChecks = outboundEntries.map(async (entry) => {
     const report = await entry.producer.getStats().catch(() => null);
     return sampleFlow(
       `out:${entry.producer.id}`,
       report,
       "outbound-rtp",
       "bytesSent",
+      entry.track,
+      entry.mid,
     );
   });
   const inboundChecks = [...session.consumers.values()].map(async (entry) => {
@@ -80,6 +88,8 @@ export async function mediasoupMediaReadiness(session, expectedInbound) {
         report,
         "inbound-rtp",
         "bytesReceived",
+        entry.track,
+        entry.mid,
       )
     );
   });

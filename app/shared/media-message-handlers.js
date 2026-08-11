@@ -35,6 +35,7 @@ export function setupMediaMessageHandlers({
       "provider-ticket",
       "provider-failure",
       "provider-recovering",
+      "participant-voice-state",
     ],
   });
   registerHandler("hi919", onServerHello);
@@ -86,6 +87,14 @@ export function setupMediaMessageHandlers({
       reason: data?.reason,
     });
     return onProviderRecovering?.(data);
+  });
+  registerHandler("participant-voice-state", (data) => {
+    if (
+      data?.userId &&
+      typeof data.muted === "boolean" &&
+      typeof data.deafened === "boolean"
+    )
+      voiceStore.updateUserVoiceState(data.userId, data);
   });
   registerHandler("p2p-qualified", (data) =>
     onP2pQualification?.({ ...data, type: "p2p-qualified" }),

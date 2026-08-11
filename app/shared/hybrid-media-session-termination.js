@@ -5,6 +5,7 @@ export function createHybridMediaSessionTermination({
   clearAttenuation,
   closeMediaSessionTransports,
   connected,
+  cancelConnect,
   disposeVisibility,
   error,
   handoff,
@@ -51,6 +52,7 @@ export function createHybridMediaSessionTermination({
   function disconnect() {
     rtpStatsSamples.clear();
     setIntentionalClose(true);
+    cancelConnect?.();
     resolveTopologyWaiter(new Error("Media signaling connection stopped"));
     setChannelId(null);
     disposeVisibility();

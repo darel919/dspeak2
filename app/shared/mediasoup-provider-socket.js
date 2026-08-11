@@ -17,6 +17,8 @@ export class MediasoupProviderSocket {
       this.socket = socket;
       mediaDebug("mediasoup.socket-created", { signalingUrl });
       let failureReported = false;
+      let handshakeSettled = false;
+      let timer;
       closeSocketOnPageHide(socket);
       const reportFailure = (error) => {
         if (failureReported) return;
@@ -25,12 +27,19 @@ export class MediasoupProviderSocket {
           Promise.resolve(this.onFailure?.(error)).catch(() => {});
         } catch {}
       };
-      const timer = setTimeout(() => {
-        const error = new Error("Media provider handshake timed out");
+      const rejectHandshake = (error) => {
+        if (handshakeSettled) return;
+        handshakeSettled = true;
+        clearTimeout(timer);
         reportFailure(error);
-        socket.close(4000, error.message);
         reject(error);
+      };
+      const timerStarted = setTimeout(() => {
+        const error = new Error("Media provider handshake timed out");
+        socket.close(4000, error.message);
+        rejectHandshake(error);
       }, 8000);
+      timer = timerStarted;
       socket.addEventListener("open", () => {
         mediaDebug("mediasoup.socket-open");
         try {
@@ -42,9 +51,7 @@ export class MediasoupProviderSocket {
             }),
           );
         } catch (error) {
-          clearTimeout(timer);
-          reportFailure(error);
-          reject(error);
+          rejectHandshake(error);
           if (this.socket === socket && socket.readyState < WebSocket.CLOSING)
             socket.close(1011, "Provider handshake failed");
         }
@@ -58,6 +65,8 @@ export class MediasoupProviderSocket {
             return;
           }
           if (message.type === "hi919") {
+            if (handshakeSettled) return;
+            handshakeSettled = true;
             clearTimeout(timer);
             mediaDebug("mediasoup.handshake-ready");
             resolve();
@@ -65,9 +74,19 @@ export class MediasoupProviderSocket {
           }
           if (message.type === "connected") return;
           if (message.type === "error919") {
-            const error = new Error(message.error || "Media provider error");
+            const payload =
+              message.data && typeof message.data === "object"
+                ? message.data
+                : message;
+            const error = new Error(
+              payload.message ||
+                payload.error ||
+                message.error ||
+                "Media provider error",
+            );
             mediaDebug("mediasoup.provider-error", { error });
-            reportFailure(error);
+            const handled = await this.onMessage?.("error", payload);
+            if (handled !== true) reportFailure(error);
             return;
           }
           await this.onMessage?.(message.type, message.data || message);
@@ -85,17 +104,19 @@ export class MediasoupProviderSocket {
           reason: event.reason,
           clean: event.wasClean,
         });
-        if (!event.wasClean)
-          reportFailure(
-            new Error(event.reason || "Media provider disconnected"),
-          );
+        const error = new Error(event.reason || "Media provider disconnected");
+        if (!handshakeSettled) rejectHandshake(error);
+        else if (!event.wasClean) reportFailure(error);
       });
       socket.addEventListener("error", () => {
         clearTimeout(timer);
         const error = new Error("Media provider connection failed");
         mediaDebug("mediasoup.socket-error", { error });
         reportFailure(error);
-        reject(error);
+        if (!handshakeSettled) {
+          handshakeSettled = true;
+          reject(error);
+        }
       });
     });
     return this.ready;

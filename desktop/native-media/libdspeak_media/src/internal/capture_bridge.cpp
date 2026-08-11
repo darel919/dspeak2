@@ -333,41 +333,36 @@ static void on_audio_frame(void* user_data,
                            uint8_t channels) {
     CaptureRoute route = user_data ? *capture_route(user_data) : CaptureRoute::kDesktop;
     std::vector<std::vector<float>> chunks;
-    NativeAudioSource* source = nullptr;
-    webrtc::Thread* audio_thread = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(g_track_mutex);
-        lib_dspeak_media_audio_track_t* track = audio_track_for_route(route);
-        if (!track || !track->source || !track->worker_thread || !data || frame_count == 0 ||
-            channels != 2 || sample_rate != 48000) return;
-        auto& pending = audio_pending_for_route(route);
-        pending.insert(pending.end(), data, data + static_cast<size_t>(frame_count) * channels);
-        constexpr size_t frames_per_webrtc_audio_frame = 480;
-        constexpr size_t samples_per_webrtc_audio_frame = frames_per_webrtc_audio_frame * 2;
-        while (pending.size() >= samples_per_webrtc_audio_frame) {
-            std::vector<float> chunk(samples_per_webrtc_audio_frame);
-            std::copy_n(pending.begin(), samples_per_webrtc_audio_frame, chunk.begin());
-            pending.erase(pending.begin(), pending.begin() + samples_per_webrtc_audio_frame);
-            chunks.push_back(std::move(chunk));
-        }
-        source = track->source;
-        audio_thread = track->worker_thread;
+    std::unique_lock<std::mutex> track_lock(g_track_mutex);
+    lib_dspeak_media_audio_track_t* track = audio_track_for_route(route);
+    if (!track || !track->source || !track->worker_thread || !data || frame_count == 0 ||
+        channels != 2 || sample_rate != 48000) return;
+    auto& pending = audio_pending_for_route(route);
+    pending.insert(pending.end(), data, data + static_cast<size_t>(frame_count) * channels);
+    constexpr size_t frames_per_webrtc_audio_frame = 480;
+    constexpr size_t samples_per_webrtc_audio_frame = frames_per_webrtc_audio_frame * 2;
+    while (pending.size() >= samples_per_webrtc_audio_frame) {
+        std::vector<float> chunk(samples_per_webrtc_audio_frame);
+        std::copy_n(pending.begin(), samples_per_webrtc_audio_frame, chunk.begin());
+        pending.erase(pending.begin(), pending.begin() + samples_per_webrtc_audio_frame);
+        chunks.push_back(std::move(chunk));
     }
 
     const int64_t timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
-    constexpr size_t frames_per_webrtc_audio_frame = 480;
     size_t emitted_frames = 0;
     for (auto& chunk : chunks) {
-        webrtc::scoped_refptr<NativeAudioSource> source_ref(source);
-        audio_thread->BlockingCall([source_ref, &chunk, sample_rate, channels, timestamp_ms,
-                                    emitted_frames, frames_per_webrtc_audio_frame] {
-            source_ref->OnCapturedData(
-                chunk.data(), 32, sample_rate, channels, frames_per_webrtc_audio_frame,
-                timestamp_ms + static_cast<int64_t>(emitted_frames * 1000 / sample_rate));
-        });
+        const auto source_ref = track->source;
+        track->worker_thread->BlockingCall(
+            [source_ref, &chunk, sample_rate, channels, timestamp_ms, emitted_frames,
+             frames_per_webrtc_audio_frame] {
+                source_ref->OnCapturedData(
+                    chunk.data(), 32, sample_rate, channels, frames_per_webrtc_audio_frame,
+                    timestamp_ms + static_cast<int64_t>(emitted_frames * 1000 / sample_rate));
+            });
         emitted_frames += frames_per_webrtc_audio_frame;
     }
+    track_lock.unlock();
 
     if (!chunks.empty() && route == CaptureRoute::kDesktop) {
         g_probe_audio_frames.fetch_add(1);
@@ -377,10 +372,20 @@ static void on_audio_frame(void* user_data,
     }
 }
 
+static const char* capture_route_name(CaptureRoute route) {
+    switch (route) {
+        case CaptureRoute::kMicrophone: return "microphone";
+        case CaptureRoute::kCamera: return "camera";
+        case CaptureRoute::kDesktop: return "desktop";
+    }
+    return "unknown";
+}
+
 static void on_capture_error(void* user_data, int error_code, const char* message) {
-    (void)user_data;
-    (void)message;
+    const auto* route = capture_route(user_data);
     g_capture_error.store(error_code);
+    lib_dspeak_media_push_capture_error_event(
+        route ? capture_route_name(*route) : "unknown", error_code, message);
 }
 
 static bool create_capture_tracks(const json& request, int* error_out) {
@@ -537,7 +542,11 @@ static int stop_capture_request(int* error_out, bool system_audio = false) {
     if (error_out) *error_out = 0;
     std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
     auto*& capture_slot = system_audio ? g_system_audio_capture : g_capture;
-    if (!capture_slot) return 0;
+    if (!capture_slot) {
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        audio_pending_for_route(CaptureRoute::kDesktop).clear();
+        return 0;
+    }
     auto* capture = capture_slot;
     const bool capture_video = system_audio ? false : g_capture_has_video;
     const bool capture_audio = system_audio ? g_system_audio_has_audio : g_capture_has_audio;
@@ -551,6 +560,10 @@ static int stop_capture_request(int* error_out, bool system_audio = false) {
     lib_dspeak_media_platform_capture_stop(capture);
     lib_dspeak_media_platform_capture_destroy(capture);
     destroy_capture_tracks(capture_video, capture_audio);
+    {
+        std::lock_guard<std::mutex> track_lock(g_track_mutex);
+        audio_pending_for_route(CaptureRoute::kDesktop).clear();
+    }
     return 0;
 }
 

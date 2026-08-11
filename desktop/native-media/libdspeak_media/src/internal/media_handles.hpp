@@ -63,10 +63,11 @@ public:
 
     void OnCapturedFrame(CVPixelBufferRef pixel_buffer, int64_t timestamp_ms) {
         const bool camera = track_id_.find("camera") != std::string::npos;
-        webrtc::VideoFrame frame = ConvertPixelBuffer(pixel_buffer, timestamp_ms);
+        const auto frame = ConvertPixelBuffer(pixel_buffer, timestamp_ms);
+        if (!frame) return;
         const char* source = camera ? "camera" : "screen";
-        lib_dspeak_media_push_local_video_frame(source, frame);
-        OnFrame(frame);
+        lib_dspeak_media_push_local_video_frame(source, *frame);
+        OnFrame(*frame);
     }
 
     void SetState(webrtc::MediaSourceInterface::SourceState new_state) {
@@ -87,34 +88,47 @@ private:
         webrtc::MediaSourceInterface::kLive;
     bool is_screencast_ RTC_GUARDED_BY(mutex_) = true;
 
-    webrtc::VideoFrame ConvertPixelBuffer(CVPixelBufferRef pb, int64_t timestamp_ms) {
-        size_t width = CVPixelBufferGetWidth(pb);
-        size_t height = CVPixelBufferGetHeight(pb);
+    std::optional<webrtc::VideoFrame> ConvertPixelBuffer(
+        CVPixelBufferRef pb, int64_t timestamp_ms) {
+        if (!pb) return std::nullopt;
+        const size_t width = CVPixelBufferGetWidth(pb);
+        const size_t height = CVPixelBufferGetHeight(pb);
+        if (width == 0 || height == 0 || width > 8192 || height > 8192)
+            return std::nullopt;
+        if (CVPixelBufferGetPixelFormatType(pb) != kCVPixelFormatType_32BGRA)
+            return std::nullopt;
 
-        CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+        if (CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly) !=
+            kCVReturnSuccess)
+            return std::nullopt;
         void* base_addr = CVPixelBufferGetBaseAddress(pb);
-        size_t bytes_per_row = CVPixelBufferGetBytesPerRow(pb);
+        const size_t bytes_per_row = CVPixelBufferGetBytesPerRow(pb);
+        const int frame_width = static_cast<int>(width);
+        const int frame_height = static_cast<int>(height);
 
         webrtc::scoped_refptr<webrtc::I420Buffer> i420_buffer =
-            webrtc::I420Buffer::Create(width, height);
+            webrtc::I420Buffer::Create(frame_width, frame_height);
 
-        if (base_addr) {
-            libyuv::ARGBToI420(
-                static_cast<const uint8_t*>(base_addr),
-                bytes_per_row,
-                i420_buffer->MutableDataY(), i420_buffer->StrideY(),
-                i420_buffer->MutableDataU(), i420_buffer->StrideU(),
-                i420_buffer->MutableDataV(), i420_buffer->StrideV(),
-                width, height);
-        }
+        const bool valid_input = base_addr && i420_buffer &&
+            bytes_per_row >= width * 4;
+        const int conversion_result = valid_input
+            ? libyuv::ARGBToI420(
+                  static_cast<const uint8_t*>(base_addr), bytes_per_row,
+                  i420_buffer->MutableDataY(), i420_buffer->StrideY(),
+                  i420_buffer->MutableDataU(), i420_buffer->StrideU(),
+                  i420_buffer->MutableDataV(), i420_buffer->StrideV(),
+                  frame_width, frame_height)
+            : -1;
 
         CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+        if (conversion_result != 0) return std::nullopt;
 
-        return webrtc::VideoFrame::Builder()
-            .set_video_frame_buffer(i420_buffer)
-            .set_timestamp_ms(timestamp_ms)
-            .set_rotation(webrtc::kVideoRotation_0)
-            .build();
+        return std::optional<webrtc::VideoFrame>(
+            webrtc::VideoFrame::Builder()
+                .set_video_frame_buffer(i420_buffer)
+                .set_timestamp_ms(timestamp_ms)
+                .set_rotation(webrtc::kVideoRotation_0)
+                .build());
     }
 };
 
@@ -179,13 +193,8 @@ public:
             output_bps = 16;
         }
 
-        std::vector<webrtc::AudioTrackSinkInterface*> sinks_copy;
-        {
-            webrtc::MutexLock lock(&mutex_);
-            sinks_copy = sinks_;
-        }
-
-        for (auto* sink : sinks_copy) {
+        webrtc::MutexLock lock(&mutex_);
+        for (auto* sink : sinks_) {
             sink->OnData(output_data, output_bps, sample_rate, number_of_channels,
                          number_of_frames, absolute_capture_timestamp_ms);
         }

@@ -31,6 +31,12 @@ export function enqueuePeerSignaling(mesh, state, operation, phase = "signal") {
   const current = previous
     .catch(() => {})
     .then(async () => {
+      if (
+        state.closed ||
+        !mesh.connections.has(state.peerId) ||
+        state.pc.connectionState === "closed"
+      )
+        return false;
       state.signalingPhase = phase;
       try {
         return await operation();
@@ -129,12 +135,22 @@ export async function applyPeerSignal(mesh, state, signalValue) {
         source === "camera" || source === "screen" ? "video" : "audio";
       const genericTracks = [...state.remoteTracks.values()].filter(
         (entry) =>
-          entry.source === expectedKind && entry.track?.kind === expectedKind,
+          entry.track?.kind === expectedKind &&
+          (String(entry.source || "") === expectedKind ||
+            String(entry.source || "").startsWith(`${expectedKind}:`)),
       );
       if (genericTracks.length === 1) current = genericTracks[0];
     }
     if (current && current.source !== source) {
-      state.remoteTracks.delete(current.source);
+      for (const [key, entry] of state.remoteTracks)
+        if (entry === current) state.remoteTracks.delete(key);
+      const existing = [...state.remoteTracks.entries()].find(
+        ([, entry]) => entry.source === source,
+      );
+      if (existing) {
+        state.remoteTracks.delete(existing[0]);
+        mesh.onRemoteTrackEnded(existing[1]);
+      }
       mesh.onRemoteTrackEnded(current);
       current.source = source;
       current.key = `p2p:${String(state.peerId)}:${source}`;
@@ -150,8 +166,11 @@ export async function applyPeerSignal(mesh, state, signalValue) {
       if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
         mesh.remoteSources.delete(key);
     }
-    const current = state.remoteTracks.get(source);
-    state.remoteTracks.delete(source);
+    const currentEntry = [...state.remoteTracks.entries()].find(
+      ([, entry]) => entry.source === source,
+    );
+    const current = currentEntry?.[1];
+    if (currentEntry) state.remoteTracks.delete(currentEntry[0]);
     if (current) state.retiredRemoteTracks.set(source, current);
     mesh.onRemoteTrackEnded(
       current || {

@@ -108,6 +108,8 @@ export class NativeMediasoupSfuSession {
     location,
     onP2pSignal,
     onCurrentlyInChannel,
+    onBeforeNativeTeardown,
+    onNativeMediaClose,
     requestTimeoutMs = 8000,
     consumerControlTimeoutMs = 4000,
     recoveryTimeoutMs = 5000,
@@ -146,6 +148,8 @@ export class NativeMediasoupSfuSession {
     this.onRemoteTrackEnded = onRemoteTrackEnded;
     this.onP2pSignal = onP2pSignal;
     this.onCurrentlyInChannel = onCurrentlyInChannel;
+    this.onBeforeNativeTeardown = onBeforeNativeTeardown;
+    this.onNativeMediaClose = onNativeMediaClose;
     this.onStateChange = onStateChange;
     this.onError = onError;
     this.getAudioBitrate = getAudioBitrate;
@@ -311,12 +315,15 @@ export class NativeMediasoupSfuSession {
     return this.cloudflareSession;
   }
 
-  async activateProvider(provider) {
+  async activateProvider(
+    provider,
+    { ensureMedia = false, closeMedia = false } = {},
+  ) {
     const nextProvider = String(provider || "mediasoup");
     this.selectedProvider = nextProvider;
     if (nextProvider === "cloudflare-realtime") {
       if (this.sendTransport || this.recvTransport || this.device) {
-        this._closeMedia(false);
+        await this._closeMedia(false);
         this.activeSfuProvider = null;
       }
       const cloudflare = this._createCloudflareSession();
@@ -338,11 +345,18 @@ export class NativeMediasoupSfuSession {
       this._emitState();
       return cloudflare;
     }
-    if (this.cloudflareSession) {
-      await this.cloudflareSession.closeMedia();
-      this.cloudflareSession = null;
+    if (this.cloudflareSession || closeMedia) {
+      await this._closeMedia(false);
       this.mediaConnectionState = "disconnected";
     }
+    if (
+      nextProvider === "mediasoup" &&
+      ensureMedia &&
+      !this.sendTransport &&
+      !this.recvTransport &&
+      !this.device
+    )
+      await this._startNegotiation();
     this.activeSfuProvider =
       this.sendTransport || this.recvTransport || this.device
         ? "mediasoup"
@@ -414,6 +428,14 @@ export class NativeMediasoupSfuSession {
       } catch (error) {
         if (previousSource) this.sources.set(entry.source, previousSource);
         throw error;
+      }
+      const paused = this.sourceTransmission.get(normalized.source) === false;
+      if (existing.paused !== paused) {
+        await this.invoke("media_set_producer_paused", {
+          source: normalized.source,
+          paused,
+        });
+        existing.paused = paused;
       }
       existing.entry = normalized;
       this.sources.set(entry.source, normalized);
@@ -577,7 +599,7 @@ export class NativeMediasoupSfuSession {
         });
       this.producerRemovals.set(source, removal);
       if (sent === false) {
-        this._closeMedia(false);
+        this._closeMedia(false).catch(() => {});
         return removal.then(() => {
           throw new Error("Media control is unavailable");
         });
@@ -931,7 +953,10 @@ export class NativeMediasoupSfuSession {
           inboundFlowing: 0,
         }
       );
-    const outboundExpected = this.sources.size;
+    const outboundEntries = [...this.producers.values()].filter(
+      (entry) => this.sourceTransmission?.get(entry.source) !== false,
+    );
+    const outboundExpected = outboundEntries.length;
     const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
     if (!this.sendTransport || !this.recvTransport) {
       return {
@@ -961,7 +986,7 @@ export class NativeMediasoupSfuSession {
       return current.bytes > previous.bytes;
     };
     const outboundResults = await Promise.all(
-      [...this.producers.values()].map(async (entry) => {
+      outboundEntries.map(async (entry) => {
         try {
           const report = await this.invoke("media_get_producer_stats", {
             producerId: entry.id,
@@ -1060,8 +1085,7 @@ export class NativeMediasoupSfuSession {
     this.signaling?.stop?.();
     this.providerSignaling?.close();
     this.providerSignaling = null;
-    this._closeMedia(false);
-    await this._beginNativeTeardown();
+    await this._beginNativeTeardown(this._closeMedia(false));
     this.connectionPhase = "closed";
     this.mediaConnectionState = "disconnected";
     this._emitState();
@@ -1071,13 +1095,17 @@ export class NativeMediasoupSfuSession {
     return this.disconnect();
   }
 
-  _closeMedia(clearSources) {
+  async _closeMedia(clearSources) {
     this.mediaRevision += 1;
     this.activeSfuProvider = null;
     this.lastProviderFailureKey = null;
+    const cleanup = [];
     if (this.cloudflareSession) {
-      this.cloudflareSession.closeMedia();
+      const cloudflareSession = this.cloudflareSession;
       this.cloudflareSession = null;
+      cleanup.push(
+        Promise.resolve().then(() => cloudflareSession.closeMedia()),
+      );
     }
     clearTimeout(this.initializationTimer);
     this.initializationTimer = null;
@@ -1127,6 +1155,9 @@ export class NativeMediasoupSfuSession {
     this.readyReject = null;
     this.initializationRequestId = null;
     if (clearSources) this.sources.clear();
+    if (this.onNativeMediaClose)
+      cleanup.push(Promise.resolve().then(() => this.onNativeMediaClose()));
+    await Promise.all(cleanup);
   }
 
   _handleSignalingClose(event) {
@@ -1135,8 +1166,7 @@ export class NativeMediasoupSfuSession {
     if (this.intentionalClose) return;
     if (event?.code === MEDIA_SIGNALING_CLIENT_PROTOCOL.closeCode) {
       // Contract mismatch: teardown native media and surface the error.
-      this._closeMedia(false);
-      this._beginNativeTeardown();
+      this._beginNativeTeardown(this._closeMedia(false));
       const error = new Error(event.reason || "Media client update required");
       error.code = "MEDIA_PROTOCOL_UPDATE_REQUIRED";
       this._fail(error);
@@ -1163,9 +1193,11 @@ export class NativeMediasoupSfuSession {
     return true;
   }
 
-  _beginNativeTeardown() {
+  _beginNativeTeardown(preTeardown) {
     if (this.nativeTeardownPromise) return this.nativeTeardownPromise;
-    const teardown = Promise.resolve()
+    const teardown = Promise.resolve(preTeardown)
+      .then(() => this.onBeforeNativeTeardown?.())
+      .catch(() => undefined)
       .then(() => this.invoke("media_leave"))
       .catch(() => undefined);
     this.nativeTeardownPromise = teardown;
@@ -1177,12 +1209,24 @@ export class NativeMediasoupSfuSession {
   }
 
   _handleServerError(data) {
-    const error = new Error(data?.message || "SFU signaling request failed");
+    const error = new Error(
+      data?.message || data?.error || "SFU signaling request failed",
+    );
+    let handled = false;
     if (data?.requestId) {
-      this.pending.get(data.requestId)?.reject(error);
-      this.pendingProduce.get(data.requestId)?.reject(error);
+      const pendingRequest = this.pending.get(data.requestId);
+      const produceRequest = this.pendingProduce.get(data.requestId);
+      if (pendingRequest) {
+        handled = true;
+        pendingRequest.reject(error);
+      }
+      if (produceRequest) {
+        handled = true;
+        produceRequest.reject(error);
+      }
     }
     if (data?.requestType === "consume" && data.producerId) {
+      handled = true;
       this.requestedConsumers.delete(data.producerId);
       this.pendingConsumers.delete(data.producerId);
       const attempts = this.consumerRetryAttempts.get(data.producerId) || 0;
@@ -1196,7 +1240,7 @@ export class NativeMediasoupSfuSession {
         timer.unref?.();
         this.consumerRetryTimers.set(data.producerId, timer);
       }
-      return;
+      return handled;
     }
     if (
       [
@@ -1205,9 +1249,10 @@ export class NativeMediasoupSfuSession {
         "create-transport",
       ].includes(data?.requestType)
     ) {
+      handled = true;
       this.rejectReadiness(error);
-      return;
     }
+    return handled;
   }
 
   _fail(error) {

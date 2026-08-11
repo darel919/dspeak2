@@ -6,6 +6,23 @@ use tauri::State;
 
 #[cfg(native_rtc)]
 #[tauri::command]
+pub async fn media_close_sfu(store: State<'_, NativeMediaStore>) -> Result<(), String> {
+    store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?
+        .clear_transports();
+    Ok(())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_close_sfu(_store: State<'_, NativeMediaStore>) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
 pub async fn media_create_device(
     store: State<'_, NativeMediaStore>,
     router_rtp_capabilities: String,

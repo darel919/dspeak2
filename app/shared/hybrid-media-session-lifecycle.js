@@ -49,14 +49,32 @@ export function createHybridMediaSessionLifecycle({
 }) {
   let activeBootstrapContext = null;
   let refreshTicketPromise = null;
+  let lifecycleGeneration = 0;
+  let activeConnectionGeneration = 0;
 
-  async function loadIceServers(connectionMode, accessToken) {
+  function createCancellationError() {
+    const cancellation = new Error("Media signaling connection stopped");
+    cancellation.code = "MEDIA_SESSION_CLOSED";
+    return cancellation;
+  }
+
+  function assertCurrent(generation) {
+    if (
+      generation !== lifecycleGeneration ||
+      getIntentionalClose() ||
+      generation !== activeConnectionGeneration
+    )
+      throw createCancellationError();
+  }
+
+  async function loadIceServers(connectionMode, accessToken, generation) {
     const nextIceServers = await $fetch(
       `${mediaControlApiPath}/config?connectionMode=${encodeURIComponent(connectionMode)}`,
       accessToken
         ? { headers: { Authorization: `Bearer ${accessToken}` } }
         : undefined,
     );
+    if (generation !== undefined) assertCurrent(generation);
     if (!Array.isArray(nextIceServers))
       throw new Error("The ICE server configuration is invalid");
     setIceServers(nextIceServers);
@@ -66,11 +84,18 @@ export function createHybridMediaSessionLifecycle({
   async function refreshControlTicket() {
     if (!activeBootstrapContext || !getMediaControlUrl()) return null;
     if (refreshTicketPromise) return refreshTicketPromise;
+    const generation = lifecycleGeneration;
     const refresh = (async () => {
+      assertCurrent(generation);
       const supabaseClient = getSupabaseClient();
       const sessionResult = await supabaseClient?.auth.getSession();
       const accessToken = sessionResult?.data?.session?.access_token;
-      await loadIceServers(activeBootstrapContext.connectionMode, accessToken);
+      assertCurrent(generation);
+      await loadIceServers(
+        activeBootstrapContext.connectionMode,
+        accessToken,
+        generation,
+      );
       const bootstrap = await mediaSessionSetup.getBootstrap({
         accessToken,
         baseApiPath: activeBootstrapContext.baseApiPath,
@@ -79,6 +104,7 @@ export function createHybridMediaSessionLifecycle({
         deviceId: activeBootstrapContext.deviceId,
         roomId: activeBootstrapContext.roomId,
       });
+      assertCurrent(generation);
       const controlUrl = getMediaControlUrl();
       setMediaControlSocketUrl(
         buildMediaControlSocketUrl({
@@ -112,6 +138,8 @@ export function createHybridMediaSessionLifecycle({
   async function connect(nextChannelId, options = {}) {
     if (connected.value && mediaSessionSetup.getChannelId() === nextChannelId)
       return;
+    const generation = ++lifecycleGeneration;
+    activeConnectionGeneration = generation;
     mediaDebug("session.connect-start", {
       channelId: nextChannelId,
       roomId: options.roomId || getRoomId(),
@@ -131,7 +159,8 @@ export function createHybridMediaSessionLifecycle({
     const supabaseClient = getSupabaseClient();
     const sessionResult = await supabaseClient?.auth.getSession();
     const accessToken = sessionResult?.data?.session?.access_token;
-    await loadIceServers(connectionMode, accessToken);
+    assertCurrent(generation);
+    await loadIceServers(connectionMode, accessToken, generation);
     const controlUrl = getMediaControlUrl();
     if (controlUrl) {
       const deviceId = mediaSessionSetup.getDeviceId();
@@ -142,6 +171,7 @@ export function createHybridMediaSessionLifecycle({
         deviceId,
         roomId,
       };
+      assertCurrent(generation);
       const bootstrap = await mediaSessionSetup.getBootstrap({
         accessToken,
         baseApiPath: mediaControlApiPath,
@@ -150,6 +180,7 @@ export function createHybridMediaSessionLifecycle({
         deviceId,
         roomId,
       });
+      assertCurrent(generation);
       activeBootstrapContext = bootstrapContext;
       setMediaControlSocketUrl(
         buildMediaControlSocketUrl({
@@ -160,18 +191,27 @@ export function createHybridMediaSessionLifecycle({
       );
       setMediaControlTicket(bootstrap.ticket);
     }
+    assertCurrent(generation);
     setupHandlers();
     await openSocket(nextChannelId);
+    assertCurrent(generation);
     await waitForInitialMediaTopology({
       isReady: () => topologyState.value.epoch > 0,
       setWaiter: mediaSessionSetup.setTopologyWaiter,
       timeoutMs: runtimeConnectionTimeoutMs,
     });
+    assertCurrent(generation);
     mediaDebug("session.lifecycle-ready", {
       channelId: nextChannelId,
       topologyEpoch: topologyState.value.epoch,
       topologyMode: topologyState.value.mode,
     });
+  }
+
+  function cancel() {
+    lifecycleGeneration += 1;
+    activeConnectionGeneration = 0;
+    activeBootstrapContext = null;
   }
 
   function handleSignalingClose(event, protocolRejected) {
@@ -244,6 +284,11 @@ export function createHybridMediaSessionLifecycle({
       registerHandler: (type, handler) => messageHandlers.set(type, handler),
       remoteProducersCount,
       onServerConnected: () => {
+        if (
+          activeConnectionGeneration !== lifecycleGeneration ||
+          getIntentionalClose()
+        )
+          return;
         if (signaling.markReady()) {
           connected.value = true;
           setConnectionPhase("signaling-ready", {
@@ -279,5 +324,5 @@ export function createHybridMediaSessionLifecycle({
     );
   }
 
-  return { connect, handleSignalingClose, refreshControlTicket };
+  return { cancel, connect, handleSignalingClose, refreshControlTicket };
 }

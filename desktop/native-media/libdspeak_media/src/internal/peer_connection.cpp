@@ -224,11 +224,15 @@ public:
 
     void OnIceConnectionChange(
         webrtc::PeerConnectionInterface::IceConnectionState state) override {
-        const bool connected =
+        const bool next_connected =
             state == webrtc::PeerConnectionInterface::kIceConnectionConnected ||
             state == webrtc::PeerConnectionInterface::kIceConnectionCompleted;
-        dspeak_media_runtime::update_p2p_connection(handle_->connected, connected);
-        handle_->failed = state == webrtc::PeerConnectionInterface::kIceConnectionFailed;
+        dspeak_media_runtime::update_p2p_connection(
+            handle_->connected, next_connected);
+        handle_->connected = next_connected;
+        if (next_connected) handle_->failed = false;
+        else if (state == webrtc::PeerConnectionInterface::kIceConnectionFailed)
+            handle_->failed = true;
         lib_dspeak_media_push_p2p_event(
             reinterpret_cast<uint64_t>(handle_),
             "ice-state", "", "", std::to_string(static_cast<int>(state)).c_str());
@@ -271,7 +275,8 @@ public:
             handle_->audio_sinks_by_id[track_id] = sink.get();
             handle_->audio_sinks.push_back(std::move(sink));
         } else if (kind == "video") {
-            auto sink = std::make_unique<NativeReceiveVideoSink>(track_id);
+            auto sink = std::make_unique<NativeReceiveVideoSink>(
+                track_id, std::to_string(reinterpret_cast<uint64_t>(handle_)));
             static_cast<webrtc::VideoTrackInterface*>(track.get())->AddOrUpdateSink(
                 sink.get(), webrtc::VideoSinkWants());
             sink->SetEnabled(true);
@@ -516,9 +521,28 @@ extern "C" void lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h)
             h->health_observer.reset();
             h->health_channel = nullptr;
             if (h->pc) {
+                for (const auto& receiver : h->pc->GetReceivers()) {
+                    if (!receiver || !receiver->track()) continue;
+                    const auto track = receiver->track();
+                    const auto track_id = track->id();
+                    if (track->kind() == "audio") {
+                        const auto sink = h->audio_sinks_by_id.find(track_id);
+                        if (sink != h->audio_sinks_by_id.end())
+                            static_cast<webrtc::AudioTrackInterface*>(track.get())
+                                ->RemoveSink(sink->second);
+                    } else if (track->kind() == "video") {
+                        const auto sink = h->video_sinks_by_id.find(track_id);
+                        if (sink != h->video_sinks_by_id.end())
+                            static_cast<webrtc::VideoTrackInterface*>(track.get())
+                                ->RemoveSink(sink->second);
+                    }
+                }
                 h->pc->Close();
                 h->pc = nullptr;
             }
+            h->audio_sinks_by_id.clear();
+            h->video_sinks_by_id.clear();
+            h->audio_receivers.clear();
             h->audio_sinks.clear();
             h->video_sinks.clear();
             h->factory = nullptr;

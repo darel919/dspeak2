@@ -157,6 +157,15 @@ describe("NativeP2pSession", () => {
 
     assert.equal(tracks.at(-1)[0], "track");
     assert.equal(tracks.at(-1)[1].frame.data, "AQIDBAUGBw==");
+    assert.equal(
+      session.handleReceiveEvent({
+        kind: 2,
+        id: "camera_capture_video",
+        payload: { handle: 999, width: 2, height: 1, timestampMs: 13 },
+        data: "AQIDBAUGBw==",
+      }),
+      false,
+    );
 
     await session.closeAll();
     assert.ok(calls.some(([command]) => command === "media_p2p_destroy"));
@@ -491,5 +500,61 @@ describe("NativeP2pSession", () => {
     ]);
 
     await session.closeAll();
+  });
+
+  it("does not count one native RTP stream as every source", async () => {
+    const session = new NativeP2pSession({
+      invoke: async (command) => {
+        if (command !== "media_p2p_get_stats") return null;
+        return {
+          audioSource: {
+            id: "audio-source",
+            type: "media-source",
+            kind: "audio",
+            trackIdentifier: "audio-track",
+          },
+          screenSource: {
+            id: "screen-source",
+            type: "media-source",
+            kind: "video",
+            trackIdentifier: "screen-track",
+          },
+          audio: {
+            id: "audio-rtp",
+            type: "outbound-rtp",
+            kind: "audio",
+            trackId: "audio-source",
+            bytesSent: 100,
+            timestamp: 2,
+          },
+          screen: {
+            id: "screen-rtp",
+            type: "outbound-rtp",
+            kind: "video",
+            trackId: "screen-source",
+            bytesSent: 0,
+            timestamp: 2,
+          },
+        };
+      },
+    });
+    session.peers.set("peer-b", {
+      handle: 31,
+      connected: true,
+      sources: new Set(["audio", "screen"]),
+      trackIds: new Map([
+        ["audio", "audio-track"],
+        ["screen", "screen-track"],
+      ]),
+    });
+    session.sources.set("audio", { source: "audio", kind: "audio" });
+    session.sources.set("screen", { source: "screen", kind: "video" });
+
+    const readiness = await session.mediaReadiness(0);
+
+    assert.equal(readiness.outboundExpected, 2);
+    assert.equal(readiness.outboundFlowing, 1);
+    assert.equal(readiness.ready, false);
+    session.peers.clear();
   });
 });

@@ -297,26 +297,30 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.restartAudioProduction();
   }
 
-  startAudioProduction() {
+  async startAudioProduction() {
+    const result = await this.session.startAudioProduction();
     this.microphoneEnabled = true;
-    return this.session.startAudioProduction();
+    return result;
   }
 
-  stopAudioProduction() {
+  async stopAudioProduction() {
+    const result = await this.session.stopAudioProduction();
     this.microphoneEnabled = false;
-    return this.session.stopAudioProduction();
+    return result;
   }
 
-  startVideoProduction(source, options = {}) {
+  async startVideoProduction(source, options = {}) {
+    const result = await this.session.startVideoProduction(source, options);
     if (source === "camera") this.cameraEnabled = true;
     if (source === "screen") this.screenSharing = true;
-    return this.session.startVideoProduction(source, options);
+    return result;
   }
 
-  stopVideoProduction(source) {
+  async stopVideoProduction(source) {
+    const result = await this.session.stopVideoProduction(source);
     if (source === "camera") this.cameraEnabled = false;
     if (source === "screen") this.screenSharing = false;
-    return this.session.stopVideoProduction(source);
+    return result;
   }
 
   startSystemAudioProduction(options = {}) {

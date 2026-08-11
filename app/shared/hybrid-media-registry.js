@@ -32,12 +32,12 @@ export function createHybridMediaRegistry({
     getAttenuation,
     onVideoReceivingChange: (entry, receiving) => {
       if (entry.provider === "sfu")
-        getSfu()
-          ?.setRemoteReceiving(entry.userId, entry.source, receiving)
-          .catch((receivingError) => {
-            error.value =
-              receivingError.message || "Remote media state change failed";
-          });
+        Promise.resolve(
+          getSfu()?.setRemoteReceiving(entry.userId, entry.source, receiving),
+        ).catch((receivingError) => {
+          error.value =
+            receivingError.message || "Remote media state change failed";
+        });
       if (entry.provider === "p2p")
         getP2pMesh()?.setRemoteReceiving(entry.peerId, entry.source, receiving);
     },

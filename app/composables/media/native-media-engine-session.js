@@ -2,6 +2,7 @@ import { triggerRef } from "vue";
 import {
   DESKTOP_CAPTURE_ERROR_CODES,
   DesktopCaptureError,
+  assertDesktopCaptureMode,
   desktopCaptureRequest,
   nativeCaptureFailure,
 } from "../../shared/desktop-capture.js";
@@ -69,6 +70,8 @@ export async function initialize(engine, config = {}) {
           engine._emit("state", state);
         },
         onP2pSignal: (data) => engine.nativeP2pSession?.handleSignal(data),
+        onBeforeNativeTeardown: () => engine.nativeP2pSession?.shutdown?.(),
+        onNativeMediaClose: () => engine._invoke("media_close_sfu"),
         onRemoteTrack: (entry) => {
           engine._syncNativeFeeds();
           engine._emit("remote-track", entry);
@@ -105,6 +108,16 @@ export async function initialize(engine, config = {}) {
       engine.nativeActionHandler = (action) =>
         engine.nativeSession?.handleNativeAction(action);
       engine.nativeReceiveEventHandler = (event) => {
+        if (Number(event?.kind) === 6) {
+          engine._handleNativeCaptureError(event.payload || {}).catch((error) =>
+            engine._emit("error", {
+              source: "native",
+              operation: "capture-recovery",
+              error,
+            }),
+          );
+          return;
+        }
         if (engine.nativeP2pSession?.handleReceiveEvent(event)) return;
         engine.nativeSession?.handleReceiveEvent(event);
       };
@@ -124,6 +137,77 @@ export async function initialize(engine, config = {}) {
   engine.qoeTimer?.unref?.();
 }
 
+export async function handleNativeCaptureError(engine, payload = {}) {
+  const route = String(payload.route || payload.source || "unknown");
+  const screenCapture = route === "desktop" || route === "screen";
+  const microphoneCapture = route === "microphone";
+  const cameraCapture = route === "camera";
+  const message =
+    String(payload.message || "Native capture stopped unexpectedly").trim() ||
+    "Native capture stopped unexpectedly";
+  const runtimeError = new Error(message);
+  runtimeError.code = "NATIVE_CAPTURE_RUNTIME_FAILED";
+  runtimeError.details = {
+    route,
+    errorCode: Number(payload.errorCode) || null,
+  };
+  const failure = nativeCaptureFailure(runtimeError, {
+    operation: `${route}-capture`,
+  });
+  const invoke = async (command, value) => {
+    try {
+      await engine._invoke(command, value);
+    } catch (error) {
+      engine._emit("error", {
+        source: "native",
+        operation: "capture-recovery",
+        error,
+      });
+    }
+  };
+
+  if (microphoneCapture) {
+    await engine._removeNativeSource("audio").catch(() => {});
+    await invoke("media_set_microphone", { enabled: false });
+    if (engine.voiceStore) {
+      engine.voiceStore.micMuted = true;
+      const authenticatedUser = engine.voiceStore.getAuthenticatedUser?.();
+      if (authenticatedUser?.id)
+        engine.voiceStore.updateUserVoiceState?.(authenticatedUser.id, {
+          muted: true,
+          deafened: Boolean(engine.voiceStore.deafened),
+        });
+      await engine.nativeSession?.sendParticipantVoiceState?.({
+        muted: true,
+        deafened: Boolean(engine.voiceStore.deafened),
+      });
+    }
+  } else if (cameraCapture) {
+    await engine._removeNativeSource("camera").catch(() => {});
+    await invoke("media_set_camera", { enabled: false });
+    if (engine.voiceStore) engine.voiceStore.cameraEnabled = false;
+  } else if (screenCapture) {
+    await engine._removeNativeSource("screen").catch(() => {});
+    await engine._removeNativeSource("screen-audio").catch(() => {});
+    await invoke("media_stop_screen_share", { source: null });
+    await invoke("media_stop_system_audio", { source: null });
+    engine.activeScreenCapture = null;
+    engine.activeSystemAudioCapture = null;
+    if (engine.voiceStore) {
+      engine.voiceStore.screenSharing = false;
+      engine.voiceStore.systemAudioSharing = false;
+    }
+  }
+
+  engine._emit("error", {
+    source: "native",
+    operation: "capture",
+    route,
+    error: failure,
+  });
+  return failure;
+}
+
 export async function setMicrophoneDevice(engine, deviceId) {
   if (!canAttemptNativeCapture(engine.flags)) {
     if (engine.nativeOnly) throw nativeOnlyError("microphone device");
@@ -135,8 +219,14 @@ export async function setMicrophoneDevice(engine, deviceId) {
     });
     const source = engine.nativeSession?.sources?.get("audio");
     if (source) {
-      await engine.nativeSession.addSource({ ...source });
-      await engine.nativeP2pSession?.addSource({ ...source });
+      try {
+        await engine.nativeSession.addSource({ ...source });
+        await engine.nativeP2pSession?.addSource({ ...source });
+      } catch (error) {
+        await engine._removeNativeSource("audio").catch(() => {});
+        await engine._invoke("media_set_microphone", { enabled: false });
+        throw error;
+      }
     }
     return result;
   } catch (error) {
@@ -196,6 +286,10 @@ export async function leaveSession(engine) {
   engine.qoeTimer = null;
   engine._stopNativeActionPump();
   const nativeSession = engine.nativeSession;
+  const nativeP2pSession = engine.nativeP2pSession;
+  try {
+    await nativeP2pSession?.shutdown?.();
+  } catch {}
   try {
     if (engine.flags.nativeRtc && hasNativeCapability(engine.flags)) {
       if (nativeSession?.disconnect) await nativeSession.disconnect();
@@ -244,7 +338,24 @@ async function setMicrophoneEnabledNow(engine, enabled) {
     return engine.browserEngine.setMicrophoneEnabled(enabled);
   }
   if (enabled) {
-    await engine._invoke("media_set_microphone", { enabled }).catch((error) => {
+    let nativeCaptureStarted = false;
+    try {
+      await engine._invoke("media_set_microphone", { enabled });
+      nativeCaptureStarted = true;
+      const entry = {
+        source: "audio",
+        track: { kind: "audio" },
+        audioBitrate: engine.getAudioBitrate?.("audio"),
+        audioStereo: engine.getAudioStereo?.("audio"),
+      };
+      await engine.nativeSession?.addSource(entry);
+      await engine.nativeP2pSession?.addSource(entry);
+    } catch (error) {
+      await engine._removeNativeSource("audio").catch(() => {});
+      if (nativeCaptureStarted)
+        await engine
+          ._invoke("media_set_microphone", { enabled: false })
+          .catch(() => {});
       engine.flags.nativeMicrophone = false;
       engine._emit("error", {
         source: "native",
@@ -253,27 +364,28 @@ async function setMicrophoneEnabledNow(engine, enabled) {
       });
       if (engine.nativeOnly) throw error;
       return engine.browserEngine.setMicrophoneEnabled(enabled);
-    });
-    const entry = {
-      source: "audio",
-      track: { kind: "audio" },
-      audioBitrate: engine.getAudioBitrate?.("audio"),
-      audioStereo: engine.getAudioStereo?.("audio"),
-    };
-    await engine.nativeSession?.addSource(entry);
-    await engine.nativeP2pSession?.addSource(entry);
+    }
   } else {
-    await engine._removeNativeSource("audio");
-    await engine._invoke("media_set_microphone", { enabled }).catch((error) => {
+    let failure = null;
+    try {
+      await engine._removeNativeSource("audio");
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      await engine._invoke("media_set_microphone", { enabled });
+    } catch (error) {
+      failure ||= error;
       engine.flags.nativeMicrophone = false;
       engine._emit("error", {
         source: "native",
         operation: "microphone",
         error,
       });
-      if (engine.nativeOnly) throw error;
-      return engine.browserEngine.setMicrophoneEnabled(enabled);
-    });
+    }
+    if (!failure) return;
+    if (engine.nativeOnly) throw failure;
+    return engine.browserEngine.setMicrophoneEnabled(enabled);
   }
 }
 
@@ -283,32 +395,52 @@ export async function setCameraEnabled(engine, enabled) {
     return engine.browserEngine.setCameraEnabled(enabled);
   }
   if (enabled) {
-    await engine._invoke("media_set_camera", { enabled }).catch((error) => {
+    let nativeCaptureStarted = false;
+    try {
+      await engine._invoke("media_set_camera", { enabled });
+      nativeCaptureStarted = true;
+      const entry = {
+        source: "camera",
+        track: { kind: "video" },
+        videoSettings: engine.getVideoSettings?.("camera"),
+      };
+      await engine.nativeSession?.addSource(entry);
+      await engine.nativeP2pSession?.addSource(entry);
+    } catch (error) {
+      await engine._removeNativeSource("camera").catch(() => {});
+      if (nativeCaptureStarted)
+        await engine
+          ._invoke("media_set_camera", { enabled: false })
+          .catch(() => {});
       engine.flags.nativeCamera = false;
       engine._emit("error", { source: "native", operation: "camera", error });
       if (engine.nativeOnly) throw error;
       return engine.browserEngine.setCameraEnabled(enabled);
-    });
-    const entry = {
-      source: "camera",
-      track: { kind: "video" },
-      videoSettings: engine.getVideoSettings?.("camera"),
-    };
-    await engine.nativeSession?.addSource(entry);
-    await engine.nativeP2pSession?.addSource(entry);
+    }
   } else {
-    await engine._removeNativeSource("camera");
-    await engine._invoke("media_set_camera", { enabled }).catch((error) => {
+    let failure = null;
+    try {
+      await engine._removeNativeSource("camera");
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      await engine._invoke("media_set_camera", { enabled });
+    } catch (error) {
+      failure ||= error;
       engine.flags.nativeCamera = false;
       engine._emit("error", { source: "native", operation: "camera", error });
-      if (engine.nativeOnly) throw error;
-      return engine.browserEngine.setCameraEnabled(enabled);
-    });
+    }
+    if (!failure) return;
+    if (engine.nativeOnly) throw failure;
+    return engine.browserEngine.setCameraEnabled(enabled);
   }
 }
 
 export async function startScreenShare(engine, options = {}) {
   const selection = options.captureSelection || null;
+  if (selection)
+    assertDesktopCaptureMode(selection, ["video", "both"], "screen-video");
   const combinedAudio = selection?.mode === "both";
   const sourceAware = isSourceAwareCaptureRequest(options);
   if (options.explicitBrowserFallback && !selection) {
@@ -335,7 +467,20 @@ export async function startScreenShare(engine, options = {}) {
       );
     return engine.browserEngine.startScreenShare(options);
   }
+  let nativeCaptureStarted = false;
   try {
+    if (
+      engine.activeSystemAudioCapture &&
+      !combinedAudio &&
+      !options.includeSystemAudio
+    )
+      throw new DesktopCaptureError(
+        "Stop the standalone system-audio capture before starting screen share.",
+        {
+          code: DESKTOP_CAPTURE_ERROR_CODES.SOURCE_CONFLICT,
+          operation: "screen-video",
+        },
+      );
     if (engine.activeScreenCapture) await stopScreenShare(engine);
     if (combinedAudio && engine.activeSystemAudioCapture)
       await engine.stopSystemAudioProduction();
@@ -347,6 +492,7 @@ export async function startScreenShare(engine, options = {}) {
     const result = await engine._invoke("media_start_screen_share", {
       request,
     });
+    nativeCaptureStarted = true;
     engine.activeScreenCapture = selection || {};
     const entry = {
       source: "screen",
@@ -379,21 +525,24 @@ export async function startScreenShare(engine, options = {}) {
       engine.activeSystemAudioCapture
     )
       await engine.stopSystemAudioProduction().catch(() => {});
-    if (combinedAudio) {
+    if (nativeCaptureStarted || engine.activeScreenCapture !== null)
       await engine
         ._invoke("media_stop_screen_share", {
           source: selection?.source || null,
         })
         .catch(() => {});
-      engine.activeScreenCapture = null;
-      engine.activeSystemAudioCapture = null;
-      await engine.nativeSession?.removeSource("screen");
-      await engine.nativeSession?.removeSource("screen-audio");
-      await engine.nativeP2pSession?.removeSource("screen").catch(() => {});
-      await engine.nativeP2pSession
-        ?.removeSource("screen-audio")
-        .catch(() => {});
+    await engine._removeNativeSource("screen").catch(() => {});
+    if (combinedAudio) {
+      await engine._removeNativeSource("screen-audio").catch(() => {});
+      if (nativeCaptureStarted || engine.activeSystemAudioCapture)
+        await engine
+          ._invoke("media_stop_system_audio", {
+            source: selection?.source || null,
+          })
+          .catch(() => {});
     }
+    engine.activeScreenCapture = null;
+    if (combinedAudio) engine.activeSystemAudioCapture = null;
     engine.flags.nativeScreenShare = false;
     const failure = nativeCaptureFailure(error, {
       operation: "screen-video",
@@ -421,11 +570,18 @@ export async function stopScreenShare(engine) {
   let failure = null;
   const combinedScreenAudio =
     engine.activeSystemAudioCapture?.combinedWithScreen === true;
+  const combinedAudioSource = engine.activeSystemAudioCapture?.source || null;
   try {
     await engine._removeNativeSource("screen");
-    if (combinedScreenAudio) await engine._removeNativeSource("screen-audio");
   } catch (error) {
     failure = error;
+  }
+  if (combinedScreenAudio) {
+    try {
+      await engine._removeNativeSource("screen-audio");
+    } catch (error) {
+      failure ||= error;
+    }
   }
   try {
     await engine._invoke("media_stop_screen_share", {
@@ -448,6 +604,10 @@ export async function stopScreenShare(engine) {
     if (combinedScreenAudio) engine.activeSystemAudioCapture = null;
     else if (engine.activeSystemAudioCapture)
       await engine.stopSystemAudioProduction();
+    if (combinedScreenAudio)
+      await engine._invoke("media_stop_system_audio", {
+        source: combinedAudioSource,
+      });
   } catch (error) {
     failure ||= error;
   }

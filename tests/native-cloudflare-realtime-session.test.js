@@ -136,6 +136,15 @@ describe("NativeCloudflareRealtimeSession", () => {
     );
     assert.equal(session.consumers.get("remote-track").source, "audio");
     assert.equal(session.remoteAudioFeeds.size, 1);
+    assert.equal(
+      session.handleReceiveEvent({
+        kind: 2,
+        id: "remote-track",
+        payload: { handle: 999, trackId: "remote-audio" },
+        data: "stale-frame",
+      }),
+      false,
+    );
 
     const stats = await session.stats();
     assert.equal(stats[0].peerOrProvider, "cloudflare-realtime");

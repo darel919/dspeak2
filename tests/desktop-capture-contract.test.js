@@ -6,6 +6,7 @@ import {
   hasTauriRuntimeMarker,
   isDesktopCaptureSelection,
   normalizeCaptureSources,
+  assertDesktopCaptureMode,
 } from "../app/shared/desktop-capture.js";
 
 describe("desktop capture contract", () => {
@@ -71,6 +72,27 @@ describe("desktop capture contract", () => {
       maxBitrateBps: 96000,
     });
     assert.equal(selection.video.frameRate, 60);
+  });
+
+  it("rejects a capture selection when its operation requires another mode", () => {
+    const selection = createDesktopCaptureSelection(
+      {
+        sourceId: "display:main",
+        sourceType: "display",
+        selfExcluded: true,
+        capabilities: { video: true, audio: true, stereo: true },
+      },
+      "both",
+    );
+
+    assert.equal(
+      assertDesktopCaptureMode(selection, ["video", "both"]),
+      selection,
+    );
+    assert.throws(
+      () => assertDesktopCaptureMode(selection, ["audio"], "system-audio"),
+      /incompatible with system-audio/,
+    );
   });
 
   it("rejects video requests for the system-audio source", () => {
