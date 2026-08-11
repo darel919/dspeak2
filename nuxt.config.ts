@@ -70,12 +70,6 @@ export default defineNuxtConfig({
         config.compilerOptions.useUnknownInCatchVariables = false;
       }
     },
-    "nitro:prepare:types"(context: any) {
-      const { tsConfig } = context;
-      tsConfig.compilerOptions ||= {};
-      tsConfig.compilerOptions.noImplicitOverride = false;
-      tsConfig.compilerOptions.useUnknownInCatchVariables = false;
-    },
   },
   typescript: {
     strict: false,
@@ -226,7 +220,7 @@ export default defineNuxtConfig({
         "Cloudflare-CDN-Cache-Control": "no-store",
       },
     },
-  },
+  } as any,
 
   icon: {
     provider: isDesktop ? "server" : "none",

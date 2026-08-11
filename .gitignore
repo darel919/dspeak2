@@ -10,6 +10,7 @@ dist
 AGENTS.md
 IDEA.md
 .hermes
+.vercel
 
 # Node dependencies
 node_modules
