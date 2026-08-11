@@ -85,7 +85,7 @@ test("avatar proxy serves protected assets via presigned R2 URLs", () => {
 
 test("animated GIF profile pictures are accepted and preserved end to end", () => {
   const api = readFileSync(
-    new URL("../server/utils/dspeak-api.js", import.meta.url),
+    new URL("../server/utils/dspeak-profile-api.js", import.meta.url),
     "utf8",
   );
   const settings = readFileSync(

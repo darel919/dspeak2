@@ -15,6 +15,36 @@ import {
 import { apiErrorMessage } from "../app/shared/api-errors.js";
 import { readFileSync } from "node:fs";
 
+const chatApiSource = [
+  "handler.js",
+  "messages.js",
+  "files.js",
+  "interactions.js",
+  "discovery.js",
+]
+  .map((file) =>
+    readFileSync(
+      new URL(`../server/utils/dspeak-chat-api/${file}`, import.meta.url),
+      "utf8",
+    ),
+  )
+  .join("\n");
+const chatStoreSource = [
+  "store.js",
+  "cache.js",
+  "extras.js",
+  "messages.js",
+  "reads.js",
+  "transport.js",
+]
+  .map((file) =>
+    readFileSync(
+      new URL(`../app/stores/chat/${file}`, import.meta.url),
+      "utf8",
+    ),
+  )
+  .join("\n");
+
 test("reconciles a pending message without breaking existing references", () => {
   const pending = {
     id: "pending_client-1",
@@ -158,25 +188,16 @@ test("message detail helpers reject absent timestamps and use channel IDs", () =
 });
 
 test("chat GET routes do not attempt to read a request body", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   assert.match(
     api,
-    /const body = event\.method === "GET" \? \{\} : await parseBody\(event\);\s+if \(suffix === "message"/,
+    /const body = event\.method === "GET" \? \{\} : await parseBody\(event\);[\s\S]*?if \(suffix === "message"/,
   );
 });
 
 test("chat messages preserve attachment and thread metadata end to end", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
-  const store = readFileSync(
-    new URL("../app/stores/chat.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
+  const store = chatStoreSource;
 
   assert.match(
     api,
@@ -190,10 +211,7 @@ test("chat messages preserve attachment and thread metadata end to end", () => {
 });
 
 test("multipart uploads are parsed once and background delivery preserves metadata", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   const worker = readFileSync(
     new URL("../public/sw.js", import.meta.url),
     "utf8",
@@ -215,10 +233,7 @@ test("chat image uploads use the CSRF-aware browser fetch path", () => {
 });
 
 test("chat uploads are associated with messages and abandoned files are removable", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
 
   const input = readFileSync(
     new URL("../app/components/Chat/ChatInput.vue", import.meta.url),
@@ -285,10 +300,7 @@ test("thread refresh stays inside the Vue component contract", () => {
 });
 
 test("reaction hydration is authorized and batched per channel", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   const window = readFileSync(
     new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
     "utf8",
@@ -304,10 +316,7 @@ test("reaction hydration is authorized and batched per channel", () => {
 });
 
 test("reaction writes validate and bind client-controlled emoji values", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   assert.match(api, /enforceRateLimit\(event, "chat-reaction"/);
   assert.match(api, /Invalid emoji/);
   assert.match(
@@ -318,10 +327,7 @@ test("reaction writes validate and bind client-controlled emoji values", () => {
 });
 
 test("link previews use bounded redirect-safe outbound HTML fetching", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   const outbound = readFileSync(
     new URL(
       "../server/infrastructure/network/outbound-request.js",
@@ -338,10 +344,7 @@ test("link previews use bounded redirect-safe outbound HTML fetching", () => {
 });
 
 test("message search binds and validates user-controlled filters", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
 
   assert.match(api, /ilike\(messages\.content/);
   assert.match(api, /Search query must be 200 characters or fewer/);
@@ -397,10 +400,7 @@ test("message policy is owned by the channel settings modal", () => {
 });
 
 test("slow mode rejects concurrent sends before persistence", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   assert.match(api, /validateReplyTarget[\s\S]*?insert\(messages\)/);
   assert.match(api, /enforceRateLimit\([^)]*"chat-slow-mode"/);
 });
@@ -423,10 +423,7 @@ test("undo send uses the server message timestamp and preserves visible failures
 });
 
 test("the chat store does not expose stale duplicate mutation paths", () => {
-  const store = readFileSync(
-    new URL("../app/stores/chat.js", import.meta.url),
-    "utf8",
-  );
+  const store = chatStoreSource;
   assert.doesNotMatch(store, /async function fetchReactions/);
   assert.doesNotMatch(store, /async function toggleReaction/);
   assert.doesNotMatch(store, /async function toggleBookmark/);
@@ -452,10 +449,7 @@ test("thread replies use the shared chat delivery contract", () => {
 });
 
 test("bookmark access and thread hydration preserve room-scoped message contracts", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   assert.match(api, /accessibleBookmarks/);
   assert.match(api, /requireRoomMember\(room, userId\)/);
   assert.match(api, /enforceRateLimit\(event, "chat-pin"/);
@@ -502,10 +496,7 @@ test("message reactions and thread link share one compact footer row", () => {
 });
 
 test("broadcast mentions require moderation permission", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
 
   assert.match(api, /messageContainsBroadcastMention\(content/);
   assert.match(api, /Missing permission to mention everyone or here/);
@@ -513,14 +504,8 @@ test("broadcast mentions require moderation permission", () => {
 });
 
 test("pin state is synchronized through the realtime store contract", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
-  const store = readFileSync(
-    new URL("../app/stores/chat.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
+  const store = chatStoreSource;
   const window = readFileSync(
     new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
     "utf8",
@@ -541,10 +526,7 @@ test("pin state is synchronized through the realtime store contract", () => {
 });
 
 test("pin records and message state mutate through Drizzle transactions", () => {
-  const api = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
-    "utf8",
-  );
+  const api = chatApiSource;
   assert.match(api, /insert\(pinnedMessages\)/);
   assert.match(
     api,

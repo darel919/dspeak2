@@ -2,10 +2,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const chatStore = await readFile(
-  new URL("../app/stores/chat.js", import.meta.url),
-  "utf8",
-);
+const chatStore = (
+  await Promise.all(
+    [
+      "store.js",
+      "cache.js",
+      "extras.js",
+      "messages.js",
+      "reads.js",
+      "transport.js",
+    ].map((file) =>
+      readFile(new URL(`../app/stores/chat/${file}`, import.meta.url), "utf8"),
+    ),
+  )
+).join("\n");
 const chatWindow = await readFile(
   new URL("../app/components/Chat/ChatWindow.vue", import.meta.url),
   "utf8",
@@ -27,7 +37,10 @@ test("offline chat preserves cached history without failure banners", () => {
 });
 
 test("offline messages remain writable and queue for reconnection", () => {
-  assert.match(chatStore, /await enqueueMessage\(queuedMessage\)/);
+  assert.match(
+    chatStore,
+    /await context\.dependencies\.enqueueMessage\(queuedMessage\)/,
+  );
   assert.match(chatStore, /status: "queued-offline"/);
   assert.match(chatInput, /send when you’re back online/);
   assert.doesNotMatch(chatInput, /Sync Now/);
@@ -36,12 +49,18 @@ test("offline messages remain writable and queue for reconnection", () => {
 
 test("orphaned pending messages are removed locally after server deletion", () => {
   assert.match(chatStore, /response\.status === 404 && isPending/);
-  assert.match(chatStore, /await dequeueMessage\(pendingClientId\)/);
+  assert.match(
+    chatStore,
+    /await context\.dependencies\.dequeueMessage\(pendingClientId\)/,
+  );
   assert.match(chatStore, /removeMessage\(messageId, pendingClientId\)/);
 });
 
 test("connectivity recovery reconnects chat and flushes the queue", () => {
-  assert.match(chatStore, /addEventListener\("online", handleBrowserOnline\)/);
+  assert.match(
+    chatStore,
+    /addEventListener\("online", context\.handleBrowserOnline\)/,
+  );
   assert.match(chatStore, /connectToChannel\([\s\S]*true,/);
   assert.match(chatStore, /type: "FLUSH_CHAT_QUEUE"/);
 });
@@ -54,7 +73,7 @@ test("denied Background Sync registration is handled", () => {
   );
   assert.match(
     chatStore,
-    /debugLog\("\[ChatStore\] Background Sync unavailable:", syncError\)/,
+    /context\.dependencies\.debugLog\([\s\S]*?Background Sync unavailable:[\s\S]*?syncError,\s*\)/,
   );
   assert.doesNotMatch(
     chatStore,

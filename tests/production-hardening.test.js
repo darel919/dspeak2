@@ -82,7 +82,7 @@ test("production CSP enforcement and cached health reads are explicit", () => {
   assert.match(nuxtConfig, /contentSecurityPolicyReportOnly: false/);
   assert.doesNotMatch(nuxtConfig, /"script-src"[\s\S]{0,160}"'unsafe-inline'"/);
   assert.doesNotMatch(nuxtConfig, /"connect-src": \["'self'", "https:"/);
-  assert.match(nuxtConfig, /"report-to": \["csp-endpoint"\]/);
+  assert.match(nuxtConfig, /"report-to": "csp-endpoint"/);
   assert.match(nuxtConfig, /Reporting-Endpoints/);
   assert.match(cspReports, /enforceRateLimit/);
   assert.match(cspReports, /sanitizeReport/);
@@ -152,7 +152,7 @@ test("CSRF, SSRF, Trusted Types, and cross-site reads are enforced", () => {
   assert.match(outboundRequest, /createPublicHttpsAgent/);
   assert.match(pushDelivery, /assertSafeOutboundUrl/);
   assert.match(pushDelivery, /agent: pushAgent/);
-  assert.match(nuxtConfig, /"require-trusted-types-for": \["'script'"\]/);
+  assert.match(nuxtConfig, /"require-trusted-types-for": "'script'"/);
   assert.match(
     nuxtConfig,
     /"trusted-types": \["vue", "dspeak-service-worker"\]/,

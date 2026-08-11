@@ -52,7 +52,7 @@ test("prepared uploads expose authenticated cleanup and the client uses it on co
 
 test("legacy multipart chat uploads write the bytes to R2 before creating metadata", () => {
   const source = readFileSync(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    new URL("../server/utils/dspeak-chat-api/files.js", import.meta.url),
     "utf8",
   );
 

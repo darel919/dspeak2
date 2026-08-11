@@ -1,0 +1,89 @@
+import {
+  nativeFlowing,
+  nativeRtpStatForTrack,
+} from "../native-mediasoup-diagnostics.js";
+
+function requestIdentifier() {
+  return (
+    globalThis.crypto?.randomUUID?.() ||
+    `native-cloudflare-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
+}
+
+function sourceKind(entry) {
+  return (
+    entry?.kind ||
+    (entry?.source === "camera" || entry?.source === "screen"
+      ? "video"
+      : "audio")
+  );
+}
+
+function mediaSections(sdp, kind) {
+  return String(sdp || "")
+    .split(/(?=m=)/g)
+    .filter((section) => section.startsWith(`m=${kind} `));
+}
+
+function sectionMid(section) {
+  const match = section.match(/(?:^|\r?\n)a=mid:([^\r\n]+)/);
+  return match?.[1]?.trim() || null;
+}
+
+function sectionContainsTrack(section, trackId) {
+  const expectedTrackId = String(trackId);
+  return section.split(/\r?\n/).some((line) => {
+    if (!line.startsWith("a=msid:")) return false;
+    return line
+      .slice("a=msid:".length)
+      .trim()
+      .split(/\s+/)
+      .includes(expectedTrackId);
+  });
+}
+
+function sectionSendsMedia(section) {
+  return /(?:^|\r?\n)a=(?:sendrecv|sendonly)(?:\r?\n|$)/.test(section);
+}
+
+function midForTrack(sdp, trackId, kind, usedMids = new Set()) {
+  const sections = mediaSections(sdp, kind)
+    .map((section) => ({
+      section,
+      mid: sectionMid(section),
+    }))
+    .filter(({ mid }) => mid && !usedMids.has(mid));
+  const exact = sections.find(({ section }) =>
+    sectionContainsTrack(section, trackId),
+  );
+  if (exact) return exact.mid;
+  const sending = sections.filter(
+    ({ section }) =>
+      sectionSendsMedia(section) &&
+      !/(?:^|\r?\n)a=inactive(?:\r?\n|$)/.test(section),
+  );
+  return sending[0]?.mid || null;
+}
+
+function nativeFlowForTrack(value, type, entry) {
+  const stat = nativeRtpStatForTrack(value, type, entry);
+  return stat ? nativeFlowing([stat], type) : null;
+}
+
+function sessionClosedError() {
+  const error = new Error("Cloudflare session closed");
+  error.code = "MEDIA_SESSION_CLOSED";
+  return error;
+}
+
+export {
+  requestIdentifier,
+  sourceKind,
+  mediaSections,
+  sectionMid,
+  sectionContainsTrack,
+  sectionSendsMedia,
+  midForTrack,
+  nativeFlowForTrack,
+  sessionClosedError,
+};

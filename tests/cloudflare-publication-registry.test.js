@@ -45,7 +45,7 @@ test("Cloudflare publication replacement and closure remove stale tracks", () =>
 test("every Cloudflare activation path replays retained publications", async () => {
   const source = await readFile(
     new URL(
-      "../app/shared/hybrid-media-topology-controller.js",
+      "../app/shared/hybrid-media-topology-controller/controller.js",
       import.meta.url,
     ),
     "utf8",

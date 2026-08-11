@@ -9,7 +9,8 @@ const [
   notificationSync,
   mediaBootstrap,
   dspeakApi,
-  chatApi,
+  channelApi,
+  chatHandler,
   socialRepository,
   roomApi,
   pushDelivery,
@@ -27,7 +28,8 @@ const [
     "../server/routes/api/notifications/sync.js",
     "../server/routes/api/media/bootstrap.post.js",
     "../server/utils/dspeak-api.js",
-    "../server/utils/dspeak-chat-api.js",
+    "../server/utils/dspeak-channel-api.js",
+    "../server/utils/dspeak-chat-api/handler.js",
     "../server/db/repositories/social.js",
     "../server/utils/dspeak-rooms-api.js",
     "../server/utils/push-delivery.js",
@@ -39,6 +41,16 @@ const [
     "../server/routes/api/files/commit.post.js",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
+
+const chatApiModules = await Promise.all(
+  ["messages.js", "files.js", "interactions.js", "discovery.js"].map((file) =>
+    readFile(
+      new URL(`../server/utils/dspeak-chat-api/${file}`, import.meta.url),
+      "utf8",
+    ),
+  ),
+);
+const chatApi = [chatHandler, ...chatApiModules].join("\n");
 
 test("room creation creates the owner membership exactly once inside one transaction", () => {
   const createRoom = roomsApi.slice(
@@ -105,15 +117,15 @@ test("channel policy fields are represented in the database schema", () => {
 });
 
 test("channel join and leave persist the inRoom column and announce it to the room", () => {
-  assert.match(dspeakApi, /\.set\(\{ inRoom: nextInRoom \}\)/);
-  assert.match(dspeakApi, /await Promise\.all\(\[[\s\S]*broadcastToChannel/);
-  assert.match(dspeakApi, /broadcastToRoom\(room\.id, \{/);
+  assert.match(channelApi, /\.set\(\{ inRoom: nextInRoom \}\)/);
+  assert.match(channelApi, /await Promise\.all\(\[[\s\S]*broadcastToChannel/);
+  assert.match(channelApi, /broadcastToRoom\(room\.id, \{/);
   assert.match(
-    dspeakApi,
+    channelApi,
     /type: "voice-presence",\s*data: \{\s*channelId: String\(channel\.id\),\s*inRoom,\s*profiles: voiceProfiles,\s*participantStates: \[\],\s*\}/,
   );
-  assert.match(dspeakApi, /type: "currentlyInChannel", inRoom/);
-  assert.doesNotMatch(dspeakApi, /getVoicePresenceSnapshots/);
+  assert.match(channelApi, /type: "currentlyInChannel", inRoom/);
+  assert.doesNotMatch(channelApi, /getVoicePresenceSnapshots/);
 });
 
 test("notification sync uses the actual notification read column", () => {
@@ -134,11 +146,11 @@ test("media bootstrap accepts both voice and stage channels", () => {
 });
 
 test("API channel edits import and persist channel policy fields", () => {
-  assert.match(dspeakApi, /normalizeChannelPolicy/);
-  assert.match(dspeakApi, /normalizeSlowMode/);
-  assert.match(dspeakApi, /from "\.\.\/\.\.\/shared\/channel-policy\.js"/);
+  assert.match(channelApi, /normalizeChannelPolicy/);
+  assert.match(channelApi, /normalizeSlowMode/);
+  assert.match(channelApi, /from "\.\.\/\.\.\/shared\/channel-policy\.js"/);
   assert.match(
-    dspeakApi,
+    channelApi,
     /body\.isMedia === true \|\| body\.isMedia === "true" \? "voice" : "text"/,
   );
 });

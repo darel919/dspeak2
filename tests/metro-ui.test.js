@@ -206,7 +206,18 @@ test("missing member avatars use identity fallbacks instead of the dSpeak logo",
 });
 
 test("self-message notification guards normalize sender IDs", async () => {
-  const chat = await readFile("app/stores/chat.js", "utf8");
+  const chat = (
+    await Promise.all(
+      [
+        "store.js",
+        "cache.js",
+        "extras.js",
+        "messages.js",
+        "reads.js",
+        "transport.js",
+      ].map((file) => readFile(`app/stores/chat/${file}`, "utf8")),
+    )
+  ).join("\n");
   const manager = await readFile("app/utils/notificationManager.js", "utf8");
   const store = await readFile("app/stores/notifications.js", "utf8");
   const delivery = await readFile("server/utils/push-delivery.js", "utf8");
@@ -474,7 +485,7 @@ test("channel rows open a permission-aware menu at the pointer", async () => {
 
 test("account settings update the public dSpeak profile", async () => {
   const source = await readFile("app/pages/settings.vue", "utf8");
-  const api = await readFile("server/utils/dspeak-api.js", "utf8");
+  const api = await readFile("server/utils/dspeak-profile-api.js", "utf8");
   const presence = await readFile("app/composables/usePresence.js", "utf8");
   assert.match(source, /Public profile/);
   assert.match(source, /form\.set\("displayName"/);
@@ -644,7 +655,18 @@ test("room switching prepares the destination before one direct navigation", asy
     "utf8",
   );
   const channels = await readFile("app/stores/channels.js", "utf8");
-  const chat = await readFile("app/stores/chat.js", "utf8");
+  const chat = (
+    await Promise.all(
+      [
+        "store.js",
+        "cache.js",
+        "extras.js",
+        "messages.js",
+        "reads.js",
+        "transport.js",
+      ].map((file) => readFile(`app/stores/chat/${file}`, "utf8")),
+    )
+  ).join("\n");
   const channelPage = await readFile(
     "app/pages/room/[roomId]/[channelId]/index.vue",
     "utf8",

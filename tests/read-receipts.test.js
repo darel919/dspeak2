@@ -33,10 +33,16 @@ test("adding a reader is idempotent and preserves expanded user data", () => {
 });
 
 test("the read queue is deduplicated and retains failed batch entries", async () => {
-  const chatStore = await readFile(
-    new URL("../app/stores/chat.js", import.meta.url),
-    "utf8",
-  );
+  const chatStore = (
+    await Promise.all(
+      ["store.js", "reads.js"].map((file) =>
+        readFile(
+          new URL(`../app/stores/chat/${file}`, import.meta.url),
+          "utf8",
+        ),
+      ),
+    )
+  ).join("\n");
   assert.match(chatStore, /const pendingReadIds = new Set\(\)/);
   assert.match(chatStore, /result\.status === "marked_as_read"/);
   assert.match(chatStore, /pendingReadIds\.delete\(result\.messageId\)/);
@@ -46,7 +52,7 @@ test("the read queue is deduplicated and retains failed batch entries", async ()
 
 test("the server bounds read batches and aggregates unread counts in one query", async () => {
   const api = await readFile(
-    new URL("../server/utils/dspeak-chat-api.js", import.meta.url),
+    new URL("../server/utils/dspeak-chat-api/messages.js", import.meta.url),
     "utf8",
   );
   assert.match(api, /ids\.length > 200/);
