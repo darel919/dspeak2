@@ -8,6 +8,8 @@ import {
   membershipRoles,
   roomRoles,
   messages,
+  directConversations,
+  directMessages,
   messageReactions,
   messageRevisions,
   userNicknames,
@@ -44,6 +46,8 @@ export default defineEventHandler(async (event) => {
     memberships,
     channelsList,
     messagesList,
+    directConversationsList,
+    directMessagesList,
     readReceipts,
     reactions,
     revisions,
@@ -53,7 +57,7 @@ export default defineEventHandler(async (event) => {
     roomNotificationPreferencesList,
     pushSubscriptionsList,
     pushJobsList,
-    soundboards,
+    soundboardsList,
     legacySoundboards,
     librarySongsList,
     streamPlayLogList,
@@ -75,6 +79,37 @@ export default defineEventHandler(async (event) => {
       .from(messages)
       .where(eq(messages.authorId, userId))
       .orderBy(desc(messages.createdAt)),
+    db
+      .select()
+      .from(directConversations)
+      .where(
+        or(
+          eq(directConversations.participantAId, userId),
+          eq(directConversations.participantBId, userId),
+        ),
+      )
+      .orderBy(desc(directConversations.updatedAt)),
+    db
+      .select()
+      .from(directMessages)
+      .where(
+        or(
+          eq(directMessages.authorId, userId),
+          inArray(
+            directMessages.conversationId,
+            db
+              .select({ id: directConversations.id })
+              .from(directConversations)
+              .where(
+                or(
+                  eq(directConversations.participantAId, userId),
+                  eq(directConversations.participantBId, userId),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(desc(directMessages.createdAt)),
     db
       .select()
       .from(messages)
@@ -150,6 +185,8 @@ export default defineEventHandler(async (event) => {
     memberships,
     channels: channelsList,
     messages: messagesList,
+    directConversations: directConversationsList,
+    directMessages: directMessagesList,
     readReceipts,
     reactions,
     revisions,
@@ -159,7 +196,7 @@ export default defineEventHandler(async (event) => {
     roomNotificationPreferences: roomNotificationPreferencesList,
     pushSubscriptions: pushSubscriptionsList,
     pushJobs: pushJobsList,
-    soundboards,
+    soundboards: soundboardsList,
     legacySoundboards,
     librarySongs: librarySongsList,
     streamPlayLog: streamPlayLogList,

@@ -4,6 +4,7 @@ import {
   nativeRtpStatForTrack,
   normalizeNativeTransportStats,
 } from "./native-mediasoup-diagnostics.js";
+import { isPairedScreenAudio } from "./media-source-ownership.js";
 
 function requestIdentifier() {
   return (
@@ -314,6 +315,7 @@ export class NativeCloudflareRealtimeSession {
           data: {
             trackName: previous.trackName,
             source,
+            ownerSource: previous.ownerSource || null,
             closed: true,
           },
         })
@@ -369,6 +371,7 @@ export class NativeCloudflareRealtimeSession {
       id: trackName,
       paused: this.sourceTransmission.get(source) === false,
       native: true,
+      ownerSource: normalized.ownerSource || null,
     };
     this.producers.set(source, producer);
     if (kind === "video")
@@ -381,7 +384,11 @@ export class NativeCloudflareRealtimeSession {
     if (
       !this.send?.({
         type: "cloudflare-publication",
-        data: { trackName, source },
+        data: {
+          trackName,
+          source,
+          ownerSource: normalized.ownerSource || null,
+        },
       })
     ) {
       this.producers.delete(source);
@@ -437,7 +444,12 @@ export class NativeCloudflareRealtimeSession {
       if (
         !this.send?.({
           type: "cloudflare-publication",
-          data: { trackName: current.trackName, source: key, closed: true },
+          data: {
+            trackName: current.trackName,
+            source: key,
+            ownerSource: current.ownerSource || null,
+            closed: true,
+          },
         })
       )
         throw new Error("Media control is unavailable");
@@ -811,6 +823,7 @@ export class NativeCloudflareRealtimeSession {
       userId: publication.userId,
       peerId: publication.peerId,
       source,
+      ownerSource: publication.ownerSource || null,
       kind,
       trackName: publication.trackName,
       provider: "sfu",
@@ -818,14 +831,23 @@ export class NativeCloudflareRealtimeSession {
       playback: kind === "audio" ? "coreaudio" : "native-frame",
       frame: null,
       receiving:
-        this.remoteReceiving.get(`${String(publication.userId)}:${source}`) !==
-        false,
+        this.remoteReceiving.get(`${String(publication.userId)}:${source}`) ??
+        !isPairedScreenAudio({
+          source,
+          ownerSource: publication.ownerSource,
+        }),
       closed: false,
       p2pHandle: this.handle,
     };
     this.consumers.set(publication.trackName, entry);
     if (kind === "audio") this.remoteAudioFeeds.set(entry.key, entry);
     else this.remoteVideoFeeds.set(entry.key, entry);
+    if (!entry.receiving)
+      void this.invoke("media_p2p_set_receive_enabled", {
+        p2pHandle: this.handle,
+        trackId: entry.trackId,
+        enabled: false,
+      }).catch((error) => this.onError?.(error));
     this.applyJitterBufferConfig(entry);
     this.onRemoteTrack?.(entry);
     this._emitState();
@@ -1017,6 +1039,7 @@ export class NativeCloudflareRealtimeSession {
           data: {
             trackName: entry.trackName,
             source: entry.source,
+            ownerSource: entry.ownerSource || null,
             closed: true,
           },
         });

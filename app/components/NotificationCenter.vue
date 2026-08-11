@@ -193,6 +193,11 @@ async function open(item) {
   const roomId = item.room?.id || item.room;
   const channelId = item.channel?.id || item.channel;
   if (roomId && channelId) await navigateTo(`/room/${roomId}/${channelId}`);
+  const conversationId = item.conversationId || item.conversation_id;
+  if (conversationId)
+    await navigateTo(
+      `/messages?conversationId=${encodeURIComponent(conversationId)}`,
+    );
 }
 
 function dismissOne(item) {

@@ -132,6 +132,13 @@
             </span>
           </div>
           <button
+            class="metro-btn metro-btn--ghost metro-btn--sm"
+            title="Message friend"
+            @click="messageFriend(friend)"
+          >
+            <Icon name="lucide:message-circle" class="size-4" />
+          </button>
+          <button
             v-if="friend.online && friend.presence_status !== 'offline'"
             class="metro-btn metro-btn--ghost metro-btn--sm"
             title="Join friend"
@@ -141,7 +148,7 @@
           </button>
         </div>
         <p
-          v-if="!friends.length"
+          v-if="!friendsWithPresence.length"
           class="p-6 text-center text-sm text-base-content/60"
         >
           No friends yet. Add friends to see them here.
@@ -176,7 +183,7 @@ const pendingRequestsCount = computed(
   () => friendRequests.value.filter((r) => r.status === "pending").length,
 );
 
-const { friends, friendRequests } = storeToRefs(friendsStore);
+const { friendsWithPresence, friendRequests } = storeToRefs(friendsStore);
 
 const localFriendRequests = ref([]);
 
@@ -204,7 +211,7 @@ onUnmounted(() => {
 });
 
 const sortedFriends = computed(() => {
-  return [...friendsStore.friends].sort((a, b) => {
+  return [...friendsWithPresence.value].sort((a, b) => {
     const aOnline = a.online && a.presence_status !== "offline" ? 0 : 1;
     const bOnline = b.online && b.presence_status !== "offline" ? 0 : 1;
     if (aOnline !== bOnline) return aOnline - bOnline;
@@ -276,6 +283,11 @@ function joinFriendRoom(friend) {
   if (room) {
     router.push(`/room/${room.id}`);
   }
+}
+
+function messageFriend(friend) {
+  dropdownRef.value?.removeAttribute("open");
+  router.push({ path: "/messages", query: { friendId: friend.id } });
 }
 
 async function refresh() {

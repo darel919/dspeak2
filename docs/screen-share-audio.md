@@ -62,14 +62,13 @@ Sensitivity is independent of fade speed. Relaxed requires louder activity for
 longer, Standard suits normal conversation, and Responsive reacts to quieter
 voices with less confirmation time.
 
-Screen video remains paused until the viewer explicitly starts it. Its paired
-screen audio and audio-only system shares are subscribed by default and are
-controlled independently from screen-video consent. SFU consumers are resumed
-before they are bound to playback and exposed to the UI, so the initial banner
-reflects the actual subscribed state and the audio graph never binds a
-default-listening share as paused. Stop listening disables only the received
-audio track and asks the active transport to stop that source; Listen reverses
-both operations.
+Screen video remains paused until the viewer explicitly starts it. Audio
+captured as part of that screen share follows the same viewer consent and stays
+disabled until the screen is started. An audio-only system share is identified
+separately by transport metadata, subscribes automatically, and keeps its own
+Stop listening and Listen control. Missing ownership metadata uses the safer
+paired-screen behavior, so an older or incomplete publisher cannot make screen
+audio play automatically.
 
 The sender creates and resumes the shared-audio processing graph before
 publishing its destination track to P2P or SFU. Starting system audio therefore

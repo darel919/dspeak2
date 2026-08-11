@@ -1,6 +1,12 @@
-import { collectPeerConnectionStats, findRtpStat } from "./rtc-media-stats.js";
+import {
+  collectPeerConnectionDiagnosticStats,
+  collectPeerConnectionStats,
+  findRtpStat,
+} from "./rtc-media-stats.js";
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.js";
 import { mediaDebug, shortMediaId } from "./media-debug.js";
+import { buildVideoProduceOptions } from "./video-settings.js";
+import { applyRtpSenderSettings } from "./rtp-sender-settings.js";
 
 function finiteOrNull(value) {
   const number = Number(value);
@@ -78,12 +84,14 @@ export class CloudflareRealtimeSession {
     onRemoteTrack,
     onRemoteTrackEnded,
     onStateChange,
+    getVideoSettings,
   }) {
     this.send = send;
     this.iceServers = iceServers;
     this.onRemoteTrack = onRemoteTrack;
     this.onRemoteTrackEnded = onRemoteTrackEnded;
     this.onStateChange = onStateChange;
+    this.getVideoSettings = getVideoSettings;
     this.peerConnection = null;
     this.sessionId = null;
     this.initializing = null;
@@ -166,7 +174,11 @@ export class CloudflareRealtimeSession {
       } catch {}
     }
     const source = publication.source || event.track.kind;
-    const receiving = this.shouldReceive(publication.userId, source);
+    const receiving = this.shouldReceive(
+      publication.userId,
+      source,
+      publication.ownerSource,
+    );
     try {
       event.track.enabled = receiving;
     } catch {}
@@ -176,6 +188,7 @@ export class CloudflareRealtimeSession {
       userId: publication.userId,
       peerId: publication.peerId,
       source,
+      ownerSource: publication.ownerSource || null,
       kind: event.track.kind,
       mid:
         event.transceiver?.mid == null ? null : String(event.transceiver.mid),
@@ -341,6 +354,8 @@ export class CloudflareRealtimeSession {
         await current.sender.replaceTrack(entry.track);
         this.assertCurrentSession(peerConnection, generation);
         current.track = entry.track;
+        current.ownerSource = entry.ownerSource || null;
+        await this.configureVideoSender(current.sender, entry);
         await this.setSourceTransmission(
           entry.source,
           this.sourceTransmission.get(entry.source),
@@ -381,6 +396,8 @@ export class CloudflareRealtimeSession {
           await sender.setParameters(parameters);
         } catch {}
       }
+      if (entry.track.kind === "video")
+        await this.configureVideoSender(sender, entry);
       this.assertCurrentSession(peerConnection, generation);
       const transceiver = peerConnection
         .getTransceivers()
@@ -409,6 +426,7 @@ export class CloudflareRealtimeSession {
         track: entry.track,
         trackName,
         mid,
+        ownerSource: entry.ownerSource || null,
       });
       await this.setSourceTransmission(
         entry.source,
@@ -417,7 +435,11 @@ export class CloudflareRealtimeSession {
       if (
         !this.send({
           type: "cloudflare-publication",
-          data: { trackName, source: entry.source },
+          data: {
+            trackName,
+            source: entry.source,
+            ownerSource: entry.ownerSource || null,
+          },
         })
       )
         throw new Error("Media control is unavailable");
@@ -570,7 +592,12 @@ export class CloudflareRealtimeSession {
       if (
         !this.send({
           type: "cloudflare-publication",
-          data: { trackName: current.trackName, source, closed: true },
+          data: {
+            trackName: current.trackName,
+            source,
+            ownerSource: current.ownerSource || null,
+            closed: true,
+          },
         })
       )
         throw new Error("Media control is unavailable");
@@ -584,10 +611,10 @@ export class CloudflareRealtimeSession {
     }
   }
 
-  shouldReceive(userId, source) {
+  shouldReceive(userId, source, ownerSource = null) {
     const key = `${String(userId)}:${String(source)}`;
     if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
-    return true;
+    return !(source === "screen-audio" && ownerSource !== "system-audio");
   }
 
   async setSourceTransmission(source, enabled) {
@@ -644,6 +671,23 @@ export class CloudflareRealtimeSession {
     return this.updateSenderParameters(entry, {
       maxBitrate: Math.floor(bitrate),
     });
+  }
+
+  configureVideoSender(sender, entry) {
+    if (entry?.track?.kind !== "video") return Promise.resolve(false);
+    const settings = entry.track.getSettings?.() || {};
+    const requested = this.getVideoSettings?.(entry.source) || {};
+    return applyRtpSenderSettings(
+      sender,
+      buildVideoProduceOptions({
+        width: settings.width,
+        height: settings.height,
+        frameRate: settings.frameRate || requested.frameRate,
+        qualityPriority: requested.qualityPriority,
+        screen: entry.source === "screen",
+        maxBitrate: requested.maxBitrate,
+      }),
+    );
   }
 
   async updateSenderParameters(entry, updates) {
@@ -829,6 +873,16 @@ export class CloudflareRealtimeSession {
     };
   }
 
+  async diagnosticStats() {
+    if (!this.peerConnection) return [];
+    return [
+      await collectPeerConnectionDiagnosticStats(
+        this.peerConnection,
+        "sfu:cloudflare-realtime",
+      ),
+    ];
+  }
+
   closeMedia() {
     mediaDebug("cloudflare.session-close", {
       sessionId: shortMediaId(this.sessionId),
@@ -849,6 +903,7 @@ export class CloudflareRealtimeSession {
           data: {
             trackName: entry.trackName,
             source: entry.source,
+            ownerSource: entry.ownerSource || null,
             closed: true,
           },
         });

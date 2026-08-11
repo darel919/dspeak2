@@ -16,6 +16,7 @@ export function updateAdaptiveVideoState(state, sample, settings) {
   );
   const pressured =
     sample?.qualityLimitationReason === "cpu" ||
+    sample?.qualityLimitationReason === "bandwidth" ||
     Number(sample?.encodeUtilization) >= 55 ||
     (Number.isFinite(Number(sample?.framesPerSecond)) &&
       Number(sample.framesPerSecond) < frameRate * 0.8);

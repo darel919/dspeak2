@@ -15,14 +15,16 @@
               />Settings
             </div>
           </div>
-          <button
-            type="button"
-            class="metro-btn metro-btn--ghost btn-sm lg:hidden"
-            aria-label="Close settings"
-            @click="goBack"
-          >
-            <Icon name="lucide:x" class="size-5" />
-          </button>
+          <div class="lg:hidden">
+            <button
+              type="button"
+              class="metro-btn metro-btn--ghost btn-sm"
+              aria-label="Close settings"
+              @click="goBack"
+            >
+              <Icon name="lucide:x" class="size-5" />
+            </button>
+          </div>
         </div>
         <nav
           class="mt-4 grid grid-cols-2 gap-1 sm:grid-cols-4 lg:block lg:space-y-1"
@@ -46,13 +48,15 @@
             >
           </button>
         </nav>
-        <button
-          type="button"
-          class="metro-btn metro-btn--ghost btn-sm mt-5 hidden w-full justify-start gap-2 lg:flex"
-          @click="goBack"
-        >
-          <Icon name="lucide:arrow-left" class="size-4" />Back
-        </button>
+        <div class="mt-5 hidden lg:flex">
+          <button
+            type="button"
+            class="metro-btn metro-btn--ghost btn-sm w-full justify-start gap-2"
+            @click="goBack"
+          >
+            <Icon name="lucide:arrow-left" class="size-4" />Back
+          </button>
+        </div>
       </aside>
 
       <main class="min-w-0 flex-1 px-4 py-6 sm:px-7 lg:px-8 lg:py-7">

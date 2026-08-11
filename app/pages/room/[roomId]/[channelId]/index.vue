@@ -61,16 +61,22 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from "vue";
 import { useRoomsStore } from "../../../../stores/rooms";
 import { useChannelsStore } from "../../../../stores/channels";
 import { useVoiceStore } from "../../../../stores/voice";
-import ChatWindow from "../../../../components/Chat/ChatWindow.vue";
 import ChannelList from "../../../../components/ChannelList.vue";
 import DesktopChannelSidebar from "../../../../components/DesktopChannelSidebar.vue";
 import MobileChannelList from "../../../../components/MobileChannelList.vue";
-import VoiceChannel from "../../../../components/VoiceChannel.vue";
 import { MOBILE_BREAKPOINT_PX } from "../../../../const/ui";
 import { STARTUP_READINESS_KEY } from "../../../../shared/startup-readiness";
+
+const ChatWindow = defineAsyncComponent(
+  () => import("../../../../components/Chat/ChatWindow.vue"),
+);
+const VoiceChannel = defineAsyncComponent(
+  () => import("../../../../components/VoiceChannel.vue"),
+);
 
 const roomsStore = useRoomsStore();
 const channelsStore = useChannelsStore();

@@ -10,14 +10,20 @@
           <Icon name="lucide:users" class="size-5 text-primary" />
           Friends
         </h1>
-        <button
-          type="button"
-          class="metro-btn metro-btn--ghost metro-btn--sm"
-          @click="goBack"
-        >
-          <Icon name="lucide:arrow-left" class="size-4" />
-          Back
-        </button>
+        <div class="flex items-center gap-2">
+          <NuxtLink to="/messages" class="metro-btn metro-btn--sm">
+            <Icon name="lucide:message-circle" class="size-4" />
+            Messages
+          </NuxtLink>
+          <button
+            type="button"
+            class="metro-btn metro-btn--ghost metro-btn--sm"
+            @click="goBack"
+          >
+            <Icon name="lucide:arrow-left" class="size-4" />
+            Back
+          </button>
+        </div>
       </header>
 
       <div class="flex border-b border-base-300 bg-base-200/40 px-4">
@@ -91,6 +97,14 @@
               {{ presenceLabel(friend) }}
             </span>
             <div class="flex items-center gap-2">
+              <button
+                class="metro-btn metro-btn--ghost metro-btn--sm"
+                title="Message friend"
+                @click="messageFriend(friend)"
+              >
+                <Icon name="lucide:message-circle" class="size-4" />
+                <span class="hidden lg:inline">Message</span>
+              </button>
               <button
                 v-if="friend.online && friend.presence_status !== 'offline'"
                 class="metro-btn metro-btn--ghost metro-btn--sm"
@@ -285,7 +299,8 @@ const addingFriend = ref(false);
 const friendError = ref("");
 const sentRequestsError = ref("");
 
-const { friends, friendRequests, sentRequests } = storeToRefs(friendsStore);
+const { friendsWithPresence, friendRequests, sentRequests } =
+  storeToRefs(friendsStore);
 
 watch(requestedTab, (tab) => {
   activeTab.value = friendTabs.has(tab) ? tab : "friends";
@@ -296,7 +311,7 @@ const tabs = computed(() => [
     id: "friends",
     label: "All friends",
     icon: "lucide:users",
-    count: friends.value.length,
+    count: friendsWithPresence.value.length,
     badgeClass: "metro-badge--ghost",
   },
   {
@@ -335,7 +350,7 @@ async function loadSentRequests() {
 }
 
 const sortedFriends = computed(() => {
-  return [...friendsStore.friends].sort((a, b) => {
+  return [...friendsWithPresence.value].sort((a, b) => {
     const aOnline = a.online && a.presence_status !== "offline" ? 0 : 1;
     const bOnline = b.online && b.presence_status !== "offline" ? 0 : 1;
     if (aOnline !== bOnline) return aOnline - bOnline;
@@ -425,6 +440,10 @@ function joinFriendRoom(friend) {
   if (room) {
     router.push(`/room/${room.id}`);
   }
+}
+
+function messageFriend(friend) {
+  router.push({ path: "/messages", query: { friendId: friend.id } });
 }
 
 function goBack() {

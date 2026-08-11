@@ -53,15 +53,30 @@ export function installHandlers(session) {
     session.cloudflareSession?.handleMessage("cloudflare-response", data),
   );
   session.messageHandlers.set("cloudflare-publication-available", (data) => {
+    const trackName = String(data?.trackName || "");
+    if (!trackName) return false;
+    if (data?.closed) session.pendingCloudflarePublications.delete(trackName);
+    for (const [
+      currentTrackName,
+      current,
+    ] of session.pendingCloudflarePublications) {
+      if (
+        !data?.closed &&
+        (currentTrackName === trackName ||
+          (data?.peerId &&
+            data?.source &&
+            current?.peerId === data.peerId &&
+            current?.source === data.source))
+      )
+        session.pendingCloudflarePublications.delete(currentTrackName);
+    }
+    if (!data?.closed)
+      session.pendingCloudflarePublications.set(trackName, data);
     if (session.cloudflareSession && !session.cloudflareSession.closed)
       return session.cloudflareSession.handleMessage(
         "cloudflare-publication-available",
         data,
       );
-    const trackName = String(data?.trackName || "");
-    if (!trackName) return false;
-    if (data?.closed) session.pendingCloudflarePublications.delete(trackName);
-    else session.pendingCloudflarePublications.set(trackName, data);
     return true;
   });
   session.messageHandlers.set("ice-restarted", (data) => {

@@ -317,11 +317,10 @@ export function createHybridMediaSessionLifecycle({
     messageHandlers.set("cloudflare-response", (data) =>
       getSfu()?.handle("cloudflare-response", data),
     );
-    messageHandlers.set("cloudflare-publication-available", (data) =>
-      getSfu()
-        ? getSfu().handle("cloudflare-publication-available", data)
-        : mediaSessionSetup.queueCloudflarePublication(data),
-    );
+    messageHandlers.set("cloudflare-publication-available", (data) => {
+      mediaSessionSetup.queueCloudflarePublication(data);
+      return getSfu()?.handle("cloudflare-publication-available", data);
+    });
   }
 
   return { cancel, connect, handleSignalingClose, refreshControlTicket };

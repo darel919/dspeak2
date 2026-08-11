@@ -124,6 +124,10 @@ export function createPublicHttpsAgent(options = {}) {
             throw new Error(
               "Outbound destination has no permitted public address",
             );
+          if (lookupOptions?.all) {
+            callback(null, addresses);
+            return;
+          }
           const requestedFamily = Number(lookupOptions?.family || 0);
           const selected =
             addresses.find(({ family }) => family === requestedFamily) ||

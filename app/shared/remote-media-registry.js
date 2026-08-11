@@ -1,5 +1,10 @@
 import { byteTimeDomainLevelDb } from "./microphone-gate.js";
 import { triggerRef } from "vue";
+import {
+  isPairedScreenAudio,
+  isStandaloneSystemAudio,
+  normalizeMediaOwnerSource,
+} from "./media-source-ownership.js";
 
 const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -42;
 const VISIBLE_VOICE_DETECTION_INTERVAL_MS = 120;
@@ -51,16 +56,28 @@ export class RemoteMediaRegistry {
   }
 
   bind(entry, { staged = false } = {}) {
+    const normalizedEntry =
+      entry?.source === "screen-audio"
+        ? {
+            ...entry,
+            ownerSource: normalizeMediaOwnerSource(
+              entry.source,
+              entry.ownerSource,
+            ),
+          }
+        : entry;
+    entry = normalizedEntry;
     if (entry.native && !entry.track) {
       const feeds = entry.kind === "video" ? this.videoFeeds : this.audioFeeds;
       const current = feeds.value.get(entry.key);
       const receiving =
-        entry.receiving !== false &&
-        (entry.kind !== "video" ||
-          entry.source !== "screen" ||
-          (this.receivingPreferences.get(entry.key) ??
+        entry.kind === "video" && entry.source === "screen"
+          ? (this.receivingPreferences.get(entry.key) ??
             current?.receiving ??
-            false));
+            false)
+          : isPairedScreenAudio(entry)
+            ? this.screenReceivingFor(entry.userId)
+            : entry.receiving !== false;
       const normalized = {
         ...entry,
         stream: null,
@@ -68,7 +85,11 @@ export class RemoteMediaRegistry {
       };
       feeds.value.set(entry.key, normalized);
       triggerRef(feeds);
-      if (entry.kind === "video")
+      if (entry.kind === "video") {
+        this.onVideoReceivingChange?.(normalized, receiving);
+        if (entry.source === "screen")
+          this.setPairedScreenAudioReceiving(entry.userId, receiving);
+      } else if (isPairedScreenAudio(normalized))
         this.onVideoReceivingChange?.(normalized, receiving);
       return;
     }
@@ -87,17 +108,23 @@ export class RemoteMediaRegistry {
       entry.track.enabled = receiving;
       this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
       triggerRef(this.videoFeeds);
-      if (entry.source === "screen")
+      if (entry.source === "screen") {
         this.onVideoReceivingChange?.(entry, receiving);
+        this.setPairedScreenAudioReceiving(entry.userId, receiving);
+      }
       return;
     }
     this.remove(entry.key);
-    const receiving = entry.receiving !== false;
+    const receiving = isPairedScreenAudio(entry)
+      ? this.screenReceivingFor(entry.userId)
+      : entry.receiving !== false;
     entry.track.enabled = receiving;
     this.audioFeeds.value.set(entry.key, { ...entry, receiving });
     triggerRef(this.audioFeeds);
     this.createAudioElement({ ...entry, receiving }, staged);
     if (entry.source === "audio") this.startVoiceDetection(entry);
+    if (isPairedScreenAudio(entry))
+      this.onVideoReceivingChange?.(entry, receiving);
   }
 
   setVideoReceiving(key, receiving, persistPreference = true) {
@@ -112,6 +139,8 @@ export class RemoteMediaRegistry {
     });
     triggerRef(this.videoFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
+    if (entry.source === "screen" && persistPreference)
+      this.setPairedScreenAudioReceiving(entry.userId, receiving);
     return true;
   }
 
@@ -130,13 +159,39 @@ export class RemoteMediaRegistry {
 
   setAudioReceiving(key, receiving) {
     const entry = this.audioFeeds.value.get(key);
-    if (!entry || entry.source !== "screen-audio") return false;
+    if (!entry || !isStandaloneSystemAudio(entry)) return false;
+    return this.updateAudioReceiving(entry, receiving);
+  }
+
+  updateAudioReceiving(entry, receiving) {
+    const key = entry.key;
     entry.receiving = Boolean(receiving);
     if (entry.track) entry.track.enabled = Boolean(receiving);
     this.audioFeeds.value.set(key, { ...entry });
     triggerRef(this.audioFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     return true;
+  }
+
+  screenReceivingFor(userId) {
+    const screen = [...this.videoFeeds.value.values()].find(
+      (entry) =>
+        entry.source === "screen" && String(entry.userId) === String(userId),
+    );
+    return screen?.receiving === true;
+  }
+
+  setPairedScreenAudioReceiving(userId, receiving) {
+    let changed = false;
+    for (const entry of this.audioFeeds.value.values()) {
+      if (
+        String(entry.userId) !== String(userId) ||
+        !isPairedScreenAudio(entry)
+      )
+        continue;
+      changed = this.updateAudioReceiving(entry, receiving) || changed;
+    }
+    return changed;
   }
 
   clearReceivingPreference(key) {

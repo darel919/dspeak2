@@ -115,7 +115,10 @@
           >
         </div>
       </button>
-      <ChatMarkdownRenderer :content="message.content" />
+      <InviteLinkCard v-if="inviteLink" :url="inviteLink.url" />
+      <template v-else>
+        <ChatMarkdownRenderer :content="message.content" />
+      </template>
 
       <div
         v-if="message.attachments && message.attachments.length > 0"
@@ -143,7 +146,7 @@
         </button>
       </div>
 
-      <LinkPreview v-if="linkPreview" :preview="linkPreview" />
+      <LinkPreview v-if="linkPreview && !inviteLink" :preview="linkPreview" />
     </div>
     <div
       v-else
@@ -212,6 +215,7 @@ import { useIdentityStore } from "../../stores/identity";
 import { useChatStore } from "../../stores/chat";
 import MessageActions from "./MessageActions.vue";
 import ChatMarkdownRenderer from "./MarkdownRenderer.vue";
+import InviteLinkCard from "./InviteLinkCard.vue";
 import LinkPreview from "./LinkPreview.vue";
 import { useChatUtils } from "../../composables/useChatUtils";
 import { hasReader, readerIds } from "../../shared/read-receipts";
@@ -222,6 +226,7 @@ import {
   isImageUrl,
   isGifUrl,
 } from "../../shared/link-preview";
+import { extractInviteLink } from "../../shared/room-invite-link.js";
 
 const { formatChatDisplayTime, getAvatarUrl } = useChatUtils();
 
@@ -270,6 +275,12 @@ const chatStore = useChatStore();
 const showActions = ref(false);
 const messageElement = ref(null);
 const linkPreview = ref(null);
+const inviteLink = computed(() =>
+  extractInviteLink(
+    props.message.content,
+    import.meta.client ? window.location.origin : undefined,
+  ),
+);
 let visibilityObserver = null;
 let readVisibilityTimer = null;
 
@@ -435,7 +446,12 @@ function isGif(attachment) {
 }
 
 async function fetchLinkPreviewForMessage() {
-  if (!props.message.content || props.message.attachments?.length > 0) return;
+  if (
+    !props.message.content ||
+    props.message.attachments?.length > 0 ||
+    inviteLink.value
+  )
+    return;
   const urls = extractUrls(props.message.content);
   const imageOrGifUrls = urls.filter((url) => isImageUrl(url) || isGifUrl(url));
   if (imageOrGifUrls.length > 0) {

@@ -586,6 +586,23 @@ test("member list exposes profile cards and persistent personal nickname control
   assert.match(api, /roles: rolesByUserId\.get/);
 });
 
+test("member list counts global presence separately from channel presence", async () => {
+  const source = await readFile("app/components/MemberList.vue", "utf8");
+  const countLogic = source.slice(
+    source.indexOf("const onlineMembersCount"),
+    source.indexOf(
+      "function isOwner",
+      source.indexOf("const onlineMembersCount"),
+    ),
+  );
+  assert.match(countLogic, /props\.members\.filter\(isMemberOnline\)/);
+  assert.match(
+    source,
+    /presenceStatusStore\.getUserStatus\(member\?\.id\)\.status/,
+  );
+  assert.match(source, /onlineUserIds\.value\.has\(String\(member\.id\)\)/);
+});
+
 test("room rail owns a permission-aware context menu", async () => {
   const source = await readFile("app/components/MetroRoomRail.vue", "utf8");
   assert.match(source, /@contextmenu\.prevent\.stop="openRoomMenu/);
@@ -708,10 +725,29 @@ test("presence selector uses a bounded Metro command surface", async () => {
   assert.match(selector, /role="radiogroup"/);
   assert.match(selector, /role="radio"/);
   assert.match(selector, /:aria-checked=/);
+  assert.match(selector, /profile\?\.username \|\| profile\?\.handle/);
+  assert.doesNotMatch(selector, /statusDotClass|presenceStore\.label/);
   assert.match(selector, /min-h-11/);
   assert.match(selector, /calc\(100vw-2rem\)/);
   assert.match(selector, /event\.key === "Escape"/);
   assert.doesNotMatch(selector, /rounded-lg|shadow-xl|range-xs|text-\[10px\]/);
+});
+
+test("profile avatar status reflects the selected presence state", async () => {
+  const navbar = await readFile("app/components/Navbar.vue", "utf8");
+  const selector = await readFile(
+    "app/components/PresenceStatusSelector.vue",
+    "utf8",
+  );
+  assert.match(navbar, /usePresenceStatusStore/);
+  assert.match(navbar, /presenceStore\.effectiveStatus === "idle"/);
+  assert.match(navbar, /presenceStore\.effectiveStatus === "dnd"/);
+  assert.match(selector, /\.avatar-idle::before/);
+  assert.match(selector, /\.avatar-dnd::before/);
+  assert.doesNotMatch(
+    navbar,
+    /presenceStatus\?\.value === "connected"\) return "avatar-online"/,
+  );
 });
 
 test("image lightbox traps focus and restores its opener", async () => {

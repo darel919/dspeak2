@@ -297,11 +297,11 @@ async function roomDetails(room, userId = null) {
     accent: normalizeRoomAccent(room.accent),
     attenuation: normalizeAttenuation(room.attenuation),
     owner: presentProfile(profileById.get(String(room.ownerId))),
-    members: memberships
-      .map((m) => {
-        const profile = profileById.get(String(m.userId));
+    members: memberIds
+      .map((userId) => {
+        const profile = profileById.get(userId);
         if (!profile) return null;
-        const memberRoles = rolesByUserId.get(String(m.userId)) || [];
+        const memberRoles = rolesByUserId.get(userId) || [];
         return { ...presentProfile(profile), roles: memberRoles };
       })
       .filter(Boolean),

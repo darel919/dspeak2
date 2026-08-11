@@ -61,7 +61,8 @@ const connectSources = [
 export default defineNuxtConfig({
   ssr: !isDesktop,
   compatibilityDate: "2025-07-15",
-  devtools: { enabled: !isProduction && !isDesktop },
+  devtools: false,
+  // devtools: { enabled: !isProduction && !isDesktop },
   dir: isDesktop ? { public: resolve("desktop/public") } : undefined,
   app: {
     head: {

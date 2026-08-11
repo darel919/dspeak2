@@ -1,0 +1,1 @@
+ALTER TABLE "direct_messages" ADD COLUMN "delivered_at" timestamp with time zone;

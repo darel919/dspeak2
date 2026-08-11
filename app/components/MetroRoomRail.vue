@@ -15,6 +15,22 @@
         class="size-10 object-cover"
       />
     </NuxtLink>
+    <NuxtLink
+      to="/messages"
+      class="metro-icon-btn metro-icon-btn--ghost relative mx-2 mb-2 min-h-12"
+      :class="route.path === '/messages' && 'metro-icon-btn--primary'"
+      aria-label="Messages"
+      title="Messages"
+    >
+      <Icon name="lucide:message-circle" class="size-5" />
+      <span
+        v-if="directMessagesStore.unreadCount"
+        class="absolute right-0 top-0 min-w-4 bg-error px-0.5 text-center text-[10px] text-error-content"
+      >
+        {{ directMessagesStore.unreadCount }}
+      </span>
+    </NuxtLink>
+    <div class="mx-3 border-t border-base-300" aria-hidden="true"></div>
     <nav
       class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2"
       @scroll="hideRoomTooltip"
@@ -167,7 +183,7 @@
           role="menuitem"
           @click="createSelectedRoomInvite"
         >
-          <Icon name="lucide:link" class="size-4" />Copy invite link
+          <Icon name="lucide:link" class="size-4" />Invite
         </button>
         <div class="my-1 border-t border-base-300"></div>
         <button
@@ -200,6 +216,7 @@ import { canAccessRoomAdministration } from "~~/shared/room-policy.js";
 import { useRoomsStore } from "../stores/rooms";
 import { useAuthStore } from "../stores/auth";
 import { useChannelsStore } from "../stores/channels";
+import { useDirectMessagesStore } from "../stores/directMessages";
 import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
 import { publicDisplayName } from "../../shared/user-profile";
 import { VIEWPORT_PADDING_PX } from "../const/ui";
@@ -208,6 +225,7 @@ import { profileAssetUrl as resolveProfileAssetUrl } from "../shared/profile-ass
 const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
 const channelsStore = useChannelsStore();
+const directMessagesStore = useDirectMessagesStore();
 const { openingRoomId, openRoom, prefetchRoom, prefetchRooms } =
   usePreparedRoomNavigation();
 const route = useRoute();
@@ -390,6 +408,7 @@ function handleRoomMenuKeydown(event) {
 }
 
 onMounted(() => {
+  void directMessagesStore.initialize().catch(() => {});
   window.addEventListener("pointerdown", handleRoomMenuDismiss);
   window.addEventListener("keydown", handleRoomMenuKeydown);
   window.addEventListener("resize", closeRoomMenu);

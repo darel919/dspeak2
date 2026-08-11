@@ -93,6 +93,8 @@
         :muted="muted"
         @loadedmetadata="handleVideoReady"
         @canplay="handleVideoReady"
+        @stalled="recoverVideoPlayback"
+        @waiting="recoverVideoPlayback"
         class="block h-full w-full object-contain"
       />
       <figcaption
@@ -161,6 +163,7 @@ const isFullscreen = ref(false);
 const previewEnabled = ref(!(props.local && props.source === "screen"));
 let lastTouchAt = 0;
 let fullscreenStateInitialized = false;
+let playbackRecoveryTimer = null;
 const localScreenPreviewPaused = computed(
   () => props.local && props.source === "screen" && !previewEnabled.value,
 );
@@ -275,7 +278,32 @@ function attachStream() {
 }
 
 function handleVideoReady() {
+  clearTimeout(playbackRecoveryTimer);
+  playbackRecoveryTimer = null;
   playVideoElement(videoElement.value, "Remote preview");
+}
+
+function recoverVideoPlayback() {
+  if (
+    props.native ||
+    props.local ||
+    !props.receiving ||
+    document.hidden ||
+    playbackRecoveryTimer
+  )
+    return;
+  playbackRecoveryTimer = setTimeout(() => {
+    playbackRecoveryTimer = null;
+    const element = videoElement.value;
+    if (!element || !props.stream || element.readyState >= 3) return;
+    element.srcObject = null;
+    element.srcObject = props.stream;
+    playVideoElement(element, "Remote recovery");
+  }, 750);
+}
+
+function handlePageVisible() {
+  if (!document.hidden) nextTick(attachStream);
 }
 
 function enablePreview() {
@@ -288,6 +316,8 @@ onMounted(() => {
   syncFullscreenState();
   document.addEventListener("fullscreenchange", syncFullscreenState);
   document.addEventListener("webkitfullscreenchange", syncFullscreenState);
+  document.addEventListener("visibilitychange", handlePageVisible);
+  window.addEventListener("pageshow", handlePageVisible);
 });
 watch(
   () => props.stream,
@@ -315,6 +345,9 @@ watch(isFullscreen, () => nextTick(attachStream));
 onBeforeUnmount(() => {
   document.removeEventListener("fullscreenchange", syncFullscreenState);
   document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
+  document.removeEventListener("visibilitychange", handlePageVisible);
+  window.removeEventListener("pageshow", handlePageVisible);
+  clearTimeout(playbackRecoveryTimer);
   if (videoElement.value) videoElement.value.srcObject = null;
   if (ownCameraElement.value) ownCameraElement.value.srcObject = null;
 });

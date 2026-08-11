@@ -260,6 +260,22 @@
           v-if="
             !isSelf(memberMenuUser) &&
             friendshipStatus &&
+            friendshipStatus.status === 'friends'
+          "
+          type="button"
+          class="flex w-full items-center gap-3 border-t border-base-300 px-3 py-2.5 text-left text-sm transition-colors hover:bg-base-200"
+          @click="messageMemberFromMenu"
+        >
+          <Icon
+            name="lucide:message-circle"
+            class="size-4 text-base-content/60"
+          />
+          Message
+        </button>
+        <button
+          v-if="
+            !isSelf(memberMenuUser) &&
+            friendshipStatus &&
             friendshipStatus.status === 'none'
           "
           type="button"
@@ -657,6 +673,7 @@ const chatStore = useChatStore();
 const authStore = useAuthStore();
 const identityStore = useIdentityStore();
 const friendsStore = useFriendsStore();
+const presenceStatusStore = usePresenceStatusStore();
 const {
   success: toastSuccess,
   info: toastInfo,
@@ -684,7 +701,7 @@ const onlineUsers = computed(() => chatStore.onlineUsers || []);
 const currentUser = computed(() => authStore.getUserData());
 
 const onlineUserIds = computed(
-  () => new Set(onlineUsers.value.map((user) => user.id)),
+  () => new Set(onlineUsers.value.map((user) => String(user.id))),
 );
 
 const sortedMembers = computed(() => {
@@ -710,10 +727,13 @@ const sortedMembers = computed(() => {
 
 const onlineMembersCount = computed(() => {
   if (!props.members) return 0;
-  return props.members.filter(
-    (member) => onlineUserIds.value.has(member.id) || member.online === true,
-  ).length;
+  return props.members.filter(isMemberOnline).length;
 });
+
+function isMemberOnline(member) {
+  if (member?.online === true) return true;
+  return presenceStatusStore.getUserStatus(member?.id).status !== "offline";
+}
 
 function isOwner(member) {
   return props.room?.owner?.id === member.id;
@@ -722,11 +742,11 @@ function isOwner(member) {
 function getMemberPresenceStatus(member) {
   if (chatStore.offline) return "unknown";
 
-  if (onlineUsers.value.some((user) => user.id === member.id)) {
+  if (onlineUserIds.value.has(String(member.id))) {
     return "in-room";
   }
 
-  if (onlineUserIds.value.has(member.id) || member.online === true) {
+  if (isMemberOnline(member)) {
     return "online";
   }
 
@@ -743,8 +763,7 @@ function memberPresenceLabel(member) {
 }
 
 function memberPlatform(member) {
-  const store = usePresenceStatusStore();
-  return store.trackedUsers.get(String(member.id))?.platform;
+  return presenceStatusStore.trackedUsers.get(String(member.id))?.platform;
 }
 
 function platformIcon(platform) {
@@ -877,5 +896,12 @@ async function removeFriendFromMenu() {
   } finally {
     friendSaving.value = false;
   }
+}
+
+function messageMemberFromMenu() {
+  const member = memberMenuUser.value;
+  if (!member) return;
+  closeMemberMenu();
+  router.push({ path: "/messages", query: { friendId: member.id } });
 }
 </script>

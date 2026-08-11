@@ -8,6 +8,8 @@ import {
   roomMemberships,
   membershipRoles,
   messages,
+  directConversations,
+  directMessages,
   messageReactions,
   messageRevisions,
   userNicknames,
@@ -96,6 +98,15 @@ async function deleteAccount(tx, userId) {
     .update(messages)
     .set({ readBy: sql`${messages.readBy} - ${userId}` })
     .where(sql`${messages.readBy} @> ${JSON.stringify([userId])}::jsonb`);
+  await tx
+    .delete(directConversations)
+    .where(
+      or(
+        eq(directConversations.participantAId, userId),
+        eq(directConversations.participantBId, userId),
+      ),
+    );
+  await tx.delete(directMessages).where(eq(directMessages.authorId, userId));
 
   await tx
     .delete(notificationPreferences)

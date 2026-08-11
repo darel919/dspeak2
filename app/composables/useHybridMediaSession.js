@@ -4,6 +4,7 @@ import { MediaCaptureManager } from "~/shared/media-capture.js";
 import { MediasoupClientSession } from "~/shared/mediasoup-client-session.js";
 import { MediasoupProviderSocket } from "~/shared/mediasoup-provider-socket.js";
 import { CloudflareRealtimeSession } from "~/shared/cloudflare-realtime-session.js";
+import { createCloudflarePublicationRegistry } from "~/shared/cloudflare-publication-registry.js";
 import { NativeP2pMesh } from "~/shared/native-p2p.js";
 import { createHybridMediaRegistry } from "~/shared/hybrid-media-registry.js";
 import { createHybridMediaAudioState } from "~/shared/hybrid-media-audio-state.js";
@@ -127,7 +128,7 @@ export function useHybridMediaSession() {
   let sfu = null;
   let providerSocket = null;
   let selectedSfuProvider = "mediasoup";
-  const pendingCloudflarePublications = [];
+  const cloudflarePublications = createCloudflarePublicationRegistry();
   let activeProvider = null;
   let intentionalClose = false;
   let topologyWaiter = null;
@@ -586,7 +587,7 @@ export function useHybridMediaSession() {
     mediaReadinessPollMs: MEDIA_TIMING.readinessPollMs,
     mediaHandoffTimeoutMs: MEDIA_TIMING.handoffTimeoutMs,
     onP2pQualification: (data) => voiceStore.setP2pQualification?.(data),
-    onRemotePublication: () => pendingCloudflarePublications.splice(0),
+    onRemotePublication: () => cloudflarePublications.values(),
     onTopologyStateUpdated: (data, nextTopologyState) => {
       for (const peer of nextTopologyState.peers)
         if (peer.profile) voiceStore.upsertUserProfile(peer.profile);
@@ -718,8 +719,7 @@ export function useHybridMediaSession() {
       topologyWaiter = waiter;
     },
     setupMessageHandlers: setupMediaMessageHandlers,
-    queueCloudflarePublication: (data) =>
-      pendingCloudflarePublications.push(data),
+    queueCloudflarePublication: (data) => cloudflarePublications.update(data),
   });
   watch(
     () => [peerConnectionMetrics.value, sfuRoundTripTime.value],

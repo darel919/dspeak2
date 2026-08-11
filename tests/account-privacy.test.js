@@ -23,6 +23,8 @@ test("account export reads complete records with Drizzle repositories", () => {
   assert.match(exportRoute, /from\(profiles\)/);
   assert.match(exportRoute, /from\(librarySongs\)/);
   assert.match(exportRoute, /from\(streamPlayLog\)/);
+  assert.match(exportRoute, /soundboardsList/);
+  assert.match(exportRoute, /soundboards:\s*soundboardsList/);
   assert.doesNotMatch(exportRoute, /getFullList/);
 });
 

@@ -262,6 +262,9 @@ export const useAuthStore = defineStore("auths", () => {
           import("./chat").then(({ useChatStore }) =>
             useChatStore().clearChat(),
           ),
+          import("./directMessages").then(({ useDirectMessagesStore }) =>
+            useDirectMessagesStore().clear(),
+          ),
         ]).then((results) => results[results.length - 1])
       : Promise.resolve();
 

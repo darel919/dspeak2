@@ -88,6 +88,47 @@ function createControlSignaling(session, messages, { stop } = {}) {
 }
 
 describe("NativeMediasoupSfuSession", () => {
+  it("retains active Cloudflare publications for transport reconstruction", async () => {
+    const forwarded = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.cloudflareSession = {
+      closed: false,
+      handleMessage: async (type, data) => forwarded.push([type, data]),
+    };
+    const publication = {
+      trackName: "track-1",
+      peerId: "peer-1",
+      source: "screen",
+    };
+
+    await session.messageHandlers.get("cloudflare-publication-available")(
+      publication,
+    );
+
+    assert.equal(
+      session.pendingCloudflarePublications.get("track-1"),
+      publication,
+    );
+    assert.deepEqual(forwarded, [
+      ["cloudflare-publication-available", publication],
+    ]);
+
+    const replacement = { ...publication, trackName: "track-2" };
+    await session.messageHandlers.get("cloudflare-publication-available")(
+      replacement,
+    );
+    await session.messageHandlers.get("cloudflare-publication-available")({
+      ...publication,
+      closed: true,
+    });
+    assert.equal(
+      session.pendingCloudflarePublications.get("track-2"),
+      replacement,
+    );
+  });
+
   it("publishes browser-compatible media kinds for every native source", async () => {
     const calls = [];
     const session = new NativeMediasoupSfuSession({
