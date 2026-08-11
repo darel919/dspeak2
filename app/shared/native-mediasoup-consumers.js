@@ -138,23 +138,14 @@ export function setRemoteReceiving(
   const userId = userIdOrKey;
   const source = sourceOrReceiving;
   const receiving = receivingValue;
-  const pairedSources =
-    source === "screen" || source === "screen-audio"
-      ? ["screen", "screen-audio"]
-      : [source];
   const operations = [];
-  for (const pairedSource of pairedSources) {
-    session.remoteReceiving.set(
-      `${String(userId)}:${String(pairedSource)}`,
-      Boolean(receiving),
-    );
-    for (const entry of session.consumers.values()) {
-      if (
-        String(entry.userId) === String(userId) &&
-        entry.source === pairedSource
-      )
-        operations.push(setConsumerReceiving(session, entry, receiving));
-    }
+  session.remoteReceiving.set(
+    `${String(userId)}:${String(source)}`,
+    Boolean(receiving),
+  );
+  for (const entry of session.consumers.values()) {
+    if (String(entry.userId) === String(userId) && entry.source === source)
+      operations.push(setConsumerReceiving(session, entry, receiving));
   }
   return Promise.all(operations);
 }

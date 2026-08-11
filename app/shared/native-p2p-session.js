@@ -568,25 +568,15 @@ export class NativeP2pSession {
     const userId = String(userIdOrKey);
     const source = String(sourceOrReceiving || "");
     const receiving = Boolean(receivingValue);
-    const pairedSources =
-      source === "screen" || source === "screen-audio"
-        ? ["screen", "screen-audio"]
-        : [source];
     const peer = [...this.peers.values()].find(
       (candidate) => String(candidate.userId) === userId,
     );
     if (!peer) return false;
     const operations = [];
-    for (const pairedSource of pairedSources)
-      this.remoteReceiving.set(`${userId}:${pairedSource}`, receiving);
-    for (const pairedSource of pairedSources)
-      peer.remoteReceiving.set(pairedSource, receiving);
+    this.remoteReceiving.set(`${userId}:${source}`, receiving);
+    peer.remoteReceiving.set(source, receiving);
     for (const entry of this.trackEntries.values()) {
-      if (
-        String(entry.userId) !== userId ||
-        !pairedSources.includes(entry.source)
-      )
-        continue;
+      if (String(entry.userId) !== userId || entry.source !== source) continue;
       entry.receiving = receiving;
       operations.push(
         this.invoke("media_p2p_set_receive_enabled", {
@@ -597,10 +587,9 @@ export class NativeP2pSession {
       );
       this.onRemoteTrack?.(entry);
     }
-    for (const pairedSource of pairedSources)
-      this._sendSignal(peer.peerId, {
-        sourceReceiving: { source: pairedSource, receiving },
-      });
+    this._sendSignal(peer.peerId, {
+      sourceReceiving: { source, receiving },
+    });
     await Promise.all(operations);
     this._emitState();
     return true;

@@ -89,7 +89,7 @@ export class NativeCloudflareRealtimeSession {
     getAudioBitrate,
     getAudioStereo,
     getVideoSettings,
-    requestTimeoutMs = 8000,
+    requestTimeoutMs = 15000,
     sources = new Map(),
     producers = new Map(),
     consumers = new Map(),
@@ -124,6 +124,8 @@ export class NativeCloudflareRealtimeSession {
     this.pendingRemoteTrackEvents = new Map();
     this.pending = new Map();
     this.subscriptionTasks = new Map();
+    this.subscribedTrackNames = new Set();
+    this.subscriptionsStarted = false;
     this.negotiationQueue = Promise.resolve();
     this.sourceOperations = new Map();
     this.rtpSamples = new Map();
@@ -162,8 +164,6 @@ export class NativeCloudflareRealtimeSession {
       if (!response?.sessionId)
         throw new Error("Cloudflare session ID is missing");
       this.sessionId = response.sessionId;
-      for (const publication of this.publications.values())
-        await this.subscribe(publication, generation);
       this._emitState();
     })();
     this.initializing = initializing;
@@ -230,6 +230,7 @@ export class NativeCloudflareRealtimeSession {
     if (!trackName) return true;
     if (data.closed) {
       this.publications.delete(trackName);
+      this.subscribedTrackNames.delete(trackName);
       for (const [mid, publication] of this.remoteByMid) {
         if (publication.trackName === trackName) {
           this.remoteByMid.delete(mid);
@@ -242,7 +243,8 @@ export class NativeCloudflareRealtimeSession {
     }
     const publication = { ...data, trackName };
     this.publications.set(trackName, publication);
-    if (this.sessionId) await this.subscribe(publication);
+    if (this.sessionId && this.subscriptionsStarted)
+      await this.subscribe(publication);
     return true;
   }
 
@@ -448,34 +450,60 @@ export class NativeCloudflareRealtimeSession {
   }
 
   async subscribe(publication, generation = this.sessionGeneration) {
-    const trackName = publication?.trackName;
-    if (
-      !trackName ||
-      generation !== this.sessionGeneration ||
-      !this.sessionId ||
-      !this.handle
-    )
-      return false;
-    if (this.consumers.has(trackName)) return true;
-    const existing = this.subscriptionTasks.get(trackName);
-    if (existing) return existing;
+    return this.subscribePublications([publication], generation);
+  }
+
+  async startSubscriptions() {
+    await this.initialize();
+    this.subscriptionsStarted = true;
+    const publications = [...this.publications.values()];
+    for (let index = 0; index < publications.length; index += 64)
+      await this.subscribePublications(
+        publications.slice(index, index + 64),
+        this.sessionGeneration,
+      );
+  }
+
+  subscribePublications(publications, generation = this.sessionGeneration) {
+    const eligible = publications.filter((publication) => {
+      const trackName = publication?.trackName;
+      return (
+        trackName &&
+        generation === this.sessionGeneration &&
+        this.sessionId &&
+        this.handle &&
+        !this.consumers.has(trackName) &&
+        !this.subscribedTrackNames.has(trackName) &&
+        !this.subscriptionTasks.has(trackName)
+      );
+    });
+    if (!eligible.length) return Promise.resolve(false);
     const task = this.enqueueNegotiation(() =>
-      this._subscribePublication(publication, generation),
+      this._subscribePublicationBatch(eligible, generation),
     );
     const tracked = task.finally(() => {
-      if (this.subscriptionTasks.get(trackName) === tracked)
-        this.subscriptionTasks.delete(trackName);
+      for (const publication of eligible)
+        if (this.subscriptionTasks.get(publication.trackName) === tracked)
+          this.subscriptionTasks.delete(publication.trackName);
     });
-    this.subscriptionTasks.set(trackName, tracked);
+    for (const publication of eligible)
+      this.subscriptionTasks.set(publication.trackName, tracked);
     tracked.catch(() => {});
     return tracked;
   }
 
   async _subscribePublication(publication, generation) {
-    const trackName = publication.trackName;
+    return this._subscribePublicationBatch([publication], generation);
+  }
+
+  async _subscribePublicationBatch(publications, generation) {
+    const active = publications.filter(
+      (publication) =>
+        this.publications.get(publication.trackName) === publication,
+    );
+    if (!active.length) return false;
     const handle = this.handle;
     if (
-      this.publications.get(trackName) !== publication ||
       generation !== this.sessionGeneration ||
       this.closed ||
       !this.sessionId ||
@@ -483,23 +511,24 @@ export class NativeCloudflareRealtimeSession {
     )
       return false;
     const response = await this.request("tracks-new", {
-      tracks: [
-        {
-          location: "remote",
-          sessionId: publication.sessionId,
-          trackName,
-        },
-      ],
+      tracks: active.map((publication) => ({
+        location: "remote",
+        sessionId: publication.sessionId,
+        trackName: publication.trackName,
+      })),
     });
     this._assertCurrent(generation, handle);
-    if (this.publications.get(trackName) !== publication) return false;
-    const track = response.tracks?.find(
-      (candidate) => candidate.trackName === trackName,
-    );
-    if (track?.mid != null)
-      this.remoteByMid.set(String(track.mid), publication);
-    if (track?.mid != null) {
+    for (const publication of active) {
+      if (this.publications.get(publication.trackName) !== publication)
+        continue;
+      const track = response.tracks?.find(
+        (candidate) => candidate.trackName === publication.trackName,
+      );
+      if (track?.mid == null)
+        throw new Error("Cloudflare subscription track MID is missing");
       const mid = String(track.mid);
+      this.remoteByMid.set(mid, publication);
+      this.subscribedTrackNames.add(publication.trackName);
       const pending = this.pendingRemoteTrackEvents.get(mid) || [];
       this.pendingRemoteTrackEvents.delete(mid);
       for (const queued of pending)
@@ -619,26 +648,19 @@ export class NativeCloudflareRealtimeSession {
     const userId = String(userIdOrKey);
     const source = String(sourceOrReceiving || "");
     const receiving = Boolean(receivingValue);
-    const pairedSources =
-      source === "screen" || source === "screen-audio"
-        ? ["screen", "screen-audio"]
-        : [source];
     const operations = [];
-    for (const pairedSource of pairedSources) {
-      this.remoteReceiving.set(`${userId}:${pairedSource}`, receiving);
-      for (const entry of this.consumers.values()) {
-        if (String(entry.userId) !== userId || entry.source !== pairedSource)
-          continue;
-        entry.receiving = receiving;
-        operations.push(
-          this.invoke("media_p2p_set_receive_enabled", {
-            p2pHandle: this.handle,
-            trackId: entry.trackId,
-            enabled: receiving,
-          }),
-        );
-        this.onRemoteTrack?.(entry);
-      }
+    this.remoteReceiving.set(`${userId}:${source}`, receiving);
+    for (const entry of this.consumers.values()) {
+      if (String(entry.userId) !== userId || entry.source !== source) continue;
+      entry.receiving = receiving;
+      operations.push(
+        this.invoke("media_p2p_set_receive_enabled", {
+          p2pHandle: this.handle,
+          trackId: entry.trackId,
+          enabled: receiving,
+        }),
+      );
+      this.onRemoteTrack?.(entry);
     }
     await Promise.all(operations);
     this._emitState();
@@ -987,6 +1009,7 @@ export class NativeCloudflareRealtimeSession {
     this.handle = null;
     this.sessionId = null;
     this.initializing = null;
+    this.subscriptionsStarted = false;
     for (const entry of this.producers.values()) {
       try {
         this.send?.({
@@ -1017,6 +1040,7 @@ export class NativeCloudflareRealtimeSession {
     this.remoteAudioFeeds.clear();
     this.rtpSamples.clear();
     this.subscriptionTasks.clear();
+    this.subscribedTrackNames.clear();
     this.negotiationQueue = Promise.resolve();
     const error = sessionClosedError();
     for (const waiting of this.pending.values()) {

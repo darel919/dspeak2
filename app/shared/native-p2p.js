@@ -464,20 +464,14 @@ export class NativeP2pMesh {
   }
 
   setRemoteReceiving(peerId, source, receiving) {
-    const pairedSources =
-      source === "screen" || source === "screen-audio"
-        ? ["screen", "screen-audio"]
-        : [source];
     const state = this.connections.get(String(peerId));
-    for (const pairedSource of pairedSources) {
-      state?.remoteReceiving.set(pairedSource, Boolean(receiving));
-      this.signal(String(peerId), {
-        sourceReceiving: {
-          source: pairedSource,
-          receiving: Boolean(receiving),
-        },
-      });
-    }
+    state?.remoteReceiving.set(source, Boolean(receiving));
+    this.signal(String(peerId), {
+      sourceReceiving: {
+        source,
+        receiving: Boolean(receiving),
+      },
+    });
     if (state)
       state.expectedRemoteSources = countEnabledP2pSources(
         state.remoteSourceNames,

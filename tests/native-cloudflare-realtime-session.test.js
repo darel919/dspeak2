@@ -115,6 +115,7 @@ describe("NativeCloudflareRealtimeSession", () => {
       peerId: "peer-2",
       source: "audio",
     });
+    await session.startSubscriptions();
     assert.ok(
       calls.some(
         ([command, payload]) =>

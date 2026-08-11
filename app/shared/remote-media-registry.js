@@ -60,7 +60,7 @@ export class RemoteMediaRegistry {
           entry.source !== "screen" ||
           (this.receivingPreferences.get(entry.key) ??
             current?.receiving ??
-            true));
+            false));
       const normalized = {
         ...entry,
         stream: null,

@@ -380,6 +380,7 @@ export function createHybridMediaTopologyController({
       for (const entry of localSources.values()) await session.addSource(entry);
       for (const publication of onRemotePublication())
         await session.handle("cloudflare-publication-available", publication);
+      await session.startSubscriptions?.();
       mediaGeneration.assert(generation);
       handoff.bind("sfu");
       setActiveProvider("sfu");
@@ -538,6 +539,7 @@ export function createHybridMediaTopologyController({
         await destinationSfu.initialize();
         for (const entry of localSources.values())
           await destinationSfu.addSource(entry);
+        await destinationSfu.startSubscriptions?.();
         await waitForRemoteTracks("sfu", data);
       } else throw new Error("The server requested an invalid media topology");
       mediaGeneration.assert(generation);
@@ -641,6 +643,7 @@ export function createHybridMediaTopologyController({
     const session = ensureSfu();
     await session.initialize();
     for (const entry of localSources.values()) await session.addSource(entry);
+    await session.startSubscriptions?.();
     await waitForRemoteTracks("sfu", data);
     mediaGeneration.assert(generation);
     handoff.bind("sfu");

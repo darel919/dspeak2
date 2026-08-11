@@ -148,7 +148,7 @@ class FakePeerConnection {
   }
 }
 
-test("Cloudflare drains publications received before session initialization", async () => {
+test("Cloudflare batches queued publications after local bootstrap", async () => {
   const previousPeerConnection = globalThis.RTCPeerConnection;
   globalThis.RTCPeerConnection = FakePeerConnection;
   const requests = [];
@@ -164,12 +164,10 @@ test("Cloudflare drains publications received before session initialization", as
             request.operation === "new-session"
               ? { sessionId: "cloudflare-session" }
               : {
-                  tracks: [
-                    {
-                      trackName: request.body.tracks[0].trackName,
-                      mid: "remote-mid",
-                    },
-                  ],
+                  tracks: request.body.tracks.map((track, index) => ({
+                    trackName: track.trackName,
+                    mid: `remote-mid-${index}`,
+                  })),
                 },
         }),
       );
@@ -178,25 +176,69 @@ test("Cloudflare drains publications received before session initialization", as
     iceServers: [],
   });
   const publication = {
-    trackName: "remote-track",
+    trackName: "remote-screen",
     sessionId: "publisher-session",
     peerId: "peer-remote",
     userId: "user-remote",
-    source: "audio",
+    source: "screen",
+  };
+  const audioPublication = {
+    ...publication,
+    trackName: "remote-screen-audio",
+    source: "screen-audio",
   };
 
   try {
     await client.handle("cloudflare-publication-available", publication);
+    await client.handle("cloudflare-publication-available", audioPublication);
     await client.initialize();
+    assert.equal(
+      requests.filter((entry) => entry.data.operation === "tracks-new").length,
+      0,
+    );
+    await client.startSubscriptions();
+    const subscriptionRequests = requests.filter(
+      (entry) => entry.data.operation === "tracks-new",
+    );
+    assert.equal(subscriptionRequests.length, 1);
+    assert.equal(subscriptionRequests[0].data.body.tracks.length, 2);
+    assert.equal(client.remoteByMid.get("remote-mid-0"), publication);
+    assert.equal(client.remoteByMid.get("remote-mid-1"), audioPublication);
+    await client.startSubscriptions();
     assert.equal(
       requests.filter((entry) => entry.data.operation === "tracks-new").length,
       1,
     );
-    assert.equal(client.remoteByMid.get("remote-mid"), publication);
   } finally {
     client.closeMedia();
     globalThis.RTCPeerConnection = previousPeerConnection;
   }
+});
+
+test("Cloudflare screen consent does not disable screen audio", async () => {
+  const client = session();
+  const screen = {
+    userId: "user-remote",
+    source: "screen",
+    receiving: true,
+    track: { enabled: true },
+  };
+  const screenAudio = {
+    userId: "user-remote",
+    source: "screen-audio",
+    receiving: true,
+    track: { enabled: true },
+  };
+  client.consumers.set("screen", screen);
+  client.consumers.set("screen-audio", screenAudio);
+
+  await client.setRemoteReceiving("user-remote", "screen", false);
+
+  assert.equal(screen.receiving, false);
+  assert.equal(screen.track.enabled, false);
+  assert.equal(screenAudio.receiving, true);
+  assert.equal(screenAudio.track.enabled, true);
+  client.closeMedia();
 });
 
 test("Cloudflare remote tracks retain the publication identity contract", async () => {
@@ -241,6 +283,7 @@ test("Cloudflare remote tracks retain the publication identity contract", async 
   try {
     await client.handle("cloudflare-publication-available", publication);
     await client.initialize();
+    await client.startSubscriptions();
     const track = {
       kind: "audio",
       addEventListener() {},
@@ -275,6 +318,7 @@ test("Cloudflare drops a subscription that closes while negotiation is pending",
   });
   client.peerConnection = new FakePeerConnection();
   client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
   const publication = {
     trackName: "remote-track",
     sessionId: "publisher-session",
