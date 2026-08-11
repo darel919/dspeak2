@@ -304,3 +304,28 @@ test("Cloudflare drops a subscription that closes while negotiation is pending",
   assert.equal(client.remoteByMid.has("late-mid"), false);
   client.closeMedia();
 });
+
+test("Cloudflare rejects subscriptions without a returned media MID", async () => {
+  const client = session();
+  client.peerConnection = new FakePeerConnection();
+  client.sessionId = "cloudflare-session";
+  const publication = {
+    trackName: "remote-screen",
+    sessionId: "publisher-session",
+    peerId: "peer-remote",
+    userId: "user-remote",
+    source: "screen",
+  };
+  client.publications.set(publication.trackName, publication);
+  client.request = async () => ({
+    tracks: [{ trackName: publication.trackName }],
+  });
+
+  await assert.rejects(
+    client.subscribePublication(publication, client.sessionGeneration),
+    /track MID is missing/,
+  );
+  assert.equal(client.consumers.size, 0);
+  assert.equal(client.remoteByMid.size, 0);
+  client.closeMedia();
+});

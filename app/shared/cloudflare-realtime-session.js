@@ -326,6 +326,10 @@ export class CloudflareRealtimeSession {
 
   async addSourceInternal(entry) {
     const { generation, peerConnection } = this.currentSession();
+    if (!this.sourceTransmission.has(entry.source))
+      this.sourceTransmission.set(entry.source, entry.track?.enabled !== false);
+    else if (entry.track && "enabled" in entry.track)
+      entry.track.enabled = this.sourceTransmission.get(entry.source) !== false;
     const current = this.producers.get(entry.source);
     if (current) {
       const previousTrack = current.track;
@@ -335,7 +339,7 @@ export class CloudflareRealtimeSession {
         current.track = entry.track;
         await this.setSourceTransmission(
           entry.source,
-          this.sourceTransmission.get(entry.source) !== false,
+          this.sourceTransmission.get(entry.source),
         );
       } catch (error) {
         try {
@@ -404,7 +408,7 @@ export class CloudflareRealtimeSession {
       });
       await this.setSourceTransmission(
         entry.source,
-        this.sourceTransmission.get(entry.source) !== false,
+        this.sourceTransmission.get(entry.source),
       );
       if (
         !this.send({
@@ -469,19 +473,18 @@ export class CloudflareRealtimeSession {
     const track = result.tracks?.find(
       (candidate) => candidate.trackName === trackName,
     );
+    if (track?.mid == null)
+      throw new Error("Cloudflare subscription track MID is missing");
     if (this.publications.get(trackName) !== publication) {
-      if (track?.mid != null) this.remoteByMid.delete(String(track.mid));
+      this.remoteByMid.delete(String(track.mid));
       return false;
     }
     this.assertCurrentSession(peerConnection, generation);
-    if (track?.mid != null)
-      this.remoteByMid.set(String(track.mid), publication);
-    if (track?.mid != null) {
-      const mid = String(track.mid);
-      const pending = this.pendingRemoteTracks.get(mid) || [];
-      this.pendingRemoteTracks.delete(mid);
-      for (const event of pending) this.handleRemoteTrack(event, publication);
-    }
+    this.remoteByMid.set(String(track.mid), publication);
+    const mid = String(track.mid);
+    const pending = this.pendingRemoteTracks.get(mid) || [];
+    this.pendingRemoteTracks.delete(mid);
+    for (const event of pending) this.handleRemoteTrack(event, publication);
     this.lastReceivedConsumerParams = result;
     if (result.sessionDescription?.type === "offer") {
       await peerConnection.setRemoteDescription(result.sessionDescription);

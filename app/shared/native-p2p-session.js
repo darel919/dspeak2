@@ -246,8 +246,10 @@ export class NativeP2pSession {
     }
     if (signal.sourceReceiving) {
       const source = String(signal.sourceReceiving.source || "");
+      const receiving = Boolean(signal.sourceReceiving.receiving);
+      peer.sourceReceiving.set(source, receiving);
       await this._setSourceParameters(peer, source, {
-        active: Boolean(signal.sourceReceiving.receiving),
+        active: receiving && this.sourceTransmission.get(source) !== false,
       });
       return true;
     }
@@ -392,6 +394,7 @@ export class NativeP2pSession {
       remoteSourceNames: new Set(
         (Array.isArray(sources) ? sources : []).map(String),
       ),
+      sourceReceiving: new Map(),
       remoteReceiving: new Map(),
     };
     this.peers.set(peerId, peer);
@@ -437,7 +440,11 @@ export class NativeP2pSession {
       await this._setSourceParameters(
         peer,
         source.source,
-        this._sourceParameters(source),
+        this._sourceParameters(source, {
+          active:
+            (peer.sourceReceiving.get(source.source) ?? true) &&
+            this.sourceTransmission.get(source.source) !== false,
+        }),
       );
       this._sendSignal(peer.peerId, {
         source: { trackId: result.trackId, source: source.source },
@@ -537,7 +544,9 @@ export class NativeP2pSession {
     await Promise.all(
       [...this.peers.values()].map((peer) =>
         this._setSourceParameters(peer, normalizedSource, {
-          active: Boolean(enabled),
+          active:
+            Boolean(enabled) &&
+            (peer.sourceReceiving.get(normalizedSource) ?? true),
         }),
       ),
     );

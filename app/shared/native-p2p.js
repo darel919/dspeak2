@@ -384,6 +384,10 @@ export class NativeP2pMesh {
 
   async publishSourceInternal(source, track, stream) {
     const previous = this.localSources.get(source);
+    if (!this.sourceTransmission.has(source))
+      this.sourceTransmission.set(source, track?.enabled !== false);
+    else if (track && "enabled" in track)
+      track.enabled = this.sourceTransmission.get(source) !== false;
     const initialStates = new Map(
       [...this.connections.values()].map((state) => [state.peerId, state]),
     );
@@ -437,13 +441,16 @@ export class NativeP2pMesh {
 
   async setSourceTransmission(source, enabled) {
     this.sourceTransmission ||= new Map();
-    this.sourceTransmission.set(source, Boolean(enabled));
+    const value = Boolean(enabled);
+    this.sourceTransmission.set(source, value);
+    const entry = this.localSources.get(source);
+    if (entry?.track && "enabled" in entry.track) entry.track.enabled = value;
     await Promise.all(
       [...this.connections.values()].map((state) => {
         const receiving = state.sourceReceiving.get(source) ?? true;
         return this.setSenderActive(
           state.senders.get(source),
-          receiving && Boolean(enabled),
+          receiving && value,
         );
       }),
     );
@@ -488,12 +495,10 @@ export class NativeP2pMesh {
 
   async setSenderActive(sender, active) {
     if (!sender) return false;
-    const track = sender.track;
-    if (track && "enabled" in track) track.enabled = Boolean(active);
-    if (!sender.getParameters || !sender.setParameters) return Boolean(track);
+    if (!sender.getParameters || !sender.setParameters) return false;
     return this.updateSender(sender, async () => {
       const parameters = sender.getParameters();
-      if (!parameters.encodings?.length) return Boolean(track);
+      if (!parameters.encodings?.length) return false;
       for (const encoding of parameters.encodings)
         encoding.active = Boolean(active);
       try {
@@ -506,7 +511,7 @@ export class NativeP2pMesh {
             "NotSupportedError",
           ].includes(error?.name)
         )
-          return Boolean(track);
+          return false;
         throw error;
       }
       return true;

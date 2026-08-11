@@ -47,6 +47,42 @@ describe("NativeP2pSession", () => {
     );
   });
 
+  it("combines global transmission with each peer receiving choice", async () => {
+    const calls = [];
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 21 };
+        if (command === "media_p2p_add_track")
+          return { trackId: `${payload.source}_capture` };
+        return null;
+      },
+      sendSignal() {},
+    });
+
+    await session.addSource({ source: "screen", kind: "video" });
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 3,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 3,
+      signal: { sourceReceiving: { source: "screen", receiving: false } },
+    });
+    await session.setSourceTransmission("screen", false);
+    await session.setSourceTransmission("screen", true);
+
+    const updates = calls.filter(
+      ([command, payload]) =>
+        command === "media_p2p_set_track_parameters" &&
+        payload.source === "screen",
+    );
+    assert.equal(updates.at(-1)[1].parameters.active, false);
+  });
+
   it("attaches sources and relays native offer, ICE, and remote frames", async () => {
     const calls = [];
     const messages = [];

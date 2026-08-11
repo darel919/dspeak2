@@ -423,6 +423,8 @@ export class MediasoupClientSession {
   }
 
   async addSourceInternal(entry) {
+    if (!this.sourceTransmission.has(entry.source))
+      this.sourceTransmission.set(entry.source, entry.track?.enabled !== false);
     const previousSource = this.sources.get(entry.source);
     const existing = this.producers.get(entry.source);
     if (existing) {
@@ -431,14 +433,14 @@ export class MediasoupClientSession {
         await existing.producer.replaceTrack({ track });
         await this.setSourceTransmission(
           entry.source,
-          this.sourceTransmission?.get(entry.source) !== false,
+          this.sourceTransmission.get(entry.source),
         );
       } catch (error) {
         try {
           await existing.producer.replaceTrack({ track: existing.track });
           await this.setSourceTransmission(
             entry.source,
-            this.sourceTransmission?.get(entry.source) !== false,
+            this.sourceTransmission.get(entry.source),
           );
         } catch (rollbackError) {
           this.onError?.(rollbackError);
@@ -479,6 +481,8 @@ export class MediasoupClientSession {
   async publish(entry) {
     if (!this.sendTransport || this.producers.has(entry.source))
       return this.producers.get(entry.source) || null;
+    if (!this.sourceTransmission.has(entry.source))
+      this.sourceTransmission.set(entry.source, entry.track?.enabled !== false);
     const activePublication = this.sourcePublications.get(entry.source);
     if (activePublication) return activePublication;
     const publication = this.publishSource(entry).finally(() => {
@@ -544,7 +548,7 @@ export class MediasoupClientSession {
     this.producers.set(entry.source, { producer, track, source: entry.source });
     await this.setSourceTransmission(
       entry.source,
-      this.sourceTransmission?.get(entry.source) !== false,
+      this.sourceTransmission.get(entry.source),
     );
     producer.on("transportclose", () => {
       if (this.producers.get(entry.source)?.producer !== producer) return;
