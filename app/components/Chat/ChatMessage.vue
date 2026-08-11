@@ -226,7 +226,7 @@ import {
   isImageUrl,
   isGifUrl,
 } from "../../shared/link-preview";
-import { extractInviteLink } from "../../shared/room-invite-link.js";
+import { extractInviteLink } from "../../shared/room-invite-link.ts";
 
 const { formatChatDisplayTime, getAvatarUrl } = useChatUtils();
 

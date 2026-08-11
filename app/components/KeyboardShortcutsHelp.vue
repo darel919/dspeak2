@@ -66,11 +66,11 @@
 
 <script setup>
 import { computed, onMounted } from "vue";
-import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.js";
+import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.ts";
 import {
   effectiveKeysForShortcut,
   loadCustomKeybindings,
-} from "../shared/keybinding-preferences.js";
+} from "../shared/keybinding-preferences.ts";
 
 const props = defineProps({
   visible: {

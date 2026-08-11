@@ -47,7 +47,7 @@
 </template>
 
 <script setup>
-import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 
 const {
   updateAvailable: pwaUpdateAvailable,

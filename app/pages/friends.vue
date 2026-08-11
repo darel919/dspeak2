@@ -277,8 +277,8 @@ import { useFriendsStore } from "../stores/friends";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { useIdentityStore } from "../stores/identity";
 import { useRoomsStore } from "../stores/rooms";
-import { PRESENCE_LABELS } from "~~/shared/presence-status.js";
-import { profileAssetUrl } from "../shared/profile-assets.js";
+import { PRESENCE_LABELS } from "~~/shared/presence-status.ts";
+import { profileAssetUrl } from "../shared/profile-assets.ts";
 import { useToast } from "../composables/useToast";
 
 const friendsStore = useFriendsStore();

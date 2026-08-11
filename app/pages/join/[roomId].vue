@@ -104,7 +104,7 @@
 </template>
 
 <script setup>
-import { publicDisplayName } from "~~/shared/user-profile.js";
+import { publicDisplayName } from "~~/shared/user-profile.ts";
 import { useRoomsStore } from "../../stores/rooms";
 import { useAuthStore } from "../../stores/auth";
 import ToastContainer from "../../components/ToastContainer.vue";

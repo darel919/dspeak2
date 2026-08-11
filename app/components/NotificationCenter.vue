@@ -122,7 +122,7 @@
 <script setup>
 import { useNotificationsStore } from "../stores/notifications";
 import { useFriendsStore } from "../stores/friends";
-import { profileAssetUrl } from "../shared/profile-assets.js";
+import { profileAssetUrl } from "../shared/profile-assets.ts";
 
 const store = useNotificationsStore();
 const friendsStore = useFriendsStore();

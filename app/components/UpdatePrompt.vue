@@ -4,7 +4,7 @@
 </template>
 
 <script setup>
-import { hasTauriRuntimeMarker } from "../shared/desktop-capture.js";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 
 const runtimeStore = useRuntimeStore();
 const runtimeReady = computed(() => runtimeStore.initialized);

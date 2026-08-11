@@ -1145,13 +1145,13 @@ import {
   STANDARD_MICROPHONE_MAX_KBPS,
   VIDEO_POLICY_QUALITY_STEPS,
   normalizeMediaPolicy,
-} from "~~/shared/media-policy.js";
+} from "~~/shared/media-policy.ts";
 import {
   CHANNEL_POLICY_LABELS,
   SLOW_MODE_OPTIONS,
   normalizeChannelPolicy,
   normalizeSlowMode,
-} from "~~/shared/channel-policy.js";
+} from "~~/shared/channel-policy.ts";
 
 const inviteDialog = ref(null);
 

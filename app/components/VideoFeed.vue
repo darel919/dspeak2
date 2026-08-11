@@ -135,7 +135,7 @@
 
 <script setup>
 import { useSettingsStore } from "~/stores/settings";
-import { playSystemSound } from "~/shared/system-sounds.js";
+import { playSystemSound } from "~/shared/system-sounds.ts";
 
 const settingsStore = useSettingsStore();
 const props = defineProps({

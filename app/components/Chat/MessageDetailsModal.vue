@@ -140,7 +140,7 @@ import {
   isValidMessageTimestamp,
   messageChannelId,
 } from "../../shared/chat-messages";
-import { profileAssetUrl } from "../../shared/profile-assets.js";
+import { profileAssetUrl } from "../../shared/profile-assets.ts";
 
 const props = defineProps({
   show: {

@@ -2,13 +2,13 @@ import tailwindcss from "@tailwindcss/vite";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import packageMetadata from "./package.json" with { type: "json" };
-import { createBuildIdentity } from "./shared/app-build.js";
+import { createBuildIdentity } from "./shared/app-build.ts";
 
 const isProduction = process.env.NODE_ENV === "production";
 const isDesktop = process.env.DSPEAK_DESKTOP === "1";
 const desktopApiBasePath = process.env.VITE_DSPEAK_API_PATH || "";
 
-function gitValue(args) {
+function gitValue(args: string[]) {
   try {
     return execFileSync("git", args, {
       cwd: process.cwd(),
@@ -47,7 +47,7 @@ const connectSources = [
   process.env.CF_MEDIA_CONTROL_URL,
   process.env.SUPABASE_URL,
 ]
-  .filter(Boolean)
+  .filter((value): value is string => Boolean(value))
   .flatMap((value) => {
     try {
       const url = new URL(value);
@@ -62,7 +62,36 @@ export default defineNuxtConfig({
   ssr: !isDesktop,
   compatibilityDate: "2025-07-15",
   devtools: false,
-  // devtools: { enabled: !isProduction && !isDesktop },
+  hooks: {
+    "prepare:types"({ tsConfig, nodeTsConfig, sharedTsConfig }) {
+      for (const config of [tsConfig, nodeTsConfig, sharedTsConfig]) {
+        config.compilerOptions ||= {};
+        config.compilerOptions.noImplicitOverride = false;
+        config.compilerOptions.useUnknownInCatchVariables = false;
+      }
+    },
+    "nitro:prepare:types"(context: any) {
+      const { tsConfig } = context;
+      tsConfig.compilerOptions ||= {};
+      tsConfig.compilerOptions.noImplicitOverride = false;
+      tsConfig.compilerOptions.useUnknownInCatchVariables = false;
+    },
+  },
+  typescript: {
+    strict: false,
+    typeCheck: "build",
+    tsConfig: {
+      compilerOptions: {
+        allowJs: true,
+        checkJs: false,
+        noUnusedLocals: false,
+        noUnusedParameters: false,
+        noImplicitOverride: false,
+        allowUnreachableCode: false,
+        allowUnusedLabels: false,
+      },
+    },
+  },
   dir: isDesktop ? { public: resolve("desktop/public") } : undefined,
   app: {
     head: {
@@ -105,7 +134,7 @@ export default defineNuxtConfig({
             "manifest-src": ["'self'"],
             "media-src": ["'self'", "blob:"],
             "object-src": ["'none'"],
-            "require-trusted-types-for": ["'script'"],
+            "require-trusted-types-for": "'script'",
             "script-src": [
               "'strict-dynamic'",
               "'nonce-{{nonce}}'",
@@ -117,7 +146,7 @@ export default defineNuxtConfig({
             "trusted-types": ["vue", "dspeak-service-worker"],
             "worker-src": ["'self'", "blob:"],
             "upgrade-insecure-requests": true,
-            "report-to": ["csp-endpoint"],
+            "report-to": "csp-endpoint",
           }
         : false,
       originAgentCluster: "?1",
@@ -207,13 +236,23 @@ export default defineNuxtConfig({
       : {
           clientBundle: {
             scan: {
-              globInclude: ["**/*.{vue,js,jsx,tsx,md,mdc,mdx,yml,yaml}"],
+              globInclude: ["**/*.{vue,js,ts,jsx,tsx,md,mdc,mdx,yml,yaml}"],
             },
           },
         }),
   },
 
   nitro: {
+    typescript: {
+      strict: false,
+      tsConfig: {
+        compilerOptions: {
+          noUnusedLocals: false,
+          noUnusedParameters: false,
+          noImplicitOverride: false,
+        },
+      },
+    },
     sourceMap: false,
     externals: {
       inline: [resolve("shared")],
@@ -279,7 +318,15 @@ export default defineNuxtConfig({
           ? `${process.env.VITE_DSPEAK_API_PATH.replace(/\/$/, "")}/api`
           : "/api",
       appVersion: buildIdentity.version,
-      appBuild: buildIdentity,
+      appBuild: buildIdentity as unknown as {
+        version: string;
+        commit: string;
+        shortCommit: string;
+        branch: string;
+        builtAt: string;
+        repository: string;
+        updateBranch: string;
+      },
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,
       supabaseUrl: process.env.SUPABASE_URL || "",

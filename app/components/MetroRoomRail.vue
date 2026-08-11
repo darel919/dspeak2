@@ -212,7 +212,7 @@
 </template>
 
 <script setup>
-import { canAccessRoomAdministration } from "~~/shared/room-policy.js";
+import { canAccessRoomAdministration } from "~~/shared/room-policy.ts";
 import { useRoomsStore } from "../stores/rooms";
 import { useAuthStore } from "../stores/auth";
 import { useChannelsStore } from "../stores/channels";
@@ -220,7 +220,7 @@ import { useDirectMessagesStore } from "../stores/directMessages";
 import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
 import { publicDisplayName } from "../../shared/user-profile";
 import { VIEWPORT_PADDING_PX } from "../const/ui";
-import { profileAssetUrl as resolveProfileAssetUrl } from "../shared/profile-assets.js";
+import { profileAssetUrl as resolveProfileAssetUrl } from "../shared/profile-assets.ts";
 
 const roomsStore = useRoomsStore();
 const authStore = useAuthStore();

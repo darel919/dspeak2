@@ -90,7 +90,7 @@ import {
   normalizeSlowMode,
   CHANNEL_POLICY_LABELS,
   SLOW_MODE_OPTIONS,
-} from "~~/shared/channel-policy.js";
+} from "~~/shared/channel-policy.ts";
 
 const props = defineProps({
   channelId: {
@@ -135,9 +135,7 @@ onMounted(async () => {
       currentPolicy.value = normalizeChannelPolicy(channel.policy);
       currentSlowMode.value = normalizeSlowMode(channel.slow_mode);
     }
-  } catch {
-    // noop
-  }
+  } catch {}
 });
 
 function setPolicy(value) {

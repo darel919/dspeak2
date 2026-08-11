@@ -102,7 +102,7 @@ import {
   canDeleteMessage,
   canEditMessage,
   canViewMessageHistory,
-} from "~~/shared/message-policy.js";
+} from "~~/shared/message-policy.ts";
 
 const props = defineProps({
   message: {

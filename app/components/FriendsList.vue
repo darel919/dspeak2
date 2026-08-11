@@ -169,8 +169,8 @@
 <script setup>
 import { useFriendsStore } from "../stores/friends";
 import { useRoomsStore } from "../stores/rooms";
-import { PRESENCE_LABELS } from "~~/shared/presence-status.js";
-import { profileAssetUrl } from "../shared/profile-assets.js";
+import { PRESENCE_LABELS } from "~~/shared/presence-status.ts";
+import { profileAssetUrl } from "../shared/profile-assets.ts";
 
 const friendsStore = useFriendsStore();
 const roomsStore = useRoomsStore();

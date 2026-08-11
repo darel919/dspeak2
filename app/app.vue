@@ -16,7 +16,7 @@
 
 <script setup>
 import { defineAsyncComponent } from "vue";
-import { hasTauriRuntimeMarker } from "./shared/desktop-capture.js";
+import { hasTauriRuntimeMarker } from "./shared/desktop-capture.ts";
 
 const GlobalVoiceStatus = defineAsyncComponent(
   () => import("./components/GlobalVoiceStatus.vue"),

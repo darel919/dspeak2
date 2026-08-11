@@ -86,12 +86,12 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.js";
+import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.ts";
 import {
   keyComboFromEvent,
   loadCustomKeybindings,
   saveCustomKeybindings,
-} from "../shared/keybinding-preferences.js";
+} from "../shared/keybinding-preferences.ts";
 
 const customKeybindings = ref({});
 const recordingId = ref("");
