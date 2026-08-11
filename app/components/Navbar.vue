@@ -463,6 +463,7 @@ import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useRtcStatsStore } from "../stores/rtc-stats";
 import { useRuntimeStore } from "../stores/runtime";
+import { usePresenceStatusStore } from "../stores/presenceStatus";
 const BroadcastSetupDialog = defineAsyncComponent(
   () => import("./BroadcastSetupDialog.vue"),
 );
@@ -484,6 +485,7 @@ const channelsStore = useChannelsStore();
 const settingsStore = useSettingsStore();
 const rtcStatsStore = useRtcStatsStore();
 const runtimeStore = useRuntimeStore();
+const presenceStore = usePresenceStatusStore();
 const route = useRoute();
 const router = useRouter();
 const config = useRuntimeConfig();
@@ -529,9 +531,10 @@ const connectionWarning = computed(() => {
 });
 const avatarStatusClass = computed(() => {
   if (voiceStore.error && !voiceStore.connected) return "avatar-offline";
-  if (presenceStatus?.value === "connected") return "avatar-online";
-  if (presenceStatus?.value) return "avatar-offline";
-  return "";
+  if (presenceStore.effectiveStatus === "online") return "avatar-online";
+  if (presenceStore.effectiveStatus === "idle") return "avatar-idle";
+  if (presenceStore.effectiveStatus === "dnd") return "avatar-dnd";
+  return "avatar-offline";
 });
 const micUnavailable = computed(
   () =>

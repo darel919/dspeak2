@@ -10,18 +10,9 @@
       @click="togglePanel"
     >
       <span class="hidden max-w-32 text-right md:block">
-        <span class="block truncate text-sm font-semibold">{{
-          profile?.name
+        <span class="truncate text-sm font-semibold">{{
+          profile?.username || profile?.handle || "User"
         }}</span>
-        <span
-          class="flex items-center justify-end gap-1.5 truncate text-xs text-base-content/60"
-        >
-          <span
-            class="size-2 shrink-0 rounded-full"
-            :class="statusDotClass"
-          ></span>
-          <span class="truncate">{{ presenceStore.label }}</span>
-        </span>
       </span>
       <span class="avatar relative select-none" :class="avatarStatusClass">
         <span
@@ -169,10 +160,6 @@ function presenceDotClass(status) {
   return "bg-base-content/40";
 }
 
-const statusDotClass = computed(() =>
-  presenceDotClass(presenceStore.effectiveStatus),
-);
-
 const formattedTimeout = computed(() => {
   const minutes = Math.round(presenceStore.idleTimeout / 60000);
   if (minutes === 60) return "1 hour";
@@ -239,5 +226,27 @@ onUnmounted(() =>
 .profile-button:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
+}
+
+.avatar-idle::before,
+.avatar-dnd::before {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  width: 15%;
+  height: 15%;
+  border-radius: 999px;
+  outline: 2px solid var(--color-base-100);
+  content: "";
+  top: 7%;
+  right: 7%;
+}
+
+.avatar-idle::before {
+  background: var(--color-warning);
+}
+
+.avatar-dnd::before {
+  background: var(--color-error);
 }
 </style>

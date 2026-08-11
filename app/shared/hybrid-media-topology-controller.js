@@ -365,9 +365,15 @@ export function createHybridMediaTopologyController({
   async function publishLocalSources(provider) {
     await Promise.all(
       [...localSources.values()].map((entry) =>
-        provider.publishSource(entry.source, entry.track, entry.stream),
+        provider.publishSource(entry.source, entry.track, entry.stream, entry),
       ),
     );
+  }
+
+  async function replayCloudflarePublications(session) {
+    if (session?.provider !== "cloudflare-realtime") return;
+    for (const publication of onRemotePublication())
+      await session.handle("cloudflare-publication-available", publication);
   }
 
   async function ensureQualificationFallback(data, generation) {
@@ -378,8 +384,7 @@ export function createHybridMediaTopologyController({
     try {
       await session.initialize();
       for (const entry of localSources.values()) await session.addSource(entry);
-      for (const publication of onRemotePublication())
-        await session.handle("cloudflare-publication-available", publication);
+      await replayCloudflarePublications(session);
       await session.startSubscriptions?.();
       mediaGeneration.assert(generation);
       handoff.bind("sfu");
@@ -539,6 +544,7 @@ export function createHybridMediaTopologyController({
         await destinationSfu.initialize();
         for (const entry of localSources.values())
           await destinationSfu.addSource(entry);
+        await replayCloudflarePublications(destinationSfu);
         await destinationSfu.startSubscriptions?.();
         await waitForRemoteTracks("sfu", data);
       } else throw new Error("The server requested an invalid media topology");
@@ -643,6 +649,7 @@ export function createHybridMediaTopologyController({
     const session = ensureSfu();
     await session.initialize();
     for (const entry of localSources.values()) await session.addSource(entry);
+    await replayCloudflarePublications(session);
     await session.startSubscriptions?.();
     await waitForRemoteTracks("sfu", data);
     mediaGeneration.assert(generation);
@@ -753,12 +760,9 @@ export function createHybridMediaTopologyController({
       if (data.provider === "cloudflare-realtime") {
         getProviderSocket()?.close();
         setProviderSocket(null);
-        await ensureSfu().initialize();
-        for (const publication of onRemotePublication())
-          await getSfu().handle(
-            "cloudflare-publication-available",
-            publication,
-          );
+        const session = ensureSfu();
+        await session.initialize();
+        await replayCloudflarePublications(session);
         sendProviderReady();
         settleTicketWaiter(true);
         return;

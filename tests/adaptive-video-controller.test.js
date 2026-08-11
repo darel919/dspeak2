@@ -82,6 +82,26 @@ test("resolution priority never adapts below 25 frames per second", () => {
   assert.equal(state.scale, 1);
 });
 
+test("sustained bandwidth pressure triggers adaptation", () => {
+  const settings = {
+    frameRate: 30,
+    qualityPriority: "framerate",
+  };
+  const state = advance(
+    { scale: 1, frameRate: 30 },
+    {
+      encodeUtilization: 25,
+      framesPerSecond: 12,
+      qualityLimitationReason: "bandwidth",
+    },
+    settings,
+    3,
+  );
+
+  assert.equal(state.scale, 1.25);
+  assert.equal(state.frameRate, 30);
+});
+
 test("adaptation recovers gradually but never exceeds user ceilings", () => {
   const settings = {
     frameRate: 30,

@@ -111,7 +111,12 @@ export function createMediaSourceController({
         throw new Error("The active SFU transport is unavailable");
       const publications = await Promise.allSettled([
         p2pRequired
-          ? p2pMesh.publishSource(entry.source, entry.track, entry.stream)
+          ? p2pMesh.publishSource(
+              entry.source,
+              entry.track,
+              entry.stream,
+              entry,
+            )
           : Promise.resolve(),
         sfuRequired ? sfu.addSource(entry) : Promise.resolve(),
       ]);
@@ -134,6 +139,7 @@ export function createMediaSourceController({
                 previous.source,
                 previous.track,
                 previous.stream,
+                previous,
               )
             : null,
           sfuRequired ? getSfu()?.addSource(previous) : null,

@@ -459,6 +459,126 @@ test("native remote screen video also requires an explicit receiving choice", ()
   assert.deepEqual(changes, [["screen", false]]);
 });
 
+test("native paired screen audio follows viewer consent", () => {
+  const changes = [];
+  const audioFeeds = { value: new Map() };
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds,
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+    onVideoReceivingChange: (entry, receiving) =>
+      changes.push([entry.source, receiving]),
+  });
+  const screenKey = "remote:user-1:screen";
+  const audioKey = "remote:user-1:screen-audio";
+
+  registry.bind({
+    key: screenKey,
+    provider: "sfu",
+    source: "screen",
+    kind: "video",
+    userId: "user-1",
+    native: true,
+  });
+  registry.bind({
+    key: audioKey,
+    provider: "sfu",
+    source: "screen-audio",
+    ownerSource: "screen",
+    kind: "audio",
+    userId: "user-1",
+    receiving: true,
+    native: true,
+  });
+
+  assert.equal(audioFeeds.value.get(audioKey).receiving, false);
+  assert.equal(registry.setVideoReceiving(screenKey, true), true);
+  assert.equal(audioFeeds.value.get(audioKey).receiving, true);
+  assert.deepEqual(changes.slice(-2), [
+    ["screen", true],
+    ["screen-audio", true],
+  ]);
+});
+
+test("native standalone system audio still starts automatically", () => {
+  const audioFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds,
+    videoFeeds: { value: new Map() },
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+  });
+  const key = "remote:user-1:screen-audio";
+
+  registry.bind({
+    key,
+    provider: "sfu",
+    source: "screen-audio",
+    ownerSource: "system-audio",
+    kind: "audio",
+    userId: "user-1",
+    native: true,
+  });
+
+  assert.equal(audioFeeds.value.get(key).receiving, true);
+});
+
+test("late paired screen audio resumes after prior viewer consent", () => {
+  const changes = [];
+  const audioFeeds = { value: new Map() };
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds,
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+    onVideoReceivingChange: (entry, receiving) =>
+      changes.push([entry.source, receiving]),
+  });
+  registry.createAudioElement = () => {};
+  const screenTrack = { kind: "video", enabled: true };
+  const audioTrack = { kind: "audio", enabled: true };
+  const screenKey = "remote:user-1:screen";
+  const audioKey = "remote:user-1:screen-audio";
+
+  registry.bind({
+    key: screenKey,
+    provider: "sfu",
+    source: "screen",
+    userId: "user-1",
+    track: screenTrack,
+    stream: {
+      getTracks: () => [screenTrack],
+      addTrack() {},
+      removeTrack() {},
+    },
+  });
+  registry.setVideoReceiving(screenKey, true);
+  registry.bind({
+    key: audioKey,
+    provider: "sfu",
+    source: "screen-audio",
+    ownerSource: "screen",
+    userId: "user-1",
+    track: audioTrack,
+  });
+
+  assert.equal(audioTrack.enabled, true);
+  assert.equal(audioFeeds.value.get(audioKey).receiving, true);
+  assert.deepEqual(changes.at(-1), ["screen-audio", true]);
+});
+
 test("remote screen video keeps an explicit stopped state during handoff", () => {
   const oldTrack = { id: "p2p-screen", kind: "video", enabled: true };
   const newTrack = { id: "sfu-screen", kind: "video", enabled: true };

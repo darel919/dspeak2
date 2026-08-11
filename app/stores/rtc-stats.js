@@ -93,14 +93,27 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     const session = voiceStore.sfuComposable;
     if (!session?.getWebRTCStatsSnapshot)
       throw new Error("RTC diagnostics are unavailable for this session.");
+    const diagnosticErrors = [];
+    const collectOptional = async (label, operation) => {
+      if (typeof operation !== "function") return [];
+      try {
+        return (await operation()) || [];
+      } catch (error) {
+        diagnosticErrors.push({
+          label,
+          message: error?.message || String(error),
+        });
+        return [];
+      }
+    };
     const [currentSnapshot, currentOutbound, currentInbound, peerConnections] =
       await Promise.all([
         session.getWebRTCStatsSnapshot(),
-        session.getOutboundRtpStats ? session.getOutboundRtpStats() : [],
-        session.getInboundRtpStats ? session.getInboundRtpStats() : [],
-        session.getWebRTCDiagnosticStats
-          ? session.getWebRTCDiagnosticStats()
-          : [],
+        collectOptional("outbound-rtp", () => session.getOutboundRtpStats?.()),
+        collectOptional("inbound-rtp", () => session.getInboundRtpStats?.()),
+        collectOptional("peer-connections", () =>
+          session.getWebRTCDiagnosticStats?.(),
+        ),
       ]);
     return {
       generatedAt: new Date().toISOString(),
@@ -122,6 +135,7 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
         Object.entries(history).map(([key, samples]) => [key, [...samples]]),
       ),
       peerConnections,
+      diagnosticErrors,
     };
   }
 

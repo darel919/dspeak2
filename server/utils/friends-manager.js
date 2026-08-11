@@ -8,10 +8,17 @@ export async function getFriendsList(userId) {
   const friendships = await db
     .select()
     .from(friends)
-    .where(and(eq(friends.userId, userId), eq(friends.status, "accepted")))
+    .where(
+      and(
+        eq(friends.status, "accepted"),
+        or(eq(friends.userId, userId), eq(friends.friendId, userId)),
+      ),
+    )
     .orderBy(desc(friends.createdAt));
 
-  const friendIds = friendships.map((f) => f.friendId);
+  const friendIds = friendships.map((f) =>
+    String(f.userId) === String(userId) ? f.friendId : f.userId,
+  );
   if (friendIds.length === 0) return [];
 
   const friendProfiles = await db
@@ -22,9 +29,13 @@ export async function getFriendsList(userId) {
   const profileMap = new Map(friendProfiles.map((p) => [p.id, p]));
 
   return friendships.map((friendship) => {
-    const profile = profileMap.get(friendship.friendId);
+    const friendId =
+      String(friendship.userId) === String(userId)
+        ? friendship.friendId
+        : friendship.userId;
+    const profile = profileMap.get(friendId);
     return {
-      id: friendship.friendId,
+      id: friendId,
       name: profile ? publicDisplayName(profile) : "",
       display_name: profile?.displayName || "",
       handle: profile?.username || "",

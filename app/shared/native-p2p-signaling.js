@@ -126,7 +126,10 @@ export async function applyPeerSignal(mesh, state, signalValue) {
   if (signalValue.source) {
     const source = String(signalValue.source.source || "");
     const trackId = String(signalValue.source.trackId || "");
-    mesh.remoteSources.set(`${state.peerId}:${trackId}`, source);
+    const sourceKey = `${state.peerId}:${trackId}`;
+    const ownerSource = signalValue.source.ownerSource || null;
+    mesh.remoteSources.set(sourceKey, source);
+    mesh.remoteSourceOwners.set(sourceKey, ownerSource);
     let current = [...state.remoteTracks.values()].find(
       (entry) => String(entry.track?.id) === trackId,
     );
@@ -153,8 +156,12 @@ export async function applyPeerSignal(mesh, state, signalValue) {
       }
       mesh.onRemoteTrackEnded(current);
       current.source = source;
+      current.ownerSource = ownerSource;
       current.key = `p2p:${String(state.peerId)}:${source}`;
       state.remoteTracks.set(source, current);
+      mesh.onRemoteTrack(current);
+    } else if (current && current.ownerSource !== ownerSource) {
+      current.ownerSource = ownerSource;
       mesh.onRemoteTrack(current);
     }
     return;
@@ -163,6 +170,8 @@ export async function applyPeerSignal(mesh, state, signalValue) {
     const source = String(signalValue.sourceRemoved.source || "");
     state.retiredRemoteTracks ||= new Map();
     for (const [key, mappedSource] of mesh.remoteSources) {
+      if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
+        mesh.remoteSourceOwners.delete(key);
       if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
         mesh.remoteSources.delete(key);
     }

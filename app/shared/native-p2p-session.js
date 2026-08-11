@@ -11,6 +11,7 @@ import {
   nativeRtpStatForTrack,
   normalizeNativeTransportStats,
 } from "./native-mediasoup-diagnostics.js";
+import { isPairedScreenAudio } from "./media-source-ownership.js";
 
 function sourceFromTrackId(trackId, kind) {
   const value = String(trackId || "");
@@ -111,6 +112,7 @@ export class NativeP2pSession {
           ? "video"
           : "audio"),
       captureSelection: entry.captureSelection || null,
+      ownerSource: entry.ownerSource || null,
       roomBitrateBps: entry.roomBitrateBps,
       audioBitrate:
         entry.audioBitrate || this.getAudioBitrate?.(entry.source) || null,
@@ -215,6 +217,10 @@ export class NativeP2pSession {
       const source = String(signal.source.source || "");
       if (trackId && source) {
         peer.sourceByTrackId.set(trackId, source);
+        peer.ownerSourceByTrackId.set(
+          trackId,
+          signal.source.ownerSource || null,
+        );
         const current = [...this.trackEntries.values()].find(
           (entry) => entry.trackId === trackId,
         );
@@ -222,8 +228,12 @@ export class NativeP2pSession {
           this.trackEntries.delete(current.trackId);
           this.onRemoteTrackEnded?.(current);
           current.source = source;
+          current.ownerSource = signal.source.ownerSource || null;
           current.key = `p2p:${peer.userId}:${source}`;
           this.trackEntries.set(current.trackId, current);
+          this.onRemoteTrack?.(current);
+        } else if (current) {
+          current.ownerSource = signal.source.ownerSource || null;
           this.onRemoteTrack?.(current);
         }
         this._checkPeerQualification(peer);
@@ -235,6 +245,7 @@ export class NativeP2pSession {
       for (const [trackId, mappedSource] of peer.sourceByTrackId) {
         if (mappedSource !== source) continue;
         peer.sourceByTrackId.delete(trackId);
+        peer.ownerSourceByTrackId.delete(trackId);
         const entry = this.trackEntries.get(trackId);
         if (entry) {
           entry.closed = true;
@@ -376,6 +387,7 @@ export class NativeP2pSession {
       connected: false,
       candidateTimer: null,
       sourceByTrackId: new Map(),
+      ownerSourceByTrackId: new Map(),
       offerCreated: false,
       negotiationInFlight: false,
       negotiationRequested: false,
@@ -447,7 +459,11 @@ export class NativeP2pSession {
         }),
       );
       this._sendSignal(peer.peerId, {
-        source: { trackId: result.trackId, source: source.source },
+        source: {
+          trackId: result.trackId,
+          source: source.source,
+          ownerSource: source.ownerSource || null,
+        },
       });
       announced = true;
       if (peer.offerCreated) this._requestOffer(peer);
@@ -887,18 +903,22 @@ export class NativeP2pSession {
       const kind = payload.kind === "video" ? "video" : "audio";
       const source =
         peer.sourceByTrackId.get(trackId) || sourceFromTrackId(trackId, kind);
+      const ownerSource = peer.ownerSourceByTrackId.get(trackId) || null;
+      const defaultReceiving = !isPairedScreenAudio({ source, ownerSource });
       const entry = {
         key: `p2p:${peer.userId}:${source}`,
         id: trackId,
         trackId,
         userId: peer.userId,
         source,
+        ownerSource,
         kind,
         native: true,
         playback: kind === "audio" ? "coreaudio" : "native-frame",
         frame: null,
         receiving:
-          this.remoteReceiving.get(`${String(peer.userId)}:${source}`) ?? true,
+          this.remoteReceiving.get(`${String(peer.userId)}:${source}`) ??
+          defaultReceiving,
         closed: false,
         p2p: true,
         p2pHandle: peer.handle,
@@ -906,6 +926,12 @@ export class NativeP2pSession {
       const previous = this.trackEntries.get(trackId);
       if (previous) this.onRemoteTrackEnded?.(previous);
       this.trackEntries.set(trackId, entry);
+      if (!entry.receiving)
+        void this.invoke("media_p2p_set_receive_enabled", {
+          p2pHandle: peer.handle,
+          trackId: entry.trackId,
+          enabled: false,
+        }).catch((error) => this.onError?.(error));
       this._applyJitterBufferConfig(entry);
       this.onRemoteTrack?.(entry);
       this._checkPeerQualification(peer);

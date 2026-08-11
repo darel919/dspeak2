@@ -51,6 +51,7 @@ const CLOUDFLARE_REQUEST_TIMEOUT_MS = 15000;
 function nativeProducerAppData(entry, kind) {
   const appData = {
     source: entry.source,
+    ...(entry.ownerSource ? { ownerSource: entry.ownerSource } : {}),
     ...(entry.captureSelection
       ? { captureSelection: entry.captureSelection }
       : {}),
@@ -339,7 +340,6 @@ export class NativeMediasoupSfuSession {
           "cloudflare-publication-available",
           publication,
         );
-      this.pendingCloudflarePublications.clear();
       if (!wasInitialized)
         for (const entry of this.sources.values())
           await cloudflare.addSource(entry);
@@ -711,8 +711,8 @@ export class NativeMediasoupSfuSession {
     );
   }
 
-  shouldReceive(userId, source) {
-    return shouldReceive(this, userId, source);
+  shouldReceive(userId, source, ownerSource = null) {
+    return shouldReceive(this, userId, source, ownerSource);
   }
 
   setConsumerVolume(userId, source, volume) {
@@ -944,7 +944,7 @@ export class NativeMediasoupSfuSession {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.expectedInboundFlowCount?.() || 0;
     return [...this.consumers.values()].filter((entry) =>
-      this.shouldReceive(entry.userId, entry.source),
+      this.shouldReceive(entry.userId, entry.source, entry.ownerSource),
     ).length;
   }
 
@@ -1005,7 +1005,8 @@ export class NativeMediasoupSfuSession {
     );
     const inboundResults = await Promise.all(
       [...this.consumers.values()].map(async (entry) => {
-        if (!this.shouldReceive(entry.userId, entry.source)) return false;
+        if (!this.shouldReceive(entry.userId, entry.source, entry.ownerSource))
+          return false;
         try {
           const report = await this.invoke("media_get_consumer_stats", {
             consumerId: entry.consumerId,

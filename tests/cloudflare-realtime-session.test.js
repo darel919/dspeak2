@@ -131,6 +131,43 @@ test("Cloudflare metrics expose the shared transport diagnostics contract", asyn
   assert.equal(stats.availableOutgoingBitrate, 96_000);
   assert.equal(stats.candidateType, "host");
   assert.equal(stats.protocol, "udp");
+  const [diagnostic] = await client.diagnosticStats();
+  assert.equal(diagnostic.kind, "sfu:cloudflare-realtime");
+  assert.equal(diagnostic.pcStates.connectionState, "connected");
+});
+
+test("Cloudflare applies high-quality video sender settings before negotiation", async () => {
+  let applied = null;
+  const client = new CloudflareRealtimeSession({
+    send() {},
+    iceServers: [],
+    getVideoSettings: () => ({
+      frameRate: 60,
+      maxBitrate: 4_500_000,
+      qualityPriority: "resolution",
+    }),
+  });
+  const sender = {
+    getParameters: () => ({ encodings: [{}] }),
+    setParameters: async (parameters) => {
+      applied = parameters;
+    },
+  };
+
+  assert.equal(
+    await client.configureVideoSender(sender, {
+      source: "screen",
+      track: {
+        kind: "video",
+        getSettings: () => ({ width: 1920, height: 1080, frameRate: 60 }),
+      },
+    }),
+    true,
+  );
+  assert.equal(applied.encodings[0].maxBitrate, 4_500_000);
+  assert.equal(applied.encodings[0].maxFramerate, 60);
+  assert.equal(applied.encodings[0].priority, "high");
+  assert.equal(applied.degradationPreference, "maintain-resolution");
 });
 
 class FakePeerConnection {
@@ -186,6 +223,7 @@ test("Cloudflare batches queued publications after local bootstrap", async () =>
     ...publication,
     trackName: "remote-screen-audio",
     source: "screen-audio",
+    ownerSource: "screen",
   };
 
   try {
@@ -215,7 +253,7 @@ test("Cloudflare batches queued publications after local bootstrap", async () =>
   }
 });
 
-test("Cloudflare screen consent does not disable screen audio", async () => {
+test("Cloudflare screen consent leaves separately controlled media unchanged", async () => {
   const client = session();
   const screen = {
     userId: "user-remote",
@@ -226,6 +264,7 @@ test("Cloudflare screen consent does not disable screen audio", async () => {
   const screenAudio = {
     userId: "user-remote",
     source: "screen-audio",
+    ownerSource: "system-audio",
     receiving: true,
     track: { enabled: true },
   };
@@ -238,6 +277,21 @@ test("Cloudflare screen consent does not disable screen audio", async () => {
   assert.equal(screen.track.enabled, false);
   assert.equal(screenAudio.receiving, true);
   assert.equal(screenAudio.track.enabled, true);
+  client.closeMedia();
+});
+
+test("Cloudflare receiving defaults distinguish paired and standalone audio", () => {
+  const client = session();
+
+  assert.equal(
+    client.shouldReceive("user-remote", "screen-audio", "screen"),
+    false,
+  );
+  assert.equal(
+    client.shouldReceive("user-remote", "screen-audio", "system-audio"),
+    true,
+  );
+  assert.equal(client.shouldReceive("user-remote", "screen-audio"), false);
   client.closeMedia();
 });
 

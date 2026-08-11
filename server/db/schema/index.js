@@ -323,6 +323,72 @@ export const friends = pgTable(
   }),
 );
 
+export const directConversations = pgTable(
+  "direct_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    participantAId: uuid("participant_a_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    participantBId: uuid("participant_b_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    participantsUnique: uniqueIndex("direct_conversation_participants").on(
+      table.participantAId,
+      table.participantBId,
+    ),
+    participantA: index("direct_conversations_participant_a").on(
+      table.participantAId,
+      table.updatedAt,
+    ),
+    participantB: index("direct_conversations_participant_b").on(
+      table.participantBId,
+      table.updatedAt,
+    ),
+  }),
+);
+
+export const directMessages = pgTable(
+  "direct_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => directConversations.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    clientId: text("client_id"),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+  },
+  (table) => ({
+    uniqueConversationAuthorClient: uniqueIndex(
+      "unique_direct_message_client",
+    ).on(table.conversationId, table.authorId, table.clientId),
+    conversationCreated: index("direct_messages_conversation_created").on(
+      table.conversationId,
+      table.createdAt,
+    ),
+    conversationRead: index("direct_messages_conversation_read").on(
+      table.conversationId,
+      table.readAt,
+    ),
+  }),
+);
+
 export const notifications = pgTable(
   "notifications",
   {

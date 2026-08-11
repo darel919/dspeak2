@@ -243,9 +243,9 @@ export function createHybridMediaDiagnostics({
   }
 
   async function getWebRTCDiagnosticStats() {
-    return getActiveProvider() === "sfu"
-      ? (await getSfu()?.diagnosticStats()) || []
-      : (await getP2pMesh()?.diagnosticStats()) || [];
+    const provider = getActiveProvider() === "sfu" ? getSfu() : getP2pMesh();
+    if (typeof provider?.diagnosticStats !== "function") return [];
+    return (await provider.diagnosticStats()) || [];
   }
 
   return {

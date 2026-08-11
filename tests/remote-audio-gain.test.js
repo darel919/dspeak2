@@ -248,6 +248,7 @@ test("audio-only system sharing can stop and resume remote transmission", () => 
         {
           key: "remote:user:screen-audio",
           source: "screen-audio",
+          ownerSource: "system-audio",
           userId: "user",
           track: { enabled: true },
         },

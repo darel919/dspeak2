@@ -503,6 +503,7 @@ export class MediasoupClientSession {
     );
     const appData = {
       source: entry.source,
+      ...(entry.ownerSource ? { ownerSource: entry.ownerSource } : {}),
       ...(entry.captureSelection
         ? { captureSelection: entry.captureSelection }
         : {}),
@@ -673,6 +674,7 @@ export class MediasoupClientSession {
       producerId: data.producerId,
       userId: data.userId,
       source: data.source || data.appData?.source || data.kind,
+      ownerSource: data.ownerSource || data.appData?.ownerSource || null,
       provider: "sfu",
       consumer,
       track: consumer.track,
@@ -707,7 +709,7 @@ export class MediasoupClientSession {
     } catch (_) {}
     this.applyJitterBufferConfig(entry);
     try {
-      if (this.shouldReceive(data.userId, entry.source))
+      if (this.shouldReceive(data.userId, entry.source, entry.ownerSource))
         await this.setConsumerReceiving(entry, true);
     } catch (error) {
       try {
@@ -719,10 +721,10 @@ export class MediasoupClientSession {
     this.onRemoteTrack?.(entry);
   }
 
-  shouldReceive(userId, source) {
+  shouldReceive(userId, source, ownerSource = null) {
     const key = `${String(userId)}:${String(source)}`;
     if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
-    return true;
+    return !(source === "screen-audio" && ownerSource !== "system-audio");
   }
 
   setRemoteReceiving(userId, source, receiving) {

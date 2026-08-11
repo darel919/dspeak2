@@ -14,4 +14,6 @@ test("copied RTC reports retain protocol lifecycle and readiness evidence", asyn
   assert.match(reportSource, /protocol: currentSnapshot\.protocol \|\| null/);
   assert.match(reportSource, /lifecycle: currentSnapshot\.lifecycle \|\| \[\]/);
   assert.match(reportSource, /readiness: currentSnapshot\.readiness \|\| null/);
+  assert.match(reportSource, /diagnosticErrors/);
+  assert.match(reportSource, /collectOptional/);
 });

@@ -51,7 +51,7 @@
                 @click="inviteDialog?.open(room)"
                 class="cursor-pointer hover:bg-base-200"
               >
-                Copy invite link
+                Invite
               </button>
             </li>
             <li v-if="isRoomOwnerOrAdmin">

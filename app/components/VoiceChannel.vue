@@ -952,16 +952,10 @@ watch(
   { flush: "post" },
 );
 const remoteSystemAudioShares = computed(() => {
-  const screenOwners = new Set(
-    Array.from(remoteVideoFeedsRef.value)
-      .filter(([, feed]) => feed.source === "screen")
-      .map(([, feed]) => String(feed.userId)),
-  );
   return Array.from(remoteAudioFeedsRef.value)
     .filter(
       ([, feed]) =>
-        feed.source === "screen-audio" &&
-        !screenOwners.has(String(feed.userId)),
+        feed.source === "screen-audio" && feed.ownerSource === "system-audio",
     )
     .map(([key, feed]) => ({
       ...feed,

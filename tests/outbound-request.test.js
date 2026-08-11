@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   configuredOutboundHosts,
+  createPublicHttpsAgent,
   isPublicOutboundAddress,
   parseOutboundHttpsUrl,
 } from "../server/infrastructure/network/outbound-request.js";
@@ -42,4 +43,35 @@ test("outbound URLs require HTTPS, standard ports, and allowed hosts", () => {
     "https://attacker.example.net",
   ])
     assert.throws(() => parseOutboundHttpsUrl(value, { allowedHosts }));
+});
+
+function runLookup(agent, hostname, options) {
+  return new Promise((resolve, reject) => {
+    agent.options.lookup(hostname, options, (error, address, family) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ address, family });
+    });
+  });
+}
+
+test("public HTTPS lookup returns all addresses when requested", async () => {
+  const result = await runLookup(createPublicHttpsAgent(), "8.8.8.8", {
+    all: true,
+  });
+
+  assert.deepEqual(result, {
+    address: [{ address: "8.8.8.8", family: 4 }],
+    family: undefined,
+  });
+});
+
+test("public HTTPS lookup returns one address for regular requests", async () => {
+  const result = await runLookup(createPublicHttpsAgent(), "8.8.8.8", {
+    family: 4,
+  });
+
+  assert.deepEqual(result, { address: "8.8.8.8", family: 4 });
 });

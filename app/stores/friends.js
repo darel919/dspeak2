@@ -1,9 +1,11 @@
 import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
+import { usePresenceStatusStore } from "./presenceStatus";
 import { deviceHeaders } from "~/shared/device-identity";
 import { STORAGE_KEYS } from "~/const/storage";
 import { apiErrorMessage } from "../shared/api-errors.js";
+import { resolveFriendsPresence } from "../shared/friend-presence.js";
 
 export const useFriendsStore = defineStore("friends", () => {
   const friends = ref([]);
@@ -12,6 +14,10 @@ export const useFriendsStore = defineStore("friends", () => {
   const loading = ref(false);
   const error = ref(null);
   const config = useRuntimeConfig();
+  const presenceStatusStore = usePresenceStatusStore();
+  const friendsWithPresence = computed(() =>
+    resolveFriendsPresence(friends.value, presenceStatusStore.trackedUsers),
+  );
 
   async function apiFetch(path, options = {}) {
     const authStore = useAuthStore();
@@ -204,13 +210,12 @@ export const useFriendsStore = defineStore("friends", () => {
   }
 
   function getOnlineFriends() {
-    return friends.value.filter(
-      (f) => f.online && f.presence_status !== "offline",
-    );
+    return friendsWithPresence.value.filter((friend) => friend.online);
   }
 
   return {
     friends,
+    friendsWithPresence,
     friendRequests,
     sentRequests,
     loading,

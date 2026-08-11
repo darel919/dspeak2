@@ -71,6 +71,20 @@
       "when": 1786298743983,
       "tag": "0009_access_path_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786440100854,
+      "tag": "0010_nasty_green_goblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786454365068,
+      "tag": "0011_hesitant_sister_grimm",
+      "breakpoints": true
     }
   ]
 }

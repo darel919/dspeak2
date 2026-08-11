@@ -3,6 +3,7 @@ import {
   nativeRemoteFeedKey,
   waitFor,
 } from "./native-mediasoup-utils.js";
+import { isPairedScreenAudio } from "./media-source-ownership.js";
 
 export function requestConsumer(session, producerId) {
   if (!producerId || producersHasId(session, producerId)) return false;
@@ -66,7 +67,11 @@ export async function createConsumer(session, data) {
       producerId: data.producerId,
       kind: data.kind,
       rtpParameters: data.rtpParameters,
-      appData: { userId: data.userId, source: data.source },
+      appData: {
+        userId: data.userId,
+        source: data.source,
+        ownerSource: data.ownerSource || null,
+      },
     });
     const consumerId = result?.id || data.id;
     if (session.closed || mediaRevision !== session.mediaRevision) {
@@ -90,6 +95,7 @@ export async function createConsumer(session, data) {
       producerId: result?.producerId || data.producerId,
       userId: data.userId,
       source,
+      ownerSource: data.ownerSource || null,
       kind: result?.kind || data.kind,
       track: null,
       stream: null,
@@ -104,7 +110,7 @@ export async function createConsumer(session, data) {
     session.consumers.set(entry.consumerId, entry);
     if (entry.kind === "audio") session.remoteAudioFeeds.set(entry.key, entry);
     if (entry.kind === "video") session.remoteVideoFeeds.set(entry.key, entry);
-    if (shouldReceive(session, entry.userId, entry.source))
+    if (shouldReceive(session, entry.userId, entry.source, entry.ownerSource))
       await setConsumerReceiving(session, entry, true);
     await session.applyJitterBufferConfig(entry);
     session.onRemoteTrack?.(entry);
@@ -150,10 +156,10 @@ export function setRemoteReceiving(
   return Promise.all(operations);
 }
 
-export function shouldReceive(session, userId, source) {
+export function shouldReceive(session, userId, source, ownerSource = null) {
   const key = `${String(userId)}:${String(source)}`;
   if (session.remoteReceiving.has(key)) return session.remoteReceiving.get(key);
-  return true;
+  return !isPairedScreenAudio({ source, ownerSource });
 }
 
 export function setConsumerVolume(session, userId, source, volume) {

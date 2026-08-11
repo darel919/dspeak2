@@ -397,7 +397,9 @@ export class MediaCaptureManager {
       stream.getTracks().forEach((candidate) => candidate.stop());
       throw this.cancelledStartError(source);
     }
-    if (screen) track.contentHint = "motion";
+    if (screen)
+      track.contentHint =
+        videoSettings.qualityPriority === "resolution" ? "detail" : "motion";
     try {
       const entry = this.register(source, stream, track, {
         captureSelection: options.captureSelection || null,

@@ -32,7 +32,7 @@ export async function collectMediasoupDiagnosticStats(session) {
 
 export function expectedMediasoupInboundFlowCount(session) {
   return [...session.consumers.values()].filter((entry) =>
-    session.shouldReceive(entry.userId, entry.source),
+    session.shouldReceive(entry.userId, entry.source, entry.ownerSource),
   ).length;
 }
 

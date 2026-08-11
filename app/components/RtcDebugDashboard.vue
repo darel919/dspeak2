@@ -1,7 +1,7 @@
 <template>
   <div class="rtc-debug-shell">
     <aside class="rtc-sidebar">
-      <NuxtLink to="/" class="rtc-back"
+      <NuxtLink :to="returnPath" class="rtc-back"
         ><Icon name="lucide:arrow-left" /> Back to dSpeak</NuxtLink
       >
       <div class="rtc-identity">
@@ -558,6 +558,11 @@ const channelName = computed(
   () =>
     channelsStore.getChannelById(voiceStore.currentChannelId)?.name ||
     "RTC session",
+);
+const returnPath = computed(() =>
+  voiceStore.currentRoomId && voiceStore.currentChannelId
+    ? `/room/${voiceStore.currentRoomId}/${voiceStore.currentChannelId}`
+    : "/",
 );
 const activeStreams = computed(() =>
   section.value === "outbound" ? outbound.value : inbound.value,

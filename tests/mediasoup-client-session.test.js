@@ -59,6 +59,7 @@ test("SFU readiness expects RTP only from media selected for reception", () => {
   client.consumers.set("screen-audio", {
     userId: "user-2",
     source: "screen-audio",
+    ownerSource: "system-audio",
   });
 
   assert.equal(client.expectedInboundFlowCount(), 3);
@@ -759,6 +760,7 @@ test("remote consumer lifecycle refreshes active media connection state", async 
       producerId: "producer-1",
       kind: "audio",
       source: "screen-audio",
+      ownerSource: "system-audio",
       userId: "user-1",
       rtpParameters: {},
     });
@@ -781,7 +783,7 @@ test("remote consumer lifecycle refreshes active media connection state", async 
   }
 });
 
-test("screen video consent does not disable automatically received screen audio", async () => {
+test("screen video consent leaves separately controlled media unchanged", async () => {
   const sent = [];
   const client = new MediasoupClientSession({
     send: (message) => sent.push(message),
@@ -790,6 +792,7 @@ test("screen video consent does not disable automatically received screen audio"
   const entries = ["screen", "screen-audio"].map((source, index) => ({
     userId: "user-1",
     source,
+    ownerSource: source === "screen-audio" ? "system-audio" : null,
     track: { enabled: true },
     consumer: { id: `consumer-${index + 1}` },
   }));
@@ -893,11 +896,16 @@ test("failed consumer control signaling rejects without waiting for timeout", as
   assert.equal(entry.track.enabled, false);
 });
 
-test("new remote screen video starts with shared audio", () => {
+test("new remote media applies safe ownership-aware receiving defaults", () => {
   const client = session();
 
   assert.equal(client.shouldReceive("user-1", "screen"), true);
-  assert.equal(client.shouldReceive("user-1", "screen-audio"), true);
+  assert.equal(client.shouldReceive("user-1", "screen-audio", "screen"), false);
+  assert.equal(
+    client.shouldReceive("user-1", "screen-audio", "system-audio"),
+    true,
+  );
+  assert.equal(client.shouldReceive("user-1", "screen-audio"), false);
   assert.equal(client.shouldReceive("user-1", "camera"), true);
   assert.equal(client.shouldReceive("user-1", "audio"), true);
 });

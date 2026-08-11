@@ -68,6 +68,7 @@ export class NativeP2pMesh {
     this.localSources = new Map();
     this.sourceTransmission = new Map();
     this.remoteSources = new Map();
+    this.remoteSourceOwners = new Map();
     this.localPeerId = null;
     this.epoch = 0;
     this.mode = "idle";
@@ -163,7 +164,11 @@ export class NativeP2pMesh {
         const entry = this.localSources.get(source);
         if (entry?.track) {
           this.signal(state.peerId, {
-            source: { trackId: entry.track.id, source },
+            source: {
+              trackId: entry.track.id,
+              source,
+              ownerSource: entry.ownerSource || null,
+            },
           });
         } else if (!sender.track) {
           this.signal(state.peerId, { sourceRemoved: { source } });
@@ -304,7 +309,8 @@ export class NativeP2pMesh {
 
   handleTrack(state, event) {
     const track = event.track;
-    const exactSource = this.remoteSources.get(`${state.peerId}:${track.id}`);
+    const sourceKey = `${state.peerId}:${track.id}`;
+    const exactSource = this.remoteSources.get(sourceKey);
     const expectedKind = track.kind;
     const unmatchedSources = [...this.remoteSources]
       .filter(
@@ -335,6 +341,7 @@ export class NativeP2pMesh {
       peerId: state.peerId,
       userId: state.userId,
       source,
+      ownerSource: this.remoteSourceOwners.get(sourceKey) || null,
       track,
       stream: new MediaStream([track]),
     };
@@ -362,11 +369,11 @@ export class NativeP2pMesh {
     );
   }
 
-  async publishSource(source, track, stream) {
+  async publishSource(source, track, stream, metadata = {}) {
     const key = String(source || "");
     if (!key) throw new Error("A P2P source identifier is required");
     return this.enqueueSourceOperation(key, () =>
-      this.publishSourceInternal(key, track, stream),
+      this.publishSourceInternal(key, track, stream, metadata),
     );
   }
 
@@ -382,7 +389,7 @@ export class NativeP2pMesh {
     return tracked;
   }
 
-  async publishSourceInternal(source, track, stream) {
+  async publishSourceInternal(source, track, stream, metadata = {}) {
     const previous = this.localSources.get(source);
     if (!this.sourceTransmission.has(source))
       this.sourceTransmission.set(source, track?.enabled !== false);
@@ -391,10 +398,15 @@ export class NativeP2pMesh {
     const initialStates = new Map(
       [...this.connections.values()].map((state) => [state.peerId, state]),
     );
-    this.localSources.set(source, { track, stream });
+    const entry = {
+      track,
+      stream,
+      ownerSource: metadata?.ownerSource || null,
+    };
+    this.localSources.set(source, entry);
     const results = await Promise.allSettled(
       [...this.connections.values()].map((state) =>
-        this.attachSource(state, source, { track, stream }),
+        this.attachSource(state, source, entry),
       ),
     );
     const failure = results.find((result) => result.status === "rejected");
@@ -561,7 +573,11 @@ export class NativeP2pMesh {
       applyP2pVideoCodecPreferences(state.pc);
       state.senders.set(source, sender);
       this.signal(state.peerId, {
-        source: { trackId: entry.track.id, source },
+        source: {
+          trackId: entry.track.id,
+          source,
+          ownerSource: entry.ownerSource || null,
+        },
       });
       announced = true;
       await this.configureSender(sender, source, entry.track);
@@ -819,7 +835,10 @@ export class NativeP2pMesh {
     state.remoteTracks.clear();
     state.retiredRemoteTracks?.clear();
     for (const key of this.remoteSources.keys())
-      if (key.startsWith(`${state.peerId}:`)) this.remoteSources.delete(key);
+      if (key.startsWith(`${state.peerId}:`)) {
+        this.remoteSources.delete(key);
+        this.remoteSourceOwners.delete(key);
+      }
     state.audioReceivers.clear();
     try {
       state.channel?.close();
@@ -839,6 +858,7 @@ export class NativeP2pMesh {
     for (const peerId of [...this.connections.keys()])
       this.closeConnection(peerId);
     this.remoteSources.clear();
+    this.remoteSourceOwners.clear();
     this.pendingSignals.clear();
     this.readyReported = false;
   }

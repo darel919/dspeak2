@@ -76,6 +76,19 @@ test("room details filters the deduplicated member ID array, not the Set", () =>
   );
 });
 
+test("room details emits one member entry for users with multiple roles", () => {
+  const memberResponse = roomsApi.slice(
+    roomsApi.indexOf("members: memberIds"),
+    roomsApi.indexOf(
+      "channels: roomChannels.map",
+      roomsApi.indexOf("members: memberIds"),
+    ),
+  );
+  assert.match(memberResponse, /members: memberIds\s*\.map/);
+  assert.match(memberResponse, /rolesByUserId\.get\(userId\)/);
+  assert.doesNotMatch(memberResponse, /memberships\.map/);
+});
+
 test("internal API errors expose a request ID without a server stack", () => {
   assert.match(dspeakApi, /data: \{ code: "INTERNAL_ERROR", requestId \}/);
   assert.match(
