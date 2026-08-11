@@ -14,6 +14,11 @@ import {
   boundedStorageMap,
   reportBrowserStorageMetric,
 } from "~/shared/bounded-browser-storage.js";
+import {
+  normalizeSharedAudioAttenuation,
+  normalizeSharedAudioDucking,
+  normalizeSharedAudioStats,
+} from "~~/shared/voice-audio-state.js";
 
 const EMPTY_MEDIA_FEEDS = new Map();
 const MAX_USER_VOLUME_ENTRIES = 200;
@@ -48,25 +53,16 @@ export const useVoiceStore = defineStore("voice", () => {
   const settingsStore = useSettingsStore();
   const channelsStore = useChannelsStore();
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
-  const sharedAudioStats = computed(
-    () =>
-      sfuComposable.value?.sharedAudioStats || { kbps: 0, level: 0, dbfs: -60 },
+  const sharedAudioStats = computed(() =>
+    normalizeSharedAudioStats(unref(sfuComposable.value?.sharedAudioStats)),
   );
-  const sharedAudioAttenuation = computed(
-    () =>
-      sfuComposable.value?.sharedAudioAttenuation || {
-        active: false,
-        effectivePercent: 100,
-        expectedListeners: 0,
-        reportingListeners: 0,
-      },
+  const sharedAudioAttenuation = computed(() =>
+    normalizeSharedAudioAttenuation(
+      unref(sfuComposable.value?.sharedAudioAttenuation),
+    ),
   );
-  const sharedAudioDucking = computed(
-    () =>
-      sfuComposable.value?.sharedAudioDucking || {
-        active: false,
-        effectivePercent: 100,
-      },
+  const sharedAudioDucking = computed(() =>
+    normalizeSharedAudioDucking(unref(sfuComposable.value?.sharedAudioDucking)),
   );
   const effectiveSystemAudioBitrate = computed(() => {
     const requested = Number(settingsStore.systemAudioBitrate) || 128;
