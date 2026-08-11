@@ -15,7 +15,7 @@
       "
       :data-label="compact ? 'Soundboard' : undefined"
       aria-label="Open soundboard"
-      @click="open = true"
+      @click="openPanel"
     >
       <Icon name="lucide:audio-lines" class="size-5" />
       <span v-if="!compact">Soundboard</span>
@@ -166,6 +166,7 @@
     </div>
 
     <SoundboardUploadDialog
+      v-if="showUpload"
       :open="showUpload"
       :room-id="roomId"
       @close="showUpload = false"
@@ -249,8 +250,13 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from "vue";
 import { useSoundboardStore } from "~/stores/soundboard";
 import { useSettingsStore } from "~/stores/settings";
+
+const SoundboardUploadDialog = defineAsyncComponent(
+  () => import("./SoundboardUploadDialog.vue"),
+);
 
 const props = defineProps({
   roomId: { type: String, required: true },
@@ -295,6 +301,11 @@ const roomVolume = computed(() =>
   settingsStore.getSoundboardVolume(props.roomId),
 );
 
+async function openPanel() {
+  open.value = true;
+  if (!store.hasLoadedLibrary(props.roomId)) await store.load(props.roomId);
+}
+
 function editClip(clip) {
   editing.value = { ...clip };
   editingIconImage.value = null;
@@ -333,8 +344,8 @@ function onKeydown(event) {
   }
 }
 onMounted(() => {
-  store.connectEvents();
-  store.load(props.roomId);
+  store.connectEvents(props.roomId);
+  if (!props.compact) store.load(props.roomId);
   document.addEventListener("keydown", onKeydown);
 });
 onUnmounted(() => {

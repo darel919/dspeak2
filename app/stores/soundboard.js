@@ -14,6 +14,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   const error = ref("");
   const canManageRoom = ref(false);
   const currentRoomId = ref(null);
+  const loadedRoomId = ref(null);
   const players = new Map();
 
   function headers(extra = {}) {
@@ -46,18 +47,25 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   }
 
   async function load(roomId) {
-    currentRoomId.value = String(roomId);
+    const normalizedRoomId = String(roomId);
+    currentRoomId.value = normalizedRoomId;
     loading.value = true;
     error.value = "";
     try {
       const result = await request(`?roomId=${encodeURIComponent(roomId)}`);
+      if (currentRoomId.value !== normalizedRoomId) return;
       clips.value = result.clips || [];
       canManageRoom.value = Boolean(result.canManageRoom);
+      loadedRoomId.value = normalizedRoomId;
     } catch (cause) {
-      error.value = cause.message;
+      if (currentRoomId.value === normalizedRoomId) error.value = cause.message;
     } finally {
-      loading.value = false;
+      if (currentRoomId.value === normalizedRoomId) loading.value = false;
     }
+  }
+
+  function hasLoadedLibrary(roomId) {
+    return loadedRoomId.value === String(roomId);
   }
 
   async function upload(roomId, file, metadata) {
@@ -205,11 +213,24 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   }
 
   function onLibraryUpdated(event) {
-    if (String(event.detail?.roomId) === String(currentRoomId.value))
-      load(currentRoomId.value);
+    const roomId = String(event.detail?.roomId);
+    if (roomId === loadedRoomId.value && roomId === String(currentRoomId.value))
+      load(roomId);
   }
 
-  function connectEvents() {
+  function connectEvents(roomId = null) {
+    if (roomId !== null) {
+      const normalizedRoomId = String(roomId);
+      currentRoomId.value = normalizedRoomId;
+      if (
+        loadedRoomId.value !== null &&
+        loadedRoomId.value !== normalizedRoomId
+      ) {
+        clips.value = [];
+        canManageRoom.value = false;
+        loadedRoomId.value = null;
+      }
+    }
     window.addEventListener("dspeak:soundboard-triggered", onTriggered);
     window.addEventListener(
       "dspeak:soundboard-library-updated",
@@ -232,6 +253,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     loading,
     uploading,
     error,
+    hasLoadedLibrary,
     load,
     upload,
     update,

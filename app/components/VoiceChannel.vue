@@ -1,6 +1,7 @@
 <template>
   <div class="voice-channel relative flex h-full flex-col bg-base-200">
     <DesktopCapturePicker
+      v-if="capturePickerOpen"
       :open="capturePickerOpen"
       :audio-only="capturePickerAudioOnly"
       @close="closeCapturePicker"
@@ -737,6 +738,7 @@
 </template>
 
 <script setup>
+import { defineAsyncComponent } from "vue";
 import { storeToRefs } from "pinia";
 import { useVoiceStore } from "~/stores/voice";
 import { useAuthStore } from "~/stores/auth";
@@ -745,6 +747,11 @@ import { useIdentityStore } from "~/stores/identity";
 import { useChannelsStore } from "~/stores/channels";
 import { useRuntimeStore } from "~/stores/runtime";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
+
+const DesktopCapturePicker = defineAsyncComponent(
+  () => import("./DesktopCapturePicker.vue"),
+);
+const VideoFeed = defineAsyncComponent(() => import("./VideoFeed.vue"));
 
 const props = defineProps({
   channel: {
