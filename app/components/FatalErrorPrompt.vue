@@ -5,18 +5,18 @@ const { active, message, refresh } = useFatalClientError();
 <template>
   <div
     v-if="active"
-    class="metro-modal modal-open z-[1000]"
+    class="metro-modal z-[1000]"
     role="alertdialog"
     aria-modal="true"
     aria-labelledby="fatal-error-title"
     aria-describedby="fatal-error-message"
   >
-    <div class="metro-flyout text-base-content">
+    <div class="fatal-error-flyout metro-flyout text-base-content">
       <h2 id="fatal-error-title" class="text-lg font-bold">Fatal error</h2>
       <p id="fatal-error-message" class="mt-3 text-base-content/70">
         {{ message }}
       </p>
-      <div class="flex justify-end gap-3">
+      <div class="fatal-error-actions flex justify-end gap-3">
         <button class="metro-btn" type="button" autofocus @click="refresh">
           Refresh page
         </button>
@@ -25,3 +25,18 @@ const { active, message, refresh } = useFatalClientError();
     <div class="modal-backdrop bg-black/60"></div>
   </div>
 </template>
+
+<style scoped>
+.fatal-error-flyout {
+  width: min(100%, 32rem);
+  padding: var(--metro-space-6);
+}
+
+.fatal-error-flyout p {
+  overflow-wrap: anywhere;
+}
+
+.fatal-error-actions {
+  margin-top: var(--metro-space-6);
+}
+</style>

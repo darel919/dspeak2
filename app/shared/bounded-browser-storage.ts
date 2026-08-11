@@ -1,6 +1,9 @@
 export const BROWSER_STORAGE_METRICS_EVENT = "dspeak:browser-storage-metrics";
 
-export function boundedStorageMap(value, limit) {
+export function boundedStorageMap(
+  value: unknown,
+  limit: number,
+): Record<string, unknown> {
   const entries =
     value && typeof value === "object" && !Array.isArray(value)
       ? Object.entries(value)
@@ -8,14 +11,19 @@ export function boundedStorageMap(value, limit) {
   return Object.fromEntries(entries.slice(-Math.max(0, Number(limit) || 0)));
 }
 
-export function updateBoundedStorageMap(value, key, entry, limit) {
+export function updateBoundedStorageMap(
+  value: unknown,
+  key: string,
+  entry: unknown,
+  limit: number,
+): Record<string, unknown> {
   const next = boundedStorageMap(value, limit);
   delete next[String(key)];
   next[String(key)] = entry;
   return boundedStorageMap(next, limit);
 }
 
-export function browserStorageMetric(key, value) {
+export function browserStorageMetric(key: string, value: unknown) {
   const serialized = JSON.stringify(value);
   return {
     key,
@@ -27,7 +35,7 @@ export function browserStorageMetric(key, value) {
   };
 }
 
-export function reportBrowserStorageMetric(key, value) {
+export function reportBrowserStorageMetric(key: string, value: unknown): void {
   if (typeof window === "undefined" || typeof CustomEvent === "undefined")
     return;
   window.dispatchEvent(

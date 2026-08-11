@@ -10,7 +10,8 @@ export const SERVICE_WORKER_URL = import.meta.dev
   : "/sw.js";
 
 const TRUSTED_TYPES_POLICY_NAME = "dspeak-service-worker";
-let registrationRequest = null;
+let registrationRequest =
+  null as Promise<ServiceWorkerRegistration | null> | null;
 let trustedTypesPolicy = null;
 
 function serviceWorkerScriptUrl() {
@@ -30,7 +31,7 @@ function serviceWorkerScriptUrl() {
   return trustedTypesPolicy.createScriptURL(SERVICE_WORKER_URL);
 }
 
-export function registerServiceWorker() {
+export function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (hasTauriRuntimeMarker()) return Promise.resolve(null);
   if (!("serviceWorker" in navigator)) return Promise.resolve(null);
   if (!registrationRequest) {

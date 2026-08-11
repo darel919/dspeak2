@@ -133,10 +133,17 @@ export const SKIN_TONES = [
 
 export const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "🎉"];
 
-export function searchEmojis(query) {
+interface EmojiSearchResult {
+  emoji: string;
+  name: string;
+  keywords: string[];
+  category: string;
+}
+
+export function searchEmojis(query: string): EmojiSearchResult[] {
   if (!query || query.length < 1) return [];
   const lower = query.toLowerCase();
-  const results = [] as any;
+  const results: EmojiSearchResult[] = [];
   for (const category of EMOJI_CATEGORIES) {
     for (const item of category.emojis) {
       if (
@@ -151,16 +158,22 @@ export function searchEmojis(query) {
   return results;
 }
 
-export function getRecentEmojis() {
+export function getRecentEmojis(): string[] {
   if (!import.meta.client) return [];
   try {
-    return JSON.parse(localStorage.getItem("dspeak_recent_emojis") || "[]");
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem("dspeak_recent_emojis") || "[]",
+    );
+    return Array.isArray(parsed) &&
+      parsed.every((item) => typeof item === "string")
+      ? parsed
+      : [];
   } catch {
     return [];
   }
 }
 
-export function addRecentEmoji(emoji) {
+export function addRecentEmoji(emoji: string) {
   if (!import.meta.client) return;
   try {
     const recent = getRecentEmojis().filter((e) => e !== emoji);
@@ -172,7 +185,7 @@ export function addRecentEmoji(emoji) {
   } catch {}
 }
 
-export function applySkinTone(emoji, skinTone) {
+export function applySkinTone(emoji: string, skinTone: string) {
   const skinToneBase = [
     "👋",
     "✋",

@@ -3,9 +3,9 @@ import { createCallWakeLockController } from "~/shared/call-wake-lock.ts";
 
 export function useCallWakeLock() {
   const authStore = useAuthStore();
-  let controller = null;
-  let stopConnectedWatcher = null;
-  let stopAuthWatcher = null;
+  let controller: ReturnType<typeof createCallWakeLockController> | null = null;
+  let stopConnectedWatcher: (() => void) | null = null;
+  let stopAuthWatcher: (() => void) | null = null;
   let mountGeneration = 0;
   let disposed = false;
 
@@ -16,7 +16,7 @@ export function useCallWakeLock() {
     controller = null;
   }
 
-  async function mountForUser(generation) {
+  async function mountForUser(generation: number) {
     try {
       const { useVoiceStore } = await import("~/stores/voice");
       if (

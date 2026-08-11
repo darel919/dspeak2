@@ -1,4 +1,13 @@
 import { mediaDebug } from "./media-debug.ts";
+import type {
+  InitialMediaTopologyContext,
+  MediaHandoffReadinessContext,
+} from "./types/media-handoff-readiness.ts";
+import type {
+  TopologyData,
+  TopologySourceEntry,
+} from "./types/topology-controller.ts";
+import type { TopologyHandoff } from "./types/topology-controller.ts";
 
 export function waitForMediaHandoff({
   getLatestTopologyKey,
@@ -13,7 +22,7 @@ export function waitForMediaHandoff({
   topology,
   topologyEventKey,
   topologyState,
-}) {
+}: MediaHandoffReadinessContext) {
   const startedAt = Date.now();
   mediaDebug("handoff.wait-start", {
     provider,
@@ -61,6 +70,9 @@ function waitForSfuHandoff({
   topologyEventKey,
   topologyState,
   startedAt,
+}: Omit<MediaHandoffReadinessContext, "provider" | "getP2pMesh"> & {
+  getSfu: MediaHandoffReadinessContext["getSfu"];
+  startedAt: number;
 }) {
   const localPeerId = getLocalPeerId();
   const expected = countExpectedFeeds(topologyState, localPeerId);
@@ -93,8 +105,11 @@ function waitForSfuHandoff({
           readiness = await sfu.mediaReadiness(
             sfu?.expectedInboundFlowCount?.() ?? expected,
           );
-        } catch (error) {
-          readiness = { ready: false, error: error.message };
+        } catch (error: unknown) {
+          readiness = {
+            ready: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
         }
       }
       if (tracksReady && readiness?.ready === true) {
@@ -108,7 +123,7 @@ function waitForSfuHandoff({
         return;
       }
       if (Date.now() - startedAt >= timeoutMs) {
-        const readinessReasons = [] as any;
+        const readinessReasons: string[] = [];
         if (readiness?.error)
           readinessReasons.push(`reason ${readiness.error}`);
         if (readiness?.connectionState || readiness?.iceConnectionState)
@@ -149,6 +164,12 @@ function waitForP2pHandoff({
   topologyEventKey,
   topologyState,
   startedAt,
+}: Omit<
+  MediaHandoffReadinessContext,
+  "provider" | "pollIntervalMs" | "getSfu"
+> & {
+  getP2pMesh: MediaHandoffReadinessContext["getP2pMesh"];
+  startedAt: number;
 }) {
   const localPeerId = getLocalPeerId();
   return new Promise<void>((resolve, reject) => {
@@ -196,7 +217,10 @@ function waitForP2pHandoff({
   });
 }
 
-function countExpectedFeeds(topologyState, localPeerId) {
+function countExpectedFeeds(
+  topologyState: MediaHandoffReadinessContext["topologyState"],
+  localPeerId: string | null,
+) {
   return topologyState.value.peers
     .filter((peer) => String(peer.peerId) !== String(localPeerId))
     .reduce(
@@ -206,7 +230,13 @@ function countExpectedFeeds(topologyState, localPeerId) {
     );
 }
 
-function countExpectedSfuFeeds(topologyState, localPeerId, sfu) {
+function countExpectedSfuFeeds(
+  topologyState: MediaHandoffReadinessContext["topologyState"],
+  localPeerId: string | null,
+  sfu: NonNullable<MediaHandoffReadinessContext["getSfu"]> extends () => infer T
+    ? T
+    : never,
+) {
   return topologyState.value.peers
     .filter((peer) => String(peer.peerId) !== String(localPeerId))
     .reduce(
@@ -221,16 +251,22 @@ function countExpectedSfuFeeds(topologyState, localPeerId, sfu) {
     );
 }
 
-function shouldExpectSfuSource(sfu, userId, source) {
+function shouldExpectSfuSource(
+  sfu: NonNullable<MediaHandoffReadinessContext["getSfu"]> extends () => infer T
+    ? T
+    : never,
+  userId: string | number | null | undefined,
+  source: string,
+) {
   return sfu?.shouldReceive ? sfu.shouldReceive(userId, source) : true;
 }
 
 function checkTracksReady(
-  handoff,
-  provider,
-  topologyState,
-  localPeerId,
-  sfu = null,
+  handoff: TopologyHandoff,
+  provider: "p2p" | "sfu",
+  topologyState: MediaHandoffReadinessContext["topologyState"],
+  localPeerId: string | null,
+  sfu: Parameters<typeof countExpectedSfuFeeds>[2] | null = null,
 ) {
   if (provider === "sfu" && sfu?.shouldReceive) {
     const tracks = [...handoff.entries(provider)];
@@ -255,7 +291,11 @@ function checkTracksReady(
   );
 }
 
-export function waitForInitialMediaTopology({ isReady, setWaiter, timeoutMs }) {
+export function waitForInitialMediaTopology({
+  isReady,
+  setWaiter,
+  timeoutMs,
+}: InitialMediaTopologyContext) {
   if (isReady()) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {

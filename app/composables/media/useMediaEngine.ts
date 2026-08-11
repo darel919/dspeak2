@@ -1,8 +1,16 @@
 import { BrowserMediaEngine } from "./browserMediaEngine.ts";
 import { NativeMediaEngine } from "./nativeMediaEngine.ts";
 import { isTauriRuntime, resolveNativeMediaFlags } from "./media-runtime.ts";
+import type {
+  BrowserMediaEngineSession,
+  MediaEngineFactoryOptions,
+} from "../../shared/types/media-engine-adapters.ts";
 
-export function useMediaEngine(sessionOrFactory, options = {} as any) {
+export function useMediaEngine(
+  sessionOrFactory:
+    BrowserMediaEngineSession | (() => BrowserMediaEngineSession),
+  options: MediaEngineFactoryOptions = {},
+) {
   const tauriRuntime = options.isTauri ?? isTauriRuntime();
   if (tauriRuntime) {
     const runtimeConfig: any =

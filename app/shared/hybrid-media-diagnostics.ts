@@ -1,3 +1,24 @@
+import type {
+  DiagnosticProvider,
+  DiagnosticSourceEntry,
+  HybridMediaDiagnosticsContext,
+  MediaReadinessContext,
+} from "./types/hybrid-media-diagnostics.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function isDiagnosticSourceEntry(
+  value: unknown,
+): value is DiagnosticSourceEntry {
+  return (
+    isRecord(value) &&
+    typeof value.source === "string" &&
+    value.track instanceof MediaStreamTrack
+  );
+}
+
 export function createHybridMediaDiagnostics({
   collectRtpStats,
   getActiveProvider,
@@ -20,30 +41,30 @@ export function createHybridMediaDiagnostics({
   topologyState,
   updateP2pStats,
   rtpStatsSamples,
-}) {
+}: HybridMediaDiagnosticsContext) {
   function sfuProducerIds() {
-    const sfu = getSfu();
-    return sfu
+    const sfu = getSfu() as DiagnosticProvider | null;
+    return sfu?.producers
       ? [...sfu.producers.values()].map((entry) => entry.producer.id)
       : [];
   }
 
   async function getWebRTCStatsSnapshot() {
     const activeProvider = getActiveProvider();
-    const p2pMesh = getP2pMesh();
-    const sfu = getSfu();
-    let p2pEdges = [] as any;
+    const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
+    const sfu = getSfu() as DiagnosticProvider | null;
+    let p2pEdges: Array<Record<string, unknown>> = [];
     if (activeProvider === "p2p" && p2pMesh) {
-      const edges = await p2pMesh.getSnapshot().catch(() => null);
+      const edges = await p2pMesh.getSnapshot?.()?.catch(() => null);
       if (edges) {
-        p2pEdges = edges;
+        p2pEdges = Array.isArray(edges) ? edges.filter(isRecord) : [];
         updateP2pStats(edges);
       }
     }
     const rawTransports =
       activeProvider === "sfu"
-        ? (await sfu?.stats()) || []
-        : (await p2pMesh?.stats()) || [];
+        ? (await sfu?.stats?.()) || []
+        : (await p2pMesh?.stats?.()) || [];
     const transports = (Array.isArray(rawTransports) ? rawTransports : [])
       .filter(Boolean)
       .map((transport) => ({
@@ -79,7 +100,11 @@ export function createHybridMediaDiagnostics({
             jitterMs: edge.jitter,
             packetLossPercent: edge.packetLoss,
             availableOutgoingBitrate: edge.bitrate,
-            candidateType: edge.candidatePair?.local?.candidateType || null,
+            candidateType:
+              (
+                edge.candidatePair as
+                  { local?: { candidateType?: string } } | undefined
+              )?.local?.candidateType || null,
             protocol: edge.network,
           }))
         : transports.map((transport) => ({
@@ -146,17 +171,17 @@ export function createHybridMediaDiagnostics({
 
   async function getOutboundRtpStats() {
     const activeProvider = getActiveProvider();
-    const p2pMesh = getP2pMesh();
-    const sfu = getSfu();
-    const results = [] as any;
+    const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
+    const sfu = getSfu() as DiagnosticProvider | null;
+    const results: Array<Record<string, unknown>> = [];
     for (const entry of localSources.values()) {
       const settings = entry.track.getSettings?.() || {};
-      const producer = sfu?.producers.get(entry.source)?.producer;
+      const producer = sfu?.producers?.get(entry.source)?.producer;
       const key = `outbound:${entry.source}`;
       const report =
         activeProvider === "sfu" && producer
           ? await producer.getStats().catch(() => null)
-          : p2pMesh
+          : p2pMesh?.getOutboundTrackStats
             ? await p2pMesh
                 .getOutboundTrackStats(entry.source)
                 .catch(() => null)
@@ -173,7 +198,7 @@ export function createHybridMediaDiagnostics({
       if (collected?.sample) rtpStatsSamples.set(key, collected.sample);
       const senderParameters =
         activeProvider === "p2p"
-          ? p2pMesh?.getOutboundTrackParameters(entry.source)
+          ? p2pMesh?.getOutboundTrackParameters?.(entry.source)
           : producer?.rtpParameters;
       const encoding = senderParameters?.encodings?.[0] || null;
       results.push({
@@ -185,10 +210,10 @@ export function createHybridMediaDiagnostics({
             : null,
         captureFps: settings.frameRate || null,
         configuredMaxBitrateKbps: Number.isFinite(Number(encoding?.maxBitrate))
-          ? Number(encoding.maxBitrate) / 1000
+          ? Number(encoding?.maxBitrate) / 1000
           : null,
         configuredMaxFramerate: Number.isFinite(Number(encoding?.maxFramerate))
-          ? Number(encoding.maxFramerate)
+          ? Number(encoding?.maxFramerate)
           : null,
         degradationPreference: senderParameters?.degradationPreference || null,
         ...(collected?.stats || {
@@ -202,20 +227,20 @@ export function createHybridMediaDiagnostics({
   }
 
   async function getInboundRtpStats() {
-    const p2pMesh = getP2pMesh();
-    const results = [] as any;
+    const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
+    const results: Array<Record<string, unknown>> = [];
     const remoteFeeds = [
-      ...remoteAudioFeeds.value.values(),
-      ...remoteVideoFeeds.value.values(),
+      ...[...remoteAudioFeeds.value.values()].filter(isDiagnosticSourceEntry),
+      ...[...remoteVideoFeeds.value.values()].filter(isDiagnosticSourceEntry),
     ];
     for (const entry of remoteFeeds) {
       const settings = entry.track.getSettings?.() || {};
       const key = `inbound:${entry.key}`;
       const report = entry.consumer
         ? await entry.consumer.getStats().catch(() => null)
-        : p2pMesh
+        : p2pMesh?.getInboundTrackStats
           ? await p2pMesh
-              .getInboundTrackStats(entry.peerId, entry.track)
+              .getInboundTrackStats?.(entry.peerId, entry.track)
               .catch(() => null)
           : null;
       const collected = report
@@ -243,7 +268,9 @@ export function createHybridMediaDiagnostics({
   }
 
   async function getWebRTCDiagnosticStats() {
-    const provider = getActiveProvider() === "sfu" ? getSfu() : getP2pMesh();
+    const provider = (
+      getActiveProvider() === "sfu" ? getSfu() : getP2pMesh()
+    ) as DiagnosticProvider | null;
     if (typeof provider?.diagnosticStats !== "function") return [];
     return (await provider.diagnosticStats()) || [];
   }
@@ -263,7 +290,7 @@ export function mediaReadinessSnapshot({
   playbackState,
   topologyState,
   transportReady,
-}) {
+}: MediaReadinessContext) {
   return {
     signaling: connected,
     topology: topologyState.epoch > 0,

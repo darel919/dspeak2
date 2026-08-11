@@ -1,9 +1,12 @@
 import { createLocalJWKSet, jwtVerify } from "jose";
+import type { H3Event } from "h3";
+import type { AuthEvent } from "../types/auth.ts";
 
-let cachedJWKS = null;
-let cachedKeySet = null;
+type LocalKeySet = ReturnType<typeof createLocalJWKSet>;
+let cachedJWKS: Record<string, unknown> | null = null;
+let cachedKeySet: LocalKeySet | null = null;
 let jwksFetchedAt = 0;
-let jwksRequest = null;
+let jwksRequest: Promise<LocalKeySet> | null = null;
 const JWKS_CACHE_TTL = 3600000;
 
 async function getJWKS() {
@@ -16,8 +19,8 @@ async function getJWKS() {
         `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`,
       );
       if (!response.ok) throw new Error("Failed to fetch JWKS");
-      cachedJWKS = await response.json();
-      cachedKeySet = createLocalJWKSet(cachedJWKS);
+      cachedJWKS = (await response.json()) as Record<string, unknown>;
+      cachedKeySet = createLocalJWKSet(cachedJWKS as never);
       jwksFetchedAt = Date.now();
       return cachedKeySet;
     } catch (error) {
@@ -30,7 +33,7 @@ async function getJWKS() {
   return jwksRequest;
 }
 
-export async function verifyAccessToken(token) {
+export async function verifyAccessToken(token: string) {
   const keySet = await getJWKS();
   const { payload } = await jwtVerify(token, keySet, {
     issuer: `${process.env.SUPABASE_URL}/auth/v1`,
@@ -39,14 +42,14 @@ export async function verifyAccessToken(token) {
   return payload;
 }
 
-export function extractBearerToken(event) {
+export function extractBearerToken(event: Pick<H3Event, "headers">) {
   const authHeader =
     event.headers.get("authorization") || event.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
   return authHeader.slice(7);
 }
 
-export async function requireAuth(event) {
+export async function requireAuth(event: AuthEvent) {
   const token = extractBearerToken(event);
   if (!token) {
     throw createError({
@@ -70,7 +73,7 @@ export async function requireAuth(event) {
   }
 }
 
-export async function optionalAuth(event) {
+export async function optionalAuth(event: AuthEvent) {
   const token = extractBearerToken(event);
   if (!token) return null;
   try {

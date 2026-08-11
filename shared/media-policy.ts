@@ -23,7 +23,7 @@ export const VIDEO_POLICY_QUALITY_STEPS = Object.freeze({
   ]),
 });
 
-export function normalizeMediaPolicy(value = {} as any) {
+export function normalizeMediaPolicy(value: MediaPolicyInput = {}) {
   value = value && typeof value === "object" ? value : {};
   const requestedMicrophone = value.microphoneKbps;
   const hdAudio =
@@ -63,12 +63,15 @@ export function normalizeMediaPolicy(value = {} as any) {
   };
 }
 
-export function validateMediaPolicy(value = {} as any) {
+export function validateMediaPolicy(value: MediaPolicyInput = {}) {
   value = value && typeof value === "object" ? value : {};
-  const errors = [] as any;
+  const errors: string[] = [];
   if (typeof value.hdAudio !== "boolean")
     errors.push("hdAudio must be a boolean");
-  for (const [key, limits] of Object.entries(MEDIA_POLICY_LIMITS)) {
+  for (const [key, limits] of Object.entries(MEDIA_POLICY_LIMITS) as [
+    keyof typeof MEDIA_POLICY_LIMITS,
+    PolicyLimits,
+  ][]) {
     const number = Number(value[key]);
     if (!Number.isFinite(number) || number < limits.min || number > limits.max)
       errors.push(
@@ -92,7 +95,7 @@ export function validateMediaPolicy(value = {} as any) {
   return { valid: true, value: normalizeMediaPolicy(value) };
 }
 
-export function readPolicyNumber(value, limits) {
+export function readPolicyNumber(value: unknown, limits: PolicyLimits) {
   const number = Number(value);
   return Number.isFinite(number) && number >= limits.min && number <= limits.max
     ? Math.round(number)
@@ -106,12 +109,13 @@ export const ConnectionMode = Object.freeze({
 
 export const DEFAULT_CONNECTION_MODE = ConnectionMode.AUTO;
 
-export function normalizeConnectionMode(value) {
+export function normalizeConnectionMode(value: unknown) {
   if (value === ConnectionMode.AUTO || value === ConnectionMode.DIRECT)
     return value;
   return DEFAULT_CONNECTION_MODE;
 }
 
-export function validateConnectionMode(value) {
+export function validateConnectionMode(value: unknown) {
   return value === ConnectionMode.AUTO || value === ConnectionMode.DIRECT;
 }
+import type { MediaPolicyInput, PolicyLimits } from "./types/media.ts";

@@ -4,8 +4,8 @@ export function useNotifications() {
 
   if (import.meta.client) {
     const authStore = useAuthStore();
-    let stopAuthWatch = null;
-    const initializeForUser = (userId) => {
+    let stopAuthWatch: (() => void) | null = null;
+    const initializeForUser = (userId: string | undefined) => {
       if (!userId) return;
       stopAuthWatch?.();
       stopAuthWatch = null;

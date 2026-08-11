@@ -1,7 +1,9 @@
+type ConnectionMetric = number | string | null | undefined;
+
 export function getConnectionQualityBars(
-  rttMs,
-  packetLossPercent = null,
-  jitterMs = null,
+  rttMs: ConnectionMetric,
+  packetLossPercent: ConnectionMetric = null,
+  jitterMs: ConnectionMetric = null,
 ) {
   if (rttMs == null || rttMs === "") return 0;
   const rtt = Number(rttMs);
@@ -18,7 +20,7 @@ export function getConnectionQualityBars(
   return Math.max(1, bars);
 }
 
-export function getConnectionQualityLabel(bars) {
+export function getConnectionQualityLabel(bars: number) {
   if (bars === 5) return "Excellent";
   if (bars === 4) return "Very good";
   if (bars === 3) return "Good";
@@ -27,7 +29,7 @@ export function getConnectionQualityLabel(bars) {
   return "Waiting for statistics";
 }
 
-export function isConnectionPending(mediaState, connecting = false) {
+export function isConnectionPending(mediaState: string, connecting = false) {
   return (
     connecting ||
     mediaState === "reconnecting" ||
@@ -38,8 +40,8 @@ export function isConnectionPending(mediaState, connecting = false) {
 }
 
 export function getActiveConnectionLabel(
-  bars,
-  mediaState,
+  bars: number,
+  mediaState: string,
   hasConnectedStatistics = false,
 ) {
   if (mediaState === "reconnecting") return "Reconnecting";
@@ -58,13 +60,13 @@ export function getActiveConnectionLabel(
     : "Signaling connected";
 }
 
-export function normalizeConnectionMetricValue(value) {
+export function normalizeConnectionMetricValue(value: ConnectionMetric) {
   return value != null && value !== "" && Number.isFinite(Number(value))
     ? Number(value)
     : null;
 }
 
-export function getConnectionQualityColorClass(bars) {
+export function getConnectionQualityColorClass(bars: number) {
   if (bars > 3) return "text-success";
   if (bars >= 2) return "text-warning";
   if (bars === 1) return "text-error";

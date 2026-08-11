@@ -10,6 +10,15 @@ export const CHANNEL_POLICIES = Object.freeze({
   moderator_only: "moderator_only",
 });
 
+function isChannelPolicy(value: unknown): value is ChannelPolicy {
+  return (
+    value === CHANNEL_POLICIES.free ||
+    value === CHANNEL_POLICIES.send_restricted ||
+    value === CHANNEL_POLICIES.read_only ||
+    value === CHANNEL_POLICIES.moderator_only
+  );
+}
+
 export const CHANNEL_POLICY_LABELS = Object.freeze({
   free: "Free for all",
   send_restricted: "Send restricted",
@@ -28,13 +37,11 @@ export const SLOW_MODE_OPTIONS = Object.freeze([
   { value: 3600, label: "1 hour" },
 ]);
 
-export function normalizeChannelPolicy(value) {
-  return Object.values(CHANNEL_POLICIES).includes(value)
-    ? value
-    : CHANNEL_POLICIES.free;
+export function normalizeChannelPolicy(value: unknown) {
+  return isChannelPolicy(value) ? value : CHANNEL_POLICIES.free;
 }
 
-export function normalizeSlowMode(value) {
+export function normalizeSlowMode(value: unknown) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, Math.min(3600, numeric)) : 0;
 }
@@ -43,6 +50,10 @@ export function canSendInChannel({
   channelPolicy,
   isModeratorOrAbove,
   hasSendPermission,
+}: {
+  channelPolicy: unknown;
+  isModeratorOrAbove: boolean;
+  hasSendPermission: boolean;
 }) {
   if (!channelPolicy || channelPolicy === CHANNEL_POLICIES.free) return true;
   if (channelPolicy === CHANNEL_POLICIES.read_only) return false;
@@ -53,12 +64,33 @@ export function canSendInChannel({
   return true;
 }
 
-export function isSlowModeCooldownActive(lastMessageAt, slowModeSeconds) {
-  if (!slowModeSeconds || slowModeSeconds <= 0 || !lastMessageAt) return false;
-  return Date.now() - lastMessageAt < slowModeSeconds * 1000;
+export function isSlowModeCooldownActive(
+  lastMessageAt: unknown,
+  slowModeSeconds: unknown,
+) {
+  const messageTime = Number(lastMessageAt);
+  const seconds = Number(slowModeSeconds);
+  if (
+    !Number.isFinite(messageTime) ||
+    !Number.isFinite(seconds) ||
+    seconds <= 0
+  )
+    return false;
+  return Date.now() - messageTime < seconds * 1000;
 }
 
-export function slowModeRemainingMs(lastMessageAt, slowModeSeconds) {
-  if (!slowModeSeconds || slowModeSeconds <= 0 || !lastMessageAt) return 0;
-  return Math.max(0, slowModeSeconds * 1000 - (Date.now() - lastMessageAt));
+export function slowModeRemainingMs(
+  lastMessageAt: unknown,
+  slowModeSeconds: unknown,
+) {
+  const messageTime = Number(lastMessageAt);
+  const seconds = Number(slowModeSeconds);
+  if (
+    !Number.isFinite(messageTime) ||
+    !Number.isFinite(seconds) ||
+    seconds <= 0
+  )
+    return 0;
+  return Math.max(0, seconds * 1000 - (Date.now() - messageTime));
 }
+import type { ChannelPolicy } from "./types/channel.ts";

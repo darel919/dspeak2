@@ -1,16 +1,26 @@
+import type {
+  MediaSignalingCloseOptions,
+  MediaSessionCleanupOptions,
+  MediaTelemetryResetOptions,
+} from "./types/media-session-cleanup.ts";
+
 export function closeMediaSessionTransports({
   capture,
   getP2pMesh,
   getSfu,
   handoff,
   socket,
-}) {
+}: MediaSessionCleanupOptions) {
   closeMediaProviders({ getP2pMesh, getSfu, handoff });
   socket?.close();
   capture.stopAll();
 }
 
-export function closeMediaProviders({ getP2pMesh, getSfu, handoff }) {
+export function closeMediaProviders({
+  getP2pMesh,
+  getSfu,
+  handoff,
+}: Omit<MediaSessionCleanupOptions, "capture" | "socket">) {
   handoff.clear();
   try {
     void closeMediaProviderSafely(getP2pMesh(), "P2P");
@@ -24,16 +34,24 @@ export function closeMediaProviders({ getP2pMesh, getSfu, handoff }) {
   }
 }
 
-export function closeMediaProvider(provider) {
-  if (!provider) return;
-  if (typeof provider.closeMedia === "function") {
-    return provider.closeMedia();
+export function closeMediaProvider(provider: unknown) {
+  if (!provider || typeof provider !== "object") return;
+  const candidate = provider as {
+    closeMedia?: () => unknown;
+    closeAll?: () => unknown;
+    close?: () => unknown;
+  };
+  if (typeof candidate.closeMedia === "function") {
+    return candidate.closeMedia();
   }
-  if (typeof provider.closeAll === "function") return provider.closeAll();
-  return provider.close?.();
+  if (typeof candidate.closeAll === "function") return candidate.closeAll();
+  return candidate.close?.();
 }
 
-export async function closeMediaProviderSafely(provider, label = "media") {
+export async function closeMediaProviderSafely(
+  provider: unknown,
+  label = "media",
+) {
   if (!provider) return true;
   try {
     await closeMediaProvider(provider);
@@ -57,13 +75,13 @@ export function resetMediaTelemetryState({
   peerRoundTripTimes,
   remoteProducersCount,
   sfuRoundTripTime,
-}) {
+}: MediaTelemetryResetOptions) {
   remoteProducersCount.value = 0;
-  peerRoundTripTimes.value = {} as any;
-  peerConnectionMetrics.value = {} as any;
-  mediaPathMetrics.value = [] as any;
+  peerRoundTripTimes.value = {};
+  peerConnectionMetrics.value = {};
+  mediaPathMetrics.value = [];
   sfuRoundTripTime.value = null;
-  participantSfuRoundTripTimes.value = {} as any;
+  participantSfuRoundTripTimes.value = {};
   iceConnectedBoth.value = false;
 }
 
@@ -74,7 +92,7 @@ export function handleMediaSignalingClose({
   protocolRejected,
   resetMediaState,
   resetTelemetry,
-}) {
+}: MediaSignalingCloseOptions) {
   if (protocolRejected) {
     closeProviders?.();
     resetTelemetry?.();

@@ -1,6 +1,13 @@
 import { ref } from "vue";
 
 const MEDIA_LIFECYCLE_TRACE_LIMIT = 64;
+type LifecycleDetails = Record<string, string | number | boolean | null>;
+type LifecycleEntry = {
+  phase: string;
+  elapsedMs: number;
+  timestamp: number;
+  details: LifecycleDetails;
+};
 
 const allowedDetailKeys = new Set([
   "code",
@@ -13,9 +20,13 @@ const allowedDetailKeys = new Set([
   "topologyMode",
 ]);
 
-function sanitizedDetails(details) {
-  const result = {} as any;
-  for (const [key, value] of Object.entries(details || {})) {
+function sanitizedDetails(details: unknown): LifecycleDetails {
+  const result: LifecycleDetails = {};
+  const source =
+    details && typeof details === "object"
+      ? (details as Record<string, unknown>)
+      : {};
+  for (const [key, value] of Object.entries(source)) {
     if (!allowedDetailKeys.has(key)) continue;
     if (
       typeof value === "string" ||
@@ -28,23 +39,25 @@ function sanitizedDetails(details) {
   return result;
 }
 
-export function createMediaLifecycleTrace(
-  {
-    limit = MEDIA_LIFECYCLE_TRACE_LIMIT,
-    now = () => Date.now(),
-    monotonicNow = () => performance.now(),
-  } = {} as any,
-) {
+export function createMediaLifecycleTrace({
+  limit = MEDIA_LIFECYCLE_TRACE_LIMIT,
+  now = () => Date.now(),
+  monotonicNow = () => performance.now(),
+}: {
+  limit?: number;
+  now?: () => number;
+  monotonicNow?: () => number;
+} = {}) {
   let startedAt = monotonicNow();
-  let entries = [] as any;
+  let entries: LifecycleEntry[] = [];
 
   function reset() {
     startedAt = monotonicNow();
-    entries = [] as any;
+    entries = [];
   }
 
-  function record(phase, details = {} as any) {
-    const entry = {
+  function record(phase: string, details: unknown = {}) {
+    const entry: LifecycleEntry = {
       phase,
       elapsedMs: Math.max(0, Math.round(monotonicNow() - startedAt)),
       timestamp: now(),
@@ -55,7 +68,7 @@ export function createMediaLifecycleTrace(
     return entry;
   }
 
-  function snapshot() {
+  function snapshot(): LifecycleEntry[] {
     return entries.map((entry) => ({
       ...entry,
       details: { ...entry.details },
@@ -68,9 +81,9 @@ export function createMediaLifecycleTrace(
 export function createMediaLifecycleState() {
   const trace = createMediaLifecycleTrace();
   const phase = ref("closed");
-  const lifecycle = ref([]);
+  const lifecycle = ref<LifecycleEntry[]>([]);
 
-  function record(nextPhase, details = {} as any) {
+  function record(nextPhase: string, details: unknown = {}) {
     phase.value = nextPhase;
     trace.record(nextPhase, details);
     lifecycle.value = trace.snapshot();
@@ -78,7 +91,7 @@ export function createMediaLifecycleState() {
 
   function reset() {
     trace.reset();
-    lifecycle.value = [] as any;
+    lifecycle.value = [];
   }
 
   return { lifecycle, phase, record, reset, snapshot: trace.snapshot };

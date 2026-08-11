@@ -67,7 +67,10 @@ test("direct messages have friend-gated, idempotent persistence", () => {
   assert.match(manager, /const profileMap = await profilesById/);
   assert.match(manager, /\.from\(profiles\)/);
   assert.match(manager, /profileMap\.get/);
-  assert.match(manager, /new Date\(latest\.createdAt\)/);
+  assert.match(
+    manager,
+    /new Date\(latest\.createdAt(?: as string \| number \| Date)?\)/,
+  );
   assert.match(manager, /type: "direct_message"/);
   assert.match(manager, /type: "notification_created"/);
   assert.match(manager, /type: "direct_messages_delivered"/);

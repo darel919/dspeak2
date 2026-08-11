@@ -5,16 +5,16 @@ import {
 
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const retryableMethods = new Set(["GET", "HEAD", "OPTIONS"]);
-let bearerTokenRequest = null;
+let bearerTokenRequest: Promise<string | undefined | null> | null = null;
 
 async function retryWithSupabaseBearer(
-  nativeFetch,
-  input,
-  options,
-  response,
-  url,
-  method,
-  apiTarget,
+  nativeFetch: typeof fetch,
+  input: RequestInfo | URL,
+  options: RequestInit,
+  response: Response,
+  url: URL,
+  method: string,
+  apiTarget: ReturnType<typeof resolveApiRequestTarget>,
 ) {
   if (
     response.status !== 401 ||
@@ -55,7 +55,10 @@ export default defineNuxtPlugin(() => {
   );
   let csrfToken = "";
 
-  globalThis.fetch = async (input, init = {} as any) => {
+  globalThis.fetch = async (
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+  ) => {
     const request = input instanceof Request ? input : null;
     const url = new URL(request?.url || String(input), window.location.origin);
     const method = String(

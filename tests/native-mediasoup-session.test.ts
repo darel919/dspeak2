@@ -5,7 +5,7 @@ import { NativeMediasoupSfuSession } from "../app/shared/native-mediasoup-sessio
 
 const serverHello = {
   protocolVersion: 919,
-  contractRevision: 2,
+  contractRevision: 3,
   heartbeatIntervalMs: 5000,
   heartbeatTimeoutMs: 20000,
   serverTime: Date.now(),
@@ -170,12 +170,19 @@ describe("NativeMediasoupSfuSession", () => {
     const session = new NativeMediasoupSfuSession({
       invoke: async () => undefined,
     });
-    session.signaling = { send: () => true };
+    const controlMessages = [];
+    session.signaling = {
+      send(message) {
+        controlMessages.push(message);
+        return true;
+      },
+    };
     session._startNegotiation = async () => undefined;
 
     try {
       const pending = session._handleProviderTicket({
         provider: "mediasoup",
+        providerId: "sfu-singapore",
         epoch: 1,
         sourceRevision: 0,
         signalingUrl: "wss://sfu.example.com/v1/ws",
@@ -185,6 +192,15 @@ describe("NativeMediasoupSfuSession", () => {
       harness.sockets[0].receive({ type: "hi919" });
       await pending;
       assert.equal(harness.sockets[0].url, "wss://sfu.example.com/v1/ws");
+      assert.deepEqual(controlMessages.at(-1), {
+        type: "provider-ready",
+        data: {
+          provider: "mediasoup",
+          providerId: "sfu-singapore",
+          epoch: 1,
+          sourceRevision: 0,
+        },
+      });
     } finally {
       session.providerSignaling?.close();
       globalThis.WebSocket = previousWebSocket;
@@ -228,6 +244,7 @@ describe("NativeMediasoupSfuSession", () => {
     await assert.rejects(
       session._handleProviderTicket({
         provider: "cloudflare-realtime",
+        providerId: "cloudflare-primary",
         epoch: 4,
         sourceRevision: 2,
       }),
@@ -237,6 +254,7 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(messages[0]?.type, "provider-failure");
     assert.equal(messages[0]?.data.epoch, 4);
     assert.equal(messages[0]?.data.sourceRevision, 2);
+    assert.equal(messages[0]?.data.providerId, "cloudflare-primary");
   });
 
   it("does not attribute a pending provider failure to the active SFU", () => {

@@ -1,11 +1,21 @@
-export function isMessageOwner(message, userId) {
+import type { MessageLike } from "./types/message.ts";
+
+export function isMessageOwner(
+  message: MessageLike | null | undefined,
+  userId: unknown,
+) {
+  const senderId =
+    typeof message?.sender === "string" ? message.sender : message?.sender?.id;
   return (
     Boolean(userId) &&
-    String(message?.sender?.id || message?.sender) === String(userId)
+    String(senderId || message?.sender || "") === String(userId)
   );
 }
 
-export function canEditMessage(message, userId) {
+export function canEditMessage(
+  message: MessageLike | null | undefined,
+  userId: unknown,
+) {
   return (
     isMessageOwner(message, userId) &&
     !String(message?.id || "").startsWith("pending_")
@@ -13,9 +23,9 @@ export function canEditMessage(message, userId) {
 }
 
 export function canDeleteMessage(
-  message,
-  userId,
-  permissions = [] as any,
+  message: MessageLike | null | undefined,
+  userId: unknown,
+  permissions: readonly string[] = [],
   isRoomOwner = false,
 ) {
   return (
@@ -26,7 +36,7 @@ export function canDeleteMessage(
 }
 
 export function canViewMessageHistory(
-  permissions = [] as any,
+  permissions: readonly string[] = [],
   isRoomOwner = false,
 ) {
   return isRoomOwner || permissions.includes("message.moderate");

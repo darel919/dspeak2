@@ -1,4 +1,4 @@
-export function avatarFileName(value) {
+export function avatarFileName(value: unknown) {
   const avatar = String(value || "").trim();
   if (!avatar) return "";
   if (!avatar.includes("/") && !avatar.includes("?")) return avatar;
@@ -18,7 +18,9 @@ export function avatarFileName(value) {
   return "";
 }
 
-export function sameOriginAvatarPath(user) {
+export function sameOriginAvatarPath(
+  user: { id?: unknown; avatar?: unknown } | null | undefined,
+) {
   const userId = String(user?.id || "").trim();
   const fileName = avatarFileName(user?.avatar);
   if (!userId || !fileName) return null;

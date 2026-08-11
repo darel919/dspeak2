@@ -24,7 +24,7 @@ The main Nuxt/Nitro process contains no mediasoup worker, router, transport, pro
 4. The client connects to `wss://media-control.example.com/media-control/<channelId>` and authenticates with that ticket.
 5. The Durable Object installs the participant, assigns the authoritative route epoch, and coordinates the selected media path.
 
-Protocol ID 919 is a permanent product identifier. Its contract revision provides atomic client/server cutovers. Incompatible clients are rejected with an update-required error rather than reconnecting indefinitely. Every state-changing message is scoped to the authenticated participant and current route epoch; messages from retired epochs cannot mutate the room.
+Protocol ID 919 is a permanent product identifier. Contract revision 3 provides atomic client/server cutovers and requires SFU readiness and failure acknowledgements to echo the selected provider instance identity when one is assigned. Incompatible clients are rejected with an update-required error rather than reconnecting indefinitely. Every state-changing message is scoped to the authenticated participant and current route epoch; messages from retired epochs cannot mutate the room.
 
 The media-control WebSocket remains required while P2P media is active because it carries heartbeats, topology state, and peer signaling. It carries control data only, not media packets.
 

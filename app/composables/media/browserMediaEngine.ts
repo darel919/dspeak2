@@ -4,6 +4,20 @@ import {
   createMediaQoeReport,
   mediaQoePathsFromStats,
 } from "../../shared/media-qoe.ts";
+import type {
+  BrowserMediaEngineOptions,
+  BrowserMediaEngineSession,
+  BrowserJoinInput,
+  BrowserScreenShareOptions,
+  BrowserSignalMessage,
+  MediaQoeReport,
+} from "../../shared/types/media-engine-adapters.ts";
+import type {
+  MediaDeviceInfo,
+  MediaEngineState,
+  MediaEngineConfig,
+  MediaStats,
+} from "../../shared/media/types.ts";
 
 const BROWSER_CAPABILITIES = Object.freeze({
   microphone: "browser",
@@ -16,8 +30,19 @@ const BROWSER_CAPABILITIES = Object.freeze({
   receiveAudio: "browser",
 });
 export class BrowserMediaEngine extends MediaEngine {
-  [key: string]: any;
-  constructor(session, { onQoe } = {} as any) {
+  session: BrowserMediaEngineSession;
+  listeners: Map<string, Set<(...args: unknown[]) => void>>;
+  initialized: boolean;
+  microphoneEnabled: boolean;
+  cameraEnabled: boolean;
+  screenSharing: boolean;
+  onQoe?: (report: MediaQoeReport) => void;
+  qoeTimer: ReturnType<typeof setInterval> | null;
+
+  constructor(
+    session: BrowserMediaEngineSession,
+    { onQoe }: BrowserMediaEngineOptions = {},
+  ) {
     super();
     if (!session)
       throw new TypeError("BrowserMediaEngine requires a media session");
@@ -31,7 +56,7 @@ export class BrowserMediaEngine extends MediaEngine {
     this.qoeTimer = null;
   }
 
-  async initialize() {
+  override async initialize(_config?: MediaEngineConfig): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
     this.qoeTimer = setInterval(() => {
@@ -40,12 +65,12 @@ export class BrowserMediaEngine extends MediaEngine {
     this.qoeTimer?.unref?.();
   }
 
-  async joinSession(input) {
+  override async joinSession(input: BrowserJoinInput): Promise<void> {
     await this.initialize();
     await this.session.connect(input.channelId || input);
   }
 
-  async leaveSession() {
+  override async leaveSession(): Promise<void> {
     if (this.qoeTimer) clearInterval(this.qoeTimer);
     this.qoeTimer = null;
     await this.session.disconnect();
@@ -54,35 +79,37 @@ export class BrowserMediaEngine extends MediaEngine {
     this.screenSharing = false;
   }
 
-  async setMicrophoneEnabled(enabled) {
+  override async setMicrophoneEnabled(enabled: boolean): Promise<void> {
     if (enabled) await this.session.startAudioProduction();
     else await this.session.stopAudioProduction();
     this.microphoneEnabled = enabled;
   }
 
-  async setCameraEnabled(enabled) {
+  override async setCameraEnabled(enabled: boolean): Promise<void> {
     if (enabled) await this.session.startVideoProduction("camera");
     else await this.session.stopVideoProduction("camera");
     this.cameraEnabled = enabled;
   }
 
-  async startScreenShare(options = {} as any) {
+  override async startScreenShare(
+    options: BrowserScreenShareOptions = {},
+  ): Promise<void> {
     await this.session.startVideoProduction("screen", options);
     this.screenSharing = true;
   }
 
-  async stopScreenShare() {
+  override async stopScreenShare(): Promise<void> {
     await this.session.stopVideoProduction("screen");
     this.screenSharing = false;
   }
 
-  async handleSignal(message) {
+  override async handleSignal(message: BrowserSignalMessage): Promise<void> {
     if (typeof this.session.handleSignal === "function") {
       return this.session.handleSignal(message);
     }
   }
 
-  async getDevices() {
+  override async getDevices(): Promise<MediaDeviceInfo[]> {
     if (!globalThis.navigator?.mediaDevices?.enumerateDevices) return [];
     const devices = await globalThis.navigator.mediaDevices.enumerateDevices();
     return devices.map(({ deviceId, groupId, kind, label }) => ({
@@ -93,11 +120,16 @@ export class BrowserMediaEngine extends MediaEngine {
     }));
   }
 
-  async getStats() {
-    const snapshot = await this.session.getWebRTCStatsSnapshot();
+  override async getStats(): Promise<MediaStats> {
+    const snapshot =
+      (await this.session.getWebRTCStatsSnapshot()) as MediaStats & {
+        timestamp?: number;
+      };
     const report = createMediaQoeReport({
       provider: unref(this.session.activeProvider) || "sfu",
-      epoch: unref(this.session.topologyState)?.epoch || 0,
+      epoch:
+        (unref(this.session.topologyState) as { epoch?: number } | undefined)
+          ?.epoch || 0,
       paths: mediaQoePathsFromStats(snapshot),
       sampledAt: snapshot.timestamp,
     });
@@ -110,8 +142,12 @@ export class BrowserMediaEngine extends MediaEngine {
     };
   }
 
-  on(event, callback) {
-    const callbacks = this.listeners.get(event) || new Set();
+  override on(
+    event: string,
+    callback: (...args: unknown[]) => void,
+  ): () => void {
+    const callbacks =
+      this.listeners.get(event) || new Set<(...args: unknown[]) => void>();
     callbacks.add(callback);
     this.listeners.set(event, callbacks);
     return () => {
@@ -120,11 +156,11 @@ export class BrowserMediaEngine extends MediaEngine {
     };
   }
 
-  getCapabilities() {
+  override getCapabilities() {
     return BROWSER_CAPABILITIES;
   }
 
-  async shutdown() {
+  override async shutdown(): Promise<void> {
     await this.leaveSession();
     this.listeners.clear();
     this.initialized = false;
@@ -132,19 +168,20 @@ export class BrowserMediaEngine extends MediaEngine {
     this.qoeTimer = null;
   }
 
-  getState() {
-    return unref(this.session.mediaConnectionState) || "disconnected";
+  override getState(): MediaEngineState {
+    return (unref(this.session.mediaConnectionState) ||
+      "disconnected") as MediaEngineState;
   }
 
-  isScreenSharing() {
+  override isScreenSharing(): boolean {
     return this.screenSharing;
   }
 
-  isMicrophoneEnabled() {
+  override isMicrophoneEnabled(): boolean {
     return this.microphoneEnabled;
   }
 
-  isCameraEnabled() {
+  override isCameraEnabled(): boolean {
     return this.cameraEnabled;
   }
 
@@ -280,7 +317,11 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.lastReceivedConsumerParams;
   }
 
-  connect(channelId, options) {
+  connect(
+    channelId: string,
+    options?: BrowserJoinInput,
+  ): ReturnType<BrowserMediaEngineSession["connect"]>;
+  connect(channelId: string, options?: BrowserJoinInput) {
     return this.session.connect(channelId, options);
   }
 
@@ -296,33 +337,36 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.restartAudioProduction();
   }
 
-  async startAudioProduction() {
+  async startAudioProduction(): Promise<unknown> {
     const result = await this.session.startAudioProduction();
     this.microphoneEnabled = true;
     return result;
   }
 
-  async stopAudioProduction() {
+  async stopAudioProduction(): Promise<unknown> {
     const result = await this.session.stopAudioProduction();
     this.microphoneEnabled = false;
     return result;
   }
 
-  async startVideoProduction(source, options = {} as any) {
+  async startVideoProduction(
+    source: string,
+    options: BrowserScreenShareOptions = {},
+  ): Promise<unknown> {
     const result = await this.session.startVideoProduction(source, options);
     if (source === "camera") this.cameraEnabled = true;
     if (source === "screen") this.screenSharing = true;
     return result;
   }
 
-  async stopVideoProduction(source) {
+  async stopVideoProduction(source: string): Promise<unknown> {
     const result = await this.session.stopVideoProduction(source);
     if (source === "camera") this.cameraEnabled = false;
     if (source === "screen") this.screenSharing = false;
     return result;
   }
 
-  startSystemAudioProduction(options = {} as any) {
+  startSystemAudioProduction(options: BrowserScreenShareOptions = {}) {
     return this.session.startSystemAudioProduction(options);
   }
 
@@ -330,64 +374,94 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.stopSystemAudioProduction();
   }
 
-  setRemoteScreenReceiving(...args) {
+  setRemoteScreenReceiving(
+    ...args: Parameters<BrowserMediaEngineSession["setRemoteScreenReceiving"]>
+  ) {
     return this.session.setRemoteScreenReceiving(...args);
   }
 
-  setRemoteSystemAudioReceiving(...args) {
+  setRemoteSystemAudioReceiving(
+    ...args: Parameters<
+      BrowserMediaEngineSession["setRemoteSystemAudioReceiving"]
+    >
+  ) {
     return this.session.setRemoteSystemAudioReceiving(...args);
   }
 
-  setSharedAudioVolume(...args) {
+  setSharedAudioVolume(
+    ...args: Parameters<BrowserMediaEngineSession["setSharedAudioVolume"]>
+  ) {
     return this.session.setSharedAudioVolume(...args);
   }
 
-  setSystemAudioBitrate(...args) {
+  setSystemAudioBitrate(
+    ...args: Parameters<BrowserMediaEngineSession["setSystemAudioBitrate"]>
+  ) {
     return this.session.setSystemAudioBitrate(...args);
   }
 
-  sendParticipantVoiceState(...args) {
+  sendParticipantVoiceState(
+    ...args: Parameters<BrowserMediaEngineSession["sendParticipantVoiceState"]>
+  ) {
     return this.session.sendParticipantVoiceState(...args);
   }
 
-  applyOutputDeviceToAll(...args) {
+  applyOutputDeviceToAll(
+    ...args: Parameters<BrowserMediaEngineSession["applyOutputDeviceToAll"]>
+  ) {
     return this.session.applyOutputDeviceToAll(...args);
   }
 
-  applyVolumeForUser(...args) {
+  applyVolumeForUser(
+    ...args: Parameters<BrowserMediaEngineSession["applyVolumeForUser"]>
+  ) {
     return this.session.applyVolumeForUser(...args);
   }
 
-  applyVolumeForTrack(...args) {
+  applyVolumeForTrack(
+    ...args: Parameters<BrowserMediaEngineSession["applyVolumeForTrack"]>
+  ) {
     return this.session.applyVolumeForTrack(...args);
   }
 
-  ensureAudioElements(...args) {
+  ensureAudioElements(
+    ...args: Parameters<BrowserMediaEngineSession["ensureAudioElements"]>
+  ) {
     return this.session.ensureAudioElements(...args);
   }
 
-  getWebRTCStatsSnapshot(...args) {
+  getWebRTCStatsSnapshot(
+    ...args: Parameters<BrowserMediaEngineSession["getWebRTCStatsSnapshot"]>
+  ) {
     return this.session.getWebRTCStatsSnapshot(...args);
   }
 
-  getOutboundRtpStats(...args) {
+  getOutboundRtpStats(
+    ...args: Parameters<BrowserMediaEngineSession["getOutboundRtpStats"]>
+  ) {
     return this.session.getOutboundRtpStats(...args);
   }
 
-  getInboundRtpStats(...args) {
+  getInboundRtpStats(
+    ...args: Parameters<BrowserMediaEngineSession["getInboundRtpStats"]>
+  ) {
     return this.session.getInboundRtpStats(...args);
   }
 
-  getWebRTCDiagnosticStats(...args) {
+  getWebRTCDiagnosticStats(
+    ...args: Parameters<BrowserMediaEngineSession["getWebRTCDiagnosticStats"]>
+  ) {
     return this.session.getWebRTCDiagnosticStats(...args);
   }
 
-  areTransportsIceConnected(...args) {
+  areTransportsIceConnected(
+    ...args: Parameters<BrowserMediaEngineSession["areTransportsIceConnected"]>
+  ) {
     return this.session.areTransportsIceConnected(...args);
   }
 }
 
-export function createBrowserMediaEngine(session) {
+export function createBrowserMediaEngine(session: BrowserMediaEngineSession) {
   return new BrowserMediaEngine(session);
 }
 

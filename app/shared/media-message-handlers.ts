@@ -1,5 +1,9 @@
 import { closeMediaProviderSafely } from "./media-session-cleanup.ts";
 import { mediaDebug } from "./media-debug.ts";
+import type {
+  MediaMessage,
+  MediaMessageHandlersContext,
+} from "./types/media-message-handlers.ts";
 
 export function setupMediaMessageHandlers({
   getHeartbeatSequence,
@@ -24,7 +28,7 @@ export function setupMediaMessageHandlers({
   onProviderFailure,
   onProviderRecovering,
   onP2pQualification,
-}) {
+}: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
     handlers: [
       "hello919",
@@ -39,40 +43,49 @@ export function setupMediaMessageHandlers({
     ],
   });
   registerHandler("hi919", onServerHello);
-  registerHandler("connected", (data) => {
+  registerHandler("connected", (data: MediaMessage) => {
     setLocalPeerId(String(data.peerId));
     onServerConnected?.();
   });
-  registerHandler("heartbeat-ack", (data) => {
+  registerHandler("heartbeat-ack", (data: MediaMessage) => {
     acknowledgeHeartbeat(data);
   });
-  registerHandler("heartbeat-nack", (data) => {
+  registerHandler("heartbeat-nack", (data: MediaMessage) => {
     if (acknowledgeHeartbeat(data) && data.topology) {
-      syncTopologyParticipants(data.topology);
-      queueTopology(data.topology);
+      const topology =
+        typeof data.topology === "object" && data.topology !== null
+          ? (data.topology as MediaMessage)
+          : null;
+      if (!topology) return;
+      syncTopologyParticipants(topology);
+      queueTopology(
+        topology as import("./types/topology-controller.ts").TopologyData,
+      );
     }
   });
-  registerHandler("topology-state", (data) => {
+  registerHandler("topology-state", (data: MediaMessage) => {
     syncTopologyParticipants(data);
     return queueTopology(data);
   });
-  registerHandler("route-commit", (data) => {
+  registerHandler("route-commit", (data: MediaMessage) => {
     syncTopologyParticipants(data);
     return queueTopology(
       data.route ? { ...data, ...data.route, route: data.route } : data,
     );
   });
-  registerHandler("error919", (data) => {
+  registerHandler("error919", (data: MediaMessage) => {
     mediaDebug("control.error", {
       code: data?.code,
       error: data?.error,
     });
-    const error = new Error(data?.error || "Media control error");
-    if (data?.code) error.code = data.code;
+    const error = new Error(
+      typeof data.error === "string" ? data.error : "Media control error",
+    );
+    if (typeof data.code === "string") error.code = data.code;
     throw error;
   });
   registerHandler("provider-ticket", onProviderTicket);
-  registerHandler("provider-failure", (data) => {
+  registerHandler("provider-failure", (data: MediaMessage) => {
     mediaDebug("control.provider-failure", {
       provider: data?.provider,
       epoch: data?.epoch,
@@ -80,7 +93,7 @@ export function setupMediaMessageHandlers({
     });
     return onProviderFailure?.(data);
   });
-  registerHandler("provider-recovering", (data) => {
+  registerHandler("provider-recovering", (data: MediaMessage) => {
     mediaDebug("control.provider-recovering", {
       retryAt: data?.retryAt,
       retryAfterMs: data?.retryAfterMs,
@@ -88,22 +101,22 @@ export function setupMediaMessageHandlers({
     });
     return onProviderRecovering?.(data);
   });
-  registerHandler("participant-voice-state", (data) => {
+  registerHandler("participant-voice-state", (data: MediaMessage) => {
     if (
       data?.userId &&
       typeof data.muted === "boolean" &&
       typeof data.deafened === "boolean"
     )
-      voiceStore.updateUserVoiceState(data.userId, data);
+      voiceStore.updateUserVoiceState(String(data.userId), data);
   });
-  registerHandler("p2p-qualified", (data) =>
+  registerHandler("p2p-qualified", (data: MediaMessage) =>
     onP2pQualification?.({ ...data, type: "p2p-qualified" }),
   );
-  registerHandler("p2p-failed", (data) =>
+  registerHandler("p2p-failed", (data: MediaMessage) =>
     onP2pQualification?.({ ...data, type: "p2p-failed", failed: true }),
   );
   registerHandler("attenuation-state", onAttenuationState);
-  registerHandler("p2p-signal", async (data) => {
+  registerHandler("p2p-signal", async (data: MediaMessage) => {
     const mesh = ensureP2p();
     if (!mesh) return;
     try {
@@ -112,7 +125,7 @@ export function setupMediaMessageHandlers({
       mesh.fail("signaling-failed", error);
     }
   });
-  registerHandler("currentlyInChannel", (data) => {
+  registerHandler("currentlyInChannel", (data: MediaMessage) => {
     lastInRoom.value = Array.isArray(data.inRoom) ? data.inRoom : [];
     for (const profile of Array.isArray(data.profiles) ? data.profiles : [])
       voiceStore.upsertUserProfile(profile);
@@ -125,25 +138,26 @@ export function setupMediaMessageHandlers({
         participantState,
       );
   });
-  registerHandler("available-producers", (data) => {
-    remoteProducersCount.value = (data.producers || []).filter(
-      (id) => ![...sfuProducerIds()].includes(id),
+  registerHandler("available-producers", (data: MediaMessage) => {
+    const producers = Array.isArray(data.producers) ? data.producers : [];
+    remoteProducersCount.value = producers.filter(
+      (id: unknown) => ![...sfuProducerIds()].includes(String(id)),
     ).length;
     return getSfu()?.handle("available-producers", data);
   });
-  registerHandler("new-producer", (data) => {
+  registerHandler("new-producer", (data: MediaMessage) => {
     remoteProducersCount.value += 1;
     return getSfu()?.handle("new-producer", data);
   });
-  registerHandler("producer-closed", (data) => {
+  registerHandler("producer-closed", (data: MediaMessage) => {
     remoteProducersCount.value = Math.max(0, remoteProducersCount.value - 1);
     return getSfu()?.handle("producer-closed", data);
   });
-  registerHandler("participant-sfu-rtt", (data) => {
+  registerHandler("participant-sfu-rtt", (data: MediaMessage) => {
     if (data.userId && Number.isFinite(Number(data.rttMs)))
       participantSfuRoundTripTimes.value = {
         ...participantSfuRoundTripTimes.value,
-        [data.userId]: Number(data.rttMs),
+        [String(data.userId)]: Number(data.rttMs),
       };
   });
   registerHandler("server-shutdown", () => {
@@ -155,7 +169,7 @@ export function setupMediaMessageHandlers({
     "soundboard-triggered",
     "soundboard-library-updated",
   ])
-    registerHandler(type, (data) => {
+    registerHandler(type, (data: MediaMessage) => {
       if (typeof window !== "undefined")
         window.dispatchEvent(
           new CustomEvent(`dspeak:${type}`, { detail: data }),
@@ -173,9 +187,9 @@ export function setupMediaMessageHandlers({
     "transport-state",
     "error",
   ])
-    registerHandler(type, (data) => getSfu()?.handle(type, data));
+    registerHandler(type, (data: MediaMessage) => getSfu()?.handle(type, data));
 
-  function acknowledgeHeartbeat(data) {
+  function acknowledgeHeartbeat(data: MediaMessage) {
     const sequence = Number(data.sequence);
     if (
       !Number.isSafeInteger(sequence) ||
@@ -187,7 +201,7 @@ export function setupMediaMessageHandlers({
     return true;
   }
 
-  function syncTopologyParticipants(data) {
+  function syncTopologyParticipants(data: MediaMessage) {
     const participants = Array.isArray(data?.peers)
       ? data.peers
       : Array.isArray(data?.participants)

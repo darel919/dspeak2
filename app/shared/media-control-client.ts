@@ -22,6 +22,13 @@ export async function getMediaControlBootstrap({
   connectionMode,
   deviceId,
   roomId,
+}: {
+  accessToken?: string | null;
+  baseApiPath?: string;
+  channelId: string;
+  connectionMode: string;
+  deviceId: string;
+  roomId: string;
 }) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -42,6 +49,10 @@ export function buildMediaControlSocketUrl({
   mediaControlUrl,
   channelId,
   ticket,
+}: {
+  mediaControlUrl: string;
+  channelId: string;
+  ticket?: string;
 }) {
   const endpoint = new URL(mediaControlUrl);
   if (endpoint.protocol === "http:") endpoint.protocol = "ws:";

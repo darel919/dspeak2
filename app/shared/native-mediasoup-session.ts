@@ -94,7 +94,9 @@ export class NativeMediasoupSfuSession {
     this.lifecycle = null;
     this.activeProvider = null;
     this.activeSfuProvider = null;
+    this.activeSfuProviderId = null;
     this.selectedProvider = "mediasoup";
+    this.selectedProviderId = null;
     this.playbackState = "native";
     this.localVideoFeeds = new Map();
     this.remoteVideoFeeds = new Map();

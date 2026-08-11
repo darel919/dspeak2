@@ -54,7 +54,7 @@ describe("voice join resolves the room before connecting", () => {
     );
     assert.match(
       source,
-      /connect\(channelId, options\) \{\s*return this\.session\.connect\(channelId, options\);/,
+      /connect\(channelId(?:: string)?, options(?:\?: BrowserJoinInput)?\) \{\s*return this\.session\.connect\(channelId, options\);/,
     );
   });
 

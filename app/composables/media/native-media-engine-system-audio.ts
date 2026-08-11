@@ -6,10 +6,19 @@ import {
   nativeCaptureFailure,
 } from "../../shared/desktop-capture.ts";
 import { nativeOnlyError } from "./native-media-engine-common.ts";
+import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
+import type {
+  NativeCaptureRequest,
+  NativeErrorLike,
+} from "../../shared/types/native-media.ts";
 
-export function startSystemAudioProduction(engine, args = [] as any) {
-  const options = args[0] || {};
-  const selection = options.captureSelection || null;
+export function startSystemAudioProduction(
+  engine: NativeMediaEngine,
+  args: unknown[] = [],
+) {
+  const options = (args[0] as NativeCaptureRequest | undefined) || {};
+  const selection =
+    (options.captureSelection as NativeCaptureRequest | undefined) || null;
   if (selection)
     assertDesktopCaptureMode(selection, ["audio", "both"], "system-audio");
   if (engine.activeScreenCapture?.mode === "both")
@@ -30,7 +39,10 @@ export function startSystemAudioProduction(engine, args = [] as any) {
   const request = selection
     ? desktopCaptureRequest(selection, {
         operation: "system-audio",
-        roomBitrateBps: options.roomBitrateBps,
+        roomBitrateBps:
+          typeof options.roomBitrateBps === "number"
+            ? options.roomBitrateBps
+            : undefined,
       })
     : options;
   if (!engine._usesNativeCapture("nativeScreenAudio")) {
@@ -54,7 +66,7 @@ export function startSystemAudioProduction(engine, args = [] as any) {
   let nativeCaptureStarted = false;
   return replaceActiveCapture
     .then(() => engine._invoke("media_start_system_audio", { request }))
-    .then(async (result) => {
+    .then(async (result: unknown) => {
       nativeCaptureStarted = true;
       engine.activeSystemAudioCapture = selection || {};
       const entry = {
@@ -68,7 +80,7 @@ export function startSystemAudioProduction(engine, args = [] as any) {
       await engine.nativeP2pSession?.addSource(entry);
       return producer || result;
     })
-    .catch(async (error) => {
+    .catch(async (error: unknown) => {
       if (nativeCaptureStarted || engine.activeSystemAudioCapture !== null)
         await engine
           ._invoke("media_stop_system_audio", {
@@ -93,7 +105,10 @@ export function startSystemAudioProduction(engine, args = [] as any) {
     });
 }
 
-export function stopSystemAudioProduction(engine, args = [] as any) {
+export function stopSystemAudioProduction(
+  engine: NativeMediaEngine,
+  args: unknown[] = [],
+) {
   const nativeCaptureActive =
     engine._usesNativeCapture("nativeScreenAudio") ||
     engine.activeSystemAudioCapture !== null;

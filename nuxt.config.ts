@@ -62,17 +62,8 @@ export default defineNuxtConfig({
   ssr: !isDesktop,
   compatibilityDate: "2025-07-15",
   devtools: false,
-  hooks: {
-    "prepare:types"({ tsConfig, nodeTsConfig, sharedTsConfig }) {
-      for (const config of [tsConfig, nodeTsConfig, sharedTsConfig]) {
-        config.compilerOptions ||= {};
-        config.compilerOptions.noImplicitOverride = false;
-        config.compilerOptions.useUnknownInCatchVariables = false;
-      }
-    },
-  },
   typescript: {
-    strict: false,
+    strict: true,
     typeCheck: "build",
     tsConfig: {
       compilerOptions: {
@@ -80,7 +71,6 @@ export default defineNuxtConfig({
         checkJs: false,
         noUnusedLocals: false,
         noUnusedParameters: false,
-        noImplicitOverride: false,
         allowUnreachableCode: false,
         allowUnusedLabels: false,
       },
@@ -238,12 +228,11 @@ export default defineNuxtConfig({
 
   nitro: {
     typescript: {
-      strict: false,
+      strict: true,
       tsConfig: {
         compilerOptions: {
           noUnusedLocals: false,
           noUnusedParameters: false,
-          noImplicitOverride: false,
         },
       },
     },

@@ -7,6 +7,16 @@ import {
 } from "../adaptive-jitter-buffer.ts";
 import { createTopologyProviderActions } from "./providers.ts";
 import { createTopologyResourceHelpers } from "./resources.ts";
+import { resolveMediaProviderIdentity } from "../media-provider-identity.ts";
+import { remoteMediaFeedKey } from "../remote-media-handoff.ts";
+import type {
+  TopologyControllerOptions,
+  TopologyData,
+  TopologyConnectionState,
+  TopologyP2pMesh,
+  TopologySfuSession,
+  TopologySourceEntry,
+} from "../types/topology-controller.ts";
 
 export function createHybridMediaTopologyController({
   CloudflareRealtimeSession,
@@ -59,11 +69,11 @@ export function createHybridMediaTopologyController({
   transportReady,
   updateP2pStats,
   waitForMediaTimeoutMs,
-}) {
+}: TopologyControllerOptions) {
   let topologyOperation = Promise.resolve();
-  let pendingTopologyKey = null;
-  let appliedTopologyKey = null;
-  let latestTopologyKey = null;
+  let pendingTopologyKey: string | null = null;
+  let appliedTopologyKey: string | null = null;
+  let latestTopologyKey: string | null = null;
   let highestQueuedEpoch = 0;
   let highestQueuedSourceRevision = 0;
   const {
@@ -73,7 +83,7 @@ export function createHybridMediaTopologyController({
     handleP2pQualification,
     handleProviderFailure,
   } = createTopologyResourceHelpers({
-    NativeP2pMesh,
+    NativeP2pMesh: NativeP2pMesh as never,
     buildP2pVideoSenderOptions,
     buildVoiceProducerOptions,
     closeSocket,
@@ -100,23 +110,45 @@ export function createHybridMediaTopologyController({
     updateP2pStats,
   });
 
-  function ensureSfu() {
+  function ensureSfu(): TopologySfuSession {
     const existing = getSfu();
     if (existing) return existing;
     const provider = getSelectedSfuProvider();
-    const SessionClass =
+    const { providerId } = resolveMediaProviderIdentity(
+      topologyState.value,
+      true,
+    );
+    const SessionClass = (
       provider === "cloudflare-realtime"
         ? CloudflareRealtimeSession
-        : MediasoupClientSession;
+        : MediasoupClientSession
+    ) as new (options: Record<string, unknown>) => TopologySfuSession;
     const session = new SessionClass({
-      send: (message) =>
+      send: (message: Record<string, unknown>) =>
         provider === "cloudflare-realtime"
           ? send(message)
           : Boolean(getProviderSocket()?.send(message)),
       iceServers: getIceServers(),
-      onRemoteTrack: (entry) => handoff.stage(entry, getActiveProvider()),
-      onRemoteTrackEnded: (entry) => handoff.remove(entry),
-      onStateChange: (direction, state, summary) => {
+      onRemoteTrack: (entry: TopologySourceEntry) =>
+        handoff.stage(
+          {
+            ...entry,
+            key: entry.key || remoteMediaFeedKey(entry),
+            provider: entry.provider || provider,
+          },
+          getActiveProvider(),
+        ),
+      onRemoteTrackEnded: (entry: TopologySourceEntry) =>
+        handoff.remove({
+          ...entry,
+          key: entry.key || remoteMediaFeedKey(entry),
+          provider: entry.provider || provider,
+        }),
+      onStateChange: (
+        direction: string,
+        state: string,
+        summary: TopologyConnectionState,
+      ) => {
         const fallbackActive = getActiveProvider() === "sfu";
         if (topologyState.value.mode !== "sfu" && !fallbackActive) return;
         if (state === "failed" || state === "closed") {
@@ -128,10 +160,10 @@ export function createHybridMediaTopologyController({
           reportSfuFailure("media-transport-failed", provider);
           return;
         }
-        transportReady.value = summary.ready;
+        transportReady.value = summary.ready === true;
         iceConnectedBoth.value =
-          summary.sendRequired &&
-          summary.receiveRequired &&
+          summary.sendRequired === true &&
+          summary.receiveRequired === true &&
           summary.send === "connected" &&
           summary.recv === "connected";
       },
@@ -140,6 +172,7 @@ export function createHybridMediaTopologyController({
       getVideoSettings: getRequestedVideoSettings,
     });
     session.provider = provider;
+    session.providerId = providerId;
     setSfu(session);
     mediaDebug("topology.sfu-created", { provider });
     return session;
@@ -169,7 +202,7 @@ export function createHybridMediaTopologyController({
     waitForMediaTimeoutMs,
   });
 
-  function queueTopology(data) {
+  function queueTopology(data: TopologyData): Promise<unknown> {
     setConnectionPhase("topology-selecting", {
       topologyEpoch: Number(data.epoch) || 0,
       topologyMode: data.mode || null,
@@ -210,7 +243,7 @@ export function createHybridMediaTopologyController({
         if (pendingTopologyKey === key) pendingTopologyKey = null;
       });
     mediaDebug("topology.queued", {
-      mode: data.mode,
+      mode: data.mode || "idle",
       target: data.target,
       provider: data.provider || data.targetProvider,
       epoch,
@@ -219,7 +252,7 @@ export function createHybridMediaTopologyController({
     return topologyOperation;
   }
 
-  async function applyTopology(data, generation) {
+  async function applyTopology(data: TopologyData, generation: number) {
     mediaGeneration.assert(generation);
     const epoch = Number(data.epoch);
     const sourceRevision = Number(data.sourceRevision) || 0;
@@ -230,9 +263,19 @@ export function createHybridMediaTopologyController({
     )
       return;
     const previousProvider = getActiveProvider();
+    const previousSfu = getSfu();
     topologyState.value = {
-      mode: data.mode,
+      mode: data.mode || "idle",
       epoch: Number(data.epoch),
+      provider: data.provider || data.targetProvider || null,
+      providerId:
+        data.providerId ||
+        data.targetProviderId ||
+        data.targetRoute?.providerId ||
+        data.route?.providerId ||
+        null,
+      targetProvider: data.targetProvider || null,
+      targetProviderId: data.targetProviderId || null,
       reason: data.reason || null,
       transitionFailure: data.transitionFailure || null,
       target: data.target || (data.mode === "probing" ? "p2p" : null),
@@ -246,8 +289,13 @@ export function createHybridMediaTopologyController({
         data.mode === "probing" && previousProvider ? "switching" : null,
     };
     const previousSelectedSfuProvider = getSelectedSfuProvider();
-    if (data.mode === "sfu" && data.provider)
-      setSelectedSfuProvider(data.provider);
+    const selectedProvider =
+      data.mode === "sfu"
+        ? data.provider
+        : data.target === "sfu"
+          ? data.targetProvider || data.provider
+          : null;
+    if (selectedProvider) setSelectedSfuProvider(selectedProvider);
     handoff.pruneExpectedFeeds(topologyState.value.peers, getLocalPeerId());
     onTopologyStateUpdated?.(data, topologyState.value);
     refreshPublicMaps();
@@ -255,7 +303,10 @@ export function createHybridMediaTopologyController({
     const activeSfuMatches =
       data.mode === "sfu" &&
       getActiveProvider() === "sfu" &&
-      (!data.provider || data.provider === previousSelectedSfuProvider);
+      (!data.provider || data.provider === previousSelectedSfuProvider) &&
+      (!data.providerId ||
+        (previousSfu?.providerId &&
+          previousSfu.providerId === data.providerId));
     if (
       data.mode === getActiveProvider() &&
       (data.mode !== "sfu" || activeSfuMatches)
@@ -307,7 +358,10 @@ export function createHybridMediaTopologyController({
     if (data.mode === "sfu") await activateSfu(data, generation);
   }
 
-  async function publishLocalSources(provider) {
+  async function publishLocalSources(
+    provider: TopologyP2pMesh | TopologySfuSession | null,
+  ) {
+    if (!provider) return;
     await Promise.all(
       [...localSources.values()].map((entry) =>
         provider.publishSource(entry.source, entry.track, entry.stream, entry),
@@ -315,13 +369,18 @@ export function createHybridMediaTopologyController({
     );
   }
 
-  async function replayCloudflarePublications(session) {
+  async function replayCloudflarePublications(
+    session: TopologySfuSession | null,
+  ) {
     if (session?.provider !== "cloudflare-realtime") return;
     for (const publication of onRemotePublication())
       await session.handle("cloudflare-publication-available", publication);
   }
 
-  async function ensureQualificationFallback(data, generation) {
+  async function ensureQualificationFallback(
+    data: TopologyData,
+    generation: number,
+  ) {
     if (getActiveProvider() !== null || data.provider !== "cloudflare-realtime")
       return;
     setSelectedSfuProvider(data.provider);
@@ -341,7 +400,7 @@ export function createHybridMediaTopologyController({
     }
   }
 
-  async function updateActiveTopology(data, generation) {
+  async function updateActiveTopology(data: TopologyData, generation: number) {
     if (data.mode === "p2p") {
       await getP2pMesh()?.applyTopology({
         ...data,
@@ -381,9 +440,12 @@ export function createHybridMediaTopologyController({
     refreshTopologyGraph();
   }
 
-  function handleTopologyFailure(data, topologyError) {
+  function handleTopologyFailure(data: TopologyData, topologyError: unknown) {
     if (topologyEventKey(data) !== latestTopologyKey) return;
-    const reason = topologyError?.message || "Topology operation failed";
+    const reason =
+      topologyError instanceof Error
+        ? topologyError.message
+        : "Topology operation failed";
     if (
       data.mode === "probing" ||
       data.mode === "p2p" ||
@@ -398,6 +460,7 @@ export function createHybridMediaTopologyController({
           type: "provider-failure",
           data: {
             provider: data.provider,
+            ...(data.providerId ? { providerId: data.providerId } : {}),
             epoch: data.epoch,
             sourceRevision: data.sourceRevision,
             reason: `fallback-activation-failed-${reason}`,
@@ -423,18 +486,32 @@ export function createHybridMediaTopologyController({
     failSession(reason);
   }
 
-  function reportSfuFailure(reason, failedProvider = null) {
+  function reportSfuFailure(
+    reason: string,
+    failedProvider: string | null = null,
+    failedProviderId: string | null = null,
+  ) {
     const epoch = topologyState.value.epoch;
     const sourceRevision = topologyState.value.sourceRevision;
-    const failureKey = `${epoch}:${sourceRevision}`;
+    const identity = resolveMediaProviderIdentity(
+      topologyState.value,
+      topologyState.value.target === "sfu",
+    );
+    const provider =
+      failedProvider ||
+      getSfu()?.provider ||
+      identity.provider ||
+      getSelectedSfuProvider();
+    const providerId =
+      failedProviderId || getSfu()?.providerId || identity.providerId;
+    const failureKey = `${provider}:${providerId || "family"}:${epoch}:${sourceRevision}`;
     if (reportedSfuFailureState.value === failureKey) return;
     reportedSfuFailureState.value = failureKey;
-    const provider =
-      failedProvider || getSfu()?.provider || getSelectedSfuProvider();
     send({
       type: "provider-failure",
       data: {
         provider,
+        ...(providerId ? { providerId } : {}),
         epoch,
         sourceRevision,
         reason,
@@ -447,8 +524,8 @@ export function createHybridMediaTopologyController({
     mediaDebug("topology.sfu-failure-reported", { epoch, reason });
   }
 
-  async function prepareTransition(data, generation) {
-    let destinationSfu = null;
+  async function prepareTransition(data: TopologyData, generation: number) {
+    let destinationSfu: TopologySfuSession | null = null;
     try {
       transportReady.value = getActiveProvider() !== null;
       if (data.target === "p2p") {
@@ -462,13 +539,18 @@ export function createHybridMediaTopologyController({
         await publishLocalSources(mesh);
         await waitForRemoteTracks("p2p", data);
       } else if (data.target === "sfu") {
+        const targetProvider = data.targetProvider;
+        if (!targetProvider)
+          throw new Error("SFU topology transition has no provider");
         const existingSfu = getSfu();
         const sameActiveProvider =
           getActiveProvider() === "sfu" &&
           existingSfu &&
-          getSelectedSfuProvider() === data.targetProvider;
-        if (data.targetProvider === "cloudflare-realtime") {
-          setSelectedSfuProvider(data.targetProvider);
+          getSelectedSfuProvider() === targetProvider &&
+          (!data.targetProviderId ||
+            existingSfu.providerId === data.targetProviderId);
+        if (targetProvider === "cloudflare-realtime") {
+          setSelectedSfuProvider(targetProvider);
           if (!sameActiveProvider) {
             closeSocket();
             setProviderSocket(null);
@@ -476,9 +558,15 @@ export function createHybridMediaTopologyController({
           }
         } else if (
           !getSfu() ||
-          getSelectedSfuProvider() !== data.targetProvider
+          getSelectedSfuProvider() !== targetProvider ||
+          (data.targetProviderId &&
+            getSfu()?.providerId !== data.targetProviderId)
         ) {
-          await waitForProviderTicket(data.epoch, data.targetProvider);
+          await waitForProviderTicket(
+            Number(data.epoch),
+            targetProvider,
+            data.targetProviderId || data.providerId || null,
+          );
         }
         destinationSfu = ensureSfu();
         if (getActiveProvider() === "sfu" && destinationSfu !== existingSfu) {
@@ -499,6 +587,16 @@ export function createHybridMediaTopologyController({
           epoch: data.epoch,
           target: data.target,
           sourceRevision: data.sourceRevision,
+          ...(data.target === "sfu"
+            ? {
+                provider: data.targetProvider || data.provider,
+                providerId:
+                  data.targetProviderId ||
+                  data.providerId ||
+                  data.targetRoute?.providerId ||
+                  null,
+              }
+            : {}),
         },
       });
       mediaDebug("topology.prepared", {
@@ -508,10 +606,16 @@ export function createHybridMediaTopologyController({
       });
       refreshPublicMaps();
       refreshTopologyGraph();
-    } catch (transitionError) {
+    } catch (transitionError: unknown) {
       if (getActiveProvider() === null) transportReady.value = false;
       if (destinationSfu && destinationSfu === getSfu()) await closeSfuSafely();
-      if (transitionError?.code === "MEDIA_SESSION_CLOSED") return;
+      if (
+        transitionError &&
+        typeof transitionError === "object" &&
+        "code" in transitionError &&
+        transitionError.code === "MEDIA_SESSION_CLOSED"
+      )
+        return;
       if (topologyEventKey(data) !== latestTopologyKey) return;
       send({
         type: "topology-failed",
@@ -519,19 +623,35 @@ export function createHybridMediaTopologyController({
           epoch: data.epoch,
           target: data.target,
           sourceRevision: data.sourceRevision,
-          reason: transitionError.message,
+          ...(data.target === "sfu"
+            ? {
+                provider: data.targetProvider || data.provider,
+                providerId:
+                  data.targetProviderId ||
+                  data.providerId ||
+                  data.targetRoute?.providerId ||
+                  null,
+              }
+            : {}),
+          reason:
+            transitionError instanceof Error
+              ? transitionError.message
+              : String(transitionError),
         },
       });
       mediaDebug("topology.handoff-failed", {
         target: data.target,
         provider: data.targetProvider,
         epoch: data.epoch,
-        reason: transitionError.message,
+        reason:
+          transitionError instanceof Error
+            ? transitionError.message
+            : String(transitionError),
       });
     }
   }
 
-  async function activateP2p(data, generation) {
+  async function activateP2p(data: TopologyData, generation: number) {
     const mesh = ensureP2p();
     if (!mesh) throw new Error("Native WebRTC is unavailable");
     await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
@@ -556,17 +676,24 @@ export function createHybridMediaTopologyController({
     refreshTopologyGraph();
   }
 
-  async function activateSfu(data, generation) {
+  async function activateSfu(data: TopologyData, generation: number) {
     transportReady.value = false;
     mediaConnectionState.value = "transport-connecting";
     setConnectionPhase("transport-connecting", {
       topologyEpoch: Number(data.epoch),
       topologyMode: "sfu",
     });
+    const currentSfu = getSfu();
     if (
-      getSfu()?.provider &&
+      currentSfu?.provider &&
       data.provider &&
-      getSfu().provider !== data.provider
+      currentSfu.provider !== data.provider
+    )
+      await closeSfuSafely();
+    if (
+      currentSfu?.providerId &&
+      data.providerId &&
+      currentSfu.providerId !== data.providerId
     )
       await closeSfuSafely();
     const session = ensureSfu();
@@ -600,9 +727,12 @@ export function createHybridMediaTopologyController({
     refreshTopologyGraph();
   }
 
-  function waitForRemoteTracks(provider, topology) {
+  function waitForRemoteTracks(
+    provider: "p2p" | "sfu",
+    topology: TopologyData,
+  ) {
     return waitForMediaHandoff({
-      getLatestTopologyKey: () => latestTopologyKey,
+      getLatestTopologyKey: () => latestTopologyKey || "",
       getLocalPeerId,
       getP2pMesh,
       getSfu,
@@ -632,21 +762,24 @@ export function createHybridMediaTopologyController({
   function applyAdaptiveJitterBuffer() {
     const provider = getActiveProvider();
     if (provider === "p2p" && getP2pMesh()) {
-      const values: any[] = Object.values(peerConnectionMetrics.value).filter(
-        (metric: any) => metric && Number.isFinite(metric.rttMs),
+      const values = Object.values(peerConnectionMetrics.value).filter(
+        (metric): metric is Record<string, unknown> =>
+          Boolean(metric) &&
+          Number.isFinite(Number((metric as Record<string, unknown>).rttMs)),
       );
       const jitterMs = values.reduce(
-        (max, metric: any) => Math.max(max, metric.jitterMs ?? 0),
+        (max, metric) => Math.max(max, Number(metric.jitterMs) || 0),
         0,
       );
       const rttMs = values.reduce(
-        (max, metric: any) => Math.max(max, metric.rttMs ?? 0),
+        (max, metric) => Math.max(max, Number(metric.rttMs) || 0),
         0,
       );
       const lossPercent = values.reduce(
-        (max, metric: any) => Math.max(max, metric.packetLossPercent ?? 0),
+        (max, metric) => Math.max(max, Number(metric.packetLossPercent) || 0),
         0,
       );
+      const mesh = getP2pMesh();
       const raw = computeJitterBufferConfig({
         jitterMs,
         rttMs,
@@ -658,9 +791,10 @@ export function createHybridMediaTopologyController({
           raw,
         );
         currentJitterBufferConfig.value = smoothed;
-        getP2pMesh().setJitterBufferConfig(smoothed);
+        mesh?.setJitterBufferConfig(smoothed);
       }
     } else if (provider === "sfu" && getSfu()) {
+      const sfu = getSfu();
       const raw = computeSfuJitterBufferConfig({
         rttMs: sfuRoundTripTime.value,
       });
@@ -670,7 +804,7 @@ export function createHybridMediaTopologyController({
           raw,
         );
         currentJitterBufferConfig.value = smoothed;
-        getSfu().setJitterBufferConfig(smoothed);
+        sfu?.setJitterBufferConfig(smoothed);
       }
     }
   }

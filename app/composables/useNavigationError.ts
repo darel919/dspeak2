@@ -1,4 +1,8 @@
-export function navigationErrorStatus(cause) {
+import type { NavigationCause } from "../shared/types/composables.ts";
+
+export function navigationErrorStatus(
+  cause: NavigationCause | null | undefined,
+) {
   return Number(
     cause?.statusCode ||
       cause?.status ||
@@ -8,13 +12,18 @@ export function navigationErrorStatus(cause) {
   );
 }
 
-export function isNavigationAccessError(cause) {
+export function isNavigationAccessError(
+  cause: NavigationCause | null | undefined,
+) {
   const statusCode = navigationErrorStatus(cause);
   return statusCode === 403 || statusCode === 404;
 }
 
 export function useNavigationError() {
-  function presentNavigationError(cause, message) {
+  function presentNavigationError(
+    cause: NavigationCause | null | undefined,
+    message?: string,
+  ) {
     const statusCode = navigationErrorStatus(cause);
     if (!isNavigationAccessError(cause)) return false;
     showError({

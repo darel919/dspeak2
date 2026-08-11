@@ -64,6 +64,29 @@ test("Metro implementation checks verify shipped source instead of a stale check
   assert.match(source, /:focus-visible/);
 });
 
+test("error and toast overlays own their Metro geometry", async () => {
+  const fatalPrompt = await readFile(
+    "app/components/FatalErrorPrompt.vue",
+    "utf8",
+  );
+  const toastContainer = await readFile(
+    "app/components/ToastContainer.vue",
+    "utf8",
+  );
+  const ui = await readFile("app/const/ui.ts", "utf8");
+
+  assert.match(fatalPrompt, /fatal-error-flyout/);
+  assert.match(fatalPrompt, /width: min\(100%, 32rem\)/);
+  assert.match(fatalPrompt, /padding: var\(--metro-space-6\)/);
+  assert.match(toastContainer, /metro-toast-region/);
+  assert.match(
+    toastContainer,
+    /grid-template-columns: auto minmax\(0, 1fr\) auto/,
+  );
+  assert.doesNotMatch(toastContainer, /class="toast toast-top toast-end/);
+  assert.match(ui, /error: "metro-status--error"/);
+});
+
 test("authenticated page copy consistently calls shared spaces rooms", async () => {
   const files = [
     "app/pages/index.vue",

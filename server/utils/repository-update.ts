@@ -1,7 +1,48 @@
+import type {
+  BuildSnapshotInput,
+  CommitNormalizationOptions,
+  CommitSummary,
+  ComparisonSummary,
+  PresentedBuild,
+  RepositoryQueryInput,
+  RepositoryUpdateInput,
+  RepositoryUpdateSnapshot,
+  UnknownRecord,
+} from "../types/repository-update.ts";
+
 const DEFAULT_UPDATE_REPOSITORY = "darel919/dspeak2";
 const DEFAULT_UPDATE_BRANCH = "next";
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 12;
+const MAX_COMMITS = 40;
 
-function normalizeCommit(value, { short = false } = {} as any) {
+const cache = new Map<
+  string,
+  { expiresAt: number; value: RepositoryUpdateSnapshot }
+>();
+const inFlight = new Map<string, Promise<RepositoryUpdateSnapshot>>();
+
+function asRecord(value: unknown): UnknownRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : {};
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : null;
+}
+
+function numberValue(value: unknown): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeCommit(
+  value: unknown,
+  { short = false }: CommitNormalizationOptions = {},
+): string | null {
   const normalized = String(value || "")
     .trim()
     .toLowerCase();
@@ -9,7 +50,7 @@ function normalizeCommit(value, { short = false } = {} as any) {
   return pattern.test(normalized) ? normalized : null;
 }
 
-function normalizeRepository(value) {
+function normalizeRepository(value: unknown): string {
   const normalized = String(value || "")
     .trim()
     .replace(/^https?:\/\/github\.com\//i, "")
@@ -20,37 +61,37 @@ function normalizeRepository(value) {
     : DEFAULT_UPDATE_REPOSITORY;
 }
 
-function normalizeBranch(value, fallback = DEFAULT_UPDATE_BRANCH) {
+function normalizeBranch(
+  value: unknown,
+  fallback: string = DEFAULT_UPDATE_BRANCH,
+): string {
   const normalized = String(value || "").trim();
   return /^[A-Za-z0-9._/-]{1,200}$/.test(normalized) ? normalized : fallback;
 }
 
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const MAX_CACHE_ENTRIES = 12;
-const MAX_COMMITS = 40;
-const cache = new Map();
-const inFlight = new Map();
-
-function sameCommit(left, right) {
+function sameCommit(left: string | null, right: string | null): boolean {
   if (!left || !right) return false;
   return left === right || left.startsWith(right) || right.startsWith(left);
 }
 
-function boundedString(value, limit) {
+function boundedString(value: unknown, limit: number): string | null {
   const normalized = String(value || "").trim();
   return normalized ? normalized.slice(0, limit) : null;
 }
 
-function githubUrl(repository, resource) {
+function githubUrl(repository: string, resource: string): string {
   return `https://api.github.com/repos/${repository}/${resource}`;
 }
 
-function safeGithubUrl(value) {
+function safeGithubUrl(value: unknown): string | null {
   const normalized = String(value || "");
   return normalized.startsWith("https://github.com/") ? normalized : null;
 }
 
-async function githubJson(repository, resource) {
+async function githubJson(
+  repository: string,
+  resource: string,
+): Promise<unknown> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "User-Agent": "dSpeak-update-check",
@@ -68,8 +109,8 @@ async function githubJson(repository, resource) {
   return response.json();
 }
 
-function presentBuild(build) {
-  const value = build && typeof build === "object" ? build : {};
+function presentBuild(build: BuildSnapshotInput | undefined): PresentedBuild {
+  const value = asRecord(build);
   const commit = normalizeCommit(value.commit, { short: true });
   return {
     version: boundedString(value.version, 80),
@@ -80,7 +121,10 @@ function presentBuild(build) {
   };
 }
 
-function pullRequestFromMessage(message, repository) {
+function pullRequestFromMessage(
+  message: string | null,
+  repository: string,
+): { number: number; url: string } | null {
   const match = String(message || "").match(
     /(?:merge pull request\s+#|in\s+#|\(#)(\d{1,9})\b/i,
   );
@@ -91,15 +135,20 @@ function pullRequestFromMessage(message, repository) {
   };
 }
 
-function summarizeCommit(value, repository) {
-  const commit = value && typeof value === "object" ? value : {};
-  const details =
-    commit.commit && typeof commit.commit === "object" ? commit.commit : {};
+function summarizeCommit(
+  value: unknown,
+  repository: string,
+): CommitSummary | null {
+  const commit = asRecord(value);
+  const details = asRecord(commit.commit);
+  const detailsAuthor = asRecord(details.author);
+  const authorRecord = asRecord(commit.author);
+  const committerRecord = asRecord(commit.committer);
   const sha = normalizeCommit(commit.sha, { short: true });
   if (!sha) return null;
-  const author = commit.author?.login || details.author?.name;
+  const author = authorRecord.login || detailsAuthor.name;
   const message = boundedString(
-    String(details.message || "").split("\n", 1)[0],
+    (stringValue(details.message) || "").split("\n", 1)[0],
     240,
   );
   return {
@@ -107,41 +156,46 @@ function summarizeCommit(value, repository) {
     shortSha: sha.slice(0, 7),
     message,
     author: boundedString(author, 120),
-    date: boundedString(details.author?.date || commit.committer?.date, 80),
+    date: boundedString(detailsAuthor.date || committerRecord.date, 80),
     url: safeGithubUrl(commit.html_url),
     pullRequest: pullRequestFromMessage(message, repository),
   };
 }
 
-function summarizeLatest(value, repository) {
+function summarizeLatest(
+  value: unknown,
+  repository: string,
+): CommitSummary | null {
   return summarizeCommit(value, repository);
 }
 
-function summarizeComparison(value, repository) {
-  const comparison = value && typeof value === "object" ? value : {};
+function summarizeComparison(
+  value: unknown,
+  repository: string,
+): ComparisonSummary {
+  const comparison = asRecord(value);
   const commits = Array.isArray(comparison.commits)
     ? comparison.commits
         .map((commit) => summarizeCommit(commit, repository))
-        .filter(Boolean)
+        .filter((commit): commit is CommitSummary => Boolean(commit))
         .slice(0, MAX_COMMITS)
     : [];
   return {
     status: boundedString(comparison.status, 40),
     url: safeGithubUrl(comparison.html_url),
-    aheadBy: Number.isFinite(Number(comparison.ahead_by))
-      ? Number(comparison.ahead_by)
-      : null,
-    behindBy: Number.isFinite(Number(comparison.behind_by))
-      ? Number(comparison.behind_by)
-      : null,
-    totalCommits: Number.isFinite(Number(comparison.total_commits))
-      ? Number(comparison.total_commits)
-      : commits.length,
+    aheadBy: numberValue(comparison.ahead_by),
+    behindBy: numberValue(comparison.behind_by),
+    totalCommits: numberValue(comparison.total_commits) ?? commits.length,
     commits,
   };
 }
 
-function cacheKey(repository, branch, clientCommit, deployedCommit) {
+function cacheKey(
+  repository: string,
+  branch: string,
+  clientCommit: string | null,
+  deployedCommit: string | null,
+): string {
   return [
     repository,
     branch,
@@ -150,7 +204,7 @@ function cacheKey(repository, branch, clientCommit, deployedCommit) {
   ].join("|");
 }
 
-function readCache(key) {
+function readCache(key: string): RepositoryUpdateSnapshot | null {
   const entry = cache.get(key);
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
@@ -160,18 +214,21 @@ function readCache(key) {
   return entry.value;
 }
 
-function writeCache(key, value) {
+function writeCache(key: string, value: RepositoryUpdateSnapshot): void {
   cache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
-  while (cache.size > MAX_CACHE_ENTRIES)
-    cache.delete(cache.keys().next().value);
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
 }
 
 function createUnavailableSnapshot(
-  clientBuild,
-  deployedBuild,
-  repository,
-  branch,
-) {
+  clientBuild: BuildSnapshotInput | undefined,
+  deployedBuild: BuildSnapshotInput | undefined,
+  repository: string,
+  branch: string,
+): RepositoryUpdateSnapshot {
   return {
     status: "unavailable",
     checkedAt: new Date().toISOString(),
@@ -191,7 +248,7 @@ async function queryRepositoryUpdate({
   deployedBuild,
   repository,
   branch,
-}) {
+}: RepositoryQueryInput): Promise<RepositoryUpdateSnapshot> {
   const client = presentBuild(clientBuild);
   const deployed = presentBuild(deployedBuild);
   const latestResponse = await githubJson(
@@ -203,7 +260,7 @@ async function queryRepositoryUpdate({
     throw new Error("Repository update response did not include a commit");
 
   const comparisonBase = client.commit || deployed.commit;
-  let comparison = null;
+  let comparison: ComparisonSummary | null = null;
   if (comparisonBase && !sameCommit(comparisonBase, latest.sha)) {
     try {
       const comparisonResponse = await githubJson(
@@ -217,7 +274,7 @@ async function queryRepositoryUpdate({
   }
 
   const sourceUpdateAvailable = comparison
-    ? comparison.aheadBy > 0
+    ? (comparison.aheadBy ?? 0) > 0
     : Boolean(comparisonBase && !sameCommit(comparisonBase, latest.sha));
   const deployedUpdateAvailable = Boolean(
     client.commit &&
@@ -239,7 +296,10 @@ async function queryRepositoryUpdate({
   };
 }
 
-export async function getRepositoryUpdate({ clientBuild, deployedBuild }) {
+export async function getRepositoryUpdate({
+  clientBuild,
+  deployedBuild,
+}: RepositoryUpdateInput): Promise<RepositoryUpdateSnapshot> {
   const repository = normalizeRepository(
     process.env.DSPEAK_UPDATE_REPOSITORY || DEFAULT_UPDATE_REPOSITORY,
   );
@@ -253,7 +313,8 @@ export async function getRepositoryUpdate({ clientBuild, deployedBuild }) {
   const key = cacheKey(repository, branch, clientCommit, deployedCommit);
   const cached = readCache(key);
   if (cached) return cached;
-  if (inFlight.has(key)) return inFlight.get(key);
+  const pending = inFlight.get(key);
+  if (pending) return pending;
 
   const request = queryRepositoryUpdate({
     clientBuild,

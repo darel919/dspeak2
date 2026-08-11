@@ -6,12 +6,20 @@ const PUBLIC_STUN_SERVERS = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
-function positiveInteger(value, fallback) {
+interface IceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+type Environment = Record<string, string | undefined>;
+
+function positiveInteger(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function port(value, fallback) {
+function port(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535
     ? parsed
@@ -22,6 +30,10 @@ export function createTurnCredentials({
   secret,
   ttlSeconds = 900,
   now = Date.now(),
+}: {
+  secret: string;
+  ttlSeconds?: number;
+  now?: number;
 }) {
   if (!secret)
     throw new Error(
@@ -37,14 +49,14 @@ export function createTurnCredentials({
 }
 
 export function createIceServers(
-  environment = process.env,
+  environment: Environment = process.env,
   now = Date.now(),
-  options = {} as any,
+  options: { connectionMode?: string } = {},
 ) {
   const { connectionMode = "auto" } = options;
   const host = environment.DSPEAK_RTC_DOMAIN?.trim();
   const secret = environment.TURN_SHARED_SECRET?.trim();
-  const servers = [] as any;
+  const servers: IceServer[] = [];
 
   servers.push(...PUBLIC_STUN_SERVERS);
 
@@ -72,8 +84,8 @@ export function createIceServers(
 }
 
 export async function createCloudflareTurnServers(
-  environment = process.env,
-  fetchImplementation = fetch,
+  environment: Environment = process.env,
+  fetchImplementation: typeof fetch = fetch,
 ) {
   const appId = environment.CF_TURN_APP_ID?.trim();
   const apiKey = environment.CF_TURN_API_KEY?.trim();
@@ -99,12 +111,15 @@ export async function createCloudflareTurnServers(
     : body.iceServers
       ? [body.iceServers]
       : [];
-  return iceServers.filter(
-    (server) =>
+  return iceServers.filter((server): server is IceServer =>
+    Boolean(
       server &&
-      server.urls &&
+      typeof server === "object" &&
+      "urls" in server &&
+      (typeof server.urls === "string" || Array.isArray(server.urls)) &&
       typeof server.username === "string" &&
       typeof server.credential === "string",
+    ),
   );
 }
 

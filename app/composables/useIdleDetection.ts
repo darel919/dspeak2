@@ -8,7 +8,7 @@ export function useIdleDetection() {
   const idleTimeoutMs = ref(DEFAULT_IDLE_TIMEOUT_MS);
   const isIdle = computed(() => presenceStore.isIdle);
 
-  let idleTimeout = null;
+  let idleTimeout: ReturnType<typeof setTimeout> | null = null;
   let lastActivity = Date.now();
   const events = [
     "mousedown",
@@ -89,7 +89,7 @@ export function useIdleDetection() {
     init,
     destroy,
     onActivity,
-    setIdleTimeout: (ms) => {
+    setIdleTimeout: (ms: number) => {
       presenceStore.setIdleTimeout(ms);
       idleTimeoutMs.value = ms;
       if (idleTimeout) {

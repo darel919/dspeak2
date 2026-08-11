@@ -1,8 +1,31 @@
 import { CloudflareNegotiationMethods } from "./cloudflare-realtime-session/negotiation.ts";
 import { CloudflareSourcesMethods } from "./cloudflare-realtime-session/sources.ts";
 import { CloudflareLifecycleMethods } from "./cloudflare-realtime-session/lifecycle.ts";
+import type {
+  CloudflareSessionLike,
+  CloudflareSessionOptions,
+} from "./types/cloudflare-media.ts";
 export class CloudflareRealtimeSession {
-  [key: string]: any;
+  declare peerConnection: RTCPeerConnection | null;
+  declare sessionId: string | null;
+  declare initializing: Promise<void> | null;
+  declare pending: CloudflareSessionLike["pending"];
+  declare producers: CloudflareSessionLike["producers"];
+  declare consumers: CloudflareSessionLike["consumers"];
+  declare sourceTransmission: CloudflareSessionLike["sourceTransmission"];
+  declare remoteReceiving: CloudflareSessionLike["remoteReceiving"];
+  declare publications: CloudflareSessionLike["publications"];
+  declare remoteByMid: CloudflareSessionLike["remoteByMid"];
+  declare pendingRemoteTracks: CloudflareSessionLike["pendingRemoteTracks"];
+  declare rtpSamples: CloudflareSessionLike["rtpSamples"];
+  declare subscriptionTasks: CloudflareSessionLike["subscriptionTasks"];
+  declare subscribedTrackNames: Set<string>;
+  declare subscriptionsStarted: boolean;
+  declare negotiationQueue: Promise<unknown>;
+  declare sourceOperations: CloudflareSessionLike["sourceOperations"];
+  declare sessionGeneration: number;
+  declare lastSentClientRtpCapabilities: unknown;
+  declare lastReceivedConsumerParams: CloudflareSessionLike["lastReceivedConsumerParams"];
   constructor({
     send,
     iceServers,
@@ -10,7 +33,7 @@ export class CloudflareRealtimeSession {
     onRemoteTrackEnded,
     onStateChange,
     getVideoSettings,
-  }) {
+  }: CloudflareSessionOptions) {
     this.send = send;
     this.iceServers = iceServers;
     this.onRemoteTrack = onRemoteTrack;
@@ -39,6 +62,8 @@ export class CloudflareRealtimeSession {
     this.lastReceivedConsumerParams = null;
   }
 }
+
+export interface CloudflareRealtimeSession extends CloudflareSessionLike {}
 
 const cloudflareMethodGroups = [
   CloudflareNegotiationMethods,

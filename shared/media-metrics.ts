@@ -9,14 +9,17 @@
  * @param {Array} peers - Peer list with peerId and userId
  * @returns {Object} Mapping of peerId/userId to RTT in ms
  */
-export function mapPeerRoundTripTimes(edges = [] as any, peers = [] as any) {
+export function mapPeerRoundTripTimes(
+  edges: readonly PeerMetric[] = [],
+  peers: readonly PeerMetric[] = [],
+) {
   const userIds = new Map<string, string>(
     peers.map((peer) => [
       String(peer.peerId),
       String(peer.userId || peer.peerId),
     ]),
   );
-  const values = {} as any;
+  const values: Record<string, number> = {};
   for (const edge of edges) {
     const rtt = Number(edge?.rtt);
     if (!Number.isFinite(rtt)) continue;
@@ -33,14 +36,17 @@ export function mapPeerRoundTripTimes(edges = [] as any, peers = [] as any) {
  * @param {Array} peers - Peer list with peerId and userId
  * @returns {Object} Mapping of peerId/userId to metrics object
  */
-export function mapPeerConnectionMetrics(edges = [] as any, peers = [] as any) {
+export function mapPeerConnectionMetrics(
+  edges: readonly PeerMetric[] = [],
+  peers: readonly PeerMetric[] = [],
+) {
   const userIds = new Map<string, string>(
     peers.map((peer) => [
       String(peer.peerId),
       String(peer.userId || peer.peerId),
     ]),
   );
-  const values = {} as any;
+  const values: Record<string, ConnectionMetric> = {};
   for (const edge of edges) {
     const peerId = String(edge.peerId);
     const value = {
@@ -64,7 +70,10 @@ export function mapPeerConnectionMetrics(edges = [] as any, peers = [] as any) {
  * @param {Object} [previous] - Previous jitter buffer stats for delta calculation
  * @returns {number|null} Average jitter buffer delay in ms, or null if not computable
  */
-export function getAverageJitterBufferDelayMs(stat, previous = null) {
+export function getAverageJitterBufferDelayMs(
+  stat: JitterBufferStat | null | undefined,
+  previous: JitterBufferStat | null = null,
+) {
   const delay = Number(stat?.jitterBufferDelay);
   const emitted = Number(stat?.jitterBufferEmittedCount);
   if (!Number.isFinite(delay) || !Number.isFinite(emitted) || emitted <= 0)
@@ -76,7 +85,7 @@ export function getAverageJitterBufferDelayMs(stat, previous = null) {
     const emittedDelta = emitted - previousEmitted;
     if (emittedDelta > 0 && delayDelta >= 0)
       return (delayDelta / emittedDelta) * 1000;
-    if (emittedDelta === 0 && Number.isFinite(previous?.averageMs))
+    if (previous && emittedDelta === 0 && Number.isFinite(previous.averageMs))
       return previous.averageMs;
   }
   return (delay / emitted) * 1000;
@@ -87,7 +96,7 @@ export function getAverageJitterBufferDelayMs(stat, previous = null) {
  * @param {Array} transports - Transport objects with ICE connection state and stats
  * @returns {Object} Aggregated metrics: connected, rttMs, jitterMs, loss, score, label
  */
-export function getRtcSignalMetrics(transports = [] as any) {
+export function getRtcSignalMetrics(transports: readonly PeerMetric[] = []) {
   const connected = transports.filter((transport) => {
     const state = transport?.pcStates?.iceConnectionState;
     return state === "connected" || state === "completed";
@@ -103,7 +112,7 @@ export function getRtcSignalMetrics(transports = [] as any) {
     };
   }
 
-  const finiteValues = (values) =>
+  const finiteValues = (values: readonly unknown[]) =>
     values
       .filter((value) => value != null && value !== "")
       .map(Number)
@@ -116,7 +125,7 @@ export function getRtcSignalMetrics(transports = [] as any) {
   const jitters = finiteValues(
     connected.map((transport) => transport?.inboundAudio?.jitter),
   ).map((value) => value * 1000);
-  const losses = [] as any;
+  const losses: number[] = [];
   for (const transport of connected) {
     const reportedPacketLoss = Number(transport?.candidatePair?.packetLoss);
     const fractionLost = Number(transport?.remoteInboundAudio?.fractionLost);
@@ -153,7 +162,7 @@ export function getRtcSignalMetrics(transports = [] as any) {
  * @param {string} state - ICE connection state
  * @returns {number|null} Recovery delay in ms, or null if no delay needed
  */
-export function getTransportRecoveryDelayMs(state) {
+export function getTransportRecoveryDelayMs(state: unknown) {
   if (state === "failed") return 0;
   if (state === "disconnected") return 3000;
   return null;
@@ -164,7 +173,7 @@ export function getTransportRecoveryDelayMs(state) {
  * @param {number} attempt - Reconnection attempt number (1-based)
  * @returns {number} Backoff delay in ms, capped at 8000ms
  */
-export function getReconnectDelayMs(attempt) {
+export function getReconnectDelayMs(attempt: number) {
   const normalizedAttempt = Math.max(1, Math.floor(Number(attempt) || 1));
   return Math.min(8000, 500 * 2 ** (normalizedAttempt - 1));
 }
@@ -176,8 +185,8 @@ export function getReconnectDelayMs(attempt) {
  * @returns {Object} { send: boolean, receive: boolean }
  */
 export function getActiveMediaDirections(
-  localProducerCount,
-  remoteProducerCount,
+  localProducerCount: number,
+  remoteProducerCount: number,
 ) {
   return {
     send: Number(localProducerCount) > 0,
@@ -191,3 +200,8 @@ import {
 } from "./connection-quality.ts";
 
 export { getConnectionQualityBars, getConnectionQualityLabel };
+import type {
+  ConnectionMetric,
+  JitterBufferStat,
+  PeerMetric,
+} from "./types/media.ts";

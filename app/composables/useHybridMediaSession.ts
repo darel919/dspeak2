@@ -80,6 +80,31 @@ import {
   microphoneLevelDb,
   updateNoiseFloor,
 } from "~/shared/microphone-gate.ts";
+import type {
+  HybridP2pMesh,
+  HybridChannelRecord,
+  HybridRoomRecord,
+  HybridProviderSocket,
+  HybridSessionLifecycle,
+  HybridSessionTermination,
+  HybridSourceController,
+  HybridSfuSession,
+  HybridTopologyController,
+  HybridTopologyState,
+  HybridTopologyPeer,
+  HybridTopologyWaiter,
+} from "~/shared/types/hybrid-media-session.ts";
+import type { RuntimeDependencyContext } from "~/shared/types/hybrid-media-session-lifecycle.ts";
+import type { HybridMediaSessionApiContext } from "~/shared/types/hybrid-media-session.ts";
+import type {
+  TopologyData,
+  TopologyP2pMesh,
+  TopologySfuSession,
+  TopologySourceEntry,
+  TopologyState,
+} from "~/shared/types/topology-controller.ts";
+import type { VideoSettings } from "~/shared/types/video-settings.ts";
+import type { AudioStatsSample } from "~/shared/types/local-audio.ts";
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig();
   const authStore = useAuthStore();
@@ -88,56 +113,56 @@ export function useHybridMediaSession() {
   const roomsStore = useRoomsStore();
   const voiceStore = useVoiceStore();
   const connected = ref(false);
-  const error = ref(null);
+  const error = ref<string | null>(null);
   const transportReady = ref(false);
   const iceConnectedBoth = ref(false);
-  const mediaConnectionState = ref("disconnected");
+  const mediaConnectionState = ref<string>("disconnected");
   const protocolUpdateRequired = ref(false);
-  const protocolState = ref(null);
+  const protocolState = ref<Record<string, unknown> | null>(null);
   const playbackState = ref("idle");
   const microphoneDeviceState = ref("preferred");
-  const localVideoFeeds = ref(new Map());
-  const remoteVideoFeeds = ref(new Map());
-  const remoteAudioFeeds = ref(new Map());
-  const lastInRoom = ref([]);
+  const localVideoFeeds = ref<Map<string, unknown>>(new Map());
+  const remoteVideoFeeds = ref<Map<string, unknown>>(new Map());
+  const remoteAudioFeeds = ref<Map<string, unknown>>(new Map());
+  const lastInRoom = ref<string[]>([]);
   const remoteProducersCount = ref(0);
   const sharedAudioStats = ref({ kbps: 0, level: 0, dbfs: -60 });
   const echoDetected = ref(false);
-  const attenuationReports = ref(new Map());
-  const peerRoundTripTimes = ref({});
-  const peerConnectionMetrics = ref({});
-  const mediaPathMetrics = ref([]);
-  const sfuRoundTripTime = ref(null);
+  const attenuationReports = ref<Map<string, unknown>>(new Map());
+  const peerRoundTripTimes = ref<Record<string, unknown>>({});
+  const peerConnectionMetrics = ref<Record<string, unknown>>({});
+  const mediaPathMetrics = ref<unknown[]>([]);
+  const sfuRoundTripTime = ref<number | null>(null);
   const currentJitterBufferConfig = ref({ minDelayMs: 0, targetDelayMs: 20 });
-  const participantSfuRoundTripTimes = ref({});
-  const activeProviderState = ref(null);
-  const topologyState: any = ref(initialMediaTopologyState());
+  const participantSfuRoundTripTimes = ref<Record<string, unknown>>({});
+  const activeProviderState = ref<string | null>(null);
+  const topologyState = ref<HybridTopologyState>(initialMediaTopologyState());
   const topologyGraph = ref(
     buildTopologyGraph({ mode: "idle", participantIds: [] }),
   );
-  const producers = ref(new Map());
-  const consumers = ref(new Map());
-  const messageHandlers = new Map();
-  const localSources = new Map();
-  let channelId = null;
-  const mediaControlSocketUrlState = ref(null);
-  const mediaControlTicketState = ref(null);
-  let localPeerId = null;
-  let iceServers = [] as any;
-  let p2pMesh = null;
-  let sfu = null;
-  let providerSocket = null;
+  const producers = ref<Map<string, unknown>>(new Map());
+  const consumers = ref<Map<string, unknown>>(new Map());
+  const messageHandlers = new Map<string, (...args: unknown[]) => void>();
+  const localSources = new Map<string, TopologySourceEntry>();
+  let channelId: string | null = null;
+  const mediaControlSocketUrlState = ref<string | null>(null);
+  const mediaControlTicketState = ref<string | null>(null);
+  let localPeerId: string | null = null;
+  let iceServers: unknown[] = [];
+  let p2pMesh: HybridP2pMesh | null = null;
+  let sfu: HybridSfuSession | null = null;
+  let providerSocket: HybridProviderSocket | null = null;
   let selectedSfuProvider = "mediasoup";
   const cloudflarePublications = createCloudflarePublicationRegistry();
-  let activeProvider = null;
+  let activeProvider: "sfu" | "p2p" | null = null;
   let intentionalClose = false;
-  let topologyWaiter = null;
-  let lastP2pEdges = [] as any;
-  const rtpStatsSamples = new Map();
-  const reportedSfuFailureState = ref(null);
-  let topologyController = null;
-  let sessionLifecycle = null;
-  let sessionTermination = null;
+  let topologyWaiter: HybridTopologyWaiter | null = null;
+  let lastP2pEdges: unknown[] = [];
+  const rtpStatsSamples = new Map<string, unknown>();
+  const reportedSfuFailureState = ref<string | null>(null);
+  let topologyController: HybridTopologyController | null = null;
+  let sessionLifecycle: HybridSessionLifecycle | null = null;
+  let sessionTermination: HybridSessionTermination | null = null;
   const lifecycleState = createMediaLifecycleState();
   const mediaGeneration = createMediaGeneration();
   const setConnectionPhase = lifecycleState.record;
@@ -172,14 +197,14 @@ export function useHybridMediaSession() {
     send,
   } = sessionOperations;
   const signaling = createHybridMediaSignaling({
-    buildClientHelloData: ({ mediaSessionId }) => ({
+    buildClientHelloData: ({ mediaSessionId }: { mediaSessionId: string }) => ({
       mediaSessionId,
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
       ...(mediaControlTicketState.value
         ? { ticket: mediaControlTicketState.value }
         : {}),
     }),
-    buildHeartbeatData: (sequence) => ({
+    buildHeartbeatData: (sequence: number) => ({
       sequence,
       topologyEpoch: topologyState.value.epoch,
       sourceRevision: topologyState.value.sourceRevision || 0,
@@ -192,16 +217,21 @@ export function useHybridMediaSession() {
     connectionTimeoutMs: MEDIA_TIMING.connectionTimeoutMs,
     defaultHeartbeatIntervalMs: MEDIA_TIMING.heartbeatIntervalMs,
     defaultHeartbeatTimeoutMs: MEDIA_TIMING.heartbeatTimeoutMs,
-    getHandler: (type) => messageHandlers.get(type),
+    getHandler: (type: string) => messageHandlers.get(type),
     isIntentionalClose: () => intentionalClose,
     onClose: handleSignalingClose,
-    onError: (signalingError) => (error.value = signalingError.message),
+    onError: (signalingError: unknown) => {
+      error.value =
+        signalingError instanceof Error
+          ? signalingError.message
+          : String(signalingError);
+    },
     onOpen: () => setConnectionPhase("protocol-negotiating"),
-    onProtocolRejected: (event) => {
+    onProtocolRejected: (event: CloseEvent) => {
       protocolUpdateRequired.value = true;
       error.value = event.reason || "Media client update required";
       setConnectionPhase("failed", {
-        code: event.code,
+        code: String(event.code),
         reason: error.value,
       });
     },
@@ -215,7 +245,7 @@ export function useHybridMediaSession() {
       }
       await sessionLifecycle?.refreshControlTicket?.();
     },
-    onFailure: (message) => sessionOperations.failSession(message),
+    onFailure: (message: unknown) => sessionOperations.failSession(message),
     protocol: MEDIA_SIGNALING_CLIENT_PROTOCOL,
   });
   const joinReady = computed(() =>
@@ -238,7 +268,10 @@ export function useHybridMediaSession() {
   } = createHybridMediaAudioState({
     attenuationReports,
     getRoomAttenuation: () =>
-      roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
+      (
+        roomsStore.getRoomById(voiceStore.currentRoomId) as
+          HybridRoomRecord | null | undefined
+      )?.attenuation,
     getStreamAttenuation: () => settingsStore.streamAttenuation,
     getPeers: () => topologyState.value.peers,
     getLocalPeerId: () => localPeerId,
@@ -261,7 +294,7 @@ export function useHybridMediaSession() {
     setConnectionPhase,
     getAttenuationReporter: () => attenuationReporter,
   });
-  let disposeVisibility = null;
+  let disposeVisibility: (() => void) | null = null;
   if (import.meta.client) {
     disposeVisibility = bindMediaVisibility(registry);
     if (getCurrentScope()) onScopeDispose(disposeVisibility);
@@ -269,10 +302,11 @@ export function useHybridMediaSession() {
   const attenuationReporter = createMediaAttenuationReporter({
     getLocalPeerId: () => localPeerId,
     getPeers: () => topologyState.value.peers,
-    onReportsChange: (reports) => (attenuationReports.value = reports),
+    onReportsChange: (reports: Map<string, unknown>) =>
+      (attenuationReports.value = reports),
     send,
   });
-  let sourceController;
+  let sourceController: HybridSourceController;
   const capture = new MediaCaptureManager({
     getSettings: () => settingsStore,
     getAudioStereo,
@@ -284,12 +318,15 @@ export function useHybridMediaSession() {
       if (error.value === "Unable to restore microphone capture")
         error.value = null;
     },
-    onSource: (entry) => sourceController.publishSource(entry),
-    onSourceEnded: (entry, options) =>
-      sourceController.removeSource(entry, options),
+    onSource: (entry: Record<string, unknown>) =>
+      sourceController.publishSource(entry),
+    onSourceEnded: (
+      entry: Record<string, unknown>,
+      options: Record<string, unknown> = {},
+    ) => sourceController.removeSource(entry, options),
   });
   const handoff = new RemoteMediaHandoff(registry);
-  function setActiveProvider(provider) {
+  function setActiveProvider(provider: "sfu" | "p2p" | null) {
     if (provider !== activeProvider) {
       if (activeProvider === "sfu" && sfu) {
         sfu.setJitterBufferConfig({ minDelayMs: 0, targetDelayMs: 20 });
@@ -305,15 +342,18 @@ export function useHybridMediaSession() {
   function resetTopologySequencing(reason = "reconnecting") {
     topologyController?.reset();
     localPeerId = null;
-    lastP2pEdges = [] as any;
+    lastP2pEdges = [];
     rtpStatsSamples.clear();
     providerRecovery.reset();
     topologyState.value = initialMediaTopologyState(reason);
     attenuationReporter.clear();
   }
-  function getRequestedVideoSettings(source) {
+  function getRequestedVideoSettings(source: string) {
     const policy = voiceStore.currentChannelId
-      ? channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
+      ? (
+          channelsStore.getChannelById(voiceStore.currentChannelId) as
+            HybridChannelRecord | null | undefined
+        )?.mediaPolicy
       : null;
     return resolveRequestedVideoSettings({
       policy,
@@ -337,19 +377,23 @@ export function useHybridMediaSession() {
     authStore,
     automaticGateThreshold,
     capture,
-    collectOutboundAudioStats,
+    collectOutboundAudioStats: (
+      report: unknown,
+      previous: AudioStatsSample | null,
+    ) => collectOutboundAudioStats(report, previous as AudioStatsSample | null),
     createNoiseFloorEstimator,
     getActiveProvider: () => activeProvider,
     getAttenuation,
     getAudioStereo,
     getEffectiveAudioBitrate,
     getP2pMesh: () => p2pMesh,
-    getRequestedVideoSettings,
+    getRequestedVideoSettings: (source: string): VideoSettings =>
+      getRequestedVideoSettings(source),
     getSfu: () => sfu,
     localSources,
     echoDetected,
     microphoneLevelDb,
-    onSpeakingChange: (userId, speaking) =>
+    onSpeakingChange: (userId: string, speaking: boolean) =>
       registry.setExternalSpeaking(userId, speaking),
     settingsStore,
     sharedAudioDucking,
@@ -360,7 +404,10 @@ export function useHybridMediaSession() {
   watch(
     () => [
       settingsStore.streamAttenuation,
-      roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
+      (
+        roomsStore.getRoomById(voiceStore.currentRoomId) as
+          HybridRoomRecord | null | undefined
+      )?.attenuation,
       [...voiceStore.connectedUsers.values()].some(
         (participant) => participant.speaking === true,
       ),
@@ -373,7 +420,10 @@ export function useHybridMediaSession() {
       setSharedAudioAttenuation(
         speaking,
         resolveMediaAttenuation(
-          roomsStore.getRoomById(voiceStore.currentRoomId)?.attenuation,
+          (
+            roomsStore.getRoomById(voiceStore.currentRoomId) as
+              HybridRoomRecord | null | undefined
+          )?.attenuation,
           { mode: "inherit" },
         ),
       );
@@ -383,12 +433,14 @@ export function useHybridMediaSession() {
   registerEchoWarning(echoDetected);
   watch(
     () =>
-      channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
-        ?.revision,
+      (
+        channelsStore.getChannelById(voiceStore.currentChannelId) as
+          HybridChannelRecord | null | undefined
+      )?.mediaPolicy?.revision,
     () => {
       if (connected.value)
-        refreshMediaPolicy().catch((policyError) => {
-          error.value = `Media policy could not be fully applied: ${policyError.message}`;
+        refreshMediaPolicy().catch((policyError: unknown) => {
+          error.value = `Media policy could not be fully applied: ${String(policyError)}`;
         });
     },
   );
@@ -402,7 +454,8 @@ export function useHybridMediaSession() {
     addressFamily,
     buildTopologyGraph,
     consumers,
-    getParticipantProfile: (userId) => channelsStore.getVoiceProfile(userId),
+    getParticipantProfile: (userId: string) =>
+      channelsStore.getVoiceProfile(userId),
     getLocalPeerId: () => localPeerId,
     getP2pEdges: () => lastP2pEdges,
     getP2pMesh: () => p2pMesh,
@@ -414,7 +467,7 @@ export function useHybridMediaSession() {
     peerConnectionMetrics,
     peerRoundTripTimes,
     producers,
-    setP2pEdges: (edges) => {
+    setP2pEdges: (edges: unknown[]) => {
       lastP2pEdges = edges;
     },
     topologyGraph,
@@ -532,29 +585,30 @@ export function useHybridMediaSession() {
     resetTopologySequencing,
     rtpStatsSamples,
     sfuRoundTripTime,
-    setActiveProvider,
-    setChannelId: (value) => {
+    setActiveProvider: (provider: "p2p" | "sfu" | null) =>
+      setActiveProvider(provider),
+    setChannelId: (value: string | null) => {
       channelId = value;
     },
-    setIntentionalClose: (value) => {
+    setIntentionalClose: (value: boolean) => {
       intentionalClose = value;
     },
-    setLastP2pEdges: (value) => {
+    setLastP2pEdges: (value: unknown[]) => {
       lastP2pEdges = value;
     },
-    setP2pMesh: (value) => {
+    setP2pMesh: (value: HybridP2pMesh | null) => {
       p2pMesh = value;
     },
-    setProviderSocket: (value) => {
+    setProviderSocket: (value: HybridProviderSocket | null) => {
       providerSocket = value;
     },
-    setSfu: (value) => {
+    setSfu: (value: HybridSfuSession | null) => {
       sfu = value;
     },
     signaling,
     stopLocalVoiceDetection,
     stopSharedAudioMeter,
-    resolveTopologyWaiter: (reason) => {
+    resolveTopologyWaiter: (reason: unknown) => {
       topologyWaiter?.(reason);
       topologyWaiter = null;
     },
@@ -576,12 +630,12 @@ export function useHybridMediaSession() {
     getEffectiveAudioBitrate,
     getIceServers: () => iceServers,
     getLocalPeerId: () => localPeerId,
-    getMessageHandler: (type) => messageHandlers.get(type),
+    getMessageHandler: (type: string) => messageHandlers.get(type),
     getProviderSocket: () => providerSocket,
     getRequestedVideoSettings,
     getSelectedSfuProvider: () => selectedSfuProvider,
-    getSfu: () => sfu,
-    getP2pMesh: () => p2pMesh,
+    getSfu: () => sfu as unknown as TopologySfuSession | null,
+    getP2pMesh: () => p2pMesh as unknown as TopologyP2pMesh | null,
     handoff,
     iceConnectedBoth,
     localSources,
@@ -589,10 +643,14 @@ export function useHybridMediaSession() {
     mediaGeneration,
     mediaReadinessPollMs: MEDIA_TIMING.readinessPollMs,
     mediaHandoffTimeoutMs: MEDIA_TIMING.handoffTimeoutMs,
-    onP2pQualification: (data) => voiceStore.setP2pQualification?.(data),
+    onP2pQualification: (data: Record<string, unknown>) =>
+      voiceStore.setP2pQualification?.(data),
     onRemotePublication: () => cloudflarePublications.values(),
-    onTopologyStateUpdated: (data, nextTopologyState) => {
-      for (const peer of nextTopologyState.peers)
+    onTopologyStateUpdated: (
+      data: TopologyData,
+      nextTopologyState: TopologyState,
+    ) => {
+      for (const peer of nextTopologyState.peers as HybridTopologyPeer[])
         if (peer.profile) voiceStore.upsertUserProfile(peer.profile);
       attenuationReporter.prune();
       topologyWaiter?.();
@@ -614,17 +672,17 @@ export function useHybridMediaSession() {
     send,
     sfuRoundTripTime,
     setActiveProvider,
-    setP2pMesh: (mesh) => {
+    setP2pMesh: (mesh: HybridP2pMesh | null) => {
       p2pMesh = mesh;
     },
     setProviderSocket: (socket) => {
-      providerSocket = socket;
+      providerSocket = socket as HybridProviderSocket | null;
     },
-    setSelectedSfuProvider: (provider) => {
+    setSelectedSfuProvider: (provider: string) => {
       selectedSfuProvider = provider;
     },
     setSfu: (session) => {
-      sfu = session;
+      sfu = session as HybridSfuSession | null;
     },
     setConnectionPhase,
     setRouteConnectionState,
@@ -665,29 +723,29 @@ export function useHybridMediaSession() {
     resetTopologySequencing,
     runtimeConnectionTimeoutMs: MEDIA_TIMING.connectionTimeoutMs,
     setActiveProvider,
-    setChannelId: (value) => {
+    setChannelId: (value: string | null) => {
       channelId = value;
     },
     setConnectionPhase,
-    setIceServers: (value) => {
+    setIceServers: (value: unknown[]) => {
       iceServers = value;
     },
-    setIntentionalClose: (value) => {
+    setIntentionalClose: (value: boolean) => {
       intentionalClose = value;
     },
-    setLocalPeerId: (value) => {
+    setLocalPeerId: (value: string | null) => {
       localPeerId = value;
     },
-    setMediaControlSocketUrl: (value) => {
+    setMediaControlSocketUrl: (value: string | null) => {
       mediaControlSocketUrlState.value = value;
     },
-    setMediaControlTicket: (value) => {
+    setMediaControlTicket: (value: string | null) => {
       mediaControlTicketState.value = value;
     },
-    setP2pMesh: (value) => {
+    setP2pMesh: (value: HybridP2pMesh | null) => {
       p2pMesh = value;
     },
-    setSfu: (value) => {
+    setSfu: (value: HybridSfuSession | null) => {
       sfu = value;
     },
     signaling,
@@ -704,26 +762,28 @@ export function useHybridMediaSession() {
     getBootstrap: getMediaControlBootstrap,
     handleP2pQualification,
     handleProviderFailure,
-    handleProviderTicket: (data) =>
+    handleProviderTicket: (data: Record<string, unknown>) =>
       topologyController?.handleProviderTicket(data),
     mediaPathMetrics,
     peerConnectionMetrics,
     peerRoundTripTimes,
+    sfuRoundTripTime,
     receiveAttenuation: attenuationReporter.receive,
     resetLifecycle: lifecycleState.reset,
-    resolveTopologyWaiter: (reason) => {
+    resolveTopologyWaiter: (reason: unknown) => {
       topologyWaiter?.(reason);
       topologyWaiter = null;
     },
     sfuProducerIds,
     sendParticipantVoiceState,
     sendSourceState: () => sourceController.sendSourceState(),
-    setTopologyWaiter: (waiter) => {
+    setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => {
       topologyWaiter = waiter;
     },
     setupMessageHandlers: setupMediaMessageHandlers,
-    queueCloudflarePublication: (data) => cloudflarePublications.update(data),
-  });
+    queueCloudflarePublication: (data: Record<string, unknown>) =>
+      cloudflarePublications.update(data),
+  } as unknown as RuntimeDependencyContext);
   watch(
     () => [peerConnectionMetrics.value, sfuRoundTripTime.value],
     () => {
@@ -775,9 +835,9 @@ export function useHybridMediaSession() {
     sharedAudioStats,
     sfuRoundTripTime,
     sendParticipantVoiceState,
-    setRemoteScreenReceiving: (feedKey, receiving) =>
+    setRemoteScreenReceiving: (feedKey: string, receiving: boolean) =>
       registry.setVideoReceiving(feedKey, receiving),
-    setRemoteSystemAudioReceiving: (key, on) =>
+    setRemoteSystemAudioReceiving: (key: string, on: boolean) =>
       registry.setAudioReceiving(key, on),
     setSharedAudioVolume,
     setSystemAudioBitrate,
@@ -791,10 +851,10 @@ export function useHybridMediaSession() {
     topologyState,
     transportReady,
     applyOutputDeviceToAll: () => registry.applyOutputDevice(),
-    applyVolumeForUser: (userId, volume) =>
+    applyVolumeForUser: (userId: string, volume: number) =>
       registry.applyVolume(userId, null, volume),
-    applyVolumeForTrack: (userId, source, volume) =>
+    applyVolumeForTrack: (userId: string, source: string, volume: number) =>
       registry.applyVolume(userId, source, volume),
     ensureAudioElements: () => registry.ensurePlayback(),
-  });
+  } as unknown as HybridMediaSessionApiContext);
 }

@@ -1,7 +1,9 @@
+import type { ApiRequestTarget } from "./types/api.ts";
+
 export function resolveApiRequestTarget(
   apiPath = "/api",
   baseOrigin = "http://localhost",
-) {
+): ApiRequestTarget | null {
   try {
     const endpoint = new URL(String(apiPath || "/api"), baseOrigin);
     const pathname = endpoint.pathname.replace(/\/+$/, "") || "/";
@@ -14,7 +16,10 @@ export function resolveApiRequestTarget(
   }
 }
 
-export function isConfiguredApiRequest(url, target) {
+export function isConfiguredApiRequest(
+  url: URL | RequestInfo,
+  target: ApiRequestTarget | null,
+): boolean {
   if (!target) return false;
 
   const requestUrl = url instanceof URL ? url : new URL(String(url));

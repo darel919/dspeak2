@@ -7,9 +7,16 @@ import {
   membershipRoles,
 } from "../schema/index.ts";
 import { eq, and, desc, asc, count } from "drizzle-orm";
+import type {
+  ChannelInsert,
+  RoomInsert,
+  RoomRoleInsert,
+} from "../../types/repositories.ts";
+type RoomPatch = Partial<RoomInsert>;
+type ChannelPatch = Partial<ChannelInsert>;
+type RoomRolePatch = Partial<RoomRoleInsert>;
 export class RoomRepository {
-  [key: string]: any;
-  async findById(id) {
+  async findById(id: string) {
     const result = await db
       .select()
       .from(rooms)
@@ -18,7 +25,10 @@ export class RoomRepository {
     return result[0] || null;
   }
 
-  async findByOwner(ownerId, { limit = 50, offset = 0 } = {} as any) {
+  async findByOwner(
+    ownerId: string,
+    { limit = 50, offset = 0 }: { limit?: number; offset?: number } = {},
+  ) {
     return db
       .select()
       .from(rooms)
@@ -28,12 +38,12 @@ export class RoomRepository {
       .offset(offset);
   }
 
-  async create(room) {
+  async create(room: RoomInsert) {
     const result = await db.insert(rooms).values(room).returning();
     return result[0];
   }
 
-  async update(id, data) {
+  async update(id: string, data: RoomPatch) {
     const result = await db
       .update(rooms)
       .set({ ...data, updatedAt: new Date() })
@@ -42,13 +52,12 @@ export class RoomRepository {
     return result[0] || null;
   }
 
-  async delete(id) {
+  async delete(id: string) {
     await db.delete(rooms).where(eq(rooms.id, id));
   }
 }
 export class ChannelRepository {
-  [key: string]: any;
-  async findById(id) {
+  async findById(id: string) {
     const result = await db
       .select()
       .from(channels)
@@ -57,7 +66,7 @@ export class ChannelRepository {
     return result[0] || null;
   }
 
-  async findByRoom(roomId) {
+  async findByRoom(roomId: string) {
     return db
       .select()
       .from(channels)
@@ -65,12 +74,12 @@ export class ChannelRepository {
       .orderBy(asc(channels.position), asc(channels.createdAt));
   }
 
-  async create(channel) {
+  async create(channel: ChannelInsert) {
     const result = await db.insert(channels).values(channel).returning();
     return result[0];
   }
 
-  async update(id, data) {
+  async update(id: string, data: ChannelPatch) {
     const result = await db
       .update(channels)
       .set({ ...data, updatedAt: new Date() })
@@ -79,19 +88,18 @@ export class ChannelRepository {
     return result[0] || null;
   }
 
-  async delete(id) {
+  async delete(id: string) {
     await db.delete(channels).where(eq(channels.id, id));
   }
 
-  async reorder(channelOrders) {
+  async reorder(channelOrders: Array<Pick<ChannelInsert, "id" | "position">>) {
     for (const { id, position } of channelOrders) {
       await db.update(channels).set({ position }).where(eq(channels.id, id));
     }
   }
 }
 export class RoomRoleRepository {
-  [key: string]: any;
-  async findByRoom(roomId) {
+  async findByRoom(roomId: string) {
     return db
       .select()
       .from(roomRoles)
@@ -99,7 +107,7 @@ export class RoomRoleRepository {
       .orderBy(asc(roomRoles.position));
   }
 
-  async findById(id) {
+  async findById(id: string) {
     const result = await db
       .select()
       .from(roomRoles)
@@ -108,12 +116,12 @@ export class RoomRoleRepository {
     return result[0] || null;
   }
 
-  async create(role) {
+  async create(role: RoomRoleInsert) {
     const result = await db.insert(roomRoles).values(role).returning();
     return result[0];
   }
 
-  async update(id, data) {
+  async update(id: string, data: RoomRolePatch) {
     const result = await db
       .update(roomRoles)
       .set({ ...data, updatedAt: new Date() })
@@ -122,27 +130,26 @@ export class RoomRoleRepository {
     return result[0] || null;
   }
 
-  async delete(id) {
+  async delete(id: string) {
     await db.delete(roomRoles).where(eq(roomRoles.id, id));
   }
 }
 export class MembershipRepository {
-  [key: string]: any;
-  async findByRoom(roomId) {
+  async findByRoom(roomId: string) {
     return db
       .select()
       .from(roomMemberships)
       .where(eq(roomMemberships.roomId, roomId));
   }
 
-  async findByUser(userId) {
+  async findByUser(userId: string) {
     return db
       .select()
       .from(roomMemberships)
       .where(eq(roomMemberships.userId, userId));
   }
 
-  async findByRoomAndUser(roomId, userId) {
+  async findByRoomAndUser(roomId: string, userId: string) {
     const result = await db
       .select()
       .from(roomMemberships)
@@ -156,7 +163,9 @@ export class MembershipRepository {
     return result[0] || null;
   }
 
-  async create(membership) {
+  async create(
+    membership: import("../../types/repositories.ts").MembershipInsert,
+  ) {
     const result = await db
       .insert(roomMemberships)
       .values(membership)
@@ -164,7 +173,7 @@ export class MembershipRepository {
     return result[0];
   }
 
-  async delete(roomId, userId) {
+  async delete(roomId: string, userId: string) {
     await db
       .delete(roomMemberships)
       .where(
@@ -175,11 +184,11 @@ export class MembershipRepository {
       );
   }
 
-  async addRole(membershipId, roleId) {
+  async addRole(membershipId: string, roleId: string) {
     await db.insert(membershipRoles).values({ membershipId, roleId });
   }
 
-  async removeRole(membershipId, roleId) {
+  async removeRole(membershipId: string, roleId: string) {
     await db
       .delete(membershipRoles)
       .where(
@@ -190,7 +199,7 @@ export class MembershipRepository {
       );
   }
 
-  async getRoles(membershipId) {
+  async getRoles(membershipId: string) {
     return db
       .select()
       .from(membershipRoles)

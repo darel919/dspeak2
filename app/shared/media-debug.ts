@@ -13,7 +13,7 @@ function mediaDebugEnabled() {
   }
 }
 
-function sanitize(value, depth = 0) {
+function sanitize(value: unknown, depth = 0): unknown {
   if (value == null || typeof value === "boolean" || typeof value === "number")
     return value;
   if (typeof value === "string")
@@ -28,7 +28,7 @@ function sanitize(value, depth = 0) {
   if (Array.isArray(value))
     return value.slice(0, 24).map((entry) => sanitize(entry, depth + 1));
   if (typeof value === "object") {
-    const output = {} as any;
+    const output: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value).slice(0, 32))
       output[key] = BLOCKED_KEY.test(key)
         ? REDACTED
@@ -38,20 +38,20 @@ function sanitize(value, depth = 0) {
   return String(value);
 }
 
-export function shortMediaId(value) {
+export function shortMediaId(value: unknown): string {
   const text = String(value || "");
   return text.length > 12 ? `${text.slice(0, 8)}...${text.slice(-4)}` : text;
 }
 
-export function mediaDebug(event, details = {} as any) {
+export function mediaDebug(event: string, details: unknown = {}) {
   if (!mediaDebugEnabled()) return;
   console.debug("[Media]", event, sanitize(details));
 }
 
-export function setMediaDebugEnabled(enabled) {
+export function setMediaDebugEnabled(enabled: boolean) {
   globalThis.__DSPEAK_MEDIA_DEBUG__ = enabled === true;
 }
 
-export function sanitizeMediaDebugValue(value) {
+export function sanitizeMediaDebugValue(value: unknown): unknown {
   return sanitize(value);
 }

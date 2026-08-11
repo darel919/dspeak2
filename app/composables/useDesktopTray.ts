@@ -18,7 +18,7 @@ export function useDesktopTray() {
     });
   }
 
-  function updatePresence(status) {
+  function updatePresence(status: string) {
     if (!runtimeStore.isTauri) return;
     const { invoke } = require("@tauri-apps/api/core");
     invoke("set_tray_presence", { status });

@@ -1,11 +1,11 @@
 export const MAX_P2P_PARTICIPANTS = 4;
 export const P2P_QUALIFICATION_TIMEOUT_MS = 8000;
 
-export function isP2pParticipantCount(count) {
+export function isP2pParticipantCount(count: number | string) {
   return Number(count) >= 2 && Number(count) <= MAX_P2P_PARTICIPANTS;
 }
 
-export function addressFamily(address) {
+export function addressFamily(address: unknown) {
   const value = String(address || "");
   if (!value) return "unknown";
   if (value.includes(":")) return "ipv6";
@@ -13,7 +13,7 @@ export function addressFamily(address) {
   return "unknown";
 }
 
-export function formatTopologyReason(value) {
+export function formatTopologyReason(value: unknown) {
   const reason = String(value || "");
   if (!reason || reason === "provider-transition") return "Active media path";
   if (reason.startsWith("provider-cooldown-"))
@@ -29,6 +29,11 @@ export function classifyTopology({
   participantCount,
   candidatePair,
   healthy = true,
+}: {
+  mode: string;
+  participantCount: number;
+  candidatePair?: { remote?: { address?: string | null } } | null;
+  healthy?: boolean;
 }) {
   if (mode === "probing") return { mode: "probing", label: "Connecting" };
   if (mode === "switching") return { mode: "switching", label: "Switching" };
@@ -54,7 +59,12 @@ export function classifyTopology({
     : { mode: "idle", label: "Degraded" };
 }
 
-function participantNode(id, index, localPeerId, health) {
+function participantNode(
+  id: string,
+  index: number,
+  localPeerId: string | number | null | undefined,
+  health: Record<string, string> | undefined,
+) {
   return {
     id: String(id),
     role: String(id) === String(localPeerId) ? "local" : "peer",
@@ -63,7 +73,25 @@ function participantNode(id, index, localPeerId, health) {
   };
 }
 
-export function buildTopologyGraph(snapshot = {} as any) {
+interface TopologySnapshot {
+  participantIds?: Array<string | number>;
+  participantCount?: number;
+  localPeerId?: string | number | null;
+  peerHealth?: Record<string, string>;
+  mode?: string;
+  currentMode?: string;
+  target?: string;
+  candidatePair?: { remote?: { address?: string | null } } | null;
+  edgeDetails?: Record<string, Record<string, unknown>>;
+  sfuEdge?: Record<string, unknown>;
+  participantSfuEdges?: Record<string, Record<string, unknown>>;
+  healthy?: boolean;
+  epoch?: number;
+  reason?: string | null;
+  activatedAt?: string | null;
+}
+
+export function buildTopologyGraph(snapshot: TopologySnapshot = {}) {
   const participantIds = Array.isArray(snapshot.participantIds)
     ? snapshot.participantIds.map(String)
     : [];
@@ -74,7 +102,7 @@ export function buildTopologyGraph(snapshot = {} as any) {
   const nodes = participantIds.map((id, index) =>
     participantNode(id, index, snapshot.localPeerId, snapshot.peerHealth),
   );
-  const edges = [] as any;
+  const edges: Array<Record<string, unknown>> = [];
   const switching = snapshot.mode === "switching";
   const showP2p =
     classification.mode === "p2p-direct" ||

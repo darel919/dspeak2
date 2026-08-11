@@ -8,6 +8,7 @@ test("SFU provider failure retires the active provider before recovery", async (
   let socket = { close() {} };
   let sfu = {
     provider: "cloudflare-realtime",
+    providerId: "cloudflare-primary",
     closeMedia() {},
   };
   let closedSocket = false;
@@ -46,6 +47,18 @@ test("SFU provider failure retires the active provider before recovery", async (
 
   controller.handleProviderFailure({
     provider: "cloudflare-realtime",
+    providerId: "cloudflare-secondary",
+    epoch: 4,
+    sourceRevision: 2,
+    reason: "other-provider-failed",
+  });
+
+  assert.equal(activeProvider, "sfu");
+  assert.equal(sfu.providerId, "cloudflare-primary");
+
+  controller.handleProviderFailure({
+    provider: "cloudflare-realtime",
+    providerId: "cloudflare-primary",
     epoch: 4,
     sourceRevision: 2,
     reason: "provider-failed",

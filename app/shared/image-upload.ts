@@ -1,4 +1,18 @@
-export function validateImageFile(file) {
+type ImageDimensions = { width?: number; height?: number };
+type UploadRecord = {
+  id: string;
+  fileName?: string;
+  size: number;
+  mimeType: string;
+};
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+export function validateImageFile(file: File | null | undefined) {
   const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
   const maxSize = 10 * 1024 * 1024;
 
@@ -6,13 +20,14 @@ export function validateImageFile(file) {
   if (!allowedTypes.includes(file.type)) {
     return { valid: false, error: "File must be JPEG, PNG, WebP, or GIF" };
   }
-  if (file.size > maxSize) {
+  if (file.size > maxSize)
     return { valid: false, error: "File must be under 10MB" };
-  }
   return { valid: true };
 }
 
-export function readFileAsDataURL(file) {
+export function readFileAsDataURL(
+  file: File,
+): Promise<string | ArrayBuffer | null> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -21,7 +36,9 @@ export function readFileAsDataURL(file) {
   });
 }
 
-export function getImageDimensions(file) {
+export function getImageDimensions(
+  file: File,
+): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -37,18 +54,21 @@ export function getImageDimensions(file) {
   });
 }
 
-async function parseJsonResponse(response) {
+async function parseJsonResponse(response: Response): Promise<unknown> {
   const responseText = await response.text();
-  let result;
+  let result: unknown;
   try {
     result = JSON.parse(responseText);
   } catch {
     result = responseText;
   }
   if (!response.ok) {
+    const resultRecord = record(result);
     const message =
-      result?.message || `Upload failed with status ${response.status}`;
-    const error = new Error(message);
+      typeof resultRecord.message === "string"
+        ? resultRecord.message
+        : `Upload failed with status ${response.status}`;
+    const error = new Error(message) as Error & { status?: number };
     error.status = response.status;
     throw error;
   }
@@ -56,29 +76,32 @@ async function parseJsonResponse(response) {
 }
 
 export async function uploadChatFile(
-  file,
-  channelId,
-  apiPath,
-  dimensions = {} as any,
+  file: File,
+  channelId: string,
+  apiPath: string,
+  dimensions: ImageDimensions = {},
 ) {
   const path = apiPath || "/api";
   const objectId = crypto.randomUUID();
-
   const prepare = await fetch(`${path}/files/prepare`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       type: "chat",
-      identifiers: {
-        channelId,
-        objectId,
-      },
+      identifiers: { channelId, objectId },
       mimeType: file.type,
       size: file.size,
     }),
   });
-  const { uploadUrl, key, cleanupToken } = await parseJsonResponse(prepare);
+  const prepared = record(await parseJsonResponse(prepare));
+  const uploadUrl =
+    typeof prepared.uploadUrl === "string" ? prepared.uploadUrl : "";
+  const key = typeof prepared.key === "string" ? prepared.key : "";
+  const cleanupToken =
+    typeof prepared.cleanupToken === "string" ? prepared.cleanupToken : "";
+  if (!uploadUrl || !key || !cleanupToken)
+    throw new Error("Upload preparation response is incomplete");
 
   const putResponse = await fetch(uploadUrl, {
     method: "PUT",
@@ -86,11 +109,10 @@ export async function uploadChatFile(
     headers: { "Content-Type": file.type },
     body: file,
   });
-  if (!putResponse.ok) {
+  if (!putResponse.ok)
     throw new Error(`R2 upload failed with status ${putResponse.status}`);
-  }
 
-  let record;
+  let result: UploadRecord;
   try {
     const commit = await fetch(`${path}/files/commit`, {
       method: "POST",
@@ -110,24 +132,40 @@ export async function uploadChatFile(
         },
       }),
     });
-    record = await parseJsonResponse(commit);
+    const committed = record(await parseJsonResponse(commit));
+    const committedRecord = record(committed.record);
+    if (
+      typeof committedRecord.id !== "string" ||
+      typeof committedRecord.size !== "number" ||
+      typeof committedRecord.mimeType !== "string"
+    )
+      throw new Error("Upload commit response is incomplete");
+    result = {
+      id: committedRecord.id,
+      fileName:
+        typeof committedRecord.fileName === "string"
+          ? committedRecord.fileName
+          : undefined,
+      size: committedRecord.size,
+      mimeType: committedRecord.mimeType,
+    };
   } catch (error) {
     await cleanupPreparedUpload(cleanupToken, path);
     throw error;
   }
 
   return {
-    id: record.record.id,
-    url: `/api/assets/chat-file?id=${encodeURIComponent(record.record.id)}`,
-    name: record.record.fileName || file.name,
-    size: record.record.size,
-    mime_type: record.record.mimeType,
+    id: result.id,
+    url: `/api/assets/chat-file?id=${encodeURIComponent(result.id)}`,
+    name: result.fileName || file.name,
+    size: result.size,
+    mime_type: result.mimeType,
     width: dimensions.width || 0,
     height: dimensions.height || 0,
   };
 }
 
-async function cleanupPreparedUpload(cleanupToken, path) {
+async function cleanupPreparedUpload(cleanupToken: string, path: string) {
   try {
     await fetch(`${path}/files/cleanup`, {
       method: "POST",
@@ -138,7 +176,7 @@ async function cleanupPreparedUpload(cleanupToken, path) {
   } catch {}
 }
 
-export async function deleteChatFile(fileId, apiPath) {
+export async function deleteChatFile(fileId: string, apiPath: string) {
   const path = apiPath || "/api";
   const response = await fetch(`${path}/chat/upload`, {
     method: "DELETE",
@@ -149,10 +187,10 @@ export async function deleteChatFile(fileId, apiPath) {
   if (!response.ok) throw new Error("Could not remove abandoned upload");
 }
 
-export function getImagesFromClipboard(event) {
+export function getImagesFromClipboard(event: ClipboardEvent): File[] {
   const items = event.clipboardData?.items || [];
-  const imageFiles = [] as any;
-  for (const item of items as any[]) {
+  const imageFiles: File[] = [];
+  for (const item of items) {
     if (item.type.startsWith("image/")) {
       const file = item.getAsFile();
       if (file) imageFiles.push(file);
@@ -161,7 +199,7 @@ export function getImagesFromClipboard(event) {
   return imageFiles;
 }
 
-export function getImagesFromDrag(event) {
+export function getImagesFromDrag(event: DragEvent): File[] {
   const files = Array.from(event.dataTransfer?.files || []);
-  return files.filter((file: any) => file.type.startsWith("image/"));
+  return files.filter((file) => file.type.startsWith("image/"));
 }

@@ -1,29 +1,40 @@
 const DEFAULT_MIGRATION_STABILITY_MS = 10_000;
 const DEFAULT_LATENCY_IMPROVEMENT_MS = 20;
 
-function finiteOrNull(value) {
+function isMediaQoeRecord(value: unknown): value is MediaQoeRecord {
+  return Boolean(value) && typeof value === "object";
+}
+
+function recordsFrom(value: unknown): MediaQoeRecord[] {
+  return Array.isArray(value) ? value.filter(isMediaQoeRecord) : [];
+}
+
+function finiteOrNull(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function normalizeTimeMs(value) {
+function normalizeTimeMs(value: unknown) {
   const number = finiteOrNull(value);
   if (number == null) return null;
   return Math.abs(number) < 1 ? number * 1000 : number;
 }
 
-function normalizePercent(value) {
+function normalizePercent(value: unknown) {
   return finiteOrNull(value);
 }
 
-export function normalizeMediaPathMetrics(metrics = {} as any) {
+export function normalizeMediaPathMetrics(
+  metrics: MediaQoeRecord = {},
+): MediaQoeRecord {
   const packetLossFraction = metrics.packetLossFraction ?? metrics.fractionLost;
+  const normalizedPacketLossFraction = finiteOrNull(packetLossFraction);
   const packetLossPercent =
     packetLossFraction == null
       ? normalizePercent(metrics.packetLossPercent ?? metrics.packetLoss)
-      : finiteOrNull(packetLossFraction) == null
+      : normalizedPacketLossFraction == null
         ? null
-        : finiteOrNull(packetLossFraction) * 100;
+        : normalizedPacketLossFraction * 100;
   return {
     routeId: metrics.routeId == null ? null : String(metrics.routeId),
     peerOrProvider:
@@ -46,49 +57,58 @@ export function normalizeMediaPathMetrics(metrics = {} as any) {
   };
 }
 
-export function createMediaQoeReport(
-  {
-    provider,
-    epoch = 0,
-    paths = [] as any,
-    sampledAt = Date.now(),
-  } = {} as any,
-) {
+export function createMediaQoeReport({
+  provider,
+  epoch = 0,
+  paths = [],
+  sampledAt = Date.now(),
+}: MediaQoeRecord = {}) {
   return {
     provider: provider == null ? null : String(provider),
     epoch: Number.isSafeInteger(Number(epoch)) ? Number(epoch) : 0,
     sampledAt: Number.isFinite(Number(sampledAt))
       ? Number(sampledAt)
       : Date.now(),
-    paths: paths.map(normalizeMediaPathMetrics),
+    paths: recordsFrom(paths).map(normalizeMediaPathMetrics),
   };
 }
 
-export function mediaQoePathsFromStats(stats) {
-  if (Array.isArray(stats)) return stats;
-  if (!stats || typeof stats !== "object") return [];
-  if (Array.isArray(stats.paths)) return stats.paths;
-  if (!Array.isArray(stats.transports)) return [];
-  return stats.transports.map((transport) => ({
-    routeId: transport.routeId || transport.id,
-    peerOrProvider: transport.peerOrProvider || transport.id || "media",
-    rttMs: transport.rttMs ?? transport.candidatePair?.currentRoundTripTime,
-    jitterMs: transport.jitterMs ?? transport.inboundAudio?.jitter,
-    packetLossPercent:
-      transport.packetLossPercent ?? transport.candidatePair?.packetLoss,
-    jitterBufferDelayMs:
-      transport.jitterBufferDelayMs ??
-      transport.inboundAudio?.averageJitterBufferDelayMs,
-    availableOutgoingBitrate:
-      transport.availableOutgoingBitrate ??
-      transport.candidatePair?.availableOutgoingBitrate,
-    candidateType:
-      transport.candidateType || transport.candidatePair?.local?.candidateType,
-    protocol: transport.protocol || transport.candidatePair?.local?.protocol,
-  }));
+export function mediaQoePathsFromStats(stats: unknown): MediaQoeRecord[] {
+  if (Array.isArray(stats)) return recordsFrom(stats);
+  if (!isMediaQoeRecord(stats)) return [];
+  if (Array.isArray(stats.paths)) return recordsFrom(stats.paths);
+  const transports = recordsFrom(stats.transports);
+  if (!transports.length) return [];
+  return transports.map((transport) => {
+    const candidatePair = isMediaQoeRecord(transport.candidatePair)
+      ? transport.candidatePair
+      : null;
+    const inboundAudio = isMediaQoeRecord(transport.inboundAudio)
+      ? transport.inboundAudio
+      : null;
+    const local = isMediaQoeRecord(candidatePair?.local)
+      ? candidatePair.local
+      : null;
+    return {
+      routeId: transport.routeId || transport.id,
+      peerOrProvider: transport.peerOrProvider || transport.id || "media",
+      rttMs: transport.rttMs ?? candidatePair?.currentRoundTripTime,
+      jitterMs: transport.jitterMs ?? inboundAudio?.jitter,
+      packetLossPercent:
+        transport.packetLossPercent ?? candidatePair?.packetLoss,
+      jitterBufferDelayMs:
+        transport.jitterBufferDelayMs ??
+        inboundAudio?.averageJitterBufferDelayMs,
+      availableOutgoingBitrate:
+        transport.availableOutgoingBitrate ??
+        candidatePair?.availableOutgoingBitrate,
+      candidateType: transport.candidateType || local?.candidateType,
+      protocol: transport.protocol || local?.protocol,
+    };
+  });
 }
 
-function pathLatencyMs(path) {
+function pathLatencyMs(path: MediaQoeRecord) {
   const rtt = finiteOrNull(path.rttMs);
   if (rtt == null) return Number.POSITIVE_INFINITY;
   const jitter = finiteOrNull(path.jitterMs) || 0;
@@ -96,22 +116,22 @@ function pathLatencyMs(path) {
   return rtt / 2 + jitter * 2 + jitterBuffer + 20;
 }
 
-function maxMetric(paths, field) {
+function maxMetric(paths: MediaQoeRecord[], field: string) {
   const values = paths
     .map((path) => finiteOrNull(path[field]))
     .filter((value) => value != null);
   return values.length ? Math.max(...values) : Number.POSITIVE_INFINITY;
 }
 
-export function rankRouteCandidates(candidates = [] as any) {
+export function rankRouteCandidates(candidates: MediaQoeRecord[] = []) {
   return candidates
     .map((candidate) => {
-      const paths = (candidate.paths || []).map(normalizeMediaPathMetrics);
+      const paths = recordsFrom(candidate.paths).map(normalizeMediaPathMetrics);
       const viable =
         candidate.viable !== false &&
         paths.every((path) => path.viable !== false) &&
-        (candidate.requiredParticipants || 0) <=
-          (candidate.readyParticipants ?? Infinity);
+        Number(candidate.requiredParticipants || 0) <=
+          Number(candidate.readyParticipants ?? Infinity);
       const worstLatencyMs = paths.length
         ? Math.max(...paths.map(pathLatencyMs))
         : Number.POSITIVE_INFINITY;
@@ -146,22 +166,23 @@ export function rankRouteCandidates(candidates = [] as any) {
         finiteOrNull(right.infrastructureCost) ?? Number.POSITIVE_INFINITY,
       ];
       for (let index = 0; index < leftTuple.length; index += 1) {
-        if (leftTuple[index] !== rightTuple[index])
-          return leftTuple[index] - rightTuple[index];
+        const leftValue = leftTuple[index] ?? 0;
+        const rightValue = rightTuple[index] ?? 0;
+        if (leftValue !== rightValue) return leftValue - rightValue;
       }
       return String(left.id || "").localeCompare(String(right.id || ""));
     });
 }
 
 export function shouldMigrateForQoe(
-  active,
-  candidate,
+  active: MediaQoeRecord | null | undefined,
+  candidate: MediaQoeRecord | null | undefined,
   {
     now = Date.now(),
     minimumImprovementMs = DEFAULT_LATENCY_IMPROVEMENT_MS,
     stabilityMs = DEFAULT_MIGRATION_STABILITY_MS,
     failure = false,
-  } = {} as any,
+  }: QoeDecisionOptions = {},
 ) {
   if (!candidate?.viable) return false;
   if (failure || active?.failed) return true;
@@ -186,3 +207,4 @@ export function shouldMigrateForQoe(
 }
 
 export { DEFAULT_LATENCY_IMPROVEMENT_MS, DEFAULT_MIGRATION_STABILITY_MS };
+import type { MediaQoeRecord, QoeDecisionOptions } from "./types/media-qoe.ts";

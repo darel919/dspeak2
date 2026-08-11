@@ -7,9 +7,22 @@ import {
   pushJobs,
 } from "../schema/index.ts";
 import { eq, and, desc, asc, lt, count } from "drizzle-orm";
+import type {
+  NotificationInsert,
+  NotificationPreferencePatch,
+  PushJobInsert,
+  PushSubscriptionInsert,
+  RoomNotificationPreferencePatch,
+} from "../../types/repositories.ts";
 export class NotificationRepository {
   [key: string]: any;
-  async createNotification({ userId, type, title, body, data }) {
+  async createNotification({
+    userId,
+    type,
+    title,
+    body,
+    data,
+  }: NotificationInsert) {
     const result = await db
       .insert(notifications)
       .values({ userId, type, title, body, data })
@@ -18,8 +31,16 @@ export class NotificationRepository {
   }
 
   async getNotifications(
-    userId,
-    { limit = 50, before, unreadOnly } = {} as any,
+    userId: string,
+    {
+      limit = 50,
+      before,
+      unreadOnly,
+    }: {
+      limit?: number;
+      before?: Date;
+      unreadOnly?: boolean;
+    } = {},
   ) {
     const conditions = [eq(notifications.userId, userId)];
     if (before) conditions.push(lt(notifications.createdAt, before));
@@ -32,7 +53,7 @@ export class NotificationRepository {
       .limit(limit);
   }
 
-  async markRead(notificationId, userId) {
+  async markRead(notificationId: string, userId: string) {
     const result = await db
       .update(notifications)
       .set({ read: true })
@@ -46,7 +67,7 @@ export class NotificationRepository {
     return result[0];
   }
 
-  async markAllRead(userId) {
+  async markAllRead(userId: string) {
     await db
       .update(notifications)
       .set({ read: true })
@@ -55,7 +76,7 @@ export class NotificationRepository {
       );
   }
 
-  async getUnreadCount(userId) {
+  async getUnreadCount(userId: string) {
     const result = await db
       .select({ count: count() })
       .from(notifications)
@@ -65,7 +86,7 @@ export class NotificationRepository {
     return result[0]?.count || 0;
   }
 
-  async getPreferences(userId) {
+  async getPreferences(userId: string) {
     const result = await db
       .select()
       .from(notificationPreferences)
@@ -81,7 +102,7 @@ export class NotificationRepository {
     return result[0];
   }
 
-  async updatePreferences(userId, prefs) {
+  async updatePreferences(userId: string, prefs: NotificationPreferencePatch) {
     const result = await db
       .update(notificationPreferences)
       .set({ ...prefs, updatedAt: new Date() })
@@ -90,7 +111,7 @@ export class NotificationRepository {
     return result[0];
   }
 
-  async getRoomPreferences(userId, roomId) {
+  async getRoomPreferences(userId: string, roomId: string) {
     const result = await db
       .select()
       .from(roomNotificationPreferences)
@@ -104,7 +125,11 @@ export class NotificationRepository {
     return result[0] || null;
   }
 
-  async setRoomPreferences(userId, roomId, prefs) {
+  async setRoomPreferences(
+    userId: string,
+    roomId: string,
+    prefs: RoomNotificationPreferencePatch,
+  ) {
     const result = await db
       .insert(roomNotificationPreferences)
       .values({ userId, roomId, ...prefs })
@@ -119,7 +144,10 @@ export class NotificationRepository {
     return result[0];
   }
 
-  async addPushSubscription(userId, { endpoint, p256dh, auth }) {
+  async addPushSubscription(
+    userId: string,
+    { endpoint, p256dh, auth }: PushSubscriptionInsert,
+  ) {
     const result = await db
       .insert(pushSubscriptions)
       .values({ userId, endpoint, p256dh, auth })
@@ -131,7 +159,7 @@ export class NotificationRepository {
     return result[0];
   }
 
-  async removePushSubscription(userId, endpoint) {
+  async removePushSubscription(userId: string, endpoint: string) {
     await db
       .delete(pushSubscriptions)
       .where(
@@ -142,14 +170,19 @@ export class NotificationRepository {
       );
   }
 
-  async getPushSubscriptions(userId) {
+  async getPushSubscriptions(userId: string) {
     return db
       .select()
       .from(pushSubscriptions)
       .where(eq(pushSubscriptions.userId, userId));
   }
 
-  async createPushJob({ subscriptionId, recipientId, payload, scheduledFor }) {
+  async createPushJob({
+    subscriptionId,
+    recipientId,
+    payload,
+    scheduledFor,
+  }: PushJobInsert) {
     const result = await db
       .insert(pushJobs)
       .values({
@@ -175,14 +208,14 @@ export class NotificationRepository {
       .limit(limit);
   }
 
-  async markPushJobSent(jobId) {
+  async markPushJobSent(jobId: string) {
     await db
       .update(pushJobs)
       .set({ status: "sent", completedAt: new Date() })
       .where(eq(pushJobs.id, jobId));
   }
 
-  async markPushJobFailed(jobId, attempts) {
+  async markPushJobFailed(jobId: string, attempts: number) {
     await db
       .update(pushJobs)
       .set({ status: "failed", attempts: attempts + 1 })

@@ -1,26 +1,31 @@
+import type { HybridSessionOperationsContext } from "./types/hybrid-media-session.ts";
+import type { SignalingMessage } from "./types/media-signaling.ts";
+import type { TopologyData } from "./types/topology-controller.ts";
+
 export function createHybridMediaSessionOperations({
   getSignaling,
   getTopologyController,
   getSessionTermination,
   getSessionLifecycle,
-}) {
+}: HybridSessionOperationsContext) {
   return {
-    send: (message) => getSignaling().send(message),
+    send: (message: SignalingMessage) => getSignaling().send(message),
     ensureP2p: () => getTopologyController()?.ensureP2p() || null,
     ensureSfu: () => getTopologyController()?.ensureSfu() || null,
-    handleProviderFailure: (data) =>
+    handleProviderFailure: (data?: Record<string, unknown>) =>
       getTopologyController()?.handleProviderFailure(data),
-    handleP2pQualification: (data) =>
+    handleP2pQualification: (data?: Record<string, unknown>) =>
       getTopologyController()?.handleP2pQualification(data),
-    queueTopology: (data) =>
+    queueTopology: (data: TopologyData) =>
       getTopologyController()?.queueTopology(data) || Promise.resolve(),
-    reportSfuFailure: (reason) =>
+    reportSfuFailure: (reason: string) =>
       getTopologyController()?.reportSfuFailure(reason),
-    failSession: (message) => getSessionTermination()?.failSession(message),
+    failSession: (message: unknown) =>
+      getSessionTermination()?.failSession(message),
     disconnect: () => getSessionTermination()?.disconnect(),
-    connect: (nextChannelId, options = {} as any) =>
+    connect: (nextChannelId: string, options: { roomId?: string } = {}) =>
       getSessionLifecycle()?.connect(nextChannelId, options),
-    handleSignalingClose: (event, protocolRejected) =>
+    handleSignalingClose: (event: CloseEvent, protocolRejected: boolean) =>
       getSessionLifecycle()?.handleSignalingClose(event, protocolRejected),
   };
 }

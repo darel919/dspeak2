@@ -10,7 +10,7 @@ function requestIdentifier() {
   );
 }
 
-function sourceKind(entry) {
+function sourceKind(entry: Record<string, unknown>): string {
   return (
     entry?.kind ||
     (entry?.source === "camera" || entry?.source === "screen"
@@ -19,18 +19,18 @@ function sourceKind(entry) {
   );
 }
 
-function mediaSections(sdp, kind) {
+function mediaSections(sdp: unknown, kind: string): string[] {
   return String(sdp || "")
     .split(/(?=m=)/g)
-    .filter((section) => section.startsWith(`m=${kind} `));
+    .filter((section: string) => section.startsWith(`m=${kind} `));
 }
 
-function sectionMid(section) {
+function sectionMid(section: string): string | null {
   const match = section.match(/(?:^|\r?\n)a=mid:([^\r\n]+)/);
   return match?.[1]?.trim() || null;
 }
 
-function sectionContainsTrack(section, trackId) {
+function sectionContainsTrack(section: string, trackId: unknown): boolean {
   const expectedTrackId = String(trackId);
   return section.split(/\r?\n/).some((line) => {
     if (!line.startsWith("a=msid:")) return false;
@@ -42,11 +42,16 @@ function sectionContainsTrack(section, trackId) {
   });
 }
 
-function sectionSendsMedia(section) {
+function sectionSendsMedia(section: string): boolean {
   return /(?:^|\r?\n)a=(?:sendrecv|sendonly)(?:\r?\n|$)/.test(section);
 }
 
-function midForTrack(sdp, trackId, kind, usedMids = new Set()) {
+function midForTrack(
+  sdp: unknown,
+  trackId: unknown,
+  kind: string,
+  usedMids: Set<string> = new Set(),
+): string | null {
   const sections = mediaSections(sdp, kind)
     .map((section) => ({
       section,
@@ -65,7 +70,11 @@ function midForTrack(sdp, trackId, kind, usedMids = new Set()) {
   return sending[0]?.mid || null;
 }
 
-function nativeFlowForTrack(value, type, entry) {
+function nativeFlowForTrack(
+  value: unknown,
+  type: string,
+  entry: Record<string, unknown>,
+) {
   const stat = nativeRtpStatForTrack(value, type, entry);
   return stat ? nativeFlowing([stat], type) : null;
 }

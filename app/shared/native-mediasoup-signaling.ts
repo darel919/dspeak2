@@ -66,7 +66,15 @@ export async function handleProviderTicket(session, data) {
       resolvedSourceRevision < currentSourceRevision)
   )
     return false;
+  const providerId =
+    typeof data?.providerId === "string" && data.providerId.trim()
+      ? data.providerId.trim()
+      : typeof data?.route?.providerId === "string" &&
+          data.route.providerId.trim()
+        ? data.route.providerId.trim()
+        : null;
   session.selectedProvider = data.provider;
+  session.selectedProviderId = providerId;
   let providerFailureNotified = false;
   const notifyProviderFailure = (error) => {
     if (providerFailureNotified) return;
@@ -75,6 +83,7 @@ export async function handleProviderTicket(session, data) {
       type: "provider-failure",
       data: {
         provider: data.provider,
+        ...(providerId ? { providerId } : {}),
         epoch,
         sourceRevision: resolvedSourceRevision,
         reason: error?.message || "Provider connection failed",
@@ -89,6 +98,7 @@ export async function handleProviderTicket(session, data) {
           type: "provider-ready",
           data: {
             provider: data.provider,
+            ...(providerId ? { providerId } : {}),
             epoch,
             sourceRevision: resolvedSourceRevision,
           },
@@ -117,11 +127,13 @@ export async function handleProviderTicket(session, data) {
     });
     await session._startNegotiation();
     session.activeSfuProvider = "mediasoup";
+    session.activeSfuProviderId = providerId;
     if (
       session.signaling?.send?.({
         type: "provider-ready",
         data: {
           provider: data.provider,
+          ...(providerId ? { providerId } : {}),
           epoch,
           sourceRevision: resolvedSourceRevision,
         },

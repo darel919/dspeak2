@@ -1,20 +1,27 @@
 import { useRuntimeStore } from "../../stores/runtime.ts";
+import type {
+  NativeMediaFlagOverrides,
+  NativeMediaFlags,
+} from "../../shared/types/native-media.ts";
 
 export function isTauriRuntime() {
   return useRuntimeStore().isTauri;
 }
 
-function environmentFlag(name, fallback = false) {
+function environmentFlag(name: string, fallback = false): boolean {
   const value = import.meta.env?.[name];
   if (value === undefined) return fallback;
   return value === "1" || value === "true";
 }
 
-export function resolveNativeMediaFlags(overrides = {} as any) {
+export function resolveNativeMediaFlags(
+  overrides: NativeMediaFlagOverrides = {},
+): NativeMediaFlags {
   const nativeRtc =
     overrides.nativeRtc ?? environmentFlag("VITE_DSPEAK_NATIVE_MEDIA");
   return {
     nativeRtc,
+    nativeBackendReady: false,
     nativeScreenShare: environmentFlag(
       "VITE_DSPEAK_NATIVE_SCREEN_SHARE",
       nativeRtc,

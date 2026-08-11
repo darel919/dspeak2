@@ -1,16 +1,37 @@
-function finite(value) {
+type StatsRecord = Record<string, unknown>;
+
+function finite(value: unknown) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
-function reportValues(report) {
+function reportValues(report: unknown): StatsRecord[] {
   if (!report) return [];
-  if (typeof report.values === "function") return [...report.values()];
-  if (Array.isArray(report)) return report;
-  if (typeof report === "object") return Object.values(report);
+  if (
+    report &&
+    typeof report === "object" &&
+    "values" in report &&
+    typeof report.values === "function"
+  )
+    return [...(report.values as () => Iterable<StatsRecord>)()];
+  if (Array.isArray(report)) return report.filter(isStatsRecord);
+  if (typeof report === "object")
+    return Object.values(report).filter(isStatsRecord);
   return [];
 }
 
-export function findRtpStat(report, type, { trackId, mid, kind } = {} as any) {
+function isStatsRecord(value: unknown): value is StatsRecord {
+  return value !== null && typeof value === "object";
+}
+
+export function findRtpStat(
+  report: unknown,
+  type: string,
+  {
+    trackId,
+    mid,
+    kind,
+  }: { trackId?: string; mid?: string | null; kind?: string } = {},
+) {
   const values = reportValues(report);
   const candidates = values.filter((stat) => {
     if (stat?.type !== type || stat.isRemote) return false;
@@ -42,7 +63,12 @@ export function findRtpStat(report, type, { trackId, mid, kind } = {} as any) {
   return candidates.length === 1 ? candidates[0] : null;
 }
 
-function deltaRate(current, previous, elapsedMs, multiplier = 1) {
+function deltaRate(
+  current: number | null,
+  previous: number | null,
+  elapsedMs: number | null,
+  multiplier = 1,
+) {
   if (
     current == null ||
     previous == null ||
@@ -55,9 +81,9 @@ function deltaRate(current, previous, elapsedMs, multiplier = 1) {
 }
 
 export function calculateTransportBitrateBps(
-  bytes,
-  timestamp,
-  previous = null,
+  bytes: unknown,
+  timestamp: unknown,
+  previous: { bytes?: unknown; timestamp?: unknown } | null = null,
 ) {
   const currentBytes = finite(bytes);
   const currentTimestamp = finite(timestamp);
@@ -73,11 +99,11 @@ export function calculateTransportBitrateBps(
 }
 
 export function collectRtpStats(
-  report,
-  direction,
-  trackSettings = {} as any,
-  previous = null,
-  expectedKind = null,
+  report: unknown,
+  direction: string,
+  trackSettings: MediaTrackSettings | Record<string, unknown> = {},
+  previous: unknown = null,
+  expectedKind: string | null = null,
 ) {
   const type = direction === "outbound" ? "outbound-rtp" : "inbound-rtp";
   const values = reportValues(report);

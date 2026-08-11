@@ -1,13 +1,17 @@
-function publicationIdentity(publication) {
+import type { CloudflarePublication } from "./types/cloudflare-media.ts";
+
+function publicationIdentity(
+  publication: CloudflarePublication,
+): string | null {
   const peerId = String(publication?.peerId || "");
   const source = String(publication?.source || "");
   return peerId && source ? `${peerId}:${source}` : null;
 }
 
 export function createCloudflarePublicationRegistry() {
-  const publications = new Map();
+  const publications = new Map<string, CloudflarePublication>();
 
-  function update(publication) {
+  function update(publication: CloudflarePublication): boolean {
     const trackName = String(publication?.trackName || "");
     if (!trackName) return false;
     if (publication.closed === true) {

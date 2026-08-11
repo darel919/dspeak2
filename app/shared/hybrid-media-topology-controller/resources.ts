@@ -1,5 +1,10 @@
 import { mediaDebug } from "../media-debug.ts";
 import { closeMediaProviderSafely } from "../media-session-cleanup.ts";
+import { remoteMediaFeedKey } from "../remote-media-handoff.ts";
+import type {
+  TopologyResourceHelpersContext,
+  TopologySourceEntry,
+} from "../types/topology-controller.ts";
 
 export function createTopologyResourceHelpers({
   NativeP2pMesh,
@@ -27,7 +32,7 @@ export function createTopologyResourceHelpers({
   topologyState,
   transportReady,
   updateP2pStats,
-}) {
+}: TopologyResourceHelpersContext) {
   function ensureP2p() {
     const existing = getP2pMesh();
     if (existing || typeof RTCPeerConnection === "undefined") return existing;
@@ -37,11 +42,23 @@ export function createTopologyResourceHelpers({
         payload.type === "ready"
           ? send({ type: "p2p-qualified", data: payload })
           : send({ type: "p2p-signal", data: payload }),
-      onRemoteTrack: (entry) =>
-        handoff.stage({ ...entry, provider: "p2p" }, getActiveProvider()),
-      onRemoteTrackEnded: (entry) =>
-        handoff.remove({ ...entry, provider: "p2p" }),
-      onFailure: (failure) => send({ type: "p2p-failed", data: failure }),
+      onRemoteTrack: (entry: TopologySourceEntry) =>
+        handoff.stage(
+          {
+            ...entry,
+            key: entry.key || remoteMediaFeedKey(entry),
+            provider: "p2p",
+          },
+          getActiveProvider(),
+        ),
+      onRemoteTrackEnded: (entry: TopologySourceEntry) =>
+        handoff.remove({
+          ...entry,
+          key: entry.key || remoteMediaFeedKey(entry),
+          provider: "p2p",
+        }),
+      onFailure: (failure: unknown) =>
+        send({ type: "p2p-failed", data: failure }),
       onSnapshot: updateP2pStats,
       getAudioStereo,
       getSenderOptions: (source, track) => {
@@ -89,16 +106,21 @@ export function createTopologyResourceHelpers({
     await closeMediaProviderSafely(provider, "SFU");
   }
 
-  function handleProviderFailure(data = {} as any) {
+  function handleProviderFailure(data: Record<string, unknown> = {}) {
     const activeSfu = getSfu();
     const activeProvider =
       activeSfu?.provider || getSelectedSfuProvider() || null;
+    const activeProviderId =
+      activeSfu?.providerId || topologyState.value.providerId;
     const epoch = Number(data.epoch);
     const sourceRevision = Number(data.sourceRevision);
     if (
       !data.provider ||
       getActiveProvider() !== "sfu" ||
       data.provider !== activeProvider ||
+      (data.providerId &&
+        activeProviderId &&
+        data.providerId !== activeProviderId) ||
       (Number.isSafeInteger(epoch) && epoch < topologyState.value.epoch) ||
       !Number.isSafeInteger(sourceRevision) ||
       sourceRevision !== Number(topologyState.value.sourceRevision || 0)
@@ -118,12 +140,13 @@ export function createTopologyResourceHelpers({
     });
     mediaDebug("topology.provider-failure", {
       provider: data.provider,
+      providerId: data.providerId,
       epoch: data.epoch,
       reason: data.reason,
     });
   }
 
-  function handleP2pQualification(data = {} as any) {
+  function handleP2pQualification(data: Record<string, unknown> = {}) {
     const epoch = Number(data.epoch);
     if (!Number.isSafeInteger(epoch) || epoch < topologyState.value.epoch)
       return;

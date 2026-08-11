@@ -1,4 +1,8 @@
 import { useRuntimeStore } from "~/stores/runtime";
+import type {
+  DesktopUpdate,
+  DesktopUpdateState,
+} from "../shared/types/desktop-update.ts";
 
 const DESKTOP_UPDATE_STATE = "desktop-update-state";
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
@@ -19,7 +23,7 @@ function isDesktopDevelopment() {
 
 export function useDesktopUpdate() {
   const runtimeStore = useRuntimeStore();
-  const state = useState(DESKTOP_UPDATE_STATE, () => ({
+  const state = useState<DesktopUpdateState>(DESKTOP_UPDATE_STATE, () => ({
     status: "idle",
     update: null,
     error: null,
@@ -29,7 +33,7 @@ export function useDesktopUpdate() {
   const installing = computed(() => state.value.status === "installing");
   const updateAvailable = computed(() => Boolean(state.value.update));
   const completed = computed(() => state.value.status === "complete");
-  let request = null;
+  let request: Promise<DesktopUpdate | null> | null = null;
 
   async function checkForUpdate() {
     if (!runtimeStore.isTauri || isDesktopDevelopment()) {
@@ -47,7 +51,9 @@ export function useDesktopUpdate() {
 
     request = (async () => {
       const invoke = await getTauriInvoke();
-      const update: any = await invoke("check_for_updates");
+      const update = (await invoke(
+        "check_for_updates",
+      )) as DesktopUpdate | null;
       const previousVersion = state.value.update?.version;
       state.value = {
         ...state.value,

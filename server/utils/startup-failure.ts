@@ -1,10 +1,14 @@
 export async function terminateFailedStartup(
-  error,
+  error: unknown,
   {
     closeRuntime = async () => {},
     exit = process.exit,
     stopBackground = () => {},
-  } = {} as any,
+  }: {
+    closeRuntime?: () => Promise<void>;
+    exit?: (code: number) => never;
+    stopBackground?: () => void;
+  } = {},
 ) {
   stopBackground();
   await closeRuntime().catch((closeError) =>

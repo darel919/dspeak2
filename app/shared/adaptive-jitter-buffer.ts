@@ -1,4 +1,13 @@
-export function computeJitterBufferConfig({ jitterMs, rttMs, lossPercent }) {
+import type {
+  JitterBufferConfig,
+  JitterBufferMetrics,
+} from "./types/adaptive-media.ts";
+
+export function computeJitterBufferConfig({
+  jitterMs,
+  rttMs,
+  lossPercent,
+}: JitterBufferMetrics): JitterBufferConfig | null {
   if (jitterMs == null || !Number.isFinite(jitterMs)) return null;
   if (jitterMs > 30 || (lossPercent != null && lossPercent > 3))
     return { minDelayMs: 80, targetDelayMs: 120 };
@@ -9,7 +18,7 @@ export function computeJitterBufferConfig({ jitterMs, rttMs, lossPercent }) {
   return { minDelayMs: 0, targetDelayMs: 20 };
 }
 
-export function computeSfuJitterBufferConfig({ rttMs }) {
+export function computeSfuJitterBufferConfig({ rttMs }: JitterBufferMetrics) {
   if (rttMs == null || !Number.isFinite(rttMs)) return null;
   if (rttMs > 80) return { minDelayMs: 80, targetDelayMs: 120 };
   if (rttMs > 30) return { minDelayMs: 50, targetDelayMs: 80 };
@@ -17,7 +26,10 @@ export function computeSfuJitterBufferConfig({ rttMs }) {
   return { minDelayMs: 0, targetDelayMs: 20 };
 }
 
-export function smoothJitterBufferConfig(current, next) {
+export function smoothJitterBufferConfig(
+  current: JitterBufferConfig | null,
+  next: JitterBufferConfig,
+): JitterBufferConfig {
   if (!current) return next;
   const minDelayMs =
     next.minDelayMs === 0

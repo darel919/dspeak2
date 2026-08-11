@@ -6,9 +6,12 @@ import {
 import { mediaDebug, shortMediaId } from "../media-debug.ts";
 
 import { secondsToMilliseconds, sessionClosedError } from "./helpers.ts";
+import type {
+  CloudflareSessionLike,
+  CloudflareTrackEvent,
+} from "../types/cloudflare-media.ts";
 export class CloudflareLifecycleMethods {
-  [key: string]: any;
-  connectionState() {
+  connectionState(this: CloudflareSessionLike) {
     const peerConnection = this.peerConnection;
     const state = peerConnection?.connectionState;
     const ready = state === "connected";
@@ -25,11 +28,11 @@ export class CloudflareLifecycleMethods {
     };
   }
 
-  async stats() {
+  async stats(this: CloudflareSessionLike) {
     return this.getMetrics();
   }
 
-  async getMetrics() {
+  async getMetrics(this: CloudflareSessionLike) {
     if (!this.peerConnection) return [];
     const stats = await (collectPeerConnectionStats as any)(
       this.peerConnection,
@@ -55,13 +58,13 @@ export class CloudflareLifecycleMethods {
     ];
   }
 
-  expectedInboundFlowCount() {
+  expectedInboundFlowCount(this: CloudflareSessionLike) {
     return [...this.consumers.values()].filter(
       (entry) => entry.receiving !== false,
     ).length;
   }
 
-  async mediaReadiness(expectedInbound) {
+  async mediaReadiness(this: CloudflareSessionLike, expectedInbound: number) {
     const outboundEntries = [...this.producers.values()].filter(
       (entry) => this.sourceTransmission.get(entry.source) !== false,
     );
@@ -80,7 +83,14 @@ export class CloudflareLifecycleMethods {
         inboundFlowing: 0,
       };
     }
-    const sampleFlow = (key, report, type, field, track, mid) => {
+    const sampleFlow = (
+      key: string,
+      report: unknown,
+      type: string,
+      field: string,
+      track: MediaStreamTrack | undefined,
+      mid: string | null | undefined,
+    ) => {
       if (!report) return false;
       const stat = findRtpStat(report, type, {
         trackId: track?.id,
@@ -101,17 +111,21 @@ export class CloudflareLifecycleMethods {
         return false;
       return bytes > previous.bytes;
     };
-    const readStats = async (endpoint, track) => {
+    const readStats = async (
+      endpoint: { getStats?: () => Promise<unknown> } | undefined,
+      track: MediaStreamTrack,
+    ) => {
+      const peerConnection = this.peerConnection;
       if (typeof endpoint?.getStats === "function")
         return endpoint.getStats().catch(() => null);
-      if (typeof this.peerConnection.getStats === "function")
-        return this.peerConnection.getStats(track).catch(() => null);
+      if (peerConnection && typeof peerConnection.getStats === "function")
+        return peerConnection.getStats(track).catch(() => null);
       return null;
     };
     const outboundChecks = outboundEntries.map(async (entry) => {
       const report = await readStats(entry.sender, entry.track);
       return sampleFlow(
-        `out:${entry.sender?.id || entry.source}`,
+        `out:${entry.source}`,
         report,
         "outbound-rtp",
         "bytesSent",
@@ -122,7 +136,7 @@ export class CloudflareLifecycleMethods {
     const inboundChecks = inboundEntries.map(async (entry) => {
       const report = await readStats(entry.receiver, entry.track);
       return sampleFlow(
-        `in:${entry.receiver?.id || entry.trackName}`,
+        `in:${entry.trackName}`,
         report,
         "inbound-rtp",
         "bytesReceived",
@@ -150,7 +164,7 @@ export class CloudflareLifecycleMethods {
     };
   }
 
-  async diagnosticStats() {
+  async diagnosticStats(this: CloudflareSessionLike) {
     if (!this.peerConnection) return [];
     return [
       await collectPeerConnectionDiagnosticStats(
@@ -160,7 +174,7 @@ export class CloudflareLifecycleMethods {
     ];
   }
 
-  closeMedia() {
+  closeMedia(this: CloudflareSessionLike) {
     mediaDebug("cloudflare.session-close", {
       sessionId: shortMediaId(this.sessionId),
       generation: this.sessionGeneration,

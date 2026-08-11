@@ -4,14 +4,20 @@ export const SOUNDBOARD_MAX_CLIPS_PER_ROOM = 50;
 export const SOUNDBOARD_OUTPUT_BITRATE = "24k";
 export const SOUNDBOARD_MAX_ICON_SOURCE_BYTES = 5 * 1024 * 1024;
 
-export function normalizeSoundboardText(value, max, fallback = "") {
+export function normalizeSoundboardText(
+  value: unknown,
+  max: number,
+  fallback = "",
+) {
   const normalized = String(value || "")
     .trim()
     .replace(/\s+/g, " ");
   return normalized.slice(0, max) || fallback;
 }
 
-export function normalizeSoundboardMetadata(value = {} as any) {
+export function normalizeSoundboardMetadata(
+  value: SoundboardMetadataInput = {},
+) {
   return {
     title: normalizeSoundboardText(value.title, 48),
     category: normalizeSoundboardText(value.category, 32, "General"),
@@ -23,14 +29,21 @@ export function normalizeSoundboardMetadata(value = {} as any) {
   };
 }
 
-export function canManageSoundboardClip(clip, userId, permissions = [] as any) {
+export function canManageSoundboardClip(
+  clip: SoundboardClip | null | undefined,
+  userId: unknown,
+  permissions: readonly string[] = [],
+) {
   return (
     String(clip?.uploader || clip?.uploaderId || clip?.createdById || "") ===
       String(userId || "") || permissions.includes("room.manage_soundboard")
   );
 }
 
-export function presentSoundboardClip(record, apiPath = "/api") {
+export function presentSoundboardClip(
+  record: SoundboardRecord,
+  apiPath = "/api",
+) {
   const roomId = record.roomId ?? record.room;
   const uploaderId = record.createdById ?? record.uploaderId ?? record.uploader;
   const iconImageKey = record.iconImageKey ?? record.icon_image;
@@ -60,3 +73,8 @@ export function presentSoundboardClip(record, apiPath = "/api") {
   };
 }
 import { publicDisplayName } from "./user-profile.ts";
+import type {
+  SoundboardClip,
+  SoundboardMetadataInput,
+  SoundboardRecord,
+} from "./types/soundboard.ts";

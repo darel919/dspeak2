@@ -1,6 +1,7 @@
 import { isTauriRuntime, resolveNativeMediaFlags } from "./media-runtime.ts";
+import type { MediaEngineFactoryOptions } from "../../shared/types/media-engine-adapters.ts";
 
-function nativeEngineOptions(options) {
+function nativeEngineOptions(options: MediaEngineFactoryOptions) {
   const runtimeConfig: any =
     typeof useRuntimeConfig === "function" ? useRuntimeConfig() : {};
   const publicConfig = runtimeConfig?.public || {};
@@ -22,7 +23,9 @@ function nativeEngineOptions(options) {
   };
 }
 
-export async function createMediaEngine(options = {} as any) {
+export async function createMediaEngine(
+  options: MediaEngineFactoryOptions = {},
+) {
   const tauriRuntime = options.isTauri ?? isTauriRuntime();
   if (tauriRuntime) {
     const { NativeMediaEngine } = await import("./nativeMediaEngine.ts");

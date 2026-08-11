@@ -22,6 +22,7 @@ export class NativeMediasoupLifecycleMethods {
   async _closeMedia(clearSources) {
     this.mediaRevision += 1;
     this.activeSfuProvider = null;
+    this.activeSfuProviderId = null;
     this.lastProviderFailureKey = null;
     const cleanup = [] as any;
     if (this.cloudflareSession) {
@@ -192,16 +193,26 @@ export class NativeMediasoupLifecycleMethods {
     if (!sent) throw new Error(`${label} signaling unavailable`);
   }
 
-  reportProviderFailure(reason, provider = this.activeSfuProvider) {
+  reportProviderFailure(
+    reason,
+    provider = this.activeSfuProvider,
+    providerId = this.activeSfuProviderId || this.topologyState?.providerId,
+  ) {
     if (!provider) return false;
     const epoch = Number(this.topologyState?.epoch) || 0;
     const sourceRevision = Number(this.topologyState?.sourceRevision) || 0;
-    const key = `${provider}:${epoch}:${sourceRevision}`;
+    const key = `${provider}:${providerId || "family"}:${epoch}:${sourceRevision}`;
     if (this.lastProviderFailureKey === key) return false;
     if (typeof this.signaling?.send !== "function") return false;
     const sent = this.signaling.send({
       type: "provider-failure",
-      data: { provider, epoch, sourceRevision, reason },
+      data: {
+        provider,
+        ...(providerId ? { providerId } : {}),
+        epoch,
+        sourceRevision,
+        reason,
+      },
     });
     if (sent === false) return false;
     this.lastProviderFailureKey = key;

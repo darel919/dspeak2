@@ -1,9 +1,10 @@
 import { STORAGE_KEYS } from "~/const/storage";
 import { DEFAULT_KEYBINDINGS } from "~~/shared/keyboard-shortcuts.ts";
 
+type KeybindingMap = Record<string, string[]>;
 const modifierKeys = new Set(["Alt", "AltGraph", "Control", "Meta", "Shift"]);
 
-export function defaultKeybindingsById() {
+export function defaultKeybindingsById(): KeybindingMap {
   return Object.fromEntries(
     Object.values(DEFAULT_KEYBINDINGS).map((shortcut) => [
       shortcut.id,
@@ -12,21 +13,22 @@ export function defaultKeybindingsById() {
   );
 }
 
-export function normalizeCustomKeybindings(value) {
+export function normalizeCustomKeybindings(value: unknown): KeybindingMap {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const defaults = defaultKeybindingsById();
-  const normalized = {} as any;
+  const normalized: KeybindingMap = {};
   for (const [id, keys] of Object.entries(value)) {
     if (!(id in defaults) || !Array.isArray(keys)) continue;
     const validKeys = keys.filter(
-      (key) => typeof key === "string" && key.length > 0 && key.length <= 80,
+      (key): key is string =>
+        typeof key === "string" && key.length > 0 && key.length <= 80,
     );
     if (validKeys.length) normalized[id] = validKeys.slice(0, 2);
   }
   return normalized;
 }
 
-export function loadCustomKeybindings() {
+export function loadCustomKeybindings(): KeybindingMap {
   if (!import.meta.client) return {};
   try {
     return normalizeCustomKeybindings(
@@ -37,7 +39,7 @@ export function loadCustomKeybindings() {
   }
 }
 
-export function saveCustomKeybindings(value) {
+export function saveCustomKeybindings(value: unknown): void {
   if (!import.meta.client) return;
   const normalized = normalizeCustomKeybindings(value);
   localStorage.setItem(STORAGE_KEYS.keybindings, JSON.stringify(normalized));
@@ -46,14 +48,18 @@ export function saveCustomKeybindings(value) {
   );
 }
 
-export function effectiveKeysForShortcut(id, fallbackKeys, custom = null) {
+export function effectiveKeysForShortcut(
+  id: string,
+  fallbackKeys: string[],
+  custom: KeybindingMap | null = null,
+): string[] {
   const preferences = custom || loadCustomKeybindings();
   return preferences[id] || fallbackKeys;
 }
 
-export function keyComboFromEvent(event) {
+export function keyComboFromEvent(event: KeyboardEvent): string {
   if (modifierKeys.has(event.key)) return "";
-  const parts = [] as any;
+  const parts: string[] = [];
   if (event.metaKey || event.ctrlKey) parts.push("Mod");
   if (event.altKey) parts.push("Alt");
   if (event.shiftKey) parts.push("Shift");

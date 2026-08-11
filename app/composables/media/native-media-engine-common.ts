@@ -42,49 +42,73 @@ export const DEFAULT_FLAGS = Object.freeze({
   nativeVideoReceive: false,
 });
 
-export function nativeOnlyError(operation) {
+export function nativeOnlyError(operation: string): Error {
   return new Error(`Native WebRTC operation is unavailable: ${operation}`);
 }
 
-export function capabilityBackend(enabled, hybrid = false, nativeOnly = false) {
+export function capabilityBackend(
+  enabled: boolean,
+  hybrid = false,
+  nativeOnly = false,
+): "unavailable" | "browser" | "hybrid" | "native" {
   if (!enabled) return nativeOnly ? "unavailable" : "browser";
   return hybrid ? "hybrid" : "native";
 }
 
-export function hasNativeCapability(flags) {
+export function hasNativeCapability(flags: NativeMediaFlags): boolean {
   return flags.nativeRtc === true && flags.nativeBackendReady === true;
 }
 
-export function canAttemptNativeCapture(flags) {
+export function canAttemptNativeCapture(flags: NativeMediaFlags): boolean {
   return hasNativeCapability(flags);
 }
 
-export function getCaptureSelection(request) {
-  if (request?.captureSelection) return request.captureSelection;
+export function getCaptureSelection(
+  request: NativeCaptureRequest | null | undefined,
+): NativeCaptureRequest | null {
+  const selection = request?.captureSelection;
+  if (selection && typeof selection === "object" && !Array.isArray(selection))
+    return selection as NativeCaptureRequest;
+  const source = request?.source;
   if (
-    request?.source &&
-    typeof request.source === "object" &&
-    typeof request.source.sourceId === "string"
+    source &&
+    typeof source === "object" &&
+    !Array.isArray(source) &&
+    typeof (source as Record<string, unknown>).sourceId === "string"
   )
     return request;
   return null;
 }
 
-export function isSourceAwareCaptureRequest(request) {
+export function isSourceAwareCaptureRequest(
+  request: NativeCaptureRequest | null | undefined,
+): boolean {
   const selection = getCaptureSelection(request);
   return Boolean(
     selection &&
     typeof selection === "object" &&
     selection.source &&
-    typeof selection.source.sourceId === "string" &&
-    typeof selection.source.sourceType === "string" &&
-    typeof selection.source.sourceKey === "string",
+    typeof selection.source === "object" &&
+    !Array.isArray(selection.source) &&
+    typeof (selection.source as Record<string, unknown>).sourceId ===
+      "string" &&
+    typeof (selection.source as Record<string, unknown>).sourceType ===
+      "string" &&
+    typeof (selection.source as Record<string, unknown>).sourceKey === "string",
   );
 }
 
-export function channelMediaPolicy(channelsStore, voiceStore) {
+export function channelMediaPolicy(
+  channelsStore: NativeMediaStore | null | undefined,
+  voiceStore: NativeMediaStore | null | undefined,
+): Record<string, unknown> | null {
   return (
     channelsStore?.getChannelById?.(voiceStore?.currentChannelId)
       ?.mediaPolicy || null
   );
 }
+import type {
+  NativeCaptureRequest,
+  NativeMediaFlags,
+  NativeMediaStore,
+} from "../../shared/types/native-media.ts";

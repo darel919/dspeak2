@@ -1,7 +1,7 @@
 export function getConnectionQualityBars(
-  rttMs,
-  packetLossPercent = null,
-  jitterMs = null,
+  rttMs: unknown,
+  packetLossPercent: unknown = null,
+  jitterMs: unknown = null,
 ) {
   if (rttMs == null || rttMs === "") return 0;
   const rtt = Number(rttMs);
@@ -18,7 +18,7 @@ export function getConnectionQualityBars(
   return Math.max(1, bars);
 }
 
-export function getConnectionQualityLabel(bars) {
+export function getConnectionQualityLabel(bars: number) {
   if (bars === 5) return "Excellent";
   if (bars === 4) return "Very good";
   if (bars === 3) return "Good";

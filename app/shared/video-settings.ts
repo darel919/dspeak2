@@ -1,3 +1,18 @@
+import type { AdaptiveFrameCounters } from "./types/adaptive-media.ts";
+import type {
+  VideoAdaptationState,
+  VideoCaptureSelection,
+  VideoCapabilityReport,
+  VideoCodec,
+  VideoFrameMetrics,
+  VideoMediaCapabilities,
+  VideoPolicy,
+  VideoSenderOptions,
+  VideoSettings,
+  VideoSettingsInput,
+  VideoSettingsResolutionInput,
+} from "./types/video-settings.ts";
+
 export const VIDEO_FRAME_RATE_MIN = 25;
 export const VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN = 24;
 export const VIDEO_FRAME_RATE_MAX = 60;
@@ -21,7 +36,15 @@ export const VIDEO_RESOLUTIONS = Object.freeze({
   "2160p": { width: 3840, height: 2160 },
 });
 
-export function resolveRequestedVideoSettings({ policy, settings, source }) {
+export function resolveRequestedVideoSettings({
+  policy,
+  settings,
+  source,
+}: {
+  policy?: VideoPolicy | null;
+  settings: { screenVideo: VideoSettings; cameraVideo: VideoSettings };
+  source: string;
+}): VideoSettings {
   const base =
     source === "screen" ? settings.screenVideo : settings.cameraVideo;
   return {
@@ -32,11 +55,14 @@ export function resolveRequestedVideoSettings({ policy, settings, source }) {
   };
 }
 
-export function normalizeVideoSettings(value = {} as any) {
-  value = value && typeof value === "object" ? value : {};
-  const resolution = Object.hasOwn(VIDEO_RESOLUTIONS, value.resolution)
-    ? value.resolution
-    : "original";
+export function normalizeVideoSettings(
+  value: VideoSettingsInput = {},
+): VideoSettings {
+  const resolution =
+    typeof value.resolution === "string" &&
+    Object.hasOwn(VIDEO_RESOLUTIONS, value.resolution)
+      ? (value.resolution as VideoSettings["resolution"])
+      : "original";
   const requestedFrameRate = Number(value.frameRate);
   const frameRate = Number.isFinite(requestedFrameRate)
     ? VIDEO_FRAME_RATE_PRESETS.reduce((closest, preset) =>
@@ -46,18 +72,18 @@ export function normalizeVideoSettings(value = {} as any) {
           : closest,
       )
     : 30;
-  const qualityPriority = VIDEO_QUALITY_PRIORITIES.includes(
-    value.qualityPriority,
-  )
-    ? value.qualityPriority
-    : "framerate";
+  const qualityPriority =
+    value.qualityPriority === "resolution" ||
+    value.qualityPriority === "framerate"
+      ? value.qualityPriority
+      : "framerate";
 
   return { resolution, frameRate, qualityPriority };
 }
 
 export function buildVideoConstraints(
-  settings,
-  { deviceId = null, display = false } = {} as any,
+  settings: VideoSettingsInput,
+  { deviceId = null, display = false }: VideoSettingsResolutionInput = {},
 ) {
   const normalized = normalizeVideoSettings(settings);
   const resolution = VIDEO_RESOLUTIONS[normalized.resolution];
@@ -65,7 +91,7 @@ export function buildVideoConstraints(
     normalized.qualityPriority === "resolution"
       ? VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN
       : VIDEO_FRAME_RATE_MIN;
-  const constraints: any = {
+  const constraints: MediaTrackConstraints = {
     frameRate: display
       ? { ideal: normalized.frameRate, max: normalized.frameRate }
       : {
@@ -84,16 +110,14 @@ export function buildVideoConstraints(
   return constraints;
 }
 
-export function buildVideoProduceOptions(
-  {
-    width,
-    height,
-    frameRate,
-    screen = false,
-    qualityPriority = "framerate",
-    maxBitrate: requestedMaxBitrate,
-  } = {} as any,
-) {
+export function buildVideoProduceOptions({
+  width,
+  height,
+  frameRate,
+  screen = false,
+  qualityPriority = "framerate",
+  maxBitrate: requestedMaxBitrate,
+}: VideoSenderOptions = {}) {
   const pixels =
     Math.max(1, Number(width) || 1280) * Math.max(1, Number(height) || 720);
   const fps = Math.min(
@@ -142,7 +166,7 @@ export function buildVideoProduceOptions(
   };
 }
 
-export function buildP2pVideoSenderOptions(options = {} as any) {
+export function buildP2pVideoSenderOptions(options: VideoSenderOptions = {}) {
   const settings = buildVideoProduceOptions(options);
   const pixels =
     Math.max(1, Number(options.width) || 1280) *
@@ -175,8 +199,8 @@ export function buildP2pVideoSenderOptions(options = {} as any) {
 }
 
 export function resolveNativeCaptureVideoSettings(
-  captureSelection = null,
-  requestedSettings = {} as any,
+  captureSelection: VideoCaptureSelection | null = null,
+  requestedSettings: VideoSettingsInput = {},
 ) {
   const captureVideo =
     captureSelection?.video && typeof captureSelection.video === "object"
@@ -186,7 +210,7 @@ export function resolveNativeCaptureVideoSettings(
     captureSelection?.bounds && typeof captureSelection.bounds === "object"
       ? captureSelection.bounds
       : {};
-  const positiveNumber = (value) => {
+  const positiveNumber = (value: unknown) => {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : null;
   };
@@ -216,7 +240,7 @@ export function resolveNativeCaptureVideoSettings(
   };
 }
 
-export function sortP2pVideoCodecPreferences(codecs = [] as any) {
+export function sortP2pVideoCodecPreferences(codecs: VideoCodec[] = []) {
   const priorities = ["video/H264", "video/VP9", "video/VP8"];
   return [...codecs].sort((left, right) => {
     const leftIndex = priorities.findIndex(
@@ -233,13 +257,14 @@ export function sortP2pVideoCodecPreferences(codecs = [] as any) {
 }
 
 export function updateVideoAdaptationState(
-  state = {} as any,
-  sendFps,
-  targetFps,
+  state: VideoAdaptationState = {},
+  sendFps: unknown,
+  targetFps: unknown,
 ) {
-  const currentScale = VIDEO_SCALE_STEPS.includes(state.scale)
-    ? state.scale
-    : 1;
+  const currentScale =
+    state.scale !== undefined && VIDEO_SCALE_STEPS.includes(state.scale)
+      ? state.scale
+      : 1;
   const actual = Number(sendFps);
   const target = Number(targetFps);
   if (!Number.isFinite(actual) || !Number.isFinite(target) || target <= 0) {
@@ -263,12 +288,12 @@ export function updateVideoAdaptationState(
           VIDEO_SCALE_STEPS.length - 1,
           VIDEO_SCALE_STEPS.indexOf(currentScale) + 1,
         )
-      ];
+      ] ?? currentScale;
   } else if (healthySamples >= 5) {
     scale =
       VIDEO_SCALE_STEPS[
         Math.max(0, VIDEO_SCALE_STEPS.indexOf(currentScale) - 1)
-      ];
+      ] ?? currentScale;
   }
 
   const changed = scale !== currentScale;
@@ -281,8 +306,8 @@ export function updateVideoAdaptationState(
 }
 
 export function isScreenShareFpsBelowTarget(
-  sendFps,
-  targetFps,
+  sendFps: unknown,
+  targetFps: unknown,
   ratio = SCREEN_SHARE_FPS_HEALTH_RATIO,
 ) {
   if (sendFps == null || targetFps == null) return false;
@@ -297,9 +322,9 @@ export function isScreenShareFpsBelowTarget(
 }
 
 export function calculateFrameTimeMs(
-  totalEncodeTime,
-  framesEncoded,
-  previous = null,
+  totalEncodeTime: unknown,
+  framesEncoded: unknown,
+  previous: AdaptiveFrameCounters | null = null,
 ) {
   const total = Number(totalEncodeTime);
   const frames = Number(framesEncoded);
@@ -316,7 +341,11 @@ export function calculateFrameTimeMs(
   return (encodeTime / encodedFrames) * 1000;
 }
 
-export function calculateEncodedFps(framesEncoded, timestamp, previous = null) {
+export function calculateEncodedFps(
+  framesEncoded: unknown,
+  timestamp: unknown,
+  previous: VideoFrameMetrics | null = null,
+) {
   const frames = Number(framesEncoded);
   const time = Number(timestamp);
   const previousFrames = Number(previous?.framesEncoded);
@@ -329,7 +358,11 @@ export function calculateEncodedFps(framesEncoded, timestamp, previous = null) {
   return (encodedFrames * 1000) / elapsedMs;
 }
 
-export function calculateBitrateKbps(bytes, timestamp, previous = null) {
+export function calculateBitrateKbps(
+  bytes: unknown,
+  timestamp: unknown,
+  previous: VideoFrameMetrics | null = null,
+) {
   const currentBytes = Number(bytes);
   const currentTime = Number(timestamp);
   const previousBytes = Number(previous?.bytes);
@@ -346,7 +379,7 @@ export function calculateBitrateKbps(bytes, timestamp, previous = null) {
   return (transferredBytes * 8) / elapsedMs;
 }
 
-export function classifyCodecImplementation(implementation) {
+export function classifyCodecImplementation(implementation: unknown) {
   const value = typeof implementation === "string" ? implementation.trim() : "";
   if (!value) return { type: "unknown", label: "Not reported by browser" };
 
@@ -378,11 +411,14 @@ export function classifyCodecImplementation(implementation) {
 
   return {
     type,
-    label: `${type === "unknown" ? "Unknown" : type[0].toUpperCase() + type.slice(1)} (${value})`,
+    label: `${type === "unknown" ? "Unknown" : type.charAt(0).toUpperCase() + type.slice(1)} (${value})`,
   };
 }
 
-export function calculateMediaEngineUtilization(processingTimeMs, fps) {
+export function calculateMediaEngineUtilization(
+  processingTimeMs: unknown,
+  fps: unknown,
+) {
   if (processingTimeMs == null || fps == null) return null;
   const time = Number(processingTimeMs);
   const rate = Number(fps);
@@ -391,7 +427,7 @@ export function calculateMediaEngineUtilization(processingTimeMs, fps) {
   return Math.min(100, Math.max(0, (time * rate) / 10));
 }
 
-export function selectHardwarePreferredVideoCodec(codecs = [] as any) {
+export function selectHardwarePreferredVideoCodec(codecs: VideoCodec[] = []) {
   const videoCodecs = codecs.filter(
     (codec) =>
       codec?.kind === "video" &&
@@ -417,7 +453,9 @@ export function selectHardwarePreferredVideoCodec(codecs = [] as any) {
   );
 }
 
-export function buildWebRtcCodecContentType(codec) {
+export function buildWebRtcCodecContentType(
+  codec: VideoCodec | null | undefined,
+) {
   const mimeType = codec?.mimeType || "";
   const parameters = Object.entries(codec?.parameters || {})
     .filter(
@@ -428,9 +466,10 @@ export function buildWebRtcCodecContentType(codec) {
 }
 
 export async function selectPowerEfficientVideoCodec(
-  codecs = [] as any,
-  video = {} as any,
-  mediaCapabilities = globalThis.navigator?.mediaCapabilities,
+  codecs: VideoCodec[] = [],
+  video: VideoSenderOptions = {},
+  mediaCapabilities: VideoMediaCapabilities | undefined = globalThis.navigator
+    ?.mediaCapabilities,
 ) {
   const ranked = await rankVideoCodecsByHardwarePreference(
     codecs,
@@ -441,9 +480,10 @@ export async function selectPowerEfficientVideoCodec(
 }
 
 export async function inspectVideoCodecCapabilities(
-  codecs = [] as any,
-  video = {} as any,
-  mediaCapabilities = globalThis.navigator?.mediaCapabilities,
+  codecs: VideoCodec[] = [],
+  video: VideoSenderOptions = {},
+  mediaCapabilities: VideoMediaCapabilities | undefined = globalThis.navigator
+    ?.mediaCapabilities,
 ) {
   const fallback = selectHardwarePreferredVideoCodec(codecs);
   const remaining = codecs.filter(
@@ -451,7 +491,7 @@ export async function inspectVideoCodecCapabilities(
       codec?.kind === "video" &&
       !/\/(rtx|red|ulpfec|flexfec)/i.test(codec.mimeType || ""),
   );
-  const ordered = [] as any;
+  const ordered: VideoCodec[] = [];
   let next = fallback;
   while (next) {
     ordered.push(next);
@@ -459,12 +499,12 @@ export async function inspectVideoCodecCapabilities(
     next = selectHardwarePreferredVideoCodec(remaining);
   }
 
-  const reports = [] as any;
+  const reports: VideoCapabilityReport[] = [];
   for (const codec of ordered) {
     const contentType = buildWebRtcCodecContentType(codec);
-    const report = {
+    const report: VideoCapabilityReport = {
       codec,
-      mimeType: codec.mimeType,
+      mimeType: codec.mimeType || "",
       contentType,
       supported: null,
       smooth: null,
@@ -501,8 +541,9 @@ export async function inspectVideoCodecCapabilities(
 }
 
 export async function inspectH264ProfileCapabilities(
-  video = {} as any,
-  mediaCapabilities = globalThis.navigator?.mediaCapabilities,
+  video: VideoSenderOptions = {},
+  mediaCapabilities: VideoMediaCapabilities | undefined = globalThis.navigator
+    ?.mediaCapabilities,
 ) {
   const profiles = ["42e01f", "42001f", "4d001f", "42e02a"];
   const codecs = profiles.map((profileLevelId) => ({
@@ -526,16 +567,17 @@ export async function inspectH264ProfileCapabilities(
 }
 
 export async function rankVideoCodecsByHardwarePreference(
-  codecs = [] as any,
-  video = {} as any,
-  mediaCapabilities = globalThis.navigator?.mediaCapabilities,
-  capabilityReports = null,
+  codecs: VideoCodec[] = [],
+  video: VideoSenderOptions = {},
+  mediaCapabilities: VideoMediaCapabilities | undefined = globalThis.navigator
+    ?.mediaCapabilities,
+  capabilityReports: VideoCapabilityReport[] | null = null,
 ) {
   const reports =
     capabilityReports ||
     (await inspectVideoCodecCapabilities(codecs, video, mediaCapabilities));
-  const hardware = [] as any;
-  const softwareOrUnknown = [] as any;
+  const hardware: VideoCodec[] = [];
+  const softwareOrUnknown: VideoCodec[] = [];
   for (const report of reports) {
     if (report.supported && report.powerEfficient) hardware.push(report.codec);
     else softwareOrUnknown.push(report.codec);

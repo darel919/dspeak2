@@ -1,14 +1,51 @@
 const providers = ["p2p", "sfu"];
+type RemoteMediaProvider = (typeof providers)[number];
 
-export function remoteMediaFeedKey(entry) {
+interface RemoteMediaEntry {
+  key: string;
+  transportKey?: string;
+  userId?: string | number | null;
+  peerId?: string | number | null;
+  source: string;
+  provider: RemoteMediaProvider;
+  track?: MediaStreamTrack | null;
+  [key: string]: unknown;
+}
+
+interface RemoteMediaRegistry {
+  bind(entry: RemoteMediaEntry, options?: { staged?: boolean }): void;
+  remove(key: string, entry?: unknown): void;
+  clear(): void;
+  clearProvider(provider: RemoteMediaProvider): void;
+  clearReceivingPreference?(key: string): void;
+  activateProvider(provider: RemoteMediaProvider): void;
+}
+
+interface ExpectedMediaPeer {
+  peerId?: string | number | null;
+  userId?: string | number | null;
+  sources?: string[];
+}
+
+export function remoteMediaFeedKey(entry: {
+  userId?: string | number | null;
+  peerId?: string | number | null;
+  source?: string | null;
+}) {
   const owner = entry?.userId ?? entry?.peerId;
   if (owner == null || !entry?.source)
     throw new Error("Remote media requires an owner and source");
   return `remote:${String(owner)}:${String(entry.source)}`;
 }
 export class RemoteMediaHandoff {
-  [key: string]: any;
-  constructor(registry) {
+  private readonly registry: RemoteMediaRegistry;
+  private readonly staged: Record<
+    RemoteMediaProvider,
+    Map<string, RemoteMediaEntry>
+  >;
+  private activeProvider: RemoteMediaProvider | null;
+
+  constructor(registry: RemoteMediaRegistry) {
     this.registry = registry;
     this.staged = Object.fromEntries(
       providers.map((provider) => [provider, new Map()]),
@@ -16,15 +53,19 @@ export class RemoteMediaHandoff {
     this.activeProvider = null;
   }
 
-  entries(provider) {
+  entries(provider: RemoteMediaProvider) {
     return this.provider(provider).values();
   }
 
-  count(provider) {
+  count(provider: RemoteMediaProvider) {
     return this.provider(provider).size;
   }
 
-  hasExpectedFeeds(provider, peers, localPeerId) {
+  hasExpectedFeeds(
+    provider: RemoteMediaProvider,
+    peers: ExpectedMediaPeer[],
+    localPeerId: string | number | null,
+  ) {
     const tracks = this.provider(provider);
     return peers
       .filter((peer) => String(peer.peerId) !== String(localPeerId))
@@ -41,7 +82,10 @@ export class RemoteMediaHandoff {
       );
   }
 
-  pruneExpectedFeeds(peers, localPeerId) {
+  pruneExpectedFeeds(
+    peers: ExpectedMediaPeer[],
+    localPeerId: string | number | null,
+  ) {
     const expected = new Set();
     for (const peer of Array.isArray(peers) ? peers : []) {
       if (String(peer.peerId) === String(localPeerId)) continue;
@@ -61,7 +105,10 @@ export class RemoteMediaHandoff {
     }
   }
 
-  stage(entry, activeProvider) {
+  stage(
+    entry: RemoteMediaEntry & { key: string; provider: RemoteMediaProvider },
+    activeProvider?: RemoteMediaProvider | null,
+  ) {
     this.activeProvider = activeProvider || this.activeProvider;
     const normalized = {
       ...entry,
@@ -69,7 +116,7 @@ export class RemoteMediaHandoff {
       key: remoteMediaFeedKey(entry),
     };
     const tracks = this.provider(normalized.provider);
-    const replaced = [] as any;
+    const replaced: Array<[string, RemoteMediaEntry]> = [];
     for (const [key, current] of tracks) {
       if (
         current.transportKey === normalized.transportKey &&
@@ -98,7 +145,9 @@ export class RemoteMediaHandoff {
       });
   }
 
-  remove(entry) {
+  remove(
+    entry: RemoteMediaEntry & { key: string; provider: RemoteMediaProvider },
+  ) {
     const tracks = this.provider(entry.provider);
     const key = remoteMediaFeedKey(entry);
     const current = tracks.get(key);
@@ -112,14 +161,14 @@ export class RemoteMediaHandoff {
     return true;
   }
 
-  bind(provider) {
+  bind(provider: RemoteMediaProvider) {
     for (const entry of this.entries(provider))
       this.registry.bind(entry, { staged: true });
     this.registry.activateProvider(provider);
     this.activeProvider = provider;
   }
 
-  retire(provider) {
+  retire(provider: RemoteMediaProvider) {
     this.registry.clearProvider(provider);
     this.provider(provider).clear();
   }
@@ -130,7 +179,7 @@ export class RemoteMediaHandoff {
     this.activeProvider = null;
   }
 
-  provider(provider) {
+  provider(provider: RemoteMediaProvider) {
     const tracks = this.staged[provider];
     if (!tracks) throw new Error(`Unknown media provider: ${String(provider)}`);
     return tracks;

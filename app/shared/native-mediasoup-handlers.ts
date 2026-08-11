@@ -89,7 +89,14 @@ export function installHandlers(session) {
     session.topologyState = { ...data, localPeerId: session.localPeerId };
     const provider =
       data?.provider || data?.targetProvider || data?.route?.provider;
+    const providerId =
+      data?.providerId ||
+      data?.targetProviderId ||
+      data?.route?.providerId ||
+      data?.targetRoute?.providerId ||
+      null;
     if (provider) session.selectedProvider = provider;
+    session.selectedProviderId = providerId;
     session._emitState();
   });
   session.messageHandlers.set("route-commit", (data) => {
@@ -103,11 +110,21 @@ export function installHandlers(session) {
       localPeerId: session.localPeerId,
     };
     const provider = route?.provider || data?.targetProvider;
+    const providerId =
+      route?.providerId || data?.targetProviderId || data?.providerId || null;
     if (provider) session.selectedProvider = provider;
+    session.selectedProviderId = providerId;
     session._emitState();
   });
   session.messageHandlers.set("provider-failure", (data) => {
-    if (data?.provider === session.activeSfuProvider) {
+    const activeProviderId =
+      session.activeSfuProviderId || session.topologyState?.providerId;
+    if (
+      data?.provider === session.activeSfuProvider &&
+      (!data?.providerId ||
+        !activeProviderId ||
+        data.providerId === activeProviderId)
+    ) {
       session.mediaConnectionState = "recovering";
       session.connectionPhase = "reconnecting";
       session._emitState();
@@ -117,6 +134,9 @@ export function installHandlers(session) {
     if (session.activeSfuProvider !== "mediasoup") return;
     const failure = {
       provider: "mediasoup",
+      ...(session.activeSfuProviderId
+        ? { providerId: session.activeSfuProviderId }
+        : {}),
       epoch: Number(session.topologyState?.epoch) || 0,
       sourceRevision: Number(session.topologyState?.sourceRevision) || 0,
       reason: data?.reason || "provider-draining",
