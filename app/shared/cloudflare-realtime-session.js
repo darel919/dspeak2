@@ -724,9 +724,6 @@ export class CloudflareRealtimeSession {
       try {
         entry.track.enabled = receiving;
       } catch {}
-      try {
-        this.onRemoteTrack?.(entry);
-      } catch {}
     }
     return true;
   }

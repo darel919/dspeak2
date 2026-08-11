@@ -280,6 +280,29 @@ test("Cloudflare screen consent leaves separately controlled media unchanged", a
   client.closeMedia();
 });
 
+test("Cloudflare screen consent does not rebind the remote track", async () => {
+  let remoteTrackCallbacks = 0;
+  const client = new CloudflareRealtimeSession({
+    send() {},
+    iceServers: [],
+    onRemoteTrack: () => {
+      remoteTrackCallbacks += 1;
+    },
+  });
+  client.consumers.set("screen", {
+    userId: "user-remote",
+    source: "screen",
+    receiving: false,
+    track: { enabled: false },
+  });
+
+  await client.setRemoteReceiving("user-remote", "screen", true);
+
+  assert.equal(remoteTrackCallbacks, 0);
+  assert.equal(client.consumers.get("screen").track.enabled, true);
+  client.closeMedia();
+});
+
 test("Cloudflare receiving defaults distinguish paired and standalone audio", () => {
   const client = session();
 

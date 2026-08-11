@@ -193,6 +193,9 @@ export function createHybridMediaTopologyController({
     transportReady.value = false;
     iceConnectedBoth.value = false;
     handoff.retire("sfu");
+    closeSocket();
+    setProviderSocket(null);
+    setActiveProvider(null);
     void closeSfuSafely();
     setConnectionPhase("reconnecting", {
       topologyEpoch: Number(data.epoch) || topologyState.value.epoch,
@@ -621,8 +624,10 @@ export function createHybridMediaTopologyController({
     handoff.retire("sfu");
     await closeSfuSafely();
     transportReady.value = true;
-    iceConnectedBoth.value = true;
-    setRouteConnectionState("media-flowing");
+    iceConnectedBoth.value = getP2pMesh()?.isMediaReady?.() === true;
+    setRouteConnectionState(
+      iceConnectedBoth.value ? "media-flowing" : "ready-no-active-media",
+    );
     setConnectionPhase("media-ready", {
       topologyEpoch: Number(data.epoch),
       topologyMode: "p2p",
@@ -712,6 +717,13 @@ export function createHybridMediaTopologyController({
       return;
     let socket = null;
     let failureNotified = false;
+    const clearProviderSocket = () => {
+      if (!socket || getProviderSocket() !== socket) return;
+      try {
+        socket.close();
+      } catch {}
+      setProviderSocket(null);
+    };
     const reportFailure = (providerError) => {
       if (failureNotified) return;
       failureNotified = true;
@@ -788,6 +800,7 @@ export function createHybridMediaTopologyController({
           return getMessageHandler(type)?.(payload || {});
         },
         onFailure: (providerError) => {
+          clearProviderSocket();
           error.value = providerError;
           reportFailure(providerError);
         },
@@ -797,6 +810,7 @@ export function createHybridMediaTopologyController({
       sendProviderReady();
       settleTicketWaiter(true);
     } catch (providerError) {
+      clearProviderSocket();
       settleTicketWaiter(false);
       reportFailure(providerError);
       error.value = providerError;
