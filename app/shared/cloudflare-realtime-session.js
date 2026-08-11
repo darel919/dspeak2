@@ -37,6 +37,8 @@ function sessionClosedError() {
 }
 
 const ICE_GATHERING_TIMEOUT_MS = 3000;
+const REQUEST_TIMEOUT_MS = 15000;
+const MAX_TRACKS_PER_REQUEST = 64;
 
 function waitForIceGatheringComplete(peerConnection) {
   if (
@@ -95,6 +97,8 @@ export class CloudflareRealtimeSession {
     this.pendingRemoteTracks = new Map();
     this.rtpSamples = new Map();
     this.subscriptionTasks = new Map();
+    this.subscribedTrackNames = new Set();
+    this.subscriptionsStarted = false;
     this.negotiationQueue = Promise.resolve();
     this.sourceOperations = new Map();
     this.sessionGeneration = 0;
@@ -135,8 +139,6 @@ export class CloudflareRealtimeSession {
         generation,
         sessionId: shortMediaId(this.sessionId),
       });
-      for (const publication of this.publications.values())
-        await this.subscribe(publication, generation);
     })();
     this.initializing = initializing;
     initializing.catch(() => {
@@ -212,7 +214,7 @@ export class CloudflareRealtimeSession {
       requestId: shortMediaId(requestId),
       hasBody: body != null,
     });
-    const waiting = deferred(8000, `Cloudflare ${operation}`);
+    const waiting = deferred(REQUEST_TIMEOUT_MS, `Cloudflare ${operation}`);
     this.pending.set(requestId, waiting);
     let sent = false;
     try {
@@ -280,6 +282,7 @@ export class CloudflareRealtimeSession {
     if (type === "cloudflare-publication-available") {
       if (data.closed) {
         this.publications.delete(data.trackName);
+        this.subscribedTrackNames.delete(data.trackName);
         for (const [mid, publication] of this.remoteByMid) {
           if (publication.trackName === data.trackName) {
             this.remoteByMid.delete(mid);
@@ -296,7 +299,8 @@ export class CloudflareRealtimeSession {
         return true;
       }
       this.publications.set(data.trackName, data);
-      if (this.sessionId) await this.subscribe(data, this.sessionGeneration);
+      if (this.sessionId && this.subscriptionsStarted)
+        await this.subscribe(data, this.sessionGeneration);
       return true;
     }
     return false;
@@ -428,63 +432,92 @@ export class CloudflareRealtimeSession {
   }
 
   subscribe(publication, generation = this.sessionGeneration) {
-    const trackName = publication?.trackName;
-    if (
-      !trackName ||
-      generation !== this.sessionGeneration ||
-      !this.sessionId ||
-      !this.peerConnection
+    return this.subscribePublications([publication], generation);
+  }
+
+  async startSubscriptions() {
+    await this.initialize();
+    this.subscriptionsStarted = true;
+    const publications = [...this.publications.values()];
+    for (
+      let index = 0;
+      index < publications.length;
+      index += MAX_TRACKS_PER_REQUEST
     )
-      return;
-    if (this.consumers.has(trackName)) return;
-    const existing = this.subscriptionTasks.get(trackName);
-    if (existing) return existing;
+      await this.subscribePublications(
+        publications.slice(index, index + MAX_TRACKS_PER_REQUEST),
+        this.sessionGeneration,
+      );
+  }
+
+  subscribePublications(publications, generation = this.sessionGeneration) {
+    const eligible = publications.filter((publication) => {
+      const trackName = publication?.trackName;
+      return (
+        trackName &&
+        generation === this.sessionGeneration &&
+        this.sessionId &&
+        this.peerConnection &&
+        !this.consumers.has(trackName) &&
+        !this.subscribedTrackNames.has(trackName) &&
+        !this.subscriptionTasks.has(trackName)
+      );
+    });
+    if (!eligible.length) return Promise.resolve(false);
     const task = this.enqueueNegotiation(() =>
-      this.subscribePublication(publication, generation),
+      this.subscribePublicationBatch(eligible, generation),
     );
     const tracked = task.finally(() => {
-      if (this.subscriptionTasks.get(trackName) === tracked)
-        this.subscriptionTasks.delete(trackName);
+      for (const publication of eligible)
+        if (this.subscriptionTasks.get(publication.trackName) === tracked)
+          this.subscriptionTasks.delete(publication.trackName);
     });
-    this.subscriptionTasks.set(trackName, tracked);
+    for (const publication of eligible)
+      this.subscriptionTasks.set(publication.trackName, tracked);
     tracked.catch(() => {});
     return tracked;
   }
 
   async subscribePublication(publication, generation) {
-    const trackName = publication.trackName;
+    return this.subscribePublicationBatch([publication], generation);
+  }
+
+  async subscribePublicationBatch(publications, generation) {
+    const active = publications.filter(
+      (publication) =>
+        this.publications.get(publication.trackName) === publication,
+    );
+    if (!active.length) return false;
     const peerConnection = this.peerConnection;
     if (
-      this.publications.get(trackName) !== publication ||
       generation !== this.sessionGeneration ||
       !this.sessionId ||
       !peerConnection
     )
       return false;
     const result = await this.request("tracks-new", {
-      tracks: [
-        {
-          location: "remote",
-          sessionId: publication.sessionId,
-          trackName,
-        },
-      ],
+      tracks: active.map((publication) => ({
+        location: "remote",
+        sessionId: publication.sessionId,
+        trackName: publication.trackName,
+      })),
     });
-    const track = result.tracks?.find(
-      (candidate) => candidate.trackName === trackName,
-    );
-    if (track?.mid == null)
-      throw new Error("Cloudflare subscription track MID is missing");
-    if (this.publications.get(trackName) !== publication) {
-      this.remoteByMid.delete(String(track.mid));
-      return false;
-    }
     this.assertCurrentSession(peerConnection, generation);
-    this.remoteByMid.set(String(track.mid), publication);
-    const mid = String(track.mid);
-    const pending = this.pendingRemoteTracks.get(mid) || [];
-    this.pendingRemoteTracks.delete(mid);
-    for (const event of pending) this.handleRemoteTrack(event, publication);
+    for (const publication of active) {
+      if (this.publications.get(publication.trackName) !== publication)
+        continue;
+      const track = result.tracks?.find(
+        (candidate) => candidate.trackName === publication.trackName,
+      );
+      if (track?.mid == null)
+        throw new Error("Cloudflare subscription track MID is missing");
+      const mid = String(track.mid);
+      this.remoteByMid.set(mid, publication);
+      this.subscribedTrackNames.add(publication.trackName);
+      const pending = this.pendingRemoteTracks.get(mid) || [];
+      this.pendingRemoteTracks.delete(mid);
+      for (const event of pending) this.handleRemoteTrack(event, publication);
+    }
     this.lastReceivedConsumerParams = result;
     if (result.sessionDescription?.type === "offer") {
       await peerConnection.setRemoteDescription(result.sessionDescription);
@@ -640,23 +673,16 @@ export class CloudflareRealtimeSession {
     const userId = String(userIdOrKey);
     const source = String(sourceOrReceiving || "");
     const receiving = Boolean(receivingValue);
-    const pairedSources =
-      source === "screen" || source === "screen-audio"
-        ? ["screen", "screen-audio"]
-        : [source];
-    for (const pairedSource of pairedSources) {
-      this.remoteReceiving.set(`${userId}:${pairedSource}`, receiving);
-      for (const entry of this.consumers.values()) {
-        if (String(entry.userId) !== userId || entry.source !== pairedSource)
-          continue;
-        entry.receiving = receiving;
-        try {
-          entry.track.enabled = receiving;
-        } catch {}
-        try {
-          this.onRemoteTrack?.(entry);
-        } catch {}
-      }
+    this.remoteReceiving.set(`${userId}:${source}`, receiving);
+    for (const entry of this.consumers.values()) {
+      if (String(entry.userId) !== userId || entry.source !== source) continue;
+      entry.receiving = receiving;
+      try {
+        entry.track.enabled = receiving;
+      } catch {}
+      try {
+        this.onRemoteTrack?.(entry);
+      } catch {}
     }
     return true;
   }
@@ -815,6 +841,7 @@ export class CloudflareRealtimeSession {
     this.peerConnection = null;
     this.sessionId = null;
     this.initializing = null;
+    this.subscriptionsStarted = false;
     for (const entry of this.producers.values()) {
       try {
         this.send({
@@ -842,6 +869,7 @@ export class CloudflareRealtimeSession {
     this.pendingRemoteTracks.clear();
     this.rtpSamples.clear();
     this.subscriptionTasks.clear();
+    this.subscribedTrackNames.clear();
     this.negotiationQueue = Promise.resolve();
     const error = sessionClosedError();
     for (const waiting of this.pending.values()) {

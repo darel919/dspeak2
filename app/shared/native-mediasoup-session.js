@@ -46,6 +46,8 @@ import {
 } from "./native-mediasoup-diagnostics.js";
 import { NativeCloudflareRealtimeSession } from "./native-cloudflare-realtime-session.js";
 
+const CLOUDFLARE_REQUEST_TIMEOUT_MS = 15000;
+
 function nativeProducerAppData(entry, kind) {
   const appData = {
     source: entry.source,
@@ -302,7 +304,10 @@ export class NativeMediasoupSfuSession {
       getAudioBitrate: this.getAudioBitrate,
       getAudioStereo: this.getAudioStereo,
       getVideoSettings: this.getVideoSettings,
-      requestTimeoutMs: this.requestTimeoutMs,
+      requestTimeoutMs: Math.max(
+        this.requestTimeoutMs,
+        CLOUDFLARE_REQUEST_TIMEOUT_MS,
+      ),
       sources: this.sources,
       producers: this.producers,
       consumers: this.consumers,
@@ -338,6 +343,7 @@ export class NativeMediasoupSfuSession {
       if (!wasInitialized)
         for (const entry of this.sources.values())
           await cloudflare.addSource(entry);
+      await cloudflare.startSubscriptions();
       this.transportStates.set("send", "connected");
       this.transportStates.set("recv", "connected");
       this.mediaConnectionState = "transport-connecting";

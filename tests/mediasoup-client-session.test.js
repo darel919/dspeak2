@@ -781,7 +781,7 @@ test("remote consumer lifecycle refreshes active media connection state", async 
   }
 });
 
-test("remote screen video and audio consumers pause and resume after acknowledgements", async () => {
+test("screen video consent does not disable automatically received screen audio", async () => {
   const sent = [];
   const client = new MediasoupClientSession({
     send: (message) => sent.push(message),
@@ -798,7 +798,7 @@ test("remote screen video and audio consumers pause and resume after acknowledge
   const pausing = client.setRemoteReceiving("user-1", "screen", false);
   assert.deepEqual(
     sent.map((message) => message.type),
-    ["pause-consumer", "pause-consumer"],
+    ["pause-consumer"],
   );
   for (const message of sent)
     await client.handle("consumer-paused", {
@@ -806,16 +806,14 @@ test("remote screen video and audio consumers pause and resume after acknowledge
       requestId: message.data.requestId,
     });
   await pausing;
-  assert.equal(
-    entries.every((entry) => entry.track.enabled === false),
-    true,
-  );
+  assert.equal(entries[0].track.enabled, false);
+  assert.equal(entries[1].track.enabled, true);
 
   sent.length = 0;
   const resuming = client.setRemoteReceiving("user-1", "screen", true);
   assert.deepEqual(
     sent.map((message) => message.type),
-    ["resume-consumer", "resume-consumer"],
+    ["resume-consumer"],
   );
   for (const message of sent)
     await client.handle("consumer-resumed", {
@@ -823,10 +821,8 @@ test("remote screen video and audio consumers pause and resume after acknowledge
       requestId: message.data.requestId,
     });
   await resuming;
-  assert.equal(
-    entries.every((entry) => entry.track.enabled === true),
-    true,
-  );
+  assert.equal(entries[0].track.enabled, true);
+  assert.equal(entries[1].track.enabled, true);
 });
 
 test("consumer control retries once after a dropped acknowledgement", async () => {

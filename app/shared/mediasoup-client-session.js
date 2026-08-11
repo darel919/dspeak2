@@ -726,23 +726,14 @@ export class MediasoupClientSession {
   }
 
   setRemoteReceiving(userId, source, receiving) {
-    const pairedSources =
-      source === "screen" || source === "screen-audio"
-        ? ["screen", "screen-audio"]
-        : [source];
     const operations = [];
-    for (const pairedSource of pairedSources) {
-      this.remoteReceiving.set(
-        `${String(userId)}:${String(pairedSource)}`,
-        Boolean(receiving),
-      );
-      for (const entry of this.consumers.values())
-        if (
-          String(entry.userId) === String(userId) &&
-          entry.source === pairedSource
-        )
-          operations.push(this.setConsumerReceiving(entry, receiving));
-    }
+    this.remoteReceiving.set(
+      `${String(userId)}:${String(source)}`,
+      Boolean(receiving),
+    );
+    for (const entry of this.consumers.values())
+      if (String(entry.userId) === String(userId) && entry.source === source)
+        operations.push(this.setConsumerReceiving(entry, receiving));
     return Promise.all(operations);
   }
 

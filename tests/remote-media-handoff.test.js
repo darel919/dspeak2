@@ -431,6 +431,34 @@ test("remote screen video requires an explicit receiving choice", () => {
   assert.equal(videoFeeds.value.get(key).receiving, true);
 });
 
+test("native remote screen video also requires an explicit receiving choice", () => {
+  const changes = [];
+  const videoFeeds = { value: new Map() };
+  const registry = new RemoteMediaRegistry({
+    audioFeeds: { value: new Map() },
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+    onVideoReceivingChange: (entry, receiving) =>
+      changes.push([entry.source, receiving]),
+  });
+  const key = "remote:user-1:screen";
+
+  registry.bind({
+    key,
+    provider: "sfu",
+    source: "screen",
+    kind: "video",
+    native: true,
+  });
+
+  assert.equal(videoFeeds.value.get(key).receiving, false);
+  assert.deepEqual(changes, [["screen", false]]);
+});
+
 test("remote screen video keeps an explicit stopped state during handoff", () => {
   const oldTrack = { id: "p2p-screen", kind: "video", enabled: true };
   const newTrack = { id: "sfu-screen", kind: "video", enabled: true };
