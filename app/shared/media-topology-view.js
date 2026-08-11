@@ -38,6 +38,16 @@ export function createMediaTopologyView({
     for (const participant of entries) {
       const profile =
         participant.profile || getParticipantProfile?.(participant.userId);
+      const sources = Array.isArray(participant.sources)
+        ? participant.sources.map((source) => String(source))
+        : null;
+      const mediaState =
+        sources === null
+          ? {}
+          : {
+              cameraEnabled: sources.includes("camera"),
+              screenSharing: sources.includes("screen"),
+            };
       if (profile)
         voiceStore.upsertUserProfile({
           ...profile,
@@ -47,7 +57,14 @@ export function createMediaTopologyView({
         voiceStore.addConnectedUser(participant.userId, {
           ...profile,
           id: participant.userId,
+          ...mediaState,
         });
+      if (
+        typeof participant.muted === "boolean" ||
+        typeof participant.deafened === "boolean" ||
+        sources !== null
+      )
+        voiceStore.updateUserVoiceState?.(participant.userId, participant);
     }
     for (const user of voiceStore.getConnectedUsersArray())
       if (!active.has(String(user.id))) voiceStore.removeConnectedUser(user.id);

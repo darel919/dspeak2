@@ -141,20 +141,39 @@ export function startHealthChecks(mesh) {
         try {
           const report = await state.pc.getStats();
           state.selectedPair = await selectedPairSnapshot(state.pc, report);
-          const flow = await mediaFlowSnapshot(state.pc, report);
-          const expectedOutboundSources = countEnabledP2pSources(
-            mesh.localSources.keys(),
-            new Map(
-              [...mesh.localSources.keys()].map((source) => [
-                source,
+          const expectedOutboundEntries = [...mesh.localSources.keys()].flatMap(
+            (source) => {
+              const enabled =
                 (state.sourceReceiving.get(source) ?? true) &&
-                  (mesh.sourceTransmission?.get(source) ?? true),
-              ]),
-            ),
+                (mesh.sourceTransmission?.get(source) ?? true);
+              if (!enabled) return [];
+              return [
+                {
+                  key: source,
+                  track: state.senders.get(source)?.track || null,
+                },
+              ];
+            },
           );
+          const expectedInboundEntries = [...state.remoteTracks.values()]
+            .filter(
+              (entry) =>
+                entry.track &&
+                (state.remoteReceiving.get(entry.source) ?? true),
+            )
+            .map((entry) => ({ key: entry.source, track: entry.track }));
+          const expectedInboundSources = [...state.remoteSourceNames].filter(
+            (source) => state.remoteReceiving.get(source) !== false,
+          );
+          const flow = await mediaFlowSnapshot(state.pc, report, {
+            outboundTracks: expectedOutboundEntries,
+            inboundTracks: expectedInboundEntries,
+          });
+          const expectedOutboundSources = expectedOutboundEntries.length;
           const countsReady =
             flow.outboundCount >= expectedOutboundSources &&
-            flow.inboundCount >= state.expectedRemoteSources;
+            flow.inboundCount >= state.expectedRemoteSources &&
+            expectedInboundEntries.length >= state.expectedRemoteSources;
           const outboundNeeded = expectedOutboundSources > 0;
           const inboundNeeded = state.expectedRemoteSources > 0;
           const outboundProgressing =
@@ -165,12 +184,48 @@ export function startHealthChecks(mesh) {
             !inboundNeeded ||
             state.lastInboundBytes == null ||
             flow.inboundBytes > state.lastInboundBytes;
+          for (const entry of expectedOutboundEntries) {
+            if (!state.lastOutboundSourceProgressAt.has(entry.key))
+              state.lastOutboundSourceProgressAt.set(entry.key, checkedAt);
+          }
+          for (const source of expectedInboundSources)
+            if (!state.lastInboundSourceProgressAt.has(source))
+              state.lastInboundSourceProgressAt.set(source, checkedAt);
+          for (const entry of flow.outboundFlows) {
+            const previous = state.lastOutboundSourceBytes.get(entry.key);
+            if (entry.flowing && (previous == null || entry.bytes > previous))
+              state.lastOutboundSourceProgressAt.set(entry.key, checkedAt);
+            state.lastOutboundSourceBytes.set(entry.key, entry.bytes);
+          }
+          for (const entry of flow.inboundFlows) {
+            const previous = state.lastInboundSourceBytes.get(entry.key);
+            if (entry.flowing && (previous == null || entry.bytes > previous))
+              state.lastInboundSourceProgressAt.set(entry.key, checkedAt);
+            state.lastInboundSourceBytes.set(entry.key, entry.bytes);
+          }
+          const mediaFlowTimedOut =
+            requireLiveness &&
+            ((outboundNeeded &&
+              expectedOutboundEntries.some((entry) =>
+                isP2pLivenessExpired(
+                  state.lastOutboundSourceProgressAt.get(entry.key),
+                  checkedAt,
+                  healthTimeout,
+                ),
+              )) ||
+              (inboundNeeded &&
+                expectedInboundSources.some((source) =>
+                  isP2pLivenessExpired(
+                    state.lastInboundSourceProgressAt.get(source),
+                    checkedAt,
+                    healthTimeout,
+                  ),
+                )));
+          if (mediaFlowTimedOut) mesh.fail("media-flow-timeout");
           if (outboundProgressing) state.lastOutboundProgressAt = checkedAt;
           if (inboundProgressing) state.lastInboundProgressAt = checkedAt;
           state.mediaReady =
-            mesh.mode === "probing"
-              ? countsReady && outboundProgressing && inboundProgressing
-              : outboundProgressing && inboundProgressing;
+            countsReady && outboundProgressing && inboundProgressing;
           state.lastOutboundBytes = flow.outboundBytes;
           state.lastInboundBytes = flow.inboundBytes;
           if (state.selectedPair && !isViableP2pPair(state.selectedPair))

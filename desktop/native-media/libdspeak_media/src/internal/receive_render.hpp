@@ -37,7 +37,7 @@ private:
 
 class NativeReceiveVideoSink final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
 public:
-    explicit NativeReceiveVideoSink(std::string consumer_id);
+    explicit NativeReceiveVideoSink(std::string consumer_id, std::string handle = {});
     ~NativeReceiveVideoSink() override = default;
 
     void OnFrame(const webrtc::VideoFrame& frame) override;
@@ -46,6 +46,7 @@ public:
 
 private:
     std::string consumer_id_;
+    std::string handle_;
     std::atomic_bool enabled_{true};
 };
 
@@ -73,6 +74,9 @@ void lib_dspeak_media_push_receive_track_closed_event(const char* consumer_id,
                                                        const char* kind);
 void lib_dspeak_media_push_local_video_frame(const char* source,
                                              const webrtc::VideoFrame& frame);
+void lib_dspeak_media_push_capture_error_event(const char* route,
+                                               int error_code,
+                                               const char* message);
 void lib_dspeak_media_push_p2p_event(uint64_t p2p_handle,
                                      const char* event_name,
                                      const char* track_id,

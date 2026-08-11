@@ -28,7 +28,6 @@ function normalizeBranch(value, fallback = DEFAULT_UPDATE_BRANCH) {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 12;
 const MAX_COMMITS = 40;
-const MAX_FILES = 200;
 const cache = new Map();
 const inFlight = new Map();
 
@@ -114,20 +113,6 @@ function summarizeCommit(value, repository) {
   };
 }
 
-function summarizeFile(value) {
-  const file = value && typeof value === "object" ? value : {};
-  const filename = boundedString(file.filename, 240);
-  if (!filename) return null;
-  return {
-    filename,
-    previousFilename: boundedString(file.previous_filename, 240),
-    status: boundedString(file.status, 40),
-    additions: Number(file.additions) || 0,
-    deletions: Number(file.deletions) || 0,
-    changes: Number(file.changes) || 0,
-  };
-}
-
 function summarizeLatest(value, repository) {
   return summarizeCommit(value, repository);
 }
@@ -139,9 +124,6 @@ function summarizeComparison(value, repository) {
         .map((commit) => summarizeCommit(commit, repository))
         .filter(Boolean)
         .slice(0, MAX_COMMITS)
-    : [];
-  const files = Array.isArray(comparison.files)
-    ? comparison.files.map(summarizeFile).filter(Boolean).slice(0, MAX_FILES)
     : [];
   return {
     status: boundedString(comparison.status, 40),
@@ -155,13 +137,7 @@ function summarizeComparison(value, repository) {
     totalCommits: Number.isFinite(Number(comparison.total_commits))
       ? Number(comparison.total_commits)
       : commits.length,
-    totalFiles: Number.isFinite(Number(comparison.files?.length))
-      ? Number(comparison.files.length)
-      : files.length,
     commits,
-    files,
-    filesTruncated:
-      Array.isArray(comparison.files) && comparison.files.length > MAX_FILES,
   };
 }
 

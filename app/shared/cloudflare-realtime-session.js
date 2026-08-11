@@ -1,4 +1,4 @@
-import { collectPeerConnectionStats } from "./rtc-media-stats.js";
+import { collectPeerConnectionStats, findRtpStat } from "./rtc-media-stats.js";
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.js";
 import { mediaDebug, shortMediaId } from "./media-debug.js";
 
@@ -88,8 +88,11 @@ export class CloudflareRealtimeSession {
     this.pending = new Map();
     this.producers = new Map();
     this.consumers = new Map();
+    this.sourceTransmission = new Map();
+    this.remoteReceiving = new Map();
     this.publications = new Map();
     this.remoteByMid = new Map();
+    this.pendingRemoteTracks = new Map();
     this.rtpSamples = new Map();
     this.subscriptionTasks = new Map();
     this.negotiationQueue = Promise.resolve();
@@ -108,31 +111,14 @@ export class CloudflareRealtimeSession {
         iceServers: this.iceServers,
       });
       this.peerConnection.addEventListener("track", (event) => {
-        const publication = this.remoteByMid.get(event.transceiver.mid);
-        if (!publication) return;
-        const entry = {
-          provider: "sfu",
-          participantId: publication.userId,
-          userId: publication.userId,
-          peerId: publication.peerId,
-          source: publication.source,
-          kind: event.track.kind,
-          receiver: event.receiver,
-          trackName: publication.trackName,
-          key: publication.trackName,
-          track: event.track,
-          stream: event.streams[0] || new MediaStream([event.track]),
-        };
-        this.consumers.set(publication.trackName, entry);
-        event.track.addEventListener("ended", () => {
-          this.consumers.delete(publication.trackName);
-          try {
-            this.onRemoteTrackEnded?.(entry);
-          } catch {}
-        });
-        try {
-          this.onRemoteTrack?.(entry);
-        } catch {}
+        const mid = event.transceiver?.mid;
+        const key = mid == null ? null : String(mid);
+        const publication = key == null ? null : this.remoteByMid.get(key);
+        if (!publication) {
+          if (key != null) this.queueRemoteTrack(key, event);
+          return;
+        }
+        this.handleRemoteTrack(event, publication);
       });
       this.peerConnection.addEventListener("connectionstatechange", () => {
         const state = this.peerConnection?.connectionState || "closed";
@@ -158,6 +144,65 @@ export class CloudflareRealtimeSession {
       if (this.initializing === initializing) this.closeMedia();
     });
     return initializing;
+  }
+
+  queueRemoteTrack(mid, event) {
+    const current = this.pendingRemoteTracks.get(mid) || [];
+    if (!current.some((candidate) => candidate.track === event.track))
+      current.push(event);
+    this.pendingRemoteTracks.set(mid, current);
+  }
+
+  handleRemoteTrack(event, publication) {
+    if (!event?.track || !publication?.trackName) return;
+    const previous = this.consumers.get(publication.trackName);
+    if (previous?.track === event.track) return;
+    if (previous) {
+      this.consumers.delete(publication.trackName);
+      try {
+        this.onRemoteTrackEnded?.(previous);
+      } catch {}
+    }
+    const source = publication.source || event.track.kind;
+    const receiving = this.shouldReceive(publication.userId, source);
+    try {
+      event.track.enabled = receiving;
+    } catch {}
+    const entry = {
+      provider: "sfu",
+      participantId: publication.userId,
+      userId: publication.userId,
+      peerId: publication.peerId,
+      source,
+      kind: event.track.kind,
+      mid:
+        event.transceiver?.mid == null ? null : String(event.transceiver.mid),
+      receiver: event.receiver,
+      trackName: publication.trackName,
+      key: publication.trackName,
+      track: event.track,
+      receiving,
+      stream:
+        event.streams?.[0] ||
+        (typeof MediaStream === "function"
+          ? new MediaStream([event.track])
+          : null),
+    };
+    this.consumers.set(publication.trackName, entry);
+    event.track.addEventListener?.(
+      "ended",
+      () => {
+        if (this.consumers.get(publication.trackName) !== entry) return;
+        this.consumers.delete(publication.trackName);
+        try {
+          this.onRemoteTrackEnded?.(entry);
+        } catch {}
+      },
+      { once: true },
+    );
+    try {
+      this.onRemoteTrack?.(entry);
+    } catch {}
   }
 
   request(operation, body) {
@@ -235,9 +280,12 @@ export class CloudflareRealtimeSession {
     if (type === "cloudflare-publication-available") {
       if (data.closed) {
         this.publications.delete(data.trackName);
-        for (const [mid, publication] of this.remoteByMid)
-          if (publication.trackName === data.trackName)
+        for (const [mid, publication] of this.remoteByMid) {
+          if (publication.trackName === data.trackName) {
             this.remoteByMid.delete(mid);
+            this.pendingRemoteTracks.delete(mid);
+          }
+        }
         const current = this.consumers.get(data.trackName);
         if (current) {
           try {
@@ -280,9 +328,22 @@ export class CloudflareRealtimeSession {
     const { generation, peerConnection } = this.currentSession();
     const current = this.producers.get(entry.source);
     if (current) {
-      await current.sender.replaceTrack(entry.track);
-      this.assertCurrentSession(peerConnection, generation);
-      current.track = entry.track;
+      const previousTrack = current.track;
+      try {
+        await current.sender.replaceTrack(entry.track);
+        this.assertCurrentSession(peerConnection, generation);
+        current.track = entry.track;
+        await this.setSourceTransmission(
+          entry.source,
+          this.sourceTransmission.get(entry.source) !== false,
+        );
+      } catch (error) {
+        try {
+          await current.sender.replaceTrack(previousTrack);
+        } catch {}
+        current.track = previousTrack;
+        throw error;
+      }
       return;
     }
     let sender = null;
@@ -341,6 +402,10 @@ export class CloudflareRealtimeSession {
         trackName,
         mid,
       });
+      await this.setSourceTransmission(
+        entry.source,
+        this.sourceTransmission.get(entry.source) !== false,
+      );
       if (
         !this.send({
           type: "cloudflare-publication",
@@ -411,6 +476,12 @@ export class CloudflareRealtimeSession {
     this.assertCurrentSession(peerConnection, generation);
     if (track?.mid != null)
       this.remoteByMid.set(String(track.mid), publication);
+    if (track?.mid != null) {
+      const mid = String(track.mid);
+      const pending = this.pendingRemoteTracks.get(mid) || [];
+      this.pendingRemoteTracks.delete(mid);
+      for (const event of pending) this.handleRemoteTrack(event, publication);
+    }
     this.lastReceivedConsumerParams = result;
     if (result.sessionDescription?.type === "offer") {
       await peerConnection.setRemoteDescription(result.sessionDescription);
@@ -477,6 +548,116 @@ export class CloudflareRealtimeSession {
     }
   }
 
+  shouldReceive(userId, source) {
+    const key = `${String(userId)}:${String(source)}`;
+    if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
+    return true;
+  }
+
+  async setSourceTransmission(source, enabled) {
+    const key = String(source || "");
+    const value = Boolean(enabled);
+    this.sourceTransmission.set(key, value);
+    const entry = this.producers.get(key);
+    if (!entry) return false;
+    try {
+      if (entry.track) entry.track.enabled = value;
+    } catch {}
+    if (entry.sender?.getParameters && entry.sender?.setParameters) {
+      const parameters = entry.sender.getParameters();
+      const encodings = Array.isArray(parameters.encodings)
+        ? parameters.encodings
+        : [];
+      if (!encodings.length) return true;
+      parameters.encodings = encodings;
+      for (const encoding of encodings) encoding.active = value;
+      try {
+        await entry.sender.setParameters(parameters);
+      } catch (error) {
+        if (
+          [
+            "InvalidModificationError",
+            "InvalidAccessError",
+            "NotSupportedError",
+          ].includes(error?.name)
+        )
+          return true;
+        throw error;
+      }
+    }
+    return true;
+  }
+
+  async updateAudioBitrate(source, maxBitrate) {
+    const entry = this.producers.get(String(source || ""));
+    const bitrate = Number(maxBitrate);
+    if (!entry || entry.track?.kind !== "audio") return false;
+    if (!Number.isFinite(bitrate) || bitrate <= 0) return false;
+    return this.updateSenderParameters(entry, {
+      maxBitrate: Math.floor(bitrate),
+      priority: "high",
+      networkPriority: "high",
+    });
+  }
+
+  async updateVideoBitrate(source, maxBitrate) {
+    const entry = this.producers.get(String(source || ""));
+    const bitrate = Number(maxBitrate);
+    if (!entry || entry.track?.kind !== "video") return false;
+    if (!Number.isFinite(bitrate) || bitrate <= 0) return false;
+    return this.updateSenderParameters(entry, {
+      maxBitrate: Math.floor(bitrate),
+    });
+  }
+
+  async updateSenderParameters(entry, updates) {
+    if (!entry?.sender?.getParameters || !entry.sender?.setParameters)
+      return false;
+    const parameters = entry.sender.getParameters();
+    const encodings = Array.isArray(parameters.encodings)
+      ? parameters.encodings
+      : [];
+    if (!encodings.length) return false;
+    parameters.encodings = encodings;
+    for (const encoding of encodings) Object.assign(encoding, updates);
+    await entry.sender.setParameters(parameters);
+    return true;
+  }
+
+  async setRemoteReceiving(userIdOrKey, sourceOrReceiving, receivingValue) {
+    if (
+      typeof sourceOrReceiving === "boolean" &&
+      receivingValue === undefined
+    ) {
+      const entry = this.consumers.get(String(userIdOrKey));
+      return entry
+        ? this.setRemoteReceiving(entry.userId, entry.source, sourceOrReceiving)
+        : false;
+    }
+    const userId = String(userIdOrKey);
+    const source = String(sourceOrReceiving || "");
+    const receiving = Boolean(receivingValue);
+    const pairedSources =
+      source === "screen" || source === "screen-audio"
+        ? ["screen", "screen-audio"]
+        : [source];
+    for (const pairedSource of pairedSources) {
+      this.remoteReceiving.set(`${userId}:${pairedSource}`, receiving);
+      for (const entry of this.consumers.values()) {
+        if (String(entry.userId) !== userId || entry.source !== pairedSource)
+          continue;
+        entry.receiving = receiving;
+        try {
+          entry.track.enabled = receiving;
+        } catch {}
+        try {
+          this.onRemoteTrack?.(entry);
+        } catch {}
+      }
+    }
+    return true;
+  }
+
   setJitterBufferConfig() {}
 
   connectionState() {
@@ -525,11 +706,19 @@ export class CloudflareRealtimeSession {
   }
 
   expectedInboundFlowCount() {
-    return this.consumers.size;
+    return [...this.consumers.values()].filter(
+      (entry) => entry.receiving !== false,
+    ).length;
   }
 
   async mediaReadiness(expectedInbound) {
-    const outboundExpected = this.producers.size;
+    const outboundEntries = [...this.producers.values()].filter(
+      (entry) => this.sourceTransmission.get(entry.source) !== false,
+    );
+    const inboundEntries = [...this.consumers.values()].filter(
+      (entry) => entry.receiving !== false,
+    );
+    const outboundExpected = outboundEntries.length;
     const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
     if (!this.peerConnection) {
       return {
@@ -541,11 +730,13 @@ export class CloudflareRealtimeSession {
         inboundFlowing: 0,
       };
     }
-    const sampleFlow = (key, report, type, field) => {
-      if (!report || typeof report.values !== "function") return false;
-      const stat = [...report.values()].find(
-        (candidate) => candidate.type === type,
-      );
+    const sampleFlow = (key, report, type, field, track, mid) => {
+      if (!report) return false;
+      const stat = findRtpStat(report, type, {
+        trackId: track?.id,
+        mid,
+        kind: track?.kind,
+      });
       if (!stat) return false;
       const bytes = Number(stat[field]);
       const timestamp = Number(stat.timestamp);
@@ -567,22 +758,26 @@ export class CloudflareRealtimeSession {
         return this.peerConnection.getStats(track).catch(() => null);
       return null;
     };
-    const outboundChecks = [...this.producers.values()].map(async (entry) => {
+    const outboundChecks = outboundEntries.map(async (entry) => {
       const report = await readStats(entry.sender, entry.track);
       return sampleFlow(
         `out:${entry.sender?.id || entry.source}`,
         report,
         "outbound-rtp",
         "bytesSent",
+        entry.track,
+        entry.mid,
       );
     });
-    const inboundChecks = [...this.consumers.values()].map(async (entry) => {
+    const inboundChecks = inboundEntries.map(async (entry) => {
       const report = await readStats(entry.receiver, entry.track);
       return sampleFlow(
         `in:${entry.receiver?.id || entry.trackName}`,
         report,
         "inbound-rtp",
         "bytesReceived",
+        entry.track,
+        entry.mid,
       );
     });
     const [outboundResults, inboundResults] = await Promise.all([
@@ -641,6 +836,7 @@ export class CloudflareRealtimeSession {
     this.consumers.clear();
     this.publications.clear();
     this.remoteByMid.clear();
+    this.pendingRemoteTracks.clear();
     this.rtpSamples.clear();
     this.subscriptionTasks.clear();
     this.negotiationQueue = Promise.resolve();

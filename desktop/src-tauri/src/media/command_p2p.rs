@@ -175,6 +175,9 @@ pub async fn media_p2p_add_track(
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
     let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    if handles.p2p_tracks.contains_key(&(p2p_handle, source.clone())) {
+        return Err("native P2P source is already attached".to_string());
+    }
     let c_source = CString::new(source.as_str()).map_err(|error| error.to_string())?;
     let track = if kind == "video" {
         unsafe { ffi::lib_dspeak_media_get_video_track(c_source.as_ptr()) }
@@ -204,6 +207,13 @@ pub async fn media_p2p_add_track(
         }
     };
     if pointer.is_null() {
+        unsafe {
+            if kind == "video" {
+                ffi::lib_dspeak_media_p2p_remove_video_track(handle, track);
+            } else {
+                ffi::lib_dspeak_media_p2p_remove_audio_track(handle, track);
+            }
+        }
         return Err("native P2P track did not return an identifier".to_string());
     }
     let track_id = unsafe { CStr::from_ptr(pointer) }
@@ -231,7 +241,8 @@ pub async fn media_p2p_remove_track(
     let handle = owned_p2p_handle(&handles, p2p_handle)?;
     let (kind, track) = handles
         .p2p_tracks
-        .remove(&(p2p_handle, source))
+        .get(&(p2p_handle, source.clone()))
+        .cloned()
         .ok_or_else(|| "native P2P source is not attached".to_string())?;
     let result = unsafe {
         if kind == "video" {
@@ -243,6 +254,7 @@ pub async fn media_p2p_remove_track(
     if result != 0 {
         return Err(format!("native P2P {kind} track removal failed"));
     }
+    handles.p2p_tracks.remove(&(p2p_handle, source));
     Ok(())
 }
 

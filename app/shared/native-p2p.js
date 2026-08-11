@@ -66,6 +66,7 @@ export class NativeP2pMesh {
     this.getAudioStereo = getAudioStereo;
     this.connections = new Map();
     this.localSources = new Map();
+    this.sourceTransmission = new Map();
     this.remoteSources = new Map();
     this.localPeerId = null;
     this.epoch = 0;
@@ -220,11 +221,16 @@ export class NativeP2pMesh {
       lastInboundBytes: null,
       lastOutboundProgressAt: performance.now(),
       lastInboundProgressAt: performance.now(),
+      lastOutboundSourceBytes: new Map(),
+      lastInboundSourceBytes: new Map(),
+      lastOutboundSourceProgressAt: new Map(),
+      lastInboundSourceProgressAt: new Map(),
       signalingOperation: null,
       signalingPhase: null,
       signalingStep: null,
       negotiationRequested: false,
       negotiationTimer: null,
+      closed: false,
     };
     this.connections.set(peerId, state);
 
@@ -304,7 +310,9 @@ export class NativeP2pMesh {
       .filter(
         ([key, source]) =>
           key.startsWith(`${state.peerId}:`) &&
-          !state.remoteTracks.has(source) &&
+          ![...state.remoteTracks.values()].some(
+            (entry) => entry.source === source,
+          ) &&
           (expectedKind === "video"
             ? source === "camera" || source === "screen"
             : source === "audio" || source === "screen-audio"),
@@ -312,8 +320,13 @@ export class NativeP2pMesh {
       .map(([, source]) => source);
     const source =
       exactSource ||
-      (unmatchedSources.length === 1 ? unmatchedSources[0] : track.kind);
+      (unmatchedSources.length === 1
+        ? unmatchedSources[0]
+        : `${expectedKind}:${String(track.id)}`);
     const key = p2pRemoteFeedKey(state.peerId, source);
+    const previous = state.remoteTracks.get(source);
+    if (previous?.track === track) return;
+    if (previous) this.onRemoteTrackEnded(previous);
     if (track.kind === "audio") {
       state.audioReceivers.set(source, event.receiver);
     }
@@ -332,8 +345,8 @@ export class NativeP2pMesh {
     track.addEventListener(
       "ended",
       () => {
-        if (state.remoteTracks.get(source)?.track === track)
-          state.remoteTracks.delete(source);
+        for (const [key, current] of state.remoteTracks)
+          if (current.track === track) state.remoteTracks.delete(key);
         if (state.retiredRemoteTracks.get(source)?.track === track)
           state.retiredRemoteTracks.delete(source);
         state.audioReceivers.delete(source);
@@ -370,12 +383,56 @@ export class NativeP2pMesh {
   }
 
   async publishSourceInternal(source, track, stream) {
+    const previous = this.localSources.get(source);
+    const initialStates = new Map(
+      [...this.connections.values()].map((state) => [state.peerId, state]),
+    );
     this.localSources.set(source, { track, stream });
-    await Promise.all(
+    const results = await Promise.allSettled(
       [...this.connections.values()].map((state) =>
         this.attachSource(state, source, { track, stream }),
       ),
     );
+    const failure = results.find((result) => result.status === "rejected");
+    if (!failure) return;
+    if (previous) this.localSources.set(source, previous);
+    else this.localSources.delete(source);
+    const rollbackStates = [
+      ...new Set([...initialStates.values(), ...this.connections.values()]),
+    ];
+    const rollbackResults = await Promise.allSettled(
+      rollbackStates.map(async (state) => {
+        if (state.closed || !this.connections.has(state.peerId)) return;
+        const sender = state.senders.get(source);
+        if (previous) {
+          if (sender) {
+            await this.updateTrack(sender, async () => {
+              await sender.replaceTrack(previous.track);
+              await this.configureSender(sender, source, previous.track);
+              await this.setSenderReceiving(
+                state,
+                source,
+                state.sourceReceiving.get(source) ?? true,
+              );
+            });
+          } else {
+            await this.attachSource(state, source, previous);
+          }
+          return;
+        }
+        if (!sender) return;
+        await this.updateTrack(sender, () => sender.replaceTrack(null));
+        state.senders.delete(source);
+        state.sourceReceiving.delete(source);
+        this.signal(state.peerId, { sourceRemoved: { source } });
+      }),
+    );
+    const rollbackFailure = rollbackResults.find(
+      (result) => result.status === "rejected",
+    );
+    if (rollbackFailure)
+      this.fail("source-rollback-failed", rollbackFailure.reason);
+    throw failure.reason;
   }
 
   async setSourceTransmission(source, enabled) {
@@ -430,24 +487,26 @@ export class NativeP2pMesh {
   }
 
   async setSenderActive(sender, active) {
-    if (!sender?.getParameters || !sender?.setParameters) return;
+    if (!sender) return false;
+    const track = sender.track;
+    if (track && "enabled" in track) track.enabled = Boolean(active);
+    if (!sender.getParameters || !sender.setParameters) return Boolean(track);
     return this.updateSender(sender, async () => {
       const parameters = sender.getParameters();
-      if (!parameters.encodings?.length) return false;
+      if (!parameters.encodings?.length) return Boolean(track);
       for (const encoding of parameters.encodings)
         encoding.active = Boolean(active);
       try {
         await sender.setParameters(parameters);
       } catch (error) {
         if (
-          Boolean(active) &&
           [
             "InvalidModificationError",
             "InvalidAccessError",
             "NotSupportedError",
           ].includes(error?.name)
         )
-          return false;
+          return Boolean(track);
         throw error;
       }
       return true;
@@ -467,6 +526,8 @@ export class NativeP2pMesh {
   async attachSource(state, source, entry) {
     const existing = state.senders.get(source);
     if (existing) {
+      const previousTrack = existing.track;
+      const previousReceiving = state.sourceReceiving.get(source) ?? true;
       try {
         await this.updateTrack(existing, async () => {
           await existing.replaceTrack(entry.track);
@@ -474,33 +535,49 @@ export class NativeP2pMesh {
           await this.setSenderReceiving(
             state,
             source,
-            (state.sourceReceiving.get(source) ?? true) &&
-              (this.sourceTransmission?.get(source) ?? true),
+            state.sourceReceiving.get(source) ?? true,
           );
         });
       } catch (error) {
+        try {
+          await this.updateTrack(existing, () =>
+            existing.replaceTrack(previousTrack),
+          );
+          await this.configureSender(existing, source, previousTrack);
+          await this.setSenderReceiving(state, source, previousReceiving);
+        } catch {}
         this.fail("track-replacement-failed", error);
         throw error;
       }
       this.signal(state.peerId, { sourceRestored: { source } });
       return existing;
     }
-    this.signal(state.peerId, { source: { trackId: entry.track.id, source } });
-    const sender = state.pc.addTrack(
-      entry.track,
-      entry.stream || new MediaStream([entry.track]),
-    );
-    applyP2pVideoCodecPreferences(state.pc);
-    state.senders.set(source, sender);
+    let sender = null;
+    let announced = false;
     try {
+      sender = state.pc.addTrack(
+        entry.track,
+        entry.stream || new MediaStream([entry.track]),
+      );
+      applyP2pVideoCodecPreferences(state.pc);
+      state.senders.set(source, sender);
+      this.signal(state.peerId, {
+        source: { trackId: entry.track.id, source },
+      });
+      announced = true;
       await this.configureSender(sender, source, entry.track);
       await this.setSenderReceiving(
         state,
         source,
-        (state.sourceReceiving.get(source) ?? true) &&
-          (this.sourceTransmission?.get(source) ?? true),
+        state.sourceReceiving.get(source) ?? true,
       );
     } catch (error) {
+      state.senders.delete(source);
+      state.sourceReceiving.delete(source);
+      try {
+        await sender?.replaceTrack(null);
+      } catch {}
+      if (announced) this.signal(state.peerId, { sourceRemoved: { source } });
       this.fail("sender-configuration-failed", error);
       throw error;
     }
@@ -538,6 +615,8 @@ export class NativeP2pMesh {
           this.fail("track-removal-failed", error);
           throw error;
         }
+        state.senders.delete(source);
+        state.sourceReceiving.delete(source);
         this.signal(state.peerId, { sourceRemoved: { source } });
       }),
     );
@@ -726,12 +805,22 @@ export class NativeP2pMesh {
   closeConnection(peerId) {
     const state = this.connections.get(peerId);
     if (!state) return;
+    state.closed = true;
+    state.negotiationRequested = false;
+    this.connections.delete(peerId);
     clearTimeout(state.disconnectTimer);
     clearTimeout(state.negotiationTimer);
-    for (const entry of state.remoteTracks.values())
-      this.onRemoteTrackEnded(entry);
+    for (const entry of state.remoteTracks.values()) {
+      try {
+        this.onRemoteTrackEnded(entry);
+      } catch (error) {
+        console.warn("[NativeP2P] Remote track cleanup failed", error);
+      }
+    }
     state.remoteTracks.clear();
     state.retiredRemoteTracks?.clear();
+    for (const key of this.remoteSources.keys())
+      if (key.startsWith(`${state.peerId}:`)) this.remoteSources.delete(key);
     state.audioReceivers.clear();
     try {
       state.channel?.close();
@@ -743,7 +832,6 @@ export class NativeP2pMesh {
     } catch (error) {
       console.warn("[NativeP2P] Peer connection cleanup failed", error);
     }
-    this.connections.delete(peerId);
   }
 
   closeAll() {

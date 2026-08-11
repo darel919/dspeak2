@@ -91,6 +91,8 @@
         autoplay
         playsinline
         :muted="muted"
+        @loadedmetadata="handleVideoReady"
+        @canplay="handleVideoReady"
         class="block h-full w-full object-contain"
       />
       <figcaption
@@ -223,6 +225,14 @@ function handleTouchEnd(event) {
   lastTouchAt = now;
 }
 
+function playVideoElement(element, label) {
+  if (!element?.srcObject || typeof element.play !== "function") return;
+  const playback = element.play();
+  playback?.catch?.((error) =>
+    console.warn(`[VideoFeed] ${label} playback failed`, error),
+  );
+}
+
 function drawNativeFrame() {
   const frame = props.nativeFrame;
   const canvas = nativeCanvasElement.value;
@@ -252,29 +262,20 @@ function attachStream() {
     drawNativeFrame();
     return;
   }
-  if (
-    previewEnabled.value &&
-    videoElement.value &&
-    videoElement.value.srcObject !== props.stream
-  ) {
-    videoElement.value.srcObject = props.stream;
-    videoElement.value
-      .play?.()
-      .catch((error) =>
-        console.warn("[VideoFeed] Remote preview playback failed", error),
-      );
+  if (previewEnabled.value && videoElement.value) {
+    if (videoElement.value.srcObject !== props.stream)
+      videoElement.value.srcObject = props.stream;
+    playVideoElement(videoElement.value, "Remote preview");
   }
-  if (
-    ownCameraElement.value &&
-    ownCameraElement.value.srcObject !== props.ownCameraStream
-  ) {
-    ownCameraElement.value.srcObject = props.ownCameraStream;
-    ownCameraElement.value
-      .play?.()
-      .catch((error) =>
-        console.warn("[VideoFeed] Local preview playback failed", error),
-      );
+  if (ownCameraElement.value) {
+    if (ownCameraElement.value.srcObject !== props.ownCameraStream)
+      ownCameraElement.value.srcObject = props.ownCameraStream;
+    playVideoElement(ownCameraElement.value, "Local preview");
   }
+}
+
+function handleVideoReady() {
+  playVideoElement(videoElement.value, "Remote preview");
 }
 
 function enablePreview() {

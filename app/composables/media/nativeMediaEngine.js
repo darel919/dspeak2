@@ -19,6 +19,7 @@ import {
   setOutputDevice,
   startScreenShare,
   stopScreenShare,
+  handleNativeCaptureError,
 } from "./native-media-engine-session.js";
 import {
   bindNativeEvents,
@@ -278,6 +279,10 @@ export class NativeMediaEngine extends MediaEngine {
 
   async _handleNativeTopology(topology = {}) {
     return handleNativeTopology(this, topology);
+  }
+
+  _handleNativeCaptureError(payload) {
+    return handleNativeCaptureError(this, payload);
   }
 
   _reportNativeP2pFailure(error) {
@@ -714,8 +719,18 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   async _removeNativeSource(source) {
-    await this.nativeSession?.removeSource(source);
-    await this.nativeP2pSession?.removeSource(source);
+    let failure = null;
+    try {
+      await this.nativeSession?.removeSource(source);
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      await this.nativeP2pSession?.removeSource(source);
+    } catch (error) {
+      failure ||= error;
+    }
+    if (failure) throw failure;
   }
 
   _mergeNativeCapabilities(capabilities = {}) {

@@ -7,8 +7,7 @@
     <NuxtPage />
     <GlobalVoiceStatus v-if="showGlobalVoiceStatus" />
     <PwaInstallPrompt />
-    <PwaUpdatePrompt />
-    <DesktopUpdatePrompt />
+    <UpdatePrompt />
     <DatabaseHealthPrompt />
     <FatalErrorPrompt />
     <CookieConsent />

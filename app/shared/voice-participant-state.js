@@ -9,6 +9,8 @@ export function createVoiceParticipantState({
   userDirectory,
   userVolumes,
 }) {
+  const pendingVoiceStates = new Map();
+
   function upsertUserProfile(profile) {
     if (!profile?.id) return;
     const userId = String(profile.id);
@@ -27,16 +29,19 @@ export function createVoiceParticipantState({
 
   function addConnectedUser(userId, userInfo) {
     const normalizedUserId = String(userId);
+    const pendingState = pendingVoiceStates.get(normalizedUserId);
+    pendingVoiceStates.delete(normalizedUserId);
     connectedUsers.value.set(normalizedUserId, {
       ...(userDirectory.value.get(normalizedUserId) || {}),
-      ...userInfo,
-      id: normalizedUserId,
       speaking: false,
       muted: false,
       deafened: false,
       cameraEnabled: false,
       screenSharing: false,
       soundboardActivity: null,
+      ...userInfo,
+      ...pendingState,
+      id: normalizedUserId,
     });
     publishConnectedUsers();
     if (
@@ -51,7 +56,9 @@ export function createVoiceParticipantState({
 
   function removeConnectedUser(userId) {
     clearSoundboardActivity(userId);
-    connectedUsers.value.delete(String(userId));
+    const normalizedUserId = String(userId);
+    pendingVoiceStates.delete(normalizedUserId);
+    connectedUsers.value.delete(normalizedUserId);
     publishConnectedUsers();
   }
 
@@ -108,19 +115,36 @@ export function createVoiceParticipantState({
   function updateUserVoiceState(userId, state) {
     const normalizedUserId = String(userId || "");
     const user = connectedUsers.value.get(normalizedUserId);
-    if (
-      !user ||
-      typeof state?.muted !== "boolean" ||
-      typeof state?.deafened !== "boolean"
-    )
+    const hasMuted = typeof state?.muted === "boolean";
+    const hasDeafened = typeof state?.deafened === "boolean";
+    if (!normalizedUserId || (!hasMuted && !hasDeafened)) return;
+    if (!user) {
+      if (hasMuted && hasDeafened)
+        pendingVoiceStates.set(normalizedUserId, {
+          muted: state.muted,
+          deafened: state.deafened,
+          ...(typeof state.cameraEnabled === "boolean"
+            ? { cameraEnabled: state.cameraEnabled }
+            : {}),
+          ...(typeof state.screenSharing === "boolean"
+            ? { screenSharing: state.screenSharing }
+            : {}),
+        });
       return;
+    }
     connectedUsers.value.set(normalizedUserId, {
       ...user,
-      muted: state.muted,
-      deafened: state.deafened,
-      cameraEnabled: state.cameraEnabled === true,
-      screenSharing: state.screenSharing === true,
-      ...(state.muted ? { speaking: false } : {}),
+      muted: hasMuted ? state.muted : user.muted,
+      deafened: hasDeafened ? state.deafened : user.deafened,
+      cameraEnabled:
+        typeof state.cameraEnabled === "boolean"
+          ? state.cameraEnabled
+          : user.cameraEnabled,
+      screenSharing:
+        typeof state.screenSharing === "boolean"
+          ? state.screenSharing
+          : user.screenSharing,
+      ...(state.muted === true ? { speaking: false } : {}),
     });
     publishConnectedUsers();
   }

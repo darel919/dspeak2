@@ -1,6 +1,7 @@
 import {
   DESKTOP_CAPTURE_ERROR_CODES,
   DesktopCaptureError,
+  assertDesktopCaptureMode,
   desktopCaptureRequest,
   nativeCaptureFailure,
 } from "../../shared/desktop-capture.js";
@@ -9,8 +10,18 @@ import { nativeOnlyError } from "./native-media-engine-common.js";
 export function startSystemAudioProduction(engine, args = []) {
   const options = args[0] || {};
   const selection = options.captureSelection || null;
+  if (selection)
+    assertDesktopCaptureMode(selection, ["audio", "both"], "system-audio");
   if (engine.activeScreenCapture?.mode === "both")
-    return Promise.resolve(engine.activeSystemAudioCapture);
+    return Promise.reject(
+      new DesktopCaptureError(
+        "System audio is already owned by the active screen-share capture.",
+        {
+          code: DESKTOP_CAPTURE_ERROR_CODES.SOURCE_CONFLICT,
+          operation: "system-audio",
+        },
+      ),
+    );
   if (options.explicitBrowserFallback && !selection) {
     if (engine.nativeOnly)
       throw nativeOnlyError("browser system audio fallback");
@@ -40,9 +51,11 @@ export function startSystemAudioProduction(engine, args = []) {
   const replaceActiveCapture = engine.activeSystemAudioCapture
     ? engine.stopSystemAudioProduction()
     : Promise.resolve();
+  let nativeCaptureStarted = false;
   return replaceActiveCapture
     .then(() => engine._invoke("media_start_system_audio", { request }))
     .then(async (result) => {
+      nativeCaptureStarted = true;
       engine.activeSystemAudioCapture = selection || {};
       const entry = {
         source: "screen-audio",
@@ -55,7 +68,15 @@ export function startSystemAudioProduction(engine, args = []) {
       await engine.nativeP2pSession?.addSource(entry);
       return producer || result;
     })
-    .catch((error) => {
+    .catch(async (error) => {
+      if (nativeCaptureStarted || engine.activeSystemAudioCapture !== null)
+        await engine
+          ._invoke("media_stop_system_audio", {
+            source: selection?.source || null,
+          })
+          .catch(() => {});
+      await engine._removeNativeSource("screen-audio").catch(() => {});
+      engine.activeSystemAudioCapture = null;
       engine.flags.nativeScreenAudio = false;
       const failure = nativeCaptureFailure(error, {
         operation: "system-audio",

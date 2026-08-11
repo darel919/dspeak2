@@ -32,21 +32,31 @@ export function nativeRtpStat(value, type, kind) {
 }
 
 export function nativeRtpStatForTrack(value, type, entry = {}) {
+  const stats = asStatObjects(value);
   const identifiers = [entry.trackId, entry.mid, entry.trackIdentifier]
     .map((identifier) => String(identifier || ""))
     .filter(Boolean);
-  const matching = asStatObjects(value).find((stat) => {
+  const byId = new Map(
+    stats
+      .filter((stat) => stat?.id != null)
+      .map((stat) => [String(stat.id), stat]),
+  );
+  const candidates = stats.filter((stat) => {
     if (stat.type !== type || stat.isRemote) return false;
-    const identifier = String(
-      stat.trackIdentifier || stat.trackId || stat.mid || "",
-    );
     const statKind = stat.kind || stat.mediaType;
-    return (
-      identifiers.includes(identifier) &&
-      (!entry.kind || !statKind || statKind === entry.kind)
-    );
+    return !entry.kind || !statKind || statKind === entry.kind;
   });
-  return matching || nativeRtpStat(value, type, entry.kind);
+  const matching = candidates.find((stat) => {
+    const related =
+      stat.trackId == null ? null : byId.get(String(stat.trackId));
+    return [
+      stat.trackIdentifier,
+      stat.trackId,
+      stat.mid,
+      related?.trackIdentifier,
+    ].some((identifier) => identifiers.includes(String(identifier || "")));
+  });
+  return matching || (candidates.length === 1 ? candidates[0] : null);
 }
 
 function candidateDetails(candidate) {

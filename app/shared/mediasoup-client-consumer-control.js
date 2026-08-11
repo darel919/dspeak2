@@ -50,6 +50,7 @@ export async function setMediasoupConsumerReceiving(session, entry, receiving) {
 
 export function closeMediasoupConsumerByProducer(session, producerId) {
   session.requestedConsumers.delete(producerId);
+  session.pendingConsumers.delete(producerId);
   session.consumerRetryAttempts.delete(producerId);
   clearTimeout(session.consumerRetryTimers.get(producerId));
   session.consumerRetryTimers.delete(producerId);
@@ -62,12 +63,24 @@ export function closeMediasoupConsumerByProducer(session, producerId) {
 }
 
 export function handleMediasoupServerError(session, data) {
-  const error = new Error(data?.message || "SFU signaling request failed");
+  const error = new Error(
+    data?.message || data?.error || "SFU signaling request failed",
+  );
+  let handled = false;
   if (data?.requestId) {
-    session.pendingProduce.get(data.requestId)?.reject(error);
-    session.pending.get(data.requestId)?.reject(error);
+    const produceRequest = session.pendingProduce.get(data.requestId);
+    const pendingRequest = session.pending.get(data.requestId);
+    if (produceRequest) {
+      handled = true;
+      produceRequest.reject(error);
+    }
+    if (pendingRequest) {
+      handled = true;
+      pendingRequest.reject(error);
+    }
   }
   if (data?.requestType === "consume" && data.producerId) {
+    handled = true;
     session.requestedConsumers.delete(data.producerId);
     session.pendingConsumers.delete(data.producerId);
     const attempts = session.consumerRetryAttempts.get(data.producerId) || 0;
@@ -82,7 +95,7 @@ export function handleMediasoupServerError(session, data) {
     }
   }
   if (data?.requestType === "connect-transport" && data.transportId)
-    session.pending.get(data.requestId)?.reject(error);
+    handled = true;
   if (
     [
       "get-rtp-capabilities",
@@ -90,7 +103,9 @@ export function handleMediasoupServerError(session, data) {
       "create-transport",
     ].includes(data?.requestType)
   ) {
+    handled = true;
     session.readyReject?.(error);
     session.resetReadiness();
   }
+  return handled;
 }

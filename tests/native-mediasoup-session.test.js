@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../shared/media-signaling-protocol.js";
 import { NativeMediasoupSfuSession } from "../app/shared/native-mediasoup-session.js";
 
 const serverHello = {
@@ -509,6 +510,26 @@ describe("NativeMediasoupSfuSession", () => {
     assert.ok(findMessage({ sent }, "get-rtp-capabilities"));
     session.readyReject?.(new Error("test complete"));
     await negotiation.catch(() => undefined);
+  });
+
+  it("stops native P2P before protocol teardown leaves native media", async () => {
+    const order = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command) => {
+        order.push(command);
+      },
+      onBeforeNativeTeardown: async () => {
+        order.push("p2p-shutdown");
+      },
+    });
+
+    session._handleSignalingClose({
+      code: MEDIA_SIGNALING_CLIENT_PROTOCOL.closeCode,
+      reason: "upgrade required",
+    });
+    await session.nativeTeardownPromise;
+
+    assert.deepEqual(order, ["p2p-shutdown", "media_leave"]);
   });
 
   it("acknowledges signaling heartbeats without restarting the native SFU", async () => {

@@ -36,7 +36,6 @@ export function createHybridMediaTopologyController({
   mediaGeneration,
   mediaReadinessPollMs,
   mediaHandoffTimeoutMs,
-  matchesPreparedActivation,
   onP2pQualification,
   onRemotePublication,
   onTopologyStateUpdated,
@@ -130,7 +129,7 @@ export function createHybridMediaTopologyController({
       send: (message) =>
         provider === "cloudflare-realtime"
           ? send(message)
-          : getProviderSocket()?.send(message) || send(message),
+          : Boolean(getProviderSocket()?.send(message)),
       iceServers: getIceServers(),
       onRemoteTrack: (entry) => handoff.stage(entry, getActiveProvider()),
       onRemoteTrackEnded: (entry) => handoff.remove(entry),
@@ -398,10 +397,12 @@ export function createHybridMediaTopologyController({
         localPeerId: getLocalPeerId(),
       });
       await publishLocalSources(getP2pMesh());
+      await waitForRemoteTracks("p2p", data);
       mediaGeneration.assert(generation);
     } else if (data.mode === "sfu") {
       await closeP2pSafely();
       handoff.retire("p2p");
+      await waitForRemoteTracks("sfu", data);
     }
     const readiness =
       data.mode === "sfu" ? getSfu()?.connectionState() : { ready: true };
@@ -605,8 +606,7 @@ export function createHybridMediaTopologyController({
     if (!mesh) throw new Error("Native WebRTC is unavailable");
     await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
     await publishLocalSources(mesh);
-    if (!matchesPreparedActivation(preparedTransition, data, "p2p"))
-      await waitForRemoteTracks("p2p", data);
+    await waitForRemoteTracks("p2p", data);
     mediaGeneration.assert(generation);
     handoff.bind("p2p");
     setActiveProvider("p2p");
@@ -641,8 +641,7 @@ export function createHybridMediaTopologyController({
     const session = ensureSfu();
     await session.initialize();
     for (const entry of localSources.values()) await session.addSource(entry);
-    if (!matchesPreparedActivation(preparedTransition, data, "sfu"))
-      await waitForRemoteTracks("sfu", data);
+    await waitForRemoteTracks("sfu", data);
     mediaGeneration.assert(generation);
     handoff.bind("sfu");
     setActiveProvider("sfu");

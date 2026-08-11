@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { BrowserMediaEngine } from "../app/composables/media/browserMediaEngine.js";
 import { NativeMediaEngine } from "../app/composables/media/nativeMediaEngine.js";
+import { handleNativeCaptureError } from "../app/composables/media/native-media-engine-session.js";
 import {
   resolveNativeMediaFlags,
   useMediaEngine,
@@ -105,6 +106,49 @@ describe("MediaEngine adapters", () => {
     assert.equal(engine.browserEngine instanceof BrowserMediaEngine, false);
   });
 
+  it("cleans up native capture and synchronizes microphone state after a runtime capture error", async () => {
+    const removed = [];
+    const invoked = [];
+    const emitted = [];
+    const voiceStore = {
+      deafened: false,
+      micMuted: false,
+      getAuthenticatedUser: () => ({ id: "user-1" }),
+      updateUserVoiceState: (userId, state) =>
+        emitted.push(["voice-state", userId, state]),
+    };
+    const engine = {
+      voiceStore,
+      nativeSession: {
+        sendParticipantVoiceState: (state) =>
+          emitted.push(["participant-state", state]),
+      },
+      _emit: (...args) => emitted.push(args),
+      _invoke: async (command, payload) => invoked.push([command, payload]),
+      _removeNativeSource: async (source) => removed.push(source),
+    };
+
+    const failure = await handleNativeCaptureError(engine, {
+      route: "microphone",
+      errorCode: 17,
+      message: "Input device stopped",
+    });
+
+    assert.equal(failure.code, "NATIVE_CAPTURE_RUNTIME_FAILED");
+    assert.deepEqual(removed, ["audio"]);
+    assert.deepEqual(invoked, [["media_set_microphone", { enabled: false }]]);
+    assert.equal(voiceStore.micMuted, true);
+    assert.deepEqual(emitted[0], [
+      "voice-state",
+      "user-1",
+      { muted: true, deafened: false },
+    ]);
+    assert.deepEqual(emitted[1], [
+      "participant-state",
+      { muted: true, deafened: false },
+    ]);
+  });
+
   it("BrowserMediaEngine delegates session operations without changing them", async () => {
     const { calls, session } = createSession();
     const engine = new BrowserMediaEngine(session);
@@ -124,6 +168,29 @@ describe("MediaEngine adapters", () => {
       ["stopVideo", "screen"],
       ["disconnect"],
     ]);
+  });
+
+  it("does not report a browser source as enabled when its session operation fails", async () => {
+    const session = createSession().session;
+    session.startAudioProduction = async () => {
+      throw new Error("microphone unavailable");
+    };
+    session.startVideoProduction = async () => {
+      throw new Error("camera unavailable");
+    };
+    const engine = new BrowserMediaEngine(session);
+
+    await assert.rejects(
+      () => engine.startAudioProduction(),
+      /microphone unavailable/,
+    );
+    await assert.rejects(
+      () => engine.startVideoProduction("camera"),
+      /camera unavailable/,
+    );
+    assert.equal(engine.isMicrophoneEnabled(), false);
+    assert.equal(engine.isCameraEnabled(), false);
+    assert.equal(engine.isScreenSharing(), false);
   });
 
   it("NativeMediaEngine delegates all capabilities when native RTC is disabled", async () => {
@@ -289,6 +356,124 @@ describe("MediaEngine adapters", () => {
     ]);
   });
 
+  it("rolls back native microphone capture when source publication fails", async () => {
+    const calls = [];
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeMicrophone: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => calls.push(command),
+      },
+    });
+    engine.nativeSession = {
+      addSource: async () => {
+        throw new Error("microphone publication failed");
+      },
+      removeSource: async (source) => calls.push(["sfu-remove", source]),
+    };
+    engine.nativeP2pSession = {
+      removeSource: async (source) => calls.push(["p2p-remove", source]),
+    };
+
+    await assert.rejects(
+      () => engine.setMicrophoneEnabled(true),
+      /microphone publication failed/,
+    );
+    assert.deepEqual(calls, [
+      "media_set_microphone",
+      ["sfu-remove", "audio"],
+      ["p2p-remove", "audio"],
+      "media_set_microphone",
+    ]);
+  });
+
+  it("rolls back native camera capture when source publication fails", async () => {
+    const calls = [];
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeCamera: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => calls.push(command),
+      },
+    });
+    engine.nativeSession = {
+      addSource: async () => {
+        throw new Error("camera publication failed");
+      },
+      removeSource: async (source) => calls.push(["sfu-remove", source]),
+    };
+    engine.nativeP2pSession = {
+      removeSource: async (source) => calls.push(["p2p-remove", source]),
+    };
+
+    await assert.rejects(
+      () => engine.setCameraEnabled(true),
+      /camera publication failed/,
+    );
+    assert.deepEqual(calls, [
+      "media_set_camera",
+      ["sfu-remove", "camera"],
+      ["p2p-remove", "camera"],
+      "media_set_camera",
+    ]);
+  });
+
+  it("does not let native system audio reuse combined screen audio", async () => {
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeScreenAudio: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async () => {
+          throw new Error("capture must not start");
+        },
+      },
+    });
+    engine.activeScreenCapture = { mode: "both" };
+    engine.activeSystemAudioCapture = {
+      mode: "both",
+      combinedWithScreen: true,
+    };
+
+    await assert.rejects(
+      () => engine.startSystemAudioProduction(),
+      (error) => error?.code === "DESKTOP_CAPTURE_SOURCE_CONFLICT",
+    );
+  });
+
+  it("does not start native screen video over standalone system audio", async () => {
+    const calls = [];
+    const engine = new NativeMediaEngine({
+      flags: {
+        nativeRtc: true,
+        nativeBackendReady: true,
+        nativeScreenShare: true,
+      },
+      nativeOnly: true,
+      tauri: {
+        invoke: async (command) => calls.push(command),
+      },
+    });
+    engine.activeSystemAudioCapture = { source: { sourceId: "audio-1" } };
+
+    await assert.rejects(
+      () => engine.startScreenShare(),
+      (error) => error?.code === "DESKTOP_CAPTURE_SOURCE_CONFLICT",
+    );
+    assert.deepEqual(calls, []);
+  });
+
   it("NativeMediaEngine keeps screen video and system audio in parity", async () => {
     const calls = [];
     const nativeSession = {
@@ -408,6 +593,7 @@ describe("MediaEngine adapters", () => {
       ["sfu-remove", "screen-audio"],
       ["p2p-remove", "screen-audio"],
       "media_stop_screen_share",
+      "media_stop_system_audio",
     ]);
   });
 

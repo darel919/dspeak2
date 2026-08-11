@@ -98,3 +98,79 @@ test("provider handshake send failures reject the connection safely", async () =
     globalThis.WebSocket = previousWebSocket;
   }
 });
+
+test("provider clean closes before the handshake reject the connection", async () => {
+  const previousWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  const failures = [];
+  try {
+    const provider = new MediasoupProviderSocket({
+      onMessage: () => {},
+      onFailure: (error) => failures.push(error),
+    });
+    const opening = provider.connect({
+      signalingUrl: "wss://provider.example",
+      ticket: "ticket",
+    });
+    const socket = provider.socket;
+    socket.close(1000, "provider closed");
+
+    await assert.rejects(opening, /provider closed/);
+    assert.equal(failures.length, 1);
+  } finally {
+    globalThis.WebSocket = previousWebSocket;
+  }
+});
+
+test("provider error responses are offered to the request handler before escalation", async () => {
+  const previousWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  const failures = [];
+  const messages = [];
+  try {
+    const provider = new MediasoupProviderSocket({
+      onMessage: async (type, data) => {
+        messages.push([type, data]);
+        return true;
+      },
+      onFailure: (error) => failures.push(error),
+    });
+    const opening = provider.connect({
+      signalingUrl: "wss://provider.example",
+      ticket: "ticket",
+    });
+    const socket = provider.socket;
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.emit("message", { data: JSON.stringify({ type: "hi919" }) });
+    await opening;
+    socket.emit("message", {
+      data: JSON.stringify({
+        type: "error919",
+        error: "Transport not found",
+        requestId: "connect-1",
+        data: {
+          message: "Transport not found",
+          requestId: "connect-1",
+          requestType: "connect-transport",
+          transportId: "transport-1",
+        },
+      }),
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(messages, [
+      [
+        "error",
+        {
+          message: "Transport not found",
+          requestId: "connect-1",
+          requestType: "connect-transport",
+          transportId: "transport-1",
+        },
+      ],
+    ]);
+    assert.equal(failures.length, 0);
+  } finally {
+    globalThis.WebSocket = previousWebSocket;
+  }
+});

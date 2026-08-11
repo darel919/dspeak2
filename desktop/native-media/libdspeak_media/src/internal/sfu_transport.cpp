@@ -663,6 +663,15 @@ extern "C" void lib_dspeak_media_destroy_consumer(lib_dspeak_media_consumer_t* c
     try {
         if (!consumer) return;
         if (consumer->consumer) {
+            auto track = consumer->consumer->GetTrack();
+            if (track && consumer->audio_sink && track->kind() == "audio") {
+                static_cast<webrtc::AudioTrackInterface*>(track)
+                    ->RemoveSink(consumer->audio_sink.get());
+            }
+            if (track && consumer->video_sink && track->kind() == "video") {
+                static_cast<webrtc::VideoTrackInterface*>(track)
+                    ->RemoveSink(consumer->video_sink.get());
+            }
             lib_dspeak_media_push_receive_track_closed_event(
                 consumer->consumer->GetId().c_str(),
                 consumer->consumer->GetProducerId().c_str(),

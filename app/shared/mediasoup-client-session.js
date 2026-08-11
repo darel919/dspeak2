@@ -74,6 +74,7 @@ export class MediasoupClientSession {
     this.recvTransport = null;
     this.sources = new Map();
     this.producers = new Map();
+    this.sourceTransmission = new Map();
     this.sourcePublications = new Map();
     this.sourceOperations = new Map();
     this.consumers = new Map();
@@ -237,8 +238,7 @@ export class MediasoupClientSession {
       return true;
     }
     if (type === "error") {
-      this.handleServerError(data);
-      return true;
+      return this.handleServerError(data);
     }
     return false;
   }
@@ -429,9 +429,23 @@ export class MediasoupClientSession {
       const track = entry.track.clone();
       try {
         await existing.producer.replaceTrack({ track });
+        await this.setSourceTransmission(
+          entry.source,
+          this.sourceTransmission?.get(entry.source) !== false,
+        );
       } catch (error) {
+        try {
+          await existing.producer.replaceTrack({ track: existing.track });
+          await this.setSourceTransmission(
+            entry.source,
+            this.sourceTransmission?.get(entry.source) !== false,
+          );
+        } catch (rollbackError) {
+          this.onError?.(rollbackError);
+        }
         track.stop();
         if (previousSource) this.sources.set(entry.source, previousSource);
+        else this.sources.delete(entry.source);
         throw error;
       }
       existing.track.stop();
@@ -528,7 +542,10 @@ export class MediasoupClientSession {
       return null;
     }
     this.producers.set(entry.source, { producer, track, source: entry.source });
-    if (this.sourceTransmission?.get(entry.source) === false) producer.pause();
+    await this.setSourceTransmission(
+      entry.source,
+      this.sourceTransmission?.get(entry.source) !== false,
+    );
     producer.on("transportclose", () => {
       if (this.producers.get(entry.source)?.producer !== producer) return;
       this.producers.delete(entry.source);
@@ -651,7 +668,7 @@ export class MediasoupClientSession {
       key: data.producerId,
       producerId: data.producerId,
       userId: data.userId,
-      source: data.source || data.kind,
+      source: data.source || data.appData?.source || data.kind,
       provider: "sfu",
       consumer,
       track: consumer.track,
@@ -781,14 +798,36 @@ export class MediasoupClientSession {
       !!this.recvTransport ||
       this.producers.size > 0 ||
       this.consumers.size > 0;
-    if (hadMedia && !this.closed) this.send({ type: "close-media" });
+    if (hadMedia && !this.closed) {
+      try {
+        this.send({ type: "close-media" });
+      } catch (error) {
+        this.onError?.(error);
+      }
+    }
     for (const entry of this.producers.values()) {
-      entry.producer.close();
-      entry.track.stop();
+      try {
+        entry.producer.close();
+      } catch (error) {
+        this.onError?.(error);
+      }
+      try {
+        entry.track.stop();
+      } catch (error) {
+        this.onError?.(error);
+      }
     }
     for (const entry of this.consumers.values()) {
-      entry.consumer.close();
-      entry.close();
+      try {
+        entry.consumer.close();
+      } catch (error) {
+        this.onError?.(error);
+      }
+      try {
+        entry.close();
+      } catch (error) {
+        this.onError?.(error);
+      }
     }
     this.producers.clear();
     this.sourcePublications.clear();
@@ -800,8 +839,16 @@ export class MediasoupClientSession {
     this.recoveryTimers.clear();
     this.recoveryAttempts.clear();
     this.recoveryOperations.clear();
-    this.sendTransport?.close();
-    this.recvTransport?.close();
+    try {
+      this.sendTransport?.close();
+    } catch (error) {
+      this.onError?.(error);
+    }
+    try {
+      this.recvTransport?.close();
+    } catch (error) {
+      this.onError?.(error);
+    }
     this.sendTransport = null;
     this.recvTransport = null;
     this.device = null;

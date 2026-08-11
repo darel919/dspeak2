@@ -102,6 +102,56 @@ test("screen capture requests the browser picker before publication work", async
   await starting;
 });
 
+test("screen video refuses to overwrite standalone system audio", async () => {
+  const audioTrack = fakeTrack("standalone-system-audio");
+  audioTrack.kind = "audio";
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      getDisplayMedia: async () => {
+        throw new Error("the picker must not open");
+      },
+    },
+    getSettings: () => ({ screenVideo: {} }),
+    onSource: () => Promise.resolve(),
+    onSourceEnded() {},
+  });
+  manager.register("screen-audio", fakeStream(audioTrack), audioTrack, {
+    ownerSource: "system-audio",
+  });
+
+  await assert.rejects(
+    () => manager.startVideo("screen"),
+    (error) => error?.code === "DESKTOP_CAPTURE_SOURCE_CONFLICT",
+  );
+  assert.equal(manager.sources.get("screen-audio").track, audioTrack);
+  assert.equal(audioTrack.readyState, "live");
+});
+
+test("standalone system audio refuses to overwrite combined screen audio", async () => {
+  const audioTrack = fakeTrack("combined-screen-audio");
+  audioTrack.kind = "audio";
+  const manager = new MediaCaptureManager({
+    mediaDevices: {
+      getDisplayMedia: async () => {
+        throw new Error("the picker must not open");
+      },
+    },
+    getSettings: () => ({}),
+    onSource: () => Promise.resolve(),
+    onSourceEnded() {},
+  });
+  manager.register("screen-audio", fakeStream(audioTrack), audioTrack, {
+    ownerSource: "screen",
+  });
+
+  await assert.rejects(
+    () => manager.startSystemAudio(),
+    (error) => error?.code === "DESKTOP_CAPTURE_SOURCE_CONFLICT",
+  );
+  assert.equal(manager.sources.get("screen-audio").track, audioTrack);
+  assert.equal(audioTrack.readyState, "live");
+});
+
 test("failed selected microphone falls back without losing its identity", async () => {
   const expectedStream = { id: "default-stream" };
   const calls = [];

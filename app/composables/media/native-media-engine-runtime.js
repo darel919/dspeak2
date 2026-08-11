@@ -149,7 +149,9 @@ async function applyNativeTopology(
       await engine.nativeP2pSession?.applyTopology(p2pTopology);
       assertCurrentNativeTopology(engine, topologyKey, generation);
       if (mode === "p2p") {
-        await engine.nativeSession?.activateProvider?.("mediasoup");
+        await engine.nativeSession?.activateProvider?.("mediasoup", {
+          closeMedia: true,
+        });
         assertCurrentNativeTopology(engine, topologyKey, generation);
         await waitForNativeMediaReadiness(
           engine,
@@ -167,6 +169,13 @@ async function applyNativeTopology(
           topologyKey,
           generation,
         );
+      if (mode === "switching" && target === "p2p") {
+        await engine.nativeSession?.activateProvider?.("mediasoup", {
+          closeMedia: true,
+        });
+        assertCurrentNativeTopology(engine, topologyKey, generation);
+        engine.nativeProvider = "p2p";
+      }
     } else {
       await engine.nativeP2pSession?.applyTopology({
         ...p2pTopology,
@@ -174,7 +183,9 @@ async function applyNativeTopology(
       });
       assertCurrentNativeTopology(engine, topologyKey, generation);
       if (mode === "sfu" || target === "sfu") {
-        await engine.nativeSession?.activateProvider?.(provider);
+        await engine.nativeSession?.activateProvider?.(provider, {
+          ensureMedia: true,
+        });
         assertCurrentNativeTopology(engine, topologyKey, generation);
         await waitForNativeMediaReadiness(
           engine,
@@ -285,8 +296,8 @@ export async function shutdown(engine) {
   await engine.nativeTopologyOperation?.catch(() => {});
   engine.nativeTopologyOperation = null;
   if (engine.flags.nativeRtc && hasNativeCapability(engine.flags)) {
-    await engine.nativeSession?.disconnect().catch(() => undefined);
     await engine.nativeP2pSession?.shutdown().catch(() => undefined);
+    await engine.nativeSession?.disconnect().catch(() => undefined);
     await engine._invoke("media_shutdown").catch(() => undefined);
   }
   if (!engine.nativeOnly) await engine.browserEngine.shutdown();

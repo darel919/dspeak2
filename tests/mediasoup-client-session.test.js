@@ -96,6 +96,15 @@ test("server errors reject only matching correlated requests", async () => {
   assert.equal((await transportError).message, "connect rejected");
 });
 
+test("closing a producer cancels a consumer request waiting for a transport", async () => {
+  const client = session();
+  client.pendingConsumers.add("producer-closed");
+
+  await client.handle("producer-closed", { producerId: "producer-closed" });
+
+  assert.equal(client.pendingConsumers.has("producer-closed"), false);
+});
+
 test("reordered producer responses resolve their matching requests", async () => {
   const client = session();
   const results = [];

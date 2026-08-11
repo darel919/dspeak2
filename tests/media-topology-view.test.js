@@ -114,7 +114,15 @@ describe("media-topology-view", () => {
     ]);
 
     assert.deepEqual(added, [
-      ["user-1", { display_name: "Remote user", id: "user-1" }],
+      [
+        "user-1",
+        {
+          cameraEnabled: false,
+          display_name: "Remote user",
+          id: "user-1",
+          screenSharing: false,
+        },
+      ],
     ]);
     assert.deepEqual(profiles, [{ display_name: "Remote user", id: "user-1" }]);
     assert.deepEqual(removed, []);

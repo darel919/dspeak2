@@ -69,6 +69,62 @@ test("SFU source removal absorbs an expected session cancellation", async () => 
   assert.equal(harness.error.value, null);
 });
 
+test("unexpected microphone capture loss marks the local participant muted", async () => {
+  const voiceStore = {
+    micMuted: false,
+    deafened: false,
+    screenSharing: false,
+    systemAudioSharing: false,
+  };
+  const harness = controller({ voiceStore });
+  const entry = {
+    source: "audio",
+    track: { id: "microphone" },
+  };
+  harness.localSources.set(entry.source, entry);
+
+  harness.instance.removeSource(entry, { unexpected: true });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(voiceStore.micMuted, true);
+  assert.deepEqual(
+    harness.sent.find((message) => message.type === "participant-voice-state")
+      ?.data,
+    { muted: true, deafened: false },
+  );
+  assert.match(harness.error.value, /capture ended/i);
+});
+
+test("a muted microphone source is published with its track disabled", async () => {
+  const voiceStore = {
+    micMuted: true,
+    deafened: false,
+  };
+  let publishedTrack = null;
+  const harness = controller({
+    voiceStore,
+    getSfu: () => ({
+      async addSource(entry) {
+        publishedTrack = entry.track;
+      },
+    }),
+  });
+  const entry = {
+    source: "audio",
+    stream: {},
+    track: {
+      id: "microphone",
+      kind: "audio",
+      readyState: "live",
+      enabled: true,
+    },
+  };
+
+  await harness.instance.publishSource(entry);
+
+  assert.equal(publishedTrack.enabled, false);
+});
+
 test("failed SFU publication never advertises a local source", async () => {
   const harness = controller({
     getSfu: () => ({

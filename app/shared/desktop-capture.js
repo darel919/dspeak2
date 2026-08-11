@@ -73,6 +73,7 @@ export function getNativeCaptureCapability(value, mode = "video") {
 
 export const DESKTOP_CAPTURE_ERROR_CODES = Object.freeze({
   INVALID_REQUEST: "DESKTOP_CAPTURE_INVALID_REQUEST",
+  SOURCE_CONFLICT: "DESKTOP_CAPTURE_SOURCE_CONFLICT",
   NATIVE_UNAVAILABLE: "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
   NATIVE_UNSUPPORTED: "DESKTOP_CAPTURE_NATIVE_UNSUPPORTED",
 });
@@ -118,6 +119,24 @@ export function assertDesktopCaptureSelection(value, operation = "capture") {
     {
       code: DESKTOP_CAPTURE_ERROR_CODES.INVALID_REQUEST,
       operation,
+    },
+  );
+}
+
+export function assertDesktopCaptureMode(
+  value,
+  allowedModes,
+  operation = "capture",
+) {
+  const selection = assertDesktopCaptureSelection(value, operation);
+  const modes = Array.isArray(allowedModes) ? allowedModes : [allowedModes];
+  if (modes.includes(selection.mode)) return selection;
+  throw new DesktopCaptureError(
+    `The selected desktop capture mode is incompatible with ${operation}.`,
+    {
+      code: DESKTOP_CAPTURE_ERROR_CODES.INVALID_REQUEST,
+      operation,
+      details: { mode: selection.mode, allowedModes: modes },
     },
   );
 }

@@ -1,4 +1,5 @@
 import { applyRtpSenderSettings } from "./rtp-sender-settings.js";
+import { findRtpStat } from "./rtc-media-stats.js";
 import { sortP2pVideoCodecPreferences } from "./video-settings.js";
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
@@ -92,8 +93,10 @@ export function applyP2pVideoCodecPreferences(pc) {
     const kind =
       transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind;
     if (kind !== "video" || !transceiver.setCodecPreferences) continue;
-    transceiver.setCodecPreferences(preferences);
-    applied = true;
+    try {
+      transceiver.setCodecPreferences(preferences);
+      applied = true;
+    } catch {}
   }
   return applied;
 }
@@ -169,35 +172,72 @@ export async function hasRequiredMediaFlow(pc, outboundCount, inboundCount) {
   );
 }
 
-export async function mediaFlowSnapshot(pc, suppliedReport = null) {
+export async function mediaFlowSnapshot(
+  pc,
+  suppliedReport = null,
+  { outboundTracks = null, inboundTracks = null } = {},
+) {
   const report = suppliedReport || (await pc.getStats());
   let flowingOutbound = 0;
   let flowingInbound = 0;
   let outboundBytes = 0;
   let inboundBytes = 0;
-  report.forEach((stat) => {
-    if (
-      stat.type === "outbound-rtp" &&
-      !stat.isRemote &&
-      Number(stat.bytesSent) > 0
-    ) {
-      flowingOutbound += 1;
-      outboundBytes += Number(stat.bytesSent);
+  const outboundFlows = [];
+  const inboundFlows = [];
+  const addTrackFlow = (tracks, type, field, flows) => {
+    for (const item of tracks || []) {
+      const track = item?.track || item;
+      const stat = findRtpStat(report, type, {
+        trackId: track?.id,
+        kind: track?.kind,
+      });
+      const bytes = Number(stat?.[field]);
+      const flowing = Number.isFinite(bytes) && bytes > 0;
+      flows.push({
+        key: item?.key || track?.id || null,
+        bytes: Number.isFinite(bytes) ? bytes : 0,
+        flowing,
+      });
+      if (!flowing) continue;
+      if (type === "outbound-rtp") {
+        flowingOutbound += 1;
+        outboundBytes += bytes;
+      } else {
+        flowingInbound += 1;
+        inboundBytes += bytes;
+      }
     }
-    if (
-      stat.type === "inbound-rtp" &&
-      !stat.isRemote &&
-      Number(stat.bytesReceived) > 0
-    ) {
-      flowingInbound += 1;
-      inboundBytes += Number(stat.bytesReceived);
-    }
-  });
+  };
+  if (outboundTracks || inboundTracks) {
+    addTrackFlow(outboundTracks, "outbound-rtp", "bytesSent", outboundFlows);
+    addTrackFlow(inboundTracks, "inbound-rtp", "bytesReceived", inboundFlows);
+  } else {
+    report.forEach((stat) => {
+      if (
+        stat.type === "outbound-rtp" &&
+        !stat.isRemote &&
+        Number(stat.bytesSent) > 0
+      ) {
+        flowingOutbound += 1;
+        outboundBytes += Number(stat.bytesSent);
+      }
+      if (
+        stat.type === "inbound-rtp" &&
+        !stat.isRemote &&
+        Number(stat.bytesReceived) > 0
+      ) {
+        flowingInbound += 1;
+        inboundBytes += Number(stat.bytesReceived);
+      }
+    });
+  }
   return {
     outboundCount: flowingOutbound,
     inboundCount: flowingInbound,
     outboundBytes,
     inboundBytes,
+    outboundFlows,
+    inboundFlows,
   };
 }
 
