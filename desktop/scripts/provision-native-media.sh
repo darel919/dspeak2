@@ -276,10 +276,6 @@ native_platform() {
         printf '%s\n' "windows-x64"
         return
         ;;
-      aarch64-pc-windows-msvc|arm64-pc-windows-msvc)
-        printf '%s\n' "windows-arm64"
-        return
-        ;;
       *)
         return 1
         ;;
@@ -298,14 +294,7 @@ native_host_platform() {
       printf '%s\n' "linux-x64"
       ;;
     MINGW*|MSYS*|CYGWIN*)
-      case "${RUNNER_ARCH:-${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}}:$(uname -m)" in
-        ARM64:*|arm64:*|AARCH64:*|aarch64:*|*:arm64|*:aarch64)
-          printf '%s\n' "windows-arm64"
-          ;;
-        *)
-          printf '%s\n' "windows-x64"
-          ;;
-      esac
+      printf '%s\n' "windows-x64"
       ;;
     *)
       return 1
@@ -363,9 +352,6 @@ native_target_cpu() {
     linux-x64|windows-x64)
       printf '%s\n' "x64"
       ;;
-    windows-arm64)
-      printf '%s\n' "arm64"
-      ;;
     *)
       return 1
       ;;
@@ -374,7 +360,7 @@ native_target_cpu() {
 
 platform_uses_windows_libraries() {
   case "$1" in
-    windows-x64|windows-arm64)
+    windows-x64)
       return 0
       ;;
     *)
@@ -697,7 +683,7 @@ clone_or_update_webrtc() {
       git fetch origin "$WEBRTC_BRANCH:refs/remotes/$WEBRTC_BRANCH" >&2
     fi
     git checkout -B "$WEBRTC_REVISION" "refs/remotes/$WEBRTC_BRANCH" >&2
-    gclient sync >&2
+    gclient sync --nohooks --no-history --with_branch_heads >&2
   )
   printf '%s\n' "$source"
 }

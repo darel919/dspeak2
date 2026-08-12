@@ -25,6 +25,7 @@ const [
   tauriMain,
   workflow,
   manifestScript,
+  nativeMediaProvisioner,
   settings,
   releaseVersionScript,
 ] = await Promise.all(
@@ -45,6 +46,7 @@ const [
     "../desktop/src-tauri/src/desktop/updates.rs",
     "../.github/workflows/desktop-build.yml",
     "../scripts/create-tauri-update-manifest.mjs",
+    "../desktop/scripts/provision-native-media.sh",
     "../app/pages/settings.vue",
     "../scripts/sync-release-version.mjs",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
@@ -161,13 +163,22 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
   assert.match(workflow, /\.nsis\.zip\.sig/);
-  assert.match(workflow, /windows-arm64/);
+  assert.match(workflow, /windows-x64/);
+  assert.doesNotMatch(workflow, /windows-arm64|windows-11-arm/);
   assert.match(manifestScript, /platforms/);
   assert.match(manifestScript, /packageMetadata/);
   assert.match(manifestScript, /releaseVersionFromTag/);
   assert.match(manifestScript, /commit/);
   assert.match(manifestScript, /signature/);
-  assert.match(manifestScript, /windows-aarch64/);
+  assert.match(manifestScript, /windows-x86_64/);
+  assert.doesNotMatch(manifestScript, /windows-aarch64/);
+  assert.equal(
+    nativeMediaProvisioner.match(
+      /gclient sync --nohooks --no-history --with_branch_heads/g,
+    )?.length,
+    3,
+  );
+  assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);
 });

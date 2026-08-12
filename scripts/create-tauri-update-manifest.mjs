@@ -55,10 +55,6 @@ const targets = [
     target: "windows-x86_64",
     pattern: /(?:x64|x86_64|amd64).*\.nsis\.zip$/i,
   },
-  {
-    target: "windows-aarch64",
-    pattern: /(?:arm64|aarch64).*\.nsis\.zip$/i,
-  },
 ];
 
 const platforms = {};
