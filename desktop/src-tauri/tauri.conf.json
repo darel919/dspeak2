@@ -7,7 +7,7 @@
     "frontendDist": "../.output/public",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "cd .. && DSPEAK_DESKTOP=1 npm run dev",
-    "beforeBuildCommand": "cd .. && NITRO_PRESET=static DSPEAK_DESKTOP=1 npx nuxi generate && rm -rf desktop/.output && cp -R .output desktop/.output"
+    "beforeBuildCommand": "node ../scripts/build-desktop-frontend.mjs"
   },
   "app": {
     "withGlobalTauri": true,

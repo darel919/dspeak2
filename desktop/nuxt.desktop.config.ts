@@ -44,7 +44,7 @@ export default defineNuxtConfig({
 
   rootDir,
   srcDir: resolve(rootDir, "app"),
-  serverDir: resolve(rootDir, "server"),
+  serverDir: resolve(desktopDir, "server"),
   alias: {
     "@": resolve(rootDir, "app"),
     "~": resolve(rootDir, "app"),

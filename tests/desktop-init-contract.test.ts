@@ -8,15 +8,33 @@ async function read(path) {
 
 describe("desktop initialization contract", () => {
   it("uses one visible Nuxt startup surface", async () => {
-    const [tauriConfig, desktopConfig, initComponent] = await Promise.all([
-      read("desktop/src-tauri/tauri.conf.json"),
-      read("desktop/nuxt.desktop.config.ts"),
-      read("app/components/Init.vue"),
-    ]);
+    const [tauriConfig, desktopConfig, initComponent, frontendBuild] =
+      await Promise.all([
+        read("desktop/src-tauri/tauri.conf.json"),
+        read("desktop/nuxt.desktop.config.ts"),
+        read("app/components/Init.vue"),
+        read("scripts/build-desktop-frontend.mjs"),
+      ]);
 
     assert.match(tauriConfig, /"label": "main"[\s\S]*"visible": true/);
     assert.doesNotMatch(tauriConfig, /"label": "init"/);
+    assert.match(
+      tauriConfig,
+      /"beforeBuildCommand": "node \.\.\/scripts\/build-desktop-frontend\.mjs"/,
+    );
+    assert.doesNotMatch(tauriConfig, /NITRO_PRESET=|rm -rf|cp -R/);
+    assert.match(frontendBuild, /spawnSync\(process\.execPath/);
+    assert.match(frontendBuild, /NITRO_PRESET: "static"/);
+    assert.match(frontendBuild, /DSPEAK_DESKTOP: "1"/);
+    assert.match(frontendBuild, /rmSync/);
+    assert.match(frontendBuild, /cwd: desktopRoot/);
+    assert.match(frontendBuild, /desktopEntry/);
     assert.match(desktopConfig, /public: resolve\(desktopDir, "public"\)/);
+    assert.match(desktopConfig, /serverDir: resolve\(desktopDir, "server"\)/);
+    assert.doesNotMatch(
+      desktopConfig,
+      /serverDir: resolve\(rootDir, "server"\)/,
+    );
     assert.match(desktopConfig, /modules: \["@pinia\/nuxt", "@nuxt\/icon"\]/);
     assert.match(desktopConfig, /provider: "server"/);
     assert.match(desktopConfig, /pwa: false/);
