@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  VOICE_JOIN_TIMEOUT_MS,
   hasUsableVoiceRoute,
   waitForVoiceTransportReady,
 } from "../app/shared/voice-join-readiness.ts";
+
+test("voice joins use a ten-second connection deadline", () => {
+  assert.equal(VOICE_JOIN_TIMEOUT_MS, 10_000);
+});
 
 function createClock() {
   let elapsed = 0;
@@ -40,6 +45,21 @@ test("voice transport readiness rejects a session error", async () => {
     }),
     /SFU transport failed/,
   );
+});
+
+test("voice transport readiness ignores empty session error details", async () => {
+  const clock = createClock();
+  let checks = 0;
+
+  await waitForVoiceTransportReady({
+    getError: () => ({}),
+    isCurrent: () => true,
+    isReady: () => ++checks === 2,
+    now: clock.now,
+    wait: clock.wait,
+  });
+
+  assert.equal(checks, 2);
 });
 
 test("voice transport readiness rejects a replaced join", async () => {

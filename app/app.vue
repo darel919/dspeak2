@@ -5,7 +5,9 @@
   <NuxtLayout>
     <NuxtLoadingIndicator />
     <NuxtPage />
-    <GlobalVoiceStatus v-if="showGlobalVoiceStatus" />
+    <ClientOnly>
+      <GlobalVoiceStatus v-if="showGlobalVoiceStatus" />
+    </ClientOnly>
     <PwaInstallPrompt />
     <UpdatePrompt />
     <DatabaseHealthPrompt />

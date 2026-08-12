@@ -18,7 +18,7 @@ unmounts the previous room, so an obsolete page may disconnect only the channel
 it originally rendered. It cannot cancel or clear a newer room connection.
 
 The separate `chat-bg-worker` IndexedDB database owns offline outgoing messages.
-The application and service worker both call the shared `app/utils/idb.js`
+The application and service worker both call the shared `app/utils/idb.ts`
 boundary. Consumers never open databases or construct transactions. The shared
 boundary preserves the installed `dspeak-cache`, `dspeak-chat`, and
 `chat-bg-worker` schemas while ensuring every read and write waits for its

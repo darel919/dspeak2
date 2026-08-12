@@ -3,6 +3,8 @@ import type {
   VoiceTransportReadinessOptions,
 } from "./types/shared-utilities.ts";
 
+export const VOICE_JOIN_TIMEOUT_MS = 10_000;
+
 export function hasUsableVoiceRoute({
   activeProvider,
   p2pReady,
@@ -23,14 +25,14 @@ export async function waitForVoiceTransportReady({
   isReady,
   now = Date.now,
   pollIntervalMs = 50,
-  timeoutMs = 15000,
+  timeoutMs = VOICE_JOIN_TIMEOUT_MS,
   wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
 }: VoiceTransportReadinessOptions) {
   const startedAt = now();
   const resolveTimeoutMs = () => {
     const value =
       typeof timeoutMs === "function" ? timeoutMs() : Number(timeoutMs);
-    return Number.isFinite(value) && value > 0 ? value : 15000;
+    return Number.isFinite(value) && value > 0 ? value : VOICE_JOIN_TIMEOUT_MS;
   };
   let deadline = startedAt + resolveTimeoutMs();
   while (now() < deadline) {
@@ -40,12 +42,14 @@ export async function waitForVoiceTransportReady({
       throw error;
     }
     const sessionError = getError();
-    if (sessionError)
-      throw new Error(
-        typeof sessionError === "string"
-          ? sessionError
-          : sessionError.message || String(sessionError),
-      );
+    const sessionErrorMessage =
+      typeof sessionError === "string"
+        ? sessionError
+        : sessionError?.message ||
+          sessionError?.code ||
+          sessionError?.cause?.code ||
+          null;
+    if (sessionErrorMessage) throw new Error(sessionErrorMessage);
     if (isReady()) return;
     deadline = Math.max(deadline, startedAt + resolveTimeoutMs());
     await wait(pollIntervalMs);

@@ -5,7 +5,10 @@ import { playSystemSound } from "./system-sounds.ts";
 import { voiceJoinErrorMessage } from "./voice-errors.ts";
 import { resolveChannelRoomId } from "./media/channel-room.ts";
 import { resolveVoicePreferences } from "./voice-preferences.ts";
-import { waitForVoiceTransportReady } from "./voice-join-readiness.ts";
+import {
+  VOICE_JOIN_TIMEOUT_MS,
+  waitForVoiceTransportReady,
+} from "./voice-join-readiness.ts";
 import { waitForOutboundSourceFlow } from "./media-source-flow.ts";
 import { STORAGE_KEYS } from "~/const/storage.ts";
 import type {
@@ -78,6 +81,31 @@ export function createVoiceMediaActions({
   let voiceToggleOperation: Promise<unknown> = Promise.resolve();
   let captureToggleOperation: Promise<unknown> = Promise.resolve();
 
+  function createJoinTimeoutError() {
+    const timeout = new Error("Voice connection timed out");
+    (timeout as Error & { code?: string }).code = "VOICE_JOIN_TIMEOUT";
+    return timeout;
+  }
+
+  function withVoiceJoinDeadline<T>(
+    operation: () => Promise<T> | T,
+    deadlineAt: number,
+  ) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) return Promise.reject(createJoinTimeoutError());
+
+    return new Promise<T>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(createJoinTimeoutError());
+      }, remainingMs);
+
+      Promise.resolve()
+        .then(operation)
+        .then(resolve, reject)
+        .finally(() => clearTimeout(timeoutId));
+    });
+  }
+
   function enqueueVoiceToggle(operation: () => unknown) {
     const task = voiceToggleOperation.catch(() => {}).then(operation);
     voiceToggleOperation = task.catch(() => {});
@@ -119,7 +147,7 @@ export function createVoiceMediaActions({
     return waitForOutboundSourceFlow({
       getStats: () => session.getOutboundRtpStats!(),
       source: "audio",
-      timeoutMs: session.getVoiceTransportTimeout?.() || 15000,
+      timeoutMs: session.getVoiceTransportTimeout?.() || VOICE_JOIN_TIMEOUT_MS,
     });
   }
 
@@ -255,12 +283,13 @@ export function createVoiceMediaActions({
       }
     };
     mediaDebug("voice.join-start", { channelId, generation });
+    let isTauriRuntime = () => false;
     try {
       connecting.value = true;
       error.value = null;
       protocolUpdateRequired.value = false;
-      const { isTauriRuntime, useMediasoupSfu } =
-        await import("~/composables/useMediasoupSfu");
+      const mediaModule = await import("~/composables/useMediasoupSfu");
+      isTauriRuntime = mediaModule.isTauriRuntime;
       ensureCurrentJoin();
       if (!isTauriRuntime()) {
         await ensureMicrophonePermission();
@@ -273,27 +302,47 @@ export function createVoiceMediaActions({
         ensureCurrentJoin();
       }
 
-      sfuComposable.value = (await useMediasoupSfu({
-        voiceStore: getVoiceStore(),
-        settingsStore,
-        channelsStore,
-      })) as unknown as VoiceMediaSessionLike;
+      const deadlineAt = Date.now() + VOICE_JOIN_TIMEOUT_MS;
+      sfuComposable.value = (await withVoiceJoinDeadline(
+        () =>
+          mediaModule.useMediasoupSfu({
+            voiceStore: getVoiceStore(),
+            settingsStore,
+            channelsStore,
+          }),
+        deadlineAt,
+      )) as unknown as VoiceMediaSessionLike;
       session = sfuComposable.value;
       if (!session) throw new Error("Voice media session is unavailable");
-      await session.prepareAudioPlayback?.();
+      await withVoiceJoinDeadline(
+        () => session?.prepareAudioPlayback?.(),
+        deadlineAt,
+      );
       ensureCurrentJoin();
 
       const joiningRoomId = resolveChannelRoomId(
         channelsStore.getChannelById(channelId),
       );
-      await session.connect(channelId, { roomId: joiningRoomId });
+      await withVoiceJoinDeadline(
+        () => session!.connect(channelId, { roomId: joiningRoomId }),
+        deadlineAt,
+      );
       ensureCurrentJoin();
       setCurrentChannel(channelId);
       restorePersistedVoiceState();
 
       try {
-        if (micMuted.value) await session.stopAudioProduction?.();
-        else await session.startAudioProduction();
+        if (micMuted.value) {
+          await withVoiceJoinDeadline(
+            () => session?.stopAudioProduction?.(),
+            deadlineAt,
+          );
+        } else {
+          await withVoiceJoinDeadline(
+            () => session!.startAudioProduction(),
+            deadlineAt,
+          );
+        }
       } catch (captureError) {
         if (
           !isTauriRuntime() ||
@@ -308,19 +357,31 @@ export function createVoiceMediaActions({
       }
       ensureCurrentJoin();
 
-      await waitForVoiceTransportReady({
-        getError: () => {
-          const value = unref(session!.error);
-          return typeof value === "string" ? value : voiceError(value);
-        },
-        isCurrent: () =>
-          generation === joinGenerationState.value &&
-          sfuComposable.value === session,
-        isReady: () => Boolean(unref(session!.joinReady)),
-        timeoutMs: session.getVoiceTransportTimeout?.() || 15_000,
-      });
+      await withVoiceJoinDeadline(
+        () =>
+          waitForVoiceTransportReady({
+            getError: () => {
+              const value = unref(session!.error);
+              if (value == null || value === "") return null;
+              return typeof value === "string" ? value : voiceError(value);
+            },
+            isCurrent: () =>
+              generation === joinGenerationState.value &&
+              sfuComposable.value === session,
+            isReady: () => Boolean(unref(session!.joinReady)),
+            timeoutMs: Math.min(
+              session!.getVoiceTransportTimeout?.() || VOICE_JOIN_TIMEOUT_MS,
+              VOICE_JOIN_TIMEOUT_MS,
+            ),
+          }),
+        deadlineAt,
+      );
       ensureCurrentJoin();
-      if (!micMuted.value) await waitForAudioSourceFlow(session);
+      if (!micMuted.value)
+        await withVoiceJoinDeadline(
+          () => waitForAudioSourceFlow(session!),
+          deadlineAt,
+        );
       ensureCurrentJoin();
 
       connected.value = true;
@@ -334,7 +395,10 @@ export function createVoiceMediaActions({
       joinChannel(channelId);
       pageLifecycle.register();
       sendParticipantVoiceState();
-      await session.ensureAudioElements?.();
+      await withVoiceJoinDeadline(
+        () => session?.ensureAudioElements?.(),
+        deadlineAt,
+      );
       playSystemSound("voice-join", settingsStore);
       mediaDebug("voice.join-ready", {
         channelId,
@@ -344,9 +408,12 @@ export function createVoiceMediaActions({
       });
     } catch (joinError: unknown) {
       const details = voiceError(joinError);
+      const timedOut = details.code === "VOICE_JOIN_TIMEOUT";
+      if (timedOut) joinGenerationState.value += 1;
       if (details.code === "MEDIA_PROTOCOL_UPDATE_REQUIRED")
         protocolUpdateRequired.value = true;
       await disposeFailedSession(session);
+      if (timedOut) connecting.value = false;
       if (details.code === "VOICE_JOIN_CANCELLED") return;
       mediaDebug("voice.join-failed", {
         channelId,

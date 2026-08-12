@@ -5,7 +5,7 @@
     @toggle="handleDropdownToggle"
   >
     <summary
-      class="metro-icon-btn metro-icon-btn--ghost btn-sm relative"
+      class="metro-icon-btn metro-icon-btn--ghost relative"
       aria-label="Friends"
     >
       <Icon name="lucide:users" class="size-5" />

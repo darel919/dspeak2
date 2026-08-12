@@ -1,7 +1,7 @@
 <template>
   <details ref="dropdownRef" class="dropdown dropdown-end relative z-30">
     <summary
-      class="metro-icon-btn metro-icon-btn--ghost btn-sm relative"
+      class="metro-icon-btn metro-icon-btn--ghost relative"
       aria-label="Notifications"
     >
       <Icon name="lucide:bell" class="size-5" />

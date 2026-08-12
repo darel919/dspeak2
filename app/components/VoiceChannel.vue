@@ -30,13 +30,14 @@
           <Icon name="lucide:refresh-cw" />
           <span class="hidden sm:inline">Refresh to update voice</span>
         </button>
-        <div
-          v-else-if="voiceStore.connecting && !voiceStore.connected"
-          class="voice-connecting-status flex items-center gap-2 text-sm"
+        <span
+          v-else-if="voiceStore.connecting"
+          class="inline-flex items-center gap-2 text-sm text-warning"
+          :title="voiceConnectionStatus.detail"
         >
-          <span class="metro-spinner metro-spinner--sm"></span>
-          <span class="hidden sm:inline">{{ connectionPhaseLabel }}</span>
-        </div>
+          <span class="metro-spinner metro-spinner--xs"></span>
+          <span>{{ voiceConnectionStatus.label }}</span>
+        </span>
         <span
           v-else-if="voiceStore.connected"
           class="inline-flex items-center gap-2 text-sm text-success"
@@ -54,18 +55,77 @@
       "
       class="flex min-h-0 flex-1 items-center justify-center p-6"
     >
-      <div class="max-w-md text-center">
+      <div
+        class="max-w-md"
+        :class="voiceStore.connecting ? 'text-left' : 'text-center'"
+      >
         <Icon name="lucide:volume-2" class="mx-auto size-12 text-primary/70" />
         <h2 class="mt-4 text-lg font-semibold">{{ channel.name }}</h2>
-        <p class="mt-2 text-sm text-base-content/60">
+        <p
+          v-if="!voiceStore.connecting"
+          class="mt-2 text-sm text-base-content/60"
+        >
           {{
             voiceStore.connected
               ? "You are connected to another voice channel."
               : "Join this voice channel to start talking."
           }}
         </p>
+        <div
+          v-if="voiceStore.connecting"
+          class="mt-5 rounded border border-warning/30 bg-base-100/60 p-4"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="flex items-start gap-3">
+            <Icon
+              :name="voiceConnectionStatus.icon"
+              class="mt-0.5 size-5 shrink-0 text-warning"
+            />
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <p class="font-semibold">{{ voiceConnectionStatus.label }}</p>
+              </div>
+              <p class="mt-1 text-sm text-base-content/70">
+                {{ voiceConnectionStatus.detail }}
+              </p>
+            </div>
+          </div>
+          <ol
+            class="mt-4 grid gap-2 text-xs text-base-content/60 sm:grid-cols-5"
+            aria-label="Voice connection progress"
+          >
+            <li
+              v-for="(step, index) in voiceConnectionStatus.steps"
+              :key="step.key"
+              class="flex items-center gap-2 sm:block"
+              :class="{
+                'text-success': step.state === 'complete',
+                'font-semibold text-warning': step.state === 'current',
+              }"
+              :aria-current="step.state === 'current' ? 'step' : undefined"
+            >
+              <span
+                class="grid size-5 shrink-0 place-items-center rounded-full border border-current sm:mb-1"
+                aria-hidden="true"
+              >
+                <Icon
+                  v-if="step.state === 'complete'"
+                  name="lucide:check"
+                  class="size-3"
+                />
+                <span
+                  v-else-if="step.state === 'current'"
+                  class="size-1.5 animate-pulse rounded-full bg-current"
+                ></span>
+                <span v-else>{{ index + 1 }}</span>
+              </span>
+              <span>{{ step.label }}</span>
+            </li>
+          </ol>
+        </div>
         <button
-          v-if="!voiceStore.connected"
+          v-if="!voiceStore.connected && !voiceStore.connecting"
           type="button"
           class="metro-btn metro-btn--primary mt-5"
           @click="joinThisChannel"
@@ -135,6 +195,7 @@
           <button
             @click="switchToThisChannel"
             class="metro-btn metro-btn--sm btn-info"
+            :disabled="voiceStore.connecting"
           >
             Switch Here
           </button>
@@ -698,12 +759,15 @@
           </label>
           <input
             id="shared-audio-volume"
-            class="metro-range range-xs w-full"
+            class="metro-range w-full"
             type="range"
             min="0"
             max="100"
             step="1"
             :value="voiceStore.sharedAudioVolume"
+            :style="{
+              '--metro-range-progress': `${voiceStore.sharedAudioVolume}%`,
+            }"
             @input="voiceStore.setSharedAudioVolume($event.target.value)"
           />
         </div>
@@ -747,6 +811,7 @@ import { useIdentityStore } from "~/stores/identity";
 import { useChannelsStore } from "~/stores/channels";
 import { useRuntimeStore } from "~/stores/runtime";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
+import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
 
 const DesktopCapturePicker = defineAsyncComponent(
   () => import("./DesktopCapturePicker.vue"),
@@ -774,15 +839,7 @@ const runtimeStore = useRuntimeStore();
 const router = useRouter();
 const config = useRuntimeConfig();
 const viewMode = ref("overview");
-const connectionPhaseLabel = computed(() => {
-  const phase = voiceStore.sfuComposable?.connectionPhase;
-  if (phase === "protocol-negotiating") return "Negotiating connection";
-  if (phase === "topology-selecting") return "Selecting media route";
-  if (phase === "transport-connecting") return "Connecting media";
-  if (phase === "reconnecting") return "Reconnecting";
-  return "Connecting";
-});
-
+const { status: voiceConnectionStatus } = useVoiceConnectionStatus(voiceStore);
 function reloadForMediaUpdate() {
   window.location.reload();
 }
@@ -1195,10 +1252,6 @@ onUnmounted(() => {
 <style scoped>
 .voice-channel {
   isolation: isolate;
-}
-
-.voice-connecting-status {
-  color: #63c7f2;
 }
 
 .voice-stage {

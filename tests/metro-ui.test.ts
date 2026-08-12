@@ -64,6 +64,23 @@ test("Metro implementation checks verify shipped source instead of a stale check
   assert.match(source, /:focus-visible/);
 });
 
+test("Metro range controls expose a visible cross-browser track", async () => {
+  const css = await readFile("app/assets/app.css", "utf8");
+  const voiceChannel = await readFile(
+    "app/components/VoiceChannel.vue",
+    "utf8",
+  );
+  assert.match(css, /\.metro-range::-webkit-slider-runnable-track/);
+  assert.match(css, /\.metro-range::-moz-range-track/);
+  assert.match(css, /\.metro-range::-moz-range-progress/);
+  assert.match(css, /height: 1rem/);
+  assert.doesNotMatch(voiceChannel, /class="metro-range range-xs w-full"/);
+  assert.match(
+    voiceChannel,
+    /'--metro-range-progress': `\$\{voiceStore\.sharedAudioVolume\}%`/,
+  );
+});
+
 test("error and toast overlays own their Metro geometry", async () => {
   const fatalPrompt = await readFile(
     "app/components/FatalErrorPrompt.vue",
@@ -172,6 +189,50 @@ test("voice overflow menus keep their trigger in the top bar", async () => {
     /\.metro-call-menu-content\s*\{[\s\S]*?position: absolute;[\s\S]*?top: calc\(100% \+ var\(--metro-space-3\)\)[\s\S]*?right: 0;/,
   );
   assert.doesNotMatch(source, /\.metro-call-menu\s*\{\s*position: absolute;/);
+});
+
+test("top-bar control surfaces share one height without truncating labels", async () => {
+  const css = await readFile("app/assets/app.css", "utf8");
+  const navbar = await readFile("app/components/Navbar.vue", "utf8");
+  const presence = await readFile(
+    "app/components/PresenceStatusSelector.vue",
+    "utf8",
+  );
+  const friends = await readFile("app/components/FriendsList.vue", "utf8");
+  const notifications = await readFile(
+    "app/components/NotificationCenter.vue",
+    "utf8",
+  );
+
+  assert.match(
+    css,
+    /\.metro-btn\s*\{[\s\S]*?min-height: var\(--metro-control-size\)/,
+  );
+  assert.match(css, /\.metro-btn\s*\{[\s\S]*?white-space: nowrap/);
+  assert.match(
+    css,
+    /\.metro-icon-btn\s*\{[\s\S]*?width: var\(--metro-control-size\)[\s\S]*?height: var\(--metro-control-size\)/,
+  );
+  assert.match(
+    navbar,
+    /\.metro-call-dock\s*\{[\s\S]*?height: var\(--metro-control-size\)/,
+  );
+  assert.match(
+    navbar,
+    /\.metro-call-icon\s*\{[\s\S]*?width: var\(--metro-control-size\)[\s\S]*?height: var\(--metro-control-size\)/,
+  );
+  assert.doesNotMatch(
+    navbar,
+    /\.metro-call-channel-link[\s\S]*?text-overflow: ellipsis/,
+  );
+  assert.doesNotMatch(
+    navbar,
+    /@media \(max-width: 899px\) \{[\s\S]*?\.metro-call-channel-info\s*\{[\s\S]*?display: none/,
+  );
+  assert.match(presence, /height: var\(--metro-control-size\)/);
+  assert.doesNotMatch(presence, /class="truncate text-sm font-semibold"/);
+  assert.doesNotMatch(friends, /metro-icon-btn[^\n]*btn-sm/);
+  assert.doesNotMatch(notifications, /metro-icon-btn[^\n]*btn-sm/);
 });
 
 test("message action menus use Metro-sized rows and bounded scrolling", async () => {
@@ -352,6 +413,23 @@ test("global voice controls keep the connected channel name across room navigati
     /getRoomChannelById\(\s*voiceStore\.currentRoomId,\s*voiceStore\.currentChannelId,\s*\)/;
   assert.match(navbar, connectedChannelLookup);
   assert.match(status, connectedChannelLookup);
+});
+
+test("voice joining exposes the current connection phase", async () => {
+  const channel = await readFile("app/components/VoiceChannel.vue", "utf8");
+  const navbar = await readFile("app/components/Navbar.vue", "utf8");
+  assert.match(channel, /voiceConnectionStatus\.label/);
+  assert.match(
+    channel,
+    /v-if="!voiceStore\.connected && !voiceStore\.connecting"/,
+  );
+  assert.match(channel, /Voice connection progress/);
+  assert.match(channel, /voiceConnectionStatus\.steps/);
+  assert.doesNotMatch(channel, /voiceConnectionPhaseElapsedText/);
+  assert.match(navbar, /v-if="profile && voiceStore\.connecting"/);
+  assert.match(navbar, /voiceConnectionStatus\.label/);
+  assert.doesNotMatch(navbar, /voiceConnectionPhaseElapsedText/);
+  assert.match(navbar, /voiceStore\.connected && voiceStore\.connectedAt/);
 });
 
 test("shared audio status keeps readable colors independent of the page theme", async () => {

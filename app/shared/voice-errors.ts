@@ -19,6 +19,10 @@ const USER_SAFE_VOICE_ERROR_CODES = new Map([
     "MEDIA_PROVIDER_UNAVAILABLE",
     "Voice media providers are temporarily unavailable.",
   ],
+  [
+    "VOICE_JOIN_TIMEOUT",
+    "Voice connection took too long. Please check your connection and try again.",
+  ],
 ]);
 
 import type { VoiceErrorLike } from "./types/shared-utilities.ts";

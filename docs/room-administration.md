@@ -46,7 +46,7 @@ Rooms receive Owner, Admin, Moderator, and Member roles. Membership records are
 the only room membership authority.
 
 All room and channel mutations pass through
-`server/utils/room-authorization.js`. Permissions from multiple roles combine.
+`server/utils/room-authorization.ts`. Permissions from multiple roles combine.
 A member can manage only roles and members below their highest role. The Owner
 role is immutable, and only the owner may delete or transfer the room.
 The room settings interface edits roles in a modal with human-readable

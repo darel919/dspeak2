@@ -24,8 +24,11 @@
 
   <section v-else class="h-screen-minus-navbar overflow-hidden bg-base-100">
     <div class="h-full min-h-0 overflow-hidden">
-      <div class="flex h-full">
-        <div v-if="!isMobile" class="flex min-h-0 w-full overflow-hidden">
+      <div class="flex h-full min-w-0">
+        <div
+          v-if="!isMobile"
+          class="flex min-h-0 min-w-0 w-full overflow-hidden"
+        >
           <DesktopChannelSidebar v-if="selectedRoom">
             <ChannelList
               :room="selectedRoom"
@@ -34,7 +37,7 @@
             />
           </DesktopChannelSidebar>
 
-          <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <ChatWindow
               v-if="selectedRoom && selectedChannel && selectedChannel.id"
               class="flex-1"
