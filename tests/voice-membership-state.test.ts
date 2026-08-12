@@ -76,6 +76,24 @@ test("native microphone permission failure keeps the voice session muted", async
   );
 });
 
+test("microphone unmute enables publication before capture and rolls back failures", async () => {
+  const source = await readFile("app/shared/voice-media-actions.ts", "utf8");
+  const toggleStart = source.indexOf("async function toggleMicInternal()");
+  const toggleEnd = source.indexOf(
+    "async function toggleDeafenInternal()",
+    toggleStart,
+  );
+  const toggle = source.slice(toggleStart, toggleEnd);
+  const enableIntent = toggle.indexOf("micMuted.value = false;");
+  const captureStart = toggle.indexOf("session.startAudioProduction()");
+  const rollback = toggle.indexOf("micMuted.value = true;", captureStart);
+
+  assert.ok(enableIntent >= 0);
+  assert.ok(captureStart > enableIntent);
+  assert.ok(rollback > captureStart);
+  assert.match(toggle, /await waitForAudioSourceFlow\(session\)/);
+});
+
 test("native participant snapshots hydrate profiles before membership rendering", async () => {
   const source = await readFile(
     "app/composables/media/native-media-engine-session.ts",

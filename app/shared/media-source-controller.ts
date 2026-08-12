@@ -329,8 +329,15 @@ export function createMediaSourceController({
     });
   }
 
-  function startAudioProduction() {
-    return capture.startMicrophone().then((entry) => producerFacade(entry));
+  async function startAudioProduction() {
+    await Promise.all(
+      [
+        asProvider(getP2pMesh())?.setSourceTransmission?.("audio", true),
+        asProvider(getSfu())?.setSourceTransmission?.("audio", true),
+      ].filter(Boolean),
+    );
+    const entry = await capture.startMicrophone();
+    return producerFacade(entry);
   }
 
   function restartAudioProduction() {

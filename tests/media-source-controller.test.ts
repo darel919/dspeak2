@@ -125,6 +125,41 @@ test("a muted microphone source is published with its track disabled", async () 
   assert.equal(publishedTrack.enabled, false);
 });
 
+test("microphone start clears stale disabled transmission before capture", async () => {
+  const calls = [];
+  const entry = {
+    source: "audio",
+    track: { id: "microphone", readyState: "live" },
+  };
+  const harness = controller({
+    capture: {
+      async startMicrophone() {
+        calls.push(["capture"]);
+        return entry;
+      },
+      stop() {},
+    },
+    getP2pMesh: () => ({
+      async setSourceTransmission(source, enabled) {
+        calls.push(["p2p", source, enabled]);
+      },
+    }),
+    getSfu: () => ({
+      async setSourceTransmission(source, enabled) {
+        calls.push(["sfu", source, enabled]);
+      },
+    }),
+  });
+
+  await harness.instance.startAudioProduction();
+
+  assert.deepEqual(calls, [
+    ["p2p", "audio", true],
+    ["sfu", "audio", true],
+    ["capture"],
+  ]);
+});
+
 test("failed SFU publication never advertises a local source", async () => {
   const harness = controller({
     getSfu: () => ({

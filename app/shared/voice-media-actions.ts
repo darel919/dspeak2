@@ -505,15 +505,25 @@ export function createVoiceMediaActions({
         if (!Boolean(unref(session.transportReady)))
           throw new Error("Voice transport not ready");
         let started = false;
+        micMuted.value = false;
         try {
           const producer = await session.startAudioProduction();
-          if (!connected.value || sfuComposable.value !== session) return false;
-          if (producer?.track) producer.track.enabled = true;
           started = true;
+          if (!connected.value || sfuComposable.value !== session) {
+            const closed = new Error("Voice media session closed");
+            (closed as Error & { code?: string }).code = "MEDIA_SESSION_CLOSED";
+            throw closed;
+          }
+          if (producer?.track) producer.track.enabled = true;
           await waitForAudioSourceFlow(session);
-          if (!connected.value || sfuComposable.value !== session) return false;
+          if (!connected.value || sfuComposable.value !== session) {
+            const closed = new Error("Voice media session closed");
+            (closed as Error & { code?: string }).code = "MEDIA_SESSION_CLOSED";
+            throw closed;
+          }
           micMuted.value = false;
           deafened.value = false;
+          error.value = null;
           syncLocalVoiceState();
           sendParticipantVoiceState();
         } catch (toggleError) {

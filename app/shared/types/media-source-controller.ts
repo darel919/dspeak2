@@ -19,6 +19,7 @@ export interface SourceProvider {
   unpublishSource: (source: string) => unknown;
   addSource: (entry: TopologySourceEntry) => unknown;
   removeSource: (source: string) => unknown;
+  setSourceTransmission?: (source: string, enabled: boolean) => unknown;
 }
 
 export interface MediaSourceControllerContext {
