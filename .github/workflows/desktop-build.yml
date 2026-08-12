@@ -181,8 +181,12 @@ jobs:
         if: github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v')
         env:
           DSPEAK_TAURI_PUBLIC_KEY: ${{ secrets.DSPEAK_TAURI_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          test -n "$DSPEAK_TAURI_PUBLIC_KEY"
+          if [[ -z "$DSPEAK_TAURI_PUBLIC_KEY" || -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "::notice::Tauri signing keypair is not configured; building installers without updater artifacts."
+            exit 0
+          fi
           node -e 'const fs = require("node:fs"); const path = "desktop/src-tauri/tauri.conf.json"; const config = JSON.parse(fs.readFileSync(path, "utf8")); config.bundle.createUpdaterArtifacts = true; config.plugins.updater.pubkey = process.env.DSPEAK_TAURI_PUBLIC_KEY; fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);'
 
       - name: Build dSpeak Desktop
@@ -231,7 +235,20 @@ jobs:
           pattern: dspeak-*
           merge-multiple: true
 
+      - name: Detect signed updater artifacts
+        id: updater
+        run: |
+          mac_signature="$(find release-assets -type f -name '*.app.tar.gz.sig' -print -quit)"
+          windows_signature="$(find release-assets -type f -name '*.nsis.zip.sig' -print -quit)"
+          if [[ -n "$mac_signature" && -n "$windows_signature" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Signed updater artifacts are absent; publishing installers without latest.json."
+          fi
+
       - name: Create updater manifest
+        if: steps.updater.outputs.enabled == 'true'
         env:
           DSPEAK_RELEASE_ASSET_DIR: release-assets
           DSPEAK_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}

@@ -173,11 +173,12 @@ Tauri package updates require one signing keypair that must never be replaced
 after the first public release. Generate it with the Tauri CLI, keep the
 private key in the GitHub `TAURI_SIGNING_PRIVATE_KEY` secret, and provide the
 matching public key through `DSPEAK_TAURI_PUBLIC_KEY`. The workflow also reads
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` when the key is protected. The release job
-creates signed updater bundles and `latest.json`; without these secrets it
-intentionally refuses to create a release build that claims to support
-automatic updates. Existing desktop binaries built before the signing key and
-manifest are configured require one manual installer update.
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` when the key is protected. When both keys
+are configured, the release job creates signed updater bundles and
+`latest.json`. Without the keypair, it still publishes the platform installers
+but omits automatic updater artifacts. Existing desktop binaries built before
+the signing key and manifest are configured require one manual installer
+update.
 
 ## Production checks
 

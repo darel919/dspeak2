@@ -153,7 +153,7 @@ test("startup and prompts expose useful release details without file listings", 
   assert.doesNotMatch(desktopPrompt, /repositoryUpdateAvailable/);
 });
 
-test("desktop release updates are signed, published as latest.json, and restart after installation", () => {
+test("desktop releases optionally publish signed updates and restart after installation", () => {
   assert.match(tauriConfig, /releases\/latest\/download\/latest\.json/);
   assert.match(tauriMain, /download_and_install/);
   assert.match(tauriMain, /app\.restart\(\)/);
@@ -161,6 +161,10 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.match(tauriMain, /DSPEAK_TAURI_PUBLIC_KEY/);
   assert.match(workflow, /Configure signed updater artifacts/);
   assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(workflow, /building installers without updater artifacts/);
+  assert.match(workflow, /Detect signed updater artifacts/);
+  assert.match(workflow, /steps\.updater\.outputs\.enabled == 'true'/);
+  assert.match(workflow, /publishing installers without latest\.json/);
   assert.match(workflow, /create-tauri-update-manifest\.mjs/);
   assert.match(workflow, /release:check/);
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);

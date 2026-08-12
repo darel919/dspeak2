@@ -68,12 +68,14 @@ with a clear message: run `native-media.yml` first.
 | macOS       | `self-hosted` arm64 Mac | `dspeak-macos-arm64` | `.dmg`, `.app`      |
 | Windows x64 | `windows-2022`          | `dspeak-windows-x64` | `.msi`, NSIS `.exe` |
 
-On `v*` tags the `release` job downloads both bundles, generates the
-signed Tauri updater manifest, and publishes the installers and `latest.json`
-under the version tag with auto-generated release notes. Release builds require
-the `DSPEAK_TAURI_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY`, and optional
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub secrets. The same signing keypair
-must be retained for the lifetime of the installed desktop clients.
+On `v*` tags the `release` job downloads both bundles and publishes the
+installers under the version tag with auto-generated release notes. When the
+`DSPEAK_TAURI_PUBLIC_KEY` and `TAURI_SIGNING_PRIVATE_KEY` GitHub secrets are
+configured, it also generates signed updater bundles and `latest.json`; the
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret is optional. Without the keypair,
+the installers are still published and automatic updater artifacts are
+omitted. The same signing keypair must be retained for the lifetime of the
+installed desktop clients.
 
 For automatic releases, the `v*` tag is the release version. CI synchronizes
 `package.json`, `tauri.conf.json`, `Cargo.toml`, and both lockfiles to that tag
