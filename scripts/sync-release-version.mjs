@@ -16,6 +16,10 @@ const versionFiles = {
 const semverPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
+function normalizeLineEndings(source) {
+  return source.replace(/\r\n?/g, "\n");
+}
+
 export function normalizeVersion(value) {
   const version = String(value || "")
     .trim()
@@ -33,7 +37,8 @@ export function releaseVersionFromTag(value) {
 }
 
 function replaceCargoPackageVersion(source, version) {
-  const packageMatch = source.match(/\[package\][\s\S]*?(?=\n\[|$)/);
+  const normalizedSource = normalizeLineEndings(source);
+  const packageMatch = normalizedSource.match(/\[package\][\s\S]*?(?=\n\[|$)/);
   if (!packageMatch) throw new Error("Cargo.toml has no package section");
   const packageSection = packageMatch[0];
   const nextSection = packageSection.replace(
@@ -42,29 +47,32 @@ function replaceCargoPackageVersion(source, version) {
   );
   if (nextSection === packageSection)
     throw new Error("Cargo.toml package version is missing");
-  return source.replace(packageSection, nextSection);
+  return normalizedSource.replace(packageSection, nextSection);
 }
 
 function replaceCargoLockPackageVersion(source, version) {
+  const normalizedSource = normalizeLineEndings(source);
   const pattern =
     /(\[\[package\]\]\r?\nname = "dspeak-desktop"\r?\nversion = )"[^"]+"/g;
-  const matches = [...source.matchAll(pattern)];
+  const matches = [...normalizedSource.matchAll(pattern)];
   if (matches.length !== 1)
     throw new Error(
       "Cargo.lock must contain exactly one dspeak-desktop package",
     );
-  return source.replace(pattern, `$1"${version}"`);
+  return normalizedSource.replace(pattern, `$1"${version}"`);
 }
 
 function readCargoPackageVersion(source, fileName) {
-  const packageMatch = source.match(/\[package\][\s\S]*?(?=\n\[|$)/);
+  const normalizedSource = normalizeLineEndings(source);
+  const packageMatch = normalizedSource.match(/\[package\][\s\S]*?(?=\n\[|$)/);
   const version = packageMatch?.[0].match(/(^|\n)version\s*=\s*"([^"]+)"/)?.[2];
   if (!version) throw new Error(`${fileName} package version is missing`);
   return version;
 }
 
 function readCargoLockPackageVersion(source) {
-  const version = source.match(
+  const normalizedSource = normalizeLineEndings(source);
+  const version = normalizedSource.match(
     /\[\[package\]\]\r?\nname = "dspeak-desktop"\r?\nversion = "([^"]+)"/,
   )?.[1];
   if (!version) throw new Error("Cargo.lock dspeak-desktop version is missing");
