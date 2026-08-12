@@ -106,12 +106,18 @@ jobs:
         run: |
           ART="$RUNNER_TEMP/native-extract/artifact"
           missing=()
+          mediasoup_mode="$(sed -n 's/^mediasoup=//p' "$ART/native-media-features" 2>/dev/null | tail -n 1)"
+          [[ "$mediasoup_mode" == "0" || "$mediasoup_mode" == "1" ]] || missing+=("native-media-features")
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            for lib in dspeak_media mediasoupclient sdptransform webrtc; do
+            libraries=(dspeak_media webrtc)
+            [[ "$mediasoup_mode" == "1" ]] && libraries+=(mediasoupclient sdptransform)
+            for lib in "${libraries[@]}"; do
               [[ -f "$ART/lib/${lib}.lib" || -f "$ART/lib/lib${lib}.lib" ]] || missing+=("${lib}")
             done
           else
-            for lib in dspeak_media mediasoupclient sdptransform webrtc; do
+            libraries=(dspeak_media webrtc)
+            [[ "$mediasoup_mode" == "1" ]] && libraries+=(mediasoupclient sdptransform)
+            for lib in "${libraries[@]}"; do
               [[ -f "$ART/lib/lib${lib}.a" ]] || missing+=("${lib}")
             done
           fi
@@ -120,6 +126,7 @@ jobs:
             echo "::error::Incomplete native media bundle at ${ART}; missing: ${missing[*]}" >&2
             exit 1
           fi
+          echo "NATIVE_MEDIA_WITH_MEDIASOUP=$mediasoup_mode" >> "$GITHUB_ENV"
           echo "Native media bundle OK: ${ART}"
 
       - name: Install Rust toolchain

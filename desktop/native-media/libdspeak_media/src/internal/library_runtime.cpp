@@ -25,7 +25,7 @@
 #include <json.hpp>
 #include "runtime_health.hpp"
 
-#if defined(__APPLE__) || defined(__linux__) || defined(_WIN32)
+#if defined(__APPLE__)
 #include "PlatformCapture.h"
 #endif
 
@@ -218,15 +218,7 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
             "a native SFU transport reached connected",
             "a live native SFU transport has not reached connected")},
     };
-#if defined(__linux__) || defined(_WIN32)
-    try {
-        auto platform = json::parse(lib_dspeak_media_platform_capabilities_json());
-        if (platform.contains("capture")) caps["capture"] = platform["capture"];
-    } catch (...) {
-        caps["capture"] = json::object();
-    }
-#endif
-#if defined(__APPLE__) || defined(__linux__) || defined(_WIN32)
+#if defined(__APPLE__)
     try {
         char* source_text = lib_dspeak_media_platform_capture_list_sources();
         if (!source_text) throw std::runtime_error("source enumeration returned no response");
@@ -241,7 +233,6 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
                 if (capabilities.value("audio", false)) audio_sources.push_back(source);
             }
         }
-#if defined(__APPLE__)
         caps["capture"]["screenCaptureKit"] = {
             {"available", screen_video_ready},
             {"reason", screen_video_ready
@@ -289,7 +280,6 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
             }
             std::free(device_caps_text);
         }
-#endif
         caps["capture"]["sourceEnumeration"] = {
             {"available", sources.is_array() && !sources.empty()},
             {"sourceCount", sources.is_array() ? sources.size() : 0},

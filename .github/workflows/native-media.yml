@@ -87,10 +87,10 @@ jobs:
 
           Artifacts contain:
           - lib/libwebrtc.a (.lib on Windows)
-          - lib/libmediasoupclient.a (.lib on Windows)
-          - lib/libsdptransform.a (.lib on Windows)
           - lib/libdspeak_media.a (.lib on Windows)
-          - include/ (all headers for both libraries)
+          - include/ (libwebrtc and shim build headers)
+
+          The self-hosted mediasoupclient transport is disabled in these bundles.
 
           Use with desktop/native-media/dependencies.env pointing to the extracted artifact directory.
           EOF

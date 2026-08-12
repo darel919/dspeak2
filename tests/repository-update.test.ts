@@ -26,6 +26,8 @@ const [
   workflow,
   manifestScript,
   nativeMediaProvisioner,
+  nativeMediaCmake,
+  nativeMediaRuntime,
   settings,
   releaseVersionScript,
 ] = await Promise.all(
@@ -47,6 +49,8 @@ const [
     "../.github/workflows/desktop-build.yml",
     "../scripts/create-tauri-update-manifest.mjs",
     "../desktop/scripts/provision-native-media.sh",
+    "../desktop/native-media/libdspeak_media/CMakeLists.txt",
+    "../desktop/native-media/libdspeak_media/src/internal/library_runtime.cpp",
     "../app/pages/settings.vue",
     "../scripts/sync-release-version.mjs",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
@@ -191,15 +195,35 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.match(nativeMediaProvisioner, /command -v sha256sum/);
   assert.match(nativeMediaProvisioner, /command -v certutil\.exe/);
   assert.doesNotMatch(nativeMediaProvisioner, /shasum -a 256 "\$archive"/);
-  assert.match(
-    nativeMediaProvisioner,
-    /: > "\$source_bundle\/lib\/dspeak_media\.lib"/,
-  );
+  assert.doesNotMatch(nativeMediaProvisioner, /dspeak_media_bootstrap/);
   assert.match(
     nativeMediaProvisioner,
     /\[\[ -s "\$bundle\/lib\/\$\{library\}\.lib"/,
   );
   assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
+  assert.doesNotMatch(
+    nativeMediaCmake,
+    /platform\/(?:linux|windows)\/PlatformCapture\.cpp/,
+  );
+  assert.doesNotMatch(
+    nativeMediaCmake,
+    /DSPEAK_MEDIA_CORE_LIBRARIES[\s\S]*?dspeak_media\.(?:lib|a)/,
+  );
+  assert.match(
+    nativeMediaRuntime,
+    /#if defined\(__APPLE__\)\n#include "PlatformCapture\.h"/,
+  );
+  assert.doesNotMatch(
+    nativeMediaRuntime,
+    /lib_dspeak_media_platform_capabilities_json/,
+  );
+  assert.match(workflow, /mediasoup_mode=/);
+  assert.match(workflow, /libraries=\(dspeak_media webrtc\)/);
+  assert.match(
+    workflow,
+    /NATIVE_MEDIA_WITH_MEDIASOUP=\$mediasoup_mode.*GITHUB_ENV/,
+  );
+  assert.match(nativeMediaCmake, /WEBRTC_WIN=1/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);
 });

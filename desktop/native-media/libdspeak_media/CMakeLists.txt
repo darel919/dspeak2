@@ -50,7 +50,6 @@ endif()
 
 if(WIN32)
   set(DSPEAK_MEDIA_CORE_LIBRARIES
-    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/dspeak_media.lib"
     "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/webrtc.lib"
   )
   set(DSPEAK_MEDIA_MEDIASOUP_LIBRARIES
@@ -59,7 +58,6 @@ if(WIN32)
   )
 else()
   set(DSPEAK_MEDIA_CORE_LIBRARIES
-    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libdspeak_media.a"
     "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libwebrtc.a"
   )
   set(DSPEAK_MEDIA_MEDIASOUP_LIBRARIES
@@ -154,14 +152,6 @@ if(APPLE)
   list(APPEND LIB_DSPEAK_MEDIA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCapture.mm
   )
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  list(APPEND LIB_DSPEAK_MEDIA_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/linux/PlatformCapture.cpp
-  )
-elseif(WIN32)
-  list(APPEND LIB_DSPEAK_MEDIA_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCapture.cpp
-  )
 endif()
 add_library(lib_dspeak_media STATIC ${LIB_DSPEAK_MEDIA_SOURCES})
 set_target_properties(lib_dspeak_media PROPERTIES OUTPUT_NAME dspeak_media)
@@ -172,6 +162,15 @@ target_compile_definitions(lib_dspeak_media PRIVATE
   DSPEAK_MEDIA_WINDOWS_WASAPI_DEPS=${DSPEAK_MEDIA_WINDOWS_WASAPI_DEPS}
   DSPEAK_MEDIA_WITH_MEDIASOUP=$<BOOL:${DSPEAK_MEDIA_WITH_MEDIASOUP}>
 )
+if(WIN32)
+  target_compile_definitions(lib_dspeak_media PRIVATE
+    WEBRTC_WIN=1
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    _WIN32_WINNT=0x0A00
+    WINVER=0x0A00
+  )
+endif()
 
 
 # ── Include paths ─────────────────────────────────────────
@@ -184,8 +183,6 @@ target_include_directories(lib_dspeak_media
     ${NATIVE_MEDIA_ARTIFACT_DIR}/include/third_party/libyuv/include
     ${NATIVE_MEDIA_ARTIFACT_DIR}/include  # bundled json.hpp from libsdptransform
     $<$<PLATFORM_ID:Darwin>:${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos>
-    $<$<PLATFORM_ID:Linux>:${CMAKE_CURRENT_SOURCE_DIR}/../platform/linux>
-    $<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows>
 )
 
 # ── Link native libraries ─────────────────────────────────

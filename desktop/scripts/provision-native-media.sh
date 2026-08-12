@@ -766,8 +766,6 @@ build_bundle_from_source() {
   local shim_build
   local shim_library
   local depot_tools
-  local stub_source
-  local stub_object
   local gn_args
   local with_mediasoup
 
@@ -877,19 +875,6 @@ build_bundle_from_source() {
   fi
 
   shim_build="$DESKTOP_ROOT/native-media/libdspeak_media/build"
-  if platform_uses_windows_libraries "$platform"; then
-    if [[ ! -f "$source_bundle/lib/dspeak_media.lib" ]]; then
-      mkdir -p "$source_bundle/lib"
-      : > "$source_bundle/lib/dspeak_media.lib"
-    fi
-  elif [[ ! -f "$source_bundle/lib/libdspeak_media.a" ]]; then
-    mkdir -p "$shim_build"
-    stub_source="$shim_build/dspeak_media_bootstrap.c"
-    stub_object="$shim_build/dspeak_media_bootstrap.o"
-    printf 'void dspeak_media_bootstrap(void) {}\n' > "$stub_source"
-    cc -c "$stub_source" -o "$stub_object"
-    ar rcs "$source_bundle/lib/libdspeak_media.a" "$stub_object"
-  fi
   printf 'Building the dSpeak native media shim\n'
   env NATIVE_MEDIA_ARTIFACT_DIR="$source_bundle" NATIVE_MEDIA_BUILD_DIR="$mediasoup_build" \
     NATIVE_MEDIA_WITH_MEDIASOUP="$with_mediasoup" \
