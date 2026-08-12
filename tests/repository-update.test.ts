@@ -182,6 +182,11 @@ test("desktop release updates are signed, published as latest.json, and restart 
     nativeMediaProvisioner,
     /export DEPOT_TOOLS_WIN_TOOLCHAIN="\$\{DEPOT_TOOLS_WIN_TOOLCHAIN:-0\}"/,
   );
+  assert.match(
+    nativeMediaProvisioner,
+    /python3 src\/build\/util\/lastchange\.py -o src\/build\/util\/LASTCHANGE/,
+  );
+  assert.doesNotMatch(nativeMediaProvisioner, /kill "\$heartbeat_pid"/);
   assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);

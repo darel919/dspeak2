@@ -553,11 +553,21 @@ sync_webrtc_checkout() {
   )
 }
 
+generate_webrtc_lastchange() {
+  local checkout="$1"
+
+  (
+    cd "$checkout"
+    python3 src/build/util/lastchange.py -o src/build/util/LASTCHANGE
+  )
+}
+
 run_webrtc_sync() {
   local checkout="$1"
   local fetch_pid
   local heartbeat_pid
   local fetch_status
+  local heartbeat_wait
 
   (sync_webrtc_checkout "$checkout") >&2 &
   fetch_pid=$!
@@ -565,7 +575,11 @@ run_webrtc_sync() {
     while kill -0 "$fetch_pid" 2>/dev/null; do
       printf 'WebRTC checkout still in progress (%s on disk)\n' \
         "$(du -sh "$checkout" 2>/dev/null | cut -f 1 || printf 'size unavailable')" >&2 2>/dev/null || true
-      sleep 15
+      heartbeat_wait=0
+      while [[ "$heartbeat_wait" -lt 15 ]] && kill -0 "$fetch_pid" 2>/dev/null; do
+        sleep 1
+        heartbeat_wait=$((heartbeat_wait + 1))
+      done
     done
   ) &
   heartbeat_pid=$!
@@ -575,7 +589,6 @@ run_webrtc_sync() {
   else
     fetch_status=$?
   fi
-  kill "$heartbeat_pid" 2>/dev/null || true
   wait "$heartbeat_pid" 2>/dev/null || true
   return "$fetch_status"
 }
@@ -688,6 +701,8 @@ clone_or_update_webrtc() {
   run_webrtc_sync "$checkout"
   [[ -d "$source/.git" || -f "$source/.git" ]] ||
     fail "WebRTC checkout did not produce the expected source tree: $source"
+  printf 'Generating WebRTC build metadata\n' >&2
+  generate_webrtc_lastchange "$checkout"
   printf '%s\n' "$source"
 }
 
