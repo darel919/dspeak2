@@ -9,26 +9,26 @@ import {
   startQualificationTimeout,
   stopHealthChecks,
 } from "../native-p2p-health.ts";
+import type { NativeP2pMeshSurface } from "../types/native-p2p.ts";
 export class NativeP2pLifecycleMethods {
-  [key: string]: any;
-  startQualificationTimeout() {
+  startQualificationTimeout(this: NativeP2pMeshSurface) {
     return startQualificationTimeout(this);
   }
 
-  startHealthChecks() {
+  startHealthChecks(this: NativeP2pMeshSurface) {
     return startHealthChecks(this);
   }
 
-  stopHealthChecks() {
+  stopHealthChecks(this: NativeP2pMeshSurface) {
     return stopHealthChecks(this);
   }
 
-  checkQualification() {
+  checkQualification(this: NativeP2pMeshSurface) {
     return checkQualification(this);
   }
 
-  async getSnapshot() {
-    const edges = [] as any;
+  async getSnapshot(this: NativeP2pMeshSurface) {
+    const edges: Array<Record<string, unknown>> = [];
     for (const state of this.connections.values()) {
       const pair =
         state.selectedPair ||
@@ -36,7 +36,7 @@ export class NativeP2pLifecycleMethods {
       const report = await state.pc.getStats().catch(() => null);
       let packetsLost = 0;
       let packetsReceived = 0;
-      let jitter = null;
+      let jitter: number | null = null;
       report?.forEach((stat) => {
         if (stat.type !== "inbound-rtp" || stat.isRemote) return;
         packetsLost += Math.max(0, Number(stat.packetsLost) || 0);
@@ -58,11 +58,14 @@ export class NativeP2pLifecycleMethods {
               ? "failed"
               : "probing",
         candidatePair: pair,
-        network: pair?.local?.protocol || pair?.remote?.protocol || null,
+        network:
+          (pair?.local as Record<string, unknown> | null)?.protocol ||
+          (pair?.remote as Record<string, unknown> | null)?.protocol ||
+          null,
         rtt:
           pair?.currentRoundTripTime == null
             ? null
-            : pair.currentRoundTripTime * 1000,
+            : Number(pair.currentRoundTripTime) * 1000,
         bitrate: pair?.availableOutgoingBitrate ?? null,
         packetLoss,
         jitter,
@@ -71,7 +74,7 @@ export class NativeP2pLifecycleMethods {
     return edges;
   }
 
-  stats() {
+  stats(this: NativeP2pMeshSurface) {
     return Promise.all(
       [...this.connections.values()].map((state) =>
         collectPeerConnectionStats(state.pc, `p2p:${state.peerId}`),
@@ -79,7 +82,7 @@ export class NativeP2pLifecycleMethods {
     );
   }
 
-  diagnosticStats() {
+  diagnosticStats(this: NativeP2pMeshSurface) {
     return Promise.all(
       [...this.connections.values()].map((state) =>
         collectPeerConnectionDiagnosticStats(state.pc, `p2p:${state.peerId}`),
@@ -87,14 +90,18 @@ export class NativeP2pLifecycleMethods {
     );
   }
 
-  getInboundTrackStats(peerId, track) {
+  getInboundTrackStats(
+    this: NativeP2pMeshSurface,
+    peerId: string | number,
+    track: MediaStreamTrack,
+  ) {
     return (
       this.connections.get(String(peerId))?.pc.getStats(track) ||
       Promise.resolve(null)
     );
   }
 
-  getOutboundTrackStats(source) {
+  getOutboundTrackStats(this: NativeP2pMeshSurface, source: string) {
     for (const state of this.connections.values()) {
       const sender = state.senders.get(source);
       if (sender?.getStats) return sender.getStats();
@@ -102,7 +109,7 @@ export class NativeP2pLifecycleMethods {
     return Promise.resolve(null);
   }
 
-  getOutboundTrackParameters(source) {
+  getOutboundTrackParameters(this: NativeP2pMeshSurface, source: string) {
     for (const state of this.connections.values()) {
       const sender = state.senders.get(source);
       if (sender?.getParameters) return sender.getParameters();
@@ -110,53 +117,66 @@ export class NativeP2pLifecycleMethods {
     return null;
   }
 
-  isMediaReady() {
+  isMediaReady(this: NativeP2pMeshSurface) {
     return (
       this.connections.size > 0 &&
       [...this.connections.values()].every((state) => state.mediaReady)
     );
   }
 
-  emitSnapshot() {
+  emitSnapshot(this: NativeP2pMeshSurface) {
     this.getSnapshot()
-      .then((snapshot) => this.onSnapshot?.(snapshot))
+      .then((snapshot) => this.onSnapshot(snapshot))
       .catch((error) =>
         console.warn("[P2P] Diagnostic snapshot failed", error),
       );
   }
 
-  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 }) {
+  setJitterBufferConfig(
+    this: NativeP2pMeshSurface,
+    {
+      minDelayMs = 0,
+      targetDelayMs = 20,
+    }: {
+      minDelayMs?: number;
+      targetDelayMs?: number;
+    } = {},
+  ) {
     this.jitterBufferMinimumDelay = minDelayMs >= 0 ? minDelayMs / 1000 : 0;
     this.jitterBufferTargetDelay = targetDelayMs >= 0 ? targetDelayMs : 20;
     for (const state of this.connections.values()) {
       for (const [, receiver] of state.audioReceivers) {
         if (!receiver) continue;
         try {
-          if (receiver.jitterBufferMinimumDelay !== undefined)
-            receiver.jitterBufferMinimumDelay = this.jitterBufferMinimumDelay;
-          if (receiver.jitterBufferTarget !== undefined)
-            receiver.jitterBufferTarget = this.jitterBufferTargetDelay;
+          const configurableReceiver = receiver as RTCRtpReceiver &
+            Record<string, unknown>;
+          if (configurableReceiver.jitterBufferMinimumDelay !== undefined)
+            configurableReceiver.jitterBufferMinimumDelay =
+              this.jitterBufferMinimumDelay;
+          if (configurableReceiver.jitterBufferTarget !== undefined)
+            configurableReceiver.jitterBufferTarget =
+              this.jitterBufferTargetDelay;
         } catch (_) {}
       }
     }
   }
 
-  fail(reason, error) {
+  fail(this: NativeP2pMeshSurface, reason: string, error?: unknown) {
     if (this.mode !== "probing" && this.mode !== "p2p") return;
     const key = `${this.epoch}:${this.mode}`;
     if (this.failureReportedKey === key) return;
     this.failureReportedKey = key;
-    this.onFailure({ reason, error, epoch: this.epoch });
+    this.onFailure(reason, error);
   }
 
-  closeConnection(peerId) {
+  closeConnection(this: NativeP2pMeshSurface, peerId: string) {
     const state = this.connections.get(peerId);
     if (!state) return;
     state.closed = true;
     state.negotiationRequested = false;
     this.connections.delete(peerId);
-    clearTimeout(state.disconnectTimer);
-    clearTimeout(state.negotiationTimer);
+    if (state.disconnectTimer) clearTimeout(state.disconnectTimer);
+    if (state.negotiationTimer) clearTimeout(state.negotiationTimer);
     for (const entry of state.remoteTracks.values()) {
       try {
         this.onRemoteTrackEnded(entry);
@@ -184,7 +204,7 @@ export class NativeP2pLifecycleMethods {
     }
   }
 
-  closeAll() {
+  closeAll(this: NativeP2pMeshSurface) {
     this.mode = "idle";
     this.stopHealthChecks();
     for (const peerId of [...this.connections.keys()])
@@ -195,3 +215,5 @@ export class NativeP2pLifecycleMethods {
     this.readyReported = false;
   }
 }
+
+export interface NativeP2pLifecycleMethods extends NativeP2pMeshSurface {}

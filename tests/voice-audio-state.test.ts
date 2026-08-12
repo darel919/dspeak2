@@ -13,15 +13,15 @@ describe("voice audio UI state", () => {
 
     assert.match(
       source,
-      /normalizeSharedAudioStats\(\s*unref\(sfuComposable\.value\?\.sharedAudioStats\)/,
+      /normalizeSharedAudioStats\([\s\S]*?unref\([\s\S]*?sfuComposable\.value\?\.sharedAudioStats/,
     );
     assert.match(
       source,
-      /normalizeSharedAudioAttenuation\(\s*unref\(sfuComposable\.value\?\.sharedAudioAttenuation\)/,
+      /normalizeSharedAudioAttenuation\([\s\S]*?unref\([\s\S]*?sfuComposable\.value\?\.sharedAudioAttenuation/,
     );
     assert.match(
       source,
-      /normalizeSharedAudioDucking\(\s*unref\(sfuComposable\.value\?\.sharedAudioDucking\)/,
+      /normalizeSharedAudioDucking\([\s\S]*?unref\([\s\S]*?sfuComposable\.value\?\.sharedAudioDucking/,
     );
   });
 

@@ -8,8 +8,7 @@ export function useDesktopTray() {
     if (!runtimeStore.isTauri) return;
 
     listen("tray:mute-toggle", () => {
-      const voiceStore: any = useVoiceStore();
-      voiceStore.toggleMute();
+      useVoiceStore().toggleMic();
     });
 
     listen("tray:join-last", () => {

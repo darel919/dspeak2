@@ -91,15 +91,24 @@ interface TopologySnapshot {
   activatedAt?: string | null;
 }
 
+interface TopologyNode {
+  id: string;
+  role: string;
+  health: string;
+  index: number;
+}
+
 export function buildTopologyGraph(snapshot: TopologySnapshot = {}) {
   const participantIds = Array.isArray(snapshot.participantIds)
     ? snapshot.participantIds.map(String)
     : [];
   const classification = classifyTopology({
-    ...snapshot,
+    mode: snapshot.mode || snapshot.currentMode || "idle",
     participantCount: snapshot.participantCount ?? participantIds.length,
+    candidatePair: snapshot.candidatePair,
+    healthy: snapshot.healthy,
   });
-  const nodes = participantIds.map((id, index) =>
+  const nodes: TopologyNode[] = participantIds.map((id, index) =>
     participantNode(id, index, snapshot.localPeerId, snapshot.peerHealth),
   );
   const edges: Array<Record<string, unknown>> = [];
@@ -120,11 +129,14 @@ export function buildTopologyGraph(snapshot: TopologySnapshot = {}) {
   if (showP2p) {
     for (let left = 0; left < nodes.length; left += 1) {
       for (let right = left + 1; right < nodes.length; right += 1) {
-        const key = [nodes[left].id, nodes[right].id].sort().join(":");
+        const leftNode = nodes[left];
+        const rightNode = nodes[right];
+        if (!leftNode || !rightNode) continue;
+        const key = [leftNode.id, rightNode.id].sort().join(":");
         const detail = snapshot.edgeDetails?.[key] || {};
         edges.push({
-          from: nodes[left].id,
-          to: nodes[right].id,
+          from: leftNode.id,
+          to: rightNode.id,
           state:
             switching && snapshot.target === "p2p"
               ? "probing"
@@ -141,12 +153,14 @@ export function buildTopologyGraph(snapshot: TopologySnapshot = {}) {
       id: "sfu",
       role: "sfu",
       health: snapshot.healthy === false ? "degraded" : "healthy",
+      index: nodes.length,
     });
     if (sfuAddressFamily === "ipv4") {
       nodes.push({
         id: "ipv4-fallback",
         role: "ipv4-fallback",
         health: "healthy",
+        index: nodes.length,
       });
     }
     for (const node of nodes.filter(

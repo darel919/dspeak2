@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { PendingOAuthSession } from "../types/auth.ts";
+import type { Session } from "@supabase/supabase-js";
 
 const pendingSessions = new Map<string, PendingOAuthSession>();
 const ttlMs = 60_000;
 
-export function createPendingOAuthSession(session: unknown) {
+export function createPendingOAuthSession(session: Session): string {
   const now = Date.now();
   for (const [key, pending] of pendingSessions)
     if (pending.expiresAt < now) pendingSessions.delete(key);

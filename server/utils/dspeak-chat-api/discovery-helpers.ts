@@ -1,24 +1,24 @@
-export function extractMeta(html, property) {
+export function extractMeta(html: string, property: string): string {
   const regex = new RegExp(
     `<meta[^>]+(?:property|name)=["']${escapeRegex(property)}["'][^>]+content=["']([^"']*)["']`,
     "i",
   );
   const match = html.match(regex);
-  if (match) return decodeHtmlEntities(match[1]);
+  if (match?.[1]) return decodeHtmlEntities(match[1]);
   const altRegex = new RegExp(
     `<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${escapeRegex(property)}["']`,
     "i",
   );
   const altMatch = html.match(altRegex);
-  return altMatch ? decodeHtmlEntities(altMatch[1]) : "";
+  return altMatch?.[1] ? decodeHtmlEntities(altMatch[1]) : "";
 }
 
-export function extractTitle(html) {
+export function extractTitle(html: string): string {
   const match = html.match(/<title>([^<]*)<\/title>/i);
-  return match ? decodeHtmlEntities(match[1]) : "";
+  return match?.[1] ? decodeHtmlEntities(match[1]) : "";
 }
 
-export function extractFavicon(html, baseUrl) {
+export function extractFavicon(html: string, baseUrl: string): string {
   const match = html.match(
     /<link[^>]+rel=["'](?:shortcut )?icon["'][^>]+href=["']([^"']*)["']/i,
   );
@@ -30,17 +30,17 @@ export function extractFavicon(html, baseUrl) {
     }
   }
   try {
-    return new URL(match[1], baseUrl).href;
+    return new URL(match[1] || "", baseUrl).href;
   } catch {
-    return match[1];
+    return match[1] || "";
   }
 }
 
-function escapeRegex(string) {
+function escapeRegex(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function decodeHtmlEntities(text) {
+function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")

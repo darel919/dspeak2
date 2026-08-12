@@ -71,7 +71,7 @@ test("profile avatar PATCH persists the R2 key and avatar metadata", () => {
   );
 
   assert.match(source, /updateProfileAvatar/);
-  assert.match(storage, /putObject\(avatarKey, body\.avatar/);
+  assert.match(storage, /putObject\(avatarKey, avatar/);
   assert.match(storage, /update\.avatarKey/);
   assert.match(storage, /insert\(avatars\)/);
 });

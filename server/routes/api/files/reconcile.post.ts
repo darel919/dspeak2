@@ -12,7 +12,7 @@ import { deleteObject, listObjects } from "../../../storage/r2.ts";
 
 const MINIMUM_AGE_MS = 2 * 60 * 60 * 1000;
 
-async function isCommitted(key) {
+async function isCommitted(key: string): Promise<boolean> {
   const rows = await Promise.all([
     db
       .select({ id: avatars.id })

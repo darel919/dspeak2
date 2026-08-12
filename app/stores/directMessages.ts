@@ -4,10 +4,22 @@ import { useAuthStore } from "./auth";
 import { apiErrorMessage } from "../shared/api-errors.ts";
 import { deviceHeaders } from "../shared/device-identity";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
+import type {
+  DirectConversation,
+  DirectMessage,
+  DirectMessageApiResponse,
+  DirectMessageFetchOptions,
+  DirectMessageRealtimePayload,
+  DirectMessageSender,
+} from "../shared/types/direct-messages.ts";
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export const useDirectMessagesStore = defineStore("directMessages", () => {
-  const conversations = ref([]);
-  const messages = ref([]);
+  const conversations = ref<DirectConversation[]>([]);
+  const messages = ref<DirectMessage[]>([]);
   const currentConversationId = ref("");
   const loading = ref(false);
   const messagesLoading = ref(false);
@@ -15,9 +27,11 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
   const error = ref("");
   const config = useRuntimeConfig();
   let initializedUserId = "";
-  let realtimeHandle = null;
-  let initialization = null;
-  let stopAuthWatcher = null;
+  let realtimeHandle: Awaited<
+    ReturnType<typeof openRealtimeChannel<DirectMessageRealtimePayload>>
+  > = null;
+  let initialization: Promise<DirectConversation[]> | null = null;
+  let stopAuthWatcher: (() => void) | null = null;
 
   const unreadCount = computed(() =>
     conversations.value.reduce(
@@ -30,7 +44,10 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     return `${config.public.apiPath}/direct-messages${path}`;
   }
 
-  async function apiFetch(path = "", options = {} as any) {
+  async function apiFetch(
+    path = "",
+    options: DirectMessageFetchOptions = {},
+  ): Promise<DirectMessageApiResponse> {
     const userId = useAuthStore().getUserData()?.id;
     if (!userId) throw new Error("Not authenticated");
     const response = await fetch(endpoint(path), {
@@ -48,21 +65,21 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
         apiErrorMessage(text, response.status, "Direct message request failed"),
       );
     }
-    return response.json();
+    return (await response.json()) as DirectMessageApiResponse;
   }
 
-  function currentUser() {
+  function currentUser(): DirectMessageSender {
     const user = useAuthStore().getUserData();
     return {
       id: String(user?.id || ""),
-      name: user?.display_name || user?.name || user?.username || "You",
-      display_name: user?.display_name || "",
-      handle: user?.username || "",
-      avatar: user?.avatar || "",
+      name: String(user?.display_name || user?.name || user?.username || "You"),
+      display_name: String(user?.display_name || ""),
+      handle: String(user?.username || ""),
+      avatar: String(user?.avatar || ""),
     };
   }
 
-  function reconcileMessage(serverMessage) {
+  function reconcileMessage(serverMessage: DirectMessage) {
     const pendingIndex = messages.value.findIndex(
       (message) =>
         message.id === `pending_${serverMessage.client_id}` ||
@@ -71,14 +88,13 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     );
     if (pendingIndex >= 0) {
       const pending = messages.value[pendingIndex];
+      if (!pending) return serverMessage;
       Object.assign(pending, serverMessage);
       delete pending.status;
       delete pending.error;
       for (let index = messages.value.length - 1; index >= 0; index -= 1) {
-        if (
-          index !== pendingIndex &&
-          messages.value[index].id === serverMessage.id
-        )
+        const candidate = messages.value[index];
+        if (index !== pendingIndex && candidate?.id === serverMessage.id)
           messages.value.splice(index, 1);
       }
       return pending;
@@ -91,12 +107,17 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     return existing || serverMessage;
   }
 
-  function updateConversationSummary(conversationId, message, unread = null) {
+  function updateConversationSummary(
+    conversationId: string,
+    message: DirectMessage,
+    unread: number | null = null,
+  ) {
     const index = conversations.value.findIndex(
       (conversation) => conversation.id === String(conversationId),
     );
     if (index < 0) return false;
     const conversation = conversations.value[index];
+    if (!conversation) return false;
     conversation.last_message = message;
     conversation.updated_at = message.created;
     if (unread !== null) conversation.unread_count = unread;
@@ -105,9 +126,16 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     return true;
   }
 
-  function applyReceipt(conversationId, messageIds, field, value) {
+  function applyReceipt(
+    conversationId: string | undefined,
+    messageIds: unknown,
+    field: "delivered_at" | "read_at",
+    value: string | null | undefined,
+  ) {
     if (String(conversationId) !== currentConversationId.value) return;
-    const ids = new Set((messageIds || []).map(String));
+    const ids = new Set(
+      (Array.isArray(messageIds) ? messageIds : []).map(String),
+    );
     for (const message of messages.value) {
       if (ids.has(String(message.id))) message[field] = value;
     }
@@ -118,76 +146,87 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     error.value = "";
     try {
       const result = await apiFetch();
-      conversations.value = Array.isArray(result?.items) ? result.items : [];
+      conversations.value = Array.isArray(result.items)
+        ? (result.items as DirectConversation[])
+        : [];
       return conversations.value;
-    } catch (cause) {
-      error.value = cause.message;
+    } catch (cause: unknown) {
+      error.value = errorMessage(cause);
       throw cause;
     } finally {
       loading.value = false;
     }
   }
 
-  async function connectRealtime(userId) {
+  async function connectRealtime(userId: string) {
     if (!import.meta.client || !userId || realtimeHandle) return;
-    realtimeHandle = await openRealtimeChannel(`notify:${userId}`, {
-      onMessage: (message) => {
-        if (message?.type === "direct_messages_delivered") {
-          applyReceipt(
-            message.data?.conversation_id,
-            message.data?.message_ids,
-            "delivered_at",
-            message.data?.delivered_at,
-          );
-          return;
-        }
-        if (message?.type === "direct_messages_read") {
-          applyReceipt(
-            message.data?.conversation_id,
-            message.data?.message_ids,
-            "read_at",
-            message.data?.read_at,
-          );
-          return;
-        }
-        if (message?.type !== "direct_message" || !message.data?.message)
-          return;
-        const conversationId = String(message.data.conversation_id || "");
-        const directMessage = message.data.message;
-        const ownMessage = String(directMessage.sender?.id) === String(userId);
-        if (conversationId === currentConversationId.value) {
-          reconcileMessage(directMessage);
-          if (!ownMessage)
+    realtimeHandle = await openRealtimeChannel<DirectMessageRealtimePayload>(
+      `notify:${userId}`,
+      {
+        onMessage: (message) => {
+          if (message?.type === "direct_messages_delivered") {
+            applyReceipt(
+              message.data?.conversation_id,
+              message.data?.message_ids,
+              "delivered_at",
+              message.data?.delivered_at,
+            );
+            return;
+          }
+          if (message?.type === "direct_messages_read") {
+            applyReceipt(
+              message.data?.conversation_id,
+              message.data?.message_ids,
+              "read_at",
+              message.data?.read_at,
+            );
+            return;
+          }
+          if (message?.type !== "direct_message" || !message.data?.message)
+            return;
+          const conversationId = String(message.data.conversation_id || "");
+          const directMessage = message.data.message;
+          if (!directMessage) return;
+          const ownMessage =
+            String(directMessage.sender?.id) === String(userId);
+          if (conversationId === currentConversationId.value) {
+            reconcileMessage(directMessage);
+            if (!ownMessage)
+              apiFetch(`/${encodeURIComponent(conversationId)}`, {
+                method: "PATCH",
+                body: JSON.stringify({
+                  action: "read",
+                }),
+              }).catch(() => {});
+          } else if (!ownMessage)
             apiFetch(`/${encodeURIComponent(conversationId)}`, {
               method: "PATCH",
               body: JSON.stringify({
-                action: "read",
+                action: "delivered",
+                messageIds: [directMessage.id],
               }),
             }).catch(() => {});
-        } else if (!ownMessage)
-          apiFetch(`/${encodeURIComponent(conversationId)}`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              action: "delivered",
-              messageIds: [directMessage.id],
-            }),
-          }).catch(() => {});
-        const conversation = conversations.value.find(
-          (item) => item.id === conversationId,
-        );
-        const unreadCount =
-          ownMessage || conversationId === currentConversationId.value
-            ? null
-            : Number(conversation?.unread_count || 0) + 1;
-        if (
-          !updateConversationSummary(conversationId, directMessage, unreadCount)
-        )
-          fetchConversations().catch(() => {});
+          const conversation = conversations.value.find(
+            (item) => item.id === conversationId,
+          );
+          const unreadCount =
+            ownMessage || conversationId === currentConversationId.value
+              ? null
+              : Number(conversation?.unread_count || 0) + 1;
+          if (
+            !updateConversationSummary(
+              conversationId,
+              directMessage,
+              unreadCount,
+            )
+          )
+            fetchConversations().catch(() => {});
+        },
+        onError: () => {
+          realtimeHandle = null;
+        },
       },
-      onError: () => {
-        realtimeHandle = null;
-      },
-    });
+    );
   }
 
   async function initialize() {
@@ -207,7 +246,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     ]).then(() => conversations.value);
     try {
       return await initialization;
-    } catch (cause) {
+    } catch (cause: unknown) {
       initialization = null;
       throw cause;
     }
@@ -225,53 +264,56 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     );
   }
 
-  async function openConversation(friendId) {
+  async function openConversation(friendId: string) {
     const result = await apiFetch("", {
       method: "POST",
       body: JSON.stringify({ friendId }),
     });
+    const conversation = result as DirectConversation;
     const existing = conversations.value.find(
-      (conversation) => conversation.id === result.id,
+      (item) => item.id === conversation.id,
     );
     if (existing) {
-      existing.friend = result.friend;
+      existing.friend = conversation.friend;
       existing.unread_count = 0;
     } else {
-      conversations.value.unshift(result);
+      conversations.value.unshift(conversation);
     }
-    currentConversationId.value = result.id;
-    return result;
+    currentConversationId.value = conversation.id;
+    return conversation;
   }
 
-  async function fetchMessages(conversationId) {
+  async function fetchMessages(conversationId: string) {
     if (!conversationId) return [];
     currentConversationId.value = String(conversationId);
     messagesLoading.value = true;
     error.value = "";
     try {
       const result = await apiFetch(`/${encodeURIComponent(conversationId)}`);
-      messages.value = Array.isArray(result?.items) ? result.items : [];
+      messages.value = Array.isArray(result.items)
+        ? (result.items as DirectMessage[])
+        : [];
       const conversation = conversations.value.find(
         (item) => item.id === String(conversationId),
       );
       if (conversation) conversation.unread_count = 0;
       return messages.value;
-    } catch (cause) {
-      error.value = cause.message;
+    } catch (cause: unknown) {
+      error.value = errorMessage(cause);
       throw cause;
     } finally {
       messagesLoading.value = false;
     }
   }
 
-  async function sendMessage(content) {
+  async function sendMessage(content: string) {
     const normalizedContent = String(content || "").trim();
     if (!currentConversationId.value || !normalizedContent) return null;
     const clientMessageId =
       typeof crypto?.randomUUID === "function"
         ? crypto.randomUUID()
         : `dm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    const pending: any = {
+    const pending: DirectMessage = {
       id: `pending_${clientMessageId}`,
       conversation_id: currentConversationId.value,
       content: normalizedContent,
@@ -295,19 +337,20 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
           }),
         },
       );
-      reconcileMessage(result);
-      updateConversationSummary(currentConversationId.value, result, null);
+      const message = result as DirectMessage;
+      reconcileMessage(message);
+      updateConversationSummary(currentConversationId.value, message, null);
       return result;
-    } catch (cause) {
+    } catch (cause: unknown) {
       pending.status = "failed";
-      pending.error = cause.message;
+      pending.error = errorMessage(cause);
       throw cause;
     } finally {
       sending.value = false;
     }
   }
 
-  async function markRead(conversationId) {
+  async function markRead(conversationId: string) {
     if (!conversationId) return;
     await apiFetch(`/${encodeURIComponent(conversationId)}`, {
       method: "PATCH",
@@ -324,8 +367,8 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     realtimeHandle = null;
     initializedUserId = "";
     initialization = null;
-    conversations.value = [] as any;
-    messages.value = [] as any;
+    conversations.value = [];
+    messages.value = [];
     currentConversationId.value = "";
     error.value = "";
   }

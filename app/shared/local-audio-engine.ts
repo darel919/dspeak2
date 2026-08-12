@@ -6,7 +6,7 @@ import type {
   LocalVoiceDetector,
   SharedAudioMeter,
 } from "./types/local-audio.ts";
-import type { MediaCaptureEntry } from "./types/media-capture.ts";
+import type { TopologySourceEntry } from "./types/topology-controller.ts";
 
 export function createLocalAudioEngine({
   authStore,
@@ -54,7 +54,7 @@ export function createLocalAudioEngine({
     return false;
   }
 
-  function producerFacade(entry: MediaCaptureEntry) {
+  function producerFacade(entry: TopologySourceEntry) {
     return {
       id: `${getActiveProvider() || "local"}:${entry.source}:${entry.track.id}`,
       track: entry.track,
@@ -64,10 +64,11 @@ export function createLocalAudioEngine({
     };
   }
 
-  function startLocalVoiceDetection(entry: MediaCaptureEntry) {
+  function startLocalVoiceDetection(entry: TopologySourceEntry) {
     stopLocalVoiceDetection();
-    const userId = authStore.getUserData()?.id;
-    if (!userId) return;
+    const userIdValue = authStore.getUserData()?.id;
+    if (!userIdValue) return;
+    const userId = String(userIdValue);
     try {
       const AudioContextConstructor =
         window.AudioContext || window.webkitAudioContext;
@@ -267,7 +268,7 @@ export function createLocalAudioEngine({
     );
   }
 
-  async function createSharedAudioSource(entry: MediaCaptureEntry) {
+  async function createSharedAudioSource(entry: TopologySourceEntry) {
     try {
       const AudioContextConstructor =
         window.AudioContext || window.webkitAudioContext;

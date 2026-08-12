@@ -20,6 +20,7 @@ export function usePreparedRoomNavigation() {
       const channels = await channelsStore.fetchChannels(roomId, {
         activate: false,
       });
+      if (!channels.length) return false;
       const textChannels = channels.filter(
         (channel: { isMedia?: boolean }) => !channel.isMedia,
       );
@@ -43,7 +44,7 @@ export function usePreparedRoomNavigation() {
     if (
       !navigator.onLine ||
       connection?.saveData ||
-      ["slow-2g", "2g"].includes(connection?.effectiveType)
+      ["slow-2g", "2g"].includes(connection?.effectiveType || "")
     ) {
       return;
     }

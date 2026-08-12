@@ -94,6 +94,7 @@ export class ChannelRepository {
 
   async reorder(channelOrders: Array<Pick<ChannelInsert, "id" | "position">>) {
     for (const { id, position } of channelOrders) {
+      if (!id) continue;
       await db.update(channels).set({ position }).where(eq(channels.id, id));
     }
   }

@@ -12,7 +12,6 @@ import {
 import type {
   MediaCaptureEntry,
   MediaCaptureManagerOptions,
-  MediaCapturePublication,
   MediaCaptureSettings,
   MediaCaptureStartOptions,
 } from "./types/media-capture.ts";
@@ -573,7 +572,7 @@ export class MediaCaptureManager {
       entry.publication = Promise.resolve(this.onSource?.(entry)).then(
         (publication) =>
           publication && typeof publication === "object"
-            ? (publication as MediaCapturePublication)
+            ? (publication as MediaCaptureEntry)
             : null,
       );
     } catch (error: unknown) {

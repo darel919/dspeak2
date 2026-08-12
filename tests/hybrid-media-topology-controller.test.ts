@@ -122,5 +122,5 @@ test("failed provider tickets do not leave a stale mediasoup socket", async () =
   assert.equal(result, false);
   assert.equal(closed, true);
   assert.equal(providerSocket, null);
-  assert.equal(error.value.message, "provider unavailable");
+  assert.equal(error.value, "provider unavailable");
 });

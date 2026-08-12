@@ -1,31 +1,39 @@
 import { lookup } from "node:dns/promises";
 import { Agent, request } from "node:https";
 import { isIP } from "node:net";
+import type { AgentOptions } from "node:https";
+import type {
+  OutboundFetchOptions,
+  OutboundUrlOptions,
+  PublicBytesResponse,
+  PublicHtmlResponse,
+} from "../../types/outbound-request.ts";
 
-const blockedIpv4Ranges = Object.freeze([
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.0.0.0", 24],
-  ["192.0.2.0", 24],
-  ["192.168.0.0", 16],
-  ["198.18.0.0", 15],
-  ["198.51.100.0", 24],
-  ["203.0.113.0", 24],
-  ["224.0.0.0", 4],
-  ["240.0.0.0", 4],
-]);
+const blockedIpv4Ranges: ReadonlyArray<readonly [string, number]> =
+  Object.freeze([
+    ["0.0.0.0", 8],
+    ["10.0.0.0", 8],
+    ["100.64.0.0", 10],
+    ["127.0.0.0", 8],
+    ["169.254.0.0", 16],
+    ["172.16.0.0", 12],
+    ["192.0.0.0", 24],
+    ["192.0.2.0", 24],
+    ["192.168.0.0", 16],
+    ["198.18.0.0", 15],
+    ["198.51.100.0", 24],
+    ["203.0.113.0", 24],
+    ["224.0.0.0", 4],
+    ["240.0.0.0", 4],
+  ]);
 
-function ipv4Number(address) {
+function ipv4Number(address: string) {
   return address
     .split(".")
-    .reduce((result, octet) => result * 256 + Number(octet), 0);
+    .reduce((result: number, octet: string) => result * 256 + Number(octet), 0);
 }
 
-function ipv4InRange(address, base, prefix) {
+function ipv4InRange(address: string, base: string, prefix: number) {
   const blockSize = 2 ** (32 - prefix);
   return (
     Math.floor(ipv4Number(address) / blockSize) ===
@@ -33,11 +41,11 @@ function ipv4InRange(address, base, prefix) {
   );
 }
 
-function normalizedIpv6(address) {
-  return address.toLowerCase().split("%")[0];
+function normalizedIpv6(address: string) {
+  return address.toLowerCase().split("%")[0] || "";
 }
 
-export function isPublicOutboundAddress(address) {
+export function isPublicOutboundAddress(address: string): boolean {
   const family = isIP(address);
   if (family === 4)
     return !blockedIpv4Ranges.some(([base, prefix]) =>
@@ -65,10 +73,10 @@ export function isPublicOutboundAddress(address) {
   return true;
 }
 
-function allowedHostname(hostname, allowedHosts) {
+function allowedHostname(hostname: string, allowedHosts?: readonly string[]) {
   if (!allowedHosts?.length) return true;
   const normalized = hostname.toLowerCase();
-  return allowedHosts.some((entry) => {
+  return allowedHosts.some((entry: string) => {
     const allowed = String(entry).trim().toLowerCase();
     return (
       allowed && (normalized === allowed || normalized.endsWith(`.${allowed}`))
@@ -76,7 +84,10 @@ function allowedHostname(hostname, allowedHosts) {
   });
 }
 
-export function parseOutboundHttpsUrl(value, options = {} as any) {
+export function parseOutboundHttpsUrl(
+  value: string,
+  options: OutboundUrlOptions = {},
+) {
   let url;
   try {
     url = new URL(value);
@@ -94,19 +105,26 @@ export function parseOutboundHttpsUrl(value, options = {} as any) {
   return url;
 }
 
-export async function resolvePublicOutboundAddresses(hostname) {
+export async function resolvePublicOutboundAddresses(
+  hostname: string,
+): Promise<Array<{ address: string; family: 4 | 6 }>> {
   if (isIP(hostname))
     return isPublicOutboundAddress(hostname)
-      ? [{ address: hostname, family: isIP(hostname) }]
+      ? [{ address: hostname, family: isIP(hostname) as 4 | 6 }]
       : [];
   const addresses = await lookup(hostname, {
     all: true,
     verbatim: true,
   });
-  return addresses.filter(({ address }) => isPublicOutboundAddress(address));
+  return addresses
+    .filter(({ address }) => isPublicOutboundAddress(address))
+    .map(({ address, family }) => ({ address, family: family as 4 | 6 }));
 }
 
-export async function assertSafeOutboundUrl(value, options = {} as any) {
+export async function assertSafeOutboundUrl(
+  value: string,
+  options: OutboundUrlOptions = {},
+) {
   const url = parseOutboundHttpsUrl(value, options);
   const addresses = await resolvePublicOutboundAddresses(url.hostname);
   if (!addresses.length)
@@ -114,7 +132,7 @@ export async function assertSafeOutboundUrl(value, options = {} as any) {
   return url;
 }
 
-export function createPublicHttpsAgent(options = {} as any) {
+export function createPublicHttpsAgent(options: AgentOptions = {}) {
   return new Agent({
     keepAlive: false,
     lookup: (hostname, lookupOptions, callback) => {
@@ -132,20 +150,33 @@ export function createPublicHttpsAgent(options = {} as any) {
           const selected =
             addresses.find(({ family }) => family === requestedFamily) ||
             addresses[0];
+          if (!selected) {
+            callback(
+              new Error("Outbound destination has no permitted address"),
+              "",
+            );
+            return;
+          }
           callback(null, selected.address, selected.family);
         })
-        .catch((error) => callback(error, null));
+        .catch((error: Error) => callback(error, ""));
     },
     ...options,
   });
 }
 
-export async function fetchPublicHtml(value, options = {} as any) {
+export async function fetchPublicHtml(
+  value: string,
+  options: OutboundFetchOptions = {},
+): Promise<PublicHtmlResponse> {
   const maxBytes = options.maxBytes || 512 * 1024;
   const maxRedirects = options.maxRedirects ?? 3;
   const timeoutMs = options.timeoutMs || 5000;
   const allowedHosts = options.allowedHosts;
-  const fetchPage = async (target, redirectsRemaining) => {
+  const fetchPage = async (
+    target: string,
+    redirectsRemaining: number,
+  ): Promise<PublicHtmlResponse> => {
     const url = await assertSafeOutboundUrl(target, { allowedHosts });
     return new Promise((resolve, reject) => {
       const outbound = request(
@@ -190,10 +221,11 @@ export async function fetchPublicHtml(value, options = {} as any) {
             reject(new Error(`Outbound request failed with status ${status}`));
             return;
           }
-          const contentType = String(response.headers["content-type"] || "")
-            .split(";", 1)[0]
-            .trim()
-            .toLowerCase();
+          const contentType =
+            String(response.headers["content-type"] || "")
+              .split(";", 1)[0]
+              ?.trim()
+              .toLowerCase() || "";
           if (!["text/html", "application/xhtml+xml"].includes(contentType)) {
             response.resume();
             reject(new Error("Outbound response is not HTML"));
@@ -205,7 +237,7 @@ export async function fetchPublicHtml(value, options = {} as any) {
             reject(new Error("Outbound response is too large"));
             return;
           }
-          const chunks = [] as any;
+          const chunks: Buffer[] = [];
           let totalBytes = 0;
           response.on("data", (chunk) => {
             totalBytes += chunk.length;
@@ -213,7 +245,7 @@ export async function fetchPublicHtml(value, options = {} as any) {
               response.destroy(new Error("Outbound response is too large"));
               return;
             }
-            chunks.push(chunk);
+            chunks.push(Buffer.from(chunk));
           });
           response.on("end", () =>
             resolve({
@@ -234,11 +266,17 @@ export async function fetchPublicHtml(value, options = {} as any) {
   return fetchPage(value, maxRedirects);
 }
 
-export async function fetchPublicBytes(value, options = {} as any) {
+export async function fetchPublicBytes(
+  value: string,
+  options: OutboundFetchOptions = {},
+): Promise<PublicBytesResponse> {
   const maxBytes = options.maxBytes || 5 * 1024 * 1024;
   const maxRedirects = options.maxRedirects ?? 3;
   const timeoutMs = options.timeoutMs || 5000;
-  const fetchBytes = async (target, redirectsRemaining) => {
+  const fetchBytes = async (
+    target: string,
+    redirectsRemaining: number,
+  ): Promise<PublicBytesResponse> => {
     const url = await assertSafeOutboundUrl(target);
     return new Promise((resolve, reject) => {
       const outbound = request(
@@ -269,10 +307,11 @@ export async function fetchPublicBytes(value, options = {} as any) {
             reject(new Error(`Outbound request failed with status ${status}`));
             return;
           }
-          const contentType = String(response.headers["content-type"] || "")
-            .split(";", 1)[0]
-            .trim()
-            .toLowerCase();
+          const contentType =
+            String(response.headers["content-type"] || "")
+              .split(";", 1)[0]
+              ?.trim()
+              .toLowerCase() || "";
           if (!contentType.startsWith("image/")) {
             response.resume();
             reject(new Error("Outbound response is not an image"));
@@ -284,7 +323,7 @@ export async function fetchPublicBytes(value, options = {} as any) {
             reject(new Error("Outbound response is too large"));
             return;
           }
-          const chunks = [] as any;
+          const chunks: Buffer[] = [];
           let totalBytes = 0;
           response.on("data", (chunk) => {
             totalBytes += chunk.length;
@@ -292,7 +331,7 @@ export async function fetchPublicBytes(value, options = {} as any) {
               response.destroy(new Error("Outbound response is too large"));
               return;
             }
-            chunks.push(chunk);
+            chunks.push(Buffer.from(chunk));
           });
           response.on("end", () =>
             resolve({
@@ -314,7 +353,7 @@ export async function fetchPublicBytes(value, options = {} as any) {
   return fetchBytes(value, maxRedirects);
 }
 
-export function configuredOutboundHosts(value) {
+export function configuredOutboundHosts(value: unknown): string[] {
   return String(value || "")
     .split(",")
     .map((host) => host.trim().toLowerCase())

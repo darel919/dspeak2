@@ -20,7 +20,7 @@ const urlFields = new Set([
   "sourceFile",
 ]);
 
-function sanitizeValue(key, value) {
+function sanitizeValue(key: string, value: unknown): unknown {
   if (typeof value !== "string") return value;
   if (!urlFields.has(key)) return value.slice(0, 1000);
   try {
@@ -32,7 +32,7 @@ function sanitizeValue(key, value) {
   }
 }
 
-function sanitizeReport(value) {
+function sanitizeReport(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return Object.fromEntries(
     Object.entries(value)
@@ -52,7 +52,13 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event);
   const reports = (Array.isArray(body) ? body : [body])
     .slice(0, 20)
-    .map((report) => sanitizeReport(report?.body || report))
+    .map((report: unknown) => {
+      const value =
+        report && typeof report === "object"
+          ? (report as { body?: unknown })
+          : {};
+      return sanitizeReport(value.body || report);
+    })
     .filter(Boolean);
   for (const report of reports)
     console.warn("[Security] CSP violation", report);

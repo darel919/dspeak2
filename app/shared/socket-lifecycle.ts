@@ -1,8 +1,8 @@
-export function shouldCloseSocketOnPageHide(readyState) {
+export function shouldCloseSocketOnPageHide(readyState: number) {
   return readyState === WebSocket.OPEN || readyState === WebSocket.CONNECTING;
 }
 
-export function closeSocketOnPageHide(socket) {
+export function closeSocketOnPageHide(socket: WebSocket | null | undefined) {
   if (!import.meta.client || !socket) return () => {};
   const handlePageHide = () => {
     if (shouldCloseSocketOnPageHide(socket.readyState)) {

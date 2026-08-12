@@ -12,7 +12,7 @@ export function createMediaAudioPolicy({
             sharedAudioKbps?: unknown;
             microphoneKbps?: unknown;
             hdAudio?: unknown;
-          };
+          } | null;
         }
       | null
       | undefined;

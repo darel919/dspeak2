@@ -11,7 +11,7 @@ export interface LifecycleBootstrap {
 }
 
 export interface LifecycleDependencyContext {
-  authStore: { getUserData: () => { id?: string } | null };
+  authStore: { getUserData: () => { id?: string | number } | null };
   buildMediaControlSocketUrl: (options: {
     mediaControlUrl: string;
     channelId: string;

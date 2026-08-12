@@ -21,7 +21,7 @@ export type PeerMetric = {
   candidatePair?: {
     currentRoundTripTime?: unknown;
     packetLoss?: unknown;
-  };
+  } | null;
   inboundAudio?: { jitter?: unknown };
   outboundAudio?: { packetsSent?: unknown };
   remoteInboundAudio?: { fractionLost?: unknown };

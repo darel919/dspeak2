@@ -38,7 +38,10 @@ function prune(state: UploadCache) {
   if (state.size <= MAX_ENTRIES) return;
   const overflow = state.size - MAX_ENTRIES;
   const keys = [...state.keys()];
-  for (let i = 0; i < overflow; i++) state.delete(keys[i]);
+  for (let i = 0; i < overflow; i++) {
+    const key = keys[i];
+    if (key) state.delete(key);
+  }
 }
 
 export function cacheUploadedFile(

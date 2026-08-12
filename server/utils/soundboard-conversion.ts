@@ -8,6 +8,10 @@ import {
   SOUNDBOARD_MAX_SOURCE_BYTES,
   SOUNDBOARD_OUTPUT_BITRATE,
 } from "../../shared/soundboard.ts";
+import type {
+  SoundboardConversionOperation,
+  SoundboardConversionResult,
+} from "../types/soundboard-conversion.ts";
 
 const ALLOWED_TYPES = new Set([
   "audio/mpeg",
@@ -32,8 +36,12 @@ const ALLOWED_IMAGE_TYPES = new Set([
   "image/gif",
 ]);
 
-function run(program, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
+function run(
+  program: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     const child = spawn(program, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -61,7 +69,7 @@ function run(program, args, timeoutMs) {
   });
 }
 
-export function validateSoundboardSource(file) {
+export function validateSoundboardSource(file: File): void {
   if (!(file instanceof File) || !file.size)
     throw createError({
       statusCode: 400,
@@ -79,7 +87,7 @@ export function validateSoundboardSource(file) {
     });
 }
 
-export function validateSoundboardIconSource(file) {
+export function validateSoundboardIconSource(file: File): void {
   if (!(file instanceof File) || !file.size)
     throw createError({
       statusCode: 400,
@@ -97,7 +105,7 @@ export function validateSoundboardIconSource(file) {
     });
 }
 
-async function convert(file) {
+async function convert(file: File): Promise<SoundboardConversionResult> {
   validateSoundboardSource(file);
   const directory = await mkdtemp(join(tmpdir(), "dspeak-soundboard-"));
   const input = join(directory, `input${extname(file.name || "") || ".media"}`);
@@ -172,8 +180,14 @@ async function convert(file) {
       bytes,
       duration: Math.min(duration, SOUNDBOARD_MAX_DURATION_SECONDS),
     };
-  } catch (error) {
-    if (error?.statusCode) throw error;
+  } catch (error: unknown) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "statusCode" in error &&
+      error.statusCode
+    )
+      throw error;
     throw createError({
       statusCode: 500,
       statusMessage: "Soundboard conversion failed",
@@ -183,10 +197,12 @@ async function convert(file) {
   }
 }
 
-let conversionQueue = Promise.resolve();
+let conversionQueue: Promise<void> = Promise.resolve();
 let pendingConversions = 0;
 
-function enqueueConversion(operation) {
+function enqueueConversion<T>(
+  operation: SoundboardConversionOperation<T>,
+): Promise<T> {
   if (pendingConversions >= 20)
     throw createError({
       statusCode: 503,
@@ -194,17 +210,22 @@ function enqueueConversion(operation) {
     });
   pendingConversions += 1;
   const result = conversionQueue.then(operation);
-  conversionQueue = result.catch(() => {});
+  conversionQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
   return result.finally(() => {
     pendingConversions -= 1;
   });
 }
 
-export function convertSoundboardSource(file) {
+export function convertSoundboardSource(
+  file: File,
+): Promise<SoundboardConversionResult> {
   return enqueueConversion(() => convert(file));
 }
 
-async function convertIcon(file) {
+async function convertIcon(file: File): Promise<Buffer> {
   validateSoundboardIconSource(file);
   const directory = await mkdtemp(join(tmpdir(), "dspeak-soundboard-icon-"));
   const input = join(directory, `input${extname(file.name || "") || ".image"}`);
@@ -248,8 +269,14 @@ async function convertIcon(file) {
         statusMessage: "Icon conversion produced invalid ICO media",
       });
     return bytes;
-  } catch (error) {
-    if (error?.statusCode) throw error;
+  } catch (error: unknown) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "statusCode" in error &&
+      error.statusCode
+    )
+      throw error;
     throw createError({
       statusCode: 500,
       statusMessage: "Soundboard icon conversion failed",
@@ -259,6 +286,6 @@ async function convertIcon(file) {
   }
 }
 
-export function convertSoundboardIcon(file) {
+export function convertSoundboardIcon(file: File): Promise<Buffer> {
   return enqueueConversion(() => convertIcon(file));
 }

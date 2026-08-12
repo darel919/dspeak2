@@ -5,8 +5,13 @@ import { chatFiles } from "../../db/schema/index.ts";
 import { getRoomById, getChannelById } from "../room-authorization.ts";
 import { cacheUploadedFile } from "../upload-cache.ts";
 import { deleteObject, putObject } from "../../storage/r2.ts";
+import type {
+  ChatRouteBody,
+  ChatRouteDependencies,
+} from "../../types/chat-api.ts";
+import type { H3Event } from "h3";
 
-export function createChatFilesHandler(dependencies) {
+export function createChatFilesHandler(dependencies: ChatRouteDependencies) {
   const {
     createError,
     enforceRateLimit,
@@ -16,7 +21,12 @@ export function createChatFilesHandler(dependencies) {
     sendPushTest,
   } = dependencies;
 
-  return async function handleRoute(event, suffix, userId, body) {
+  return async function handleRoute(
+    event: H3Event,
+    suffix: string,
+    userId: string,
+    body: ChatRouteBody,
+  ) {
     if (suffix === "push/test" && event.method === "POST") {
       enforceRateLimit(event, "push-test", userId, 5, 60 * 60 * 1000);
       const deviceId = requireValue(
@@ -91,22 +101,28 @@ export function createChatFilesHandler(dependencies) {
         await deleteObject(r2Key).catch(() => {});
         throw error;
       }
-      const verifiedId = record[0].id;
+      const uploaded = record[0];
+      if (!uploaded)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Uploaded file could not be stored",
+        });
+      const verifiedId = uploaded.id;
       cacheUploadedFile(userId, {
         id: verifiedId,
         room_channel: channelId,
-        name: record[0].fileName,
-        size: record[0].size,
-        mime_type: record[0].mimeType,
+        name: uploaded.fileName,
+        size: uploaded.size,
+        mime_type: uploaded.mimeType,
         width: 0,
         height: 0,
       });
       return {
         id: verifiedId,
         url: `/api/assets/chat-file?id=${verifiedId}`,
-        name: record[0].fileName,
-        size: record[0].size,
-        mime_type: record[0].mimeType,
+        name: uploaded.fileName,
+        size: uploaded.size,
+        mime_type: uploaded.mimeType,
         width: 0,
         height: 0,
       };

@@ -3,11 +3,15 @@ import {
   resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "../video-settings.ts";
+import type { NativeSourceEntry } from "../types/native-mediasoup-session.ts";
 
 const CLOUDFLARE_REQUEST_TIMEOUT_MS = 15000;
 
-function nativeProducerAppData(entry, kind) {
-  const appData: any = {
+function nativeProducerAppData(
+  entry: NativeSourceEntry,
+  kind: "audio" | "video",
+): Record<string, unknown> {
+  const appData: Record<string, unknown> = {
     source: entry.source,
     ...(entry.ownerSource ? { ownerSource: entry.ownerSource } : {}),
     ...(entry.captureSelection
@@ -15,8 +19,13 @@ function nativeProducerAppData(entry, kind) {
       : {}),
   };
   if (kind === "audio") {
+    const audioSelection =
+      entry.captureSelection?.audio &&
+      typeof entry.captureSelection.audio === "object"
+        ? (entry.captureSelection.audio as Record<string, unknown>)
+        : null;
     const maxBitrate = Number(
-      entry.captureSelection?.audio?.maxBitrateBps ||
+      audioSelection?.maxBitrateBps ||
         entry.audioBitrate ||
         entry.roomBitrateBps,
     );
@@ -43,9 +52,12 @@ function nativeProducerAppData(entry, kind) {
   }
   const video = resolveNativeCaptureVideoSettings(
     entry.captureSelection,
-    entry.videoSettings || {},
+    entry.videoSettings || undefined,
   );
-  const resolution = VIDEO_RESOLUTIONS[video.resolution];
+  const resolutionKey = String(
+    video.resolution || "",
+  ) as keyof typeof VIDEO_RESOLUTIONS;
+  const resolution = VIDEO_RESOLUTIONS[resolutionKey];
   const options = buildVideoProduceOptions({
     width: video.width || resolution?.width || 1920,
     height: video.height || resolution?.height || 1080,

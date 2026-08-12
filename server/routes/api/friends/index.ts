@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
   try {
     if (method === "GET") {
       const query = getQuery(event);
-      const type = query.type || "list";
+      const type = String(query.type || "list");
 
       if (type === "requests") {
         return { items: await getFriendRequests(userId) };
@@ -30,45 +30,47 @@ export default defineEventHandler(async (event) => {
       }
 
       if (type === "status" && query.targetId) {
-        return await getFriendshipStatus(userId, query.targetId);
+        return await getFriendshipStatus(userId, String(query.targetId));
       }
 
       if (type === "mutual" && query.targetId) {
-        return { items: await getMutualFriends(userId, query.targetId) };
+        return {
+          items: await getMutualFriends(userId, String(query.targetId)),
+        };
       }
 
       return { items: await getFriendsList(userId) };
     }
 
     if (method === "POST") {
-      const body = await readBody(event);
+      const body = (await readBody(event)) as Record<string, unknown>;
       const { action, recipientHandle, targetUserId, requestId, accept } = body;
 
       if (action === "send" && recipientHandle) {
-        return await sendFriendRequest(userId, recipientHandle);
+        return await sendFriendRequest(userId, String(recipientHandle));
       }
 
       if (action === "send" && targetUserId) {
-        return await sendFriendRequestById(userId, targetUserId);
+        return await sendFriendRequestById(userId, String(targetUserId));
       }
 
       if (action === "respond" && requestId) {
         return await respondToFriendRequest(
-          requestId,
+          String(requestId),
           userId,
           accept === true || accept === "true",
         );
       }
 
       if (action === "cancel" && requestId) {
-        return await cancelFriendRequest(requestId, userId);
+        return await cancelFriendRequest(String(requestId), userId);
       }
 
       throw createError({ statusCode: 400, statusMessage: "Invalid request" });
     }
 
     if (method === "DELETE") {
-      const body = await readBody(event);
+      const body = (await readBody(event)) as { friendId?: unknown };
       const { friendId } = body;
 
       if (!friendId) {
@@ -78,15 +80,19 @@ export default defineEventHandler(async (event) => {
         });
       }
 
-      return await removeFriend(userId, friendId);
+      return await removeFriend(userId, String(body.friendId));
     }
 
     throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
-  } catch (error) {
-    if (error.statusCode || error.status) throw error;
+  } catch (error: unknown) {
+    const errorRecord =
+      error && typeof error === "object"
+        ? (error as { statusCode?: number; status?: number; message?: string })
+        : {};
+    if (errorRecord.statusCode || errorRecord.status) throw error;
     throw createError({
       statusCode: 400,
-      statusMessage: error.message || "Friend request failed",
+      statusMessage: errorRecord.message || "Friend request failed",
     });
   }
 });

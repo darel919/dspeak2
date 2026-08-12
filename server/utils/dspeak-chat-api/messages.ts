@@ -18,8 +18,16 @@ import {
   slowModeRemainingMs,
 } from "../../../shared/channel-policy.ts";
 import { messageContainsBroadcastMention } from "../../../shared/notification-policy.ts";
+import type {
+  ChatRouteBody,
+  ChatRouteDependencies,
+  ChatRouteHandler,
+} from "../../types/chat-api.ts";
+import type { H3Event } from "h3";
 
-export function createChatMessagesHandler(dependencies) {
+export function createChatMessagesHandler(
+  dependencies: ChatRouteDependencies,
+): ChatRouteHandler {
   const {
     broadcastToChannel,
     broadcastToUser,
@@ -39,7 +47,12 @@ export function createChatMessagesHandler(dependencies) {
     validateMessageAttachments,
   } = dependencies;
 
-  return async function handleRoute(event, suffix, userId, body) {
+  return async function handleRoute(
+    event: H3Event,
+    suffix: string,
+    userId: string,
+    body: ChatRouteBody,
+  ) {
     if (suffix === "unread" && event.method === "GET") {
       const memberships = await db
         .select({ roomId: roomMemberships.roomId })
@@ -119,9 +132,10 @@ export function createChatMessagesHandler(dependencies) {
 
     if (suffix === "message" && event.method === "POST") {
       enforceRateLimit(event, "chat-message", userId, 120, 60 * 1000);
-      requireValue(body.channelId, "Channel ID is required");
-      const hasContent = typeof body.content === "string";
-      const content = hasContent ? body.content.trim() : "";
+      const channelId = requireValue(body.channelId, "Channel ID is required");
+      const contentValue = body.content;
+      const hasContent = typeof contentValue === "string";
+      const content = hasContent ? contentValue.trim() : "";
       const hasAttachments =
         Array.isArray(body.attachments) && body.attachments.length > 0;
       if (!content && !hasAttachments)
@@ -129,7 +143,7 @@ export function createChatMessagesHandler(dependencies) {
           statusCode: 400,
           statusMessage: "Message content or an image is required",
         });
-      if (hasContent && body.content.length > 4000)
+      if (hasContent && contentValue.length > 4000)
         throw createError({
           statusCode: 400,
           statusMessage: "Message content must be at most 4000 characters",
@@ -145,7 +159,7 @@ export function createChatMessagesHandler(dependencies) {
           statusCode: 400,
           statusMessage: "A valid client message ID is required",
         });
-      const channel = await getChannelById(body.channelId);
+      const channel = await getChannelById(channelId);
       if (!channel)
         throw createError({
           statusCode: 404,
@@ -217,7 +231,9 @@ export function createChatMessagesHandler(dependencies) {
         userId,
         clientId,
       );
-      const replyTo = await validateReplyTarget(body.replyTo, channel.id);
+      const replyToValue =
+        typeof body.replyTo === "string" ? body.replyTo : null;
+      const replyTo = await validateReplyTarget(replyToValue, channel.id);
       if (slowModeApplies)
         enforceRateLimit(
           event,
@@ -249,30 +265,34 @@ export function createChatMessagesHandler(dependencies) {
               validatedAttachments.map((attachment) => attachment.id),
             ),
           );
-      const result = created
-        ? await presentMessage(created)
-        : await presentMessage(
-            await db
-              .select()
-              .from(messages)
-              .where(
-                and(
-                  eq(messages.channelId, channel.id),
-                  eq(messages.authorId, userId),
-                  eq(messages.clientId, clientId),
-                ),
-              )
-              .orderBy(desc(messages.createdAt))
-              .limit(1)
-              .then((r) => r[0]),
-          );
+      const persisted =
+        created ||
+        (await db
+          .select()
+          .from(messages)
+          .where(
+            and(
+              eq(messages.channelId, channel.id),
+              eq(messages.authorId, userId),
+              eq(messages.clientId, clientId),
+            ),
+          )
+          .orderBy(desc(messages.createdAt))
+          .limit(1)
+          .then((r) => r[0]));
+      if (!persisted)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Message could not be persisted",
+        });
+      const result = await presentMessage(persisted);
       const wasCreated = Boolean(created);
       if (wasCreated)
         broadcastToChannel(channel.id, { type: "new_message", data: result });
       const delivery = await persistMessageNotifications({
         room,
         channel,
-        message: created || result,
+        message: persisted,
         senderId: userId,
       });
       if (delivery.notifications) {
@@ -369,10 +389,16 @@ export function createChatMessagesHandler(dependencies) {
           .set({ content: nextContent, updatedAt: editedAt })
           .where(eq(messages.id, target.id))
           .returning();
+        const updatedMessage = updated[0];
+        if (!updatedMessage)
+          throw createError({
+            statusCode: 500,
+            statusMessage: "Message update did not persist",
+          });
         const result = {
-          id: updated[0].id,
-          content: updated[0].content,
-          updated: updated[0].updatedAt,
+          id: updatedMessage.id,
+          content: updatedMessage.content,
+          updated: updatedMessage.updatedAt,
           edited_at: editedAt.toISOString(),
         };
         broadcastToChannel(channel.id, {
@@ -419,7 +445,7 @@ export function createChatMessagesHandler(dependencies) {
           statusCode: 400,
           statusMessage: "A maximum of 200 message IDs is allowed",
         });
-      const results = [] as any;
+      const results: Array<Record<string, unknown>> = [];
       for (const messageId of ids) {
         try {
           const message = await db

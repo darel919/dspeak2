@@ -15,7 +15,6 @@ import type {
   RoomNotificationPreferencePatch,
 } from "../../types/repositories.ts";
 export class NotificationRepository {
-  [key: string]: any;
   async createNotification({
     userId,
     type,
@@ -146,7 +145,7 @@ export class NotificationRepository {
 
   async addPushSubscription(
     userId: string,
-    { endpoint, p256dh, auth }: PushSubscriptionInsert,
+    { endpoint, p256dh, auth }: Omit<PushSubscriptionInsert, "userId">,
   ) {
     const result = await db
       .insert(pushSubscriptions)

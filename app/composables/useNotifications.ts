@@ -12,14 +12,14 @@ export function useNotifications() {
       void store.initialize();
     };
     onMounted(() => {
-      const userId = authStore.getUserData()?.id;
+      const userId = String(authStore.getUserData()?.id || "");
       if (userId) {
         initializeForUser(userId);
         return;
       }
       stopAuthWatch = watch(
         () => authStore.getUserData()?.id,
-        (nextUserId) => initializeForUser(nextUserId),
+        (nextUserId) => initializeForUser(String(nextUserId || "")),
       );
     });
     onUnmounted(() => stopAuthWatch?.());

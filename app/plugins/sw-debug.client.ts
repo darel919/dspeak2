@@ -26,7 +26,11 @@ export default defineNuxtPlugin(async (nuxtApp) => {
       { immediate: true },
     );
 
-    (nuxtApp.hook as any)("app:beforeUnmount", stopAuthWatcher);
+    const registerHook = nuxtApp.hook as unknown as (
+      name: string,
+      callback: () => void,
+    ) => void;
+    registerHook("app:beforeUnmount", stopAuthWatcher);
   } catch (error) {
     console.error("[ServiceWorker] Initialization failed:", error);
   }

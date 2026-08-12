@@ -43,7 +43,7 @@ test("the read queue is deduplicated and retains failed batch entries", async ()
       ),
     )
   ).join("\n");
-  assert.match(chatStore, /const pendingReadIds = new Set\(\)/);
+  assert.match(chatStore, /const pendingReadIds = new Set<string>\(\)/);
   assert.match(chatStore, /result\.status === "marked_as_read"/);
   assert.match(chatStore, /pendingReadIds\.delete\(result\.messageId\)/);
   assert.match(chatStore, /\[\.\.\.pendingReadIds\]\.slice\(0, 200\)/);

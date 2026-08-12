@@ -1,9 +1,12 @@
+import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
+
 export function handleNativeMediasoupTransportRecovery(
-  session,
-  direction,
-  state,
+  session: NativeMediasoupSfuSession,
+  direction: "send" | "recv",
+  state: string,
 ) {
-  clearTimeout(session.recoveryTimers.get(direction));
+  const existingTimer = session.recoveryTimers.get(direction);
+  if (existingTimer) clearTimeout(existingTimer);
   session.recoveryTimers.delete(direction);
   if (state === "connected") {
     session.recoveryAttempts.delete(direction);
@@ -23,7 +26,10 @@ export function handleNativeMediasoupTransportRecovery(
   session.recoveryTimers.set(direction, timer);
 }
 
-export function restartNativeMediasoupTransportIce(session, direction) {
+export function restartNativeMediasoupTransportIce(
+  session: NativeMediasoupSfuSession,
+  direction: "send" | "recv",
+) {
   const active = session.recoveryOperations.get(direction);
   if (active) return active;
   const operation = performNativeMediasoupTransportIceRestart(
@@ -37,7 +43,10 @@ export function restartNativeMediasoupTransportIce(session, direction) {
   return operation;
 }
 
-async function performNativeMediasoupTransportIceRestart(session, direction) {
+async function performNativeMediasoupTransportIceRestart(
+  session: NativeMediasoupSfuSession,
+  direction: "send" | "recv",
+) {
   const attempts = session.recoveryAttempts.get(direction) || 0;
   if (attempts >= 1) throw new Error("SFU ICE recovery was exhausted");
   const transport =

@@ -47,27 +47,43 @@ export interface NativeFeed {
 
 export interface NativeMediaStore {
   currentChannelId?: string | null;
-  getChannelById?: (
-    channelId: string | null | undefined,
-  ) => { mediaPolicy?: Record<string, unknown> } | undefined;
-  [key: string]: unknown;
+  loadedRoomId?: string | null;
+  systemSoundVolume?: number;
+  systemSoundTheme?: string;
+  systemSoundsMuted?: boolean;
+  outputDeviceId?: string | null;
+  systemAudioBitrate?: number | null;
+  screenVideo?: VideoSettings;
+  cameraVideo?: VideoSettings;
+  getChannelById?: (channelId: string | null) =>
+    | (ChannelRoomRecord & {
+        mediaPolicy?: Record<string, unknown> | null;
+      })
+    | null
+    | undefined;
 }
 
 export interface NativeMediaEngineOptions {
   browserEngine?: import("./media-engine-adapters.ts").BrowserMediaEngineSession;
   flags?: Partial<NativeMediaFlags>;
-  tauri?: unknown;
+  tauri?: NativeTauriLike;
   nativeConfig?: NativeCaptureRequest;
   nativeOnly?: boolean;
-  voiceStore?: unknown;
-  settingsStore?: unknown;
-  channelsStore?: unknown;
-  getAudioBitrate?: (source: string) => number;
-  getAudioStereo?: (source: string) => boolean;
-  getVideoSettings?: (source: string) => Record<string, unknown>;
+  voiceStore?: NativeVoiceStoreLike;
+  settingsStore?: NativeMediaStore;
+  channelsStore?: NativeMediaStore;
+  getAudioBitrate?: (source: string) => number | null;
+  getAudioStereo?: (source: string) => boolean | null;
+  getVideoSettings?: (source: string) => VideoSettings;
   onQoe?: (
     report: ReturnType<
       typeof import("../../shared/media-qoe.ts").createMediaQoeReport
     >,
   ) => void;
 }
+import type {
+  NativeTauriLike,
+  NativeVoiceStoreLike,
+} from "./native-media-engine.ts";
+import type { VideoSettings } from "./video-settings.ts";
+import type { ChannelRoomRecord } from "./channel-room.ts";

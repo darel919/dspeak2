@@ -14,6 +14,7 @@ import { eq, and, inArray, asc, desc } from "drizzle-orm";
 import {
   getEffectivePermissions,
   getHighestRolePosition,
+  normalizePermissions,
   normalizeAttenuation,
   normalizeRoomAccent,
 } from "../../shared/room-policy.ts";
@@ -39,30 +40,53 @@ import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
 import { publicDisplayName } from "../../shared/user-profile.ts";
 import { createDownloadUrl, deleteObject, putObject } from "../storage/r2.ts";
 import { enforceRateLimit } from "./rate-limit.ts";
+import type { InferInsertModel } from "drizzle-orm";
+import type {
+  ChannelRow,
+  InvitePayload,
+  ProfileRow,
+  RoomRow,
+  RoomsApiBody,
+  RoomsApiEvent,
+} from "../types/rooms-api.ts";
 
-function requireValue(value, message) {
+function requireValue(value: unknown, message: string): string {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
-  return value;
+  return String(value);
 }
 
-function sameInstant(left, right) {
+function sameInstant(left: Date | string, right: Date | string) {
   const leftTime = left instanceof Date ? left.getTime() : Date.parse(left);
-  const rightTime = Date.parse(right);
+  const rightTime = right instanceof Date ? right.getTime() : Date.parse(right);
   return Number.isFinite(leftTime) && leftTime === rightTime;
 }
 
-function inviteMatchesPayload(invite, payload) {
+function inviteMatchesPayload(
+  invite: {
+    id: string;
+    roomId: string;
+    inviterId: string;
+    createdAt: Date;
+    expiresAt: Date | null;
+  },
+  payload: InvitePayload,
+) {
+  if (!invite.expiresAt) return false;
   return (
     String(invite.id) === String(payload.id) &&
     String(invite.roomId) === String(payload.roomId) &&
     String(invite.inviterId) === String(payload.createdBy) &&
-    sameInstant(invite.createdAt, payload.createdAt) &&
-    sameInstant(invite.expiresAt, payload.expiresAt)
+    sameInstant(invite.createdAt, String(payload.createdAt)) &&
+    sameInstant(invite.expiresAt, String(payload.expiresAt))
   );
 }
 
-function structuredValue(value, fallback = {} as any) {
-  if (value && typeof value === "object") return value;
+function structuredValue(
+  value: unknown,
+  fallback: Record<string, unknown> = {},
+): Record<string, unknown> {
+  if (value && typeof value === "object")
+    return value as Record<string, unknown>;
   if (typeof value !== "string") return fallback;
   try {
     const parsed = JSON.parse(value);
@@ -72,16 +96,24 @@ function structuredValue(value, fallback = {} as any) {
   }
 }
 
-async function parseBody(event) {
+type RoomUpdate = Omit<
+  Partial<InferInsertModel<typeof rooms>>,
+  "attenuation"
+> & {
+  attenuation?: ReturnType<typeof normalizeAttenuation>;
+};
+
+async function parseBody(event: RoomsApiEvent): Promise<RoomsApiBody> {
   const contentType = getHeader(event, "content-type") || "";
   if (contentType.includes("multipart/form-data")) {
     const form = await readFormData(event);
     return Object.fromEntries(form.entries());
   }
-  return (await readBody(event)) || {};
+  const body: unknown = await readBody(event);
+  return body && typeof body === "object" ? (body as RoomsApiBody) : {};
 }
 
-async function validateRoomImage(file, limit, label) {
+async function validateRoomImage(file: unknown, limit: number, label: string) {
   if (!(file instanceof File) || !file.size) return;
   if (file.size > limit)
     throw createError({
@@ -106,7 +138,11 @@ async function validateRoomImage(file, limit, label) {
     });
 }
 
-async function replaceRoomImage(roomId, type, file) {
+async function replaceRoomImage(
+  roomId: string,
+  type: "header" | "profile",
+  file: unknown,
+) {
   if (!(file instanceof File) || !file.size) return;
   const limit = type === "header" ? 5 * 1024 * 1024 : 2 * 1024 * 1024;
   const label = type === "header" ? "Room header" : "Room picture";
@@ -143,27 +179,29 @@ async function replaceRoomImage(roomId, type, file) {
   );
 }
 
-function presentProfile(profile) {
+function presentProfile(profile: ProfileRow | undefined | null) {
   if (!profile) return null;
   return {
     id: String(profile.id),
     name: publicDisplayName(profile),
     display_name: profile.displayName || "",
     username: profile.username || "",
-    handle: profile.username || profile.handle || "",
+    handle: profile.username || "",
     online: false,
     avatar: sameOriginAvatarPath(profile),
   };
 }
 
-function presentChannel(channel, roomId) {
+function presentChannel(channel: ChannelRow, roomId: string) {
   const isMedia = ["voice", "stage"].includes(channel.type);
   return {
     id: channel.id,
     name: channel.name,
     desc: channel.description || "",
     isMedia,
-    mediaPolicy: normalizeMediaPolicy(channel.mediaPolicy),
+    mediaPolicy: normalizeMediaPolicy(
+      channel.mediaPolicy as Parameters<typeof normalizeMediaPolicy>[0],
+    ),
     inRoom: [],
     created: channel.createdAt?.toISOString?.() || channel.createdAt,
     updated: channel.updatedAt?.toISOString?.() || channel.updatedAt,
@@ -174,7 +212,7 @@ function presentChannel(channel, roomId) {
   };
 }
 
-async function roomDetails(room, userId = null) {
+async function roomDetails(room: RoomRow, userId: string | null = null) {
   const [roomChannels, memberships, imageRows] = await Promise.all([
     db
       .select()
@@ -207,7 +245,7 @@ async function roomDetails(room, userId = null) {
   const memberIds = [
     ...new Set(memberships.map((m) => String(m.userId))),
   ].filter(Boolean);
-  let memberProfiles = [] as any;
+  let memberProfiles: ProfileRow[] = [];
   if (memberIds.length) {
     memberProfiles = await db
       .select()
@@ -231,7 +269,7 @@ async function roomDetails(room, userId = null) {
     }))
     .filter((m) => m.roleId);
 
-  const rolesByUserId = new Map();
+  const rolesByUserId = new Map<string, Array<Record<string, unknown>>>();
   for (const role of roles) {
     const userRoles = rolesByUserId.get(role.userId) || [];
     userRoles.push({
@@ -255,7 +293,7 @@ async function roomDetails(room, userId = null) {
           name: membership.roleName,
           color: membership.roleColor,
           position: membership.rolePosition,
-          permissions: membership.rolePermissions,
+          permissions: normalizePermissions(membership.rolePermissions),
           system: membership.roleSystem,
           isDefault: membership.roleIsDefault,
         }))
@@ -264,9 +302,23 @@ async function roomDetails(room, userId = null) {
   const access = userId
     ? {
         roles: accessRoles,
-        permissions: getEffectivePermissions(accessRoles, isOwner),
+        permissions: getEffectivePermissions(
+          accessRoles.map((role) => ({
+            permissions: role.permissions,
+            position: Number(role.position) || 0,
+            system: Boolean(role.system),
+          })),
+          isOwner,
+        ),
         isOwner,
-        highestPosition: getHighestRolePosition(accessRoles, isOwner),
+        highestPosition: getHighestRolePosition(
+          accessRoles.map((role) => ({
+            permissions: role.permissions,
+            position: Number(role.position) || 0,
+            system: Boolean(role.system),
+          })),
+          isOwner,
+        ),
       }
     : null;
 
@@ -295,7 +347,9 @@ async function roomDetails(room, userId = null) {
       ? `/api/room/header?id=${encodeURIComponent(room.id)}`
       : null,
     accent: normalizeRoomAccent(room.accent),
-    attenuation: normalizeAttenuation(room.attenuation),
+    attenuation: normalizeAttenuation(
+      room.attenuation as Parameters<typeof normalizeAttenuation>[0],
+    ),
     owner: presentProfile(profileById.get(String(room.ownerId))),
     members: memberIds
       .map((userId) => {
@@ -312,7 +366,11 @@ async function roomDetails(room, userId = null) {
   };
 }
 
-async function handleRoomRoles(event, roomId, userId) {
+async function handleRoomRoles(
+  event: RoomsApiEvent,
+  roomId: unknown,
+  userId: string,
+) {
   const method = event.method;
   const body = method === "GET" ? {} : await parseBody(event);
   const resolvedRoomId = requireValue(
@@ -379,7 +437,7 @@ async function handleRoomRoles(event, roomId, userId) {
       });
     const roleIds: string[] = [
       ...new Set((Array.isArray(body.roleIds) ? body.roleIds : []).map(String)),
-    ] as any;
+    ];
     if (!roleIds.length)
       throw createError({
         statusCode: 400,
@@ -407,7 +465,7 @@ async function handleRoomRoles(event, roomId, userId) {
         .where(eq(membershipRoles.membershipId, membershipId));
       await tx
         .insert(membershipRoles)
-        .values(roleIds.map((roleId) => ({ membershipId, roleId })) as any);
+        .values(roleIds.map((roleId) => ({ membershipId, roleId })));
     });
     return { success: true };
   }
@@ -442,7 +500,12 @@ async function handleRoomRoles(event, roomId, userId) {
     .limit(1);
   if (!role[0])
     throw createError({ statusCode: 404, statusMessage: "Role not found" });
-  await requireRoleManagement(room, userId, role[0]);
+  await requireRoleManagement(room, userId, {
+    ...role[0],
+    permissions: normalizePermissions(role[0].permissions),
+    position: Number(role[0].position) || 0,
+    system: Boolean(role[0].system),
+  });
 
   if (method === "PUT") {
     const position = Math.max(
@@ -473,7 +536,7 @@ async function handleRoomRoles(event, roomId, userId) {
   throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
 }
 
-async function handleRooms(event, suffix) {
+async function handleRooms(event: RoomsApiEvent, suffix: string) {
   const method = event.method;
   const query = getQuery(event);
 
@@ -488,14 +551,14 @@ async function handleRooms(event, suffix) {
     const invite = await db
       .select()
       .from(roomInvites)
-      .where(eq(roomInvites.id, payload.id))
+      .where(eq(roomInvites.id, String(payload.id)))
       .limit(1);
     if (!invite[0] || !inviteMatchesPayload(invite[0], payload))
       throw createError({
         statusCode: 400,
         statusMessage: "Invalid invite link",
       });
-    if (new Date(invite[0].expiresAt).getTime() <= Date.now())
+    if (!invite[0].expiresAt || invite[0].expiresAt.getTime() <= Date.now())
       throw createError({
         statusCode: 410,
         statusMessage: "This invite link has expired",
@@ -598,8 +661,14 @@ async function handleRooms(event, suffix) {
         expiresAt,
       })
       .returning();
+    const createdInvite = invite[0];
+    if (!createdInvite)
+      throw createError({
+        statusCode: 500,
+        statusMessage: "Invite creation failed",
+      });
     const payload = {
-      id: invite[0].id,
+      id: createdInvite.id,
       createdBy: String(userId),
       createdAt: createdAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
@@ -624,7 +693,7 @@ async function handleRooms(event, suffix) {
     const access = await requireRoomMember(room, userId);
     if (
       !access.isOwner &&
-      !access.permissions.some((p) =>
+      !access.permissions.some((p: string) =>
         ["room.manage_invites", "room.manage_members"].includes(p),
       )
     )
@@ -711,7 +780,8 @@ async function handleRooms(event, suffix) {
         })
         .returning();
       const nextRoom = room[0];
-      await seedRoomRoles(nextRoom, userId, tx);
+      if (!nextRoom) throw new Error("Room creation failed");
+      await seedRoomRoles(nextRoom, userId, tx as unknown as typeof db);
       await tx.insert(channels).values([
         {
           roomId: nextRoom.id,
@@ -747,7 +817,7 @@ async function handleRooms(event, suffix) {
       await requireRoomPermission(room, userId, "room.update_identity");
     if (body.accent !== undefined || body.attenuation !== undefined)
       await requireRoomPermission(room, userId, "room.update_theme");
-    const update = {} as any;
+    const update: RoomUpdate = {};
     if (body.name) update.name = body.name;
     if (body.desc !== undefined) update.description = body.desc;
     if (body.accent !== undefined)
@@ -762,12 +832,12 @@ async function handleRooms(event, suffix) {
     }
     await replaceRoomImage(room.id, "profile", body.picture);
     await replaceRoomImage(room.id, "header", body.headerImage);
-    const data: any = {
+    const data: Record<string, unknown> = {
       id: room.id,
       accent: normalizeRoomAccent(update.accent ?? room.accent),
     };
     data.attenuation = normalizeAttenuation(
-      update.attenuation ?? room.attenuation,
+      update.attenuation ?? structuredValue(room.attenuation),
     );
     broadcastGlobally({ type: "room_updated", data });
     return roomDetails({ ...room, ...update }, userId);
@@ -822,12 +892,13 @@ async function handleRooms(event, suffix) {
         const invite = await db
           .select()
           .from(roomInvites)
-          .where(eq(roomInvites.id, payload.id))
+          .where(eq(roomInvites.id, String(payload.id)))
           .limit(1);
         if (
           !invite[0] ||
           !inviteMatchesPayload(invite[0], payload) ||
-          new Date(invite[0].expiresAt).getTime() <= Date.now()
+          !invite[0]?.expiresAt ||
+          invite[0].expiresAt.getTime() <= Date.now()
         )
           throw createError({
             statusCode: 403,
@@ -867,6 +938,6 @@ async function handleRooms(event, suffix) {
   });
 }
 
-export function createRoomsApiHandler(dependencies) {
+export function createRoomsApiHandler(_dependencies: unknown) {
   return handleRooms;
 }

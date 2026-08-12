@@ -58,12 +58,15 @@ test("room creation creates the owner membership exactly once inside one transac
     roomsApi.indexOf('if (!suffix && method === "PUT")'),
   );
   assert.match(createRoom, /db\.transaction\(async \(tx\)/);
-  assert.match(createRoom, /seedRoomRoles\(nextRoom, userId, tx\)/);
+  assert.match(
+    createRoom,
+    /seedRoomRoles\(nextRoom, userId, tx(?: as [^)]+)?\)/,
+  );
   assert.doesNotMatch(createRoom, /insert\(roomMemberships\)/);
 });
 
 test("default room roles use the repository's snake_case template contract", () => {
-  assert.match(roomAuth, /template\.isDefault \?\? template\.is_default/);
+  assert.match(roomAuth, /template\.is_default/);
 });
 
 test("room role mutations resolve the room from their JSON body", () => {
@@ -156,7 +159,7 @@ test("API channel edits import and persist channel policy fields", () => {
 });
 
 test("chat accepts attachment-only messages and implements both content filters", () => {
-  assert.match(chatApi, /if \(hasContent && body\.content\.length > 4000\)/);
+  assert.match(chatApi, /if \(hasContent && contentValue\.length > 4000\)/);
   assert.match(chatApi, /query\.has === "attachment"/);
   assert.match(chatApi, /query\.has === "link"/);
   assert.match(chatApi, /Invalid before date/);
@@ -170,8 +173,8 @@ test("social repository uses SQL null semantics for invite use and imports audit
 });
 
 test("room presentation returns persisted channel policy and profile handles", () => {
-  assert.match(roomApi, /normalizeMediaPolicy\(channel\.mediaPolicy\)/);
-  assert.match(roomApi, /handle: profile\.username \|\| profile\.handle/);
+  assert.match(roomApi, /normalizeMediaPolicy\(\s*channel\.mediaPolicy/);
+  assert.match(roomApi, /handle: profile\.username \|\| ""/);
 });
 
 test("push jobs include their required recipient and current soundboards are protected from cleanup", () => {

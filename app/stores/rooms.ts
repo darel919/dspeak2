@@ -2,15 +2,26 @@ import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import { cacheRooms, getCachedRooms, isIdbAvailable } from "~/utils/idb";
+import {
+  isRoomRecord,
+  type CreateRoomResponse,
+  type RoomDetailsResponse,
+  type RoomRecord,
+  type RoomUpdate,
+  type RoomUpdateInput,
+} from "../shared/types/rooms-store.ts";
 
 export const useRoomsStore = defineStore("rooms", () => {
-  const rooms = ref([]);
+  const rooms = ref<RoomRecord[]>([]);
   const loading = ref(false);
-  const error = ref(null);
+  const error = ref<string | null>(null);
   const config = useRuntimeConfig();
-  let roomsRequest = null;
+  let roomsRequest: Promise<void> | null = null;
 
-  async function updateRoom(roomId, data) {
+  async function updateRoom(
+    roomId: string,
+    data: RoomUpdateInput,
+  ): Promise<RoomRecord> {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     const apiPath = config.public.apiPath;
@@ -39,28 +50,34 @@ export const useRoomsStore = defineStore("rooms", () => {
       body: body || JSON.stringify({ roomId, ...data }),
     });
     if (!response.ok) throw new Error("Failed to update room");
-    const updatedRoom = await response.json();
+    const updatedRoom: unknown = await response.json();
+    if (!isRoomRecord(updatedRoom)) throw new Error("Invalid room response");
     applyRealtimeRoomUpdate(updatedRoom);
     await fetchRooms();
     return updatedRoom;
   }
 
-  function applyRealtimeRoomUpdate(update) {
+  function applyRealtimeRoomUpdate(update: RoomUpdate): void {
     if (!update?.id) return;
     const index = rooms.value.findIndex(
       (room) => String(room.id) === String(update.id),
     );
     if (index === -1) return;
-    rooms.value[index] = { ...rooms.value[index], ...update };
+    const current = rooms.value[index];
+    if (!current) return;
+    rooms.value[index] = { ...current, ...update, id: String(update.id) };
   }
 
-  function getRoomById(id) {
+  function getRoomById(id: string): RoomRecord | undefined {
     return Array.isArray(rooms?.value)
       ? rooms.value.find((room) => room.id === id)
       : undefined;
   }
 
-  async function createRoom(name, desc = "") {
+  async function createRoom(
+    name: string,
+    desc = "",
+  ): Promise<CreateRoomResponse> {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     const apiPath = config.public.apiPath;
@@ -68,7 +85,7 @@ export const useRoomsStore = defineStore("rooms", () => {
       throw new Error("Room name is required");
     if (!userData || !userData.id) throw new Error("User not authenticated");
     if (!apiPath) throw new Error("API path is not defined");
-    const body: any = { name: name.trim() };
+    const body: Record<string, unknown> = { name: name.trim() };
     if (desc && typeof desc === "string" && desc.trim())
       body.desc = desc.trim();
     const response = await fetch(`${apiPath}/room/`, {
@@ -83,7 +100,8 @@ export const useRoomsStore = defineStore("rooms", () => {
       const errorText = await response.text();
       throw new Error(`Failed to create room: ${response.status} ${errorText}`);
     }
-    const data: any = await response.json();
+    const data: unknown = await response.json();
+    if (!isRoomRecord(data)) throw new Error("Invalid room response");
     await fetchRooms();
 
     if (data && data.id) {
@@ -124,17 +142,18 @@ export const useRoomsStore = defineStore("rooms", () => {
         const errorText = await response.text();
         throw new Error(`Failed to fetch rooms: ${response.status}`);
       }
-      const data = await response.json();
+      const data: unknown = await response.json();
       if (authStore.getUserData()?.id !== userData.id) return;
-      rooms.value = data;
+      if (!Array.isArray(data)) throw new Error("Invalid rooms response");
+      rooms.value = data.filter(isRoomRecord);
       if (import.meta.client && isIdbAvailable()) {
         cacheRooms(userData.id, data).catch((cacheError) => {
           console.warn("[RoomsStore] Failed to cache rooms:", cacheError);
         });
       }
       loading.value = false;
-    } catch (err) {
-      error.value = err.message;
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : String(err);
       console.error("[RoomsStore] Error fetching rooms:", err);
 
       if (import.meta.client && isIdbAvailable()) {
@@ -156,7 +175,7 @@ export const useRoomsStore = defineStore("rooms", () => {
     }
   }
 
-  async function getRoomDetails(roomId) {
+  async function getRoomDetails(roomId: string): Promise<RoomDetailsResponse> {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     const apiPath = config.public.apiPath;
@@ -177,10 +196,12 @@ export const useRoomsStore = defineStore("rooms", () => {
       error.status = response.status;
       throw error;
     }
-    return await response.json();
+    const data: unknown = await response.json();
+    if (!isRoomRecord(data)) throw new Error("Invalid room details response");
+    return data;
   }
 
-  async function deleteRoom(roomId) {
+  async function deleteRoom(roomId: string): Promise<void> {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     const apiPath = config.public.apiPath;
@@ -198,11 +219,19 @@ export const useRoomsStore = defineStore("rooms", () => {
     await fetchRooms();
   }
 
-  function isOwner(room, userData) {
-    return room.owner.id === userData.id;
+  function isOwner(
+    room: RoomRecord,
+    userData: { id?: string | number } | null | undefined,
+  ): boolean {
+    return Boolean(
+      room.owner?.id && userData?.id && room.owner.id === String(userData.id),
+    );
   }
 
-  async function joinRoom(roomId, inviteToken = null) {
+  async function joinRoom(
+    roomId: string,
+    inviteToken: string | null = null,
+  ): Promise<RoomRecord | unknown> {
     loading.value = true;
     error.value = null;
 
@@ -245,7 +274,7 @@ export const useRoomsStore = defineStore("rooms", () => {
         throw new Error("API path is not defined");
       }
 
-      let response;
+      let response: Response | undefined;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           response = await fetch(`${apiPath}/room/join`, {
@@ -267,6 +296,7 @@ export const useRoomsStore = defineStore("rooms", () => {
         await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** attempt));
       }
 
+      if (!response) throw new Error("Failed to join room");
       if (!response.ok) {
         const errorText = await response.text();
         console.error(
@@ -310,15 +340,15 @@ export const useRoomsStore = defineStore("rooms", () => {
       }
 
       return data;
-    } catch (err) {
-      error.value = err.message;
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : String(err);
       throw err;
     } finally {
       loading.value = false;
     }
   }
 
-  async function leaveRoom(roomId) {
+  async function leaveRoom(roomId: string): Promise<unknown> {
     try {
       loading.value = true;
       error.value = null;
@@ -359,7 +389,7 @@ export const useRoomsStore = defineStore("rooms", () => {
           const { usePushSubscription } =
             await import("../composables/usePushSubscription");
           const { unsubscribe } = usePushSubscription();
-          await (unsubscribe as any)(trimmedRoomId);
+          await unsubscribe();
         } catch (pushError) {
           console.warn(
             "[RoomsStore] Push subscription cleanup failed",
@@ -371,8 +401,8 @@ export const useRoomsStore = defineStore("rooms", () => {
       await fetchRooms();
 
       return data;
-    } catch (err) {
-      error.value = err.message;
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : String(err);
       throw err;
     } finally {
       loading.value = false;
@@ -380,7 +410,7 @@ export const useRoomsStore = defineStore("rooms", () => {
   }
 
   function clearRooms() {
-    rooms.value = [] as any;
+    rooms.value = [];
     error.value = null;
   }
 

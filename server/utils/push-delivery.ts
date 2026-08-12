@@ -1,4 +1,5 @@
 import webpush from "web-push";
+import "../types/web-push.d.ts";
 import {
   isMessageNotificationEligible,
   messageContainsBroadcastMention,
@@ -23,6 +24,16 @@ import {
   configuredOutboundHosts,
   createPublicHttpsAgent,
 } from "../infrastructure/network/outbound-request.ts";
+import type {
+  PushChannel,
+  PushDispatcherState,
+  PushJob,
+  PushMessage,
+  PushNotificationInput,
+  PushProfile,
+  PushRoom,
+  PushSubscriptionRow,
+} from "../types/push-delivery.ts";
 
 const dispatcherKey = Symbol.for("dspeak.push.dispatcher");
 const retryDelays = [5_000, 30_000, 120_000, 600_000, 1_800_000];
@@ -36,10 +47,14 @@ const pushAllowedHosts = configuredOutboundHosts(
 );
 const pushAgent = createPublicHttpsAgent();
 
-function getState() {
-  if (!globalThis[dispatcherKey]) {
-    globalThis[dispatcherKey] = {
+function getState(): PushDispatcherState {
+  const globalState = globalThis as typeof globalThis & {
+    [key: symbol]: PushDispatcherState;
+  };
+  if (!globalState[dispatcherKey]) {
+    globalState[dispatcherKey] = {
       timer: null,
+      dispatchPromise: null,
       running: false,
       configured: false,
       databaseUnavailable: false,
@@ -58,7 +73,7 @@ function getState() {
       },
     };
   }
-  return globalThis[dispatcherKey];
+  return globalState[dispatcherKey];
 }
 
 function configureWebPush() {
@@ -72,8 +87,9 @@ function configureWebPush() {
   return true;
 }
 
-function handleMissingRelation(error) {
-  const message = [error?.message, error?.cause?.message, String(error)]
+function handleMissingRelation(error: unknown): boolean {
+  const value = error as { message?: string; cause?: { message?: string } };
+  const message = [value.message, value.cause?.message, String(error)]
     .filter(Boolean)
     .join(" ");
   if (!/relation ".+" does not exist/.test(message)) return false;
@@ -87,7 +103,13 @@ function handleMissingRelation(error) {
   return true;
 }
 
-async function createMessageNotification(userId, message, channel, room, body) {
+async function createMessageNotification(
+  userId: string,
+  message: PushMessage,
+  channel: PushChannel,
+  room: PushRoom,
+  body: string,
+) {
   const notificationData = JSON.stringify({
     messageId: message.id,
     channelId: channel.id,
@@ -128,7 +150,7 @@ export async function persistMessageNotifications({
   channel,
   message,
   senderId,
-}) {
+}: PushNotificationInput) {
   const allMemberships = await db
     .select({ userId: roomMemberships.userId })
     .from(roomMemberships)
@@ -173,7 +195,7 @@ export async function persistMessageNotifications({
   const roomPreferencesByUser = new Map(
     roomPrefRows.map((p) => [String(p.userId), p]),
   );
-  const subscriptionsByUser = new Map();
+  const subscriptionsByUser = new Map<string, PushSubscriptionRow[]>();
   for (const subscription of subRows) {
     const userSubscriptions =
       subscriptionsByUser.get(String(subscription.userId)) || [];
@@ -253,14 +275,14 @@ export async function persistMessageNotifications({
   };
 }
 
-function retryAt(attempts) {
+function retryAt(attempts: number): Date {
   const base =
     retryDelays[Math.min(Math.max(attempts - 1, 0), retryDelays.length - 1)];
   const jitter = 0.8 + Math.random() * 0.4;
-  return new Date(Date.now() + Math.round(base * jitter));
+  return new Date(Date.now() + Math.round((base ?? 0) * jitter));
 }
 
-async function deliverJob(job) {
+async function deliverJob(job: PushJob): Promise<void> {
   const state = getState();
   if (Date.now() - job.scheduledFor.getTime() > jobLifetime) {
     await db
@@ -323,8 +345,11 @@ async function deliverJob(job) {
         .where(eq(pushSubscriptions.id, subscription[0].id)),
     ]);
     state.metrics.delivered += 1;
-  } catch (error) {
-    const statusCode = Number(error?.statusCode || 0);
+  } catch (error: unknown) {
+    const statusCode =
+      error && typeof error === "object" && "statusCode" in error
+        ? Number(error.statusCode)
+        : 0;
     if (
       statusCode === 404 ||
       statusCode === 410 ||
@@ -403,7 +428,7 @@ export async function dispatchPushJobs() {
   return dispatchedCount;
 }
 
-export async function sendPushTest(userId) {
+export async function sendPushTest(userId: string) {
   if (!configureWebPush()) throw new Error("Web Push is not configured");
   const subscriptions = await db
     .select()
@@ -436,21 +461,31 @@ export async function sendPushTest(userId) {
 export function startPushDispatcher() {
   const state = getState();
   if (state.timer) return;
-  dispatchPushJobs().catch((error) =>
-    console.error("[PushDispatcher] Dispatch failed", error),
-  );
+  const runDispatch = () => {
+    if (state.dispatchPromise) return;
+    const dispatchPromise = dispatchPushJobs()
+      .catch((error) =>
+        console.error("[PushDispatcher] Dispatch failed", error),
+      )
+      .then(() => undefined);
+    state.dispatchPromise = dispatchPromise;
+    dispatchPromise.finally(() => {
+      if (state.dispatchPromise === dispatchPromise)
+        state.dispatchPromise = null;
+    });
+  };
+  runDispatch();
   state.timer = setInterval(() => {
-    dispatchPushJobs().catch((error) =>
-      console.error("[PushDispatcher] Dispatch failed", error),
-    );
+    runDispatch();
   }, dispatchInterval);
   state.timer.unref?.();
 }
 
-export function stopPushDispatcher() {
+export async function stopPushDispatcher(): Promise<void> {
   const state = getState();
   if (state.timer) clearInterval(state.timer);
   state.timer = null;
+  await state.dispatchPromise;
 }
 
 export async function refreshPushMetrics() {
@@ -472,7 +507,7 @@ export async function refreshPushMetrics() {
   getState().metricsSnapshot = {
     pending: pending[0]?.n ?? 0,
     activeSubscriptions: subscriptions[0]?.n ?? 0,
-    oldestPendingAt: oldest || null,
+    oldestPendingAt: oldest?.toISOString() || null,
     checkedAt: now,
     available: true,
   };

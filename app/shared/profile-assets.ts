@@ -1,4 +1,6 @@
-export function profileAssetUrl(path) {
+export function profileAssetUrl(
+  path: string | null | undefined,
+): string | null {
   if (!path) return null;
 
   const value = String(path).trim();
@@ -31,12 +33,12 @@ export function profileAssetUrl(path) {
   return normalizedPath;
 }
 
-export function profileInitials(name) {
+export function profileInitials(name: string | null | undefined): string {
   return String(name || "")
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-    .map((part) => part[0])
+    .map((part) => part[0] || "")
     .join("")
     .toUpperCase()
     .slice(0, 2);

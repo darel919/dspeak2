@@ -1,5 +1,6 @@
 import type { Ref } from "vue";
 import type { SignalingMessage } from "./media-signaling.ts";
+import type { RtpStatsSample } from "../rtc-media-stats.ts";
 
 export interface DiagnosticSourceEntry {
   source: string;
@@ -44,9 +45,12 @@ export interface HybridMediaDiagnosticsContext {
     report: unknown,
     direction: string,
     settings: MediaTrackSettings | Record<string, unknown>,
-    previous?: unknown,
+    previous?: RtpStatsSample | null,
     kind?: string | null,
-  ) => { sample?: unknown; stats?: Record<string, unknown> | null } | null;
+  ) => {
+    sample?: RtpStatsSample | null;
+    stats?: Record<string, unknown> | null;
+  } | null;
   getActiveProvider: () => string | null;
   getActiveRouteProvider?: () => string | null;
   getP2pMesh: () => unknown;
@@ -65,8 +69,8 @@ export interface HybridMediaDiagnosticsContext {
   sfuRoundTripTime: Ref<number | null>;
   topologyGraph: Ref<DiagnosticTopologyGraph>;
   topologyState: Ref<{ epoch?: number }>;
-  updateP2pStats: (edges: unknown) => void;
-  rtpStatsSamples: Map<string, unknown>;
+  updateP2pStats: (edges: unknown[]) => unknown;
+  rtpStatsSamples: Map<string, RtpStatsSample>;
 }
 
 export interface MediaReadinessContext {

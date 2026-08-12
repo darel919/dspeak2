@@ -69,10 +69,14 @@ export class ChatRepository {
     return result[0];
   }
 
-  async createRevision(messageId: MessageId, content: string) {
+  async createRevision(
+    messageId: MessageId,
+    content: string,
+    editorId: string,
+  ) {
     const result = await db
       .insert(messageRevisions)
-      .values({ messageId, content })
+      .values({ messageId, content, editorId })
       .returning();
     return result[0];
   }

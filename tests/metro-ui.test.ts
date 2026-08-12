@@ -254,7 +254,7 @@ test("self-message notification guards normalize sender IDs", async () => {
     /const viewerId = currentUserId \|\| storedUserData\?\.id/,
   );
   assert.match(manager, /String\(senderId\) === String\(viewerId\)/);
-  assert.match(chat, /currentChannelName\.value,\s+userData\?\.id/);
+  assert.match(chat, /currentChannelName\.value[\s\S]{0,100}userData\?\.id/);
   assert.match(store, /String\(senderId\) === String\(currentUserId\)/);
   assert.match(delivery, /\.filter\(\(id\) => id !== String\(senderId\)\)/);
   assert.match(delivery, /senderId: String\(message\.authorId/);
@@ -469,17 +469,26 @@ test("room rail tooltips preview connected voice participants", async () => {
   assert.match(rail, /\[\s*\(\) => roomsStore\.rooms,\s*activeRoomId\s*\]/);
   assert.match(rail, /roomIds\.push\(activeRoomId\.value\)/);
   assert.match(rail, /channelsStore\.syncVoicePresenceRooms/);
-  assert.match(channels, /function getRoomChannels\(roomId\)/);
-  assert.match(channels, /const voicePresenceConnections = new Map\(\)/);
-  assert.match(channels, /const voicePresenceSnapshots = new Map\(\)/);
+  assert.match(channels, /function getRoomChannels\(roomId: string\)/);
+  assert.match(
+    channels,
+    /const voicePresenceConnections = new Map<string, VoicePresenceConnection>\(\)/,
+  );
+  assert.match(
+    channels,
+    /const voicePresenceSnapshots = new Map<[\s\S]*?VoicePresenceSnapshot[\s\S]*?>\(\)/,
+  );
   assert.match(channels, /applyStoredVoicePresence\(normalizedRoomId\)/);
   assert.match(channels, /existing\?\.connecting/);
   assert.match(
     channels,
-    /applyVoicePresence\(message\.data, normalizedRoomId\)/,
+    /applyVoicePresence\(\s*message\.data as VoicePresenceSnapshot,\s*normalizedRoomId,\s*\)/,
   );
-  assert.match(channels, /openRealtimeChannel\(`room:\$\{normalizedRoomId\}`/);
-  assert.match(channels, /function syncVoicePresenceRooms\(roomIds\)/);
+  assert.match(
+    channels,
+    /openRealtimeChannel(?:<[\s\S]*?>)?\(`room:\$\{normalizedRoomId\}`/,
+  );
+  assert.match(channels, /function syncVoicePresenceRooms\(roomIds: unknown\)/);
 });
 
 test("voice channel participant rows own a channel-specific context menu", async () => {
@@ -707,11 +716,20 @@ test("room switching prepares the destination before one direct navigation", asy
   assert.match(navigation, /`\/room\/\$\{roomId\}\/\$\{destination\.id\}`/);
   assert.match(mobileRooms, /await openRoom\(room\)/);
   assert.match(channels, /pendingRoomRequests/);
-  assert.match(channels, /const roomChannels = reactive\(new Map\(\)\)/);
-  assert.match(channels, /function getRoomChannelById\(roomId, channelId\)/);
+  assert.match(
+    channels,
+    /const roomChannels = reactive\(new Map<string, ChannelRecord\[\]>\(\)\)/,
+  );
+  assert.match(
+    channels,
+    /function getRoomChannelById\(roomId: string, channelId: string\)/,
+  );
   assert.match(chat, /pendingChannelPreparations/);
-  assert.match(chat, /async function prepareChannel\(channelId\)/);
-  assert.match(chat, /async function prepareChannels\(channelIds/);
+  assert.match(chat, /async function prepareChannel\(channelId: string\)/);
+  assert.match(
+    chat,
+    /async function prepareChannels\(\s*channelIds: string\[\]/,
+  );
   assert.match(chat, /PREPARED_CHANNEL_MAX_AGE_MS/);
   assert.match(channelPage, /await chatStore\.prepareChannel\(channel\.id\)/);
   assert.match(rail, /prefetchRoom\(room, \{ allChannels: true \}\)/);

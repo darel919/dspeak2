@@ -1,5 +1,5 @@
 export type ChatMessageInput = Record<string, unknown> & {
-  sender?: { id?: string };
+  sender?: { id?: string } | null;
   created?: string | number | Date;
 };
 export type ChatUserInput = { id: string; name?: string; email?: string };

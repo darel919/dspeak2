@@ -58,7 +58,7 @@ export function createHybridMediaDiagnostics({
       const edges = await p2pMesh.getSnapshot?.()?.catch(() => null);
       if (edges) {
         p2pEdges = Array.isArray(edges) ? edges.filter(isRecord) : [];
-        updateP2pStats(edges);
+        if (Array.isArray(edges)) updateP2pStats(edges);
       }
     }
     const rawTransports =

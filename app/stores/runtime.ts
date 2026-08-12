@@ -4,7 +4,7 @@ import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 export const useRuntimeStore = defineStore("runtime", () => {
   const initialized = ref(false);
   const isTauri = ref(false);
-  let initializationRequest = null;
+  let initializationRequest: Promise<boolean> | null = null;
 
   async function initialize() {
     if (initialized.value) return isTauri.value;

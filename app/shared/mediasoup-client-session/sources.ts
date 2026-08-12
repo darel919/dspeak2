@@ -1,8 +1,16 @@
 import { buildVideoProduceOptions } from "../video-settings.ts";
 import { buildVoiceProducerOptions } from "../voice-transport.ts";
+import type {
+  MediasoupClientSessionLike,
+  MediasoupProducerLike,
+  MediasoupSourceEntry,
+} from "../types/mediasoup-client.ts";
 
-export const methods: Record<string, any> = {
-  async addSource(entry) {
+export const methods: Record<string, unknown> = {
+  async addSource(
+    this: MediasoupClientSessionLike,
+    entry: MediasoupSourceEntry,
+  ) {
     if (!entry?.source)
       throw new Error("A media source identifier is required");
     const source = String(entry.source);
@@ -11,7 +19,11 @@ export const methods: Record<string, any> = {
     );
   },
 
-  enqueueSourceOperation(source, operation) {
+  enqueueSourceOperation(
+    this: MediasoupClientSessionLike,
+    source: string,
+    operation: () => Promise<unknown>,
+  ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
     const tracked = task.finally(() => {
@@ -23,7 +35,10 @@ export const methods: Record<string, any> = {
     return tracked;
   },
 
-  async addSourceInternal(entry) {
+  async addSourceInternal(
+    this: MediasoupClientSessionLike,
+    entry: MediasoupSourceEntry,
+  ) {
     if (!this.sourceTransmission.has(entry.source))
       this.sourceTransmission.set(entry.source, entry.track?.enabled !== false);
     const previousSource = this.sources.get(entry.source);
@@ -69,7 +84,11 @@ export const methods: Record<string, any> = {
     return null;
   },
 
-  async setSourceTransmission(source, enabled) {
+  async setSourceTransmission(
+    this: MediasoupClientSessionLike,
+    source: string,
+    enabled: boolean | undefined,
+  ) {
     this.sourceTransmission ||= new Map();
     this.sourceTransmission.set(source, Boolean(enabled));
     const entry = this.producers.get(source);
@@ -79,7 +98,7 @@ export const methods: Record<string, any> = {
     return true;
   },
 
-  async publish(entry) {
+  async publish(this: MediasoupClientSessionLike, entry: MediasoupSourceEntry) {
     if (!this.sendTransport || this.producers.has(entry.source))
       return this.producers.get(entry.source) || null;
     if (!this.sourceTransmission.has(entry.source))
@@ -94,11 +113,17 @@ export const methods: Record<string, any> = {
     return publication;
   },
 
-  async publishSource(entry) {
+  async publishSource(
+    this: MediasoupClientSessionLike,
+    entry: MediasoupSourceEntry,
+  ) {
     const mediaRevision = this.mediaRevision;
     const track = entry.track.clone();
     const settings = track.getSettings?.() || {};
-    const requestedVideo = this.getVideoSettings?.(entry.source) || {};
+    const requestedVideo = (this.getVideoSettings?.(entry.source) || {}) as {
+      qualityPriority?: "framerate" | "resolution";
+      maxBitrate?: number | null;
+    };
     const selectedBitrate = Number(
       entry.captureSelection?.audio?.maxBitrateBps || entry.roomBitrateBps,
     );
@@ -135,9 +160,11 @@ export const methods: Record<string, any> = {
               maxBitrate: requestedVideo.maxBitrate,
             }),
           };
-    let producer;
+    const sendTransport = this.sendTransport;
+    if (!sendTransport) return null;
+    let producer: MediasoupProducerLike;
     try {
-      producer = await this.sendTransport.produce(options);
+      producer = await sendTransport.produce(options);
     } catch (error) {
       track.stop();
       throw error;
@@ -160,14 +187,14 @@ export const methods: Record<string, any> = {
     return producer;
   },
 
-  async removeSource(source) {
+  async removeSource(this: MediasoupClientSessionLike, source: string) {
     const key = String(source || "");
     return this.enqueueSourceOperation(key, () =>
       this.removeSourceInternal(key),
     );
   },
 
-  async removeSourceInternal(source) {
+  async removeSourceInternal(this: MediasoupClientSessionLike, source: string) {
     this.sources.delete(source);
     const entry = this.producers.get(source);
     if (!entry) return;
@@ -184,7 +211,11 @@ export const methods: Record<string, any> = {
     }
   },
 
-  async updateAudioBitrate(source, maxBitrate) {
+  async updateAudioBitrate(
+    this: MediasoupClientSessionLike,
+    source: string,
+    maxBitrate: number | null,
+  ) {
     const entry = this.producers.get(source);
     if (!entry || entry.track?.kind !== "audio") return false;
     const bitrate = Number(maxBitrate);
@@ -198,7 +229,11 @@ export const methods: Record<string, any> = {
     return true;
   },
 
-  async updateVideoBitrate(source, maxBitrate) {
+  async updateVideoBitrate(
+    this: MediasoupClientSessionLike,
+    source: string,
+    maxBitrate: number | null,
+  ) {
     const entry = this.producers.get(source);
     if (!entry || entry.track?.kind !== "video") return false;
     const bitrate = Number(maxBitrate);

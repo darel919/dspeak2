@@ -35,26 +35,33 @@ import { createChatExtraActions } from "./extras.ts";
 import { createChatMessageActions } from "./messages.ts";
 import { createChatReadActions } from "./reads.ts";
 import { createChatTransportActions } from "./transport.ts";
+import type {
+  ChatDependencies,
+  ChatMessage,
+  ChatRuntime,
+  ChatStoreContext,
+} from "../../shared/types/chat-store.ts";
+import type { RealtimeChannelLike } from "../../shared/realtime-channel.ts";
 
 export const useChatStore = defineStore("chat", () => {
-  const messages = ref([]);
+  const messages = ref<ChatMessage[]>([]);
   const loading = ref(false);
-  const error = ref(null);
-  const realtimeChannel = ref(null);
+  const error = ref<string | null>(null);
+  const realtimeChannel = ref<RealtimeChannelLike | null>(null);
   const connected = ref(false);
   const connecting = ref(false);
   const intentionalDisconnect = ref(false);
-  const currentChannelId = ref(null);
-  const currentChannelName = ref(null);
-  const currentRoomId = ref(null);
-  const onlineUsers = ref([]);
-  const typingUsers = ref([]);
+  const currentChannelId = ref<string | null>(null);
+  const currentChannelName = ref<string | null>(null);
+  const currentRoomId = ref<string | null>(null);
+  const onlineUsers = ref<Array<{ id: string; [key: string]: unknown }>>([]);
+  const typingUsers = ref<string[]>([]);
   const offline = ref(import.meta.client ? !navigator.onLine : false);
-  const reactionChanged = ref(null);
-  const pinChanged = ref(null);
+  const reactionChanged = ref<Record<string, unknown> | null>(null);
+  const pinChanged = ref<Record<string, unknown> | null>(null);
   const config = useRuntimeConfig();
 
-  const runtime = {
+  const runtime: ChatRuntime = {
     reconnectTimer: null,
     backoffAttempts: 0,
     connectionGeneration: 0,
@@ -66,10 +73,10 @@ export const useChatStore = defineStore("chat", () => {
     localDataGeneration: 0,
     pageHideRemoveListener: null,
   };
-  const pendingReadIds = new Set();
-  const channelMessages = new Map();
-  const pendingChannelPreparations = new Map();
-  const channelPreparedAt = new Map();
+  const pendingReadIds = new Set<string>();
+  const channelMessages = new Map<string, ChatMessage[]>();
+  const pendingChannelPreparations = new Map<string, Promise<boolean>>();
+  const channelPreparedAt = new Map<string, number>();
   const dependencies = {
     useAuthStore,
     useRoomsStore,
@@ -97,7 +104,7 @@ export const useChatStore = defineStore("chat", () => {
     hasTauriRuntimeMarker,
     getSupabaseClient,
   };
-  const context: any = {
+  const context = {
     messages,
     loading,
     error,
@@ -123,8 +130,10 @@ export const useChatStore = defineStore("chat", () => {
     INACTIVE_CHANNEL_MESSAGE_LIMIT: 300,
     CHANNEL_MEMORY_LIMIT: 8,
     runtime,
-    dependencies,
-  };
+    dependencies: dependencies as unknown as ChatDependencies,
+    legacyReadStorageKey: (userId: string) =>
+      `dspeak2_unread_message_ids_${userId}`,
+  } as unknown as ChatStoreContext;
 
   Object.assign(
     context,

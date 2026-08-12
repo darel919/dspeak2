@@ -1,58 +1,73 @@
-export function installHandlers(session) {
-  session.messageHandlers.set("hi919", (data) => {
-    if (session.signaling.acceptServerHello(data))
+import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
+
+type NativeMessageHandler = (data: Record<string, unknown>) => unknown;
+
+export function installHandlers(session: NativeMediasoupSfuSession) {
+  const messageHandlers = session.messageHandlers as Map<
+    string,
+    NativeMessageHandler
+  >;
+  messageHandlers.set("hi919", (data) => {
+    if (session.signaling?.acceptServerHello(data))
       session.protocolState = session.signaling.getProtocolState();
   });
-  session.messageHandlers.set("connected", (data) => {
+  messageHandlers.set("connected", (data) => {
     session.connected = true;
     session.localPeerId = String(data?.peerId || "");
     session.closed = false;
     session.connectionPhase = "signaling-ready";
-    session.signaling.markReady();
+    session.signaling?.markReady();
     session.onCurrentlyInChannel?.(data);
     session._resolveConnect();
     session._emitState();
     if (!session.controlTicket)
-      session._startNegotiation().catch((error) => session._fail(error));
+      session
+        ._startNegotiation()
+        .catch((error: unknown) => session._fail(error));
   });
-  session.messageHandlers.set("provider-ticket", (data) => {
-    session._handleProviderTicket(data).catch((error) => session._fail(error));
+  messageHandlers.set("provider-ticket", (data) => {
+    session
+      ._handleProviderTicket(data)
+      .catch((error: unknown) => session._fail(error));
   });
-  session.messageHandlers.set("rtp-capabilities", (data) =>
+  messageHandlers.set("rtp-capabilities", (data) =>
     session._handleRtpCapabilities(data),
   );
-  session.messageHandlers.set("transport-params", (data) =>
+  messageHandlers.set("transport-params", (data) =>
     session._handleTransportParams(data),
   );
-  session.messageHandlers.set("transport-connected", (data) => {
-    session.pending.get(data.requestId)?.resolve(data);
+  messageHandlers.set("transport-connected", (data) => {
+    session.pending.get(String(data.requestId))?.resolve(data);
   });
-  session.messageHandlers.set("producer-id", (data) => {
-    session.pendingProduce.get(data.requestId)?.resolve({ id: data.id });
+  messageHandlers.set("producer-id", (data) => {
+    session.pendingProduce
+      .get(String(data.requestId))
+      ?.resolve({ id: data.id });
   });
-  session.messageHandlers.set("consumer-params", (data) =>
+  messageHandlers.set("consumer-params", (data) =>
     session._createConsumer(data),
   );
-  session.messageHandlers.set("new-producer", (data) => {
-    session.requestConsumer(data.producerId);
+  messageHandlers.set("new-producer", (data) => {
+    session.requestConsumer(String(data.producerId || ""));
   });
-  session.messageHandlers.set("available-producers", (data) => {
-    for (const producerId of data?.producers || [])
-      session.requestConsumer(producerId);
+  messageHandlers.set("available-producers", (data) => {
+    if (Array.isArray(data?.producers))
+      for (const producerId of data.producers)
+        session.requestConsumer(String(producerId));
   });
-  session.messageHandlers.set("producer-closed", (data) => {
-    session.closeConsumerByProducer(data.producerId);
+  messageHandlers.set("producer-closed", (data) => {
+    session.closeConsumerByProducer(String(data.producerId || ""));
   });
-  session.messageHandlers.set("consumer-resumed", (data) => {
+  messageHandlers.set("consumer-resumed", (data) => {
     session._resolveConsumerControl(data, true);
   });
-  session.messageHandlers.set("consumer-paused", (data) => {
+  messageHandlers.set("consumer-paused", (data) => {
     session._resolveConsumerControl(data, false);
   });
-  session.messageHandlers.set("cloudflare-response", (data) =>
+  messageHandlers.set("cloudflare-response", (data) =>
     session.cloudflareSession?.handleMessage("cloudflare-response", data),
   );
-  session.messageHandlers.set("cloudflare-publication-available", (data) => {
+  messageHandlers.set("cloudflare-publication-available", (data) => {
     const trackName = String(data?.trackName || "");
     if (!trackName) return false;
     if (data?.closed) session.pendingCloudflarePublications.delete(trackName);
@@ -79,28 +94,40 @@ export function installHandlers(session) {
       );
     return true;
   });
-  session.messageHandlers.set("ice-restarted", (data) => {
-    session.pending.get(data.requestId)?.resolve(data.iceParameters);
+  messageHandlers.set("ice-restarted", (data) => {
+    session.pending.get(String(data.requestId))?.resolve(data.iceParameters);
   });
-  session.messageHandlers.set("transport-state", (data) => {
+  messageHandlers.set("transport-state", (data) => {
     session._handleTransportState(data);
   });
-  session.messageHandlers.set("topology-state", (data) => {
+  messageHandlers.set("topology-state", (data) => {
     session.topologyState = { ...data, localPeerId: session.localPeerId };
-    const provider =
-      data?.provider || data?.targetProvider || data?.route?.provider;
+    const route =
+      data?.route && typeof data.route === "object"
+        ? (data.route as Record<string, unknown>)
+        : null;
+    const targetRoute =
+      data?.targetRoute && typeof data.targetRoute === "object"
+        ? (data.targetRoute as Record<string, unknown>)
+        : null;
+    const provider = String(
+      data?.provider || data?.targetProvider || route?.provider || "",
+    );
     const providerId =
       data?.providerId ||
       data?.targetProviderId ||
-      data?.route?.providerId ||
-      data?.targetRoute?.providerId ||
+      route?.providerId ||
+      targetRoute?.providerId ||
       null;
     if (provider) session.selectedProvider = provider;
-    session.selectedProviderId = providerId;
+    session.selectedProviderId = providerId == null ? null : String(providerId);
     session._emitState();
   });
-  session.messageHandlers.set("route-commit", (data) => {
-    const route = data?.route || data;
+  messageHandlers.set("route-commit", (data) => {
+    const route =
+      data?.route && typeof data.route === "object"
+        ? (data.route as Record<string, unknown>)
+        : data;
     session.topologyState = {
       ...session.topologyState,
       ...route,
@@ -109,28 +136,28 @@ export function installHandlers(session) {
       sourceRevision: Number(route?.sourceRevision) || 0,
       localPeerId: session.localPeerId,
     };
-    const provider = route?.provider || data?.targetProvider;
+    const provider = String(route?.provider || data?.targetProvider || "");
     const providerId =
       route?.providerId || data?.targetProviderId || data?.providerId || null;
     if (provider) session.selectedProvider = provider;
-    session.selectedProviderId = providerId;
+    session.selectedProviderId = providerId == null ? null : String(providerId);
     session._emitState();
   });
-  session.messageHandlers.set("provider-failure", (data) => {
+  messageHandlers.set("provider-failure", (data) => {
     const activeProviderId =
       session.activeSfuProviderId || session.topologyState?.providerId;
     if (
-      data?.provider === session.activeSfuProvider &&
+      String(data?.provider || "") === session.activeSfuProvider &&
       (!data?.providerId ||
         !activeProviderId ||
-        data.providerId === activeProviderId)
+        String(data.providerId) === activeProviderId)
     ) {
       session.mediaConnectionState = "recovering";
       session.connectionPhase = "reconnecting";
       session._emitState();
     }
   });
-  session.messageHandlers.set("provider-draining", (data) => {
+  messageHandlers.set("provider-draining", (data) => {
     if (session.activeSfuProvider !== "mediasoup") return;
     const failure = {
       provider: "mediasoup",
@@ -139,27 +166,28 @@ export function installHandlers(session) {
         : {}),
       epoch: Number(session.topologyState?.epoch) || 0,
       sourceRevision: Number(session.topologyState?.sourceRevision) || 0,
-      reason: data?.reason || "provider-draining",
+      reason: String(data?.reason || "provider-draining"),
     };
     session.signaling?.send?.({ type: "provider-failure", data: failure });
     session.mediaConnectionState = "recovering";
     session.connectionPhase = "reconnecting";
     session._emitState();
   });
-  session.messageHandlers.set("heartbeat-ack", (data) => {
+  messageHandlers.set("heartbeat-ack", (data) => {
     session._acknowledgeHeartbeat(data);
   });
-  session.messageHandlers.set("heartbeat-nack", (data) => {
+  messageHandlers.set("heartbeat-nack", (data) => {
     session._acknowledgeHeartbeat(data);
   });
-  session.messageHandlers.set("currentlyInChannel", (data) => {
-    session.lastInRoom = Array.isArray(data?.inRoom) ? data.inRoom : [];
+  messageHandlers.set("currentlyInChannel", (data) => {
+    session.lastInRoom = Array.isArray(data?.inRoom)
+      ? data.inRoom.filter(
+          (entry): entry is Record<string, unknown> =>
+            Boolean(entry) && typeof entry === "object",
+        )
+      : [];
     session.onCurrentlyInChannel?.(data);
   });
-  session.messageHandlers.set("error", (data) =>
-    session._handleServerError(data),
-  );
-  session.messageHandlers.set("p2p-signal", (data) =>
-    session.onP2pSignal?.(data),
-  );
+  messageHandlers.set("error", (data) => session._handleServerError(data));
+  messageHandlers.set("p2p-signal", (data) => session.onP2pSignal?.(data));
 }

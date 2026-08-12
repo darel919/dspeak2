@@ -35,8 +35,6 @@ export const MediaEngineEventNames = [
 ] as const;
 
 export class MediaEngine {
-  [key: string]: unknown;
-
   async initialize(_config?: MediaEngineConfig): Promise<void> {
     throw new Error("Not implemented");
   }

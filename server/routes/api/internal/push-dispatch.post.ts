@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { dispatchPushJobs } from "../../../utils/push-delivery.ts";
+import type { H3Event } from "h3";
 
-function verifyCronSecret(event) {
+function verifyCronSecret(event: H3Event): boolean {
   const expected =
     process.env.DSPEAK_CRON_SECRET || process.env.CRON_SECRET || "";
   if (!expected) return false;

@@ -1,4 +1,5 @@
 import { createMediaEngine } from "./media/createMediaEngine.ts";
+import type { MediaEngineFactoryOptions } from "../shared/types/media-engine-adapters.ts";
 
 /**
  * Creates the application-facing media session.
@@ -9,7 +10,7 @@ import { createMediaEngine } from "./media/createMediaEngine.ts";
  * @returns {import("./media/browserMediaEngine.ts").BrowserMediaEngine}
  *   or a native compatibility engine in the Tauri runtime.
  */
-export function useMediasoupSfu(options = {} as any) {
+export function useMediasoupSfu(options: MediaEngineFactoryOptions = {}) {
   return createMediaEngine(options);
 }
 

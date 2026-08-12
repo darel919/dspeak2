@@ -7,7 +7,7 @@ const updatePrompt = await readFile(
   "utf8",
 );
 const serviceWorker = await readFile(
-  new URL("../public/sw.js", import.meta.url),
+  new URL("../public/sw.ts", import.meta.url),
   "utf8",
 );
 const nuxtConfig = await readFile(

@@ -31,7 +31,7 @@ test("compact soundboard loads its library only when opened", async () => {
   assert.match(panel, /@click="openPanel"/);
   assert.match(panel, /if \(!props\.compact\) store\.load\(props\.roomId\)/);
   assert.match(panel, /store\.connectEvents\(props\.roomId\)/);
-  assert.match(store, /function hasLoadedLibrary\(roomId\)/);
+  assert.match(store, /function hasLoadedLibrary\(roomId: string\)/);
   assert.match(
     store,
     /if \(roomId !== null\) \{[\s\S]*currentRoomId\.value = normalizedRoomId/,

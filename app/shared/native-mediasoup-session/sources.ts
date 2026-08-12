@@ -1,9 +1,14 @@
 import { asError } from "../native-mediasoup-utils.ts";
+import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
+import type {
+  NativeProducerEntry,
+  NativeMediasoupSfuSessionSurface,
+  NativeSourceEntry,
+} from "../types/native-mediasoup-session.ts";
 
 import { nativeProducerAppData } from "./helpers.ts";
 export class NativeMediasoupSourcesMethods {
-  [key: string]: any;
-  async addSource(entry) {
+  async addSource(this: NativeMediasoupSfuSession, entry: NativeSourceEntry) {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     if (this.selectedProvider === "cloudflare-realtime") {
@@ -16,7 +21,11 @@ export class NativeMediasoupSourcesMethods {
     );
   }
 
-  enqueueSourceOperation(source, operation) {
+  enqueueSourceOperation(
+    this: NativeMediasoupSfuSession,
+    source: string,
+    operation: () => Promise<unknown>,
+  ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
     const tracked = task.finally(() => {
@@ -28,12 +37,15 @@ export class NativeMediasoupSourcesMethods {
     return tracked;
   }
 
-  async addSourceInternal(entry) {
+  async addSourceInternal(
+    this: NativeMediasoupSfuSession,
+    entry: NativeSourceEntry,
+  ) {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     const previousSource = this.sources.get(entry.source);
     const existing = this.producers.get(entry.source);
-    const normalized = {
+    const normalized: NativeSourceEntry = {
       ...entry,
       kind:
         entry.kind ||
@@ -41,7 +53,8 @@ export class NativeMediasoupSourcesMethods {
           ? "video"
           : "audio"),
       audioBitrate: entry.audioBitrate ?? this.getAudioBitrate?.(entry.source),
-      audioStereo: entry.audioStereo ?? this.getAudioStereo?.(entry.source),
+      audioStereo:
+        entry.audioStereo ?? this.getAudioStereo?.(entry.source) ?? undefined,
       videoSettings:
         entry.videoSettings || this.getVideoSettings?.(entry.source) || null,
     };
@@ -117,7 +130,7 @@ export class NativeMediasoupSourcesMethods {
     return producer;
   }
 
-  async _republishSources() {
+  async _republishSources(this: NativeMediasoupSfuSession) {
     for (const entry of this.sources.values()) {
       if (!this.producers.has(entry.source)) {
         const producer = await this.publish(entry);
@@ -134,7 +147,10 @@ export class NativeMediasoupSourcesMethods {
     this._emitState();
   }
 
-  async publish(entry) {
+  async publish(
+    this: NativeMediasoupSfuSession,
+    entry: NativeSourceEntry,
+  ): Promise<NativeProducerEntry | null> {
     if (!this.sendTransport || this.producers.has(entry.source))
       return this.producers.get(entry.source) || null;
     const activePublication = this.sourcePublications.get(entry.source);
@@ -147,10 +163,13 @@ export class NativeMediasoupSourcesMethods {
     return publication;
   }
 
-  async _publishSource(entry) {
+  async _publishSource(
+    this: NativeMediasoupSfuSession,
+    entry: NativeSourceEntry,
+  ): Promise<NativeProducerEntry | null> {
     await this.producerRemovals.get(entry.source);
     if (this.producers.has(entry.source))
-      return this.producers.get(entry.source);
+      return this.producers.get(entry.source) || null;
     const mediaRevision = this.mediaRevision;
     const kind =
       entry.kind ||
@@ -165,8 +184,8 @@ export class NativeMediasoupSourcesMethods {
         kind,
         appData,
       });
-      const producer = {
-        id: result?.id,
+      const producer: NativeProducerEntry = {
+        id: String(result?.id || ""),
         source: entry.source,
         kind,
         entry,
@@ -196,7 +215,7 @@ export class NativeMediasoupSourcesMethods {
     }
   }
 
-  removeSource(source) {
+  removeSource(this: NativeMediasoupSfuSession, source: string) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.removeSource(source);
     const key = String(source || "");
@@ -205,7 +224,10 @@ export class NativeMediasoupSourcesMethods {
     );
   }
 
-  removeSourceInternal(source) {
+  removeSourceInternal(
+    this: NativeMediasoupSfuSession,
+    source: string,
+  ): Promise<unknown> {
     const entry = this.sources.get(source);
     this.sources.delete(source);
     this.localVideoFeeds.delete(source);
@@ -237,7 +259,11 @@ export class NativeMediasoupSourcesMethods {
     return this.producerRemovals.get(source) || Promise.resolve(entry || null);
   }
 
-  async setSourceTransmission(source, enabled) {
+  async setSourceTransmission(
+    this: NativeMediasoupSfuSession,
+    source: string,
+    enabled: boolean,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.setSourceTransmission(source, enabled);
     const normalizedSource = String(source || "");
@@ -254,7 +280,11 @@ export class NativeMediasoupSourcesMethods {
     return true;
   }
 
-  async updateAudioBitrate(source, maxBitrate) {
+  async updateAudioBitrate(
+    this: NativeMediasoupSfuSession,
+    source: string,
+    maxBitrate: number,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.updateAudioBitrate(source, maxBitrate);
     const producer = this.producers.get(String(source || ""));
@@ -278,7 +308,11 @@ export class NativeMediasoupSourcesMethods {
     return true;
   }
 
-  async updateVideoBitrate(source, maxBitrate) {
+  async updateVideoBitrate(
+    this: NativeMediasoupSfuSession,
+    source: string,
+    maxBitrate: number,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.updateVideoBitrate(source, maxBitrate);
     const producer = this.producers.get(String(source || ""));
@@ -297,7 +331,7 @@ export class NativeMediasoupSourcesMethods {
     return true;
   }
 
-  _sendSourceState() {
+  _sendSourceState(this: NativeMediasoupSfuSession) {
     if (!this.signaling) return;
     this.signaling.send({
       type: "media-sources",
@@ -305,3 +339,12 @@ export class NativeMediasoupSourcesMethods {
     });
   }
 }
+
+export interface NativeMediasoupSourcesMethods extends Omit<
+  NativeMediasoupSfuSessionSurface,
+  | "addSource"
+  | "removeSource"
+  | "setSourceTransmission"
+  | "updateAudioBitrate"
+  | "updateVideoBitrate"
+> {}

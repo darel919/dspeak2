@@ -62,23 +62,33 @@ import {
   roomMemberships,
   roomRoles,
 } from "../db/schema/index.ts";
+import type {
+  DSpeakChannelRow,
+  DSpeakEvent,
+  DSpeakProfileInput,
+  DSpeakRoomRow,
+} from "../types/dspeak-api.ts";
 
 function noop() {}
 
-function profileAvatar(user) {
+function profileAvatar(user: DSpeakProfileInput | null | undefined) {
   const userId = String(user?.id || "");
   const key = user?.avatarKey || "";
   if (!userId || !key) return null;
   return `/api/assets/avatar?userId=${encodeURIComponent(userId)}&fileName=${encodeURIComponent(key)}`;
 }
 
-function requireValue(value, message) {
+function requireValue(value: unknown, message: string): string {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
-  return value;
+  return String(value);
 }
 
-function structuredValue(value, fallback = {} as any) {
-  if (value && typeof value === "object") return value;
+function structuredValue(
+  value: unknown,
+  fallback: Record<string, unknown> = {},
+): Record<string, unknown> {
+  if (value && typeof value === "object")
+    return value as Record<string, unknown>;
   if (typeof value !== "string") return fallback;
   try {
     const parsed = JSON.parse(value);
@@ -88,13 +98,13 @@ function structuredValue(value, fallback = {} as any) {
   }
 }
 
-function sameInstant(left, right) {
+function sameInstant(left: string, right: string) {
   return (
     Number.isFinite(Date.parse(left)) && Date.parse(left) === Date.parse(right)
   );
 }
 
-function presentUser(user) {
+function presentUser(user: DSpeakProfileInput | null | undefined) {
   if (!user) return null;
   return {
     id: String(user.id),
@@ -107,7 +117,7 @@ function presentUser(user) {
   };
 }
 
-function presentPublicProfile(user) {
+function presentPublicProfile(user: DSpeakProfileInput | null | undefined) {
   if (!user) return null;
   const publicName = publicDisplayName(user);
   return {
@@ -121,8 +131,10 @@ function presentPublicProfile(user) {
   };
 }
 
-function presentChannel(channel) {
-  const mediaPolicy = normalizeMediaPolicy(channel.mediaPolicy);
+function presentChannel(channel: DSpeakChannelRow) {
+  const mediaPolicy = normalizeMediaPolicy(
+    channel.mediaPolicy as Parameters<typeof normalizeMediaPolicy>[0],
+  );
   const isMedia = ["voice", "stage"].includes(channel.type);
   const inRoom = (channel.inRoom || []).map(String);
   return {
@@ -141,16 +153,19 @@ function presentChannel(channel) {
   };
 }
 
-async function parseBody(event) {
+async function parseBody(event: DSpeakEvent): Promise<Record<string, unknown>> {
   const type = getHeader(event, "content-type") || "";
   if (type.includes("multipart/form-data")) {
     const form = await readFormData(event);
     return Object.fromEntries(form.entries());
   }
-  return (await readBody(event)) || {};
+  const body: unknown = await readBody(event);
+  return body && typeof body === "object"
+    ? (body as Record<string, unknown>)
+    : {};
 }
 
-async function roomDetails(room, userId = null) {
+async function roomDetails(room: DSpeakRoomRow, userId: string | null = null) {
   const [channelRows, membershipRows] = await Promise.all([
     db
       .select()
@@ -190,7 +205,7 @@ async function roomDetails(room, userId = null) {
   const profileById = new Map(
     profileRows.map((profile) => [String(profile.id), profile]),
   );
-  const rolesByUserId = new Map();
+  const rolesByUserId = new Map<string, Array<Record<string, unknown>>>();
   for (const row of membershipRows) {
     if (!row.roleId) continue;
     const list = rolesByUserId.get(String(row.userId)) || [];
@@ -236,7 +251,7 @@ async function roomDetails(room, userId = null) {
   };
 }
 
-async function broadcastParticipantChange(roomId) {
+async function broadcastParticipantChange(roomId: string) {
   const channelRows = await db
     .select()
     .from(channels)
@@ -337,7 +352,7 @@ const handleProfile = createProfileApiHandler({
   updateProfileAvatar,
 });
 
-export async function handleDspeakApi(event) {
+export async function handleDspeakApi(event: DSpeakEvent) {
   const path = String(getRouterParam(event, "path") || "").replace(
     /^\/+|\/+$/g,
     "",
@@ -351,7 +366,7 @@ export async function handleDspeakApi(event) {
       const userId = await requireAuthenticatedUser(event);
       enforceRateLimit(event, "turn-credentials", userId, 12, 10 * 60 * 1000);
       const query = getQuery(event);
-      const connectionMode = query.connectionMode || "auto";
+      const connectionMode = String(query.connectionMode || "auto");
       return createIceServers(process.env, Date.now(), { connectionMode });
     }
     if (domain === "room") return await handleRooms(event, suffix);
@@ -365,26 +380,37 @@ export async function handleDspeakApi(event) {
       statusCode: 404,
       statusMessage: "dSpeak endpoint not found",
     });
-  } catch (error) {
-    if (error?.statusCode) throw error;
-    if (Number(error?.status) >= 400 && Number(error?.status) < 500) {
+  } catch (error: unknown) {
+    const details =
+      error && typeof error === "object"
+        ? (error as Record<string, unknown>)
+        : {};
+    if (details.statusCode) throw error;
+    if (Number(details.status) >= 400 && Number(details.status) < 500) {
       console.error("[dSpeak API] client error caught in catch-all handler", {
         domain,
         suffix,
         method: event.method,
         path: getRequestURL(event).pathname,
-        status: Number(error.status),
-        statusMessage: error.message || error.statusMessage,
-        responseData: error.response?.data || error.response,
-        errorUrl: error.url,
-        url: error?.response?.url,
+        status: Number(details.status),
+        statusMessage: details.message || details.statusMessage,
+        responseData:
+          details.response && typeof details.response === "object"
+            ? (details.response as Record<string, unknown>).data ||
+              details.response
+            : details.response,
+        errorUrl: details.url,
+        url:
+          details.response && typeof details.response === "object"
+            ? (details.response as Record<string, unknown>).url
+            : undefined,
       });
       throw createError({
-        statusCode: Number(error.status),
+        statusCode: Number(details.status),
         statusMessage:
-          Number(error.status) === 404
+          Number(details.status) === 404
             ? "Resource not found"
-            : Number(error.status) === 409
+            : Number(details.status) === 409
               ? "Resource conflict"
               : "Invalid request",
       });

@@ -15,7 +15,6 @@ import type {
   SoundboardInsert,
 } from "../../types/repositories.ts";
 export class AssetsRepository {
-  [key: string]: any;
   async createSoundboard({
     roomId,
     name,

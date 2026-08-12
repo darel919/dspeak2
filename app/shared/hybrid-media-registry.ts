@@ -1,7 +1,11 @@
 import { RemoteMediaRegistry } from "./remote-media-registry.ts";
 import type { Ref } from "vue";
 import type { AttenuationReportInput } from "./media-attenuation-reporter.ts";
-import type { RegistryEntry } from "./types/hybrid-media-registry.ts";
+import type {
+  RegistryAttenuation,
+  RegistryEntry,
+  RemoteMediaEntry,
+} from "./types/hybrid-media-registry.ts";
 
 export function createHybridMediaRegistry({
   audioFeeds,
@@ -19,9 +23,11 @@ export function createHybridMediaRegistry({
   setConnectionPhase,
   getAttenuationReporter,
 }: {
-  audioFeeds: Ref<Map<string, unknown>>;
-  videoFeeds: Ref<Map<string, unknown>>;
-  getAttenuation: (entry: Record<string, unknown>) => unknown;
+  audioFeeds: Ref<Map<string, RemoteMediaEntry>>;
+  videoFeeds: Ref<Map<string, RemoteMediaEntry>>;
+  getAttenuation: (
+    entry: Record<string, unknown>,
+  ) => RegistryAttenuation | null;
   voiceStore: {
     getTrackVolume: (userId: string, source: string) => number;
     deafened: boolean;
@@ -76,10 +82,14 @@ export function createHybridMediaRegistry({
     onSpeaking: (userId: string, speaking: boolean) =>
       voiceStore.updateUserSpeaking(userId, speaking),
     getAttenuation,
-    onVideoReceivingChange: (entry: RegistryEntry, receiving: boolean) => {
+    onVideoReceivingChange: (entry: RemoteMediaEntry, receiving: boolean) => {
       if (entry.provider === "sfu")
         Promise.resolve(
-          getSfu()?.setRemoteReceiving?.(entry.userId, entry.source, receiving),
+          getSfu()?.setRemoteReceiving?.(
+            entry.userId == null ? undefined : String(entry.userId),
+            entry.source,
+            receiving,
+          ),
         ).catch((receivingError: unknown) => {
           error.value =
             receivingError instanceof Error
@@ -88,7 +98,7 @@ export function createHybridMediaRegistry({
         });
       if (entry.provider === "p2p")
         getP2pMesh()?.setRemoteReceiving?.(
-          entry.peerId,
+          entry.peerId == null ? undefined : String(entry.peerId),
           entry.source,
           receiving,
         );

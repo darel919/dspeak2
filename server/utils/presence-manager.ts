@@ -1,19 +1,24 @@
 import { db } from "../db/client.ts";
 import { userPresence } from "../db/schema/index.ts";
 import { eq, ne, and, lt } from "drizzle-orm";
-
-export const PRESENCE_STATUSES = ["online", "idle", "dnd", "offline"];
+import {
+  PRESENCE_STATUSES,
+  type PresenceStatus,
+  type PresenceUpdateOptions,
+} from "../types/presence.ts";
 
 export const OFFLINE_AFTER_MS = 15 * 60 * 1000;
 
-export function normalizePresenceStatus(value) {
-  return PRESENCE_STATUSES.includes(value) ? value : "online";
+export function normalizePresenceStatus(value: unknown): PresenceStatus {
+  return PRESENCE_STATUSES.includes(value as PresenceStatus)
+    ? (value as PresenceStatus)
+    : "online";
 }
 
 export async function setPresence(
-  userId,
-  status,
-  { timestamp, isManualOverride, platform } = {} as any,
+  userId: string,
+  status: unknown,
+  { timestamp, isManualOverride, platform }: PresenceUpdateOptions = {},
 ) {
   const normalizedStatus = normalizePresenceStatus(status);
   const updatedAt = timestamp ? new Date(timestamp) : new Date();
@@ -54,22 +59,22 @@ export async function setPresence(
   };
 }
 
-export async function markPresenceActivity(userId) {
+export async function markPresenceActivity(userId: string): Promise<boolean> {
   const result = await db
     .update(userPresence)
     .set({ lastActivityAt: new Date() })
     .where(
       and(eq(userPresence.userId, userId), ne(userPresence.status, "offline")),
     );
-  return (result as any).count > 0;
+  return Number(result.count) > 0;
 }
 
-export async function markPresenceOffline(userId) {
+export async function markPresenceOffline(userId: string): Promise<boolean> {
   const result = await db
     .update(userPresence)
     .set({ status: "offline", updatedAt: new Date() })
     .where(eq(userPresence.userId, userId));
-  return (result as any).count > 0;
+  return Number(result.count) > 0;
 }
 
 export async function sweepExpiredPresence(now = Date.now()) {

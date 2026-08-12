@@ -4,25 +4,29 @@ import {
   expectedMediasoupInboundFlowCount,
   mediasoupMediaReadiness,
 } from "../mediasoup-client-diagnostics.ts";
+import type { MediasoupClientSessionLike } from "../types/mediasoup-client.ts";
 
-export const methods: Record<string, any> = {
-  async stats() {
+export const methods: Record<string, unknown> = {
+  async stats(this: MediasoupClientSessionLike) {
     return collectMediasoupStats(this);
   },
 
-  async diagnosticStats() {
+  async diagnosticStats(this: MediasoupClientSessionLike) {
     return collectMediasoupDiagnosticStats(this);
   },
 
-  expectedInboundFlowCount() {
+  expectedInboundFlowCount(this: MediasoupClientSessionLike) {
     return expectedMediasoupInboundFlowCount(this);
   },
 
-  async mediaReadiness(expectedInbound) {
+  async mediaReadiness(
+    this: MediasoupClientSessionLike,
+    expectedInbound: number,
+  ) {
     return mediasoupMediaReadiness(this, expectedInbound);
   },
 
-  closeMedia() {
+  closeMedia(this: MediasoupClientSessionLike) {
     this.mediaRevision += 1;
     this.initializationRequestId = null;
     this.transportRequestIds.clear();
@@ -100,16 +104,16 @@ export const methods: Record<string, any> = {
     this.pendingProduce.clear();
   },
 
-  resetReadiness() {
+  resetReadiness(this: MediasoupClientSessionLike) {
     this.readyPromise?.catch(() => {});
-    clearTimeout(this.initializationTimer);
+    if (this.initializationTimer) clearTimeout(this.initializationTimer);
     this.initializationTimer = null;
     this.readyPromise = null;
     this.readyResolve = null;
     this.readyReject = null;
   },
 
-  close() {
+  close(this: MediasoupClientSessionLike) {
     this.closed = true;
     this.closeMedia();
     this.remoteReceiving.clear();

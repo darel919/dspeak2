@@ -5,10 +5,15 @@ import {
 import { requireAuth } from "../../../auth/middleware.ts";
 import { SignJWT, importPKCS8 } from "jose";
 import { randomUUID } from "node:crypto";
+import type {
+  MediaBootstrapBody,
+  MediaConnectionMode,
+  MediaSigningKey,
+} from "../../../types/media-bootstrap.ts";
 
-let privateKeyCache = null;
+let privateKeyCache: MediaSigningKey | null = null;
 
-async function getSigningKey() {
+async function getSigningKey(): Promise<MediaSigningKey> {
   if (privateKeyCache) return privateKeyCache;
   const privateKeyB64 = process.env.CF_MEDIA_TICKET_PRIVATE_KEY;
   if (!privateKeyB64) throw new Error("CF_MEDIA_TICKET_PRIVATE_KEY not set");
@@ -21,7 +26,7 @@ export default defineEventHandler(async (event) => {
   await requireAuth(event);
   const user = event.context.user;
 
-  const body = await readBody(event);
+  const body = (await readBody(event)) as MediaBootstrapBody;
   const { channelId, roomId } = body;
 
   if (!channelId || !roomId) {
@@ -31,9 +36,11 @@ export default defineEventHandler(async (event) => {
     });
   }
 
+  const validatedChannelId = String(channelId);
+  const validatedRoomId = String(roomId);
   const membership = await membershipRepository.findByRoomAndUser(
-    roomId,
-    user.id,
+    validatedRoomId,
+    String(user.id),
   );
   if (!membership) {
     throw createError({
@@ -42,10 +49,10 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const channel = await channelRepository.findById(channelId);
+  const channel = await channelRepository.findById(validatedChannelId);
   if (
     !channel ||
-    String(channel.roomId) !== String(roomId) ||
+    String(channel.roomId) !== validatedRoomId ||
     !["voice", "stage"].includes(channel.type)
   ) {
     throw createError({
@@ -54,7 +61,8 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const connectionMode = body.connectionMode || "auto";
+  const connectionMode: MediaConnectionMode =
+    body.connectionMode === "direct" ? "direct" : "auto";
   if (!new Set(["auto", "direct"]).has(connectionMode)) {
     throw createError({
       statusCode: 400,
@@ -65,7 +73,7 @@ export default defineEventHandler(async (event) => {
   const mediaControlUrl =
     process.env.CF_MEDIA_CONTROL_URL || "https://media-control.example.com";
   const websocketUrl = new URL(mediaControlUrl);
-  websocketUrl.searchParams.set("channelId", channelId);
+  websocketUrl.searchParams.set("channelId", validatedChannelId);
   if (websocketUrl.protocol === "http:") websocketUrl.protocol = "ws:";
   if (websocketUrl.protocol === "https:") websocketUrl.protocol = "wss:";
   const requestedDeviceId = String(body.deviceId || "").trim();
@@ -77,9 +85,9 @@ export default defineEventHandler(async (event) => {
     });
   }
   const ticket = await generateMediaTicket(
-    user.id,
-    channelId,
-    roomId,
+    String(user.id),
+    validatedChannelId,
+    validatedRoomId,
     connectionMode,
     deviceId,
   );
@@ -96,12 +104,12 @@ export default defineEventHandler(async (event) => {
 });
 
 async function generateMediaTicket(
-  userId,
-  channelId,
-  roomId,
-  connectionMode,
-  deviceId,
-) {
+  userId: string,
+  channelId: string,
+  roomId: string,
+  connectionMode: MediaConnectionMode,
+  deviceId: string,
+): Promise<string> {
   const key = await getSigningKey();
   const issuer = process.env.CF_MEDIA_CONTROL_ISSUER || "dspeak-media-control";
   const token = await new SignJWT({

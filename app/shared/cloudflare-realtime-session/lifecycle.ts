@@ -6,10 +6,7 @@ import {
 import { mediaDebug, shortMediaId } from "../media-debug.ts";
 
 import { secondsToMilliseconds, sessionClosedError } from "./helpers.ts";
-import type {
-  CloudflareSessionLike,
-  CloudflareTrackEvent,
-} from "../types/cloudflare-media.ts";
+import type { CloudflareSessionLike } from "../types/cloudflare-media.ts";
 export class CloudflareLifecycleMethods {
   connectionState(this: CloudflareSessionLike) {
     const peerConnection = this.peerConnection;
@@ -34,8 +31,9 @@ export class CloudflareLifecycleMethods {
 
   async getMetrics(this: CloudflareSessionLike) {
     if (!this.peerConnection) return [];
-    const stats = await (collectPeerConnectionStats as any)(
+    const stats = await collectPeerConnectionStats(
       this.peerConnection,
+      "audio",
     );
     const candidatePair = stats.candidatePair;
     const inboundAudio = stats.inboundAudio;

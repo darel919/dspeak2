@@ -1,5 +1,6 @@
 import type { DesktopCaptureSelection } from "../desktop-capture.ts";
 import type { VideoSettingsInput } from "../types/video-settings.ts";
+import type { TopologySourceEntry } from "./topology-controller.ts";
 
 export interface MediaCaptureSettings {
   audio?: MediaTrackConstraints;
@@ -18,7 +19,7 @@ export interface MediaCaptureEntry {
   source: string;
   stream: MediaStream;
   track: MediaStreamTrack;
-  publication: Promise<MediaCapturePublication | null | undefined>;
+  publication: Promise<TopologySourceEntry | null>;
   ownerSource?: string;
   captureSelection?: DesktopCaptureSelection | null;
   roomBitrateBps?: number | null;

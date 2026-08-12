@@ -59,7 +59,8 @@ export function createTopologyResourceHelpers({
         }),
       onFailure: (failure: unknown) =>
         send({ type: "p2p-failed", data: failure }),
-      onSnapshot: updateP2pStats,
+      onSnapshot: (snapshot: unknown) =>
+        updateP2pStats(Array.isArray(snapshot) ? snapshot : []),
       getAudioStereo,
       getSenderOptions: (source, track) => {
         if (track.kind === "audio") {

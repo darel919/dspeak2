@@ -9,6 +9,8 @@ import type {
   PresenceRealtimeMessage,
   PresenceRecord,
 } from "../shared/types/presence.ts";
+import type { IdentityProfile } from "../shared/types/identity.ts";
+import type { VoiceUserRecord } from "../shared/types/voice-media-actions.ts";
 
 export function usePresence(userId: string | Ref<string | null | undefined>) {
   const status = ref<string>("disconnected");
@@ -20,7 +22,7 @@ export function usePresence(userId: string | Ref<string | null | undefined>) {
   const roomsStore = useRoomsStore();
   const presenceStatusStore = usePresenceStatusStore();
   let voiceStorePromise: Promise<{
-    upsertUserProfile: (profile: PresenceRecord) => unknown;
+    upsertUserProfile: (profile: VoiceUserRecord) => unknown;
   }> | null = null;
 
   function loadVoiceStore() {
@@ -72,7 +74,7 @@ export function usePresence(userId: string | Ref<string | null | undefined>) {
     }
 
     if (message.type !== "profile_updated" || !data.id) return;
-    const profile = data;
+    const profile: IdentityProfile = { ...data, id: String(data.id) };
     identityStore.upsertPublicProfile(profile);
     void loadVoiceStore()
       .then((voiceStore) => voiceStore.upsertUserProfile(profile))
@@ -89,7 +91,7 @@ export function usePresence(userId: string | Ref<string | null | undefined>) {
     }
     intentionallyDisconnected = false;
     debugLog("[usePresence] Subscribing to global presence channel");
-    openRealtimeChannel("global", {
+    openRealtimeChannel<PresenceRealtimeMessage>("global", {
       onMessage: receiveMessage,
       onSubscribe: () => {
         debugLog("[usePresence] Global channel subscribed");

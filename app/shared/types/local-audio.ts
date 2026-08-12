@@ -1,4 +1,5 @@
 import type { Ref } from "vue";
+import type { NoiseFloorEstimator } from "./microphone-gate.ts";
 
 export interface LocalAudioProvider {
   setSourceTransmission?: (source: string, enabled: boolean) => unknown;
@@ -23,7 +24,7 @@ export interface AudioStatsSample {
 }
 
 export interface LocalAudioContext {
-  authStore: { getUserData: () => { id?: string } | null };
+  authStore: { getUserData: () => { id?: string | number } | null };
   automaticGateThreshold: (noiseFloorDb: number) => number;
   capture: { stop: (source: string) => unknown };
   collectOutboundAudioStats: (
@@ -36,7 +37,7 @@ export interface LocalAudioContext {
       audioLevel?: number | null;
     } | null;
   };
-  createNoiseFloorEstimator: () => { noiseFloorDb: number };
+  createNoiseFloorEstimator: () => NoiseFloorEstimator;
   echoDetected: Ref<boolean>;
   getActiveProvider: () => string | null;
   getAudioStereo: (source: string) => boolean;
@@ -64,7 +65,7 @@ export interface LocalAudioContext {
     dbfs: number;
   }>;
   updateNoiseFloor: (
-    estimator: { noiseFloorDb: number },
+    estimator: NoiseFloorEstimator,
     levelDb: number,
     active: boolean,
   ) => unknown;

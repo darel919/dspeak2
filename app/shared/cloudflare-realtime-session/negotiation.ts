@@ -33,9 +33,15 @@ export class CloudflareNegotiationMethods {
           this.onStateChange?.("cloudflare", state, this.connectionState());
         } catch {}
       });
-      const result: any = await this.request("new-session", undefined);
+      const result = await this.request("new-session", undefined);
       if (generation !== this.sessionGeneration) throw sessionClosedError();
-      if (!result.sessionId)
+      if (
+        !result ||
+        typeof result !== "object" ||
+        !("sessionId" in result) ||
+        typeof result.sessionId !== "string" ||
+        !result.sessionId
+      )
         throw new Error("Cloudflare session ID is missing");
       this.sessionId = result.sessionId;
       mediaDebug("cloudflare.session-created", {

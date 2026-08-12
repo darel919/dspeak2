@@ -11,8 +11,15 @@ import {
   normalizeNickname,
 } from "../../shared/user-profile.ts";
 import { getRoomById } from "./room-authorization.ts";
+import type { H3Event } from "h3";
+import type { ProfileUpdateInput } from "../types/profile-repository.ts";
+import type { ProfileApiDependencies } from "../types/profile-api.ts";
 
-export function createProfileApiHandler(dependencies) {
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function createProfileApiHandler(dependencies: ProfileApiDependencies) {
   const {
     broadcastGlobally,
     createError,
@@ -28,7 +35,12 @@ export function createProfileApiHandler(dependencies) {
     updateProfileAvatar,
   } = dependencies;
 
-  async function validateRoomImage(file, limit, label, allowGif = false) {
+  async function validateRoomImage(
+    file: File,
+    limit: number,
+    label: string,
+    allowGif = false,
+  ): Promise<void> {
     if (!(file instanceof File) || !file.size) return;
     if (file.size > limit)
       throw createError({
@@ -66,7 +78,7 @@ export function createProfileApiHandler(dependencies) {
       });
   }
 
-  async function handleProfile(event, suffix) {
+  async function handleProfile(event: H3Event, suffix: string) {
     const userId = await requireAuthenticatedUser(event);
     if (!["GET", "HEAD"].includes(event.method))
       enforceRateLimit(event, "profile-mutation", userId, 30, 60 * 60 * 1000);
@@ -82,19 +94,25 @@ export function createProfileApiHandler(dependencies) {
 
     if (!suffix && event.method === "PATCH") {
       const body = await parseBody(event);
-      const update = {} as any;
+      const update: ProfileUpdateInput = {};
       if (Object.hasOwn(body, "displayName")) {
         try {
           update.displayName = normalizeDisplayName(body.displayName);
-        } catch (error) {
-          throw createError({ statusCode: 400, statusMessage: error.message });
+        } catch (error: unknown) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: errorMessage(error),
+          });
         }
       }
       if (Object.hasOwn(body, "handle")) {
         try {
           update.username = normalizeHandle(body.handle);
-        } catch (error) {
-          throw createError({ statusCode: 400, statusMessage: error.message });
+        } catch (error: unknown) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: errorMessage(error),
+          });
         }
       }
       if (body.avatar instanceof File && body.avatar.size)
@@ -117,14 +135,19 @@ export function createProfileApiHandler(dependencies) {
       let updated;
       try {
         updated = await updateProfileAvatar({ db, userId, body, update });
-      } catch (error) {
-        if (error?.message?.includes("unique"))
+      } catch (error: unknown) {
+        if (errorMessage(error).includes("unique"))
           throw createError({
             statusCode: 409,
             statusMessage: "Username is already taken",
           });
         throw error;
       }
+      if (!updated)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Profile update did not persist",
+        });
       const publicProfile = presentPublicProfile(updated);
       await updateActiveUserProfile(publicProfile);
       broadcastGlobally({ type: "profile_updated", data: publicProfile });
@@ -182,8 +205,11 @@ export function createProfileApiHandler(dependencies) {
       let nickname;
       try {
         nickname = normalizeNickname(body.nickname);
-      } catch (error) {
-        throw createError({ statusCode: 400, statusMessage: error.message });
+      } catch (error: unknown) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: errorMessage(error),
+        });
       }
       const existing = await db
         .select({ id: userNicknames.id })
@@ -212,7 +238,13 @@ export function createProfileApiHandler(dependencies) {
             .insert(userNicknames)
             .values({ roomId, userId: targetUserId, nickname, setById: userId })
             .returning();
-      return { targetUserId, nickname: result[0].nickname };
+      const updatedNickname = result[0];
+      if (!updatedNickname)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Nickname update did not persist",
+        });
+      return { targetUserId, nickname: updatedNickname.nickname };
     }
 
     throw createError({

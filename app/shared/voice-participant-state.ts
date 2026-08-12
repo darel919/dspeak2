@@ -1,4 +1,9 @@
 import { triggerRef } from "vue";
+import type {
+  VoiceParticipantStateOptions,
+  VoiceStateUpdate,
+} from "./types/voice-participant-state.ts";
+import type { VoiceUserRecord } from "./types/voice-media-actions.ts";
 
 export function createVoiceParticipantState({
   clearSoundboardActivity,
@@ -8,10 +13,10 @@ export function createVoiceParticipantState({
   trackVolumes,
   userDirectory,
   userVolumes,
-}) {
-  const pendingVoiceStates = new Map();
+}: VoiceParticipantStateOptions) {
+  const pendingVoiceStates = new Map<string, VoiceStateUpdate>();
 
-  function upsertUserProfile(profile) {
+  function upsertUserProfile(profile: VoiceUserRecord) {
     if (!profile?.id) return;
     const userId = String(profile.id);
     const merged = {
@@ -27,7 +32,10 @@ export function createVoiceParticipantState({
     }
   }
 
-  function addConnectedUser(userId, userInfo) {
+  function addConnectedUser(
+    userId: string | number,
+    userInfo: VoiceUserRecord,
+  ) {
     const normalizedUserId = String(userId);
     const pendingState = pendingVoiceStates.get(normalizedUserId);
     pendingVoiceStates.delete(normalizedUserId);
@@ -56,7 +64,7 @@ export function createVoiceParticipantState({
     }
   }
 
-  function removeConnectedUser(userId) {
+  function removeConnectedUser(userId: string | number) {
     clearSoundboardActivity(userId);
     const normalizedUserId = String(userId);
     pendingVoiceStates.delete(normalizedUserId);
@@ -64,32 +72,32 @@ export function createVoiceParticipantState({
     publishConnectedUsers();
   }
 
-  function setUserVolume(userId, volume) {
+  function setUserVolume(userId: string, volume: number) {
     const normalized = Math.max(0, Math.min(2, Number(volume)));
     userVolumes.value[userId] = normalized;
     return getMediaSession()?.applyVolumeForUser?.(userId, normalized);
   }
 
-  function getUserVolume(userId) {
+  function getUserVolume(userId: string) {
     return typeof userVolumes.value[userId] !== "undefined"
       ? userVolumes.value[userId]
       : 1;
   }
 
-  function setTrackVolume(userId, source, volume) {
+  function setTrackVolume(userId: string, source: string, volume: number) {
     const normalized = Math.max(0, Math.min(2, Number(volume)));
     trackVolumes.value[`${userId}:${source}`] = normalized;
     if (source === "audio") userVolumes.value[userId] = normalized;
     return getMediaSession()?.applyVolumeForTrack?.(userId, source, normalized);
   }
 
-  function getTrackVolume(userId, source) {
+  function getTrackVolume(userId: string, source: string) {
     const value = trackVolumes.value[`${userId}:${source}`];
     if (typeof value !== "undefined") return value;
     return source === "audio" ? getUserVolume(userId) : 1;
   }
 
-  function updateUserSpeaking(userId, speaking) {
+  function updateUserSpeaking(userId: string | number, speaking: boolean) {
     const normalizedUserId = String(userId);
     let user = connectedUsers.value.get(normalizedUserId);
     const authenticatedUser = getAuthenticatedUser();
@@ -102,7 +110,7 @@ export function createVoiceParticipantState({
     publishConnectedUsers();
   }
 
-  function updateUserMuted(userId, muted) {
+  function updateUserMuted(userId: string | number, muted: boolean) {
     const normalizedUserId = String(userId);
     const user = connectedUsers.value.get(normalizedUserId);
     if (!user) return;
@@ -114,7 +122,10 @@ export function createVoiceParticipantState({
     publishConnectedUsers();
   }
 
-  function updateUserVoiceState(userId, state) {
+  function updateUserVoiceState(
+    userId: string | number,
+    state: VoiceStateUpdate,
+  ) {
     const normalizedUserId = String(userId || "");
     const user = connectedUsers.value.get(normalizedUserId);
     const hasMuted = typeof state?.muted === "boolean";
@@ -156,8 +167,8 @@ export function createVoiceParticipantState({
   }
 
   function getDisplayUsersArray() {
-    const result = [] as any;
-    const seen = new Set();
+    const result: VoiceUserRecord[] = [];
+    const seen = new Set<string>();
     for (const user of connectedUsers.value.values()) {
       const userId = String(user.id);
       if (!seen.has(userId)) {
@@ -181,11 +192,14 @@ export function createVoiceParticipantState({
     getConnectedUsersArray,
     getDisplayUsersArray,
     getTrackVolume,
-    getUserById: (userId) => connectedUsers.value.get(String(userId)),
-    getUserProfile: (userId) => userDirectory.value.get(String(userId)),
+    getUserById: (userId: string | number) =>
+      connectedUsers.value.get(String(userId)),
+    getUserProfile: (userId: string | number) =>
+      userDirectory.value.get(String(userId)),
     clearUserDirectory,
     getUserVolume,
-    isUserConnected: (userId) => connectedUsers.value.has(String(userId)),
+    isUserConnected: (userId: string | number) =>
+      connectedUsers.value.has(String(userId)),
     removeConnectedUser,
     setTrackVolume,
     setUserVolume,

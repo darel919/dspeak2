@@ -5,6 +5,7 @@ import type {
   BrowserMediaEngineSession,
   MediaEngineFactoryOptions,
 } from "../../shared/types/media-engine-adapters.ts";
+import type { RuntimeConfigShape } from "../../shared/types/runtime-config.ts";
 
 export function useMediaEngine(
   sessionOrFactory:
@@ -13,8 +14,10 @@ export function useMediaEngine(
 ) {
   const tauriRuntime = options.isTauri ?? isTauriRuntime();
   if (tauriRuntime) {
-    const runtimeConfig: any =
-      typeof useRuntimeConfig === "function" ? useRuntimeConfig() : {};
+    const runtimeConfig: RuntimeConfigShape =
+      typeof useRuntimeConfig === "function"
+        ? (useRuntimeConfig() as RuntimeConfigShape)
+        : {};
     const publicConfig = runtimeConfig?.public || {};
     const serverUrl =
       publicConfig.baseApiPath || import.meta.env?.VITE_DSPEAK_API_PATH || "";
@@ -27,9 +30,9 @@ export function useMediaEngine(
         ...options.nativeConfig,
       },
       nativeOnly: true,
-      voiceStore: options.voiceStore || null,
-      settingsStore: options.settingsStore || null,
-      channelsStore: options.channelsStore || null,
+      voiceStore: options.voiceStore,
+      settingsStore: options.settingsStore,
+      channelsStore: options.channelsStore,
       onQoe: options.onQoe,
     });
   }

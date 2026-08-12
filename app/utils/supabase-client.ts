@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-let supabaseClient = null;
+let supabaseClient: SupabaseClient | null = null;
 
 export function getSupabaseClient() {
   if (supabaseClient) return supabaseClient;
@@ -55,7 +56,10 @@ export async function captureSupabaseSession() {
   }
 }
 
-export async function bindSupabaseSession(accessToken, refreshToken = "") {
+export async function bindSupabaseSession(
+  accessToken: string,
+  refreshToken = "",
+) {
   const client = getSupabaseClient();
   if (!client || !accessToken) return false;
   try {

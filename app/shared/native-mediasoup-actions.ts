@@ -1,22 +1,38 @@
 import { closeConsumer } from "./native-mediasoup-consumers.ts";
 import { receiveEventMatches, waitFor } from "./native-mediasoup-utils.ts";
+import type {
+  NativeAction,
+  NativeReceiveEvent,
+} from "./types/native-mediasoup.ts";
+import type { NativeDirection } from "./types/native-mediasoup-session.ts";
+import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
 
-export async function handleNativeAction(session, action) {
+export async function handleNativeAction(
+  session: NativeMediasoupSfuSession,
+  action: NativeAction,
+) {
   if (!action || session.closed) return false;
-  let params = action.params;
-  if (typeof params === "string") params = JSON.parse(params);
-  let state = action.state;
-  if (typeof state === "string") {
+  let params: Record<string, unknown> =
+    action.params && typeof action.params === "object" ? action.params : {};
+  if (typeof action.params === "string")
+    params = JSON.parse(action.params) as Record<string, unknown>;
+  let state: Record<string, unknown> =
+    action.state && typeof action.state === "object" ? action.state : {};
+  if (typeof action.state === "string") {
     try {
-      state = JSON.parse(state);
+      state = JSON.parse(action.state) as Record<string, unknown>;
     } catch {}
   }
   const pointer = Number(action.transportPtr);
   if (action.kind === 1) {
-    const direction =
-      params?.direction ||
+    const directionValue =
+      params.direction ||
       session.transportPointers.get(pointer) ||
       session.pendingNativeDirection;
+    const direction: NativeDirection | undefined =
+      directionValue === "send" || directionValue === "recv"
+        ? directionValue
+        : undefined;
     const transport =
       direction === "recv" ? session.recvTransport : session.sendTransport;
     if (!direction || !transport)
@@ -72,7 +88,7 @@ export async function handleNativeAction(session, action) {
       },
       "SFU producer publication",
     );
-    const result: any = await acknowledgement;
+    const result = (await acknowledgement) as Record<string, unknown>;
     await session.invoke("media_complete_produce", {
       actionId: Number(action.actionId),
       producerId: result.id,
@@ -81,13 +97,15 @@ export async function handleNativeAction(session, action) {
   }
   if (action.kind === 3 || action.kind === 4) {
     if (params?.event === "consumer-closed" && params.consumerId) {
-      closeConsumer(
-        session,
-        session.consumers.get(params.consumerId) || {
-          consumerId: params.consumerId,
-          producerId: params.producerId,
-        },
-      );
+      const consumerId = String(params.consumerId);
+      const entry = session.consumers.get(consumerId) || {
+        consumerId,
+        key: consumerId,
+        producerId: String(params.producerId || ""),
+        kind: "audio",
+        source: "audio",
+      };
+      closeConsumer(session, entry);
     }
     return true;
   }
@@ -99,7 +117,10 @@ export async function handleNativeAction(session, action) {
   return false;
 }
 
-export function handleReceiveEvent(session, event) {
+export function handleReceiveEvent(
+  session: NativeMediasoupSfuSession,
+  event: NativeReceiveEvent,
+) {
   const payload = event?.payload || {};
   if (event?.kind === 5) {
     const source = String(payload.source || event.id || "");
@@ -125,8 +146,10 @@ export function handleReceiveEvent(session, event) {
     session._emitState();
     return true;
   }
-  const consumerId = event?.id || payload.consumerId;
+  const consumerId = String(event?.id || payload.consumerId || "");
+  if (!consumerId) return false;
   const entry = session.consumers.get(consumerId);
+  if (!entry) return false;
   if (!receiveEventMatches(entry, { ...payload, consumerId })) return false;
   if (event.kind === 1) return true;
   if (event.kind === 2) {
@@ -142,6 +165,6 @@ export function handleReceiveEvent(session, event) {
     session._emitState();
     return true;
   }
-  if (event.kind === 3) return closeConsumer(session, entry);
+  if (event.kind === 3 && entry) return closeConsumer(session, entry);
   return false;
 }

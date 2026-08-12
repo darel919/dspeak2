@@ -11,8 +11,18 @@ import {
 import { getRoomById } from "../room-authorization.ts";
 import { notificationModeFromRecord } from "../../../shared/notification-policy.ts";
 import { getCachedFile } from "../upload-cache.ts";
+import type { H3Event } from "h3";
+import type {
+  ChatApiDependencies,
+  ChatAttachmentFile,
+  ChatMessageRow,
+  ChatAttachmentRecord,
+  ChatProfileRow,
+  ChatRouteDependencies,
+} from "../../types/chat-api.ts";
+import type { DSpeakProfileInput } from "../../types/dspeak-api.ts";
 
-function createChatApiHandler(dependencies) {
+function createChatApiHandler(dependencies: ChatApiDependencies) {
   const {
     broadcastToUser,
     createError,
@@ -24,12 +34,16 @@ function createChatApiHandler(dependencies) {
     requireValue,
   } = dependencies;
 
-  function presentMessageRecord(message, author, files = [] as any) {
+  function presentMessageRecord(
+    message: ChatMessageRow,
+    author: DSpeakProfileInput | null | undefined,
+    files: ChatAttachmentFile[] = [],
+  ) {
     return {
       id: message.id,
       content: message.content,
       room_channel: message.channelId,
-      sender: presentUser(author[0], true),
+      sender: presentUser(author, true),
       created: message.createdAt,
       updated: message.updatedAt,
       edited_at: null,
@@ -47,7 +61,7 @@ function createChatApiHandler(dependencies) {
     };
   }
 
-  async function presentMessage(message) {
+  async function presentMessage(message: ChatMessageRow) {
     const [author, files] = await Promise.all([
       db
         .select()
@@ -59,11 +73,11 @@ function createChatApiHandler(dependencies) {
     return presentMessageRecord(message, author[0], files);
   }
 
-  async function presentMessages(rows) {
+  async function presentMessages(rows: ChatMessageRow[]) {
     if (!rows.length) return [];
     const authorIds: string[] = [
       ...new Set(rows.map((row) => row.authorId).filter(Boolean)),
-    ] as any;
+    ];
     const messageIds = rows.map((row) => row.id).filter(Boolean);
     const [authors, files] = await Promise.all([
       authorIds.length
@@ -76,10 +90,10 @@ function createChatApiHandler(dependencies) {
             .where(inArray(chatFiles.messageId, messageIds))
         : [],
     ]);
-    const authorById = new Map<any, any>(
-      authors.map((author) => [String(author.id), author]) as any,
+    const authorById = new Map<string, ChatProfileRow>(
+      authors.map((author) => [String(author.id), author]),
     );
-    const filesByMessageId = new Map();
+    const filesByMessageId = new Map<string, ChatAttachmentFile[]>();
     for (const file of files) {
       const messageFiles = filesByMessageId.get(String(file.messageId)) || [];
       messageFiles.push(file);
@@ -94,7 +108,9 @@ function createChatApiHandler(dependencies) {
     );
   }
 
-  function presentNotificationPreferences(row) {
+  function presentNotificationPreferences(
+    row: Record<string, unknown> | null | undefined,
+  ) {
     if (!row)
       return {
         mode: "all",
@@ -113,7 +129,10 @@ function createChatApiHandler(dependencies) {
     };
   }
 
-  function presentRoomNotificationPreferences(row, roomId) {
+  function presentRoomNotificationPreferences(
+    row: Record<string, unknown> | null | undefined,
+    roomId: string,
+  ) {
     return row
       ? {
           ...row,
@@ -125,17 +144,20 @@ function createChatApiHandler(dependencies) {
       : { room: roomId, mode: "all", push: null, sound: null };
   }
 
-  function parseNotificationData(value) {
+  function parseNotificationData(value: unknown): Record<string, unknown> {
     if (!value) return {};
     try {
-      const parsed = JSON.parse(value);
+      const parsed = JSON.parse(String(value));
       return parsed && typeof parsed === "object" ? parsed : {};
     } catch {
       return {};
     }
   }
 
-  async function validateReplyTarget(replyTo, channelId) {
+  async function validateReplyTarget(
+    replyTo: string | null | undefined,
+    channelId: string,
+  ) {
     if (!replyTo) return null;
     const target = await db
       .select()
@@ -152,9 +174,9 @@ function createChatApiHandler(dependencies) {
   }
 
   async function validateMessageAttachments(
-    submittedAttachments,
-    channelId,
-    userId,
+    submittedAttachments: unknown,
+    channelId: string,
+    userId: string,
   ) {
     if (submittedAttachments == null) return [];
     if (!Array.isArray(submittedAttachments) || submittedAttachments.length > 4)
@@ -162,8 +184,8 @@ function createChatApiHandler(dependencies) {
         statusCode: 400,
         statusMessage: "A message can include up to 4 images",
       });
-    const attachments = [] as any;
-    const seen = new Set();
+    const attachments: ChatAttachmentRecord[] = [];
+    const seen = new Set<string>();
     for (const submitted of submittedAttachments) {
       const id = String(submitted?.id || "");
       if (!id || seen.has(id))
@@ -172,7 +194,7 @@ function createChatApiHandler(dependencies) {
           statusMessage: "Invalid image attachment",
         });
       seen.add(id);
-      const cached = getCachedFile(id);
+      const cached = getCachedFile(id) as ChatAttachmentFile | null;
       const record = cached
         ? cached
         : await db
@@ -180,7 +202,7 @@ function createChatApiHandler(dependencies) {
             .from(chatFiles)
             .where(eq(chatFiles.id, id))
             .limit(1)
-            .then((rows) => rows[0]);
+            .then((rows) => rows[0] as ChatAttachmentFile | undefined);
       if (!record)
         throw createError({
           statusCode: 404,
@@ -222,8 +244,13 @@ function createChatApiHandler(dependencies) {
     return attachments;
   }
 
-  async function handleNotifications(event, userId, suffix) {
-    const body = event.method === "GET" ? {} : await parseBody(event);
+  async function handleNotifications(
+    event: H3Event,
+    userId: string,
+    suffix: string,
+  ) {
+    const body: Record<string, unknown> =
+      event.method === "GET" ? {} : await parseBody(event);
     if (suffix === "notifications" && event.method === "GET") {
       const items = await db
         .select()
@@ -396,8 +423,9 @@ function createChatApiHandler(dependencies) {
       if (event.method === "GET")
         return presentRoomNotificationPreferences(existing[0], roomId);
       if (event.method === "PUT") {
-        const mode = ["all", "mentions", "muted"].includes(body.mode)
-          ? body.mode
+        const requestedMode = typeof body.mode === "string" ? body.mode : "all";
+        const mode = ["all", "mentions", "muted"].includes(requestedMode)
+          ? requestedMode
           : "all";
         const data = {
           userId,
@@ -434,20 +462,20 @@ function createChatApiHandler(dependencies) {
     });
   }
 
-  const routeDependencies = {
+  const routeDependencies: ChatRouteDependencies = {
     ...dependencies,
     presentMessage,
     presentMessages,
     validateReplyTarget,
     validateMessageAttachments,
-  };
+  } as unknown as ChatRouteDependencies;
   const handleMessageRoutes = createChatMessagesHandler(routeDependencies);
   const handleFileRoutes = createChatFilesHandler(routeDependencies);
   const handleInteractionRoutes =
     createChatInteractionsHandler(routeDependencies);
   const handleDiscoveryRoutes = createChatDiscoveryHandler(routeDependencies);
 
-  async function handleChat(event, suffix) {
+  async function handleChat(event: H3Event, suffix: string) {
     if (!suffix && event.method === "GET") return "dSpeak Chat";
     if (suffix === "socket" && event.method === "GET")
       throw createError({ statusCode: 426, statusMessage: "Upgrade Required" });

@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
   const method = getMethod(event);
 
   if (method === "GET") {
-    const channelId = getQuery(event).channelId;
+    const channelId = String(getQuery(event).channelId || "");
     if (!channelId) {
       throw createError({
         statusCode: 400,
@@ -74,7 +74,7 @@ export default defineEventHandler(async (event) => {
 
     await requireRoomPermission(room, userId, "channel.update");
 
-    const updateData = {} as any;
+    const updateData: { policy?: string; slowMode?: number } = {};
     if (policy !== undefined) {
       updateData.policy = normalizeChannelPolicy(policy);
     }

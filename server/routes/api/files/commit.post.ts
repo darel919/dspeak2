@@ -19,12 +19,55 @@ import {
 } from "../../../utils/room-authorization.ts";
 import { and, eq } from "drizzle-orm";
 
+const uploadTypes = [
+  "avatar",
+  "room-profile",
+  "room-header",
+  "chat",
+  "soundboard",
+] as const;
+type UploadType = (typeof uploadTypes)[number];
+interface UploadMetadata {
+  roomId?: string;
+  channelId?: string;
+  messageId?: string;
+  objectId: string;
+  mimeType: string;
+  size: number;
+  fileName?: string;
+  name?: string;
+  volume?: number;
+}
+
+function requiredMetadataString(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value)
+    throw createError({
+      statusCode: 400,
+      statusMessage: `${label} is required`,
+    });
+  return value;
+}
+
 export default defineEventHandler(async (event) => {
   await requireAuth(event);
   const user = event.context.user;
 
-  const body = await readBody(event);
-  const { type, key, metadata } = body;
+  const body = (await readBody(event)) as {
+    type?: unknown;
+    key?: unknown;
+    metadata?: unknown;
+  };
+  const typeValue = body.type;
+  const type =
+    typeof typeValue === "string" &&
+    uploadTypes.includes(typeValue as UploadType)
+      ? (typeValue as UploadType)
+      : null;
+  const key = typeof body.key === "string" ? body.key : "";
+  const metadata =
+    body.metadata && typeof body.metadata === "object"
+      ? (body.metadata as UploadMetadata)
+      : null;
 
   if (!type || !key) {
     throw createError({
@@ -60,7 +103,8 @@ export default defineEventHandler(async (event) => {
     });
 
   if (["room-profile", "room-header", "soundboard"].includes(type)) {
-    const room = await getRoomById(metadata.roomId);
+    const roomId = requiredMetadataString(metadata.roomId, "Room ID");
+    const room = await getRoomById(roomId);
     if (!room)
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
     await requireRoomPermission(
@@ -70,7 +114,8 @@ export default defineEventHandler(async (event) => {
     );
   }
   if (type === "chat") {
-    const channel = await channelRepository.findById(metadata.channelId);
+    const channelId = requiredMetadataString(metadata.channelId, "Channel ID");
+    const channel = await channelRepository.findById(channelId);
     const membership = channel
       ? await membershipRepository.findByRoomAndUser(channel.roomId, user.id)
       : null;
@@ -94,10 +139,7 @@ export default defineEventHandler(async (event) => {
         .select({ id: messages.id, authorId: messages.authorId })
         .from(messages)
         .where(
-          and(
-            eq(messages.id, messageId),
-            eq(messages.channelId, metadata.channelId),
-          ),
+          and(eq(messages.id, messageId), eq(messages.channelId, channelId)),
         )
         .limit(1)
         .then((rows) => rows[0]);
@@ -116,10 +158,10 @@ export default defineEventHandler(async (event) => {
 
   const expectedPrefix = {
     avatar: `avatars/${user.id}/`,
-    "room-profile": `rooms/${metadata.roomId}/profile/`,
-    "room-header": `rooms/${metadata.roomId}/headers/`,
-    chat: `chat/${metadata.channelId}/`,
-    soundboard: `soundboards/${metadata.roomId}/`,
+    "room-profile": `rooms/${String(metadata.roomId || "")}/profile/`,
+    "room-header": `rooms/${String(metadata.roomId || "")}/headers/`,
+    chat: `chat/${String(metadata.channelId || "")}/`,
+    soundboard: `soundboards/${String(metadata.roomId || "")}/`,
   }[type];
   if (!expectedPrefix || !key.startsWith(expectedPrefix))
     throw createError({
@@ -135,7 +177,6 @@ export default defineEventHandler(async (event) => {
         const avatarResult = await tx
           .insert(avatars)
           .values({
-            id: objectId,
             userId: user.id,
             r2Key: key,
             mimeType: metadata.mimeType,
@@ -158,11 +199,10 @@ export default defineEventHandler(async (event) => {
     }
     case "room-profile":
     case "room-header": {
-      const { roomId, objectId } = metadata;
+      const roomId = requiredMetadataString(metadata.roomId, "Room ID");
       result = await db
         .insert(roomImages)
         .values({
-          id: objectId,
           roomId,
           type: type === "room-header" ? "header" : "profile",
           r2Key: key,
@@ -173,15 +213,19 @@ export default defineEventHandler(async (event) => {
       break;
     }
     case "chat": {
-      const { channelId, messageId, objectId } = metadata;
+      const channelId = requiredMetadataString(
+        metadata.channelId,
+        "Channel ID",
+      );
+      const messageId = metadata.messageId;
+      const fileName = requiredMetadataString(metadata.fileName, "File name");
       result = await db
         .insert(chatFiles)
         .values({
-          id: objectId,
           channelId,
           messageId: messageId || null,
           uploaderId: user.id,
-          fileName: metadata.fileName,
+          fileName,
           mimeType: metadata.mimeType,
           size: metadata.size,
           r2Key: key,
@@ -190,13 +234,13 @@ export default defineEventHandler(async (event) => {
       break;
     }
     case "soundboard": {
-      const { roomId, objectId } = metadata;
+      const roomId = requiredMetadataString(metadata.roomId, "Room ID");
+      const name = requiredMetadataString(metadata.name, "Soundboard name");
       result = await db
         .insert(soundboards)
         .values({
-          id: objectId,
           roomId,
-          name: metadata.name,
+          name,
           audioKey: key,
           volume: metadata.volume || 100,
           createdById: user.id,

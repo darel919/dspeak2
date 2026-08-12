@@ -111,13 +111,15 @@ export async function createCloudflareTurnServers(
     : body.iceServers
       ? [body.iceServers]
       : [];
-  return iceServers.filter((server): server is IceServer =>
+  return iceServers.filter((server: unknown): server is IceServer =>
     Boolean(
       server &&
       typeof server === "object" &&
       "urls" in server &&
       (typeof server.urls === "string" || Array.isArray(server.urls)) &&
+      "username" in server &&
       typeof server.username === "string" &&
+      "credential" in server &&
       typeof server.credential === "string",
     ),
   );

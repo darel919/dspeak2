@@ -1,4 +1,10 @@
-function mediaControlUrl(channelId, action) {
+import type {
+  MediaControlModerationResponse,
+  MediaControlParticipantsResponse,
+  MediaControlRequestOptions,
+} from "../types/media-control-admin.ts";
+
+function mediaControlUrl(channelId: string, action: string): string | null {
   const base = process.env.CF_MEDIA_CONTROL_URL;
   if (!base) return null;
   return new URL(
@@ -7,7 +13,11 @@ function mediaControlUrl(channelId, action) {
   ).toString();
 }
 
-async function request(channelId, action, options = {} as any) {
+async function request(
+  channelId: string,
+  action: string,
+  options: MediaControlRequestOptions = {},
+): Promise<unknown> {
   const url = mediaControlUrl(channelId, action);
   const token = process.env.CF_MEDIA_CONTROL_ADMIN_TOKEN;
   if (!url || !token) return null;
@@ -24,8 +34,14 @@ async function request(channelId, action, options = {} as any) {
   return response.json();
 }
 
-export async function isActiveVoiceParticipant(channelId, userId) {
-  const result = await request(channelId, "participants");
+export async function isActiveVoiceParticipant(
+  channelId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = (await request(
+    channelId,
+    "participants",
+  )) as MediaControlParticipantsResponse | null;
   return Boolean(
     result?.participants?.some(
       (participant) => String(participant.userId) === String(userId),
@@ -34,21 +50,25 @@ export async function isActiveVoiceParticipant(channelId, userId) {
 }
 
 export async function moderateVoiceParticipant(
-  channelId,
-  userId,
-  targetChannelId = null,
-) {
-  const result = await request(channelId, "moderate", {
+  channelId: string,
+  userId: string,
+  targetChannelId: string | null = null,
+): Promise<number> {
+  const result = (await request(channelId, "moderate", {
     method: "POST",
     body: JSON.stringify({ userId, targetChannelId }),
-  });
+  })) as MediaControlModerationResponse | null;
   return Number(result?.affected || 0);
 }
 
-export function disconnectVoiceParticipant(channelId, userId) {
+export function disconnectVoiceParticipant(
+  channelId: string,
+  userId: string,
+): Promise<number> {
   return moderateVoiceParticipant(channelId, userId, null);
 }
 
-export function updateActiveUserProfile() {
-  return false;
+export function updateActiveUserProfile(profile: unknown): Promise<boolean> {
+  void profile;
+  return Promise.resolve(false);
 }

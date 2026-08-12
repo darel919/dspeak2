@@ -37,7 +37,7 @@ export interface MediaSourceControllerContext {
   ) => Promise<Map<string, Record<string, unknown>> | null>;
   getVideoSettings?: (source: string) => AdaptiveVideoSettings;
   localSources: Map<string, TopologySourceEntry>;
-  localVideoFeeds: Ref<Map<string, unknown>>;
+  localVideoFeeds: Ref<Map<string, MediaVideoFeed>>;
   onSharedAudioStopped?: () => unknown;
   producerFacade: (entry: TopologySourceEntry) => unknown;
   refreshMediaPolicy?: () => Promise<unknown>;
@@ -55,6 +55,12 @@ export interface MediaSourceControllerContext {
     screenSharing: boolean;
     systemAudioSharing: boolean;
   };
+}
+
+export interface MediaVideoFeed {
+  source: string;
+  stream?: MediaStream;
+  producerId: string;
 }
 
 export type MediaAdaptiveEntry = AdaptiveVideoEntry & TopologySourceEntry;

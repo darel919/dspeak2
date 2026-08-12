@@ -1,19 +1,26 @@
 export const STARTUP_READINESS_KEY = Symbol("startup-readiness");
 export const STARTUP_READINESS_TIMEOUT_MS = 15_000;
 
-export function createStartupReadiness({ onPending } = {} as any) {
-  const tasks = new Map();
+import type {
+  StartupReadinessOptions,
+  StartupWaitOptions,
+} from "./types/shared-utilities.ts";
+
+export function createStartupReadiness({
+  onPending,
+}: StartupReadinessOptions = {}) {
+  const tasks = new Map<number, Promise<void>>();
   let accepting = true;
   let generation = 0;
   let nextTaskId = 0;
   let latestStatus = "";
 
-  function hold(status) {
+  function hold(status: string) {
     if (!accepting) return () => {};
 
     const taskId = ++nextTaskId;
-    let releaseTask;
-    const promise = new Promise((resolve) => {
+    let releaseTask: () => void = () => {};
+    const promise = new Promise<void>((resolve) => {
       releaseTask = resolve;
     });
 
@@ -32,15 +39,15 @@ export function createStartupReadiness({ onPending } = {} as any) {
   }
 
   async function waitForIdle(
-    settle,
-    { timeoutMs = STARTUP_READINESS_TIMEOUT_MS } = {} as any,
+    settle?: () => unknown,
+    { timeoutMs = STARTUP_READINESS_TIMEOUT_MS }: StartupWaitOptions = {},
   ) {
     const startedAt = Date.now();
     while (accepting) {
       const observedGeneration = generation;
       const pending = Promise.all([...tasks.values()]);
       const remaining = Math.max(timeoutMs - (Date.now() - startedAt), 0);
-      let timer;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
           pending,
@@ -55,7 +62,7 @@ export function createStartupReadiness({ onPending } = {} as any) {
           }),
         ]);
       } finally {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
       }
       await settle?.();
 

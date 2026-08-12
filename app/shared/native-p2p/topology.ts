@@ -16,9 +16,34 @@ import {
   handleConnectionState,
   handleIceState,
 } from "../native-p2p-health.ts";
+import type {
+  NativeP2pConnectionState,
+  NativeP2pMeshSurface,
+  NativeP2pRemoteTrackEntry,
+} from "../types/native-p2p.ts";
+
+interface NativeP2pTopologyPeer {
+  peerId: string;
+  userId?: string | number | null;
+  sources?: string[];
+}
+
+interface NativeP2pTopology {
+  mode?: string;
+  epoch?: number | string;
+  peers?: NativeP2pTopologyPeer[];
+  localPeerId?: string | null;
+}
 export class NativeP2pTopologyMethods {
-  [key: string]: any;
-  applyTopology({ mode, epoch, peers, localPeerId }) {
+  async applyTopology(
+    this: NativeP2pMeshSurface,
+    {
+      mode = "idle",
+      epoch = 0,
+      peers = [],
+      localPeerId = null,
+    }: NativeP2pTopology,
+  ) {
     const previousEpoch = this.epoch;
     const existingPeerIds = new Set(this.connections.keys());
     const previousFailureKey = `${this.epoch}:${this.mode}`;
@@ -42,7 +67,7 @@ export class NativeP2pTopologyMethods {
       for (const peer of peers || []) {
         const peerId = String(peer.peerId);
         if (peerId !== this.localPeerId) {
-          const state = this.ensureConnection(peerId, peer.userId);
+          const state = this.ensureConnection(peerId, peer.userId ?? null);
           state.remoteSourceNames = new Set(
             (Array.isArray(peer.sources) ? peer.sources : []).map(String),
           );
@@ -64,7 +89,10 @@ export class NativeP2pTopologyMethods {
     this.emitSnapshot();
   }
 
-  queuePendingSignal(payload) {
+  queuePendingSignal(
+    this: NativeP2pMeshSurface,
+    payload: Record<string, unknown>,
+  ) {
     const epoch = Number(payload?.epoch);
     if (!Number.isSafeInteger(epoch) || epoch < this.epoch) return false;
     const pending = this.pendingSignals.get(epoch) || [];
@@ -74,7 +102,7 @@ export class NativeP2pTopologyMethods {
     return true;
   }
 
-  async flushPendingSignals() {
+  async flushPendingSignals(this: NativeP2pMeshSurface) {
     const pending = this.pendingSignals.get(this.epoch);
     if (!pending?.length) return;
     this.pendingSignals.delete(this.epoch);
@@ -88,7 +116,10 @@ export class NativeP2pTopologyMethods {
     }
   }
 
-  resynchronizeEpoch(peerIds = null) {
+  resynchronizeEpoch(
+    this: NativeP2pMeshSurface,
+    peerIds: Set<string> | null = null,
+  ) {
     for (const state of this.connections.values()) {
       if (peerIds && !peerIds.has(state.peerId)) continue;
       for (const [source, sender] of state.senders) {
@@ -115,9 +146,14 @@ export class NativeP2pTopologyMethods {
     }
   }
 
-  ensureConnection(peerId, userId) {
+  ensureConnection(
+    this: NativeP2pMeshSurface,
+    peerId: string,
+    userId: string | number | null,
+  ): NativeP2pConnectionState {
     if (this.connections.has(peerId)) {
       const state = this.connections.get(peerId);
+      if (!state) return this.ensureConnection(peerId, userId);
       const resolvedUserId = String(userId || peerId);
       if (state.userId !== resolvedUserId) {
         state.userId = resolvedUserId;
@@ -129,7 +165,7 @@ export class NativeP2pTopologyMethods {
       return state;
     }
     const pc = new RTCPeerConnection(this.configuration);
-    const state = {
+    const state: NativeP2pConnectionState = {
       peerId,
       userId: String(userId || peerId),
       pc,
@@ -166,6 +202,7 @@ export class NativeP2pTopologyMethods {
       signalingStep: null,
       negotiationRequested: false,
       negotiationTimer: null,
+      remoteDescription: null,
       closed: false,
     };
     this.connections.set(peerId, state);
@@ -198,47 +235,84 @@ export class NativeP2pTopologyMethods {
     return state;
   }
 
-  signal(targetPeerId, signalPayload) {
+  signal(
+    this: NativeP2pMeshSurface,
+    targetPeerId: string,
+    signalPayload: Record<string, unknown>,
+  ) {
     return signal(this, targetPeerId, signalPayload);
   }
 
-  sendControl(payload, failureReason = "signaling-unavailable") {
+  sendControl(
+    this: NativeP2pMeshSurface,
+    payload: Record<string, unknown>,
+    failureReason = "signaling-unavailable",
+  ) {
     return sendControl(this, payload, failureReason);
   }
 
-  enqueuePeerSignaling(state, operation, phase = "signal") {
+  enqueuePeerSignaling(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+    operation: () => Promise<unknown>,
+    phase = "signal",
+  ) {
     return enqueuePeerSignaling(this, state, operation, phase);
   }
 
-  schedulePeerNegotiation(state) {
+  schedulePeerNegotiation(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+  ) {
     return schedulePeerNegotiation(this, state);
   }
 
-  retryPeerNegotiation(state) {
+  retryPeerNegotiation(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+  ) {
     return retryPeerNegotiation(this, state);
   }
 
-  async receiveSignal(payload) {
+  async receiveSignal(
+    this: NativeP2pMeshSurface,
+    payload: Record<string, unknown>,
+  ) {
     return receiveSignal(this, payload);
   }
 
-  async applyPeerSignal(state, signal) {
+  async applyPeerSignal(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+    signal: Record<string, unknown>,
+  ) {
     return applyPeerSignal(this, state, signal);
   }
 
-  bindHealthChannel(state, channel) {
+  bindHealthChannel(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+    channel: RTCDataChannel,
+  ) {
     return bindHealthChannel(this, state, channel);
   }
 
-  handleConnectionState(state) {
+  handleConnectionState(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+  ) {
     return handleConnectionState(this, state);
   }
 
-  handleIceState(state) {
+  handleIceState(this: NativeP2pMeshSurface, state: NativeP2pConnectionState) {
     return handleIceState(this, state);
   }
 
-  handleTrack(state, event) {
+  handleTrack(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+    event: RTCTrackEvent,
+  ) {
     const track = event.track;
     const sourceKey = `${state.peerId}:${track.id}`;
     const exactSource = this.remoteSources.get(sourceKey);
@@ -255,10 +329,10 @@ export class NativeP2pTopologyMethods {
             : source === "audio" || source === "screen-audio"),
       )
       .map(([, source]) => source);
-    const source =
+    const source: string =
       exactSource ||
       (unmatchedSources.length === 1
-        ? unmatchedSources[0]
+        ? String(unmatchedSources[0])
         : `${expectedKind}:${String(track.id)}`);
     const key = p2pRemoteFeedKey(state.peerId, source);
     const previous = state.remoteTracks.get(source);
@@ -267,12 +341,12 @@ export class NativeP2pTopologyMethods {
     if (track.kind === "audio") {
       state.audioReceivers.set(source, event.receiver);
     }
-    const entry = {
+    const entry: NativeP2pRemoteTrackEntry = {
       key,
       peerId: state.peerId,
       userId: state.userId,
       source,
-      ownerSource: this.remoteSourceOwners.get(sourceKey) || null,
+      ownerSource: this.remoteSourceOwners.get(sourceKey) ?? null,
       track,
       stream: new MediaStream([track]),
     };
@@ -300,3 +374,5 @@ export class NativeP2pTopologyMethods {
     );
   }
 }
+
+export interface NativeP2pTopologyMethods extends NativeP2pMeshSurface {}

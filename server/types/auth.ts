@@ -1,4 +1,4 @@
-import type { User } from "@supabase/supabase-js";
+import type { Session, User } from "@supabase/supabase-js";
 import type { H3Event } from "h3";
 
 export type AuthEvent = H3Event;
@@ -7,7 +7,7 @@ export type OAuthProfileRecord = Record<string, unknown> & {
   avatarKey?: string | null;
 };
 export interface PendingOAuthSession {
-  session: unknown;
+  session: Session;
   expiresAt: number;
 }
 export interface OAuthStorage {

@@ -69,10 +69,13 @@ export function startSystemAudioProduction(
     .then(async (result: unknown) => {
       nativeCaptureStarted = true;
       engine.activeSystemAudioCapture = selection || {};
+      const sourceCaptureSelection =
+        (request.captureSelection as NativeCaptureRequest | null | undefined) ||
+        selection;
       const entry = {
         source: "screen-audio",
         track: { kind: "audio" },
-        captureSelection: request.captureSelection || selection,
+        captureSelection: sourceCaptureSelection,
         audioBitrate: engine.getAudioBitrate?.("screen-audio"),
         audioStereo: engine.getAudioStereo?.("screen-audio"),
       };
@@ -131,17 +134,17 @@ export function stopSystemAudioProduction(
       }
       if (!failure) return;
       if (engine.nativeOnly) throw failure;
-      await engine.browserEngine
-        .stopSystemAudioProduction(...args)
-        .finally(() =>
-          engine._emit("error", {
-            source: "native",
+      await Promise.resolve(
+        engine.browserEngine.stopSystemAudioProduction(...args),
+      ).finally(() =>
+        engine._emit("error", {
+          source: "native",
+          operation: "system-audio-stop",
+          error: nativeCaptureFailure(failure, {
             operation: "system-audio-stop",
-            error: nativeCaptureFailure(failure, {
-              operation: "system-audio-stop",
-            }),
           }),
-        );
+        }),
+      );
     })();
   }
   if (engine.nativeOnly) throw nativeOnlyError("system audio production stop");

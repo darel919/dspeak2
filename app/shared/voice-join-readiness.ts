@@ -1,3 +1,8 @@
+import type {
+  VoiceJoinReadinessOptions,
+  VoiceTransportReadinessOptions,
+} from "./types/shared-utilities.ts";
+
 export function hasUsableVoiceRoute({
   activeProvider,
   p2pReady,
@@ -5,7 +10,7 @@ export function hasUsableVoiceRoute({
   signalingConnected,
   topologyMode,
   transportReady,
-}) {
+}: VoiceJoinReadinessOptions) {
   if (!signalingConnected) return false;
   if (activeProvider === "p2p") return p2pReady === true;
   if (activeProvider === "sfu") return sfuReady === true;
@@ -20,13 +25,11 @@ export async function waitForVoiceTransportReady({
   pollIntervalMs = 50,
   timeoutMs = 15000,
   wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
-}) {
+}: VoiceTransportReadinessOptions) {
   const startedAt = now();
   const resolveTimeoutMs = () => {
     const value =
-      typeof timeoutMs === "function"
-        ? (timeoutMs as any)()
-        : Number(timeoutMs);
+      typeof timeoutMs === "function" ? timeoutMs() : Number(timeoutMs);
     return Number.isFinite(value) && value > 0 ? value : 15000;
   };
   let deadline = startedAt + resolveTimeoutMs();
@@ -38,7 +41,11 @@ export async function waitForVoiceTransportReady({
     }
     const sessionError = getError();
     if (sessionError)
-      throw new Error(sessionError?.message || String(sessionError));
+      throw new Error(
+        typeof sessionError === "string"
+          ? sessionError
+          : sessionError.message || String(sessionError),
+      );
     if (isReady()) return;
     deadline = Math.max(deadline, startedAt + resolveTimeoutMs());
     await wait(pollIntervalMs);

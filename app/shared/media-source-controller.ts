@@ -3,10 +3,12 @@ import {
   createAdaptiveVideoController,
 } from "./adaptive-video-controller.ts";
 import { resolveMediaProviderIdentity } from "./media-provider-identity.ts";
+import type { MediaCaptureStartOptions } from "./types/media-capture.ts";
 import type {
   MediaSourceControllerContext,
   SourceProvider,
 } from "./types/media-source-controller.ts";
+import type { AdaptiveVideoEntry } from "./types/adaptive-media.ts";
 import type { TopologySourceEntry } from "./types/topology-controller.ts";
 
 export function createMediaSourceController({
@@ -18,7 +20,7 @@ export function createMediaSourceController({
   getIntentionalClose,
   getP2pMesh,
   getSfu,
-  getVideoReport = () => null,
+  getVideoReport = async () => null,
   getVideoSettings = () => ({
     frameRate: 30,
     qualityPriority: "framerate",
@@ -43,8 +45,9 @@ export function createMediaSourceController({
     value && typeof value === "object" ? (value as SourceProvider) : null;
   const adaptiveVideo = createAdaptiveVideoController({
     apply: async (entry, state, settings) => {
-      await entry.track.applyConstraints(
-        adaptiveTrackConstraints(entry, state, settings),
+      const mediaEntry = entry as AdaptiveVideoEntry;
+      await mediaEntry.track.applyConstraints(
+        adaptiveTrackConstraints(mediaEntry, state, settings),
       );
       await refreshMediaPolicy();
     },
@@ -71,11 +74,11 @@ export function createMediaSourceController({
       error.value = details.message || `Unable to stop ${source} publication`;
       if (getActiveProvider() === "sfu" || topologyState.value.mode === "sfu")
         reportSfuFailure(
-          `source-${source}-remove-failed-${sourceError?.message || "unknown"}`,
+          `source-${source}-remove-failed-${details.message || "unknown"}`,
         );
     };
     try {
-      return Promise.resolve(getSfu()?.removeSource(source)).catch(
+      return Promise.resolve(asProvider(getSfu())?.removeSource(source)).catch(
         (sourceError: unknown) => {
           reportError(sourceError);
           if (
@@ -139,20 +142,21 @@ export function createMediaSourceController({
         throw new Error("The active SFU transport is unavailable");
       const publications = await Promise.allSettled([
         p2pRequired
-          ? p2pMesh.publishSource(
+          ? p2pMesh!.publishSource(
               entry.source,
               entry.track,
               entry.stream,
               entry,
             )
           : Promise.resolve(),
-        sfuRequired ? sfu.addSource(entry) : Promise.resolve(),
+        sfuRequired ? sfu!.addSource(entry) : Promise.resolve(),
       ]);
       const rejected = publications.find(
         (publication) => publication.status === "rejected",
       );
       if (rejected) throw rejected.reason;
-      const captureTrack = entry.captureTrack || entry.track;
+      const captureTrack =
+        (entry.captureTrack as MediaStreamTrack | undefined) || entry.track;
       if (
         captureTrack.readyState === "ended" ||
         entry.track.readyState === "ended"
@@ -181,7 +185,10 @@ export function createMediaSourceController({
       }
       if (
         isVideo &&
-        localVideoFeeds.value.get(entry.source)?.stream === entry.stream
+        (
+          localVideoFeeds.value.get(entry.source) as
+            { stream?: MediaStream } | undefined
+        )?.stream === entry.stream
       ) {
         if (previousVideoFeed)
           localVideoFeeds.value.set(entry.source, previousVideoFeed);
@@ -327,24 +334,24 @@ export function createMediaSourceController({
   }
 
   function restartAudioProduction() {
-    return capture.restartMicrophone().then((entry) => producerFacade(entry));
+    return capture
+      .restartMicrophone()
+      .then((entry) => (entry ? producerFacade(entry) : null));
   }
 
   function startVideoProduction(
     source: "camera" | "screen",
-    options: { captureSelection?: unknown; roomBitrateBps?: number } = {},
+    options: MediaCaptureStartOptions = {},
   ) {
     return capture
       .startVideo(source, options)
-      .then((entry) => producerFacade(entry));
+      .then((entry) => (entry ? producerFacade(entry) : null));
   }
 
-  function startSystemAudioProduction(
-    options: { captureSelection?: unknown; roomBitrateBps?: number } = {},
-  ) {
+  function startSystemAudioProduction(options: MediaCaptureStartOptions = {}) {
     return capture
       .startSystemAudio(options)
-      .then((entry) => producerFacade(entry));
+      .then((entry) => (entry ? producerFacade(entry) : null));
   }
 
   return {

@@ -1,9 +1,12 @@
 import { isTauriRuntime, resolveNativeMediaFlags } from "./media-runtime.ts";
 import type { MediaEngineFactoryOptions } from "../../shared/types/media-engine-adapters.ts";
+import type { RuntimeConfigShape } from "../../shared/types/runtime-config.ts";
 
 function nativeEngineOptions(options: MediaEngineFactoryOptions) {
-  const runtimeConfig: any =
-    typeof useRuntimeConfig === "function" ? useRuntimeConfig() : {};
+  const runtimeConfig: RuntimeConfigShape =
+    typeof useRuntimeConfig === "function"
+      ? (useRuntimeConfig() as RuntimeConfigShape)
+      : {};
   const publicConfig = runtimeConfig?.public || {};
   const serverUrl =
     publicConfig.baseApiPath || import.meta.env?.VITE_DSPEAK_API_PATH || "";
@@ -16,9 +19,9 @@ function nativeEngineOptions(options: MediaEngineFactoryOptions) {
       ...options.nativeConfig,
     },
     nativeOnly: true,
-    voiceStore: options.voiceStore || null,
-    settingsStore: options.settingsStore || null,
-    channelsStore: options.channelsStore || null,
+    voiceStore: options.voiceStore,
+    settingsStore: options.settingsStore,
+    channelsStore: options.channelsStore,
     onQoe: options.onQoe,
   };
 }

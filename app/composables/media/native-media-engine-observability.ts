@@ -19,11 +19,17 @@ export async function handleSignal(
   engine: NativeMediaEngine,
   message: MediaSignalMessage,
 ): Promise<unknown> {
+  const data =
+    message.data &&
+    typeof message.data === "object" &&
+    !Array.isArray(message.data)
+      ? (message.data as Record<string, unknown>)
+      : {};
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) {
     if (engine.nativeOnly) throw nativeOnlyError("signaling");
-    return engine.browserEngine.handleSignal(message);
+    return engine.browserEngine.handleSignal?.(message);
   }
-  return engine.nativeSession?.handle(message.type, message.data || {});
+  return engine.nativeSession?.handle(String(message.type || ""), data);
 }
 
 export async function getDevices(
@@ -34,7 +40,7 @@ export async function getDevices(
     !engine._usesNativeCapture("nativeCamera")
   ) {
     if (engine.nativeOnly) throw nativeOnlyError("device enumeration");
-    return engine.browserEngine.getDevices();
+    return (await engine.browserEngine.getDevices?.()) || [];
   }
   return engine
     ._invoke("media_get_devices")
@@ -44,7 +50,7 @@ export async function getDevices(
     })
     .catch((error: unknown) => {
       if (engine.nativeOnly) throw error;
-      return engine.browserEngine.getDevices();
+      return engine.browserEngine.getDevices?.() || [];
     });
 }
 
@@ -56,13 +62,16 @@ export async function getCaptureSources(
     !engine._usesNativeCapture("nativeScreenAudio")
   )
     return [];
-  return engine._invoke("media_list_capture_sources").catch(() => []);
+  return engine
+    ._invoke("media_list_capture_sources")
+    .then((sources) => (Array.isArray(sources) ? sources : []))
+    .catch(() => []);
 }
 
 export async function getStats(engine: NativeMediaEngine): Promise<MediaStats> {
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) {
     if (engine.nativeOnly) throw nativeOnlyError("statistics");
-    return engine.browserEngine.getStats();
+    return (await engine.browserEngine.getStats?.()) || {};
   }
   const nativeStats =
     engine.nativeProvider === "p2p"
@@ -80,12 +89,12 @@ export async function getStats(engine: NativeMediaEngine): Promise<MediaStats> {
             }
           : stats,
       );
-      emitQoe(engine, snapshot);
-      return snapshot;
+      emitQoe(engine, snapshot as MediaStats);
+      return snapshot as MediaStats;
     })
     .catch((error: unknown) => {
       if (engine.nativeOnly) throw error;
-      return engine.browserEngine.getStats();
+      return engine.browserEngine.getStats?.() || {};
     });
 }
 

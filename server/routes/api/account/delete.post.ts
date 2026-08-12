@@ -32,17 +32,21 @@ import {
 import { eq, and, or, inArray, sql } from "drizzle-orm";
 import { enforceRateLimit } from "../../../utils/rate-limit.ts";
 import { supabaseAdmin } from "../../../auth/supabase.ts";
+import { db } from "../../../db/client.ts";
 
 const accountDeletionLocksKey = Symbol.for("dspeak.account-deletion-locks");
 
-function accountDeletionLocks() {
-  if (!globalThis[accountDeletionLocksKey]) {
-    globalThis[accountDeletionLocksKey] = new Set();
+function accountDeletionLocks(): Set<string> {
+  const globalState = globalThis as typeof globalThis & {
+    [accountDeletionLocksKey]?: Set<string>;
+  };
+  if (!globalState[accountDeletionLocksKey]) {
+    globalState[accountDeletionLocksKey] = new Set<string>();
   }
-  return globalThis[accountDeletionLocksKey];
+  return globalState[accountDeletionLocksKey] as Set<string>;
 }
 
-async function deleteAccount(tx, userId) {
+async function deleteAccount(tx: typeof db, userId: string): Promise<void> {
   const ownedRooms = await tx
     .select({ id: rooms.id })
     .from(rooms)
@@ -59,9 +63,11 @@ async function deleteAccount(tx, userId) {
       )
       .limit(1);
     if (otherMembers.length > 0) {
+      const otherMember = otherMembers[0];
+      if (!otherMember) continue;
       await tx
         .update(rooms)
-        .set({ ownerId: otherMembers[0].userId })
+        .set({ ownerId: otherMember.userId })
         .where(eq(rooms.id, room.id));
     } else {
       await tx.delete(rooms).where(eq(rooms.id, room.id));

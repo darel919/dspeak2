@@ -12,8 +12,19 @@ import {
 } from "~~/shared/presence-status.ts";
 import { debugLog } from "../shared/debug";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
+import type { PresenceRecord } from "../shared/types/presence.ts";
+import type { PresenceStatus } from "~~/shared/types/presence.ts";
+import {
+  isPresenceRecord,
+  type PresenceActivityTimer,
+  type PresenceChannel,
+  type PresenceChannelMessage,
+  type PresencePayload,
+  type PresencePlatform,
+  type PresenceStoreUser,
+} from "../shared/types/presence-status.ts";
 
-function detectPlatform(isTauri) {
+function detectPlatform(isTauri: boolean): PresencePlatform {
   if (typeof window === "undefined" || !isTauri) return "web";
   if (isTauri) {
     const ua = navigator.userAgent.toLowerCase();
@@ -28,7 +39,9 @@ function detectPlatform(isTauri) {
 export const usePresenceStatusStore = defineStore("presenceStatus", () => {
   const runtimeStore = useRuntimeStore();
   const presenceOverride = skipHydrate(
-    ref(loadPersisted(STORAGE_KEYS.presenceOverride, null)),
+    ref<PresenceStatus | null>(
+      loadPersisted<PresenceStatus | null>(STORAGE_KEYS.presenceOverride, null),
+    ),
   );
   const idleTimeout = skipHydrate(
     ref(
@@ -38,20 +51,22 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     ),
   );
   const effectiveStatus = skipHydrate(
-    ref(resolveAutomaticPresence(presenceOverride.value, "online")),
+    ref<PresenceStatus>(
+      resolveAutomaticPresence(presenceOverride.value, "online"),
+    ),
   );
   const connectionStatus = ref("disconnected");
-  const trackedUsers = ref(new Map());
-  const onlineUsersList = ref([]);
+  const trackedUsers = ref<Map<string, PresenceStoreUser>>(new Map());
+  const onlineUsersList = ref<PresenceRecord[]>([]);
 
   const config = useRuntimeConfig();
-  let activityTimer = null;
-  let presenceChannel = null;
-  let closePresenceChannel = null;
+  let activityTimer: PresenceActivityTimer | null = null;
+  let presenceChannel: PresenceChannel | null = null;
+  let closePresenceChannel: (() => void) | null = null;
   let intentDisconnect = false;
   let reconnectAttempts = 0;
-  let reconnectTimer = null;
-  let removePageHideListener = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let removePageHideListener: (() => void) | null = null;
   const MAX_RECONNECT_ATTEMPTS = 10;
   const BASE_RECONNECT_DELAY = 1000;
 
@@ -62,7 +77,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
   const isIdle = computed(() => effectiveStatus.value === "idle");
   const isDnd = computed(() => effectiveStatus.value === "dnd");
 
-  function loadPersisted(key, fallback) {
+  function loadPersisted<T>(key: string, fallback: T): T {
     if (!import.meta.client) return fallback;
     try {
       const raw = localStorage.getItem(key);
@@ -73,14 +88,14 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     }
   }
 
-  function persist(key, value) {
+  function persist<T>(key: string, value: T): void {
     if (!import.meta.client) return;
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch {}
   }
 
-  async function postPresence(payload) {
+  async function postPresence(payload: PresencePayload): Promise<void> {
     if (!import.meta.client) return;
     try {
       await fetch(`${config.public.apiPath}/presence`, {
@@ -126,10 +141,17 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
         credentials: "include",
       });
       if (!response.ok) return;
-      const data = await response.json();
-      if (Array.isArray(data.users)) {
-        onlineUsersList.value = data.users;
-        for (const entry of data.users) {
+      const data: unknown = await response.json();
+      const users =
+        data &&
+        typeof data === "object" &&
+        "users" in data &&
+        Array.isArray(data.users)
+          ? data.users.filter(isPresenceRecord)
+          : [];
+      if (users.length) {
+        onlineUsersList.value = users;
+        for (const entry of users) {
           if (entry.userId) {
             updateUserStatus({
               userId: entry.userId,
@@ -153,8 +175,11 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
 
     intentDisconnect = false;
     openRealtimeChannel("global", {
-      onMessage: (message) => {
-        if (message?.type === "status_updated" && message.data) {
+      onMessage: (message: PresenceChannelMessage) => {
+        if (
+          message?.type === "status_updated" &&
+          isPresenceRecord(message.data)
+        ) {
           updateUserStatus(message.data);
         }
       },
@@ -290,7 +315,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     updatedAt,
     isManualOverride,
     platform,
-  }) {
+  }: PresenceRecord): void {
     if (!userId) return;
     trackedUsers.value.set(String(userId), {
       status: normalizePresenceStatus(status),
@@ -301,7 +326,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     trackedUsers.value = new Map(trackedUsers.value);
   }
 
-  function getUserStatus(userId) {
+  function getUserStatus(userId: string | number): PresenceStoreUser {
     return (
       trackedUsers.value.get(String(userId)) || {
         status: "offline",
@@ -311,7 +336,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     );
   }
 
-  function sendStatus(status, manual) {
+  function sendStatus(status: PresenceStatus, manual: boolean): void {
     postPresence({
       status,
       manual,
@@ -320,7 +345,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     });
   }
 
-  function setStatus(status) {
+  function setStatus(status: unknown): void {
     const normalized = normalizePresenceStatus(status);
     presenceOverride.value = normalized === "online" ? null : normalized;
     persist(STORAGE_KEYS.presenceOverride, presenceOverride.value);
@@ -328,13 +353,13 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     sendStatus(normalized, Boolean(presenceOverride.value));
   }
 
-  function setAutomaticStatus(status) {
+  function setAutomaticStatus(status: unknown): void {
     if (presenceOverride.value) return;
     effectiveStatus.value = resolveAutomaticPresence(null, status);
     sendStatus(effectiveStatus.value, false);
   }
 
-  function setIdleTimeout(ms) {
+  function setIdleTimeout(ms: unknown): void {
     idleTimeout.value = normalizeIdleTimeout(ms);
     persist(STORAGE_KEYS.idleTimeout, idleTimeout.value);
   }
@@ -345,7 +370,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
 
   function clearUsers() {
     trackedUsers.value = new Map();
-    onlineUsersList.value = [] as any;
+    onlineUsersList.value = [];
   }
 
   function init() {

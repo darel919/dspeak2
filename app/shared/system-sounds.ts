@@ -14,7 +14,7 @@ type SoundEvent =
   | "screen-start"
   | "screen-enter"
   | "screen-exit";
-interface SoundSettings {
+export interface SoundSettings {
   systemSoundVolume: number;
   systemSoundTheme: keyof typeof THEMES;
   systemSoundsMuted: boolean;
@@ -62,10 +62,11 @@ function playTone(notes: number[], settings: SoundSettings) {
   const AudioContextConstructor = window.AudioContext;
   if (!AudioContextConstructor) return;
   context ||= new AudioContextConstructor();
-  const start = context.currentTime;
+  const audioContext = context;
+  const start = audioContext.currentTime;
   notes.forEach((frequency, index) => {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
     oscillator.type = "sine";
     oscillator.frequency.value = frequency;
     const noteStart = start + index * 0.075;
@@ -75,7 +76,7 @@ function playTone(notes: number[], settings: SoundSettings) {
       noteStart + 0.012,
     );
     gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.14);
-    oscillator.connect(gain).connect(context.destination);
+    oscillator.connect(gain).connect(audioContext.destination);
     oscillator.start(noteStart);
     oscillator.stop(noteStart + 0.15);
   });

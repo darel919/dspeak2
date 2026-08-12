@@ -6,8 +6,10 @@ import {
 import { MediasoupProviderSocket } from "./mediasoup-provider-socket.ts";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.ts";
 import { asError } from "./native-mediasoup-utils.ts";
+import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
+import type { NativeTransportEntry } from "./types/native-mediasoup-session.ts";
 
-export function connect(session, channelId) {
+export function connect(session: NativeMediasoupSfuSession, channelId: string) {
   if (!channelId) throw new Error("Channel ID is required");
   if (
     session.connected &&
@@ -25,13 +27,22 @@ export function connect(session, channelId) {
     session.connectReject = reject;
   });
   createSignaling(session);
-  return session.signaling.open().then(() => session.connectPromise);
+  const signaling = session.signaling;
+  if (!signaling) throw new Error("Media signaling socket was not created");
+  return signaling.open().then(() => session.connectPromise);
 }
 
-export function configureControl(session, config = {} as any) {
-  const endpoint =
-    config.websocketUrl || config.controlWebsocketUrl || config.mediaControlUrl;
-  const channelId = config.channelId || session.channelId;
+export function configureControl(
+  session: NativeMediasoupSfuSession,
+  config: Record<string, unknown> = {},
+) {
+  const endpoint = String(
+    config.websocketUrl ||
+      config.controlWebsocketUrl ||
+      config.mediaControlUrl ||
+      "",
+  );
+  const channelId = String(config.channelId || session.channelId || "");
   if (!endpoint) throw new Error("Media control websocket URL is missing");
   session.buildUrl = () => {
     const url = new URL(
@@ -43,15 +54,20 @@ export function configureControl(session, config = {} as any) {
     if (url.protocol === "https:") url.protocol = "wss:";
     return url.toString();
   };
-  session.controlTicket = config.ticket;
-  session.mediaSessionId = config.mediaSessionId;
+  session.controlTicket = String(config.ticket || "");
+  session.mediaSessionId = String(config.mediaSessionId || "");
 }
 
-export async function handleProviderTicket(session, data) {
-  const sourceRevision = Number(
-    data?.sourceRevision ?? data?.route?.sourceRevision,
-  );
-  const epoch = Number(data?.epoch ?? data?.route?.epoch);
+export async function handleProviderTicket(
+  session: NativeMediasoupSfuSession,
+  data: Record<string, unknown>,
+) {
+  const route =
+    data.route && typeof data.route === "object"
+      ? (data.route as Record<string, unknown>)
+      : {};
+  const sourceRevision = Number(data?.sourceRevision ?? route.sourceRevision);
+  const epoch = Number(data?.epoch ?? route.epoch);
   const currentEpoch = Number(session.topologyState?.epoch);
   const currentSourceRevision = Number(session.topologyState?.sourceRevision);
   const resolvedSourceRevision = Number.isFinite(sourceRevision)
@@ -69,35 +85,35 @@ export async function handleProviderTicket(session, data) {
   const providerId =
     typeof data?.providerId === "string" && data.providerId.trim()
       ? data.providerId.trim()
-      : typeof data?.route?.providerId === "string" &&
-          data.route.providerId.trim()
-        ? data.route.providerId.trim()
+      : typeof route.providerId === "string" && route.providerId.trim()
+        ? route.providerId.trim()
         : null;
-  session.selectedProvider = data.provider;
+  const provider = String(data.provider || "mediasoup");
+  session.selectedProvider = provider;
   session.selectedProviderId = providerId;
   let providerFailureNotified = false;
-  const notifyProviderFailure = (error) => {
+  const notifyProviderFailure = (error: unknown) => {
     if (providerFailureNotified) return;
     providerFailureNotified = true;
     session.signaling?.send?.({
       type: "provider-failure",
       data: {
-        provider: data.provider,
+        provider,
         ...(providerId ? { providerId } : {}),
         epoch,
         sourceRevision: resolvedSourceRevision,
-        reason: error?.message || "Provider connection failed",
+        reason: asError(error, "Provider connection failed").message,
       },
     });
   };
-  if (data?.provider === "cloudflare-realtime") {
+  if (provider === "cloudflare-realtime") {
     try {
       await session.activateProvider("cloudflare-realtime");
       if (
         session.signaling?.send?.({
           type: "provider-ready",
           data: {
-            provider: data.provider,
+            provider,
             ...(providerId ? { providerId } : {}),
             epoch,
             sourceRevision: resolvedSourceRevision,
@@ -121,9 +137,11 @@ export async function handleProviderTicket(session, data) {
         session._fail(error);
       },
     });
-    await session.providerSignaling.connect({
-      signalingUrl: data.signalingUrl,
-      ticket: data.ticket,
+    const providerSignaling = session.providerSignaling;
+    if (!providerSignaling) throw new Error("Provider signaling unavailable");
+    await providerSignaling.connect({
+      signalingUrl: String(data.signalingUrl || ""),
+      ticket: String(data.ticket || ""),
     });
     await session._startNegotiation();
     session.activeSfuProvider = "mediasoup";
@@ -132,7 +150,7 @@ export async function handleProviderTicket(session, data) {
       session.signaling?.send?.({
         type: "provider-ready",
         data: {
-          provider: data.provider,
+          provider,
           ...(providerId ? { providerId } : {}),
           epoch,
           sourceRevision: resolvedSourceRevision,
@@ -146,7 +164,7 @@ export async function handleProviderTicket(session, data) {
   }
 }
 
-export function createSignaling(session) {
+export function createSignaling(session: NativeMediasoupSfuSession) {
   session.signaling?.stop?.();
   session.signaling = createMediaSignalingSocket({
     buildHeartbeatData: (sequence) => ({
@@ -171,15 +189,20 @@ export function createSignaling(session) {
         onFailure: (error) => session._fail(asError(error, "Signaling failed")),
       }),
     isIntentionalClose: () => session.intentionalClose,
-    onClose: (event) => session._handleSignalingClose(event),
+    onClose: (event) =>
+      session._handleSignalingClose(
+        event as unknown as Record<string, unknown>,
+      ),
     onError: (error) => session._fail(error),
     onOpen: () => {
       session.connectionPhase = "protocol-negotiating";
       session._emitState();
     },
     onProtocolRejected: (event) => {
-      const error = new Error(event.reason || "Media client update required");
-      error.code = "MEDIA_PROTOCOL_UPDATE_REQUIRED";
+      const error = Object.assign(
+        new Error(event.reason || "Media client update required"),
+        { code: "MEDIA_PROTOCOL_UPDATE_REQUIRED" },
+      );
       session._fail(error);
     },
     onReconnect: () => {
@@ -190,16 +213,16 @@ export function createSignaling(session) {
     reconnectBaseDelayMs: 500,
     reconnectJitterMs: 250,
     reconnectMaxDelayMs: 10000,
-  });
+  }) as unknown as NonNullable<typeof session.signaling>;
 }
 
-export function resolveConnect(session) {
+export function resolveConnect(session: NativeMediasoupSfuSession) {
   session.connectResolve?.();
   session.connectResolve = null;
   session.connectReject = null;
 }
 
-export async function startNegotiation(session) {
+export async function startNegotiation(session: NativeMediasoupSfuSession) {
   if (session.readyPromise) return session.readyPromise;
   await session.nativeTeardownPromise;
   session.connectionPhase = "transport-connecting";
@@ -229,12 +252,15 @@ export async function startNegotiation(session) {
   return session.readyPromise;
 }
 
-export async function handleRtpCapabilities(session, data) {
+export async function handleRtpCapabilities(
+  session: NativeMediasoupSfuSession,
+  data: Record<string, unknown>,
+) {
   if (data.requestId !== session.initializationRequestId) return false;
   const mediaRevision = session.mediaRevision;
   const routerCapabilities = { ...data };
   delete routerCapabilities.requestId;
-  const device = await session.invoke("media_create_device", {
+  const deviceResult = await session.invoke("media_create_device", {
     routerRtpCapabilities: JSON.stringify(routerCapabilities),
   });
   if (
@@ -243,8 +269,12 @@ export async function handleRtpCapabilities(session, data) {
     data.requestId !== session.initializationRequestId
   )
     return false;
-  if (!device?.handle || !device.rtpCapabilities)
+  if (!deviceResult?.handle || !deviceResult.rtpCapabilities)
     throw new Error("Native device negotiation returned no capabilities");
+  const device = {
+    handle: String(deviceResult.handle),
+    rtpCapabilities: deviceResult.rtpCapabilities as Record<string, unknown>,
+  };
   session.device = device;
   session.lastSentClientRtpCapabilities = device.rtpCapabilities;
   try {
@@ -255,7 +285,7 @@ export async function handleRtpCapabilities(session, data) {
       },
       "SFU capability negotiation",
     );
-    for (const direction of ["send", "recv"]) {
+    for (const direction of ["send", "recv"] as const) {
       const requestId = session.requestId(`create-${direction}`);
       session.transportRequestIds.set(direction, requestId);
       session.sendOrThrow(
@@ -273,19 +303,24 @@ export async function handleRtpCapabilities(session, data) {
   return true;
 }
 
-export async function handleTransportParams(session, data) {
+export async function handleTransportParams(
+  session: NativeMediasoupSfuSession,
+  data: Record<string, unknown>,
+) {
   const direction = data.direction;
   if (direction !== "send" && direction !== "recv") return false;
   if (session.transportRequestIds.get(direction) !== data.requestId)
     return false;
   const mediaRevision = session.mediaRevision;
   session.transportRequestIds.delete(direction);
+  const device = session.device;
+  if (!device) throw new Error("Native media device is unavailable");
   const result = await session.invoke(
     direction === "send"
       ? "media_create_send_transport"
       : "media_create_recv_transport",
     {
-      deviceHandle: session.device.handle,
+      deviceHandle: device.handle,
       id: data.id,
       iceParameters: data.iceParameters,
       iceCandidates: data.iceCandidates,
@@ -296,9 +331,10 @@ export async function handleTransportParams(session, data) {
   if (session.closed || mediaRevision !== session.mediaRevision) return false;
   if (!result?.handle)
     throw new Error(`Native ${direction} transport was not created`);
-  const transport = {
+  const transport: NativeTransportEntry = {
     ...data,
-    handle: result.handle,
+    id: String(data.id || ""),
+    handle: String(result.handle),
     direction,
     closed: false,
   };
@@ -306,7 +342,7 @@ export async function handleTransportParams(session, data) {
   else session.recvTransport = transport;
   session.transportStates.set(direction, "new");
   if (session.sendTransport && session.recvTransport) {
-    clearTimeout(session.initializationTimer);
+    if (session.initializationTimer) clearTimeout(session.initializationTimer);
     session.initializationTimer = null;
     session.readyResolve?.();
     session.readyResolve = null;

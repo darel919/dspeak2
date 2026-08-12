@@ -26,20 +26,25 @@ export {
   getActiveMediaDirections,
 };
 
-export function buildVoiceProducerOptions(track, maxBitrate, stereo = false) {
+export function buildVoiceProducerOptions(
+  track: MediaStreamTrack,
+  maxBitrate: unknown,
+  stereo = false,
+) {
   const policy = getAudioCodecPolicy("microphone", stereo);
   const bitrate = Number(maxBitrate);
   const producerOptions = toMediasoupProducerOptions(policy, track);
   if (Number.isFinite(bitrate) && bitrate > 0) {
-    producerOptions.encodings[0].maxBitrate = Math.floor(bitrate);
+    const encoding = producerOptions.encodings?.[0];
+    if (encoding) encoding.maxBitrate = Math.floor(bitrate);
   }
   return producerOptions;
 }
 
 export function getAudioBitrateBps(
-  source,
-  channelBitrateKbps,
-  systemAudioBitrateKbps,
+  source: string,
+  channelBitrateKbps: unknown,
+  systemAudioBitrateKbps: unknown,
 ) {
   const channel = Number(channelBitrateKbps);
   const requested =

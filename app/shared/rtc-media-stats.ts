@@ -1,4 +1,12 @@
 type StatsRecord = Record<string, unknown>;
+import type {
+  AudioStatsSample,
+  RtpStatsSample,
+} from "./types/rtc-media-stats.ts";
+export type {
+  AudioStatsSample,
+  RtpStatsSample,
+} from "./types/rtc-media-stats.ts";
 
 function finite(value: unknown) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
@@ -102,12 +110,12 @@ export function collectRtpStats(
   report: unknown,
   direction: string,
   trackSettings: MediaTrackSettings | Record<string, unknown> = {},
-  previous: unknown = null,
+  previous: RtpStatsSample | null = null,
   expectedKind: string | null = null,
 ) {
   const type = direction === "outbound" ? "outbound-rtp" : "inbound-rtp";
   const values = reportValues(report);
-  const rtp = findRtpStat(report, type, { kind: expectedKind });
+  const rtp = findRtpStat(report, type, { kind: expectedKind ?? undefined });
   if (!rtp) return { stats: null, sample: previous };
 
   const codec = values.find((stat) => stat.id === rtp.codecId);
@@ -123,10 +131,15 @@ export function collectRtpStats(
     previous?.timestamp == null ? null : timestamp - previous.timestamp;
   const calculatedFps = deltaRate(
     frameCounter,
-    previous?.frameCounter,
+    previous?.frameCounter ?? null,
     elapsedMs,
   );
-  const bitrateKbps = deltaRate(bytes, previous?.bytes, elapsedMs, 8 / 1000);
+  const bitrateKbps = deltaRate(
+    bytes,
+    previous?.bytes ?? null,
+    elapsedMs,
+    8 / 1000,
+  );
   const totalCodecTime = finite(
     direction === "outbound" ? rtp.totalEncodeTime : rtp.totalDecodeTime,
   );
@@ -139,8 +152,14 @@ export function collectRtpStats(
       ? null
       : totalCodecTime - previous.totalCodecTime;
   const frameTimeMs =
-    codecFrames > 0 && codecTime >= 0 ? (codecTime * 1000) / codecFrames : null;
+    codecFrames != null &&
+    codecTime != null &&
+    codecFrames > 0 &&
+    codecTime >= 0
+      ? (codecTime * 1000) / codecFrames
+      : null;
 
+  const targetBitrate = finite(rtp.targetBitrate);
   const common = {
     kind,
     width:
@@ -161,9 +180,7 @@ export function collectRtpStats(
       ? {
           ...common,
           targetBitrateKbps:
-            finite(rtp.targetBitrate) == null
-              ? null
-              : finite(rtp.targetBitrate) / 1000,
+            targetBitrate == null ? null : targetBitrate / 1000,
           framesEncoded: frameCounter,
           frameTimeMs,
           qualityLimitationReason: rtp.qualityLimitationReason || null,
@@ -224,16 +241,19 @@ export function collectRtpStats(
 }
 
 export function collectVideoRtpStats(
-  report,
-  direction,
-  trackSettings = {} as any,
-  previous = null,
+  report: unknown,
+  direction: string,
+  trackSettings: MediaTrackSettings | Record<string, unknown> = {},
+  previous: RtpStatsSample | null = null,
 ) {
   return collectRtpStats(report, direction, trackSettings, previous, "video");
 }
 
-export function collectOutboundAudioStats(report, previous = null) {
-  const values = report ? [...report.values()] : [];
+export function collectOutboundAudioStats(
+  report: unknown,
+  previous: AudioStatsSample | null = null,
+) {
+  const values = reportValues(report);
   const rtp = values.find(
     (stat) =>
       stat.type === "outbound-rtp" &&
@@ -247,22 +267,35 @@ export function collectOutboundAudioStats(report, previous = null) {
     previous?.timestamp == null ? null : timestamp - previous.timestamp;
   return {
     stats: {
-      bitrateKbps: deltaRate(bytes, previous?.bytes, elapsedMs, 8 / 1000),
+      bitrateKbps: deltaRate(
+        bytes,
+        previous?.bytes ?? null,
+        elapsedMs,
+        8 / 1000,
+      ),
       audioLevel: finite(rtp.audioLevel),
     },
     sample: { timestamp, bytes },
   };
 }
 
-export async function collectPeerConnectionStats(pc, kind) {
+export async function collectPeerConnectionStats(
+  pc: RTCPeerConnection,
+  kind: string,
+) {
   const report = await pc.getStats();
-  const byId = new Map();
-  report.forEach((stat) => byId.set(stat.id, stat));
+  const byId = new Map<string, StatsRecord>();
+  report.forEach((rawStat) => {
+    const stat = rawStat as StatsRecord;
+    if (typeof stat.id === "string") byId.set(stat.id, stat);
+  });
   const transport = [...byId.values()].find(
     (stat) => stat.type === "transport" && stat.selectedCandidatePairId,
   );
   const pair =
-    (transport ? byId.get(transport.selectedCandidatePairId) : null) ||
+    (transport
+      ? byId.get(String(transport.selectedCandidatePairId || ""))
+      : null) ||
     [...byId.values()].find(
       (stat) =>
         stat.type === "candidate-pair" &&
@@ -270,12 +303,12 @@ export async function collectPeerConnectionStats(pc, kind) {
         stat.nominated,
     ) ||
     null;
-  const local = pair ? byId.get(pair.localCandidateId) : null;
-  const remote = pair ? byId.get(pair.remoteCandidateId) : null;
+  const local = pair ? byId.get(String(pair.localCandidateId || "")) : null;
+  const remote = pair ? byId.get(String(pair.remoteCandidateId || "")) : null;
   let packetsLost = 0;
   let packetsReceived = 0;
   let outboundPacketsSent = 0;
-  const remoteLossFractions = [] as any;
+  const remoteLossFractions: number[] = [];
   let inboundAudio = null;
   let outboundAudio = null;
   let remoteInboundAudio = null;
@@ -374,7 +407,10 @@ export async function collectPeerConnectionStats(pc, kind) {
   };
 }
 
-export async function collectPeerConnectionDiagnosticStats(pc, kind) {
+export async function collectPeerConnectionDiagnosticStats(
+  pc: RTCPeerConnection,
+  kind: string,
+) {
   const report = await pc.getStats();
   return {
     kind,
@@ -388,13 +424,13 @@ export async function collectPeerConnectionDiagnosticStats(pc, kind) {
   };
 }
 
-function averageJitterDelay(value, emitted) {
+function averageJitterDelay(value: unknown, emitted: number) {
   return emitted > 0 && Number.isFinite(Number(value))
     ? (Number(value) * 1000) / emitted
     : null;
 }
 
-function candidateDetails(candidate) {
+function candidateDetails(candidate: StatsRecord) {
   return {
     address: candidate.address || candidate.ip || null,
     port: candidate.port ?? null,

@@ -210,7 +210,7 @@ export default defineNuxtConfig({
         "Cloudflare-CDN-Cache-Control": "no-store",
       },
     },
-  } as any,
+  },
 
   icon: {
     provider: isDesktop ? "server" : "none",
@@ -250,7 +250,7 @@ export default defineNuxtConfig({
     : {
         strategies: "injectManifest",
         srcDir: "../public",
-        filename: "sw.js",
+        filename: "sw.ts",
         registerType: "prompt",
         injectRegister: false,
         injectManifest: {

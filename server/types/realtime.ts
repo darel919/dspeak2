@@ -1,11 +1,13 @@
-import type {
-  RealtimeChannel,
-  RealtimePresenceState,
-} from "@supabase/supabase-js";
+export interface RealtimeChannelPublisher {
+  httpSend: (event: string, message: unknown) => Promise<unknown>;
+}
+
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type RealtimePayload = Record<string, unknown>;
-export type RealtimePresence = RealtimePresenceState<RealtimePayload>;
-export type RealtimeStatus = "SUBSCRIBED" | "CLOSED" | "CHANNEL_ERROR";
+export type RealtimeStatus =
+  "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR";
+export type RealtimePresence = Record<string, RealtimePayload[]>;
 
 export interface RealtimeChannelOptions {
   userId?: string;
@@ -22,12 +24,6 @@ export interface ChatCallbacks {
   onError?: (status: RealtimeStatus) => void;
 }
 
-export interface NotificationCallbacks {
-  onNotification?: (payload: RealtimePayload) => void;
-  onSubscribed?: () => void;
-  onError?: (status: RealtimeStatus) => void;
-}
-
 export interface ChatSubscription {
   channel: RealtimeChannel;
   sendMessage: (message: RealtimePayload) => Promise<unknown>;
@@ -38,7 +34,20 @@ export interface ChatSubscription {
   unsubscribe: () => void;
 }
 
+export interface NotificationCallbacks {
+  onNotification?: (payload: RealtimePayload) => void;
+  onSubscribed?: () => void;
+  onError?: (status: RealtimeStatus) => void;
+}
+
 export interface NotificationSubscription {
   channel: RealtimeChannel;
   unsubscribe: () => void;
+}
+
+export interface RealtimePublisher {
+  channel: (
+    topic: string,
+    options?: { config?: { private?: boolean } },
+  ) => RealtimeChannelPublisher;
 }

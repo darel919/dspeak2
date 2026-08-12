@@ -8,6 +8,36 @@ import { resolveVoicePreferences } from "./voice-preferences.ts";
 import { waitForVoiceTransportReady } from "./voice-join-readiness.ts";
 import { waitForOutboundSourceFlow } from "./media-source-flow.ts";
 import { STORAGE_KEYS } from "~/const/storage.ts";
+import type {
+  VoiceMediaActionOptions,
+  VoiceMediaSessionLike,
+} from "./types/voice-media-actions.ts";
+import type { VoiceErrorLike } from "./types/shared-utilities.ts";
+
+function voiceError(error: unknown): VoiceErrorLike & { name?: string } {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...("code" in error && typeof error.code === "string"
+        ? { code: error.code }
+        : {}),
+    };
+  }
+  if (error && typeof error === "object") {
+    const value = error as Record<string, unknown>;
+    return {
+      ...(typeof value.name === "string" ? { name: value.name } : {}),
+      ...(typeof value.message === "string" ? { message: value.message } : {}),
+      ...(typeof value.code === "string" ? { code: value.code } : {}),
+      cause:
+        value.cause && typeof value.cause === "object"
+          ? (value.cause as { code?: string })
+          : null,
+    };
+  }
+  return {};
+}
 
 export function createVoiceMediaActions({
   addConnectedUser,
@@ -44,23 +74,23 @@ export function createVoiceMediaActions({
   sfuComposable,
   updateUserVoiceState,
   upsertUserProfile,
-}) {
-  let voiceToggleOperation = Promise.resolve();
-  let captureToggleOperation = Promise.resolve();
+}: VoiceMediaActionOptions) {
+  let voiceToggleOperation: Promise<unknown> = Promise.resolve();
+  let captureToggleOperation: Promise<unknown> = Promise.resolve();
 
-  function enqueueVoiceToggle(operation) {
+  function enqueueVoiceToggle(operation: () => unknown) {
     const task = voiceToggleOperation.catch(() => {}).then(operation);
     voiceToggleOperation = task.catch(() => {});
     return task;
   }
 
-  function enqueueCaptureToggle(operation) {
+  function enqueueCaptureToggle(operation: () => unknown) {
     const task = captureToggleOperation.catch(() => {}).then(operation);
     captureToggleOperation = task.catch(() => {});
     return task;
   }
 
-  function setCurrentChannel(channelId) {
+  function setCurrentChannel(channelId: string | null) {
     currentChannelId.value = channelId;
     const channel = channelId ? channelsStore.getChannelById(channelId) : null;
     currentRoomId.value = resolveChannelRoomId(channel);
@@ -84,10 +114,10 @@ export function createVoiceMediaActions({
     });
   }
 
-  async function waitForAudioSourceFlow(session) {
+  async function waitForAudioSourceFlow(session: VoiceMediaSessionLike) {
     if (typeof session?.getOutboundRtpStats !== "function") return true;
     return waitForOutboundSourceFlow({
-      getStats: () => session.getOutboundRtpStats(),
+      getStats: () => session.getOutboundRtpStats!(),
       source: "audio",
       timeoutMs: session.getVoiceTransportTimeout?.() || 15000,
     });
@@ -127,7 +157,8 @@ export function createVoiceMediaActions({
 
       setCurrentChannel(null);
       currentRoomId.value = null;
-      if (leavingChannelId) leaveChannel(leavingChannelId).catch(() => {});
+      if (leavingChannelId)
+        Promise.resolve(leaveChannel(leavingChannelId)).catch(() => {});
       pageLifecycle.unregister();
       for (const timer of soundboardActivityTimers.values())
         clearTimeout(timer);
@@ -169,7 +200,7 @@ export function createVoiceMediaActions({
     } catch (_) {}
   }
 
-  async function disposeFailedSession(session) {
+  async function disposeFailedSession(session: VoiceMediaSessionLike | null) {
     try {
       await session?.disconnect?.();
     } catch (disposeError) {
@@ -187,12 +218,12 @@ export function createVoiceMediaActions({
     connectedAt.value = null;
   }
 
-  function isNativeMicrophonePermissionError(permissionError) {
+  function isNativeMicrophonePermissionError(permissionError: unknown) {
+    const detailsValue = voiceError(permissionError);
     const details = [
-      permissionError?.code,
-      permissionError?.message,
-      permissionError?.cause?.code,
-      permissionError?.cause?.message,
+      detailsValue.code,
+      detailsValue.message,
+      detailsValue.cause?.code,
     ]
       .filter((value) => value !== undefined && value !== null)
       .join(" ")
@@ -205,7 +236,7 @@ export function createVoiceMediaActions({
     );
   }
 
-  async function joinVoiceChannel(channelId) {
+  async function joinVoiceChannel(channelId: string) {
     if (
       currentChannelId.value === channelId &&
       connected.value &&
@@ -214,12 +245,12 @@ export function createVoiceMediaActions({
       return;
     if (connecting.value) return;
 
-    let session = null;
+    let session: VoiceMediaSessionLike | null = null;
     const generation = ++joinGenerationState.value;
     const ensureCurrentJoin = () => {
       if (generation !== joinGenerationState.value) {
         const cancelled = new Error("Voice connection was cancelled");
-        cancelled.code = "VOICE_JOIN_CANCELLED";
+        (cancelled as Error & { code?: string }).code = "VOICE_JOIN_CANCELLED";
         throw cancelled;
       }
     };
@@ -242,12 +273,13 @@ export function createVoiceMediaActions({
         ensureCurrentJoin();
       }
 
-      sfuComposable.value = await useMediasoupSfu({
+      sfuComposable.value = (await useMediasoupSfu({
         voiceStore: getVoiceStore(),
         settingsStore,
         channelsStore,
-      });
+      })) as unknown as VoiceMediaSessionLike;
       session = sfuComposable.value;
+      if (!session) throw new Error("Voice media session is unavailable");
       await session.prepareAudioPlayback?.();
       ensureCurrentJoin();
 
@@ -277,12 +309,15 @@ export function createVoiceMediaActions({
       ensureCurrentJoin();
 
       await waitForVoiceTransportReady({
-        getError: () => session.error,
+        getError: () => {
+          const value = unref(session!.error);
+          return typeof value === "string" ? value : voiceError(value);
+        },
         isCurrent: () =>
           generation === joinGenerationState.value &&
           sfuComposable.value === session,
-        isReady: () => session.joinReady,
-        timeoutMs: (session.getVoiceTransportTimeout as any)?.() || 15_000,
+        isReady: () => Boolean(unref(session!.joinReady)),
+        timeoutMs: session.getVoiceTransportTimeout?.() || 15_000,
       });
       ensureCurrentJoin();
       if (!micMuted.value) await waitForAudioSourceFlow(session);
@@ -305,31 +340,33 @@ export function createVoiceMediaActions({
         channelId,
         generation,
         muted: micMuted.value,
-        provider: session.activeProvider?.value || session.activeProvider,
+        provider: unref(session.activeProvider) || null,
       });
-    } catch (joinError) {
-      if (joinError?.code === "MEDIA_PROTOCOL_UPDATE_REQUIRED")
+    } catch (joinError: unknown) {
+      const details = voiceError(joinError);
+      if (details.code === "MEDIA_PROTOCOL_UPDATE_REQUIRED")
         protocolUpdateRequired.value = true;
       await disposeFailedSession(session);
-      if (joinError?.code === "VOICE_JOIN_CANCELLED") return;
+      if (details.code === "VOICE_JOIN_CANCELLED") return;
       mediaDebug("voice.join-failed", {
         channelId,
         generation,
-        code: joinError?.code,
-        error: joinError?.message,
+        code: details.code,
+        error: details.message,
       });
       console.error("[VoiceStore] Failed to join voice channel:", joinError);
       if (isFatalClientError(joinError)) {
         playFatalError(joinError);
         return;
       }
-      error.value = voiceJoinErrorMessage(joinError, {
-        includeDetails: import.meta.dev || isTauriRuntime(),
-      });
+      error.value =
+        voiceJoinErrorMessage(details, {
+          includeDetails: import.meta.dev || isTauriRuntime(),
+        }) || "Voice connection failed. Please try again.";
       if (typeof window !== "undefined") {
         const { useToast } = await import("~/composables/useToast");
         const { error: showError } = useToast();
-        showError(error.value as any, undefined as any);
+        showError(error.value || "Voice connection failed", 3000);
       }
       throw joinError;
     } finally {
@@ -352,9 +389,9 @@ export function createVoiceMediaActions({
         if (status.state === "granted") return;
         if (status.state === "denied")
           throw new Error("Microphone permission is required to join the room");
-      } catch (permissionError) {
+      } catch (permissionError: unknown) {
         if (
-          permissionError?.message ===
+          voiceError(permissionError).message ===
           "Microphone permission is required to join the room"
         )
           throw permissionError;
@@ -366,15 +403,14 @@ export function createVoiceMediaActions({
       permissionStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
-    } catch (permissionError) {
+    } catch (permissionError: unknown) {
+      const details = voiceError(permissionError);
       if (
-        permissionError?.name === "NotAllowedError" ||
-        permissionError?.name === "PermissionDeniedError"
+        details.name === "NotAllowedError" ||
+        details.name === "PermissionDeniedError"
       )
         throw new Error("Microphone permission is required to join the room");
-      throw new Error(
-        permissionError?.message || "Unable to access the microphone",
-      );
+      throw new Error(details.message || "Unable to access the microphone");
     } finally {
       permissionStream?.getTracks().forEach((track) => track.stop());
     }
@@ -428,14 +464,15 @@ export function createVoiceMediaActions({
       }
       mediaDebug("voice.mic-toggle-complete", { muted: micMuted.value });
       return true;
-    } catch (toggleError) {
-      if (toggleError?.code === "MEDIA_SESSION_CLOSED") return false;
+    } catch (toggleError: unknown) {
+      const details = voiceError(toggleError);
+      if (details.code === "MEDIA_SESSION_CLOSED") return false;
       console.error("[VoiceStore] Error toggling microphone:", toggleError);
-      error.value = toggleError?.message || String(toggleError);
+      error.value = details.message || String(toggleError);
       if (typeof window !== "undefined") {
         const { useToast } = await import("~/composables/useToast");
         const { error: showError } = useToast();
-        showError(`Microphone error: ${error.value}` as any, undefined as any);
+        showError(`Microphone error: ${error.value}`, 3000);
       }
       return false;
     }
@@ -464,8 +501,9 @@ export function createVoiceMediaActions({
       sendParticipantVoiceState();
       await sfuComposable.value?.ensureAudioElements?.();
       return true;
-    } catch (toggleError) {
-      error.value = toggleError?.message || "Unable to update deafen state";
+    } catch (toggleError: unknown) {
+      error.value =
+        voiceError(toggleError).message || "Unable to update deafen state";
       return false;
     }
   }
@@ -483,24 +521,26 @@ export function createVoiceMediaActions({
       cameraEnabled.value = enable;
       syncLocalVoiceState();
       error.value = null;
-    } catch (toggleError) {
+    } catch (toggleError: unknown) {
+      const details = voiceError(toggleError);
       if (generation !== cameraToggleGenerationState.value) return;
       cameraEnabled.value = previous;
       syncLocalVoiceState();
       if (
         ["MEDIA_START_CANCELLED", "MEDIA_SESSION_CLOSED"].includes(
-          toggleError?.code,
+          details.code ?? "",
         )
       )
         return;
-      error.value = toggleError?.message || "Unable to access the camera";
+      error.value = details.message || "Unable to access the camera";
       throw toggleError;
     }
   }
 
   async function toggleScreenShareInternal(
-    captureSelection = null,
-    options = {} as any,
+    captureSelection:
+      import("./desktop-capture.ts").DesktopCaptureSelection | null = null,
+    options: import("./types/voice-media-actions.ts").VoiceCaptureToggleOptions = {},
   ) {
     if (!connected.value || !sfuComposable.value) return;
     const previousSharing = Boolean(
@@ -550,21 +590,23 @@ export function createVoiceMediaActions({
         producer?.on?.("trackended", handleScreenShareEnded);
       }
       error.value = null;
-    } catch (shareError) {
-      if (shareError?.name !== "NotAllowedError")
-        error.value = shareError?.message || "Unable to share the screen";
+    } catch (shareError: unknown) {
+      const details = voiceError(shareError);
+      if (details.name !== "NotAllowedError")
+        error.value = details.message || "Unable to share the screen";
       screenSharing.value = previousSharing;
       systemAudioSharing.value = previousSystemAudioSharing;
       syncLocalVoiceState();
       sendParticipantVoiceState();
-      if (shareError?.code === "MEDIA_SESSION_CLOSED") return;
+      if (details.code === "MEDIA_SESSION_CLOSED") return;
       throw shareError;
     }
   }
 
   async function toggleSystemAudioShareInternal(
-    captureSelection = null,
-    options = {} as any,
+    captureSelection:
+      import("./desktop-capture.ts").DesktopCaptureSelection | null = null,
+    options: import("./types/voice-media-actions.ts").VoiceCaptureToggleOptions = {},
   ) {
     if (!connected.value || !sfuComposable.value) return;
     const previousSharing = systemAudioSharing.value;
@@ -609,13 +651,14 @@ export function createVoiceMediaActions({
         producer?.on?.("trackended", handleEnded);
       }
       error.value = null;
-    } catch (shareError) {
-      if (shareError?.name !== "NotAllowedError")
-        error.value = shareError?.message || "Unable to share system audio";
+    } catch (shareError: unknown) {
+      const details = voiceError(shareError);
+      if (details.name !== "NotAllowedError")
+        error.value = details.message || "Unable to share system audio";
       systemAudioSharing.value = previousSharing;
       syncLocalVoiceState();
       sendParticipantVoiceState();
-      if (shareError?.code === "MEDIA_SESSION_CLOSED") return;
+      if (details.code === "MEDIA_SESSION_CLOSED") return;
       throw shareError;
     }
   }
@@ -628,15 +671,19 @@ export function createVoiceMediaActions({
     return enqueueVoiceToggle(toggleDeafenInternal);
   }
 
-  function toggleCamera(...args) {
-    return enqueueCaptureToggle(() => (toggleCameraInternal as any)(...args));
+  function toggleCamera() {
+    return enqueueCaptureToggle(toggleCameraInternal);
   }
 
-  function toggleScreenShare(...args) {
+  function toggleScreenShare(
+    ...args: Parameters<typeof toggleScreenShareInternal>
+  ) {
     return enqueueCaptureToggle(() => toggleScreenShareInternal(...args));
   }
 
-  function toggleSystemAudioShare(...args) {
+  function toggleSystemAudioShare(
+    ...args: Parameters<typeof toggleSystemAudioShareInternal>
+  ) {
     return enqueueCaptureToggle(() => toggleSystemAudioShareInternal(...args));
   }
 

@@ -42,9 +42,11 @@ export default defineEventHandler(async (event) => {
 
   return {
     items: notificationsList.map((n) => {
-      let data = {} as any;
+      let data: Record<string, unknown> = {};
       try {
-        data = n.data ? JSON.parse(n.data) : {};
+        const parsed: unknown = n.data ? JSON.parse(n.data) : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+          data = parsed as Record<string, unknown>;
       } catch {}
       return {
         id: n.id,

@@ -3,7 +3,7 @@ import { provisionOAuthProfile } from "../../../auth/oauth-profile.ts";
 
 export default defineEventHandler(async (event) => {
   setHeader(event, "Cache-Control", "no-store");
-  const body = await readBody(event);
+  const body = (await readBody(event)) as { code?: unknown };
   const code = String(body?.code || "");
   if (!/^[A-Za-z0-9_-]{40,64}$/.test(code)) {
     throw createError({

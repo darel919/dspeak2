@@ -32,7 +32,7 @@ test("the application error surface owns invalid and unauthorized links", () => 
 });
 
 test("global presence channel teardown is idempotent and owned by the composable scope", () => {
-  assert.match(presence, /openRealtimeChannel\("global"/);
+  assert.match(presence, /openRealtimeChannel[^\n]*\("global"/);
   assert.match(presence, /closeChannel/);
   assert.match(presence, /onScopeDispose\(\(\) => \{/);
   assert.doesNotMatch(presence, /new WebSocket/);

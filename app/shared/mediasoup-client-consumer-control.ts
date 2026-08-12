@@ -1,4 +1,13 @@
-export async function setMediasoupConsumerReceiving(session, entry, receiving) {
+import type {
+  MediasoupClientSessionLike,
+  MediasoupConsumerEntry,
+} from "./types/mediasoup-client.ts";
+
+export async function setMediasoupConsumerReceiving(
+  session: MediasoupClientSessionLike,
+  entry: MediasoupConsumerEntry,
+  receiving: boolean,
+) {
   const desired = Boolean(receiving);
   entry.desiredReceiving = desired;
   entry.receivingRevision = (entry.receivingRevision || 0) + 1;
@@ -48,7 +57,10 @@ export async function setMediasoupConsumerReceiving(session, entry, receiving) {
   throw lastError;
 }
 
-export function closeMediasoupConsumerByProducer(session, producerId) {
+export function closeMediasoupConsumerByProducer(
+  session: MediasoupClientSessionLike,
+  producerId: string,
+) {
   session.requestedConsumers.delete(producerId);
   session.pendingConsumers.delete(producerId);
   session.consumerRetryAttempts.delete(producerId);
@@ -62,14 +74,22 @@ export function closeMediasoupConsumerByProducer(session, producerId) {
   match.close();
 }
 
-export function handleMediasoupServerError(session, data) {
+export function handleMediasoupServerError(
+  session: MediasoupClientSessionLike,
+  data: Record<string, unknown>,
+) {
   const error = new Error(
-    data?.message || data?.error || "SFU signaling request failed",
+    typeof data.message === "string"
+      ? data.message
+      : typeof data.error === "string"
+        ? data.error
+        : "SFU signaling request failed",
   );
   let handled = false;
-  if (data?.requestId) {
-    const produceRequest = session.pendingProduce.get(data.requestId);
-    const pendingRequest = session.pending.get(data.requestId);
+  const requestId = typeof data.requestId === "string" ? data.requestId : null;
+  if (requestId) {
+    const produceRequest = session.pendingProduce.get(requestId);
+    const pendingRequest = session.pending.get(requestId);
     if (produceRequest) {
       handled = true;
       produceRequest.reject(error);
@@ -79,29 +99,31 @@ export function handleMediasoupServerError(session, data) {
       pendingRequest.reject(error);
     }
   }
-  if (data?.requestType === "consume" && data.producerId) {
+  const producerId =
+    typeof data.producerId === "string" ? data.producerId : null;
+  if (data.requestType === "consume" && producerId) {
     handled = true;
-    session.requestedConsumers.delete(data.producerId);
-    session.pendingConsumers.delete(data.producerId);
-    const attempts = session.consumerRetryAttempts.get(data.producerId) || 0;
+    session.requestedConsumers.delete(producerId);
+    session.pendingConsumers.delete(producerId);
+    const attempts = session.consumerRetryAttempts.get(producerId) || 0;
     if (!session.closed && attempts < 2) {
-      session.consumerRetryAttempts.set(data.producerId, attempts + 1);
+      session.consumerRetryAttempts.set(producerId, attempts + 1);
       const delay = session.consumerRetryDelayMs * 2 ** attempts;
       const timer = setTimeout(() => {
-        session.consumerRetryTimers.delete(data.producerId);
-        session.requestConsumer(data.producerId);
+        session.consumerRetryTimers.delete(producerId);
+        session.requestConsumer(producerId);
       }, delay);
-      session.consumerRetryTimers.set(data.producerId, timer);
+      session.consumerRetryTimers.set(producerId, timer);
     }
   }
-  if (data?.requestType === "connect-transport" && data.transportId)
+  if (data.requestType === "connect-transport" && data.transportId)
     handled = true;
   if (
     [
       "get-rtp-capabilities",
       "client-rtp-capabilities",
       "create-transport",
-    ].includes(data?.requestType)
+    ].includes(data.requestType as string)
   ) {
     handled = true;
     session.readyReject?.(error);

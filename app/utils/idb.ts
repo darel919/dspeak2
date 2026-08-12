@@ -1,6 +1,15 @@
+import type { ChatMessage } from "../shared/types/chat-store.ts";
+import { isRoomRecord, type RoomRecord } from "../shared/types/rooms-store.ts";
+
 const HEALTH_EVENT = "dspeak:idb-health";
 const OPEN_TIMEOUT_MS = 5000;
 const RETRY_DELAY_MS = 50;
+
+type DatabaseDefinition = {
+  readonly name: string;
+  readonly version: number;
+  readonly stores: Readonly<Record<string, IDBObjectStoreParameters>>;
+};
 
 const DATABASES = Object.freeze({
   rooms: {
@@ -25,16 +34,88 @@ const DATABASES = Object.freeze({
       messageQueue: { keyPath: "id" },
     },
   },
-});
+}) satisfies Record<string, DatabaseDefinition>;
 
-const recentReports = new Map();
-let lastHealthIssue = null;
-let persistenceRequest = null;
+type DatabaseId = keyof typeof DATABASES;
+type StoreName = string;
+type StorageRecord = Record<string, unknown>;
+
+export interface IdbIssue {
+  source: "indexeddb";
+  database: string | null;
+  operation: string;
+  store: string | null;
+  errorName: string | null;
+  code: string;
+  severity: "info" | "warning" | "error" | "fatal";
+  recoverable: boolean;
+  canReset: boolean;
+  message: string;
+  timestamp: number;
+  recovered?: boolean;
+}
+
+interface IdbErrorContext {
+  database?: string | null;
+  operation?: string;
+  store?: string | null;
+}
+
+interface CachedRoomsRecord extends StorageRecord {
+  userId: string;
+  rooms: unknown[];
+}
+
+interface CachedMessagesRecord extends StorageRecord {
+  key: string;
+  userId: string;
+  channelId: string;
+  messages: ChatMessage[];
+  updatedAt: number;
+}
+
+interface PendingReadsRecord extends StorageRecord {
+  userId: string;
+  messageIds: string[];
+  updatedAt: number;
+}
+
+export interface QueuedMessage extends StorageRecord {
+  id: string;
+  channelId?: string;
+  content?: string;
+  ownerId?: string;
+  pendingId?: string;
+  attachments?: unknown[];
+  replyTo?: unknown;
+}
+
+interface ServiceWorkerClientLike {
+  postMessage(message: unknown): void;
+}
+
+interface ServiceWorkerClientsLike {
+  matchAll(options: {
+    type: "window";
+    includeUncontrolled: boolean;
+  }): Promise<ServiceWorkerClientLike[]>;
+}
+
+const recentReports = new Map<string, number>();
+let lastHealthIssue: IdbIssue | null = null;
+let persistenceRequest: Promise<boolean> | null = null;
 
 export class IdbOperationError extends Error {
-  constructor(issue, cause) {
+  override name = "IdbOperationError";
+  override readonly code: string;
+  readonly database: string | null;
+  readonly operation: string;
+  readonly severity: IdbIssue["severity"];
+  readonly recoverable: boolean;
+  readonly canReset: boolean;
+
+  constructor(issue: IdbIssue, cause: unknown) {
     super(issue.message, { cause });
-    this.name = "IdbOperationError";
     this.code = issue.code;
     this.database = issue.database;
     this.operation = issue.operation;
@@ -44,23 +125,31 @@ export class IdbOperationError extends Error {
   }
 }
 
-function idbFactory() {
+function idbFactory(): IDBFactory | undefined {
   return globalThis.indexedDB;
 }
 
-function databaseDefinition(databaseId) {
+function databaseDefinition(databaseId: DatabaseId): DatabaseDefinition {
   const definition = DATABASES[databaseId];
   if (!definition) throw new Error(`Unknown browser database: ${databaseId}`);
   return definition;
 }
 
-function errorName(error) {
-  return error?.name || "UnknownError";
+function errorName(error: unknown): string {
+  if (error instanceof Error) return error.name || "UnknownError";
+  if (error && typeof error === "object" && "name" in error) {
+    const name = error.name;
+    if (typeof name === "string" && name) return name;
+  }
+  return "UnknownError";
 }
 
-export function classifyIdbError(error, context = {}) {
+export function classifyIdbError(
+  error: unknown,
+  context: IdbErrorContext = {},
+): IdbIssue {
   const name = errorName(error);
-  const issue = {
+  const issue: IdbIssue = {
     source: "indexeddb",
     database: context.database || null,
     operation: context.operation || "unknown",
@@ -144,7 +233,7 @@ export function classifyIdbError(error, context = {}) {
   return issue;
 }
 
-function storageSnapshot(value) {
+function storageSnapshot(value: unknown): unknown {
   try {
     const serialized = JSON.stringify(value);
     if (serialized === undefined)
@@ -152,17 +241,19 @@ function storageSnapshot(value) {
         "Local record is not JSON-compatible",
         "DataCloneError",
       );
-    return JSON.parse(serialized);
-  } catch (error) {
-    if (error?.name === "DataCloneError") throw error;
+    return JSON.parse(serialized) as unknown;
+  } catch (error: unknown) {
+    if (errorName(error) === "DataCloneError") throw error;
     throw new DOMException(
-      error?.message || "Local record could not be cloned",
+      error instanceof Error
+        ? error.message
+        : "Local record could not be cloned",
       "DataCloneError",
     );
   }
 }
 
-function serializedIssue(issue) {
+function serializedIssue(issue: IdbIssue): IdbIssue {
   return {
     source: issue.source,
     database: issue.database,
@@ -179,7 +270,7 @@ function serializedIssue(issue) {
   };
 }
 
-export function reportIdbHealth(issue) {
+export function reportIdbHealth(issue: IdbIssue): void {
   const report = serializedIssue(issue);
   lastHealthIssue = report;
   const signature = `${report.database}:${report.operation}:${report.code}:${report.recovered}`;
@@ -192,15 +283,20 @@ export function reportIdbHealth(issue) {
     return;
   }
 
-  if (globalThis.clients?.matchAll) {
-    globalThis.clients
+  const workerClients = (
+    globalThis as typeof globalThis & {
+      clients?: ServiceWorkerClientsLike;
+    }
+  ).clients;
+  if (workerClients?.matchAll) {
+    workerClients
       .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clients) => {
+      .then((clients: ServiceWorkerClientLike[]) => {
         for (const client of clients) {
           client.postMessage({ type: "IDB_HEALTH", issue: report });
         }
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.warn(
           "[IndexedDB] Unable to report worker storage health:",
           error,
@@ -209,11 +305,11 @@ export function reportIdbHealth(issue) {
   }
 }
 
-export function getLastIdbHealthIssue() {
+export function getLastIdbHealthIssue(): IdbIssue | null {
   return lastHealthIssue;
 }
 
-function reportRecoveredDatabase(database) {
+function reportRecoveredDatabase(database: string): void {
   if (
     !lastHealthIssue ||
     lastHealthIssue.recovered ||
@@ -230,8 +326,8 @@ function reportRecoveredDatabase(database) {
   });
 }
 
-function requestPromise(request) {
-  return new Promise((resolve, reject) => {
+function requestPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () =>
       reject(
@@ -240,8 +336,8 @@ function requestPromise(request) {
   });
 }
 
-function transactionPromise(transaction) {
-  return new Promise((resolve, reject) => {
+function transactionPromise(transaction: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
     transaction.onerror = () =>
       reject(
@@ -256,7 +352,10 @@ function transactionPromise(transaction) {
   });
 }
 
-function ensureSchema(database, definition) {
+function ensureSchema(
+  database: IDBDatabase,
+  definition: DatabaseDefinition,
+): void {
   for (const [storeName, options] of Object.entries(definition.stores)) {
     if (!database.objectStoreNames.contains(storeName)) {
       database.createObjectStore(storeName, options);
@@ -264,7 +363,7 @@ function ensureSchema(database, definition) {
   }
 }
 
-function openDatabase(databaseId) {
+function openDatabase(databaseId: DatabaseId): Promise<IDBDatabase> {
   const factory = idbFactory();
   if (!factory) {
     return Promise.reject(
@@ -287,7 +386,7 @@ function openDatabase(databaseId) {
     request.onupgradeneeded = () => {
       try {
         ensureSchema(request.result, definition);
-      } catch (error) {
+      } catch (error: unknown) {
         request.transaction?.abort();
         if (!settled) {
           settled = true;
@@ -318,19 +417,28 @@ function openDatabase(databaseId) {
   });
 }
 
-function wait(delay) {
-  return new Promise((resolve) => setTimeout(resolve, delay));
+function wait(delay: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, delay));
 }
 
-async function runTransaction(databaseId, storeName, mode, operation, handler) {
+async function runTransaction<T>(
+  databaseId: DatabaseId,
+  storeName: StoreName,
+  mode: IDBTransactionMode,
+  operation: string,
+  handler: (
+    store: IDBObjectStore,
+    toPromise: <R>(request: IDBRequest<R>) => Promise<R>,
+  ) => Promise<T>,
+): Promise<T> {
   const definition = databaseDefinition(databaseId);
   if (!definition.stores[storeName]) {
     throw new Error(`Unknown store ${storeName} in ${databaseId}`);
   }
 
-  let firstIssue = null;
+  let firstIssue: IdbIssue | null = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    let database = null;
+    let database: IDBDatabase | null = null;
     try {
       database = await openDatabase(databaseId);
       const transaction = database.transaction(storeName, mode);
@@ -352,7 +460,7 @@ async function runTransaction(databaseId, storeName, mode, operation, handler) {
         reportRecoveredDatabase(definition.name);
       }
       return result;
-    } catch (error) {
+    } catch (error: unknown) {
       const issue = classifyIdbError(error, {
         database: definition.name,
         operation,
@@ -369,13 +477,18 @@ async function runTransaction(databaseId, storeName, mode, operation, handler) {
       database?.close();
     }
   }
+  throw new Error(`IndexedDB operation did not complete: ${operation}`);
 }
 
 export function isIdbAvailable() {
   return Boolean(idbFactory());
 }
 
-export async function putRecord(databaseId, storeName, value) {
+export async function putRecord(
+  databaseId: DatabaseId,
+  storeName: StoreName,
+  value: unknown,
+): Promise<unknown> {
   return runTransaction(
     databaseId,
     storeName,
@@ -385,7 +498,11 @@ export async function putRecord(databaseId, storeName, value) {
   );
 }
 
-export async function getRecord(databaseId, storeName, key) {
+export async function getRecord(
+  databaseId: DatabaseId,
+  storeName: StoreName,
+  key: IDBValidKey,
+): Promise<unknown> {
   return runTransaction(
     databaseId,
     storeName,
@@ -395,7 +512,10 @@ export async function getRecord(databaseId, storeName, key) {
   );
 }
 
-export async function getAllRecords(databaseId, storeName) {
+export async function getAllRecords(
+  databaseId: DatabaseId,
+  storeName: StoreName,
+): Promise<unknown[]> {
   return runTransaction(
     databaseId,
     storeName,
@@ -405,7 +525,11 @@ export async function getAllRecords(databaseId, storeName) {
   );
 }
 
-export async function deleteRecord(databaseId, storeName, key) {
+export async function deleteRecord(
+  databaseId: DatabaseId,
+  storeName: StoreName,
+  key: IDBValidKey,
+): Promise<unknown> {
   return runTransaction(
     databaseId,
     storeName,
@@ -415,14 +539,19 @@ export async function deleteRecord(databaseId, storeName, key) {
   );
 }
 
-async function deleteRecordsWhere(databaseId, storeName, operation, predicate) {
+async function deleteRecordsWhere(
+  databaseId: DatabaseId,
+  storeName: StoreName,
+  operation: string,
+  predicate: (record: unknown) => boolean,
+): Promise<void> {
   return runTransaction(
     databaseId,
     storeName,
     "readwrite",
     operation,
     (store) =>
-      new Promise((resolve, reject) => {
+      new Promise<void>((resolve, reject) => {
         const request = store.openCursor();
         request.onerror = () =>
           reject(
@@ -442,20 +571,57 @@ async function deleteRecordsWhere(databaseId, storeName, operation, predicate) {
   );
 }
 
-export async function cacheRooms(userId, rooms) {
+export async function cacheRooms(
+  userId: string | number,
+  rooms: unknown[],
+): Promise<void> {
   await putRecord("rooms", "roomsCache", { userId, rooms });
 }
 
-export async function getCachedRooms(userId) {
+export async function getCachedRooms(
+  userId: string | number,
+): Promise<RoomRecord[]> {
   const record = await getRecord("rooms", "roomsCache", userId);
-  return record?.rooms ?? [];
+  if (!isCachedRoomsRecord(record)) return [];
+  return record.rooms.filter(isRoomRecord);
 }
 
-function channelCacheKey(userId, channelId) {
+function isCachedRoomsRecord(value: unknown): value is CachedRoomsRecord {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "rooms" in value &&
+    Array.isArray(value.rooms),
+  );
+}
+
+function isCachedMessagesRecord(value: unknown): value is CachedMessagesRecord {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "messages" in value &&
+    Array.isArray(value.messages),
+  );
+}
+
+function isQueuedMessage(value: unknown): value is QueuedMessage {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof value.id === "string",
+  );
+}
+
+function channelCacheKey(userId: string | number, channelId: string): string {
   return `${userId}:${channelId}`;
 }
 
-export async function cacheChannelMessages(userId, channelId, messages) {
+export async function cacheChannelMessages(
+  userId: string | number,
+  channelId: string,
+  messages: ChatMessage[],
+): Promise<void> {
   await putRecord("chat", "channelMessages", {
     key: channelCacheKey(userId, channelId),
     userId,
@@ -465,17 +631,22 @@ export async function cacheChannelMessages(userId, channelId, messages) {
   });
 }
 
-export async function getCachedChannelMessages(userId, channelId) {
-  return (
-    (await getRecord(
-      "chat",
-      "channelMessages",
-      channelCacheKey(userId, channelId),
-    )) || null
+export async function getCachedChannelMessages(
+  userId: string | number,
+  channelId: string,
+): Promise<CachedMessagesRecord | null> {
+  const record = await getRecord(
+    "chat",
+    "channelMessages",
+    channelCacheKey(userId, channelId),
   );
+  return isCachedMessagesRecord(record) ? record : null;
 }
 
-export async function savePendingReadIds(userId, messageIds) {
+export async function savePendingReadIds(
+  userId: string | number,
+  messageIds: Array<string | number>,
+): Promise<void> {
   await putRecord("chat", "pendingReads", {
     userId: String(userId),
     messageIds: [...new Set(messageIds.map(String))],
@@ -483,25 +654,36 @@ export async function savePendingReadIds(userId, messageIds) {
   });
 }
 
-export async function getPendingReadIds(userId) {
+export async function getPendingReadIds(
+  userId: string | number,
+): Promise<string[]> {
   const record = await getRecord("chat", "pendingReads", String(userId || ""));
-  return Array.isArray(record?.messageIds) ? record.messageIds : [];
+  if (
+    record &&
+    typeof record === "object" &&
+    "messageIds" in record &&
+    Array.isArray(record.messageIds)
+  )
+    return record.messageIds.filter(
+      (messageId): messageId is string => typeof messageId === "string",
+    );
+  return [];
 }
 
-export async function enqueueMessage(message) {
+export async function enqueueMessage(message: QueuedMessage): Promise<void> {
   void ensurePersistentStorage();
   await putRecord("queue", "messageQueue", message);
 }
 
-export async function getQueuedMessages() {
-  return getAllRecords("queue", "messageQueue");
+export async function getQueuedMessages(): Promise<QueuedMessage[]> {
+  return (await getAllRecords("queue", "messageQueue")).filter(isQueuedMessage);
 }
 
-export async function dequeueMessage(id) {
+export async function dequeueMessage(id: string): Promise<void> {
   await deleteRecord("queue", "messageQueue", id);
 }
 
-export async function purgeUserLocalData(userId) {
+export async function purgeUserLocalData(userId: string): Promise<void> {
   const normalizedUserId = String(userId || "");
   if (!normalizedUserId) return;
   await Promise.all([
@@ -510,19 +692,25 @@ export async function purgeUserLocalData(userId) {
       "chat",
       "channelMessages",
       "purge-user",
-      (record) => String(record?.userId || "") === normalizedUserId,
+      (record) => recordField(record, "userId") === normalizedUserId,
     ),
     deleteRecord("chat", "pendingReads", normalizedUserId),
     deleteRecordsWhere(
       "queue",
       "messageQueue",
       "purge-user",
-      (record) => String(record?.ownerId || "") === normalizedUserId,
+      (record) => recordField(record, "ownerId") === normalizedUserId,
     ),
   ]);
 }
 
-function deleteDatabase(databaseId) {
+function recordField(record: unknown, field: string): string {
+  if (!record || typeof record !== "object" || !(field in record)) return "";
+  const value = (record as Record<string, unknown>)[field];
+  return String(value || "");
+}
+
+function deleteDatabase(databaseId: DatabaseId): Promise<void> {
   const factory = idbFactory();
   const definition = databaseDefinition(databaseId);
   if (!factory) {
@@ -549,9 +737,9 @@ function deleteDatabase(databaseId) {
   });
 }
 
-export async function resetLocalDatabases() {
+export async function resetLocalDatabases(): Promise<void> {
   const results = await Promise.allSettled(
-    Object.keys(DATABASES).map(deleteDatabase),
+    (Object.keys(DATABASES) as DatabaseId[]).map(deleteDatabase),
   );
   const failure = results.find((result) => result.status === "rejected");
   if (failure) {
@@ -577,9 +765,10 @@ export async function resetLocalDatabases() {
   });
 }
 
-export async function probeLocalDatabases() {
-  for (const [databaseId, definition] of Object.entries(DATABASES)) {
-    let database = null;
+export async function probeLocalDatabases(): Promise<boolean> {
+  for (const databaseId of Object.keys(DATABASES) as DatabaseId[]) {
+    const definition = DATABASES[databaseId];
+    let database: IDBDatabase | null = null;
     try {
       database = await openDatabase(databaseId);
       for (const storeName of Object.keys(definition.stores)) {
@@ -595,7 +784,11 @@ export async function probeLocalDatabases() {
   return true;
 }
 
-export async function getBrowserStorageEstimate() {
+export async function getBrowserStorageEstimate(): Promise<{
+  usage: number | null;
+  quota: number | null;
+  persisted: boolean | null;
+} | null> {
   if (!globalThis.navigator?.storage?.estimate) return null;
   const estimate = await globalThis.navigator.storage.estimate();
   return {
@@ -607,7 +800,7 @@ export async function getBrowserStorageEstimate() {
   };
 }
 
-export async function ensurePersistentStorage() {
+export async function ensurePersistentStorage(): Promise<boolean> {
   if (!globalThis.navigator?.storage?.persisted) return false;
   if (!persistenceRequest) {
     persistenceRequest = (async () => {

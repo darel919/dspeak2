@@ -1,4 +1,4 @@
-function sourceFromTrackId(trackId, kind) {
+function sourceFromTrackId(trackId: string, kind: "audio" | "video") {
   const value = String(trackId || "");
   if (value.includes("desktop_capture_video")) return "screen";
   if (value.includes("desktop_capture_audio")) return "screen-audio";
@@ -8,7 +8,7 @@ function sourceFromTrackId(trackId, kind) {
   return kind === "video" ? "camera" : "audio";
 }
 
-function asPeerId(value) {
+function asPeerId(value: unknown) {
   return value == null ? "" : String(value);
 }
 

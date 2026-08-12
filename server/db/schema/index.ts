@@ -10,6 +10,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const profiles = pgTable("profiles", {
@@ -173,7 +174,7 @@ export const messages = pgTable(
       .notNull()
       .references(() => profiles.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
-    replyToId: uuid("reply_to_id").references(() => messages.id, {
+    replyToId: uuid("reply_to_id").references((): AnyPgColumn => messages.id, {
       onDelete: "set null",
     }),
     createdAt: timestamp("created_at", { withTimezone: true })

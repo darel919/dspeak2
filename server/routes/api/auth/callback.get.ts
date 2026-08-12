@@ -4,7 +4,7 @@ import { exchangeOAuthCode } from "../../../auth/oauth-exchange.ts";
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
-  const code = query.code;
+  const code = String(query.code || "");
 
   if (!code) {
     throw createError({
@@ -14,10 +14,13 @@ export default defineEventHandler(async (event) => {
   }
 
   const { client, clearStorage } = createOAuthSupabaseClient(event);
-  let data;
-  let error;
+  let data: { session: import("@supabase/supabase-js").Session | null };
+  let error: { message: string } | null;
   try {
-    ({ data, error } = await exchangeOAuthCode(client, code));
+    ({ data, error } = (await exchangeOAuthCode(client, code)) as {
+      data: { session: import("@supabase/supabase-js").Session | null };
+      error: { message: string } | null;
+    });
   } finally {
     await clearStorage();
   }
@@ -27,6 +30,11 @@ export default defineEventHandler(async (event) => {
   }
 
   const session = data.session;
+  if (!session)
+    throw createError({
+      statusCode: 400,
+      statusMessage: "OAuth session was not returned",
+    });
 
   const pendingCode = createPendingOAuthSession(session);
   return sendRedirect(event, `/auth?code=${encodeURIComponent(pendingCode)}`);

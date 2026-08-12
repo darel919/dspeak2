@@ -3,10 +3,12 @@ export type VideoResolutionName =
 export type VideoQualityPriority = "framerate" | "resolution";
 
 export interface VideoSettings {
+  [key: string]: unknown;
   resolution: VideoResolutionName;
   frameRate: number;
   qualityPriority: VideoQualityPriority;
   maxBitrate?: number | null;
+  scaleResolutionDownBy?: number;
   width?: number;
   height?: number;
   screen?: boolean;

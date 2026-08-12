@@ -203,7 +203,10 @@ test("chat messages preserve attachment and thread metadata end to end", () => {
     api,
     /attachments: files\.map\(\(file\) => \(\{[\s\S]*?reply_to:/,
   );
-  assert.match(api, /const hasContent = typeof body\.content === "string"/);
+  assert.match(
+    api,
+    /const contentValue = body\.content[\s\S]*?const hasContent = typeof contentValue === "string"/,
+  );
   assert.match(api, /validateMessageAttachments\(/);
   assert.match(api, /validateReplyTarget\(/);
   assert.match(store, /attachments,\s+reply_to: replyTo/);
@@ -213,7 +216,7 @@ test("chat messages preserve attachment and thread metadata end to end", () => {
 test("multipart uploads are parsed once and background delivery preserves metadata", () => {
   const api = chatApiSource;
   const worker = readFileSync(
-    new URL("../public/sw.js", import.meta.url),
+    new URL("../public/sw.ts", import.meta.url),
     "utf8",
   );
   assert.match(api, /const form = body/);
@@ -515,7 +518,7 @@ test("pin state is synchronized through the realtime store contract", () => {
   assert.match(store, /case "message_pinned":[\s\S]*?case "message_unpinned":/);
   assert.match(
     store,
-    /updateMessage\(\{[\s\S]*?id: data\.data\.messageId,[\s\S]*?pinned:/,
+    /context\.updateMessage\(\{[\s\S]*?id: String\(data\.data\?\.messageId[\s\S]*?pinned:/,
   );
   assert.match(store, /pinChanged/);
   assert.match(

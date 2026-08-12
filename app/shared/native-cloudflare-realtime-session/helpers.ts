@@ -11,12 +11,11 @@ function requestIdentifier() {
 }
 
 function sourceKind(entry: Record<string, unknown>): string {
-  return (
-    entry?.kind ||
-    (entry?.source === "camera" || entry?.source === "screen"
+  return typeof entry.kind === "string"
+    ? entry.kind
+    : entry.source === "camera" || entry.source === "screen"
       ? "video"
-      : "audio")
-  );
+      : "audio";
 }
 
 function mediaSections(sdp: unknown, kind: string): string[] {

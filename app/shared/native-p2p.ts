@@ -19,8 +19,11 @@ import {
 import { NativeP2pTopologyMethods } from "./native-p2p/topology.ts";
 import { NativeP2pSourcesMethods } from "./native-p2p/sources.ts";
 import { NativeP2pLifecycleMethods } from "./native-p2p/lifecycle.ts";
+import type {
+  NativeP2pMeshOptions,
+  NativeP2pMeshSurface,
+} from "./types/native-p2p.ts";
 export class NativeP2pMesh {
-  [key: string]: any;
   constructor({
     iceServers,
     sendSignal,
@@ -30,7 +33,7 @@ export class NativeP2pMesh {
     onSnapshot,
     getSenderOptions,
     getAudioStereo,
-  }) {
+  }: NativeP2pMeshOptions) {
     this.configuration = {
       iceServers: directIceServers(iceServers),
       bundlePolicy: "max-bundle",
@@ -67,6 +70,8 @@ export class NativeP2pMesh {
     this.jitterBufferTargetDelay = 20;
   }
 }
+
+export interface NativeP2pMesh extends NativeP2pMeshSurface {}
 
 const nativeP2pMethodGroups = [
   NativeP2pTopologyMethods,

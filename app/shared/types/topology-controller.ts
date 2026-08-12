@@ -130,7 +130,7 @@ export interface TopologyResourceHelpersContext {
   ) => unknown;
   topologyState: Ref<TopologyState>;
   transportReady: Ref<boolean>;
-  updateP2pStats: (data: Record<string, unknown>) => unknown;
+  updateP2pStats: (data: unknown[]) => unknown;
 }
 export interface TopologyState {
   mode: string;
@@ -294,6 +294,6 @@ export interface TopologyControllerOptions {
   topologyEventKey: (data: TopologyData) => string;
   topologyState: Ref<TopologyState>;
   transportReady: Ref<boolean>;
-  updateP2pStats: (data: Record<string, unknown>) => unknown;
+  updateP2pStats: (data: unknown[]) => unknown;
   waitForMediaTimeoutMs: () => number;
 }

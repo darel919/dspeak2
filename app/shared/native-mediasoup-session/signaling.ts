@@ -10,44 +10,56 @@ import {
 } from "../native-mediasoup-signaling.ts";
 import { installHandlers } from "../native-mediasoup-handlers.ts";
 import { NativeCloudflareRealtimeSession } from "../native-cloudflare-realtime-session.ts";
+import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
+import type {
+  NativeCloudflareSessionLike,
+  NativeMediasoupSfuSessionSurface,
+} from "../types/native-mediasoup-session.ts";
 
 import { CLOUDFLARE_REQUEST_TIMEOUT_MS } from "./helpers.ts";
 export class NativeMediasoupSignalingMethods {
-  [key: string]: any;
-  _installHandlers() {
+  _installHandlers(this: NativeMediasoupSfuSession) {
     return installHandlers(this);
   }
 
-  async connect(channelId) {
+  async connect(this: NativeMediasoupSfuSession, channelId: string) {
     return connect(this, channelId);
   }
 
-  configureControl(config = {} as any) {
+  configureControl(
+    this: NativeMediasoupSfuSession,
+    config: Record<string, unknown> = {},
+  ) {
     return configureControl(this, config);
   }
 
-  async _handleProviderTicket(data) {
+  async _handleProviderTicket(
+    this: NativeMediasoupSfuSession,
+    data: Record<string, unknown>,
+  ) {
     return handleProviderTicket(this, data);
   }
 
-  _createSignaling() {
+  _createSignaling(this: NativeMediasoupSfuSession) {
     return createSignaling(this);
   }
 
-  _resolveConnect() {
+  _resolveConnect(this: NativeMediasoupSfuSession) {
     return resolveConnect(this);
   }
 
-  _createCloudflareSession() {
+  _createCloudflareSession(
+    this: NativeMediasoupSfuSession,
+  ): NativeCloudflareSessionLike {
     if (this.cloudflareSession) return this.cloudflareSession;
     this.cloudflareSession = new NativeCloudflareRealtimeSession({
       invoke: this.invoke,
-      send: (message) => this.signaling?.send?.(message),
-      onRemoteTrack: (entry) => {
+      send: (message: unknown) => this.signaling?.send?.(message),
+      onRemoteTrack: (entry: Record<string, unknown>) => {
         this.onRemoteTrack?.(entry);
         this._emitState();
       },
-      onRemoteTrackEnded: (entry) => {
+      onRemoteTrackEnded: (entry: Record<string, unknown>) => {
         this.onRemoteTrackEnded?.(entry);
         this._emitState();
       },
@@ -66,7 +78,10 @@ export class NativeMediasoupSignalingMethods {
           this.reportProviderFailure("native-cloudflare-transport-failed");
         this._emitState();
       },
-      onError: (error) => this.onError?.(error),
+      onError: (error: unknown) =>
+        this.onError?.(
+          error instanceof Error ? error : new Error(String(error)),
+        ),
       getAudioBitrate: this.getAudioBitrate,
       getAudioStereo: this.getAudioStereo,
       getVideoSettings: this.getVideoSettings,
@@ -83,12 +98,18 @@ export class NativeMediasoupSignalingMethods {
       remoteVideoFeeds: this.remoteVideoFeeds,
       remoteAudioFeeds: this.remoteAudioFeeds,
     });
+    if (!this.cloudflareSession)
+      throw new Error("Cloudflare media session was not created");
     return this.cloudflareSession;
   }
 
   async activateProvider(
-    provider,
-    { ensureMedia = false, closeMedia = false } = {} as any,
+    this: NativeMediasoupSfuSession,
+    provider: string,
+    {
+      ensureMedia = false,
+      closeMedia = false,
+    }: { ensureMedia?: boolean; closeMedia?: boolean } = {},
   ) {
     const nextProvider = String(provider || "mediasoup");
     this.selectedProvider = nextProvider;
@@ -135,15 +156,23 @@ export class NativeMediasoupSignalingMethods {
     return null;
   }
 
-  async _startNegotiation() {
+  async _startNegotiation(this: NativeMediasoupSfuSession) {
     return startNegotiation(this);
   }
 
-  async _handleRtpCapabilities(data) {
+  async _handleRtpCapabilities(
+    this: NativeMediasoupSfuSession,
+    data: Record<string, unknown>,
+  ) {
     return handleRtpCapabilities(this, data);
   }
 
-  async _handleTransportParams(data) {
+  async _handleTransportParams(
+    this: NativeMediasoupSfuSession,
+    data: Record<string, unknown>,
+  ) {
     return handleTransportParams(this, data);
   }
 }
+
+export interface NativeMediasoupSignalingMethods extends NativeMediasoupSfuSessionSurface {}

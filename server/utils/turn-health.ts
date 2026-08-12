@@ -1,16 +1,21 @@
 import { randomBytes } from "node:crypto";
 import { resolve6 } from "node:dns/promises";
 import { createSocket } from "node:dgram";
+import type {
+  TurnHealthOptions,
+  TurnHealthResult,
+  TurnProbeResult,
+} from "../types/turn-health.ts";
 
 const stunBindingRequest = 0x0001;
 const stunBindingSuccess = 0x0101;
 const stunMagicCookie = 0x2112a442;
 const cacheDurationMs = 30_000;
-let cachedResult;
+let cachedResult: TurnHealthResult | undefined;
 let cachedAt = 0;
-let refreshPromise = null;
+let refreshPromise: Promise<TurnHealthResult | null> | null = null;
 
-function bindingRequest(transactionId) {
+function bindingRequest(transactionId: Buffer): Buffer {
   const request = Buffer.alloc(20);
   request.writeUInt16BE(stunBindingRequest, 0);
   request.writeUInt16BE(0, 2);
@@ -19,12 +24,16 @@ function bindingRequest(transactionId) {
   return request;
 }
 
-function sendBindingRequest(address, port, timeoutMs) {
-  return new Promise((resolve) => {
+function sendBindingRequest(
+  address: string,
+  port: number,
+  timeoutMs: number,
+): Promise<TurnProbeResult> {
+  return new Promise<TurnProbeResult>((resolve) => {
     const socket = createSocket("udp6");
     const transactionId = randomBytes(12);
     let settled = false;
-    const finish = (result) => {
+    const finish = (result: TurnProbeResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -42,7 +51,10 @@ function sendBindingRequest(address, port, timeoutMs) {
     socket.once("error", (error) =>
       finish({
         available: false,
-        detail: (error as any).code || "probe-error",
+        detail:
+          error && typeof error === "object" && "code" in error
+            ? String(error.code)
+            : "probe-error",
       }),
     );
     socket.once("message", (message) => {
@@ -62,9 +74,9 @@ function sendBindingRequest(address, port, timeoutMs) {
 }
 
 export async function probeSelfHostedTurn(
-  environment = process.env,
-  options = {} as any,
-) {
+  environment: NodeJS.ProcessEnv = process.env,
+  options: TurnHealthOptions = {},
+): Promise<TurnHealthResult> {
   const host = environment.DSPEAK_RTC_DOMAIN?.trim();
   const secret = environment.TURN_SHARED_SECRET?.trim();
   if (!host || !secret)
@@ -84,18 +96,23 @@ export async function probeSelfHostedTurn(
         detail: "no-ipv6-address",
       };
     else {
+      const address = addresses[0];
+      if (!address) throw new Error("DNS returned an empty IPv6 address");
       const probe = await sendBindingRequest(
-        addresses[0],
+        address,
         Number(environment.TURN_PORT || 3478),
         options.timeoutMs || 1000,
       );
-      result = { configured: true, ...(probe as any) };
+      result = { configured: true, ...probe };
     }
-  } catch (error) {
+  } catch (error: unknown) {
     result = {
       configured: true,
       available: false,
-      detail: error.code || "dns-resolution-failed",
+      detail:
+        error && typeof error === "object" && "code" in error
+          ? String(error.code)
+          : "dns-resolution-failed",
     };
   }
   cachedResult = result;
@@ -108,7 +125,9 @@ export function resetTurnHealthCache() {
   cachedAt = 0;
 }
 
-export function readTurnHealth(environment = process.env) {
+export function readTurnHealth(
+  environment: NodeJS.ProcessEnv = process.env,
+): TurnHealthResult {
   const host = environment.DSPEAK_RTC_DOMAIN?.trim();
   const secret = environment.TURN_SHARED_SECRET?.trim();
   if (!host || !secret)

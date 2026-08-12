@@ -5,24 +5,25 @@ import {
 import { NativeP2pSessionSourcesMethods } from "./native-p2p-session/sources.ts";
 import { NativeP2pSessionDiagnosticsMethods } from "./native-p2p-session/diagnostics.ts";
 import { NativeP2pSessionLifecycleMethods } from "./native-p2p-session/lifecycle.ts";
+import type {
+  NativeP2pSessionOptions,
+  NativeP2pSessionSurface,
+} from "./types/native-p2p-session.ts";
 export class NativeP2pSession {
-  [key: string]: any;
-  constructor(
-    {
-      invoke,
-      sendSignal,
-      sendMessage,
-      onRemoteTrack,
-      onRemoteTrackEnded,
-      onStateChange,
-      onError,
-      getAudioBitrate,
-      getAudioStereo,
-      getVideoSettings,
-      disconnectGraceMs = P2P_DISCONNECT_GRACE_MS,
-      iceRestartTimeoutMs = P2P_ICE_RESTART_TIMEOUT_MS,
-    } = {} as any,
-  ) {
+  constructor({
+    invoke,
+    sendSignal,
+    sendMessage,
+    onRemoteTrack,
+    onRemoteTrackEnded,
+    onStateChange,
+    onError,
+    getAudioBitrate,
+    getAudioStereo,
+    getVideoSettings,
+    disconnectGraceMs = P2P_DISCONNECT_GRACE_MS,
+    iceRestartTimeoutMs = P2P_ICE_RESTART_TIMEOUT_MS,
+  }: NativeP2pSessionOptions) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeP2pSession requires invoke");
     this.invoke = invoke;
@@ -53,6 +54,8 @@ export class NativeP2pSession {
     this.pendingSignalLimit = 256;
   }
 }
+
+export interface NativeP2pSession extends NativeP2pSessionSurface {}
 
 const nativeP2pSessionMethodGroups = [
   NativeP2pSessionSourcesMethods,

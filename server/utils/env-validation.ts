@@ -15,7 +15,7 @@ const requiredVariables = [
   "VAPID_SUBJECT",
 ];
 
-function readPort(name, fallback) {
+function readPort(name: string, fallback: number): number {
   const raw = process.env[name] || String(fallback);
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 1 || value > 65535) {
@@ -48,14 +48,19 @@ export async function validateRuntimeEnvironment() {
       `Missing required environment variables: ${missing.join(", ")}`,
     );
   }
-  if (process.env.DSPEAK_CSRF_SECRET.trim().length < 32)
+  const csrfSecret = process.env.DSPEAK_CSRF_SECRET;
+  if (!csrfSecret || csrfSecret.trim().length < 32)
     throw new Error("DSPEAK_CSRF_SECRET must contain at least 32 characters");
 
-  let supabaseUrl;
-  let vapidSubject;
+  const supabaseUrlValue = process.env.SUPABASE_URL;
+  const vapidSubjectValue = process.env.VAPID_SUBJECT;
+  if (!supabaseUrlValue || !vapidSubjectValue)
+    throw new Error("Supabase and VAPID URLs are required");
+  let supabaseUrl: URL;
+  let vapidSubject: URL;
   try {
-    supabaseUrl = new URL(process.env.SUPABASE_URL);
-    vapidSubject = new URL(process.env.VAPID_SUBJECT);
+    supabaseUrl = new URL(supabaseUrlValue);
+    vapidSubject = new URL(vapidSubjectValue);
   } catch {
     throw new Error(
       "SUPABASE_URL and VAPID_SUBJECT must be valid absolute URLs",

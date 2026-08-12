@@ -1,4 +1,9 @@
-export function createChatExtraActions(context) {
+import type {
+  ChatMessage,
+  ChatStoreContext,
+} from "../../shared/types/chat-store.ts";
+
+export function createChatExtraActions(context: ChatStoreContext) {
   const { error } = context;
   function clearChat() {
     context.runtime.localDataGeneration += 1;
@@ -16,14 +21,16 @@ export function createChatExtraActions(context) {
     context.channelMessages.clear();
     context.pendingChannelPreparations.clear();
     context.channelPreparedAt.clear();
-    context.messages.value = [] as any;
+    context.messages.value = [];
     error.value = null;
-    context.onlineUsers.value = [] as any;
-    context.typingUsers.value = [] as any;
+    context.onlineUsers.value = [];
+    context.typingUsers.value = [];
     return pendingStorageCleanup;
   }
 
-  async function handleNewMessageNotification(message) {
+  async function handleNewMessageNotification(
+    message: ChatMessage,
+  ): Promise<void> {
     try {
       const authStore = context.dependencies.useAuthStore();
       const userData = authStore.getUserData();
@@ -80,8 +87,8 @@ export function createChatExtraActions(context) {
 
         const notification = notificationManager.showMessageNotification(
           message,
-          context.currentChannelName.value,
-          userData?.id,
+          context.currentChannelName.value || undefined,
+          userData?.id == null ? undefined : String(userData.id),
         );
 
         if (notification) {
@@ -127,7 +134,7 @@ export function createChatExtraActions(context) {
     }
   }
 
-  async function fetchPinned(channelId) {
+  async function fetchPinned(channelId: string): Promise<unknown> {
     try {
       const apiPath = context.config.public.apiPath;
       const response = await fetch(
@@ -142,7 +149,16 @@ export function createChatExtraActions(context) {
     }
   }
 
-  async function searchMessages(channelId, query, filters) {
+  async function searchMessages(
+    channelId: string,
+    query: string,
+    filters: {
+      author?: string;
+      has?: string;
+      before?: string;
+      after?: string;
+    } = {},
+  ): Promise<unknown> {
     try {
       const apiPath = context.config.public.apiPath;
       const params = new URLSearchParams({ channelId, q: query });
@@ -161,7 +177,7 @@ export function createChatExtraActions(context) {
     }
   }
 
-  async function undoMessage(messageId) {
+  async function undoMessage(messageId: string): Promise<unknown> {
     try {
       const apiPath = context.config.public.apiPath;
       const response = await fetch(`${apiPath}/chat/message/undo`, {

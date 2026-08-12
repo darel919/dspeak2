@@ -4,7 +4,7 @@ import { exchangeOAuthCode } from "../../../auth/oauth-exchange.ts";
 import { provisionOAuthProfile } from "../../../auth/oauth-profile.ts";
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody(event);
+  const body = (await readBody(event)) as { code?: unknown };
   const code = String(body?.code || "");
   if (!code)
     throw createError({
@@ -13,10 +13,19 @@ export default defineEventHandler(async (event) => {
     });
 
   const { client, clearStorage } = createOAuthSupabaseClient(event);
-  let data;
-  let error;
+  let data: {
+    session: import("@supabase/supabase-js").Session | null;
+    user: import("@supabase/supabase-js").User | null;
+  };
+  let error: { message: string } | null;
   try {
-    ({ data, error } = await exchangeOAuthCode(client, code));
+    ({ data, error } = (await exchangeOAuthCode(client, code)) as {
+      data: {
+        session: import("@supabase/supabase-js").Session | null;
+        user: import("@supabase/supabase-js").User | null;
+      };
+      error: { message: string } | null;
+    });
   } finally {
     await clearStorage();
   }

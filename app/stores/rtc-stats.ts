@@ -3,6 +3,14 @@ import { useVoiceStore } from "./voice";
 import { getRtcSignalMetrics } from "../shared/voice-transport";
 import { calculateTransportBitrateBps } from "../shared/rtc-media-stats";
 import { normalizeConnectionMetricValue } from "../shared/connection-quality";
+import type {
+  RtcHistory,
+  RtcHistorySample,
+  RtcMetricValue,
+  RtcStatsSnapshot,
+  RtcTrafficSample,
+  RtcTransportPair,
+} from "../shared/types/rtc-stats.ts";
 
 const HISTORY_LIMIT = 30;
 const SUMMARY_INTERVAL_MS = 5000;
@@ -11,12 +19,12 @@ const DETAILED_INTERVAL_MS = 1000;
 
 export const useRtcStatsStore = defineStore("rtc-stats", () => {
   const voiceStore = useVoiceStore();
-  const snapshot = ref(null);
-  const outbound = ref([]);
-  const inbound = ref([]);
-  const incomingBitrate = ref(null);
-  const outgoingBitrate = ref(null);
-  const history = reactive({
+  const snapshot = ref<RtcStatsSnapshot | null>(null);
+  const outbound = ref<unknown[]>([]);
+  const inbound = ref<unknown[]>([]);
+  const incomingBitrate = ref<number | null>(null);
+  const outgoingBitrate = ref<number | null>(null);
+  const history = reactive<RtcHistory>({
     rtt: [],
     availableOutgoingBitrate: [],
     outgoingBitrate: [],
@@ -28,21 +36,25 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
   const polling = ref(false);
   const detailedPolling = ref(false);
   const lastError = ref("");
-  let pollTimer = null;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let pollBusy = false;
-  let previousTrafficSample = null;
+  let previousTrafficSample: RtcTrafficSample | null = null;
   let detailedConsumers = 0;
 
-  function sumFinite(pairs, field) {
+  function sumFinite(pairs: RtcTransportPair[], field: string): number | null {
     const values = pairs
-      .map((pair) => Number(pair?.[field]))
+      .map((pair) => Number(pair?.[field as keyof RtcTransportPair]))
       .filter(Number.isFinite);
     return values.length
       ? values.reduce((total, value) => total + value, 0)
       : null;
   }
 
-  function measuredTrafficBitrates(pairs, timestamp, updatePrevious = false) {
+  function measuredTrafficBitrates(
+    pairs: RtcTransportPair[],
+    timestamp: number,
+    updatePrevious = false,
+  ) {
     const bytesSent = sumFinite(pairs, "bytesSent");
     const bytesReceived = sumFinite(pairs, "bytesReceived");
     const previous = previousTrafficSample;
@@ -66,10 +78,10 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
 
   const metrics = computed(() => {
     const result = getRtcSignalMetrics(snapshot.value?.transports);
-    const pairs =
+    const pairs: RtcTransportPair[] =
       snapshot.value?.transports
         ?.map((item) => item.candidatePair)
-        .filter(Boolean) || [];
+        .filter((pair): pair is RtcTransportPair => Boolean(pair)) || [];
     return {
       ...result,
       lossPercent: result.loss == null ? null : result.loss * 100,
@@ -93,15 +105,19 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     const session = voiceStore.sfuComposable;
     if (!session?.getWebRTCStatsSnapshot)
       throw new Error("RTC diagnostics are unavailable for this session.");
-    const diagnosticErrors = [] as any;
-    const collectOptional = async (label, operation) => {
+    const diagnosticErrors: Array<{ label: string; message: string }> = [];
+    const collectOptional = async (
+      label: string,
+      operation: (() => Promise<unknown> | undefined) | undefined,
+    ): Promise<unknown[]> => {
       if (typeof operation !== "function") return [];
       try {
-        return (await operation()) || [];
-      } catch (error) {
+        const result = await operation();
+        return Array.isArray(result) ? result : [];
+      } catch (error: unknown) {
         diagnosticErrors.push({
           label,
-          message: error?.message || String(error),
+          message: error instanceof Error ? error.message : String(error),
         });
         return [];
       }
@@ -139,7 +155,11 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     };
   }
 
-  function appendHistory(target, value, timestamp) {
+  function appendHistory(
+    target: RtcHistorySample[],
+    value: RtcMetricValue,
+    timestamp: number,
+  ): void {
     target.push({
       value: normalizeConnectionMetricValue(value),
       timestamp,
@@ -150,8 +170,8 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
 
   function reset() {
     snapshot.value = null;
-    outbound.value = [] as any;
-    inbound.value = [] as any;
+    outbound.value = [];
+    inbound.value = [];
     incomingBitrate.value = null;
     outgoingBitrate.value = null;
     history.rtt.splice(0);
@@ -165,7 +185,9 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     lastError.value = "";
   }
 
-  async function update({ detailed = detailedPolling.value } = {} as any) {
+  async function update({
+    detailed = detailedPolling.value,
+  }: { detailed?: boolean } = {}) {
     if (pollBusy || !polling.value || !voiceStore.connected) return;
     const session = voiceStore.sfuComposable;
     if (!session?.getWebRTCStatsSnapshot) return;
@@ -173,9 +195,10 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     try {
       const next = await session.getWebRTCStatsSnapshot();
       const nextMetrics = getRtcSignalMetrics(next?.transports);
-      const pairs =
-        next?.transports?.map((item) => item.candidatePair).filter(Boolean) ||
-        [];
+      const pairs: RtcTransportPair[] =
+        next?.transports
+          ?.map((item) => item.candidatePair)
+          .filter((pair): pair is RtcTransportPair => Boolean(pair)) || [];
       const availableOutgoingBitrate = sumFinite(
         pairs,
         "availableOutgoingBitrate",
@@ -189,12 +212,14 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
       incomingBitrate.value = measured.incoming;
       snapshot.value = next;
       if (detailed) {
-        outbound.value = session.getOutboundRtpStats
+        const nextOutbound = session.getOutboundRtpStats
           ? await session.getOutboundRtpStats()
           : [];
-        inbound.value = session.getInboundRtpStats
+        const nextInbound = session.getInboundRtpStats
           ? await session.getInboundRtpStats()
           : [];
+        outbound.value = Array.isArray(nextOutbound) ? nextOutbound : [];
+        inbound.value = Array.isArray(nextInbound) ? nextInbound : [];
       }
       appendHistory(history.rtt, nextMetrics.rttMs, next.timestamp);
       appendHistory(history.jitter, nextMetrics.jitterMs, next.timestamp);
@@ -216,9 +241,11 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
       );
       appendHistory(history.incomingBitrate, measured.incoming, next.timestamp);
       lastError.value = "";
-    } catch (error) {
+    } catch (error: unknown) {
       lastError.value =
-        error?.message || "RTC statistics could not be collected.";
+        error instanceof Error
+          ? error.message
+          : "RTC statistics could not be collected.";
     } finally {
       pollBusy = false;
     }

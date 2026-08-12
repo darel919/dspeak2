@@ -29,7 +29,7 @@ describe("automatic presence", () => {
       new URL("../app/composables/useIdleDetection.ts", import.meta.url),
       "utf8",
     );
-    assert.match(store, /function setAutomaticStatus\(status\)/);
+    assert.match(store, /function setAutomaticStatus\(status: unknown\)/);
     assert.match(store, /if \(presenceOverride\.value\) return/);
     assert.match(idleDetection, /setAutomaticStatus\("idle"\)/);
     assert.match(idleDetection, /setAutomaticStatus\("online"\)/);

@@ -81,13 +81,15 @@ async function waitForNativeMediaReadiness(
     topology.localPeerId ||
     mediaSession.localPeerId ||
     engine.nativeSession?.localPeerId;
-  const topologyInbound = expectedInboundSources(topology, localPeerId);
+  const topologyInbound = expectedInboundSources(topology, localPeerId || null);
   const startedAt = Date.now();
   let latest = null;
   while (Date.now() - startedAt < NATIVE_MEDIA_READINESS_TIMEOUT_MS) {
     assertCurrentNativeTopology(engine, topologyKey, generation);
     const observedInbound = Number(
-      mediaSession.expectedInboundFlowCount?.() || 0,
+      "expectedInboundFlowCount" in mediaSession
+        ? mediaSession.expectedInboundFlowCount?.() || 0
+        : 0,
     );
     latest = await mediaSession.mediaReadiness(
       Math.max(topologyInbound, observedInbound),
@@ -359,7 +361,7 @@ export async function shutdown(engine: NativeMediaEngine) {
     await engine.nativeSession?.disconnect().catch(() => undefined);
     await engine._invoke("media_shutdown").catch(() => undefined);
   }
-  if (!engine.nativeOnly) await engine.browserEngine.shutdown();
+  if (!engine.nativeOnly) await engine.browserEngine.shutdown?.();
   await Promise.allSettled(
     engine.unlisten.splice(0).map((unlisten: () => void) => unlisten()),
   );
@@ -425,9 +427,9 @@ export async function invoke(
   engine: NativeMediaEngine,
   command: string,
   payload: NativeCaptureRequest = {},
-) {
+): Promise<NativeCaptureRequest> {
   const tauri = await getTauri(engine);
-  return tauri.invoke(command, payload);
+  return (await tauri.invoke(command, payload)) as NativeCaptureRequest;
 }
 
 export async function configureNativeIceServers(engine: NativeMediaEngine) {

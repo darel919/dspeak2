@@ -100,10 +100,10 @@ export function isSourceAwareCaptureRequest(
 
 export function channelMediaPolicy(
   channelsStore: NativeMediaStore | null | undefined,
-  voiceStore: NativeMediaStore | null | undefined,
+  voiceStore: Pick<NativeMediaStore, "currentChannelId"> | null | undefined,
 ): Record<string, unknown> | null {
   return (
-    channelsStore?.getChannelById?.(voiceStore?.currentChannelId)
+    channelsStore?.getChannelById?.(voiceStore?.currentChannelId || null)
       ?.mediaPolicy || null
   );
 }

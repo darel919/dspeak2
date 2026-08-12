@@ -1,14 +1,24 @@
 const stateKey = Symbol.for("dspeak.rate-limit");
+import type { H3Event } from "h3";
+import type {
+  RateLimitEntry,
+  RateLimitErrorData,
+  RateLimitState,
+} from "../types/rate-limit.ts";
 const maximumEntries = 10_000;
 const pruneIntervalMs = 30_000;
 let nextPruneAt = 0;
 
-function getState() {
-  if (!globalThis[stateKey]) globalThis[stateKey] = new Map();
-  return globalThis[stateKey];
+function getState(): RateLimitState {
+  const globalState = globalThis as typeof globalThis & {
+    [key: symbol]: RateLimitState;
+  };
+  if (!globalState[stateKey])
+    globalState[stateKey] = new Map<string, RateLimitEntry>();
+  return globalState[stateKey];
 }
 
-function prune(state, now) {
+function prune(state: RateLimitState, now: number): void {
   for (const [key, value] of state) {
     if (value.resetAt <= now) state.delete(key);
   }
@@ -17,21 +27,34 @@ function prune(state, now) {
   for (const key of [...state.keys()].slice(0, overflow)) state.delete(key);
 }
 
-export function resolveClientIp(event) {
+export function resolveClientIp(event: H3Event): string {
   const trustProxy = process.env.DSPEAK_TRUST_PROXY === "true";
   return getRequestIP(event, { xForwardedFor: trustProxy }) || "unknown";
 }
 
-export function resolveWebSocketClientIp(request) {
+export function resolveWebSocketClientIp(request: {
+  headers?: Headers | Record<string, string | string[] | undefined>;
+}): string {
   if (process.env.DSPEAK_TRUST_PROXY !== "true") return "untrusted-proxy";
+  const headers = request.headers;
   const forwarded =
-    request.headers?.get?.("x-forwarded-for") ||
-    request.headers?.["x-forwarded-for"] ||
-    "";
-  return String(forwarded).split(",")[0].trim() || "unknown";
+    headers instanceof Headers
+      ? headers.get("x-forwarded-for")
+      : headers?.["x-forwarded-for"];
+  return (
+    String(forwarded ?? "")
+      .split(",")[0]
+      ?.trim() || "unknown"
+  );
 }
 
-export function enforceRateLimit(event, scope, identity, limit, windowMs) {
+export function enforceRateLimit(
+  event: H3Event,
+  scope: string,
+  identity: string | null | undefined,
+  limit: number,
+  windowMs: number,
+): void {
   try {
     const resetSeconds = enforceIdentifierRateLimit(
       scope,
@@ -40,14 +63,23 @@ export function enforceRateLimit(event, scope, identity, limit, windowMs) {
       windowMs,
     );
     setHeader(event, "RateLimit-Reset", String(resetSeconds));
-  } catch (error) {
-    if ((error as any)?.data?.retryAfter)
-      setHeader(event, "Retry-After", Number((error as any).data.retryAfter));
+  } catch (error: unknown) {
+    const data =
+      error && typeof error === "object" && "data" in error
+        ? (error.data as RateLimitErrorData | undefined)
+        : undefined;
+    if (data?.retryAfter)
+      setHeader(event, "Retry-After", Number(data.retryAfter));
     throw error;
   }
 }
 
-export function enforceIdentifierRateLimit(scope, identity, limit, windowMs) {
+export function enforceIdentifierRateLimit(
+  scope: string,
+  identity: string,
+  limit: number,
+  windowMs: number,
+): number {
   const state = getState();
   const now = Date.now();
   if (now >= nextPruneAt || state.size > maximumEntries) {

@@ -75,7 +75,10 @@ export class SocialRepository {
       );
   }
 
-  async getFriends(userId: string, status = "accepted") {
+  async getFriends(
+    userId: string,
+    status: "accepted" | "pending" | "blocked" = "accepted",
+  ) {
     return db
       .select()
       .from(friends)

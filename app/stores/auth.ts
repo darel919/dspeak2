@@ -3,19 +3,26 @@ import { useRuntimeConfig } from "#app";
 import { deviceHeaders } from "~/shared/device-identity";
 import { purgeUserLocalData } from "~/utils/idb";
 import { useRuntimeStore } from "./runtime";
+import type { SupabaseClient, Subscription } from "@supabase/supabase-js";
+import type {
+  AuthCallbackResponse,
+  AuthSessionRecord,
+  AuthStorageValue,
+  AuthTokenResponse,
+} from "../shared/types/auth.ts";
 
 export const useAuthStore = defineStore("auths", () => {
-  const user = ref(null);
+  const user = ref<AuthSessionRecord | null>(null);
   const sessionChecked = ref(false);
   const config = useRuntimeConfig();
   const runtimeStore = useRuntimeStore();
-  let sessionCheckPromise = null;
-  let supabaseAuthSubscription = null;
-  let desktopCallbackPromise = null;
+  let sessionCheckPromise: Promise<boolean> | null = null;
+  let supabaseAuthSubscription: Subscription | null = null;
+  let desktopCallbackPromise: Promise<boolean> | null = null;
   let desktopCallbackCode = "";
   let completedDesktopCallbackCode = "";
 
-  function bridgeSupabaseSession(client) {
+  function bridgeSupabaseSession(client: SupabaseClient | null) {
     if (!client || supabaseAuthSubscription) return;
     const result = client.auth.onAuthStateChange((event, session) => {
       if (!session?.access_token) return;
@@ -31,7 +38,7 @@ export const useAuthStore = defineStore("auths", () => {
     supabaseAuthSubscription = result.data.subscription;
   }
 
-  function writeStorage(key, value) {
+  function writeStorage(key: string, value: string) {
     if (!import.meta.client) return;
     try {
       localStorage.setItem(key, value);
@@ -40,7 +47,7 @@ export const useAuthStore = defineStore("auths", () => {
     }
   }
 
-  function removeStorage(key) {
+  function removeStorage(key: string) {
     if (!import.meta.client) return;
     try {
       localStorage.removeItem(key);
@@ -49,7 +56,7 @@ export const useAuthStore = defineStore("auths", () => {
     }
   }
 
-  function setUser(val) {
+  function setUser(val: AuthSessionRecord | null) {
     user.value = val;
     if (val?.user?.user_metadata) {
       writeStorage("userData", JSON.stringify(val.user.user_metadata));
@@ -117,22 +124,26 @@ export const useAuthStore = defineStore("auths", () => {
         }),
       });
       if (!response.ok) return false;
-      setUser(await response.json());
+      setUser((await response.json()) as AuthSessionRecord);
       return true;
     } catch {
       return false;
     }
   }
 
-  async function completeWebSignIn(code) {
-    const tokens: any = await $fetch(
+  async function completeWebSignIn(code: string) {
+    const fetchUnknown = $fetch as unknown as (
+      url: string,
+      options: Record<string, unknown>,
+    ) => Promise<unknown>;
+    const tokens = (await fetchUnknown(
       `${config.public.apiPath}/auth/callback-session`,
       {
         method: "POST",
         credentials: "include",
         body: { code },
       },
-    );
+    )) as AuthTokenResponse;
     const { getSupabaseClient } = await import("~/utils/supabase-client");
     const client = getSupabaseClient();
     if (!client) throw new Error("Supabase client is not configured");
@@ -144,7 +155,7 @@ export const useAuthStore = defineStore("auths", () => {
     return restoreSession();
   }
 
-  async function completeDesktopSignIn(code) {
+  async function completeDesktopSignIn(code: string) {
     const callbackCode = String(code || "");
     if (!callbackCode) throw new Error("Missing desktop authorization code");
     if (completedDesktopCallbackCode === callbackCode) return true;
@@ -153,7 +164,11 @@ export const useAuthStore = defineStore("auths", () => {
 
     desktopCallbackCode = callbackCode;
     const request = (async () => {
-      const result: any = await $fetch(
+      const request = $fetch as unknown as (
+        url: string,
+        options: Record<string, unknown>,
+      ) => Promise<AuthCallbackResponse>;
+      const result = await request(
         `${config.public.apiPath}/auth/desktop-callback-session`,
         {
           method: "POST",
@@ -178,7 +193,9 @@ export const useAuthStore = defineStore("auths", () => {
   async function completePendingDesktopSignIn() {
     if (!runtimeStore.isTauri) return false;
     const { invoke } = await import("@tauri-apps/api/core");
-    const pending: any = await invoke("get_pending_oauth_callback");
+    const pending = (await invoke("get_pending_oauth_callback")) as {
+      code?: string;
+    } | null;
     if (!pending?.code) return false;
     return completeDesktopSignIn(pending.code);
   }
@@ -197,10 +214,12 @@ export const useAuthStore = defineStore("auths", () => {
     return sessionCheckPromise;
   }
 
-  function storedUserId() {
+  function storedUserId(): string {
     if (!import.meta.client) return "";
     try {
-      const metadata = JSON.parse(localStorage.getItem("userData") || "null");
+      const metadata = JSON.parse(
+        localStorage.getItem("userData") || "null",
+      ) as AuthStorageValue | null;
       return String(metadata?.id || "");
     } catch {
       return "";
@@ -280,7 +299,7 @@ export const useAuthStore = defineStore("auths", () => {
     return user.value?.user?.user_metadata || null;
   }
 
-  function updateUserData(update) {
+  function updateUserData(update: AuthStorageValue | null | undefined) {
     if (!user.value?.user || !update) return;
     const userMetadata = {
       ...(user.value.user.user_metadata || {}),

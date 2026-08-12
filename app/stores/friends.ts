@@ -6,20 +6,28 @@ import { deviceHeaders } from "~/shared/device-identity";
 import { STORAGE_KEYS } from "~/const/storage";
 import { apiErrorMessage } from "../shared/api-errors.ts";
 import { resolveFriendsPresence } from "../shared/friend-presence.ts";
+import type {
+  FriendApiResult,
+  FriendRecord,
+  FriendRequestRecord,
+} from "../shared/types/friends.ts";
 
 export const useFriendsStore = defineStore("friends", () => {
-  const friends = ref([]);
-  const friendRequests = ref([]);
-  const sentRequests = ref([]);
+  const friends = ref<FriendRecord[]>([]);
+  const friendRequests = ref<FriendRequestRecord[]>([]);
+  const sentRequests = ref<FriendRequestRecord[]>([]);
   const loading = ref(false);
-  const error = ref(null);
+  const error = ref<string | null>(null);
   const config = useRuntimeConfig();
   const presenceStatusStore = usePresenceStatusStore();
   const friendsWithPresence = computed(() =>
     resolveFriendsPresence(friends.value, presenceStatusStore.trackedUsers),
   );
 
-  async function apiFetch(path, options = {} as any) {
+  async function apiFetch(
+    path: string,
+    options: RequestInit = {},
+  ): Promise<FriendApiResult> {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     if (!userData?.id) throw new Error("Not authenticated");
@@ -41,7 +49,7 @@ export const useFriendsStore = defineStore("friends", () => {
       );
     }
 
-    return response.json();
+    return (await response.json()) as FriendApiResult;
   }
 
   async function fetchFriends() {
@@ -59,8 +67,8 @@ export const useFriendsStore = defineStore("friends", () => {
         } catch {}
       }
       return friends.value;
-    } catch (cause) {
-      error.value = cause.message;
+    } catch (cause: unknown) {
+      error.value = cause instanceof Error ? cause.message : String(cause);
       if (import.meta.client) {
         try {
           const cached = localStorage.getItem(STORAGE_KEYS.friendsList);
@@ -88,8 +96,8 @@ export const useFriendsStore = defineStore("friends", () => {
         } catch {}
       }
       return friendRequests.value;
-    } catch (cause) {
-      error.value = cause.message;
+    } catch (cause: unknown) {
+      error.value = cause instanceof Error ? cause.message : String(cause);
       if (import.meta.client) {
         try {
           const cached = localStorage.getItem(STORAGE_KEYS.friendRequests);
@@ -102,21 +110,27 @@ export const useFriendsStore = defineStore("friends", () => {
     }
   }
 
-  async function sendRequest(recipientHandle) {
+  async function sendRequest(
+    recipientHandle: string,
+  ): Promise<FriendApiResult> {
     const result = await apiFetch("", {
       method: "POST",
       body: JSON.stringify({ action: "send", recipientHandle }),
     });
     if (result?.status === "pending" && result?.id) {
+      const request = result as FriendRequestRecord;
       sentRequests.value = [
-        result,
-        ...sentRequests.value.filter((request) => request.id !== result.id),
+        request,
+        ...sentRequests.value.filter((item) => item.id !== request.id),
       ];
     }
     return result;
   }
 
-  async function respondToRequest(requestId, accept) {
+  async function respondToRequest(
+    requestId: string,
+    accept: boolean,
+  ): Promise<FriendApiResult> {
     const result = await apiFetch("", {
       method: "POST",
       body: JSON.stringify({ action: "respond", requestId, accept }),
@@ -134,7 +148,7 @@ export const useFriendsStore = defineStore("friends", () => {
     return result;
   }
 
-  async function removeFriend(friendId) {
+  async function removeFriend(friendId: string): Promise<void> {
     await apiFetch("", {
       method: "DELETE",
       body: JSON.stringify({ friendId }),
@@ -148,13 +162,15 @@ export const useFriendsStore = defineStore("friends", () => {
       const result = await apiFetch("?type=sent", { method: "GET" });
       sentRequests.value = Array.isArray(result?.items) ? result.items : [];
       return sentRequests.value;
-    } catch (cause) {
-      error.value = cause.message;
+    } catch (cause: unknown) {
+      error.value = cause instanceof Error ? cause.message : String(cause);
       throw cause;
     }
   }
 
-  async function checkFriendshipStatus(userId) {
+  async function checkFriendshipStatus(
+    userId: string,
+  ): Promise<FriendApiResult> {
     try {
       return await apiFetch(
         `?type=status&targetId=${encodeURIComponent(userId)}`,
@@ -167,7 +183,7 @@ export const useFriendsStore = defineStore("friends", () => {
     }
   }
 
-  async function fetchMutualFriends(userId) {
+  async function fetchMutualFriends(userId: string): Promise<FriendRecord[]> {
     try {
       const result = await apiFetch(
         `?type=mutual&targetId=${encodeURIComponent(userId)}`,
@@ -179,21 +195,22 @@ export const useFriendsStore = defineStore("friends", () => {
     }
   }
 
-  async function sendRequestById(userId) {
+  async function sendRequestById(userId: string): Promise<FriendApiResult> {
     const result = await apiFetch("", {
       method: "POST",
       body: JSON.stringify({ action: "send", targetUserId: userId }),
     });
     if (result?.status === "pending" && result?.id) {
+      const request = result as FriendRequestRecord;
       sentRequests.value = [
-        result,
-        ...sentRequests.value.filter((request) => request.id !== result.id),
+        request,
+        ...sentRequests.value.filter((item) => item.id !== request.id),
       ];
     }
     return result;
   }
 
-  async function cancelRequest(requestId) {
+  async function cancelRequest(requestId: string): Promise<void> {
     await apiFetch("", {
       method: "POST",
       body: JSON.stringify({ action: "cancel", requestId }),

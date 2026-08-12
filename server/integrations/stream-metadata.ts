@@ -1,21 +1,27 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type {
+  ItunesSongRecord,
+  SongRecordInput,
+  StreamMetadataDatabase,
+  StreamSongResult,
+} from "../types/stream-metadata.ts";
 
 const ALBUM_ART_DIR = "data/album-art";
 
 const ITUNES_SEARCH_URL = "https://itunes.apple.com/search";
 
-export function normalizeSongTitle(str) {
+export function normalizeSongTitle(str: unknown): string {
   if (typeof str !== "string") return "";
   return str.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-export function normalizeArtist(str) {
+export function normalizeArtist(str: unknown): string {
   if (typeof str !== "string") return "";
   return str.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-export function getAlbumArtPath(songId) {
+export function getAlbumArtPath(songId: string): string {
   return join(ALBUM_ART_DIR, `${songId}.jpg`);
 }
 
@@ -23,7 +29,11 @@ export async function ensureAlbumArtDir() {
   await mkdir(ALBUM_ART_DIR, { recursive: true });
 }
 
-export async function processStreamMetadata(pb, title, artist) {
+export async function processStreamMetadata(
+  pb: StreamMetadataDatabase,
+  title: string,
+  artist: string,
+): Promise<StreamSongResult> {
   const normalizedTitle = normalizeSongTitle(title);
   const normalizedArtist = normalizeArtist(artist);
 
@@ -49,13 +59,13 @@ export async function processStreamMetadata(pb, title, artist) {
 }
 
 export async function logPlayToHistory(
-  pb,
-  songId,
-  channelId,
-  userId,
-  playedAt,
-  duration,
-) {
+  pb: StreamMetadataDatabase,
+  songId: string | null | undefined,
+  channelId: string | null | undefined,
+  userId: string | null | undefined,
+  playedAt: string | null | undefined,
+  duration: number | null | undefined,
+): Promise<unknown> {
   if (!pb || !songId || !channelId) return null;
 
   return pb.collection("dspeak_stream_playlog").create({
@@ -67,7 +77,11 @@ export async function logPlayToHistory(
   });
 }
 
-async function lookupCachedSong(pb, normalizedTitle, normalizedArtist) {
+async function lookupCachedSong(
+  pb: StreamMetadataDatabase,
+  normalizedTitle: string,
+  normalizedArtist: string,
+): Promise<StreamSongResult | null> {
   const escapedTitle = normalizedTitle.replace(/'/g, "''");
   const escapedArtist = normalizedArtist.replace(/'/g, "''");
 
@@ -78,33 +92,41 @@ async function lookupCachedSong(pb, normalizedTitle, normalizedArtist) {
         `title = '${escapedTitle}' && artist = '${escapedArtist}'`,
       );
 
+    const song = record as {
+      id?: string;
+      title?: string;
+      artist?: string;
+      album?: string | null;
+      album_art_path?: string | null;
+      itunes_artwork_url?: string | null;
+    };
+    if (!song.id || !song.title || !song.artist) return null;
     return {
-      songId: record.id,
-      title: record.title,
-      artist: record.artist,
-      album: record.album || null,
-      albumArtUrl: record.album_art_path
-        ? `/api/assets/album-art/${record.id}`
-        : record.itunes_artwork_url?.replace(
-            "100x100bb.jpg",
-            "192x192bb.jpg",
-          ) || null,
+      songId: song.id,
+      title: song.title,
+      artist: song.artist,
+      album: song.album || null,
+      albumArtUrl: song.album_art_path
+        ? `/api/assets/album-art/${song.id}`
+        : song.itunes_artwork_url?.replace("100x100bb.jpg", "192x192bb.jpg") ||
+          null,
       cached: true,
     };
-  } catch (error) {
-    if (error?.status === 404 || error?.response?.status === 404) return null;
+  } catch (error: unknown) {
+    const value = error as { status?: number; response?: { status?: number } };
+    if (value.status === 404 || value.response?.status === 404) return null;
     console.error("[StreamMetadata] cache lookup failed", error);
     return null;
   }
 }
 
 async function fetchFromItunes(
-  pb,
-  normalizedTitle,
-  normalizedArtist,
-  originalTitle,
-  originalArtist,
-) {
+  pb: StreamMetadataDatabase,
+  normalizedTitle: string,
+  normalizedArtist: string,
+  originalTitle: string,
+  originalArtist: string,
+): Promise<StreamSongResult> {
   const searchParams = new URLSearchParams({
     term: `${normalizedArtist} ${normalizedTitle}`,
     entity: "song",
@@ -112,7 +134,7 @@ async function fetchFromItunes(
     media: "music",
   });
 
-  let itunesResult = null;
+  let itunesResult: ItunesSongRecord | null = null;
   try {
     const response = await fetch(`${ITUNES_SEARCH_URL}?${searchParams}`);
     if (!response.ok) {
@@ -128,8 +150,14 @@ async function fetchFromItunes(
       );
     }
 
-    const data = await response.json();
-    if (!data.results || data.results.length === 0) {
+    const data: unknown = await response.json();
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !("results" in data) ||
+      !Array.isArray(data.results) ||
+      data.results.length === 0
+    ) {
       return buildFallbackResult(
         normalizedTitle,
         normalizedArtist,
@@ -138,8 +166,8 @@ async function fetchFromItunes(
       );
     }
 
-    itunesResult = data.results[0];
-  } catch (error) {
+    itunesResult = data.results[0] as ItunesSongRecord;
+  } catch (error: unknown) {
     console.error("[StreamMetadata] iTunes search error", error);
     return buildFallbackResult(
       normalizedTitle,
@@ -149,6 +177,13 @@ async function fetchFromItunes(
     );
   }
 
+  if (!itunesResult)
+    return buildFallbackResult(
+      normalizedTitle,
+      normalizedArtist,
+      originalTitle,
+      originalArtist,
+    );
   const itunesTitle = itunesResult.trackName || originalTitle;
   const itunesArtist = itunesResult.artistName || originalArtist;
   const album = itunesResult.collectionName || null;
@@ -196,11 +231,11 @@ async function fetchFromItunes(
 }
 
 function buildFallbackResult(
-  normalizedTitle,
-  normalizedArtist,
-  originalTitle,
-  originalArtist,
-) {
+  normalizedTitle: string,
+  normalizedArtist: string,
+  originalTitle: string,
+  originalArtist: string,
+): StreamSongResult {
   return {
     songId: null,
     title: originalTitle || normalizedTitle,
@@ -211,7 +246,7 @@ function buildFallbackResult(
   };
 }
 
-async function downloadAlbumArt(url) {
+async function downloadAlbumArt(url: string): Promise<string | null> {
   try {
     await ensureAlbumArtDir();
     const response = await fetch(url);
@@ -228,16 +263,16 @@ async function downloadAlbumArt(url) {
     const filePath = getAlbumArtPath(tempId);
     await writeFile(filePath, buffer);
     return filePath;
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("[StreamMetadata] album art download error", error);
     return null;
   }
 }
 
 async function persistSongRecord(
-  pb,
-  { title, artist, album, albumArtPath, itunesArtworkUrl },
-) {
+  pb: StreamMetadataDatabase,
+  { title, artist, album, albumArtPath, itunesArtworkUrl }: SongRecordInput,
+): Promise<string | null> {
   try {
     const record = await pb.collection("dspeak_lib_song").create({
       title,
@@ -247,8 +282,9 @@ async function persistSongRecord(
       itunes_artwork_url: itunesArtworkUrl,
       last_updated: new Date().toISOString(),
     });
-    return record.id;
-  } catch (error) {
+    const value = record as { id?: string };
+    return value.id || null;
+  } catch (error: unknown) {
     console.error("[StreamMetadata] failed to persist song record", error);
     return null;
   }

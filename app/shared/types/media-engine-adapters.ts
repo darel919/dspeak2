@@ -2,10 +2,21 @@ import type { useHybridMediaSession } from "../../composables/useHybridMediaSess
 import type { createMediaQoeReport } from "../media-qoe.ts";
 import type {
   JoinSessionInput,
+  MediaDeviceInfo,
   MediaEngineConfig,
   MediaSignalMessage,
+  MediaStats,
   ScreenShareOptions,
 } from "../media/types.ts";
+import type {
+  NativeCaptureRequest,
+  NativeMediaFlags,
+  NativeMediaStore,
+} from "./native-media.ts";
+import type {
+  NativeTauriLike,
+  NativeVoiceStoreLike,
+} from "./native-media-engine.ts";
 
 export type BrowserMediaSession = ReturnType<typeof useHybridMediaSession>;
 export type MediaQoeReport = ReturnType<typeof createMediaQoeReport>;
@@ -16,15 +27,33 @@ export interface BrowserMediaEngineOptions {
 
 export interface MediaEngineFactoryOptions extends BrowserMediaEngineOptions {
   isTauri?: boolean;
-  flags?: Record<string, boolean>;
-  tauri?: unknown;
-  nativeConfig?: Record<string, unknown>;
-  voiceStore?: unknown;
-  settingsStore?: unknown;
-  channelsStore?: unknown;
+  flags?: Partial<NativeMediaFlags>;
+  tauri?: NativeTauriLike;
+  nativeConfig?: NativeCaptureRequest;
+  voiceStore?: NativeVoiceStoreLike;
+  settingsStore?: NativeMediaStore;
+  channelsStore?: NativeMediaStore;
 }
 
-export interface BrowserMediaEngineSession {
+export type BrowserMediaEngineSession = BrowserMediaSession & {
+  on?: (event: string, callback: (...args: unknown[]) => void) => () => void;
+  initialize?: (config?: MediaEngineConfig) => Promise<void>;
+  joinSession?: (input: JoinSessionInput) => Promise<void>;
+  leaveSession?: () => Promise<void>;
+  setMicrophoneEnabled?: (enabled: boolean) => Promise<void>;
+  setCameraEnabled?: (enabled: boolean) => Promise<void>;
+  startScreenShare?: (options?: ScreenShareOptions) => Promise<void>;
+  stopScreenShare?: () => Promise<void>;
+  handleSignal?: (message: MediaSignalMessage) => Promise<void>;
+  getDevices?: () => Promise<MediaDeviceInfo[]>;
+  getStats?: () => Promise<MediaStats>;
+  shutdown?: () => Promise<void>;
+  setMicrophoneDevice?: (deviceId: string) => Promise<void>;
+  setOutputDevice?: (deviceId: string) => Promise<void>;
+  setJitterBufferConfig?: (config?: Record<string, unknown>) => unknown;
+  isScreenSharing?: () => boolean;
+  isMicrophoneEnabled?: () => boolean;
+  isCameraEnabled?: () => boolean;
   connect: BrowserMediaSession["connect"];
   disconnect: BrowserMediaSession["disconnect"];
   startAudioProduction: BrowserMediaSession["startAudioProduction"];
@@ -49,13 +78,11 @@ export interface BrowserMediaEngineSession {
   getWebRTCDiagnosticStats: BrowserMediaSession["getWebRTCDiagnosticStats"];
   areTransportsIceConnected: BrowserMediaSession["areTransportsIceConnected"];
   getWebRTCStatsSnapshot: BrowserMediaSession["getWebRTCStatsSnapshot"];
-  handleSignal?: BrowserMediaSession["handleSignal"];
   activeProvider: BrowserMediaSession["activeProvider"];
   topologyState: BrowserMediaSession["topologyState"];
   mediaConnectionState: BrowserMediaSession["mediaConnectionState"];
   error: BrowserMediaSession["error"];
-  [key: string]: unknown;
-}
+};
 
 export type BrowserJoinInput = JoinSessionInput;
 export type BrowserSignalMessage = MediaSignalMessage;
