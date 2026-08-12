@@ -1,6 +1,6 @@
 <template>
   <section class="h-screen-minus-navbar overflow-hidden bg-base-100">
-    <div class="flex h-full min-h-0 overflow-hidden">
+    <div class="flex h-full min-h-0 min-w-0 overflow-hidden">
       <DesktopChannelSidebar>
         <ChannelList
           v-if="room"
@@ -10,7 +10,7 @@
         />
       </DesktopChannelSidebar>
 
-      <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div
           v-if="selectedChannel?.isMedia"
           class="min-h-0 flex-1 overflow-hidden"

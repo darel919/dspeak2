@@ -10,6 +10,30 @@ function report(type, bytesField, bytes, timestamp) {
   return new Map([["rtp", { type, [bytesField]: bytes, timestamp }]]);
 }
 
+test("Cloudflare sessions without active media are ready after bootstrap", () => {
+  const client = session();
+  client.peerConnection = { connectionState: "new" };
+
+  assert.equal(client.connectionState().ready, false);
+
+  client.sessionId = "cloudflare-session";
+  assert.deepEqual(client.connectionState(), {
+    ready: true,
+    send: "new",
+    recv: "new",
+    sendRequired: false,
+    receiveRequired: false,
+    connectionState: "new",
+    iceConnectionState: "new",
+    iceGatheringState: "new",
+    signalingState: "new",
+  });
+
+  client.producers.set("audio", {});
+  assert.equal(client.connectionState().ready, false);
+  client.closeMedia();
+});
+
 test("Cloudflare SFU readiness requires every expected RTP flow", async () => {
   const client = session();
   client.peerConnection = { connectionState: "connected" };

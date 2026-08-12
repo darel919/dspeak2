@@ -43,7 +43,7 @@ describe("voice join resolves the room before connecting", () => {
     );
     assert.match(
       source,
-      /await session\.connect\(channelId, \{ roomId: joiningRoomId \}\)/,
+      /withVoiceJoinDeadline\(\s*\(\) => session!\.connect\(channelId, \{ roomId: joiningRoomId \}\)/,
     );
   });
 

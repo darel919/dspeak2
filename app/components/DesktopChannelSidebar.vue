@@ -1,7 +1,7 @@
 <template>
   <aside
     class="desktop-channel-sidebar relative hidden shrink-0 border-r border-base-300 md:block"
-    :style="{ width: `${width}px` }"
+    :style="{ '--desktop-channel-sidebar-width': `${width}px` }"
   >
     <div class="h-full min-h-0 overflow-hidden">
       <slot />
@@ -126,6 +126,7 @@ onUnmounted(() => {
 
 <style scoped>
 .desktop-channel-sidebar {
+  width: min(var(--desktop-channel-sidebar-width), 32vw);
   min-width: 15rem;
   max-width: 30rem;
 }

@@ -4,7 +4,7 @@ dSpeak stores durable application data in Supabase PostgreSQL. Nitro uses Drizzl
 
 ## Schema and migrations
 
-The canonical schema is defined in `server/db/schema/index.js`. Drizzle migrations are checked in under `drizzle/` and applied with `npx drizzle-kit migrate`. The project config prefers `DIRECT_DATABASE_URL` for this command; use a direct Supabase PostgreSQL connection rather than the transaction-pooled runtime connection.
+The canonical schema is defined in `server/db/schema/index.ts`. Drizzle migrations are checked in under `drizzle/` and applied with `npx drizzle-kit migrate`. The project config prefers `DIRECT_DATABASE_URL` for this command; use a direct Supabase PostgreSQL connection rather than the transaction-pooled runtime connection.
 
 ```bash
 npx drizzle-kit check

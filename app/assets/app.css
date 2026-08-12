@@ -844,6 +844,7 @@ body {
 /* ===== Metro buttons (flat, hard corners, accent primary) ===== */
 .metro-btn {
   display: inline-flex;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
   gap: var(--metro-space-2);
@@ -852,6 +853,7 @@ body {
   font-size: 0.875rem;
   font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
   background: var(--metro-accent);
   color: var(--metro-accent-content);
   border: none;
@@ -883,7 +885,7 @@ body {
 }
 
 .metro-btn--sm {
-  min-height: 2.25rem;
+  min-height: var(--metro-control-size);
   padding: 0 var(--metro-space-3);
   font-size: 0.8125rem;
 }
@@ -1136,21 +1138,50 @@ body {
 .metro-range {
   appearance: none;
   width: 100%;
-  height: 2px;
-  background: var(--metro-border);
+  height: 1rem;
+  min-width: 0;
+  background: transparent;
   border-radius: 0;
   outline: none;
   cursor: pointer;
+}
+
+.metro-range::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 0.25rem;
+  background: linear-gradient(
+    to right,
+    var(--metro-accent) 0%,
+    var(--metro-accent) var(--metro-range-progress, 0%),
+    var(--metro-border) var(--metro-range-progress, 0%),
+    var(--metro-border) 100%
+  );
+  border-radius: 0;
 }
 
 .metro-range::-webkit-slider-thumb {
   appearance: none;
   width: 20px;
   height: 20px;
+  margin-top: -8px;
   border-radius: 0;
   background: var(--metro-accent);
   border: none;
   cursor: pointer;
+}
+
+.metro-range::-moz-range-track {
+  width: 100%;
+  height: 0.25rem;
+  background: var(--metro-border);
+  border: none;
+  border-radius: 0;
+}
+
+.metro-range::-moz-range-progress {
+  height: 0.25rem;
+  background: var(--metro-accent);
+  border-radius: 0;
 }
 
 .metro-range::-moz-range-thumb {
@@ -1170,6 +1201,9 @@ body {
 /* ===== Metro icon buttons (44px touch targets, hard corners) ===== */
 .metro-icon-btn {
   display: inline-flex;
+  box-sizing: border-box;
+  width: var(--metro-control-size);
+  height: var(--metro-control-size);
   align-items: center;
   justify-content: center;
   min-width: var(--metro-control-size);

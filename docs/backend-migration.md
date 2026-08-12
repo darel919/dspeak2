@@ -16,7 +16,7 @@ dSpeak uses independently scalable managed and edge services. This document reco
 | Managed SFU and relay                               | Cloudflare Realtime and Cloudflare TURN                             |
 | Optional self-hosted SFU                            | Standalone `dspeak-sfu` service                                     |
 
-The PostgreSQL schema lives in `server/db/schema/index.js`, with checked-in Drizzle migrations under `drizzle/`.
+The PostgreSQL schema lives in `server/db/schema/index.ts`, with checked-in Drizzle migrations under `drizzle/`.
 
 ## Authentication migration
 

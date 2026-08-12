@@ -11,13 +11,20 @@ export class CloudflareLifecycleMethods {
   connectionState(this: CloudflareSessionLike) {
     const peerConnection = this.peerConnection;
     const state = peerConnection?.connectionState;
-    const ready = state === "connected";
+    const sendRequired = this.producers.size > 0;
+    const receiveRequired = this.publications.size > 0;
+    const ready =
+      state === "connected" ||
+      (!sendRequired &&
+        !receiveRequired &&
+        state === "new" &&
+        !!this.sessionId);
     return {
       ready,
-      send: ready ? "connected" : state || "new",
-      recv: ready ? "connected" : state || "new",
-      sendRequired: this.producers.size > 0,
-      receiveRequired: this.publications.size > 0,
+      send: state || "new",
+      recv: state || "new",
+      sendRequired,
+      receiveRequired,
       connectionState: state || "new",
       iceConnectionState: peerConnection?.iceConnectionState || "new",
       iceGatheringState: peerConnection?.iceGatheringState || "new",

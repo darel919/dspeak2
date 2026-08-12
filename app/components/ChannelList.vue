@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-full bg-base-200">
+  <div class="flex h-full min-w-0 flex-col bg-base-200">
     <!-- Channel list header -->
     <div class="border-base-300 p-4">
       <div class="relative flex w-full flex-col items-center gap-3">

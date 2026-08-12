@@ -301,6 +301,9 @@
                   max="100"
                   step="1"
                   :value="voiceStore.sharedAudioVolume"
+                  :style="{
+                    '--metro-range-progress': `${voiceStore.sharedAudioVolume}%`,
+                  }"
                   @input="voiceStore.setSharedAudioVolume($event.target.value)"
                 />
                 <div
@@ -425,9 +428,11 @@
         <div
           v-if="profile && voiceStore.connecting"
           class="metro-connection-warning"
+          role="status"
+          :title="voiceConnectionStatus.detail"
         >
           <span class="metro-spinner metro-spinner--xs" />
-          <span>Connecting…</span>
+          <span>{{ voiceConnectionStatus.label }}</span>
         </div>
 
         <PresenceStatusSelector
@@ -476,6 +481,7 @@ import {
   isConnectionPending,
 } from "../shared/connection-quality";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
+import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
@@ -489,6 +495,7 @@ const presenceStore = usePresenceStatusStore();
 const route = useRoute();
 const router = useRouter();
 const config = useRuntimeConfig();
+const { status: voiceConnectionStatus } = useVoiceConnectionStatus(voiceStore);
 
 const profile = computed(() => authStore.getUserData());
 const profileAvatar = computed(() => profile.value?.avatar || "");
@@ -743,7 +750,6 @@ watch(
 
 onMounted(() => {
   rtcStatsStore.start();
-  startElapsedTimer();
   document.addEventListener("pointerdown", dismissCallMenu);
   document.addEventListener("keydown", dismissCallMenu);
   window.addEventListener("blur", closeCallMenu);
@@ -855,12 +861,14 @@ onBeforeUnmount(() => {
 
 .metro-call-dock {
   display: flex;
+  box-sizing: border-box;
+  height: var(--metro-control-size);
   min-width: 0;
   align-items: center;
   gap: var(--metro-space-1);
   border: 1px solid var(--metro-border);
   background: var(--color-base-100);
-  padding: var(--metro-space-1);
+  padding: 0;
 }
 
 .metro-call-dock--connected {
@@ -874,11 +882,15 @@ onBeforeUnmount(() => {
 
 .metro-call-channel {
   display: flex;
+  box-sizing: border-box;
+  height: 100%;
   min-width: 0;
-  max-width: 15rem;
+  width: 12rem;
+  max-width: 12rem;
+  flex: 0 1 12rem;
   align-items: center;
   gap: var(--metro-space-2);
-  padding: var(--metro-space-1) var(--metro-space-2);
+  padding: 0 var(--metro-space-2);
   transition: background-color 150ms ease;
 }
 
@@ -902,9 +914,9 @@ onBeforeUnmount(() => {
   max-width: 100%;
   font-size: 0.875rem;
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  white-space: normal;
   background: none;
   border: none;
   padding: 0;
@@ -926,6 +938,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--metro-space-1);
+  white-space: nowrap;
   font-size: 0.75rem;
   color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
 }
@@ -982,8 +995,8 @@ onBeforeUnmount(() => {
 
 .metro-call-icon {
   display: inline-flex;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: var(--metro-control-size);
+  height: var(--metro-control-size);
   flex: none;
   align-items: center;
   justify-content: center;
@@ -1171,10 +1184,36 @@ onBeforeUnmount(() => {
 
 @media (max-width: 639px) {
   .metro-call-channel {
-    max-width: 8.5rem;
+    width: 12rem;
+    max-width: 12rem;
   }
   .metro-call-dock {
     gap: var(--metro-space-1);
+  }
+}
+
+@media (max-width: 1100px) {
+  .metro-navbar-end {
+    gap: var(--metro-space-1);
+  }
+
+  .metro-call-channel {
+    width: 12rem;
+    max-width: 12rem;
+  }
+
+  .metro-call-dock {
+    padding: 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .metro-call-channel {
+    padding-inline: var(--metro-space-1);
+  }
+
+  .metro-call-dock .metro-divider {
+    display: none;
   }
 }
 </style>

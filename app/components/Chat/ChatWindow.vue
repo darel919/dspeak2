@@ -4,9 +4,11 @@
     :class="['relative flex h-full flex-row bg-base-100', $attrs.class]"
   >
     <div class="flex-1 min-w-0 flex flex-col">
-      <div class="bg-base-200 border-base-300 p-4">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
+      <div class="channel-header border-base-300 bg-base-200 p-4">
+        <div
+          class="channel-header-row flex min-w-0 items-center justify-between gap-3"
+        >
+          <div class="channel-header-title flex min-w-0 items-center gap-3">
             <button
               v-if="showBackButton"
               @click="$emit('back')"
@@ -17,7 +19,7 @@
             </button>
 
             <div
-              class="flex flex-col sm:flex-row items-start sm:items-center gap-0 sm:gap-3"
+              class="flex min-w-0 flex-col items-start gap-0 sm:flex-row sm:items-center sm:gap-3"
             >
               <span
                 v-if="channel?.isMedia"
@@ -28,18 +30,20 @@
                 >Text channel</span
               >
               <h1
-                class="font-semibold text-md"
+                class="min-w-0 max-w-full truncate text-md font-semibold"
                 :title="channel?.desc || 'No description'"
               >
                 #{{ channel?.name || "Channel" }}
               </h1>
-              <p class="text-sm text-base-content/65">
+              <p
+                class="channel-header-room truncate text-sm text-base-content/65"
+              >
                 {{ room?.name || "Room" }}
               </p>
             </div>
           </div>
 
-          <div class="flex items-center gap-2">
+          <div class="channel-header-actions flex shrink-0 items-center gap-2">
             <button
               class="metro-icon-btn"
               @click="showSearch = !showSearch"
@@ -66,7 +70,7 @@
 
             <div
               v-if="onlineUsers?.length > 0"
-              class="text-sm text-base-content/60"
+              class="channel-header-online text-sm text-base-content/60"
             >
               {{ onlineUsers.length }} online
             </div>
@@ -380,7 +384,7 @@
       <div
         v-if="showMemberList && !showThreadSidebar"
         key="member-list"
-        class="hidden md:flex flex-col w-[260px] min-w-[260px] border-l border-base-300 bg-base-100 h-full relative"
+        class="chat-member-panel hidden h-full w-[260px] min-w-[260px] flex-col border-l border-base-300 bg-base-100 md:flex"
       >
         <button
           class="absolute top-2 right-2 metro-icon-btn metro-icon-btn--ghost metro-icon-btn--sm z-10"
@@ -464,7 +468,8 @@ const showMemberList = ref(true);
 
 onMounted(() => {
   const saved = localStorage.getItem(STORAGE_KEYS.chatMemberListVisible);
-  showMemberList.value = saved === null ? true : saved === "true";
+  const savedVisibility = saved === null ? true : saved === "true";
+  showMemberList.value = window.innerWidth < 1200 ? false : savedVisibility;
 });
 
 watch(showMemberList, (val) => {
@@ -1124,3 +1129,51 @@ function closeLightbox() {
   lightboxImages.value = [];
 }
 </script>
+
+<style scoped>
+.channel-header-title {
+  flex: 1 1 auto;
+}
+
+.channel-header-actions {
+  flex: 0 0 auto;
+}
+
+.chat-member-panel {
+  position: relative;
+}
+
+@media (max-width: 1100px) {
+  .channel-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .channel-header-room,
+  .channel-header-online {
+    display: none;
+  }
+}
+
+@media (max-width: 1199px) {
+  .chat-member-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: min(16.25rem, 28vw);
+    min-width: min(16.25rem, 28vw);
+  }
+}
+
+@media (max-width: 899px) {
+  .channel-header {
+    padding-inline: 0.75rem;
+  }
+
+  .chat-member-panel {
+    width: min(16.25rem, calc(100% - 4rem));
+    min-width: min(16.25rem, calc(100% - 4rem));
+  }
+}
+</style>

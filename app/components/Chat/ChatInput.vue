@@ -84,11 +84,14 @@
           {{ sendError }}
         </p>
 
-        <form @submit.prevent="handleSendMessage" class="flex gap-2 items-end">
+        <form
+          @submit.prevent="handleSendMessage"
+          class="flex min-w-0 items-end gap-2"
+        >
           <div class="dropdown dropdown-top">
             <button
               type="button"
-              class="metro-btn metro-btn--ghost btn-sm btn-square"
+              class="metro-btn metro-btn--ghost btn-sm btn-square shrink-0"
               @click="toggleEmojiPicker"
               aria-label="Add emoji"
             >
@@ -110,14 +113,14 @@
 
           <button
             type="button"
-            class="metro-btn metro-btn--ghost btn-sm btn-square"
+            class="metro-btn metro-btn--ghost btn-sm btn-square shrink-0"
             @click="openFilePicker"
             aria-label="Upload image"
           >
             <Icon name="lucide:image-plus" class="size-5" />
           </button>
 
-          <div class="flex-1 relative">
+          <div class="relative min-w-0 flex-1">
             <textarea
               v-model="messageText"
               ref="chatTextarea"
@@ -141,7 +144,7 @@
           </div>
           <button
             type="submit"
-            class="metro-btn"
+            class="metro-btn shrink-0"
             aria-label="Send message"
             :disabled="
               (!messageText.trim() && pendingImages.length === 0) || sending

@@ -19,7 +19,7 @@
 
 ---
 
-## `app/shared/media-capture.js` — Capture
+## `app/shared/media-capture.ts` — Capture
 
 | Pattern                                  | Line   | Domain  |
 | ---------------------------------------- | ------ | ------- |
@@ -27,7 +27,7 @@
 | `mediaDevices.getUserMedia()`            | 32, 39 | Capture |
 | `navigator.mediaDevices` (default param) | 66     | Capture |
 
-## `app/shared/mediasoup-client-session.js` — SFU
+## `app/shared/mediasoup-client-session.ts` — SFU
 
 | Pattern                                     | Line    | Domain          |
 | ------------------------------------------- | ------- | --------------- |
@@ -39,7 +39,7 @@
 | `device.createSendTransport()`              | various | SFU             |
 | `device.createRecvTransport()`              | various | SFU             |
 
-## `app/shared/native-p2p.js` — P2P
+## `app/shared/native-p2p.ts` — P2P
 
 | Pattern                                | Line     | Domain          |
 | -------------------------------------- | -------- | --------------- |
@@ -58,21 +58,21 @@
 | `pc.onicecandidate`                    | various  | P2P             |
 | `pc.onconnectionstatechange`           | various  | P2P             |
 
-## `app/shared/remote-media-registry.js` — Playback/Render
+## `app/shared/remote-media-registry.ts` — Playback/Render
 
 | Pattern                                  | Line    | Domain          |
 | ---------------------------------------- | ------- | --------------- |
 | `new MediaStream()`                      | 8, 56   | Playback/Render |
 | `MediaStreamTrack` references throughout | various | Playback/Render |
 
-## `app/shared/rtc-media-stats.js` — Diagnostics
+## `app/shared/rtc-media-stats.ts` — Diagnostics
 
 | Pattern                          | Line    | Domain      |
 | -------------------------------- | ------- | ----------- |
 | `pc.getStats()`                  | various | Diagnostics |
 | `RTCPeerConnection` as parameter | various | Diagnostics |
 
-## `app/stores/voice.js` — Orchestration + Capture
+## `app/stores/voice.ts` — Orchestration + Capture
 
 | Pattern                                      | Line | Domain                     |
 | -------------------------------------------- | ---- | -------------------------- |
@@ -83,7 +83,7 @@
 | `sfuComposable.startSystemAudioProduction()` | 661  | Capture (system audio)     |
 | `producer.track.addEventListener("ended")`   | 666  | Capture (audio lifecycle)  |
 
-## `app/stores/settings.js` — UI + Capture
+## `app/stores/settings.ts` — UI + Capture
 
 | Pattern                                            | Line    | Domain                |
 | -------------------------------------------------- | ------- | --------------------- |
@@ -103,7 +103,7 @@
 | `context.createMediaStreamSource(stream)`      | 1475 | UI (microphone preview) |
 | `context.createMediaStreamDestination()`       | 1481 | UI (microphone preview) |
 
-## `app/composables/useHybridMediaSession.js` — Orchestration
+## `app/composables/useHybridMediaSession.ts` — Orchestration
 
 | Pattern                                           | Line | Domain                         |
 | ------------------------------------------------- | ---- | ------------------------------ |
@@ -128,15 +128,15 @@
 
 ## Summary
 
-| Domain              | File Count | Key Files                                                  |
-| ------------------- | ---------- | ---------------------------------------------------------- |
-| **Capture**         | 4          | `media-capture.js`, `store/voice.js`, `pages/settings.vue` |
-| **P2P**             | 1          | `native-p2p.js`                                            |
-| **SFU**             | 1          | `mediasoup-client-session.js`                              |
-| **Playback/Render** | 2          | `remote-media-registry.js`, `native-p2p.js`                |
-| **Diagnostics**     | 2          | `rtc-media-stats.js`, `RtcDebugDashboard.vue`              |
-| **Orchestration**   | 2          | `useHybridMediaSession.js`, `store/voice.js`               |
-| **UI**              | 3          | `settings.vue`, `settings.js`, `VoiceChannel.vue`          |
+| Domain              | File Count | Key Files                                                   |
+| ------------------- | ---------- | ----------------------------------------------------------- |
+| **Capture**         | 4          | `media-capture.ts`, `stores/voice.ts`, `pages/settings.vue` |
+| **P2P**             | 1          | `native-p2p.ts`                                             |
+| **SFU**             | 1          | `mediasoup-client-session.ts`                               |
+| **Playback/Render** | 2          | `remote-media-registry.ts`, `native-p2p.ts`                 |
+| **Diagnostics**     | 2          | `rtc-media-stats.ts`, `RtcDebugDashboard.vue`               |
+| **Orchestration**   | 2          | `useHybridMediaSession.ts`, `stores/voice.ts`               |
+| **UI**              | 3          | `settings.vue`, `stores/settings.ts`, `VoiceChannel.vue`    |
 
 **Total direct browser API call sites: ~85** (across ~14 files)
 

@@ -9,8 +9,8 @@
       :aria-expanded="isOpen"
       @click="togglePanel"
     >
-      <span class="hidden max-w-32 text-right md:block">
-        <span class="truncate text-sm font-semibold">{{
+      <span class="text-right md:block">
+        <span class="whitespace-nowrap text-sm font-semibold">{{
           profile?.username || profile?.handle || "User"
         }}</span>
       </span>
@@ -212,7 +212,9 @@ onUnmounted(() =>
 <style scoped>
 .profile-button {
   display: flex;
-  min-height: 2.75rem;
+  box-sizing: border-box;
+  height: var(--metro-control-size);
+  min-height: var(--metro-control-size);
   align-items: center;
   gap: 0.7rem;
   padding: 0.25rem;
