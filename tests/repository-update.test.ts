@@ -191,6 +191,14 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.match(nativeMediaProvisioner, /command -v sha256sum/);
   assert.match(nativeMediaProvisioner, /command -v certutil\.exe/);
   assert.doesNotMatch(nativeMediaProvisioner, /shasum -a 256 "\$archive"/);
+  assert.match(
+    nativeMediaProvisioner,
+    /: > "\$source_bundle\/lib\/dspeak_media\.lib"/,
+  );
+  assert.match(
+    nativeMediaProvisioner,
+    /\[\[ -s "\$bundle\/lib\/\$\{library\}\.lib"/,
+  );
   assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);

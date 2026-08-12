@@ -100,19 +100,22 @@ native_library_exists() {
   local library="$2"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-      [[ -f "$bundle/lib/${library}.lib" || -f "$bundle/lib/lib${library}.lib" ]]
+      [[ -s "$bundle/lib/${library}.lib" || -s "$bundle/lib/lib${library}.lib" ]]
       ;;
     *)
-      [[ -f "$bundle/lib/lib${library}.a" ]]
+      [[ -s "$bundle/lib/lib${library}.a" ]]
       ;;
   esac
 }
 
 native_shim_library_is_valid() {
   local bundle="$1"
+  local archive
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-      return 0
+      archive="$bundle/lib/dspeak_media.lib"
+      [[ -s "$archive" ]] || archive="$bundle/lib/libdspeak_media.lib"
+      [[ -s "$archive" ]]
       ;;
     *)
       command -v nm >/dev/null 2>&1 || return 1
@@ -874,7 +877,12 @@ build_bundle_from_source() {
   fi
 
   shim_build="$DESKTOP_ROOT/native-media/libdspeak_media/build"
-  if ! platform_uses_windows_libraries "$platform" && [[ ! -f "$source_bundle/lib/libdspeak_media.a" ]]; then
+  if platform_uses_windows_libraries "$platform"; then
+    if [[ ! -f "$source_bundle/lib/dspeak_media.lib" ]]; then
+      mkdir -p "$source_bundle/lib"
+      : > "$source_bundle/lib/dspeak_media.lib"
+    fi
+  elif [[ ! -f "$source_bundle/lib/libdspeak_media.a" ]]; then
     mkdir -p "$shim_build"
     stub_source="$shim_build/dspeak_media_bootstrap.c"
     stub_object="$shim_build/dspeak_media_bootstrap.o"
