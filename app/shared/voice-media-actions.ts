@@ -311,6 +311,7 @@ export function createVoiceMediaActions({
       await waitForVoiceTransportReady({
         getError: () => {
           const value = unref(session!.error);
+          if (value == null || value === "") return null;
           return typeof value === "string" ? value : voiceError(value);
         },
         isCurrent: () =>

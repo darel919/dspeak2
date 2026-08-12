@@ -40,12 +40,14 @@ export async function waitForVoiceTransportReady({
       throw error;
     }
     const sessionError = getError();
-    if (sessionError)
-      throw new Error(
-        typeof sessionError === "string"
-          ? sessionError
-          : sessionError.message || String(sessionError),
-      );
+    const sessionErrorMessage =
+      typeof sessionError === "string"
+        ? sessionError
+        : sessionError?.message ||
+          sessionError?.code ||
+          sessionError?.cause?.code ||
+          null;
+    if (sessionErrorMessage) throw new Error(sessionErrorMessage);
     if (isReady()) return;
     deadline = Math.max(deadline, startedAt + resolveTimeoutMs());
     await wait(pollIntervalMs);

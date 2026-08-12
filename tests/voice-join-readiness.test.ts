@@ -42,6 +42,21 @@ test("voice transport readiness rejects a session error", async () => {
   );
 });
 
+test("voice transport readiness ignores empty session error details", async () => {
+  const clock = createClock();
+  let checks = 0;
+
+  await waitForVoiceTransportReady({
+    getError: () => ({}),
+    isCurrent: () => true,
+    isReady: () => ++checks === 2,
+    now: clock.now,
+    wait: clock.wait,
+  });
+
+  assert.equal(checks, 2);
+});
+
 test("voice transport readiness rejects a replaced join", async () => {
   await assert.rejects(
     waitForVoiceTransportReady({
