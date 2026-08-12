@@ -201,6 +201,16 @@ test("desktop release updates are signed, published as latest.json, and restart 
     /\[\[ -s "\$bundle\/lib\/\$\{library\}\.lib"/,
   );
   assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
+  assert.match(nativeMediaProvisioner, /-name '\*\.inc'/);
+  assert.match(nativeMediaProvisioner, /"\$webrtc_output\/gen"/);
+  assert.match(
+    nativeMediaProvisioner,
+    /third_party\/abseil-cpp\/absl\/numeric\/int128_no_intrinsic\.inc/,
+  );
+  assert.match(
+    nativeMediaProvisioner,
+    /validate_webrtc_headers "\$source_bundle"/,
+  );
   assert.doesNotMatch(
     nativeMediaCmake,
     /platform\/(?:linux|windows)\/PlatformCapture\.cpp/,

@@ -53,7 +53,7 @@ jobs:
               desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
               desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           - platform: windows-x64
-            runner: windows-2022
+            runner: self-hosted
             artifact: dspeak-windows-x64
             native_artifact: lib-dspeak-media-windows-x64
             upload_pattern: |

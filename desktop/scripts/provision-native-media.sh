@@ -550,6 +550,22 @@ ensure_json_header() {
   rm -f -- "$temporary_header"
 }
 
+validate_webrtc_headers() {
+  local source_bundle="$1"
+  local required
+  local required_headers=(
+    api/peer_connection_interface.h
+    api/scoped_refptr.h
+    third_party/abseil-cpp/absl/numeric/int128.h
+    third_party/abseil-cpp/absl/numeric/int128_no_intrinsic.inc
+  )
+
+  for required in "${required_headers[@]}"; do
+    [[ -f "$source_bundle/include/$required" ]] ||
+      fail "Exported WebRTC headers are incomplete: include/$required is missing."
+  done
+}
+
 configure_webrtc_gclient() {
   local checkout="$1"
 
@@ -825,11 +841,20 @@ build_bundle_from_source() {
     fi
     (
       cd "$webrtc_source"
-      find . -name '*.h' ! -path "./out/$WEBRTC_REVISION/*" -print | tar -cf - -T -
+      find . -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.inl' -o -name '*.tcc' \) \
+        ! -path "./out/$WEBRTC_REVISION/*" -print | tar -cf - -T -
     ) | tar -xf - -C "$source_bundle/include"
+    if [[ -d "$webrtc_output/gen" ]]; then
+      (
+        cd "$webrtc_output/gen"
+        find . -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.inl' -o -name '*.tcc' \) \
+          -print | tar -cf - -T -
+      ) | tar -xf - -C "$source_bundle/include"
+    fi
   else
     printf 'Using the prebuilt libwebrtc dependency for %s\n' "$platform"
   fi
+  validate_webrtc_headers "$source_bundle"
 
   if [[ "$with_mediasoup" == 1 ]]; then
     mediasoup_source="$(clone_or_update_libmediasoupclient "$provision_root")"
