@@ -192,6 +192,14 @@ test("desktop releases optionally publish signed updates and restart after insta
   );
   assert.match(
     nativeMediaProvisioner,
+    /platform_uses_windows_libraries "\$platform"[\s\S]*use_custom_libcxx=false/,
+  );
+  assert.match(
+    nativeMediaProvisioner,
+    /Windows WebRTC must use the MSVC-compatible standard library ABI/,
+  );
+  assert.match(
+    nativeMediaProvisioner,
     /python3 src\/build\/util\/lastchange\.py -o src\/build\/util\/LASTCHANGE/,
   );
   assert.doesNotMatch(nativeMediaProvisioner, /kill "\$heartbeat_pid"/);

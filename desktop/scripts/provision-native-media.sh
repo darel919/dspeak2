@@ -819,6 +819,13 @@ build_bundle_from_source() {
     webrtc_source="$(clone_or_update_webrtc "$provision_root")"
     webrtc_output="$webrtc_source/out/$WEBRTC_REVISION"
     gn_args="$WEBRTC_GN_ARGS"
+    if platform_uses_windows_libraries "$platform"; then
+      if [[ "$gn_args" == *"use_custom_libcxx=true"* ]]; then
+        fail "Windows WebRTC must use the MSVC-compatible standard library ABI; remove use_custom_libcxx=true."
+      elif [[ "$gn_args" != *"use_custom_libcxx=false"* ]]; then
+        gn_args="$gn_args use_custom_libcxx=false"
+      fi
+    fi
     if [[ "$gn_args" != *target_cpu* ]]; then
       gn_args="$gn_args target_cpu=\"$target_cpu\""
     fi
