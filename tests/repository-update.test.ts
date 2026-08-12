@@ -187,6 +187,10 @@ test("desktop release updates are signed, published as latest.json, and restart 
     /python3 src\/build\/util\/lastchange\.py -o src\/build\/util\/LASTCHANGE/,
   );
   assert.doesNotMatch(nativeMediaProvisioner, /kill "\$heartbeat_pid"/);
+  assert.equal(nativeMediaProvisioner.match(/sha256_file/g)?.length, 4);
+  assert.match(nativeMediaProvisioner, /command -v sha256sum/);
+  assert.match(nativeMediaProvisioner, /command -v certutil\.exe/);
+  assert.doesNotMatch(nativeMediaProvisioner, /shasum -a 256 "\$archive"/);
   assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);

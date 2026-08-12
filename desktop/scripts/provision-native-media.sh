@@ -50,6 +50,27 @@ fail() {
   exit 1
 }
 
+sha256_file() {
+  local file="$1"
+  local digest
+
+  if command -v shasum >/dev/null 2>&1; then
+    digest="$(shasum -a 256 "$file" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum "$file" | awk '{print $1}')"
+  elif command -v openssl >/dev/null 2>&1; then
+    digest="$(openssl dgst -sha256 "$file" | awk '{print $NF}')"
+  elif command -v certutil.exe >/dev/null 2>&1; then
+    digest="$(certutil.exe -hashfile "$file" SHA256 | sed -n '2p' | tr -d '[:space:]')"
+  else
+    fail "Unable to calculate a SHA-256 checksum: no supported checksum utility is installed."
+  fi
+
+  [[ "$digest" =~ ^[[:xdigit:]]{64}$ ]] ||
+    fail "Checksum utility returned an invalid SHA-256 digest for $file."
+  printf '%s\n' "$digest" | tr '[:upper:]' '[:lower:]'
+}
+
 resolve_path() {
   local path="$1"
   if [[ "$path" == /* ]]; then
@@ -458,7 +479,7 @@ download_libwebrtc_dependency() {
   fi
 
   if [[ -n "$LIBWEBRTC_ARTIFACT_SHA256" ]]; then
-    actual_sha256="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
+    actual_sha256="$(sha256_file "$archive")"
     if [[ "$actual_sha256" != "$LIBWEBRTC_ARTIFACT_SHA256" ]]; then
       rm -rf -- "$temp_root"
       fail "libwebrtc archive checksum mismatch. Expected $LIBWEBRTC_ARTIFACT_SHA256, got $actual_sha256."
@@ -517,7 +538,7 @@ ensure_json_header() {
     rm -f -- "$temporary_header"
     fail "Unable to download the pinned nlohmann/json header. Set NATIVE_MEDIA_JSON_HEADER to a local json.hpp."
   fi
-  actual_sha256="$(shasum -a 256 "$temporary_header" | cut -d ' ' -f 1)"
+  actual_sha256="$(sha256_file "$temporary_header")"
   if [[ "$actual_sha256" != "$NLOHMANN_JSON_SHA256" ]]; then
     rm -f -- "$temporary_header"
     fail "nlohmann/json header checksum mismatch. Expected $NLOHMANN_JSON_SHA256, got $actual_sha256."
@@ -637,7 +658,7 @@ download_bundle() {
   fi
 
   if [[ -n "$NATIVE_MEDIA_ARTIFACT_SHA256" ]]; then
-    actual_sha256="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
+    actual_sha256="$(sha256_file "$archive")"
     if [[ "$actual_sha256" != "$NATIVE_MEDIA_ARTIFACT_SHA256" ]]; then
       printf 'Native media archive checksum mismatch. Expected %s, got %s.\n' \
         "$NATIVE_MEDIA_ARTIFACT_SHA256" "$actual_sha256" >&2
