@@ -99,12 +99,31 @@ jobs:
 
       - name: Extract native media bundle
         run: |
-          find "$RUNNER_TEMP/native-bundle" -name '*.tar.gz' -exec tar xzf {} -C "$RUNNER_TEMP/native-extract" \;
-          echo "NATIVE_MEDIA_ARTIFACT_DIR=$RUNNER_TEMP/native-extract/artifact" >> "$GITHUB_ENV"
+          temp_root="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            temp_root="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+          archive="$(find "$temp_root/native-bundle" -type f -name '*.tar.gz' -print -quit)"
+          [[ -n "$archive" ]] || {
+            echo "::error::Downloaded native media artifact does not contain a .tar.gz archive." >&2
+            exit 1
+          }
+          extract_root="$temp_root/native-extract"
+          mkdir -p "$extract_root"
+          tar -xzf "$archive" -C "$extract_root"
+          artifact_dir="$extract_root/artifact"
+          [[ -d "$artifact_dir" ]] || {
+            echo "::error::Native media archive does not contain artifact/." >&2
+            exit 1
+          }
+          if command -v cygpath >/dev/null 2>&1; then
+            artifact_dir="$(cygpath -m "$artifact_dir")"
+          fi
+          echo "NATIVE_MEDIA_ARTIFACT_DIR=$artifact_dir" >> "$GITHUB_ENV"
 
       - name: Verify native media bundle
         run: |
-          ART="$RUNNER_TEMP/native-extract/artifact"
+          ART="$NATIVE_MEDIA_ARTIFACT_DIR"
           missing=()
           mediasoup_mode="$(sed -n 's/^mediasoup=//p' "$ART/native-media-features" 2>/dev/null | tail -n 1)"
           [[ "$mediasoup_mode" == "0" || "$mediasoup_mode" == "1" ]] || missing+=("native-media-features")
@@ -166,7 +185,6 @@ jobs:
 
       - name: Build dSpeak Desktop
         env:
-          NATIVE_MEDIA_ARTIFACT_DIR: ${{ runner.temp }}/native-extract/artifact
           DSPEAK_TAURI_PUBLIC_KEY: ${{ secrets.DSPEAK_TAURI_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

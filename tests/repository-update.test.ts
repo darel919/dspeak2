@@ -229,6 +229,11 @@ test("desktop release updates are signed, published as latest.json, and restart 
   );
   assert.match(workflow, /mediasoup_mode=/);
   assert.match(workflow, /libraries=\(dspeak_media webrtc\)/);
+  assert.match(workflow, /temp_root="\$\(cygpath -u "\$RUNNER_TEMP"\)"/);
+  assert.match(workflow, /tar -xzf "\$archive" -C "\$extract_root"/);
+  assert.match(workflow, /artifact_dir="\$\(cygpath -m "\$artifact_dir"\)"/);
+  assert.match(workflow, /ART="\$NATIVE_MEDIA_ARTIFACT_DIR"/);
+  assert.doesNotMatch(workflow, /find .* -exec tar xzf/);
   assert.match(
     workflow,
     /NATIVE_MEDIA_WITH_MEDIASOUP=\$mediasoup_mode.*GITHUB_ENV/,
