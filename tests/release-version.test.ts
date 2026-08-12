@@ -59,3 +59,24 @@ test("mismatches identify the stale downstream manifest", () => {
   state.tauriConfig = "3.0.0-alpha.1";
   assert.deepEqual(findVersionMismatches(state), ["tauriConfig=3.0.0-alpha.1"]);
 });
+
+test("synchronization accepts Cargo lockfiles with CRLF line endings", () => {
+  const source = versionFiles();
+  const next = synchronizeVersionContents({
+    version: "3.0.0-alpha.1",
+    packageLock: source.packageLock,
+    tauriConfig: source.tauriConfig,
+    cargoToml: source.cargoToml.replaceAll("\n", "\r\n"),
+    cargoLock: source.cargoLock.replaceAll("\n", "\r\n"),
+  });
+  const state = extractVersionState({
+    packageJson: { version: "3.0.0-alpha.1" },
+    packageLock: next.packageLock,
+    tauriConfig: next.tauriConfig,
+    cargoToml: next.cargoToml,
+    cargoLock: next.cargoLock,
+  });
+
+  assert.deepEqual(findVersionMismatches(state), []);
+  assert.match(next.cargoLock, /version = "3\.0\.0-alpha\.1"/);
+});

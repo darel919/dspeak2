@@ -47,7 +47,7 @@ function replaceCargoPackageVersion(source, version) {
 
 function replaceCargoLockPackageVersion(source, version) {
   const pattern =
-    /(\[\[package\]\]\nname = "dspeak-desktop"\nversion = )"[^"]+"/g;
+    /(\[\[package\]\]\r?\nname = "dspeak-desktop"\r?\nversion = )"[^"]+"/g;
   const matches = [...source.matchAll(pattern)];
   if (matches.length !== 1)
     throw new Error(
@@ -65,7 +65,7 @@ function readCargoPackageVersion(source, fileName) {
 
 function readCargoLockPackageVersion(source) {
   const version = source.match(
-    /\[\[package\]\]\nname = "dspeak-desktop"\nversion = "([^"]+)"/,
+    /\[\[package\]\]\r?\nname = "dspeak-desktop"\r?\nversion = "([^"]+)"/,
   )?.[1];
   if (!version) throw new Error("Cargo.lock dspeak-desktop version is missing");
   return version;
