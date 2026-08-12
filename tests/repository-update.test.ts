@@ -172,12 +172,12 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.match(manifestScript, /signature/);
   assert.match(manifestScript, /windows-x86_64/);
   assert.doesNotMatch(manifestScript, /windows-aarch64/);
-  assert.equal(
-    nativeMediaProvisioner.match(
-      /gclient sync --nohooks --no-history --with_branch_heads/g,
-    )?.length,
-    3,
-  );
+  assert.equal(nativeMediaProvisioner.match(/gclient sync/g)?.length, 1);
+  assert.match(nativeMediaProvisioner, /--reset/);
+  assert.match(nativeMediaProvisioner, /--revision "src@\$WEBRTC_BRANCH"/);
+  assert.doesNotMatch(nativeMediaProvisioner, /git checkout -B/);
+  assert.doesNotMatch(nativeMediaProvisioner, /--with_branch_heads/);
+  assert.match(nativeMediaProvisioner, /export PATH="\$depot_tools:\$PATH"/);
   assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);

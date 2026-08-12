@@ -540,17 +540,26 @@ configure_webrtc_gclient() {
   )
 }
 
-run_webrtc_fetch() {
+sync_webrtc_checkout() {
+  local checkout="$1"
+
+  (
+    cd "$checkout"
+    gclient sync \
+      --nohooks \
+      --no-history \
+      --reset \
+      --revision "src@$WEBRTC_BRANCH"
+  )
+}
+
+run_webrtc_sync() {
   local checkout="$1"
   local fetch_pid
   local heartbeat_pid
   local fetch_status
 
-  (
-    configure_webrtc_gclient "$checkout"
-    cd "$checkout"
-    gclient sync --nohooks --no-history --with_branch_heads
-  ) >&2 &
+  (sync_webrtc_checkout "$checkout") >&2 &
   fetch_pid=$!
   (
     while kill -0 "$fetch_pid" 2>/dev/null; do
@@ -665,26 +674,20 @@ clone_or_update_webrtc() {
   if [[ ! -d "$source/.git" && ! -f "$source/.git" ]]; then
     if [[ -f "$checkout/.gclient" ]]; then
       printf 'Resuming the interrupted WebRTC checkout\n' >&2
-      configure_webrtc_gclient "$checkout"
-      (cd "$checkout" && gclient sync --nohooks --no-history --with_branch_heads) >&2
     elif [[ -e "$checkout" ]] && ! directory_is_empty "$checkout"; then
       fail "WebRTC checkout directory is not empty but is not a Git checkout: $checkout"
     else
       mkdir -p "$checkout"
       printf 'Fetching shallow pinned WebRTC sources for %s; the first checkout can still take several minutes\n' "$WEBRTC_REVISION" >&2
-      run_webrtc_fetch "$checkout"
     fi
+  else
+    printf 'Updating WebRTC checkout to %s\n' "$WEBRTC_BRANCH" >&2
   fi
 
-  printf 'Updating WebRTC checkout to %s\n' "$WEBRTC_BRANCH" >&2
-  (
-    cd "$source"
-    if ! git show-ref --verify --quiet "refs/remotes/$WEBRTC_BRANCH"; then
-      git fetch origin "$WEBRTC_BRANCH:refs/remotes/$WEBRTC_BRANCH" >&2
-    fi
-    git checkout -B "$WEBRTC_REVISION" "refs/remotes/$WEBRTC_BRANCH" >&2
-    gclient sync --nohooks --no-history --with_branch_heads >&2
-  )
+  configure_webrtc_gclient "$checkout" >&2
+  run_webrtc_sync "$checkout"
+  [[ -d "$source/.git" || -f "$source/.git" ]] ||
+    fail "WebRTC checkout did not produce the expected source tree: $source"
   printf '%s\n' "$source"
 }
 
@@ -723,6 +726,7 @@ build_bundle_from_source() {
   local source_bundle
   local shim_build
   local shim_library
+  local depot_tools
   local stub_source
   local stub_object
   local gn_args
@@ -746,6 +750,7 @@ build_bundle_from_source() {
 
   provision_root="$NATIVE_MEDIA_BUILD_DIR/provision"
   source_bundle="$provision_root/artifact"
+  depot_tools="$provision_root/depot_tools"
   with_mediasoup="$(native_mediasoup_enabled "$source_bundle")"
   mkdir -p "$provision_root"
   if bundle_is_complete "$source_bundle"; then
@@ -754,6 +759,7 @@ build_bundle_from_source() {
     return
   fi
   if ! download_libwebrtc_dependency "$source_bundle"; then
+    export PATH="$depot_tools:$PATH"
     webrtc_source="$(clone_or_update_webrtc "$provision_root")"
     webrtc_output="$webrtc_source/out/$WEBRTC_REVISION"
     gn_args="$WEBRTC_GN_ARGS"
