@@ -16,14 +16,91 @@ env:
   LIBMEDIASOUPCLIENT_REPOSITORY: https://github.com/versatica/libmediasoupclient.git
   LIBMEDIASOUPCLIENT_REF: webrtc-m140
   LIBMEDIASOUPCLIENT_COMMIT: b9602ba50477d9a22b673fc3e6b5abff16c02deb
+  NATIVE_MEDIA_WITH_MEDIASOUP: "0"
+  NATIVE_MEDIA_TARGETS: macos-arm64,windows-x64
 
 defaults:
   run:
     shell: bash
 
 jobs:
+  resolve-native-media:
+    name: Resolve native media bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      provision_mode: ${{ steps.resolve.outputs.provision_mode }}
+    steps:
+      - name: Checkout dSpeak history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve whether native media needs rebuilding
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_tag="webrtc-${WEBRTC_REVISION}"
+          release_json="$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json body,assets 2>/dev/null || true)"
+          provision_mode=source
+          reason="the durable native media release is unavailable"
+
+          if [[ -n "$release_json" ]]; then
+            release_body="$(jq -r '.body // ""' <<<"$release_json")"
+            baseline_commit="$(sed -n 's/^Native media source commit: //p' <<<"$release_body" | head -1)"
+
+            if [[ -z "$baseline_commit" ]]; then
+              git fetch --no-tags origin "refs/tags/$release_tag:refs/tags/$release_tag" >/dev/null 2>&1 || true
+              baseline_commit="$(git rev-parse "refs/tags/$release_tag^{commit}" 2>/dev/null || true)"
+            fi
+
+            missing_asset=""
+            IFS=',' read -r -a native_platforms <<< "$NATIVE_MEDIA_TARGETS"
+            for platform in "${native_platforms[@]}"; do
+              asset="lib-dspeak-media-${platform}.tar.gz"
+              if ! jq -e --arg asset "$asset" '.assets[]? | select(.name == $asset)' <<<"$release_json" >/dev/null; then
+                missing_asset="$asset"
+                break
+              fi
+            done
+
+            if [[ -n "$missing_asset" ]]; then
+              reason="the durable release is missing $missing_asset"
+            elif [[ -z "$baseline_commit" ]]; then
+              reason="the durable release has no native source baseline"
+            elif ! git cat-file -e "$baseline_commit^{commit}" 2>/dev/null; then
+              reason="the native source baseline is unavailable in Git"
+            elif ! git merge-base --is-ancestor "$baseline_commit" "$GITHUB_SHA"; then
+              reason="the current release is not based on the native source baseline"
+            elif ! git diff --quiet "$baseline_commit" "$GITHUB_SHA" -- \
+              desktop/scripts/provision-native-media.sh \
+              desktop/native-media/libdspeak_media; then
+              reason="native media source files changed since the last bundle"
+            elif ! grep -Fqx "libwebrtc: ${WEBRTC_REVISION} (${WEBRTC_BRANCH})" <<<"$release_body"; then
+              reason="the pinned libwebrtc input changed since the last bundle"
+            elif ! grep -Fqx "libmediasoupclient: ${LIBMEDIASOUPCLIENT_REF} (${LIBMEDIASOUPCLIENT_COMMIT})" <<<"$release_body"; then
+              reason="the pinned libmediasoupclient input changed since the last bundle"
+            elif grep -q '^Native media mode:' <<<"$release_body" &&
+              ! grep -Fqx "Native media mode: ${NATIVE_MEDIA_WITH_MEDIASOUP}" <<<"$release_body"; then
+              reason="the native transport mode changed since the last bundle"
+            elif [[ "$NATIVE_MEDIA_WITH_MEDIASOUP" != "0" ]] &&
+              grep -Fqx "The self-hosted mediasoupclient transport is disabled in these bundles." <<<"$release_body"; then
+              reason="the native transport mode changed since the legacy bundle"
+            else
+              provision_mode=download
+              reason="native media inputs are unchanged; reusing $release_tag"
+            fi
+          fi
+
+          printf 'Native media provisioning mode: %s (%s)\n' "$provision_mode" "$reason"
+          echo "provision_mode=$provision_mode" >> "$GITHUB_OUTPUT"
+
   build-dev-native-media:
     name: Build native media with desktop provisioner (${{ matrix.platform }})
+    needs: resolve-native-media
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     strategy:
@@ -44,8 +121,7 @@ jobs:
 
       - name: Provision native media with dev-desktop logic
         env:
-          NATIVE_MEDIA_PROVISION_MODE: source
-          NATIVE_MEDIA_WITH_MEDIASOUP: "0"
+          NATIVE_MEDIA_PROVISION_MODE: ${{ needs.resolve-native-media.outputs.provision_mode }}
           NATIVE_MEDIA_TARGET_TRIPLE: ${{ matrix.target_triple }}
           NATIVE_MEDIA_ARTIFACT_DIR: .ci-native-media-${{ github.run_id }}/artifact
           NATIVE_MEDIA_BUILD_DIR: .ci-native-media-${{ github.run_id }}/build
@@ -65,8 +141,10 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: build-dev-native-media
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs:
+      - resolve-native-media
+      - build-dev-native-media
+    if: needs.resolve-native-media.outputs.provision_mode == 'source'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -84,6 +162,9 @@ jobs:
 
           libwebrtc: ${{ env.WEBRTC_REVISION }} (${{ env.WEBRTC_BRANCH }})
           libmediasoupclient: ${{ env.LIBMEDIASOUPCLIENT_REF }} (${{ env.LIBMEDIASOUPCLIENT_COMMIT }})
+          Native media targets: ${{ env.NATIVE_MEDIA_TARGETS }}
+          Native media mode: ${{ env.NATIVE_MEDIA_WITH_MEDIASOUP }}
+          Native media source commit: ${{ github.sha }}
 
           Artifacts contain:
           - lib/libwebrtc.a (.lib on Windows)
