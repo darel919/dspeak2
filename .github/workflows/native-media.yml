@@ -35,7 +35,7 @@ jobs:
             target_triple: aarch64-apple-darwin
             artifact: lib-dspeak-media-macos-arm64
           - platform: windows-x64
-            runner: self-hosted
+            runner: windows-2022
             target_triple: x86_64-pc-windows-msvc
             artifact: lib-dspeak-media-windows-x64
     steps:
