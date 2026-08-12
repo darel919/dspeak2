@@ -564,7 +564,7 @@ run_webrtc_sync() {
   (
     while kill -0 "$fetch_pid" 2>/dev/null; do
       printf 'WebRTC checkout still in progress (%s on disk)\n' \
-        "$(du -sh "$checkout" 2>/dev/null | cut -f 1 || printf 'size unavailable')" >&2
+        "$(du -sh "$checkout" 2>/dev/null | cut -f 1 || printf 'size unavailable')" >&2 2>/dev/null || true
       sleep 15
     done
   ) &
@@ -737,6 +737,9 @@ build_bundle_from_source() {
   fi
   if ! target_cpu="$(native_target_cpu "$platform")"; then
     fail "No WebRTC target CPU is configured for $platform."
+  fi
+  if platform_uses_windows_libraries "$platform"; then
+    export DEPOT_TOOLS_WIN_TOOLCHAIN="${DEPOT_TOOLS_WIN_TOOLCHAIN:-0}"
   fi
   if [[ -n "$NATIVE_MEDIA_TARGET_TRIPLE" ]]; then
     local host_platform

@@ -178,6 +178,10 @@ test("desktop release updates are signed, published as latest.json, and restart 
   assert.doesNotMatch(nativeMediaProvisioner, /git checkout -B/);
   assert.doesNotMatch(nativeMediaProvisioner, /--with_branch_heads/);
   assert.match(nativeMediaProvisioner, /export PATH="\$depot_tools:\$PATH"/);
+  assert.match(
+    nativeMediaProvisioner,
+    /export DEPOT_TOOLS_WIN_TOOLCHAIN="\$\{DEPOT_TOOLS_WIN_TOOLCHAIN:-0\}"/,
+  );
   assert.doesNotMatch(nativeMediaProvisioner, /gclient sync --cache-dir/);
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);
