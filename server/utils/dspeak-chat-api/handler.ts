@@ -11,6 +11,10 @@ import {
 import { getRoomById } from "../room-authorization.ts";
 import { notificationModeFromRecord } from "../../../shared/notification-policy.ts";
 import { getCachedFile } from "../upload-cache.ts";
+import { createChatDiscoveryHandler } from "./discovery.ts";
+import { createChatFilesHandler } from "./files.ts";
+import { createChatInteractionsHandler } from "./interactions.ts";
+import { createChatMessagesHandler } from "./messages.ts";
 import type { H3Event } from "h3";
 import type {
   ChatApiDependencies,
