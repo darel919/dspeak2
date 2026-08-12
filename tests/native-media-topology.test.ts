@@ -91,6 +91,7 @@ describe("native media topology transitions", () => {
       target: "sfu",
       provider: "cloudflare-realtime",
       targetProvider: "cloudflare-realtime",
+      targetProviderId: "cloudflare-primary",
       epoch: 9,
       sourceRevision: 4,
       localPeerId: "local",
@@ -105,7 +106,13 @@ describe("native media topology transitions", () => {
       "signal",
       {
         type: "topology-ready",
-        data: { epoch: 9, target: "sfu", sourceRevision: 4 },
+        data: {
+          provider: "cloudflare-realtime",
+          providerId: "cloudflare-primary",
+          epoch: 9,
+          target: "sfu",
+          sourceRevision: 4,
+        },
       },
     ]);
   });

@@ -4,9 +4,11 @@ import {
   nativeRtpStatForTrack,
   normalizeNativeTransportStats,
 } from "../native-mediasoup-diagnostics.ts";
+import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
+import type { NativeMediasoupSfuSessionSurface } from "../types/native-mediasoup-session.ts";
+
 export class NativeMediasoupDiagnosticsMethods {
-  [key: string]: any;
-  connectionState() {
+  connectionState(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return (
         this.cloudflareSession?.connectionState?.() || {
@@ -41,7 +43,8 @@ export class NativeMediasoupDiagnosticsMethods {
   }
 
   get joinReady() {
-    return this.connectionState().ready;
+    return (this as unknown as NativeMediasoupSfuSession).connectionState()
+      .ready;
   }
 
   get transportReady() {
@@ -69,19 +72,24 @@ export class NativeMediasoupDiagnosticsMethods {
     return this.consumers.size;
   }
 
-  getState() {
+  getState(this: NativeMediasoupSfuSession) {
     return this.mediaConnectionState;
   }
 
-  waitForPending(requestId, label, timeoutMs = this.requestTimeoutMs) {
+  waitForPending(
+    this: NativeMediasoupSfuSession,
+    requestId: string,
+    label: string,
+    timeoutMs = this.requestTimeoutMs,
+  ) {
     return waitFor(this.pending, requestId, timeoutMs, label);
   }
 
-  async stats() {
+  async stats(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.stats?.() || [];
-    const transports = [] as any;
-    for (const direction of ["send", "recv"]) {
+    const transports: Array<Record<string, unknown>> = [];
+    for (const direction of ["send", "recv"] as const) {
       const transport =
         direction === "send" ? this.sendTransport : this.recvTransport;
       if (!transport) continue;
@@ -103,13 +111,13 @@ export class NativeMediasoupDiagnosticsMethods {
     return transports;
   }
 
-  async diagnosticStats() {
+  async diagnosticStats(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.diagnosticStats?.() || [];
     return this.stats();
   }
 
-  expectedInboundFlowCount() {
+  expectedInboundFlowCount(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.expectedInboundFlowCount?.() || 0;
     return [...this.consumers.values()].filter((entry) =>
@@ -117,7 +125,10 @@ export class NativeMediasoupDiagnosticsMethods {
     ).length;
   }
 
-  async mediaReadiness(expectedInbound) {
+  async mediaReadiness(
+    this: NativeMediasoupSfuSession,
+    expectedInbound: number,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return (
         this.cloudflareSession?.mediaReadiness?.(expectedInbound) || {
@@ -142,7 +153,7 @@ export class NativeMediasoupDiagnosticsMethods {
         inboundFlowing: 0,
       };
     }
-    const sampleFlow = (key, report, type) => {
+    const sampleFlow = (key: string, report: unknown, type: string) => {
       const current = nativeFlowing(report, type);
       if (
         !current ||
@@ -152,8 +163,11 @@ export class NativeMediasoupDiagnosticsMethods {
         return false;
       const previous = this.rtpSamples.get(key);
       this.rtpSamples.set(key, current);
+      if (!previous || current.timestamp == null || current.bytes == null)
+        return false;
       if (
-        !previous ||
+        previous.timestamp == null ||
+        previous.bytes == null ||
         current.timestamp <= previous.timestamp ||
         current.bytes < previous.bytes
       )
@@ -203,10 +217,10 @@ export class NativeMediasoupDiagnosticsMethods {
     };
   }
 
-  async getOutboundRtpStats() {
+  async getOutboundRtpStats(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.getOutboundRtpStats?.() || [];
-    const results = [] as any;
+    const results: Array<Record<string, unknown>> = [];
     for (const entry of this.sources.values()) {
       const producer = this.producers.get(entry.source);
       if (!producer) continue;
@@ -229,10 +243,10 @@ export class NativeMediasoupDiagnosticsMethods {
     return results;
   }
 
-  async getInboundRtpStats() {
+  async getInboundRtpStats(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.getInboundRtpStats?.() || [];
-    const results = [] as any;
+    const results: Array<Record<string, unknown>> = [];
     for (const entry of this.consumers.values()) {
       let report = null;
       try {
@@ -254,3 +268,19 @@ export class NativeMediasoupDiagnosticsMethods {
     return results;
   }
 }
+
+export interface NativeMediasoupDiagnosticsMethods extends Omit<
+  NativeMediasoupSfuSessionSurface,
+  | "stats"
+  | "diagnosticStats"
+  | "getOutboundRtpStats"
+  | "getInboundRtpStats"
+  | "mediaReadiness"
+  | "expectedInboundFlowCount"
+  | "getState"
+  | "joinReady"
+  | "transportReady"
+  | "iceConnectedBoth"
+  | "isProducing"
+  | "remoteProducersCount"
+> {}

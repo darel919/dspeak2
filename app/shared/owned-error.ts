@@ -1,6 +1,13 @@
-export function reconcileOwnedError(currentError, ownedError, nextError) {
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
+
+export function reconcileOwnedError(
+  currentError: OwnedErrorValue,
+  ownedError: OwnedErrorValue,
+  nextError: OwnedErrorValue,
+) {
   if (nextError) {
-    const normalizedError = nextError?.message || String(nextError);
+    const normalizedError =
+      nextError instanceof Error ? nextError.message : String(nextError);
     return { error: normalizedError, ownedError: normalizedError };
   }
 

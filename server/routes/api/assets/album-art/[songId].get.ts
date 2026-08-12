@@ -2,11 +2,19 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assetsRepository } from "../../../../db/repositories/assets.ts";
 
+type AlbumSong = NonNullable<
+  Awaited<ReturnType<typeof assetsRepository.getSong>>
+>;
+interface SongCacheEntry {
+  value: AlbumSong;
+  expiresAt: number;
+}
+
 const ALBUM_ART_DIR = "data/album-art";
 
 const SONG_CACHE_TTL_MS = 3_600_000;
 const SONG_CACHE_MAX = 500;
-const songCache = new Map();
+const songCache = new Map<string, SongCacheEntry>();
 
 function evictExpiredSongs() {
   const now = Date.now();
@@ -15,11 +23,12 @@ function evictExpiredSongs() {
   }
 }
 
-function cacheSong(songId, song) {
+function cacheSong(songId: string, song: AlbumSong | null): void {
+  if (!song) return;
   if (songCache.size >= SONG_CACHE_MAX) evictExpiredSongs();
   if (songCache.size >= SONG_CACHE_MAX) {
     const oldest = songCache.keys().next().value;
-    songCache.delete(oldest);
+    if (oldest) songCache.delete(oldest);
   }
   songCache.set(songId, {
     value: song,
@@ -27,7 +36,7 @@ function cacheSong(songId, song) {
   });
 }
 
-function getCachedSong(songId) {
+function getCachedSong(songId: string): AlbumSong | undefined {
   const entry = songCache.get(songId);
   if (!entry) return undefined;
   if (entry.expiresAt <= Date.now()) {
@@ -45,8 +54,11 @@ export default defineEventHandler(async (event) => {
 
   let song = getCachedSong(songId);
   if (song === undefined) {
-    song = await assetsRepository.getSong(songId);
-    cacheSong(songId, song);
+    const loadedSong = await assetsRepository.getSong(songId);
+    if (loadedSong) {
+      song = loadedSong;
+      cacheSong(songId, loadedSong);
+    }
   }
   if (!song) {
     throw createError({ statusCode: 404, statusMessage: "Song not found" });

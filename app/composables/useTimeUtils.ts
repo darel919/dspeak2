@@ -1,4 +1,4 @@
-export function formatTimeOfDay(dateString) {
+export function formatTimeOfDay(dateString: string | number | Date) {
   const date = new Date(dateString);
   let hours = date.getHours();
   const minutes = date.getMinutes();
@@ -8,7 +8,7 @@ export function formatTimeOfDay(dateString) {
   const minutesStr = minutes < 10 ? "0" + minutes : minutes;
   return `${hours}.${minutesStr}${ampm}`;
 }
-export function formatTime(dateString) {
+export function formatTime(dateString: string | number | Date) {
   const date = new Date(dateString);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();

@@ -1,5 +1,13 @@
-export function createVoicePageLifecycle({ getChannelId, leaveChannel }) {
-  let removePageHideListener = null;
+export interface VoicePageLifecycleOptions {
+  getChannelId: () => string | null;
+  leaveChannel: (channelId: string) => unknown;
+}
+
+export function createVoicePageLifecycle({
+  getChannelId,
+  leaveChannel,
+}: VoicePageLifecycleOptions) {
+  let removePageHideListener: (() => void) | null = null;
 
   function register() {
     if (typeof window === "undefined" || removePageHideListener) return;

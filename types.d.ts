@@ -1,6 +1,6 @@
 interface Error {
   code?: string;
-  details?: any;
+  details?: unknown;
   errorCode?: string;
   status?: number;
   statusCode?: number;
@@ -13,9 +13,20 @@ interface Window {
 }
 
 interface Navigator {
-  connection?: any;
+  connection?: NetworkInformation;
   deviceMemory?: number;
-  userAgentData?: any;
+  userAgentData?: NavigatorUAData;
+}
+
+interface NetworkInformation {
+  effectiveType?: string;
+  saveData?: boolean;
+  addEventListener?: EventTarget["addEventListener"];
+  removeEventListener?: EventTarget["removeEventListener"];
+}
+
+interface NavigatorUAData {
+  platform?: string;
 }
 
 interface AudioContext {
@@ -27,7 +38,7 @@ interface HTMLAudioElement {
 }
 
 interface ServiceWorkerRegistration {
-  sync?: any;
+  sync?: { register: (tag: string) => Promise<void> };
 }
 
 declare const webkitAudioContext: typeof AudioContext | undefined;

@@ -9,13 +9,17 @@ const FATAL_CLIENT_ERROR_PATTERNS = [
   /chunkloaderror/i,
 ];
 
-export function isFatalClientError(error) {
+export function isFatalClientError(error: unknown) {
+  const record =
+    error && typeof error === "object"
+      ? (error as { name?: unknown; message?: unknown })
+      : null;
   const message =
     error instanceof Error
       ? `${error.name} ${error.message}`
       : typeof error === "string"
         ? error
-        : `${error?.name || ""} ${error?.message || ""}`;
+        : `${record?.name || ""} ${record?.message || ""}`;
 
   return FATAL_CLIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }

@@ -16,11 +16,17 @@ const DEFAULT_SHARED_AUDIO_DUCKING = Object.freeze({
   effectivePercent: 100,
 });
 
-function finiteNumber(value, fallback) {
-  return Number.isFinite(value) ? value : fallback;
+import type {
+  SharedAudioAttenuationLike,
+  SharedAudioDuckingLike,
+  SharedAudioStatsLike,
+} from "./types/voice.ts";
+
+function finiteNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-export function normalizeSharedAudioStats(stats) {
+export function normalizeSharedAudioStats(stats: SharedAudioStatsLike) {
   return {
     kbps: finiteNumber(stats?.kbps, DEFAULT_SHARED_AUDIO_STATS.kbps),
     level: finiteNumber(stats?.level, DEFAULT_SHARED_AUDIO_STATS.level),
@@ -28,7 +34,9 @@ export function normalizeSharedAudioStats(stats) {
   };
 }
 
-export function normalizeSharedAudioAttenuation(attenuation) {
+export function normalizeSharedAudioAttenuation(
+  attenuation: SharedAudioAttenuationLike,
+) {
   return {
     active: attenuation?.active === true,
     effectivePercent: finiteNumber(
@@ -46,7 +54,7 @@ export function normalizeSharedAudioAttenuation(attenuation) {
   };
 }
 
-export function normalizeSharedAudioDucking(ducking) {
+export function normalizeSharedAudioDucking(ducking: SharedAudioDuckingLike) {
   return {
     active: ducking?.active === true,
     effectivePercent: finiteNumber(

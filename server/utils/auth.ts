@@ -3,6 +3,9 @@ import { readBody } from "h3";
 import { verifyAccessToken } from "../auth/middleware.ts";
 import { profileRepository } from "../db/repositories/profiles.ts";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
+import type { H3Event } from "h3";
+import type { JWTPayload } from "jose";
+import type { ProfileRepository } from "../db/repositories/profiles.ts";
 
 const SESSION_COOKIE =
   process.env.NODE_ENV === "production"
@@ -14,14 +17,18 @@ const CSRF_SECRET = process.env.DSPEAK_CSRF_SECRET;
 if (!CSRF_SECRET) {
   throw new Error("DSPEAK_CSRF_SECRET is not configured");
 }
+const requiredCsrfSecret = CSRF_SECRET;
+type AuthProfile = NonNullable<
+  Awaited<ReturnType<ProfileRepository["findById"]>>
+>;
 
-function csrfTokenForSession(userId) {
-  return createHmac("sha256", CSRF_SECRET)
+function csrfTokenForSession(userId: string): string {
+  return createHmac("sha256", requiredCsrfSecret)
     .update(`dspeak-csrf:${userId}`)
     .digest("base64url");
 }
 
-export function exposeCsrfToken(event, userId) {
+export function exposeCsrfToken(event: H3Event, userId: string): void {
   setHeader(event, "X-dSpeak-CSRF-Token", csrfTokenForSession(userId));
 }
 
@@ -35,18 +42,18 @@ function sessionCookieOptions(maxAge = SESSION_LIFETIME_SECONDS) {
   };
 }
 
-function publicUserMetadata(user) {
+function publicUserMetadata(user: AuthProfile): Record<string, string> {
   return {
     id: String(user.id),
-    name: user.name || "",
+    name: user.displayName || "",
     username: user.username || "",
     display_name: user.displayName || "",
-    handle: user.username || user.handle || "",
-    avatar: sameOriginAvatarPath(user),
+    handle: user.username || "",
+    avatar: sameOriginAvatarPath({ id: user.id, avatar: user.avatarKey }) || "",
   };
 }
 
-function isDesktopClientRequest(event) {
+function isDesktopClientRequest(event: H3Event): boolean {
   if (getHeader(event, "x-desktop-app") !== "true") return false;
   const origin = getHeader(event, "origin") || "";
   return (
@@ -56,12 +63,12 @@ function isDesktopClientRequest(event) {
 }
 
 export async function persistAuthenticatedSession(
-  event,
-  userId,
-  deviceId,
-  accessToken,
-  profileOverride = null,
-) {
+  event: H3Event,
+  userId: string,
+  deviceId: string,
+  accessToken: string,
+  profileOverride: AuthProfile | null = null,
+): Promise<{ user: { user_metadata: Record<string, string> } }> {
   if (!userId || !deviceId || !accessToken) {
     throw createError({
       statusCode: 400,
@@ -100,7 +107,7 @@ export async function persistAuthenticatedSession(
   };
 }
 
-export async function validateCsrfRequest(event) {
+export async function validateCsrfRequest(event: H3Event): Promise<boolean> {
   if (event.context.authToken) return true;
 
   const token = getCookie(event, SESSION_COOKIE);
@@ -110,6 +117,7 @@ export async function validateCsrfRequest(event) {
     const payload = await verifiedPayloadForEvent(event, token);
     if (!payload) return true;
     const supplied = getHeader(event, "x-dspeak-csrf-token") || "";
+    if (!payload.sub) return true;
     const expected = csrfTokenForSession(payload.sub);
     return (
       supplied.length === expected.length &&
@@ -120,9 +128,12 @@ export async function validateCsrfRequest(event) {
   }
 }
 
-function verifiedPayloadForEvent(event, token) {
+function verifiedPayloadForEvent(
+  event: H3Event,
+  token: string,
+): Promise<JWTPayload | null> {
   if (event.context.authToken === token && event.context.authPayload)
-    return Promise.resolve(event.context.authPayload);
+    return Promise.resolve(event.context.authPayload as JWTPayload);
   if (
     event.context.authVerification?.token === token &&
     event.context.authVerification.promise
@@ -133,7 +144,9 @@ function verifiedPayloadForEvent(event, token) {
   return promise;
 }
 
-export async function getAuthenticatedSession(event) {
+export async function getAuthenticatedSession(
+  event: H3Event,
+): Promise<{ user: string; profile: AuthProfile } | null> {
   const token = event.context.token || getCookie(event, SESSION_COOKIE);
   if (!token) return null;
 
@@ -148,7 +161,7 @@ export async function getAuthenticatedSession(event) {
   event.context.authSessionToken = token;
   event.context.authSessionPromise = (async () => {
     const payload = await verifiedPayloadForEvent(event, token);
-    if (!payload) return null;
+    if (!payload?.sub) return null;
     const profile =
       event.context.authToken === token && event.context.authProfile
         ? event.context.authProfile
@@ -161,7 +174,9 @@ export async function getAuthenticatedSession(event) {
   return event.context.authSessionPromise;
 }
 
-export async function requireAuthenticatedUser(event) {
+export async function requireAuthenticatedUser(
+  event: H3Event,
+): Promise<string> {
   const session = await getAuthenticatedSession(event);
   if (!session) {
     throw createError({
@@ -172,7 +187,9 @@ export async function requireAuthenticatedUser(event) {
   return String(session.user);
 }
 
-export async function revokeAuthenticatedSession(event) {
+export async function revokeAuthenticatedSession(
+  event: H3Event,
+): Promise<{ success: boolean }> {
   deleteCookie(event, SESSION_COOKIE, sessionCookieOptions(0));
   return { success: true };
 }

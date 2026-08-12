@@ -2,8 +2,16 @@ import {
   applyOpusAudioProfile,
   applyP2pVideoCodecPreferences,
 } from "./native-p2p-common.ts";
+import type {
+  NativeP2pConnectionState,
+  NativeP2pSignalingMesh,
+} from "./types/native-p2p.ts";
 
-export function signal(mesh, targetPeerId, signalPayload) {
+export function signal(
+  mesh: NativeP2pSignalingMesh,
+  targetPeerId: string,
+  signalPayload: Record<string, unknown>,
+) {
   return sendControl(
     mesh,
     { targetPeerId, epoch: mesh.epoch, signal: signalPayload },
@@ -12,21 +20,26 @@ export function signal(mesh, targetPeerId, signalPayload) {
 }
 
 export function sendControl(
-  mesh,
-  payload,
+  mesh: NativeP2pSignalingMesh,
+  payload: Record<string, unknown>,
   failureReason = "signaling-unavailable",
 ) {
   try {
     const delivered = mesh.sendSignal(payload);
     if (delivered === false) mesh.fail(failureReason);
     return delivered !== false;
-  } catch (error) {
+  } catch (error: unknown) {
     mesh.fail("signaling-send-failed", error);
     return false;
   }
 }
 
-export function enqueuePeerSignaling(mesh, state, operation, phase = "signal") {
+export function enqueuePeerSignaling(
+  mesh: NativeP2pSignalingMesh,
+  state: NativeP2pConnectionState,
+  operation: () => Promise<unknown>,
+  phase = "signal",
+) {
   const previous = state.signalingOperation || Promise.resolve();
   const current = previous
     .catch(() => {})
@@ -50,9 +63,12 @@ export function enqueuePeerSignaling(mesh, state, operation, phase = "signal") {
   });
 }
 
-export function schedulePeerNegotiation(mesh, state) {
+export function schedulePeerNegotiation(
+  mesh: NativeP2pSignalingMesh,
+  state: NativeP2pConnectionState,
+) {
   state.negotiationRequested = true;
-  clearTimeout(state.negotiationTimer);
+  if (state.negotiationTimer) clearTimeout(state.negotiationTimer);
   state.negotiationTimer = null;
   return enqueuePeerSignaling(
     mesh,
@@ -70,7 +86,7 @@ export function schedulePeerNegotiation(mesh, state) {
         const offer = await state.pc.createOffer();
         await state.pc.setLocalDescription({
           type: offer.type,
-          sdp: applyOpusAudioProfile(offer.sdp, mesh.usesStereoAudio()),
+          sdp: applyOpusAudioProfile(offer.sdp || "", mesh.usesStereoAudio()),
         });
         signal(mesh, state.peerId, {
           description: state.pc.localDescription,
@@ -82,13 +98,16 @@ export function schedulePeerNegotiation(mesh, state) {
       }
     },
     "negotiation",
-  ).catch((error) => {
+  ).catch((error: unknown) => {
     mesh.fail("negotiation-failed", error);
     return false;
   });
 }
 
-export function retryPeerNegotiation(mesh, state) {
+export function retryPeerNegotiation(
+  mesh: NativeP2pSignalingMesh,
+  state: NativeP2pConnectionState,
+) {
   if (state.negotiationTimer || !state.negotiationRequested) return;
   state.negotiationTimer = setTimeout(() => {
     state.negotiationTimer = null;
@@ -97,8 +116,15 @@ export function retryPeerNegotiation(mesh, state) {
   }, 50);
 }
 
-export async function receiveSignal(mesh, payload) {
-  const { fromPeerId, epoch, signal: value } = payload || {};
+export async function receiveSignal(
+  mesh: NativeP2pSignalingMesh,
+  payload: Record<string, unknown>,
+) {
+  const { fromPeerId, epoch, signal: rawValue } = payload || {};
+  const value =
+    rawValue && typeof rawValue === "object"
+      ? (rawValue as Record<string, unknown>)
+      : null;
   const signalEpoch = Number(epoch);
   if (!Number.isSafeInteger(signalEpoch) || !value) return false;
   if (signalEpoch !== mesh.epoch || !mesh.connections.has(String(fromPeerId))) {
@@ -106,6 +132,7 @@ export async function receiveSignal(mesh, payload) {
     return signalEpoch >= mesh.epoch;
   }
   const state = mesh.connections.get(String(fromPeerId));
+  if (!state) return false;
   return enqueuePeerSignaling(
     mesh,
     state,
@@ -117,17 +144,28 @@ export async function receiveSignal(mesh, payload) {
   });
 }
 
-export async function applyPeerSignal(mesh, state, signalValue) {
+export async function applyPeerSignal(
+  mesh: NativeP2pSignalingMesh,
+  state: NativeP2pConnectionState,
+  signalValue: Record<string, unknown>,
+) {
   const pc = state.pc;
   if (signalValue.renegotiationNeeded === true) {
     schedulePeerNegotiation(mesh, state);
     return;
   }
-  if (signalValue.source) {
-    const source = String(signalValue.source.source || "");
-    const trackId = String(signalValue.source.trackId || "");
+  const sourceSignal =
+    signalValue.source && typeof signalValue.source === "object"
+      ? (signalValue.source as Record<string, unknown>)
+      : null;
+  if (sourceSignal) {
+    const source = String(sourceSignal.source || "");
+    const trackId = String(sourceSignal.trackId || "");
     const sourceKey = `${state.peerId}:${trackId}`;
-    const ownerSource = signalValue.source.ownerSource || null;
+    const ownerSource =
+      typeof sourceSignal.ownerSource === "string"
+        ? sourceSignal.ownerSource
+        : null;
     mesh.remoteSources.set(sourceKey, source);
     mesh.remoteSourceOwners.set(sourceKey, ownerSource);
     let current = [...state.remoteTracks.values()].find(
@@ -166,8 +204,12 @@ export async function applyPeerSignal(mesh, state, signalValue) {
     }
     return;
   }
-  if (signalValue.sourceRemoved) {
-    const source = String(signalValue.sourceRemoved.source || "");
+  const removedSignal =
+    signalValue.sourceRemoved && typeof signalValue.sourceRemoved === "object"
+      ? (signalValue.sourceRemoved as Record<string, unknown>)
+      : null;
+  if (removedSignal) {
+    const source = String(removedSignal.source || "");
     state.retiredRemoteTracks ||= new Map();
     for (const [key, mappedSource] of mesh.remoteSources) {
       if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
@@ -191,8 +233,12 @@ export async function applyPeerSignal(mesh, state, signalValue) {
     );
     return;
   }
-  if (signalValue.sourceRestored) {
-    const source = String(signalValue.sourceRestored.source || "");
+  const restoredSignal =
+    signalValue.sourceRestored && typeof signalValue.sourceRestored === "object"
+      ? (signalValue.sourceRestored as Record<string, unknown>)
+      : null;
+  if (restoredSignal) {
+    const source = String(restoredSignal.source || "");
     state.retiredRemoteTracks ||= new Map();
     const entry =
       state.remoteTracks.get(source) || state.retiredRemoteTracks.get(source);
@@ -203,34 +249,42 @@ export async function applyPeerSignal(mesh, state, signalValue) {
     }
     return;
   }
-  if (signalValue.sourceReceiving) {
-    const source = String(signalValue.sourceReceiving.source || "");
+  const receivingSignal =
+    signalValue.sourceReceiving &&
+    typeof signalValue.sourceReceiving === "object"
+      ? (signalValue.sourceReceiving as Record<string, unknown>)
+      : null;
+  if (receivingSignal) {
+    const source = String(receivingSignal.source || "");
     await mesh.setSenderReceiving(
       state,
       source,
-      signalValue.sourceReceiving.receiving,
+      Boolean(receivingSignal.receiving),
     );
     return;
   }
-  if (signalValue.description) {
+  const description =
+    signalValue.description && typeof signalValue.description === "object"
+      ? (signalValue.description as RTCSessionDescriptionInit)
+      : null;
+  if (description) {
     state.signalingStep = "description-start";
     const readyForOffer =
       !state.makingOffer &&
       (pc.signalingState === "stable" || state.settingRemoteAnswer);
-    const collision =
-      signalValue.description.type === "offer" && !readyForOffer;
+    const collision = description.type === "offer" && !readyForOffer;
     state.ignoreOffer = !state.polite && collision;
     if (state.ignoreOffer) return;
-    state.settingRemoteAnswer = signalValue.description.type === "answer";
+    state.settingRemoteAnswer = description.type === "answer";
     try {
       if (collision && state.polite) {
         state.signalingStep = "rollback";
         await pc.setLocalDescription({ type: "rollback" });
         state.signalingStep = "remote-description";
-        await pc.setRemoteDescription(signalValue.description);
+        await pc.setRemoteDescription(description);
       } else {
         state.signalingStep = "remote-description";
-        await pc.setRemoteDescription(signalValue.description);
+        await pc.setRemoteDescription(description);
       }
       applyP2pVideoCodecPreferences(pc);
     } finally {
@@ -239,12 +293,12 @@ export async function applyPeerSignal(mesh, state, signalValue) {
     state.signalingStep = "candidates";
     for (const candidate of state.candidates.splice(0))
       await pc.addIceCandidate(candidate);
-    if (signalValue.description.type === "offer") {
+    if (description.type === "offer") {
       state.signalingStep = "answer";
       const answer = await pc.createAnswer();
       await pc.setLocalDescription({
         type: answer.type,
-        sdp: applyOpusAudioProfile(answer.sdp, mesh.usesStereoAudio()),
+        sdp: applyOpusAudioProfile(answer.sdp || "", mesh.usesStereoAudio()),
       });
       signal(mesh, state.peerId, { description: pc.localDescription });
     }
@@ -255,13 +309,17 @@ export async function applyPeerSignal(mesh, state, signalValue) {
     state.signalingStep = null;
     return;
   }
-  if (signalValue.candidate) {
+  const candidate =
+    signalValue.candidate && typeof signalValue.candidate === "object"
+      ? (signalValue.candidate as RTCIceCandidateInit)
+      : null;
+  if (candidate) {
     if (!pc.remoteDescription) {
-      state.candidates.push(signalValue.candidate);
+      state.candidates.push(candidate);
       return;
     }
     try {
-      await pc.addIceCandidate(signalValue.candidate);
+      await pc.addIceCandidate(candidate);
     } catch (error) {
       if (!state.ignoreOffer) throw error;
     }

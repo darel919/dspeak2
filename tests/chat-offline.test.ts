@@ -53,7 +53,10 @@ test("orphaned pending messages are removed locally after server deletion", () =
     chatStore,
     /await context\.dependencies\.dequeueMessage\(pendingClientId\)/,
   );
-  assert.match(chatStore, /removeMessage\(messageId, pendingClientId\)/);
+  assert.match(
+    chatStore,
+    /removeMessage\(messageId, pendingClientId \|\| undefined\)/,
+  );
 });
 
 test("connectivity recovery reconnects chat and flushes the queue", () => {
@@ -69,7 +72,7 @@ test("denied Background Sync registration is handled", () => {
   assert.match(chatStore, /async function requestBackgroundSync/);
   assert.match(
     chatStore,
-    /await registration\.sync\.register\("chat-sync-v2"\)/,
+    /await registration\.sync\?\.register\("chat-sync-v2"\)/,
   );
   assert.match(
     chatStore,
@@ -94,10 +97,10 @@ test("obsolete room teardown cannot disconnect the destination channel", () => {
 
 test("permanent HTTP rejections are not queued for repeated delivery", () => {
   assert.match(chatStore, /deliveryError\.retryable =/);
-  assert.match(chatStore, /fetchError\.retryable === false/);
+  assert.match(chatStore, /deliveryError\.retryable === false/);
   assert.match(
     chatStore,
-    /removeMessage\(pendingMessage\.id, clientMessageId\)/,
+    /context\.removeMessage\(pendingMessage!\.id, clientMessageId\)/,
   );
   assert.match(chatStore, /throw fetchError/);
   assert.doesNotMatch(chatStore, /response\.status === 429/);

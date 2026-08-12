@@ -21,9 +21,11 @@ const USER_SAFE_VOICE_ERROR_CODES = new Map([
   ],
 ]);
 
+import type { VoiceErrorLike } from "./types/shared-utilities.ts";
+
 export function voiceJoinErrorMessage(
-  error,
-  { includeDetails = false } = {} as any,
+  error: string | VoiceErrorLike | null | undefined,
+  { includeDetails = false }: { includeDetails?: boolean } = {},
 ) {
   const message =
     typeof error === "string"
@@ -32,9 +34,10 @@ export function voiceJoinErrorMessage(
         ? error.message
         : error?.message;
 
-  if (USER_SAFE_VOICE_JOIN_MESSAGES.has(message)) return message;
-  const code = error?.code || error?.cause?.code;
-  if (USER_SAFE_VOICE_ERROR_CODES.has(code))
+  if (message && USER_SAFE_VOICE_JOIN_MESSAGES.has(message)) return message;
+  const details = typeof error === "string" ? null : error;
+  const code = details?.code || details?.cause?.code;
+  if (code && USER_SAFE_VOICE_ERROR_CODES.has(code))
     return USER_SAFE_VOICE_ERROR_CODES.get(code);
   if (includeDetails && message) return `Voice connection failed: ${message}`;
   return VOICE_CONNECTION_ERROR_MESSAGE;

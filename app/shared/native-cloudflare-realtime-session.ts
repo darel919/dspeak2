@@ -2,30 +2,31 @@ import { NativeCloudflareInitializationMethods } from "./native-cloudflare-realt
 import { NativeCloudflareSourcesMethods } from "./native-cloudflare-realtime-session/sources.ts";
 import { NativeCloudflareRemoteMethods } from "./native-cloudflare-realtime-session/remote.ts";
 import { NativeCloudflareLifecycleMethods } from "./native-cloudflare-realtime-session/lifecycle.ts";
+import type {
+  NativeCloudflareSessionOptions,
+  NativeCloudflareSessionSurface,
+} from "./types/native-cloudflare-session.ts";
 export class NativeCloudflareRealtimeSession {
-  [key: string]: any;
-  constructor(
-    {
-      invoke,
-      send,
-      onRemoteTrack,
-      onRemoteTrackEnded,
-      onStateChange,
-      onError,
-      getAudioBitrate,
-      getAudioStereo,
-      getVideoSettings,
-      requestTimeoutMs = 15000,
-      sources = new Map(),
-      producers = new Map(),
-      consumers = new Map(),
-      sourceTransmission = new Map(),
-      remoteReceiving = new Map(),
-      localVideoFeeds = new Map(),
-      remoteVideoFeeds = new Map(),
-      remoteAudioFeeds = new Map(),
-    } = {} as any,
-  ) {
+  constructor({
+    invoke,
+    send,
+    onRemoteTrack,
+    onRemoteTrackEnded,
+    onStateChange,
+    onError,
+    getAudioBitrate,
+    getAudioStereo,
+    getVideoSettings,
+    requestTimeoutMs = 15000,
+    sources = new Map(),
+    producers = new Map(),
+    consumers = new Map(),
+    sourceTransmission = new Map(),
+    remoteReceiving = new Map(),
+    localVideoFeeds = new Map(),
+    remoteVideoFeeds = new Map(),
+    remoteAudioFeeds = new Map(),
+  }: NativeCloudflareSessionOptions) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeCloudflareRealtimeSession requires invoke");
     this.invoke = invoke;
@@ -68,6 +69,8 @@ export class NativeCloudflareRealtimeSession {
     this.lastReceivedConsumerParams = null;
   }
 }
+
+export interface NativeCloudflareRealtimeSession extends NativeCloudflareSessionSurface {}
 
 const nativeCloudflareMethodGroups = [
   NativeCloudflareInitializationMethods,

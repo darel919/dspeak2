@@ -18,20 +18,24 @@ export default defineEventHandler(async (event) => {
         60,
         60 * 1000,
       );
-      const body = await readBody(event);
+      const body = (await readBody(event)) as { friendId?: unknown };
       if (!body?.friendId)
         throw createError({
           statusCode: 400,
           statusMessage: "friendId is required",
         });
-      return await openDirectConversation(userId, body.friendId);
+      return await openDirectConversation(userId, String(body.friendId));
     }
     throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
-  } catch (error) {
-    if (error.statusCode || error.status) throw error;
+  } catch (error: unknown) {
+    const errorRecord =
+      error && typeof error === "object"
+        ? (error as { statusCode?: number; status?: number; message?: string })
+        : {};
+    if (errorRecord.statusCode || errorRecord.status) throw error;
     throw createError({
       statusCode: 400,
-      statusMessage: error.message || "Direct message request failed",
+      statusMessage: errorRecord.message || "Direct message request failed",
     });
   }
 });

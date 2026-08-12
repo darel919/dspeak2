@@ -1,9 +1,15 @@
 import { mediaDebug, shortMediaId } from "../media-debug.ts";
 
 import { deferred, sessionClosedError, REQUEST_TIMEOUT_MS } from "./helpers.ts";
+import type {
+  CloudflarePublication,
+  CloudflareConsumerEntry,
+  CloudflareRequestResult,
+  CloudflareSessionLike,
+  CloudflareTrackEvent,
+} from "../types/cloudflare-media.ts";
 export class CloudflareNegotiationMethods {
-  [key: string]: any;
-  initialize() {
+  initialize(this: CloudflareSessionLike) {
     if (this.initializing) return this.initializing;
     const generation = this.sessionGeneration;
     mediaDebug("cloudflare.initialize-start", { generation });
@@ -11,7 +17,7 @@ export class CloudflareNegotiationMethods {
       this.peerConnection = new RTCPeerConnection({
         iceServers: this.iceServers,
       });
-      this.peerConnection.addEventListener("track", (event) => {
+      this.peerConnection.addEventListener("track", (event: RTCTrackEvent) => {
         const mid = event.transceiver?.mid;
         const key = mid == null ? null : String(mid);
         const publication = key == null ? null : this.remoteByMid.get(key);
@@ -27,9 +33,15 @@ export class CloudflareNegotiationMethods {
           this.onStateChange?.("cloudflare", state, this.connectionState());
         } catch {}
       });
-      const result: any = await this.request("new-session", undefined);
+      const result = await this.request("new-session", undefined);
       if (generation !== this.sessionGeneration) throw sessionClosedError();
-      if (!result.sessionId)
+      if (
+        !result ||
+        typeof result !== "object" ||
+        !("sessionId" in result) ||
+        typeof result.sessionId !== "string" ||
+        !result.sessionId
+      )
         throw new Error("Cloudflare session ID is missing");
       this.sessionId = result.sessionId;
       mediaDebug("cloudflare.session-created", {
@@ -45,19 +57,28 @@ export class CloudflareNegotiationMethods {
     return initializing;
   }
 
-  queueRemoteTrack(mid, event) {
+  queueRemoteTrack(
+    this: CloudflareSessionLike,
+    mid: string,
+    event: CloudflareTrackEvent,
+  ) {
     const current = this.pendingRemoteTracks.get(mid) || [];
     if (!current.some((candidate) => candidate.track === event.track))
       current.push(event);
     this.pendingRemoteTracks.set(mid, current);
   }
 
-  handleRemoteTrack(event, publication) {
-    if (!event?.track || !publication?.trackName) return;
-    const previous = this.consumers.get(publication.trackName);
+  handleRemoteTrack(
+    this: CloudflareSessionLike,
+    event: CloudflareTrackEvent,
+    publication: CloudflarePublication,
+  ) {
+    const trackName = publication.trackName;
+    if (!event?.track || !trackName) return;
+    const previous = this.consumers.get(trackName);
     if (previous?.track === event.track) return;
     if (previous) {
-      this.consumers.delete(publication.trackName);
+      this.consumers.delete(trackName);
       try {
         this.onRemoteTrackEnded?.(previous);
       } catch {}
@@ -82,7 +103,7 @@ export class CloudflareNegotiationMethods {
       mid:
         event.transceiver?.mid == null ? null : String(event.transceiver.mid),
       receiver: event.receiver,
-      trackName: publication.trackName,
+      trackName,
       key: publication.trackName,
       track: event.track,
       receiving,
@@ -92,12 +113,12 @@ export class CloudflareNegotiationMethods {
           ? new MediaStream([event.track])
           : null),
     };
-    this.consumers.set(publication.trackName, entry);
+    this.consumers.set(trackName, entry as CloudflareConsumerEntry);
     event.track.addEventListener?.(
       "ended",
       () => {
-        if (this.consumers.get(publication.trackName) !== entry) return;
-        this.consumers.delete(publication.trackName);
+        if (this.consumers.get(trackName) !== entry) return;
+        this.consumers.delete(trackName);
         try {
           this.onRemoteTrackEnded?.(entry);
         } catch {}
@@ -109,14 +130,21 @@ export class CloudflareNegotiationMethods {
     } catch {}
   }
 
-  request(operation, body = undefined) {
+  request(
+    this: CloudflareSessionLike,
+    operation: string,
+    body: unknown = undefined,
+  ) {
     const requestId = crypto.randomUUID();
     mediaDebug("cloudflare.request", {
       operation,
       requestId: shortMediaId(requestId),
       hasBody: body != null,
     });
-    const waiting = deferred(REQUEST_TIMEOUT_MS, `Cloudflare ${operation}`);
+    const waiting = deferred<CloudflareRequestResult>(
+      REQUEST_TIMEOUT_MS,
+      `Cloudflare ${operation}`,
+    );
     this.pending.set(requestId, waiting);
     let sent = false;
     try {
@@ -146,7 +174,7 @@ export class CloudflareNegotiationMethods {
     return result;
   }
 
-  currentSession() {
+  currentSession(this: CloudflareSessionLike) {
     if (!this.peerConnection || !this.sessionId) throw sessionClosedError();
     return {
       generation: this.sessionGeneration,
@@ -154,7 +182,11 @@ export class CloudflareNegotiationMethods {
     };
   }
 
-  assertCurrentSession(peerConnection, generation) {
+  assertCurrentSession(
+    this: CloudflareSessionLike,
+    peerConnection: RTCPeerConnection,
+    generation: number,
+  ) {
     if (
       this.peerConnection !== peerConnection ||
       this.sessionGeneration !== generation ||
@@ -163,46 +195,66 @@ export class CloudflareNegotiationMethods {
       throw sessionClosedError();
   }
 
-  enqueueNegotiation(operation) {
+  enqueueNegotiation(
+    this: CloudflareSessionLike,
+    operation: () => Promise<unknown>,
+  ) {
     const task = this.negotiationQueue.then(operation);
     this.negotiationQueue = task.catch(() => {});
     return task;
   }
 
-  async handle(type, data) {
+  async handle(
+    this: CloudflareSessionLike,
+    type: string,
+    data: Record<string, unknown>,
+  ) {
     if (type === "cloudflare-response") {
-      const waiting = this.pending.get(data.requestId);
+      const requestId =
+        typeof data.requestId === "string" ? data.requestId : null;
+      if (!requestId) return false;
+      const waiting = this.pending.get(requestId);
       if (!waiting) return false;
-      if (data.error) waiting.reject(new Error(data.error));
-      else waiting.resolve(data.result || {});
+      if (typeof data.error === "string") waiting.reject(new Error(data.error));
+      else
+        waiting.resolve(
+          data.result && typeof data.result === "object"
+            ? (data.result as CloudflareRequestResult)
+            : {},
+        );
       mediaDebug("cloudflare.response", {
-        requestId: shortMediaId(data.requestId),
-        ok: !data.error,
+        requestId: shortMediaId(requestId),
+        ok: typeof data.error !== "string",
       });
       return true;
     }
     if (type === "cloudflare-publication-available") {
-      if (data.closed) {
-        this.publications.delete(data.trackName);
-        this.subscribedTrackNames.delete(data.trackName);
+      const trackName =
+        typeof data.trackName === "string" ? data.trackName : null;
+      if (!trackName) return false;
+      if (data.closed === true) {
+        this.publications.delete(trackName);
+        this.subscribedTrackNames.delete(trackName);
         for (const [mid, publication] of this.remoteByMid) {
-          if (publication.trackName === data.trackName) {
+          if (publication.trackName === trackName) {
             this.remoteByMid.delete(mid);
             this.pendingRemoteTracks.delete(mid);
           }
         }
-        const current = this.consumers.get(data.trackName);
+        const current = this.consumers.get(trackName);
         if (current) {
           try {
             this.onRemoteTrackEnded?.(current);
           } catch {}
         }
-        this.consumers.delete(data.trackName);
+        this.consumers.delete(trackName);
         return true;
       }
-      this.publications.set(data.trackName, data);
+      const publication = data as CloudflarePublication;
+      publication.trackName = trackName;
+      this.publications.set(trackName, publication);
       if (this.sessionId && this.subscriptionsStarted)
-        await this.subscribe(data, this.sessionGeneration);
+        await this.subscribe(publication, this.sessionGeneration);
       return true;
     }
     return false;

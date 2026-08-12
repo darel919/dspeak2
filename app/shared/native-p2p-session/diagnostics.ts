@@ -2,9 +2,13 @@ import {
   nativeRtpStatForTrack,
   normalizeNativeTransportStats,
 } from "../native-mediasoup-diagnostics.ts";
+import type {
+  NativeP2pSessionPeer,
+  NativeP2pSessionSurface,
+  NativeP2pTrackEntry,
+} from "../types/native-p2p-session.ts";
 export class NativeP2pSessionDiagnosticsMethods {
-  [key: string]: any;
-  async _rawStats(peer) {
+  async _rawStats(peer: NativeP2pSessionPeer) {
     try {
       return await this.invoke("media_p2p_get_stats", {
         p2pHandle: peer.handle,
@@ -15,7 +19,7 @@ export class NativeP2pSessionDiagnosticsMethods {
   }
 
   async stats() {
-    const results = [] as any;
+    const results: Array<Record<string, unknown>> = [];
     for (const peer of this.peers.values()) {
       const raw = await this._rawStats(peer);
       if (!raw) continue;
@@ -41,7 +45,7 @@ export class NativeP2pSessionDiagnosticsMethods {
   }
 
   async getOutboundRtpStats() {
-    const results = [] as any;
+    const results: Array<Record<string, unknown>> = [];
     for (const peer of this.peers.values()) {
       const raw = await this._rawStats(peer);
       for (const source of peer.sources) {
@@ -62,7 +66,7 @@ export class NativeP2pSessionDiagnosticsMethods {
   }
 
   async getInboundRtpStats() {
-    const results = [] as any;
+    const results: Array<Record<string, unknown>> = [];
     for (const peer of this.peers.values()) {
       const raw = await this._rawStats(peer);
       for (const entry of this.trackEntries.values()) {
@@ -130,7 +134,7 @@ export class NativeP2pSessionDiagnosticsMethods {
     );
   }
 
-  _applyJitterBufferConfig(entry) {
+  _applyJitterBufferConfig(entry: NativeP2pTrackEntry) {
     if (!entry || entry.kind !== "audio" || !entry.trackId || !entry.p2pHandle)
       return Promise.resolve(false);
     return this.invoke("media_p2p_set_jitter_buffer", {
@@ -138,13 +142,16 @@ export class NativeP2pSessionDiagnosticsMethods {
       trackId: entry.trackId,
       minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay || 0)),
       targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay || 0)),
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       this.onError?.(error);
       return false;
     });
   }
 
-  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 } = {} as any) {
+  setJitterBufferConfig({
+    minDelayMs = 0,
+    targetDelayMs = 20,
+  }: { minDelayMs?: number; targetDelayMs?: number } = {}) {
     this.jitterBufferMinimumDelay =
       Number.isFinite(Number(minDelayMs)) && Number(minDelayMs) >= 0
         ? Number(minDelayMs)
@@ -160,10 +167,13 @@ export class NativeP2pSessionDiagnosticsMethods {
     );
   }
 
-  async _updateSourceParameters(source, parameters) {
+  async _updateSourceParameters(
+    source: string,
+    parameters: Record<string, unknown>,
+  ) {
     const normalizedSource = String(source || "");
-    if (!Number.isFinite(parameters.maxBitrate) || parameters.maxBitrate <= 0)
-      return false;
+    const maxBitrate = Number(parameters.maxBitrate);
+    if (!Number.isFinite(maxBitrate) || maxBitrate <= 0) return false;
     await Promise.all(
       [...this.peers.values()].map((peer) =>
         this._setSourceParameters(peer, normalizedSource, parameters),
@@ -172,3 +182,5 @@ export class NativeP2pSessionDiagnosticsMethods {
     return true;
   }
 }
+
+export interface NativeP2pSessionDiagnosticsMethods extends NativeP2pSessionSurface {}

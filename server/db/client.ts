@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 const runtimeUrl = process.env.DATABASE_URL;
 const directUrl = process.env.DIRECT_DATABASE_URL;
 
-function poolSize(name, fallback) {
+function poolSize(name: string, fallback: number) {
   const value = Number(process.env[name] || fallback);
   if (!Number.isInteger(value) || value < 1 || value > 20) return fallback;
   return value;

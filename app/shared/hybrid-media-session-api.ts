@@ -1,4 +1,5 @@
 import { computed, readonly } from "vue";
+import type { HybridMediaSessionApiContext } from "./types/hybrid-media-session.ts";
 
 export function createHybridMediaSessionApi({
   activeProviderState,
@@ -60,7 +61,7 @@ export function createHybridMediaSessionApi({
   applyVolumeForTrack,
   applyVolumeForUser,
   ensureAudioElements,
-}) {
+}: HybridMediaSessionApiContext) {
   return {
     connected: readonly(connected),
     joinReady,
@@ -94,8 +95,10 @@ export function createHybridMediaSessionApi({
     topologyState: readonly(topologyState),
     topologyGraph: readonly(topologyGraph),
     activeProvider: readonly(activeProviderState),
-    lastSentClientRtpCapabilities: computed(lastSentClientRtpCapabilities),
-    lastReceivedConsumerParams: computed(lastReceivedConsumerParams),
+    lastSentClientRtpCapabilities: computed(() =>
+      lastSentClientRtpCapabilities(),
+    ),
+    lastReceivedConsumerParams: computed(() => lastReceivedConsumerParams()),
     connect,
     disconnect,
     prepareAudioPlayback,

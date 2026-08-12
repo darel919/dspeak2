@@ -12,7 +12,7 @@ import {
 import { deleteObject } from "../../../storage/r2.ts";
 import { verifyUploadCleanupToken } from "../../../storage/upload-cleanup-token.ts";
 
-async function committedUploadExists(key) {
+async function committedUploadExists(key: string): Promise<boolean> {
   const matches = await Promise.all([
     db
       .select({ id: avatars.id })
@@ -60,7 +60,7 @@ async function committedUploadExists(key) {
 
 export default defineEventHandler(async (event) => {
   await requireAuth(event);
-  const body = await readBody(event);
+  const body = (await readBody(event)) as { cleanupToken?: unknown };
   const claims = verifyUploadCleanupToken(
     body?.cleanupToken,
     event.context.user.id,

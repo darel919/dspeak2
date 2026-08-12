@@ -9,11 +9,23 @@ import {
   channelMediaPolicy,
   hasNativeCapability,
 } from "./native-media-engine-common.ts";
+import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
+import type {
+  NativeCaptureRequest,
+  NativeCapabilities,
+  NativeErrorLike,
+  NativeFeed,
+  NativeTopology,
+} from "../../shared/types/native-media.ts";
+import { resolveMediaProviderIdentity } from "../../shared/media-provider-identity.ts";
 
 const NATIVE_MEDIA_READINESS_TIMEOUT_MS = 10_000;
 const NATIVE_MEDIA_READINESS_POLL_MS = 100;
 
-function expectedInboundSources(topology, localPeerId) {
+function expectedInboundSources(
+  topology: NativeTopology,
+  localPeerId: string | null,
+) {
   return (Array.isArray(topology.peers) ? topology.peers : [])
     .filter((peer) => String(peer.peerId || "") !== String(localPeerId || ""))
     .reduce(
@@ -23,30 +35,44 @@ function expectedInboundSources(topology, localPeerId) {
     );
 }
 
-function nativeTopologyKey(topology, provider) {
-  return `${String(topology.mode || "idle")}:${topology.epoch}:${String(topology.target || "")}:${provider}:${topology.sourceRevision}`;
+function nativeTopologyKey(
+  topology: Record<string, unknown>,
+  provider: string,
+  providerId: string | null = null,
+): string {
+  return `${String(topology.mode || "idle")}:${topology.epoch}:${String(topology.target || "")}:${provider}:${providerId || "family"}:${topology.sourceRevision}`;
 }
 
-function isCurrentNativeTopology(engine, topologyKey, generation) {
+function isCurrentNativeTopology(
+  engine: NativeMediaEngine,
+  topologyKey: string,
+  generation: number,
+): boolean {
   return (
     engine.nativeTopologyKey === topologyKey &&
     engine.nativeTopologyGeneration === generation
   );
 }
 
-function assertCurrentNativeTopology(engine, topologyKey, generation) {
+function assertCurrentNativeTopology(
+  engine: NativeMediaEngine,
+  topologyKey: string,
+  generation: number,
+): void {
   if (isCurrentNativeTopology(engine, topologyKey, generation)) return;
-  const error = new Error("Native topology operation was superseded");
-  error.code = "NATIVE_TOPOLOGY_SUPERSEDED";
+  const error = Object.assign(
+    new Error("Native topology operation was superseded"),
+    { code: "NATIVE_TOPOLOGY_SUPERSEDED" },
+  );
   throw error;
 }
 
 async function waitForNativeMediaReadiness(
-  engine,
-  topology,
-  provider,
-  topologyKey,
-  generation,
+  engine: NativeMediaEngine,
+  topology: NativeTopology,
+  provider: string,
+  topologyKey: string,
+  generation: number,
 ) {
   const mediaSession =
     provider === "p2p" ? engine.nativeP2pSession : engine.nativeSession;
@@ -55,13 +81,15 @@ async function waitForNativeMediaReadiness(
     topology.localPeerId ||
     mediaSession.localPeerId ||
     engine.nativeSession?.localPeerId;
-  const topologyInbound = expectedInboundSources(topology, localPeerId);
+  const topologyInbound = expectedInboundSources(topology, localPeerId || null);
   const startedAt = Date.now();
   let latest = null;
   while (Date.now() - startedAt < NATIVE_MEDIA_READINESS_TIMEOUT_MS) {
     assertCurrentNativeTopology(engine, topologyKey, generation);
     const observedInbound = Number(
-      mediaSession.expectedInboundFlowCount?.() || 0,
+      "expectedInboundFlowCount" in mediaSession
+        ? mediaSession.expectedInboundFlowCount?.() || 0
+        : 0,
     );
     latest = await mediaSession.mediaReadiness(
       Math.max(topologyInbound, observedInbound),
@@ -77,17 +105,20 @@ async function waitForNativeMediaReadiness(
   );
 }
 
-export function handleNativeTopology(engine, topology = {} as any) {
+export function handleNativeTopology(
+  engine: NativeMediaEngine,
+  topology: NativeTopology = {},
+) {
   const mode = String(topology.mode || "idle");
   const target = String(topology.target || "");
-  const provider = String(
-    topology.provider ||
-      topology.targetProvider ||
-      topology.route?.provider ||
-      engine.nativeSession?.selectedProvider ||
-      "mediasoup",
+  const identity = resolveMediaProviderIdentity(
+    topology,
+    target === "sfu" || mode === "switching",
   );
-  const topologyKey = nativeTopologyKey(topology, provider);
+  const provider =
+    identity.provider || engine.nativeSession?.selectedProvider || "mediasoup";
+  const providerId = identity.providerId;
+  const topologyKey = nativeTopologyKey(topology, provider, providerId);
   if (engine.nativeTopologyKey === topologyKey)
     return engine.nativeTopologyOperation || Promise.resolve();
   const generation = (Number(engine.nativeTopologyGeneration) || 0) + 1;
@@ -97,7 +128,14 @@ export function handleNativeTopology(engine, topology = {} as any) {
   const operation = previousOperation
     .catch(() => {})
     .then(() =>
-      applyNativeTopology(engine, topology, provider, topologyKey, generation),
+      applyNativeTopology(
+        engine,
+        topology,
+        provider,
+        providerId,
+        topologyKey,
+        generation,
+      ),
     );
   const tracked = operation.finally(() => {
     if (engine.nativeTopologyOperation === tracked)
@@ -109,11 +147,12 @@ export function handleNativeTopology(engine, topology = {} as any) {
 }
 
 async function applyNativeTopology(
-  engine,
-  topology,
-  provider,
-  topologyKey,
-  generation,
+  engine: NativeMediaEngine,
+  topology: NativeTopology,
+  provider: string,
+  providerId: string | null,
+  topologyKey: string,
+  generation: number,
 ) {
   const mode = String(topology.mode || "idle");
   const target = String(topology.target || "");
@@ -124,6 +163,10 @@ async function applyNativeTopology(
   };
   let fallbackActivationFailed = false;
   try {
+    if (engine.nativeSession) {
+      engine.nativeSession.selectedProvider = provider;
+      engine.nativeSession.selectedProviderId = providerId;
+    }
     assertCurrentNativeTopology(engine, topologyKey, generation);
     if (direct) {
       if (
@@ -205,6 +248,8 @@ async function applyNativeTopology(
       engine.nativeSession?.signaling?.send?.({
         type: "topology-ready",
         data: {
+          provider,
+          ...(providerId ? { providerId } : {}),
           epoch: topology.epoch,
           target,
           sourceRevision: topology.sourceRevision,
@@ -212,8 +257,9 @@ async function applyNativeTopology(
       });
     }
   } catch (error) {
+    const errorLike = error as NativeErrorLike;
     if (
-      error?.code === "NATIVE_TOPOLOGY_SUPERSEDED" ||
+      errorLike.code === "NATIVE_TOPOLOGY_SUPERSEDED" ||
       !isCurrentNativeTopology(engine, topologyKey, generation)
     )
       return;
@@ -222,9 +268,10 @@ async function applyNativeTopology(
         type: "provider-failure",
         data: {
           provider,
+          ...(providerId ? { providerId } : {}),
           epoch: topology.epoch,
           sourceRevision: topology.sourceRevision,
-          reason: error?.message || "native-sfu-fallback-failed",
+          reason: errorLike.message || "native-sfu-fallback-failed",
         },
       });
     else if (direct) reportNativeP2pFailure(engine, error);
@@ -234,16 +281,19 @@ async function applyNativeTopology(
         data:
           mode === "switching"
             ? {
+                provider,
+                ...(providerId ? { providerId } : {}),
                 epoch: topology.epoch,
                 target: "sfu",
                 sourceRevision: topology.sourceRevision,
-                reason: error?.message || "native-sfu-transition-failed",
+                reason: errorLike.message || "native-sfu-transition-failed",
               }
             : {
                 provider,
+                ...(providerId ? { providerId } : {}),
                 epoch: topology.epoch,
                 sourceRevision: topology.sourceRevision,
-                reason: error?.message || "native-sfu-activation-failed",
+                reason: errorLike.message || "native-sfu-activation-failed",
               },
       });
     engine._emit("error", { source: "native-p2p", error });
@@ -251,7 +301,10 @@ async function applyNativeTopology(
   }
 }
 
-export function reportNativeP2pFailure(engine, error) {
+export function reportNativeP2pFailure(
+  engine: NativeMediaEngine,
+  error: unknown,
+): void {
   const topology = engine.nativeSession?.topologyState;
   const mode = String(topology?.mode || "");
   const target = String(topology?.target || "");
@@ -263,32 +316,40 @@ export function reportNativeP2pFailure(engine, error) {
     type: "p2p-failed",
     data: {
       epoch,
-      reason: `native-direct-path-${error?.message || "failed"}`,
+      reason: `native-direct-path-${(error as NativeErrorLike).message || "failed"}`,
     },
   });
 }
 
-export async function setTopology(engine, topology) {
+export async function setTopology(
+  engine: NativeMediaEngine,
+  topology: NativeTopology,
+) {
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) return;
   await handleNativeTopology(engine, topology);
-  const provider = String(
-    topology.provider ||
-      topology.targetProvider ||
-      topology.route?.provider ||
-      engine.nativeSession?.selectedProvider ||
-      "mediasoup",
+  const identity = resolveMediaProviderIdentity(
+    topology,
+    topology.target === "sfu" || topology.mode === "switching",
   );
-  if (engine.nativeTopologyKey !== nativeTopologyKey(topology, provider))
+  const resolvedProvider =
+    identity.provider || engine.nativeSession?.selectedProvider || "mediasoup";
+  if (
+    engine.nativeTopologyKey !==
+    nativeTopologyKey(topology, resolvedProvider, identity.providerId)
+  )
     return;
   await engine._invoke("media_set_topology", { topology }).catch(() => {});
 }
 
-export async function setIceServers(engine, iceServers) {
+export async function setIceServers(
+  engine: NativeMediaEngine,
+  iceServers: unknown[],
+) {
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) return;
   await engine._invoke("media_set_ice_servers", { iceServers }).catch(() => {});
 }
 
-export async function shutdown(engine) {
+export async function shutdown(engine: NativeMediaEngine) {
   engine._stopNativeActionPump();
   engine.nativeTopologyGeneration =
     (Number(engine.nativeTopologyGeneration) || 0) + 1;
@@ -300,9 +361,9 @@ export async function shutdown(engine) {
     await engine.nativeSession?.disconnect().catch(() => undefined);
     await engine._invoke("media_shutdown").catch(() => undefined);
   }
-  if (!engine.nativeOnly) await engine.browserEngine.shutdown();
+  if (!engine.nativeOnly) await engine.browserEngine.shutdown?.();
   await Promise.allSettled(
-    engine.unlisten.splice(0).map((unlisten) => unlisten()),
+    engine.unlisten.splice(0).map((unlisten: () => void) => unlisten()),
   );
   engine.listeners.clear();
   engine.initialized = false;
@@ -315,7 +376,10 @@ export async function shutdown(engine) {
   triggerRef(engine.remoteAudioFeedsRef);
 }
 
-export function mergeNativeCapabilities(engine, capabilities = {} as any) {
+export function mergeNativeCapabilities(
+  engine: NativeMediaEngine,
+  capabilities: NativeCapabilities = {},
+) {
   const mapping = {
     nativeRtc: "nativeRtc",
     nativeBackendReady: "nativeBackendReady",
@@ -341,7 +405,7 @@ export function mergeNativeCapabilities(engine, capabilities = {} as any) {
       engine.flags[flagName] = capabilities[nativeName] === true;
   }
   const capture = capabilities.capture || {};
-  const hasSources = (name) =>
+  const hasSources = (name: string) =>
     Array.isArray(capture[name]?.sources) && capture[name].sources.length > 0;
   if (Object.prototype.hasOwnProperty.call(capture, "microphone"))
     engine.flags.nativeMicrophone = hasSources("microphone");
@@ -359,12 +423,16 @@ export function mergeNativeCapabilities(engine, capabilities = {} as any) {
   }
 }
 
-export async function invoke(engine, command, payload = {} as any) {
+export async function invoke(
+  engine: NativeMediaEngine,
+  command: string,
+  payload: NativeCaptureRequest = {},
+): Promise<NativeCaptureRequest> {
   const tauri = await getTauri(engine);
-  return tauri.invoke(command, payload);
+  return (await tauri.invoke(command, payload)) as NativeCaptureRequest;
 }
 
-export async function configureNativeIceServers(engine) {
+export async function configureNativeIceServers(engine: NativeMediaEngine) {
   const config = engine.nativeConfig || {};
   const configuredPath = String(config.apiPath || "/api").replace(/\/$/, "");
   const serverUrl = String(config.serverUrl || "").replace(/\/$/, "");
@@ -375,8 +443,8 @@ export async function configureNativeIceServers(engine) {
   if (accessToken) engine.nativeAuthToken = accessToken;
   const authToken = accessToken || engine.nativeAuthToken;
   const endpoint = /^https?:\/\//.test(configuredPath)
-    ? `${configuredPath}/config?connectionMode=${encodeURIComponent(connectionMode)}`
-    : `${serverUrl}${configuredPath}/config?connectionMode=${encodeURIComponent(connectionMode)}` ||
+    ? `${configuredPath}/config?connectionMode=${encodeURIComponent(String(connectionMode))}`
+    : `${serverUrl}${configuredPath}/config?connectionMode=${encodeURIComponent(String(connectionMode))}` ||
       "/api/config";
   if (!endpoint) return;
   try {
@@ -392,7 +460,11 @@ export async function configureNativeIceServers(engine) {
   } catch {}
 }
 
-export async function configureNativeControl(engine, channelId, roomId) {
+export async function configureNativeControl(
+  engine: NativeMediaEngine,
+  channelId: string,
+  roomId: string,
+) {
   const config = engine.nativeConfig || {};
   const configuredPath = String(config.apiPath || "/api").replace(/\/$/, "");
   const serverUrl = String(config.serverUrl || "").replace(/\/$/, "");
@@ -441,7 +513,10 @@ export async function configureNativeControl(engine, channelId, roomId) {
   });
 }
 
-export async function loadSignalingToken(_engine?: any, _config?: any) {
+export async function loadSignalingToken(
+  _engine?: NativeMediaEngine,
+  _config?: NativeCaptureRequest,
+) {
   try {
     const { getSupabaseClient } = await import("../../utils/supabase-client");
     const sessionResult = await getSupabaseClient()?.auth.getSession();
@@ -451,7 +526,7 @@ export async function loadSignalingToken(_engine?: any, _config?: any) {
   }
 }
 
-export function syncNativeFeeds(engine) {
+export function syncNativeFeeds(engine: NativeMediaEngine) {
   if (!engine.nativeSession) return;
   const nativeVideoFeeds = [...engine.nativeSession.remoteVideoFeeds];
   const nativeAudioFeeds = [...engine.nativeSession.remoteAudioFeeds];
@@ -467,8 +542,11 @@ export function syncNativeFeeds(engine) {
           (entry) => entry.kind === "audio" && !entry.closed,
         )
       : [];
-  const mergeFeeds = (nativeFeeds, p2pFeeds) => {
-    const merged = new Map();
+  const mergeFeeds = (
+    nativeFeeds: Iterable<[string, NativeFeed]>,
+    p2pFeeds: NativeFeed[],
+  ) => {
+    const merged = new Map<string, [string, NativeFeed]>();
     for (const [key, entry] of nativeFeeds)
       merged.set(`${String(entry.userId)}:${String(entry.source)}`, [
         key,
@@ -478,7 +556,7 @@ export function syncNativeFeeds(engine) {
       const logicalKey = `${String(entry.userId)}:${String(entry.source)}`;
       const current = merged.get(logicalKey)?.[1];
       if (current?.kind === "video" && current.frame && !entry.frame) continue;
-      merged.set(logicalKey, [entry.key, entry]);
+      merged.set(logicalKey, [entry.key || logicalKey, entry]);
     }
     return new Map(merged.values());
   };
@@ -494,7 +572,7 @@ export function syncNativeFeeds(engine) {
   triggerRef(engine.remoteAudioFeedsRef);
 }
 
-export function syncLocalFeeds(engine) {
+export function syncLocalFeeds(engine: NativeMediaEngine) {
   if (!engine.nativeSession) return;
   const feeds = new Map(engine.nativeSession.localVideoFeeds);
   for (const [source, entry] of engine.nativeSession.sources || []) {
@@ -513,11 +591,11 @@ export function syncLocalFeeds(engine) {
   triggerRef(engine.localVideoFeedsRef);
 }
 
-export function startNativeActionPump(engine) {
+export function startNativeActionPump(engine: NativeMediaEngine) {
   if (engine.nativeActionPump || !engine.flags.nativeRtc) return;
   let stopped = false;
-  let timer = null;
-  const schedule = (delay) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const schedule = (delay: number) => {
     timer = setTimeout(pump, delay);
     timer?.unref?.();
   };
@@ -587,14 +665,18 @@ export function startNativeActionPump(engine) {
           await engine
             ._invoke("media_fail_connect", {
               transportPtr: action.transportPtr,
-              error: error?.message || "Native transport connection failed",
+              error:
+                (error as NativeErrorLike).message ||
+                "Native transport connection failed",
             })
             .catch(() => {});
         } else if (action?.kind === 2) {
           await engine
             ._invoke("media_fail_produce", {
               actionId: action.actionId,
-              error: error?.message || "Native producer creation failed",
+              error:
+                (error as NativeErrorLike).message ||
+                "Native producer creation failed",
             })
             .catch(() => {});
         }
@@ -615,24 +697,27 @@ export function startNativeActionPump(engine) {
   };
 }
 
-export function stopNativeActionPump(engine) {
+export function stopNativeActionPump(engine: NativeMediaEngine) {
   engine.nativeActionPump?.stop?.();
   engine.nativeActionPump = null;
 }
 
-export async function bindNativeEvents(engine) {
+export async function bindNativeEvents(engine: NativeMediaEngine) {
   const tauri = await getTauri(engine);
   if (!tauri.listen || engine.unlisten.length > 0) return;
   for (const eventName of NATIVE_EVENT_NAMES) {
-    const unlisten = await tauri.listen(eventName, ({ payload }) => {
-      const event = EVENT_ALIASES[eventName];
-      engine._emit(event, payload);
-    });
+    const unlisten = await tauri.listen(
+      eventName,
+      ({ payload }: { payload: unknown }) => {
+        const event = EVENT_ALIASES[eventName as keyof typeof EVENT_ALIASES];
+        engine._emit(event, payload);
+      },
+    );
     engine.unlisten.push(unlisten);
   }
 }
 
-export async function getTauri(engine) {
+export async function getTauri(engine: NativeMediaEngine) {
   if (engine.tauri) return engine.tauri;
   const [{ invoke }, { listen }] = await Promise.all([
     import("@tauri-apps/api/core"),

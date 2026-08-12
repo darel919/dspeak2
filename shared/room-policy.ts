@@ -1,3 +1,11 @@
+import type {
+  AttenuationInput,
+  RoomLike,
+  RoomAccent,
+  RoomPermission,
+  RoomRole,
+} from "./types/room.ts";
+
 export const ROOM_PERMISSIONS = Object.freeze([
   "room.update_identity",
   "room.update_theme",
@@ -22,7 +30,7 @@ export const ROOM_ACCENTS = Object.freeze([
   "lime",
 ]);
 
-export function canAccessRoomAdministration(room) {
+export function canAccessRoomAdministration(room: RoomLike | null | undefined) {
   return Boolean(
     room?.isOwner ||
     (room?.permissions || []).some(
@@ -83,14 +91,23 @@ export const DEFAULT_ROLE_TEMPLATES = Object.freeze([
   },
 ]);
 
-export function normalizePermissions(value) {
+export function normalizePermissions(value: unknown): RoomPermission[] {
   const permissions = Array.isArray(value) ? value : [];
   return [
-    ...new Set(permissions.filter((item) => ROOM_PERMISSIONS.includes(item))),
+    ...new Set(
+      permissions.filter(
+        (item): item is RoomPermission =>
+          typeof item === "string" &&
+          ROOM_PERMISSIONS.some((permission) => permission === item),
+      ),
+    ),
   ];
 }
 
-export function getEffectivePermissions(roles, isOwner = false) {
+export function getEffectivePermissions(
+  roles: readonly RoomRole[] | null | undefined,
+  isOwner = false,
+) {
   if (isOwner) return [...ROOM_PERMISSIONS];
   return normalizePermissions(
     (Array.isArray(roles) ? roles : []).flatMap(
@@ -99,7 +116,10 @@ export function getEffectivePermissions(roles, isOwner = false) {
   );
 }
 
-export function getHighestRolePosition(roles, isOwner = false) {
+export function getHighestRolePosition(
+  roles: readonly RoomRole[] | null | undefined,
+  isOwner = false,
+) {
   if (isOwner) return Number.POSITIVE_INFINITY;
   return Math.max(
     0,
@@ -109,7 +129,11 @@ export function getHighestRolePosition(roles, isOwner = false) {
   );
 }
 
-export function canManageRole(actorRoles, targetRole, isOwner = false) {
+export function canManageRole(
+  actorRoles: readonly RoomRole[] | null | undefined,
+  targetRole: RoomRole | null | undefined,
+  isOwner = false,
+) {
   if (isOwner) return !targetRole?.system;
   const permissions = getEffectivePermissions(actorRoles);
   return (
@@ -119,7 +143,11 @@ export function canManageRole(actorRoles, targetRole, isOwner = false) {
   );
 }
 
-export function canManageMember(actorRoles, targetRoles, isOwner = false) {
+export function canManageMember(
+  actorRoles: readonly RoomRole[] | null | undefined,
+  targetRoles: readonly RoomRole[] | null | undefined,
+  isOwner = false,
+) {
   if ((targetRoles || []).some((role) => role.system)) return false;
   if (
     !isOwner &&
@@ -133,8 +161,8 @@ export function canManageMember(actorRoles, targetRoles, isOwner = false) {
 }
 
 export function canModerateVoiceMember(
-  actorRoles,
-  targetRoles,
+  actorRoles: readonly RoomRole[] | null | undefined,
+  targetRoles: readonly RoomRole[] | null | undefined,
   isOwner = false,
 ) {
   if ((targetRoles || []).some((role) => role.system)) return false;
@@ -149,26 +177,34 @@ export function canModerateVoiceMember(
   );
 }
 
-export function normalizeRoomAccent(value) {
-  return ROOM_ACCENTS.includes(value) ? value : DEFAULT_ROOM_ACCENT;
+export function normalizeRoomAccent(value: unknown): RoomAccent {
+  return ROOM_ACCENTS.some((accent) => accent === value)
+    ? (value as RoomAccent)
+    : DEFAULT_ROOM_ACCENT;
 }
 
-export function normalizeAttenuation(value = {} as any) {
+export function normalizeAttenuation(value: AttenuationInput = {}) {
   value = value && typeof value === "object" ? value : {};
   return {
     enabled: value.enabled !== false,
     reductionPercent: boundedNumber(value.reductionPercent, 65, 0, 100),
-    sensitivity: ["relaxed", "standard", "responsive"].includes(
-      value.sensitivity,
-    )
-      ? value.sensitivity
-      : "standard",
+    sensitivity:
+      value.sensitivity === "relaxed" ||
+      value.sensitivity === "standard" ||
+      value.sensitivity === "responsive"
+        ? value.sensitivity
+        : "standard",
     attackMs: boundedNumber(value.attackMs, 120, 20, 2000),
     releaseMs: boundedNumber(value.releaseMs, 650, 50, 5000),
   };
 }
 
-function boundedNumber(value, fallback, min, max) {
+function boundedNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+) {
   const number = Number(value);
   return Number.isFinite(number) && number >= min && number <= max
     ? Math.round(number)

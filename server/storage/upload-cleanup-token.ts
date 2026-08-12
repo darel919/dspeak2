@@ -1,21 +1,22 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const CLEANUP_SECRET = process.env.DSPEAK_CSRF_SECRET;
+const configuredCleanupSecret = process.env.DSPEAK_CSRF_SECRET;
 const CLEANUP_TOKEN_LIFETIME_SECONDS = 2 * 60 * 60;
 
-if (!CLEANUP_SECRET) {
+if (!configuredCleanupSecret) {
   throw new Error("DSPEAK_CSRF_SECRET is not configured");
 }
+const CLEANUP_SECRET: string = configuredCleanupSecret;
 
-function sign(payload) {
+function sign(payload: string): string {
   return createHmac("sha256", CLEANUP_SECRET)
     .update(payload)
     .digest("base64url");
 }
 
 export function createUploadCleanupToken(
-  userId,
-  key,
+  userId: string,
+  key: string,
   expiresAt = Math.floor(Date.now() / 1000) + CLEANUP_TOKEN_LIFETIME_SECONDS,
 ) {
   const payload = Buffer.from(
@@ -25,8 +26,8 @@ export function createUploadCleanupToken(
 }
 
 export function verifyUploadCleanupToken(
-  token,
-  userId,
+  token: unknown,
+  userId: string,
   now = Math.floor(Date.now() / 1000),
 ) {
   if (typeof token !== "string") return null;

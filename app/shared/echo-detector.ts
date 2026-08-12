@@ -2,18 +2,30 @@ const ACTIVE_SAMPLES_REQUIRED = 10;
 const QUIET_SAMPLES_RESET = 8;
 const COOLDOWN_MS = 30_000;
 
-export function createEchoDetector({ onDetected }) {
+export function createEchoDetector({
+  onDetected,
+}: {
+  onDetected: (detected: boolean) => void;
+}) {
   let activeSamples = 0;
   let quietSamples = 0;
   let reported = false;
-  let cooldownTimer = null;
+  let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
 
   function resetSamples() {
     activeSamples = 0;
     quietSamples = 0;
   }
 
-  function sample({ active, echoCancellation, remoteSpeaking }) {
+  function sample({
+    active,
+    echoCancellation,
+    remoteSpeaking,
+  }: {
+    active: boolean;
+    echoCancellation: boolean;
+    remoteSpeaking: boolean;
+  }) {
     if (echoCancellation || !remoteSpeaking) {
       resetSamples();
       return;

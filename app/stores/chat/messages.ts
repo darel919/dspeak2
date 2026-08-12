@@ -1,8 +1,18 @@
-export function createChatMessageActions(context) {
+import type {
+  ChatDeliveryError,
+  ChatEventEnvelope,
+  ChatMessage,
+  ChatSendOptions,
+  ChatStoreContext,
+} from "../../shared/types/chat-store.ts";
+
+export function createChatMessageActions(context: ChatStoreContext) {
   const { error } = context;
-  async function handleWebSocketMessage(event) {
+  async function handleWebSocketMessage(event: {
+    data: unknown;
+  }): Promise<void> {
     try {
-      const data = JSON.parse(event.data);
+      const data = JSON.parse(String(event.data)) as ChatEventEnvelope;
       switch (data.type) {
         case "connected":
           break;
@@ -10,7 +20,7 @@ export function createChatMessageActions(context) {
           if (
             context.dependencies.reconcileIncomingMessage(
               context.messages.value,
-              data.data,
+              data.data as ChatMessage,
             ).inserted
           ) {
             context.messages.value = context.boundedMessages(
@@ -22,7 +32,7 @@ export function createChatMessageActions(context) {
               context.messages.value,
               true,
             );
-            context.handleNewMessageNotification(data.data);
+            context.handleNewMessageNotification(data.data as ChatMessage);
           }
           break;
         case "message_updated":
@@ -30,14 +40,14 @@ export function createChatMessageActions(context) {
             "[ChatStore] Message updated:",
             data.data,
           );
-          context.updateMessage(data.data);
+          context.updateMessage(data.data as ChatMessage);
           break;
         case "message_deleted":
           context.dependencies.debugLog(
             "[ChatStore] Message deleted:",
             data.data,
           );
-          context.removeMessage(data.data.id);
+          context.removeMessage(String(data.data?.id || ""));
           break;
         case "channel_updated":
           context.dependencies.debugLog(
@@ -57,7 +67,10 @@ export function createChatMessageActions(context) {
             "[ChatStore] User typing status:",
             data.data,
           );
-          context.updateTypingStatus(data.data.userId, data.data.isTyping);
+          context.updateTypingStatus(
+            String(data.data?.userId || ""),
+            Boolean(data.data?.isTyping),
+          );
           break;
         case "pong":
           break;
@@ -68,9 +81,17 @@ export function createChatMessageActions(context) {
             data.inRoom,
           );
           if (Array.isArray(data.inRoom)) {
-            context.onlineUsers.value = data.inRoom.map((u) =>
-              typeof u === "string" ? { id: u } : u,
-            );
+            context.onlineUsers.value = data.inRoom
+              .map((u) =>
+                typeof u === "string"
+                  ? { id: u }
+                  : u && typeof u.id === "string"
+                    ? u
+                    : null,
+              )
+              .filter(
+                (u): u is { id: string; [key: string]: unknown } => u !== null,
+              );
             context.dependencies.debugLog(
               "[ChatStore] Updated onlineUsers:",
               context.onlineUsers.value,
@@ -108,12 +129,13 @@ export function createChatMessageActions(context) {
         case "message_pinned":
         case "message_unpinned":
           context.updateMessage({
-            id: data.data.messageId,
+            id: String(data.data?.messageId || ""),
+            content: "",
             pinned: data.type === "message_pinned",
           });
           context.pinChanged.value = {
-            messageId: data.data.messageId,
-            channelId: data.data.channelId,
+            messageId: data.data?.messageId,
+            channelId: data.data?.channelId,
             pinned: data.type === "message_pinned",
             ts: Date.now(),
           };
@@ -121,11 +143,16 @@ export function createChatMessageActions(context) {
         case "channel_policy_updated":
           context.dependencies
             .useChannelsStore()
-            .applyRealtimePolicy(data.data.channelId, data.data);
+            .applyRealtimePolicy(
+              String(data.data?.channelId || ""),
+              data.data || {},
+            );
           break;
         case "notification_created":
         case "notifications_read":
-          context.dependencies.useNotificationsStore().receiveRealtime(data);
+          context.dependencies
+            .useNotificationsStore()
+            .receiveRealtime(data as never);
           break;
         default:
           context.dependencies.debugLog(
@@ -133,7 +160,7 @@ export function createChatMessageActions(context) {
             data.type,
           );
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(
         "[ChatStore] Error parsing WebSocket message:",
         err,
@@ -165,8 +192,12 @@ export function createChatMessageActions(context) {
     }
   }
 
-  async function sendMessage(channelId, content, options = {} as any) {
-    const { attachments = [] as any, replyTo = null } = options;
+  async function sendMessage(
+    channelId: string,
+    content: string,
+    options: ChatSendOptions = {},
+  ): Promise<unknown> {
+    const { attachments = [], replyTo = null } = options;
     const channelsStore = context.dependencies.useChannelsStore();
     const { canSend, slowModeSeconds } =
       channelsStore.getChannelSendPermission(channelId);
@@ -177,10 +208,10 @@ export function createChatMessageActions(context) {
       );
     }
 
-    if (slowModeSeconds > 0 && context.connected.value) {
+    if (Number(slowModeSeconds) > 0 && context.connected.value) {
       const lastMessageFromUser = context.messages.value
         .filter((m) => {
-          const senderId = m.sender?.id || m.sender;
+          const senderId = m.sender?.id;
           const auth = context.dependencies.useAuthStore();
           return String(senderId) === String(auth.getUserData()?.id);
         })
@@ -204,7 +235,7 @@ export function createChatMessageActions(context) {
       }
     }
 
-    let pendingMessage = null;
+    let pendingMessage: ChatMessage | null = null;
     try {
       const authStore = context.dependencies.useAuthStore();
       const userData = authStore.getUserData();
@@ -220,13 +251,14 @@ export function createChatMessageActions(context) {
         content,
         room_channel: channelId,
         sender: {
-          id: userData.id,
-          name: userData.name || "You",
-          email: userData.email,
+          id: String(userData.id),
+          name: typeof userData.name === "string" ? userData.name : "You",
+          email:
+            typeof userData.email === "string" ? userData.email : undefined,
         },
         created,
         updated: created,
-        read_by: [userData.id],
+        read_by: [String(userData.id)],
         client_id: clientMessageId,
         attachments,
         reply_to: replyTo,
@@ -254,7 +286,7 @@ export function createChatMessageActions(context) {
           channelId,
           content,
           ownerId: userData.id,
-          pendingId: pendingMessage.id,
+          pendingId: pendingMessage!.id,
           attachments,
           replyTo,
         };
@@ -277,7 +309,7 @@ export function createChatMessageActions(context) {
             clientMessageId,
             ownerId: userData.id,
             ...(attachments.length > 0 && { attachments }),
-            ...(replyTo && { replyTo }),
+            ...(replyTo != null ? { replyTo } : {}),
           }),
         });
 
@@ -288,18 +320,24 @@ export function createChatMessageActions(context) {
           throw deliveryError;
         }
 
-        const message = await response.json();
+        const message = (await response.json()) as ChatMessage;
 
         context.dependencies.reconcileSentMessage(
           context.messages.value,
-          pendingMessage.id,
+          pendingMessage!.id,
           message,
         );
 
         return message;
-      } catch (fetchError) {
-        if (fetchError.retryable === false) {
-          context.removeMessage(pendingMessage.id, clientMessageId);
+      } catch (fetchError: unknown) {
+        const deliveryError: ChatDeliveryError =
+          fetchError instanceof Error
+            ? (fetchError as ChatDeliveryError)
+            : Object.assign(new Error(String(fetchError)), {
+                retryable: undefined,
+              });
+        if (deliveryError.retryable === false) {
+          context.removeMessage(pendingMessage!.id, clientMessageId);
           throw fetchError;
         }
         const queuedMessage = {
@@ -307,15 +345,15 @@ export function createChatMessageActions(context) {
           channelId,
           content,
           ownerId: userData.id,
-          pendingId: pendingMessage.id,
+          pendingId: pendingMessage!.id,
           attachments,
           replyTo,
         };
         await context.dependencies.enqueueMessage(queuedMessage);
         context.requestBackgroundSync();
-        return { status: "queued-error", error: fetchError.message };
+        return { status: "queued-error", error: deliveryError.message };
       }
-    } catch (err) {
+    } catch (err: unknown) {
       if (
         pendingMessage &&
         err instanceof context.dependencies.IdbOperationError
@@ -323,27 +361,31 @@ export function createChatMessageActions(context) {
         pendingMessage.status = "failed";
         pendingMessage.error = err.message;
       } else {
-        error.value = err.message;
+        error.value = err instanceof Error ? err.message : String(err);
       }
       console.error("[ChatStore] Error sending message:", err);
       throw err;
     }
   }
 
-  function updateMessageReadBy(messageId, readBy) {
+  function updateMessageReadBy(
+    messageId: string,
+    readBy: string[] | undefined,
+  ): void {
     const messageIndex = context.messages.value.findIndex(
       (msg) => msg.id === messageId,
     );
     if (messageIndex !== -1) {
-      context.messages.value[messageIndex].read_by =
-        context.dependencies.mergeReaders(
-          context.messages.value[messageIndex].read_by,
-          readBy,
-        );
+      const message = context.messages.value[messageIndex];
+      if (!message) return;
+      message.read_by = context.dependencies.mergeReaders(
+        message.read_by,
+        readBy,
+      );
     }
   }
 
-  function updateMessage(update) {
+  function updateMessage(update: ChatMessage): void {
     const message = context.messages.value.find(
       (item) => item.id === update.id,
     );
@@ -357,7 +399,9 @@ export function createChatMessageActions(context) {
       );
   }
 
-  async function chatResponseError(response) {
+  async function chatResponseError(
+    response: Response,
+  ): Promise<ChatDeliveryError> {
     return new Error(
       context.dependencies.chatApiErrorMessage(
         await response.text(),
@@ -366,7 +410,10 @@ export function createChatMessageActions(context) {
     );
   }
 
-  async function editMessage(messageId, content) {
+  async function editMessage(
+    messageId: string,
+    content: string,
+  ): Promise<ChatMessage> {
     const response = await fetch(
       `${context.config.public.apiPath}/chat/message/edit`,
       {
@@ -377,12 +424,12 @@ export function createChatMessageActions(context) {
       },
     );
     if (!response.ok) throw await context.chatResponseError(response);
-    const result = await response.json();
+    const result = (await response.json()) as ChatMessage;
     context.updateMessage(result);
     return result;
   }
 
-  async function deleteMessage(messageId) {
+  async function deleteMessage(messageId: string): Promise<void> {
     const targetMessage = context.messages.value.find(
       (message) => message.id === messageId,
     );
@@ -399,19 +446,20 @@ export function createChatMessageActions(context) {
     );
     if (!response.ok) {
       if (response.status === 404 && isPending) {
-        const pendingClientId =
-          context.dependencies.pendingMessageClientId(targetMessage);
+        const pendingClientId = context.dependencies.pendingMessageClientId(
+          targetMessage!,
+        );
         if (pendingClientId) {
           try {
             await context.dependencies.dequeueMessage(pendingClientId);
-          } catch (queueError) {
+          } catch (queueError: unknown) {
             console.warn(
               "[ChatStore] Unable to remove stale message from delivery queue:",
               queueError,
             );
           }
         }
-        context.removeMessage(messageId, pendingClientId);
+        context.removeMessage(messageId, pendingClientId || undefined);
         return;
       }
       throw await context.chatResponseError(response);
@@ -419,7 +467,7 @@ export function createChatMessageActions(context) {
     context.removeMessage(messageId, clientId);
   }
 
-  async function fetchMessageHistory(messageId) {
+  async function fetchMessageHistory(messageId: string): Promise<unknown> {
     const response = await fetch(
       `${context.config.public.apiPath}/chat/message/history?messageId=${encodeURIComponent(messageId)}`,
       { credentials: "include" },
@@ -428,7 +476,7 @@ export function createChatMessageActions(context) {
     return response.json();
   }
 
-  function removeMessage(messageId, clientId = "") {
+  function removeMessage(messageId: string, clientId = ""): void {
     context.dependencies.removeMessageAliases(
       context.messages.value,
       messageId,
@@ -439,7 +487,7 @@ export function createChatMessageActions(context) {
     if (!userId || !channelId) return;
     context.setChannelMessages(channelId, context.messages.value, true);
     context.dependencies
-      .cacheChannelMessages(userId, channelId, context.messages.value)
+      .cacheChannelMessages(String(userId), channelId, context.messages.value)
       .catch((cacheError) => {
         console.warn(
           "[ChatStore] Unable to persist deleted message cache:",
@@ -448,7 +496,7 @@ export function createChatMessageActions(context) {
       });
   }
 
-  function updateTypingStatus(userId, isTyping) {
+  function updateTypingStatus(userId: string, isTyping: boolean): void {
     const authStore = context.dependencies.useAuthStore();
     const userData = authStore.getUserData();
 
@@ -458,7 +506,7 @@ export function createChatMessageActions(context) {
       currentUser: userData?.id,
     });
 
-    if (userData && userId === userData.id) {
+    if (userData && userId === String(userData.id)) {
       context.dependencies.debugLog(
         "[ChatStore] Ignoring typing status for current user",
       );

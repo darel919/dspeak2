@@ -15,8 +15,8 @@ export const TOAST_ICONS = Object.freeze({
 });
 
 export const TOAST_CLASSES = Object.freeze({
-  success: "alert-success",
-  error: "alert-error",
-  warning: "alert-warning",
-  info: "alert-info",
+  success: "metro-status--success",
+  error: "metro-status--error",
+  warning: "metro-status--warning",
+  info: "metro-status--info",
 });

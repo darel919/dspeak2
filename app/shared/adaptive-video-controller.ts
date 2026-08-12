@@ -3,13 +3,30 @@ import {
   VIDEO_RESOLUTIONS,
   VIDEO_SCALE_STEPS,
 } from "./video-settings.ts";
+import type {
+  AdaptiveFrameCounters,
+  AdaptiveTrackConstraints,
+  AdaptiveVideoEntry,
+  AdaptiveVideoReport,
+  AdaptiveVideoSample,
+  AdaptiveVideoSettings,
+  AdaptiveVideoState,
+} from "./types/adaptive-media.ts";
 
 const ADAPTIVE_FRAME_RATES = Object.freeze([25, 30, 50, 60]);
 
-export function updateAdaptiveVideoState(state, sample, settings) {
+export function updateAdaptiveVideoState(
+  state: AdaptiveVideoState | null,
+  sample: AdaptiveVideoSample,
+  settings: AdaptiveVideoSettings,
+) {
   const priority = settings.qualityPriority;
   const targetFrameRate = Number(settings.frameRate) || 30;
-  const scale = VIDEO_SCALE_STEPS.includes(state?.scale) ? state.scale : 1;
+  const currentScale = state?.scale;
+  const scale =
+    currentScale !== undefined && VIDEO_SCALE_STEPS.includes(currentScale)
+      ? currentScale
+      : 1;
   const frameRate = Math.min(
     targetFrameRate,
     Number(state?.frameRate) || targetFrameRate,
@@ -45,7 +62,7 @@ export function updateAdaptiveVideoState(state, sample, settings) {
             VIDEO_SCALE_STEPS.length - 1,
             VIDEO_SCALE_STEPS.indexOf(scale) + 1,
           )
-        ];
+        ] ?? scale;
     }
   } else if (healthySamples >= 6) {
     if (priority === "resolution") {
@@ -55,7 +72,8 @@ export function updateAdaptiveVideoState(state, sample, settings) {
       nextFrameRate = higherRates[0] || frameRate;
     } else {
       nextScale =
-        VIDEO_SCALE_STEPS[Math.max(0, VIDEO_SCALE_STEPS.indexOf(scale) - 1)];
+        VIDEO_SCALE_STEPS[Math.max(0, VIDEO_SCALE_STEPS.indexOf(scale) - 1)] ??
+        scale;
     }
   }
 
@@ -75,14 +93,26 @@ export function createAdaptiveVideoController({
   getSettings,
   intervalMs = 2000,
   onError,
+}: {
+  apply: (
+    entry: Record<string, unknown>,
+    state: AdaptiveVideoState,
+    settings: AdaptiveVideoSettings,
+  ) => Promise<void> | void;
+  getReport: (
+    source: string,
+  ) => Promise<Map<string, Record<string, unknown>> | null>;
+  getSettings: (source: string) => AdaptiveVideoSettings;
+  intervalMs?: number;
+  onError?: (error: unknown) => void;
 }) {
-  let active = null;
-  let timer = null;
-  let previous = null;
-  let state = null;
+  let active: AdaptiveVideoEntry | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let previous: AdaptiveFrameCounters | null = null;
+  let state: AdaptiveVideoState | null = null;
 
   function stop() {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     timer = null;
     active = null;
     previous = null;
@@ -100,7 +130,7 @@ export function createAdaptiveVideoController({
     try {
       const report = await getReport(active.source);
       const outbound = report
-        ? [...report.values()].find(
+        ? ([...report.values()] as AdaptiveVideoReport[]).find(
             (stat) =>
               stat.type === "outbound-rtp" &&
               !stat.isRemote &&
@@ -109,13 +139,13 @@ export function createAdaptiveVideoController({
         : null;
       if (outbound) {
         const frameTimeMs = calculateFrameTimeMs(
-          outbound.totalEncodeTime,
-          outbound.framesEncoded,
+          Number(outbound.totalEncodeTime),
+          Number(outbound.framesEncoded),
           previous,
         );
         previous = {
-          totalEncodeTime: outbound.totalEncodeTime,
-          framesEncoded: outbound.framesEncoded,
+          totalEncodeTime: Number(outbound.totalEncodeTime),
+          framesEncoded: Number(outbound.framesEncoded),
         };
         const settings = getSettings(active.source);
         const next = updateAdaptiveVideoState(
@@ -139,11 +169,12 @@ export function createAdaptiveVideoController({
     if (active) schedule();
   }
 
-  function start(entry) {
+  function start(entry: AdaptiveVideoEntry) {
     stop();
     const trackSettings = entry.track.getSettings?.() || {};
     const requested = getSettings(entry.source);
-    const resolution = VIDEO_RESOLUTIONS[requested.resolution];
+    const resolution =
+      VIDEO_RESOLUTIONS[requested.resolution as keyof typeof VIDEO_RESOLUTIONS];
     active = {
       ...entry,
       ceilingWidth:
@@ -169,9 +200,14 @@ export function createAdaptiveVideoController({
   return { start, stop };
 }
 
-export function adaptiveTrackConstraints(entry, state, settings) {
+export function adaptiveTrackConstraints(
+  entry: AdaptiveVideoEntry,
+  state: AdaptiveVideoState,
+  settings: AdaptiveVideoSettings,
+): AdaptiveTrackConstraints {
   const scale = settings.qualityPriority === "framerate" ? state.scale : 1;
-  const resolution = VIDEO_RESOLUTIONS[settings.resolution];
+  const resolution =
+    VIDEO_RESOLUTIONS[settings.resolution as keyof typeof VIDEO_RESOLUTIONS];
   const ceilingWidth = Math.min(
     Number(entry.ceilingWidth) || Infinity,
     Number(resolution?.width) || Infinity,
@@ -180,7 +216,7 @@ export function adaptiveTrackConstraints(entry, state, settings) {
     Number(entry.ceilingHeight) || Infinity,
     Number(resolution?.height) || Infinity,
   );
-  const constraints: any = {
+  const constraints: AdaptiveTrackConstraints = {
     frameRate: {
       ideal: state.frameRate,
       max: state.frameRate,

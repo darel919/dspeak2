@@ -6,20 +6,38 @@ import {
   DeleteObjectCommand,
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
+import type { ListObjectsV2CommandOutput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type {
+  R2Body,
+  R2ObjectIdentifiers,
+  R2ObjectRecord,
+  R2ObjectTypeName,
+  R2UploadResult,
+  UploadValidationResult,
+} from "../types/storage.ts";
+
+function requiredEnvironment(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required for R2 storage`);
+  return value;
+}
 
 const r2Client = new S3Client({
   region: "auto",
-  endpoint: `https://${process.env.CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  endpoint: `https://${requiredEnvironment("CF_R2_ACCOUNT_ID")}.r2.cloudflarestorage.com`,
   credentials: {
-    accessKeyId: process.env.CF_R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.CF_R2_SECRET_ACCESS_KEY,
+    accessKeyId: requiredEnvironment("CF_R2_ACCESS_KEY_ID"),
+    secretAccessKey: requiredEnvironment("CF_R2_SECRET_ACCESS_KEY"),
   },
 });
 
 const BUCKET = process.env.CF_R2_BUCKET_NAME || "dspeak";
 
-export function generateObjectKey(type, identifiers) {
+export function generateObjectKey(
+  type: R2ObjectTypeName,
+  identifiers: R2ObjectIdentifiers,
+): string {
   const { userId, roomId, channelId, messageId, objectId, contentHash } =
     identifiers;
   switch (type) {
@@ -41,11 +59,11 @@ export function generateObjectKey(type, identifiers) {
 }
 
 export async function createUploadUrl(
-  type,
-  identifiers,
-  contentType,
+  type: R2ObjectTypeName,
+  identifiers: R2ObjectIdentifiers,
+  contentType: string,
   maxSizeBytes = 50 * 1024 * 1024,
-) {
+): Promise<R2UploadResult> {
   const key = generateObjectKey(type, identifiers);
   const command = new PutObjectCommand({
     Bucket: BUCKET,
@@ -56,7 +74,12 @@ export async function createUploadUrl(
   return { uploadUrl, key, expiresIn: 3600 };
 }
 
-export async function putObject(key, body, contentType, contentLength) {
+export async function putObject(
+  key: string,
+  body: R2Body,
+  contentType: string,
+  contentLength: number | null | undefined,
+): Promise<void> {
   const command = new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
@@ -67,21 +90,24 @@ export async function putObject(key, body, contentType, contentLength) {
   await r2Client.send(command);
 }
 
-export async function createDownloadUrl(key, expiresIn = 3600) {
+export async function createDownloadUrl(
+  key: string,
+  expiresIn = 3600,
+): Promise<string> {
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
   return getSignedUrl(r2Client, command, { expiresIn });
 }
 
-export async function deleteObject(key) {
+export async function deleteObject(key: string): Promise<void> {
   const command = new DeleteObjectCommand({ Bucket: BUCKET, Key: key });
   await r2Client.send(command);
 }
 
-export async function listObjects(prefix) {
-  const objects = [] as any;
-  let continuationToken;
+export async function listObjects(prefix: string): Promise<R2ObjectRecord[]> {
+  const objects: R2ObjectRecord[] = [];
+  let continuationToken: string | undefined;
   do {
-    const result = await r2Client.send(
+    const result: ListObjectsV2CommandOutput = await r2Client.send(
       new ListObjectsV2Command({
         Bucket: BUCKET,
         Prefix: prefix,
@@ -101,7 +127,7 @@ export async function listObjects(prefix) {
   return objects;
 }
 
-export async function objectExists(key) {
+export async function objectExists(key: string): Promise<boolean> {
   try {
     await getObjectMetadata(key);
     return true;
@@ -110,7 +136,9 @@ export async function objectExists(key) {
   }
 }
 
-export async function getObjectMetadata(key) {
+export async function getObjectMetadata(
+  key: string,
+): Promise<{ contentLength: number; contentType: string }> {
   const command = new HeadObjectCommand({ Bucket: BUCKET, Key: key });
   const result = await r2Client.send(command);
   return {
@@ -147,11 +175,11 @@ export const ALLOWED_MIME_TYPES = {
 };
 
 export function validateUpload(
-  type,
-  mimeType,
-  size,
+  type: R2ObjectTypeName,
+  mimeType: string,
+  size: unknown,
   maxSizeBytes = 50 * 1024 * 1024,
-) {
+): UploadValidationResult {
   const allowed = ALLOWED_MIME_TYPES[type];
   if (!allowed?.includes(mimeType)) {
     return {

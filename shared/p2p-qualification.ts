@@ -10,14 +10,17 @@ export const FAILBACK_STABILITY_WINDOW_MS = 300000; // 5 minutes
 
 export const CIRCUIT_BREAKER_COOLDOWNS_MS = [30000, 60000, 120000, 300000];
 
-export function isVideoActive(sources) {
+export function isVideoActive(sources: readonly P2PSource[]) {
   for (const source of sources) {
     if (source === "camera" || source === "screen") return true;
   }
   return false;
 }
 
-export function getMaxParticipants(connectionMode, hasVideo) {
+export function getMaxParticipants(
+  connectionMode: "auto" | "direct",
+  hasVideo: boolean,
+) {
   if (connectionMode === "direct") {
     return hasVideo
       ? DIRECT_VIDEO_MAX_PARTICIPANTS
@@ -29,11 +32,11 @@ export function getMaxParticipants(connectionMode, hasVideo) {
 }
 
 export function checkEligibility(
-  connectionMode,
-  participantCount,
-  hasVideo,
-  providerHealth,
-  requiredSources = [] as any,
+  connectionMode: "auto" | "direct",
+  participantCount: number,
+  hasVideo: boolean,
+  providerHealth: ProviderHealth,
+  requiredSources: readonly string[] = [],
 ) {
   const maxParticipants = getMaxParticipants(connectionMode, hasVideo);
 
@@ -57,10 +60,7 @@ export function checkEligibility(
   }
 
   if (connectionMode !== "direct") {
-    for (const [providerId, health] of Object.entries(providerHealth) as [
-      string,
-      any,
-    ][]) {
+    for (const [providerId, health] of Object.entries(providerHealth)) {
       if (!health.healthy) {
         return { eligible: false, reason: `${providerId}-unhealthy` };
       }
@@ -70,7 +70,7 @@ export function checkEligibility(
   return { eligible: true };
 }
 
-export function classifyICECandidate(candidate) {
+export function classifyICECandidate(candidate: IceCandidate) {
   if (!candidate) return "unknown";
   if (candidate.type === "host") return "host";
   if (candidate.type === "srflx") return "srflx";
@@ -79,15 +79,19 @@ export function classifyICECandidate(candidate) {
   return "unknown";
 }
 
-export function getPreferredCandidateType(candidates) {
+export function getPreferredCandidateType(candidates: readonly IceCandidate[]) {
   for (const c of candidates) {
+    if (!c) continue;
     if (c.type === "host") return "host";
   }
   for (const c of candidates) {
+    if (!c) continue;
     if (c.type === "srflx") return "srflx";
   }
   for (const c of candidates) {
+    if (!c) continue;
     if (c.type === "relay") return "relay";
   }
   return "unknown";
 }
+import type { IceCandidate, P2PSource, ProviderHealth } from "./types/media.ts";

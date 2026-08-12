@@ -29,10 +29,54 @@ export const NATIVE_CAPTURE_BACKENDS = Object.freeze([
   "wasapiProcessLoopback",
 ]);
 
+type CaptureKind = (typeof DESKTOP_CAPTURE_KINDS)[number];
+type CaptureMode = (typeof DESKTOP_CAPTURE_MODES)[number];
+type UnknownRecord = Record<string, unknown>;
+interface CaptureSource {
+  sourceId: string;
+  sourceType: CaptureKind;
+  sourceKey: string;
+  title: string;
+  appName: string | null;
+  appId: string | null;
+  displayId: string | null;
+  thumbnail: string | null;
+  bounds: { x: number; y: number; width: number; height: number } | null;
+  capabilities: {
+    video: boolean;
+    audio: boolean;
+    stereo: boolean;
+    channels: number | null;
+    sampleRate: number | null;
+  };
+  selfExcluded: boolean;
+  available: boolean;
+  reason: string | null;
+}
+export interface DesktopCaptureSelection {
+  source: { sourceId: string; sourceType: CaptureKind; sourceKey: string };
+  sourceId: string;
+  sourceType: CaptureKind;
+  sourceKey: string;
+  mode: CaptureMode;
+  excludeSelf: true;
+  excludeSelfAudio: true;
+  video: UnknownRecord;
+  audio: UnknownRecord;
+  [key: string]: unknown;
+}
+interface NativeCaptureCapability {
+  available: boolean;
+  reason: string;
+  sources: unknown[];
+}
+
 const DEFAULT_NATIVE_CAPTURE_REASON =
   "Native capture support was not reported by the platform backend.";
 
-function normalizeNativeCaptureCapability(value) {
+function normalizeNativeCaptureCapability(
+  value: UnknownRecord | null | undefined,
+) {
   return {
     available: value?.available === true,
     reason:
@@ -43,26 +87,40 @@ function normalizeNativeCaptureCapability(value) {
   };
 }
 
-export function normalizeNativeCaptureCapabilities(value) {
-  const capture = value?.capture;
+export function normalizeNativeCaptureCapabilities(
+  value: UnknownRecord | null | undefined,
+) {
+  const capture =
+    value?.capture && typeof value.capture === "object"
+      ? (value.capture as UnknownRecord)
+      : {};
   return Object.fromEntries(
     NATIVE_CAPTURE_BACKENDS.map((backend) => [
       backend,
-      normalizeNativeCaptureCapability(capture?.[backend]),
+      normalizeNativeCaptureCapability(
+        capture[backend] && typeof capture[backend] === "object"
+          ? (capture[backend] as UnknownRecord)
+          : null,
+      ),
     ]),
-  );
+  ) as Record<string, NativeCaptureCapability>;
 }
 
-export function getNativeCaptureCapability(value, mode = "video") {
+export function getNativeCaptureCapability(
+  value: UnknownRecord | null | undefined,
+  mode: "video" | "audio" = "video",
+) {
   const capabilities = normalizeNativeCaptureCapabilities(value);
   const backends =
     mode === "audio"
       ? ["screenAudio", "systemAudio", "wasapiProcessLoopback"]
       : ["screenCaptureKit", "pipewirePortal", "x11", "windowsGraphicsCapture"];
-  const available = backends.find((backend) => capabilities[backend].available);
+  const available = backends.find(
+    (backend) => capabilities[backend]?.available === true,
+  );
   if (available) return capabilities[available];
   const reasons = backends
-    .map((backend) => capabilities[backend].reason)
+    .map((backend) => capabilities[backend]?.reason || "")
     .filter((reason, index, all) => all.indexOf(reason) === index);
   return {
     available: false,
@@ -78,10 +136,16 @@ export const DESKTOP_CAPTURE_ERROR_CODES = Object.freeze({
   NATIVE_UNSUPPORTED: "DESKTOP_CAPTURE_NATIVE_UNSUPPORTED",
 });
 export class DesktopCaptureError extends Error {
-  [key: string]: any;
+  override code: string;
+  operation: string;
+  override details: unknown;
   constructor(
-    message,
-    { code, operation = "capture", details = null } = {} as any,
+    message: string,
+    {
+      code,
+      operation = "capture",
+      details = null,
+    }: { code?: string; operation?: string; details?: unknown } = {},
   ) {
     super(message);
     this.name = "DesktopCaptureError";
@@ -91,31 +155,43 @@ export class DesktopCaptureError extends Error {
   }
 }
 
-export function captureSourceKey(sourceType, sourceId) {
+export function captureSourceKey(sourceType: string, sourceId: string) {
   return `${sourceType}:${sourceId}`;
 }
 
-export function isDesktopCaptureSelection(value) {
+export function isDesktopCaptureSelection(
+  value: unknown,
+): value is DesktopCaptureSelection {
+  const record =
+    value && typeof value === "object" ? (value as UnknownRecord) : null;
   return Boolean(
-    value &&
-    typeof value === "object" &&
-    typeof value.sourceId === "string" &&
-    DESKTOP_CAPTURE_KINDS.includes(value.sourceType) &&
-    typeof value.sourceKey === "string" &&
-    value.sourceKey === captureSourceKey(value.sourceType, value.sourceId) &&
-    DESKTOP_CAPTURE_MODES.includes(value.mode) &&
-    value.audio?.channels === 2 &&
-    value.audio?.sampleRate === 48000 &&
-    value.audio?.stereo === true &&
-    value.audio?.excludeSelfAudio === true &&
-    value.excludeSelf === true &&
-    value.source?.sourceId === value.sourceId &&
-    value.source?.sourceType === value.sourceType &&
-    value.source?.sourceKey === value.sourceKey,
+    record &&
+    typeof record.sourceId === "string" &&
+    typeof record.sourceType === "string" &&
+    DESKTOP_CAPTURE_KINDS.includes(record.sourceType as CaptureKind) &&
+    typeof record.sourceKey === "string" &&
+    record.sourceKey === captureSourceKey(record.sourceType, record.sourceId) &&
+    typeof record.mode === "string" &&
+    DESKTOP_CAPTURE_MODES.includes(record.mode as CaptureMode) &&
+    record.audio &&
+    typeof record.audio === "object" &&
+    (record.audio as UnknownRecord).channels === 2 &&
+    (record.audio as UnknownRecord).sampleRate === 48000 &&
+    (record.audio as UnknownRecord).stereo === true &&
+    (record.audio as UnknownRecord).excludeSelfAudio === true &&
+    record.excludeSelf === true &&
+    record.source &&
+    typeof record.source === "object" &&
+    (record.source as UnknownRecord).sourceId === record.sourceId &&
+    (record.source as UnknownRecord).sourceType === record.sourceType &&
+    (record.source as UnknownRecord).sourceKey === record.sourceKey,
   );
 }
 
-export function assertDesktopCaptureSelection(value, operation = "capture") {
+export function assertDesktopCaptureSelection(
+  value: unknown,
+  operation = "capture",
+): DesktopCaptureSelection {
   if (isDesktopCaptureSelection(value)) return value;
   throw new DesktopCaptureError(
     "The desktop capture selection is invalid or incomplete.",
@@ -127,8 +203,8 @@ export function assertDesktopCaptureSelection(value, operation = "capture") {
 }
 
 export function assertDesktopCaptureMode(
-  value,
-  allowedModes,
+  value: unknown,
+  allowedModes: CaptureMode | CaptureMode[],
   operation = "capture",
 ) {
   const selection = assertDesktopCaptureSelection(value, operation);
@@ -145,37 +221,55 @@ export function assertDesktopCaptureMode(
 }
 
 export function nativeCaptureFailure(
-  error,
-  { operation = "capture", selection = null } = {} as any,
+  error: unknown,
+  {
+    operation = "capture",
+    selection = null,
+  }: { operation?: string; selection?: unknown } = {},
 ) {
   if (error instanceof DesktopCaptureError) return error;
-  const details =
-    error && typeof error === "object" && error.details ? error.details : null;
+  const errorRecord =
+    error && typeof error === "object" ? (error as UnknownRecord) : null;
+  const details = errorRecord?.details || null;
   return new DesktopCaptureError(
-    error?.message || "Native desktop capture is unavailable.",
+    typeof errorRecord?.message === "string"
+      ? errorRecord.message
+      : "Native desktop capture is unavailable.",
     {
-      code: error?.code || DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNAVAILABLE,
-      operation: error?.operation || operation,
+      code:
+        typeof errorRecord?.code === "string"
+          ? errorRecord.code
+          : DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNAVAILABLE,
+      operation:
+        typeof errorRecord?.operation === "string"
+          ? errorRecord.operation
+          : operation,
       details: details || (selection ? { selection } : null),
     },
   );
 }
 
-export function desktopCaptureRequest(selection, options = {} as any) {
-  assertDesktopCaptureSelection(selection, options.operation || "capture");
+export function desktopCaptureRequest(
+  selection: unknown,
+  options: { operation?: string; roomBitrateBps?: number } = {},
+) {
+  const validatedSelection = assertDesktopCaptureSelection(
+    selection,
+    options.operation || "capture",
+  );
   const requestedBitrate = Number(
-    options.roomBitrateBps ?? selection.audio?.maxBitrateBps,
+    options.roomBitrateBps ?? validatedSelection.audio?.maxBitrateBps,
   );
   const roomBitrateBps =
     Number.isFinite(requestedBitrate) && requestedBitrate > 0
       ? Math.floor(requestedBitrate)
       : null;
   const captureSelection = {
-    ...selection,
+    ...validatedSelection,
     ...(roomBitrateBps
       ? {
           roomBitrateBps,
-          audio: { ...selection.audio, maxBitrateBps: roomBitrateBps },
+          audio: { ...validatedSelection.audio, maxBitrateBps: roomBitrateBps },
         }
       : {}),
   };
@@ -194,33 +288,40 @@ export function desktopCaptureRequest(selection, options = {} as any) {
   };
 }
 
-export function normalizeCaptureSource(source) {
-  if (!source || typeof source !== "object") return null;
-  const sourceType = DESKTOP_CAPTURE_KINDS.includes(source.sourceType)
-    ? source.sourceType
-    : DESKTOP_CAPTURE_KINDS.includes(source.kind)
-      ? source.kind
-      : null;
-  const sourceId = String(source.sourceId || source.id || "");
+export function normalizeCaptureSource(source: unknown): CaptureSource | null {
+  const record =
+    source && typeof source === "object" ? (source as UnknownRecord) : null;
+  if (!record) return null;
+  const sourceType =
+    typeof record.sourceType === "string" &&
+    DESKTOP_CAPTURE_KINDS.includes(record.sourceType as CaptureKind)
+      ? (record.sourceType as CaptureKind)
+      : typeof record.kind === "string" &&
+          DESKTOP_CAPTURE_KINDS.includes(record.kind as CaptureKind)
+        ? (record.kind as CaptureKind)
+        : null;
+  const sourceId = String(record.sourceId || record.id || "");
   if (!sourceType || !sourceId) return null;
-  const capabilities = source.capabilities || {};
-  const selfExcluded = source.selfExcluded === true;
+  const capabilities =
+    record.capabilities && typeof record.capabilities === "object"
+      ? (record.capabilities as UnknownRecord)
+      : {};
   return {
     sourceId,
     sourceType,
     sourceKey: captureSourceKey(sourceType, sourceId),
-    title: String(source.title || source.name || "Untitled source"),
-    appName: source.appName ? String(source.appName) : null,
-    appId: source.appId ? String(source.appId) : null,
-    displayId: source.displayId ? String(source.displayId) : null,
-    thumbnail: source.thumbnail ? String(source.thumbnail) : null,
+    title: String(record.title || record.name || "Untitled source"),
+    appName: record.appName ? String(record.appName) : null,
+    appId: record.appId ? String(record.appId) : null,
+    displayId: record.displayId ? String(record.displayId) : null,
+    thumbnail: record.thumbnail ? String(record.thumbnail) : null,
     bounds:
-      source.bounds && typeof source.bounds === "object"
+      record.bounds && typeof record.bounds === "object"
         ? {
-            x: Number(source.bounds.x) || 0,
-            y: Number(source.bounds.y) || 0,
-            width: Number(source.bounds.width) || 0,
-            height: Number(source.bounds.height) || 0,
+            x: Number((record.bounds as UnknownRecord).x) || 0,
+            y: Number((record.bounds as UnknownRecord).y) || 0,
+            width: Number((record.bounds as UnknownRecord).width) || 0,
+            height: Number((record.bounds as UnknownRecord).height) || 0,
           }
         : null,
     capabilities: {
@@ -228,29 +329,33 @@ export function normalizeCaptureSource(source) {
       audio: capabilities.audio === true,
       stereo: capabilities.stereo === true,
       channels: Number.isInteger(capabilities.channels)
-        ? capabilities.channels
+        ? Number(capabilities.channels)
         : null,
       sampleRate: Number.isFinite(Number(capabilities.sampleRate))
         ? Number(capabilities.sampleRate)
         : null,
     },
-    selfExcluded,
-    available: source.available !== false,
-    reason: source.reason ? String(source.reason) : null,
+    selfExcluded: record.selfExcluded === true,
+    available: record.available !== false,
+    reason: record.reason ? String(record.reason) : null,
   };
 }
 
-export function normalizeCaptureSources(sources) {
+export function normalizeCaptureSources(sources: unknown) {
   return (Array.isArray(sources) ? sources : [])
     .map(normalizeCaptureSource)
-    .filter(Boolean)
+    .filter((source): source is CaptureSource => source !== null)
     .filter((source) => source.available && source.selfExcluded);
 }
 
 export function createDesktopCaptureSelection(
-  source,
-  mode,
-  options = {} as any,
+  source: unknown,
+  mode: CaptureMode,
+  options: {
+    audio?: UnknownRecord;
+    roomBitrateBps?: number;
+    video?: UnknownRecord;
+  } = {},
 ) {
   const normalized = normalizeCaptureSource(source);
   if (!normalized) throw new Error("A capture source is required");
@@ -299,7 +404,11 @@ export function createDesktopCaptureSelection(
   };
 }
 
-export function desktopCaptureInvoke(invoke, command, payload = {} as any) {
+export function desktopCaptureInvoke(
+  invoke: (command: string, payload: unknown) => unknown,
+  command: string,
+  payload: unknown = {},
+) {
   if (typeof invoke !== "function")
     return Promise.reject(new Error("Desktop capture is unavailable"));
   return invoke(command, payload);

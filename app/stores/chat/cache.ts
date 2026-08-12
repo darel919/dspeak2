@@ -1,11 +1,20 @@
-export function createChatCacheActions(context) {
+import type {
+  ChatMessage,
+  ChatStoreContext,
+} from "../../shared/types/chat-store.ts";
+
+export function createChatCacheActions(context: ChatStoreContext) {
   const { error } = context;
-  function boundedMessages(items, limit) {
+  function boundedMessages(items: ChatMessage[], limit: number): ChatMessage[] {
     if (!Array.isArray(items)) return [];
     return items.length > limit ? items.slice(-limit) : items;
   }
 
-  function setChannelMessages(channelId, items, active = false) {
+  function setChannelMessages(
+    channelId: string | null,
+    items: ChatMessage[],
+    active = false,
+  ): ChatMessage[] | undefined {
     const normalizedChannelId = String(channelId);
     context.channelMessages.delete(normalizedChannelId);
     context.channelMessages.set(
@@ -19,8 +28,10 @@ export function createChatCacheActions(context) {
     );
     while (context.channelMessages.size > context.CHANNEL_MEMORY_LIMIT) {
       const oldestChannelId = context.channelMessages.keys().next().value;
+      if (oldestChannelId === undefined) break;
       if (oldestChannelId === String(context.currentChannelId.value)) {
         const activeMessages = context.channelMessages.get(oldestChannelId);
+        if (!activeMessages) break;
         context.channelMessages.delete(oldestChannelId);
         context.channelMessages.set(oldestChannelId, activeMessages);
         continue;
@@ -28,24 +39,27 @@ export function createChatCacheActions(context) {
       context.channelMessages.delete(oldestChannelId);
       context.channelPreparedAt.delete(oldestChannelId);
     }
-    return context.channelMessages.get(normalizedChannelId);
+    return context.channelMessages.get(normalizedChannelId) || [];
   }
 
-  function isChannelPrepared(channelId) {
+  function isChannelPrepared(channelId: string): boolean {
     const preparedAt = context.channelPreparedAt.get(String(channelId || ""));
+    if (preparedAt == null) return false;
     return (
       Number.isFinite(preparedAt) &&
       Date.now() - preparedAt < context.PREPARED_CHANNEL_MAX_AGE_MS
     );
   }
 
-  async function prepareChannel(channelId) {
+  async function prepareChannel(channelId: string): Promise<boolean> {
     const preparationGeneration = context.runtime.localDataGeneration;
     const normalizedChannelId = String(channelId || "");
     if (!normalizedChannelId) return false;
     if (context.isChannelPrepared(normalizedChannelId)) return true;
     if (context.pendingChannelPreparations.has(normalizedChannelId)) {
-      return context.pendingChannelPreparations.get(normalizedChannelId);
+      return (
+        context.pendingChannelPreparations.get(normalizedChannelId) || false
+      );
     }
 
     const preparation = (async () => {
@@ -63,7 +77,7 @@ export function createChatCacheActions(context) {
         if (cached && Array.isArray(cached.messages)) {
           context.setChannelMessages(normalizedChannelId, cached.messages);
         }
-      } catch (cacheError) {
+      } catch (cacheError: unknown) {
         console.warn(
           "[ChatStore] Unable to prepare cached channel messages:",
           cacheError,
@@ -91,14 +105,16 @@ export function createChatCacheActions(context) {
         );
         if (!response.ok) return false;
 
-        const data = await response.json();
+        const data = (await response.json()) as
+          { messages?: ChatMessage[] } | ChatMessage[];
         if (preparationGeneration !== context.runtime.localDataGeneration)
           return false;
-        const serverMessages = Array.isArray(data.messages)
-          ? data.messages
-          : Array.isArray(data)
-            ? data
-            : [];
+        const serverMessages =
+          !Array.isArray(data) && Array.isArray(data.messages)
+            ? data.messages
+            : Array.isArray(data)
+              ? data
+              : [];
         const preparedMessages =
           context.dependencies.mergeServerMessagesWithPending(
             serverMessages,
@@ -112,7 +128,7 @@ export function createChatCacheActions(context) {
             normalizedChannelId,
             preparedMessages,
           )
-          .catch((cacheError) => {
+          .catch((cacheError: unknown) => {
             console.warn(
               "[ChatStore] Unable to persist prepared channel messages:",
               cacheError,
@@ -142,7 +158,10 @@ export function createChatCacheActions(context) {
     }
   }
 
-  async function prepareChannels(channelIds, concurrency = 2) {
+  async function prepareChannels(
+    channelIds: string[],
+    concurrency = 2,
+  ): Promise<unknown> {
     const pendingIds = [...new Set(channelIds.map(String))].filter(
       (channelId) => channelId && !context.isChannelPrepared(channelId),
     );
@@ -153,17 +172,19 @@ export function createChatCacheActions(context) {
       Array.from({ length: workerCount }, async () => {
         while (nextIndex < pendingIds.length) {
           const channelId = pendingIds[nextIndex];
+          if (!channelId) break;
           nextIndex += 1;
           await context.prepareChannel(channelId);
         }
       }),
     );
+    return;
   }
 
   async function fetchMessages(
-    channelId,
+    channelId: string,
     generation = context.runtime.connectionGeneration,
-  ) {
+  ): Promise<void> {
     const hasVisibleMessages =
       context.currentChannelId.value === channelId &&
       context.messages.value.length > 0;
@@ -211,7 +232,7 @@ export function createChatCacheActions(context) {
       } else if (Array.isArray(data)) {
         nextMessages = data;
       } else {
-        nextMessages = [] as any;
+        nextMessages = [];
       }
       nextMessages = context.dependencies.mergeServerMessagesWithPending(
         nextMessages,
@@ -225,7 +246,7 @@ export function createChatCacheActions(context) {
       context.messages.value = nextMessages;
       context.dependencies
         .cacheChannelMessages(userData.id, channelId, nextMessages)
-        .catch((cacheError) => {
+        .catch((cacheError: unknown) => {
           console.warn(
             "[ChatStore] Unable to persist message cache:",
             cacheError,
@@ -233,11 +254,12 @@ export function createChatCacheActions(context) {
         });
 
       try {
-        await context.hydratePendingReadIds(userData.id);
+        await context.hydratePendingReadIds(String(userData.id));
         const alreadyReadIds = context.messages.value
           .filter(
             (msg) =>
-              Array.isArray(msg.read_by) && msg.read_by.includes(userData.id),
+              Array.isArray(msg.read_by) &&
+              msg.read_by.includes(String(userData.id)),
           )
           .map((msg) => msg.id);
         const originalSize = context.pendingReadIds.size;
@@ -245,19 +267,20 @@ export function createChatCacheActions(context) {
           context.pendingReadIds.delete(messageId);
         }
         if (context.pendingReadIds.size !== originalSize) {
-          await context.persistPendingReadIds(userData.id);
+          await context.persistPendingReadIds(String(userData.id));
         }
       } catch (e) {
         console.warn("[ChatStore] Failed to reconcile local unread IDs:", e);
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      const errorValue = err instanceof Error ? err : new Error(String(err));
       if (!navigator.onLine) {
         context.handleBrowserOffline();
       } else if (
-        err.name !== "AbortError" &&
+        errorValue.name !== "AbortError" &&
         generation === context.runtime.connectionGeneration
       ) {
-        error.value = err.message;
+        error.value = errorValue.message;
         console.error("[ChatStore] Error fetching messages:", err);
       }
     } finally {
@@ -273,7 +296,7 @@ export function createChatCacheActions(context) {
     }
   }
 
-  function handleBackgroundSyncSuccess(pendingId) {
+  function handleBackgroundSyncSuccess(pendingId: string): void {
     const authStore = context.dependencies.useAuthStore();
     const userId = authStore.getUserData()?.id;
     for (const [channelId, cachedMessages] of [...context.channelMessages]) {
@@ -292,7 +315,7 @@ export function createChatCacheActions(context) {
       if (userId) {
         context.dependencies
           .cacheChannelMessages(userId, channelId, nextMessages)
-          .catch((cacheError) => {
+          .catch((cacheError: unknown) => {
             console.warn(
               "[ChatStore] Unable to reconcile synced message cache:",
               cacheError,
@@ -302,7 +325,10 @@ export function createChatCacheActions(context) {
     }
   }
 
-  function handleBackgroundSyncFailure(pendingId, status) {
+  function handleBackgroundSyncFailure(
+    pendingId: string,
+    status: number,
+  ): void {
     for (const cachedMessages of context.channelMessages.values()) {
       const pending = cachedMessages.find(
         (message) => message.id === pendingId,

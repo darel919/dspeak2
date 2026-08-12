@@ -1,11 +1,14 @@
 const INVITE_URL_PATTERN = /^<?(https?:\/\/[^\s<>]+)>?$/i;
 const MARKDOWN_INVITE_PATTERN = /^\[[^\]]*\]\((https?:\/\/[^)\s]+)\)$/i;
 
-function trimUrlPunctuation(value) {
+function trimUrlPunctuation(value: string) {
   return value.replace(/[.,!?;:)\]}]+$/g, "");
 }
 
-export function extractInviteLink(value, allowedOrigin) {
+export function extractInviteLink(
+  value: unknown,
+  allowedOrigin?: string | null,
+) {
   if (typeof value !== "string" || !value.trim()) return null;
 
   const content = value.trim();
@@ -25,7 +28,9 @@ export function extractInviteLink(value, allowedOrigin) {
     const tokenMatch = url.pathname.match(/^\/join\/([^/]+)\/?$/);
     if (!tokenMatch) return null;
 
-    const token = decodeURIComponent(tokenMatch[1]);
+    const tokenValue = tokenMatch[1];
+    if (!tokenValue) return null;
+    const token = decodeURIComponent(tokenValue);
     if (!token || token.includes("/")) return null;
 
     return { token, url: url.href };

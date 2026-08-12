@@ -1,19 +1,22 @@
 import { useRoomsStore } from "../stores/rooms";
 import { useSettingsStore } from "../stores/settings";
 import { resolveSurfaceMode } from "../shared/appearance";
+import type { RoomAppearanceRecord } from "../shared/types/composables.ts";
 
 export function useAppearance() {
   const route = useRoute();
   const roomsStore = useRoomsStore();
   const settingsStore = useSettingsStore();
   const systemDark = ref(false);
-  let mediaQuery = null;
+  let mediaQuery: MediaQueryList | null = null;
 
   const currentRoom = computed(() =>
     roomsStore.getRoomById(String(route.params.roomId || "")),
   );
   const activeAccent = computed(
-    () => currentRoom.value?.accent || settingsStore.appearance.accent,
+    () =>
+      (currentRoom.value as RoomAppearanceRecord | undefined)?.accent ||
+      settingsStore.appearance.accent,
   );
   const activeSurface = computed(() =>
     resolveSurfaceMode(settingsStore.appearance.surfaceMode, systemDark.value),
@@ -25,7 +28,7 @@ export function useAppearance() {
     document.documentElement.dataset.accent = activeAccent.value;
   }
 
-  function onSystemTheme(event) {
+  function onSystemTheme(event: MediaQueryListEvent) {
     systemDark.value = event.matches;
   }
 

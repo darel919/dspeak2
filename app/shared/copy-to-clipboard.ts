@@ -1,11 +1,28 @@
+interface ClipboardNavigator {
+  clipboard?: { writeText(text: string): Promise<void> };
+}
+
+interface ClipboardDocument {
+  body?: { appendChild(element: HTMLTextAreaElement): unknown } | null;
+  createElement?(tagName: string): HTMLTextAreaElement;
+  execCommand?(command: string): boolean;
+}
+
 export async function copyTextToClipboard(
-  text,
-  { navigatorObject, documentObject } = {} as any,
+  text: string,
+  {
+    navigatorObject,
+    documentObject,
+  }: {
+    navigatorObject?: ClipboardNavigator | null;
+    documentObject?: ClipboardDocument | null;
+  } = {},
 ) {
   const currentNavigator =
     navigatorObject || (typeof navigator !== "undefined" ? navigator : null);
-  const currentDocument =
-    documentObject || (typeof document !== "undefined" ? document : null);
+  const currentDocument: ClipboardDocument | null =
+    documentObject ||
+    (typeof document !== "undefined" ? (document as ClipboardDocument) : null);
 
   if (currentNavigator?.clipboard?.writeText) {
     try {

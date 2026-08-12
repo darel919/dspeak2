@@ -8,23 +8,39 @@ const THEMES = Object.freeze({
   },
 });
 
-let context = null;
+type SoundEvent =
+  | "voice-join"
+  | "voice-leave"
+  | "screen-start"
+  | "screen-enter"
+  | "screen-exit";
+export interface SoundSettings {
+  systemSoundVolume: number;
+  systemSoundTheme: keyof typeof THEMES;
+  systemSoundsMuted: boolean;
+  outputDeviceId?: string | null;
+}
+
+let context: AudioContext | null = null;
 const activeAudio = new Set();
 
 export function availableSystemSoundThemes() {
   return Object.keys(THEMES);
 }
 
-export function systemSoundAsset(event, theme = "default") {
+export function systemSoundAsset(
+  event: SoundEvent,
+  theme: keyof typeof THEMES = "default",
+) {
   const value = THEMES[theme]?.[event];
   return typeof value === "string" ? value : null;
 }
 
-function volume(settings) {
+function volume(settings: SoundSettings) {
   return Math.max(0, Math.min(1, Number(settings.systemSoundVolume) / 100));
 }
 
-async function playAsset(path, settings) {
+async function playAsset(path: string, settings: SoundSettings) {
   const audio = new Audio(path);
   audio.volume = volume(settings);
   if (settings.outputDeviceId && typeof audio.setSinkId === "function") {
@@ -42,14 +58,15 @@ async function playAsset(path, settings) {
   await audio.play().catch(cleanup);
 }
 
-function playTone(notes, settings) {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return;
-  context ||= new AudioContext();
-  const start = context.currentTime;
+function playTone(notes: number[], settings: SoundSettings) {
+  const AudioContextConstructor = window.AudioContext;
+  if (!AudioContextConstructor) return;
+  context ||= new AudioContextConstructor();
+  const audioContext = context;
+  const start = audioContext.currentTime;
   notes.forEach((frequency, index) => {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
     oscillator.type = "sine";
     oscillator.frequency.value = frequency;
     const noteStart = start + index * 0.075;
@@ -59,13 +76,13 @@ function playTone(notes, settings) {
       noteStart + 0.012,
     );
     gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.14);
-    oscillator.connect(gain).connect(context.destination);
+    oscillator.connect(gain).connect(audioContext.destination);
     oscillator.start(noteStart);
     oscillator.stop(noteStart + 0.15);
   });
 }
 
-export function playSystemSound(event, settings) {
+export function playSystemSound(event: SoundEvent, settings: SoundSettings) {
   if (!import.meta.client || settings.systemSoundsMuted) return;
   const sound = THEMES[settings.systemSoundTheme]?.[event];
   if (typeof sound === "string") return playAsset(sound, settings);

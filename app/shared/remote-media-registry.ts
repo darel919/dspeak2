@@ -5,12 +5,48 @@ import {
   isStandaloneSystemAudio,
   normalizeMediaOwnerSource,
 } from "./media-source-ownership.ts";
+import type { Ref } from "vue";
+import type {
+  AudioGraph,
+  AudioGraphTrack,
+  RegistryAttenuation,
+  RemoteMediaEntry,
+  VoiceDetector,
+} from "./types/hybrid-media-registry.ts";
+import type { AttenuationReportInput } from "./media-attenuation-reporter.ts";
 
 const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -42;
 const VISIBLE_VOICE_DETECTION_INTERVAL_MS = 120;
 const HIDDEN_VOICE_DETECTION_INTERVAL_MS = 300;
 
-export function replaceMediaStreamTrack(stream, track) {
+export interface RemoteMediaRegistryOptions {
+  audioFeeds: Ref<Map<string, RemoteMediaEntry>>;
+  videoFeeds: Ref<Map<string, RemoteMediaEntry>>;
+  getVolume: (userId: string, source: string) => number;
+  getOutputDevice: () => string | null;
+  isDeafened: () => boolean;
+  isBroadcastMode: () => boolean;
+  isAnyoneSpeaking: () => boolean;
+  onSpeaking: (userId: string, speaking: boolean) => unknown;
+  getAttenuation: (
+    entry: Record<string, unknown>,
+  ) => RegistryAttenuation | null;
+  onVideoReceivingChange: (
+    entry: RemoteMediaEntry,
+    receiving: boolean,
+  ) => unknown;
+  onPlaybackState: (state: {
+    userId: string | null;
+    state: string;
+    error: { name: string; message: string } | null;
+  }) => unknown;
+  onEffectiveGain: (state: AttenuationReportInput) => unknown;
+}
+
+export function replaceMediaStreamTrack(
+  stream: MediaStream,
+  track: MediaStreamTrack,
+) {
   if (!stream.getTracks().includes(track)) stream.addTrack(track);
   for (const currentTrack of stream.getTracks()) {
     if (currentTrack !== track) stream.removeTrack(currentTrack);
@@ -18,7 +54,27 @@ export function replaceMediaStreamTrack(stream, track) {
   return stream;
 }
 export class RemoteMediaRegistry {
-  [key: string]: any;
+  audioFeeds: Ref<Map<string, RemoteMediaEntry>>;
+  videoFeeds: Ref<Map<string, RemoteMediaEntry>>;
+  getVolume: RemoteMediaRegistryOptions["getVolume"];
+  getOutputDevice: RemoteMediaRegistryOptions["getOutputDevice"];
+  isDeafened: RemoteMediaRegistryOptions["isDeafened"];
+  isBroadcastMode: RemoteMediaRegistryOptions["isBroadcastMode"];
+  isAnyoneSpeaking: RemoteMediaRegistryOptions["isAnyoneSpeaking"];
+  onSpeaking: RemoteMediaRegistryOptions["onSpeaking"];
+  getAttenuation: RemoteMediaRegistryOptions["getAttenuation"];
+  onVideoReceivingChange: RemoteMediaRegistryOptions["onVideoReceivingChange"];
+  onPlaybackState: RemoteMediaRegistryOptions["onPlaybackState"];
+  onEffectiveGain: RemoteMediaRegistryOptions["onEffectiveGain"];
+  voiceDetectors: Map<string, VoiceDetector>;
+  speakingUsers: Set<string>;
+  participantAudio: Map<string, AudioGraph>;
+  receivingPreferences: Map<string, boolean>;
+  audioContext: AudioContext | null;
+  audioContextToken: number;
+  voiceDetectionTimer: ReturnType<typeof setTimeout> | null;
+  externalSpeakingUsers: Set<string>;
+
   constructor({
     audioFeeds,
     videoFeeds,
@@ -28,11 +84,11 @@ export class RemoteMediaRegistry {
     isBroadcastMode,
     isAnyoneSpeaking,
     onSpeaking,
-    getAttenuation,
+    getAttenuation = () => null,
     onVideoReceivingChange,
     onPlaybackState,
     onEffectiveGain,
-  }) {
+  }: RemoteMediaRegistryOptions) {
     this.audioFeeds = audioFeeds;
     this.videoFeeds = videoFeeds;
     this.getVolume = getVolume;
@@ -55,7 +111,7 @@ export class RemoteMediaRegistry {
     this.externalSpeakingUsers = new Set();
   }
 
-  bind(entry, { staged = false } = {} as any) {
+  bind(entry: RemoteMediaEntry, { staged = false }: { staged?: boolean } = {}) {
     const normalizedEntry =
       entry?.source === "screen-audio"
         ? {
@@ -86,14 +142,15 @@ export class RemoteMediaRegistry {
       feeds.value.set(entry.key, normalized);
       triggerRef(feeds);
       if (entry.kind === "video") {
-        this.onVideoReceivingChange?.(normalized, receiving);
+        this.onVideoReceivingChange?.(normalized, Boolean(receiving));
         if (entry.source === "screen")
           this.setPairedScreenAudioReceiving(entry.userId, receiving);
       } else if (isPairedScreenAudio(normalized))
-        this.onVideoReceivingChange?.(normalized, receiving);
+        this.onVideoReceivingChange?.(normalized, Boolean(receiving));
       return;
     }
     if (!entry?.track) return;
+    const trackEntry = { ...entry, track: entry.track };
     if (entry.track.kind === "video") {
       const current = this.videoFeeds.value.get(entry.key);
       const stream =
@@ -121,13 +178,13 @@ export class RemoteMediaRegistry {
     entry.track.enabled = receiving;
     this.audioFeeds.value.set(entry.key, { ...entry, receiving });
     triggerRef(this.audioFeeds);
-    this.createAudioElement({ ...entry, receiving }, staged);
-    if (entry.source === "audio") this.startVoiceDetection(entry);
+    this.createAudioElement({ ...trackEntry, receiving }, staged);
+    if (entry.source === "audio") this.startVoiceDetection(trackEntry);
     if (isPairedScreenAudio(entry))
       this.onVideoReceivingChange?.(entry, receiving);
   }
 
-  setVideoReceiving(key, receiving, persistPreference = true) {
+  setVideoReceiving(key: string, receiving: boolean, persistPreference = true) {
     const entry = this.videoFeeds.value.get(key);
     if (!entry) return false;
     if (entry.track) entry.track.enabled = Boolean(receiving);
@@ -144,12 +201,12 @@ export class RemoteMediaRegistry {
     return true;
   }
 
-  setDocumentHidden(hidden) {
+  setDocumentHidden(hidden: boolean) {
     for (const [key, entry] of this.videoFeeds.value) {
       if (entry.source === "screen") {
         const receiving = hidden
           ? false
-          : (this.receivingPreferences.get(key) ?? entry.receiving);
+          : (this.receivingPreferences.get(key) ?? entry.receiving ?? false);
         this.setVideoReceiving(key, receiving, false);
         continue;
       }
@@ -157,13 +214,13 @@ export class RemoteMediaRegistry {
     }
   }
 
-  setAudioReceiving(key, receiving) {
+  setAudioReceiving(key: string, receiving: boolean) {
     const entry = this.audioFeeds.value.get(key);
     if (!entry || !isStandaloneSystemAudio(entry)) return false;
     return this.updateAudioReceiving(entry, receiving);
   }
 
-  updateAudioReceiving(entry, receiving) {
+  updateAudioReceiving(entry: RemoteMediaEntry, receiving: boolean) {
     const key = entry.key;
     entry.receiving = Boolean(receiving);
     if (entry.track) entry.track.enabled = Boolean(receiving);
@@ -173,7 +230,7 @@ export class RemoteMediaRegistry {
     return true;
   }
 
-  screenReceivingFor(userId) {
+  screenReceivingFor(userId: string | number | null | undefined) {
     const screen = [...this.videoFeeds.value.values()].find(
       (entry) =>
         entry.source === "screen" && String(entry.userId) === String(userId),
@@ -181,7 +238,10 @@ export class RemoteMediaRegistry {
     return screen?.receiving === true;
   }
 
-  setPairedScreenAudioReceiving(userId, receiving) {
+  setPairedScreenAudioReceiving(
+    userId: string | number | null | undefined,
+    receiving: boolean,
+  ) {
     let changed = false;
     for (const entry of this.audioFeeds.value.values()) {
       if (
@@ -194,11 +254,11 @@ export class RemoteMediaRegistry {
     return changed;
   }
 
-  clearReceivingPreference(key) {
+  clearReceivingPreference(key: string) {
     this.receivingPreferences.delete(key);
   }
 
-  activateProvider(provider) {
+  activateProvider(provider: string) {
     for (const graph of this.participantAudio.values()) {
       for (const track of graph.tracks.values()) {
         track.active = track.entry.provider === provider;
@@ -209,18 +269,19 @@ export class RemoteMediaRegistry {
     }
   }
 
-  setExternalSpeaking(userId, speaking) {
+  setExternalSpeaking(userId: string | number, speaking: boolean) {
     const normalizedUserId = String(userId);
     if (speaking) this.externalSpeakingUsers.add(normalizedUserId);
     else this.externalSpeakingUsers.delete(normalizedUserId);
     this.applyAttenuation();
   }
 
-  remove(key, owner = null) {
+  remove(key: string, owner: RemoteMediaEntry | null = null) {
     const audio = this.audioFeeds.value.get(key);
     const video = this.videoFeeds.value.get(key);
     if (!audio && !video) return;
-    const current = video || audio;
+    const current = video ?? audio;
+    if (!current) return;
     if (owner?.provider && current.provider !== owner.provider) return;
     if (owner?.track && current.track !== owner.track) return;
     this.audioFeeds.value.delete(key);
@@ -231,8 +292,8 @@ export class RemoteMediaRegistry {
     this.stopVoiceDetection(key);
   }
 
-  clearProvider(provider) {
-    const keys = new Set();
+  clearProvider(provider: string) {
+    const keys = new Set<string>();
     for (const [key, entry] of this.audioFeeds.value)
       if (entry.provider === provider) keys.add(key);
     for (const [key, entry] of this.videoFeeds.value)
@@ -269,7 +330,10 @@ export class RemoteMediaRegistry {
     }
   }
 
-  createAudioElement(entry, staged) {
+  createAudioElement(
+    entry: RemoteMediaEntry & { track: MediaStreamTrack },
+    staged: boolean,
+  ) {
     const graph = this.getOrCreateGraph(entry.userId);
     const audio = document.createElement("audio");
     audio.id = `audio-${entry.key}`;
@@ -279,8 +343,8 @@ export class RemoteMediaRegistry {
     audio.playsInline = true;
     audio.srcObject = new MediaStream([entry.track]);
     this.audioContainer().appendChild(audio);
-    const source = this.audioContext.createMediaElementSource(audio);
-    const gain = this.audioContext.createGain();
+    const source = graph.context.createMediaElementSource(audio);
+    const gain = graph.context.createGain();
     const handleUnmute = () => this.resumeGraph(graph);
     entry.track.addEventListener?.("unmute", handleUnmute);
     const track = {
@@ -299,14 +363,14 @@ export class RemoteMediaRegistry {
       this.resumeGraph(graph);
   }
 
-  getOrCreateGraph(userId) {
+  getOrCreateGraph(userId: string | number | null | undefined): AudioGraph {
     const normalizedUserId = String(userId);
     const existing = this.participantAudio.get(normalizedUserId);
     if (existing) return existing;
     const context = this.getAudioContext();
     const graph = {
       context,
-      tracks: new Map(),
+      tracks: new Map<string, AudioGraphTrack>(),
       userId: normalizedUserId,
       resumeAttempt: 0,
       resumePromise: null,
@@ -318,7 +382,7 @@ export class RemoteMediaRegistry {
     return graph;
   }
 
-  getAudioContext() {
+  getAudioContext(): AudioContext {
     if (this.audioContext) return this.audioContext;
     const AudioContextConstructor =
       window.AudioContext || window.webkitAudioContext;
@@ -396,7 +460,7 @@ export class RemoteMediaRegistry {
       .catch((error) => this.recoverOutputDevice(context, null, error));
   }
 
-  applyVolume(userId, source, volume) {
+  applyVolume(userId: string | number, source: string, volume: number) {
     const graph = this.participantAudio.get(String(userId));
     if (!graph) return;
     for (const track of graph.tracks.values())
@@ -404,7 +468,7 @@ export class RemoteMediaRegistry {
         this.applyTrackGain(graph, track, false, volume);
   }
 
-  attenuatedVolume(source, baseVolume) {
+  attenuatedVolume(source: string, baseVolume: number) {
     if (
       !this.speakingUsers.size &&
       !this.externalSpeakingUsers.size &&
@@ -412,21 +476,26 @@ export class RemoteMediaRegistry {
     )
       return baseVolume;
     if (!["screen-audio", "system-audio"].includes(source)) return baseVolume;
-    const attenuation = this.getAttenuation?.() || { enabled: false };
+    const attenuation = this.getAttenuation({}) || { enabled: false };
     if (!attenuation.enabled) return baseVolume;
-    return baseVolume * (1 - attenuation.reductionPercent / 100);
+    return baseVolume * (1 - Number(attenuation.reductionPercent || 0) / 100);
   }
 
-  applyTrackGain(graph, track, immediate = false, volume = null) {
+  applyTrackGain(
+    graph: AudioGraph,
+    track: AudioGraphTrack,
+    immediate = false,
+    volume: number | null = null,
+  ) {
     const baseVolume =
       volume === null
-        ? this.getVolume(track.entry.userId, track.entry.source)
+        ? this.getVolume(String(track.entry.userId ?? ""), track.entry.source)
         : volume;
     const target =
       track.active && !this.isDeafened() && !this.isBroadcastMode()
         ? this.attenuatedVolume(track.entry.source, baseVolume)
         : 0;
-    const attenuation = this.getAttenuation?.() || {};
+    const attenuation = this.getAttenuation({}) || {};
     const duration =
       target < track.gain.gain.value
         ? Number(attenuation.attackMs) || 120
@@ -473,7 +542,7 @@ export class RemoteMediaRegistry {
     );
   }
 
-  async resumeGraph(graph) {
+  async resumeGraph(graph: AudioGraph): Promise<boolean> {
     if (graph.closed || !graph.tracks.size) return false;
     if (graph.resumePromise) return graph.resumePromise;
     const generation = graph.resumeGeneration;
@@ -485,7 +554,7 @@ export class RemoteMediaRegistry {
     return trackedPromise;
   }
 
-  isGraphActive(graph, generation) {
+  isGraphActive(graph: AudioGraph, generation: number) {
     return (
       !graph.closed &&
       graph.resumeGeneration === generation &&
@@ -493,7 +562,7 @@ export class RemoteMediaRegistry {
     );
   }
 
-  async performGraphResume(graph, generation) {
+  async performGraphResume(graph: AudioGraph, generation: number) {
     try {
       if (!this.isGraphActive(graph, generation)) return false;
       await graph.context.resume();
@@ -505,8 +574,11 @@ export class RemoteMediaRegistry {
             graph.tracks.get(key) !== track
           )
             return true;
-          const streamTrack = track.audio.srcObject?.getAudioTracks?.()[0];
-          if (streamTrack !== track.entry.track)
+          const streamTrack =
+            track.audio.srcObject instanceof MediaStream
+              ? track.audio.srcObject.getAudioTracks()[0]
+              : undefined;
+          if (streamTrack !== track.entry.track && track.entry.track)
             track.audio.srcObject = new MediaStream([track.entry.track]);
           return Promise.resolve()
             .then(() => track.audio.play())
@@ -522,7 +594,7 @@ export class RemoteMediaRegistry {
       );
       if (!this.isGraphActive(graph, generation)) return false;
       graph.resumeAttempt = 0;
-      clearTimeout(graph.resumeTimer);
+      if (graph.resumeTimer) clearTimeout(graph.resumeTimer);
       graph.resumeTimer = null;
       this.publishPlaybackState(graph.userId, "ready");
       return true;
@@ -534,7 +606,7 @@ export class RemoteMediaRegistry {
     }
   }
 
-  scheduleGraphResume(graph) {
+  scheduleGraphResume(graph: AudioGraph) {
     if (
       graph.closed ||
       graph.resumeTimer ||
@@ -553,7 +625,11 @@ export class RemoteMediaRegistry {
     graph.resumeTimer?.unref?.();
   }
 
-  async recoverOutputDevice(output, userId, error) {
+  async recoverOutputDevice(
+    output: AudioContext,
+    userId: string | number | null,
+    error: unknown,
+  ) {
     this.publishPlaybackState(userId, "output-failed", error);
     if (typeof output.setSinkId !== "function") return false;
     try {
@@ -566,7 +642,11 @@ export class RemoteMediaRegistry {
     }
   }
 
-  publishPlaybackState(userId, state, error = null) {
+  publishPlaybackState(
+    userId: string | number | null,
+    state: string,
+    error: unknown = null,
+  ) {
     try {
       const result = this.onPlaybackState?.({
         userId: userId === null ? null : String(userId),
@@ -576,7 +656,7 @@ export class RemoteMediaRegistry {
             ? { name: error.name, message: error.message }
             : null,
       });
-      result?.catch?.((callbackError) => {
+      Promise.resolve(result).catch((callbackError: unknown) => {
         console.warn("[Media] playback-state observer failed", callbackError);
       });
     } catch (callbackError) {
@@ -584,7 +664,7 @@ export class RemoteMediaRegistry {
     }
   }
 
-  disposeAudioTrack(track) {
+  disposeAudioTrack(track: AudioGraphTrack) {
     try {
       track.source.disconnect();
     } catch {}
@@ -592,7 +672,7 @@ export class RemoteMediaRegistry {
       track.gain.disconnect();
     } catch {}
     try {
-      track.entry.track.removeEventListener?.("unmute", track.handleUnmute);
+      track.entry.track?.removeEventListener?.("unmute", track.handleUnmute);
     } catch {}
     try {
       track.audio.pause();
@@ -605,7 +685,7 @@ export class RemoteMediaRegistry {
     } catch {}
   }
 
-  removeAudioTrack(entry) {
+  removeAudioTrack(entry: RemoteMediaEntry) {
     const graph = this.participantAudio.get(String(entry.userId));
     const track = graph?.tracks.get(entry.key);
     if (!graph || !track) return;
@@ -617,27 +697,28 @@ export class RemoteMediaRegistry {
     }
   }
 
-  closeGraph(graph) {
+  closeGraph(graph: AudioGraph) {
     graph.closed = true;
     graph.resumeGeneration += 1;
-    clearTimeout(graph.resumeTimer);
+    if (graph.resumeTimer) clearTimeout(graph.resumeTimer);
     graph.resumeTimer = null;
     graph.resumePromise = null;
     for (const track of graph.tracks.values()) this.disposeAudioTrack(track);
     graph.tracks.clear();
   }
 
-  startVoiceDetection(entry) {
+  startVoiceDetection(entry: RemoteMediaEntry & { track: MediaStreamTrack }) {
     this.stopVoiceDetection(entry.key);
     try {
       const graph = this.participantAudio.get(String(entry.userId));
       const playbackTrack = graph?.tracks.get(entry.key);
-      if (!graph || !playbackTrack)
+      const context = graph?.context || this.audioContext;
+      if (!context || !playbackTrack)
         throw new Error("Audio graph is unavailable");
-      const detectionSource = this.audioContext.createMediaStreamSource(
+      const detectionSource = context.createMediaStreamSource(
         new MediaStream([entry.track]),
       );
-      const analyser = this.audioContext.createAnalyser();
+      const analyser = context.createAnalyser();
       analyser.fftSize = 256;
       detectionSource.connect(analyser);
       const samples = new Uint8Array(analyser.fftSize);
@@ -656,15 +737,22 @@ export class RemoteMediaRegistry {
       });
       this.startVoiceDetectionScheduler();
     } catch (error) {
-      this.publishPlaybackState(entry.userId, "analysis-unavailable", error);
-      this.notifySpeaking(entry.userId, false);
+      this.publishPlaybackState(
+        entry.userId ?? null,
+        "analysis-unavailable",
+        error,
+      );
+      this.notifySpeaking(entry.userId ?? null, false);
     }
   }
 
-  notifySpeaking(userId, speaking) {
+  notifySpeaking(
+    userId: string | number | null | undefined,
+    speaking: boolean,
+  ) {
     try {
-      const result = this.onSpeaking?.(userId, speaking);
-      result?.catch?.((error) => {
+      const result = this.onSpeaking?.(String(userId ?? ""), speaking);
+      Promise.resolve(result).catch((error: unknown) => {
         console.warn("[Media] speaking observer failed", error);
       });
     } catch (error) {
@@ -684,10 +772,14 @@ export class RemoteMediaRegistry {
             ?.tracks.get(detector.key);
           if (!playbackTrack?.active || playbackTrack.entry.receiving === false)
             continue;
-          detector.analyser.getByteTimeDomainData(detector.samples);
-          const levelDb = byteTimeDomainLevelDb(detector.samples);
+          detector.analyser.getByteTimeDomainData(
+            detector.samples as unknown as Uint8Array<ArrayBuffer>,
+          );
+          const levelDb = byteTimeDomainLevelDb(
+            detector.samples as unknown as Uint8Array<ArrayBuffer>,
+          );
           const sensitivity =
-            this.getAttenuation?.()?.sensitivity || "standard";
+            this.getAttenuation({})?.sensitivity || "standard";
           const thresholdOffset =
             sensitivity === "relaxed"
               ? 5
@@ -728,11 +820,11 @@ export class RemoteMediaRegistry {
           detector.speaking = false;
           this.speakingUsers.delete(String(detector.userId));
           this.publishPlaybackState(
-            detector.userId,
+            detector.userId ?? null,
             "analysis-unavailable",
             error,
           );
-          this.notifySpeaking(detector.userId, false);
+          this.notifySpeaking(detector.userId ?? null, false);
         }
       }
       if (this.voiceDetectors.size)
@@ -747,11 +839,11 @@ export class RemoteMediaRegistry {
   }
 
   stopVoiceDetectionScheduler() {
-    clearTimeout(this.voiceDetectionTimer);
+    if (this.voiceDetectionTimer) clearTimeout(this.voiceDetectionTimer);
     this.voiceDetectionTimer = null;
   }
 
-  stopVoiceDetection(key) {
+  stopVoiceDetection(key: string) {
     const detector = this.voiceDetectors.get(key);
     if (!detector) return;
     try {

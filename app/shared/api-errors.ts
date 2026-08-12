@@ -1,15 +1,21 @@
-function parsePayload(value) {
-  if (value && typeof value === "object") return value;
+import type { ApiErrorPayload } from "./types/api.ts";
+
+function parsePayload(value: unknown): ApiErrorPayload | null {
+  if (value && typeof value === "object" && !Array.isArray(value))
+    return value as ApiErrorPayload;
   if (typeof value !== "string" || !value.trim()) return null;
 
   try {
-    return JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as ApiErrorPayload)
+      : null;
   } catch {
     return null;
   }
 }
 
-function firstMessage(payload) {
+function firstMessage(payload: ApiErrorPayload | null): string | undefined {
   const candidates = [
     payload?.statusMessage,
     payload?.message,
@@ -18,15 +24,20 @@ function firstMessage(payload) {
   ];
 
   return candidates.find(
-    (message) => typeof message === "string" && message.trim(),
+    (message): message is string =>
+      typeof message === "string" && Boolean(message.trim()),
   );
 }
 
-function isStackTrace(value) {
+function isStackTrace(value: string): boolean {
   return /^Error(?::|\s)/i.test(value) || /\n\s*at\s+/.test(value);
 }
 
-export function apiErrorMessage(value, status, fallback = "Request failed") {
+export function apiErrorMessage(
+  value: unknown,
+  status: number | null | undefined,
+  fallback = "Request failed",
+): string {
   const payload = parsePayload(value);
   const message = firstMessage(payload);
   if (message) return message.trim();

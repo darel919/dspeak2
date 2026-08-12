@@ -1,17 +1,49 @@
+interface AttenuationPeer {
+  peerId?: string | number | null;
+  userId?: string | number | null;
+}
+
+export interface AttenuationEntry {
+  peerId?: string | number | null;
+  userId?: string | number | null;
+}
+
+export interface AttenuationReportInput {
+  active: boolean;
+  baseVolume: number;
+  effectiveVolume: number;
+  entry: AttenuationEntry;
+}
+
+interface AttenuationReport {
+  active: boolean;
+  effectivePercent: number;
+}
+
 export function createMediaAttenuationReporter({
   getLocalPeerId,
   getPeers,
   onReportsChange,
   send,
+}: {
+  getLocalPeerId: () => string | number | null;
+  getPeers: () => AttenuationPeer[];
+  onReportsChange: (reports: Map<string, AttenuationReport>) => void;
+  send: (message: SignalingMessage) => boolean;
 }) {
-  const reports = new Map();
-  const sentStates = new Map();
+  const reports = new Map<string, AttenuationReport>();
+  const sentStates = new Map<string, string>();
 
   function notify() {
     onReportsChange(new Map(reports));
   }
 
-  function report({ active, baseVolume, effectiveVolume, entry }) {
+  function report({
+    active,
+    baseVolume,
+    effectiveVolume,
+    entry,
+  }: AttenuationReportInput) {
     const targetPeerId =
       entry.peerId ||
       getPeers().find((peer) => String(peer.userId) === String(entry.userId))
@@ -41,7 +73,12 @@ export function createMediaAttenuationReporter({
       sentStates.set(key, signature);
   }
 
-  function receive(data) {
+  function receive(data: {
+    fromPeerId?: string | number | null;
+    source?: string;
+    active?: boolean;
+    effectivePercent?: number | string;
+  }) {
     if (
       !data.fromPeerId ||
       data.source !== "screen-audio" ||
@@ -76,7 +113,11 @@ export function createMediaAttenuationReporter({
   return { clear, prune, receive, report };
 }
 
-export function summarizeMediaAttenuation(reports, peers, localPeerId) {
+export function summarizeMediaAttenuation(
+  reports: Map<string, AttenuationReport>,
+  peers: AttenuationPeer[],
+  localPeerId: string | number | null,
+) {
   const values = [...reports.values()];
   return {
     active: values.some((report) => report.active),
@@ -90,7 +131,13 @@ export function summarizeMediaAttenuation(reports, peers, localPeerId) {
   };
 }
 
-export function resolveMediaAttenuation(roomValue, override) {
+export function resolveMediaAttenuation(
+  roomValue: Record<string, unknown> | null | undefined,
+  override: {
+    mode?: string;
+    reductionPercent?: number;
+  },
+) {
   const attenuation = roomValue || {
     enabled: true,
     reductionPercent: 65,
@@ -107,3 +154,4 @@ export function resolveMediaAttenuation(roomValue, override) {
     };
   return attenuation;
 }
+import type { SignalingMessage } from "./types/media-signaling.ts";

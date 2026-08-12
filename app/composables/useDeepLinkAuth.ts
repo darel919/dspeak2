@@ -5,9 +5,11 @@ import { useRuntimeStore } from "~/stores/runtime";
 export function useDeepLinkAuth() {
   const authStore = useAuthStore();
   const runtimeStore = useRuntimeStore();
-  let unlistenOAuthCallback;
+  let unlistenOAuthCallback: (() => void) | undefined;
 
-  async function exchangeCallback(payload) {
+  async function exchangeCallback(
+    payload: { code?: string } | null | undefined,
+  ) {
     const code = payload?.code;
     if (!code) return false;
 
@@ -28,9 +30,12 @@ export function useDeepLinkAuth() {
       import("@tauri-apps/api/core"),
     ]);
 
-    unlistenOAuthCallback = await listen("oauth-callback", (event) => {
-      void exchangeCallback(event.payload);
-    });
+    unlistenOAuthCallback = await listen(
+      "oauth-callback",
+      (event: { payload: { code?: string } }) => {
+        void exchangeCallback(event.payload);
+      },
+    );
 
     const pending = await invoke("get_pending_oauth_callback");
     if (pending) await exchangeCallback(pending);

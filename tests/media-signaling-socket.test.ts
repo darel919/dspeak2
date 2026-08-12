@@ -124,7 +124,7 @@ test("media signaling includes a control ticket in the hello payload", async () 
     assert.equal(
       signaling.acceptServerHello({
         protocolVersion: 919,
-        contractRevision: 2,
+        contractRevision: 3,
         mediaSessionId: "session-1",
         heartbeatIntervalMs: 30000,
         heartbeatTimeoutMs: 90000,
@@ -139,7 +139,7 @@ test("media signaling includes a control ticket in the hello payload", async () 
         mediaSessionId: "session-1",
         ticket: "control-ticket",
         protocolVersion: 919,
-        contractRevision: 2,
+        contractRevision: 3,
       },
     });
     candidate.onclose({ code: 4000, reason: "test" });

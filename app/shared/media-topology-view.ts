@@ -1,17 +1,52 @@
 import { normalizeMediaPathMetrics } from "#shared/media-route.ts";
+import type {
+  MediaTopologyCandidatePair,
+  MediaTopologyConnection,
+  MediaTopologyEdge,
+  MediaTopologyParticipant,
+  MediaTopologyProvider,
+  MediaTopologyViewContext,
+} from "./types/media-topology-view.ts";
+
+function asProvider(value: unknown): MediaTopologyProvider | null {
+  if (!value || typeof value !== "object") return null;
+  const provider = value as Partial<MediaTopologyProvider>;
+  return provider.connections instanceof Map
+    ? (provider as MediaTopologyProvider)
+    : null;
+}
+
+function asParticipant(value: unknown): MediaTopologyParticipant {
+  if (value && typeof value === "object")
+    return value as MediaTopologyParticipant;
+  return {
+    userId:
+      typeof value === "string" || typeof value === "number" ? value : null,
+  };
+}
+
+function asEdge(value: unknown): MediaTopologyEdge {
+  return value && typeof value === "object" ? (value as MediaTopologyEdge) : {};
+}
+
+function asCandidatePair(value: unknown): MediaTopologyCandidatePair | null {
+  return value && typeof value === "object"
+    ? (value as MediaTopologyCandidatePair)
+    : null;
+}
 
 export function createMediaTopologyView({
   activeProvider,
   addressFamily,
-  buildTopologyGraph,
+  buildTopologyGraph: buildTopologyGraphValue,
   consumers,
   getParticipantProfile,
   getLocalPeerId,
   getP2pEdges,
   getP2pMesh,
   getSfu,
-  mapPeerConnectionMetrics,
-  mapPeerRoundTripTimes,
+  mapPeerConnectionMetrics: mapPeerConnectionMetricsValue,
+  mapPeerRoundTripTimes: mapPeerRoundTripTimesValue,
   mediaPathMetrics,
   participantSfuRoundTripTimes,
   peerConnectionMetrics,
@@ -21,14 +56,22 @@ export function createMediaTopologyView({
   topologyGraph,
   topologyState,
   voiceStore,
-}) {
-  function syncConnectedUsers(participants = [] as any) {
+}: MediaTopologyViewContext) {
+  const buildTopologyGraph = buildTopologyGraphValue as (
+    snapshot: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  const mapPeerConnectionMetrics = mapPeerConnectionMetricsValue as (
+    edges: unknown[],
+    peers: unknown[],
+  ) => Record<string, unknown>;
+  const mapPeerRoundTripTimes = mapPeerRoundTripTimesValue as (
+    edges: unknown[],
+    peers: unknown[],
+  ) => Record<string, unknown>;
+
+  function syncConnectedUsers(participants: unknown[] = []) {
     const entries = participants
-      .map((participant) =>
-        participant && typeof participant === "object"
-          ? participant
-          : { userId: participant },
-      )
+      .map(asParticipant)
       .map((participant) => ({
         ...participant,
         userId: String(participant.userId || participant.id || ""),
@@ -37,11 +80,12 @@ export function createMediaTopologyView({
     const active = new Set(entries.map((participant) => participant.userId));
     for (const participant of entries) {
       const profile =
-        participant.profile || getParticipantProfile?.(participant.userId);
+        participant.profile ||
+        getParticipantProfile?.(String(participant.userId));
       const sources = Array.isArray(participant.sources)
         ? participant.sources.map((source) => String(source))
         : null;
-      const mediaState =
+      const mediaState: Record<string, unknown> =
         sources === null
           ? {}
           : {
@@ -51,12 +95,12 @@ export function createMediaTopologyView({
       if (profile)
         voiceStore.upsertUserProfile({
           ...profile,
-          id: participant.userId,
+          id: String(participant.userId),
         });
-      if (!voiceStore.isUserConnected(participant.userId))
-        voiceStore.addConnectedUser(participant.userId, {
-          ...profile,
-          id: participant.userId,
+      if (!voiceStore.isUserConnected(String(participant.userId)))
+        voiceStore.addConnectedUser(String(participant.userId), {
+          ...(profile || {}),
+          id: String(participant.userId),
           ...mediaState,
         });
       if (
@@ -64,13 +108,19 @@ export function createMediaTopologyView({
         typeof participant.deafened === "boolean" ||
         sources !== null
       )
-        voiceStore.updateUserVoiceState?.(participant.userId, participant);
+        voiceStore.updateUserVoiceState?.(
+          String(participant.userId),
+          participant,
+        );
     }
-    for (const user of voiceStore.getConnectedUsersArray())
-      if (!active.has(String(user.id))) voiceStore.removeConnectedUser(user.id);
+    for (const user of voiceStore.getConnectedUsersArray()) {
+      const userId = String(user.id || "");
+      if (!active.has(userId)) voiceStore.removeConnectedUser(userId);
+    }
   }
 
-  function updateP2pStats(edges) {
+  function updateP2pStats(rawEdges: unknown[]) {
+    const edges = rawEdges.map(asEdge);
     setP2pEdges(edges);
     peerRoundTripTimes.value = mapPeerRoundTripTimes(
       edges,
@@ -82,7 +132,7 @@ export function createMediaTopologyView({
     );
     if (mediaPathMetrics)
       mediaPathMetrics.value = edges
-        .filter((edge) => edge?.peerId)
+        .filter((edge) => edge.peerId)
         .map((edge) =>
           normalizeMediaPathMetrics({
             routeId: `p2p:${String(edge.peerId)}`,
@@ -93,37 +143,51 @@ export function createMediaTopologyView({
             jitterBufferDelayMs: edge.jitterBufferDelayMs,
             availableOutgoingBitrate: edge.availableOutgoingBitrate,
             concealedAudioRatio: edge.concealedAudioRatio,
-            candidateType: edge.candidatePair?.local?.candidateType,
-            protocol: edge.candidatePair?.local?.protocol,
+            candidateType:
+              edge.candidatePair?.local?.candidateType === "host" ||
+              edge.candidatePair?.local?.candidateType === "srflx" ||
+              edge.candidatePair?.local?.candidateType === "relay"
+                ? edge.candidatePair.local.candidateType
+                : undefined,
+            protocol:
+              edge.candidatePair?.local?.protocol === "udp" ||
+              edge.candidatePair?.local?.protocol === "tcp" ||
+              edge.candidatePair?.local?.protocol === "tls"
+                ? edge.candidatePair.local.protocol
+                : undefined,
           }),
         );
     refreshTopologyGraph();
   }
 
-  function refreshTopologyGraph(candidatePair = null) {
-    const details = {} as any;
-    const p2pMesh = getP2pMesh();
+  function refreshTopologyGraph(candidatePairValue: unknown = null) {
+    const details: Record<string, Record<string, unknown>> = {};
+    const p2pMesh = asProvider(getP2pMesh());
     const localPeerId = getLocalPeerId();
-    for (const connection of p2pMesh ? p2pMesh.connections.values() : []) {
+    for (const connection of p2pMesh?.connections?.values() || []) {
+      const typedConnection = connection as MediaTopologyConnection;
       const edge =
-        getP2pEdges().find(
-          (candidate) => candidate.peerId === connection.peerId,
-        ) || {};
-      const key = [localPeerId, connection.peerId].sort().join(":");
+        getP2pEdges()
+          .map(asEdge)
+          .find((candidate) => candidate.peerId === typedConnection.peerId) ||
+        {};
+      const key = [localPeerId, typedConnection.peerId].sort().join(":");
+      const pair = asCandidatePair(edge.candidatePair);
       details[key] = {
         state:
           edge.state ||
-          (connection.pc.connectionState === "connected"
+          (typedConnection.pc.connectionState === "connected"
             ? "active"
             : "probing"),
         rtt: edge.rtt ?? null,
         network: edge.network || null,
-        candidateType: edge.candidatePair?.local?.candidateType || null,
-        addressFamily: addressFamily(edge.candidatePair?.remote?.address),
+        candidateType: pair?.local?.candidateType || null,
+        addressFamily: addressFamily(pair?.remote?.address),
         bitrate: edge.bitrate ?? null,
         packetLoss: edge.packetLoss ?? null,
       };
     }
+    const candidatePair = asCandidatePair(candidatePairValue);
     topologyGraph.value = buildTopologyGraph({
       mode: topologyState.value.displayMode || topologyState.value.mode,
       currentMode: activeProvider(),
@@ -163,19 +227,16 @@ export function createMediaTopologyView({
   }
 
   function refreshPublicMaps() {
-    const sfu = getSfu();
+    const sfu = asProvider(getSfu());
     producers.value = new Map(
-      sfu
-        ? [...sfu.producers].map(([source, entry]) => [
-            entry.producer.id,
-            entry,
-          ])
+      sfu?.producers
+        ? [...sfu.producers].map(([source, entry]) => [source, entry])
         : [],
     );
     consumers.value = new Map(
-      sfu
+      sfu?.consumers
         ? [...sfu.consumers.values()].map((entry) => [
-            entry.producerId,
+            entry.producerId || "",
             entry.consumer,
           ])
         : [],

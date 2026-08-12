@@ -28,7 +28,7 @@ export function createCircuitBreaker() {
   };
 }
 
-export function recordFailure(circuitBreaker) {
+export function recordFailure(circuitBreaker: CircuitBreaker) {
   circuitBreaker.failureCount = Math.min(
     circuitBreaker.failureCount + 1,
     PROVIDER_COOLDOWN_MS.length,
@@ -37,7 +37,7 @@ export function recordFailure(circuitBreaker) {
 
   const cooldowns = PROVIDER_COOLDOWN_MS;
   const index = Math.min(circuitBreaker.failureCount - 1, cooldowns.length - 1);
-  circuitBreaker.nextAttempt = Date.now() + cooldowns[index];
+  circuitBreaker.nextAttempt = Date.now() + (cooldowns[index] ?? 0);
 
   if (circuitBreaker.failureCount >= 3) {
     circuitBreaker.state = "open";
@@ -46,7 +46,7 @@ export function recordFailure(circuitBreaker) {
   return circuitBreaker;
 }
 
-export function tryHalfOpen(circuitBreaker) {
+export function tryHalfOpen(circuitBreaker: CircuitBreaker) {
   if (
     circuitBreaker.state === "open" &&
     Date.now() >= circuitBreaker.nextAttempt
@@ -57,7 +57,7 @@ export function tryHalfOpen(circuitBreaker) {
   return false;
 }
 
-export function recordSuccess(circuitBreaker) {
+export function recordSuccess(circuitBreaker: CircuitBreaker) {
   circuitBreaker.failureCount = 0;
   circuitBreaker.state = "closed";
   circuitBreaker.nextAttempt = 0;
@@ -65,8 +65,8 @@ export function recordSuccess(circuitBreaker) {
 }
 
 export function evaluateRouteImprovement(
-  currentRouteMetrics,
-  candidateRouteMetrics,
+  currentRouteMetrics: RouteMetrics[],
+  candidateRouteMetrics: RouteMetrics[],
 ) {
   if (!currentRouteMetrics || !candidateRouteMetrics) return false;
 
@@ -82,8 +82,11 @@ export function evaluateRouteImprovement(
   return improvement >= ROUTE_IMPROVEMENT_THRESHOLD_MS;
 }
 
-export function getWorstParticipantMetric(metrics, field) {
-  let worst = null;
+export function getWorstParticipantMetric(
+  metrics: RouteMetrics[],
+  field: string,
+): number | null {
+  let worst: number | null = null;
   for (const m of metrics) {
     const value = m[field];
     if (value !== null && value !== undefined) {
@@ -95,12 +98,19 @@ export function getWorstParticipantMetric(metrics, field) {
   return worst;
 }
 
-export function shouldFailback(providerState, failbackStartTime) {
+export function shouldFailback(
+  providerState: string,
+  failbackStartTime: number,
+) {
   if (providerState !== PROVIDER_STATE.HEALTHY) return false;
   return Date.now() - failbackStartTime >= FAILBACK_STABILITY_WINDOW_MS;
 }
 
-export function createFailoverPlan(currentRoute, candidates, trigger) {
+export function createFailoverPlan(
+  currentRoute: unknown,
+  candidates: readonly unknown[],
+  trigger: string,
+) {
   return {
     fromRoute: currentRoute,
     toRoute: candidates[0],
@@ -110,3 +120,6 @@ export function createFailoverPlan(currentRoute, candidates, trigger) {
     parallelPreparation: candidates.slice(1),
   };
 }
+import type { CircuitBreaker, RouteMetrics } from "./types/media.ts";
+
+export type { CircuitBreaker } from "./types/media.ts";

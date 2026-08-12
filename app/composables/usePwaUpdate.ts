@@ -3,6 +3,10 @@ import {
   hasTauriRuntimeMarker,
   isDesktopClient,
 } from "../shared/desktop-capture.ts";
+import type {
+  PwaUpdateRuntime,
+  PwaUpdateState,
+} from "../shared/types/pwa-update.ts";
 
 const STARTUP_RESTART_GUARD = "dspeak-pwa-startup-restart";
 const INSTALL_WAIT_MS = 10000;
@@ -10,14 +14,18 @@ const ACTIVATION_WAIT_MS = 5000;
 const VERSION_WAIT_MS = 1000;
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
-let runtime = null;
+let runtime: PwaUpdateRuntime | null = null;
 
-function waitForState(worker, expectedStates, timeout) {
+function waitForState(
+  worker: ServiceWorker | null,
+  expectedStates: ServiceWorkerState[],
+  timeout: number,
+): Promise<ServiceWorkerState | undefined> {
   if (!worker || expectedStates.includes(worker.state))
     return Promise.resolve(worker?.state);
 
   return new Promise((resolve) => {
-    let timer = null;
+    let timer: number | null = null;
     const finish = () => {
       worker.removeEventListener("statechange", handleStateChange);
       if (timer) window.clearTimeout(timer);
@@ -32,7 +40,7 @@ function waitForState(worker, expectedStates, timeout) {
   });
 }
 
-function createRuntime(state) {
+function createRuntime(state: PwaUpdateState): PwaUpdateRuntime {
   return {
     ...state,
     registration: null,
@@ -43,17 +51,17 @@ function createRuntime(state) {
     updateInterval: null,
     reloadStarted: false,
     listenersAttached: false,
-    startupRestartAttempted: false,
+    startupRestartAttempted: null,
   };
 }
 
-function workerVersion(worker) {
+function workerVersion(worker: ServiceWorker | null): Promise<string | null> {
   if (!worker) return Promise.resolve(null);
 
   return new Promise((resolve) => {
     const channel = new MessageChannel();
-    let timer = null;
-    const finish = (version) => {
+    let timer: number | null = null;
+    const finish = (version: unknown) => {
       if (timer) window.clearTimeout(timer);
       channel.port1.close();
       channel.port2.close();
@@ -78,7 +86,7 @@ export function usePwaUpdate() {
     () => "idle",
   );
 
-  function currentRuntime() {
+  function currentRuntime(): PwaUpdateRuntime {
     if (!runtime) {
       runtime = createRuntime({
         updateAvailable,
@@ -91,19 +99,24 @@ export function usePwaUpdate() {
     return runtime;
   }
 
-  function syncUpdateAvailable(activeRuntime) {
-    const waitingWorker =
+  function syncUpdateAvailable(activeRuntime: PwaUpdateRuntime) {
+    const waitingWorker = Boolean(
       navigator.serviceWorker.controller &&
-      activeRuntime.registration?.waiting?.state === "installed";
+      activeRuntime.registration?.waiting?.state === "installed",
+    );
     const activeSessionWaiting =
       waitingWorker &&
       activeRuntime.startupFinished.value &&
+      activeRuntime.registration !== null &&
       activeRuntime.registration.waiting !== activeRuntime.startupWorker;
     activeRuntime.updateAvailable.value =
       activeRuntime.reloadRequired.value || Boolean(activeSessionWaiting);
   }
 
-  function observeInstallingWorker(activeRuntime, worker) {
+  function observeInstallingWorker(
+    activeRuntime: PwaUpdateRuntime,
+    worker: ServiceWorker | null | undefined,
+  ) {
     if (!worker || worker === activeRuntime.installingWorker) return;
     activeRuntime.installingWorker = worker;
     if (!activeRuntime.startupFinished.value)
@@ -115,7 +128,7 @@ export function usePwaUpdate() {
     });
   }
 
-  function inspectRegistration(activeRuntime) {
+  function inspectRegistration(activeRuntime: PwaUpdateRuntime) {
     observeInstallingWorker(
       activeRuntime,
       activeRuntime.registration?.installing,
@@ -123,13 +136,13 @@ export function usePwaUpdate() {
     syncUpdateAvailable(activeRuntime);
   }
 
-  function reloadApplication(activeRuntime) {
+  function reloadApplication(activeRuntime: PwaUpdateRuntime) {
     if (activeRuntime.reloadStarted) return;
     activeRuntime.reloadStarted = true;
     window.location.reload();
   }
 
-  function startupRestartGuard(activeRuntime) {
+  function startupRestartGuard(activeRuntime: PwaUpdateRuntime) {
     if (activeRuntime.startupRestartAttempted)
       return activeRuntime.startupRestartAttempted;
     try {
@@ -145,7 +158,10 @@ export function usePwaUpdate() {
     }
   }
 
-  function setStartupRestartGuard(activeRuntime, version) {
+  function setStartupRestartGuard(
+    activeRuntime: PwaUpdateRuntime,
+    version: string,
+  ) {
     activeRuntime.startupRestartAttempted = version;
     try {
       sessionStorage.setItem(
@@ -157,7 +173,7 @@ export function usePwaUpdate() {
     }
   }
 
-  function clearStartupRestartGuard(activeRuntime) {
+  function clearStartupRestartGuard(activeRuntime: PwaUpdateRuntime) {
     activeRuntime.startupRestartAttempted = null;
     try {
       sessionStorage.removeItem(STARTUP_RESTART_GUARD);
@@ -166,7 +182,7 @@ export function usePwaUpdate() {
     }
   }
 
-  function handleControllerChange(activeRuntime) {
+  function handleControllerChange(activeRuntime: PwaUpdateRuntime) {
     if (activeRuntime.activationWorker) {
       reloadApplication(activeRuntime);
       return;
@@ -186,25 +202,28 @@ export function usePwaUpdate() {
     activeRuntime.updateAvailable.value = true;
   }
 
-  function attachListeners(activeRuntime) {
+  function attachListeners(activeRuntime: PwaUpdateRuntime) {
     if (activeRuntime.listenersAttached) return;
+    const registration = activeRuntime.registration;
+    if (!registration) return;
     activeRuntime.listenersAttached = true;
-    activeRuntime.registration.addEventListener("updatefound", () => {
-      observeInstallingWorker(
-        activeRuntime,
-        activeRuntime.registration.installing,
-      );
+    registration.addEventListener("updatefound", () => {
+      observeInstallingWorker(activeRuntime, registration.installing);
     });
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       handleControllerChange(activeRuntime);
     });
   }
 
-  async function ensureRegistration(activeRuntime) {
+  async function ensureRegistration(
+    activeRuntime: PwaUpdateRuntime,
+  ): Promise<ServiceWorkerRegistration> {
     if (activeRuntime.registration) return activeRuntime.registration;
     if (!activeRuntime.registrationPromise) {
       activeRuntime.registrationPromise = registerServiceWorker()
         .then((registration) => {
+          if (!registration)
+            throw new Error("Service worker registration unavailable");
           activeRuntime.registration = registration;
           attachListeners(activeRuntime);
           inspectRegistration(activeRuntime);
@@ -215,7 +234,10 @@ export function usePwaUpdate() {
           throw error;
         });
     }
-    return activeRuntime.registrationPromise;
+    const registration = await activeRuntime.registrationPromise;
+    if (!registration)
+      throw new Error("Service worker registration unavailable");
+    return registration;
   }
 
   async function checkForUpdate() {
@@ -246,7 +268,7 @@ export function usePwaUpdate() {
     }
   }
 
-  async function activateWaitingWorker(mode) {
+  async function activateWaitingWorker(mode: "active" | "startup") {
     const activeRuntime = currentRuntime();
     const worker = activeRuntime.registration?.waiting;
     if (!worker || worker.state !== "installed") {
@@ -259,8 +281,9 @@ export function usePwaUpdate() {
     worker.postMessage({ type: "SKIP_WAITING" });
     await waitForState(worker, ["activated", "redundant"], ACTIVATION_WAIT_MS);
 
+    const workerState = worker.state as ServiceWorkerState;
     if (
-      worker.state === "activated" ||
+      workerState === "activated" ||
       activeRuntime.registration?.active === worker
     ) {
       reloadApplication(activeRuntime);

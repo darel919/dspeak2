@@ -1,8 +1,13 @@
-let realtimePublisher = null;
-let publisherOverride = null;
-const cachedChannels = new Map();
+import type {
+  RealtimeChannelPublisher,
+  RealtimePublisher,
+} from "../types/realtime.ts";
 
-async function loadPublisher() {
+let realtimePublisher: RealtimePublisher | null = null;
+let publisherOverride: RealtimePublisher | null = null;
+const cachedChannels = new Map<string, RealtimeChannelPublisher>();
+
+async function loadPublisher(): Promise<RealtimePublisher | null> {
   if (publisherOverride) return publisherOverride;
   if (realtimePublisher) return realtimePublisher;
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -10,16 +15,21 @@ async function loadPublisher() {
   }
   const { supabaseAdmin } = await import("../auth/supabase.ts");
   if (!supabaseAdmin) return null;
-  realtimePublisher = supabaseAdmin;
+  realtimePublisher = supabaseAdmin as unknown as RealtimePublisher;
   return realtimePublisher;
 }
 
-export function setRealtimePublisherForTests(publisher) {
+export function setRealtimePublisherForTests(
+  publisher: RealtimePublisher | null,
+): void {
   publisherOverride = publisher;
   cachedChannels.clear();
 }
 
-export async function publishToRealtime(topic, message) {
+export async function publishToRealtime(
+  topic: string,
+  message: unknown,
+): Promise<void> {
   const publisher = await loadPublisher();
   if (!publisher) return;
   let channel = cachedChannels.get(topic);
@@ -34,18 +44,27 @@ export async function publishToRealtime(topic, message) {
   }
 }
 
-export function broadcastGlobally(message) {
+export function broadcastGlobally(message: unknown): Promise<void> {
   return publishToRealtime("global", message);
 }
 
-export function broadcastToUser(userId, message) {
+export function broadcastToUser(
+  userId: string | number,
+  message: unknown,
+): Promise<void> {
   return publishToRealtime(`notify:${String(userId)}`, message);
 }
 
-export function broadcastToChannel(channelId, message) {
+export function broadcastToChannel(
+  channelId: string | number,
+  message: unknown,
+): Promise<void> {
   return publishToRealtime(`chat:${String(channelId)}`, message);
 }
 
-export function broadcastToRoom(roomId, message) {
+export function broadcastToRoom(
+  roomId: string | number,
+  message: unknown,
+): Promise<void> {
   return publishToRealtime(`room:${String(roomId)}`, message);
 }

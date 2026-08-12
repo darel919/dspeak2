@@ -3,26 +3,45 @@ import { debugLog } from "../shared/debug";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
+import type { RealtimeChannelLike } from "../shared/realtime-channel.ts";
 import {
   normalizeChannelPolicy,
   normalizeSlowMode,
 } from "~~/shared/channel-policy.ts";
+import type {
+  ChannelInput,
+  ChannelPolicyUpdate,
+  ChannelRecord,
+  FetchChannelsOptions,
+  VoicePresenceConnection,
+  VoicePresenceSnapshot,
+} from "../shared/types/channels.ts";
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export const useChannelsStore = defineStore("channels", () => {
-  const channels = ref([]);
+  const channels = ref<ChannelRecord[]>([]);
   const loading = ref(false);
-  const error = ref(null);
-  const currentChannelId = ref(null);
-  const voiceProfiles = ref(new Map());
-  const loadedRoomId = ref(null);
-  const roomChannels = reactive(new Map());
-  const pendingRoomRequests = new Map();
-  const voicePresenceConnections = new Map();
-  const voicePresenceSnapshots = new Map();
-  const channelPolicies = ref(new Map());
+  const error = ref<string | null>(null);
+  const currentChannelId = ref<string | null>(null);
+  const voiceProfiles = ref<Map<string, Record<string, unknown>>>(new Map());
+  const loadedRoomId = ref<string | null>(null);
+  const roomChannels = reactive(new Map<string, ChannelRecord[]>());
+  const pendingRoomRequests = new Map<string, Promise<ChannelRecord[]>>();
+  const voicePresenceConnections = new Map<string, VoicePresenceConnection>();
+  const voicePresenceSnapshots = new Map<
+    string,
+    Map<string, VoicePresenceSnapshot>
+  >();
+  const channelPolicies = ref<Map<string, Record<string, unknown>>>(new Map());
   const config = useRuntimeConfig();
 
-  async function fetchChannels(roomId, options = {} as any) {
+  async function fetchChannels(
+    roomId: string,
+    options: FetchChannelsOptions = {},
+  ): Promise<ChannelRecord[]> {
     if (!roomId) {
       throw new Error("Room ID is required");
     }
@@ -33,11 +52,13 @@ export const useChannelsStore = defineStore("channels", () => {
     if (!force && roomChannels.has(normalizedRoomId)) {
       const cachedChannels = roomChannels.get(normalizedRoomId);
       applyStoredVoicePresence(normalizedRoomId);
-      if (activate) activateRoomChannels(normalizedRoomId, cachedChannels);
-      return cachedChannels;
+      if (activate && cachedChannels)
+        activateRoomChannels(normalizedRoomId, cachedChannels);
+      return cachedChannels || [];
     }
     if (pendingRoomRequests.has(normalizedRoomId)) {
       const pendingChannels = await pendingRoomRequests.get(normalizedRoomId);
+      if (!pendingChannels) return [];
       if (activate) activateRoomChannels(normalizedRoomId, pendingChannels);
       return pendingChannels;
     }
@@ -54,13 +75,13 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  function activateRoomChannels(roomId, nextChannels) {
+  function activateRoomChannels(roomId: string, nextChannels: ChannelRecord[]) {
     channels.value = nextChannels;
     loadedRoomId.value = String(roomId);
     applyStoredVoicePresence(roomId);
   }
 
-  function getRoomChannelById(roomId, channelId) {
+  function getRoomChannelById(roomId: string, channelId: string) {
     const roomChannelList = roomChannels.get(String(roomId || ""));
     if (!roomChannelList) return null;
     return (
@@ -70,11 +91,13 @@ export const useChannelsStore = defineStore("channels", () => {
     );
   }
 
-  function getRoomChannels(roomId) {
+  function getRoomChannels(roomId: string) {
     return roomChannels.get(String(roomId || "")) || [];
   }
 
-  async function fetchChannelsFromServer(roomId) {
+  async function fetchChannelsFromServer(
+    roomId: string,
+  ): Promise<ChannelRecord[]> {
     loading.value = true;
     error.value = null;
 
@@ -97,15 +120,15 @@ export const useChannelsStore = defineStore("channels", () => {
         throw new Error(`Failed to fetch channels: ${response.status}`);
       }
 
-      const data = await response.json();
-      const nextChannels = Array.isArray(data) ? data : [];
+      const data: unknown = await response.json();
+      const nextChannels = (Array.isArray(data) ? data : []) as ChannelRecord[];
       roomChannels.set(String(roomId), nextChannels);
       applyStoredVoicePresence(roomId);
       debugLog("[ChannelsStore] Fetched channels:", nextChannels);
 
       return nextChannels;
-    } catch (err) {
-      error.value = err.message;
+    } catch (err: unknown) {
+      error.value = errorMessage(err);
       console.error("[ChannelsStore] Error fetching channels:", err);
       throw err;
     } finally {
@@ -113,7 +136,7 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  async function createChannel(roomId, channelData) {
+  async function createChannel(roomId: string, channelData: ChannelInput) {
     if (!roomId) {
       throw new Error("Room ID is required");
     }
@@ -161,8 +184,8 @@ export const useChannelsStore = defineStore("channels", () => {
       await fetchChannels(roomId, { force: true });
 
       return newChannel;
-    } catch (err) {
-      error.value = err.message;
+    } catch (err: unknown) {
+      error.value = errorMessage(err);
       console.error("[ChannelsStore] Error creating channel:", err);
       throw err;
     } finally {
@@ -170,7 +193,10 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  async function editChannel(channelId, channelData) {
+  async function editChannel(
+    channelId: string,
+    channelData: Partial<ChannelInput>,
+  ) {
     if (!channelId) {
       throw new Error("Channel ID is required");
     }
@@ -211,9 +237,13 @@ export const useChannelsStore = defineStore("channels", () => {
 
       const channelIndex = channels.value.findIndex((c) => c.id === channelId);
       if (channelIndex !== -1) {
+        const existingChannel = channels.value[channelIndex];
+        if (!existingChannel) return false;
         channels.value[channelIndex] = {
-          ...channels.value[channelIndex],
+          ...existingChannel,
           ...channelData,
+          id: existingChannel.id,
+          inRoom: existingChannel.inRoom,
         };
         channels.value = [...channels.value];
         if (loadedRoomId.value)
@@ -221,8 +251,8 @@ export const useChannelsStore = defineStore("channels", () => {
       }
 
       return true;
-    } catch (err) {
-      error.value = err.message;
+    } catch (err: unknown) {
+      error.value = errorMessage(err);
       console.error("[ChannelsStore] Error editing channel:", err);
       throw err;
     } finally {
@@ -230,7 +260,7 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  async function deleteChannel(channelId) {
+  async function deleteChannel(channelId: string) {
     if (!channelId) {
       throw new Error("Channel ID is required");
     }
@@ -275,8 +305,8 @@ export const useChannelsStore = defineStore("channels", () => {
       }
 
       return true;
-    } catch (err) {
-      error.value = err.message;
+    } catch (err: unknown) {
+      error.value = errorMessage(err);
       console.error("[ChannelsStore] Error deleting channel:", err);
       throw err;
     } finally {
@@ -284,7 +314,7 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  async function joinChannel(channelId) {
+  async function joinChannel(channelId: string) {
     if (!channelId) {
       throw new Error("Channel ID is required");
     }
@@ -319,9 +349,11 @@ export const useChannelsStore = defineStore("channels", () => {
 
       const channelIndex = channels.value.findIndex((c) => c.id === channelId);
       if (channelIndex !== -1) {
-        const channel = channels.value[channelIndex];
-        if (!channel.inRoom.includes(userData.id)) {
-          channel.inRoom.push(userData.id);
+        const channel = channels.value.find((item) => item.id === channelId);
+        if (!channel) return false;
+        const normalizedUserId = String(userData.id);
+        if (!channel.inRoom.includes(normalizedUserId)) {
+          channel.inRoom.push(normalizedUserId);
         }
       }
 
@@ -332,7 +364,7 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  async function leaveChannel(channelId) {
+  async function leaveChannel(channelId: string) {
     if (!channelId) {
       throw new Error("Channel ID is required");
     }
@@ -369,7 +401,8 @@ export const useChannelsStore = defineStore("channels", () => {
 
       const channelIndex = channels.value.findIndex((c) => c.id === channelId);
       if (channelIndex !== -1) {
-        const channel = channels.value[channelIndex];
+        const channel = channels.value.find((item) => item.id === channelId);
+        if (!channel) return false;
         channel.inRoom = channel.inRoom.filter(
           (userId) => userId !== userData.id,
         );
@@ -383,9 +416,9 @@ export const useChannelsStore = defineStore("channels", () => {
   }
 
   async function moderateVoiceParticipant(
-    channelId,
-    targetUserId,
-    targetChannelId = null,
+    channelId: string,
+    targetUserId: string,
+    targetChannelId: string | null = null,
   ) {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
@@ -415,7 +448,7 @@ export const useChannelsStore = defineStore("channels", () => {
     return response.json();
   }
 
-  async function getChannelDetails(channelId) {
+  async function getChannelDetails(channelId: string) {
     if (!channelId) {
       throw new Error("Channel ID is required");
     }
@@ -488,7 +521,7 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  function getChannelById(channelId) {
+  function getChannelById(channelId: string | null) {
     return channels.value.find((c) => c.id === channelId);
   }
 
@@ -502,7 +535,7 @@ export const useChannelsStore = defineStore("channels", () => {
 
   function clearChannels() {
     disconnectVoicePresence();
-    channels.value = [] as any;
+    channels.value = [];
     loadedRoomId.value = null;
     roomChannels.clear();
     voicePresenceSnapshots.clear();
@@ -512,7 +545,10 @@ export const useChannelsStore = defineStore("channels", () => {
     error.value = null;
   }
 
-  function storeVoicePresenceSnapshot(snapshot, roomId) {
+  function storeVoicePresenceSnapshot(
+    snapshot: VoicePresenceSnapshot,
+    roomId: string,
+  ) {
     const normalizedRoomId = String(roomId || "");
     if (!normalizedRoomId) return;
     let snapshots = voicePresenceSnapshots.get(normalizedRoomId);
@@ -534,14 +570,17 @@ export const useChannelsStore = defineStore("channels", () => {
     });
   }
 
-  function clearStoredVoicePresence(roomId, channelId) {
+  function clearStoredVoicePresence(roomId: string, channelId: string) {
     const snapshots = voicePresenceSnapshots.get(String(roomId || ""));
     if (!snapshots) return;
     snapshots.delete(String(channelId));
     if (!snapshots.size) voicePresenceSnapshots.delete(String(roomId));
   }
 
-  function applyVoicePresenceToChannel(snapshot, roomId = null) {
+  function applyVoicePresenceToChannel(
+    snapshot: VoicePresenceSnapshot,
+    roomId: string | null = null,
+  ) {
     const roomChannelList = roomId
       ? roomChannels.get(String(roomId)) || []
       : channels.value;
@@ -575,7 +614,7 @@ export const useChannelsStore = defineStore("channels", () => {
     return true;
   }
 
-  function applyStoredVoicePresence(roomId) {
+  function applyStoredVoicePresence(roomId: string) {
     const normalizedRoomId = String(roomId || "");
     const snapshots = voicePresenceSnapshots.get(normalizedRoomId);
     if (!snapshots) return;
@@ -584,7 +623,10 @@ export const useChannelsStore = defineStore("channels", () => {
     if (!snapshots.size) voicePresenceSnapshots.delete(normalizedRoomId);
   }
 
-  function applyVoicePresence(snapshot, roomId = null) {
+  function applyVoicePresence(
+    snapshot: VoicePresenceSnapshot,
+    roomId: string | null = null,
+  ) {
     if (!snapshot?.channelId || !Array.isArray(snapshot.inRoom)) return false;
     const normalizedRoomId = String(roomId || loadedRoomId.value || "");
     if (normalizedRoomId)
@@ -595,7 +637,7 @@ export const useChannelsStore = defineStore("channels", () => {
     return applied;
   }
 
-  function disconnectVoicePresence(roomId = null) {
+  function disconnectVoicePresence(roomId: string | null = null) {
     const roomIds = roomId
       ? [String(roomId)]
       : [
@@ -617,7 +659,10 @@ export const useChannelsStore = defineStore("channels", () => {
     }
   }
 
-  function scheduleVoicePresenceReconnect(normalizedRoomId, connection) {
+  function scheduleVoicePresenceReconnect(
+    normalizedRoomId: string,
+    connection: VoicePresenceConnection,
+  ) {
     if (connection.intentionalClose || connection.reconnectTimer) return;
     const delay = Math.min(15000, 500 * 2 ** connection.reconnectAttempt++);
     connection.reconnectTimer = setTimeout(
@@ -629,7 +674,7 @@ export const useChannelsStore = defineStore("channels", () => {
     );
   }
 
-  function connectVoicePresence(roomId) {
+  function connectVoicePresence(roomId: string) {
     if (!import.meta.client || !roomId) return;
     const normalizedRoomId = String(roomId);
     const existing = voicePresenceConnections.get(normalizedRoomId);
@@ -645,10 +690,14 @@ export const useChannelsStore = defineStore("channels", () => {
     connection.intentionalClose = false;
     connection.connecting = true;
     voicePresenceConnections.set(normalizedRoomId, connection);
-    openRealtimeChannel(`room:${normalizedRoomId}`, {
+    openRealtimeChannel<Record<string, unknown>>(`room:${normalizedRoomId}`, {
       onMessage: (message) => {
         if (message?.type === "voice-presence") {
-          applyVoicePresence(message.data, normalizedRoomId);
+          if (message.data && typeof message.data === "object")
+            applyVoicePresence(
+              message.data as VoicePresenceSnapshot,
+              normalizedRoomId,
+            );
         }
       },
       onSubscribe: () => {
@@ -676,7 +725,7 @@ export const useChannelsStore = defineStore("channels", () => {
           handle.close();
           return;
         }
-        connection.channel = handle.channel;
+        connection.channel = handle.channel as RealtimeChannelLike;
         connection.close = handle.close;
       })
       .catch((err) => {
@@ -690,7 +739,7 @@ export const useChannelsStore = defineStore("channels", () => {
       });
   }
 
-  function syncVoicePresenceRooms(roomIds) {
+  function syncVoicePresenceRooms(roomIds: unknown) {
     if (!import.meta.client) return;
     const desiredRoomIds = new Set(
       (Array.isArray(roomIds) ? roomIds : [])
@@ -702,20 +751,24 @@ export const useChannelsStore = defineStore("channels", () => {
     for (const roomId of desiredRoomIds) connectVoicePresence(roomId);
   }
 
-  function getVoiceProfile(userId) {
+  function getVoiceProfile(userId: string | number) {
     return voiceProfiles.value.get(String(userId));
   }
 
-  function applyRealtimePolicy(channelId, data) {
-    if (data?.mediaPolicy) {
+  function applyRealtimePolicy(
+    channelId: string,
+    data: Record<string, unknown>,
+  ) {
+    if (data.mediaPolicy && typeof data.mediaPolicy === "object") {
+      const nextMediaPolicy = data.mediaPolicy as ChannelRecord["mediaPolicy"];
       const channel = channels.value.find((item) => item.id === channelId);
       if (!channel) return false;
       if (
         Number(channel.mediaPolicy?.revision || 0) >=
-        Number(data.mediaPolicy.revision || 0)
+        Number(nextMediaPolicy?.revision || 0)
       )
         return false;
-      channel.mediaPolicy = data.mediaPolicy;
+      channel.mediaPolicy = nextMediaPolicy;
       channels.value = [...channels.value];
       return true;
     }
@@ -741,7 +794,10 @@ export const useChannelsStore = defineStore("channels", () => {
     return false;
   }
 
-  async function updateChannelPolicy(channelId, { policy, slowMode }) {
+  async function updateChannelPolicy(
+    channelId: string,
+    { policy, slowMode }: ChannelPolicyUpdate,
+  ) {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     if (!userData?.id) throw new Error("User not authenticated");
@@ -765,11 +821,11 @@ export const useChannelsStore = defineStore("channels", () => {
     return result;
   }
 
-  function getChannelPolicy(channelId) {
+  function getChannelPolicy(channelId: string) {
     return channelPolicies.value.get(String(channelId)) || null;
   }
 
-  function getChannelSendPermission(channelId) {
+  function getChannelSendPermission(channelId: string) {
     const channel = channels.value.find(
       (c) => String(c.id) === String(channelId),
     );

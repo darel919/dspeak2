@@ -1,10 +1,14 @@
 import { profileAssetUrl } from "../shared/profile-assets.ts";
+import type {
+  ChatMessageInput,
+  ChatUserInput,
+} from "../shared/types/composables.ts";
 
 export const useChatUtils = () => {
   /**
    * Format a timestamp for display in chat
    */
-  function formatChatTime(dateString) {
+  function formatChatTime(dateString: string | number | Date) {
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -37,7 +41,7 @@ export const useChatUtils = () => {
    * - Last week: d/M (e.g. 8/8)
    * - Else: yyyy/M/d
    */
-  function formatChatDisplayTime(dateString) {
+  function formatChatDisplayTime(dateString: string | number | Date) {
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
@@ -45,7 +49,7 @@ export const useChatUtils = () => {
 
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-    const pad = (n) => n.toString().padStart(2, "0");
+    const pad = (n: number) => n.toString().padStart(2, "0");
 
     const hour12 = date.getHours() % 12 || 12;
     const min = pad(date.getMinutes());
@@ -80,7 +84,7 @@ export const useChatUtils = () => {
   /**
    * Format a full date for detailed views
    */
-  function formatFullDate(dateString) {
+  function formatFullDate(dateString: string | number | Date) {
     const date = new Date(dateString);
     return date.toLocaleString("en-US", {
       year: "numeric",
@@ -97,14 +101,14 @@ export const useChatUtils = () => {
    * Get the protected avatar URL when a profile has one.
    * Missing avatars are rendered as initials by the caller.
    */
-  function getAvatarUrl(avatarPath) {
+  function getAvatarUrl(avatarPath: string | null | undefined) {
     return profileAssetUrl(avatarPath) || "";
   }
 
   /**
    * Validate message content
    */
-  function validateMessage(content) {
+  function validateMessage(content: unknown) {
     if (!content || typeof content !== "string") {
       return { valid: false, error: "Message content is required" };
     }
@@ -135,7 +139,7 @@ export const useChatUtils = () => {
   /**
    * Check if user is mentioned in message
    */
-  function isUserMentioned(message, userId) {
+  function isUserMentioned(message: string, userId: string) {
     if (!message || !userId) return false;
 
     const mentionPattern = new RegExp(`@${userId}\\b`, "i");
@@ -145,14 +149,22 @@ export const useChatUtils = () => {
   /**
    * Check if two messages should be grouped (same sender, close in time)
    */
-  function shouldGroupMessages(prevMessage, currentMessage) {
+  function shouldGroupMessages(
+    prevMessage: ChatMessageInput,
+    currentMessage: ChatMessageInput,
+  ) {
     if (!prevMessage || !currentMessage) return false;
 
-    if (prevMessage.sender.id !== currentMessage.sender.id) return false;
+    if (
+      prevMessage.sender?.id === undefined ||
+      currentMessage.sender?.id === undefined ||
+      prevMessage.sender.id !== currentMessage.sender.id
+    )
+      return false;
 
     const timeDiff =
-      new Date(currentMessage.created).getTime() -
-      new Date(prevMessage.created).getTime();
+      new Date(String(currentMessage.created || "")).getTime() -
+      new Date(String(prevMessage.created || "")).getTime();
     if (timeDiff > 5 * 60 * 1000) return false;
 
     return true;
@@ -161,7 +173,7 @@ export const useChatUtils = () => {
   /**
    * Get user display name with fallback
    */
-  function getUserDisplayName(user, currentUserId) {
+  function getUserDisplayName(user: ChatUserInput, currentUserId: string) {
     if (!user) return "Unknown User";
 
     if (user.id === currentUserId) return "You";
@@ -172,7 +184,7 @@ export const useChatUtils = () => {
   /**
    * Copy text to clipboard with fallback
    */
-  async function copyToClipboard(text) {
+  async function copyToClipboard(text: string) {
     if (!import.meta.client) return false;
 
     try {
@@ -190,9 +202,9 @@ export const useChatUtils = () => {
   /**
    * Debounce function for typing indicators
    */
-  function debounce(func, delay) {
-    let timeoutId;
-    return (...args) => {
+  function debounce(func: (...args: unknown[]) => void, delay: number) {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    return (...args: unknown[]) => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => func(...args), delay);
     };

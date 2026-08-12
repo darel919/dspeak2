@@ -3,8 +3,10 @@ import { friends, profiles } from "../db/schema/index.ts";
 import { eq, and, or, desc, asc, inArray } from "drizzle-orm";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
 import { publicDisplayName } from "../../shared/user-profile.ts";
+type UserId = string;
+type FriendRequestStatus = "pending" | "accepted" | "blocked";
 
-export async function getFriendsList(userId) {
+export async function getFriendsList(userId: UserId) {
   const friendships = await db
     .select()
     .from(friends)
@@ -48,11 +50,14 @@ export async function getFriendsList(userId) {
   });
 }
 
-export async function getFriendRequests(userId, status = "pending") {
+export async function getFriendRequests(
+  userId: UserId,
+  status: FriendRequestStatus = "pending",
+) {
   const requests = await db
     .select()
     .from(friends)
-    .where(and(eq(friends.friendId, userId), eq(friends.status, status as any)))
+    .where(and(eq(friends.friendId, userId), eq(friends.status, status)))
     .orderBy(desc(friends.createdAt));
 
   const requesterIds = [...new Set(requests.map((r) => r.userId))];
@@ -83,7 +88,10 @@ export async function getFriendRequests(userId, status = "pending") {
   });
 }
 
-export async function sendFriendRequest(requesterId, recipientHandle) {
+export async function sendFriendRequest(
+  requesterId: UserId,
+  recipientHandle: string,
+) {
   const recipient = await db
     .select()
     .from(profiles)
@@ -113,6 +121,7 @@ export async function sendFriendRequest(requesterId, recipientHandle) {
 
   if (existing.length > 0) {
     const existingFriendship = existing[0];
+    if (!existingFriendship) throw new Error("Friendship could not be loaded");
     if (existingFriendship.status === "accepted") {
       throw new Error("Already friends with this user");
     }
@@ -158,6 +167,7 @@ export async function sendFriendRequest(requesterId, recipientHandle) {
     .returning();
 
   const request = result[0];
+  if (!request) throw new Error("Friend request could not be created");
 
   return {
     id: request.id,
@@ -173,7 +183,11 @@ export async function sendFriendRequest(requesterId, recipientHandle) {
   };
 }
 
-export async function respondToFriendRequest(requestId, userId, accept) {
+export async function respondToFriendRequest(
+  requestId: UserId,
+  userId: UserId,
+  accept: boolean,
+) {
   const request = await db
     .select()
     .from(friends)
@@ -183,22 +197,24 @@ export async function respondToFriendRequest(requestId, userId, accept) {
   if (!request[0]) {
     throw new Error("Friend request not found");
   }
+  const requestRow = request[0];
 
-  if (String(request[0].friendId) !== String(userId)) {
+  if (String(requestRow.friendId) !== String(userId)) {
     throw new Error("Not authorized to respond to this request");
   }
 
-  if (request[0].status !== "pending") {
+  if (requestRow.status !== "pending") {
     throw new Error("Friend request is no longer pending");
   }
 
-  const newStatus: any = accept ? "accepted" : "rejected";
   if (accept)
     await db
       .update(friends)
-      .set({ status: newStatus })
+      .set({ status: "accepted" })
       .where(eq(friends.id, requestId));
   else await db.delete(friends).where(eq(friends.id, requestId));
+
+  const newStatus = accept ? "accepted" : "rejected";
 
   return {
     id: requestId,
@@ -206,7 +222,7 @@ export async function respondToFriendRequest(requestId, userId, accept) {
   };
 }
 
-export async function getFriendshipStatus(userId, otherUserId) {
+export async function getFriendshipStatus(userId: UserId, otherUserId: UserId) {
   if (String(userId) === String(otherUserId)) {
     return { status: "self" };
   }
@@ -227,6 +243,7 @@ export async function getFriendshipStatus(userId, otherUserId) {
   }
 
   const f = friendship[0];
+  if (!f) return { status: "none" };
 
   if (f.status === "accepted") {
     return { status: "friends", friendshipId: f.id };
@@ -247,7 +264,7 @@ export async function getFriendshipStatus(userId, otherUserId) {
   return { status: "none" };
 }
 
-export async function getMutualFriends(userId, otherUserId) {
+export async function getMutualFriends(userId: UserId, otherUserId: UserId) {
   const userFriendships = await db
     .select()
     .from(friends)
@@ -293,7 +310,10 @@ export async function getMutualFriends(userId, otherUserId) {
   });
 }
 
-export async function sendFriendRequestById(requesterId, recipientId) {
+export async function sendFriendRequestById(
+  requesterId: UserId,
+  recipientId: UserId,
+) {
   if (String(requesterId) === String(recipientId)) {
     throw new Error("Cannot add yourself as a friend");
   }
@@ -321,6 +341,7 @@ export async function sendFriendRequestById(requesterId, recipientId) {
 
   if (existing.length > 0) {
     const existingFriendship = existing[0];
+    if (!existingFriendship) throw new Error("Friendship could not be loaded");
     if (existingFriendship.status === "accepted") {
       throw new Error("Already friends with this user");
     }
@@ -351,6 +372,7 @@ export async function sendFriendRequestById(requesterId, recipientId) {
     .returning();
 
   const request = result[0];
+  if (!request) throw new Error("Friend request could not be created");
 
   return {
     id: request.id,
@@ -366,7 +388,7 @@ export async function sendFriendRequestById(requesterId, recipientId) {
   };
 }
 
-export async function getSentFriendRequests(userId) {
+export async function getSentFriendRequests(userId: UserId) {
   const requests = await db
     .select()
     .from(friends)
@@ -401,7 +423,7 @@ export async function getSentFriendRequests(userId) {
   });
 }
 
-export async function cancelFriendRequest(requestId, userId) {
+export async function cancelFriendRequest(requestId: UserId, userId: UserId) {
   const request = await db
     .select()
     .from(friends)
@@ -424,7 +446,7 @@ export async function cancelFriendRequest(requestId, userId) {
   return { success: true };
 }
 
-export async function removeFriend(userId, friendId) {
+export async function removeFriend(userId: UserId, friendId: UserId) {
   const friendship = await db
     .select()
     .from(friends)

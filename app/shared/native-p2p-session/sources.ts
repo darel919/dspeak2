@@ -5,16 +5,33 @@ import {
 } from "../video-settings.ts";
 
 import { asPeerId } from "./helpers.ts";
+import type {
+  NativeP2pSessionPeer,
+  NativeP2pSessionSurface,
+  NativeP2pSource,
+} from "../types/native-p2p-session.ts";
 export class NativeP2pSessionSourcesMethods {
-  [key: string]: any;
-  async applyTopology(topology = {} as any) {
+  async applyTopology(
+    this: NativeP2pSessionSurface,
+    topology: Record<string, unknown> = {},
+  ) {
     return this._enqueue(async () => {
       this.mode = String(topology.mode || "idle");
       this.epoch = Number(topology.epoch) || 0;
       this.localPeerId = asPeerId(topology.localPeerId);
-      const expected = new Map(
+      const expected = new Map<string, Record<string, unknown>>(
         (Array.isArray(topology.peers) ? topology.peers : [])
-          .map((peer) => [asPeerId(peer.peerId), peer])
+          .filter(
+            (peer): peer is Record<string, unknown> =>
+              Boolean(peer) && typeof peer === "object",
+          )
+          .map(
+            (peer) =>
+              [asPeerId(peer.peerId), peer] as [
+                string,
+                Record<string, unknown>,
+              ],
+          )
           .filter(([peerId]) => peerId && peerId !== this.localPeerId),
       );
       if (this.mode !== "p2p" && this.mode !== "probing") {
@@ -24,19 +41,30 @@ export class NativeP2pSessionSourcesMethods {
       }
       for (const peerId of this.peers.keys())
         if (!expected.has(peerId)) await this._closePeer(peerId);
-      for (const [peerId, peer] of expected as any)
-        await this._ensurePeer(peerId, peer.userId, peer.sources);
+      for (const [peerId, peer] of expected) {
+        const sources = Array.isArray(peer.sources)
+          ? peer.sources.map(String)
+          : [];
+        const userId =
+          typeof peer.userId === "string" || typeof peer.userId === "number"
+            ? peer.userId
+            : null;
+        await this._ensurePeer(peerId, userId, sources);
+      }
       await this._flushPendingSignals();
       this._emitState();
     });
   }
 
-  async addSource(entry) {
+  async addSource(this: NativeP2pSessionSurface, entry: NativeP2pSource) {
     if (!entry?.source) return false;
     return this._enqueue(() => this.addSourceInternal(entry));
   }
 
-  async addSourceInternal(entry) {
+  async addSourceInternal(
+    this: NativeP2pSessionSurface,
+    entry: NativeP2pSource,
+  ) {
     const sourceKey = String(entry.source);
     const previous = this.sources.get(sourceKey);
     const normalized = {
@@ -78,11 +106,11 @@ export class NativeP2pSessionSourcesMethods {
     }
   }
 
-  async removeSource(source) {
+  async removeSource(this: NativeP2pSessionSurface, source: string) {
     return this._enqueue(() => this.removeSourceInternal(source));
   }
 
-  async removeSourceInternal(source) {
+  async removeSourceInternal(this: NativeP2pSessionSurface, source: string) {
     const key = String(source || "");
     const previous = this.sources.get(key);
     this.sources.delete(key);
@@ -109,7 +137,10 @@ export class NativeP2pSessionSourcesMethods {
     }
   }
 
-  async handleSignal(data = {} as any) {
+  async handleSignal(
+    this: NativeP2pSessionSurface,
+    data: Record<string, unknown> = {},
+  ) {
     const epoch = Number(data.epoch);
     const peerId = asPeerId(data.fromPeerId);
     if (!Number.isSafeInteger(epoch) || !data.signal) return false;
@@ -121,7 +152,10 @@ export class NativeP2pSessionSourcesMethods {
     return this._enqueue(() => this.handleSignalInternal(data));
   }
 
-  queuePendingSignal(data) {
+  queuePendingSignal(
+    this: NativeP2pSessionSurface,
+    data: Record<string, unknown>,
+  ) {
     const epoch = Number(data?.epoch);
     if (!Number.isSafeInteger(epoch) || epoch < this.epoch) return false;
     const pending = this.pendingSignals.get(epoch) || [];
@@ -131,7 +165,7 @@ export class NativeP2pSessionSourcesMethods {
     return true;
   }
 
-  async _flushPendingSignals() {
+  async _flushPendingSignals(this: NativeP2pSessionSurface) {
     const pending = this.pendingSignals.get(this.epoch);
     if (!pending?.length) return;
     this.pendingSignals.delete(this.epoch);
@@ -140,21 +174,33 @@ export class NativeP2pSessionSourcesMethods {
         await this.handleSignalInternal(data);
   }
 
-  async handleSignalInternal(data = {} as any) {
+  async handleSignalInternal(
+    this: NativeP2pSessionSurface,
+    data: Record<string, unknown> = {},
+  ) {
     const peerId = asPeerId(data.fromPeerId);
     if (!peerId || Number(data.epoch) !== this.epoch || !data.signal)
       return false;
     const peer = this.peers.get(peerId);
     if (!peer) return false;
-    const signal = data.signal;
-    if (signal.source) {
-      const trackId = String(signal.source.trackId || "");
-      const source = String(signal.source.source || "");
+    const signal =
+      data.signal && typeof data.signal === "object"
+        ? (data.signal as Record<string, unknown>)
+        : {};
+    const sourceSignal =
+      signal.source && typeof signal.source === "object"
+        ? (signal.source as Record<string, unknown>)
+        : null;
+    if (sourceSignal) {
+      const trackId = String(sourceSignal.trackId || "");
+      const source = String(sourceSignal.source || "");
       if (trackId && source) {
         peer.sourceByTrackId.set(trackId, source);
         peer.ownerSourceByTrackId.set(
           trackId,
-          signal.source.ownerSource || null,
+          typeof sourceSignal.ownerSource === "string"
+            ? sourceSignal.ownerSource
+            : null,
         );
         const current = [...this.trackEntries.values()].find(
           (entry) => entry.trackId === trackId,
@@ -163,20 +209,30 @@ export class NativeP2pSessionSourcesMethods {
           this.trackEntries.delete(current.trackId);
           this.onRemoteTrackEnded?.(current);
           current.source = source;
-          current.ownerSource = signal.source.ownerSource || null;
+          current.ownerSource =
+            typeof sourceSignal.ownerSource === "string"
+              ? sourceSignal.ownerSource
+              : null;
           current.key = `p2p:${peer.userId}:${source}`;
           this.trackEntries.set(current.trackId, current);
           this.onRemoteTrack?.(current);
         } else if (current) {
-          current.ownerSource = signal.source.ownerSource || null;
+          current.ownerSource =
+            typeof sourceSignal.ownerSource === "string"
+              ? sourceSignal.ownerSource
+              : null;
           this.onRemoteTrack?.(current);
         }
         this._checkPeerQualification(peer);
       }
       return true;
     }
-    if (signal.sourceRemoved) {
-      const source = String(signal.sourceRemoved.source || "");
+    const removedSignal =
+      signal.sourceRemoved && typeof signal.sourceRemoved === "object"
+        ? (signal.sourceRemoved as Record<string, unknown>)
+        : null;
+    if (removedSignal) {
+      const source = String(removedSignal.source || "");
       for (const [trackId, mappedSource] of peer.sourceByTrackId) {
         if (mappedSource !== source) continue;
         peer.sourceByTrackId.delete(trackId);
@@ -190,20 +246,28 @@ export class NativeP2pSessionSourcesMethods {
       }
       return true;
     }
-    if (signal.sourceReceiving) {
-      const source = String(signal.sourceReceiving.source || "");
-      const receiving = Boolean(signal.sourceReceiving.receiving);
+    const receivingSignal =
+      signal.sourceReceiving && typeof signal.sourceReceiving === "object"
+        ? (signal.sourceReceiving as Record<string, unknown>)
+        : null;
+    if (receivingSignal) {
+      const source = String(receivingSignal.source || "");
+      const receiving = Boolean(receivingSignal.receiving);
       peer.sourceReceiving.set(source, receiving);
       await this._setSourceParameters(peer, source, {
         active: receiving && this.sourceTransmission.get(source) !== false,
       });
       return true;
     }
-    if (signal.candidate) {
+    const candidateSignal =
+      signal.candidate && typeof signal.candidate === "object"
+        ? (signal.candidate as Record<string, unknown>)
+        : null;
+    if (candidateSignal) {
       if (!peer.remoteDescriptionSet) {
-        peer.pendingCandidates.push(signal.candidate);
+        peer.pendingCandidates.push(candidateSignal);
       } else {
-        await this._addCandidate(peer, signal.candidate);
+        await this._addCandidate(peer, candidateSignal);
       }
       return true;
     }
@@ -216,8 +280,11 @@ export class NativeP2pSessionSourcesMethods {
         this._requestOffer(peer);
       return true;
     }
-    if (!signal.description) return false;
-    const description = signal.description;
+    const description =
+      signal.description && typeof signal.description === "object"
+        ? (signal.description as Record<string, unknown>)
+        : null;
+    if (!description) return false;
     if (description.type === "offer") {
       const answer = await this.invoke("media_p2p_create_answer", {
         p2pHandle: peer.handle,
@@ -246,9 +313,15 @@ export class NativeP2pSessionSourcesMethods {
     return false;
   }
 
-  handleReceiveEvent(event = {} as any) {
+  handleReceiveEvent(
+    this: NativeP2pSessionSurface,
+    event: Record<string, unknown> = {},
+  ) {
     const kind = Number(event.kind);
-    const payload = event.payload || {};
+    const payload =
+      event.payload && typeof event.payload === "object"
+        ? (event.payload as Record<string, unknown>)
+        : {};
     const handle = String(payload.handle || "");
     const peer = [...this.peers.values()].find(
       (candidate) => String(candidate.handle) === handle,
@@ -271,36 +344,41 @@ export class NativeP2pSessionSourcesMethods {
       data: event.data || null,
     };
     this.onRemoteTrack?.(entry);
-    this._checkPeerQualification(framePeer);
+    if (framePeer) this._checkPeerQualification(framePeer);
     this._emitState();
     return true;
   }
 
-  async closeAll() {
+  async closeAll(this: NativeP2pSessionSurface) {
     for (const peerId of [...this.peers.keys()]) await this._closePeer(peerId);
     this.trackEntries.clear();
     this.pendingSignals.clear();
     this._emitState();
   }
 
-  async shutdown() {
+  async shutdown(this: NativeP2pSessionSurface) {
     this.closed = true;
     await this.closeAll();
     this.sources.clear();
   }
 
-  _enqueue(operation) {
+  _enqueue(this: NativeP2pSessionSurface, operation: () => Promise<unknown>) {
     if (this.closed)
       return Promise.reject(new Error("Native P2P session is closed"));
     const next = this.operation.catch(() => {}).then(operation);
-    this.operation = next.catch((error) => {
+    this.operation = next.catch((error: unknown) => {
       this.onError?.(error);
       throw error;
     });
     return next;
   }
 
-  async _ensurePeer(peerId, userId, sources = [] as any) {
+  async _ensurePeer(
+    this: NativeP2pSessionSurface,
+    peerId: string,
+    userId: string | number | null,
+    sources: string[] = [],
+  ) {
     const existing = this.peers.get(peerId);
     if (existing) {
       if (userId != null) existing.userId = String(userId);
@@ -313,16 +391,20 @@ export class NativeP2pSessionSourcesMethods {
       offerer: Boolean(this.localPeerId && this.localPeerId < peerId),
     });
     if (!result?.handle) throw new Error("Native P2P handle was not created");
-    const peer = {
+    const handle: string | number =
+      typeof result.handle === "string" || typeof result.handle === "number"
+        ? result.handle
+        : String(result.handle);
+    const peer: NativeP2pSessionPeer = {
       peerId,
       userId: String(userId || peerId),
-      handle: result.handle,
-      sources: new Set(),
-      trackIds: new Map(),
+      handle,
+      sources: new Set<string>(),
+      trackIds: new Map<string, string>(),
       connected: false,
       candidateTimer: null,
-      sourceByTrackId: new Map(),
-      ownerSourceByTrackId: new Map(),
+      sourceByTrackId: new Map<string, string>(),
+      ownerSourceByTrackId: new Map<string, string | null>(),
       offerCreated: false,
       negotiationInFlight: false,
       negotiationRequested: false,
@@ -338,11 +420,11 @@ export class NativeP2pSessionSourcesMethods {
       restarted: false,
       failureReported: false,
       readyReported: false,
-      remoteSourceNames: new Set(
+      remoteSourceNames: new Set<string>(
         (Array.isArray(sources) ? sources : []).map(String),
       ),
-      sourceReceiving: new Map(),
-      remoteReceiving: new Map(),
+      sourceReceiving: new Map<string, boolean>(),
+      remoteReceiving: new Map<string, boolean>(),
     };
     this.peers.set(peerId, peer);
     try {
@@ -366,7 +448,11 @@ export class NativeP2pSessionSourcesMethods {
     }
   }
 
-  async _attachSource(peer, source) {
+  async _attachSource(
+    this: NativeP2pSessionSurface,
+    peer: NativeP2pSessionPeer,
+    source: NativeP2pSource,
+  ) {
     if (peer.sources.has(source.source)) return;
     let attached = false;
     let announced = false;
@@ -402,11 +488,11 @@ export class NativeP2pSessionSourcesMethods {
       });
       announced = true;
       if (peer.offerCreated) this._requestOffer(peer);
-    } catch (error) {
+    } catch (error: unknown) {
       if (attached) {
         try {
           await this._detachSource(peer, source.source);
-        } catch (cleanupError) {
+        } catch (cleanupError: unknown) {
           this.onError?.(cleanupError);
         }
       }
@@ -418,7 +504,11 @@ export class NativeP2pSessionSourcesMethods {
     }
   }
 
-  async _detachSource(peer, source) {
+  async _detachSource(
+    this: NativeP2pSessionSurface,
+    peer: NativeP2pSessionPeer,
+    source: string,
+  ) {
     if (!peer.sources.has(source)) return false;
     await this.invoke("media_p2p_remove_track", {
       p2pHandle: peer.handle,
@@ -429,15 +519,20 @@ export class NativeP2pSessionSourcesMethods {
     return true;
   }
 
-  _sourceParameters(source, overrides = {} as any) {
-    const parameters = {
+  _sourceParameters(
+    this: NativeP2pSessionSurface,
+    source: NativeP2pSource,
+    overrides: Record<string, unknown> = {},
+  ) {
+    const parameters: Record<string, unknown> = {
       active: this.sourceTransmission.get(source.source) !== false,
       priority: "high",
       networkPriority: "high",
       ...overrides,
     };
     const bitrate = Number(
-      source.captureSelection?.audio?.maxBitrateBps ||
+      (source.captureSelection?.audio as Record<string, unknown> | undefined)
+        ?.maxBitrateBps ||
         source.audioBitrate ||
         source.roomBitrateBps,
     );
@@ -446,9 +541,12 @@ export class NativeP2pSessionSourcesMethods {
     if (source.kind === "video") {
       const video = resolveNativeCaptureVideoSettings(
         source.captureSelection,
-        source.videoSettings || {},
+        source.videoSettings || undefined,
       );
-      const resolution = VIDEO_RESOLUTIONS[video.resolution];
+      const resolutionKey = String(
+        video.resolution || "",
+      ) as keyof typeof VIDEO_RESOLUTIONS;
+      const resolution = VIDEO_RESOLUTIONS[resolutionKey];
       const options = buildP2pVideoSenderOptions({
         width: video.width || resolution?.width || 1920,
         height: video.height || resolution?.height || 1080,
@@ -466,7 +564,7 @@ export class NativeP2pSessionSourcesMethods {
     return parameters;
   }
 
-  _syncAudioProfile(peer) {
+  _syncAudioProfile(this: NativeP2pSessionSurface, peer: NativeP2pSessionPeer) {
     const stereo = [...this.sources.values()].some(
       (source) =>
         source.kind === "audio" &&
@@ -478,7 +576,12 @@ export class NativeP2pSessionSourcesMethods {
     });
   }
 
-  async _setSourceParameters(peer, source, parameters) {
+  async _setSourceParameters(
+    this: NativeP2pSessionSurface,
+    peer: NativeP2pSessionPeer,
+    source: string,
+    parameters: Record<string, unknown>,
+  ) {
     const trackId = peer.trackIds.get(source);
     if (!trackId) return false;
     await this.invoke("media_p2p_set_track_parameters", {
@@ -489,7 +592,11 @@ export class NativeP2pSessionSourcesMethods {
     return true;
   }
 
-  async setSourceTransmission(source, enabled) {
+  async setSourceTransmission(
+    this: NativeP2pSessionSurface,
+    source: string,
+    enabled: boolean,
+  ) {
     const normalizedSource = String(source || "");
     this.sourceTransmission.set(normalizedSource, Boolean(enabled));
     await Promise.all(
@@ -504,7 +611,12 @@ export class NativeP2pSessionSourcesMethods {
     return true;
   }
 
-  async setRemoteReceiving(userIdOrKey, sourceOrReceiving, receivingValue) {
+  async setRemoteReceiving(
+    this: NativeP2pSessionSurface,
+    userIdOrKey: string,
+    sourceOrReceiving: string | boolean,
+    receivingValue?: boolean,
+  ): Promise<boolean> {
     if (
       typeof sourceOrReceiving === "boolean" &&
       receivingValue === undefined
@@ -513,7 +625,11 @@ export class NativeP2pSessionSourcesMethods {
         (candidate) => candidate.key === String(userIdOrKey),
       );
       return entry
-        ? this.setRemoteReceiving(entry.userId, entry.source, sourceOrReceiving)
+        ? this.setRemoteReceiving(
+            String(entry.userId),
+            entry.source,
+            sourceOrReceiving,
+          )
         : false;
     }
     const userId = String(userIdOrKey);
@@ -523,7 +639,7 @@ export class NativeP2pSessionSourcesMethods {
       (candidate) => String(candidate.userId) === userId,
     );
     if (!peer) return false;
-    const operations = [] as any;
+    const operations: Array<Promise<unknown>> = [];
     this.remoteReceiving.set(`${userId}:${source}`, receiving);
     peer.remoteReceiving.set(source, receiving);
     for (const entry of this.trackEntries.values()) {
@@ -546,19 +662,32 @@ export class NativeP2pSessionSourcesMethods {
     return true;
   }
 
-  async updateAudioBitrate(source, maxBitrate) {
+  async updateAudioBitrate(
+    this: NativeP2pSessionSurface,
+    source: string,
+    maxBitrate: number,
+  ) {
     return this._updateSourceParameters(source, {
       maxBitrate: Math.floor(Number(maxBitrate)),
     });
   }
 
-  async updateVideoBitrate(source, maxBitrate) {
+  async updateVideoBitrate(
+    this: NativeP2pSessionSurface,
+    source: string,
+    maxBitrate: number,
+  ) {
     return this._updateSourceParameters(source, {
       maxBitrate: Math.floor(Number(maxBitrate)),
     });
   }
 
-  async setConsumerVolume(userId, source, volume) {
+  async setConsumerVolume(
+    this: NativeP2pSessionSurface,
+    userId: string | number,
+    source: string,
+    volume: number,
+  ) {
     const normalized = Math.max(0, Math.min(2, Number(volume)));
     const operations = [...this.trackEntries.values()]
       .filter(
@@ -578,3 +707,16 @@ export class NativeP2pSessionSourcesMethods {
     return operations.length > 0;
   }
 }
+
+export interface NativeP2pSessionSourcesMethods extends Omit<
+  NativeP2pSessionSurface,
+  | "applyTopology"
+  | "addSource"
+  | "removeSource"
+  | "handleSignal"
+  | "handleReceiveEvent"
+  | "setSourceTransmission"
+  | "updateAudioBitrate"
+  | "updateVideoBitrate"
+  | "setConsumerVolume"
+> {}

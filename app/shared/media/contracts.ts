@@ -1,40 +1,26 @@
-export type MediaEngineState =
-  "connecting" | "connected" | "reconnecting" | "disconnected" | "failed";
+import type {
+  JoinSessionInput,
+  MediaDeviceInfo,
+  MediaEngineCapabilities,
+  MediaEngineConfig,
+  MediaEngineEventMap,
+  MediaEngineState,
+  MediaSignalMessage,
+  MediaStats,
+  ScreenShareOptions,
+} from "./types.ts";
 
-export type MediaCapability =
-  | "microphone"
-  | "camera"
-  | "screenVideo"
-  | "screenAudio"
-  | "p2p"
-  | "sfu"
-  | "receiveVideo"
-  | "receiveAudio";
-
-export type MediaBackend = "browser" | "native" | "hybrid";
-
-export type MediaEngineCapabilities = Record<MediaCapability, MediaBackend>;
-
-export type MediaEngineConfig = Record<string, any>;
-
-export type JoinSessionInput = Record<string, any> & {
-  roomId?: string;
-  channelId?: string;
-  participantId?: string;
-};
-
-export type ScreenShareOptions = Record<string, any>;
-export type MediaSignalMessage = Record<string, any>;
-
-export type MediaDeviceInfo = {
-  deviceId: string;
-  label: string;
-  kind: "audioinput" | "videoinput" | "audiooutput" | string;
-  groupId?: string;
-};
-
-export type MediaStats = Record<string, any>;
-export type MediaEngineEventMap = Record<string, (...args: any[]) => void>;
+export type {
+  JoinSessionInput,
+  MediaDeviceInfo,
+  MediaEngineCapabilities,
+  MediaEngineConfig,
+  MediaEngineEventMap,
+  MediaEngineState,
+  MediaSignalMessage,
+  MediaStats,
+  ScreenShareOptions,
+} from "./types.ts";
 
 export const MediaEngineEventNames = [
   "state",
@@ -49,8 +35,6 @@ export const MediaEngineEventNames = [
 ] as const;
 
 export class MediaEngine {
-  [key: string]: any;
-
   async initialize(_config?: MediaEngineConfig): Promise<void> {
     throw new Error("Not implemented");
   }
@@ -91,7 +75,7 @@ export class MediaEngine {
     throw new Error("Not implemented");
   }
 
-  on(_event: string, _callback: (...args: any[]) => void): () => void {
+  on(_event: string, _callback: (...args: unknown[]) => void): () => void {
     throw new Error("Not implemented");
   }
 

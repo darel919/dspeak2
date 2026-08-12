@@ -1,10 +1,10 @@
 <template>
-  <div class="toast toast-top toast-end z-50">
-    <TransitionGroup name="toast" tag="div">
+  <div class="metro-toast-region">
+    <TransitionGroup name="metro-toast" tag="div" class="metro-toast-list">
       <div
         v-for="toast in toasts"
         :key="toast.id"
-        class="metro-status grid grid-cols-[auto_minmax(0,1fr)_auto] items-start"
+        class="metro-toast"
         :class="getToastClass(toast.type)"
         :role="toast.type === 'error' ? 'alert' : 'status'"
       >
@@ -40,49 +40,69 @@ function getToastIcon(type) {
 </script>
 
 <style scoped>
-.toast {
+.metro-toast-region {
+  position: fixed;
   top: calc(var(--navbar-height) + 0.75rem);
   right: 0.75rem;
+  z-index: 50;
   width: min(28rem, calc(100vw - 1.5rem));
-  padding: 0;
+  pointer-events: none;
 }
 
-.alert-error .toast-message {
-  background-color: var(--color-error);
-  color: var(--color-error-content);
+.metro-toast-list {
+  display: grid;
+  gap: var(--metro-space-3);
 }
 
-.alert-info .toast-message {
-  background-color: var(--color-info);
-  color: var(--color-info-content);
+.metro-toast {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  width: 100%;
+  gap: var(--metro-space-2);
+  padding: var(--metro-space-3) var(--metro-space-4);
+  border: 1px solid var(--metro-border);
+  border-left-width: 4px;
+  background: var(--color-base-100);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  pointer-events: auto;
 }
 
-.alert-success .toast-message {
-  background-color: var(--color-success);
-  color: var(--color-success-content);
+.toast-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-base-content);
 }
 
-.alert-warning .toast-message {
-  background-color: var(--color-warning);
-  color: var(--color-warning-content);
+.metro-toast .metro-btn {
+  min-width: var(--metro-control-size);
 }
 
-.toast-enter-active,
-.toast-leave-active {
+.metro-toast-enter-active,
+.metro-toast-leave-active {
   transition: all 0.3s ease;
 }
 
-.toast-enter-from {
+.metro-toast-enter-from {
   opacity: 0;
   transform: translateX(100%);
 }
 
-.toast-leave-to {
+.metro-toast-leave-to {
   opacity: 0;
   transform: translateX(100%);
 }
 
-.toast-move {
+.metro-toast-move {
   transition: transform 0.3s ease;
+}
+
+@media (max-width: 640px) {
+  .metro-toast-region {
+    right: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+  }
 }
 </style>

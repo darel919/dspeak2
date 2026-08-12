@@ -1,29 +1,32 @@
-function finite(value) {
+type StatsRecord = Record<string, unknown>;
+
+function finite(value: unknown) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
-function toMilliseconds(value) {
+function toMilliseconds(value: unknown) {
   const number = finite(value);
   if (number == null) return null;
   return Math.abs(number) < 1 ? number * 1000 : number;
 }
 
-function asStatObjects(value) {
+function asStatObjects(value: unknown): StatsRecord[] {
   if (Array.isArray(value))
     return value.flatMap((candidate) => asStatObjects(candidate));
   if (!value || typeof value !== "object") return [];
-  if (value.type) return [value];
-  if (Array.isArray(value.stats)) return asStatObjects(value.stats);
-  if (value.stats && typeof value.stats === "object")
-    return asStatObjects(value.stats);
-  return Object.values(value).flatMap((candidate) => asStatObjects(candidate));
+  const record = value as StatsRecord;
+  if (record.type) return [record];
+  if (Array.isArray(record.stats)) return asStatObjects(record.stats);
+  if (record.stats && typeof record.stats === "object")
+    return asStatObjects(record.stats);
+  return Object.values(record).flatMap((candidate) => asStatObjects(candidate));
 }
 
-export function nativeStatsObjects(value) {
+export function nativeStatsObjects(value: unknown) {
   return asStatObjects(value);
 }
 
-export function nativeRtpStat(value, type, kind) {
+export function nativeRtpStat(value: unknown, type: string, kind?: string) {
   return asStatObjects(value).find((stat) => {
     if (stat.type !== type || stat.isRemote) return false;
     const statKind = stat.kind || stat.mediaType;
@@ -31,7 +34,16 @@ export function nativeRtpStat(value, type, kind) {
   });
 }
 
-export function nativeRtpStatForTrack(value, type, entry = {} as any) {
+export function nativeRtpStatForTrack(
+  value: unknown,
+  type: string,
+  entry: {
+    trackId?: string | number | null;
+    mid?: string | number | null;
+    trackIdentifier?: string | null;
+    kind?: string | null;
+  } = {},
+) {
   const stats = asStatObjects(value);
   const identifiers = [entry.trackId, entry.mid, entry.trackIdentifier]
     .map((identifier) => String(identifier || ""))
@@ -47,7 +59,7 @@ export function nativeRtpStatForTrack(value, type, entry = {} as any) {
     return !entry.kind || !statKind || statKind === entry.kind;
   });
   const matching = candidates.find((stat) => {
-    const related: any =
+    const related: StatsRecord | null | undefined =
       stat.trackId == null ? null : byId.get(String(stat.trackId));
     return [
       stat.trackIdentifier,
@@ -59,7 +71,7 @@ export function nativeRtpStatForTrack(value, type, entry = {} as any) {
   return matching || (candidates.length === 1 ? candidates[0] : null);
 }
 
-function candidateDetails(candidate) {
+function candidateDetails(candidate: StatsRecord | null) {
   if (!candidate) return null;
   return {
     address: candidate.address || candidate.ip || null,
@@ -69,7 +81,7 @@ function candidateDetails(candidate) {
   };
 }
 
-function findCandidatePair(stats) {
+function findCandidatePair(stats: StatsRecord[]) {
   const transport = stats.find(
     (stat) => stat.type === "transport" && stat.selectedCandidatePairId,
   );
@@ -86,12 +98,15 @@ function findCandidatePair(stats) {
   );
 }
 
-function findCandidate(stats, id) {
+function findCandidate(stats: StatsRecord[], id: unknown) {
   if (!id) return null;
   return stats.find((stat) => stat.id === id) || null;
 }
 
-function normalizeCandidatePair(pair, stats) {
+function normalizeCandidatePair(
+  pair: StatsRecord | null,
+  stats: StatsRecord[],
+) {
   if (!pair) return null;
   const local = findCandidate(stats, pair.localCandidateId);
   const remote = findCandidate(stats, pair.remoteCandidateId);
@@ -108,20 +123,24 @@ function normalizeCandidatePair(pair, stats) {
     packetsSent: finite(pair.packetsSent),
     packetsReceived: finite(pair.packetsReceived),
     packetLoss: finite(pair.packetLoss),
-    local: candidateDetails(local || pair.local),
-    remote: candidateDetails(remote || pair.remote),
+    local: candidateDetails(
+      local || (pair.local as StatsRecord | null | undefined) || null,
+    ),
+    remote: candidateDetails(
+      remote || (pair.remote as StatsRecord | null | undefined) || null,
+    ),
   };
 }
 
-function averageJitterDelay(value, emitted) {
-  return emitted > 0 && finite(value) != null
+function averageJitterDelay(value: unknown, emitted: number | null) {
+  return emitted != null && emitted > 0 && finite(value) != null
     ? (Number(value) * 1000) / emitted
     : null;
 }
 
 export function normalizeNativeTransportStats(
-  value,
-  kind,
+  value: unknown,
+  kind: string,
   transportState = "unknown",
 ) {
   const stats = asStatObjects(value);
@@ -211,10 +230,11 @@ export function normalizeNativeTransportStats(
   };
 }
 
-export function normalizeNativeStatsSnapshot(snapshot) {
+export function normalizeNativeStatsSnapshot(snapshot: unknown) {
   if (!snapshot || typeof snapshot !== "object") return snapshot;
-  const transports = Array.isArray(snapshot.transports)
-    ? snapshot.transports.map((transport) =>
+  const record = snapshot as StatsRecord;
+  const transports = Array.isArray(record.transports)
+    ? record.transports.map((transport) =>
         transport?.stats || transport?.raw
           ? normalizeNativeTransportStats(
               transport.raw ?? transport.stats,
@@ -224,11 +244,11 @@ export function normalizeNativeStatsSnapshot(snapshot) {
           : transport,
       )
     : [];
-  return { ...snapshot, transports };
+  return { ...record, transports };
 }
 
-export function nativeFlowing(value, type) {
-  const stat: any = (nativeRtpStat as any)(value, type, undefined);
+export function nativeFlowing(value: unknown, type: string) {
+  const stat = nativeRtpStat(value, type);
   if (!stat) return null;
   return {
     bytes:

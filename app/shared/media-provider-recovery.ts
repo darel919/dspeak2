@@ -5,10 +5,18 @@ export function createProviderRecoveryState({
   transportReady,
   mediaConnectionState,
   setConnectionPhase,
+}: {
+  error: { value: string | null };
+  transportReady: { value: boolean };
+  mediaConnectionState: { value: string };
+  setConnectionPhase: (
+    phase: string,
+    details?: Record<string, unknown>,
+  ) => unknown;
 }) {
   let retryAt = 0;
   return {
-    receive(data = {} as any) {
+    receive(data: Record<string, unknown> = {}) {
       const nextRetryAt = Number(data.retryAt);
       if (Number.isFinite(nextRetryAt) && nextRetryAt > Date.now())
         retryAt = Math.max(retryAt, nextRetryAt);

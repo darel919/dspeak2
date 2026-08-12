@@ -3,8 +3,9 @@ import { isFatalClientError } from "~/shared/fatal-client-error.ts";
 export default defineNuxtPlugin(() => {
   const { report } = useFatalClientError();
 
-  function handleError(event) {
-    const error = event.error || event.reason || event.message;
+  function handleError(event: ErrorEvent | PromiseRejectionEvent) {
+    const error =
+      event instanceof ErrorEvent ? event.error || event.message : event.reason;
     if (!isFatalClientError(error)) return;
     report(error);
     if (window.__TAURI__ || window.__TAURI_INTERNALS__) {

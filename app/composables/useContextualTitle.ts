@@ -1,12 +1,13 @@
 import { buildDocumentTitle } from "../shared/document-title";
 import { useChannelsStore } from "../stores/channels";
 import { useRoomsStore } from "../stores/rooms";
+import type { UnreadCountRecord } from "../shared/types/composables.ts";
 
 export function useContextualTitle() {
   const route = useRoute();
   const roomsStore = useRoomsStore();
   const channelsStore = useChannelsStore();
-  const unreadCounts = useState("unread-counts", () => []);
+  const unreadCounts = useState<UnreadCountRecord[]>("unread-counts", () => []);
   const room = computed(() =>
     roomsStore.getRoomById(String(route.params.roomId || "")),
   );

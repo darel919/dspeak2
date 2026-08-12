@@ -1,7 +1,10 @@
 export const DEFAULT_UPDATE_REPOSITORY = "darel919/dspeak2";
 export const DEFAULT_UPDATE_BRANCH = "next";
 
-export function normalizeCommit(value, { short = false } = {} as any) {
+export function normalizeCommit(
+  value: unknown,
+  { short = false }: CommitOptions = {},
+) {
   const normalized = String(value || "")
     .trim()
     .toLowerCase();
@@ -9,7 +12,7 @@ export function normalizeCommit(value, { short = false } = {} as any) {
   return pattern.test(normalized) ? normalized : null;
 }
 
-export function normalizeRepository(value) {
+export function normalizeRepository(value: unknown) {
   const normalized = String(value || "")
     .trim()
     .replace(/^https?:\/\/github\.com\//i, "")
@@ -20,7 +23,10 @@ export function normalizeRepository(value) {
     : DEFAULT_UPDATE_REPOSITORY;
 }
 
-export function normalizeBranch(value, fallback = DEFAULT_UPDATE_BRANCH) {
+export function normalizeBranch(
+  value: unknown,
+  fallback: string = DEFAULT_UPDATE_BRANCH,
+) {
   const normalized = String(value || "").trim();
   return /^[A-Za-z0-9._/-]{1,200}$/.test(normalized) ? normalized : fallback;
 }
@@ -32,7 +38,7 @@ export function createBuildIdentity({
   builtAt,
   repository,
   updateBranch,
-}) {
+}: BuildIdentityInput) {
   const normalizedCommit = normalizeCommit(commit);
   const normalizedRepository = normalizeRepository(repository);
   const normalizedBranch = String(branch || "").trim();
@@ -48,3 +54,4 @@ export function createBuildIdentity({
     updateBranch: normalizeBranch(updateBranch),
   };
 }
+import type { BuildIdentityInput, CommitOptions } from "./types/app-build.ts";

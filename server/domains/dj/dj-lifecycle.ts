@@ -1,9 +1,20 @@
-let participantDisconnectedHandler = null;
+type ParticipantDisconnectedHandler = (
+  channelId: string,
+  userId: string,
+) => void;
 
-export function registerDjParticipantDisconnectedHandler(handler) {
+let participantDisconnectedHandler: ParticipantDisconnectedHandler | null =
+  null;
+
+export function registerDjParticipantDisconnectedHandler(
+  handler: ParticipantDisconnectedHandler,
+): void {
   participantDisconnectedHandler = handler;
 }
 
-export function notifyDjParticipantDisconnected(channelId, userId) {
+export function notifyDjParticipantDisconnected(
+  channelId: string,
+  userId: string,
+): void {
   participantDisconnectedHandler?.(String(channelId), String(userId));
 }

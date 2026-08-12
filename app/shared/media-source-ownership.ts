@@ -1,9 +1,14 @@
-export function normalizeMediaOwnerSource(source, ownerSource) {
+export function normalizeMediaOwnerSource(
+  source: unknown,
+  ownerSource: unknown,
+): "system-audio" | "screen" | null {
   if (source !== "screen-audio") return null;
   return ownerSource === "system-audio" ? "system-audio" : "screen";
 }
 
-export function isStandaloneSystemAudio(entry) {
+export function isStandaloneSystemAudio(
+  entry: { source?: unknown; ownerSource?: unknown } | null | undefined,
+) {
   return (
     entry?.source === "screen-audio" &&
     normalizeMediaOwnerSource(entry.source, entry.ownerSource) ===
@@ -11,7 +16,9 @@ export function isStandaloneSystemAudio(entry) {
   );
 }
 
-export function isPairedScreenAudio(entry) {
+export function isPairedScreenAudio(
+  entry: { source?: unknown; ownerSource?: unknown } | null | undefined,
+) {
   return (
     entry?.source === "screen-audio" &&
     normalizeMediaOwnerSource(entry.source, entry.ownerSource) === "screen"

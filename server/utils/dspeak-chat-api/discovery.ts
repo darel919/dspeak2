@@ -8,8 +8,17 @@ import {
   extractMeta,
   extractTitle,
 } from "./discovery-helpers.ts";
+import type {
+  ChatRouteBody,
+  ChatRouteDependencies,
+  ChatRouteHandler,
+  ChatMessageRow,
+} from "../../types/chat-api.ts";
+import type { H3Event } from "h3";
 
-export function createChatDiscoveryHandler(dependencies) {
+export function createChatDiscoveryHandler(
+  dependencies: ChatRouteDependencies,
+): ChatRouteHandler {
   const {
     broadcastToChannel,
     assertSafeOutboundUrl,
@@ -24,7 +33,12 @@ export function createChatDiscoveryHandler(dependencies) {
     presentMessages,
   } = dependencies;
 
-  return async function handleRoute(event, suffix, userId, body) {
+  return async function handleRoute(
+    event: H3Event,
+    suffix: string,
+    userId: string,
+    body: ChatRouteBody,
+  ) {
     if (suffix === "bookmarks" && event.method === "GET") {
       const rows = await db
         .select()
@@ -45,9 +59,12 @@ export function createChatDiscoveryHandler(dependencies) {
       const bookmarkMessageById = new Map(
         bookmarkMessages.map((message) => [String(message.id), message]),
       );
-      const accessibleBookmarks = [] as any;
-      const channelCache = new Map();
-      const roomAccessCache = new Map();
+      const accessibleBookmarks: Array<{
+        bookmark: typeof bookmarks.$inferSelect;
+        message: ChatMessageRow;
+      }> = [];
+      const channelCache = new Map<string, ReturnType<typeof getChannelById>>();
+      const roomAccessCache = new Map<string, Promise<unknown> | null>();
       for (const bookmark of rows) {
         const message = bookmarkMessageById.get(String(bookmark.messageId));
         if (!message) continue;
@@ -69,9 +86,19 @@ export function createChatDiscoveryHandler(dependencies) {
             );
           await roomAccessCache.get(channel.roomId);
           accessibleBookmarks.push({ bookmark, message });
-        } catch (error) {
+        } catch (error: unknown) {
+          const errorRecord =
+            error && typeof error === "object"
+              ? (error as {
+                  statusCode?: number;
+                  status?: number;
+                  response?: { status?: number };
+                })
+              : {};
           const status =
-            error?.statusCode || error?.status || error?.response?.status;
+            errorRecord.statusCode ||
+            errorRecord.status ||
+            errorRecord.response?.status;
           if (status !== 403 && status !== 404) throw error;
         }
       }
@@ -139,6 +166,11 @@ export function createChatDiscoveryHandler(dependencies) {
         .onConflictDoNothing()
         .returning();
       const book = bookmark[0];
+      if (!book)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Bookmark could not be created",
+        });
       return { id: book.id, messageId, saved_at: book.createdAt };
     }
 

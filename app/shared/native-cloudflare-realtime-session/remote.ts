@@ -1,21 +1,31 @@
 import { asError, nativeRemoteFeedKey } from "../native-mediasoup-utils.ts";
 import { isPairedScreenAudio } from "../media-source-ownership.ts";
+import type { NativeCloudflareEvent } from "../types/native-cloudflare.ts";
+import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
+export interface NativeCloudflareRemoteMethods extends NativeCloudflareSessionSurface {}
 export class NativeCloudflareRemoteMethods {
-  [key: string]: any;
-  async setRemoteReceiving(userIdOrKey, sourceOrReceiving, receivingValue) {
+  async setRemoteReceiving(
+    userIdOrKey: string,
+    sourceOrReceiving: string | boolean,
+    receivingValue?: boolean,
+  ): Promise<boolean> {
     if (
       typeof sourceOrReceiving === "boolean" &&
       receivingValue === undefined
     ) {
       const entry = this.consumers.get(String(userIdOrKey));
       return entry
-        ? this.setRemoteReceiving(entry.userId, entry.source, sourceOrReceiving)
+        ? this.setRemoteReceiving(
+            String(entry.userId || ""),
+            String(entry.source || ""),
+            sourceOrReceiving,
+          )
         : false;
     }
     const userId = String(userIdOrKey);
     const source = String(sourceOrReceiving || "");
     const receiving = Boolean(receivingValue);
-    const operations = [] as any;
+    const operations: Array<Promise<unknown>> = [];
     this.remoteReceiving.set(`${userId}:${source}`, receiving);
     for (const entry of this.consumers.values()) {
       if (String(entry.userId) !== userId || entry.source !== source) continue;
@@ -34,7 +44,11 @@ export class NativeCloudflareRemoteMethods {
     return true;
   }
 
-  async setConsumerVolume(userId, source, volume) {
+  async setConsumerVolume(
+    userId: string | number,
+    source: string,
+    volume: number,
+  ) {
     const normalized = Math.max(0, Math.min(2, Number(volume)));
     const operations = [...this.consumers.values()]
       .filter(
@@ -54,14 +68,16 @@ export class NativeCloudflareRemoteMethods {
     return operations.length > 0;
   }
 
-  sendParticipantVoiceState(state = {} as any) {
+  sendParticipantVoiceState(
+    state: { muted?: boolean; deafened?: boolean } = {},
+  ) {
     return this.send?.({
       type: "participant-voice-state",
       data: { muted: Boolean(state.muted), deafened: Boolean(state.deafened) },
     });
   }
 
-  applyJitterBufferConfig(entry) {
+  applyJitterBufferConfig(entry: Record<string, unknown>) {
     if (!entry?.trackId || entry.kind !== "audio" || !this.handle)
       return Promise.resolve(false);
     return this.invoke("media_p2p_set_jitter_buffer", {
@@ -69,7 +85,7 @@ export class NativeCloudflareRemoteMethods {
       trackId: entry.trackId,
       minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay)),
       targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay)),
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       this.onError?.(
         asError(error, "Native Cloudflare jitter buffer update failed"),
       );
@@ -77,7 +93,7 @@ export class NativeCloudflareRemoteMethods {
     });
   }
 
-  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 } = {} as any) {
+  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 } = {}) {
     this.jitterBufferMinimumDelay = Number.isFinite(Number(minDelayMs))
       ? Math.max(0, Number(minDelayMs))
       : 0;
@@ -91,7 +107,7 @@ export class NativeCloudflareRemoteMethods {
     );
   }
 
-  handleReceiveEvent(event = {} as any) {
+  handleReceiveEvent(event: NativeCloudflareEvent = {}) {
     const payload = event.payload || {};
     const eventHandle = payload.handle == null ? null : String(payload.handle);
     if (event.kind === 4) {
@@ -128,14 +144,17 @@ export class NativeCloudflareRemoteMethods {
         data: event.data,
         eventId: event.eventId,
       };
-      this.remoteVideoFeeds.set(entry.key, { ...entry });
+      this.remoteVideoFeeds.set(String(entry.key || ""), { ...entry });
     }
     this.onRemoteTrack?.(entry);
     this._emitState();
     return true;
   }
 
-  _handleTrackAdded(payload = {} as any, event = {} as any) {
+  _handleTrackAdded(
+    payload: Record<string, unknown> = {},
+    event: NativeCloudflareEvent = {},
+  ) {
     const trackId = String(payload.trackId || event.id || "");
     const mid = String(payload.mid || "");
     const publication = this.remoteByMid.get(mid);
@@ -144,7 +163,10 @@ export class NativeCloudflareRemoteMethods {
         const current = this.pendingRemoteTrackEvents.get(mid) || [];
         if (
           !current.some(
-            (queued) =>
+            (queued: {
+              payload?: Record<string, unknown>;
+              event?: NativeCloudflareEvent;
+            }) =>
               String(queued.payload?.trackId || queued.event?.id || "") ===
               trackId,
           )
@@ -160,19 +182,23 @@ export class NativeCloudflareRemoteMethods {
       return true;
     }
     const kind = payload.kind === "video" ? "video" : "audio";
-    const source = publication.source || kind;
-    const previous = this.consumers.get(publication.trackName);
+    const source = String(publication.source || kind);
+    const trackName = String(publication.trackName || "");
+    const previous = this.consumers.get(trackName);
     if (previous?.trackId === trackId) return true;
     if (previous) this._closeConsumer(previous);
     const entry = {
       key: nativeRemoteFeedKey(
-        publication.userId,
+        typeof publication.userId === "string" ||
+          typeof publication.userId === "number"
+          ? publication.userId
+          : null,
         source,
-        publication.trackName,
+        trackName,
       ),
       id: trackId,
-      consumerId: publication.trackName,
-      producerId: publication.trackName,
+      consumerId: trackName,
+      producerId: trackName,
       trackId,
       mid,
       userId: publication.userId,
@@ -194,7 +220,7 @@ export class NativeCloudflareRemoteMethods {
       closed: false,
       p2pHandle: this.handle,
     };
-    this.consumers.set(publication.trackName, entry);
+    this.consumers.set(trackName, entry);
     if (kind === "audio") this.remoteAudioFeeds.set(entry.key, entry);
     else this.remoteVideoFeeds.set(entry.key, entry);
     if (!entry.receiving)
@@ -202,7 +228,7 @@ export class NativeCloudflareRemoteMethods {
         p2pHandle: this.handle,
         trackId: entry.trackId,
         enabled: false,
-      }).catch((error) => this.onError?.(error));
+      }).catch((error: unknown) => this.onError?.(error));
     this.applyJitterBufferConfig(entry);
     this.onRemoteTrack?.(entry);
     this._emitState();

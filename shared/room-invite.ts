@@ -6,7 +6,7 @@ export const INVITE_EXPIRY_OPTIONS = Object.freeze([
   { label: "7 days", seconds: 7 * 24 * 60 * 60 },
 ]);
 
-export function encodeInvitePayload(payload) {
+export function encodeInvitePayload(payload: unknown) {
   const json = JSON.stringify(payload);
   const bytes = new TextEncoder().encode(json);
   let binary = "";
@@ -17,7 +17,9 @@ export function encodeInvitePayload(payload) {
     .replace(/=+$/g, "");
 }
 
-export function decodeInvitePayload(value) {
+export function decodeInvitePayload(
+  value: unknown,
+): Record<string, unknown> | null {
   if (typeof value !== "string" || !value || value.length > 4096) return null;
   try {
     const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -26,24 +28,24 @@ export function decodeInvitePayload(value) {
     const bytes = Uint8Array.from(binary, (character) =>
       character.charCodeAt(0),
     );
-    const payload = JSON.parse(new TextDecoder().decode(bytes));
+    const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!payload || typeof payload !== "object") return null;
+    const record = payload as Record<string, unknown>;
     if (
-      !payload ||
-      typeof payload !== "object" ||
-      !payload.id ||
-      !payload.createdBy ||
-      !payload.createdAt ||
-      !payload.expiresAt ||
-      !payload.roomId
+      !record.id ||
+      !record.createdBy ||
+      !record.createdAt ||
+      !record.expiresAt ||
+      !record.roomId
     )
       return null;
-    return payload;
+    return record;
   } catch {
     return null;
   }
 }
 
-export function validateInviteExpiry(seconds) {
+export function validateInviteExpiry(seconds: unknown) {
   const value = Number(seconds);
   return INVITE_EXPIRY_OPTIONS.some((option) => option.seconds === value)
     ? value

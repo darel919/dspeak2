@@ -8,8 +8,7 @@ export function useDesktopTray() {
     if (!runtimeStore.isTauri) return;
 
     listen("tray:mute-toggle", () => {
-      const voiceStore: any = useVoiceStore();
-      voiceStore.toggleMute();
+      useVoiceStore().toggleMic();
     });
 
     listen("tray:join-last", () => {
@@ -18,7 +17,7 @@ export function useDesktopTray() {
     });
   }
 
-  function updatePresence(status) {
+  function updatePresence(status: string) {
     if (!runtimeStore.isTauri) return;
     const { invoke } = require("@tauri-apps/api/core");
     invoke("set_tray_presence", { status });

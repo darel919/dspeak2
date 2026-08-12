@@ -1,4 +1,4 @@
-import { dequeueMessage, getQueuedMessages } from "../app/utils/idb.js";
+import { dequeueMessage, getQueuedMessages } from "../app/utils/idb.ts";
 
 const PRECACHE_ENTRIES = [
   ...new Map(

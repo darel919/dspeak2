@@ -1,0 +1,76 @@
+import type {
+  NativeCaptureRequest,
+  NativeMediaFlags,
+  NativeMediaStore,
+} from "./native-media.ts";
+import type { VideoSettings } from "./video-settings.ts";
+import type { VoiceUserRecord } from "./voice-media-actions.ts";
+
+export interface NativeVoiceStoreLike {
+  currentChannelId?: string | null;
+  micMuted?: boolean;
+  deafened?: boolean;
+  cameraEnabled?: boolean;
+  screenSharing?: boolean;
+  systemAudioSharing?: boolean;
+  getChannelById?: NativeMediaStore["getChannelById"];
+  getAuthenticatedUser?: () => { id?: string | number } | null;
+  upsertUserProfile?: (profile: Record<string, unknown>) => unknown;
+  isUserConnected?: (userId: string) => boolean;
+  addConnectedUser?: (userId: string, user: VoiceUserRecord) => unknown;
+  getConnectedUsersArray?: () => VoiceUserRecord[];
+  removeConnectedUser?: (userId: string | number) => unknown;
+  updateUserVoiceState?: (
+    userId: string | number,
+    state: Record<string, unknown>,
+  ) => unknown;
+}
+
+export interface NativeTauriLike {
+  invoke: (command: string, payload?: NativeCaptureRequest) => Promise<unknown>;
+  listen: (
+    event: string,
+    callback: (event: { payload: unknown }) => void,
+  ) => Promise<() => void>;
+}
+
+export interface NativeActionPumpLike {
+  stop: () => void;
+}
+
+export interface NativeMediaEngineState {
+  browserEngine: import("./media-engine-adapters.ts").BrowserMediaEngineSession;
+  flags: NativeMediaFlags;
+  tauri: NativeTauriLike | null;
+  nativeConfig: NativeCaptureRequest;
+  nativeOnly: boolean;
+  voiceStore: NativeVoiceStoreLike | null;
+  settingsStore: NativeMediaStore | null;
+  channelsStore: NativeMediaStore | null;
+  getAudioBitrate: (source: string) => number | null;
+  getAudioStereo: (source: string) => boolean | null;
+  getVideoSettings: (source: string) => VideoSettings;
+  listeners: Map<string, Set<(...args: unknown[]) => void>>;
+  unlisten: Array<() => void>;
+  initialized: boolean;
+  activeScreenCapture: NativeCaptureRequest | null;
+  activeSystemAudioCapture: NativeCaptureRequest | null;
+  microphoneOperation: Promise<unknown>;
+  nativeActionPump: NativeActionPumpLike | null;
+  nativeActionHandler: ((action: NativeCaptureRequest) => unknown) | null;
+  nativeReceiveEventHandler: ((event: NativeCaptureRequest) => void) | null;
+  nativeSession:
+    import("../native-mediasoup-session.ts").NativeMediasoupSfuSession | null;
+  nativeP2pSession: import("../native-p2p-session.ts").NativeP2pSession | null;
+  remoteVideoFeedsRef: import("vue").Ref<Map<string, unknown>>;
+  remoteAudioFeedsRef: import("vue").Ref<Map<string, unknown>>;
+  localVideoFeedsRef: import("vue").Ref<Map<string, unknown>>;
+  nativeProvider: "sfu" | "p2p";
+  nativeP2pFailureEpoch: number | null;
+  nativeTopologyKey: string | null;
+  nativeTopologyGeneration: number;
+  nativeTopologyOperation: Promise<unknown> | null;
+  onQoe: import("./native-media.ts").NativeMediaEngineOptions["onQoe"];
+  qoeTimer: ReturnType<typeof setInterval> | null;
+  nativeAuthToken: string;
+}

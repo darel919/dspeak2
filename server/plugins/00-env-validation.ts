@@ -1,4 +1,5 @@
 import { validateRuntimeEnvironment } from "../utils/env-validation.ts";
+import { closeDatabase } from "../db/client.ts";
 import {
   startPushDispatcher,
   stopPushDispatcher,
@@ -9,7 +10,8 @@ import { isPersistentEnvironment } from "../../shared/runtime-mode.ts";
 export default defineNitroPlugin(async (nitroApp) => {
   if (
     process.env.NITRO_PRESET === "static" ||
-    (nitroApp as any).options?.preset === "static"
+    (nitroApp as unknown as { options?: { preset?: string } }).options
+      ?.preset === "static"
   )
     return;
   try {
@@ -17,8 +19,9 @@ export default defineNitroPlugin(async (nitroApp) => {
     if (isPersistentEnvironment()) {
       startPushDispatcher();
     }
-    nitroApp.hooks.hook("close", () => {
-      stopPushDispatcher();
+    nitroApp.hooks.hook("close", async () => {
+      await stopPushDispatcher();
+      return closeDatabase();
     });
   } catch (error) {
     await terminateFailedStartup(error, {

@@ -10,6 +10,7 @@ export default defineEventHandler(async (event) => {
   try {
     const { verifyAccessToken } = await import("../auth/middleware.ts");
     const payload = await verifyAccessToken(token);
+    if (!payload.sub) return;
     const { profileRepository } =
       await import("../db/repositories/profiles.ts");
     const profile = await profileRepository.findById(payload.sub);

@@ -26,7 +26,7 @@ const routeSource = await readFile(
 test("sending a friend request immediately adds the canonical request to Sent", () => {
   assert.match(
     storeSource,
-    /sentRequests\.value = \[[\s\S]{0,80}result,[\s\S]{0,80}\.\.\.sentRequests\.value\.filter\(/,
+    /sentRequests\.value = \[[\s\S]{0,120}request,[\s\S]{0,120}\.\.\.sentRequests\.value\.filter\(/,
   );
   assert.doesNotMatch(
     pageSource,
@@ -68,7 +68,7 @@ test("a failed Sent refresh preserves confirmed requests and exposes the error",
   );
   assert.match(
     storeSource,
-    /async function fetchSentRequests\(\)[\s\S]{0,500}error\.value = cause\.message;[\s\S]{0,120}throw cause;/,
+    /async function fetchSentRequests\(\)[\s\S]{0,500}error\.value = cause instanceof Error \? cause\.message : String\(cause\);[\s\S]{0,120}throw cause;/,
   );
 });
 

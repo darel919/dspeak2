@@ -1,13 +1,23 @@
 import { applyRtpSenderSettings } from "./rtp-sender-settings.ts";
 import { findRtpStat } from "./rtc-media-stats.ts";
 import { sortP2pVideoCodecPreferences } from "./video-settings.ts";
+import type { VideoCodec } from "./types/video-settings.ts";
+
+type P2pStat = RTCStats & Record<string, unknown>;
+type P2pTrackEntry =
+  MediaStreamTrack | { track?: MediaStreamTrack | null; key?: string };
+interface P2pFlowEntry {
+  key: string;
+  bytes: number;
+  flowing: boolean;
+}
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
 export const P2P_STABILITY_LIVENESS_TIMEOUT_MS = 8000;
 export const P2P_DISCONNECT_GRACE_MS = 8000;
 export const P2P_ICE_RESTART_TIMEOUT_MS = 12000;
 
-export function p2pActiveLivenessTimeoutMs(connectionCount) {
+export function p2pActiveLivenessTimeoutMs(connectionCount: number) {
   return Math.max(
     10000,
     P2P_ACTIVE_HEALTH_TIMEOUT_MS -
@@ -15,29 +25,39 @@ export function p2pActiveLivenessTimeoutMs(connectionCount) {
   );
 }
 
-export function isP2pLivenessExpired(lastProgressAt, now, timeoutMs) {
+export function isP2pLivenessExpired(
+  lastProgressAt: number | null | undefined,
+  now: number,
+  timeoutMs: number,
+) {
   return (
     Number.isFinite(lastProgressAt) &&
     Number.isFinite(now) &&
-    now - lastProgressAt >= timeoutMs
+    now - Number(lastProgressAt) >= timeoutMs
   );
 }
 
-export function requiresP2pLiveness(mode, readyReported) {
+export function requiresP2pLiveness(mode: string, readyReported: boolean) {
   return mode === "p2p" || (mode === "probing" && readyReported);
 }
 
-export function countEnabledP2pSources(sources, receiving = new Map()) {
+export function countEnabledP2pSources(
+  sources: Iterable<string> | null | undefined,
+  receiving: Map<string, boolean> = new Map(),
+) {
   return [...(sources || [])].filter(
     (source) => receiving.get(String(source)) !== false,
   ).length;
 }
 
-export function p2pRemoteFeedKey(peerId, source) {
+export function p2pRemoteFeedKey(
+  peerId: string | number,
+  source: string | null,
+) {
   return `p2p:${String(peerId)}:${String(source || "media")}`;
 }
 
-export function applyOpusAudioProfile(sdp, stereo = true) {
+export function applyOpusAudioProfile(sdp: string, stereo = true) {
   if (!sdp) return sdp;
   return String(sdp)
     .split(/(?=m=)/)
@@ -82,27 +102,35 @@ export function applyOpusAudioProfile(sdp, stereo = true) {
     .join("");
 }
 
-export function applyP2pVideoCodecPreferences(pc) {
+export function applyP2pVideoCodecPreferences(pc: RTCPeerConnection) {
   const capabilities =
     globalThis.RTCRtpReceiver?.getCapabilities?.("video")?.codecs ||
     globalThis.RTCRtpSender?.getCapabilities?.("video")?.codecs;
   if (!capabilities?.length) return false;
-  const preferences = sortP2pVideoCodecPreferences(capabilities);
+  const preferences = sortP2pVideoCodecPreferences(
+    capabilities as unknown as VideoCodec[],
+  );
   let applied = false;
   for (const transceiver of pc.getTransceivers?.() || []) {
     const kind =
       transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind;
     if (kind !== "video" || !transceiver.setCodecPreferences) continue;
     try {
-      transceiver.setCodecPreferences(preferences);
+      transceiver.setCodecPreferences(
+        preferences as unknown as Parameters<
+          RTCRtpTransceiver["setCodecPreferences"]
+        >[0],
+      );
       applied = true;
     } catch {}
   }
   return applied;
 }
 
-export function directIceServers(servers) {
-  return (Array.isArray(servers) ? servers : []).flatMap((server) => {
+export function directIceServers(servers: unknown): RTCIceServer[] {
+  return (Array.isArray(servers) ? servers : []).flatMap((value: unknown) => {
+    if (!value || typeof value !== "object") return [];
+    const server = value as Record<string, unknown>;
     const urls = (
       Array.isArray(server.urls) ? server.urls : [server.urls]
     ).filter(
@@ -113,19 +141,24 @@ export function directIceServers(servers) {
   });
 }
 
-export async function selectedPairSnapshot(pc, suppliedReport = null) {
+export async function selectedPairSnapshot(
+  pc: RTCPeerConnection,
+  suppliedReport: RTCStatsReport | null = null,
+) {
   const report = suppliedReport || (await pc.getStats());
-  const byId = new Map();
-  report.forEach((stat) => byId.set(stat.id, stat));
-  let pair = null;
-  let transport = null;
-  report.forEach((stat) => {
+  const byId = new Map<string, P2pStat>();
+  report.forEach((stat) => byId.set(stat.id, stat as P2pStat));
+  let pair: P2pStat | null = null;
+  let selectedPairId = "";
+  report.forEach((rawStat) => {
+    const stat = rawStat as P2pStat;
     if (stat.type === "transport" && stat.selectedCandidatePairId)
-      transport = stat;
+      selectedPairId = String(stat.selectedCandidatePairId);
   });
-  if (transport) pair = byId.get(transport.selectedCandidatePairId) || null;
+  if (selectedPairId) pair = byId.get(selectedPairId) || null;
   if (!pair) {
-    report.forEach((stat) => {
+    report.forEach((rawStat) => {
+      const stat = rawStat as P2pStat;
       if (
         stat.type === "candidate-pair" &&
         stat.state === "succeeded" &&
@@ -135,8 +168,8 @@ export async function selectedPairSnapshot(pc, suppliedReport = null) {
     });
   }
   if (!pair) return null;
-  const local = byId.get(pair.localCandidateId) || null;
-  const remote = byId.get(pair.remoteCandidateId) || null;
+  const local = byId.get(String(pair.localCandidateId || "")) || null;
+  const remote = byId.get(String(pair.remoteCandidateId || "")) || null;
   return {
     id: pair.id,
     state: pair.state,
@@ -164,7 +197,11 @@ export async function selectedPairSnapshot(pc, suppliedReport = null) {
   };
 }
 
-export async function hasRequiredMediaFlow(pc, outboundCount, inboundCount) {
+export async function hasRequiredMediaFlow(
+  pc: RTCPeerConnection,
+  outboundCount: number,
+  inboundCount: number,
+) {
   if (outboundCount === 0 && inboundCount === 0) return true;
   const flow = await mediaFlowSnapshot(pc);
   return (
@@ -173,20 +210,31 @@ export async function hasRequiredMediaFlow(pc, outboundCount, inboundCount) {
 }
 
 export async function mediaFlowSnapshot(
-  pc,
-  suppliedReport = null,
-  { outboundTracks = null, inboundTracks = null } = {} as any,
+  pc: RTCPeerConnection,
+  suppliedReport: RTCStatsReport | null = null,
+  {
+    outboundTracks = null,
+    inboundTracks = null,
+  }: {
+    outboundTracks?: P2pTrackEntry[] | null;
+    inboundTracks?: P2pTrackEntry[] | null;
+  } = {},
 ) {
   const report = suppliedReport || (await pc.getStats());
   let flowingOutbound = 0;
   let flowingInbound = 0;
   let outboundBytes = 0;
   let inboundBytes = 0;
-  const outboundFlows = [] as any;
-  const inboundFlows = [] as any;
-  const addTrackFlow = (tracks, type, field, flows) => {
+  const outboundFlows: P2pFlowEntry[] = [];
+  const inboundFlows: P2pFlowEntry[] = [];
+  const addTrackFlow = (
+    tracks: P2pTrackEntry[] | null,
+    type: "outbound-rtp" | "inbound-rtp",
+    field: "bytesSent" | "bytesReceived",
+    flows: P2pFlowEntry[],
+  ) => {
     for (const item of tracks || []) {
-      const track = item?.track || item;
+      const track = item instanceof MediaStreamTrack ? item : item.track;
       const stat = findRtpStat(report, type, {
         trackId: track?.id,
         kind: track?.kind,
@@ -194,7 +242,11 @@ export async function mediaFlowSnapshot(
       const bytes = Number(stat?.[field]);
       const flowing = Number.isFinite(bytes) && bytes > 0;
       flows.push({
-        key: item?.key || track?.id || null,
+        key: String(
+          (item instanceof MediaStreamTrack ? undefined : item.key) ||
+            track?.id ||
+            "",
+        ),
         bytes: Number.isFinite(bytes) ? bytes : 0,
         flowing,
       });
@@ -212,7 +264,8 @@ export async function mediaFlowSnapshot(
     addTrackFlow(outboundTracks, "outbound-rtp", "bytesSent", outboundFlows);
     addTrackFlow(inboundTracks, "inbound-rtp", "bytesReceived", inboundFlows);
   } else {
-    report.forEach((stat) => {
+    report.forEach((rawStat) => {
+      const stat = rawStat as P2pStat;
       if (
         stat.type === "outbound-rtp" &&
         !stat.isRemote &&
@@ -241,18 +294,39 @@ export async function mediaFlowSnapshot(
   };
 }
 
-export function isViableP2pPair(pair) {
+export function isViableP2pPair(
+  pair: Record<string, unknown> | null | undefined,
+) {
+  const local =
+    pair?.local && typeof pair.local === "object"
+      ? (pair.local as Record<string, unknown>)
+      : null;
+  const remote =
+    pair?.remote && typeof pair.remote === "object"
+      ? (pair.remote as Record<string, unknown>)
+      : null;
   return (
     !!pair &&
     pair.state === "succeeded" &&
-    !!pair.local?.candidateType &&
-    !!pair.remote?.candidateType &&
-    pair.local.candidateType !== "relay" &&
-    pair.remote.candidateType !== "relay"
+    !!local?.candidateType &&
+    !!remote?.candidateType &&
+    local.candidateType !== "relay" &&
+    remote.candidateType !== "relay"
   );
 }
 
-export function configureP2pSender(mesh, sender, source, track) {
+export function configureP2pSender(
+  mesh: {
+    getSenderOptions?: (
+      source: string,
+      track: MediaStreamTrack,
+    ) => Record<string, unknown> | null;
+    updateSender: (sender: RTCRtpSender, operation: () => unknown) => unknown;
+  },
+  sender: RTCRtpSender,
+  source: string,
+  track: MediaStreamTrack,
+) {
   const options = mesh.getSenderOptions?.(source, track);
   if (!options) return false;
   return mesh.updateSender(sender, () =>

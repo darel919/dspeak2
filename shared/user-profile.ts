@@ -4,13 +4,13 @@ export const HANDLE_MIN_LENGTH = 3;
 export const HANDLE_MAX_LENGTH = 32;
 export const NICKNAME_MAX_LENGTH = 32;
 
-function normalizedText(value) {
+function normalizedText(value: unknown) {
   return String(value || "")
     .trim()
     .replace(/\s+/g, " ");
 }
 
-export function normalizeDisplayName(value) {
+export function normalizeDisplayName(value: unknown) {
   const name = normalizedText(value);
   if (
     name.length < DISPLAY_NAME_MIN_LENGTH ||
@@ -22,7 +22,7 @@ export function normalizeDisplayName(value) {
   return name;
 }
 
-export function normalizeHandle(value) {
+export function normalizeHandle(value: unknown) {
   const handle = String(value || "")
     .trim()
     .toLowerCase();
@@ -37,7 +37,7 @@ export function normalizeHandle(value) {
   return handle;
 }
 
-export function normalizeNickname(value) {
+export function normalizeNickname(value: unknown) {
   const nickname = normalizedText(value);
   if (nickname.length > NICKNAME_MAX_LENGTH)
     throw new Error(
@@ -46,7 +46,7 @@ export function normalizeNickname(value) {
   return nickname;
 }
 
-export function publicDisplayName(user) {
+export function publicDisplayName(user: UserProfileLike | null | undefined) {
   return (
     user?.handle ||
     user?.username ||
@@ -58,7 +58,7 @@ export function publicDisplayName(user) {
   );
 }
 
-export function publicFullName(user) {
+export function publicFullName(user: UserProfileLike | null | undefined) {
   const primaryName = normalizedText(publicDisplayName(user));
   const fullName = normalizedText(
     user?.display_name || user?.provider_name || user?.name,
@@ -66,7 +66,10 @@ export function publicFullName(user) {
   return fullName && fullName !== primaryName ? fullName : "";
 }
 
-export function profileIdentityLine(user, nickname) {
+export function profileIdentityLine(
+  user: UserProfileLike | null | undefined,
+  nickname: unknown,
+) {
   const displayName = publicDisplayName(user);
   const personalNickname = normalizedText(nickname);
 
@@ -74,3 +77,4 @@ export function profileIdentityLine(user, nickname) {
   if (personalNickname === normalizedText(displayName)) return displayName;
   return `${personalNickname} AKA ${displayName}`;
 }
+import type { UserProfileLike } from "./types/user.ts";

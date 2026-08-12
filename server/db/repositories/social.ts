@@ -6,9 +6,9 @@ import {
   roomAuditLog,
 } from "../schema/index.ts";
 import { eq, and, desc, or, isNull, lt } from "drizzle-orm";
+import type { RoomAuditInsert } from "../../types/repositories.ts";
 export class SocialRepository {
-  [key: string]: any;
-  async findFriendship(userId, friendId) {
+  async findFriendship(userId: string, friendId: string) {
     const result = await db
       .select()
       .from(friends)
@@ -17,7 +17,7 @@ export class SocialRepository {
     return result[0] || null;
   }
 
-  async findFriendshipEither(userId, friendId) {
+  async findFriendshipEither(userId: string, friendId: string) {
     const result = await db
       .select()
       .from(friends)
@@ -31,7 +31,7 @@ export class SocialRepository {
     return result[0] || null;
   }
 
-  async sendFriendRequest(userId, friendId) {
+  async sendFriendRequest(userId: string, friendId: string) {
     const result = await db
       .insert(friends)
       .values({ userId, friendId, status: "pending" })
@@ -40,7 +40,7 @@ export class SocialRepository {
     return result[0];
   }
 
-  async acceptFriendRequest(userId, friendId) {
+  async acceptFriendRequest(userId: string, friendId: string) {
     const result = await db
       .update(friends)
       .set({ status: "accepted" })
@@ -55,7 +55,7 @@ export class SocialRepository {
     return result[0];
   }
 
-  async blockUser(userId, friendId) {
+  async blockUser(userId: string, friendId: string) {
     const result = await db
       .update(friends)
       .set({ status: "blocked" })
@@ -64,7 +64,7 @@ export class SocialRepository {
     return result[0];
   }
 
-  async removeFriend(userId, friendId) {
+  async removeFriend(userId: string, friendId: string) {
     await db
       .delete(friends)
       .where(
@@ -75,15 +75,18 @@ export class SocialRepository {
       );
   }
 
-  async getFriends(userId, status = "accepted") {
+  async getFriends(
+    userId: string,
+    status: "accepted" | "pending" | "blocked" = "accepted",
+  ) {
     return db
       .select()
       .from(friends)
-      .where(and(eq(friends.userId, userId), eq(friends.status, status as any)))
+      .where(and(eq(friends.userId, userId), eq(friends.status, status)))
       .orderBy(desc(friends.createdAt));
   }
 
-  async getPendingRequests(userId) {
+  async getPendingRequests(userId: string) {
     return db
       .select()
       .from(friends)
@@ -91,7 +94,12 @@ export class SocialRepository {
       .orderBy(desc(friends.createdAt));
   }
 
-  async setNickname(roomId, userId, nickname, setById) {
+  async setNickname(
+    roomId: string,
+    userId: string,
+    nickname: string,
+    setById: string,
+  ) {
     const result = await db
       .insert(userNicknames)
       .values({ roomId, userId, nickname, setById })
@@ -103,7 +111,7 @@ export class SocialRepository {
     return result[0];
   }
 
-  async getNickname(roomId, userId) {
+  async getNickname(roomId: string, userId: string) {
     const result = await db
       .select()
       .from(userNicknames)
@@ -114,7 +122,7 @@ export class SocialRepository {
     return result[0] || null;
   }
 
-  async removeNickname(roomId, userId) {
+  async removeNickname(roomId: string, userId: string) {
     await db
       .delete(userNicknames)
       .where(
@@ -129,6 +137,13 @@ export class SocialRepository {
     inviteeId,
     code,
     expiresAt,
+  }: {
+    roomId: string;
+    channelId?: string | null;
+    inviterId: string;
+    inviteeId?: string | null;
+    code: string;
+    expiresAt: Date;
   }) {
     const result = await db
       .insert(roomInvites)
@@ -137,7 +152,7 @@ export class SocialRepository {
     return result[0];
   }
 
-  async getInviteByCode(code) {
+  async getInviteByCode(code: string) {
     const result = await db
       .select()
       .from(roomInvites)
@@ -146,7 +161,7 @@ export class SocialRepository {
     return result[0] || null;
   }
 
-  async useInvite(code, inviteeId) {
+  async useInvite(code: string, inviteeId: string) {
     const result = await db
       .update(roomInvites)
       .set({ inviteeId, usedAt: new Date() })
@@ -155,7 +170,13 @@ export class SocialRepository {
     return result[0];
   }
 
-  async logAudit({ roomId, actorId, action, targetId, metadata }) {
+  async logAudit({
+    roomId,
+    actorId,
+    action,
+    targetId,
+    metadata,
+  }: RoomAuditInsert) {
     const result = await db
       .insert(roomAuditLog)
       .values({ roomId, actorId, action, targetId, metadata })
@@ -163,7 +184,10 @@ export class SocialRepository {
     return result[0];
   }
 
-  async getAuditLog(roomId, { limit = 50, before } = {} as any) {
+  async getAuditLog(
+    roomId: string,
+    { limit = 50, before }: { limit?: number; before?: Date } = {},
+  ) {
     const conditions = [eq(roomAuditLog.roomId, roomId)];
     if (before) conditions.push(lt(roomAuditLog.createdAt, before));
     return db

@@ -1,5 +1,9 @@
 import { mediaDebug } from "./media-debug.ts";
 import { waitForInitialMediaTopology } from "./media-handoff-readiness.ts";
+import type {
+  LifecycleBootstrap,
+  LifecycleDependencyContext,
+} from "./types/hybrid-media-session-lifecycle.ts";
 
 export function createHybridMediaSessionLifecycle({
   authStore,
@@ -46,9 +50,9 @@ export function createHybridMediaSessionLifecycle({
   topologyState,
   transportReady,
   voiceStore,
-}) {
-  let activeBootstrapContext = null;
-  let refreshTicketPromise = null;
+}: LifecycleDependencyContext) {
+  let activeBootstrapContext: LifecycleBootstrap | null = null;
+  let refreshTicketPromise: Promise<unknown> | null = null;
   let lifecycleGeneration = 0;
   let activeConnectionGeneration = 0;
 
@@ -58,7 +62,7 @@ export function createHybridMediaSessionLifecycle({
     return cancellation;
   }
 
-  function assertCurrent(generation) {
+  function assertCurrent(generation: number) {
     if (
       generation !== lifecycleGeneration ||
       getIntentionalClose() ||
@@ -67,7 +71,11 @@ export function createHybridMediaSessionLifecycle({
       throw createCancellationError();
   }
 
-  async function loadIceServers(connectionMode, accessToken, generation) {
+  async function loadIceServers(
+    connectionMode: string,
+    accessToken: string | undefined,
+    generation?: number,
+  ) {
     const nextIceServers = await $fetch(
       `${mediaControlApiPath}/config?connectionMode=${encodeURIComponent(connectionMode)}`,
       accessToken
@@ -106,6 +114,7 @@ export function createHybridMediaSessionLifecycle({
       });
       assertCurrent(generation);
       const controlUrl = getMediaControlUrl();
+      if (!controlUrl) return null;
       setMediaControlSocketUrl(
         buildMediaControlSocketUrl({
           mediaControlUrl: bootstrap.mediaControlUrl || controlUrl,
@@ -128,14 +137,17 @@ export function createHybridMediaSessionLifecycle({
     return tracked;
   }
 
-  function openSocket(channelId) {
+  function openSocket(channelId: string) {
     const userId = authStore.getUserData()?.id;
     if (!userId) return Promise.reject(new Error("User not authenticated"));
     if (!channelId) return Promise.reject(new Error("Channel ID is required"));
     return signaling.open();
   }
 
-  async function connect(nextChannelId, options = {} as any) {
+  async function connect(
+    nextChannelId: string,
+    options: { roomId?: string } = {},
+  ) {
     if (connected.value && mediaSessionSetup.getChannelId() === nextChannelId)
       return;
     const generation = ++lifecycleGeneration;
@@ -214,7 +226,7 @@ export function createHybridMediaSessionLifecycle({
     activeBootstrapContext = null;
   }
 
-  function handleSignalingClose(event, protocolRejected) {
+  function handleSignalingClose(event: CloseEvent, protocolRejected: boolean) {
     connected.value = false;
     protocolState.value = null;
     mediaDebug("session.signaling-close", {
@@ -281,7 +293,8 @@ export function createHybridMediaSessionLifecycle({
       lastInRoom,
       participantSfuRoundTripTimes,
       queueTopology,
-      registerHandler: (type, handler) => messageHandlers.set(type, handler),
+      registerHandler: (type: string, handler: (data: unknown) => unknown) =>
+        messageHandlers.set(type, handler),
       remoteProducersCount,
       onServerConnected: () => {
         if (
@@ -299,7 +312,7 @@ export function createHybridMediaSessionLifecycle({
         mediaSessionSetup.sendSourceState();
         sendParticipantVoiceState();
       },
-      onServerHello: (data) => {
+      onServerHello: (data: unknown) => {
         if (signaling.acceptServerHello(data))
           protocolState.value = signaling.getProtocolState();
       },
@@ -307,17 +320,18 @@ export function createHybridMediaSessionLifecycle({
       onProviderFailure: mediaSessionSetup.handleProviderFailure,
       onProviderRecovering: providerRecovery.receive,
       onP2pQualification: mediaSessionSetup.handleP2pQualification,
-      onProviderTicket: (data) => mediaSessionSetup.handleProviderTicket(data),
+      onProviderTicket: (data: unknown) =>
+        mediaSessionSetup.handleProviderTicket(data),
       setHeartbeatAck: signaling.acknowledgeHeartbeat,
       setLocalPeerId,
       sfuProducerIds: mediaSessionSetup.sfuProducerIds,
       syncConnectedUsers,
       voiceStore,
     });
-    messageHandlers.set("cloudflare-response", (data) =>
+    messageHandlers.set("cloudflare-response", (data: unknown) =>
       getSfu()?.handle("cloudflare-response", data),
     );
-    messageHandlers.set("cloudflare-publication-available", (data) => {
+    messageHandlers.set("cloudflare-publication-available", (data: unknown) => {
       mediaSessionSetup.queueCloudflarePublication(data);
       return getSfu()?.handle("cloudflare-publication-available", data);
     });

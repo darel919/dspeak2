@@ -1,4 +1,10 @@
-export function extractUrls(text) {
+type EmbedPlatform = {
+  domains: string[];
+  getEmbedUrl?: (url: string) => string | null;
+  getThumbnail?: (url: string) => string | null;
+};
+
+export function extractUrls(text: string | null | undefined): string[] {
   if (!text) return [];
   const urlRegex = /(https?:\/\/[^\s<]+[^\s<.,;:!?)}\]'"])/gi;
   const matches = text.match(urlRegex);
@@ -6,7 +12,7 @@ export function extractUrls(text) {
   return [...new Set(matches)];
 }
 
-export function isImageUrl(url) {
+export function isImageUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   const imageExtensions = [
     ".jpg",
@@ -26,7 +32,7 @@ export function isImageUrl(url) {
   }
 }
 
-export function isGifUrl(url) {
+export function isGifUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   try {
     const parsed = new URL(url);
@@ -36,7 +42,7 @@ export function isGifUrl(url) {
   }
 }
 
-export function getDomain(url) {
+export function getDomain(url: string): string {
   try {
     return new URL(url).hostname.replace("www.", "");
   } catch {
@@ -44,10 +50,10 @@ export function getDomain(url) {
   }
 }
 
-export const EMBED_PLATFORMS = {
+export const EMBED_PLATFORMS: Record<string, EmbedPlatform> = {
   youtube: {
     domains: ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"],
-    getEmbedUrl: (url) => {
+    getEmbedUrl: (url: string) => {
       try {
         const parsed = new URL(url);
         let videoId = null;
@@ -62,7 +68,7 @@ export const EMBED_PLATFORMS = {
       } catch {}
       return null;
     },
-    getThumbnail: (url) => {
+    getThumbnail: (url: string) => {
       try {
         const parsed = new URL(url);
         let videoId = null;
@@ -85,7 +91,7 @@ export const EMBED_PLATFORMS = {
   },
 };
 
-export function identifyPlatform(url) {
+export function identifyPlatform(url: string): string | null {
   try {
     const hostname = new URL(url).hostname.replace("www.", "");
     for (const [platform, config] of Object.entries(EMBED_PLATFORMS)) {
@@ -97,7 +103,7 @@ export function identifyPlatform(url) {
   return null;
 }
 
-export async function fetchLinkPreview(url) {
+export async function fetchLinkPreview(url: string): Promise<unknown> {
   try {
     const apiPath = window.__NUXT__?.config?.public?.apiPath || "/api";
     const response = await fetch(

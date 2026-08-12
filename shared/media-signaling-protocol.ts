@@ -1,5 +1,5 @@
 export const MEDIA_SIGNALING_PROTOCOL_VERSION = 919;
-export const MEDIA_SIGNALING_CONTRACT_REVISION = 2;
+export const MEDIA_SIGNALING_CONTRACT_REVISION = 3;
 export const MEDIA_SIGNALING_SERVER_HELLO = "hi919";
 export const MEDIA_SIGNALING_CLIENT_HELLO = "hello919";
 export const MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE = 4002;
@@ -10,18 +10,32 @@ export const MEDIA_SIGNALING_TRACE_LIMIT = 64;
 export const MEDIA_SIGNALING_HEARTBEAT_INTERVAL_MS = 5_000;
 export const MEDIA_SIGNALING_HEARTBEAT_TIMEOUT_MS = 20_000;
 
-export function isMediaSignalingServerHello(data) {
+export function isMediaSignalingServerHello(
+  data: unknown,
+): data is MediaSignalingRecord & {
+  protocolVersion: number;
+  contractRevision: number;
+  mediaSessionId: string;
+  heartbeatIntervalMs: number;
+  heartbeatTimeoutMs: number;
+  serverTime: number;
+} {
+  if (!data || typeof data !== "object") return false;
+  const record = data as MediaSignalingRecord;
   return (
-    data?.protocolVersion === MEDIA_SIGNALING_PROTOCOL_VERSION &&
-    data.contractRevision === MEDIA_SIGNALING_CONTRACT_REVISION &&
-    typeof data.mediaSessionId === "string" &&
-    data.mediaSessionId.length > 0 &&
-    data.mediaSessionId.length <= 160 &&
-    Number.isInteger(data.heartbeatIntervalMs) &&
-    data.heartbeatIntervalMs >= 1_000 &&
-    Number.isInteger(data.heartbeatTimeoutMs) &&
-    data.heartbeatTimeoutMs > data.heartbeatIntervalMs &&
-    Number.isFinite(data.serverTime)
+    record.protocolVersion === MEDIA_SIGNALING_PROTOCOL_VERSION &&
+    record.contractRevision === MEDIA_SIGNALING_CONTRACT_REVISION &&
+    typeof record.mediaSessionId === "string" &&
+    record.mediaSessionId.length > 0 &&
+    record.mediaSessionId.length <= 160 &&
+    typeof record.heartbeatIntervalMs === "number" &&
+    Number.isInteger(record.heartbeatIntervalMs) &&
+    record.heartbeatIntervalMs >= 1_000 &&
+    typeof record.heartbeatTimeoutMs === "number" &&
+    Number.isInteger(record.heartbeatTimeoutMs) &&
+    record.heartbeatTimeoutMs > record.heartbeatIntervalMs &&
+    typeof record.serverTime === "number" &&
+    Number.isFinite(record.serverTime)
   );
 }
 
@@ -34,7 +48,10 @@ export const MEDIA_SIGNALING_CLIENT_PROTOCOL = Object.freeze({
   contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
 });
 
-export function isMediaSignalingClientHello(data, mediaSessionId) {
+export function isMediaSignalingClientHello(
+  data: MediaSignalingRecord | null | undefined,
+  mediaSessionId: string,
+) {
   return (
     data?.protocolVersion === MEDIA_SIGNALING_PROTOCOL_VERSION &&
     data.contractRevision === MEDIA_SIGNALING_CONTRACT_REVISION &&
@@ -48,6 +65,11 @@ export function classifyMediaSignalingClientHello({
   mediaSessionId,
   protocolReady,
   type,
+}: {
+  data: MediaSignalingRecord | null | undefined;
+  mediaSessionId: string;
+  protocolReady: boolean;
+  type: string;
 }) {
   if (protocolReady)
     return type === MEDIA_SIGNALING_CLIENT_HELLO ? "duplicate" : "ready";
@@ -58,3 +80,4 @@ export function classifyMediaSignalingClientHello({
     return "accept";
   return "reject";
 }
+import type { MediaSignalingRecord } from "./types/media.ts";

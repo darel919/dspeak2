@@ -23,14 +23,25 @@ import {
   requireRoomMember,
   requireRoomPermission,
 } from "./room-authorization.ts";
+import type { SoundboardRecord } from "../../shared/types/soundboard.ts";
+import type { AuthorizationRoom } from "../types/room-authorization.ts";
+import type {
+  SoundboardBody,
+  SoundboardConversionResult,
+  SoundboardEvent,
+} from "../types/soundboard-api.ts";
 
-const uploadLocks = new Map();
+const uploadLocks = new Map<string, Promise<unknown>>();
 
-function broadcastVoiceChannelEvent(channelId, type, data) {
+function broadcastVoiceChannelEvent(
+  channelId: string,
+  type: string,
+  data: Record<string, unknown>,
+) {
   return broadcastToChannel(channelId, { type, data });
 }
 
-function withRoomUploadLock(roomId, operation) {
+function withRoomUploadLock(roomId: string, operation: () => Promise<unknown>) {
   const previous = uploadLocks.get(roomId) || Promise.resolve();
   const result = previous.catch(() => {}).then(operation);
   uploadLocks.set(roomId, result);
@@ -39,7 +50,11 @@ function withRoomUploadLock(roomId, operation) {
   });
 }
 
-async function context(roomId, userId, permission = null) {
+async function context(
+  roomId: string,
+  userId: string,
+  permission: string | null = null,
+) {
   if (!roomId)
     throw createError({
       statusCode: 400,
@@ -59,7 +74,11 @@ async function context(roomId, userId, permission = null) {
   return room;
 }
 
-async function clipContext(clipId, userId, permission = null) {
+async function clipContext(
+  clipId: string,
+  userId: string,
+  permission: string | null = null,
+) {
   if (!clipId)
     throw createError({
       statusCode: 400,
@@ -79,7 +98,11 @@ async function clipContext(clipId, userId, permission = null) {
   return { clip: clip[0], room };
 }
 
-async function requireClipManager(clip, room, userId) {
+async function requireClipManager(
+  clip: SoundboardRecord,
+  room: AuthorizationRoom,
+  userId: string,
+) {
   const { permissions } = await getRoomAccess(room, userId);
   if (!canManageSoundboardClip(clip, userId, permissions))
     throw createError({
@@ -89,7 +112,7 @@ async function requireClipManager(clip, room, userId) {
     });
 }
 
-async function listClips(roomId, userId) {
+async function listClips(roomId: string, userId: string) {
   const room = await context(roomId, userId);
   const { permissions } = await getRoomAccess(room, userId);
   const canManageRoom = permissions.includes("room.manage_soundboard");
@@ -108,7 +131,7 @@ async function listClips(roomId, userId) {
   };
 }
 
-async function uploadClip(event, userId) {
+async function uploadClip(event: SoundboardEvent, userId: string) {
   const form = await readFormData(event);
   const roomId = String(form.get("roomId") || "");
   await context(roomId, userId, "room.manage_soundboard");
@@ -141,10 +164,17 @@ async function uploadClip(event, userId) {
         statusCode: 409,
         statusMessage: "This room already has 50 soundboard clips",
       });
-    const converted: any = await (convertSoundboardSource as any)(source);
-    const convertedIcon: any =
+    if (!(source instanceof File))
+      throw createError({
+        statusCode: 400,
+        statusMessage: "Audio file is required",
+      });
+    const converted = (await convertSoundboardSource(
+      source,
+    )) as unknown as SoundboardConversionResult;
+    const convertedIcon: Buffer | null =
       iconImage instanceof File && iconImage.size
-        ? await (convertSoundboardIcon as any)(iconImage)
+        ? ((await convertSoundboardIcon(iconImage)) as unknown as Buffer)
         : null;
 
     const audioKey = `soundboards/${roomId}/${crypto.randomUUID()}.ogg`;
@@ -157,7 +187,7 @@ async function uploadClip(event, userId) {
     const iconImageKey = convertedIcon
       ? `soundboards/${roomId}/icons/${crypto.randomUUID()}.ico`
       : null;
-    if (convertedIcon)
+    if (convertedIcon && iconImageKey)
       await putObject(
         iconImageKey,
         convertedIcon,
@@ -185,11 +215,16 @@ async function uploadClip(event, userId) {
 
     await broadcastLibraryUpdate(roomId);
     setResponseStatus(event, 201);
+    if (!created)
+      throw createError({
+        statusCode: 500,
+        statusMessage: "Clip creation failed",
+      });
     return presentSoundboardClip(created);
   });
 }
 
-async function broadcastLibraryUpdate(roomId) {
+async function broadcastLibraryUpdate(roomId: string) {
   const mediaChannels = await db
     .select({ id: channels.id })
     .from(channels)
@@ -209,14 +244,16 @@ async function broadcastLibraryUpdate(roomId) {
   );
 }
 
-async function updateClip(event, userId) {
+async function updateClip(event: SoundboardEvent, userId: string) {
   const contentType = getHeader(event, "content-type") || "";
-  const body = contentType.includes("multipart/form-data")
-    ? Object.fromEntries((await readFormData(event)).entries())
-    : (await readBody(event)) || {};
-  const { clip, room } = await clipContext(body.id, userId);
-  await requireClipManager(clip, room, userId);
-  const update = {} as any;
+  const body = (
+    contentType.includes("multipart/form-data")
+      ? Object.fromEntries((await readFormData(event)).entries())
+      : (await readBody(event)) || {}
+  ) as SoundboardBody;
+  const { clip, room } = await clipContext(String(body.id || ""), userId);
+  await requireClipManager(clip as SoundboardRecord, room, userId);
+  const update: Record<string, unknown> = {};
   if (body.title !== undefined) {
     update.name = normalizeSoundboardText(body.title, 48);
     if (!update.name)
@@ -230,9 +267,9 @@ async function updateClip(event, userId) {
   if (body.icon !== undefined)
     update.icon = normalizeSoundboardText(body.icon, 16);
   const iconImage = body.iconImage;
-  const convertedIcon: any =
+  const convertedIcon: Buffer | null =
     iconImage instanceof File && iconImage.size
-      ? await (convertSoundboardIcon as any)(iconImage)
+      ? ((await convertSoundboardIcon(iconImage)) as unknown as Buffer)
       : null;
   if (
     body.icon !== undefined &&
@@ -250,9 +287,10 @@ async function updateClip(event, userId) {
     update.displayOrder = Math.max(0, Math.floor(Number(body.order) || 0));
 
   if (convertedIcon) {
-    update.iconImageKey = `soundboards/${clip.roomId}/icons/${crypto.randomUUID()}.ico`;
+    const iconImageKey = `soundboards/${clip.roomId}/icons/${crypto.randomUUID()}.ico`;
+    update.iconImageKey = iconImageKey;
     await putObject(
-      update.iconImageKey,
+      iconImageKey,
       convertedIcon,
       "image/x-icon",
       convertedIcon.length,
@@ -268,10 +306,12 @@ async function updateClip(event, userId) {
   const updated = result[0];
 
   await broadcastLibraryUpdate(clip.roomId);
+  if (!updated)
+    throw createError({ statusCode: 500, statusMessage: "Clip update failed" });
   return presentSoundboardClip(updated);
 }
 
-async function deleteClip(userId, clipId) {
+async function deleteClip(userId: string, clipId: string) {
   const { clip, room } = await clipContext(clipId, userId);
   await requireClipManager(clip, room, userId);
   await db.delete(roomSoundboards).where(eq(roomSoundboards.id, clip.id));
@@ -279,7 +319,7 @@ async function deleteClip(userId, clipId) {
   return { success: true };
 }
 
-async function media(event, userId, clipId) {
+async function media(event: SoundboardEvent, userId: string, clipId: string) {
   const { clip } = await clipContext(clipId, userId);
   if (!clip.audioKey)
     throw createError({
@@ -291,7 +331,11 @@ async function media(event, userId, clipId) {
   return sendRedirect(event, url, 302);
 }
 
-async function iconMedia(event, userId, clipId) {
+async function iconMedia(
+  event: SoundboardEvent,
+  userId: string,
+  clipId: string,
+) {
   const { clip } = await clipContext(clipId, userId);
   if (!clip.iconImageKey)
     throw createError({
@@ -303,8 +347,8 @@ async function iconMedia(event, userId, clipId) {
   return sendRedirect(event, url, 302);
 }
 
-async function trigger(userId, body) {
-  const { clip } = await clipContext(body.id, userId);
+async function trigger(userId: string, body: SoundboardBody) {
+  const { clip } = await clipContext(String(body.id || ""), userId);
   if (!clip.enabled)
     throw createError({
       statusCode: 409,
@@ -348,7 +392,7 @@ async function trigger(userId, body) {
   return { success: true };
 }
 
-export async function handleSoundboardApi(event, suffix = "") {
+export async function handleSoundboardApi(event: SoundboardEvent, suffix = "") {
   const userId = await requireAuthenticatedUser(event);
   const method = event.method;
   const query = getQuery(event);
@@ -373,7 +417,7 @@ export async function handleSoundboardApi(event, suffix = "") {
   if (suffix === "icon" && method === "GET")
     return iconMedia(event, userId, String(query.id || ""));
   if (suffix === "trigger" && method === "POST")
-    return trigger(userId, (await readBody(event)) || {});
+    return trigger(userId, ((await readBody(event)) || {}) as SoundboardBody);
   throw createError({
     statusCode: 405,
     statusMessage: "Soundboard method not allowed",

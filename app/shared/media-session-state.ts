@@ -16,7 +16,7 @@ export function createMediaGeneration() {
       current += 1;
       return current;
     },
-    assert(generation) {
+    assert(generation: number) {
       if (generation !== current)
         throw new Error("Media signaling generation retired");
     },

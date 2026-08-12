@@ -7,11 +7,14 @@ import {
   bookmarks,
 } from "../schema/index.ts";
 import { eq, and, desc, asc, count, inArray, lt, gt } from "drizzle-orm";
+import type { MessageInsert, MessageRow } from "../../types/repositories.ts";
+
+type MessageId = string;
+type MessageWindow = { limit?: number; before?: Date; after?: Date };
 export class ChatRepository {
-  [key: string]: any;
   async findMessagesByChannel(
-    channelId,
-    { limit = 50, before, after } = {} as any,
+    channelId: string,
+    { limit = 50, before, after }: MessageWindow = {},
   ) {
     const conditions = [eq(messages.channelId, channelId)];
     if (before) conditions.push(lt(messages.createdAt, before));
@@ -26,7 +29,7 @@ export class ChatRepository {
     return result.reverse();
   }
 
-  async findMessageById(messageId) {
+  async findMessageById(messageId: MessageId): Promise<MessageRow | null> {
     const result = await db
       .select()
       .from(messages)
@@ -35,7 +38,12 @@ export class ChatRepository {
     return result[0] || null;
   }
 
-  async createMessage({ channelId, authorId, content, replyToId }) {
+  async createMessage({
+    channelId,
+    authorId,
+    content,
+    replyToId,
+  }: Pick<MessageInsert, "channelId" | "authorId" | "content" | "replyToId">) {
     const result = await db
       .insert(messages)
       .values({ channelId, authorId, content, replyToId })
@@ -43,7 +51,7 @@ export class ChatRepository {
     return result[0];
   }
 
-  async updateMessage(messageId, authorId, content) {
+  async updateMessage(messageId: MessageId, authorId: string, content: string) {
     const result = await db
       .update(messages)
       .set({ content, updatedAt: new Date() })
@@ -52,7 +60,7 @@ export class ChatRepository {
     return result[0];
   }
 
-  async deleteMessage(messageId, authorId) {
+  async deleteMessage(messageId: MessageId, authorId: string) {
     const result = await db
       .update(messages)
       .set({ deletedAt: new Date() })
@@ -61,15 +69,19 @@ export class ChatRepository {
     return result[0];
   }
 
-  async createRevision(messageId, content) {
+  async createRevision(
+    messageId: MessageId,
+    content: string,
+    editorId: string,
+  ) {
     const result = await db
       .insert(messageRevisions)
-      .values({ messageId, content } as any)
+      .values({ messageId, content, editorId })
       .returning();
     return result[0];
   }
 
-  async getRevisions(messageId) {
+  async getRevisions(messageId: MessageId) {
     return db
       .select()
       .from(messageRevisions)
@@ -77,7 +89,7 @@ export class ChatRepository {
       .orderBy(desc(messageRevisions.editedAt));
   }
 
-  async addReaction(messageId, userId, emoji) {
+  async addReaction(messageId: MessageId, userId: string, emoji: string) {
     const result = await db
       .insert(messageReactions)
       .values({ messageId, userId, emoji })
@@ -92,7 +104,7 @@ export class ChatRepository {
     return result[0];
   }
 
-  async removeReaction(messageId, userId, emoji) {
+  async removeReaction(messageId: MessageId, userId: string, emoji: string) {
     await db
       .delete(messageReactions)
       .where(
@@ -104,14 +116,18 @@ export class ChatRepository {
       );
   }
 
-  async getReactions(messageId) {
+  async getReactions(messageId: MessageId) {
     return db
       .select()
       .from(messageReactions)
       .where(eq(messageReactions.messageId, messageId));
   }
 
-  async pinMessage(channelId, messageId, pinnedById) {
+  async pinMessage(
+    channelId: string,
+    messageId: MessageId,
+    pinnedById: string,
+  ) {
     const result = await db
       .insert(pinnedMessages)
       .values({ channelId, messageId, pinnedById })
@@ -123,7 +139,7 @@ export class ChatRepository {
     return result[0];
   }
 
-  async unpinMessage(channelId, messageId) {
+  async unpinMessage(channelId: string, messageId: MessageId) {
     await db
       .delete(pinnedMessages)
       .where(
@@ -134,7 +150,7 @@ export class ChatRepository {
       );
   }
 
-  async getPinnedMessages(channelId) {
+  async getPinnedMessages(channelId: string) {
     return db
       .select()
       .from(pinnedMessages)
@@ -142,7 +158,7 @@ export class ChatRepository {
       .orderBy(desc(pinnedMessages.createdAt));
   }
 
-  async addBookmark(userId, messageId) {
+  async addBookmark(userId: string, messageId: MessageId) {
     const result = await db
       .insert(bookmarks)
       .values({ userId, messageId })
@@ -151,7 +167,7 @@ export class ChatRepository {
     return result[0];
   }
 
-  async removeBookmark(userId, messageId) {
+  async removeBookmark(userId: string, messageId: MessageId) {
     await db
       .delete(bookmarks)
       .where(
@@ -159,7 +175,7 @@ export class ChatRepository {
       );
   }
 
-  async getBookmarks(userId) {
+  async getBookmarks(userId: string) {
     return db
       .select()
       .from(bookmarks)

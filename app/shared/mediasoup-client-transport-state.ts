@@ -1,4 +1,12 @@
-export function getMediasoupConnectionState(session) {
+import type {
+  MediasoupClientSessionLike,
+  MediasoupTransportDirection,
+  MediasoupTransportState,
+} from "./types/mediasoup-client.ts";
+
+export function getMediasoupConnectionState(
+  session: MediasoupClientSessionLike,
+) {
   const sendRequired = session.sources.size > 0;
   const receiveRequired =
     session.consumers.size > 0 || session.requestedConsumers.size > 0;
@@ -15,8 +23,11 @@ export function getMediasoupConnectionState(session) {
   };
 }
 
-export function handleMediasoupTransportState(session, data) {
-  const direction = data?.direction;
+export function handleMediasoupTransportState(
+  session: MediasoupClientSessionLike,
+  data: Record<string, unknown>,
+) {
+  const direction = data.direction;
   if (direction !== "send" && direction !== "recv") return false;
   const state = data.state === "completed" ? "connected" : data.state;
   if (
@@ -27,12 +38,13 @@ export function handleMediasoupTransportState(session, data) {
       "disconnected",
       "failed",
       "closed",
-    ].includes(state)
+    ].includes(String(state))
   )
     return false;
-  session.transportStates.set(direction, state);
+  const validState = state as MediasoupTransportState;
+  session.transportStates.set(direction, validState);
   const summary = getMediasoupConnectionState(session);
-  session.onStateChange?.(direction, state, summary);
-  session.handleTransportRecovery(direction, state);
+  session.onStateChange?.(direction, validState, summary);
+  session.handleTransportRecovery(direction, validState);
   return true;
 }

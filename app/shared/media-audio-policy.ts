@@ -4,8 +4,23 @@ export function createMediaAudioPolicy({
   channelsStore,
   settingsStore,
   voiceStore,
+}: {
+  channelsStore: {
+    getChannelById: (id: string) =>
+      | {
+          mediaPolicy?: {
+            sharedAudioKbps?: unknown;
+            microphoneKbps?: unknown;
+            hdAudio?: unknown;
+          } | null;
+        }
+      | null
+      | undefined;
+  };
+  settingsStore: { systemAudioBitrate?: unknown };
+  voiceStore: { currentChannelId: string | null };
 }) {
-  function getEffectiveAudioBitrate(source) {
+  function getEffectiveAudioBitrate(source: string) {
     const channel = voiceStore.currentChannelId
       ? channelsStore.getChannelById(voiceStore.currentChannelId)
       : null;
@@ -20,7 +35,7 @@ export function createMediaAudioPolicy({
     );
   }
 
-  function getAudioStereo(source) {
+  function getAudioStereo(source: string) {
     if (source === "screen-audio") return true;
     if (!voiceStore.currentChannelId) return false;
     return (

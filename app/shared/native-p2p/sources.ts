@@ -3,9 +3,19 @@ import {
   applyP2pVideoCodecPreferences,
   countEnabledP2pSources,
 } from "../native-p2p-common.ts";
+import type {
+  NativeP2pConnectionState,
+  NativeP2pLocalSourceEntry,
+  NativeP2pMeshSurface,
+} from "../types/native-p2p.ts";
 export class NativeP2pSourcesMethods {
-  [key: string]: any;
-  async publishSource(source, track, stream, metadata = {} as any) {
+  async publishSource(
+    this: NativeP2pMeshSurface,
+    source: string,
+    track: MediaStreamTrack,
+    stream?: MediaStream,
+    metadata: Record<string, unknown> = {},
+  ) {
     const key = String(source || "");
     if (!key) throw new Error("A P2P source identifier is required");
     return this.enqueueSourceOperation(key, () =>
@@ -13,7 +23,11 @@ export class NativeP2pSourcesMethods {
     );
   }
 
-  enqueueSourceOperation(source, operation) {
+  enqueueSourceOperation(
+    this: NativeP2pMeshSurface,
+    source: string,
+    operation: () => Promise<unknown>,
+  ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
     const tracked = task.finally(() => {
@@ -25,7 +39,13 @@ export class NativeP2pSourcesMethods {
     return tracked;
   }
 
-  async publishSourceInternal(source, track, stream, metadata = {} as any) {
+  async publishSourceInternal(
+    this: NativeP2pMeshSurface,
+    source: string,
+    track: MediaStreamTrack,
+    stream?: MediaStream,
+    metadata: Record<string, unknown> = {},
+  ) {
     const previous = this.localSources.get(source);
     if (!this.sourceTransmission.has(source))
       this.sourceTransmission.set(source, track?.enabled !== false);
@@ -34,10 +54,11 @@ export class NativeP2pSourcesMethods {
     const initialStates = new Map(
       [...this.connections.values()].map((state) => [state.peerId, state]),
     );
-    const entry = {
+    const entry: NativeP2pLocalSourceEntry = {
       track,
       stream,
-      ownerSource: metadata?.ownerSource || null,
+      ownerSource:
+        typeof metadata.ownerSource === "string" ? metadata.ownerSource : null,
     };
     this.localSources.set(source, entry);
     const results = await Promise.allSettled(
@@ -87,7 +108,11 @@ export class NativeP2pSourcesMethods {
     throw failure.reason;
   }
 
-  async setSourceTransmission(source, enabled) {
+  async setSourceTransmission(
+    this: NativeP2pMeshSurface,
+    source: string,
+    enabled: boolean,
+  ) {
     this.sourceTransmission ||= new Map();
     const value = Boolean(enabled);
     this.sourceTransmission.set(source, value);
@@ -104,14 +129,20 @@ export class NativeP2pSourcesMethods {
     );
   }
 
-  usesStereoAudio() {
+  usesStereoAudio(this: NativeP2pMeshSurface) {
     return [...this.localSources].some(
       ([source, entry]) =>
         entry.track?.kind === "audio" && this.getAudioStereo?.(source),
     );
   }
 
-  setRemoteReceiving(peerId, source, receiving) {
+  setRemoteReceiving(
+    this: NativeP2pMeshSurface,
+    peerId: string | number | undefined,
+    source: string,
+    receiving: boolean,
+  ) {
+    if (peerId === undefined) return false;
     const state = this.connections.get(String(peerId));
     state?.remoteReceiving.set(source, Boolean(receiving));
     this.signal(String(peerId), {
@@ -127,7 +158,12 @@ export class NativeP2pSourcesMethods {
       );
   }
 
-  async setSenderReceiving(state, source, receiving) {
+  async setSenderReceiving(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+    source: string,
+    receiving: boolean,
+  ) {
     state.sourceReceiving.set(source, Boolean(receiving));
     return this.setSenderActive(
       state.senders.get(source),
@@ -135,7 +171,11 @@ export class NativeP2pSourcesMethods {
     );
   }
 
-  async setSenderActive(sender, active) {
+  async setSenderActive(
+    this: NativeP2pMeshSurface,
+    sender: RTCRtpSender | undefined,
+    active: boolean,
+  ) {
     if (!sender) return false;
     if (!sender.getParameters || !sender.setParameters) return false;
     return this.updateSender(sender, async () => {
@@ -145,13 +185,19 @@ export class NativeP2pSourcesMethods {
         encoding.active = Boolean(active);
       try {
         await sender.setParameters(parameters);
-      } catch (error) {
+      } catch (error: unknown) {
+        const errorName =
+          error instanceof DOMException
+            ? error.name
+            : error && typeof error === "object" && "name" in error
+              ? String(error.name)
+              : "";
         if (
           [
             "InvalidModificationError",
             "InvalidAccessError",
             "NotSupportedError",
-          ].includes(error?.name)
+          ].includes(errorName)
         )
           return false;
         throw error;
@@ -160,7 +206,11 @@ export class NativeP2pSourcesMethods {
     });
   }
 
-  updateSender(sender, operation) {
+  updateSender(
+    this: NativeP2pMeshSurface,
+    sender: RTCRtpSender,
+    operation: () => Promise<unknown>,
+  ) {
     const previous = this.senderOperations.get(sender) || Promise.resolve();
     const current = previous.catch(() => {}).then(operation);
     this.senderOperations.set(sender, current);
@@ -170,7 +220,12 @@ export class NativeP2pSourcesMethods {
     });
   }
 
-  async attachSource(state, source, entry) {
+  async attachSource(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+    source: string,
+    entry: NativeP2pLocalSourceEntry,
+  ) {
     const existing = state.senders.get(source);
     if (existing) {
       const previousTrack = existing.track;
@@ -190,7 +245,8 @@ export class NativeP2pSourcesMethods {
           await this.updateTrack(existing, () =>
             existing.replaceTrack(previousTrack),
           );
-          await this.configureSender(existing, source, previousTrack);
+          if (previousTrack)
+            await this.configureSender(existing, source, previousTrack);
           await this.setSenderReceiving(state, source, previousReceiving);
         } catch {}
         this.fail("track-replacement-failed", error);
@@ -199,7 +255,7 @@ export class NativeP2pSourcesMethods {
       this.signal(state.peerId, { sourceRestored: { source } });
       return existing;
     }
-    let sender = null;
+    let sender: RTCRtpSender | null = null;
     let announced = false;
     try {
       sender = state.pc.addTrack(
@@ -237,7 +293,11 @@ export class NativeP2pSourcesMethods {
     return sender;
   }
 
-  updateTrack(sender, operation) {
+  updateTrack(
+    this: NativeP2pMeshSurface,
+    sender: RTCRtpSender,
+    operation: () => Promise<unknown>,
+  ) {
     const previous = this.trackOperations.get(sender) || Promise.resolve();
     const current = previous.catch(() => {}).then(operation);
     this.trackOperations.set(sender, current);
@@ -247,14 +307,14 @@ export class NativeP2pSourcesMethods {
     });
   }
 
-  async unpublishSource(source) {
+  async unpublishSource(this: NativeP2pMeshSurface, source: string) {
     const key = String(source || "");
     return this.enqueueSourceOperation(key, () =>
       this.unpublishSourceInternal(key),
     );
   }
 
-  async unpublishSourceInternal(source) {
+  async unpublishSourceInternal(this: NativeP2pMeshSurface, source: string) {
     this.localSources.delete(source);
     await Promise.all(
       [...this.connections.values()].map(async (state) => {
@@ -273,15 +333,23 @@ export class NativeP2pSourcesMethods {
     );
   }
 
-  async configureSender(sender, source, track) {
-    const options = this.getSenderOptions?.(source, track);
+  async configureSender(
+    this: NativeP2pMeshSurface,
+    sender: RTCRtpSender,
+    source: string,
+    track: MediaStreamTrack,
+  ) {
+    const options = this.getSenderOptions(source, track);
     if (!options) return false;
     return this.updateSender(sender, () =>
       applyRtpSenderSettings(sender, options),
     );
   }
 
-  configureStateSenders(state) {
+  configureStateSenders(
+    this: NativeP2pMeshSurface,
+    state: NativeP2pConnectionState,
+  ) {
     return Promise.all(
       [...state.senders].map(([source, sender]) => {
         const transceiver = state.pc
@@ -302,7 +370,7 @@ export class NativeP2pSourcesMethods {
     );
   }
 
-  reconfigureSource(source) {
+  reconfigureSource(this: NativeP2pMeshSurface, source: string) {
     const entry = this.localSources.get(source);
     if (!entry) return Promise.resolve();
     return Promise.all(
@@ -315,3 +383,5 @@ export class NativeP2pSourcesMethods {
     );
   }
 }
+
+export interface NativeP2pSourcesMethods extends NativeP2pMeshSurface {}

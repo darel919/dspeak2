@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
     setHeader(event, "Pragma", "no-cache");
     const fetchSite = getHeader(event, "sec-fetch-site");
     if (
-      ["same-site", "cross-site"].includes(fetchSite) &&
+      Boolean(fetchSite && ["same-site", "cross-site"].includes(fetchSite)) &&
       ["GET", "HEAD"].includes(event.method) &&
       !oauthCallbackPaths.has(path) &&
       !internalCronPaths.has(path)
@@ -44,7 +44,7 @@ export default defineEventHandler(async (event) => {
     try {
       originAllowed =
         Boolean(origin) &&
-        new URL(origin).origin === new URL(expectedOrigin).origin;
+        new URL(origin || "").origin === new URL(expectedOrigin || "").origin;
     } catch {
       originAllowed = false;
     }

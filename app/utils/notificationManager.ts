@@ -1,6 +1,16 @@
 import { STORAGE_KEYS } from "~/const/storage";
+interface NotificationMessage {
+  id?: string;
+  content?: string;
+  roomId?: string;
+  sender?: { id?: string; name?: string } | string | null;
+}
+
 class NotificationManager {
-  [key: string]: any;
+  isSupported: boolean;
+  permission: NotificationPermission;
+  isEnabled: boolean;
+  initialized: boolean;
   constructor() {
     this.isSupported = false;
     this.permission = "default";
@@ -57,7 +67,7 @@ class NotificationManager {
     }
   }
 
-  showNotification(title, options = {} as any) {
+  showNotification(title: string, options: NotificationOptions = {}) {
     if (!this.isEnabled || !this.isSupported) {
       return null;
     }
@@ -80,7 +90,11 @@ class NotificationManager {
     }
   }
 
-  showMessageNotification(message, roomName, currentUserId) {
+  showMessageNotification(
+    message: NotificationMessage,
+    roomName: string | undefined,
+    currentUserId: string | undefined,
+  ) {
     let storedUserData = null;
     if (!currentUserId) {
       try {
@@ -103,7 +117,13 @@ class NotificationManager {
     }
 
     const title = roomName ? `New message in ${roomName}` : "New message";
-    const body = `${message.sender.name}: ${message.content}`;
+    const senderName =
+      sender && typeof sender === "object"
+        ? sender.name || "Someone"
+        : typeof sender === "string"
+          ? sender
+          : "Someone";
+    const body = `${senderName}: ${message.content || "New message"}`;
 
     this.playNotificationSound();
 
@@ -113,7 +133,7 @@ class NotificationManager {
       data: {
         messageId: message.id,
         roomId: message.roomId || null,
-        senderId: message.sender.id,
+        senderId,
       },
       requireInteraction: false,
     });
@@ -155,7 +175,7 @@ class NotificationManager {
     }
   }
 
-  async setEnabled(enabled) {
+  async setEnabled(enabled: boolean): Promise<boolean> {
     if (enabled && this.permission !== "granted") {
       const granted = await this.requestPermission();
       if (!granted) return false;

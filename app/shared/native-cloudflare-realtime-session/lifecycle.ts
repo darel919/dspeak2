@@ -5,8 +5,13 @@ import {
 } from "../native-mediasoup-diagnostics.ts";
 
 import { nativeFlowForTrack, sessionClosedError } from "./helpers.ts";
+import type {
+  NativeCloudflareSourceEntry,
+  NativeCloudflareTopology,
+} from "../types/native-cloudflare.ts";
+import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
+export interface NativeCloudflareLifecycleMethods extends NativeCloudflareSessionSurface {}
 export class NativeCloudflareLifecycleMethods {
-  [key: string]: any;
   connectionState() {
     const connected = this.iceState === 2 || this.iceState === 3;
     const failed = this.iceState === 4;
@@ -26,9 +31,12 @@ export class NativeCloudflareLifecycleMethods {
     ).length;
   }
 
-  async waitForRemoteTracks(topology = {} as any, timeoutMs = 10000) {
+  async waitForRemoteTracks(
+    topology: NativeCloudflareTopology = {},
+    timeoutMs = 10000,
+  ) {
     const localPeerId = String(topology.localPeerId || "");
-    const expected = [] as any;
+    const expected: Array<{ userId: string; source: string }> = [];
     for (const peer of Array.isArray(topology.peers) ? topology.peers : []) {
       const userId = String(peer.userId || peer.peerId || "");
       if (!userId || userId === localPeerId) continue;
@@ -48,15 +56,15 @@ export class NativeCloudflareLifecycleMethods {
     if (ready()) return true;
     return new Promise((resolve, reject) => {
       const startedAt = Date.now();
-      let timer;
+      let timer: ReturnType<typeof setInterval> | null = null;
       const check = () => {
         if (ready()) {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           resolve(true);
           return;
         }
         if (Date.now() - startedAt >= timeoutMs) {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           reject(new Error("Native Cloudflare remote tracks timed out"));
         }
       };
@@ -109,9 +117,9 @@ export class NativeCloudflareLifecycleMethods {
     }
   }
 
-  async mediaReadiness(expectedInbound) {
+  async mediaReadiness(expectedInbound: number) {
     const outboundEntries = [...this.producers.values()].filter(
-      (entry) => this.sourceTransmission.get(entry.source) !== false,
+      (entry) => this.sourceTransmission.get(String(entry.source)) !== false,
     );
     const inboundEntries = [...this.consumers.values()].filter(
       (entry) => entry.receiving !== false,
@@ -127,22 +135,38 @@ export class NativeCloudflareLifecycleMethods {
         inboundFlowing: 0,
       };
     }
-    const sample = (key, entry, type) => {
+    const sample = (
+      key: string,
+      entry: NativeCloudflareSourceEntry,
+      type: string,
+    ) => {
       const current = nativeFlowForTrack(raw, type, entry);
       if (!current) return false;
       const previous = this.rtpSamples.get(key);
       this.rtpSamples.set(key, current);
       return Boolean(
         previous &&
+        current.timestamp != null &&
+        previous.timestamp != null &&
+        current.bytes != null &&
+        previous.bytes != null &&
         current.timestamp > previous.timestamp &&
         current.bytes > previous.bytes,
       );
     };
     const outboundFlowing = outboundEntries.filter((entry) =>
-      sample(`out:${entry.trackName || entry.source}`, entry, "outbound-rtp"),
+      sample(
+        `out:${String(entry.trackName || entry.source)}`,
+        entry as NativeCloudflareSourceEntry,
+        "outbound-rtp",
+      ),
     ).length;
     const inboundFlowing = inboundEntries.filter((entry) =>
-      sample(`in:${entry.trackName || entry.trackId}`, entry, "inbound-rtp"),
+      sample(
+        `in:${String(entry.trackName || entry.trackId)}`,
+        entry as NativeCloudflareSourceEntry,
+        "inbound-rtp",
+      ),
     ).length;
     return {
       ready:
@@ -178,7 +202,7 @@ export class NativeCloudflareLifecycleMethods {
   closeMedia() {
     this.sessionGeneration += 1;
     this.closed = true;
-    clearTimeout(this.candidateTimer);
+    if (this.candidateTimer) clearTimeout(this.candidateTimer);
     this.candidateTimer = null;
     const handle = this.handle;
     this.handle = null;
@@ -232,7 +256,10 @@ export class NativeCloudflareLifecycleMethods {
     return Promise.resolve();
   }
 
-  _assertCurrent(generation, handle = this.handle) {
+  _assertCurrent(
+    generation: number,
+    handle: string | number | null = this.handle,
+  ) {
     if (
       this.closed ||
       generation !== this.sessionGeneration ||
@@ -245,12 +272,13 @@ export class NativeCloudflareLifecycleMethods {
     return this.closeMedia();
   }
 
-  _closeConsumer(entry) {
+  _closeConsumer(entry: Record<string, unknown>) {
     if (!entry || entry.closed) return;
     entry.closed = true;
-    this.consumers.delete(entry.consumerId || entry.trackName);
-    this.remoteAudioFeeds.delete(entry.key);
-    this.remoteVideoFeeds.delete(entry.key);
+    this.consumers.delete(String(entry.consumerId || entry.trackName || ""));
+    const key = String(entry.key || "");
+    this.remoteAudioFeeds.delete(key);
+    this.remoteVideoFeeds.delete(key);
     try {
       this.onRemoteTrackEnded?.(entry);
     } catch (error) {

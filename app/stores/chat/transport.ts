@@ -1,6 +1,11 @@
-export function createChatTransportActions(context) {
+import type { ChatStoreContext } from "../../shared/types/chat-store.ts";
+import type { RealtimeChannelLike } from "../../shared/realtime-channel.ts";
+
+export function createChatTransportActions(context: ChatStoreContext) {
   const { error } = context;
-  function handleServiceWorkerMessage(event) {
+  function handleServiceWorkerMessage(event: {
+    data: { type?: string; pendingId?: string; status?: number };
+  }): void {
     if (event.data.type === "BACKGROUND_SYNC_SUCCESS") {
       context.handleBackgroundSyncSuccess(event.data.pendingId);
     }
@@ -23,7 +28,7 @@ export function createChatTransportActions(context) {
     context.realtimeChannel.value = null;
     if (!channel) return;
     try {
-      channel.unsubscribe().then(() => {});
+      Promise.resolve(channel.unsubscribe()).then(() => {});
     } catch (socketError) {
       console.warn(
         "[ChatStore] Unable to unsubscribe realtime channel:",
@@ -32,12 +37,12 @@ export function createChatTransportActions(context) {
     }
   }
 
-  function joinChannelMembership(channelId) {
+  function joinChannelMembership(channelId: string): void {
     if (!import.meta.client || !channelId) return;
     context.dependencies
       .useChannelsStore()
       .joinChannel(channelId)
-      .catch((joinError) => {
+      .catch((joinError: unknown) => {
         context.dependencies.debugLog(
           "[ChatStore] Failed to join channel membership:",
           joinError,
@@ -56,12 +61,12 @@ export function createChatTransportActions(context) {
       window.removeEventListener("pagehide", handlePageHide);
   }
 
-  function leaveChannelMembership(channelId) {
+  function leaveChannelMembership(channelId: string | null): void {
     if (!import.meta.client || !channelId) return;
     context.dependencies
       .useChannelsStore()
       .leaveChannel(channelId)
-      .catch((leaveError) => {
+      .catch((leaveError: unknown) => {
         context.dependencies.debugLog(
           "[ChatStore] Failed to leave channel membership:",
           leaveError,
@@ -74,8 +79,8 @@ export function createChatTransportActions(context) {
     error.value = null;
     context.connected.value = false;
     context.connecting.value = false;
-    context.onlineUsers.value = [] as any;
-    context.typingUsers.value = [] as any;
+    context.onlineUsers.value = [];
+    context.typingUsers.value = [];
     if (context.runtime.activeFetchController) {
       context.runtime.activeFetchController.abort();
       context.runtime.activeFetchController = null;
@@ -118,7 +123,7 @@ export function createChatTransportActions(context) {
       return;
     try {
       const registration = await navigator.serviceWorker.ready;
-      await registration.sync.register("chat-sync-v2");
+      await registration.sync?.register("chat-sync-v2");
     } catch (syncError) {
       context.dependencies.debugLog(
         "[ChatStore] Background Sync unavailable:",
@@ -178,9 +183,9 @@ export function createChatTransportActions(context) {
   }
 
   async function connectToChannel(
-    channelId,
-    channelName = null,
-    roomId = null,
+    channelId: string,
+    channelName: string | null = null,
+    roomId: string | null = null,
     isReconnect = false,
   ) {
     if (
@@ -226,8 +231,8 @@ export function createChatTransportActions(context) {
       context.currentChannelName.value = channelName;
       context.currentRoomId.value = roomId;
       error.value = null;
-      context.onlineUsers.value = [] as any;
-      context.typingUsers.value = [] as any;
+      context.onlineUsers.value = [];
+      context.typingUsers.value = [];
 
       if (context.pendingChannelPreparations.has(String(channelId))) {
         await context.pendingChannelPreparations.get(String(channelId));
@@ -244,7 +249,7 @@ export function createChatTransportActions(context) {
         context.messages.value = memoryMessages;
         context.loading.value = false;
       } else {
-        context.messages.value = [] as any;
+        context.messages.value = [];
         context.loading.value = true;
         try {
           const cached = await context.dependencies.getCachedChannelMessages(
@@ -306,22 +311,27 @@ export function createChatTransportActions(context) {
       const supabaseChannel = supabaseClient.channel(`chat:${channelId}`, {
         config: { private: true },
       });
-      context.realtimeChannel.value = supabaseChannel;
+      const channel = supabaseChannel as unknown as RealtimeChannelLike;
+      context.realtimeChannel.value = channel;
 
       supabaseChannel
-        .on("broadcast", { event: "message" }, (payload) => {
-          if (
-            context.realtimeChannel.value === supabaseChannel &&
-            generation === context.runtime.connectionGeneration &&
-            context.currentChannelId.value === channelId
-          ) {
-            context.handleWebSocketMessage({
-              data: JSON.stringify(payload?.payload),
-            });
-          }
-        })
-        .subscribe((status) => {
-          if (context.realtimeChannel.value !== supabaseChannel) {
+        .on(
+          "broadcast",
+          { event: "message" },
+          (payload: { payload?: unknown }) => {
+            if (
+              context.realtimeChannel.value === channel &&
+              generation === context.runtime.connectionGeneration &&
+              context.currentChannelId.value === channelId
+            ) {
+              void context.handleWebSocketMessage({
+                data: JSON.stringify(payload?.payload),
+              });
+            }
+          },
+        )
+        .subscribe((status: string) => {
+          if (context.realtimeChannel.value !== channel) {
             return;
           }
           if (status === "SUBSCRIBED" || status === "SYNCED") {
@@ -373,12 +383,12 @@ export function createChatTransportActions(context) {
           console.warn("[ChatStore] Failed to update push subscription:", err);
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       context.connecting.value = false;
       if (!navigator.onLine) {
         context.handleBrowserOffline();
       } else {
-        error.value = err.message;
+        error.value = err instanceof Error ? err.message : String(err);
         console.error("[ChatStore] Error connecting to channel:", err);
       }
     }
@@ -430,9 +440,9 @@ export function createChatTransportActions(context) {
     context.currentChannelId.value = null;
     context.currentChannelName.value = null;
     context.currentRoomId.value = null;
-    if (!preserveMessages) context.messages.value = [] as any;
-    context.onlineUsers.value = [] as any;
-    context.typingUsers.value = [] as any;
+    if (!preserveMessages) context.messages.value = [];
+    context.onlineUsers.value = [];
+    context.typingUsers.value = [];
     return true;
   }
 

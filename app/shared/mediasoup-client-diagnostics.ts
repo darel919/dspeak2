@@ -3,13 +3,16 @@ import {
   collectPeerConnectionStats,
   findRtpStat,
 } from "./rtc-media-stats.ts";
+import type { MediasoupClientSessionLike } from "./types/mediasoup-client.ts";
 
-export async function collectMediasoupStats(session) {
-  const transports = [] as any;
+export async function collectMediasoupStats(
+  session: MediasoupClientSessionLike,
+) {
+  const transports: Array<Record<string, unknown>> = [];
   for (const [kind, transport] of [
     ["send", session.sendTransport],
     ["recv", session.recvTransport],
-  ]) {
+  ] as const) {
     const pc = transport?._handler?._pc;
     if (!pc) continue;
     transports.push(await collectPeerConnectionStats(pc, kind));
@@ -17,12 +20,14 @@ export async function collectMediasoupStats(session) {
   return transports;
 }
 
-export async function collectMediasoupDiagnosticStats(session) {
-  const transports = [] as any;
+export async function collectMediasoupDiagnosticStats(
+  session: MediasoupClientSessionLike,
+) {
+  const transports: Array<Record<string, unknown>> = [];
   for (const [kind, transport] of [
     ["send", session.sendTransport],
     ["recv", session.recvTransport],
-  ]) {
+  ] as const) {
     const pc = transport?._handler?._pc;
     if (!pc) continue;
     transports.push(await collectPeerConnectionDiagnosticStats(pc, kind));
@@ -30,13 +35,18 @@ export async function collectMediasoupDiagnosticStats(session) {
   return transports;
 }
 
-export function expectedMediasoupInboundFlowCount(session) {
+export function expectedMediasoupInboundFlowCount(
+  session: MediasoupClientSessionLike,
+) {
   return [...session.consumers.values()].filter((entry) =>
     session.shouldReceive(entry.userId, entry.source, entry.ownerSource),
   ).length;
 }
 
-export async function mediasoupMediaReadiness(session, expectedInbound) {
+export async function mediasoupMediaReadiness(
+  session: MediasoupClientSessionLike,
+  expectedInbound: number,
+) {
   const outboundEntries = [...session.producers.values()].filter(
     (entry) => session.sourceTransmission?.get(entry.source) !== false,
   );
@@ -51,7 +61,14 @@ export async function mediasoupMediaReadiness(session, expectedInbound) {
       inboundFlowing: 0,
     };
   }
-  const sampleFlow = (key, report, type, field, track, mid) => {
+  const sampleFlow = (
+    key: string,
+    report: unknown,
+    type: string,
+    field: string,
+    track: MediaStreamTrack,
+    mid?: string | null,
+  ) => {
     if (!report) return false;
     const stat = findRtpStat(report, type, {
       trackId: track?.id,

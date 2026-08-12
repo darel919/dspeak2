@@ -1,9 +1,15 @@
 import { asError } from "../native-mediasoup-utils.ts";
 
 import { requestIdentifier, sourceKind, midForTrack } from "./helpers.ts";
+import type {
+  NativeCloudflareNegotiationResponse,
+  NativeCloudflarePublication,
+  NativeCloudflareSourceEntry,
+} from "../types/native-cloudflare.ts";
+import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
+export interface NativeCloudflareSourcesMethods extends NativeCloudflareSessionSurface {}
 export class NativeCloudflareSourcesMethods {
-  [key: string]: any;
-  async addSource(entry) {
+  async addSource(entry: NativeCloudflareSourceEntry) {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     const source = String(entry.source);
@@ -26,7 +32,7 @@ export class NativeCloudflareSourcesMethods {
     });
   }
 
-  enqueueSourceOperation(source, operation) {
+  enqueueSourceOperation(source: string, operation: () => Promise<unknown>) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
     const tracked = task.finally(() => {
@@ -38,7 +44,7 @@ export class NativeCloudflareSourcesMethods {
     return tracked;
   }
 
-  async addSourceInternal(entry) {
+  async addSourceInternal(entry: NativeCloudflareSourceEntry) {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     const source = String(entry.source);
@@ -48,7 +54,7 @@ export class NativeCloudflareSourcesMethods {
       source,
       kind,
       audioBitrate: entry.audioBitrate ?? this.getAudioBitrate?.(source),
-      audioStereo: entry.audioStereo ?? this.getAudioStereo?.(source),
+      audioStereo: entry.audioStereo ?? this.getAudioStereo?.(source) ?? false,
       videoSettings:
         entry.videoSettings || this.getVideoSettings?.(source) || null,
     };
@@ -82,7 +88,9 @@ export class NativeCloudflareSourcesMethods {
       kind,
     });
     this._assertCurrent(generation);
-    const trackId = String(trackResult?.trackId || "");
+    const trackId = String(
+      (trackResult as Record<string, unknown>)?.trackId || "",
+    );
     if (!trackId) throw new Error("Native Cloudflare track ID is missing");
     if (kind === "audio") {
       await this.invoke("media_p2p_set_audio_stereo", {
@@ -95,19 +103,19 @@ export class NativeCloudflareSourcesMethods {
       p2pHandle: this.handle,
     });
     this._assertCurrent(generation);
-    const usedMids = new Set(
+    const usedMids = new Set<string>(
       [...this.producers.values()]
-        .map((producer) => producer.mid)
+        .map((producer) => String(producer.mid || ""))
         .filter(Boolean),
     );
     const mid = midForTrack(offer, trackId, kind, usedMids);
     if (!mid)
       throw new Error(`Native Cloudflare ${source} transceiver MID is missing`);
     const trackName = requestIdentifier();
-    const response = await this.request("tracks-new", {
+    const response = (await this.request("tracks-new", {
       sessionDescription: { type: "offer", sdp: offer },
       tracks: [{ location: "local", mid, trackName }],
-    });
+    })) as NativeCloudflareNegotiationResponse;
     this._assertCurrent(generation);
     if (response.sessionDescription)
       await this.invoke("media_p2p_set_remote_description", {
@@ -152,14 +160,14 @@ export class NativeCloudflareSourcesMethods {
     return producer;
   }
 
-  async removeSource(source) {
+  async removeSource(source: string) {
     const key = String(source || "");
     return this.enqueueSourceOperation(key, () =>
       this.enqueueNegotiation(() => this.removeSourceInternal(key)),
     );
   }
 
-  async removeSourceInternal(source) {
+  async removeSourceInternal(source: string) {
     const key = String(source || "");
     const current = this.producers.get(key);
     this.sources.delete(key);
@@ -182,11 +190,11 @@ export class NativeCloudflareSourcesMethods {
         p2pHandle: handle,
       });
       this._assertCurrent(generation, handle);
-      const response = await this.request("tracks-close", {
+      const response = (await this.request("tracks-close", {
         tracks: [{ mid: current.mid }],
         sessionDescription: { type: "offer", sdp: offer },
         force: false,
-      });
+      })) as NativeCloudflareNegotiationResponse;
       this._assertCurrent(generation, handle);
       if (response.sessionDescription)
         await this.invoke("media_p2p_set_remote_description", {
@@ -215,14 +223,19 @@ export class NativeCloudflareSourcesMethods {
     this._emitState();
   }
 
-  async subscribe(publication, generation = this.sessionGeneration) {
+  async subscribe(
+    publication: NativeCloudflarePublication,
+    generation = this.sessionGeneration,
+  ) {
     return this.subscribePublications([publication], generation);
   }
 
   async startSubscriptions() {
     await this.initialize();
     this.subscriptionsStarted = true;
-    const publications = [...this.publications.values()];
+    const publications = [
+      ...this.publications.values(),
+    ] as NativeCloudflarePublication[];
     for (let index = 0; index < publications.length; index += 64)
       await this.subscribePublications(
         publications.slice(index, index + 64),
@@ -230,7 +243,10 @@ export class NativeCloudflareSourcesMethods {
       );
   }
 
-  subscribePublications(publications, generation = this.sessionGeneration) {
+  subscribePublications(
+    publications: NativeCloudflarePublication[],
+    generation = this.sessionGeneration,
+  ) {
     const eligible = publications.filter((publication) => {
       const trackName = publication?.trackName;
       return (
@@ -258,11 +274,17 @@ export class NativeCloudflareSourcesMethods {
     return tracked;
   }
 
-  async _subscribePublication(publication, generation) {
+  async _subscribePublication(
+    publication: NativeCloudflarePublication,
+    generation: number,
+  ) {
     return this._subscribePublicationBatch([publication], generation);
   }
 
-  async _subscribePublicationBatch(publications, generation) {
+  async _subscribePublicationBatch(
+    publications: NativeCloudflarePublication[],
+    generation: number,
+  ) {
     const active = publications.filter(
       (publication) =>
         this.publications.get(publication.trackName) === publication,
@@ -276,19 +298,20 @@ export class NativeCloudflareSourcesMethods {
       !handle
     )
       return false;
-    const response = await this.request("tracks-new", {
+    const response = (await this.request("tracks-new", {
       tracks: active.map((publication) => ({
         location: "remote",
         sessionId: publication.sessionId,
         trackName: publication.trackName,
       })),
-    });
+    })) as NativeCloudflareNegotiationResponse;
     this._assertCurrent(generation, handle);
     for (const publication of active) {
       if (this.publications.get(publication.trackName) !== publication)
         continue;
       const track = response.tracks?.find(
-        (candidate) => candidate.trackName === publication.trackName,
+        (candidate: { trackName?: string }) =>
+          candidate.trackName === publication.trackName,
       );
       if (track?.mid == null)
         throw new Error("Cloudflare subscription track MID is missing");
@@ -298,7 +321,10 @@ export class NativeCloudflareSourcesMethods {
       const pending = this.pendingRemoteTrackEvents.get(mid) || [];
       this.pendingRemoteTrackEvents.delete(mid);
       for (const queued of pending)
-        this._handleTrackAdded(queued.payload, queued.event);
+        this._handleTrackAdded(
+          (queued.payload || {}) as Record<string, unknown>,
+          queued.event || {},
+        );
     }
     this.lastReceivedConsumerParams = response;
     if (response.sessionDescription?.type === "offer") {
@@ -321,30 +347,30 @@ export class NativeCloudflareSourcesMethods {
     return true;
   }
 
-  async setSourceTransmission(source, enabled) {
+  async setSourceTransmission(source: string, enabled: boolean) {
     const key = String(source || "");
     const value = Boolean(enabled);
     this.sourceTransmission.set(key, value);
     if (!this.producers.has(key) || !this.handle) return false;
     await this._setSourceParameters(
-      this.sources.get(key) || { source: key },
+      (this.sources.get(key) || { source: key }) as NativeCloudflareSourceEntry,
       this.sessionGeneration,
     );
     const producer = this.producers.get(key);
-    producer.paused = !value;
+    if (producer) producer.paused = !value;
     this._emitState();
     return true;
   }
 
-  async updateAudioBitrate(source, maxBitrate) {
+  async updateAudioBitrate(source: string, maxBitrate: number) {
     return this._updateBitrate(source, maxBitrate);
   }
 
-  async updateVideoBitrate(source, maxBitrate) {
+  async updateVideoBitrate(source: string, maxBitrate: number) {
     return this._updateBitrate(source, maxBitrate);
   }
 
-  async _updateBitrate(source, maxBitrate) {
+  async _updateBitrate(source: string, maxBitrate: number) {
     const value = Number(maxBitrate);
     const entry = this.sources.get(String(source || ""));
     if (!entry || !Number.isFinite(value) || value <= 0) return false;
@@ -353,37 +379,47 @@ export class NativeCloudflareSourcesMethods {
       ...(entry.videoSettings || {}),
       maxBitrate: value,
     };
-    return this._setSourceParameters(entry);
+    return this._setSourceParameters(entry as NativeCloudflareSourceEntry);
   }
 
-  async _setSourceParameters(entry, generation = this.sessionGeneration) {
+  async _setSourceParameters(
+    entry: NativeCloudflareSourceEntry,
+    generation = this.sessionGeneration,
+  ) {
     if (!entry?.source || !this.handle) return false;
     this._assertCurrent(generation);
-    const parameters: any = {
+    const parameters: Record<string, unknown> = {
       active: this.sourceTransmission.get(entry.source) !== false,
       priority: "high",
       networkPriority: "high",
     };
+    const captureSelection = entry.captureSelection as
+      | {
+          audio?: { maxBitrateBps?: number };
+          video?: { maxBitrateBps?: number };
+        }
+      | null
+      | undefined;
     const bitrate = Number(
       entry.audioBitrate ||
-        entry.captureSelection?.audio?.maxBitrateBps ||
+        captureSelection?.audio?.maxBitrateBps ||
         entry.videoSettings?.maxBitrate ||
-        entry.captureSelection?.video?.maxBitrateBps,
+        captureSelection?.video?.maxBitrateBps,
     );
     if (Number.isFinite(bitrate) && bitrate > 0)
       parameters.maxBitrate = Math.floor(bitrate);
-    const video = entry.videoSettings || {};
+    const video = entry.videoSettings;
     if (sourceKind(entry) === "video") {
       if (
-        Number.isFinite(Number(video.frameRate)) &&
-        Number(video.frameRate) > 0
+        Number.isFinite(Number(video?.frameRate)) &&
+        Number(video?.frameRate) > 0
       )
-        parameters.maxFramerate = Number(video.frameRate);
+        parameters.maxFramerate = Number(video?.frameRate);
       if (
-        Number.isFinite(Number(video.scaleResolutionDownBy)) &&
-        Number(video.scaleResolutionDownBy) >= 1
+        Number.isFinite(Number(video?.scaleResolutionDownBy)) &&
+        Number(video?.scaleResolutionDownBy) >= 1
       )
-        parameters.scaleResolutionDownBy = Number(video.scaleResolutionDownBy);
+        parameters.scaleResolutionDownBy = Number(video?.scaleResolutionDownBy);
     }
     try {
       await this.invoke("media_p2p_set_track_parameters", {

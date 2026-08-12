@@ -7,8 +7,16 @@ import {
   pinnedMessages,
 } from "../../db/schema/index.ts";
 import { getRoomById, getChannelById } from "../room-authorization.ts";
+import type {
+  ChatRouteBody,
+  ChatRouteDependencies,
+  ChatRouteHandler,
+} from "../../types/chat-api.ts";
+import type { H3Event } from "h3";
 
-export function createChatInteractionsHandler(dependencies) {
+export function createChatInteractionsHandler(
+  dependencies: ChatRouteDependencies,
+): ChatRouteHandler {
   const {
     broadcastToChannel,
     createError,
@@ -19,7 +27,12 @@ export function createChatInteractionsHandler(dependencies) {
     requireValue,
   } = dependencies;
 
-  return async function handleRoute(event, suffix, userId, body) {
+  return async function handleRoute(
+    event: H3Event,
+    suffix: string,
+    userId: string,
+    body: ChatRouteBody,
+  ) {
     if (suffix === "reaction" && event.method === "POST") {
       enforceRateLimit(event, "chat-reaction", userId, 120, 60 * 1000);
       const messageId = requireValue(body.messageId, "Message ID is required");
@@ -90,18 +103,18 @@ export function createChatInteractionsHandler(dependencies) {
         .select()
         .from(messageReactions)
         .where(eq(messageReactions.messageId, messageId));
-      const grouped = {} as any;
+      const grouped: Record<
+        string,
+        { emoji: string; count: number; users: unknown[] }
+      > = {};
       for (const reaction of allReactions) {
-        if (!grouped[reaction.emoji])
-          grouped[reaction.emoji] = {
-            emoji: reaction.emoji,
-            count: 0,
-            users: [],
-          };
-        grouped[reaction.emoji].count += 1;
-        grouped[reaction.emoji].users.push(
-          presentUser({ id: reaction.userId }),
-        );
+        const group = (grouped[reaction.emoji] ||= {
+          emoji: reaction.emoji,
+          count: 0,
+          users: [],
+        });
+        group.count += 1;
+        group.users.push(presentUser({ id: reaction.userId }));
       }
       return { reactions: Object.values(grouped) };
     }
@@ -157,10 +170,19 @@ export function createChatInteractionsHandler(dependencies) {
         .from(messageReactions)
         .where(inArray(messageReactions.messageId, messageIds))
         .limit(1000);
-      const reactionsByMessage = Object.fromEntries(
-        messageIds.map((id) => [id, []]),
-      );
-      const grouped = new Map();
+      const reactionsByMessage: Record<
+        string,
+        Array<{ emoji: string; count: number; users: unknown[] }>
+      > = Object.fromEntries(messageIds.map((id) => [id, []]));
+      const grouped = new Map<
+        string,
+        {
+          messageId: string;
+          emoji: string;
+          count: number;
+          users: unknown[];
+        }
+      >();
       for (const reaction of allReactions) {
         const key = `${reaction.messageId}:${reaction.emoji}`;
         if (!grouped.has(key))
@@ -171,11 +193,14 @@ export function createChatInteractionsHandler(dependencies) {
             users: [],
           });
         const group = grouped.get(key);
+        if (!group) continue;
         group.count += 1;
         group.users.push(presentUser({ id: reaction.userId }));
       }
       for (const group of grouped.values()) {
-        reactionsByMessage[group.messageId].push({
+        const messageReactionsForGroup = reactionsByMessage[group.messageId];
+        if (!messageReactionsForGroup) continue;
+        messageReactionsForGroup.push({
           emoji: group.emoji,
           count: group.count,
           users: group.users,
@@ -185,7 +210,7 @@ export function createChatInteractionsHandler(dependencies) {
         reactionsByMessage,
         reactions:
           messageIds.length === 1
-            ? reactionsByMessage[messageIds[0]]
+            ? reactionsByMessage[messageIds[0] || ""]
             : undefined,
       };
     }
@@ -224,7 +249,7 @@ export function createChatInteractionsHandler(dependencies) {
       const pinnedMessageById = new Map(
         pinnedMessageRows.map((message) => [String(message.id), message]),
       );
-      const pined = [] as any;
+      const pined: Array<Record<string, unknown>> = [];
       for (const pin of pins) {
         const message = pinnedMessageById.get(String(pin.messageId));
         pined.push({
@@ -314,6 +339,11 @@ export function createChatInteractionsHandler(dependencies) {
           .where(eq(pinnedMessages.messageId, messageId))
           .limit(1)
           .then((r) => r[0]));
+      if (!pinRecord)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Pin could not be persisted",
+        });
       broadcastToChannel(channel.id, {
         type: "message_pinned",
         data: { id: pinRecord.id, messageId, channelId, pinnedBy: userId },

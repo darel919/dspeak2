@@ -6,23 +6,29 @@ const BACKGROUND_PREFETCH_LIMIT = 2;
 export function usePreparedRoomNavigation() {
   const channelsStore = useChannelsStore();
   const chatStore = useChatStore();
-  const openingRoomId = ref(null);
+  const openingRoomId = ref<string | null>(null);
   let navigationGeneration = 0;
   let backgroundGeneration = 0;
 
-  async function prefetchRoom(room, options = {} as any) {
+  async function prefetchRoom(
+    room: { id?: string },
+    options: { allChannels?: boolean } = {},
+  ) {
     const roomId = String(room?.id || "");
     if (!roomId) return false;
     try {
       const channels = await channelsStore.fetchChannels(roomId, {
         activate: false,
       });
-      const textChannels = channels.filter((channel) => !channel.isMedia);
+      if (!channels.length) return false;
+      const textChannels = channels.filter(
+        (channel: { isMedia?: boolean }) => !channel.isMedia,
+      );
       const channelsToPrepare = options.allChannels
         ? textChannels
         : textChannels.slice(0, 1);
       await chatStore.prepareChannels(
-        channelsToPrepare.map((channel) => channel.id),
+        channelsToPrepare.map((channel: { id: string }) => channel.id),
         2,
       );
       return true;
@@ -31,14 +37,14 @@ export function usePreparedRoomNavigation() {
     }
   }
 
-  function prefetchRooms(rooms) {
+  function prefetchRooms(rooms: Array<{ id?: string }>) {
     if (!import.meta.client || !Array.isArray(rooms) || rooms.length === 0)
       return;
     const connection = navigator.connection;
     if (
       !navigator.onLine ||
       connection?.saveData ||
-      ["slow-2g", "2g"].includes(connection?.effectiveType)
+      ["slow-2g", "2g"].includes(connection?.effectiveType || "")
     ) {
       return;
     }
@@ -57,7 +63,7 @@ export function usePreparedRoomNavigation() {
     }
   }
 
-  async function openRoom(room) {
+  async function openRoom(room: { id?: string }) {
     const roomId = String(room?.id || "");
     if (!roomId) return false;
     const generation = ++navigationGeneration;
@@ -68,7 +74,8 @@ export function usePreparedRoomNavigation() {
       });
       if (generation !== navigationGeneration) return false;
       const destination =
-        channels.find((channel) => !channel.isMedia) || channels[0];
+        channels.find((channel: { isMedia?: boolean }) => !channel.isMedia) ||
+        channels[0];
       if (destination && !destination.isMedia) {
         await chatStore.prepareChannel(destination.id);
       }

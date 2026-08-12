@@ -20,7 +20,7 @@ const applicationSources = await Promise.all(
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
 const worker = await readFile(
-  new URL("../public/sw.js", import.meta.url),
+  new URL("../public/sw.ts", import.meta.url),
   "utf8",
 );
 const runtimeConfig = await readFile(

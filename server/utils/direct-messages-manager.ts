@@ -10,22 +10,30 @@ import {
 import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
 import { publicDisplayName } from "../../shared/user-profile.ts";
 import { broadcastToUser } from "./dspeak-realtime.ts";
+import type {
+  DatabaseId,
+  DirectConversationRow,
+  DirectMessageRow,
+  NotificationRow,
+  ProfileRow,
+} from "../types/database.ts";
 
 const DIRECT_MESSAGE_LIMIT = 100;
 
-function fail(statusCode, statusMessage) {
+function fail(statusCode: number, statusMessage: string): never {
   const error = new Error(statusMessage);
-  (error as any).statusCode = statusCode;
+  Object.assign(error, { statusCode });
   throw error;
 }
 
-function participantPair(leftId, rightId) {
+function participantPair(leftId: DatabaseId, rightId: DatabaseId) {
   return String(leftId) < String(rightId)
     ? { participantAId: leftId, participantBId: rightId }
     : { participantAId: rightId, participantBId: leftId };
 }
 
-function presentProfile(profile) {
+function presentProfile(profile: ProfileRow | null | undefined) {
+  if (!profile) return null;
   return {
     id: String(profile.id),
     name: publicDisplayName(profile),
@@ -35,7 +43,10 @@ function presentProfile(profile) {
   };
 }
 
-function presentMessage(message, profile) {
+function presentMessage(
+  message: DirectMessageRow,
+  profile: ProfileRow | null | undefined,
+) {
   return {
     id: String(message.id),
     conversation_id: String(message.conversationId),
@@ -48,7 +59,7 @@ function presentMessage(message, profile) {
   };
 }
 
-async function findFriendship(userId, friendId) {
+async function findFriendship(userId: DatabaseId, friendId: DatabaseId) {
   return db
     .select()
     .from(friends)
@@ -64,7 +75,7 @@ async function findFriendship(userId, friendId) {
     .limit(1);
 }
 
-async function requireFriend(userId, friendId) {
+async function requireFriend(userId: DatabaseId, friendId: DatabaseId) {
   if (!friendId || String(userId) === String(friendId))
     fail(400, "A different friend is required");
   const friendship = await findFriendship(userId, friendId);
@@ -79,7 +90,10 @@ async function requireFriend(userId, friendId) {
   return profile[0];
 }
 
-async function findConversationForUser(userId, conversationId) {
+async function findConversationForUser(
+  userId: DatabaseId,
+  conversationId: DatabaseId,
+) {
   const rows = await db
     .select()
     .from(directConversations)
@@ -103,7 +117,7 @@ async function findConversationForUser(userId, conversationId) {
   return { conversation, friendId };
 }
 
-async function profilesById(ids) {
+async function profilesById(ids: readonly DatabaseId[]) {
   if (!ids.length) return new Map();
   const rows = await db
     .select()
@@ -112,7 +126,9 @@ async function profilesById(ids) {
   return new Map(rows.map((profile) => [String(profile.id), profile]));
 }
 
-async function latestMessagesByConversation(conversationIds) {
+async function latestMessagesByConversation(
+  conversationIds: readonly DatabaseId[],
+) {
   if (!conversationIds.length) return new Map();
   const latestTimes = await db
     .select({
@@ -123,8 +139,8 @@ async function latestMessagesByConversation(conversationIds) {
     .where(inArray(directMessages.conversationId, conversationIds))
     .groupBy(directMessages.conversationId);
   if (!latestTimes.length) return new Map();
-  const conditions = latestTimes.flatMap((latest: any) => {
-    const createdAt = new Date(latest.createdAt);
+  const conditions = latestTimes.flatMap((latest) => {
+    const createdAt = new Date(latest.createdAt as string | number | Date);
     if (!Number.isFinite(createdAt.getTime())) return [];
     return [
       and(
@@ -143,7 +159,10 @@ async function latestMessagesByConversation(conversationIds) {
   );
 }
 
-async function unreadCountsByConversation(userId, conversationIds) {
+async function unreadCountsByConversation(
+  userId: DatabaseId,
+  conversationIds: readonly DatabaseId[],
+) {
   if (!conversationIds.length) return new Map();
   const rows = await db
     .select({
@@ -165,11 +184,11 @@ async function unreadCountsByConversation(userId, conversationIds) {
 }
 
 async function presentConversation(
-  conversation,
-  userId,
-  profile,
-  lastMessage,
-  unreadCount,
+  conversation: DirectConversationRow,
+  _userId: DatabaseId,
+  profile: ProfileRow | null | undefined,
+  lastMessage: DirectMessageRow | null | undefined,
+  unreadCount: number,
 ) {
   return {
     id: String(conversation.id),
@@ -180,10 +199,14 @@ async function presentConversation(
   };
 }
 
-function presentNotification(notification) {
-  let data = {} as any;
+function presentNotification(notification: NotificationRow) {
+  let data: Record<string, unknown> = {};
   try {
-    data = notification.data ? JSON.parse(notification.data) : {};
+    const parsed: unknown = notification.data
+      ? JSON.parse(notification.data)
+      : {};
+    if (parsed && typeof parsed === "object")
+      data = parsed as Record<string, unknown>;
   } catch {}
   return {
     ...data,
@@ -196,7 +219,11 @@ function presentNotification(notification) {
   };
 }
 
-async function createDirectMessageNotification(userId, message, sender) {
+async function createDirectMessageNotification(
+  userId: DatabaseId,
+  message: DirectMessageRow,
+  sender: ProfileRow,
+) {
   try {
     const rows = await db
       .insert(notifications)
@@ -218,7 +245,10 @@ async function createDirectMessageNotification(userId, message, sender) {
   }
 }
 
-async function markDirectMessageNotificationsRead(userId, conversationId) {
+async function markDirectMessageNotificationsRead(
+  userId: DatabaseId,
+  conversationId: DatabaseId,
+) {
   const rows = await db
     .select({ id: notifications.id, data: notifications.data })
     .from(notifications)
@@ -256,7 +286,7 @@ async function markDirectMessageNotificationsRead(userId, conversationId) {
   return ids;
 }
 
-export async function listDirectConversations(userId) {
+export async function listDirectConversations(userId: DatabaseId) {
   const acceptedFriendships = await db
     .select()
     .from(friends)
@@ -320,7 +350,10 @@ export async function listDirectConversations(userId) {
   );
 }
 
-export async function openDirectConversation(userId, friendId) {
+export async function openDirectConversation(
+  userId: DatabaseId,
+  friendId: DatabaseId,
+) {
   const friend = await requireFriend(userId, friendId);
   const pair = participantPair(userId, friend.id);
   let rows = await db
@@ -358,7 +391,10 @@ export async function openDirectConversation(userId, friendId) {
   return presentConversation(rows[0], userId, friend, null, 0);
 }
 
-export async function getDirectMessages(userId, conversationId) {
+export async function getDirectMessages(
+  userId: DatabaseId,
+  conversationId: DatabaseId,
+) {
   const { conversation, friendId } = await findConversationForUser(
     userId,
     conversationId,
@@ -393,10 +429,10 @@ export async function getDirectMessages(userId, conversationId) {
 }
 
 export async function sendDirectMessage(
-  userId,
-  conversationId,
-  content,
-  clientMessageId,
+  userId: DatabaseId,
+  conversationId: DatabaseId,
+  content: string,
+  clientMessageId: string,
 ) {
   const { conversation, friendId } = await findConversationForUser(
     userId,
@@ -433,6 +469,7 @@ export async function sendDirectMessage(
       )
       .limit(1)
       .then((result) => result[0]));
+  if (!created) fail(500, "Direct message could not be created");
   if (createdRows[0])
     await db
       .update(directConversations)
@@ -441,7 +478,9 @@ export async function sendDirectMessage(
   const [sender] = await Promise.all([
     db.select().from(profiles).where(eq(profiles.id, userId)).limit(1),
   ]);
-  const result = presentMessage(created, sender[0]);
+  const senderProfile = sender[0];
+  if (!senderProfile) fail(500, "Sender profile not found");
+  const result = presentMessage(created, senderProfile);
   if (createdRows[0]) {
     const event = {
       type: "direct_message",
@@ -450,7 +489,7 @@ export async function sendDirectMessage(
     const notification = await createDirectMessageNotification(
       friendId,
       created,
-      sender[0],
+      senderProfile,
     );
     if (notification) {
       await Promise.allSettled([
@@ -469,8 +508,8 @@ export async function sendDirectMessage(
 }
 
 export async function markDirectConversationRead(
-  userId,
-  conversationId,
+  userId: DatabaseId,
+  conversationId: DatabaseId,
   validate = true,
 ) {
   const { conversation, friendId } = validate
@@ -518,9 +557,9 @@ export async function markDirectConversationRead(
 }
 
 export async function markDirectMessagesDelivered(
-  userId,
-  conversationId,
-  messageIds,
+  userId: DatabaseId,
+  conversationId: DatabaseId,
+  messageIds: unknown,
 ) {
   const { conversation, friendId } = await findConversationForUser(
     userId,

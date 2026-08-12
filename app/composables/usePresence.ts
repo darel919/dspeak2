@@ -4,17 +4,26 @@ import { useRoomsStore } from "../stores/rooms";
 import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { debugLog } from "../shared/debug";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
+import type { Ref } from "vue";
+import type {
+  PresenceRealtimeMessage,
+  PresenceRecord,
+} from "../shared/types/presence.ts";
+import type { IdentityProfile } from "../shared/types/identity.ts";
+import type { VoiceUserRecord } from "../shared/types/voice-media-actions.ts";
 
-export function usePresence(userId) {
-  const status = ref("disconnected");
-  let closeChannel = null;
-  let stopUserWatcher = null;
+export function usePresence(userId: string | Ref<string | null | undefined>) {
+  const status = ref<string>("disconnected");
+  let closeChannel: (() => void) | null = null;
+  let stopUserWatcher: (() => void) | null = null;
   let intentionallyDisconnected = false;
   const authStore = useAuthStore();
   const identityStore = useIdentityStore();
   const roomsStore = useRoomsStore();
   const presenceStatusStore = usePresenceStatusStore();
-  let voiceStorePromise = null;
+  let voiceStorePromise: Promise<{
+    upsertUserProfile: (profile: VoiceUserRecord) => unknown;
+  }> | null = null;
 
   function loadVoiceStore() {
     voiceStorePromise ||= import("../stores/voice").then(({ useVoiceStore }) =>
@@ -23,28 +32,27 @@ export function usePresence(userId) {
     return voiceStorePromise;
   }
 
-  function receiveMessage(message) {
-    if (message?.type === "room_updated" && message.data?.id) {
+  function receiveMessage(message: PresenceRealtimeMessage) {
+    const data = message.data;
+    if (!data) return;
+
+    if (
+      message?.type === "room_updated" &&
+      !Array.isArray(message.data) &&
+      message.data?.id
+    ) {
       roomsStore.applyRealtimeRoomUpdate(message.data);
       return;
     }
 
-    if (message?.type === "status_updated" && message.data?.userId) {
-      presenceStatusStore.updateUserStatus({
-        ...message.data,
-        platform: message.data.platform || null,
-      } as any);
-      return;
-    }
-
-    if (message?.type === "online_users" && Array.isArray(message.data)) {
-      for (const entry of message.data) {
+    if (message.type === "online_users" && Array.isArray(data)) {
+      for (const entry of data) {
         if (entry.userId) {
           presenceStatusStore.updateUserStatus({
             userId: entry.userId,
-            status: entry.status,
-            updatedAt: entry.updatedAt,
-            isManualOverride: entry.isManualOverride,
+            status: entry.status || "offline",
+            updatedAt: entry.updatedAt || new Date().toISOString(),
+            isManualOverride: entry.isManualOverride || false,
             platform: entry.platform || null,
           });
         }
@@ -52,8 +60,21 @@ export function usePresence(userId) {
       return;
     }
 
-    if (message?.type !== "profile_updated" || !message.data?.id) return;
-    const profile = message.data;
+    if (Array.isArray(data)) return;
+
+    if (message.type === "status_updated" && data.userId) {
+      presenceStatusStore.updateUserStatus({
+        userId: data.userId,
+        status: data.status || "offline",
+        updatedAt: data.updatedAt || new Date().toISOString(),
+        isManualOverride: data.isManualOverride || false,
+        platform: data.platform || null,
+      });
+      return;
+    }
+
+    if (message.type !== "profile_updated" || !data.id) return;
+    const profile: IdentityProfile = { ...data, id: String(data.id) };
     identityStore.upsertPublicProfile(profile);
     void loadVoiceStore()
       .then((voiceStore) => voiceStore.upsertUserProfile(profile))
@@ -63,21 +84,21 @@ export function usePresence(userId) {
     }
   }
 
-  function connect(id) {
+  function connect(id: string) {
     if (!import.meta.client || !id) {
       debugLog("[usePresence] No userId provided for connection");
       return;
     }
     intentionallyDisconnected = false;
     debugLog("[usePresence] Subscribing to global presence channel");
-    openRealtimeChannel("global", {
+    openRealtimeChannel<PresenceRealtimeMessage>("global", {
       onMessage: receiveMessage,
       onSubscribe: () => {
         debugLog("[usePresence] Global channel subscribed");
         status.value = "connected";
         presenceStatusStore.connectionStatus = "connected";
       },
-      onError: (err, channelStatus) => {
+      onError: (err: unknown, channelStatus: string) => {
         debugLog("[usePresence] Global channel error:", err, channelStatus);
         status.value = "disconnected";
         presenceStatusStore.connectionStatus = "disconnected";
@@ -107,7 +128,7 @@ export function usePresence(userId) {
     debugLog("[usePresence] Setting up watcher for reactive userId");
     stopUserWatcher = watch(
       userId,
-      (id, oldId) => {
+      (id: string | null | undefined, oldId: string | null | undefined) => {
         debugLog("[usePresence] userId changed from", oldId, "to", id);
         disconnect();
         if (id) connect(id);
@@ -126,7 +147,10 @@ export function usePresence(userId) {
 
   return {
     status,
-    connect: () => connect(isRef(userId) ? userId.value : userId),
+    connect: () => {
+      const id = isRef(userId) ? userId.value : userId;
+      if (id) connect(id);
+    },
     disconnect,
   };
 }

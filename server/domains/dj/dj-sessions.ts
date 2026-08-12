@@ -1,6 +1,12 @@
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { registerDjParticipantDisconnectedHandler } from "./dj-lifecycle.ts";
+import type {
+  DjBridge,
+  DjIngestPayload,
+  DjSession,
+  DjState,
+} from "../../types/dj-sessions.ts";
 
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const ACTIVE_SESSION_TTL_MS = 6 * 60 * 60 * 1000;
@@ -8,21 +14,26 @@ const PUBLISHER_RECOVERY_MS = 20 * 1000;
 const BRIDGE_RETRY_MS = 1000;
 const stateKey = Symbol.for("dspeak.dj.sessions");
 
-async function createDjBroadcastProducer() {
+async function createDjBroadcastProducer(
+  ..._args: unknown[]
+): Promise<DjBridge> {
   throw new Error("DJ media ingest is unavailable with the external SFU");
 }
 
 function state() {
-  if (!globalThis[stateKey])
-    globalThis[stateKey] = {
+  const globalState = globalThis as typeof globalThis & {
+    [stateKey]?: DjState;
+  };
+  if (!globalState[stateKey])
+    globalState[stateKey] = {
       sessions: new Map(),
       userSessions: new Map(),
       channelSessions: new Map(),
     };
-  return globalThis[stateKey];
+  return globalState[stateKey]!;
 }
 
-function safeEqual(left, right) {
+function safeEqual(left: unknown, right: unknown) {
   const leftBuffer = Buffer.from(String(left || ""));
   const rightBuffer = Buffer.from(String(right || ""));
   return (
@@ -31,7 +42,7 @@ function safeEqual(left, right) {
   );
 }
 
-function publicSession(session) {
+function publicSession(session: DjSession) {
   return {
     id: session.id,
     channelId: session.channelId,
@@ -43,12 +54,12 @@ function publicSession(session) {
   };
 }
 
-function publisherUrl(host, port, path, token) {
+function publisherUrl(host: string, port: number, path: string, token: string) {
   const streamId = `publish:${path}:dj:${token}`;
   return `srt://${host}:${port}?streamid=${streamId}&pkt_size=1316`;
 }
 
-function closeBridge(session) {
+function closeBridge(session: DjSession) {
   if (session.recoveryTimer) clearTimeout(session.recoveryTimer);
   session.recoveryTimer = null;
   if (session.process && !session.process.killed)
@@ -58,13 +69,16 @@ function closeBridge(session) {
   session.bridge = null;
 }
 
-export function closeDjSession(sessionId, userId = null) {
+export function closeDjSession(
+  sessionId: string,
+  userId: string | null = null,
+) {
   const current = state();
   const session = current.sessions.get(String(sessionId));
   if (!session) return false;
   if (userId && String(session.userId) !== String(userId)) return false;
   closeBridge(session);
-  clearTimeout(session.expiryTimer);
+  if (session.expiryTimer) clearTimeout(session.expiryTimer);
   current.sessions.delete(session.id);
   if (current.userSessions.get(session.userId) === session.id)
     current.userSessions.delete(session.userId);
@@ -74,20 +88,30 @@ export function closeDjSession(sessionId, userId = null) {
   return true;
 }
 
-registerDjParticipantDisconnectedHandler((channelId, userId) => {
-  for (const session of [...state().sessions.values()]) {
-    if (
-      session.channelId === String(channelId) &&
-      session.userId === String(userId)
-    )
-      closeDjSession(session.id);
-  }
-});
+registerDjParticipantDisconnectedHandler(
+  (channelId: string, userId: string) => {
+    for (const session of [...state().sessions.values()]) {
+      if (
+        session.channelId === String(channelId) &&
+        session.userId === String(userId)
+      )
+        closeDjSession(session.id);
+    }
+  },
+);
 
-export function createDjSession({ channelId, userId }) {
+export function createDjSession({
+  channelId,
+  userId,
+}: {
+  channelId: string;
+  userId: string;
+}) {
   const current = state();
   const channelSessionId = current.channelSessions.get(String(channelId));
-  const channelSession = current.sessions.get(channelSessionId);
+  const channelSession = channelSessionId
+    ? current.sessions.get(channelSessionId)
+    : undefined;
   if (channelSession && channelSession.userId !== String(userId))
     throw createError({
       statusCode: 409,
@@ -106,7 +130,7 @@ export function createDjSession({ channelId, userId }) {
   const fallbackPort = Number(
     process.env.DSPEAK_INGEST_FALLBACK_PORT || directPort,
   );
-  const session: any = {
+  const session: DjSession = {
     id,
     token,
     path,
@@ -118,6 +142,7 @@ export function createDjSession({ channelId, userId }) {
     process: null,
     recoveryTimer: null,
     recoveryDeadline: null,
+    expiryTimer: null,
     expiresAt: Date.now() + SESSION_TTL_MS,
     directUrl: publisherUrl(directHost, directPort, path, token),
     fallbackUrl: publisherUrl(fallbackHost, fallbackPort, path, token),
@@ -130,15 +155,15 @@ export function createDjSession({ channelId, userId }) {
   return publicSession(session);
 }
 
-export function getDjSession(sessionId, userId) {
+export function getDjSession(sessionId: string, userId: string) {
   const session = state().sessions.get(String(sessionId));
   if (!session || String(session.userId) !== String(userId)) return null;
   return publicSession(session);
 }
 
-function findAuthorizedSession(payload) {
-  if (!["publish", "read"].includes(payload?.action)) return null;
-  if (!["srt", "rtsp"].includes(payload?.protocol)) return null;
+function findAuthorizedSession(payload: DjIngestPayload) {
+  if (!["publish", "read"].includes(String(payload.action || ""))) return null;
+  if (!["srt", "rtsp"].includes(String(payload.protocol || ""))) return null;
   const session = [...state().sessions.values()].find(
     (candidate) => candidate.path === String(payload.path || ""),
   );
@@ -150,7 +175,7 @@ function findAuthorizedSession(payload) {
   return session;
 }
 
-function scheduleRecovery(session, message) {
+function scheduleRecovery(session: DjSession, message: string) {
   if (session.status === "stopped") return;
   closeBridge(session);
   if (!session.recoveryDeadline)
@@ -168,7 +193,7 @@ function scheduleRecovery(session, message) {
   session.recoveryTimer.unref?.();
 }
 
-async function startBridge(session) {
+async function startBridge(session: DjSession) {
   if (session.bridge || session.status === "stopped") return;
   if (session.recoveryTimer) clearTimeout(session.recoveryTimer);
   session.recoveryTimer = null;
@@ -176,7 +201,7 @@ async function startBridge(session) {
   session.error = null;
   const ssrc = randomInt(1, 0xffffffff);
   try {
-    session.bridge = await (createDjBroadcastProducer as any)(
+    session.bridge = await createDjBroadcastProducer(
       session.channelId,
       session.userId,
       ssrc,
@@ -215,7 +240,7 @@ async function startBridge(session) {
       { stdio: ["ignore", "ignore", "pipe"] },
     );
     let stderr = "";
-    session.process.stderr.on("data", (chunk) => {
+    session.process.stderr?.on("data", (chunk: Buffer) => {
       stderr = `${stderr}${chunk}`.slice(-2048);
     });
     const bridgeProcess = session.process;
@@ -228,7 +253,7 @@ async function startBridge(session) {
           session.status = "live";
           session.error = null;
           session.recoveryDeadline = null;
-          clearTimeout(session.expiryTimer);
+          if (session.expiryTimer) clearTimeout(session.expiryTimer);
           session.expiresAt = Date.now() + ACTIVE_SESSION_TTL_MS;
           session.expiryTimer = setTimeout(
             () => closeDjSession(session.id),
@@ -236,35 +261,44 @@ async function startBridge(session) {
           );
           session.expiryTimer.unref?.();
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           if (session.process !== bridgeProcess || session.status === "stopped")
             return;
-          scheduleRecovery(session, error.message);
+          scheduleRecovery(
+            session,
+            error instanceof Error ? error.message : String(error),
+          );
         });
     });
-    session.process.once("error", (error) => {
+    session.process.once("error", (error: Error) => {
       if (session.process !== bridgeProcess || session.status === "stopped")
         return;
       scheduleRecovery(session, error.message || "FFmpeg failed to start");
     });
-    session.process.once("exit", (code, signal) => {
-      if (
-        session.process !== bridgeProcess ||
-        session.status === "stopped" ||
-        signal === "SIGTERM"
-      )
-        return;
-      scheduleRecovery(
-        session,
-        stderr.trim() || `Publisher bridge exited with code ${code}`,
-      );
-    });
-  } catch (error) {
-    scheduleRecovery(session, error.message || "DJ bridge failed");
+    session.process.once(
+      "exit",
+      (code: number | null, signal: NodeJS.Signals | null) => {
+        if (
+          session.process !== bridgeProcess ||
+          session.status === "stopped" ||
+          signal === "SIGTERM"
+        )
+          return;
+        scheduleRecovery(
+          session,
+          stderr.trim() || `Publisher bridge exited with code ${code}`,
+        );
+      },
+    );
+  } catch (error: unknown) {
+    scheduleRecovery(
+      session,
+      error instanceof Error ? error.message : "DJ bridge failed",
+    );
   }
 }
 
-export function authorizeDjIngest(payload) {
+export function authorizeDjIngest(payload: DjIngestPayload) {
   const session = findAuthorizedSession(payload);
   if (!session) return false;
   if (payload.action === "publish") {

@@ -1,4 +1,5 @@
 import { mediaDebug } from "./media-debug.ts";
+import type { HybridSessionTerminationContext } from "./types/hybrid-media-session.ts";
 
 export function createHybridMediaSessionTermination({
   capture,
@@ -39,9 +40,13 @@ export function createHybridMediaSessionTermination({
   stopSharedAudioMeter,
   resolveTopologyWaiter,
   transportReady,
-}) {
-  function failSession(message) {
-    error.value = message?.message || message;
+}: HybridSessionTerminationContext) {
+  function failSession(message: unknown) {
+    if (message instanceof Error) error.value = message.message;
+    else if (typeof message === "string") error.value = message;
+    else if (message && typeof message === "object" && "message" in message)
+      error.value = String(message.message);
+    else error.value = String(message);
     iceConnectedBoth.value = false;
     mediaConnectionState.value = "failed";
     lifecycleState.record("failed", { reason: error.value });
@@ -83,11 +88,11 @@ export function createHybridMediaSessionTermination({
     playbackState.value = "idle";
     resetTopologySequencing("disconnected");
     setLastP2pEdges([]);
-    peerRoundTripTimes.value = {} as any;
-    peerConnectionMetrics.value = {} as any;
-    mediaPathMetrics.value = [] as any;
+    peerRoundTripTimes.value = {};
+    peerConnectionMetrics.value = {};
+    mediaPathMetrics.value = [];
     sfuRoundTripTime.value = null;
-    participantSfuRoundTripTimes.value = {} as any;
+    participantSfuRoundTripTimes.value = {};
     refreshPublicMaps();
     refreshTopologyGraph();
     mediaDebug("session.disconnected");
@@ -96,6 +101,6 @@ export function createHybridMediaSessionTermination({
   return { disconnect, failSession };
 }
 
-function closeMediaSignalingForRecovery(socket) {
+function closeMediaSignalingForRecovery(socket: WebSocket | null) {
   socket?.close();
 }

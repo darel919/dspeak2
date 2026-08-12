@@ -8,13 +8,14 @@ import {
 } from "./room-authorization.ts";
 import { requireAuthenticatedUser } from "./auth.ts";
 import { desc, eq } from "drizzle-orm";
+import type { DSpeakEvent } from "../types/dspeak-api.ts";
 
-function requireValue(value, message) {
+function requireValue(value: unknown, message: string): string {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
-  return value;
+  return String(value);
 }
 
-export async function handleAssets(event, suffix) {
+export async function handleAssets(event: DSpeakEvent, suffix: string) {
   if (event.method !== "GET")
     throw createError({
       statusCode: 404,

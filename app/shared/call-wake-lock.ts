@@ -1,13 +1,25 @@
-export function createCallWakeLockController({ wakeLock, documentTarget }) {
+import type {
+  CallWakeLockApi,
+  CallWakeLockTarget,
+  WakeLockSentinelLike,
+} from "./types/call-wake-lock.ts";
+
+export function createCallWakeLockController({
+  wakeLock,
+  documentTarget,
+}: {
+  wakeLock?: CallWakeLockApi | null;
+  documentTarget?: CallWakeLockTarget | null;
+}) {
   let connected = false;
-  let sentinel = null;
-  let pendingRequest = null;
+  let sentinel: WakeLockSentinelLike | null = null;
+  let pendingRequest: Promise<WakeLockSentinelLike> | null = null;
   let generation = 0;
   let listening = false;
 
   const isVisible = () => documentTarget?.visibilityState !== "hidden";
 
-  const handleRelease = (releasedSentinel) => {
+  const handleRelease = (releasedSentinel: WakeLockSentinelLike) => {
     if (sentinel === releasedSentinel) sentinel = null;
   };
 
@@ -23,7 +35,7 @@ export function createCallWakeLockController({ wakeLock, documentTarget }) {
     }
 
     const requestGeneration = generation;
-    let request;
+    let request: Promise<WakeLockSentinelLike>;
     try {
       request = Promise.resolve(wakeLock.request("screen"));
     } catch {
@@ -63,7 +75,7 @@ export function createCallWakeLockController({ wakeLock, documentTarget }) {
   }
 
   function stopListening() {
-    if (!listening) return;
+    if (!listening || !documentTarget) return;
     documentTarget.removeEventListener(
       "visibilitychange",
       handleVisibilityChange,
@@ -71,7 +83,7 @@ export function createCallWakeLockController({ wakeLock, documentTarget }) {
     listening = false;
   }
 
-  async function setConnected(nextConnected) {
+  async function setConnected(nextConnected: unknown) {
     const next = nextConnected === true;
     if (connected === next) {
       if (next) return acquire();

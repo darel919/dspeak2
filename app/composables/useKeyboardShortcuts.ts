@@ -1,11 +1,12 @@
 import { shortcutMatchesEvent } from "~~/shared/keyboard-shortcuts.ts";
 import { effectiveKeysForShortcut } from "../shared/keybinding-preferences.ts";
+import type { ShortcutBinding } from "../shared/types/composables.ts";
 
 const activeScope = ref("global");
-const registeredShortcuts = new Map();
+const registeredShortcuts = new Map<string, ShortcutBinding>();
 let eventHandlerInstalled = false;
 
-function handleKeydown(event) {
+function handleKeydown(event: KeyboardEvent) {
   if (event.isComposing || event.key === undefined) return;
 
   for (const [, binding] of registeredShortcuts) {
@@ -39,7 +40,12 @@ export function useKeyboardShortcuts() {
     eventHandlerInstalled = false;
   }
 
-  function register(id, keys, handler, scope = "global") {
+  function register(
+    id: string,
+    keys: string | string[],
+    handler: (event: KeyboardEvent) => boolean | void,
+    scope = "global",
+  ) {
     if (!import.meta.client) return () => {};
 
     installHandler();
@@ -58,7 +64,7 @@ export function useKeyboardShortcuts() {
     };
   }
 
-  function setScope(scope) {
+  function setScope(scope: string) {
     activeScope.value = scope;
   }
 

@@ -2,11 +2,21 @@ import { db } from "../client.ts";
 import { profiles, users } from "../schema/index.ts";
 import { and, eq, ne } from "drizzle-orm";
 import { generateRandomUsername } from "../../auth/random-username.ts";
+import type {
+  FirstLoginInput,
+  ProfileInsertInput,
+  ProfileUpdateInput,
+} from "../../types/profile-repository.ts";
+
+type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const usernameRetryLimit = 3;
 const usernameCandidateLimit = 10;
 
-async function findAvailableUsername(tx, userId) {
+async function findAvailableUsername(
+  tx: DatabaseTransaction,
+  userId: string,
+): Promise<string> {
   for (let counter = 0; counter < usernameCandidateLimit; counter += 1) {
     const candidate = generateRandomUsername();
     const [userConflict] = await tx
@@ -26,17 +36,20 @@ async function findAvailableUsername(tx, userId) {
   throw new Error("Unable to allocate a unique username");
 }
 
-function isUsernameConflict(error) {
+function isUsernameConflict(error: unknown): boolean {
+  const value = error as {
+    constraint_name?: string;
+    cause?: { constraint_name?: string };
+  };
   const constraint =
-    error?.constraint_name || error?.cause?.constraint_name || "";
+    value.constraint_name || value.cause?.constraint_name || "";
   return (
     constraint === "users_username_unique" ||
     constraint === "profiles_username_unique"
   );
 }
 export class ProfileRepository {
-  [key: string]: any;
-  async findById(id) {
+  async findById(id: string) {
     const result = await db
       .select()
       .from(profiles)
@@ -45,7 +58,7 @@ export class ProfileRepository {
     return result[0] || null;
   }
 
-  async findByUsername(username) {
+  async findByUsername(username: string) {
     const result = await db
       .select()
       .from(profiles)
@@ -54,7 +67,10 @@ export class ProfileRepository {
     return result[0] || null;
   }
 
-  async create(id, { username, displayName, avatarKey }) {
+  async create(
+    id: string,
+    { username, displayName, avatarKey }: ProfileInsertInput,
+  ) {
     const result = await db
       .insert(profiles)
       .values({
@@ -67,7 +83,10 @@ export class ProfileRepository {
     return result[0];
   }
 
-  async update(id, { username, displayName, avatarKey }) {
+  async update(
+    id: string,
+    { username, displayName, avatarKey }: ProfileUpdateInput,
+  ) {
     const result = await db
       .update(profiles)
       .set({
@@ -81,7 +100,10 @@ export class ProfileRepository {
     return result[0];
   }
 
-  async getOrCreateOnFirstLogin(userId, { email, displayName, avatarKey }) {
+  async getOrCreateOnFirstLogin(
+    userId: string,
+    { email, displayName, avatarKey }: FirstLoginInput,
+  ) {
     for (let attempt = 0; attempt < usernameRetryLimit; attempt += 1) {
       try {
         return await db.transaction(async (tx) => {
@@ -125,7 +147,7 @@ export class ProfileRepository {
           if (profile[0]) return profile[0];
           throw new Error("OAuth profile could not be created");
         });
-      } catch (error) {
+      } catch (error: unknown) {
         if (!isUsernameConflict(error) || attempt === usernameRetryLimit - 1)
           throw error;
       }

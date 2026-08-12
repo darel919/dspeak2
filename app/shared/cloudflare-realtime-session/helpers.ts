@@ -1,18 +1,23 @@
-function finiteOrNull(value) {
+import type {
+  CloudflarePeerConnectionLike,
+  DeferredPromise,
+} from "../types/cloudflare-media.ts";
+
+function finiteOrNull(value: unknown): number | null {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function secondsToMilliseconds(value) {
+function secondsToMilliseconds(value: unknown): number | null {
   const number = finiteOrNull(value);
   return number == null ? null : number * 1000;
 }
 
-function deferred(timeoutMs, label) {
-  let timer;
-  let resolvePromise;
-  let rejectPromise;
-  const promise = new Promise((resolve, reject) => {
+function deferred<T>(timeoutMs: number, label: string): DeferredPromise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  let resolvePromise: (value: T) => void = () => {};
+  let rejectPromise: (error: unknown) => void = () => {};
+  const promise = new Promise<T>((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
     timer = setTimeout(
@@ -20,7 +25,9 @@ function deferred(timeoutMs, label) {
       timeoutMs,
     );
   });
-  const waiting: any = promise.finally(() => clearTimeout(timer));
+  const waiting = promise.finally(() =>
+    clearTimeout(timer),
+  ) as DeferredPromise<T>;
   waiting.resolve = resolvePromise;
   waiting.reject = rejectPromise;
   return waiting;
@@ -36,7 +43,9 @@ const ICE_GATHERING_TIMEOUT_MS = 3000;
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_TRACKS_PER_REQUEST = 64;
 
-function waitForIceGatheringComplete(peerConnection) {
+function waitForIceGatheringComplete(
+  peerConnection: CloudflarePeerConnectionLike | null,
+): Promise<void> {
   if (
     !peerConnection ||
     peerConnection.iceGatheringState == null ||
@@ -45,19 +54,21 @@ function waitForIceGatheringComplete(peerConnection) {
   )
     return Promise.resolve();
   return new Promise<void>((resolve) => {
-    let timer;
+    let timer: ReturnType<typeof setTimeout>;
     const finish = () => {
       clearTimeout(timer);
       peerConnection.removeEventListener?.("icegatheringstatechange", finish);
       resolve();
     };
-    peerConnection.addEventListener("icegatheringstatechange", finish);
+    peerConnection.addEventListener!("icegatheringstatechange", finish);
     timer = setTimeout(finish, ICE_GATHERING_TIMEOUT_MS);
     if (peerConnection.iceGatheringState === "complete") finish();
   });
 }
 
-async function getLocalSessionDescription(peerConnection) {
+async function getLocalSessionDescription(
+  peerConnection: CloudflarePeerConnectionLike,
+) {
   await waitForIceGatheringComplete(peerConnection);
   const description = peerConnection.localDescription;
   if (!description?.type || typeof description.sdp !== "string")

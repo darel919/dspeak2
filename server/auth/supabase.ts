@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { createLocalJWKSet } from "jose";
 import { getCookie, setCookie } from "h3";
+import type { H3Event } from "h3";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -10,10 +13,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
     "SUPABASE_URL and SUPABASE_ANON_KEY environment variables are required",
   );
 }
+const requiredSupabaseUrl = supabaseUrl;
+const requiredSupabaseAnonKey = supabaseAnonKey;
 
 const oauthStorageKey = "dspeak-oauth";
 const oauthCookiePrefix = "dspeak_oauth_";
-const oauthCookieOptions: any = {
+const oauthCookieOptions: Parameters<typeof setCookie>[3] = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax",
@@ -21,15 +26,15 @@ const oauthCookieOptions: any = {
   maxAge: 600,
 };
 
-function oauthCookieName(key) {
+function oauthCookieName(key: string): string {
   return `${oauthCookiePrefix}${Buffer.from(String(key)).toString("base64url")}`;
 }
 
-function createOAuthStorage(event) {
-  const values = new Map();
-  const cookieNames = new Set();
+function createOAuthStorage(event: H3Event) {
+  const values = new Map<string, string | null>();
+  const cookieNames = new Set<string>();
 
-  function rememberCookie(key) {
+  function rememberCookie(key: string): string {
     const name = oauthCookieName(key);
     cookieNames.add(name);
     return name;
@@ -37,17 +42,17 @@ function createOAuthStorage(event) {
 
   const storage = {
     isServer: true,
-    async getItem(key) {
-      if (values.has(key)) return values.get(key);
-      const value = getCookie(event, rememberCookie(key)) || null;
+    async getItem(key: string): Promise<string | null> {
+      if (values.has(key)) return values.get(key) ?? null;
+      const value = getCookie(event, rememberCookie(key)) ?? null;
       values.set(key, value);
       return value;
     },
-    async setItem(key, value) {
+    async setItem(key: string, value: string): Promise<void> {
       values.set(key, value);
       setCookie(event, rememberCookie(key), value, oauthCookieOptions);
     },
-    async removeItem(key) {
+    async removeItem(key: string): Promise<void> {
       values.delete(key);
       setCookie(event, rememberCookie(key), "", {
         ...oauthCookieOptions,
@@ -61,10 +66,14 @@ function createOAuthStorage(event) {
     async clear() {
       const indexKey = `${oauthStorageKey}-flows-code-verifier`;
       const indexValue = await storage.getItem(indexKey);
-      let flowIds = [] as any;
+      let flowIds: string[] = [];
       try {
         const parsed = JSON.parse(indexValue || "null");
-        if (Array.isArray(parsed)) flowIds = parsed;
+        if (
+          Array.isArray(parsed) &&
+          parsed.every((id) => typeof id === "string")
+        )
+          flowIds = parsed;
       } catch {}
 
       const keys = new Set([
@@ -81,24 +90,31 @@ function createOAuthStorage(event) {
         setCookie(event, String(name), "", {
           ...oauthCookieOptions,
           maxAge: 0,
-        } as any);
+        });
       }
     },
   };
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-    detectSessionInUrl: false,
-    flowType: "pkce",
+export const supabase = createClient(
+  requiredSupabaseUrl,
+  requiredSupabaseAnonKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+      flowType: "pkce",
+    },
   },
-});
+);
 
-export function createOAuthSupabaseClient(event) {
+export function createOAuthSupabaseClient(event: H3Event): {
+  client: SupabaseClient;
+  clearStorage: () => Promise<void>;
+} {
   const { storage, clear } = createOAuthStorage(event);
-  const client = createClient(supabaseUrl, supabaseAnonKey, {
+  const client = createClient(requiredSupabaseUrl, requiredSupabaseAnonKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: true,
@@ -120,13 +136,18 @@ export const supabaseAdmin = supabaseServiceKey
     })
   : null;
 
-export async function getUserFromToken(accessToken) {
+export async function getUserFromToken(
+  accessToken: string,
+): Promise<User | null> {
   const { data, error } = await supabase.auth.getUser(accessToken);
   if (error || !data.user) return null;
   return data.user;
 }
 
-export async function verifyJWTLocally(token, jwks) {
+export async function verifyJWTLocally(
+  token: string,
+  jwks: ReturnType<typeof createLocalJWKSet>,
+) {
   const jose = await import("jose");
   const { payload } = await jose.jwtVerify(token, jwks, {
     issuer: `${supabaseUrl}/auth/v1`,

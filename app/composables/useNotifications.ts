@@ -4,22 +4,22 @@ export function useNotifications() {
 
   if (import.meta.client) {
     const authStore = useAuthStore();
-    let stopAuthWatch = null;
-    const initializeForUser = (userId) => {
+    let stopAuthWatch: (() => void) | null = null;
+    const initializeForUser = (userId: string | undefined) => {
       if (!userId) return;
       stopAuthWatch?.();
       stopAuthWatch = null;
       void store.initialize();
     };
     onMounted(() => {
-      const userId = authStore.getUserData()?.id;
+      const userId = String(authStore.getUserData()?.id || "");
       if (userId) {
         initializeForUser(userId);
         return;
       }
       stopAuthWatch = watch(
         () => authStore.getUserData()?.id,
-        (nextUserId) => initializeForUser(nextUserId),
+        (nextUserId) => initializeForUser(String(nextUserId || "")),
       );
     });
     onUnmounted(() => stopAuthWatch?.());

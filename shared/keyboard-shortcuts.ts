@@ -100,12 +100,15 @@ export const DEFAULT_KEYBINDINGS = Object.freeze({
   },
 });
 
-export function shortcutMatchesEvent(shortcutKeys, event) {
+export function shortcutMatchesEvent(
+  shortcutKeys: readonly string[],
+  event: KeyboardEvent,
+) {
   const mod = event.metaKey || event.ctrlKey;
   const alt = event.altKey;
   const shift = event.shiftKey;
 
-  return shortcutKeys.some((keyCombo) => {
+  return shortcutKeys.some((keyCombo: string) => {
     const parts = keyCombo.split("+");
     let match = true;
     let keyFound = false;

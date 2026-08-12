@@ -1,41 +1,43 @@
-export function createChatReadActions(context) {
-  function markMessageAsRead(messageId) {
+import type { ChatStoreContext } from "../../shared/types/chat-store.ts";
+
+export function createChatReadActions(context: ChatStoreContext) {
+  function markMessageAsRead(messageId: string): void {
     const userData = context.dependencies.useAuthStore().getUserData();
     if (!userData?.id) return;
     const message = context.messages.value.find(
       (item) => item.id === messageId,
     );
-    if (!message || message.sender?.id === userData.id) return;
+    if (!message || message.sender?.id === String(userData.id)) return;
     if (context.dependencies.hasReader(message.read_by, userData.id)) return;
 
     message.read_by = context.dependencies.addReader(message.read_by, userData);
     context.pendingReadIds.add(messageId);
-    void context.persistPendingReadIds(userData.id);
+    void context.persistPendingReadIds(String(userData.id));
     context.scheduleReadFlush();
   }
 
-  function legacyReadStorageKey(userId) {
+  function legacyReadStorageKey(userId: string): string {
     return `dspeak2_unread_message_ids_${userId}`;
   }
 
-  async function hydratePendingReadIds(userId) {
-    if (context.runtime.pendingReadHydration)
-      return context.runtime.pendingReadHydration;
+  async function hydratePendingReadIds(userId: string): Promise<void> {
+    if (context.runtime.pendingReadHydration) return;
     context.runtime.pendingReadHydration = (async () => {
       const stored = await context.dependencies.getPendingReadIds(userId);
-      let legacy = [] as any;
+      let legacy: unknown = [];
       try {
         legacy = JSON.parse(
           localStorage.getItem(context.legacyReadStorageKey(userId)) || "[]",
         );
-      } catch (storageError) {
+      } catch (storageError: unknown) {
         console.warn(
           "[ChatStore] Unable to import legacy pending read state:",
           storageError,
         );
       }
+      const storedIds = Array.isArray(stored) ? stored : [];
       for (const messageId of [
-        ...stored,
+        ...storedIds,
         ...(Array.isArray(legacy) ? legacy : []),
       ]) {
         context.pendingReadIds.add(String(messageId));
@@ -45,29 +47,31 @@ export function createChatReadActions(context) {
       }
       try {
         localStorage.removeItem(context.legacyReadStorageKey(userId));
-      } catch (storageError) {
+      } catch (storageError: unknown) {
         console.warn(
           "[ChatStore] Unable to remove legacy pending read state:",
           storageError,
         );
       }
-    })().catch((storageError) => {
+    })().catch((storageError: unknown) => {
       context.runtime.pendingReadHydration = null;
       console.warn(
         "[ChatStore] Unable to restore pending read state:",
         storageError,
       );
     });
-    return context.runtime.pendingReadHydration;
+    await context.runtime.pendingReadHydration;
   }
 
-  function persistPendingReadIds(userId) {
+  async function persistPendingReadIds(userId: string): Promise<void> {
     const snapshot = [...context.pendingReadIds];
     context.runtime.pendingReadPersistence =
       context.runtime.pendingReadPersistence
         .catch(() => {})
-        .then(() => context.dependencies.savePendingReadIds(userId, snapshot))
-        .catch((storageError) => {
+        .then(async () => {
+          await context.dependencies.savePendingReadIds(userId, snapshot);
+        })
+        .catch((storageError: unknown) => {
           console.warn(
             "[ChatStore] Unable to persist pending read state:",
             storageError,
@@ -94,7 +98,7 @@ export function createChatReadActions(context) {
       return context.runtime.readFlushPromise;
     const userData = context.dependencies.useAuthStore().getUserData();
     if (!userData?.id || !navigator.onLine) return;
-    await context.hydratePendingReadIds(userData.id);
+    await context.hydratePendingReadIds(String(userData.id));
     const pendingReadIds = context.pendingReadIds;
     const messageIds = [...pendingReadIds].slice(0, 200);
     if (messageIds.length === 0) return;
@@ -115,20 +119,22 @@ export function createChatReadActions(context) {
       if (!response.ok) {
         throw new Error(`Failed to update read state: ${response.status}`);
       }
-      const payload = await response.json();
+      const payload = (await response.json()) as {
+        results?: Array<{ status?: string; messageId?: string }>;
+      };
       if (flushGeneration !== context.runtime.localDataGeneration) return;
       for (const result of payload.results || []) {
         if (
           result.status === "marked_as_read" ||
           result.status === "already_read"
         ) {
-          context.pendingReadIds.delete(result.messageId);
+          if (result.messageId) context.pendingReadIds.delete(result.messageId);
         }
       }
-      await context.persistPendingReadIds(userData.id);
+      await context.persistPendingReadIds(String(userData.id));
       await context.dependencies.useChannelsStore().getUnreadCounts();
     })()
-      .catch((readError) => {
+      .catch((readError: unknown) => {
         console.error("[ChatStore] Unable to update read state:", readError);
       })
       .finally(() => {
@@ -144,7 +150,7 @@ export function createChatReadActions(context) {
     return context.runtime.readFlushPromise;
   }
 
-  function sendTypingIndicator(isTyping) {
+  function sendTypingIndicator(isTyping: boolean): void {
     context.dependencies.debugLog("[ChatStore] Sending typing indicator:", {
       isTyping,
       connected: context.connected.value,
@@ -159,13 +165,13 @@ export function createChatReadActions(context) {
           payload: {
             type: "user_typing",
             data: {
-              userId: userData?.id,
+              userId: userData?.id ? String(userData.id) : null,
               channelId: context.currentChannelId.value,
               isTyping,
             },
           },
         })
-        .catch((typingError) => {
+        .catch((typingError: unknown) => {
           context.dependencies.debugLog(
             "[ChatStore] Typing broadcast failed:",
             typingError,

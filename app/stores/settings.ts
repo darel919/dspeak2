@@ -15,30 +15,57 @@ import {
   reportBrowserStorageMetric,
   updateBoundedStorageMap,
 } from "~/shared/bounded-browser-storage";
+import type {
+  AppearanceSettings,
+  AudioSettings,
+  SoundboardRoomVolumes,
+  StreamAttenuationSettings,
+  SystemSoundTheme,
+} from "../shared/types/settings.ts";
+import type { MicrophoneGateSettings } from "../shared/types/microphone-gate.ts";
+import type {
+  VideoSettings,
+  VideoSettingsInput,
+} from "../shared/types/video-settings.ts";
 
 const MAX_ROOM_VOLUME_ENTRIES = 100;
 
 export const useSettingsStore = defineStore("settings", () => {
+  const defaultAudioSettings: AudioSettings = { ...DEFAULT_AUDIO_SETTINGS };
   const audio = skipHydrate(
-    ref(loadPersisted("audioSettings", DEFAULT_AUDIO_SETTINGS)),
+    ref<AudioSettings>(loadPersisted("audioSettings", defaultAudioSettings)),
   );
   const microphoneGate = skipHydrate(
-    ref(
+    ref<Required<MicrophoneGateSettings>>(
       normalizeMicrophoneGate(
         loadPersisted("microphoneGateSettings", DEFAULT_MICROPHONE_GATE),
       ),
     ),
   );
-  const micDeviceId = skipHydrate(ref(loadPersisted("audioDeviceId", null)));
-  const outputDeviceId = skipHydrate(
-    ref(loadPersisted("audioOutputDeviceId", null)),
+  const micDeviceId = skipHydrate(
+    ref<string | null>(loadPersisted<string | null>("audioDeviceId", null)),
   );
-  const cameraDeviceId = skipHydrate(ref(loadPersisted("videoDeviceId", null)));
+  const outputDeviceId = skipHydrate(
+    ref<string | null>(
+      loadPersisted<string | null>("audioOutputDeviceId", null),
+    ),
+  );
+  const cameraDeviceId = skipHydrate(
+    ref<string | null>(loadPersisted<string | null>("videoDeviceId", null)),
+  );
   const cameraVideo = skipHydrate(
-    ref(normalizeVideoSettings(loadPersisted("cameraVideoSettings", {}))),
+    ref<VideoSettings>(
+      normalizeVideoSettings(
+        loadPersisted<VideoSettingsInput>("cameraVideoSettings", {}),
+      ),
+    ),
   );
   const screenVideo = skipHydrate(
-    ref(normalizeVideoSettings(loadPersisted("screenVideoSettings", {}))),
+    ref<VideoSettings>(
+      normalizeVideoSettings(
+        loadPersisted<VideoSettingsInput>("screenVideoSettings", {}),
+      ),
+    ),
   );
   const broadcastMode = skipHydrate(ref(loadPersisted("broadcastMode", false)));
   const sharedAudioVolume = skipHydrate(
@@ -48,10 +75,12 @@ export const useSettingsStore = defineStore("settings", () => {
     ref(normalizeSystemAudioBitrate(loadPersisted("systemAudioBitrate", 128))),
   );
   const appearance = skipHydrate(
-    ref(normalizeAppearance(loadPersisted(STORAGE_KEYS.appearance, {}))),
+    ref<AppearanceSettings>(
+      normalizeAppearance(loadPersisted(STORAGE_KEYS.appearance, {})),
+    ),
   );
   const streamAttenuation = skipHydrate(
-    ref(
+    ref<StreamAttenuationSettings>(
       loadPersisted(STORAGE_KEYS.streamAttenuation, {
         mode: "room",
         reductionPercent: 65,
@@ -83,20 +112,20 @@ export const useSettingsStore = defineStore("settings", () => {
     ref(Boolean(loadPersisted(STORAGE_KEYS.systemSoundsMuted, false))),
   );
 
-  function normalizePercent(value) {
+  function normalizePercent(value: unknown): number {
     const numeric = Number(value);
     return Number.isFinite(numeric)
       ? Math.min(100, Math.max(0, Math.round(numeric)))
       : 100;
   }
 
-  function setSoundboardVolume(value) {
+  function setSoundboardVolume(value: unknown): void {
     soundboardVolume.value = normalizePercent(value);
     persist(STORAGE_KEYS.soundboardVolume, soundboardVolume.value);
   }
 
-  function setRoomSoundboardVolume(roomId, value) {
-    let next = { ...soundboardRoomVolumes.value };
+  function setRoomSoundboardVolume(roomId: string, value: unknown): void {
+    let next: SoundboardRoomVolumes = { ...soundboardRoomVolumes.value };
     if (value === null || value === undefined || value === "") {
       delete next[roomId];
     } else {
@@ -111,28 +140,28 @@ export const useSettingsStore = defineStore("settings", () => {
     persist(STORAGE_KEYS.soundboardRoomVolumes, next);
   }
 
-  function getSoundboardVolume(roomId) {
+  function getSoundboardVolume(roomId: string): number {
     const override = soundboardRoomVolumes.value[String(roomId)];
     return Number.isFinite(Number(override))
       ? Number(override)
       : soundboardVolume.value;
   }
 
-  function setSystemSoundTheme(value) {
+  function setSystemSoundTheme(value: unknown): void {
     systemSoundTheme.value = normalizeSystemSoundTheme(value);
     persist(STORAGE_KEYS.systemSoundTheme, systemSoundTheme.value);
   }
 
-  function normalizeSystemSoundTheme(value) {
+  function normalizeSystemSoundTheme(value: unknown): SystemSoundTheme {
     return value === "default" ? value : "default";
   }
 
-  function setSystemSoundVolume(value) {
+  function setSystemSoundVolume(value: unknown): void {
     systemSoundVolume.value = normalizePercent(value);
     persist(STORAGE_KEYS.systemSoundVolume, systemSoundVolume.value);
   }
 
-  function setSystemSoundsMuted(value) {
+  function setSystemSoundsMuted(value: unknown): void {
     systemSoundsMuted.value = Boolean(value);
     persist(STORAGE_KEYS.systemSoundsMuted, systemSoundsMuted.value);
   }
@@ -157,13 +186,13 @@ export const useSettingsStore = defineStore("settings", () => {
     };
   });
 
-  function setAudioSetting(key, value) {
+  function setAudioSetting(key: keyof AudioSettings, value: unknown): void {
     if (!(key in audio.value)) return;
     audio.value = { ...audio.value, [key]: !!value };
     persist("audioSettings", audio.value);
   }
 
-  function setMicrophoneGate(value) {
+  function setMicrophoneGate(value: MicrophoneGateSettings): void {
     microphoneGate.value = normalizeMicrophoneGate({
       ...microphoneGate.value,
       ...value,
@@ -171,42 +200,47 @@ export const useSettingsStore = defineStore("settings", () => {
     persist("microphoneGateSettings", microphoneGate.value);
   }
 
-  function setBroadcastMode(val) {
+  function setBroadcastMode(val: unknown): void {
     broadcastMode.value = !!val;
     persist("broadcastMode", broadcastMode.value);
   }
 
-  function normalizeSharedAudioVolume(value) {
+  function normalizeSharedAudioVolume(value: unknown): number {
     const numeric = Number(value);
     return Number.isFinite(numeric)
       ? Math.min(100, Math.max(0, Math.round(numeric)))
       : 100;
   }
 
-  function setSharedAudioVolume(value) {
+  function setSharedAudioVolume(value: unknown): void {
     sharedAudioVolume.value = normalizeSharedAudioVolume(value);
     persist("sharedAudioVolume", sharedAudioVolume.value);
   }
 
-  function normalizeSystemAudioBitrate(value) {
+  function normalizeSystemAudioBitrate(value: unknown): number {
     const numeric = Number(value);
     return SYSTEM_AUDIO_BITRATE_OPTIONS.includes(numeric) ? numeric : 128;
   }
 
-  function setSystemAudioBitrate(value) {
+  function setSystemAudioBitrate(value: unknown): void {
     systemAudioBitrate.value = normalizeSystemAudioBitrate(value);
     persist("systemAudioBitrate", systemAudioBitrate.value);
   }
 
-  function setAppearance(value) {
+  function setAppearance(value: Partial<AppearanceSettings>): void {
     appearance.value = normalizeAppearance({ ...appearance.value, ...value });
     persist(STORAGE_KEYS.appearance, appearance.value);
   }
 
-  function setStreamAttenuation(value) {
-    const mode = ["room", "enabled", "disabled"].includes(value?.mode)
-      ? value.mode
-      : streamAttenuation.value.mode;
+  function setStreamAttenuation(
+    value: Partial<StreamAttenuationSettings>,
+  ): void {
+    const mode: StreamAttenuationSettings["mode"] =
+      value.mode === "room" ||
+      value.mode === "enabled" ||
+      value.mode === "disabled"
+        ? value.mode
+        : streamAttenuation.value.mode;
     const reduction = Number(value?.reductionPercent);
     streamAttenuation.value = {
       mode,
@@ -217,12 +251,12 @@ export const useSettingsStore = defineStore("settings", () => {
     persist(STORAGE_KEYS.streamAttenuation, streamAttenuation.value);
   }
 
-  function setMicDeviceId(id) {
+  function setMicDeviceId(id: string | null): void {
     micDeviceId.value = id || null;
     persist("audioDeviceId", micDeviceId.value);
   }
 
-  function setOutputDeviceId(id) {
+  function setOutputDeviceId(id: string | null): Promise<unknown> | void {
     outputDeviceId.value = id || null;
     persist("audioOutputDeviceId", outputDeviceId.value);
 
@@ -233,12 +267,12 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  function setCameraDeviceId(id) {
+  function setCameraDeviceId(id: string | null): void {
     cameraDeviceId.value = id || null;
     persist("videoDeviceId", cameraDeviceId.value);
   }
 
-  function setCameraVideoSettings(value) {
+  function setCameraVideoSettings(value: VideoSettingsInput): void {
     cameraVideo.value = normalizeVideoSettings({
       ...cameraVideo.value,
       ...value,
@@ -246,7 +280,7 @@ export const useSettingsStore = defineStore("settings", () => {
     persist("cameraVideoSettings", cameraVideo.value);
   }
 
-  function setScreenVideoSettings(value) {
+  function setScreenVideoSettings(value: VideoSettingsInput): void {
     screenVideo.value = normalizeVideoSettings({
       ...screenVideo.value,
       ...value,
@@ -254,7 +288,7 @@ export const useSettingsStore = defineStore("settings", () => {
     persist("screenVideoSettings", screenVideo.value);
   }
 
-  function loadPersisted(key, fallback) {
+  function loadPersisted<T>(key: string, fallback: T): T {
     try {
       if (typeof localStorage === "undefined") return fallback;
       const raw = localStorage.getItem(key);
@@ -276,7 +310,7 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  function persist(key, value) {
+  function persist<T>(key: string, value: T): void {
     try {
       if (typeof localStorage === "undefined") return;
       localStorage.setItem(key, JSON.stringify(value));

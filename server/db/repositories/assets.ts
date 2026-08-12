@@ -7,9 +7,21 @@ import {
   roomImages,
 } from "../schema/index.ts";
 import { eq, and, desc, asc } from "drizzle-orm";
+import type {
+  AvatarInsert,
+  LibrarySongInsert,
+  PlayLogInsert,
+  RoomImageInsert,
+  SoundboardInsert,
+} from "../../types/repositories.ts";
 export class AssetsRepository {
-  [key: string]: any;
-  async createSoundboard({ roomId, name, audioKey, volume, createdById }) {
+  async createSoundboard({
+    roomId,
+    name,
+    audioKey,
+    volume,
+    createdById,
+  }: SoundboardInsert) {
     const result = await db
       .insert(roomSoundboards)
       .values({ roomId, name, audioKey, volume, createdById })
@@ -17,7 +29,7 @@ export class AssetsRepository {
     return result[0];
   }
 
-  async getSoundboards(roomId) {
+  async getSoundboards(roomId: string) {
     return db
       .select()
       .from(roomSoundboards)
@@ -25,7 +37,7 @@ export class AssetsRepository {
       .orderBy(asc(roomSoundboards.createdAt));
   }
 
-  async getSoundboard(soundboardId) {
+  async getSoundboard(soundboardId: string) {
     const result = await db
       .select()
       .from(roomSoundboards)
@@ -34,7 +46,10 @@ export class AssetsRepository {
     return result[0] || null;
   }
 
-  async updateSoundboard(soundboardId, { name, volume }) {
+  async updateSoundboard(
+    soundboardId: string,
+    { name, volume }: Pick<SoundboardInsert, "name" | "volume">,
+  ) {
     const result = await db
       .update(roomSoundboards)
       .set({ name, volume })
@@ -43,7 +58,7 @@ export class AssetsRepository {
     return result[0];
   }
 
-  async deleteSoundboard(soundboardId) {
+  async deleteSoundboard(soundboardId: string) {
     await db
       .delete(roomSoundboards)
       .where(eq(roomSoundboards.id, soundboardId));
@@ -58,7 +73,7 @@ export class AssetsRepository {
     artworkKey,
     duration,
     addedById,
-  }) {
+  }: LibrarySongInsert) {
     const result = await db
       .insert(librarySongs)
       .values({
@@ -75,7 +90,7 @@ export class AssetsRepository {
     return result[0];
   }
 
-  async getSongs(roomId) {
+  async getSongs(roomId: string) {
     return db
       .select()
       .from(librarySongs)
@@ -83,7 +98,7 @@ export class AssetsRepository {
       .orderBy(desc(librarySongs.createdAt));
   }
 
-  async getSong(songId) {
+  async getSong(songId: string) {
     const result = await db
       .select()
       .from(librarySongs)
@@ -92,11 +107,11 @@ export class AssetsRepository {
     return result[0] || null;
   }
 
-  async deleteSong(songId) {
+  async deleteSong(songId: string) {
     await db.delete(librarySongs).where(eq(librarySongs.id, songId));
   }
 
-  async logPlay({ roomId, songId, playedById }) {
+  async logPlay({ roomId, songId, playedById }: PlayLogInsert) {
     const result = await db
       .insert(streamPlayLog)
       .values({ roomId, songId, playedById })
@@ -104,14 +119,14 @@ export class AssetsRepository {
     return result[0];
   }
 
-  async endPlay(playLogId) {
+  async endPlay(playLogId: string) {
     await db
       .update(streamPlayLog)
       .set({ endedAt: new Date() })
       .where(eq(streamPlayLog.id, playLogId));
   }
 
-  async getPlayLog(roomId, { limit = 50 } = {} as any) {
+  async getPlayLog(roomId: string, { limit = 50 }: { limit?: number } = {}) {
     return db
       .select()
       .from(streamPlayLog)
@@ -120,7 +135,7 @@ export class AssetsRepository {
       .limit(limit);
   }
 
-  async createAvatar({ userId, r2Key, mimeType, size }) {
+  async createAvatar({ userId, r2Key, mimeType, size }: AvatarInsert) {
     const result = await db
       .insert(avatars)
       .values({ userId, r2Key, mimeType, size })
@@ -128,7 +143,7 @@ export class AssetsRepository {
     return result[0];
   }
 
-  async getAvatar(userId) {
+  async getAvatar(userId: string) {
     const result = await db
       .select()
       .from(avatars)
@@ -138,11 +153,17 @@ export class AssetsRepository {
     return result[0] || null;
   }
 
-  async deleteAvatar(userId) {
+  async deleteAvatar(userId: string) {
     await db.delete(avatars).where(eq(avatars.userId, userId));
   }
 
-  async createRoomImage({ roomId, type, r2Key, mimeType, size }) {
+  async createRoomImage({
+    roomId,
+    type,
+    r2Key,
+    mimeType,
+    size,
+  }: RoomImageInsert) {
     const result = await db
       .insert(roomImages)
       .values({ roomId, type, r2Key, mimeType, size })
@@ -150,7 +171,7 @@ export class AssetsRepository {
     return result[0];
   }
 
-  async getRoomImages(roomId, type) {
+  async getRoomImages(roomId: string, type: RoomImageInsert["type"]) {
     return db
       .select()
       .from(roomImages)
@@ -158,7 +179,7 @@ export class AssetsRepository {
       .orderBy(desc(roomImages.createdAt));
   }
 
-  async deleteRoomImage(imageId) {
+  async deleteRoomImage(imageId: string) {
     await db.delete(roomImages).where(eq(roomImages.id, imageId));
   }
 }

@@ -7,30 +7,36 @@ import { useAuthStore } from "./auth";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 import { debugLog } from "../shared/debug";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
+import type {
+  NotificationFetchOptions,
+  NotificationPreferences,
+  NotificationRecord,
+  NotificationRealtimePayload,
+} from "../shared/types/notifications.ts";
 
 export const useNotificationsStore = defineStore("notifications", () => {
   const notificationSupported = ref(false);
   const pushSupported = ref(false);
-  const permission = ref("default");
+  const permission = ref<NotificationPermission>("default");
   const isEnabled = ref(false);
-  const subscription = shallowRef(null);
+  const subscription = shallowRef<PushSubscription | null>(null);
   const isSubscribed = ref(false);
   const loading = ref(false);
-  const error = ref(null);
-  const inbox = ref([]);
-  const preferences = ref({
+  const error = ref<string | null>(null);
+  const inbox = ref<NotificationRecord[]>([]);
+  const preferences = ref<NotificationPreferences>({
     mode: "all",
     push: false,
     sound: true,
     previews: true,
   });
   const config = useRuntimeConfig();
-  let initialization = null;
-  let notificationsChannel = null;
-  let closeNotificationsChannel = null;
-  let notificationsReconnectTimer = null;
+  let initialization: Promise<void> | null = null;
+  let notificationsChannel: unknown = null;
+  let closeNotificationsChannel: (() => void) | null = null;
+  let notificationsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let notificationsReconnectAttempts = 0;
-  let stopAuthWatcher = null;
+  let stopAuthWatcher: (() => void) | null = null;
   const MAX_REALTIME_RECONNECT_ATTEMPTS = 10;
 
   function syncNotificationState() {
@@ -80,7 +86,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     const authStore = useAuthStore();
     stopAuthWatcher = watch(
       () => authStore.getUserData()?.id,
-      (userId) => {
+      (userId: string | number | undefined) => {
         if (userId) connectRealtime(userId);
         else disconnectRealtime();
       },
@@ -88,37 +94,42 @@ export const useNotificationsStore = defineStore("notifications", () => {
     );
   }
 
-  async function connectRealtime(userId) {
+  async function connectRealtime(userId: string | number) {
     if (!import.meta.client || !userId) return;
     if (notificationsChannel) return;
     const normalizedUserId = String(userId);
-    openRealtimeChannel(`notify:${normalizedUserId}`, {
-      onMessage: (message) => receiveRealtime(message),
-      onSubscribe: () => {
-        notificationsReconnectAttempts = 0;
-        if (notificationsReconnectTimer) {
-          clearTimeout(notificationsReconnectTimer);
-          notificationsReconnectTimer = null;
-        }
+    openRealtimeChannel<NotificationRealtimePayload>(
+      `notify:${normalizedUserId}`,
+      {
+        onMessage: (message) => receiveRealtime(message),
+        onSubscribe: () => {
+          notificationsReconnectAttempts = 0;
+          if (notificationsReconnectTimer) {
+            clearTimeout(notificationsReconnectTimer);
+            notificationsReconnectTimer = null;
+          }
+        },
+        onError: (err, status) => {
+          debugLog("[Notifications] Realtime channel error:", err, status);
+          notificationsChannel = null;
+          closeNotificationsChannel = null;
+          if (
+            notificationsReconnectAttempts >= MAX_REALTIME_RECONNECT_ATTEMPTS
+          ) {
+            debugLog("[Notifications] Realtime reconnect attempts exhausted");
+            return;
+          }
+          const delay =
+            1000 * 2 ** notificationsReconnectAttempts +
+            Math.floor(Math.random() * 250);
+          notificationsReconnectAttempts += 1;
+          notificationsReconnectTimer = setTimeout(
+            () => connectRealtime(normalizedUserId),
+            delay,
+          );
+        },
       },
-      onError: (err, status) => {
-        debugLog("[Notifications] Realtime channel error:", err, status);
-        notificationsChannel = null;
-        closeNotificationsChannel = null;
-        if (notificationsReconnectAttempts >= MAX_REALTIME_RECONNECT_ATTEMPTS) {
-          debugLog("[Notifications] Realtime reconnect attempts exhausted");
-          return;
-        }
-        const delay =
-          1000 * 2 ** notificationsReconnectAttempts +
-          Math.floor(Math.random() * 250);
-        notificationsReconnectAttempts += 1;
-        notificationsReconnectTimer = setTimeout(
-          () => connectRealtime(normalizedUserId),
-          delay,
-        );
-      },
-    }).then((handle) => {
+    ).then((handle) => {
       if (!handle) return;
       if (!useAuthStore().getUserData()?.id) {
         handle.close();
@@ -146,7 +157,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
     disconnectRealtime();
   });
 
-  async function authenticatedFetch(path, options = {} as any) {
+  async function authenticatedFetch(
+    path: string,
+    options: NotificationFetchOptions = {},
+  ): Promise<Record<string, unknown>> {
     const userData = useAuthStore().getUserData();
     if (!userData?.id) throw new Error("User not authenticated");
     const response = await fetch(`${config.public.apiPath}/chat/${path}`, {
@@ -160,16 +174,18 @@ export const useNotificationsStore = defineStore("notifications", () => {
     });
     if (!response.ok)
       throw new Error(`Notification request failed: ${response.status}`);
-    return response.json();
+    return (await response.json()) as Record<string, unknown>;
   }
 
   async function fetchInbox() {
     const result = await authenticatedFetch("notifications");
-    inbox.value = Array.isArray(result?.items) ? result.items : [];
+    inbox.value = Array.isArray(result.items)
+      ? (result.items as NotificationRecord[])
+      : [];
     return inbox.value;
   }
 
-  async function dismiss(ids = [] as any) {
+  async function dismiss(ids: string[] = []) {
     await authenticatedFetch("notifications/dismiss", {
       method: "POST",
       body: JSON.stringify({ ids }),
@@ -180,7 +196,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
       : [];
   }
 
-  async function markRead(ids = [] as any) {
+  async function markRead(ids: string[] = []) {
     await authenticatedFetch("notifications/read", {
       method: "POST",
       body: JSON.stringify({ ids }),
@@ -195,19 +211,21 @@ export const useNotificationsStore = defineStore("notifications", () => {
   }
 
   async function fetchPreferences() {
-    preferences.value = await authenticatedFetch("notification-preferences");
+    preferences.value = (await authenticatedFetch(
+      "notification-preferences",
+    )) as unknown as NotificationPreferences;
     return preferences.value;
   }
 
-  async function savePreferences(value) {
-    preferences.value = await authenticatedFetch("notification-preferences", {
+  async function savePreferences(value: Partial<NotificationPreferences>) {
+    preferences.value = (await authenticatedFetch("notification-preferences", {
       method: "PUT",
       body: JSON.stringify({ ...preferences.value, ...value }),
-    });
+    })) as unknown as NotificationPreferences;
     return preferences.value;
   }
 
-  function receiveRealtime(message) {
+  function receiveRealtime(message: NotificationRealtimePayload) {
     if (message?.type === "notification_created" && message.data) {
       const senderId = message.data.senderId;
       const currentUserId = useAuthStore().getUserData()?.id;
@@ -231,8 +249,8 @@ export const useNotificationsStore = defineStore("notifications", () => {
       }
     }
     if (message?.type === "notifications_changed")
-      fetchInbox().catch((cause) => {
-        error.value = cause.message;
+      fetchInbox().catch((cause: unknown) => {
+        error.value = cause instanceof Error ? cause.message : String(cause);
       });
     if (message?.type === "notifications_read") {
       const ids = new Set(message.data?.ids || []);
@@ -257,7 +275,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return result;
   }
 
-  async function setEnabled(enabled) {
+  async function setEnabled(enabled: boolean) {
     if (import.meta.client && hasTauriRuntimeMarker()) {
       notificationManager.isEnabled = enabled;
       localStorage.setItem(
@@ -276,7 +294,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return result;
   }
 
-  function showNotification(title, options = {} as any) {
+  function showNotification(
+    title: string,
+    options: NotificationOptions & { data?: Record<string, unknown> } = {},
+  ) {
     if (import.meta.client && hasTauriRuntimeMarker()) {
       if (!notificationManager.isEnabled) return null;
       return import("@tauri-apps/api/core")
@@ -294,11 +315,14 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return notificationManager.showNotification(title, options);
   }
 
-  function showMessageNotification(message, roomName) {
+  function showMessageNotification(
+    message: NotificationRecord,
+    roomName: string | null,
+  ) {
     const title = roomName ? `New message in ${roomName}` : "New message";
     const senderName =
       typeof message?.sender === "object"
-        ? message.sender.name
+        ? message.sender?.name || "Someone"
         : message?.sender || "Someone";
     const content = String(message?.content || "");
     return showNotification(title, {
@@ -315,7 +339,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return notificationManager.shouldShowNotification();
   }
 
-  function urlBase64ToUint8Array(base64String) {
+  function urlBase64ToUint8Array(base64String: string): Uint8Array {
     if (!base64String) throw new Error("VAPID public key is missing");
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
     const base64 = `${base64String}${padding}`
@@ -359,7 +383,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
         existing ||
         (await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+          applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
         }));
       const response = await fetch(
         `${config.public.apiPath}/push-subscriptions`,

@@ -76,9 +76,9 @@ test("rooms state is isolated inside each SSR Pinia instance", () => {
     'export const useRoomsStore = defineStore("rooms", () => {',
   );
   for (const declaration of [
-    "const rooms = ref([]);",
+    "const rooms = ref<RoomRecord[]>([]);",
     "const loading = ref(false);",
-    "const error = ref(null);",
+    "const error = ref<string | null>(null);",
   ]) {
     assert.ok(
       roomsStore.indexOf(declaration) > storeStart,

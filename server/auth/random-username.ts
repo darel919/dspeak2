@@ -73,8 +73,8 @@ const nouns = [
   "wolf",
 ];
 
-function randomItem(values) {
-  return values[randomInt(values.length)];
+function randomItem(values: string[]): string {
+  return values[randomInt(values.length)] || "user";
 }
 
 export function generateRandomUsername() {

@@ -1,4 +1,5 @@
 import { createHybridMediaSessionLifecycle } from "./hybrid-media-session-lifecycle.ts";
+import type { RuntimeDependencyContext } from "./types/hybrid-media-session-lifecycle.ts";
 
 export function createHybridMediaSessionRuntime({
   authStore,
@@ -57,6 +58,7 @@ export function createHybridMediaSessionRuntime({
   mediaPathMetrics,
   peerConnectionMetrics,
   peerRoundTripTimes,
+  sfuRoundTripTime,
   receiveAttenuation,
   resetLifecycle,
   resolveTopologyWaiter,
@@ -66,7 +68,7 @@ export function createHybridMediaSessionRuntime({
   setTopologyWaiter,
   setupMessageHandlers,
   queueCloudflarePublication,
-}) {
+}: RuntimeDependencyContext) {
   return createHybridMediaSessionLifecycle({
     authStore,
     buildMediaControlSocketUrl,
@@ -126,6 +128,7 @@ export function createHybridMediaSessionRuntime({
       mediaPathMetrics,
       peerConnectionMetrics,
       peerRoundTripTimes,
+      sfuRoundTripTime,
       receiveAttenuation,
       resetLifecycle,
       resolveTopologyWaiter,

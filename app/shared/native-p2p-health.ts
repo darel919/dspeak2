@@ -11,13 +11,23 @@ import {
   requiresP2pLiveness,
   selectedPairSnapshot,
 } from "./native-p2p-common.ts";
+import type {
+  NativeP2pConnectionState,
+  NativeP2pHealthMesh,
+} from "./types/native-p2p.ts";
 
-export function bindHealthChannel(mesh, state, channel) {
+export function bindHealthChannel(
+  mesh: NativeP2pHealthMesh,
+  state: NativeP2pConnectionState,
+  channel: RTCDataChannel,
+) {
   state.channel = channel;
   channel.onmessage = (event) => {
-    let message = null;
+    let message: Record<string, unknown>;
     try {
-      message = JSON.parse(event.data);
+      const parsed: unknown = JSON.parse(event.data);
+      if (!parsed || typeof parsed !== "object") return;
+      message = parsed as Record<string, unknown>;
     } catch (_) {
       return;
     }
@@ -48,7 +58,10 @@ export function bindHealthChannel(mesh, state, channel) {
   };
 }
 
-export function handleConnectionState(mesh, state) {
+export function handleConnectionState(
+  mesh: NativeP2pHealthMesh,
+  state: NativeP2pConnectionState,
+) {
   const connectionState = state.pc.connectionState;
   if (connectionState === "failed") mesh.fail("peer-connection-failed");
   if (
@@ -59,9 +72,12 @@ export function handleConnectionState(mesh, state) {
   mesh.emitSnapshot();
 }
 
-export function handleIceState(mesh, state) {
+export function handleIceState(
+  mesh: NativeP2pHealthMesh,
+  state: NativeP2pConnectionState,
+) {
   if (state.pc.iceConnectionState === "disconnected") {
-    clearTimeout(state.disconnectTimer);
+    if (state.disconnectTimer) clearTimeout(state.disconnectTimer);
     state.disconnectTimer = setTimeout(() => {
       if (state.pc.iceConnectionState !== "disconnected") return;
       if (!state.restarted) {
@@ -84,7 +100,7 @@ export function handleIceState(mesh, state) {
       mesh.fail("ice-disconnected");
     }, P2P_DISCONNECT_GRACE_MS);
   } else {
-    clearTimeout(state.disconnectTimer);
+    if (state.disconnectTimer) clearTimeout(state.disconnectTimer);
     state.disconnectTimer = null;
     if (
       state.pc.iceConnectionState === "connected" ||
@@ -96,15 +112,15 @@ export function handleIceState(mesh, state) {
   mesh.emitSnapshot();
 }
 
-export function startQualificationTimeout(mesh) {
-  clearTimeout(mesh.qualificationTimeout);
+export function startQualificationTimeout(mesh: NativeP2pHealthMesh) {
+  if (mesh.qualificationTimeout) clearTimeout(mesh.qualificationTimeout);
   mesh.qualificationTimeout = setTimeout(() => {
     if (!mesh.readyReported && mesh.mode === "probing")
       mesh.fail("qualification-timeout");
   }, P2P_QUALIFICATION_TIMEOUT_MS);
 }
 
-export function startHealthChecks(mesh) {
+export function startHealthChecks(mesh: NativeP2pHealthMesh) {
   stopHealthChecks(mesh);
   const runToken = mesh.healthRunToken;
   let sequence = 0;
@@ -242,7 +258,7 @@ export function startHealthChecks(mesh) {
     }
   };
   const execute = () =>
-    run().catch((error) => mesh.fail("health-check-failed", error));
+    run().catch((error: unknown) => mesh.fail("health-check-failed", error));
   execute();
   mesh.healthInterval = setInterval(
     execute,
@@ -250,16 +266,16 @@ export function startHealthChecks(mesh) {
   );
 }
 
-export function stopHealthChecks(mesh) {
+export function stopHealthChecks(mesh: NativeP2pHealthMesh) {
   mesh.healthRunToken += 1;
   mesh.healthCheckRunning = false;
   if (mesh.healthInterval) clearInterval(mesh.healthInterval);
   mesh.healthInterval = null;
-  clearTimeout(mesh.qualificationTimeout);
+  if (mesh.qualificationTimeout) clearTimeout(mesh.qualificationTimeout);
   mesh.qualificationTimeout = null;
 }
 
-export function checkQualification(mesh) {
+export function checkQualification(mesh: NativeP2pHealthMesh) {
   if (
     mesh.mode !== "probing" ||
     mesh.readyReported ||
@@ -276,7 +292,7 @@ export function checkQualification(mesh) {
   );
   if (qualified.length !== mesh.connections.size) return;
   mesh.readyReported = true;
-  clearTimeout(mesh.qualificationTimeout);
+  if (mesh.qualificationTimeout) clearTimeout(mesh.qualificationTimeout);
   if (
     !mesh.sendControl({
       type: "ready",
@@ -284,16 +300,40 @@ export function checkQualification(mesh) {
       qualifiedPeerIds: qualified.map((state) => state.peerId),
       candidateReports: qualified.map((state) => ({
         peerId: state.peerId,
-        localCandidateType: state.selectedPair?.local?.candidateType || null,
-        remoteCandidateType: state.selectedPair?.remote?.candidateType || null,
+        localCandidateType:
+          state.selectedPair?.local &&
+          typeof state.selectedPair.local === "object"
+            ? String(
+                (state.selectedPair.local as Record<string, unknown>)
+                  .candidateType || "",
+              ) || null
+            : null,
+        remoteCandidateType:
+          state.selectedPair?.remote &&
+          typeof state.selectedPair.remote === "object"
+            ? String(
+                (state.selectedPair.remote as Record<string, unknown>)
+                  .candidateType || "",
+              ) || null
+            : null,
         rttMs:
           state.selectedPair?.currentRoundTripTime == null
             ? null
-            : state.selectedPair.currentRoundTripTime * 1000,
+            : Number(state.selectedPair.currentRoundTripTime) * 1000,
         protocol:
-          state.selectedPair?.local?.protocol ||
-          state.selectedPair?.remote?.protocol ||
-          null,
+          state.selectedPair?.local &&
+          typeof state.selectedPair.local === "object"
+            ? String(
+                (state.selectedPair.local as Record<string, unknown>)
+                  .protocol || "",
+              ) || null
+            : state.selectedPair?.remote &&
+                typeof state.selectedPair.remote === "object"
+              ? String(
+                  (state.selectedPair.remote as Record<string, unknown>)
+                    .protocol || "",
+                ) || null
+              : null,
       })),
     })
   )

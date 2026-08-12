@@ -1,14 +1,19 @@
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
 import { buildVideoProduceOptions } from "../video-settings.ts";
 import { applyRtpSenderSettings } from "../rtp-sender-settings.ts";
+import type {
+  CloudflarePublication,
+  CloudflareSessionLike,
+  CloudflareSourceEntry,
+  CloudflareSourceInput,
+} from "../types/cloudflare-media.ts";
 
 import {
   MAX_TRACKS_PER_REQUEST,
   getLocalSessionDescription,
 } from "./helpers.ts";
 export class CloudflareSourcesMethods {
-  [key: string]: any;
-  async addSource(entry) {
+  async addSource(this: CloudflareSessionLike, entry: CloudflareSourceInput) {
     if (!entry?.source)
       throw new Error("A media source identifier is required");
     const source = String(entry.source);
@@ -18,7 +23,11 @@ export class CloudflareSourcesMethods {
     });
   }
 
-  enqueueSourceOperation(source, operation) {
+  enqueueSourceOperation(
+    this: CloudflareSessionLike,
+    source: string,
+    operation: () => Promise<unknown>,
+  ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
     const tracked = task.finally(() => {
@@ -30,7 +39,10 @@ export class CloudflareSourcesMethods {
     return tracked;
   }
 
-  async addSourceInternal(entry) {
+  async addSourceInternal(
+    this: CloudflareSessionLike,
+    entry: CloudflareSourceInput,
+  ) {
     const { generation, peerConnection } = this.currentSession();
     if (!this.sourceTransmission.has(entry.source))
       this.sourceTransmission.set(entry.source, entry.track?.enabled !== false);
@@ -47,7 +59,7 @@ export class CloudflareSourcesMethods {
         await this.configureVideoSender(current.sender, entry);
         await this.setSourceTransmission(
           entry.source,
-          this.sourceTransmission.get(entry.source),
+          this.sourceTransmission.get(entry.source) ?? true,
         );
       } catch (error) {
         try {
@@ -58,7 +70,7 @@ export class CloudflareSourcesMethods {
       }
       return;
     }
-    let sender = null;
+    let sender: RTCRtpSender | null = null;
     try {
       const stream = entry.stream || new MediaStream([entry.track]);
       sender = peerConnection.addTrack(entry.track, stream);
@@ -76,21 +88,21 @@ export class CloudflareSourcesMethods {
           ? parameters.encodings
           : [];
         if (!encodings[0] || typeof encodings[0] !== "object")
-          encodings[0] = {} as any;
+          encodings[0] = {};
         parameters.encodings = encodings;
         encodings[0].maxBitrate = entry.audioBitrate || policy.maxBitrateBps;
-        encodings[0].priority = policy.priority;
-        encodings[0].networkPriority = policy.priority;
+        encodings[0].priority = policy.priority as RTCPriorityType;
+        encodings[0].networkPriority = policy.priority as RTCPriorityType;
         try {
           await sender.setParameters(parameters);
         } catch {}
       }
-      if (entry.track.kind === "video")
+      if (entry.track.kind === "video" && sender)
         await this.configureVideoSender(sender, entry);
       this.assertCurrentSession(peerConnection, generation);
       const transceiver = peerConnection
         .getTransceivers()
-        .find((candidate) => candidate.sender === sender);
+        .find((candidate: RTCRtpTransceiver) => candidate.sender === sender);
       const trackName = crypto.randomUUID();
       const offer = await peerConnection.createOffer();
       this.assertCurrentSession(peerConnection, generation);
@@ -119,7 +131,7 @@ export class CloudflareSourcesMethods {
       });
       await this.setSourceTransmission(
         entry.source,
-        this.sourceTransmission.get(entry.source),
+        this.sourceTransmission.get(entry.source) ?? true,
       );
       if (
         !this.send({
@@ -142,11 +154,15 @@ export class CloudflareSourcesMethods {
     }
   }
 
-  subscribe(publication, generation = this.sessionGeneration) {
+  subscribe(
+    this: CloudflareSessionLike,
+    publication: CloudflarePublication,
+    generation = this.sessionGeneration,
+  ) {
     return this.subscribePublications([publication], generation);
   }
 
-  async startSubscriptions() {
+  async startSubscriptions(this: CloudflareSessionLike) {
     await this.initialize();
     this.subscriptionsStarted = true;
     const publications = [...this.publications.values()];
@@ -161,7 +177,11 @@ export class CloudflareSourcesMethods {
       );
   }
 
-  subscribePublications(publications, generation = this.sessionGeneration) {
+  subscribePublications(
+    this: CloudflareSessionLike,
+    publications: CloudflarePublication[],
+    generation = this.sessionGeneration,
+  ) {
     const eligible = publications.filter((publication) => {
       const trackName = publication?.trackName;
       return (
@@ -179,23 +199,36 @@ export class CloudflareSourcesMethods {
       this.subscribePublicationBatch(eligible, generation),
     );
     const tracked = task.finally(() => {
-      for (const publication of eligible)
-        if (this.subscriptionTasks.get(publication.trackName) === tracked)
-          this.subscriptionTasks.delete(publication.trackName);
+      for (const publication of eligible) {
+        const trackName = publication.trackName;
+        if (trackName && this.subscriptionTasks.get(trackName) === tracked)
+          this.subscriptionTasks.delete(trackName);
+      }
     });
-    for (const publication of eligible)
-      this.subscriptionTasks.set(publication.trackName, tracked);
+    for (const publication of eligible) {
+      const trackName = publication.trackName;
+      if (trackName) this.subscriptionTasks.set(trackName, tracked);
+    }
     tracked.catch(() => {});
     return tracked;
   }
 
-  async subscribePublication(publication, generation) {
+  async subscribePublication(
+    this: CloudflareSessionLike,
+    publication: CloudflarePublication,
+    generation: number,
+  ) {
     return this.subscribePublicationBatch([publication], generation);
   }
 
-  async subscribePublicationBatch(publications, generation) {
+  async subscribePublicationBatch(
+    this: CloudflareSessionLike,
+    publications: CloudflarePublication[],
+    generation: number,
+  ) {
     const active = publications.filter(
       (publication) =>
+        publication.trackName != null &&
         this.publications.get(publication.trackName) === publication,
     );
     if (!active.length) return false;
@@ -215,7 +248,10 @@ export class CloudflareSourcesMethods {
     });
     this.assertCurrentSession(peerConnection, generation);
     for (const publication of active) {
-      if (this.publications.get(publication.trackName) !== publication)
+      if (
+        !publication.trackName ||
+        this.publications.get(publication.trackName) !== publication
+      )
         continue;
       const track = result.tracks?.find(
         (candidate) => candidate.trackName === publication.trackName,
@@ -249,14 +285,14 @@ export class CloudflareSourcesMethods {
     return true;
   }
 
-  async removeSource(source) {
+  async removeSource(this: CloudflareSessionLike, source: string) {
     const key = String(source || "");
     return this.enqueueSourceOperation(key, () =>
       this.enqueueNegotiation(() => this.removeSourceInternal(key)),
     );
   }
 
-  async removeSourceInternal(source) {
+  async removeSourceInternal(this: CloudflareSessionLike, source: string) {
     const current = this.producers.get(source);
     if (!current) return;
     const { generation, peerConnection } = this.currentSession();
@@ -300,13 +336,22 @@ export class CloudflareSourcesMethods {
     }
   }
 
-  shouldReceive(userId, source, ownerSource = null) {
+  shouldReceive(
+    this: CloudflareSessionLike,
+    userId: string | undefined,
+    source: string,
+    ownerSource: string | null = null,
+  ) {
     const key = `${String(userId)}:${String(source)}`;
     if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
     return !(source === "screen-audio" && ownerSource !== "system-audio");
   }
 
-  async setSourceTransmission(source, enabled) {
+  async setSourceTransmission(
+    this: CloudflareSessionLike,
+    source: string,
+    enabled: boolean,
+  ) {
     const key = String(source || "");
     const value = Boolean(enabled);
     this.sourceTransmission.set(key, value);
@@ -326,12 +371,16 @@ export class CloudflareSourcesMethods {
       try {
         await entry.sender.setParameters(parameters);
       } catch (error) {
+        const errorName =
+          error && typeof error === "object" && "name" in error
+            ? String(error.name)
+            : "";
         if (
           [
             "InvalidModificationError",
             "InvalidAccessError",
             "NotSupportedError",
-          ].includes(error?.name)
+          ].includes(errorName)
         )
           return true;
         throw error;
@@ -340,7 +389,11 @@ export class CloudflareSourcesMethods {
     return true;
   }
 
-  async updateAudioBitrate(source, maxBitrate) {
+  async updateAudioBitrate(
+    this: CloudflareSessionLike,
+    source: string,
+    maxBitrate: number,
+  ) {
     const entry = this.producers.get(String(source || ""));
     const bitrate = Number(maxBitrate);
     if (!entry || entry.track?.kind !== "audio") return false;
@@ -352,7 +405,11 @@ export class CloudflareSourcesMethods {
     });
   }
 
-  async updateVideoBitrate(source, maxBitrate) {
+  async updateVideoBitrate(
+    this: CloudflareSessionLike,
+    source: string,
+    maxBitrate: number,
+  ) {
     const entry = this.producers.get(String(source || ""));
     const bitrate = Number(maxBitrate);
     if (!entry || entry.track?.kind !== "video") return false;
@@ -362,7 +419,11 @@ export class CloudflareSourcesMethods {
     });
   }
 
-  configureVideoSender(sender, entry) {
+  configureVideoSender(
+    this: CloudflareSessionLike,
+    sender: RTCRtpSender,
+    entry: CloudflareSourceInput,
+  ) {
     if (entry?.track?.kind !== "video") return Promise.resolve(false);
     const settings = entry.track.getSettings?.() || {};
     const requested = this.getVideoSettings?.(entry.source) || {};
@@ -371,15 +432,29 @@ export class CloudflareSourcesMethods {
       buildVideoProduceOptions({
         width: settings.width,
         height: settings.height,
-        frameRate: settings.frameRate || requested.frameRate,
-        qualityPriority: requested.qualityPriority,
+        frameRate:
+          settings.frameRate ||
+          (typeof requested.frameRate === "number"
+            ? requested.frameRate
+            : undefined),
+        qualityPriority:
+          typeof requested.qualityPriority === "string"
+            ? requested.qualityPriority
+            : undefined,
         screen: entry.source === "screen",
-        maxBitrate: requested.maxBitrate,
+        maxBitrate:
+          typeof requested.maxBitrate === "number"
+            ? requested.maxBitrate
+            : null,
       }),
     );
   }
 
-  async updateSenderParameters(entry, updates) {
+  async updateSenderParameters(
+    this: CloudflareSessionLike,
+    entry: CloudflareSourceEntry,
+    updates: Record<string, unknown>,
+  ) {
     if (!entry?.sender?.getParameters || !entry.sender?.setParameters)
       return false;
     const parameters = entry.sender.getParameters();
@@ -393,14 +468,23 @@ export class CloudflareSourcesMethods {
     return true;
   }
 
-  async setRemoteReceiving(userIdOrKey, sourceOrReceiving, receivingValue) {
+  async setRemoteReceiving(
+    this: CloudflareSessionLike,
+    userIdOrKey: string,
+    sourceOrReceiving: string | boolean,
+    receivingValue?: boolean,
+  ) {
     if (
       typeof sourceOrReceiving === "boolean" &&
       receivingValue === undefined
     ) {
       const entry = this.consumers.get(String(userIdOrKey));
       return entry
-        ? this.setRemoteReceiving(entry.userId, entry.source, sourceOrReceiving)
+        ? this.setRemoteReceiving(
+            String(entry.userId || ""),
+            String(entry.source || ""),
+            sourceOrReceiving,
+          )
         : false;
     }
     const userId = String(userIdOrKey);

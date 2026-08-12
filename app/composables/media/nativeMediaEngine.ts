@@ -52,9 +52,28 @@ import {
   startSystemAudioProduction,
   stopSystemAudioProduction,
 } from "./native-media-engine-system-audio.ts";
+import type {
+  NativeCaptureRequest,
+  NativeErrorLike,
+  NativeMediaEngineOptions,
+  NativeMediaFlags,
+  NativeTopology,
+} from "../../shared/types/native-media.ts";
+import type {
+  JoinSessionInput,
+  MediaDeviceInfo,
+  MediaEngineCapabilities,
+  MediaEngineState,
+  MediaSignalMessage,
+  MediaStats,
+} from "../../shared/media/types.ts";
+import type { NativeMediaEngineState } from "../../shared/types/native-media-engine.ts";
+import type { VideoSettings } from "../../shared/types/video-settings.ts";
+
+export interface NativeMediaEngine extends NativeMediaEngineState {}
 
 export function createNativeSessionBoundary() {
-  const unavailable = (operation) => {
+  const unavailable = (operation: string): never => {
     throw nativeOnlyError(`native session ${operation}`);
   };
   return {
@@ -101,42 +120,41 @@ export function createNativeSessionBoundary() {
   };
 }
 export class NativeMediaEngine extends MediaEngine {
-  [key: string]: any;
-  constructor(
-    {
-      browserEngine,
-      flags = {} as any,
-      tauri,
-      nativeConfig = {} as any,
-      nativeOnly = false,
-      voiceStore = null,
-      settingsStore = null,
-      channelsStore = null,
-      getAudioBitrate,
-      getAudioStereo,
-      getVideoSettings,
-      onQoe,
-    } = {} as any,
-  ) {
+  constructor({
+    browserEngine,
+    flags = {},
+    tauri,
+    nativeConfig = {},
+    nativeOnly = false,
+    voiceStore,
+    settingsStore,
+    channelsStore,
+    getAudioBitrate,
+    getAudioStereo,
+    getVideoSettings,
+    onQoe,
+  }: NativeMediaEngineOptions = {}) {
     super();
     if (!browserEngine && !nativeOnly) {
       throw new TypeError(
         "NativeMediaEngine requires a browser engine fallback",
       );
     }
-    this.browserEngine = browserEngine || createNativeSessionBoundary();
+    this.browserEngine =
+      browserEngine ||
+      (createNativeSessionBoundary() as unknown as NativeMediaEngineState["browserEngine"]);
     this.flags = { ...DEFAULT_FLAGS, ...flags };
-    this.tauri = tauri;
+    this.tauri = tauri || null;
     this.nativeConfig = nativeConfig;
     this.nativeOnly = nativeOnly;
-    this.voiceStore = voiceStore;
-    this.settingsStore = settingsStore;
-    this.channelsStore = channelsStore;
+    this.voiceStore = voiceStore || null;
+    this.settingsStore = settingsStore || null;
+    this.channelsStore = channelsStore || null;
     this.getAudioBitrate =
       getAudioBitrate ||
-      ((source) => {
+      ((source: string) => {
         const channel = this.channelsStore?.getChannelById?.(
-          this.voiceStore?.currentChannelId,
+          this.voiceStore?.currentChannelId || null,
         );
         return getAudioBitrateBps(
           source,
@@ -148,20 +166,31 @@ export class NativeMediaEngine extends MediaEngine {
       });
     this.getAudioStereo =
       getAudioStereo ||
-      ((source) =>
+      ((source: string) =>
         source === "screen-audio" ||
         channelMediaPolicy(this.channelsStore, this.voiceStore)?.hdAudio ===
           true);
     this.getVideoSettings =
       getVideoSettings ||
-      ((source) =>
+      ((source: string) =>
         resolveRequestedVideoSettings({
           policy: channelMediaPolicy(this.channelsStore, this.voiceStore),
-          settings: this.settingsStore || {},
+          settings: {
+            screenVideo: this.settingsStore?.screenVideo || {
+              resolution: "original",
+              frameRate: 30,
+              qualityPriority: "framerate",
+            },
+            cameraVideo: this.settingsStore?.cameraVideo || {
+              resolution: "original",
+              frameRate: 30,
+              qualityPriority: "framerate",
+            },
+          },
           source,
         }));
     this.listeners = new Map();
-    this.unlisten = [] as any;
+    this.unlisten = [];
     this.initialized = false;
     this.activeScreenCapture = null;
     this.activeSystemAudioCapture = null;
@@ -183,67 +212,69 @@ export class NativeMediaEngine extends MediaEngine {
     this.nativeAuthToken = "";
   }
 
-  async initialize(config = {} as any) {
-    return initialize(this, config);
+  override async initialize(config: NativeCaptureRequest = {}): Promise<void> {
+    await initialize(this, config);
   }
 
-  async setMicrophoneDevice(deviceId) {
+  async setMicrophoneDevice(deviceId: string) {
     return setMicrophoneDevice(this, deviceId);
   }
 
-  async setOutputDevice(deviceId) {
+  async setOutputDevice(deviceId: string) {
     return setOutputDevice(this, deviceId);
   }
 
-  async joinSession(input) {
-    return joinSession(this, input);
+  override async joinSession(input: JoinSessionInput): Promise<void> {
+    await joinSession(this, input);
   }
 
-  async leaveSession() {
-    return leaveSession(this);
+  override async leaveSession(): Promise<void> {
+    await leaveSession(this);
   }
 
-  _usesNativeCapture(capability) {
+  _usesNativeCapture(capability: string) {
     return hasNativeCapability(this.flags) && this.flags[capability] === true;
   }
 
-  setMicrophoneEnabled(enabled) {
+  override async setMicrophoneEnabled(enabled: boolean): Promise<void> {
+    await setMicrophoneEnabled(this, enabled);
+  }
+
+  async _setMicrophoneEnabled(enabled: boolean) {
     return setMicrophoneEnabled(this, enabled);
   }
 
-  async _setMicrophoneEnabled(enabled) {
-    return setMicrophoneEnabled(this, enabled);
+  override async setCameraEnabled(enabled: boolean): Promise<void> {
+    await setCameraEnabled(this, enabled);
   }
 
-  async setCameraEnabled(enabled) {
-    return setCameraEnabled(this, enabled);
+  override async startScreenShare(
+    options: NativeCaptureRequest = {},
+  ): Promise<void> {
+    await startScreenShare(this, options);
   }
 
-  async startScreenShare(options = {} as any) {
-    return startScreenShare(this, options);
+  override async stopScreenShare(): Promise<void> {
+    await stopScreenShare(this);
   }
 
-  async stopScreenShare() {
-    return stopScreenShare(this);
+  override async handleSignal(message: MediaSignalMessage): Promise<void> {
+    await handleSignal(this, message);
   }
 
-  async handleSignal(message) {
-    return handleSignal(this, message);
-  }
-
-  async getDevices() {
+  override async getDevices(): Promise<MediaDeviceInfo[]> {
     return getDevices(this);
   }
 
-  async getCaptureSources() {
+  async getCaptureSources(): Promise<unknown[]> {
     return getCaptureSources(this);
   }
 
-  async getStats() {
+  override async getStats(): Promise<MediaStats> {
     return getStats(this);
   }
 
-  _emitQoe(stats) {
+  _emitQoe(stats: MediaStats) {
     return emitQoe(this, stats);
   }
 
@@ -255,11 +286,13 @@ export class NativeMediaEngine extends MediaEngine {
     return getNativeCapabilities(this);
   }
 
-  on(event, callback) {
-    const callbacks = this.listeners.get(event) || new Set();
+  override on(event: string, callback: (...args: unknown[]) => void) {
+    const callbacks =
+      this.listeners.get(event) || new Set<(...args: unknown[]) => void>();
     callbacks.add(callback);
     this.listeners.set(event, callbacks);
-    const unsubscribeBrowser = this.browserEngine.on(event, callback);
+    const unsubscribeBrowser =
+      this.browserEngine.on?.(event, callback) || (() => {});
     return () => {
       callbacks.delete(callback);
       if (callbacks.size === 0) this.listeners.delete(event);
@@ -267,7 +300,7 @@ export class NativeMediaEngine extends MediaEngine {
     };
   }
 
-  _emit(event, payload) {
+  _emit(event: string, payload: unknown) {
     for (const callback of this.listeners.get(event) || []) {
       try {
         callback(payload);
@@ -275,31 +308,31 @@ export class NativeMediaEngine extends MediaEngine {
     }
   }
 
-  getCapabilities(): any {
+  override getCapabilities(): MediaEngineCapabilities {
     return getCapabilities(this);
   }
 
-  async _handleNativeTopology(topology = {} as any) {
+  async _handleNativeTopology(topology: NativeTopology = {}) {
     return handleNativeTopology(this, topology);
   }
 
-  _handleNativeCaptureError(payload) {
+  _handleNativeCaptureError(payload: NativeCaptureRequest) {
     return handleNativeCaptureError(this, payload);
   }
 
-  _reportNativeP2pFailure(error) {
+  _reportNativeP2pFailure(error: unknown) {
     return reportNativeP2pFailure(this, error);
   }
 
-  async setTopology(topology) {
+  async setTopology(topology: NativeTopology) {
     return setTopology(this, topology);
   }
 
-  async setIceServers(iceServers) {
+  async setIceServers(iceServers: unknown[]) {
     return setIceServers(this, iceServers);
   }
 
-  async shutdown() {
+  override async shutdown() {
     return shutdown(this);
   }
 
@@ -312,8 +345,11 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get error() {
-    const session = this.nativeSession || this.browserEngine;
-    return session.errorMessage ?? session.error ?? null;
+    if (this.nativeSession)
+      return (
+        this.nativeSession.errorMessage ?? this.nativeSession.error ?? null
+      );
+    return String(this.browserEngine.error?.value || "") || null;
   }
 
   get transportReady() {
@@ -446,11 +482,17 @@ export class NativeMediaEngine extends MediaEngine {
       .lastReceivedConsumerParams;
   }
 
-  async connect(...args) {
+  async connect(...args: unknown[]) {
     let phase = "initialize";
     try {
       await this.initialize();
-      const input = { channelId: args[0], roomId: args[1]?.roomId };
+      const input = {
+        channelId: String(args[0] || ""),
+        roomId:
+          args[1] && typeof args[1] === "object"
+            ? String((args[1] as Record<string, unknown>).roomId || "")
+            : "",
+      };
       if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
         await this._configureNativeIceServers();
         await this._configureNativeControl(input.channelId, input.roomId);
@@ -465,12 +507,12 @@ export class NativeMediaEngine extends MediaEngine {
       try {
         this.flags.nativeBackendReady = false;
       } catch (_) {}
-      const message = error?.message || String(error);
+      const errorLike = error as NativeErrorLike;
+      const message = errorLike.message || String(error);
       const wrapped = new Error(
         `Native voice connect failed during ${phase}: ${message}`,
       );
-      wrapped.code = error?.code;
-      wrapped.cause = error;
+      Object.assign(wrapped, { code: errorLike.code, cause: error });
       this._emit("error", {
         source: "native",
         operation: "join",
@@ -480,22 +522,22 @@ export class NativeMediaEngine extends MediaEngine {
     }
   }
 
-  disconnect(...args) {
-    if (this.nativeOnly) return (this.leaveSession as any)(...args);
-    return (this.browserEngine.disconnect as any)(...args);
+  disconnect() {
+    if (this.nativeOnly) return this.leaveSession();
+    return this.browserEngine.disconnect();
   }
 
-  prepareAudioPlayback(...args) {
+  prepareAudioPlayback() {
     if (this.nativeOnly) return Promise.resolve();
-    return (this.browserEngine.prepareAudioPlayback as any)(...args);
+    return this.browserEngine.prepareAudioPlayback();
   }
 
-  restartAudioProduction(...args) {
+  restartAudioProduction(...args: unknown[]) {
     if (this.nativeOnly) return this.startAudioProduction(...args);
     return this.browserEngine.restartAudioProduction(...args);
   }
 
-  startAudioProduction(...args) {
+  startAudioProduction(...args: unknown[]) {
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return this.setMicrophoneEnabled(true);
     }
@@ -503,7 +545,7 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.startAudioProduction(...args);
   }
 
-  stopAudioProduction(...args) {
+  stopAudioProduction(...args: unknown[]) {
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return this.setMicrophoneEnabled(false);
     }
@@ -511,10 +553,12 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.stopAudioProduction(...args);
   }
 
-  startVideoProduction(...args) {
+  startVideoProduction(...args: unknown[]) {
     const [source] = args;
     if (source === "screen" && this._usesNativeCapture("nativeScreenShare")) {
-      return this.startScreenShare(args[1] || {});
+      return this.startScreenShare(
+        (args[1] as NativeCaptureRequest | undefined) || {},
+      );
     }
     if (source === "camera" && this._usesNativeCapture("nativeCamera")) {
       return this.setCameraEnabled(true);
@@ -523,7 +567,7 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.startVideoProduction(...args);
   }
 
-  stopVideoProduction(...args) {
+  stopVideoProduction(...args: unknown[]) {
     const [source] = args;
     if (source === "screen" && this._usesNativeCapture("nativeScreenShare")) {
       return this.stopScreenShare();
@@ -536,31 +580,57 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.stopVideoProduction(...args);
   }
 
-  startSystemAudioProduction(...args) {
+  startSystemAudioProduction(...args: unknown[]) {
     return startSystemAudioProduction(this, args);
   }
 
-  stopSystemAudioProduction(...args) {
-    return stopSystemAudioProduction(this, args);
+  async stopSystemAudioProduction(...args: unknown[]): Promise<void> {
+    await stopSystemAudioProduction(this, args);
   }
 
-  setRemoteScreenReceiving(...args) {
+  setRemoteScreenReceiving(...args: unknown[]) {
+    const [userIdOrKey, sourceOrReceiving, receivingValue] = args;
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setRemoteReceiving(...args)
-        : this.nativeSession?.setRemoteReceiving(...args);
+        ? this.nativeP2pSession?.setRemoteReceiving(
+            String(userIdOrKey || ""),
+            typeof sourceOrReceiving === "boolean"
+              ? sourceOrReceiving
+              : String(sourceOrReceiving || ""),
+            typeof receivingValue === "boolean" ? receivingValue : undefined,
+          )
+        : this.nativeSession?.setRemoteReceiving(
+            String(userIdOrKey || ""),
+            typeof sourceOrReceiving === "boolean"
+              ? sourceOrReceiving
+              : String(sourceOrReceiving || ""),
+            typeof receivingValue === "boolean" ? receivingValue : undefined,
+          );
     return this.browserEngine.setRemoteScreenReceiving(...args);
   }
 
-  setRemoteSystemAudioReceiving(...args) {
+  setRemoteSystemAudioReceiving(...args: unknown[]) {
+    const [userIdOrKey, sourceOrReceiving, receivingValue] = args;
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setRemoteReceiving(...args)
-        : this.nativeSession?.setRemoteReceiving(...args);
+        ? this.nativeP2pSession?.setRemoteReceiving(
+            String(userIdOrKey || ""),
+            typeof sourceOrReceiving === "boolean"
+              ? sourceOrReceiving
+              : String(sourceOrReceiving || ""),
+            typeof receivingValue === "boolean" ? receivingValue : undefined,
+          )
+        : this.nativeSession?.setRemoteReceiving(
+            String(userIdOrKey || ""),
+            typeof sourceOrReceiving === "boolean"
+              ? sourceOrReceiving
+              : String(sourceOrReceiving || ""),
+            typeof receivingValue === "boolean" ? receivingValue : undefined,
+          );
     return this.browserEngine.setRemoteSystemAudioReceiving(...args);
   }
 
-  setSharedAudioVolume(...args) {
+  setSharedAudioVolume(...args: unknown[]) {
     const normalized = Math.max(0, Math.min(100, Number(args[0]))) > 0;
     if (this.nativeOnly) {
       return Promise.allSettled([
@@ -574,7 +644,7 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.setSharedAudioVolume(...args);
   }
 
-  setSystemAudioBitrate(...args) {
+  setSystemAudioBitrate(...args: unknown[]) {
     if (this.nativeOnly) {
       const bitrate = Number(args[0]);
       return Promise.allSettled([
@@ -585,44 +655,68 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.setSystemAudioBitrate(...args);
   }
 
-  sendParticipantVoiceState(...args) {
+  sendParticipantVoiceState(...args: unknown[]) {
     if (
       this.flags.nativeRtc &&
       hasNativeCapability(this.flags) &&
       this.nativeSession?.sendParticipantVoiceState
     ) {
-      return this.nativeSession.sendParticipantVoiceState(...args);
+      const state = args[0];
+      return this.nativeSession.sendParticipantVoiceState(
+        state && typeof state === "object"
+          ? {
+              muted: Boolean((state as Record<string, unknown>).muted),
+              deafened: Boolean((state as Record<string, unknown>).deafened),
+            }
+          : undefined,
+      );
     }
     if (this.nativeOnly) throw nativeOnlyError("participant voice state");
     return this.browserEngine.sendParticipantVoiceState(...args);
   }
 
-  applyOutputDeviceToAll(...args) {
+  applyOutputDeviceToAll(...args: unknown[]) {
     if (this.nativeOnly) throw nativeOnlyError("output device application");
     return this.browserEngine.applyOutputDeviceToAll(...args);
   }
 
-  applyVolumeForUser(...args) {
+  applyVolumeForUser(...args: unknown[]) {
     if (this.nativeOnly) {
       const [userId, volume] = args;
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setConsumerVolume(userId, null, volume)
-        : this.nativeSession?.setConsumerVolume(userId, null, volume);
+        ? this.nativeP2pSession?.setConsumerVolume(
+            String(userId || ""),
+            null,
+            Number(volume),
+          )
+        : this.nativeSession?.setConsumerVolume(
+            String(userId || ""),
+            "",
+            Number(volume),
+          );
     }
     return this.browserEngine.applyVolumeForUser(...args);
   }
 
-  applyVolumeForTrack(...args) {
+  applyVolumeForTrack(...args: unknown[]) {
     if (this.nativeOnly) {
       const [userId, source, volume] = args;
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setConsumerVolume(userId, source, volume)
-        : this.nativeSession?.setConsumerVolume(userId, source, volume);
+        ? this.nativeP2pSession?.setConsumerVolume(
+            String(userId || ""),
+            String(source || ""),
+            Number(volume),
+          )
+        : this.nativeSession?.setConsumerVolume(
+            String(userId || ""),
+            String(source || ""),
+            Number(volume),
+          );
     }
     return this.browserEngine.applyVolumeForTrack(...args);
   }
 
-  ensureAudioElements(...args) {
+  ensureAudioElements(...args: unknown[]) {
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return Promise.resolve();
     }
@@ -630,13 +724,13 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.ensureAudioElements(...args);
   }
 
-  getWebRTCStatsSnapshot(...args) {
+  getWebRTCStatsSnapshot(...args: unknown[]) {
     if (this.nativeOnly)
       return (
         (this.nativeProvider === "p2p"
           ? this.nativeP2pSession?.stats?.()
           : this.nativeSession?.stats?.()
-        )?.then((transports) => ({
+        )?.then((transports: unknown) => ({
           timestamp: Date.now(),
           engine: "native",
           topology: this.nativeProvider === "p2p" ? "p2p" : "sfu",
@@ -646,31 +740,31 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.getWebRTCStatsSnapshot(...args);
   }
 
-  getOutboundRtpStats(...args) {
+  getOutboundRtpStats(...args: unknown[]) {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.getOutboundRtpStats?.(...args) || []
-        : this.nativeSession?.getOutboundRtpStats?.(...args) || [];
+        ? this.nativeP2pSession?.getOutboundRtpStats?.() || []
+        : this.nativeSession?.getOutboundRtpStats?.() || [];
     return this.browserEngine.getOutboundRtpStats(...args);
   }
 
-  getInboundRtpStats(...args) {
+  getInboundRtpStats(...args: unknown[]) {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.getInboundRtpStats?.(...args) || []
-        : this.nativeSession?.getInboundRtpStats?.(...args) || [];
+        ? this.nativeP2pSession?.getInboundRtpStats?.() || []
+        : this.nativeSession?.getInboundRtpStats?.() || [];
     return this.browserEngine.getInboundRtpStats(...args);
   }
 
-  getWebRTCDiagnosticStats(...args) {
+  getWebRTCDiagnosticStats(...args: unknown[]) {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.diagnosticStats?.(...args) || []
-        : this.nativeSession?.diagnosticStats?.(...args) || [];
+        ? this.nativeP2pSession?.diagnosticStats?.() || []
+        : this.nativeSession?.diagnosticStats?.() || [];
     return this.browserEngine.getWebRTCDiagnosticStats(...args);
   }
 
-  areTransportsIceConnected(...args) {
+  areTransportsIceConnected(...args: unknown[]) {
     if (this.nativeOnly)
       return Promise.resolve(
         this.nativeProvider === "p2p"
@@ -680,7 +774,7 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.areTransportsIceConnected(...args);
   }
 
-  setJitterBufferConfig(...args) {
+  setJitterBufferConfig(...args: unknown[]) {
     if (this.nativeOnly) {
       const config = args[0] || {};
       return Promise.allSettled([
@@ -688,39 +782,45 @@ export class NativeMediaEngine extends MediaEngine {
         this.nativeP2pSession?.setJitterBufferConfig?.(config),
       ]);
     }
-    return this.browserEngine.setJitterBufferConfig?.(...args);
+    return this.browserEngine.setJitterBufferConfig?.(
+      args[0] && typeof args[0] === "object"
+        ? (args[0] as Record<string, unknown>)
+        : undefined,
+    );
   }
 
-  getState() {
-    return (this.nativeSession || this.browserEngine).getState();
+  override getState(): MediaEngineState {
+    return this.nativeSession
+      ? (this.nativeSession.getState() as MediaEngineState)
+      : "disconnected";
   }
 
-  isScreenSharing() {
+  override isScreenSharing() {
     return this._hasNativeSource("screen")
       ? true
-      : this.browserEngine.isScreenSharing();
+      : this.browserEngine.isScreenSharing?.() || false;
   }
 
-  isMicrophoneEnabled() {
+  override isMicrophoneEnabled() {
     return this._hasNativeSource("audio")
       ? true
-      : this.browserEngine.isMicrophoneEnabled();
+      : this.browserEngine.isMicrophoneEnabled?.() || false;
   }
 
-  isCameraEnabled() {
+  override isCameraEnabled() {
     return this._hasNativeSource("camera")
       ? true
-      : this.browserEngine.isCameraEnabled();
+      : this.browserEngine.isCameraEnabled?.() || false;
   }
 
-  _hasNativeSource(source) {
+  _hasNativeSource(source: string) {
     return Boolean(
       this.nativeSession?.sources?.has(source) ||
       this.nativeP2pSession?.sources?.has(source),
     );
   }
 
-  async _removeNativeSource(source) {
+  async _removeNativeSource(source: string) {
     let failure = null;
     try {
       await this.nativeSession?.removeSource(source);
@@ -735,11 +835,14 @@ export class NativeMediaEngine extends MediaEngine {
     if (failure) throw failure;
   }
 
-  _mergeNativeCapabilities(capabilities = {} as any) {
+  _mergeNativeCapabilities(capabilities: NativeMediaFlags = this.flags) {
     return mergeNativeCapabilities(this, capabilities);
   }
 
-  async _invoke(command, payload = {} as any) {
+  async _invoke(
+    command: string,
+    payload: NativeCaptureRequest = {},
+  ): Promise<NativeCaptureRequest> {
     return invoke(this, command, payload);
   }
 
@@ -747,11 +850,11 @@ export class NativeMediaEngine extends MediaEngine {
     return configureNativeIceServers(this);
   }
 
-  async _configureNativeControl(channelId, roomId) {
-    return configureNativeControl(this, channelId, roomId);
+  async _configureNativeControl(channelId: string, roomId?: string) {
+    return configureNativeControl(this, channelId, roomId || "");
   }
 
-  async _loadSignalingToken(config) {
+  async _loadSignalingToken(config: NativeCaptureRequest) {
     return loadSignalingToken(this, config);
   }
 

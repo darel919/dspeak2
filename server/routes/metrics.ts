@@ -43,7 +43,6 @@ export default defineEventHandler(async (event) => {
     `dspeak_push_delivery_total{outcome="delivered"} ${push.delivered}`,
     `dspeak_push_delivery_total{outcome="failed"} ${push.failed}`,
     `dspeak_push_delivery_total{outcome="retried"} ${push.retried}`,
-    `dspeak_push_delivery_total{outcome="expired"} ${push.expired}`,
     "",
   ].join("\n");
 });

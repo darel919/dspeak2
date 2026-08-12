@@ -2,19 +2,31 @@ import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { publicDisplayName } from "~~/shared/user-profile.ts";
 import { useAuthStore } from "./auth";
+import type {
+  IdentityApiResult,
+  IdentityProfile,
+  IdentityRequestOptions,
+} from "../shared/types/identity.ts";
 
 export const useIdentityStore = defineStore("identity", () => {
-  const nicknames = ref({});
-  const publicProfiles = ref(new Map());
-  const loadedForUserId = ref(null);
+  const nicknames = ref<Record<string, string>>({});
+  const publicProfiles = ref<Map<string, IdentityProfile>>(new Map());
+  const loadedForUserId = ref<string | null>(null);
   const config = useRuntimeConfig();
   const authStore = useAuthStore();
-  let nicknamesRequest = null;
+  let nicknamesRequest: Promise<void> | null = null;
 
-  function request(path, options = {} as any) {
+  function request(
+    path: string,
+    options: IdentityRequestOptions = {},
+  ): Promise<unknown> {
     const userId = authStore.getUserData()?.id;
     if (!userId) throw new Error("You must be signed in");
-    return $fetch(`${config.public.apiPath}/profile${path}`, {
+    const fetchRequest = $fetch as unknown as (
+      url: string,
+      options: Record<string, unknown>,
+    ) => Promise<unknown>;
+    return fetchRequest(`${config.public.apiPath}/profile${path}`, {
       ...options,
       credentials: "include",
       headers: { ...options.headers },
@@ -34,24 +46,27 @@ export const useIdentityStore = defineStore("identity", () => {
   async function loadIdentity() {
     const userId = authStore.getUserData()?.id;
     if (!userId) {
-      nicknames.value = {} as any;
+      nicknames.value = {};
       loadedForUserId.value = null;
       return;
     }
-    const [profile, result]: any[] = await Promise.all([
+    const [profile, result] = (await Promise.all([
       request(""),
       request("/nicknames"),
-    ]);
+    ])) as [Record<string, unknown>, IdentityApiResult];
     authStore.updateUserData(profile);
     nicknames.value = result.nicknames || {};
     loadedForUserId.value = String(userId);
   }
 
-  async function saveNickname(targetUserId, nickname) {
-    const result: any = await request("/nickname", {
+  async function saveNickname(
+    targetUserId: string | number,
+    nickname: string,
+  ): Promise<string | undefined> {
+    const result = (await request("/nickname", {
       method: "PUT",
       body: { targetUserId, nickname },
-    });
+    })) as IdentityApiResult;
     const next = { ...nicknames.value };
     if (result.nickname) next[String(targetUserId)] = result.nickname;
     else delete next[String(targetUserId)];
@@ -59,11 +74,11 @@ export const useIdentityStore = defineStore("identity", () => {
     return result.nickname;
   }
 
-  function nicknameFor(userId) {
+  function nicknameFor(userId: string | number | null | undefined): string {
     return nicknames.value[String(userId)] || "";
   }
 
-  function upsertPublicProfile(profile) {
+  function upsertPublicProfile(profile: IdentityProfile): void {
     if (!profile?.id) return;
     const userId = String(profile.id);
     const previous = publicProfiles.value.get(userId) || {};
@@ -71,17 +86,19 @@ export const useIdentityStore = defineStore("identity", () => {
     publicProfiles.value = new Map(publicProfiles.value);
   }
 
-  function profileFor(user) {
-    if (!user?.id) return user || {};
+  function profileFor(
+    user: IdentityProfile | null | undefined,
+  ): IdentityProfile {
+    if (!user?.id) return user || { id: "" };
     return { ...user, ...(publicProfiles.value.get(String(user.id)) || {}) };
   }
 
-  function displayName(user) {
+  function displayName(user: IdentityProfile | null | undefined): string {
     return nicknameFor(user?.id) || publicDisplayName(profileFor(user));
   }
 
   function clearIdentity() {
-    nicknames.value = {} as any;
+    nicknames.value = {};
     publicProfiles.value = new Map();
     loadedForUserId.value = null;
   }

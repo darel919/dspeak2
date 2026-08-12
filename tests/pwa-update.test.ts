@@ -7,7 +7,7 @@ const updatePrompt = await readFile(
   "utf8",
 );
 const serviceWorker = await readFile(
-  new URL("../public/sw.js", import.meta.url),
+  new URL("../public/sw.ts", import.meta.url),
   "utf8",
 );
 const nuxtConfig = await readFile(
@@ -139,7 +139,10 @@ test("service worker source and registration consistently use modules", () => {
   assert.match(serviceWorkerRegistration, /"\/dev-sw\.js\?dev-sw"/);
   assert.match(serviceWorkerRegistration, /: "\/sw\.js"/);
   assert.doesNotMatch(serviceWorkerRegistration, /sw\.js\?build=/);
-  assert.match(serviceWorkerRegistration, /let registrationRequest = null/);
+  assert.match(
+    serviceWorkerRegistration,
+    /registrationRequest[\s\S]*null as Promise<ServiceWorkerRegistration \| null> \| null/,
+  );
   assert.match(
     serviceWorkerRegistration,
     /createPolicy\(\s*TRUSTED_TYPES_POLICY_NAME/,

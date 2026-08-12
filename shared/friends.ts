@@ -5,8 +5,16 @@ export const FRIEND_REQUEST_STATUSES = Object.freeze({
   blocked: "blocked",
 });
 
-export function normalizeFriendRequestStatus(value) {
-  return Object.values(FRIEND_REQUEST_STATUSES).includes(value)
-    ? value
-    : FRIEND_REQUEST_STATUSES.pending;
+function isFriendRequestStatus(value: unknown): value is FriendRequestStatus {
+  return (
+    value === FRIEND_REQUEST_STATUSES.pending ||
+    value === FRIEND_REQUEST_STATUSES.accepted ||
+    value === FRIEND_REQUEST_STATUSES.rejected ||
+    value === FRIEND_REQUEST_STATUSES.blocked
+  );
 }
+
+export function normalizeFriendRequestStatus(value: unknown) {
+  return isFriendRequestStatus(value) ? value : FRIEND_REQUEST_STATUSES.pending;
+}
+import type { FriendRequestStatus } from "./types/friends.ts";

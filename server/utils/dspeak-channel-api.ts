@@ -14,8 +14,11 @@ import {
   normalizeSlowMode,
 } from "../../shared/channel-policy.ts";
 import { validateMediaPolicy } from "../../shared/media-policy.ts";
+import type { H3Event } from "h3";
+import type { RoomRole } from "../../shared/types/room.ts";
+import type { ChannelApiDependencies } from "../types/channel-api.ts";
 
-export function createChannelApiHandler(dependencies) {
+export function createChannelApiHandler(dependencies: ChannelApiDependencies) {
   const {
     broadcastToChannel,
     broadcastToRoom,
@@ -37,7 +40,10 @@ export function createChannelApiHandler(dependencies) {
     moderateVoiceParticipant,
   } = dependencies;
 
-  async function roomRolesForUser(roomId, userId) {
+  async function roomRolesForUser(
+    roomId: string,
+    userId: string,
+  ): Promise<RoomRole[]> {
     const rows = await db
       .select({
         id: roomRoles.id,
@@ -59,10 +65,16 @@ export function createChannelApiHandler(dependencies) {
           eq(roomMemberships.userId, userId),
         ),
       );
-    return rows.filter((row) => row.id);
+    return rows
+      .filter((row) => row.id)
+      .map((row) => ({
+        permissions: [],
+        position: row.position || 0,
+        system: Boolean(row.system),
+      }));
   }
 
-  async function handleChannels(event, suffix) {
+  async function handleChannels(event: H3Event, suffix: string) {
     const userId = await requireAuthenticatedUser(event);
     const method = event.method;
     const query = getQuery(event);
@@ -147,7 +159,11 @@ export function createChannelApiHandler(dependencies) {
       const targetRoles = await roomRolesForUser(room.id, targetUserId);
       if (
         !canModerateVoiceMemberOverride(
-          access.roles,
+          access.roles.map((role) => ({
+            permissions: role.permissions,
+            position: role.position,
+            system: Boolean(role.system),
+          })),
           targetRoles,
           access.isOwner,
         )
@@ -238,7 +254,13 @@ export function createChannelApiHandler(dependencies) {
           position,
         })
         .returning();
-      return presentChannel(result[0]);
+      const created = result[0];
+      if (!created)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Channel creation failed",
+        });
+      return presentChannel(created);
     }
 
     if (!suffix && method === "PUT") {
@@ -265,7 +287,7 @@ export function createChannelApiHandler(dependencies) {
       if (!room)
         throw createError({ statusCode: 404, statusMessage: "Room not found" });
       await requireRoomPermission(room, userId, "channel.update");
-      const update: any = { updatedAt: new Date() };
+      const update: Record<string, unknown> = { updatedAt: new Date() };
       if (body.name) update.name = String(body.name).trim();
       if (body.desc !== undefined) update.description = String(body.desc);
       if (body.policy !== undefined)
@@ -282,7 +304,8 @@ export function createChannelApiHandler(dependencies) {
         if (!validation.valid)
           throw createError({
             statusCode: 400,
-            statusMessage: validation.errors.join("; "),
+            statusMessage:
+              validation.errors?.join("; ") || "Invalid media policy",
           });
         update.mediaPolicy = validation.value;
       }
@@ -292,6 +315,11 @@ export function createChannelApiHandler(dependencies) {
         .where(eq(channels.id, channel.id))
         .returning();
       const updated = result[0];
+      if (!updated)
+        throw createError({
+          statusCode: 500,
+          statusMessage: "Channel update failed",
+        });
       const presented = presentChannel(updated);
       broadcastToChannel(channel.id, {
         type: "channel_updated",
@@ -395,7 +423,7 @@ export function createChannelApiHandler(dependencies) {
           );
         }
       }
-      let voiceProfiles = [] as any;
+      let voiceProfiles: unknown[] = [];
       if (inRoom.length) {
         try {
           const profileRows = await db

@@ -1,16 +1,26 @@
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.ts";
 import { closeSocketOnPageHide } from "./socket-lifecycle.ts";
 import { mediaDebug } from "./media-debug.ts";
+import type {
+  MediasoupProviderConnectOptions,
+  MediasoupProviderSocketOptions,
+} from "./types/mediasoup-provider-socket.ts";
 export class MediasoupProviderSocket {
-  [key: string]: any;
-  constructor({ onMessage, onFailure }) {
+  private readonly onMessage: MediasoupProviderSocketOptions["onMessage"];
+  private readonly onFailure: MediasoupProviderSocketOptions["onFailure"];
+  private socket: WebSocket | null = null;
+  private ready: Promise<void> | null = null;
+  constructor({ onMessage, onFailure }: MediasoupProviderSocketOptions) {
     this.onMessage = onMessage;
     this.onFailure = onFailure;
     this.socket = null;
     this.ready = null;
   }
 
-  connect({ signalingUrl, ticket }) {
+  connect({
+    signalingUrl,
+    ticket,
+  }: MediasoupProviderConnectOptions): Promise<void> {
     this.close();
     this.ready = new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(signalingUrl);
@@ -18,19 +28,19 @@ export class MediasoupProviderSocket {
       mediaDebug("mediasoup.socket-created", { signalingUrl });
       let failureReported = false;
       let handshakeSettled = false;
-      let timer;
+      let timer: ReturnType<typeof setTimeout> | null = null;
       closeSocketOnPageHide(socket);
-      const reportFailure = (error) => {
+      const reportFailure = (error: unknown) => {
         if (failureReported) return;
         failureReported = true;
         try {
           Promise.resolve(this.onFailure?.(error)).catch(() => {});
         } catch {}
       };
-      const rejectHandshake = (error) => {
+      const rejectHandshake = (error: unknown) => {
         if (handshakeSettled) return;
         handshakeSettled = true;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         reportFailure(error);
         reject(error);
       };
@@ -60,7 +70,7 @@ export class MediasoupProviderSocket {
         void (async () => {
           let message;
           try {
-            message = JSON.parse(event.data);
+            message = JSON.parse(String(event.data)) as Record<string, unknown>;
           } catch {
             return;
           }
@@ -74,14 +84,14 @@ export class MediasoupProviderSocket {
           }
           if (message.type === "connected") return;
           if (message.type === "error919") {
-            const payload =
+            const payload: Record<string, unknown> =
               message.data && typeof message.data === "object"
-                ? message.data
+                ? (message.data as Record<string, unknown>)
                 : message;
             const error = new Error(
-              payload.message ||
-                payload.error ||
-                message.error ||
+              (typeof payload.message === "string" ? payload.message : null) ||
+                (typeof payload.error === "string" ? payload.error : null) ||
+                (typeof message.error === "string" ? message.error : null) ||
                 "Media provider error",
             );
             mediaDebug("mediasoup.provider-error", { error });
@@ -89,7 +99,13 @@ export class MediasoupProviderSocket {
             if (handled !== true) reportFailure(error);
             return;
           }
-          await this.onMessage?.(message.type, message.data || message);
+          if (typeof message.type === "string")
+            await this.onMessage?.(
+              message.type,
+              message.data && typeof message.data === "object"
+                ? (message.data as Record<string, unknown>)
+                : message,
+            );
         })().catch((error) => {
           reportFailure(error);
           if (this.socket === socket && socket.readyState < WebSocket.CLOSING)
@@ -97,7 +113,7 @@ export class MediasoupProviderSocket {
         });
       });
       socket.addEventListener("close", (event) => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         if (this.socket === socket) this.socket = null;
         mediaDebug("mediasoup.socket-close", {
           code: event.code,
@@ -109,7 +125,7 @@ export class MediasoupProviderSocket {
         else if (!event.wasClean) reportFailure(error);
       });
       socket.addEventListener("error", () => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         const error = new Error("Media provider connection failed");
         mediaDebug("mediasoup.socket-error", { error });
         reportFailure(error);
@@ -122,7 +138,7 @@ export class MediasoupProviderSocket {
     return this.ready;
   }
 
-  send(message) {
+  send(message: unknown) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
     try {
       this.socket.send(JSON.stringify(message));

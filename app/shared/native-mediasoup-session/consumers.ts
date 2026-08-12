@@ -20,21 +20,37 @@ import {
   handleNativeMediasoupTransportRecovery,
   restartNativeMediasoupTransportIce,
 } from "../native-mediasoup-recovery.ts";
+import type { NativeConsumerEntry } from "../types/native-mediasoup.ts";
+import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
+import type { NativeMediasoupSfuSessionSurface } from "../types/native-mediasoup-session.ts";
 export class NativeMediasoupConsumersMethods {
-  [key: string]: any;
-  requestConsumer(producerId) {
-    return requestConsumer(this, producerId);
+  requestConsumer(this: NativeMediasoupSfuSession, producerId: string) {
+    return requestConsumer(
+      this as unknown as NativeMediasoupSfuSession,
+      producerId,
+    );
   }
 
-  producersHasId(producerId) {
-    return producersHasId(this, producerId);
+  producersHasId(this: NativeMediasoupSfuSession, producerId: string) {
+    return producersHasId(
+      this as unknown as NativeMediasoupSfuSession,
+      producerId,
+    );
   }
 
-  async _createConsumer(data) {
-    return createConsumer(this, data);
+  async _createConsumer(
+    this: NativeMediasoupSfuSession,
+    data: Record<string, unknown>,
+  ) {
+    return createConsumer(this as unknown as NativeMediasoupSfuSession, data);
   }
 
-  setRemoteReceiving(userIdOrKey, sourceOrReceiving, receivingValue) {
+  setRemoteReceiving(
+    this: NativeMediasoupSfuSession,
+    userIdOrKey: string,
+    sourceOrReceiving: string | boolean,
+    receivingValue?: boolean,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.setRemoteReceiving(
         userIdOrKey,
@@ -42,34 +58,71 @@ export class NativeMediasoupConsumersMethods {
         receivingValue,
       );
     return setRemoteReceiving(
-      this,
+      this as unknown as NativeMediasoupSfuSession,
       userIdOrKey,
       sourceOrReceiving,
       receivingValue,
     );
   }
 
-  shouldReceive(userId, source, ownerSource = null) {
-    return shouldReceive(this, userId, source, ownerSource);
+  shouldReceive(
+    this: NativeMediasoupSfuSession,
+    userId: string | number | null | undefined,
+    source: string,
+    ownerSource: string | null = null,
+  ) {
+    return shouldReceive(
+      this as unknown as NativeMediasoupSfuSession,
+      userId,
+      source,
+      ownerSource,
+    );
   }
 
-  setConsumerVolume(userId, source, volume) {
+  setConsumerVolume(
+    this: NativeMediasoupSfuSession,
+    userId: string | number,
+    source: string,
+    volume: number,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.setConsumerVolume(userId, source, volume);
-    return setConsumerVolume(this, userId, source, volume);
+    return setConsumerVolume(
+      this as unknown as NativeMediasoupSfuSession,
+      userId,
+      source,
+      volume,
+    );
   }
 
-  sendParticipantVoiceState(state = {} as any) {
+  sendParticipantVoiceState(
+    this: NativeMediasoupSfuSession,
+    state: { muted?: boolean; deafened?: boolean } = {},
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.sendParticipantVoiceState(state);
-    return sendParticipantVoiceState(this, state);
+    return sendParticipantVoiceState(
+      this as unknown as NativeMediasoupSfuSession,
+      state,
+    );
   }
 
-  async setConsumerReceiving(entry, receiving) {
-    return setConsumerReceiving(this, entry, receiving);
+  async setConsumerReceiving(
+    this: NativeMediasoupSfuSession,
+    entry: NativeConsumerEntry,
+    receiving: boolean,
+  ) {
+    return setConsumerReceiving(
+      this as unknown as NativeMediasoupSfuSession,
+      entry,
+      receiving,
+    );
   }
 
-  applyJitterBufferConfig(entry) {
+  applyJitterBufferConfig(
+    this: NativeMediasoupSfuSession,
+    entry: NativeConsumerEntry,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.applyJitterBufferConfig(entry);
     if (!entry?.consumerId || entry.closed) return Promise.resolve(false);
@@ -77,13 +130,19 @@ export class NativeMediasoupConsumersMethods {
       consumerId: entry.consumerId,
       minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay || 0)),
       targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay || 0)),
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       this.onError?.(asError(error, "Native jitter buffer update failed"));
       return false;
     });
   }
 
-  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 } = {} as any) {
+  setJitterBufferConfig(
+    this: NativeMediasoupSfuSession,
+    {
+      minDelayMs = 0,
+      targetDelayMs = 20,
+    }: { minDelayMs?: number; targetDelayMs?: number } = {},
+  ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.setJitterBufferConfig({
         minDelayMs,
@@ -104,55 +163,94 @@ export class NativeMediasoupConsumersMethods {
     );
   }
 
-  _resolveConsumerControl(data, receiving) {
-    return resolveConsumerControl(this, data, receiving);
+  _resolveConsumerControl(
+    this: NativeMediasoupSfuSession,
+    data: Record<string, unknown>,
+    receiving: boolean,
+  ) {
+    return resolveConsumerControl(
+      this as unknown as NativeMediasoupSfuSession,
+      data,
+      receiving,
+    );
   }
 
-  closeConsumerByProducer(producerId) {
-    return closeConsumerByProducer(this, producerId);
+  closeConsumerByProducer(this: NativeMediasoupSfuSession, producerId: string) {
+    return closeConsumerByProducer(
+      this as unknown as NativeMediasoupSfuSession,
+      producerId,
+    );
   }
 
-  closeConsumer(entry, { releaseNative = true } = {} as any) {
-    return closeConsumer(this, entry, { releaseNative });
+  closeConsumer(
+    this: NativeMediasoupSfuSession,
+    entry: NativeConsumerEntry,
+    { releaseNative = true }: { releaseNative?: boolean } = {},
+  ) {
+    return closeConsumer(this as unknown as NativeMediasoupSfuSession, entry, {
+      releaseNative,
+    });
   }
 
-  async handle(type, data = {} as any) {
+  async handle(
+    this: NativeMediasoupSfuSession,
+    type: string,
+    data: Record<string, unknown> = {},
+  ) {
     if (this.closed && type !== "connected") return false;
     const handler = this.messageHandlers.get(type);
     if (!handler) return false;
     try {
       return (await handler(data)) !== false;
-    } catch (error) {
+    } catch (error: unknown) {
       this._fail(error);
       throw error;
     }
   }
 
-  async handleNativeAction(action) {
+  async handleNativeAction(
+    this: NativeMediasoupSfuSession,
+    action: import("../types/native-mediasoup.ts").NativeAction,
+  ) {
     if (this.selectedProvider === "cloudflare-realtime") return false;
-    return handleNativeAction(this, action);
+    return handleNativeAction(
+      this as unknown as NativeMediasoupSfuSession,
+      action,
+    );
   }
 
-  handleReceiveEvent(event) {
-    if (this.cloudflareSession?.handleReceiveEvent(event)) return true;
-    return handleReceiveEvent(this, event);
-  }
-
-  _handleTransportState(data) {
-    const direction = data?.direction;
-    const state = data?.state === "completed" ? "connected" : data?.state;
-    if (!["send", "recv"].includes(direction)) return false;
+  handleReceiveEvent(
+    this: NativeMediasoupSfuSession,
+    event: import("../types/native-mediasoup.ts").NativeReceiveEvent,
+  ) {
     if (
-      ![
-        "new",
-        "connecting",
-        "connected",
-        "disconnected",
-        "failed",
-        "closed",
-      ].includes(state)
+      this.cloudflareSession?.handleReceiveEvent(
+        event as unknown as Record<string, unknown>,
+      )
+    )
+      return true;
+    return handleReceiveEvent(
+      this as unknown as NativeMediasoupSfuSession,
+      event,
+    );
+  }
+
+  _handleTransportState(
+    this: NativeMediasoupSfuSession,
+    data: Record<string, unknown>,
+  ) {
+    const direction = data.direction;
+    if (direction !== "send" && direction !== "recv") return false;
+    const rawState = data.state === "completed" ? "connected" : data.state;
+    if (
+      rawState !== "new" &&
+      rawState !== "connecting" &&
+      rawState !== "connected" &&
+      rawState !== "disconnected" &&
+      rawState !== "failed"
     )
       return false;
+    const state = rawState;
     this.transportStates.set(direction, state);
     this.mediaConnectionState =
       state === "failed"
@@ -167,11 +265,27 @@ export class NativeMediasoupConsumersMethods {
     return true;
   }
 
-  handleTransportRecovery(direction, state) {
-    return handleNativeMediasoupTransportRecovery(this, direction, state);
+  handleTransportRecovery(
+    this: NativeMediasoupSfuSession,
+    direction: "send" | "recv",
+    state: string,
+  ) {
+    return handleNativeMediasoupTransportRecovery(
+      this as unknown as NativeMediasoupSfuSession,
+      direction,
+      state,
+    );
   }
 
-  restartTransportIce(direction) {
-    return restartNativeMediasoupTransportIce(this, direction);
+  restartTransportIce(
+    this: NativeMediasoupSfuSession,
+    direction: "send" | "recv",
+  ) {
+    return restartNativeMediasoupTransportIce(
+      this as unknown as NativeMediasoupSfuSession,
+      direction,
+    );
   }
 }
+
+export interface NativeMediasoupConsumersMethods extends NativeMediasoupSfuSessionSurface {}

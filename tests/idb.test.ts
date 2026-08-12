@@ -21,7 +21,7 @@ import {
   reportIdbHealth,
   resetLocalDatabases,
   savePendingReadIds,
-} from "../app/utils/idb.js";
+} from "../app/utils/idb.ts";
 
 globalThis.indexedDB = fakeIndexedDB;
 
@@ -254,7 +254,7 @@ test("all IndexedDB access is owned by idb.ts", async () => {
   const files = [
     "../app/stores/chat.ts",
     "../app/stores/rooms.ts",
-    "../public/sw.js",
+    "../public/sw.ts",
   ];
   for (const path of files) {
     const source = await readFile(new URL(path, import.meta.url), "utf8");
@@ -262,7 +262,7 @@ test("all IndexedDB access is owned by idb.ts", async () => {
   }
 
   const idbSource = await readFile(
-    new URL("../app/utils/idb.js", import.meta.url),
+    new URL("../app/utils/idb.ts", import.meta.url),
     "utf8",
   );
   assert.match(idbSource, /database\.transaction\(/);

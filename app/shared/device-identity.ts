@@ -1,5 +1,5 @@
 const DEVICE_STORAGE_KEY = "dspeak:device-id";
-let memoryDeviceId = null;
+let memoryDeviceId: string | null = null;
 
 export function getDeviceId() {
   if (!import.meta.client) return "";
@@ -20,7 +20,7 @@ export function getDeviceId() {
   }
 }
 
-export function deviceHeaders(headers = {} as any) {
+export function deviceHeaders(headers: Record<string, string> = {}) {
   return {
     ...headers,
     "X-Device-Id": getDeviceId(),

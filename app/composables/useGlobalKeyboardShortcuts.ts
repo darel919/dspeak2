@@ -1,5 +1,6 @@
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAuthStore } from "../stores/auth";
+import { useVoiceStore } from "../stores/voice";
 
 export function useGlobalKeyboardShortcuts() {
   const { register, setScope } = useKeyboardShortcuts();
@@ -7,8 +8,9 @@ export function useGlobalKeyboardShortcuts() {
   const router = useRouter();
   const route = useRoute();
 
-  let cleanups = [] as any;
-  let voiceStorePromise = null;
+  let cleanups: Array<() => void> = [];
+  type VoiceStore = ReturnType<typeof useVoiceStore>;
+  let voiceStorePromise: Promise<VoiceStore> | null = null;
 
   function loadVoiceStore() {
     voiceStorePromise ||= import("../stores/voice").then(({ useVoiceStore }) =>
@@ -17,11 +19,11 @@ export function useGlobalKeyboardShortcuts() {
     return voiceStorePromise;
   }
 
-  function runVoiceAction(action) {
+  function runVoiceAction(action: (voiceStore: VoiceStore) => unknown) {
     if (!authStore.getUserData()) return;
     void loadVoiceStore()
       .then(action)
-      .catch((error) => console.error("[Keyboard shortcuts]", error));
+      .catch((error: unknown) => console.error("[Keyboard shortcuts]", error));
   }
 
   function init() {
@@ -74,7 +76,7 @@ export function useGlobalKeyboardShortcuts() {
     for (const cleanup of cleanups) {
       cleanup();
     }
-    cleanups = [] as any;
+    cleanups = [];
   }
 
   onScopeDispose(destroy);

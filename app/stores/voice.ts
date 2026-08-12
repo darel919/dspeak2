@@ -19,50 +19,74 @@ import {
   normalizeSharedAudioDucking,
   normalizeSharedAudioStats,
 } from "~~/shared/voice-audio-state.ts";
+import type { OwnedErrorValue } from "~/shared/types/shared-utilities.ts";
+import type {
+  VoiceMediaSessionLike,
+  VoiceSettingsLike,
+  VoiceSoundboardActivityInput,
+  VoiceUserRecord,
+} from "~/shared/types/voice-media-actions.ts";
+import type { VoiceStateUpdate } from "~/shared/types/voice-participant-state.ts";
+import type {
+  SharedAudioAttenuationLike,
+  SharedAudioDuckingLike,
+  SharedAudioStatsLike,
+} from "~~/shared/types/voice.ts";
 
-const EMPTY_MEDIA_FEEDS = new Map();
+const EMPTY_MEDIA_FEEDS = new Map<string, unknown>();
 const MAX_USER_VOLUME_ENTRIES = 200;
 const MAX_TRACK_VOLUME_ENTRIES = 400;
 
 export const useVoiceStore = defineStore("voice", () => {
-  const currentChannelId = ref(null);
-  const currentRoomId = ref(null);
-  const connectedUsers = ref(new Map());
+  const currentChannelId = ref<string | null>(null);
+  const currentRoomId = ref<string | null>(null);
+  const connectedUsers = ref<Map<string, VoiceUserRecord>>(new Map());
   const pageLifecycle = createVoicePageLifecycle({
     getChannelId: () => currentChannelId.value,
     leaveChannel: (channelId) => channelsStore.leaveChannel(channelId),
   });
 
-  const userVolumes = skipHydrate(ref({}));
-  const trackVolumes = skipHydrate(ref({}));
+  const userVolumes = skipHydrate(ref<Record<string, number>>({}));
+  const trackVolumes = skipHydrate(ref<Record<string, number>>({}));
 
-  const userDirectory = ref(new Map());
+  const userDirectory = ref<Map<string, VoiceUserRecord>>(new Map());
   const micMuted = skipHydrate(ref(true));
   const deafened = skipHydrate(ref(false));
   const connecting = ref(false);
   const connected = ref(false);
   const protocolUpdateRequired = ref(false);
-  const error = ref(null);
-  const connectedAt = ref(null);
+  const error = ref<string | null>(null);
+  const connectedAt = ref<number | null>(null);
   const cameraEnabled = ref(false);
   const screenSharing = ref(false);
   const systemAudioSharing = ref(false);
   const broadcastAudioSharing = ref(false);
-  const djSession = ref(null);
-  const p2pQualification = ref(null);
+  const djSession = ref<Record<string, unknown> | null>(null);
+  const p2pQualification = ref<unknown>(null);
   const settingsStore = useSettingsStore();
   const channelsStore = useChannelsStore();
+  function getAuthenticatedVoiceUser(): VoiceUserRecord | null {
+    const profile = useAuthStore().getUserData();
+    if (!profile?.id) return null;
+    return { ...profile, id: String(profile.id) };
+  }
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
   const sharedAudioStats = computed(() =>
-    normalizeSharedAudioStats(unref(sfuComposable.value?.sharedAudioStats)),
+    normalizeSharedAudioStats(
+      unref(sfuComposable.value?.sharedAudioStats) as SharedAudioStatsLike,
+    ),
   );
   const sharedAudioAttenuation = computed(() =>
     normalizeSharedAudioAttenuation(
-      unref(sfuComposable.value?.sharedAudioAttenuation),
+      unref(
+        sfuComposable.value?.sharedAudioAttenuation,
+      ) as SharedAudioAttenuationLike,
     ),
   );
   const sharedAudioDucking = computed(() =>
-    normalizeSharedAudioDucking(unref(sfuComposable.value?.sharedAudioDucking)),
+    normalizeSharedAudioDucking(
+      unref(sfuComposable.value?.sharedAudioDucking) as SharedAudioDuckingLike,
+    ),
   );
   const effectiveSystemAudioBitrate = computed(() => {
     const requested = Number(settingsStore.systemAudioBitrate) || 128;
@@ -75,7 +99,7 @@ export const useVoiceStore = defineStore("voice", () => {
       : requested;
   });
 
-  const sfuComposable = shallowRef(null);
+  const sfuComposable = shallowRef<VoiceMediaSessionLike | null>(null);
   const localVideoFeeds = computed(
     () => unref(sfuComposable.value?.localVideoFeeds) || EMPTY_MEDIA_FEEDS,
   );
@@ -88,15 +112,21 @@ export const useVoiceStore = defineStore("voice", () => {
 
   const joinGenerationState = { value: 0 };
   const cameraToggleGenerationState = { value: 0 };
-  let mediaSessionError = null;
-  let djStatusTimer = null;
-  const soundboardActivityTimers = new Map();
+  let mediaSessionError: OwnedErrorValue = null;
+  let djStatusTimer: ReturnType<typeof setTimeout> | null = null;
+  const soundboardActivityTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
-  function setP2pQualification(value) {
+  function setP2pQualification(value: unknown) {
     p2pQualification.value = value || null;
   }
 
-  function clearSoundboardActivity(userId, expectedActivity = null) {
+  function clearSoundboardActivity(
+    userId: string | number,
+    expectedActivity: Record<string, unknown> | null = null,
+  ) {
     const normalizedUserId = String(userId);
     const user = connectedUsers.value.get(normalizedUserId);
     if (!user?.soundboardActivity) return;
@@ -115,7 +145,10 @@ export const useVoiceStore = defineStore("voice", () => {
     connectedUsers.value = new Map(connectedUsers.value);
   }
 
-  function showSoundboardActivity(userId, activity) {
+  function showSoundboardActivity(
+    userId: string | number,
+    activity: VoiceSoundboardActivityInput,
+  ) {
     const normalizedUserId = String(userId);
     const user = connectedUsers.value.get(normalizedUserId);
     if (!user || !activity?.title) return;
@@ -216,7 +249,7 @@ export const useVoiceStore = defineStore("voice", () => {
         try {
           const bounded = boundedStorageMap(vols, MAX_USER_VOLUME_ENTRIES);
           if (Object.keys(vols).length > MAX_USER_VOLUME_ENTRIES) {
-            userVolumes.value = bounded;
+            userVolumes.value = bounded as Record<string, number>;
           }
           localStorage.setItem("voice.userVolumes", JSON.stringify(bounded));
           reportBrowserStorageMetric("voice.userVolumes", bounded);
@@ -232,7 +265,7 @@ export const useVoiceStore = defineStore("voice", () => {
         try {
           const bounded = boundedStorageMap(vols, MAX_TRACK_VOLUME_ENTRIES);
           if (Object.keys(vols).length > MAX_TRACK_VOLUME_ENTRIES) {
-            trackVolumes.value = bounded;
+            trackVolumes.value = bounded as Record<string, number>;
           }
           localStorage.setItem("voice.trackVolumes", JSON.stringify(bounded));
           reportBrowserStorageMetric("voice.trackVolumes", bounded);
@@ -247,12 +280,14 @@ export const useVoiceStore = defineStore("voice", () => {
   watch(
     () => sfuComposable.value?.error,
     (sessionError) => {
+      const sessionErrorValue = unref(sessionError);
       const reconciled = reconcileOwnedError(
         error.value,
         mediaSessionError,
-        sessionError,
+        typeof sessionErrorValue === "string" ? sessionErrorValue : null,
       );
-      error.value = reconciled.error;
+      error.value =
+        typeof reconciled.error === "string" ? reconciled.error : null;
       mediaSessionError = reconciled.ownedError;
     },
   );
@@ -286,7 +321,7 @@ export const useVoiceStore = defineStore("voice", () => {
   } = createVoiceParticipantState({
     clearSoundboardActivity,
     connectedUsers,
-    getAuthenticatedUser: () => useAuthStore().getUserData(),
+    getAuthenticatedUser: getAuthenticatedVoiceUser,
     getMediaSession: () => sfuComposable.value,
     trackVolumes,
     userDirectory,
@@ -318,7 +353,7 @@ export const useVoiceStore = defineStore("voice", () => {
     djSession,
     effectiveSystemAudioBitrate,
     error,
-    getAuthenticatedUser: () => useAuthStore().getUserData(),
+    getAuthenticatedUser: getAuthenticatedVoiceUser,
     getVoiceStore: () => useVoiceStore(),
     joinChannel: (channelId) =>
       channelsStore.joinChannel(channelId).catch(() => {}),
@@ -330,7 +365,7 @@ export const useVoiceStore = defineStore("voice", () => {
     playFatalError: (joinError) => useFatalClientError().report(joinError),
     protocolUpdateRequired,
     screenSharing,
-    settingsStore,
+    settingsStore: settingsStore as unknown as VoiceSettingsLike,
     soundboardActivityTimers,
     stopBroadcast,
     systemAudioSharing,
@@ -344,20 +379,28 @@ export const useVoiceStore = defineStore("voice", () => {
     djStatusTimer = null;
   }
 
-  async function refreshDjSession(sessionId) {
+  async function refreshDjSession(sessionId: string) {
     if (!djSession.value || djSession.value.id !== sessionId) return;
     try {
-      const next: any = await $fetch("/api/dj/session", {
+      const fetchUnknown = $fetch as unknown as (
+        url: string,
+        options: Record<string, unknown>,
+      ) => Promise<unknown>;
+      const next = (await fetchUnknown("/api/dj/session", {
         query: { sessionId },
-      });
+      })) as { id: string; status: string };
       if (!djSession.value || djSession.value.id !== sessionId) return;
       djSession.value = next;
       broadcastAudioSharing.value = next.status === "live";
       if (!["stopped", "error"].includes(next.status)) {
         djStatusTimer = setTimeout(() => refreshDjSession(sessionId), 1500);
       }
-    } catch (err) {
-      if (err?.statusCode === 404) {
+    } catch (err: unknown) {
+      const statusCode =
+        err && typeof err === "object" && "statusCode" in err
+          ? (err as { statusCode?: number }).statusCode
+          : undefined;
+      if (statusCode === 404) {
         djSession.value = null;
         broadcastAudioSharing.value = false;
         return;
@@ -370,10 +413,14 @@ export const useVoiceStore = defineStore("voice", () => {
     if (!connected.value || !sfuComposable.value)
       throw new Error("Not connected to a voice channel");
     clearDjStatusTimer();
-    const session: any = await $fetch("/api/dj/session", {
+    const fetchUnknown = $fetch as unknown as (
+      url: string,
+      options: Record<string, unknown>,
+    ) => Promise<unknown>;
+    const session = (await fetchUnknown("/api/dj/session", {
       method: "POST",
       body: { channelId: currentChannelId.value },
-    });
+    })) as { id: string; status?: string };
     djSession.value = session;
     broadcastAudioSharing.value = false;
     djStatusTimer = setTimeout(() => refreshDjSession(session.id), 1000);
@@ -397,14 +444,14 @@ export const useVoiceStore = defineStore("voice", () => {
     else await startBroadcast();
   }
 
-  function setSharedAudioVolume(value) {
+  function setSharedAudioVolume(value: number) {
     settingsStore.setSharedAudioVolume(value);
     sfuComposable.value?.setSharedAudioVolume?.(
       settingsStore.sharedAudioVolume,
     );
   }
 
-  async function setSystemAudioBitrate(value) {
+  async function setSystemAudioBitrate(value: number) {
     settingsStore.setSystemAudioBitrate(value);
     await sfuComposable.value?.setSystemAudioBitrate?.(
       settingsStore.systemAudioBitrate,
@@ -413,16 +460,22 @@ export const useVoiceStore = defineStore("voice", () => {
 
   watch(
     () =>
-      channelsStore.getChannelById(currentChannelId.value)?.mediaPolicy
-        ?.sharedAudioKbps,
+      currentChannelId.value
+        ? channelsStore.getChannelById(currentChannelId.value)?.mediaPolicy
+            ?.sharedAudioKbps
+        : undefined,
     () => {
       if (connected.value)
-        sfuComposable.value
-          ?.setSystemAudioBitrate?.(settingsStore.systemAudioBitrate)
-          .catch((cause) => {
-            error.value =
-              cause?.message || "Unable to apply the channel audio bitrate";
-          });
+        Promise.resolve(
+          sfuComposable.value?.setSystemAudioBitrate?.(
+            settingsStore.systemAudioBitrate,
+          ),
+        ).catch((cause: unknown) => {
+          error.value =
+            cause instanceof Error
+              ? cause.message
+              : "Unable to apply the channel audio bitrate";
+        });
     },
   );
 
@@ -434,8 +487,11 @@ export const useVoiceStore = defineStore("voice", () => {
       try {
         await sfuComposable.value.applyOutputDeviceToAll();
         return { ok: true };
-      } catch (cause) {
-        error.value = cause?.message || "Unable to apply the audio output";
+      } catch (cause: unknown) {
+        error.value =
+          cause instanceof Error
+            ? cause.message
+            : "Unable to apply the audio output";
         return { ok: false, error: error.value };
       }
     }
@@ -452,34 +508,45 @@ export const useVoiceStore = defineStore("voice", () => {
       ([rooms]) => {
         try {
           if (!currentRoomId.value) return;
-          const room = Array.isArray(rooms)
-            ? rooms.find((r) => r.id === currentRoomId.value)
-            : null;
+          const room = (Array.isArray(rooms) ? rooms : [])
+            .map((value) =>
+              value && typeof value === "object"
+                ? (value as Record<string, unknown>)
+                : null,
+            )
+            .find((value) => value?.id === currentRoomId.value);
           if (room) {
             if (Array.isArray(room.members)) {
-              room.members.forEach((m) =>
+              room.members.forEach((value) => {
+                if (!value || typeof value !== "object") return;
+                const member = value as Record<string, unknown>;
+                if (member.id == null) return;
+                const id = String(member.id);
                 upsertUserProfile({
-                  id: m.id,
-                  display_name: m.display_name || m.name || m.email || m.id,
-                  username: m.name || m.email || m.id,
-                  name: m.name,
-                  email: m.email,
-                  avatar: m.avatar,
-                }),
-              );
+                  id,
+                  display_name: String(
+                    member.display_name || member.name || member.email || id,
+                  ),
+                  username: String(member.name || member.email || id),
+                  name: member.name,
+                  email: member.email,
+                  avatar: member.avatar,
+                });
+              });
             }
-            if (room.owner && room.owner.id) {
+            if (room.owner && typeof room.owner === "object") {
+              const owner = room.owner as Record<string, unknown>;
+              if (owner.id == null) return;
+              const id = String(owner.id);
               upsertUserProfile({
-                id: room.owner.id,
-                display_name:
-                  room.owner.display_name ||
-                  room.owner.name ||
-                  room.owner.email ||
-                  room.owner.id,
-                username: room.owner.name || room.owner.email || room.owner.id,
-                name: room.owner.name,
-                email: room.owner.email,
-                avatar: room.owner.avatar,
+                id,
+                display_name: String(
+                  owner.display_name || owner.name || owner.email || id,
+                ),
+                username: String(owner.name || owner.email || id),
+                name: owner.name,
+                email: owner.email,
+                avatar: owner.avatar,
               });
             }
           }
@@ -540,7 +607,7 @@ export const useVoiceStore = defineStore("voice", () => {
     clearSoundboardActivity,
     clearUserDirectory,
     getConnectedUsersArray,
-    getAuthenticatedUser: () => useAuthStore().getUserData(),
+    getAuthenticatedUser: getAuthenticatedVoiceUser,
     getDisplayUsersArray,
     isUserConnected,
     getUserById,

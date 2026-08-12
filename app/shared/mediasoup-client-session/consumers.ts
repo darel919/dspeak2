@@ -3,9 +3,14 @@ import {
   handleMediasoupServerError,
   setMediasoupConsumerReceiving,
 } from "../mediasoup-client-consumer-control.ts";
+import type {
+  MediasoupClientSessionLike,
+  MediasoupConsumerEntry,
+  MediasoupMessage,
+} from "../types/mediasoup-client.ts";
 
-export const methods: Record<string, any> = {
-  requestConsumer(producerId) {
+export const methods: Record<string, unknown> = {
+  requestConsumer(this: MediasoupClientSessionLike, producerId: string) {
     if (
       !producerId ||
       [...this.producers.values()].some(
@@ -47,7 +52,11 @@ export const methods: Record<string, any> = {
     }
   },
 
-  async createConsumer(data) {
+  async createConsumer(
+    this: MediasoupClientSessionLike,
+    data: MediasoupMessage,
+  ) {
+    if (!data.producerId || !data.id) return;
     this.requestedConsumers.delete(data.producerId);
     this.consumerRetryAttempts.delete(data.producerId);
     clearTimeout(this.consumerRetryTimers.get(data.producerId));
@@ -66,7 +75,7 @@ export const methods: Record<string, any> = {
       consumer.close();
       return;
     }
-    const entry: any = {
+    const entry = {
       key: data.producerId,
       producerId: data.producerId,
       userId: data.userId,
@@ -77,7 +86,7 @@ export const methods: Record<string, any> = {
       track: consumer.track,
       stream: new MediaStream([consumer.track]),
       receiving: false,
-    };
+    } as MediasoupConsumerEntry;
     this.consumers.set(consumer.id, entry);
     this.onStateChange?.(
       "consumer",
@@ -118,14 +127,24 @@ export const methods: Record<string, any> = {
     this.onRemoteTrack?.(entry);
   },
 
-  shouldReceive(userId, source, ownerSource = null) {
+  shouldReceive(
+    this: MediasoupClientSessionLike,
+    userId: string | number | null | undefined,
+    source: string,
+    ownerSource: string | null = null,
+  ) {
     const key = `${String(userId)}:${String(source)}`;
     if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
     return !(source === "screen-audio" && ownerSource !== "system-audio");
   },
 
-  setRemoteReceiving(userId, source, receiving) {
-    const operations = [] as any;
+  setRemoteReceiving(
+    this: MediasoupClientSessionLike,
+    userId: string,
+    source: string,
+    receiving: boolean,
+  ) {
+    const operations: Array<Promise<unknown>> = [];
     this.remoteReceiving.set(
       `${String(userId)}:${String(source)}`,
       Boolean(receiving),
@@ -136,7 +155,10 @@ export const methods: Record<string, any> = {
     return Promise.all(operations);
   },
 
-  applyJitterBufferConfig(entry) {
+  applyJitterBufferConfig(
+    this: MediasoupClientSessionLike,
+    entry: MediasoupConsumerEntry,
+  ) {
     const receiver = entry?.consumer?.receiver;
     if (!receiver) return;
     try {
@@ -147,7 +169,16 @@ export const methods: Record<string, any> = {
     } catch (_) {}
   },
 
-  setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 }) {
+  setJitterBufferConfig(
+    this: MediasoupClientSessionLike,
+    {
+      minDelayMs = 0,
+      targetDelayMs = 20,
+    }: {
+      minDelayMs?: number;
+      targetDelayMs?: number;
+    },
+  ) {
     this.jitterBufferMinimumDelay = minDelayMs >= 0 ? minDelayMs / 1000 : 0;
     this.jitterBufferTargetDelay = targetDelayMs >= 0 ? targetDelayMs : 20;
     for (const entry of this.consumers.values()) {
@@ -155,15 +186,25 @@ export const methods: Record<string, any> = {
     }
   },
 
-  async setConsumerReceiving(entry, receiving) {
+  async setConsumerReceiving(
+    this: MediasoupClientSessionLike,
+    entry: MediasoupConsumerEntry,
+    receiving: boolean,
+  ) {
     return setMediasoupConsumerReceiving(this, entry, receiving);
   },
 
-  closeConsumerByProducer(producerId) {
+  closeConsumerByProducer(
+    this: MediasoupClientSessionLike,
+    producerId: string,
+  ) {
     return closeMediasoupConsumerByProducer(this, producerId);
   },
 
-  handleServerError(data) {
+  handleServerError(
+    this: MediasoupClientSessionLike,
+    data: Record<string, unknown>,
+  ) {
     return handleMediasoupServerError(this, data);
   },
 };

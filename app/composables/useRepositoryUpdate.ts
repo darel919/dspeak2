@@ -1,8 +1,14 @@
+import type {
+  RepositoryBuildMetadata,
+  RepositoryUpdateSnapshot,
+} from "../shared/types/repository-update.ts";
+
 const STATE_KEY = "repository-update-state";
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
-let sharedRequest = null;
 
-function normalizeCommit(value) {
+let sharedRequest: Promise<RepositoryUpdateSnapshot | null> | null = null;
+
+function normalizeCommit(value: unknown) {
   const normalized = String(value || "")
     .trim()
     .toLowerCase();
@@ -11,7 +17,11 @@ function normalizeCommit(value) {
 
 export function useRepositoryUpdate() {
   const config = useRuntimeConfig();
-  const state = useState(STATE_KEY, () => ({
+  const state = useState<{
+    status: string;
+    snapshot: RepositoryUpdateSnapshot | null;
+    error: unknown;
+  }>(STATE_KEY, () => ({
     status: "idle",
     snapshot: null,
     error: null,
@@ -45,7 +55,9 @@ export function useRepositoryUpdate() {
         /\/$/,
         "",
       );
-      const commit = normalizeCommit((currentBuild.value as any).commit);
+      const commit = normalizeCommit(
+        (currentBuild.value as RepositoryBuildMetadata).commit,
+      );
       const query = commit ? `?commit=${encodeURIComponent(commit)}` : "";
       const response = await fetch(`${apiPath}/update${query}`, {
         cache: "no-store",
@@ -55,7 +67,7 @@ export function useRepositoryUpdate() {
       });
       if (!response.ok)
         throw new Error(`Update check failed (${response.status})`);
-      const nextSnapshot: any = await response.json();
+      const nextSnapshot = (await response.json()) as RepositoryUpdateSnapshot;
       state.value = {
         ...state.value,
         status: nextSnapshot?.status === "ok" ? "complete" : "unavailable",

@@ -14,10 +14,19 @@ import {
   channels,
 } from "../db/schema/index.ts";
 import { eq, and, inArray } from "drizzle-orm";
+import type {
+  AuthorizationChannel,
+  AuthorizationChannelUpdate,
+  AuthorizationRoom,
+  CachedRoomAccess,
+} from "../types/room-authorization.ts";
 
 const CACHE_TTL_MS = 15_000;
 const CACHE_MAX_SIZE = 2_000;
-const roomAccessCache = new Map();
+const roomAccessCache = new Map<
+  string,
+  { value: CachedRoomAccess; timestamp: number }
+>();
 
 function evictExpiredEntries() {
   const now = Date.now();
@@ -26,7 +35,10 @@ function evictExpiredEntries() {
   }
 }
 
-export function invalidateRoomAccess(roomId, userId) {
+export function invalidateRoomAccess(
+  roomId: string | null | undefined,
+  userId: string | null | undefined,
+) {
   if (roomId == null && userId == null) {
     roomAccessCache.clear();
     return;
@@ -48,13 +60,13 @@ export function invalidateRoomAccess(roomId, userId) {
   roomAccessCache.delete(`${String(roomId)}:${String(userId)}`);
 }
 
-export async function getRoomAccess(room, userId) {
+export async function getRoomAccess(room: AuthorizationRoom, userId: string) {
   const isOwner = String(room.ownerId) === String(userId);
 
   const cacheKey = `${String(room.id)}:${String(userId)}`;
   const now = Date.now();
   const cached = roomAccessCache.get(cacheKey);
-  let dbResult;
+  let dbResult: CachedRoomAccess;
 
   if (cached && now - cached.timestamp < CACHE_TTL_MS) {
     dbResult = cached.value;
@@ -88,13 +100,13 @@ export async function getRoomAccess(room, userId) {
     const roles = membership
       .filter((m) => m.roleId)
       .map((m) => ({
-        id: m.roleId,
+        id: String(m.roleId),
         name: m.roleName,
         color: m.roleColor,
-        position: m.rolePosition,
-        permissions: m.rolePermissions,
-        system: m.roleSystem,
-        isDefault: m.roleIsDefault,
+        position: Number(m.rolePosition) || 0,
+        permissions: normalizePermissions(m.rolePermissions),
+        system: Boolean(m.roleSystem),
+        isDefault: Boolean(m.roleIsDefault),
       }));
 
     dbResult = {
@@ -106,7 +118,7 @@ export async function getRoomAccess(room, userId) {
     evictExpiredEntries();
     if (roomAccessCache.size >= CACHE_MAX_SIZE) {
       const oldestKey = roomAccessCache.keys().next().value;
-      roomAccessCache.delete(oldestKey);
+      if (oldestKey) roomAccessCache.delete(oldestKey);
     }
     roomAccessCache.set(cacheKey, { value: dbResult, timestamp: now });
   }
@@ -119,7 +131,10 @@ export async function getRoomAccess(room, userId) {
   };
 }
 
-export async function requireRoomMember(room, userId) {
+export async function requireRoomMember(
+  room: AuthorizationRoom,
+  userId: string,
+) {
   const access = await getRoomAccess(room, userId);
   if (!access.member) {
     throw createError({
@@ -130,7 +145,11 @@ export async function requireRoomMember(room, userId) {
   return access;
 }
 
-export async function requireRoomPermission(room, userId, permission) {
+export async function requireRoomPermission(
+  room: AuthorizationRoom,
+  userId: string,
+  permission: string,
+) {
   const access = await requireRoomMember(room, userId);
   if (!access.permissions.includes(permission)) {
     throw createError({
@@ -141,8 +160,12 @@ export async function requireRoomPermission(room, userId, permission) {
   return access;
 }
 
-export async function seedRoomRoles(room, ownerId, database: any = db) {
-  const roleTemplates: any = DEFAULT_ROLE_TEMPLATES;
+export async function seedRoomRoles(
+  room: AuthorizationRoom,
+  ownerId: string,
+  database: typeof db = db,
+) {
+  const roleTemplates = DEFAULT_ROLE_TEMPLATES;
   const createdRoles = await database
     .insert(roomRoles)
     .values(
@@ -153,7 +176,7 @@ export async function seedRoomRoles(room, ownerId, database: any = db) {
         position: template.position,
         permissions: template.permissions,
         system: template.system,
-        isDefault: template.isDefault ?? template.is_default,
+        isDefault: template.is_default,
       })),
     )
     .returning();
@@ -167,16 +190,21 @@ export async function seedRoomRoles(room, ownerId, database: any = db) {
         joinedAt: new Date(),
       })
       .returning({ id: roomMemberships.id });
-    await database.insert(membershipRoles).values({
-      membershipId: membership[0].id,
-      roleId: ownerRole.id,
-    });
+    const ownerMembership = membership[0];
+    if (ownerMembership)
+      await database.insert(membershipRoles).values({
+        membershipId: ownerMembership.id,
+        roleId: ownerRole.id,
+      });
   }
   invalidateRoomAccess(room.id, ownerId);
   return createdRoles;
 }
 
-export async function ensureRoomMembership(room, userId) {
+export async function ensureRoomMembership(
+  room: AuthorizationRoom,
+  userId: string,
+) {
   const membership = await db.transaction(async (tx) => {
     const existing = await tx
       .select()
@@ -238,7 +266,7 @@ export async function ensureRoomMembership(room, userId) {
   return membership;
 }
 
-export async function removeRoomMembership(roomId, userId) {
+export async function removeRoomMembership(roomId: string, userId: string) {
   await db
     .delete(roomMemberships)
     .where(
@@ -250,7 +278,10 @@ export async function removeRoomMembership(roomId, userId) {
   invalidateRoomAccess(roomId, userId);
 }
 
-export async function presentRoomAccess(room, userId) {
+export async function presentRoomAccess(
+  room: AuthorizationRoom,
+  userId: string,
+) {
   const access = await getRoomAccess(room, userId);
   return {
     roles: access.roles.map((role) => ({
@@ -267,9 +298,24 @@ export async function presentRoomAccess(room, userId) {
   };
 }
 
-export async function requireRoleManagement(room, userId, targetRole) {
+export async function requireRoleManagement(
+  room: AuthorizationRoom,
+  userId: string,
+  targetRole: Parameters<typeof canManageRole>[1],
+) {
   const access = await requireRoomPermission(room, userId, "room.manage_roles");
-  if (targetRole && !canManageRole(access.roles, targetRole, access.isOwner)) {
+  if (
+    targetRole &&
+    !canManageRole(
+      access.roles.map((role) => ({
+        permissions: normalizePermissions(role.permissions),
+        position: Number(role.position) || 0,
+        system: Boolean(role.system),
+      })),
+      targetRole,
+      access.isOwner,
+    )
+  ) {
     throw createError({
       statusCode: 403,
       statusMessage: "You cannot manage a role at or above your position",
@@ -278,7 +324,7 @@ export async function requireRoleManagement(room, userId, targetRole) {
   return access;
 }
 
-export async function getChannelById(channelId) {
+export async function getChannelById(channelId: string) {
   const result = await db
     .select()
     .from(channels)
@@ -287,7 +333,10 @@ export async function getChannelById(channelId) {
   return result[0] || null;
 }
 
-export async function updateChannel(channelId, data) {
+export async function updateChannel(
+  channelId: string,
+  data: AuthorizationChannelUpdate,
+) {
   const result = await db
     .update(channels)
     .set({ ...data, updatedAt: new Date() })
@@ -296,7 +345,7 @@ export async function updateChannel(channelId, data) {
   return result[0] || null;
 }
 
-export async function getRoomById(roomId) {
+export async function getRoomById(roomId: string) {
   const result = await db
     .select()
     .from(rooms)

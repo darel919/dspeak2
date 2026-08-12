@@ -1,14 +1,22 @@
 import { closeSocketOnPageHide } from "./socket-lifecycle.ts";
 import { mediaDebug, shortMediaId } from "./media-debug.ts";
+import type {
+  MediaSignalingSocketOptions,
+  PendingReady,
+  ServerHello,
+  SignalingLocation,
+  SignalingMessage,
+  DispatchMediaSignalingOptions,
+} from "./types/media-signaling.ts";
 
 export function mediaSignalingUrl(
-  configuredPath,
-  channelId,
-  location = globalThis.window?.location || {
+  configuredPath: unknown,
+  channelId: string,
+  location: SignalingLocation = globalThis.window?.location || {
     protocol: "http:",
     host: "localhost",
   },
-  accessToken = "",
+  accessToken: string = "",
 ) {
   if (typeof configuredPath === "string" && /^wss?:\/\//.test(configuredPath)) {
     const endpoint = new URL(configuredPath);
@@ -17,7 +25,10 @@ export function mediaSignalingUrl(
     return endpoint.toString();
   }
   const origin = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
-  const base = configuredPath || `${origin}/socket`;
+  const base =
+    typeof configuredPath === "string" && configuredPath
+      ? configuredPath
+      : `${origin}/socket`;
   const separator = base.includes("?") ? "&" : "?";
   const token = accessToken
     ? `&accessToken=${encodeURIComponent(accessToken)}`
@@ -25,7 +36,9 @@ export function mediaSignalingUrl(
   return `${base}${separator}channelId=${encodeURIComponent(channelId)}${token}`;
 }
 
-export function closeMediaSignalingForRecovery(socket) {
+export function closeMediaSignalingForRecovery(
+  socket: WebSocket | null | undefined,
+) {
   try {
     socket?.close(4000, "Media signaling session recovery required");
   } catch (error) {
@@ -52,11 +65,11 @@ export function createMediaSignalingSocket({
   reconnectJitterMs = 250,
   reconnectMaxDelayMs = 10000,
   reconnectMaxElapsedMs = 120000,
-}) {
-  let socket = null;
-  let pendingReady = null;
-  let heartbeatTimer = null;
-  let reconnectTimer = null;
+}: MediaSignalingSocketOptions) {
+  let socket: WebSocket | null = null;
+  let pendingReady: PendingReady | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
   let reconnectStartedAt = 0;
   let heartbeatSequence = 0;
@@ -64,9 +77,9 @@ export function createMediaSignalingSocket({
   let lastHeartbeatAckAt = 0;
   let heartbeatIntervalMs = defaultHeartbeatIntervalMs;
   let heartbeatTimeoutMs = defaultHeartbeatTimeoutMs;
-  let protocolState = null;
+  let protocolState: ServerHello | null = null;
 
-  function reportError(error) {
+  function reportError(error: unknown) {
     try {
       onError(error);
     } catch (reportingError) {
@@ -74,7 +87,7 @@ export function createMediaSignalingSocket({
     }
   }
 
-  function send(message) {
+  function send(message: SignalingMessage) {
     if (isIntentionalClose()) return false;
     if (socket?.readyState !== WebSocket.OPEN) {
       if (socket && socket.readyState !== WebSocket.CLOSED)
@@ -130,7 +143,7 @@ export function createMediaSignalingSocket({
   }
 
   function stopReconnect() {
-    clearTimeout(reconnectTimer);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
 
@@ -138,8 +151,8 @@ export function createMediaSignalingSocket({
     if (pendingReady?.promise) return pendingReady.promise;
     if (socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     stopReconnect();
-    const promise = new Promise((resolve, reject) => {
-      let candidate;
+    const promise = new Promise<void>((resolve, reject) => {
+      let candidate: WebSocket;
       try {
         candidate = new WebSocket(buildUrl());
       } catch (error) {
@@ -230,7 +243,7 @@ export function createMediaSignalingSocket({
     return promise;
   }
 
-  function acceptServerHello(data) {
+  function acceptServerHello(data: unknown) {
     if (!protocol.isServerHello(data)) {
       socket?.close(protocol.closeCode, protocol.closeReason);
       return false;
@@ -322,7 +335,7 @@ export function createMediaSignalingSocket({
 
   return {
     acceptServerHello,
-    acknowledgeHeartbeat: (sequence, acknowledgedAt) => {
+    acknowledgeHeartbeat: (sequence: number, acknowledgedAt: number) => {
       lastHeartbeatAckSequence = sequence;
       lastHeartbeatAckAt = acknowledgedAt;
     },
@@ -337,25 +350,37 @@ export function createMediaSignalingSocket({
   };
 }
 
-export function dispatchMediaSignalingMessage(raw, { getHandler, onFailure }) {
-  let message;
+export function dispatchMediaSignalingMessage(
+  raw: unknown,
+  { getHandler, onFailure }: DispatchMediaSignalingOptions,
+) {
+  let message: SignalingMessage;
   try {
     if (typeof raw !== "string" || raw.length > 96000)
       throw new Error("Invalid signaling payload");
-    message = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object")
+      throw new Error("Invalid signaling payload");
+    message = parsed as SignalingMessage;
   } catch {
     onFailure("The media server sent an invalid message");
     return;
   }
+  if (typeof message.type !== "string") return;
   const handler = getHandler(message.type);
   if (!handler) return;
   Promise.resolve(handler(message.data || {})).catch((error) => {
-    const detail = error?.message || String(error || "Unknown handler error");
+    const detail =
+      error instanceof Error
+        ? error.message
+        : String(error || "Unknown handler error");
     const failure = new Error(
       `Media message handling failed for ${message.type}: ${detail}`,
     );
-    failure.code = "MEDIA_MESSAGE_HANDLER_FAILED";
-    failure.cause = error;
+    Object.assign(failure, {
+      code: "MEDIA_MESSAGE_HANDLER_FAILED",
+      cause: error,
+    });
     onFailure(failure);
   });
 }
