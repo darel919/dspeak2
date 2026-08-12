@@ -545,17 +545,12 @@ configure_webrtc_gclient() {
 
   (
     cd "$checkout"
-    gclient config --spec 'solutions = [
-  {
-    "name": "src",
-    "url": "https://webrtc.googlesource.com/src.git",
-    "deps_file": "DEPS",
-    "managed": False,
-    "custom_deps": {},
-  },
-]
-cache_dir = None
-'
+    gclient config \
+      --name src \
+      --deps-file DEPS \
+      --unmanaged \
+      --cache-dir None \
+      https://webrtc.googlesource.com/src.git
   )
 }
 
@@ -567,7 +562,8 @@ run_webrtc_fetch() {
 
   (
     configure_webrtc_gclient "$checkout"
-    gclient sync --cache-dir None --nohooks --no-history --with_branch_heads
+    cd "$checkout"
+    gclient sync --nohooks --no-history --with_branch_heads
   ) >&2 &
   fetch_pid=$!
   (
@@ -684,7 +680,7 @@ clone_or_update_webrtc() {
     if [[ -f "$checkout/.gclient" ]]; then
       printf 'Resuming the interrupted WebRTC checkout\n' >&2
       configure_webrtc_gclient "$checkout"
-      (cd "$checkout" && gclient sync --cache-dir None --nohooks --no-history --with_branch_heads) >&2
+      (cd "$checkout" && gclient sync --nohooks --no-history --with_branch_heads) >&2
     elif [[ -e "$checkout" ]] && ! directory_is_empty "$checkout"; then
       fail "WebRTC checkout directory is not empty but is not a Git checkout: $checkout"
     else
@@ -701,7 +697,7 @@ clone_or_update_webrtc() {
       git fetch origin "$WEBRTC_BRANCH:refs/remotes/$WEBRTC_BRANCH" >&2
     fi
     git checkout -B "$WEBRTC_REVISION" "refs/remotes/$WEBRTC_BRANCH" >&2
-    gclient sync --cache-dir None >&2
+    gclient sync >&2
   )
   printf '%s\n' "$source"
 }
