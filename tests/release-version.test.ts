@@ -54,6 +54,32 @@ test("synchronization updates every downstream release manifest", () => {
   assert.match(next.cargoLock, /version = "3\.0\.0-alpha\.1"/);
 });
 
+test("synchronization is idempotent for an already current Cargo manifest", () => {
+  const source = versionFiles("3.0.0-alpha.1");
+  const next = synchronizeVersionContents({
+    version: "3.0.0-alpha.1",
+    packageLock: source.packageLock,
+    tauriConfig: source.tauriConfig,
+    cargoToml: source.cargoToml,
+    cargoLock: source.cargoLock,
+  });
+
+  assert.equal(next.cargoToml, source.cargoToml);
+  assert.equal(next.cargoLock, source.cargoLock);
+  assert.deepEqual(
+    findVersionMismatches(
+      extractVersionState({
+        packageJson: { version: "3.0.0-alpha.1" },
+        packageLock: next.packageLock,
+        tauriConfig: next.tauriConfig,
+        cargoToml: next.cargoToml,
+        cargoLock: next.cargoLock,
+      }),
+    ),
+    [],
+  );
+});
+
 test("mismatches identify the stale downstream manifest", () => {
   const state = extractVersionState(versionFiles());
   state.tauriConfig = "3.0.0-alpha.1";

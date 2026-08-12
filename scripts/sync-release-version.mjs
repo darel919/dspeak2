@@ -41,12 +41,13 @@ function replaceCargoPackageVersion(source, version) {
   const packageMatch = normalizedSource.match(/\[package\][\s\S]*?(?=\n\[|$)/);
   if (!packageMatch) throw new Error("Cargo.toml has no package section");
   const packageSection = packageMatch[0];
+  const versionPattern = /(^|\n)version\s*=\s*"[^"]+"/;
+  if (!versionPattern.test(packageSection))
+    throw new Error("Cargo.toml package version is missing");
   const nextSection = packageSection.replace(
-    /(^|\n)version\s*=\s*"[^"]+"/,
+    versionPattern,
     `$1version = "${version}"`,
   );
-  if (nextSection === packageSection)
-    throw new Error("Cargo.toml package version is missing");
   return normalizedSource.replace(packageSection, nextSection);
 }
 
