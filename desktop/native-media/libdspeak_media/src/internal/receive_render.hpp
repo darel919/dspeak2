@@ -28,6 +28,7 @@ public:
 
     void SetEnabled(bool enabled);
     void SetVolume(double volume);
+    void SetJitterBuffer(int min_delay_ms, int target_delay_ms);
     const std::string& id() const { return consumer_id_; }
 
 private:
@@ -58,6 +59,10 @@ int lib_dspeak_media_audio_output_start(void* output);
 void lib_dspeak_media_audio_output_stop(void* output);
 void lib_dspeak_media_audio_output_set_enabled(void* output, bool enabled);
 void lib_dspeak_media_audio_output_set_volume(void* output, double volume);
+void lib_dspeak_media_audio_output_set_jitter_buffer(
+    void* output,
+    int min_delay_ms,
+    int target_delay_ms);
 void lib_dspeak_media_audio_output_write(void* output,
                                          const float* samples,
                                          uint32_t frame_count,

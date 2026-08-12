@@ -109,6 +109,8 @@ struct AudioOutput {
     bool running = false;
     uint32_t sample_rate = 48000;
     uint8_t channels = 2;
+    uint32_t target_frames = 0;
+    bool primed = true;
 };
 
 OSStatus render_audio(void* user_data,
@@ -121,6 +123,10 @@ OSStatus render_audio(void* user_data,
     if (!output || !io_data) return noErr;
     std::lock_guard<std::mutex> lock(output->mutex);
     if (!output->enabled) output->samples.clear();
+    const bool target_reached = output->target_frames == 0 ||
+        output->samples.size() >= static_cast<size_t>(output->target_frames) * 2;
+    if (target_reached) output->primed = true;
+    const bool ready = output->enabled && output->primed;
     const bool interleaved = io_data->mNumberBuffers == 1;
     if (interleaved) {
         auto& buffer = io_data->mBuffers[0];
@@ -130,19 +136,20 @@ OSStatus render_audio(void* user_data,
         for (UInt32 frame = 0; frame < frame_count; ++frame) {
             for (UInt32 channel = 0; channel < channels; ++channel) {
                 float value = 0.0f;
-                if (output->enabled && !output->samples.empty()) {
+                if (ready && !output->samples.empty()) {
                     value = output->samples.front() * static_cast<float>(output->volume);
                     output->samples.pop_front();
                 }
                 destination[frame * channels + channel] = value;
             }
         }
+        if (output->target_frames > 0 && output->samples.empty()) output->primed = false;
         return noErr;
     }
     for (UInt32 frame = 0; frame < frame_count; ++frame) {
         float left = 0.0f;
         float right = 0.0f;
-        if (output->enabled && !output->samples.empty()) {
+        if (ready && !output->samples.empty()) {
             left = output->samples.front();
             output->samples.pop_front();
             right = output->samples.empty() ? left : output->samples.front();
@@ -158,6 +165,7 @@ OSStatus render_audio(void* user_data,
                 destination[frame * channels + channel] = value;
         }
     }
+    if (output->target_frames > 0 && output->samples.empty()) output->primed = false;
     return noErr;
 }
 #endif
@@ -273,7 +281,10 @@ extern "C" void lib_dspeak_media_audio_output_set_enabled(void* value, bool enab
     if (!output) return;
     std::lock_guard<std::mutex> lock(output->mutex);
     output->enabled = enabled;
-    if (!enabled) output->samples.clear();
+    if (!enabled) {
+        output->samples.clear();
+        output->primed = output->target_frames == 0;
+    }
 #else
     (void)value;
     (void)enabled;
@@ -289,6 +300,25 @@ extern "C" void lib_dspeak_media_audio_output_set_volume(void* value, double vol
 #else
     (void)value;
     (void)volume;
+#endif
+}
+
+extern "C" void lib_dspeak_media_audio_output_set_jitter_buffer(
+    void* value,
+    int min_delay_ms,
+    int target_delay_ms) {
+#if defined(__APPLE__)
+    auto* output = static_cast<AudioOutput*>(value);
+    if (!output) return;
+    const int effective_delay_ms = std::max(0, std::max(min_delay_ms, target_delay_ms));
+    std::lock_guard<std::mutex> lock(output->mutex);
+    output->target_frames = static_cast<uint32_t>(
+        std::min(2000, effective_delay_ms) * 48000 / 1000);
+    output->primed = output->target_frames == 0;
+#else
+    (void)value;
+    (void)min_delay_ms;
+    (void)target_delay_ms;
 #endif
 }
 
@@ -370,6 +400,11 @@ void NativeReceiveAudioSink::SetEnabled(bool enabled) {
 
 void NativeReceiveAudioSink::SetVolume(double volume) {
     lib_dspeak_media_audio_output_set_volume(output_, volume);
+}
+
+void NativeReceiveAudioSink::SetJitterBuffer(int min_delay_ms, int target_delay_ms) {
+    lib_dspeak_media_audio_output_set_jitter_buffer(
+        output_, min_delay_ms, target_delay_ms);
 }
 
 NativeReceiveVideoSink::NativeReceiveVideoSink(std::string consumer_id, std::string handle)

@@ -11,6 +11,7 @@ NATIVE_MEDIA_ARTIFACT_ARCHIVE="${NATIVE_MEDIA_ARTIFACT_ARCHIVE:-}"
 NATIVE_MEDIA_ARTIFACT_URL="${NATIVE_MEDIA_ARTIFACT_URL:-}"
 NATIVE_MEDIA_ARTIFACT_SHA256="${NATIVE_MEDIA_ARTIFACT_SHA256:-}"
 NATIVE_MEDIA_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
+NATIVE_MEDIA_WITH_MEDIASOUP="${NATIVE_MEDIA_WITH_MEDIASOUP:-auto}"
 LIBWEBRTC_ARTIFACT_ARCHIVE="${LIBWEBRTC_ARTIFACT_ARCHIVE:-}"
 LIBWEBRTC_ARTIFACT_URL="${LIBWEBRTC_ARTIFACT_URL:-}"
 LIBWEBRTC_ARTIFACT_SHA256="${LIBWEBRTC_ARTIFACT_SHA256:-0e09ccab9cf35071c5731c962b0862a3000f68eda9aa3c563b2832997942cff0}"
@@ -21,6 +22,10 @@ WEBRTC_GN_ARGS="${WEBRTC_GN_ARGS:-is_debug=false is_component_build=false is_cla
 LIBMEDIASOUPCLIENT_REPOSITORY="${LIBMEDIASOUPCLIENT_REPOSITORY:-https://github.com/versatica/libmediasoupclient.git}"
 LIBMEDIASOUPCLIENT_REF="${LIBMEDIASOUPCLIENT_REF:-webrtc-m140}"
 LIBMEDIASOUPCLIENT_COMMIT="${LIBMEDIASOUPCLIENT_COMMIT:-b9602ba50477d9a22b673fc3e6b5abff16c02deb}"
+NATIVE_MEDIA_JSON_HEADER="${NATIVE_MEDIA_JSON_HEADER:-}"
+NLOHMANN_JSON_VERSION="${NLOHMANN_JSON_VERSION:-3.11.3}"
+NLOHMANN_JSON_URL="${NLOHMANN_JSON_URL:-https://raw.githubusercontent.com/nlohmann/json/v${NLOHMANN_JSON_VERSION}/single_include/nlohmann/json.hpp}"
+NLOHMANN_JSON_SHA256="${NLOHMANN_JSON_SHA256:-9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6}"
 
 TEMP_ROOT=""
 STAGING_DIR=""
@@ -60,8 +65,11 @@ bundle_is_complete() {
     [[ -f "$bundle/include/json.hpp" ]] &&
     native_library_exists "$bundle" dspeak_media &&
     native_shim_library_is_valid "$bundle" &&
-    native_library_exists "$bundle" mediasoupclient &&
-    native_library_exists "$bundle" sdptransform &&
+    native_shim_mode_matches "$bundle" &&
+    { [[ "$(native_mediasoup_enabled "$bundle")" != 1 ]] || {
+      native_library_exists "$bundle" mediasoupclient &&
+      native_library_exists "$bundle" sdptransform;
+    }; } &&
     native_library_exists "$bundle" webrtc &&
     bundle_architecture_is_valid "$bundle"
 }
@@ -92,6 +100,85 @@ native_shim_library_is_valid() {
   esac
 }
 
+native_media_requested_mode() {
+  case "$NATIVE_MEDIA_WITH_MEDIASOUP" in
+    1|true|TRUE|yes|YES|on|ON)
+      printf '1\n'
+      ;;
+    0|false|FALSE|no|NO|off|OFF)
+      printf '0\n'
+      ;;
+    *)
+      printf 'auto\n'
+      ;;
+  esac
+}
+
+native_shim_mode() {
+  local bundle="$1"
+  local marker
+  local archive
+
+  if [[ -f "$bundle/native-media-features" ]]; then
+    marker="$(sed -n 's/^mediasoup=//p' "$bundle/native-media-features" | head -1)"
+    if [[ "$marker" == 0 || "$marker" == 1 ]]; then
+      printf '%s\n' "$marker"
+      return 0
+    fi
+  fi
+
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      archive="$bundle/lib/dspeak_media.lib"
+      [[ -f "$archive" ]] || archive="$bundle/lib/libdspeak_media.lib"
+      if command -v dumpbin >/dev/null 2>&1 && [[ -f "$archive" ]] &&
+        dumpbin /symbols "$archive" 2>/dev/null |
+          grep -Ei 'mediasoupclient|sdptransform' >/dev/null; then
+        printf '1\n'
+      elif native_library_exists "$bundle" mediasoupclient &&
+        native_library_exists "$bundle" sdptransform; then
+        printf '1\n'
+      else
+        printf '0\n'
+      fi
+      ;;
+    *)
+      archive="$bundle/lib/libdspeak_media.a"
+      if command -v nm >/dev/null 2>&1 && [[ -f "$archive" ]] &&
+        nm -u "$archive" 2>/dev/null |
+          grep -Ei 'mediasoupclient|sdptransform' >/dev/null; then
+        printf '1\n'
+      elif native_library_exists "$bundle" mediasoupclient &&
+        native_library_exists "$bundle" sdptransform; then
+        printf '1\n'
+      else
+        printf '0\n'
+      fi
+      ;;
+  esac
+}
+
+native_shim_mode_matches() {
+  local bundle="$1"
+  local requested
+  local actual
+  requested="$(native_media_requested_mode)"
+  [[ "$requested" == auto ]] && return 0
+  actual="$(native_shim_mode "$bundle")"
+  [[ "$actual" == "$requested" ]]
+}
+
+native_mediasoup_enabled() {
+  local bundle="$1"
+  local requested
+  requested="$(native_media_requested_mode)"
+  if [[ "$requested" != auto ]]; then
+    printf '%s\n' "$requested"
+    return 0
+  fi
+  native_shim_mode "$bundle"
+}
+
 directory_is_empty() {
   local directory="$1"
   local entry
@@ -110,17 +197,25 @@ bundle_missing_items() {
   [[ -f "$bundle/include/json.hpp" ]] || missing+=("include/json.hpp")
   if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
     native_library_exists "$bundle" dspeak_media || missing+=("lib/dspeak_media.lib")
-    native_library_exists "$bundle" mediasoupclient || missing+=("lib/mediasoupclient.lib")
-    native_library_exists "$bundle" sdptransform || missing+=("lib/sdptransform.lib")
     native_library_exists "$bundle" webrtc || missing+=("lib/webrtc.lib")
   else
     native_library_exists "$bundle" dspeak_media || missing+=("lib/libdspeak_media.a")
-    native_library_exists "$bundle" mediasoupclient || missing+=("lib/libmediasoupclient.a")
-    native_library_exists "$bundle" sdptransform || missing+=("lib/libsdptransform.a")
     native_library_exists "$bundle" webrtc || missing+=("lib/libwebrtc.a")
+  fi
+  if [[ "$(native_mediasoup_enabled "$bundle")" == 1 ]]; then
+    if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
+      native_library_exists "$bundle" mediasoupclient || missing+=("lib/mediasoupclient.lib")
+      native_library_exists "$bundle" sdptransform || missing+=("lib/sdptransform.lib")
+    else
+      native_library_exists "$bundle" mediasoupclient || missing+=("lib/libmediasoupclient.a")
+      native_library_exists "$bundle" sdptransform || missing+=("lib/libsdptransform.a")
+    fi
   fi
   if native_library_exists "$bundle" dspeak_media && ! native_shim_library_is_valid "$bundle"; then
     missing+=("a valid libdspeak_media archive")
+  fi
+  if ! native_shim_mode_matches "$bundle"; then
+    missing+=("libdspeak_media archive compiled for NATIVE_MEDIA_WITH_MEDIASOUP=$(native_media_requested_mode)")
   fi
   if [[ "$(uname -s)" == Darwin ]] && ! bundle_architecture_is_valid "$bundle"; then
     missing+=("native libraries for the selected architecture")
@@ -248,7 +343,11 @@ bundle_architecture_is_valid() {
 
   command -v lipo >/dev/null 2>&1 || return 1
   expected_arch="$(native_target_arch)"
-  for library in dspeak_media mediasoupclient sdptransform webrtc; do
+  local libraries=(dspeak_media webrtc)
+  if [[ "$(native_mediasoup_enabled "$bundle")" == 1 ]]; then
+    libraries=(dspeak_media mediasoupclient sdptransform webrtc)
+  fi
+  for library in "${libraries[@]}"; do
     path="$bundle/lib/lib${library}.a"
     [[ -f "$path" ]] || continue
     info="$(lipo -info "$path" 2>/dev/null)" || return 1
@@ -409,6 +508,36 @@ download_libwebrtc_dependency() {
     [[ -d "$source_bundle/include" && -f "$source_bundle/lib/libwebrtc.a" ]] ||
       fail "Extracted libwebrtc dependency is incomplete."
   }
+}
+
+ensure_json_header() {
+  local source_bundle="$1"
+  local json_header
+  local temporary_header
+  local actual_sha256
+
+  [[ -f "$source_bundle/include/json.hpp" ]] && return 0
+  mkdir -p "$source_bundle/include"
+  if [[ -n "$NATIVE_MEDIA_JSON_HEADER" ]]; then
+    json_header="$(resolve_path "$NATIVE_MEDIA_JSON_HEADER")"
+    [[ -f "$json_header" ]] || fail "Configured NATIVE_MEDIA_JSON_HEADER does not exist: $json_header"
+    cp "$json_header" "$source_bundle/include/json.hpp"
+    return 0
+  fi
+
+  temporary_header="$(mktemp "${TMPDIR:-/tmp}/dspeak-json.XXXXXX")"
+  if ! curl --fail --location --retry 3 --retry-delay 2 --connect-timeout 30 \
+    --output "$temporary_header" "$NLOHMANN_JSON_URL"; then
+    rm -f -- "$temporary_header"
+    fail "Unable to download the pinned nlohmann/json header. Set NATIVE_MEDIA_JSON_HEADER to a local json.hpp."
+  fi
+  actual_sha256="$(shasum -a 256 "$temporary_header" | cut -d ' ' -f 1)"
+  if [[ "$actual_sha256" != "$NLOHMANN_JSON_SHA256" ]]; then
+    rm -f -- "$temporary_header"
+    fail "nlohmann/json header checksum mismatch. Expected $NLOHMANN_JSON_SHA256, got $actual_sha256."
+  fi
+  cp "$temporary_header" "$source_bundle/include/json.hpp"
+  rm -f -- "$temporary_header"
 }
 
 configure_webrtc_gclient() {
@@ -615,6 +744,7 @@ build_bundle_from_source() {
   local stub_source
   local stub_object
   local gn_args
+  local with_mediasoup
 
   if ! platform="$(native_platform)"; then
     fail "Automatic native media source builds are unsupported on $(uname -s)/$(uname -m)."
@@ -634,6 +764,7 @@ build_bundle_from_source() {
 
   provision_root="$NATIVE_MEDIA_BUILD_DIR/provision"
   source_bundle="$provision_root/artifact"
+  with_mediasoup="$(native_mediasoup_enabled "$source_bundle")"
   mkdir -p "$provision_root"
   if bundle_is_complete "$source_bundle"; then
     printf 'Reusing the previously built native media bundle\n'
@@ -672,41 +803,47 @@ build_bundle_from_source() {
     printf 'Using the prebuilt libwebrtc dependency for %s\n' "$platform"
   fi
 
-  mediasoup_source="$(clone_or_update_libmediasoupclient "$provision_root")"
-  mediasoup_build="$mediasoup_source/build"
-  printf 'Configuring libmediasoupclient\n'
-  cmake -S "$mediasoup_source" -B "$mediasoup_build" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
-    -DLIBWEBRTC_BINARY_PATH="$source_bundle/lib" \
-    -DMEDIASOUPCLIENT_BUILD_TESTS=OFF \
-    -DMEDIASOUPCLIENT_BUILD_DEMO=OFF
-  printf 'Building libmediasoupclient\n'
-  cmake --build "$mediasoup_build" --config Release --parallel
-  if platform_uses_windows_libraries "$platform"; then
-    mediasoup_library="$(find "$mediasoup_build" -type f \( -name 'mediasoupclient.lib' -o -name 'libmediasoupclient.lib' \) -print -quit)"
+  if [[ "$with_mediasoup" == 1 ]]; then
+    mediasoup_source="$(clone_or_update_libmediasoupclient "$provision_root")"
+    mediasoup_build="$mediasoup_source/build"
+    printf 'Configuring libmediasoupclient\n'
+    cmake -S "$mediasoup_source" -B "$mediasoup_build" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
+      -DLIBWEBRTC_BINARY_PATH="$source_bundle/lib" \
+      -DMEDIASOUPCLIENT_BUILD_TESTS=OFF \
+      -DMEDIASOUPCLIENT_BUILD_DEMO=OFF
+    printf 'Building libmediasoupclient\n'
+    cmake --build "$mediasoup_build" --config Release --parallel
+    if platform_uses_windows_libraries "$platform"; then
+      mediasoup_library="$(find "$mediasoup_build" -type f \( -name 'mediasoupclient.lib' -o -name 'libmediasoupclient.lib' \) -print -quit)"
+    else
+      mediasoup_library="$(find "$mediasoup_build" -type f \( -name 'libmediasoupclient.a' -o -name 'mediasoupclient.a' \) -print -quit)"
+    fi
+    [[ -n "$mediasoup_library" ]] || fail "libmediasoupclient build did not produce a static library"
+    if platform_uses_windows_libraries "$platform"; then
+      cp "$mediasoup_library" "$source_bundle/lib/mediasoupclient.lib"
+    else
+      cp "$mediasoup_library" "$source_bundle/lib/libmediasoupclient.a"
+    fi
+    cp -R "$mediasoup_source/include/." "$source_bundle/include/"
+    json_header="$(find "$mediasoup_build" -type f -name json.hpp -print -quit)"
+    [[ -n "$json_header" ]] || fail "libmediasoupclient build did not produce json.hpp"
+    cp "$json_header" "$source_bundle/include/json.hpp"
+    if platform_uses_windows_libraries "$platform"; then
+      sdp_library="$(find "$mediasoup_build" -type f \( -name 'sdptransform.lib' -o -name 'libsdptransform.lib' \) -print -quit)"
+      [[ -n "$sdp_library" ]] || fail "libmediasoupclient build did not produce sdptransform.lib"
+      cp "$sdp_library" "$source_bundle/lib/sdptransform.lib"
+    else
+      sdp_library="$(find "$mediasoup_build" -type f \( -name 'libsdptransform.a' -o -name 'sdptransform.a' \) -print -quit)"
+      [[ -n "$sdp_library" ]] || fail "libmediasoupclient build did not produce sdptransform.a"
+      cp "$sdp_library" "$source_bundle/lib/libsdptransform.a"
+    fi
   else
-    mediasoup_library="$(find "$mediasoup_build" -type f \( -name 'libmediasoupclient.a' -o -name 'mediasoupclient.a' \) -print -quit)"
-  fi
-  [[ -n "$mediasoup_library" ]] || fail "libmediasoupclient build did not produce a static library"
-  if platform_uses_windows_libraries "$platform"; then
-    cp "$mediasoup_library" "$source_bundle/lib/mediasoupclient.lib"
-  else
-    cp "$mediasoup_library" "$source_bundle/lib/libmediasoupclient.a"
-  fi
-  cp -R "$mediasoup_source/include/." "$source_bundle/include/"
-  json_header="$(find "$mediasoup_build" -type f -name json.hpp -print -quit)"
-  [[ -n "$json_header" ]] || fail "libmediasoupclient build did not produce json.hpp"
-  cp "$json_header" "$source_bundle/include/json.hpp"
-  if platform_uses_windows_libraries "$platform"; then
-    sdp_library="$(find "$mediasoup_build" -type f \( -name 'sdptransform.lib' -o -name 'libsdptransform.lib' \) -print -quit)"
-    [[ -n "$sdp_library" ]] || fail "libmediasoupclient build did not produce sdptransform.lib"
-    cp "$sdp_library" "$source_bundle/lib/sdptransform.lib"
-  else
-    sdp_library="$(find "$mediasoup_build" -type f \( -name 'libsdptransform.a' -o -name 'sdptransform.a' \) -print -quit)"
-    [[ -n "$sdp_library" ]] || fail "libmediasoupclient build did not produce libsdptransform.a"
-    cp "$sdp_library" "$source_bundle/lib/libsdptransform.a"
+    printf 'Building native Cloudflare/P2P transport without mediasoupclient\n'
+    ensure_json_header "$source_bundle"
+    mediasoup_build=""
   fi
 
   shim_build="$DESKTOP_ROOT/native-media/libdspeak_media/build"
@@ -720,6 +857,7 @@ build_bundle_from_source() {
   fi
   printf 'Building the dSpeak native media shim\n'
   env NATIVE_MEDIA_ARTIFACT_DIR="$source_bundle" NATIVE_MEDIA_BUILD_DIR="$mediasoup_build" \
+    NATIVE_MEDIA_WITH_MEDIASOUP="$with_mediasoup" \
     cmake -S "$DESKTOP_ROOT/native-media/libdspeak_media" -B "$shim_build" \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -733,6 +871,7 @@ build_bundle_from_source() {
     [[ -n "$shim_library" ]] || fail "dSpeak native media shim build did not produce libdspeak_media.a"
     cp "$shim_library" "$source_bundle/lib/libdspeak_media.a"
   fi
+  printf 'mediasoup=%s\n' "$with_mediasoup" > "$source_bundle/native-media-features"
   install_bundle "$source_bundle"
 }
 

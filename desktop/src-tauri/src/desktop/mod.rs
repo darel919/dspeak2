@@ -161,6 +161,7 @@ pub(crate) fn run() {
             media::media_p2p_restart_ice,
             media::media_p2p_add_track,
             media::media_p2p_remove_track,
+            media::media_p2p_replace_track,
             media::media_p2p_set_track_parameters,
             media::media_p2p_set_audio_stereo,
             media::media_p2p_set_receive_enabled,

@@ -23,11 +23,13 @@
 #include <chrono>
 #include <optional>
 
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
 #include <mediasoupclient.hpp>
 #include <Device.hpp>
 #include <Transport.hpp>
 #include <Producer.hpp>
 #include <Consumer.hpp>
+#endif
 #include <api/create_peerconnection_factory.h>
 #include <api/audio/create_audio_device_module.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
@@ -86,6 +88,7 @@ static double priority_value(const json& value)
     return 2.0;
 }
 
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
 static std::vector<webrtc::RtpEncodingParameters> parse_encodings(const json& app_data)
 {
     std::vector<webrtc::RtpEncodingParameters> encodings;
@@ -137,6 +140,7 @@ static void apply_degradation_preference(
     parameters.degradation_preference = value;
     sender->SetParameters(parameters);
 }
+#endif
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Native track creation and mediasoup producer attachment            */
@@ -363,6 +367,7 @@ extern "C" const char* lib_dspeak_media_audio_track_get_id(lib_dspeak_media_audi
     return lib_dspeak_media_strdup(t->track->id().c_str());
 }
 
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
 extern "C" lib_dspeak_media_producer_t* lib_dspeak_media_produce_video_track(
     lib_dspeak_media_send_transport_t* transport,
     lib_dspeak_media_video_track_t* track,
@@ -414,3 +419,4 @@ extern "C" lib_dspeak_media_producer_t* lib_dspeak_media_produce_audio_track(
         return nullptr;
     }
 }
+#endif

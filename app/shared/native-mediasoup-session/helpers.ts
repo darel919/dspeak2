@@ -3,6 +3,7 @@ import {
   resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "../video-settings.ts";
+import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
 import type { NativeSourceEntry } from "../types/native-mediasoup-session.ts";
 
 const CLOUDFLARE_REQUEST_TIMEOUT_MS = 15000;
@@ -24,10 +25,15 @@ function nativeProducerAppData(
       typeof entry.captureSelection.audio === "object"
         ? (entry.captureSelection.audio as Record<string, unknown>)
         : null;
+    const policy = getAudioCodecPolicy(
+      entry.source === "screen-audio" ? "shared-audio" : "microphone",
+      entry.audioStereo === true,
+    );
     const maxBitrate = Number(
       audioSelection?.maxBitrateBps ||
         entry.audioBitrate ||
-        entry.roomBitrateBps,
+        entry.roomBitrateBps ||
+        policy.maxBitrateBps,
     );
     appData.encodings = [
       {

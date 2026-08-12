@@ -151,6 +151,34 @@ pub fn p2p_set_track_parameters(
     }
 }
 
+pub fn p2p_replace_video_track(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    old_track: *mut std::ffi::c_void,
+    new_track: *mut std::ffi::c_void,
+) -> Result<(), String> {
+    let result =
+        unsafe { ffi::lib_dspeak_media_p2p_replace_video_track(handle, old_track, new_track) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P video track replacement failed".to_string())
+    }
+}
+
+pub fn p2p_replace_audio_track(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    old_track: *mut std::ffi::c_void,
+    new_track: *mut std::ffi::c_void,
+) -> Result<(), String> {
+    let result =
+        unsafe { ffi::lib_dspeak_media_p2p_replace_audio_track(handle, old_track, new_track) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P audio track replacement failed".to_string())
+    }
+}
+
 pub fn p2p_set_receive_enabled(
     handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
     track_id: &str,

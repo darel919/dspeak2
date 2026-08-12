@@ -91,6 +91,7 @@ export interface NativeP2pSessionSurface {
   sourceTransmission: Map<string, boolean>;
   remoteReceiving: Map<string, boolean>;
   trackEntries: Map<string, NativeP2pTrackEntry>;
+  retiredTrackEntries: Map<string, NativeP2pTrackEntry>;
   jitterBufferMinimumDelay: number;
   jitterBufferTargetDelay: number;
   mode: string;
@@ -156,6 +157,10 @@ export interface NativeP2pSessionSurface {
   _detachSource: (
     peer: NativeP2pSessionPeer,
     source: string,
+  ) => Promise<unknown>;
+  _replaceSource: (
+    peer: NativeP2pSessionPeer,
+    source: NativeP2pSource,
   ) => Promise<unknown>;
   _syncAudioProfile: (peer: NativeP2pSessionPeer) => unknown;
   _setSourceParameters: (

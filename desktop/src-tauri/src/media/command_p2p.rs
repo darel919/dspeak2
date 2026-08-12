@@ -175,7 +175,10 @@ pub async fn media_p2p_add_track(
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
     let handle = owned_p2p_handle(&handles, p2p_handle)?;
-    if handles.p2p_tracks.contains_key(&(p2p_handle, source.clone())) {
+    if handles
+        .p2p_tracks
+        .contains_key(&(p2p_handle, source.clone()))
+    {
         return Err("native P2P source is already attached".to_string());
     }
     let c_source = CString::new(source.as_str()).map_err(|error| error.to_string())?;
@@ -256,6 +259,67 @@ pub async fn media_p2p_remove_track(
     }
     handles.p2p_tracks.remove(&(p2p_handle, source));
     Ok(())
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
+pub async fn media_p2p_replace_track(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+    source: String,
+    kind: String,
+) -> Result<Value, String> {
+    let mut handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let handle = owned_p2p_handle(&handles, p2p_handle)?;
+    let (attached_kind, old_track) = handles
+        .p2p_tracks
+        .get(&(p2p_handle, source.clone()))
+        .cloned()
+        .ok_or_else(|| "native P2P source is not attached".to_string())?;
+    if attached_kind != kind {
+        return Err("native P2P replacement track kind does not match".to_string());
+    }
+    let c_source = CString::new(source.as_str()).map_err(|error| error.to_string())?;
+    let new_track = unsafe {
+        if kind == "video" {
+            ffi::lib_dspeak_media_get_video_track(c_source.as_ptr())
+        } else if kind == "audio" {
+            ffi::lib_dspeak_media_get_audio_track(c_source.as_ptr())
+        } else {
+            std::ptr::null_mut()
+        }
+    };
+    if new_track.is_null() {
+        return Err(format!("native P2P {kind} capture track is unavailable"));
+    }
+    if new_track != old_track {
+        if kind == "video" {
+            native::p2p_replace_video_track(handle, old_track, new_track)?;
+        } else {
+            native::p2p_replace_audio_track(handle, old_track, new_track)?;
+        }
+    }
+    let pointer = unsafe {
+        if kind == "video" {
+            ffi::lib_dspeak_media_video_track_get_id(new_track)
+        } else {
+            ffi::lib_dspeak_media_audio_track_get_id(new_track)
+        }
+    };
+    if pointer.is_null() {
+        return Err("native P2P replacement track did not return an identifier".to_string());
+    }
+    let track_id = unsafe { CStr::from_ptr(pointer) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+    handles
+        .p2p_tracks
+        .insert((p2p_handle, source), (kind, new_track));
+    Ok(serde_json::json!({ "trackId": track_id }))
 }
 
 #[cfg(native_rtc)]
@@ -525,6 +589,17 @@ pub async fn media_p2p_remove_track(
     _p2p_handle: u64,
     _source: String,
 ) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_replace_track(
+    _store: State<'_, NativeMediaStore>,
+    _p2p_handle: u64,
+    _source: String,
+    _kind: String,
+) -> Result<Value, String> {
     Err("native media backend not available".to_string())
 }
 

@@ -198,4 +198,80 @@ describe("NativeCloudflareRealtimeSession", () => {
     assert.ok(calls.includes("media_p2p_create_offer"));
     await session.closeMedia();
   });
+
+  it("replaces a native source without closing its Cloudflare publication", async () => {
+    const calls = [];
+    let session;
+    const invoke = async (command, payload = {}) => {
+      calls.push([command, payload]);
+      if (command === "media_p2p_create") return { handle: 9 };
+      if (command === "media_p2p_poll_ice_candidate") return null;
+      if (command === "media_p2p_add_track")
+        return { trackId: "native-audio-1" };
+      if (command === "media_p2p_replace_track")
+        return { trackId: "native-audio-2" };
+      if (command === "media_p2p_create_offer")
+        return localOffer("native-audio-1");
+      return {};
+    };
+    const send = (message) => {
+      calls.push(["send", message]);
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation, body } = message.data;
+      const result =
+        operation === "new-session"
+          ? { sessionId: "native-session" }
+          : body?.tracks?.[0]?.location === "local"
+            ? { sessionDescription: { type: "answer", sdp: "answer" } }
+            : {};
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", { requestId, result }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({
+      invoke,
+      send,
+      sources: new Map(),
+      producers: new Map(),
+      consumers: new Map(),
+    });
+
+    await session.addSource({ source: "audio", kind: "audio" });
+    const previous = session.producers.get("audio");
+    const initialPublicationCount = calls.filter(
+      ([command, payload]) =>
+        command === "send" &&
+        payload.type === "cloudflare-publication" &&
+        !payload.data.closed,
+    ).length;
+    await session.addSource({ source: "audio", kind: "audio" });
+
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_replace_track").length,
+      1,
+    );
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_remove_track").length,
+      0,
+    );
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_add_track").length,
+      1,
+    );
+    const current = session.producers.get("audio");
+    assert.equal(current.trackName, previous.trackName);
+    assert.equal(current.mid, previous.mid);
+    assert.equal(current.trackId, "native-audio-2");
+    assert.equal(
+      calls.filter(
+        ([command, payload]) =>
+          command === "send" &&
+          payload.type === "cloudflare-publication" &&
+          !payload.data.closed,
+      ).length,
+      initialPublicationCount,
+    );
+    await session.closeMedia();
+  });
 });

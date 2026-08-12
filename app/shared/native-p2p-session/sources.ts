@@ -3,6 +3,7 @@ import {
   resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "../video-settings.ts";
+import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
 
 import { asPeerId } from "./helpers.ts";
 import type {
@@ -66,6 +67,14 @@ export class NativeP2pSessionSourcesMethods {
     entry: NativeP2pSource,
   ) {
     const sourceKey = String(entry.source);
+    const track = entry.track;
+    if (!this.sourceTransmission.has(sourceKey))
+      this.sourceTransmission.set(
+        sourceKey,
+        !(track && "enabled" in track) || track.enabled !== false,
+      );
+    else if (track && "enabled" in track)
+      track.enabled = this.sourceTransmission.get(sourceKey) !== false;
     const previous = this.sources.get(sourceKey);
     const normalized = {
       source: sourceKey,
@@ -82,12 +91,16 @@ export class NativeP2pSessionSourcesMethods {
       videoSettings:
         entry.videoSettings || this.getVideoSettings?.(entry.source) || null,
     };
+    if (previous && previous.kind !== normalized.kind)
+      throw new Error(
+        `Native P2P source kind cannot change for ${sourceKey}; remove it first`,
+      );
     this.sources.set(normalized.source, normalized);
     try {
       for (const peer of this.peers.values()) {
         if (previous && peer.sources.has(normalized.source))
-          await this._detachSource(peer, normalized.source);
-        await this._attachSource(peer, normalized);
+          await this._replaceSource(peer, normalized);
+        else await this._attachSource(peer, normalized);
       }
       return true;
     } catch (error) {
@@ -95,9 +108,13 @@ export class NativeP2pSessionSourcesMethods {
       else this.sources.delete(sourceKey);
       for (const peer of this.peers.values()) {
         try {
-          if (peer.sources.has(sourceKey))
-            await this._detachSource(peer, sourceKey);
-          if (previous) await this._attachSource(peer, previous);
+          if (previous && peer.sources.has(sourceKey))
+            await this._replaceSource(peer, previous);
+          else {
+            if (peer.sources.has(sourceKey))
+              await this._detachSource(peer, sourceKey);
+            if (previous) await this._attachSource(peer, previous);
+          }
         } catch (restoreError) {
           this.onError?.(restoreError);
         }
@@ -241,9 +258,31 @@ export class NativeP2pSessionSourcesMethods {
         if (entry) {
           entry.closed = true;
           this.trackEntries.delete(trackId);
+          this.retiredTrackEntries.set(`${peer.peerId}:${source}`, entry);
           this.onRemoteTrackEnded?.(entry);
         }
       }
+      return true;
+    }
+    const restoredSignal =
+      signal.sourceRestored && typeof signal.sourceRestored === "object"
+        ? (signal.sourceRestored as Record<string, unknown>)
+        : null;
+    if (restoredSignal) {
+      const source = String(restoredSignal.source || "");
+      if (!source) return true;
+      const key = `${peer.peerId}:${source}`;
+      const current = [...this.trackEntries.values()].find(
+        (entry) => entry.userId === peer.userId && entry.source === source,
+      );
+      const entry = current || this.retiredTrackEntries.get(key);
+      if (!entry) return true;
+      entry.closed = false;
+      this.retiredTrackEntries.delete(key);
+      this.trackEntries.set(entry.trackId, entry);
+      this.onRemoteTrack?.(entry);
+      this._checkPeerQualification(peer);
+      this._emitState();
       return true;
     }
     const receivingSignal =
@@ -352,6 +391,7 @@ export class NativeP2pSessionSourcesMethods {
   async closeAll(this: NativeP2pSessionSurface) {
     for (const peerId of [...this.peers.keys()]) await this._closePeer(peerId);
     this.trackEntries.clear();
+    this.retiredTrackEntries.clear();
     this.pendingSignals.clear();
     this._emitState();
   }
@@ -519,6 +559,39 @@ export class NativeP2pSessionSourcesMethods {
     return true;
   }
 
+  async _replaceSource(
+    this: NativeP2pSessionSurface,
+    peer: NativeP2pSessionPeer,
+    source: NativeP2pSource,
+  ) {
+    if (!peer.sources.has(source.source)) return false;
+    const result = await this.invoke("media_p2p_replace_track", {
+      p2pHandle: peer.handle,
+      source: source.source,
+      kind: source.kind,
+    });
+    const trackId = String(result?.trackId || "");
+    if (!trackId)
+      throw new Error(
+        `Native P2P replacement track ID is unavailable for ${source.source}`,
+      );
+    peer.trackIds.set(source.source, trackId);
+    await this._syncAudioProfile(peer);
+    await this._setSourceParameters(
+      peer,
+      source.source,
+      this._sourceParameters(source, {
+        active:
+          (peer.sourceReceiving.get(source.source) ?? true) &&
+          this.sourceTransmission.get(source.source) !== false,
+      }),
+    );
+    this._sendSignal(peer.peerId, {
+      sourceRestored: { source: source.source },
+    });
+    return true;
+  }
+
   _sourceParameters(
     this: NativeP2pSessionSurface,
     source: NativeP2pSource,
@@ -534,7 +607,11 @@ export class NativeP2pSessionSourcesMethods {
       (source.captureSelection?.audio as Record<string, unknown> | undefined)
         ?.maxBitrateBps ||
         source.audioBitrate ||
-        source.roomBitrateBps,
+        source.roomBitrateBps ||
+        getAudioCodecPolicy(
+          source.source === "screen-audio" ? "shared-audio" : "microphone",
+          this.getAudioStereo?.(source.source) === true,
+        ).maxBitrateBps,
     );
     if (Number.isFinite(bitrate) && bitrate > 0)
       parameters.maxBitrate = Math.floor(bitrate);
@@ -551,6 +628,7 @@ export class NativeP2pSessionSourcesMethods {
         width: video.width || resolution?.width || 1920,
         height: video.height || resolution?.height || 1080,
         frameRate: video.frameRate || 60,
+        qualityPriority: video.qualityPriority || "framerate",
         screen: source.source === "screen",
         maxBitrate: video.maxBitrate,
       });
@@ -559,6 +637,7 @@ export class NativeP2pSessionSourcesMethods {
         parameters.maxBitrate = encoding.maxBitrate;
         parameters.maxFramerate = encoding.maxFramerate;
         parameters.scaleResolutionDownBy = encoding.scaleResolutionDownBy;
+        parameters.degradationPreference = options.degradationPreference;
       }
     }
     return parameters;
@@ -667,6 +746,7 @@ export class NativeP2pSessionSourcesMethods {
     source: string,
     maxBitrate: number,
   ) {
+    if (this.sources.get(String(source || ""))?.kind !== "audio") return false;
     return this._updateSourceParameters(source, {
       maxBitrate: Math.floor(Number(maxBitrate)),
     });
@@ -677,6 +757,7 @@ export class NativeP2pSessionSourcesMethods {
     source: string,
     maxBitrate: number,
   ) {
+    if (this.sources.get(String(source || ""))?.kind !== "video") return false;
     return this._updateSourceParameters(source, {
       maxBitrate: Math.floor(Number(maxBitrate)),
     });

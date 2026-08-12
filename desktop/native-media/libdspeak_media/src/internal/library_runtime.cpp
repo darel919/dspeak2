@@ -11,10 +11,9 @@
 #include <stdexcept>
 #include <vector>
 #include <memory>
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
 #include <mediasoupclient.hpp>
-#include <Transport.hpp>
-#include <Producer.hpp>
-#include <Consumer.hpp>
+#endif
 #include <api/media_stream_interface.h>
 #include <api/scoped_refptr.h>
 #include <api/create_peerconnection_factory.h>
@@ -107,11 +106,17 @@ char* lib_dspeak_media_json_to_cstr(const json& j)
 extern "C" int lib_dspeak_media_initialize(void)
 {
     try {
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
         mediasoupclient::Initialize();
+#endif
         const bool ready = probe_core_runtime();
         g_initialized = ready;
         dspeak_media_runtime::core_ready.store(ready);
-        if (!ready) mediasoupclient::Cleanup();
+        if (!ready) {
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
+            mediasoupclient::Cleanup();
+#endif
+        }
         return ready ? 0 : -1;
     } catch (...) {
         g_initialized = false;
@@ -150,7 +155,9 @@ extern "C" void lib_dspeak_media_shutdown(void)
     lib_dspeak_media_stop_camera_capture(nullptr);
 #endif
     try {
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
         mediasoupclient::Cleanup();
+#endif
     } catch (...) {}
     g_initialized = false;
     dspeak_media_runtime::reset();
@@ -184,7 +191,7 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
     caps["capture"] = json::object();
     caps["health"] = {
         {"nativeRtc", runtime_health_record(core_ready,
-            "libwebrtc and mediasoupclient initialized and peer-connection factory probe passed",
+            "libwebrtc initialized and peer-connection factory probe passed",
             "native core runtime probe has not passed")},
         {"microphone", runtime_health_record(microphone_ready,
             "microphone callback delivered validated stereo 48 kHz PCM",
@@ -339,6 +346,8 @@ extern "C" const char* lib_dspeak_media_capture_error_message(int error_code)
             return "native runtime probe ran before native initialization";
         case -401:
             return "native core runtime probe failed";
+        case -700:
+            return "self-hosted mediasoup SFU support is not included in this native bundle";
         default:
             return "native capture failed";
     }

@@ -1,4 +1,10 @@
 import { asError } from "../native-mediasoup-utils.ts";
+import {
+  buildVideoProduceOptions,
+  resolveNativeCaptureVideoSettings,
+  VIDEO_RESOLUTIONS,
+} from "../video-settings.ts";
+import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
 
 import { requestIdentifier, sourceKind, midForTrack } from "./helpers.ts";
 import type {
@@ -48,6 +54,14 @@ export class NativeCloudflareSourcesMethods {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     const source = String(entry.source);
+    const track = entry.track;
+    if (!this.sourceTransmission.has(source))
+      this.sourceTransmission.set(
+        source,
+        !(track && "enabled" in track) || track.enabled !== false,
+      );
+    else if (track && "enabled" in track)
+      track.enabled = this.sourceTransmission.get(source) !== false;
     const kind = sourceKind(entry);
     const normalized = {
       ...entry,
@@ -62,25 +76,30 @@ export class NativeCloudflareSourcesMethods {
     const generation = this.sessionGeneration;
     this._assertCurrent(generation);
     const previous = this.producers.get(source);
-    if (previous) {
-      await this.invoke("media_p2p_remove_track", {
+    if (previous && String(previous.kind || "") !== kind)
+      throw new Error(
+        `Native Cloudflare source kind cannot change for ${source}; remove it first`,
+      );
+    if (previous && String(previous.kind || kind) === kind) {
+      const replacement = await this.invoke("media_p2p_replace_track", {
         p2pHandle: this.handle,
         source,
+        kind,
       });
       this._assertCurrent(generation);
-      this.producers.delete(source);
-      if (
-        !this.send?.({
-          type: "cloudflare-publication",
-          data: {
-            trackName: previous.trackName,
-            source,
-            ownerSource: previous.ownerSource || null,
-            closed: true,
-          },
-        })
-      )
-        throw new Error("Media control is unavailable");
+      const trackId = String(
+        (replacement as Record<string, unknown>)?.trackId || "",
+      );
+      if (!trackId)
+        throw new Error("Native Cloudflare replacement track ID is missing");
+      await this._setSourceParameters(normalized, generation);
+      previous.track = normalized.track || null;
+      previous.trackId = trackId;
+      previous.ownerSource = normalized.ownerSource || null;
+      previous.paused = this.sourceTransmission.get(source) === false;
+      this.producers.set(source, previous);
+      this._emitState();
+      return previous;
     }
     const trackResult = await this.invoke("media_p2p_add_track", {
       p2pHandle: this.handle,
@@ -363,22 +382,33 @@ export class NativeCloudflareSourcesMethods {
   }
 
   async updateAudioBitrate(source: string, maxBitrate: number) {
-    return this._updateBitrate(source, maxBitrate);
+    return this._updateBitrate(source, maxBitrate, "audio");
   }
 
   async updateVideoBitrate(source: string, maxBitrate: number) {
-    return this._updateBitrate(source, maxBitrate);
+    return this._updateBitrate(source, maxBitrate, "video");
   }
 
-  async _updateBitrate(source: string, maxBitrate: number) {
+  async _updateBitrate(
+    source: string,
+    maxBitrate: number,
+    kind: "audio" | "video",
+  ) {
     const value = Number(maxBitrate);
     const entry = this.sources.get(String(source || ""));
-    if (!entry || !Number.isFinite(value) || value <= 0) return false;
-    entry.audioBitrate = value;
-    entry.videoSettings = {
-      ...(entry.videoSettings || {}),
-      maxBitrate: value,
-    };
+    if (
+      !entry ||
+      sourceKind(entry) !== kind ||
+      !Number.isFinite(value) ||
+      value <= 0
+    )
+      return false;
+    if (kind === "audio") entry.audioBitrate = value;
+    else
+      entry.videoSettings = {
+        ...(entry.videoSettings || {}),
+        maxBitrate: value,
+      };
     return this._setSourceParameters(entry as NativeCloudflareSourceEntry);
   }
 
@@ -400,26 +430,43 @@ export class NativeCloudflareSourcesMethods {
         }
       | null
       | undefined;
-    const bitrate = Number(
-      entry.audioBitrate ||
-        captureSelection?.audio?.maxBitrateBps ||
-        entry.videoSettings?.maxBitrate ||
-        captureSelection?.video?.maxBitrateBps,
-    );
-    if (Number.isFinite(bitrate) && bitrate > 0)
-      parameters.maxBitrate = Math.floor(bitrate);
-    const video = entry.videoSettings;
-    if (sourceKind(entry) === "video") {
-      if (
-        Number.isFinite(Number(video?.frameRate)) &&
-        Number(video?.frameRate) > 0
-      )
-        parameters.maxFramerate = Number(video?.frameRate);
-      if (
-        Number.isFinite(Number(video?.scaleResolutionDownBy)) &&
-        Number(video?.scaleResolutionDownBy) >= 1
-      )
-        parameters.scaleResolutionDownBy = Number(video?.scaleResolutionDownBy);
+    const kind = sourceKind(entry);
+    if (kind === "video") {
+      const video = resolveNativeCaptureVideoSettings(
+        entry.captureSelection,
+        entry.videoSettings || undefined,
+      );
+      const resolutionKey = String(
+        video.resolution || "",
+      ) as keyof typeof VIDEO_RESOLUTIONS;
+      const resolution = VIDEO_RESOLUTIONS[resolutionKey];
+      const options = buildVideoProduceOptions({
+        width: video.width || resolution?.width || 1920,
+        height: video.height || resolution?.height || 1080,
+        frameRate: video.frameRate || 60,
+        qualityPriority: video.qualityPriority || "framerate",
+        screen: entry.source === "screen",
+        maxBitrate: video.maxBitrate || captureSelection?.video?.maxBitrateBps,
+      });
+      const encoding = options.encodings?.[0];
+      if (encoding) {
+        parameters.maxBitrate = encoding.maxBitrate;
+        parameters.maxFramerate = encoding.maxFramerate;
+        parameters.scaleResolutionDownBy = encoding.scaleResolutionDownBy;
+        parameters.degradationPreference = options.degradationPreference;
+      }
+    } else {
+      const policy = getAudioCodecPolicy(
+        entry.source === "screen-audio" ? "shared-audio" : "microphone",
+        entry.audioStereo === true,
+      );
+      const bitrate = Number(
+        entry.audioBitrate ||
+          captureSelection?.audio?.maxBitrateBps ||
+          policy.maxBitrateBps,
+      );
+      if (Number.isFinite(bitrate) && bitrate > 0)
+        parameters.maxBitrate = Math.floor(bitrate);
     }
     try {
       await this.invoke("media_p2p_set_track_parameters", {

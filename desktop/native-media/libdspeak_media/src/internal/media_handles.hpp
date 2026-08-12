@@ -16,8 +16,14 @@
 #include <media/base/audio_source.h>
 #include <rtc_base/synchronization/mutex.h>
 
+#if !defined(DSPEAK_MEDIA_WITH_MEDIASOUP)
+#define DSPEAK_MEDIA_WITH_MEDIASOUP 1
+#endif
+
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
 #include <Device.hpp>
 #include <Transport.hpp>
+#endif
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
 #include <api/data_channel_interface.h>
@@ -230,6 +236,7 @@ private:
 /* C API: Create/Destroy tracks                                       */
 /* ────────────────────────────────────────────────────────────────── */
 
+#if DSPEAK_MEDIA_WITH_MEDIASOUP
 struct lib_dspeak_media_device {
     std::unique_ptr<mediasoupclient::Device> device;
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
@@ -254,6 +261,12 @@ struct lib_dspeak_media_recv_transport {
     mediasoupclient::RecvTransport* transport = nullptr;
     CxxRecvListener* listener = nullptr;
 };
+#else
+struct lib_dspeak_media_device {};
+struct lib_dspeak_media_consumer {};
+struct lib_dspeak_media_send_transport {};
+struct lib_dspeak_media_recv_transport {};
+#endif
 
 struct lib_dspeak_media_video_track {
 #if defined(__APPLE__)
