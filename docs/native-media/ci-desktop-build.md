@@ -75,10 +75,10 @@ the `DSPEAK_TAURI_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY`, and optional
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub secrets. The same signing keypair
 must be retained for the lifetime of the installed desktop clients.
 
-The release tag must match the canonical root `package.json` version. CI runs
-`bun run release:sync` and `bun run release:check` before building. For local
-Tauri builds, run `bun run release:sync` after a version bump to verify that
-`tauri.conf.json`, `Cargo.toml`, and the lockfiles are synchronized.
+For automatic releases, the `v*` tag is the release version. CI synchronizes
+`package.json`, `tauri.conf.json`, `Cargo.toml`, and both lockfiles to that tag
+immediately after checkout, before downloading native media or installing
+dependencies. Manual builds continue to use the root `package.json` version.
 
 ## Prerequisites and notes
 

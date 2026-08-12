@@ -67,6 +67,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
+      - name: Synchronize release version
+        env:
+          DSPEAK_RELEASE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || '' }}
+        run: node scripts/sync-release-version.mjs --write
+
       - name: Resolve native media source
         id: resolve
         env:
@@ -163,9 +168,6 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Synchronize release version
-        run: bun run release:sync
-
       - name: Verify synchronized release version
         run: bun run release:check
 
@@ -213,6 +215,8 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Synchronize release version
+        env:
+          DSPEAK_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
         run: node scripts/sync-release-version.mjs --write
 
       - name: Verify release tag version

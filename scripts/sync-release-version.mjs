@@ -107,6 +107,7 @@ export function findVersionMismatches(state) {
 
 export function synchronizeVersionContents({
   version,
+  packageJson,
   packageLock,
   tauriConfig,
   cargoToml,
@@ -114,6 +115,10 @@ export function synchronizeVersionContents({
 }) {
   const normalizedVersion = normalizeVersion(version);
   return {
+    packageJson: {
+      ...packageJson,
+      version: normalizedVersion,
+    },
     packageLock: {
       ...packageLock,
       version: normalizedVersion,
@@ -173,6 +178,11 @@ async function readVersionFiles() {
 async function writeSynchronizedFiles(files) {
   await Promise.all([
     writeFile(
+      versionFiles.packageJson,
+      `${JSON.stringify(files.packageJson, null, 2)}\n`,
+      "utf8",
+    ),
+    writeFile(
       versionFiles.packageLock,
       `${JSON.stringify(files.packageLock, null, 2)}\n`,
       "utf8",
@@ -198,18 +208,19 @@ export async function main(args = process.argv.slice(2)) {
   const files = await readVersionFiles();
   const canonicalVersion = normalizeVersion(files.state.packageJson);
   const releaseTag = releaseTagFromArguments(args);
+  const releaseVersion = releaseTag
+    ? releaseVersionFromTag(releaseTag)
+    : canonicalVersion;
 
-  if (releaseTag) {
-    const tagVersion = releaseVersionFromTag(releaseTag);
-    if (tagVersion !== canonicalVersion)
-      throw new Error(
-        `Release tag ${releaseTag} does not match package version ${canonicalVersion}`,
-      );
-  }
+  if (releaseTag && !write && releaseVersion !== canonicalVersion)
+    throw new Error(
+      `Release tag ${releaseTag} does not match package version ${canonicalVersion}`,
+    );
 
   if (write) {
     const synchronized = synchronizeVersionContents({
-      version: canonicalVersion,
+      version: releaseVersion,
+      packageJson: files.parsed.packageJson,
       packageLock: files.parsed.packageLock,
       tauriConfig: files.parsed.tauriConfig,
       cargoToml: files.raw.cargoToml,
@@ -226,7 +237,7 @@ export async function main(args = process.argv.slice(2)) {
     );
 
   console.log(
-    `Release version ${canonicalVersion} is synchronized${releaseTag ? ` for ${releaseTag}` : ""}`,
+    `Release version ${releaseVersion} is synchronized${releaseTag ? ` for ${releaseTag}` : ""}`,
   );
 }
 

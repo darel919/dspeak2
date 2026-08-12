@@ -35,6 +35,7 @@ test("synchronization updates every downstream release manifest", () => {
   const source = versionFiles();
   const next = synchronizeVersionContents({
     version: "3.0.0-alpha.1",
+    packageJson: source.packageJson,
     packageLock: source.packageLock,
     tauriConfig: source.tauriConfig,
     cargoToml: source.cargoToml,
@@ -49,6 +50,7 @@ test("synchronization updates every downstream release manifest", () => {
   });
 
   assert.deepEqual(findVersionMismatches(state), []);
+  assert.equal(next.packageJson.version, "3.0.0-alpha.1");
   assert.equal(next.tauriConfig.version, "3.0.0-alpha.1");
   assert.match(next.cargoToml, /version = "3\.0\.0-alpha\.1"/);
   assert.match(next.cargoLock, /version = "3\.0\.0-alpha\.1"/);
@@ -58,6 +60,7 @@ test("synchronization is idempotent for an already current Cargo manifest", () =
   const source = versionFiles("3.0.0-alpha.1");
   const next = synchronizeVersionContents({
     version: "3.0.0-alpha.1",
+    packageJson: source.packageJson,
     packageLock: source.packageLock,
     tauriConfig: source.tauriConfig,
     cargoToml: source.cargoToml,
@@ -91,6 +94,7 @@ test("synchronization accepts alternate Cargo line endings", () => {
     const source = versionFiles();
     const next = synchronizeVersionContents({
       version: "3.0.0-alpha.1",
+      packageJson: source.packageJson,
       packageLock: source.packageLock,
       tauriConfig: source.tauriConfig,
       cargoToml: source.cargoToml.replaceAll("\n", lineEnding),
