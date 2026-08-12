@@ -16,12 +16,17 @@ export class NativeCloudflareLifecycleMethods {
     const connected = this.iceState === 2 || this.iceState === 3;
     const failed = this.iceState === 4;
     const state = connected ? "connected" : failed ? "failed" : "new";
+    const sendRequired = this.producers.size > 0;
+    const receiveRequired = this.publications.size > 0;
     return {
-      ready: !this.closed && connected,
+      ready:
+        !this.closed &&
+        (connected ||
+          (!sendRequired && !receiveRequired && Boolean(this.sessionId))),
       send: state,
       recv: state,
-      sendRequired: this.producers.size > 0,
-      receiveRequired: this.publications.size > 0,
+      sendRequired,
+      receiveRequired,
     };
   }
 

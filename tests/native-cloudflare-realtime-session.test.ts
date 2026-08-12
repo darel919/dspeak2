@@ -17,6 +17,43 @@ function localOffer(trackId, kind = "audio", includeTrackId = true) {
 }
 
 describe("NativeCloudflareRealtimeSession", () => {
+  it("reports a bootstrapped session ready before media is added", async () => {
+    let session;
+    const invoke = async (command) => {
+      if (command === "media_p2p_create") return { handle: 6 };
+      if (command === "media_p2p_poll_ice_candidate") return null;
+      return {};
+    };
+    const send = (message) => {
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation } = message.data;
+      const result =
+        operation === "new-session" ? { sessionId: "native-session" } : {};
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", { requestId, result }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({
+      invoke,
+      send,
+      sources: new Map(),
+      producers: new Map(),
+      consumers: new Map(),
+    });
+
+    await session.initialize();
+
+    assert.deepEqual(session.connectionState(), {
+      ready: true,
+      send: "new",
+      recv: "new",
+      sendRequired: false,
+      receiveRequired: false,
+    });
+    await session.closeMedia();
+  });
+
   it("uses the Cloudflare raw SDP lifecycle on a native PeerConnection", async () => {
     const calls = [];
     const sources = new Map();

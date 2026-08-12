@@ -78,10 +78,13 @@ export class NativeMediasoupSignalingMethods {
           this.reportProviderFailure("native-cloudflare-transport-failed");
         this._emitState();
       },
-      onError: (error: unknown) =>
-        this.onError?.(
-          error instanceof Error ? error : new Error(String(error)),
-        ),
+      onError: (error: unknown) => {
+        const failure =
+          error instanceof Error ? error : new Error(String(error));
+        this.error = failure;
+        this.onError?.(failure);
+        this._emitState();
+      },
       getAudioBitrate: this.getAudioBitrate,
       getAudioStereo: this.getAudioStereo,
       getVideoSettings: this.getVideoSettings,
