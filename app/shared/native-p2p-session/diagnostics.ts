@@ -173,7 +173,8 @@ export class NativeP2pSessionDiagnosticsMethods {
   ) {
     const normalizedSource = String(source || "");
     const maxBitrate = Number(parameters.maxBitrate);
-    if (!Number.isFinite(maxBitrate) || maxBitrate <= 0) return false;
+    const entry = this.sources.get(normalizedSource);
+    if (!entry || !Number.isFinite(maxBitrate) || maxBitrate <= 0) return false;
     await Promise.all(
       [...this.peers.values()].map((peer) =>
         this._setSourceParameters(peer, normalizedSource, parameters),

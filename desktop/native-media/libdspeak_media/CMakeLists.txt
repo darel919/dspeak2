@@ -9,9 +9,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Native media dependency bundle path.
-# Must contain:
-#   include/   – libmediasoupclient and libwebrtc headers
-#   lib/       – libwebrtc.a + libmediasoupclient.a
+# Must contain libwebrtc headers and libraries. Mediasoup headers and libraries
+# are required only when DSPEAK_MEDIA_WITH_MEDIASOUP is enabled.
 if(NOT DEFINED ENV{NATIVE_MEDIA_ARTIFACT_DIR})
   set(NATIVE_MEDIA_ARTIFACT_DIR "" CACHE PATH "Path to native-media bundle (include/ + lib/)")
 else()
@@ -29,6 +28,15 @@ if(NOT NATIVE_MEDIA_ARTIFACT_DIR)
   message(FATAL_ERROR "NATIVE_MEDIA_ARTIFACT_DIR not set. Point it to the unpacked native-media bundle.")
 endif()
 
+option(DSPEAK_MEDIA_WITH_MEDIASOUP
+  "Build the self-hosted mediasoup SFU transport"
+  ON
+)
+if(DEFINED ENV{NATIVE_MEDIA_WITH_MEDIASOUP})
+  set(DSPEAK_MEDIA_WITH_MEDIASOUP $ENV{NATIVE_MEDIA_WITH_MEDIASOUP} CACHE BOOL
+    "Build the self-hosted mediasoup SFU transport" FORCE)
+endif()
+
 message(STATUS "NATIVE_MEDIA_ARTIFACT_DIR  : ${NATIVE_MEDIA_ARTIFACT_DIR}")
 message(STATUS "NATIVE_MEDIA_BUILD_DIR     : ${NATIVE_MEDIA_BUILD_DIR}")
 
@@ -41,25 +49,36 @@ if(NOT EXISTS "${NATIVE_MEDIA_ARTIFACT_DIR}/lib")
 endif()
 
 if(WIN32)
-  set(DSPEAK_MEDIA_REQUIRED_LIBRARIES
+  set(DSPEAK_MEDIA_CORE_LIBRARIES
     "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/dspeak_media.lib"
-    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/mediasoupclient.lib"
-    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/sdptransform.lib"
     "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/webrtc.lib"
   )
+  set(DSPEAK_MEDIA_MEDIASOUP_LIBRARIES
+    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/mediasoupclient.lib"
+    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/sdptransform.lib"
+  )
 else()
-  set(DSPEAK_MEDIA_REQUIRED_LIBRARIES
+  set(DSPEAK_MEDIA_CORE_LIBRARIES
     "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libdspeak_media.a"
-    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libmediasoupclient.a"
-    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libsdptransform.a"
     "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libwebrtc.a"
   )
+  set(DSPEAK_MEDIA_MEDIASOUP_LIBRARIES
+    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libmediasoupclient.a"
+    "${NATIVE_MEDIA_ARTIFACT_DIR}/lib/libsdptransform.a"
+  )
 endif()
-foreach(required_library IN LISTS DSPEAK_MEDIA_REQUIRED_LIBRARIES)
+foreach(required_library IN LISTS DSPEAK_MEDIA_CORE_LIBRARIES)
   if(NOT EXISTS "${required_library}")
     message(FATAL_ERROR "Native media artifact is missing ${required_library}")
   endif()
 endforeach()
+if(DSPEAK_MEDIA_WITH_MEDIASOUP)
+  foreach(required_library IN LISTS DSPEAK_MEDIA_MEDIASOUP_LIBRARIES)
+    if(NOT EXISTS "${required_library}")
+      message(FATAL_ERROR "Native media artifact is missing ${required_library}")
+    endif()
+  endforeach()
+endif()
 
 if(WIN32)
   include(CheckIncludeFileCXX)
@@ -112,6 +131,7 @@ message(STATUS "Linux PipeWire/SPA dependencies: ${DSPEAK_MEDIA_LINUX_PIPEWIRE_D
 message(STATUS "Linux X11 dependencies: ${DSPEAK_MEDIA_LINUX_X11_DEPS}")
 message(STATUS "Windows Graphics Capture dependencies: ${DSPEAK_MEDIA_WINDOWS_WGC_DEPS}")
 message(STATUS "Windows WASAPI dependencies: ${DSPEAK_MEDIA_WINDOWS_WASAPI_DEPS}")
+message(STATUS "Mediasoup self-hosted SFU transport: ${DSPEAK_MEDIA_WITH_MEDIASOUP}")
 
 find_path(LIBSDPTRANSFORM_INCLUDE_DIR json.hpp
   PATHS
@@ -125,6 +145,11 @@ endif()
 
 # ── Library target ─────────────────────────────────────────
 file(GLOB_RECURSE LIB_DSPEAK_MEDIA_SOURCES CONFIGURE_DEPENDS src/*.cpp src/internal/*.cpp)
+if(DSPEAK_MEDIA_WITH_MEDIASOUP)
+  list(FILTER LIB_DSPEAK_MEDIA_SOURCES EXCLUDE REGEX "sfu_transport_stub\\.cpp$")
+else()
+  list(FILTER LIB_DSPEAK_MEDIA_SOURCES EXCLUDE REGEX "sfu_transport\\.cpp$")
+endif()
 if(APPLE)
   list(APPEND LIB_DSPEAK_MEDIA_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCapture.mm
@@ -145,6 +170,7 @@ target_compile_definitions(lib_dspeak_media PRIVATE
   DSPEAK_MEDIA_LINUX_X11_DEPS=${DSPEAK_MEDIA_LINUX_X11_DEPS}
   DSPEAK_MEDIA_WINDOWS_WGC_DEPS=${DSPEAK_MEDIA_WINDOWS_WGC_DEPS}
   DSPEAK_MEDIA_WINDOWS_WASAPI_DEPS=${DSPEAK_MEDIA_WINDOWS_WASAPI_DEPS}
+  DSPEAK_MEDIA_WITH_MEDIASOUP=$<BOOL:${DSPEAK_MEDIA_WITH_MEDIASOUP}>
 )
 
 
@@ -167,9 +193,14 @@ link_directories(${NATIVE_MEDIA_ARTIFACT_DIR}/lib)
 target_link_libraries(lib_dspeak_media
   PUBLIC
     webrtc
-    mediasoupclient
-    sdptransform
 )
+if(DSPEAK_MEDIA_WITH_MEDIASOUP)
+  target_link_libraries(lib_dspeak_media
+    PUBLIC
+      mediasoupclient
+      sdptransform
+  )
+endif()
 
 # macOS-specific: define WEBRTC_MAC so libwebrtc headers resolve properly.
 if(APPLE)

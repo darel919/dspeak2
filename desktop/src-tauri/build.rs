@@ -1,9 +1,32 @@
+fn env_flag(name: &str) -> Option<bool> {
+    match std::env::var(name).ok()?.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn artifact_mediasoup_mode(artifact_dir: &std::path::Path) -> Option<bool> {
+    let marker = artifact_dir.join("native-media-features");
+    let contents = std::fs::read_to_string(marker).ok()?;
+    let value = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("mediasoup="))?;
+    match value.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
 fn main() {
     tauri_build::build();
     println!("cargo:rustc-check-cfg=cfg(native_rtc)");
+    println!("cargo:rustc-check-cfg=cfg(native_mediasoup)");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=NATIVE_MEDIA_ARTIFACT_DIR");
     println!("cargo:rerun-if-env-changed=NATIVE_MEDIA_BUILD_DIR");
+    println!("cargo:rerun-if-env-changed=NATIVE_MEDIA_WITH_MEDIASOUP");
 
     let artifact_dir = std::env::var_os("NATIVE_MEDIA_ARTIFACT_DIR").unwrap_or_else(|| {
         panic!(
@@ -18,12 +41,22 @@ fn main() {
     let json_from_build = build_dir
         .as_ref()
         .map(|path| path.join("_deps/libsdptransform-src/include/json.hpp"));
-    let required_libraries = if cfg!(target_os = "windows") {
+    let core_libraries = if cfg!(target_os = "windows") {
         vec![
             vec![
                 lib_dir.join("dspeak_media.lib"),
                 lib_dir.join("libdspeak_media.lib"),
             ],
+            vec![lib_dir.join("webrtc.lib"), lib_dir.join("libwebrtc.lib")],
+        ]
+    } else {
+        vec![
+            vec![lib_dir.join("libdspeak_media.a")],
+            vec![lib_dir.join("libwebrtc.a")],
+        ]
+    };
+    let mediasoup_libraries = if cfg!(target_os = "windows") {
+        vec![
             vec![
                 lib_dir.join("mediasoupclient.lib"),
                 lib_dir.join("libmediasoupclient.lib"),
@@ -32,16 +65,33 @@ fn main() {
                 lib_dir.join("sdptransform.lib"),
                 lib_dir.join("libsdptransform.lib"),
             ],
-            vec![lib_dir.join("webrtc.lib"), lib_dir.join("libwebrtc.lib")],
         ]
     } else {
         vec![
-            vec![lib_dir.join("libdspeak_media.a")],
             vec![lib_dir.join("libmediasoupclient.a")],
             vec![lib_dir.join("libsdptransform.a")],
-            vec![lib_dir.join("libwebrtc.a")],
         ]
     };
+    let mediasoup_available = mediasoup_libraries
+        .iter()
+        .all(|candidates| candidates.iter().any(|path| path.is_file()));
+    let requested_mediasoup = env_flag("NATIVE_MEDIA_WITH_MEDIASOUP");
+    let marked_mediasoup = artifact_mediasoup_mode(&artifact_dir);
+    if let (Some(requested), Some(marked)) = (requested_mediasoup, marked_mediasoup) {
+        if requested != marked {
+            panic!(
+                "native media artifact feature marker requires NATIVE_MEDIA_WITH_MEDIASOUP={}",
+                if marked { 1 } else { 0 }
+            );
+        }
+    }
+    let with_mediasoup = requested_mediasoup
+        .or(marked_mediasoup)
+        .unwrap_or(mediasoup_available);
+    let mut required_libraries = core_libraries;
+    if with_mediasoup {
+        required_libraries.extend(mediasoup_libraries.iter().cloned());
+    }
     for candidates in &required_libraries {
         for path in candidates {
             println!("cargo:rerun-if-changed={}", path.display());
@@ -63,8 +113,16 @@ fn main() {
         .collect::<Vec<_>>();
     if !missing.is_empty() {
         panic!(
-            "native media artifact is incomplete; desktop builds require libwebrtc/libmediasoupclient: {}",
+            "native media artifact is incomplete for the selected native transport features: {}",
             missing.join(", ")
+        );
+    }
+
+    if with_mediasoup {
+        println!("cargo:rustc-cfg=native_mediasoup");
+    } else {
+        println!(
+            "cargo:warning=mediasoupclient is disabled; native Cloudflare/P2P transport remains available and self-hosted SFU commands fail closed"
         );
     }
 
@@ -88,8 +146,10 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=dspeak_media");
-    println!("cargo:rustc-link-lib=static=mediasoupclient");
-    println!("cargo:rustc-link-lib=static=sdptransform");
+    if with_mediasoup {
+        println!("cargo:rustc-link-lib=static=mediasoupclient");
+        println!("cargo:rustc-link-lib=static=sdptransform");
+    }
     println!("cargo:rustc-link-lib=static=webrtc");
 
     if cfg!(target_os = "macos") {

@@ -109,6 +109,14 @@ int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* h, lib_d
 int lib_dspeak_media_p2p_add_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
 int lib_dspeak_media_p2p_remove_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track);
 int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
+int lib_dspeak_media_p2p_replace_video_track(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_video_track_t* old_track,
+    lib_dspeak_media_video_track_t* new_track);
+int lib_dspeak_media_p2p_replace_audio_track(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_audio_track_t* old_track,
+    lib_dspeak_media_audio_track_t* new_track);
 int lib_dspeak_media_p2p_set_track_parameters(
     lib_dspeak_media_p2p_handle_t* h,
     const char* track_id,

@@ -43,6 +43,7 @@ export class NativeP2pSession {
     this.sourceTransmission = new Map();
     this.remoteReceiving = new Map();
     this.trackEntries = new Map();
+    this.retiredTrackEntries = new Map();
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
     this.mode = "idle";

@@ -145,6 +145,7 @@ export class NativeP2pSessionLifecycleMethods {
       };
       const previous = this.trackEntries.get(trackId);
       if (previous) this.onRemoteTrackEnded?.(previous);
+      this.retiredTrackEntries.delete(`${peer.peerId}:${source}`);
       this.trackEntries.set(trackId, entry);
       if (!entry.receiving)
         void this.invoke("media_p2p_set_receive_enabled", {
@@ -167,6 +168,7 @@ export class NativeP2pSessionLifecycleMethods {
       if (entry) {
         entry.closed = true;
         this.trackEntries.delete(trackId);
+        this.retiredTrackEntries.set(`${peer.peerId}:${entry.source}`, entry);
         this.onRemoteTrackEnded?.(entry);
         this._emitState();
       }
@@ -359,6 +361,9 @@ export class NativeP2pSessionLifecycleMethods {
       } catch (error: unknown) {
         this.onError?.(error);
       }
+    }
+    for (const [key, entry] of this.retiredTrackEntries) {
+      if (entry.userId === peer.userId) this.retiredTrackEntries.delete(key);
     }
     try {
       await this.invoke("media_p2p_destroy", { p2pHandle: peer.handle });

@@ -20,11 +20,6 @@
 #include <string>
 #include <thread>
 
-#include <mediasoupclient.hpp>
-#include <Device.hpp>
-#include <Transport.hpp>
-#include <Producer.hpp>
-#include <Consumer.hpp>
 #include <api/create_peerconnection_factory.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
@@ -156,6 +151,43 @@ extern "C" int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_hand
     }
 }
 
+template <typename TrackHandle>
+static int replace_p2p_track(lib_dspeak_media_p2p_handle_t* handle,
+                             TrackHandle* old_track,
+                             TrackHandle* new_track) {
+    try {
+        if (!handle || !handle->pc || !handle->signaling_thread || !old_track ||
+            !old_track->track || !new_track || !new_track->track)
+            return -1;
+        const std::string expected_id = old_track->track->id();
+        return handle->signaling_thread->BlockingCall(
+            [handle, expected_id, new_track] {
+                for (const auto& sender : handle->pc->GetSenders()) {
+                    if (!sender->track() || sender->track()->id() != expected_id)
+                        continue;
+                    return sender->SetTrack(new_track->track.get()) ? 0 : -1;
+                }
+                return -1;
+            });
+    } catch (...) {
+        return -1;
+    }
+}
+
+extern "C" int lib_dspeak_media_p2p_replace_video_track(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_video_track_t* old_track,
+    lib_dspeak_media_video_track_t* new_track) {
+    return replace_p2p_track(handle, old_track, new_track);
+}
+
+extern "C" int lib_dspeak_media_p2p_replace_audio_track(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_audio_track_t* old_track,
+    lib_dspeak_media_audio_track_t* new_track) {
+    return replace_p2p_track(handle, old_track, new_track);
+}
+
 extern "C" int lib_dspeak_media_p2p_set_track_parameters(
     lib_dspeak_media_p2p_handle_t* handle,
     const char* track_id,
@@ -183,6 +215,19 @@ extern "C" int lib_dspeak_media_p2p_set_track_parameters(
                         encoding.bitrate_priority = native_priority_value(value["priority"]);
                     if (value.contains("networkPriority") && value["networkPriority"].is_string())
                         encoding.network_priority = native_priority(value["networkPriority"], webrtc::Priority::kLow);
+                }
+                if (value.contains("degradationPreference") &&
+                    value["degradationPreference"].is_string()) {
+                    const auto preference = value["degradationPreference"].get<std::string>();
+                    if (preference == "maintain-framerate")
+                        current.degradation_preference =
+                            webrtc::DegradationPreference::MAINTAIN_FRAMERATE;
+                    else if (preference == "maintain-resolution")
+                        current.degradation_preference =
+                            webrtc::DegradationPreference::MAINTAIN_RESOLUTION;
+                    else if (preference == "balanced")
+                        current.degradation_preference =
+                            webrtc::DegradationPreference::BALANCED;
                 }
                 return sender->SetParameters(current).ok() ? 0 : -1;
             }

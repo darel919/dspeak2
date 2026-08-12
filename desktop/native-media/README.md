@@ -17,7 +17,7 @@ pinned inputs in this file.
 
 ## Required artifacts
 
-The native media build must provide, for the target platform:
+The self-hosted SFU build must provide, for the target platform:
 
 ```text
 lib/libdspeak_media.a
@@ -26,6 +26,13 @@ lib/libmediasoupclient.a
 lib/libwebrtc.a
 include/                # libwebrtc, libmediasoupclient, and json.hpp headers
 ```
+
+Cloudflare Realtime and native P2P do not require the mediasoup libraries. A
+Cloudflare/P2P-only bundle contains `lib/libdspeak_media.a`,
+`lib/libwebrtc.a`, and the libwebrtc plus `json.hpp` headers. Build the shim
+with `-DDSPEAK_MEDIA_WITH_MEDIASOUP=OFF` and build Tauri with
+`NATIVE_MEDIA_WITH_MEDIASOUP=0`. The two settings must describe the same shim
+artifact.
 
 The Rust/Tauri application should link only against this prebuilt artifact
 bundle. It must not invoke `fetch`, `gclient`, CMake, or a package download from
@@ -79,10 +86,10 @@ the browser client: session creation, local and remote track negotiation,
 renegotiation, track closure, native receive rendering, and native RTP stats.
 No mediasoup signaling or mediasoup transport is used on that path.
 
-The current native artifact is a combined build, so it still links
-`libmediasoupclient` and `libsdptransform` for the self-hosted mediasoup path.
-Cloudflare does not remove the artifact or startup prerequisites until the
-native shim is split into separate Cloudflare-only and mediasoup builds.
+Self-hosted mediasoup remains available in the combined build. A Cloudflare-
+only build excludes that transport and returns a fail-closed unsupported error
+if the self-hosted path is selected; it does not silently fall back to browser
+WebRTC.
 
 ## Runtime state
 

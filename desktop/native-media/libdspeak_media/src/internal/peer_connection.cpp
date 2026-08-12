@@ -18,11 +18,6 @@
 #include <optional>
 #include <sstream>
 
-#include <mediasoupclient.hpp>
-#include <Device.hpp>
-#include <Transport.hpp>
-#include <Producer.hpp>
-#include <Consumer.hpp>
 #include <api/create_peerconnection_factory.h>
 #include <api/audio/create_audio_device_module.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
@@ -723,15 +718,18 @@ extern "C" int lib_dspeak_media_p2p_set_jitter_buffer(
     int min_delay_ms,
     int target_delay_ms)
 {
-    (void)target_delay_ms;
     if (!h || !h->signaling_thread || !track_id) return -1;
     const std::string id = track_id;
     const auto minimum_delay_ms = std::max(0, min_delay_ms);
-    return h->signaling_thread->BlockingCall([h, id, minimum_delay_ms] {
+    const auto target_delay = std::max(0, target_delay_ms);
+    return h->signaling_thread->BlockingCall([h, id, minimum_delay_ms, target_delay] {
         const auto receiver = h->audio_receivers.find(id);
         if (receiver == h->audio_receivers.end() || !receiver->second) return -1;
         receiver->second->SetJitterBufferMinimumDelay(
             static_cast<double>(minimum_delay_ms) / 1000.0);
+        const auto sink = h->audio_sinks_by_id.find(id);
+        if (sink == h->audio_sinks_by_id.end() || !sink->second) return -1;
+        sink->second->SetJitterBuffer(minimum_delay_ms, target_delay);
         return 0;
     });
 }

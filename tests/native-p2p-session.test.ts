@@ -392,6 +392,110 @@ describe("NativeP2pSession", () => {
     assert.equal(tracks.at(-1).source, "screen");
   });
 
+  it("replaces an attached native source without removing or renegotiating it", async () => {
+    const calls = [];
+    const messages = [];
+    let replacement = 0;
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 22 };
+        if (command === "media_p2p_add_track") return { trackId: "audio-1" };
+        if (command === "media_p2p_replace_track") {
+          replacement += 1;
+          return { trackId: `audio-${replacement + 1}` };
+        }
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+    });
+
+    await session.addSource({ source: "audio", kind: "audio" });
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 12,
+      localPeerId: "peer-z",
+      peers: [{ peerId: "peer-a", userId: "user-a" }],
+    });
+    calls.length = 0;
+    messages.length = 0;
+
+    await session.addSource({ source: "audio", kind: "audio" });
+
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_replace_track").length,
+      1,
+    );
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_remove_track").length,
+      0,
+    );
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_add_track").length,
+      0,
+    );
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_create_offer").length,
+      0,
+    );
+    assert.deepEqual(messages, [
+      {
+        targetPeerId: "peer-a",
+        epoch: 12,
+        signal: { sourceRestored: { source: "audio" } },
+      },
+    ]);
+    assert.equal(session.peers.get("peer-a").trackIds.get("audio"), "audio-2");
+  });
+
+  it("restores a retired native remote track without renegotiation", async () => {
+    const tracks = [];
+    const session = new NativeP2pSession({
+      invoke: async (command) => {
+        if (command === "media_p2p_create") return { handle: 24 };
+        return null;
+      },
+      onRemoteTrack: (entry) => tracks.push(["track", entry]),
+      onRemoteTrackEnded: (entry) => tracks.push(["ended", entry]),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 13,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    session.handleReceiveEvent({
+      kind: 4,
+      id: "audio-track",
+      payload: {
+        event: "track-added",
+        handle: 24,
+        trackId: "audio-track",
+        kind: "audio",
+      },
+    });
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 13,
+      signal: { source: { trackId: "audio-track", source: "audio" } },
+    });
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 13,
+      signal: { sourceRemoved: { source: "audio" } },
+    });
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 13,
+      signal: { sourceRestored: { source: "audio" } },
+    });
+
+    assert.equal(tracks.filter(([type]) => type === "ended").length, 1);
+    assert.equal(tracks.filter(([type]) => type === "track").length, 3);
+    assert.equal(session.trackEntries.get("audio-track").closed, false);
+  });
+
   it("applies native jitter configuration to remote audio receivers", async () => {
     const calls = [];
     const session = new NativeP2pSession({

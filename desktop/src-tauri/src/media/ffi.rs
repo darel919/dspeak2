@@ -188,6 +188,16 @@ extern "C" {
         handle: *mut c_void,
         track: *mut c_void,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_replace_video_track(
+        handle: *mut c_void,
+        old_track: *mut c_void,
+        new_track: *mut c_void,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_replace_audio_track(
+        handle: *mut c_void,
+        old_track: *mut c_void,
+        new_track: *mut c_void,
+    ) -> c_int;
     pub fn lib_dspeak_media_p2p_set_track_parameters(
         handle: *mut c_void,
         track_id: *const c_char,

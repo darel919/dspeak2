@@ -49,6 +49,7 @@ jobs:
       - name: Provision native media with dev-desktop logic
         env:
           NATIVE_MEDIA_PROVISION_MODE: source
+          NATIVE_MEDIA_WITH_MEDIASOUP: "0"
           NATIVE_MEDIA_TARGET_TRIPLE: ${{ matrix.target_triple }}
           NATIVE_MEDIA_ARTIFACT_DIR: .ci-native-media-${{ github.run_id }}/artifact
           NATIVE_MEDIA_BUILD_DIR: .ci-native-media-${{ github.run_id }}/build

@@ -892,8 +892,12 @@ extern "C" int lib_dspeak_media_consumer_set_jitter_buffer(
         if (!c || !c->consumer) return -1;
         auto* receiver = c->consumer->GetRtpReceiver();
         if (!receiver) return -1;
+        const auto minimum_delay_ms = std::max(0, min_delay_ms);
+        const auto target_delay = std::max(0, target_delay_ms);
         receiver->SetJitterBufferMinimumDelay(
-            static_cast<double>(min_delay_ms) / 1000.0);
+            static_cast<double>(minimum_delay_ms) / 1000.0);
+        if (c->audio_sink)
+            c->audio_sink->SetJitterBuffer(minimum_delay_ms, target_delay);
         return 0;
     } catch (...) {
         return -1;
