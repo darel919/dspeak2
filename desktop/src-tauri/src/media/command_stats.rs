@@ -16,7 +16,64 @@ fn parse_stats(value: String, label: &str) -> Result<Value, String> {
 }
 
 #[cfg(native_rtc)]
+fn append_video_stream_diagnostics(
+    value: &Value,
+    direction: &str,
+    owner: &str,
+    output: &mut Vec<Value>,
+) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                append_video_stream_diagnostics(value, direction, owner, output);
+            }
+        }
+        Value::Object(values) => {
+            let kind = values
+                .get("kind")
+                .or_else(|| values.get("mediaType"))
+                .and_then(Value::as_str);
+            if values.get("type").and_then(Value::as_str) == Some(direction)
+                && kind == Some("video")
+            {
+                let field = |name: &str| values.get(name).cloned().unwrap_or(Value::Null);
+                output.push(serde_json::json!({
+                    "owner": owner,
+                    "direction": direction,
+                    "id": field("id"),
+                    "codecId": field("codecId"),
+                    "frameWidth": field("frameWidth"),
+                    "frameHeight": field("frameHeight"),
+                    "framesPerSecond": field("framesPerSecond"),
+                    "framesEncoded": field("framesEncoded"),
+                    "framesDecoded": field("framesDecoded"),
+                    "framesDropped": field("framesDropped"),
+                    "totalEncodeTime": field("totalEncodeTime"),
+                    "totalDecodeTime": field("totalDecodeTime"),
+                    "encoderImplementation": field("encoderImplementation"),
+                    "decoderImplementation": field("decoderImplementation"),
+                    "qualityLimitationReason": field("qualityLimitationReason"),
+                    "powerEfficientEncoder": field("powerEfficientEncoder"),
+                    "powerEfficientDecoder": field("powerEfficientDecoder"),
+                }));
+            }
+            for value in values.values() {
+                append_video_stream_diagnostics(value, direction, owner, output);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+#[cfg(native_rtc)]
 pub(crate) fn collect_media_stats(store: &NativeMediaStore) -> Result<Value, String> {
+    let video_codec_diagnostics = store
+        .state
+        .lock()
+        .map_err(|_| "native media state lock poisoned".to_string())?
+        .capabilities
+        .video_codec_diagnostics
+        .clone();
     let handles = store
         .handles
         .lock()
@@ -26,6 +83,7 @@ pub(crate) fn collect_media_stats(store: &NativeMediaStore) -> Result<Value, Str
         .map_err(|error| error.to_string())?
         .as_millis();
     let mut transports = Vec::new();
+    let mut video_streams = Vec::new();
     if !handles.send_transport.is_null() {
         let stats = parse_stats(
             native::send_transport_get_stats(handles.send_transport)?,
@@ -60,6 +118,7 @@ pub(crate) fn collect_media_stats(store: &NativeMediaStore) -> Result<Value, Str
             native::producer_get_stats(*producer)?,
             "native producer stats",
         )?;
+        append_video_stream_diagnostics(&stats, "outbound-rtp", &producer_id, &mut video_streams);
         producers.push(serde_json::json!({
             "id": producer_id,
             "source": source,
@@ -73,6 +132,7 @@ pub(crate) fn collect_media_stats(store: &NativeMediaStore) -> Result<Value, Str
             native::consumer_get_stats(*consumer)?,
             "native consumer stats",
         )?;
+        append_video_stream_diagnostics(&stats, "inbound-rtp", &metadata.0, &mut video_streams);
         consumers.push(serde_json::json!({
             "id": metadata.0,
             "producerId": metadata.1,
@@ -87,7 +147,49 @@ pub(crate) fn collect_media_stats(store: &NativeMediaStore) -> Result<Value, Str
         "transports": transports,
         "producers": producers,
         "consumers": consumers,
+        "videoStreams": video_streams,
+        "videoCodecDiagnostics": video_codec_diagnostics,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_video_stream_diagnostics;
+    use serde_json::json;
+
+    #[test]
+    fn extracts_live_video_fields_from_nested_rtp_stats() {
+        let value = json!({
+            "stats": [
+                {
+                    "id": "outbound-video",
+                    "type": "outbound-rtp",
+                    "kind": "video",
+                    "frameWidth": 1920,
+                    "frameHeight": 1080,
+                    "framesPerSecond": 30,
+                    "totalEncodeTime": 12.5,
+                    "encoderImplementation": "libvpx",
+                    "qualityLimitationReason": "cpu"
+                },
+                {
+                    "id": "outbound-audio",
+                    "type": "outbound-rtp",
+                    "kind": "audio"
+                }
+            ]
+        });
+        let mut streams = Vec::new();
+
+        append_video_stream_diagnostics(&value, "outbound-rtp", "producer-1", &mut streams);
+
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0]["owner"], "producer-1");
+        assert_eq!(streams[0]["frameWidth"], 1920);
+        assert_eq!(streams[0]["framesPerSecond"], 30);
+        assert_eq!(streams[0]["encoderImplementation"], "libvpx");
+        assert_eq!(streams[0]["qualityLimitationReason"], "cpu");
+    }
 }
 
 #[cfg(native_rtc)]

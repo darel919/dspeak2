@@ -939,6 +939,48 @@
             </div>
           </section>
 
+          <section v-else-if="activeSection === 'desktop'" class="space-y-6">
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>Window close behavior</h2>
+                  <p>Choose what happens when you close the dSpeak window.</p>
+                </div>
+              </div>
+              <label class="settings-row">
+                <span class="settings-row-label">
+                  <Icon name="lucide:panel-top-close" />
+                  Close dSpeak window
+                  <small>
+                    Keep calls alive when minimizing to the tray, or exit the
+                    desktop application completely.
+                  </small>
+                </span>
+                <select
+                  class="metro-select w-full max-w-xs"
+                  :value="closeToTray ? 'tray' : 'exit'"
+                  :disabled="closePreferenceLoading"
+                  @change="setCloseToTray($event.target.value === 'tray')"
+                >
+                  <option value="tray">Minimize to tray</option>
+                  <option value="exit">Exit dSpeak</option>
+                </select>
+              </label>
+              <p
+                v-if="closePreferenceError"
+                class="border-t border-base-300 px-5 py-3 text-sm text-error"
+                role="alert"
+              >
+                {{ closePreferenceError }}
+              </p>
+              <p
+                class="border-t border-base-300 px-5 py-3 text-xs text-base-content/60"
+              >
+                Starting dSpeak on login always starts it minimized to the tray.
+              </p>
+            </div>
+          </section>
+
           <section v-else-if="activeSection === 'appearance'" class="space-y-6">
             <div class="settings-panel">
               <div class="settings-panel-heading">
@@ -1030,6 +1072,10 @@ import {
   VIDEO_RESOLUTION_OPTIONS,
 } from "../const/media";
 import { captureMicrophone } from "../shared/media-capture.ts";
+import {
+  invokeNativeDesktopMedia,
+  listenNativeDesktopMedia,
+} from "../shared/desktop-capture.ts";
 import { debugLog } from "../shared/debug";
 import {
   automaticGateThreshold,
@@ -1055,13 +1101,16 @@ const channelsStore = useChannelsStore();
 const activeSection = ref("account");
 const route = useRoute();
 const router = useRouter();
-const settingsNavigation = [
+const settingsNavigation = computed(() => [
   { id: "account", label: "Account", icon: "lucide:user-round" },
   { id: "voice", label: "Voice & Video", icon: "lucide:audio-lines" },
+  ...(runtimeStore.isTauri
+    ? [{ id: "desktop", label: "Desktop", icon: "lucide:monitor-cog" }]
+    : []),
   { id: "appearance", label: "Appearance", icon: "lucide:palette" },
   { id: "notifications", label: "Notifications", icon: "lucide:bell" },
   { id: "keyboard", label: "Keyboard", icon: "lucide:keyboard" },
-];
+]);
 const sectionDetails = {
   account: {
     title: "My account",
@@ -1071,6 +1120,10 @@ const sectionDetails = {
     title: "Voice & video",
     description:
       "Configure capture devices, call processing, and media quality.",
+  },
+  desktop: {
+    title: "Desktop",
+    description: "Configure the dSpeak desktop window and tray behavior.",
   },
   appearance: {
     title: "Appearance",
@@ -1086,11 +1139,14 @@ const sectionDetails = {
   },
 };
 const activeSectionMeta = computed(() => sectionDetails[activeSection.value]);
+const closeToTray = ref(true);
+const closePreferenceLoading = ref(false);
+const closePreferenceError = ref("");
 
 watch(
-  () => route.query.section,
-  (section) => {
-    if (settingsNavigation.some((item) => item.id === section)) {
+  () => [route.query.section, runtimeStore.isTauri],
+  ([section]) => {
+    if (settingsNavigation.value.some((item) => item.id === section)) {
       activeSection.value = section;
     }
   },
@@ -1130,6 +1186,33 @@ const audioProcessingOptions = [
 function goBack() {
   if (window.history.length > 1) router.back();
   else router.push("/");
+}
+
+async function loadDesktopClosePreference() {
+  if (!runtimeStore.isTauri) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    closeToTray.value = Boolean(await invoke("get_hide_on_close"));
+  } catch {
+    closePreferenceError.value = "Unable to read the desktop close preference.";
+  }
+}
+
+async function setCloseToTray(enabled) {
+  if (!runtimeStore.isTauri || closePreferenceLoading.value) return;
+  const previous = closeToTray.value;
+  closeToTray.value = enabled;
+  closePreferenceLoading.value = true;
+  closePreferenceError.value = "";
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_hide_on_close", { enabled });
+  } catch {
+    closeToTray.value = previous;
+    closePreferenceError.value = "Unable to save the desktop close preference.";
+  } finally {
+    closePreferenceLoading.value = false;
+  }
 }
 
 const audio = computed(() => settingsStore.audio);
@@ -1441,6 +1524,11 @@ let micCheckDurationTimer = null;
 let micCheckStopTimer = null;
 let nativeMicCheckRecording = false;
 let nativeMicCheckGeneration = 0;
+let nativeMicCheckStopPromise = Promise.resolve();
+let nativeSettingsMediaInitialized = false;
+let nativeSettingsMediaInitialization = null;
+let nativeSettingsMediaRelease = Promise.resolve();
+let nativeAudioTelemetryUnlisten = null;
 
 const effectiveGateEnabled = computed(
   () => microphoneGate.value.enabled && !hdAudioEnabled.value,
@@ -1476,26 +1564,48 @@ const microphonePreviewStatusClass = computed(() => {
 
 async function startMicrophonePreview() {
   const generation = ++microphonePreviewGeneration;
-  stopMicrophonePreviewResources();
+  const stopped = stopMicrophonePreviewResources();
   microphonePreviewLoading.value = true;
   microphonePreviewError.value = "";
   try {
+    await stopped;
+    if (generation !== microphonePreviewGeneration) return;
     if (runtimeStore.isTauri) {
-      const { invoke } = await import("@tauri-apps/api/core");
+      await ensureNativeSettingsMedia();
+      if (generation !== microphonePreviewGeneration) return;
       if (settingsStore.micDeviceId)
-        await invoke("media_set_microphone_device", {
+        await invokeNativeDesktopMedia("media_set_microphone_device", {
           deviceId: settingsStore.micDeviceId,
         });
+      if (generation !== microphonePreviewGeneration) return;
       const shouldOwnCapture = !voiceStore.connected || voiceStore.micMuted;
+      let ownsCapture = false;
       if (shouldOwnCapture) {
-        await invoke("media_set_microphone", { enabled: true });
+        await invokeNativeDesktopMedia("media_set_microphone", {
+          enabled: true,
+        });
+        ownsCapture = true;
+        if (generation !== microphonePreviewGeneration) {
+          if (!nativeMicrophonePreviewOwnsCapture)
+            await invokeNativeDesktopMedia("media_set_microphone", {
+              enabled: false,
+            }).catch(() => {});
+          return;
+        }
         nativeMicrophonePreviewOwnsCapture = true;
       }
       const noiseFloorEstimator = createNoiseFloorEstimator();
-      microphonePreviewTimer = setInterval(async () => {
-        try {
-          const levels = await invoke("media_get_audio_levels");
-          const levelDb = Math.max(-60, Number(levels?.microphoneDbfs) || -60);
+      const unlisten = await listenNativeDesktopMedia(
+        "media:native-receive-event",
+        (event) => {
+          if (generation !== microphonePreviewGeneration) return;
+          const nativeEvent = event && typeof event === "object" ? event : {};
+          if (Number(nativeEvent.kind) !== 7) return;
+          const levels =
+            nativeEvent.payload && typeof nativeEvent.payload === "object"
+              ? nativeEvent.payload
+              : {};
+          const levelDb = Math.max(-60, Number(levels.microphoneDbfs) || -60);
           const thresholdDb = microphoneGate.value.automatic
             ? automaticGateThreshold(noiseFloorEstimator.noiseFloorDb)
             : microphoneGate.value.thresholdDb;
@@ -1506,11 +1616,17 @@ async function startMicrophonePreview() {
             levelDb,
             levelDb >= thresholdDb,
           );
-        } catch {
-          microphoneLevelDbValue.value = -60;
-        }
-      }, 40);
-      if (generation !== microphonePreviewGeneration) return;
+        },
+      );
+      if (generation !== microphonePreviewGeneration) {
+        unlisten?.();
+        if (ownsCapture && !nativeMicrophonePreviewOwnsCapture)
+          await invokeNativeDesktopMedia("media_set_microphone", {
+            enabled: false,
+          }).catch(() => {});
+        return;
+      }
+      nativeAudioTelemetryUnlisten = unlisten;
       microphonePreviewReady.value = true;
       return;
     }
@@ -1570,15 +1686,36 @@ async function startMicrophonePreview() {
   }
 }
 
+async function ensureNativeSettingsMedia() {
+  if (!runtimeStore.isTauri || voiceStore.connected) return;
+  await nativeSettingsMediaRelease;
+  if (nativeSettingsMediaInitialized || voiceStore.connected) return;
+  if (!nativeSettingsMediaInitialization) {
+    nativeSettingsMediaInitialization = invokeNativeDesktopMedia(
+      "media_initialize",
+    )
+      .then(() => {
+        nativeSettingsMediaInitialized = true;
+      })
+      .finally(() => {
+        nativeSettingsMediaInitialization = null;
+      });
+  }
+  await nativeSettingsMediaInitialization;
+}
+
 function stopMicrophonePreviewResources() {
-  stopMicCheckRecorder(true);
+  const stoppedMicCheck = stopMicCheckRecorder(true);
   if (microphonePreviewTimer) clearInterval(microphonePreviewTimer);
   microphonePreviewTimer = null;
+  nativeAudioTelemetryUnlisten?.();
+  nativeAudioTelemetryUnlisten = null;
+  let stoppedCapture = Promise.resolve();
   if (nativeMicrophonePreviewOwnsCapture) {
     nativeMicrophonePreviewOwnsCapture = false;
-    import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke("media_set_microphone", { enabled: false }))
-      .catch(() => {});
+    stoppedCapture = invokeNativeDesktopMedia("media_set_microphone", {
+      enabled: false,
+    }).catch(() => {});
   }
   microphonePreviewSource?.disconnect();
   microphonePreviewAnalyser?.disconnect();
@@ -1593,11 +1730,34 @@ function stopMicrophonePreviewResources() {
   microphonePreviewDestination = null;
   microphonePreviewReady.value = false;
   microphoneLevelDbValue.value = -60;
+  const pendingInitialization =
+    nativeSettingsMediaInitialization || Promise.resolve();
+  const hasNativeSettingsMedia =
+    nativeSettingsMediaInitialized ||
+    Boolean(nativeSettingsMediaInitialization);
+  if (!hasNativeSettingsMedia || voiceStore.connected) {
+    return Promise.allSettled([
+      stoppedMicCheck,
+      stoppedCapture,
+      pendingInitialization,
+    ]);
+  }
+  nativeSettingsMediaInitialized = false;
+  const release = Promise.allSettled([
+    stoppedMicCheck,
+    stoppedCapture,
+    pendingInitialization,
+  ]).then(async () => {
+    if (!voiceStore.connected)
+      await invokeNativeDesktopMedia("media_shutdown").catch(() => {});
+  });
+  nativeSettingsMediaRelease = release;
+  return release;
 }
 
 function stopMicrophonePreview() {
   microphonePreviewGeneration += 1;
-  stopMicrophonePreviewResources();
+  stopMicrophonePreviewResources().catch(() => {});
   microphonePreviewLoading.value = false;
 }
 
@@ -1615,11 +1775,11 @@ function stopMicCheckTimers() {
 
 function stopMicCheckRecorder(discard = false) {
   stopMicCheckTimers();
+  if (discard) nativeMicCheckGeneration += 1;
   if (nativeMicCheckRecording) {
     nativeMicCheckRecording = false;
-    const generation = ++nativeMicCheckGeneration;
-    import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke("media_stop_microphone_check"))
+    const generation = nativeMicCheckGeneration;
+    const stopped = invokeNativeDesktopMedia("media_stop_microphone_check")
       .then((bytes) => {
         if (discard || generation !== nativeMicCheckGeneration) return;
         const values = Array.isArray(bytes) ? bytes : [];
@@ -1638,11 +1798,12 @@ function stopMicCheckRecorder(discard = false) {
           micCheckError.value = error?.message || "The mic check failed.";
       });
     micCheckRecording.value = false;
-    return;
+    nativeMicCheckStopPromise = stopped;
+    return stopped;
   }
   if (!micCheckRecorder) {
     micCheckRecording.value = false;
-    return;
+    return Promise.resolve();
   }
   if (discard) {
     micCheckRecorder.ondataavailable = null;
@@ -1652,6 +1813,7 @@ function stopMicCheckRecorder(discard = false) {
   if (discard) micCheckChunks = [];
   micCheckRecorder = null;
   micCheckRecording.value = false;
+  return nativeMicCheckStopPromise;
 }
 
 function stopMicCheck() {
@@ -1666,9 +1828,16 @@ function startMicCheck() {
       return;
     }
     clearMicCheck();
-    import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke("media_start_microphone_check"))
+    const generation = ++nativeMicCheckGeneration;
+    nativeMicCheckStopPromise
+      .catch(() => {})
+      .then(() => invokeNativeDesktopMedia("media_start_microphone_check"))
       .then(() => {
+        if (generation !== nativeMicCheckGeneration) {
+          return invokeNativeDesktopMedia("media_stop_microphone_check").catch(
+            () => {},
+          );
+        }
         nativeMicCheckRecording = true;
         micCheckSeconds.value = 0;
         micCheckRecording.value = true;
@@ -1678,8 +1847,9 @@ function startMicCheck() {
         micCheckStopTimer = setTimeout(stopMicCheck, 10000);
       })
       .catch((error) => {
-        micCheckError.value =
-          error?.message || "The native mic check could not start.";
+        if (generation === nativeMicCheckGeneration)
+          micCheckError.value =
+            error?.message || "The native mic check could not start.";
       });
     return;
   }
@@ -1754,8 +1924,6 @@ const videoDevices = ref([]);
 const devicesLoading = ref(false);
 const devicesError = ref("");
 const selectedDeviceId = ref("");
-let nativeDeviceRefreshTimer = null;
-let settingsMounted = false;
 const selectedMicrophoneUnavailable = computed(
   () =>
     Boolean(selectedDeviceId.value) &&
@@ -1763,15 +1931,13 @@ const selectedMicrophoneUnavailable = computed(
 );
 
 onMounted(async () => {
-  settingsMounted = true;
   await runtimeStore.initialize();
+  await loadDesktopClosePreference();
   selectedDeviceId.value = settingsStore.micDeviceId || "";
   selectedOutputId.value = settingsStore.outputDeviceId || "";
   selectedCameraId.value = settingsStore.cameraDeviceId || "";
   if (activeSection.value === "voice") await startMicrophonePreview();
   await refreshDevices();
-  if (settingsMounted && runtimeStore.isTauri)
-    nativeDeviceRefreshTimer = setInterval(() => refreshDevices(), 3000);
 });
 
 watch(activeSection, (section) => {
@@ -1787,8 +1953,13 @@ async function refreshDevices() {
   devicesError.value = "";
   try {
     if (runtimeStore.isTauri) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const nativeList = await invoke("media_get_devices");
+      await nativeSettingsMediaInitialization?.catch(() => {});
+      if (!voiceStore.connected) await nativeSettingsMediaRelease;
+      const command =
+        voiceStore.connected || nativeSettingsMediaInitialized
+          ? "media_get_devices"
+          : "media_prepare_devices";
+      const nativeList = await invokeNativeDesktopMedia(command);
       const list = Array.isArray(nativeList)
         ? nativeList.map((device) => {
             const sourceType =
@@ -1857,8 +2028,7 @@ async function onDeviceChange() {
   if (runtimeStore.isTauri) {
     if (!voiceStore.connected && !microphonePreviewReady.value) return;
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("media_set_microphone_device", {
+      await invokeNativeDesktopMedia("media_set_microphone_device", {
         deviceId: selectedDeviceId.value || "",
       });
     } catch {
@@ -1881,9 +2051,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  settingsMounted = false;
-  if (nativeDeviceRefreshTimer) clearInterval(nativeDeviceRefreshTimer);
-  nativeDeviceRefreshTimer = null;
+  stopMicrophonePreview();
   navigator.mediaDevices?.removeEventListener?.(
     "devicechange",
     handleMediaDevicesChanged,
@@ -1902,8 +2070,7 @@ async function onCameraDeviceChange() {
   settingsStore.setCameraDeviceId(selectedCameraId.value || null);
   if (!runtimeStore.isTauri || !voiceStore.connected) return;
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("media_set_camera_device", {
+    await invokeNativeDesktopMedia("media_set_camera_device", {
       deviceId: selectedCameraId.value || "",
     });
   } catch {
@@ -1915,8 +2082,9 @@ async function onOutputChange() {
   settingsStore.setOutputDeviceId(id);
   if (runtimeStore.isTauri && voiceStore.connected) {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("media_set_output_device", { deviceId: id || "" });
+      await invokeNativeDesktopMedia("media_set_output_device", {
+        deviceId: id || "",
+      });
     } catch {
       devicesError.value = "The selected speakers could not be used.";
       return;

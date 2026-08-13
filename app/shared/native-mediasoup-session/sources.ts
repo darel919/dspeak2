@@ -84,6 +84,7 @@ export class NativeMediasoupSourcesMethods {
           source: normalized.source,
           producerId: existing.id || `local:${normalized.source}`,
           native: true,
+          surfaceId: `local:${normalized.source}`,
           frame: null,
         });
       this._sendSourceState();
@@ -99,6 +100,7 @@ export class NativeMediasoupSourcesMethods {
         source: normalized.source,
         producerId: `local:${normalized.source}`,
         native: true,
+        surfaceId: `local:${normalized.source}`,
         frame: null,
       });
     }
@@ -123,6 +125,7 @@ export class NativeMediasoupSourcesMethods {
         source: normalized.source,
         producerId: producer?.id || `local:${normalized.source}`,
         native: true,
+        surfaceId: `local:${normalized.source}`,
         frame: null,
       });
     }
@@ -139,6 +142,7 @@ export class NativeMediasoupSourcesMethods {
             source: entry.source,
             producerId: producer?.id || `local:${entry.source}`,
             native: true,
+            surfaceId: `local:${entry.source}`,
             frame: null,
           });
         }
@@ -331,6 +335,34 @@ export class NativeMediasoupSourcesMethods {
     return true;
   }
 
+  async updateVideoParameters(
+    this: NativeMediasoupSfuSession,
+    source: string,
+    parameters: Record<string, unknown>,
+  ) {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.updateVideoParameters(source, parameters);
+    const producer = this.producers.get(String(source || ""));
+    if (!producer || producer.kind !== "video") return false;
+    const updates = Object.fromEntries(
+      Object.entries(parameters || {}).filter(([key, value]) => {
+        if (key === "maxFramerate")
+          return Number.isFinite(Number(value)) && Number(value) > 0;
+        if (key === "scaleResolutionDownBy")
+          return Number.isFinite(Number(value)) && Number(value) >= 1;
+        if (key === "maxBitrate")
+          return Number.isFinite(Number(value)) && Number(value) > 0;
+        return false;
+      }),
+    );
+    if (Object.keys(updates).length === 0) return false;
+    await this.invoke("media_set_producer_parameters", {
+      source: producer.source,
+      parameters: updates,
+    });
+    return true;
+  }
+
   _sendSourceState(this: NativeMediasoupSfuSession) {
     if (!this.signaling) return;
     this.signaling.send({
@@ -347,4 +379,5 @@ export interface NativeMediasoupSourcesMethods extends Omit<
   | "setSourceTransmission"
   | "updateAudioBitrate"
   | "updateVideoBitrate"
+  | "updateVideoParameters"
 > {}

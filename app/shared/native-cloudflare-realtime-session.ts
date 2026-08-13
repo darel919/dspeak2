@@ -63,7 +63,6 @@ export class NativeCloudflareRealtimeSession {
     this.sessionGeneration = 0;
     this.closed = true;
     this.iceState = 0;
-    this.candidateTimer = null;
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
     this.lastReceivedConsumerParams = null;

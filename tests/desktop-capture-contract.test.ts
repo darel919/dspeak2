@@ -170,6 +170,38 @@ describe("desktop capture contract", () => {
     });
   });
 
+  it("allows the native low-spec profile to cap screen capture before capture starts", () => {
+    const selection = createDesktopCaptureSelection(
+      {
+        sourceId: "display:main",
+        sourceType: "display",
+        bounds: { width: 2560, height: 1440 },
+        selfExcluded: true,
+        capabilities: { video: true, audio: true, stereo: true },
+      },
+      "video",
+    );
+    const request = desktopCaptureRequest(selection, {
+      video: {
+        resolution: "720p",
+        width: 1280,
+        height: 720,
+        frameRate: 15,
+        lowSpec: true,
+      },
+    });
+
+    assert.deepEqual(request.video, {
+      resolution: "720p",
+      frameRate: 15,
+      qualityPriority: "framerate",
+      width: 1280,
+      height: 720,
+      lowSpec: true,
+    });
+    assert.deepEqual(request.captureSelection.video, request.video);
+  });
+
   it("builds the exact native request for macOS system audio", () => {
     const selection = createDesktopCaptureSelection(
       {
@@ -206,5 +238,55 @@ describe("desktop capture contract", () => {
     assert.match(source, /@click="requestSystemAudioShare"/);
     assert.match(source, /:audio-only="capturePickerAudioOnly"/);
     assert.doesNotMatch(source, /@click="voiceStore\.toggleSystemAudioShare"/);
+  });
+
+  it("enumerates native sources through a short-lived media preparation probe", async () => {
+    const picker = await readFile(
+      "app/components/DesktopCapturePicker.vue",
+      "utf8",
+    );
+    const desktop = await readFile(
+      "desktop/src-tauri/src/desktop/mod.rs",
+      "utf8",
+    );
+    assert.match(picker, /media_prepare_capture/);
+    assert.doesNotMatch(picker, /media_list_capture_sources/);
+    assert.match(desktop, /media::media_prepare_capture/);
+  });
+
+  it("enumerates native devices through a short-lived media preparation probe", async () => {
+    const runtime = await readFile(
+      "app/composables/media/native-media-engine-observability.ts",
+      "utf8",
+    );
+    const command = await readFile(
+      "desktop/src-tauri/src/media/command_capture.rs",
+      "utf8",
+    );
+    assert.match(runtime, /media_prepare_devices/);
+    assert.match(command, /pub async fn media_prepare_devices/);
+    assert.match(command, /call_native_shutdown\(\)/);
+  });
+
+  it("passes the bounded camera profile into native capture", async () => {
+    const session = await readFile(
+      "app/composables/media/native-media-engine-session.ts",
+      "utf8",
+    );
+    const command = await readFile(
+      "desktop/src-tauri/src/media/command_capture.rs",
+      "utf8",
+    );
+    const bridge = await readFile(
+      "desktop/native-media/libdspeak_media/src/internal/device_capture_bridge.cpp",
+      "utf8",
+    );
+    assert.match(
+      session,
+      /videoSettings: engine\.getVideoSettings\?\.\("camera"\)/,
+    );
+    assert.match(command, /start_camera_capture\(settings\.as_ptr\(\)/);
+    assert.match(bridge, /camera_profile_from_json/);
+    assert.match(bridge, /std::clamp\(profile\.frame_rate, 15u, 60u\)/);
   });
 });

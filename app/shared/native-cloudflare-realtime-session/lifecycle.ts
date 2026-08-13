@@ -207,8 +207,6 @@ export class NativeCloudflareLifecycleMethods {
   closeMedia() {
     this.sessionGeneration += 1;
     this.closed = true;
-    if (this.candidateTimer) clearTimeout(this.candidateTimer);
-    this.candidateTimer = null;
     const handle = this.handle;
     this.handle = null;
     this.sessionId = null;
@@ -289,30 +287,6 @@ export class NativeCloudflareLifecycleMethods {
     } catch (error) {
       this.onError?.(error);
     }
-  }
-
-  _startCandidateDrain() {
-    const poll = async () => {
-      if (this.closed || this.handle == null) return;
-      try {
-        let candidate = await this.invoke("media_p2p_poll_ice_candidate", {
-          p2pHandle: this.handle,
-        });
-        while (candidate)
-          candidate = await this.invoke("media_p2p_poll_ice_candidate", {
-            p2pHandle: this.handle,
-          });
-      } catch (error) {
-        this.onError?.(
-          asError(error, "Native Cloudflare ICE candidate polling failed"),
-        );
-      }
-      if (!this.closed) {
-        this.candidateTimer = setTimeout(poll, 50);
-        this.candidateTimer.unref?.();
-      }
-    };
-    poll();
   }
 
   _emitState() {

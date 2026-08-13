@@ -173,6 +173,8 @@ if(APPLE)
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCaptureScreen.mm
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCaptureDevices.mm
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCaptureDevice.mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/VideoSurfaceMacos.mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/VideoToolboxCodecsMacos.mm
   )
 elseif(WIN32)
   list(APPEND LIB_DSPEAK_MEDIA_SOURCES
@@ -181,6 +183,8 @@ elseif(WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsAudio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsSession.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsOutput.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/VideoSurfaceWindows.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/MediaFoundationCodecsWindows.cpp
   )
 endif()
 add_library(lib_dspeak_media STATIC ${LIB_DSPEAK_MEDIA_SOURCES})

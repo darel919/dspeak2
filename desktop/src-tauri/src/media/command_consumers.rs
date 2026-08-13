@@ -1,6 +1,7 @@
 #[cfg(native_rtc)]
 use super::ffi;
 use super::state::NativeMediaStore;
+#[cfg(native_rtc)]
 use std::ffi::CStr;
 use tauri::State;
 

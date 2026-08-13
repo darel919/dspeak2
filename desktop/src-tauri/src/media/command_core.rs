@@ -2,7 +2,7 @@ use super::startup::{call_native_shutdown, native_capabilities_value, try_native
 use super::state::{emit_state, lock_state, NativeMediaStore};
 use super::types::{NativeMediaCapabilities, NativeMediaState};
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 pub(crate) fn stop_native_captures() {
     #[cfg(native_rtc)]
@@ -18,15 +18,18 @@ pub(crate) fn stop_native_captures() {
 }
 
 pub(crate) fn shutdown_for_exit(store: &NativeMediaStore) {
+    let _lifecycle = store.lifecycle.lock().ok();
     store.stay_awake.release();
     #[cfg(native_rtc)]
     {
+        let _ = super::event_bridge::stop(&store.event_dispatcher);
         if let Ok(mut handles) = store.handles.lock() {
             handles.clear_all();
         }
     }
     stop_native_captures();
     call_native_shutdown();
+    store.worker.stop();
 }
 
 #[tauri::command]
@@ -35,6 +38,10 @@ pub async fn media_initialize(
     store: State<'_, NativeMediaStore>,
     config: Value,
 ) -> Result<NativeMediaState, String> {
+    let _lifecycle = store
+        .lifecycle
+        .lock()
+        .map_err(|_| "native media lifecycle lock poisoned".to_string())?;
     let snapshot = {
         let mut state = lock_state(&store)?;
 
@@ -65,6 +72,10 @@ pub async fn media_initialize(
             state.clone()
         }
     };
+    #[cfg(native_rtc)]
+    if snapshot.capabilities.native_rtc && snapshot.capabilities.native_backend_ready {
+        super::event_bridge::start(&app, &store.event_dispatcher)?;
+    }
     emit_state(&app, &snapshot);
     Ok(snapshot)
 }
@@ -94,6 +105,10 @@ pub async fn media_join(
 
 #[tauri::command]
 pub async fn media_leave(app: AppHandle, store: State<'_, NativeMediaStore>) -> Result<(), String> {
+    let _lifecycle = store
+        .lifecycle
+        .lock()
+        .map_err(|_| "native media lifecycle lock poisoned".to_string())?;
     store.stay_awake.release();
     #[cfg(native_rtc)]
     {
@@ -124,7 +139,13 @@ pub async fn media_shutdown(
     app: AppHandle,
     store: State<'_, NativeMediaStore>,
 ) -> Result<(), String> {
+    let _lifecycle = store
+        .lifecycle
+        .lock()
+        .map_err(|_| "native media lifecycle lock poisoned".to_string())?;
     store.stay_awake.release();
+    #[cfg(native_rtc)]
+    super::event_bridge::stop(&store.event_dispatcher)?;
     #[cfg(native_rtc)]
     store
         .handles
@@ -146,6 +167,11 @@ pub async fn media_shutdown(
         state.clone()
     };
     emit_state(&app, &snapshot);
+    if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(true) {
+            let _ = window.destroy();
+        }
+    }
     Ok(())
 }
 

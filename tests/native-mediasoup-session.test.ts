@@ -160,7 +160,7 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(session.producers.get("camera").kind, "video");
     assert.equal(session.producers.get("screen").kind, "video");
     assert.equal(calls[0][1].appData.encodings[0].priority, "high");
-    assert.equal(calls[2][1].appData.encodings[0].maxFramerate, 60);
+    assert.equal(calls[2][1].appData.encodings[0].maxFramerate, 30);
   });
 
   it("passes the provider signaling URL under the provider socket contract", async () => {
@@ -273,7 +273,7 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(session.connectionPhase, "idle");
   });
 
-  it("attaches native local video frames to the camera feed", async () => {
+  it("attaches a native local video surface to the camera feed", async () => {
     const session = new NativeMediasoupSfuSession({
       invoke: async (command, payload) => {
         if (command === "media_create_capture_producer")
@@ -293,22 +293,15 @@ describe("NativeMediasoupSfuSession", () => {
         id: "camera",
         payload: {
           source: "camera",
-          width: 640,
-          height: 360,
-          pixelFormat: "rgba",
+          surfaceId: "local:camera",
         },
-        data: new Uint8Array([1, 2, 3, 4]),
       }),
       true,
     );
-    assert.deepEqual(session.localVideoFeeds.get("camera").frame, {
-      source: "camera",
-      width: 640,
-      height: 360,
-      pixelFormat: "rgba",
-      data: new Uint8Array([1, 2, 3, 4]),
-      eventId: 12,
-    });
+    assert.equal(
+      session.localVideoFeeds.get("camera").surfaceId,
+      "local:camera",
+    );
   });
 
   it("recreates a native local video feed if transport state cleared its map", async () => {
@@ -332,16 +325,16 @@ describe("NativeMediasoupSfuSession", () => {
         id: "camera",
         payload: {
           source: "camera",
-          width: 640,
-          height: 360,
-          pixelFormat: "rgba",
+          surfaceId: "local:camera",
         },
-        data: new Uint8Array([1, 2, 3, 4]),
       }),
       true,
     );
     assert.equal(session.localVideoFeeds.get("camera").native, true);
-    assert.equal(session.localVideoFeeds.get("camera").frame.eventId, 13);
+    assert.equal(
+      session.localVideoFeeds.get("camera").surfaceId,
+      "local:camera",
+    );
   });
 
   it("uses the shared audio and screen video producer policy", async () => {
@@ -811,14 +804,14 @@ describe("NativeMediasoupSfuSession", () => {
         payload: {
           width: 2,
           height: 1,
+          surfaceId: "consumer-native",
         },
-        data: "AQIDBA==",
       }),
       true,
     );
     assert.equal(
-      session.remoteVideoFeeds.get(entry.key).frame.data,
-      "AQIDBA==",
+      session.remoteVideoFeeds.get(entry.key).surfaceId,
+      "consumer-native",
     );
     assert.equal(
       session.handleReceiveEvent({
@@ -830,7 +823,6 @@ describe("NativeMediasoupSfuSession", () => {
           producerId: "stale-producer",
           kind: "video",
         },
-        data: "BQYH",
       }),
       false,
     );
@@ -865,7 +857,6 @@ describe("NativeMediasoupSfuSession", () => {
           producerId: "producer-remote",
           kind: "video",
         },
-        data: "CAkK",
       }),
       false,
     );

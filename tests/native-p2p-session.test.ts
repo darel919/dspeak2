@@ -87,7 +87,6 @@ describe("NativeP2pSession", () => {
     const calls = [];
     const messages = [];
     const tracks = [];
-    let candidatePolls = 0;
     const session = new NativeP2pSession({
       invoke: async (command, payload) => {
         calls.push([command, payload]);
@@ -96,12 +95,6 @@ describe("NativeP2pSession", () => {
           return { trackId: "camera_capture_video" };
         if (command === "media_p2p_create_offer") return "local-offer";
         if (command === "media_p2p_create_answer") return "local-answer";
-        if (command === "media_p2p_poll_ice_candidate") {
-          candidatePolls += 1;
-          return candidatePolls === 1
-            ? JSON.stringify({ candidate: "candidate" })
-            : null;
-        }
         return null;
       },
       sendSignal: (message) => messages.push(["p2p-signal", message]),
@@ -117,7 +110,16 @@ describe("NativeP2pSession", () => {
       localPeerId: "peer-a",
       peers: [{ peerId: "peer-b", userId: "user-b" }],
     });
-    await new Promise((resolve) => setTimeout(resolve, 35));
+    session.handleReceiveEvent({
+      kind: 4,
+      payload: {
+        event: "ice-candidate",
+        handle: 9,
+        candidate: "candidate",
+        sdpMid: "0",
+        sdpMLineIndex: 0,
+      },
+    });
 
     assert.ok(calls.some(([command]) => command === "media_p2p_add_track"));
     assert.ok(
@@ -126,6 +128,10 @@ describe("NativeP2pSession", () => {
           type === "p2p-signal" &&
           data.signal.description?.sdp === "local-offer",
       ),
+    );
+    assert.equal(
+      calls.some(([command]) => command === "media_p2p_poll_ice_candidate"),
+      false,
     );
     assert.ok(
       messages.some(
@@ -188,17 +194,15 @@ describe("NativeP2pSession", () => {
       kind: 2,
       id: "camera_capture_video",
       payload: { width: 2, height: 1, timestampMs: 12 },
-      data: "AQIDBAUGBw==",
     });
 
     assert.equal(tracks.at(-1)[0], "track");
-    assert.equal(tracks.at(-1)[1].frame.data, "AQIDBAUGBw==");
+    assert.equal(tracks.at(-1)[1].surfaceId, "camera_capture_video");
     assert.equal(
       session.handleReceiveEvent({
         kind: 2,
         id: "camera_capture_video",
         payload: { handle: 999, width: 2, height: 1, timestampMs: 13 },
-        data: "AQIDBAUGBw==",
       }),
       false,
     );
@@ -634,7 +638,6 @@ describe("NativeP2pSession", () => {
       kind: 2,
       id: "camera_capture_video",
       payload: { width: 2, height: 1, timestampMs: 12 },
-      data: "AQIDBAUGBw==",
     });
     event("health-received", "0");
     event("health-received", "1");

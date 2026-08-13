@@ -162,6 +162,9 @@ void* create_audio_capture(const std::wstring& endpoint_id,
 int start_audio_capture(void* value);
 void destroy_audio_capture(void* value);
 void* create_camera_capture(const std::wstring& device_id,
+                            uint32_t video_width,
+                            uint32_t video_height,
+                            uint32_t video_frame_rate,
                             lib_dspeak_media_screen_frame_cb screen_cb,
                             lib_dspeak_media_capture_error_cb error_cb,
                             void* user_data);

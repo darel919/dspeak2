@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "scenario": "tray-idle",
+  "platform": "darwin",
+  "machine": "local macOS Apple Silicon host",
+  "buildCommit": "6c756d7993395397df5c4a276f5b9187488700eb",
+  "releaseExecutable": "desktop/src-tauri/target/release/dspeak-desktop",
+  "durationSeconds": 5,
+  "intervalSeconds": 1,
+  "warmupSeconds": 2,
+  "processCountMaximum": 1,
+  "cpuPercentAverage": 0.2,
+  "cpuPercentP95": 0.4,
+  "rssKbAverage": 74752,
+  "rssKbP95": 74752,
+  "privateMemoryKbAverage": null,
+  "threadsAverage": 15,
+  "notes": [
+    "Final release tray shell was sampled after the release package rebuild with no WebView and no native media worker.",
+    "The working tree contained the optimization changes at measurement time; HEAD was 6c756d7993395397df5c4a276f5b9187488700eb.",
+    "This is local macOS evidence, not a 2017 dual-core/4 GB target-machine result.",
+    "macOS ps does not expose private memory in the sampler; collect vmmap or Instruments data for that field."
+  ]
+}

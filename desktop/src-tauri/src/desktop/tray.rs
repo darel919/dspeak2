@@ -1,6 +1,6 @@
 use crate::media;
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -17,6 +17,19 @@ pub(crate) fn create_tray(
 
     let tray = TrayIconBuilder::new()
         .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Err(error) = super::window::open_main_window(tray.app_handle()) {
+                    eprintln!("[dspeak] failed to open main window from tray: {error}");
+                }
+            }
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "toggle_mute" => {
                 let _ = app.emit("tray:mute-toggle", ());
@@ -25,9 +38,8 @@ pub(crate) fn create_tray(
                 let _ = app.emit("tray:join-last", ());
             }
             "open_window" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                if let Err(error) = super::window::open_main_window(app) {
+                    eprintln!("[dspeak] failed to open main window from tray menu: {error}");
                 }
             }
             "quit" => {

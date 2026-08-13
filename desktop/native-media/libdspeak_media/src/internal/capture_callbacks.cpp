@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 
 #if defined(__APPLE__) || defined(_WIN32)
@@ -21,6 +22,8 @@ static double audio_level(double rms) {
     if (!std::isfinite(rms)) return 0.0;
     return std::max(0.0, std::min(1.0, rms * 4.0));
 }
+
+static std::atomic<int64_t> g_last_audio_levels_event_ms{-1000};
 
 void on_screen_frame(void* user_data,
                             const uint8_t* data,
@@ -130,6 +133,19 @@ void on_audio_frame(void* user_data,
     }
     if (route == CaptureRoute::kDesktop)
         g_shared_audio_attenuation_current.store(attenuation);
+
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    auto previous_ms = g_last_audio_levels_event_ms.load(std::memory_order_relaxed);
+    if (now_ms - previous_ms >= 40 &&
+        g_last_audio_levels_event_ms.compare_exchange_strong(
+            previous_ms, now_ms, std::memory_order_relaxed)) {
+        if (char* levels = lib_dspeak_media_get_audio_levels()) {
+            lib_dspeak_media_push_audio_levels_event(levels);
+            std::free(levels);
+        }
+    }
+
     constexpr size_t frames_per_webrtc_audio_frame = 480;
     std::array<float, frames_per_webrtc_audio_frame * 2> chunk{};
     const int64_t timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(

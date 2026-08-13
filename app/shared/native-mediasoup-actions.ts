@@ -134,14 +134,10 @@ export function handleReceiveEvent(
       };
       session.localVideoFeeds.set(source, feed);
     }
-    if (!feed || !event.data) return false;
+    if (!feed) return false;
     session.localVideoFeeds.set(source, {
       ...feed,
-      frame: {
-        ...payload,
-        data: event.data,
-        eventId: event.eventId,
-      },
+      surfaceId: String(payload.surfaceId || `local:${source}`),
     });
     session._emitState();
     return true;
@@ -153,14 +149,10 @@ export function handleReceiveEvent(
   if (!receiveEventMatches(entry, { ...payload, consumerId })) return false;
   if (event.kind === 1) return true;
   if (event.kind === 2) {
-    if (entry.kind !== "video" || !event.data) return false;
+    if (entry.kind !== "video") return false;
     const feed = session.remoteVideoFeeds.get(entry.key);
     if (!feed) return false;
-    feed.frame = {
-      ...payload,
-      data: event.data,
-      eventId: event.eventId,
-    };
+    feed.surfaceId = String(payload.surfaceId || entry.consumerId);
     session.remoteVideoFeeds.set(entry.key, { ...feed });
     session._emitState();
     return true;

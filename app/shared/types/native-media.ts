@@ -47,12 +47,14 @@ export type NativeCapabilities = Partial<NativeMediaFlags> & {
     string,
     { available?: boolean; sources?: unknown[] } | undefined
   >;
+  videoCodecDiagnostics?: Record<string, unknown>;
 };
 export interface NativeFeed {
   key?: string;
   userId?: unknown;
   source?: unknown;
   kind?: string;
+  surfaceId?: string;
   closed?: boolean;
   frame?: unknown;
 }

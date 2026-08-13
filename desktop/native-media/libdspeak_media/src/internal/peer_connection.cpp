@@ -2,6 +2,7 @@
 #include <json.hpp>
 #include "media_handles.hpp"
 #include "runtime_health.hpp"
+#include "platform_video_codec_factories.hpp"
 
 #include <cstring>
 #include <cstdlib>
@@ -23,16 +24,6 @@
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/environment/environment_factory.h>
-#include <api/video_codecs/video_decoder_factory_template.h>
-#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_open_h264_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template.h>
-#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_open_h264_adapter.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
 #include <api/stats/rtc_stats_collector_callback.h>
@@ -122,6 +113,12 @@ static std::string apply_native_opus_profile(std::string sdp, bool stereo)
 
 /* ── P2P (PeerConnection) transport ─────────────────── */
 
+static uint64_t p2p_event_handle(const lib_dspeak_media_p2p_handle* handle) {
+    if (!handle) return 0;
+    const auto event_handle = handle->event_handle.load(std::memory_order_acquire);
+    return event_handle != 0 ? event_handle : reinterpret_cast<uint64_t>(handle);
+}
+
 
 class P2pHealthDataChannelObserver : public webrtc::DataChannelObserver {
 public:
@@ -131,16 +128,18 @@ public:
         : handle_(handle), channel_(std::move(channel)) {}
 
     void OnStateChange() override {
-        if (!handle_ || !channel_) return;
+        if (!handle_ || handle_->closed.load(std::memory_order_acquire) || !channel_) return;
         const auto state = channel_->state();
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_),
+            p2p_event_handle(handle_),
             "data-channel-state", "", "",
             webrtc::DataChannelInterface::DataStateString(state));
     }
 
     void OnMessage(const webrtc::DataBuffer& buffer) override {
-        if (!handle_ || buffer.binary || buffer.data.size() == 0) return;
+        if (!handle_ || handle_->closed.load(std::memory_order_acquire) || buffer.binary ||
+            buffer.data.size() == 0)
+            return;
         const std::string text(
             reinterpret_cast<const char*>(buffer.data.data()), buffer.data.size());
         try {
@@ -149,7 +148,7 @@ public:
             if (type != "health" && type != "health-ack") return;
             const auto sequence = message.value("sequence", 0U);
             lib_dspeak_media_push_p2p_event(
-                reinterpret_cast<uint64_t>(handle_), "health-received", "", "",
+                p2p_event_handle(handle_), "health-received", "", "",
                 std::to_string(sequence).c_str());
             if (type != "health") return;
             const auto channel = channel_;
@@ -183,7 +182,7 @@ void bind_health_channel(
         handle, channel);
     channel->RegisterObserver(handle->health_observer.get());
     lib_dspeak_media_push_p2p_event(
-        reinterpret_cast<uint64_t>(handle), "data-channel-state", "", "",
+        p2p_event_handle(handle), "data-channel-state", "", "",
         webrtc::DataChannelInterface::DataStateString(channel->state()));
 }
 
@@ -191,15 +190,20 @@ class P2pObserver : public webrtc::PeerConnectionObserver {
 public:
     explicit P2pObserver(lib_dspeak_media_p2p_handle* h) : handle_(h) {}
 
+    bool active() const {
+        return handle_ && !handle_->closed.load(std::memory_order_acquire);
+    }
+
     void OnSignalingChange(
         webrtc::PeerConnectionInterface::SignalingState new_state) override {
+        if (!active()) return;
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_),
+            p2p_event_handle(handle_),
             "signaling-state", "", "", std::to_string(static_cast<int>(new_state)).c_str());
     }
 
     void OnIceCandidate(const webrtc::IceCandidateInterface* candidate) override {
-        if (!candidate) return;
+        if (!active() || !candidate) return;
         std::string sdp;
         if (candidate->ToString(&sdp)) {
             const auto payload = json{
@@ -208,50 +212,52 @@ public:
                 {"sdpMLineIndex", candidate->sdp_mline_index()},
             };
             const auto serialized = payload.dump();
-            {
-                std::lock_guard<std::mutex> lock(handle_->ice_mutex);
-                handle_->ice_candidates.push(serialized);
-            }
             lib_dspeak_media_push_p2p_event(
-                reinterpret_cast<uint64_t>(handle_), "ice-candidate", "", "", serialized.c_str());
+                p2p_event_handle(handle_), "ice-candidate", "", "", serialized.c_str());
         }
     }
 
     void OnIceConnectionChange(
         webrtc::PeerConnectionInterface::IceConnectionState state) override {
+        if (!active()) return;
         const bool next_connected =
             state == webrtc::PeerConnectionInterface::kIceConnectionConnected ||
             state == webrtc::PeerConnectionInterface::kIceConnectionCompleted;
+        bool previous_connected =
+            handle_->connected.exchange(next_connected, std::memory_order_acq_rel);
         dspeak_media_runtime::update_p2p_connection(
-            handle_->connected, next_connected);
-        handle_->connected = next_connected;
-        if (next_connected) handle_->failed = false;
+            previous_connected, next_connected);
+        if (next_connected) handle_->failed.store(false, std::memory_order_release);
         else if (state == webrtc::PeerConnectionInterface::kIceConnectionFailed)
-            handle_->failed = true;
+            handle_->failed.store(true, std::memory_order_release);
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_),
+            p2p_event_handle(handle_),
             "ice-state", "", "", std::to_string(static_cast<int>(state)).c_str());
     }
 
     void OnIceGatheringChange(
         webrtc::PeerConnectionInterface::IceGatheringState state) override {
+        if (!active()) return;
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_),
+            p2p_event_handle(handle_),
             "ice-gathering-state", "", "", std::to_string(static_cast<int>(state)).c_str());
     }
     void OnIceConnectionReceivingChange(bool receiving) override {
+        if (!active()) return;
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_),
+            p2p_event_handle(handle_),
             "ice-receiving", "", "", receiving ? "true" : "false");
     }
     void OnAddStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface>) override {}
     void OnRemoveStream(webrtc::scoped_refptr<webrtc::MediaStreamInterface>) override {}
     void OnDataChannel(
         webrtc::scoped_refptr<webrtc::DataChannelInterface> channel) override {
+        if (!active()) return;
         bind_health_channel(handle_, std::move(channel));
     }
 
     void OnTrack(webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) override {
+        if (!active()) return;
         if (!transceiver || !transceiver->receiver()) return;
         auto track = transceiver->receiver()->track();
         if (!track) return;
@@ -260,7 +266,7 @@ public:
         const auto mid = transceiver->mid().value_or("");
         const auto metadata = json{{"mid", mid}}.dump();
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_), "track-added", track_id.c_str(), kind.c_str(),
+            p2p_event_handle(handle_), "track-added", track_id.c_str(), kind.c_str(),
             metadata.c_str());
         if (kind == "audio") {
             handle_->audio_receivers[track_id] = transceiver->receiver();
@@ -271,7 +277,7 @@ public:
             handle_->audio_sinks.push_back(std::move(sink));
         } else if (kind == "video") {
             auto sink = std::make_unique<NativeReceiveVideoSink>(
-                track_id, std::to_string(reinterpret_cast<uint64_t>(handle_)));
+                track_id, std::to_string(p2p_event_handle(handle_)));
             static_cast<webrtc::VideoTrackInterface*>(track.get())->AddOrUpdateSink(
                 sink.get(), webrtc::VideoSinkWants());
             sink->SetEnabled(true);
@@ -282,7 +288,7 @@ public:
 
     void OnRemoveTrack(
         webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver) override {
-        if (!receiver || !receiver->track()) return;
+        if (!active() || !receiver || !receiver->track()) return;
         const auto track = receiver->track();
         const auto track_id = track->id();
         if (track->kind() == "audio") {
@@ -318,13 +324,14 @@ public:
             }
         }
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_),
+            p2p_event_handle(handle_),
             "track-removed", track_id.c_str(), track->kind().c_str(), "");
     }
 
     void OnRenegotiationNeeded() override {
+        if (!active()) return;
         lib_dspeak_media_push_p2p_event(
-            reinterpret_cast<uint64_t>(handle_), "renegotiation-needed", "", "", "");
+            p2p_event_handle(handle_), "renegotiation-needed", "", "", "");
     }
 
 private:
@@ -418,11 +425,12 @@ static std::optional<webrtc::SdpType> sdp_type_from_string(const char* value) {
 }
 
 extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
-    const char* ice_servers_json, bool offerer)
+    const char* ice_servers_json, bool offerer, uint64_t event_handle)
 {
     try {
         auto* h = new(std::nothrow) lib_dspeak_media_p2p_handle();
         if (!h) return nullptr;
+        h->event_handle.store(event_handle, std::memory_order_release);
 
         h->network_thread = webrtc::Thread::CreateWithSocketServer().release();
         h->network_thread->SetName("dspeak_p2p_network", nullptr);
@@ -452,16 +460,8 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
             /*default_adm=*/null_adm,
             /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
             /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
-            std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-                webrtc::LibvpxVp8EncoderTemplateAdapter,
-                webrtc::LibvpxVp9EncoderTemplateAdapter,
-                webrtc::OpenH264EncoderTemplateAdapter,
-                webrtc::LibaomAv1EncoderTemplateAdapter>>(),
-            std::make_unique<webrtc::VideoDecoderFactoryTemplate<
-                webrtc::LibvpxVp8DecoderTemplateAdapter,
-                webrtc::LibvpxVp9DecoderTemplateAdapter,
-                webrtc::OpenH264DecoderTemplateAdapter,
-                webrtc::Dav1dDecoderTemplateAdapter>>(),
+            dspeak_native::create_video_encoder_factory(),
+            dspeak_native::create_video_decoder_factory(),
             /*audio_mixer=*/nullptr,
             /*audio_processing=*/nullptr);
         if (!h->factory) {
@@ -518,8 +518,9 @@ extern "C" void lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h)
 {
     try {
         if (!h) return;
-        h->closed = true;
-        dspeak_media_runtime::update_p2p_connection(h->connected, false);
+        h->closed.store(true, std::memory_order_release);
+        bool was_connected = h->connected.exchange(false, std::memory_order_acq_rel);
+        dspeak_media_runtime::update_p2p_connection(was_connected, false);
         auto destroy = [h] {
             if (h->health_channel) h->health_channel->UnregisterObserver();
             h->health_observer.reset();
@@ -569,7 +570,7 @@ extern "C" void lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h)
 extern "C" int lib_dspeak_media_p2p_send_health(
     lib_dspeak_media_p2p_handle_t* h, const char* message)
 {
-    if (!h || !h->pc || !message || h->closed) return -1;
+    if (!h || !h->pc || !message || h->closed.load(std::memory_order_acquire)) return -1;
     try {
         const std::string payload = message;
         return h->signaling_thread->BlockingCall([h, payload] {
@@ -704,22 +705,12 @@ extern "C" int lib_dspeak_media_p2p_add_ice_candidate(lib_dspeak_media_p2p_handl
     }
 }
 
-extern "C" char* lib_dspeak_media_p2p_poll_ice_candidate(lib_dspeak_media_p2p_handle_t* h)
-{
-    if (!h) return nullptr;
-    std::lock_guard<std::mutex> lock(h->ice_mutex);
-    if (h->ice_candidates.empty()) return nullptr;
-    auto s = h->ice_candidates.front();
-    h->ice_candidates.pop();
-    return lib_dspeak_media_strdup(s.c_str());
-}
-
 extern "C" int lib_dspeak_media_p2p_ice_connection_state(lib_dspeak_media_p2p_handle_t* h)
 {
     if (!h || !h->pc) return -1;
-    if (h->closed)  return 3;
-    if (h->failed)  return 2;
-    if (h->connected) return 1;
+    if (h->closed.load(std::memory_order_acquire)) return 3;
+    if (h->failed.load(std::memory_order_acquire)) return 2;
+    if (h->connected.load(std::memory_order_acquire)) return 1;
     return 0;
 }
 
@@ -774,7 +765,9 @@ extern "C" int lib_dspeak_media_p2p_restart_ice(lib_dspeak_media_p2p_handle_t* h
 
 extern "C" char* lib_dspeak_media_p2p_get_stats(lib_dspeak_media_p2p_handle_t* h)
 {
-    if (!h || !h->pc || !h->signaling_thread || h->closed) return nullptr;
+    if (!h || !h->pc || !h->signaling_thread ||
+        h->closed.load(std::memory_order_acquire))
+        return nullptr;
     try {
         auto observer = webrtc::make_ref_counted<P2pStatsObserver>();
         auto future = observer->GetFuture();

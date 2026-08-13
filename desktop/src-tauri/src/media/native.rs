@@ -351,10 +351,6 @@ pub fn create_recv_transport(
     }
 }
 
-pub fn poll_action() -> ffi::lib_dspeak_media_action_t {
-    unsafe { ffi::lib_dspeak_media_poll_action() }
-}
-
 pub fn complete_connect(transport_ptr: *mut std::ffi::c_void) {
     unsafe { ffi::lib_dspeak_media_complete_connect(transport_ptr) }
 }
@@ -379,7 +375,7 @@ pub fn p2p_create(
     offerer: bool,
 ) -> Result<*mut ffi::lib_dspeak_media_p2p_handle_t, String> {
     let ice_servers = CString::new(ice_servers_json).map_err(|error| error.to_string())?;
-    let handle = unsafe { ffi::lib_dspeak_media_p2p_create(ice_servers.as_ptr(), offerer) };
+    let handle = unsafe { ffi::lib_dspeak_media_p2p_create(ice_servers.as_ptr(), offerer, 0) };
     if handle.is_null() {
         Err("native P2P PeerConnection creation failed".to_string())
     } else {
@@ -439,11 +435,7 @@ pub fn p2p_set_remote_description(
     let sdp = CString::new(sdp).map_err(|error| error.to_string())?;
     let sdp_type = CString::new(sdp_type).map_err(|error| error.to_string())?;
     let result = unsafe {
-        ffi::lib_dspeak_media_p2p_set_remote_description(
-            handle,
-            sdp_type.as_ptr(),
-            sdp.as_ptr(),
-        )
+        ffi::lib_dspeak_media_p2p_set_remote_description(handle, sdp_type.as_ptr(), sdp.as_ptr())
     };
     if result == 0 {
         Ok(())
@@ -465,18 +457,6 @@ pub fn p2p_add_ice_candidate(
     } else {
         Err("native P2P ICE candidate failed".to_string())
     }
-}
-
-pub fn p2p_poll_ice_candidate(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Option<String> {
-    let pointer = unsafe { ffi::lib_dspeak_media_p2p_poll_ice_candidate(handle) };
-    if pointer.is_null() {
-        return None;
-    }
-    let value = unsafe { CStr::from_ptr(pointer) }
-        .to_string_lossy()
-        .into_owned();
-    unsafe { ffi::lib_dspeak_media_free_string(pointer) };
-    Some(value)
 }
 
 pub fn p2p_ice_state(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> i32 {

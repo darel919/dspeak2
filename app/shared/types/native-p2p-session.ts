@@ -30,7 +30,6 @@ export interface NativeP2pSessionPeer extends Record<string, unknown> {
   sources: Set<string>;
   trackIds: Map<string, string>;
   connected: boolean;
-  candidateTimer: ReturnType<typeof setTimeout> | null;
   sourceByTrackId: Map<string, string>;
   ownerSourceByTrackId: Map<string, string | null>;
   offerCreated: boolean;
@@ -132,6 +131,10 @@ export interface NativeP2pSessionSurface {
   setSourceTransmission: (source: string, enabled: boolean) => Promise<unknown>;
   updateAudioBitrate: (source: string, bitrate: number) => Promise<unknown>;
   updateVideoBitrate: (source: string, bitrate: number) => Promise<unknown>;
+  updateVideoParameters: (
+    source: string,
+    parameters: Record<string, unknown>,
+  ) => Promise<unknown>;
   setConsumerVolume: (
     userId: string | number,
     source: string | null,
@@ -189,7 +192,6 @@ export interface NativeP2pSessionSurface {
   _flushCandidates: (peer: NativeP2pSessionPeer) => Promise<unknown>;
   _createOffer: (peer: NativeP2pSessionPeer) => Promise<unknown>;
   _requestOffer: (peer: NativeP2pSessionPeer) => unknown;
-  _startCandidatePump: (peer: NativeP2pSessionPeer) => unknown;
   _handleIceState: (peer: NativeP2pSessionPeer, state: number) => unknown;
   _restartIce: (peer: NativeP2pSessionPeer) => Promise<unknown>;
   _failPeer: (

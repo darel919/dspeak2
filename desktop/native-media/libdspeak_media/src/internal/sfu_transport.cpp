@@ -2,6 +2,8 @@
 #include <json.hpp>
 #include "media_handles.hpp"
 #include "runtime_health.hpp"
+#include "event_bridge.hpp"
+#include "platform_video_codec_factories.hpp"
 
 #include <cstring>
 #include <cstdlib>
@@ -27,16 +29,6 @@
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/environment/environment_factory.h>
-#include <api/video_codecs/video_decoder_factory_template.h>
-#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_open_h264_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template.h>
-#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_open_h264_adapter.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
 #include <api/scoped_refptr.h>
@@ -104,6 +96,7 @@ void lib_dspeak_media_push_action(lib_dspeak_media_action_kind_t kind,
     act.state        = st     ? lib_dspeak_media_json_to_cstr(*st)     : nullptr;
     std::lock_guard<std::mutex> lock(g_action_mutex);
     g_actions.push(std::move(act));
+    lib_dspeak_media_signal_event();
 }
 
 /* ── Forward declarations for promise globals ───────── */
@@ -319,16 +312,8 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
             null_adm,
             webrtc::CreateBuiltinAudioEncoderFactory(),
             webrtc::CreateBuiltinAudioDecoderFactory(),
-            std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-                webrtc::LibvpxVp8EncoderTemplateAdapter,
-                webrtc::LibvpxVp9EncoderTemplateAdapter,
-                webrtc::OpenH264EncoderTemplateAdapter,
-                webrtc::LibaomAv1EncoderTemplateAdapter>>(),
-            std::make_unique<webrtc::VideoDecoderFactoryTemplate<
-                webrtc::LibvpxVp8DecoderTemplateAdapter,
-                webrtc::LibvpxVp9DecoderTemplateAdapter,
-                webrtc::OpenH264DecoderTemplateAdapter,
-                webrtc::Dav1dDecoderTemplateAdapter>>(),
+            dspeak_native::create_video_encoder_factory(),
+            dspeak_native::create_video_decoder_factory(),
             /*audio_mixer=*/nullptr,
             /*audio_processing=*/nullptr);
         if (!d->factory) {
@@ -478,9 +463,9 @@ extern "C" void lib_dspeak_media_destroy_recv_transport(lib_dspeak_media_recv_tr
     delete transport;
 }
 
-/* ── Pending action polling ────────────────────────── */
+/* ── Pending action queue drain ─────────────────────── */
 
-extern "C" lib_dspeak_media_action_t lib_dspeak_media_poll_action(void)
+extern "C" lib_dspeak_media_action_t lib_dspeak_media_drain_action(void)
 {
     std::lock_guard<std::mutex> lock(g_action_mutex);
     if (g_actions.empty()) {

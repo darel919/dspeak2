@@ -88,8 +88,10 @@ function updateNativeStats(
   };
 }
 
-async function pollNativeAudioTelemetry(engine: NativeMediaEngine) {
-  const levels = await engine._invoke("media_get_audio_levels");
+export function handleNativeAudioTelemetry(
+  engine: NativeMediaEngine,
+  levels: Record<string, unknown>,
+) {
   const microphoneDbfs = clampDb(levels.microphoneDbfs);
   const sharedAudioDbfs = clampDb(levels.sharedAudioDbfs);
   const sharedAudioLevel = Math.max(
@@ -116,8 +118,7 @@ async function pollNativeAudioTelemetry(engine: NativeMediaEngine) {
 }
 
 export function startNativeAudioTelemetry(engine: NativeMediaEngine) {
-  if (engine.nativeAudioTelemetryTimer) return;
-  stopNativeAudioTelemetry(engine);
+  if (engine.nativeNoiseFloorEstimator) return;
   engine.nativeNoiseFloorEstimator = createNoiseFloorEstimator();
   engine.nativeSpeaking = false;
   engine.nativeActiveSamples = 0;
@@ -127,21 +128,9 @@ export function startNativeAudioTelemetry(engine: NativeMediaEngine) {
       if (engine.nativeSession) engine.nativeSession.echoDetected = detected;
     },
   });
-  const poll = () => {
-    if (engine.nativeAudioTelemetryPoll) return;
-    const request = pollNativeAudioTelemetry(engine).catch(() => undefined);
-    engine.nativeAudioTelemetryPoll = request.finally(() => {
-      engine.nativeAudioTelemetryPoll = null;
-    });
-  };
-  engine.nativeAudioTelemetryTimer = setInterval(poll, 40);
 }
 
 export function stopNativeAudioTelemetry(engine: NativeMediaEngine) {
-  if (engine.nativeAudioTelemetryTimer)
-    clearInterval(engine.nativeAudioTelemetryTimer);
-  engine.nativeAudioTelemetryTimer = null;
-  engine.nativeAudioTelemetryPoll = null;
   engine.nativeEchoDetector?.clear();
   engine.nativeEchoDetector = null;
   const userId = engine.voiceStore?.getAuthenticatedUser?.()?.id;

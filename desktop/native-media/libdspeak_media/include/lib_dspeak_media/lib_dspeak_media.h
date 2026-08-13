@@ -48,6 +48,7 @@ typedef enum {
     LIB_DSPEAK_MEDIA_RECEIVE_EVENT_P2P = 4,
     LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME = 5,
     LIB_DSPEAK_MEDIA_RECEIVE_EVENT_CAPTURE_ERROR = 6,
+    LIB_DSPEAK_MEDIA_RECEIVE_EVENT_AUDIO_LEVELS = 7,
 } lib_dspeak_media_receive_event_kind_t;
 
 typedef struct {
@@ -55,8 +56,6 @@ typedef struct {
     uint64_t event_id;
     char* id;
     char* payload_json;
-    uint8_t* data;
-    uint32_t data_len;
 } lib_dspeak_media_receive_event_t;
 
 /* ── Lifecycle ──────────────────────────────────────── */
@@ -87,10 +86,24 @@ lib_dspeak_media_recv_transport_t* lib_dspeak_media_create_recv_transport(
     const char* app_data_json, int* error_out);
 void lib_dspeak_media_destroy_recv_transport(lib_dspeak_media_recv_transport_t* t);
 
-/* ── Action polling ─────────────────────────────────── */
-lib_dspeak_media_action_t lib_dspeak_media_poll_action(void);
-lib_dspeak_media_receive_event_t lib_dspeak_media_poll_receive_event(void);
+/* ── Event queue drain ───────────────────────────────── */
+lib_dspeak_media_action_t lib_dspeak_media_drain_action(void);
+lib_dspeak_media_receive_event_t lib_dspeak_media_drain_receive_event(void);
 void lib_dspeak_media_free_receive_event(lib_dspeak_media_receive_event_t* event);
+int lib_dspeak_media_wait_for_event(uint32_t timeout_ms);
+void lib_dspeak_media_wake_event(void);
+
+/* ── Native video surfaces ─────────────────────────── */
+int lib_dspeak_media_video_surface_set_bounds(const char* surface_id,
+                                              int x,
+                                              int y,
+                                              int width,
+                                              int height,
+                                              bool visible);
+int lib_dspeak_media_video_surface_destroy(const char* surface_id);
+void lib_dspeak_media_video_surface_clear(void);
+void lib_dspeak_media_video_surface_run_loop(void);
+void lib_dspeak_media_video_surface_stop_loop(void);
 
 /* ── Connect completion ─────────────────────────────── */
 void lib_dspeak_media_complete_connect(void* transport_ptr);
@@ -180,7 +193,8 @@ const char* lib_dspeak_media_capture_error_message(int error_code);
 /* ── P2P (PeerConnection) transport ─────────────────── */
 lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
     const char* ice_servers_json,
-    bool offerer);
+    bool offerer,
+    uint64_t event_handle);
 void              lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* h, char** sdp_out);
 int               lib_dspeak_media_p2p_create_answer(lib_dspeak_media_p2p_handle_t* h, const char* remote_sdp, char** sdp_out);
@@ -189,7 +203,6 @@ int               lib_dspeak_media_p2p_set_remote_description(
     const char* sdp_type,
     const char* sdp);
 int               lib_dspeak_media_p2p_add_ice_candidate(lib_dspeak_media_p2p_handle_t* h, const char* candidate);
-char*             lib_dspeak_media_p2p_poll_ice_candidate(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_ice_connection_state(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_restart_ice(lib_dspeak_media_p2p_handle_t* h, char** sdp_out);
 char*             lib_dspeak_media_p2p_get_stats(lib_dspeak_media_p2p_handle_t* h);
@@ -222,7 +235,7 @@ uint8_t* lib_dspeak_media_stop_microphone_check(size_t* length_out);
 void lib_dspeak_media_free_buffer(uint8_t* buffer);
 int  lib_dspeak_media_start_microphone_capture(int* error_out);
 int  lib_dspeak_media_stop_microphone_capture(int* error_out);
-int  lib_dspeak_media_start_camera_capture(int* error_out);
+int  lib_dspeak_media_start_camera_capture(const char* settings_json, int* error_out);
 int  lib_dspeak_media_stop_camera_capture(int* error_out);
 int  lib_dspeak_media_start_screen_capture(uint64_t display_id, int* error_out);
 int  lib_dspeak_media_stop_screen_capture(int* error_out);

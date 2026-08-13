@@ -139,12 +139,8 @@ export class NativeCloudflareRemoteMethods {
       (candidate) => candidate.trackId === trackId,
     );
     if (!entry) return false;
-    if (entry.kind === "video" && event.data) {
-      entry.frame = {
-        ...payload,
-        data: event.data,
-        eventId: event.eventId,
-      };
+    if (entry.kind === "video") {
+      entry.surfaceId = entry.surfaceId || trackId;
       this.remoteVideoFeeds.set(String(entry.key || ""), { ...entry });
     }
     this.onRemoteTrack?.(entry);
@@ -210,7 +206,8 @@ export class NativeCloudflareRemoteMethods {
       trackName: publication.trackName,
       provider: "sfu",
       native: true,
-      playback: kind === "audio" ? "coreaudio" : "native-frame",
+      playback: kind === "audio" ? "coreaudio" : "native-surface",
+      surfaceId: kind === "video" ? trackId : undefined,
       frame: null,
       receiving:
         this.remoteReceiving.get(`${String(publication.userId)}:${source}`) ??

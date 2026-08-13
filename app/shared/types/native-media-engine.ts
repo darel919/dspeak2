@@ -36,10 +36,6 @@ export interface NativeTauriLike {
   ) => Promise<() => void>;
 }
 
-export interface NativeActionPumpLike {
-  stop: () => void;
-}
-
 export interface NativeMediaEngineState {
   browserEngine: import("./media-engine-adapters.ts").BrowserMediaEngineSession;
   flags: NativeMediaFlags;
@@ -58,7 +54,7 @@ export interface NativeMediaEngineState {
   activeScreenCapture: NativeCaptureRequest | null;
   activeSystemAudioCapture: NativeCaptureRequest | null;
   microphoneOperation: Promise<unknown>;
-  nativeActionPump: NativeActionPumpLike | null;
+  nativeEventOperation: Promise<unknown> | null;
   nativeActionHandler: ((action: NativeCaptureRequest) => unknown) | null;
   nativeReceiveEventHandler: ((event: NativeCaptureRequest) => void) | null;
   nativeSession:
@@ -84,8 +80,16 @@ export interface NativeMediaEngineState {
   nativeTopologyOperation: Promise<unknown> | null;
   onQoe: import("./native-media.ts").NativeMediaEngineOptions["onQoe"];
   qoeTimer: ReturnType<typeof setInterval> | null;
-  nativeAudioTelemetryTimer: ReturnType<typeof setInterval> | null;
-  nativeAudioTelemetryPoll: Promise<unknown> | null;
+  nativeVideoAdaptationTimer: ReturnType<typeof setTimeout> | null;
+  nativeVideoAdaptationOperation: Promise<unknown> | null;
+  nativeVideoAdaptationStates: Map<
+    string,
+    import("./adaptive-media.ts").AdaptiveVideoState
+  >;
+  nativeVideoAdaptationCounters: Map<
+    string,
+    { totalEncodeTime: number; framesEncoded: number }
+  >;
   nativeNoiseFloorEstimator: NoiseFloorEstimator | null;
   nativeSpeaking: boolean;
   nativeActiveSamples: number;

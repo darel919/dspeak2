@@ -66,11 +66,9 @@ export interface NativeCloudflareSessionSurface {
   sessionGeneration: number;
   closed: boolean;
   iceState: number;
-  candidateTimer: ReturnType<typeof setTimeout> | null;
   jitterBufferMinimumDelay: number;
   jitterBufferTargetDelay: number;
   lastReceivedConsumerParams: unknown;
-  _startCandidateDrain: () => unknown;
   _assertCurrent: (generation: number, handle?: string | number | null) => void;
   _emitState: () => unknown;
   closeMedia: () => unknown;
@@ -78,6 +76,10 @@ export interface NativeCloudflareSessionSurface {
   setSourceTransmission: (source: string, enabled: boolean) => unknown;
   updateAudioBitrate: (source: string, bitrate: number) => unknown;
   updateVideoBitrate: (source: string, bitrate: number) => unknown;
+  updateVideoParameters: (
+    source: string,
+    parameters: Record<string, unknown>,
+  ) => unknown;
   setRemoteReceiving: (
     userIdOrKey: string,
     sourceOrReceiving: string | boolean,

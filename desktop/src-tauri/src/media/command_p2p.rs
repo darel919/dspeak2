@@ -104,11 +104,7 @@ pub async fn media_p2p_set_remote_description(
         .handles
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
-    native::p2p_set_remote_description(
-        owned_p2p_handle(&handles, p2p_handle)?,
-        &sdp,
-        &sdp_type,
-    )
+    native::p2p_set_remote_description(owned_p2p_handle(&handles, p2p_handle)?, &sdp, &sdp_type)
 }
 
 #[cfg(native_rtc)]
@@ -123,20 +119,6 @@ pub async fn media_p2p_add_ice_candidate(
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
     native::p2p_add_ice_candidate(owned_p2p_handle(&handles, p2p_handle)?, &candidate)
-}
-
-#[cfg(native_rtc)]
-#[tauri::command]
-pub async fn media_p2p_poll_ice_candidate(
-    store: State<'_, NativeMediaStore>,
-    p2p_handle: u64,
-) -> Result<Option<String>, String> {
-    let handles = store
-        .handles
-        .lock()
-        .map_err(|_| "native media handle lock poisoned".to_string())?;
-    let handle = owned_p2p_handle(&handles, p2p_handle)?;
-    Ok(native::p2p_poll_ice_candidate(handle))
 }
 
 #[cfg(native_rtc)]
@@ -325,12 +307,6 @@ pub async fn media_p2p_replace_track(
         .p2p_tracks
         .insert((p2p_handle, source), (kind, new_track));
     Ok(serde_json::json!({ "trackId": track_id }))
-}
-
-#[cfg(native_rtc)]
-#[tauri::command]
-pub async fn media_p2p_poll_event(store: State<'_, NativeMediaStore>) -> Result<Value, String> {
-    super::command_signaling::media_poll_receive_event(store).await
 }
 
 #[cfg(native_rtc)]
@@ -552,15 +528,6 @@ pub async fn media_p2p_add_ice_candidate(
 
 #[cfg(not(native_rtc))]
 #[tauri::command]
-pub async fn media_p2p_poll_ice_candidate(
-    _store: State<'_, NativeMediaStore>,
-    _p2p_handle: u64,
-) -> Result<Option<String>, String> {
-    Err("native media backend not available".to_string())
-}
-
-#[cfg(not(native_rtc))]
-#[tauri::command]
 pub async fn media_p2p_ice_state(
     _store: State<'_, NativeMediaStore>,
     _p2p_handle: u64,
@@ -607,12 +574,6 @@ pub async fn media_p2p_replace_track(
     _kind: String,
 ) -> Result<Value, String> {
     Err("native media backend not available".to_string())
-}
-
-#[cfg(not(native_rtc))]
-#[tauri::command]
-pub async fn media_p2p_poll_event(_store: State<'_, NativeMediaStore>) -> Result<Value, String> {
-    Ok(serde_json::json!({ "kind": 0 }))
 }
 
 #[cfg(not(native_rtc))]

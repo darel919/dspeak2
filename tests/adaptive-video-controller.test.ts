@@ -139,3 +139,29 @@ test("active adaptation follows a newly lowered resolution ceiling", () => {
     },
   );
 });
+
+test("native adaptation lowers bitrate after frame rate and scale limits", () => {
+  const settings = {
+    frameRate: 15,
+    qualityPriority: "framerate",
+    resolution: "360p",
+    maxBitrate: 900_000,
+    minimumBitrate: 200_000,
+    minimumFrameRate: 15,
+    frameRateFirst: true,
+    adaptBitrate: true,
+  };
+  const state = advance(
+    { scale: 2.5, frameRate: 15, maxBitrate: 900_000 },
+    {
+      encodeUtilization: 90,
+      framesPerSecond: 8,
+      qualityLimitationReason: "cpu",
+    },
+    settings,
+    3,
+  );
+  assert.equal(state.scale, 2.5);
+  assert.equal(state.frameRate, 15);
+  assert.equal(state.maxBitrate, 675_000);
+});

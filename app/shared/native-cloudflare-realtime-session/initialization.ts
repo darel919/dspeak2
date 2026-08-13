@@ -24,7 +24,6 @@ export class NativeCloudflareInitializationMethods {
       }
       this.handle = result.handle;
       this.iceState = 0;
-      this._startCandidateDrain();
       const response = (await this.request(
         "new-session",
         undefined,

@@ -10,6 +10,7 @@ export interface JitterBufferConfig {
 export interface AdaptiveVideoState {
   scale: number;
   frameRate: number;
+  maxBitrate?: number;
   pressureSamples?: number;
   healthySamples?: number;
   changed?: boolean;
@@ -23,6 +24,11 @@ export interface AdaptiveVideoSettings {
   qualityPriority: string;
   frameRate?: number;
   resolution: string;
+  maxBitrate?: number | null;
+  minimumBitrate?: number | null;
+  minimumFrameRate?: number;
+  frameRateFirst?: boolean;
+  adaptBitrate?: boolean;
 }
 export interface AdaptiveVideoReport {
   type?: string;

@@ -30,6 +30,7 @@ pub async fn register_background_notifications(
         cursor: None,
         seen_ids: HashSet::new(),
     });
+    state.wake.notify_one();
     Ok(())
 }
 
@@ -41,6 +42,7 @@ pub async fn clear_background_notifications(
         .session
         .lock()
         .map_err(|_| "Notification state is unavailable")? = None;
+    state.wake.notify_one();
     Ok(())
 }
 
@@ -57,11 +59,14 @@ pub(crate) async fn run_background_notification_poller(
     app: AppHandle,
     state: BackgroundNotificationState,
 ) {
-    let client = reqwest::Client::new();
+    let mut client = None;
     loop {
+        let wake = state.wake.clone();
+        let notification = wake.notified();
         let session = state.session.lock().ok().and_then(|value| value.clone());
         if let Some(session) = session {
-            if let Ok(response) = fetch_background_notifications(&client, &session).await {
+            let request_client = client.get_or_insert_with(reqwest::Client::new);
+            if let Ok(response) = fetch_background_notifications(request_client, &session).await {
                 let mut pending = Vec::new();
                 if let Ok(mut current) = state.session.lock() {
                     if let Some(current) = current.as_mut() {
@@ -98,8 +103,14 @@ pub(crate) async fn run_background_notification_poller(
                         .show();
                 }
             }
+            tokio::select! {
+                _ = sleep(Duration::from_secs(30)) => {}
+                _ = notification => {}
+            }
+        } else {
+            client = None;
+            notification.await;
         }
-        sleep(Duration::from_secs(30)).await;
     }
 }
 

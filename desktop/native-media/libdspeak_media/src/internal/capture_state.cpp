@@ -17,6 +17,7 @@ lib_dspeak_media_video_track_t* g_camera_track = nullptr;
 lib_dspeak_media_audio_track_t* g_microphone_track = nullptr;
 std::string g_microphone_device_id;
 std::string g_camera_device_id;
+std::string g_camera_settings_json;
 std::atomic<double> g_shared_audio_volume{1.0};
 std::atomic<double> g_shared_audio_attenuation_target{1.0};
 std::atomic<double> g_shared_audio_attenuation_current{1.0};

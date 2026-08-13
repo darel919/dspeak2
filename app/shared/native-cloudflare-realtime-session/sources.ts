@@ -13,6 +13,7 @@ import type {
   NativeCloudflareSourceEntry,
 } from "../types/native-cloudflare.ts";
 import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
+import type { VideoSettings } from "../types/video-settings.ts";
 
 type NativeSessionDescriptionType = "offer" | "answer" | "pranswer";
 
@@ -182,6 +183,7 @@ export class NativeCloudflareSourcesMethods {
         source,
         producerId: trackName,
         native: true,
+        surfaceId: `local:${source}`,
         frame: null,
       });
     if (
@@ -423,6 +425,37 @@ export class NativeCloudflareSourcesMethods {
     return this._updateBitrate(source, maxBitrate, "video");
   }
 
+  async updateVideoParameters(
+    source: string,
+    parameters: Record<string, unknown>,
+  ) {
+    const entry = this.sources.get(String(source || ""));
+    if (!entry || sourceKind(entry) !== "video") return false;
+    const next: VideoSettings = {
+      resolution: "original",
+      frameRate: 30,
+      qualityPriority: "framerate",
+      ...(entry.videoSettings || {}),
+    };
+    const maxBitrate = Number(parameters?.maxBitrate);
+    const maxFramerate = Number(parameters?.maxFramerate);
+    const scaleResolutionDownBy = Number(parameters?.scaleResolutionDownBy);
+    if (!(
+      (Number.isFinite(maxBitrate) && maxBitrate > 0) ||
+      (Number.isFinite(maxFramerate) && maxFramerate > 0) ||
+      (Number.isFinite(scaleResolutionDownBy) && scaleResolutionDownBy >= 1)
+    ))
+      return false;
+    if (Number.isFinite(maxBitrate) && maxBitrate > 0)
+      next.maxBitrate = Math.floor(maxBitrate);
+    if (Number.isFinite(maxFramerate) && maxFramerate > 0)
+      next.frameRate = maxFramerate;
+    if (Number.isFinite(scaleResolutionDownBy) && scaleResolutionDownBy >= 1)
+      next.scaleResolutionDownBy = scaleResolutionDownBy;
+    entry.videoSettings = next;
+    return this._setSourceParameters(entry as NativeCloudflareSourceEntry);
+  }
+
   async _updateBitrate(
     source: string,
     maxBitrate: number,
@@ -477,16 +510,21 @@ export class NativeCloudflareSourcesMethods {
       const options = buildVideoProduceOptions({
         width: video.width || resolution?.width || 1920,
         height: video.height || resolution?.height || 1080,
-        frameRate: video.frameRate || 60,
+        frameRate: video.frameRate || 30,
         qualityPriority: video.qualityPriority || "framerate",
         screen: entry.source === "screen",
         maxBitrate: video.maxBitrate || captureSelection?.video?.maxBitrateBps,
+        lowSpec: video.lowSpec === true,
       });
       const encoding = options.encodings?.[0];
       if (encoding) {
         parameters.maxBitrate = encoding.maxBitrate;
         parameters.maxFramerate = encoding.maxFramerate;
-        parameters.scaleResolutionDownBy = encoding.scaleResolutionDownBy;
+        parameters.scaleResolutionDownBy = Number.isFinite(
+          Number(video.scaleResolutionDownBy),
+        )
+          ? Math.max(1, Number(video.scaleResolutionDownBy))
+          : encoding.scaleResolutionDownBy;
         parameters.degradationPreference = options.degradationPreference;
       }
     } else {

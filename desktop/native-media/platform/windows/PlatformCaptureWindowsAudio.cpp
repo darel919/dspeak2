@@ -294,10 +294,16 @@ private:
 class CameraCapture {
 public:
     CameraCapture(std::wstring device_id,
+                  uint32_t video_width,
+                  uint32_t video_height,
+                  uint32_t video_frame_rate,
                   lib_dspeak_media_screen_frame_cb screen_cb,
                   lib_dspeak_media_capture_error_cb error_cb,
                   void* user_data)
         : device_id_(std::move(device_id)),
+          video_width_(video_width),
+          video_height_(video_height),
+          video_frame_rate_(video_frame_rate),
           screen_cb_(screen_cb),
           error_cb_(error_cb),
           user_data_(user_data) {}
@@ -379,6 +385,12 @@ private:
             MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
         if (SUCCEEDED(result)) result = output_type->SetUINT32(
             MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        if (SUCCEEDED(result) && video_width_ > 0 && video_height_ > 0)
+            result = MFSetAttributeSize(
+                output_type, MF_MT_FRAME_SIZE, video_width_, video_height_);
+        if (SUCCEEDED(result) && video_frame_rate_ > 0)
+            result = MFSetAttributeRatio(
+                output_type, MF_MT_FRAME_RATE, video_frame_rate_, 1);
         if (SUCCEEDED(result)) result = reader->SetCurrentMediaType(
             MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, output_type);
         if (output_type) output_type->Release();
@@ -471,6 +483,9 @@ private:
     }
 
     std::wstring device_id_;
+    uint32_t video_width_ = 1280;
+    uint32_t video_height_ = 720;
+    uint32_t video_frame_rate_ = 30;
     lib_dspeak_media_screen_frame_cb screen_cb_ = nullptr;
     lib_dspeak_media_capture_error_cb error_cb_ = nullptr;
     void* user_data_ = nullptr;
@@ -508,10 +523,15 @@ void destroy_audio_capture(void* value) {
 }
 
 void* create_camera_capture(const std::wstring& device_id,
+                            uint32_t video_width,
+                            uint32_t video_height,
+                            uint32_t video_frame_rate,
                             lib_dspeak_media_screen_frame_cb screen_cb,
                             lib_dspeak_media_capture_error_cb error_cb,
                             void* user_data) {
-    return new(std::nothrow) CameraCapture(device_id, screen_cb, error_cb, user_data);
+    return new(std::nothrow) CameraCapture(
+        device_id, video_width, video_height, video_frame_rate,
+        screen_cb, error_cb, user_data);
 }
 
 int start_camera_capture(void* value) {

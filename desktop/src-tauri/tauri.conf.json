@@ -7,21 +7,11 @@
     "frontendDist": "../.output/public",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "cd .. && DSPEAK_DESKTOP=1 npm run dev",
-    "beforeBuildCommand": "node ../scripts/build-desktop-frontend.mjs"
+    "beforeBuildCommand": "node ../scripts/build-desktop-frontend.mjs && node ../scripts/build-desktop-worker.mjs"
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "dSpeak",
-        "width": 1200,
-        "height": 800,
-        "resizable": true,
-        "fullscreen": false,
-        "visible": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
@@ -29,6 +19,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/dspeak-media"],
     "macOS": {
       "minimumSystemVersion": "13.0"
     },

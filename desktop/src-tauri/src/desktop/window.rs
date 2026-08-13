@@ -1,6 +1,10 @@
 use super::state::HIDE_ON_CLOSE;
+use crate::media;
 use std::sync::atomic::Ordering;
 use tauri::Manager;
+use tauri::WebviewUrl;
+
+const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
 
 #[tauri::command]
 pub fn desktop_ready(app: tauri::AppHandle) -> Result<(), String> {
@@ -11,6 +15,28 @@ pub fn desktop_ready(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn load_preferences(app: &tauri::AppHandle) {
+    let Ok(app_dir) = app
+        .path()
+        .resolve("", tauri::path::BaseDirectory::AppConfig)
+    else {
+        return;
+    };
+    let path = app_dir.join(DESKTOP_PREFERENCES_FILE);
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(preferences) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+    if let Some(close_to_tray) = preferences
+        .get("closeToTray")
+        .and_then(|value| value.as_bool())
+    {
+        HIDE_ON_CLOSE.store(close_to_tray, Ordering::Relaxed);
+    }
+}
+
 pub(crate) fn attach_main_window_lifecycle(window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
     window.on_window_event(move |event| {
@@ -18,12 +44,18 @@ pub(crate) fn attach_main_window_lifecycle(window: &tauri::WebviewWindow) {
             if HIDE_ON_CLOSE.load(Ordering::Relaxed) {
                 api.prevent_close();
                 let _ = save_window_state_sync(&window_clone);
-                let _ = window_clone.destroy();
+                if media::is_connected(&window_clone.app_handle()) {
+                    media::clear_video_surfaces(&window_clone.app_handle());
+                    let _ = window_clone.hide();
+                } else {
+                    let _ = window_clone.destroy();
+                }
             } else {
-                let state_window = window_clone.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = save_window_state(state_window).await;
-                });
+                api.prevent_close();
+                let _ = save_window_state_sync(&window_clone);
+                let app = window_clone.app_handle();
+                media::shutdown_for_exit(app.state::<media::NativeMediaStore>().inner());
+                app.exit(0);
             }
         }
     });
@@ -57,17 +89,15 @@ pub(crate) fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let config = app
-        .config()
-        .app
-        .windows
-        .iter()
-        .find(|window| window.label == "main")
-        .ok_or_else(|| "main window configuration is missing".to_string())?;
-    let window = tauri::WebviewWindowBuilder::from_config(app, config)
-        .map_err(|error| error.to_string())?
-        .build()
-        .map_err(|error| error.to_string())?;
+    let window =
+        tauri::WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            .title("dSpeak")
+            .inner_size(1200.0, 800.0)
+            .resizable(true)
+            .fullscreen(false)
+            .visible(false)
+            .build()
+            .map_err(|error| error.to_string())?;
     attach_main_window_lifecycle(&window);
     let state_window = window.clone();
     tauri::async_runtime::spawn(async move {
@@ -137,8 +167,17 @@ pub async fn restore_window_state(window: tauri::WebviewWindow) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn set_hide_on_close(enabled: bool) {
+pub async fn set_hide_on_close(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     HIDE_ON_CLOSE.store(enabled, Ordering::Relaxed);
+    let app_dir = app
+        .path()
+        .resolve("", tauri::path::BaseDirectory::AppConfig)
+        .map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&app_dir).map_err(|error| error.to_string())?;
+    let path = app_dir.join(DESKTOP_PREFERENCES_FILE);
+    let preferences = serde_json::json!({ "closeToTray": enabled });
+    std::fs::write(path, preferences.to_string()).map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

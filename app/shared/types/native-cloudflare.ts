@@ -40,7 +40,6 @@ export interface NativeCloudflareTopology {
 export interface NativeCloudflareEvent {
   kind?: number;
   id?: string;
-  data?: unknown;
   eventId?: number | string;
   payload?: Record<string, unknown>;
 }

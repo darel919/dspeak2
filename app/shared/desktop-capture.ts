@@ -1,3 +1,5 @@
+import type { InvokeArgs } from "@tauri-apps/api/core";
+
 export const DESKTOP_CAPTURE_KINDS = Object.freeze([
   "application",
   "window",
@@ -257,7 +259,11 @@ export function nativeCaptureFailure(
 
 export function desktopCaptureRequest(
   selection: unknown,
-  options: { operation?: string; roomBitrateBps?: number } = {},
+  options: {
+    operation?: string;
+    roomBitrateBps?: number;
+    video?: UnknownRecord;
+  } = {},
 ) {
   const validatedSelection = assertDesktopCaptureSelection(
     selection,
@@ -272,6 +278,9 @@ export function desktopCaptureRequest(
       : null;
   const captureSelection = {
     ...validatedSelection,
+    ...(options.video
+      ? { video: { ...validatedSelection.video, ...options.video } }
+      : {}),
     ...(roomBitrateBps
       ? {
           roomBitrateBps,
@@ -442,7 +451,36 @@ export async function getDesktopCaptureApi() {
   if (!(await isDesktopClient())) return null;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    return { invoke };
+    return {
+      invoke: (command: string, payload: unknown = {}) =>
+        command.startsWith("media_video_surface_")
+          ? invoke(command, payload as InvokeArgs)
+          : invoke("media_worker_invoke", { command, payload }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function invokeNativeDesktopMedia(
+  command: string,
+  payload: unknown = {},
+) {
+  const api = await getDesktopCaptureApi();
+  if (!api) throw new Error("Native desktop media is unavailable");
+  return api.invoke(command, payload);
+}
+
+export async function listenNativeDesktopMedia(
+  eventName: string,
+  handler: (payload: unknown) => void,
+) {
+  if (!(await isDesktopClient())) return null;
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    return await listen(eventName, ({ payload }: { payload: unknown }) => {
+      handler(payload);
+    });
   } catch {
     return null;
   }

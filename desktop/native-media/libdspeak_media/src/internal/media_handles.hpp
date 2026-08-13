@@ -7,9 +7,9 @@
 #include <memory>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <vector>
 #include <mutex>
-#include <queue>
 #include <string>
 #include <map>
 #include <optional>
@@ -42,6 +42,10 @@ class CxxSendListener;
 class CxxRecvListener;
 class CxxConsumerListener;
 class P2pHealthDataChannelObserver;
+
+namespace dspeak_native {
+struct SharedTrackFactory;
+}
 
 class NativeVideoSource : public webrtc::AdaptedVideoTrackSource {
 public:
@@ -265,6 +269,7 @@ struct lib_dspeak_media_video_track {
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
+    std::shared_ptr<dspeak_native::SharedTrackFactory> runtime;
     webrtc::scoped_refptr<webrtc::VideoTrackInterface> track;
 };
 
@@ -273,6 +278,7 @@ struct lib_dspeak_media_audio_track {
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
+    std::shared_ptr<dspeak_native::SharedTrackFactory> runtime;
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> track;
 };
 
@@ -282,11 +288,10 @@ struct lib_dspeak_media_p2p_handle {
     webrtc::Thread* network_thread = nullptr;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
-    std::queue<std::string> ice_candidates;
-    std::mutex ice_mutex;
-    bool connected = false;
-    bool failed = false;
-    bool closed = false;
+    std::atomic<uint64_t> event_handle{0};
+    std::atomic<bool> connected{false};
+    std::atomic<bool> failed{false};
+    std::atomic<bool> closed{false};
     bool audio_stereo = false;
     webrtc::scoped_refptr<webrtc::DataChannelInterface> health_channel;
     std::unique_ptr<P2pHealthDataChannelObserver> health_observer;
@@ -314,7 +319,7 @@ uint64_t lib_dspeak_media_next_action_id();
 void lib_dspeak_media_push_action(lib_dspeak_media_action_kind_t kind, void* transport,
                                   uint64_t action_id, const lib_dspeak_media_json* params,
                                   const lib_dspeak_media_json* state);
-lib_dspeak_media_action_t lib_dspeak_media_poll_action_impl();
+lib_dspeak_media_action_t lib_dspeak_media_drain_action_impl();
 
 
 

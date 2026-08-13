@@ -353,7 +353,8 @@ async function loadSources() {
     const api = await getDesktopCaptureApi();
     if (!api)
       throw new Error("This capture picker is available in desktop mode only.");
-    const capabilities = await api.invoke("media_get_capabilities");
+    const prepared = await api.invoke("media_prepare_capture");
+    const capabilities = prepared?.capabilities || {};
     const captureCapability = getNativeCaptureCapability(
       capabilities,
       props.audioOnly ? "audio" : "video",
@@ -364,9 +365,7 @@ async function loadSources() {
     ) {
       throw new Error(captureCapability.reason);
     }
-    const listedSources = normalizeCaptureSources(
-      await api.invoke("media_list_capture_sources"),
-    );
+    const listedSources = normalizeCaptureSources(prepared?.sources);
     sources.value = listedSources.filter((source) =>
       props.audioOnly ? source.capabilities.audio : source.capabilities.video,
     );

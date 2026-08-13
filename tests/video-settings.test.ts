@@ -5,6 +5,7 @@ import {
   buildP2pVideoSenderOptions,
   buildVideoProduceOptions,
   buildWebRtcCodecContentType,
+  applyLowSpecNativeVideoProfile,
   calculateEncodedFps,
   calculateBitrateKbps,
   calculateMediaEngineUtilization,
@@ -24,6 +25,75 @@ import {
   VIDEO_FRAME_RATE_MIN,
   VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN,
 } from "../app/shared/video-settings.ts";
+
+test("low-spec native profile caps camera and screen-share workload", () => {
+  const camera = applyLowSpecNativeVideoProfile(
+    { resolution: "original", frameRate: 60, qualityPriority: "framerate" },
+    "camera",
+    true,
+  );
+  const screen = applyLowSpecNativeVideoProfile(
+    { resolution: "1080p", frameRate: 30, qualityPriority: "framerate" },
+    "screen",
+    true,
+  );
+  assert.deepEqual(
+    {
+      resolution: camera.resolution,
+      width: camera.width,
+      height: camera.height,
+      frameRate: camera.frameRate,
+      maxBitrate: camera.maxBitrate,
+      lowSpec: camera.lowSpec,
+    },
+    {
+      resolution: "360p",
+      width: 640,
+      height: 360,
+      frameRate: 15,
+      maxBitrate: 900_000,
+      lowSpec: true,
+    },
+  );
+  assert.deepEqual(
+    {
+      resolution: screen.resolution,
+      width: screen.width,
+      height: screen.height,
+      frameRate: screen.frameRate,
+      maxBitrate: screen.maxBitrate,
+      lowSpec: screen.lowSpec,
+    },
+    {
+      resolution: "720p",
+      width: 1280,
+      height: 720,
+      frameRate: 15,
+      maxBitrate: 1_800_000,
+      lowSpec: true,
+    },
+  );
+});
+
+test("low-spec production options use a 15 FPS bounded bitrate profile", () => {
+  const camera = buildVideoProduceOptions({
+    width: 640,
+    height: 360,
+    frameRate: 15,
+    lowSpec: true,
+  });
+  const screen = buildP2pVideoSenderOptions({
+    width: 1280,
+    height: 720,
+    frameRate: 15,
+    screen: true,
+    lowSpec: true,
+  });
+  assert.equal(camera.encodings[0].maxFramerate, 15);
+  assert.equal(camera.encodings[0].maxBitrate, 200_000);
+  assert.equal(screen.encodings[0].maxFramerate, 15);
+  assert.equal(screen.encodings[0].maxBitrate, 898_560);
+});
 
 test("native capture settings preserve explicit user video preferences", () => {
   assert.deepEqual(

@@ -257,6 +257,11 @@
               :stream="tile.feed.stream"
               :native="tile.feed.native === true"
               :native-frame="tile.feed.frame || null"
+              :native-surface-id="
+                tile.feed.surfaceId ||
+                tile.feed.frame?.surfaceId ||
+                tile.feed.key
+              "
               :source="tile.feed.source"
               :label="tile.feed.label"
               :muted="true"
@@ -268,6 +273,9 @@
               :own-camera-feed-key="ownCameraFeed?.key || null"
               @start-receiving="setScreenReceiving(tile.feed, true)"
               @stop-receiving="setScreenReceiving(tile.feed, false)"
+              @visibility-receiving-change="
+                setVideoReceiving(tile.feed, $event)
+              "
               @preview-change="setLocalPreview(tile.feed, $event)"
             />
             <div
@@ -1033,6 +1041,12 @@ const remoteSystemAudioShares = computed(() => {
 
 function setScreenReceiving(feed, receiving) {
   if (feed.local || feed.source !== "screen") return;
+  voiceStore.setRemoteScreenReceiving(feed.key, receiving);
+}
+
+function setVideoReceiving(feed, receiving) {
+  if (feed.local || (feed.source !== "camera" && feed.source !== "screen"))
+    return;
   voiceStore.setRemoteScreenReceiving(feed.key, receiving);
 }
 

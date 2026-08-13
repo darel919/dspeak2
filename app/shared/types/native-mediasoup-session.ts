@@ -74,6 +74,10 @@ export interface NativeCloudflareSessionLike {
   setSourceTransmission: (source: string, enabled: boolean) => unknown;
   updateAudioBitrate: (source: string, bitrate: number) => unknown;
   updateVideoBitrate: (source: string, bitrate: number) => unknown;
+  updateVideoParameters: (
+    source: string,
+    parameters: Record<string, unknown>,
+  ) => unknown;
   setRemoteReceiving: (
     userIdOrKey: string,
     sourceOrReceiving: string | boolean,
@@ -137,6 +141,10 @@ export interface NativeMediasoupSfuSessionSurface {
   setSourceTransmission: (source: string, enabled: boolean) => Promise<unknown>;
   updateAudioBitrate: (source: string, bitrate: number) => Promise<unknown>;
   updateVideoBitrate: (source: string, bitrate: number) => Promise<unknown>;
+  updateVideoParameters: (
+    source: string,
+    parameters: Record<string, unknown>,
+  ) => Promise<unknown>;
   setJitterBufferConfig: (config?: {
     minDelayMs?: number;
     targetDelayMs?: number;

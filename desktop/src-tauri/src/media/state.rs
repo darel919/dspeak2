@@ -1,10 +1,16 @@
 #[cfg(native_rtc)]
 use super::ffi;
 use super::types::NativeMediaState;
+use super::worker_client::MediaWorkerClient;
 use super::MEDIA_EVENT_STATE;
+#[cfg(native_rtc)]
 use std::collections::BTreeMap;
+#[cfg(native_rtc)]
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+#[cfg(native_rtc)]
+use std::thread::JoinHandle;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(native_rtc)]
 pub(crate) struct NativeHandleRegistry {
@@ -92,16 +98,30 @@ impl Drop for NativeHandleRegistry {
 
 pub struct NativeMediaStore {
     pub(crate) state: Arc<Mutex<NativeMediaState>>,
+    pub(crate) lifecycle: Mutex<()>,
     pub(crate) stay_awake: crate::power::StayAwake,
+    pub(crate) worker: Arc<MediaWorkerClient>,
+    #[cfg(native_rtc)]
+    pub(crate) event_dispatcher: Arc<Mutex<Option<NativeEventDispatcher>>>,
     #[cfg(native_rtc)]
     pub(crate) handles: Arc<Mutex<NativeHandleRegistry>>,
+}
+
+#[cfg(native_rtc)]
+pub(crate) struct NativeEventDispatcher {
+    pub(crate) stop: Arc<AtomicBool>,
+    pub(crate) thread: Option<JoinHandle<()>>,
 }
 
 impl Default for NativeMediaStore {
     fn default() -> Self {
         Self {
             state: Arc::new(Mutex::new(NativeMediaState::default())),
+            lifecycle: Mutex::new(()),
             stay_awake: crate::power::StayAwake::default(),
+            worker: Arc::new(MediaWorkerClient::default()),
+            #[cfg(native_rtc)]
+            event_dispatcher: Arc::new(Mutex::new(None)),
             #[cfg(native_rtc)]
             handles: Arc::new(Mutex::new(NativeHandleRegistry::default())),
         }
@@ -119,4 +139,10 @@ pub(crate) fn lock_state<'a>(
 
 pub(crate) fn emit_state(app: &AppHandle, state: &NativeMediaState) {
     let _ = app.emit(MEDIA_EVENT_STATE, state);
+}
+
+pub(crate) fn is_connected(app: &AppHandle) -> bool {
+    app.try_state::<NativeMediaStore>()
+        .and_then(|store| store.state.lock().ok().map(|state| state.connected))
+        .unwrap_or(false)
 }

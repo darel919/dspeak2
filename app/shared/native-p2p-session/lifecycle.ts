@@ -60,34 +60,6 @@ export class NativeP2pSessionLifecycleMethods {
       await this._addCandidate(peer, candidate);
   }
 
-  _startCandidatePump(
-    this: NativeP2pSessionSurface,
-    peer: NativeP2pSessionPeer,
-  ) {
-    const poll = async () => {
-      if (!this.peers.has(peer.peerId) || this.closed) return;
-      try {
-        let candidate = await this.invoke("media_p2p_poll_ice_candidate", {
-          p2pHandle: peer.handle,
-        });
-        while (candidate) {
-          this._sendSignal(peer.peerId, {
-            candidate: JSON.parse(String(candidate)),
-          });
-          candidate = await this.invoke("media_p2p_poll_ice_candidate", {
-            p2pHandle: peer.handle,
-          });
-        }
-      } catch (error: unknown) {
-        this.onError?.(error);
-      }
-      if (!this.peers.has(peer.peerId) || this.closed) return;
-      peer.candidateTimer = setTimeout(poll, 20);
-      peer.candidateTimer.unref?.();
-    };
-    poll();
-  }
-
   _handleP2pEvent(
     this: NativeP2pSessionSurface,
     peer: NativeP2pSessionPeer | undefined,
@@ -96,6 +68,16 @@ export class NativeP2pSessionLifecycleMethods {
   ) {
     if (!peer) return false;
     const eventName = String(payload.event || "");
+    if (eventName === "ice-candidate") {
+      const candidate = {
+        candidate: payload.candidate,
+        sdpMid: payload.sdpMid,
+        sdpMLineIndex: payload.sdpMLineIndex,
+      };
+      if (typeof candidate.candidate === "string" && candidate.candidate)
+        this._sendSignal(peer.peerId, { candidate });
+      return true;
+    }
     if (eventName === "ice-state") {
       const state = Number(payload.value);
       this._handleIceState(peer, state);
@@ -134,7 +116,8 @@ export class NativeP2pSessionLifecycleMethods {
         ownerSource,
         kind,
         native: true,
-        playback: kind === "audio" ? "coreaudio" : "native-frame",
+        playback: kind === "audio" ? "coreaudio" : "native-surface",
+        surfaceId: kind === "video" ? trackId : undefined,
         frame: null,
         receiving:
           this.remoteReceiving.get(`${String(peer.userId)}:${source}`) ??
@@ -315,7 +298,7 @@ export class NativeP2pSessionLifecycleMethods {
           candidate.source === source &&
           !candidate.closed,
       );
-      if (!entry || (entry.kind === "video" && !entry.frame)) return false;
+      if (!entry) return false;
     }
     return true;
   }
@@ -348,7 +331,6 @@ export class NativeP2pSessionLifecycleMethods {
     if (!peer) return;
     peer.closed = true;
     this.peers.delete(peerId);
-    if (peer.candidateTimer) clearTimeout(peer.candidateTimer);
     if (peer.disconnectTimer) clearTimeout(peer.disconnectTimer);
     if (peer.restartTimer) clearTimeout(peer.restartTimer);
     this._stopHealthPump(peer);

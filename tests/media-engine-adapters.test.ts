@@ -66,25 +66,19 @@ describe("MediaEngine adapters", () => {
     assert.equal(flags.nativeAudioReceive, true);
   });
 
-  it("uses adaptive native action polling instead of a fixed idle spin", async () => {
+  it("uses push-driven native media events instead of a polling loop", async () => {
     const source = await readFile(
       "app/composables/media/native-media-engine-runtime.ts",
       "utf8",
     );
-    const constants = await readFile(
-      "app/composables/media/native-media-engine-common.ts",
-      "utf8",
-    );
-
-    assert.match(constants, /NATIVE_ACTION_POLL_IDLE_MS = 100/);
-    assert.match(constants, /NATIVE_ACTION_POLL_ACTIVE_MS = 5/);
     assert.match(
       source,
-      /active \? NATIVE_ACTION_POLL_ACTIVE_MS : NATIVE_ACTION_POLL_IDLE_MS/,
+      /dispatchNativeAction\(engine, payload as NativeCaptureRequest\)/,
     );
-    assert.match(source, /engine\.nativeActionPump = \{/);
-    assert.doesNotMatch(source, /this\.nativeActionPump\.stop\s*=/);
-    assert.doesNotMatch(source, /schedule\(10\)/);
+    assert.match(source, /engine\.nativeEventOperation/);
+    assert.doesNotMatch(source, /media_poll_action/);
+    assert.doesNotMatch(source, /media_poll_receive_event/);
+    assert.doesNotMatch(source, /media_p2p_poll_ice_candidate/);
   });
 
   it("does not probe browser microphone access before the Tauri factory", async () => {
@@ -347,7 +341,6 @@ describe("MediaEngine adapters", () => {
     );
 
     await engine.initialize();
-    engine._stopNativeActionPump();
     engine.nativeSession = {
       connect: async (channelId) => calls.push(["connect", channelId]),
     };
@@ -356,6 +349,32 @@ describe("MediaEngine adapters", () => {
       ["media_initialize", { config: {} }],
       ["connect", "channel-3"],
       ["media_join", { channelId: "channel-3" }],
+    ]);
+  });
+
+  it("marks the native worker connected through the normal connect path", async () => {
+    const calls = [];
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: { nativeRtc: true, nativeBackendReady: true },
+        nativeOnly: true,
+        tauri: {
+          invoke: async (command, payload) => calls.push([command, payload]),
+        },
+      }),
+    );
+    engine.initialized = true;
+    engine.nativeSession = {
+      connect: async (channelId) => calls.push(["connect", channelId]),
+    };
+    engine._configureNativeIceServers = async () => {};
+    engine._configureNativeControl = async () => {};
+
+    await engine.connect("channel-connect");
+
+    assert.deepEqual(calls, [
+      ["connect", "channel-connect"],
+      ["media_join", { channelId: "channel-connect" }],
     ]);
   });
 
@@ -377,7 +396,7 @@ describe("MediaEngine adapters", () => {
 
     await engine.leaveSession();
 
-    assert.deepEqual(calls, ["media_leave"]);
+    assert.deepEqual(calls, ["media_leave", "media_shutdown"]);
   });
 
   it("NativeMediaEngine attempts microphone capture before callback health is proven", async () => {
@@ -537,6 +556,7 @@ describe("MediaEngine adapters", () => {
       source: "camera",
       producerId: "local:camera",
       native: true,
+      surfaceId: "local:camera",
       frame: null,
     });
   });

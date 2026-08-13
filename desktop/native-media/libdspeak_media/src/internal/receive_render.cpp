@@ -1,10 +1,10 @@
 #include "receive_render.hpp"
 #include "runtime_health.hpp"
+#include "event_bridge.hpp"
+#include "video_surface.hpp"
 
 #include <json.hpp>
 #include <api/video/i420_buffer.h>
-#include <common_video/libyuv/include/webrtc_libyuv.h>
-#include <third_party/libyuv/include/libyuv/convert_argb.h>
 #include <third_party/libyuv/include/libyuv/scale.h>
 
 #include <algorithm>
@@ -16,7 +16,6 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -34,8 +33,6 @@ struct ReceiveEvent {
     uint64_t event_id = 0;
     char* id = nullptr;
     char* payload_json = nullptr;
-    uint8_t* data = nullptr;
-    uint32_t data_len = 0;
 };
 
 std::mutex g_receive_event_mutex;
@@ -61,33 +58,22 @@ char* duplicate_string(const char* value) {
 void release_event(ReceiveEvent& event) {
     std::free(event.id);
     std::free(event.payload_json);
-    std::free(event.data);
     event = {};
 }
 
 void push_event(lib_dspeak_media_receive_event_kind_t kind,
                 const char* id,
-                const json& payload,
-                const uint8_t* data = nullptr,
-                uint32_t data_len = 0) {
+                const json& payload) {
     ReceiveEvent event;
     event.kind = kind;
     event.event_id = g_receive_event_id.fetch_add(1);
     event.id = duplicate_string(id);
     const auto serialized = payload.dump();
     event.payload_json = duplicate_string(serialized.c_str());
-    if (data && data_len) {
-        event.data = static_cast<uint8_t*>(std::malloc(data_len));
-        if (!event.data) {
-            release_event(event);
-            return;
-        }
-        std::memcpy(event.data, data, data_len);
-        event.data_len = data_len;
-    }
     std::lock_guard<std::mutex> lock(g_receive_event_mutex);
     if ((kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME ||
-         kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME) && id) {
+         kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME ||
+         kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_AUDIO_LEVELS) && id) {
         for (auto it = g_receive_events.begin(); it != g_receive_events.end(); ++it) {
             if (it->kind == kind && it->id && std::strcmp(it->id, id) == 0) {
                 release_event(*it);
@@ -101,18 +87,7 @@ void push_event(lib_dspeak_media_receive_event_kind_t kind,
         g_receive_events.pop_front();
     }
     g_receive_events.push_back(std::move(event));
-}
-
-bool has_pending_video_frame(
-    lib_dspeak_media_receive_event_kind_t kind,
-    const char* id) {
-    if (!id) return false;
-    std::lock_guard<std::mutex> lock(g_receive_event_mutex);
-    return std::any_of(
-        g_receive_events.begin(), g_receive_events.end(),
-        [kind, id](const ReceiveEvent& event) {
-            return event.kind == kind && event.id && std::strcmp(event.id, id) == 0;
-        });
+    lib_dspeak_media_signal_event();
 }
 
 }
@@ -471,33 +446,11 @@ NativeReceiveVideoSink::NativeReceiveVideoSink(std::string consumer_id, std::str
     : consumer_id_(std::move(consumer_id)), handle_(std::move(handle)) {}
 
 void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
-    if (!enabled_ || has_pending_video_frame(
-            LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME, consumer_id_.c_str()))
-        return;
-    const auto buffer = frame.video_frame_buffer()->ToI420();
-    if (!buffer) return;
-    const int width = buffer->width();
-    const int height = buffer->height();
+    if (!enabled_) return;
+    const int width = frame.width();
+    const int height = frame.height();
     if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return;
-    const size_t width_size = static_cast<size_t>(width);
-    const size_t height_size = static_cast<size_t>(height);
-    if (width_size > std::numeric_limits<size_t>::max() / height_size / 4)
-        return;
-    std::vector<uint8_t> rgba(width_size * height_size * 4);
-    if (libyuv::I420ToRGBA(buffer->DataY(), buffer->StrideY(),
-                           buffer->DataU(), buffer->StrideU(),
-                           buffer->DataV(), buffer->StrideV(),
-                           rgba.data(), width * 4, width, height) != 0) return;
-    json payload = {
-        {"consumerId", consumer_id_},
-        {"width", width},
-        {"height", height},
-        {"timestampMs", frame.timestamp_us() / 1000},
-        {"pixelFormat", "rgba"},
-    };
-    if (!handle_.empty()) payload["handle"] = handle_;
-    push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME, consumer_id_.c_str(), payload, rgba.data(),
-               static_cast<uint32_t>(rgba.size()));
+    dspeak_media_video_surface::render(consumer_id_.c_str(), frame);
     if (!g_video_frame_logged.exchange(true))
         std::fprintf(stderr, "[dspeak:media] native video frame received consumer=%s size=%dx%d\n",
                      consumer_id_.c_str(), width, height);
@@ -510,6 +463,9 @@ void NativeReceiveVideoSink::SetEnabled(bool enabled) {
 
 extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
                                                           const webrtc::VideoFrame& frame) {
+    if (!source || !lib_dspeak_media_local_video_preview_enabled(source)) return;
+    const std::string surface_id = std::string("local:") + source;
+    if (!dspeak_media_video_surface::is_visible(surface_id.c_str())) return;
     const auto input = frame.video_frame_buffer()->ToI420();
     if (!input) return;
     const int input_width = input->width();
@@ -536,22 +492,11 @@ extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
                           width, height, libyuv::kFilterBox) != 0)
         return;
 
-    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
-    if (libyuv::I420ToRGBA(scaled->DataY(), scaled->StrideY(),
-                           scaled->DataU(), scaled->StrideU(),
-                           scaled->DataV(), scaled->StrideV(),
-                           rgba.data(), width * 4, width, height) != 0)
-        return;
-    push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME,
-               source,
-               {
-                   {"source", source ? source : ""},
-                   {"width", width},
-                   {"height", height},
-                   {"timestampMs", frame.timestamp_us() / 1000},
-                   {"pixelFormat", "rgba"},
-               },
-               rgba.data(), static_cast<uint32_t>(rgba.size()));
+    const webrtc::VideoFrame scaled_frame = webrtc::VideoFrame::Builder()
+        .set_video_frame_buffer(scaled)
+        .set_timestamp_us(frame.timestamp_us())
+        .build();
+    dspeak_media_video_surface::render(surface_id.c_str(), scaled_frame);
     if (!g_local_video_frame_logged.exchange(true))
         std::fprintf(stderr, "[dspeak:media] native local video frame source=%s size=%dx%d\n",
                      source ? source : "", width, height);
@@ -570,6 +515,14 @@ extern "C" void lib_dspeak_media_push_capture_error_event(const char* route,
         });
 }
 
+extern "C" void lib_dspeak_media_push_audio_levels_event(const char* payload_json) {
+    if (!payload_json) return;
+    try {
+        const auto payload = json::parse(payload_json);
+        push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_AUDIO_LEVELS, "audio-levels", payload);
+    } catch (...) {}
+}
+
 extern "C" void lib_dspeak_media_push_receive_track_event(const char* event_name,
                                                             const char* consumer_id,
                                                             const char* producer_id,
@@ -581,7 +534,10 @@ extern "C" void lib_dspeak_media_push_receive_track_event(const char* event_name
         {"producerId", producer_id ? producer_id : ""},
         {"kind", kind ? kind : ""},
         {"native", true},
-        {"playback", kind && std::strcmp(kind, "audio") == 0 ? "coreaudio" : "canvas"},
+        {"playback", kind && std::strcmp(kind, "audio") == 0 ? "coreaudio" : "native-surface"},
+        {"surfaceId", kind && std::strcmp(kind, "audio") == 0
+            ? ""
+            : (consumer_id ? consumer_id : "")},
     };
     if (app_data_json) {
         try {
@@ -627,19 +583,18 @@ extern "C" void lib_dspeak_media_push_p2p_event(uint64_t p2p_handle,
     push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_P2P, track_id, payload);
 }
 
-extern "C" lib_dspeak_media_receive_event_t lib_dspeak_media_poll_receive_event(void) {
+extern "C" lib_dspeak_media_receive_event_t lib_dspeak_media_drain_receive_event(void) {
     std::lock_guard<std::mutex> lock(g_receive_event_mutex);
     if (g_receive_events.empty())
-        return {LIB_DSPEAK_MEDIA_RECEIVE_EVENT_NONE, 0, nullptr, nullptr, nullptr, 0};
+        return {LIB_DSPEAK_MEDIA_RECEIVE_EVENT_NONE, 0, nullptr, nullptr};
     ReceiveEvent event = std::move(g_receive_events.front());
     g_receive_events.pop_front();
-    return {event.kind, event.event_id, event.id, event.payload_json, event.data, event.data_len};
+    return {event.kind, event.event_id, event.id, event.payload_json};
 }
 
 extern "C" void lib_dspeak_media_free_receive_event(lib_dspeak_media_receive_event_t* event) {
     if (!event) return;
     std::free(event->id);
     std::free(event->payload_json);
-    std::free(event->data);
     *event = {};
 }

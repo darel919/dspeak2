@@ -32,6 +32,7 @@ extern lib_dspeak_media_video_track_t* g_camera_track;
 extern lib_dspeak_media_audio_track_t* g_microphone_track;
 extern std::string g_microphone_device_id;
 extern std::string g_camera_device_id;
+extern std::string g_camera_settings_json;
 extern std::atomic<double> g_shared_audio_volume;
 extern std::atomic<double> g_shared_audio_attenuation_target;
 extern std::atomic<double> g_shared_audio_attenuation_current;

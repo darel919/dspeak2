@@ -1,8 +1,11 @@
 #[cfg(native_rtc)]
 use super::ffi;
+#[cfg(native_rtc)]
+use super::startup::{call_native_shutdown, native_capabilities_value, try_native_initialize};
 use super::state::{lock_state, NativeMediaStore};
 use super::types::{capture_error, validate_capture_request, NativeMediaError};
 use serde_json::Value;
+#[cfg(native_rtc)]
 use std::ffi::{CStr, CString};
 use tauri::{AppHandle, State};
 
@@ -19,6 +22,21 @@ fn native_capture_sources() -> Result<Vec<Value>, String> {
     unsafe { ffi::lib_dspeak_media_free_string(pointer) };
     let text = text?;
     serde_json::from_str(&text).map_err(|_| "native source JSON was invalid".to_string())
+}
+
+#[cfg(native_rtc)]
+fn native_capture_devices() -> Result<Vec<Value>, String> {
+    let pointer = unsafe { ffi::lib_dspeak_media_list_capture_devices() };
+    if pointer.is_null() {
+        return Err("native media device enumeration failed".to_string());
+    }
+    let text = unsafe { CStr::from_ptr(pointer) }
+        .to_str()
+        .map(str::to_owned)
+        .map_err(|_| "native media device list was not UTF-8".to_string());
+    unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+    let text = text?;
+    serde_json::from_str(&text).map_err(|_| "native media device list was invalid JSON".to_string())
 }
 
 #[cfg(native_rtc)]
@@ -73,6 +91,134 @@ pub async fn media_list_capture_sources(
         "enumerate",
         "native media backend is unavailable",
     ))
+}
+
+#[tauri::command]
+pub async fn media_prepare_capture(
+    store: State<'_, NativeMediaStore>,
+) -> Result<Value, NativeMediaError> {
+    let _lifecycle = store.lifecycle.lock().map_err(|_| {
+        capture_error(
+            "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+            "prepare",
+            "native media lifecycle lock poisoned",
+        )
+    })?;
+    let state = store.state.lock().map_err(|_| {
+        capture_error(
+            "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+            "prepare",
+            "native media state lock poisoned",
+        )
+    })?;
+    if state.initialized {
+        if !state.capabilities.native_rtc || !state.native_backend_ready {
+            return Err(capture_error(
+                "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+                "prepare",
+                "native media backend is unavailable",
+            ));
+        }
+        let capabilities = serde_json::to_value(&state.capabilities).map_err(|_| {
+            capture_error(
+                "DESKTOP_CAPTURE_CAPABILITIES_FAILED",
+                "prepare",
+                "native media capabilities could not be serialized",
+            )
+        })?;
+        drop(state);
+        #[cfg(native_rtc)]
+        {
+            let sources = native_capture_sources().map_err(|message| {
+                capture_error("DESKTOP_CAPTURE_ENUMERATION_FAILED", "prepare", &message)
+            })?;
+            return Ok(serde_json::json!({
+                "capabilities": capabilities,
+                "sources": sources,
+            }));
+        }
+        #[cfg(not(native_rtc))]
+        {
+            let _ = capabilities;
+            return Err(capture_error(
+                "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+                "prepare",
+                "native media backend is unavailable",
+            ));
+        }
+    }
+    drop(state);
+
+    #[cfg(native_rtc)]
+    {
+        if !try_native_initialize() {
+            return Err(capture_error(
+                "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+                "prepare",
+                "native media backend is unavailable",
+            ));
+        }
+        let capabilities = native_capabilities_value();
+        let sources = match native_capture_sources() {
+            Ok(sources) => sources,
+            Err(message) => {
+                call_native_shutdown();
+                return Err(capture_error(
+                    "DESKTOP_CAPTURE_ENUMERATION_FAILED",
+                    "prepare",
+                    &message,
+                ));
+            }
+        };
+        call_native_shutdown();
+        return Ok(serde_json::json!({
+            "capabilities": capabilities,
+            "sources": sources,
+        }));
+    }
+    #[cfg(not(native_rtc))]
+    Err(capture_error(
+        "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+        "prepare",
+        "native media backend is unavailable",
+    ))
+}
+
+#[tauri::command]
+pub async fn media_prepare_devices(
+    store: State<'_, NativeMediaStore>,
+) -> Result<Vec<Value>, String> {
+    let _lifecycle = store
+        .lifecycle
+        .lock()
+        .map_err(|_| "native media lifecycle lock poisoned".to_string())?;
+    let state = store
+        .state
+        .lock()
+        .map_err(|_| "native media state lock poisoned".to_string())?;
+    if state.initialized {
+        if !state.capabilities.native_rtc || !state.native_backend_ready {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        #[cfg(native_rtc)]
+        return native_capture_devices();
+        #[cfg(not(native_rtc))]
+        return Err("native media backend is unavailable".to_string());
+    }
+    drop(state);
+
+    #[cfg(native_rtc)]
+    {
+        if !try_native_initialize() {
+            return Err("native media backend is unavailable".to_string());
+        }
+        let devices = native_capture_devices();
+        call_native_shutdown();
+        return devices;
+    }
+    #[cfg(not(native_rtc))]
+    Err("native media backend is unavailable".to_string())
 }
 
 #[tauri::command]
@@ -558,34 +704,7 @@ pub async fn media_stop_microphone_check(
 
 #[tauri::command]
 pub async fn media_get_devices(store: State<'_, NativeMediaStore>) -> Result<Vec<Value>, String> {
-    #[cfg(native_rtc)]
-    {
-        let state = store
-            .state
-            .lock()
-            .map_err(|_| "native media state lock poisoned".to_string())?;
-        if !state.native_backend_ready || !state.capabilities.native_rtc {
-            return Err("native media backend is unavailable".to_string());
-        }
-        drop(state);
-        let pointer = unsafe { ffi::lib_dspeak_media_list_capture_devices() };
-        if pointer.is_null() {
-            return Err("native media device enumeration failed".to_string());
-        }
-        let text = unsafe { CStr::from_ptr(pointer) }
-            .to_str()
-            .map(str::to_owned)
-            .map_err(|_| "native media device list was not UTF-8".to_string());
-        unsafe { ffi::lib_dspeak_media_free_string(pointer) };
-        let text = text?;
-        serde_json::from_str(&text)
-            .map_err(|_| "native media device list was invalid JSON".to_string())
-    }
-    #[cfg(not(native_rtc))]
-    {
-        let _ = store;
-        Err("native media backend not available".to_string())
-    }
+    media_prepare_devices(store).await
 }
 
 #[tauri::command]
@@ -642,6 +761,7 @@ pub async fn media_set_microphone(
 pub async fn media_set_camera(
     store: State<'_, NativeMediaStore>,
     enabled: bool,
+    video_settings: Option<Value>,
 ) -> Result<(), String> {
     #[cfg(native_rtc)]
     {
@@ -654,10 +774,16 @@ pub async fn media_set_camera(
                 return Err("native camera capture is unavailable".to_string());
             }
         }
+        let settings = serde_json::to_string(
+            &video_settings.unwrap_or_else(|| Value::Object(Default::default())),
+        )
+        .map_err(|_| "native camera settings could not be serialized".to_string())?;
+        let settings =
+            CString::new(settings).map_err(|_| "native camera settings are invalid".to_string())?;
         let mut error = 0;
         let result = unsafe {
             if enabled {
-                ffi::lib_dspeak_media_start_camera_capture(&mut error)
+                ffi::lib_dspeak_media_start_camera_capture(settings.as_ptr(), &mut error)
             } else {
                 ffi::lib_dspeak_media_stop_camera_capture(&mut error)
             }
@@ -671,6 +797,7 @@ pub async fn media_set_camera(
     {
         let _ = store;
         let _ = enabled;
+        let _ = video_settings;
         Err("native media backend not available".to_string())
     }
 }

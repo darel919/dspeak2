@@ -55,7 +55,10 @@ char* lib_dspeak_media_platform_capture_capabilities(void);
 
 struct lib_dspeak_media_device_capture_session*
 lib_dspeak_media_platform_device_capture_create(const char* device_id,
-                                                const char* kind);
+                                                const char* kind,
+                                                uint32_t video_width,
+                                                uint32_t video_height,
+                                                uint32_t video_frame_rate);
 
 int lib_dspeak_media_platform_device_capture_start(
     struct lib_dspeak_media_device_capture_session* session,

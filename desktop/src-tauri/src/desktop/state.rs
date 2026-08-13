@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::Notify;
 
 #[derive(Clone)]
 pub(crate) struct OAuthState {
@@ -22,8 +24,9 @@ pub(crate) struct OAuthServerState {
 
 #[derive(Clone)]
 pub(crate) struct BackgroundNotificationState {
-    pub(crate) session: std::sync::Arc<Mutex<Option<BackgroundNotificationSession>>>,
-    pub(crate) enabled: std::sync::Arc<AtomicBool>,
+    pub(crate) session: Arc<Mutex<Option<BackgroundNotificationSession>>>,
+    pub(crate) enabled: Arc<AtomicBool>,
+    pub(crate) wake: Arc<Notify>,
 }
 
 #[derive(Clone)]

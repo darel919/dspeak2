@@ -377,12 +377,7 @@ export class NativeP2pSessionSourcesMethods {
       [...this.peers.values()].find(
         (candidate) => candidate.userId === entry.userId,
       );
-    entry.frame = {
-      width: Number(payload.width),
-      height: Number(payload.height),
-      timestampMs: Number(payload.timestampMs) || 0,
-      data: event.data || null,
-    };
+    entry.surfaceId = entry.surfaceId || trackId;
     this.onRemoteTrack?.(entry);
     if (framePeer) this._checkPeerQualification(framePeer);
     this._emitState();
@@ -443,7 +438,6 @@ export class NativeP2pSessionSourcesMethods {
       sources: new Set<string>(),
       trackIds: new Map<string, string>(),
       connected: false,
-      candidateTimer: null,
       sourceByTrackId: new Map<string, string>(),
       ownerSourceByTrackId: new Map<string, string | null>(),
       offerCreated: false,
@@ -471,7 +465,6 @@ export class NativeP2pSessionSourcesMethods {
     try {
       for (const source of this.sources.values())
         await this._attachSource(peer, source);
-      this._startCandidatePump(peer);
       if (this.localPeerId && this.localPeerId < peerId) {
         peer.negotiationInFlight = true;
         try {
@@ -628,10 +621,11 @@ export class NativeP2pSessionSourcesMethods {
       const options = buildP2pVideoSenderOptions({
         width: video.width || resolution?.width || 1920,
         height: video.height || resolution?.height || 1080,
-        frameRate: video.frameRate || 60,
+        frameRate: video.frameRate || 30,
         qualityPriority: video.qualityPriority || "framerate",
         screen: source.source === "screen",
         maxBitrate: video.maxBitrate,
+        lowSpec: video.lowSpec === true,
       });
       const encoding = options.encodings?.[0];
       if (encoding) {
@@ -765,6 +759,15 @@ export class NativeP2pSessionSourcesMethods {
     });
   }
 
+  async updateVideoParameters(
+    this: NativeP2pSessionSurface,
+    source: string,
+    parameters: Record<string, unknown>,
+  ) {
+    if (this.sources.get(String(source || ""))?.kind !== "video") return false;
+    return this._updateSourceParameters(source, parameters);
+  }
+
   async setConsumerVolume(
     this: NativeP2pSessionSurface,
     userId: string | number,
@@ -801,5 +804,6 @@ export interface NativeP2pSessionSourcesMethods extends Omit<
   | "setSourceTransmission"
   | "updateAudioBitrate"
   | "updateVideoBitrate"
+  | "updateVideoParameters"
   | "setConsumerVolume"
 > {}

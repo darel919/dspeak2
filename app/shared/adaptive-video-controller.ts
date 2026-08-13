@@ -1,5 +1,6 @@
 import {
   calculateFrameTimeMs,
+  VIDEO_FRAME_RATE_MIN,
   VIDEO_RESOLUTIONS,
   VIDEO_SCALE_STEPS,
 } from "./video-settings.ts";
@@ -13,7 +14,7 @@ import type {
   AdaptiveVideoState,
 } from "./types/adaptive-media.ts";
 
-const ADAPTIVE_FRAME_RATES = Object.freeze([25, 30, 50, 60]);
+const ADAPTIVE_FRAME_RATES = Object.freeze([15, 25, 30, 50, 60]);
 
 export function updateAdaptiveVideoState(
   state: AdaptiveVideoState | null,
@@ -22,6 +23,11 @@ export function updateAdaptiveVideoState(
 ) {
   const priority = settings.qualityPriority;
   const targetFrameRate = Number(settings.frameRate) || 30;
+  const minimumFrameRate = Math.max(
+    1,
+    Number(settings.minimumFrameRate) || VIDEO_FRAME_RATE_MIN,
+  );
+  const frameRateFirst = settings.frameRateFirst === true;
   const currentScale = state?.scale;
   const scale =
     currentScale !== undefined && VIDEO_SCALE_STEPS.includes(currentScale)
@@ -31,6 +37,20 @@ export function updateAdaptiveVideoState(
     targetFrameRate,
     Number(state?.frameRate) || targetFrameRate,
   );
+  const targetBitrate = Number(settings.maxBitrate);
+  const hasBitrateCeiling =
+    settings.adaptBitrate === true &&
+    Number.isFinite(targetBitrate) &&
+    targetBitrate > 0;
+  const bitrate = hasBitrateCeiling
+    ? Math.min(targetBitrate, Number(state?.maxBitrate) || targetBitrate)
+    : null;
+  const minimumBitrate = hasBitrateCeiling
+    ? Math.min(
+        targetBitrate,
+        Math.max(100_000, Number(settings.minimumBitrate) || 100_000),
+      )
+    : null;
   const pressured =
     sample?.qualityLimitationReason === "cpu" ||
     sample?.qualityLimitationReason === "bandwidth" ||
@@ -48,13 +68,22 @@ export function updateAdaptiveVideoState(
   const healthySamples = healthy ? (state?.healthySamples || 0) + 1 : 0;
   let nextScale = scale;
   let nextFrameRate = frameRate;
+  let nextBitrate = bitrate;
 
   if (pressureSamples >= 3) {
-    if (priority === "resolution") {
+    if (priority === "resolution" || frameRateFirst) {
       const lowerRates = ADAPTIVE_FRAME_RATES.filter(
-        (candidate) => candidate < frameRate,
+        (candidate) => candidate < frameRate && candidate >= minimumFrameRate,
       );
-      nextFrameRate = lowerRates.at(-1) || frameRate;
+      if (lowerRates.length > 0) nextFrameRate = lowerRates.at(-1) || frameRate;
+      else if (frameRateFirst)
+        nextScale =
+          VIDEO_SCALE_STEPS[
+            Math.min(
+              VIDEO_SCALE_STEPS.length - 1,
+              VIDEO_SCALE_STEPS.indexOf(scale) + 1,
+            )
+          ] ?? scale;
     } else {
       nextScale =
         VIDEO_SCALE_STEPS[
@@ -64,23 +93,47 @@ export function updateAdaptiveVideoState(
           )
         ] ?? scale;
     }
+    if (
+      hasBitrateCeiling &&
+      nextScale === scale &&
+      nextFrameRate === frameRate &&
+      bitrate !== null &&
+      minimumBitrate !== null
+    )
+      nextBitrate = Math.max(minimumBitrate, Math.floor(bitrate * 0.75));
   } else if (healthySamples >= 6) {
-    if (priority === "resolution") {
+    if (priority === "resolution" || frameRateFirst) {
       const higherRates = ADAPTIVE_FRAME_RATES.filter(
         (candidate) => candidate > frameRate && candidate <= targetFrameRate,
       );
-      nextFrameRate = higherRates[0] || frameRate;
+      if (higherRates.length > 0) nextFrameRate = higherRates[0] || frameRate;
+      else if (frameRateFirst)
+        nextScale =
+          VIDEO_SCALE_STEPS[
+            Math.max(0, VIDEO_SCALE_STEPS.indexOf(scale) - 1)
+          ] ?? scale;
     } else {
       nextScale =
         VIDEO_SCALE_STEPS[Math.max(0, VIDEO_SCALE_STEPS.indexOf(scale) - 1)] ??
         scale;
     }
+    if (
+      hasBitrateCeiling &&
+      nextScale === scale &&
+      nextFrameRate === frameRate &&
+      bitrate !== null
+    )
+      nextBitrate = Math.min(targetBitrate, Math.ceil(bitrate * 1.1));
   }
 
-  const changed = nextScale !== scale || nextFrameRate !== frameRate;
+  const changed =
+    nextScale !== scale ||
+    nextFrameRate !== frameRate ||
+    nextBitrate !== bitrate;
   return {
     scale: nextScale,
     frameRate: nextFrameRate,
+    ...(nextBitrate !== null ? { maxBitrate: nextBitrate } : {}),
     pressureSamples: changed ? 0 : pressureSamples,
     healthySamples: changed ? 0 : healthySamples,
     changed,

@@ -5,6 +5,7 @@
 #include <common_video/libyuv/include/webrtc_libyuv.h>
 #include <media/base/adapted_video_track_source.h>
 #include "media_handles.hpp"
+#include "platform_video_codec_factories.hpp"
 
 #include <cstring>
 #include <cstdlib>
@@ -32,16 +33,6 @@
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/environment/environment_factory.h>
-#include <api/video_codecs/video_decoder_factory_template.h>
-#include <api/video_codecs/video_decoder_factory_template_dav1d_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
-#include <api/video_codecs/video_decoder_factory_template_open_h264_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template.h>
-#include <api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h>
-#include <api/video_codecs/video_encoder_factory_template_open_h264_adapter.h>
 #include <api/media_stream_interface.h>
 #include <api/peer_connection_interface.h>
 #include <api/rtp_parameters.h>
@@ -54,6 +45,7 @@
 #include <rtc_base/ref_counted_object.h>
 #include <rtc_base/synchronization/mutex.h>
 #include <rtc_base/thread.h>
+#include "library_runtime.hpp"
 
 using json = nlohmann::json;
 
@@ -145,43 +137,8 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
     }
 
     try {
-        webrtc::Thread* signaling_thread = webrtc::Thread::Create().release();
-        dspeak_native::start_media_thread(signaling_thread);
-        webrtc::Thread* worker_thread = webrtc::Thread::Create().release();
-        dspeak_native::start_media_thread(worker_thread);
-
-        auto null_adm = webrtc::CreateAudioDeviceModule(
-            webrtc::CreateEnvironment(),
-            webrtc::AudioDeviceModule::kDummyAudio);
-        if (!null_adm) {
-            delete signaling_thread;
-            delete worker_thread;
-            if (error_out) *error_out = -2;
-            return nullptr;
-        }
-
-        auto factory = webrtc::CreatePeerConnectionFactory(
-            /*network_thread=*/nullptr,
-            worker_thread,
-            signaling_thread,
-            /*default_adm=*/null_adm,
-            /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
-            /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
-            std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-                webrtc::LibvpxVp8EncoderTemplateAdapter,
-                webrtc::LibvpxVp9EncoderTemplateAdapter,
-                webrtc::OpenH264EncoderTemplateAdapter,
-                webrtc::LibaomAv1EncoderTemplateAdapter>>(),
-            std::make_unique<webrtc::VideoDecoderFactoryTemplate<
-                webrtc::LibvpxVp8DecoderTemplateAdapter,
-                webrtc::LibvpxVp9DecoderTemplateAdapter,
-                webrtc::OpenH264DecoderTemplateAdapter,
-                webrtc::Dav1dDecoderTemplateAdapter>>(),
-            /*audio_mixer=*/nullptr,
-            /*audio_processing=*/nullptr);
-        if (!factory) {
-            delete signaling_thread;
-            delete worker_thread;
+        auto runtime = dspeak_native::get_shared_track_factory();
+        if (!runtime || !runtime->factory) {
             if (error_out) *error_out = -2;
             return nullptr;
         }
@@ -189,10 +146,8 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
         auto* source = new webrtc::RefCountedObject<NativeVideoSource>(track_id);
         webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface> video_source(source);
         webrtc::scoped_refptr<webrtc::VideoTrackInterface> track =
-            factory->CreateVideoTrack(video_source, track_id);
+            runtime->factory->CreateVideoTrack(video_source, track_id);
         if (!track) {
-            delete signaling_thread;
-            delete worker_thread;
             if (error_out) *error_out = -3;
             return nullptr;
         }
@@ -202,9 +157,10 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
                 : webrtc::VideoTrackInterface::ContentHint::kNone);
 
         auto* handle = new lib_dspeak_media_video_track();
-        handle->factory = factory;
-        handle->signaling_thread = signaling_thread;
-        handle->worker_thread = worker_thread;
+        handle->factory = runtime->factory;
+        handle->signaling_thread = runtime->signaling_thread;
+        handle->worker_thread = runtime->worker_thread;
+        handle->runtime = std::move(runtime);
         handle->source = source;
         handle->track = track;
 
@@ -224,35 +180,8 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
     }
 
     try {
-        webrtc::Thread* signaling_thread = webrtc::Thread::Create().release();
-        dspeak_native::start_media_thread(signaling_thread);
-        webrtc::Thread* worker_thread = webrtc::Thread::Create().release();
-        dspeak_native::start_media_thread(worker_thread);
-
-        auto null_adm = webrtc::CreateAudioDeviceModule(
-            webrtc::CreateEnvironment(),
-            webrtc::AudioDeviceModule::kDummyAudio);
-        if (!null_adm) {
-            delete signaling_thread;
-            delete worker_thread;
-            if (error_out) *error_out = -2;
-            return nullptr;
-        }
-
-        auto factory = webrtc::CreatePeerConnectionFactory(
-            /*network_thread=*/nullptr,
-            worker_thread,
-            signaling_thread,
-            /*default_adm=*/null_adm,
-            /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
-            /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
-            /*video_encoder_factory=*/nullptr,
-            /*video_decoder_factory=*/nullptr,
-            /*audio_mixer=*/nullptr,
-            /*audio_processing=*/nullptr);
-        if (!factory) {
-            delete signaling_thread;
-            delete worker_thread;
+        auto runtime = dspeak_native::get_shared_track_factory();
+        if (!runtime || !runtime->factory) {
             if (error_out) *error_out = -2;
             return nullptr;
         }
@@ -260,25 +189,22 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
         auto* source = new webrtc::RefCountedObject<NativeAudioSource>(track_id);
         webrtc::scoped_refptr<webrtc::AudioSourceInterface> audio_source(source);
         if (!audio_source) {
-            delete signaling_thread;
-            delete worker_thread;
             if (error_out) *error_out = -3;
             return nullptr;
         }
 
         webrtc::scoped_refptr<webrtc::AudioTrackInterface> track =
-            factory->CreateAudioTrack(track_id, audio_source.get());
+            runtime->factory->CreateAudioTrack(track_id, audio_source.get());
         if (!track) {
-            delete signaling_thread;
-            delete worker_thread;
             if (error_out) *error_out = -4;
             return nullptr;
         }
 
         auto* handle = new lib_dspeak_media_audio_track();
-        handle->factory = factory;
-        handle->signaling_thread = signaling_thread;
-        handle->worker_thread = worker_thread;
+        handle->factory = runtime->factory;
+        handle->signaling_thread = runtime->signaling_thread;
+        handle->worker_thread = runtime->worker_thread;
+        handle->runtime = std::move(runtime);
         handle->source = source;
         handle->track = track;
 
@@ -293,36 +219,36 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
 extern "C" void lib_dspeak_media_destroy_video_track(lib_dspeak_media_video_track_t* t)
 {
     if (!t) return;
+    auto runtime = t->runtime;
     auto destroy = [t] {
         if (t->source)
             t->source->SetState(webrtc::MediaSourceInterface::kEnded);
         t->track = nullptr;
         t->factory = nullptr;
     };
-    if (t->signaling_thread)
-        t->signaling_thread->BlockingCall(destroy);
+    if (runtime && runtime->signaling_thread)
+        runtime->signaling_thread->BlockingCall(destroy);
     else
         destroy();
-    delete t->signaling_thread;
-    delete t->worker_thread;
+    t->runtime.reset();
     delete t;
 }
 
 extern "C" void lib_dspeak_media_destroy_audio_track(lib_dspeak_media_audio_track_t* t)
 {
     if (!t) return;
+    auto runtime = t->runtime;
     auto destroy = [t] {
         if (t->source)
             t->source->OnClose();
         t->track = nullptr;
         t->factory = nullptr;
     };
-    if (t->signaling_thread)
-        t->signaling_thread->BlockingCall(destroy);
+    if (runtime && runtime->signaling_thread)
+        runtime->signaling_thread->BlockingCall(destroy);
     else
         destroy();
-    delete t->signaling_thread;
-    delete t->worker_thread;
+    t->runtime.reset();
     delete t;
 }
 

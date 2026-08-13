@@ -67,10 +67,11 @@ function nativeProducerAppData(
   const options = buildVideoProduceOptions({
     width: video.width || resolution?.width || 1920,
     height: video.height || resolution?.height || 1080,
-    frameRate: video.frameRate || 60,
+    frameRate: video.frameRate || 30,
     qualityPriority: video.qualityPriority || "framerate",
     screen: entry.source === "screen",
     maxBitrate: video.maxBitrate,
+    lowSpec: video.lowSpec === true,
   });
   appData.encodings = options.encodings;
   appData.codecOptions = options.codecOptions;
