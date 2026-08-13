@@ -221,15 +221,21 @@ pub(crate) fn validate_capture_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn capability_json_keeps_runtime_health_separate_from_boolean_flags() {
-        let mut capabilities = NativeMediaCapabilities::default();
-        capabilities.native_rtc = true;
-        capabilities.native_backend_ready = true;
-        capabilities.health.native_rtc = NativeRuntimeCapability {
-            available: true,
-            reason: "peer factory probe passed".to_string(),
+        let capabilities = NativeMediaCapabilities {
+            native_rtc: true,
+            native_backend_ready: true,
+            health: NativeMediaHealth {
+                native_rtc: NativeRuntimeCapability {
+                    available: true,
+                    reason: "peer factory probe passed".to_string(),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
         };
         let value = serde_json::to_value(capabilities).expect("capability JSON should serialize");
         assert_eq!(value["nativeRtc"], true);
@@ -249,5 +255,34 @@ mod tests {
         assert!(
             crate::media::startup::missing_required_native_components(&capabilities).is_empty()
         );
+    }
+
+    #[test]
+    fn validates_the_native_system_audio_selection_contract() {
+        let request = Some(json!({
+            "captureSelection": {
+                "source": {
+                    "sourceId": "macos:system-audio",
+                    "sourceType": "system-audio",
+                    "sourceKey": "system-audio:macos:system-audio"
+                },
+                "sourceId": "macos:system-audio",
+                "sourceType": "system-audio",
+                "sourceKey": "system-audio:macos:system-audio",
+                "mode": "audio",
+                "excludeSelf": true,
+                "excludeSelfAudio": true,
+                "audio": {
+                    "channels": 2,
+                    "sampleRate": 48000,
+                    "stereo": true,
+                    "excludeSelfAudio": true
+                }
+            },
+            "roomBitrateBps": 128000
+        }));
+
+        assert!(validate_capture_request(&request, "system-audio", "audio").is_ok());
+        assert!(validate_capture_request(&request, "screen-video", "video").is_err());
     }
 }

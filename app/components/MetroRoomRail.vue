@@ -218,6 +218,7 @@ import { useAuthStore } from "../stores/auth";
 import { useChannelsStore } from "../stores/channels";
 import { useDirectMessagesStore } from "../stores/directMessages";
 import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
+import { useConfirmDialog } from "../composables/useConfirmDialog";
 import { publicDisplayName } from "../../shared/user-profile";
 import { VIEWPORT_PADDING_PX } from "../const/ui";
 import { profileAssetUrl as resolveProfileAssetUrl } from "../shared/profile-assets.ts";
@@ -226,6 +227,7 @@ const roomsStore = useRoomsStore();
 const authStore = useAuthStore();
 const channelsStore = useChannelsStore();
 const directMessagesStore = useDirectMessagesStore();
+const { confirm: confirmDialog } = useConfirmDialog();
 const { openingRoomId, openRoom, prefetchRoom, prefetchRooms } =
   usePreparedRoomNavigation();
 const route = useRoute();
@@ -384,7 +386,12 @@ async function deleteSelectedRoom() {
   closeRoomMenu();
   if (
     !room ||
-    !confirm(`Delete the room "${room.name}"? This cannot be undone.`)
+    !(await confirmDialog({
+      title: "Delete room?",
+      message: `Delete the room "${room.name}"? This cannot be undone.`,
+      confirmLabel: "Delete room",
+      destructive: true,
+    }))
   )
     return;
   await roomsStore.deleteRoom(room.id);
@@ -394,7 +401,16 @@ async function deleteSelectedRoom() {
 async function leaveSelectedRoom() {
   const room = contextRoom.value;
   closeRoomMenu();
-  if (!room || !confirm(`Leave the room "${room.name}"?`)) return;
+  if (
+    !room ||
+    !(await confirmDialog({
+      title: "Leave room?",
+      message: `Leave the room "${room.name}"?`,
+      confirmLabel: "Leave room",
+      destructive: true,
+    }))
+  )
+    return;
   await roomsStore.leaveRoom(room.id);
   if (String(activeRoomId.value) === String(room.id)) navigateTo("/");
 }

@@ -5,7 +5,10 @@ import {
   desktopCaptureRequest,
   nativeCaptureFailure,
 } from "../../shared/desktop-capture.ts";
-import { nativeOnlyError } from "./native-media-engine-common.ts";
+import {
+  canAttemptNativeCapture,
+  nativeOnlyError,
+} from "./native-media-engine-common.ts";
 import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
 import type {
   NativeCaptureRequest,
@@ -45,7 +48,11 @@ export function startSystemAudioProduction(
             : undefined,
       })
     : options;
-  if (!engine._usesNativeCapture("nativeScreenAudio")) {
+  const nativeCaptureAttemptable =
+    engine._usesNativeCapture("nativeScreenAudio") ||
+    (canAttemptNativeCapture(engine.flags) &&
+      (engine.nativeOnly || Boolean(selection)));
+  if (!nativeCaptureAttemptable) {
     if (engine.nativeOnly) throw nativeOnlyError("system audio production");
     if (selection && !options.explicitBrowserFallback)
       return Promise.reject(
@@ -81,6 +88,10 @@ export function startSystemAudioProduction(
       };
       const producer = await engine.nativeSession?.addSource(entry);
       await engine.nativeP2pSession?.addSource(entry);
+      engine._startNativeAudioTelemetry();
+      await engine.setSharedAudioVolume?.(
+        engine.settingsStore?.sharedAudioVolume ?? 100,
+      );
       return producer || result;
     })
     .catch(async (error: unknown) => {

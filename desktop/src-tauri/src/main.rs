@@ -2,6 +2,7 @@
 
 mod desktop;
 mod media;
+mod power;
 
 fn main() {
     desktop::run();

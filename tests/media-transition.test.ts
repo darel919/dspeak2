@@ -14,12 +14,14 @@ import {
   membershipTopology as serverMembershipTopology,
 } from "../server/utils/media-transition.ts";
 
-test("membership topology enforces the four-device mesh limit", () => {
+test("membership topology follows audio and video P2P ceilings", () => {
   assert.equal(membershipTopology(0), "idle");
   assert.equal(membershipTopology(1), "sfu");
   assert.equal(membershipTopology(2), "probing");
-  assert.equal(membershipTopology(4), "probing");
-  assert.equal(membershipTopology(5), "sfu");
+  assert.equal(membershipTopology(8), "probing");
+  assert.equal(membershipTopology(9), "sfu");
+  assert.equal(membershipTopology(4, true), "probing");
+  assert.equal(membershipTopology(5, true), "sfu");
 });
 
 test("P2P confidence decreases as the mesh gains participants", () => {
@@ -32,6 +34,10 @@ test("P2P confidence decreases as the mesh gains participants", () => {
     stabilityDelayMs: 4000,
   });
   assert.deepEqual(p2pRoutingPolicy(4), {
+    recoveryDelayMs: 10000,
+    stabilityDelayMs: 8000,
+  });
+  assert.deepEqual(p2pRoutingPolicy(5, true), {
     recoveryDelayMs: 10000,
     stabilityDelayMs: 8000,
   });

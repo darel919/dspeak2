@@ -25,7 +25,7 @@
 #include <json.hpp>
 #include "runtime_health.hpp"
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
 #include "PlatformCapture.h"
 #endif
 
@@ -42,8 +42,12 @@ static bool probe_core_runtime() {
             delete worker_thread;
             return false;
         }
-        signaling_thread->Start();
-        worker_thread->Start();
+        if (!dspeak_native::start_media_thread(signaling_thread) ||
+            !dspeak_native::start_media_thread(worker_thread)) {
+            delete signaling_thread;
+            delete worker_thread;
+            return false;
+        }
         auto null_adm = webrtc::CreateAudioDeviceModule(
             webrtc::CreateEnvironment(),
             webrtc::AudioDeviceModule::kDummyAudio);
@@ -139,7 +143,7 @@ extern "C" int lib_dspeak_media_probe_runtime(int* error_out)
     return ready ? 0 : -1;
 }
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
 extern "C" int lib_dspeak_media_stop_screen_capture(int* error_out);
 extern "C" void lib_dspeak_media_stop_system_audio_capture(void);
 extern "C" int lib_dspeak_media_stop_microphone_capture(int* error_out);
@@ -148,7 +152,7 @@ extern "C" int lib_dspeak_media_stop_camera_capture(int* error_out);
 
 extern "C" void lib_dspeak_media_shutdown(void)
 {
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     lib_dspeak_media_stop_screen_capture(nullptr);
     lib_dspeak_media_stop_system_audio_capture();
     lib_dspeak_media_stop_microphone_capture(nullptr);
@@ -200,10 +204,10 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
             "camera callback delivered a native frame",
             "camera device enumeration is not proof of callback delivery")},
         {"screenVideo", runtime_health_record(screen_video_ready,
-            "ScreenCaptureKit delivered a native video sample",
+            "Native desktop capture delivered a native video sample",
             "screen source enumeration is not proof of video delivery")},
         {"screenAudio", runtime_health_record(screen_audio_ready,
-            "ScreenCaptureKit delivered validated stereo 48 kHz float PCM",
+            "Native desktop audio capture delivered validated stereo 48 kHz float PCM",
             "screen source enumeration is not proof of audio delivery")},
         {"audioReceive", runtime_health_record(audio_receive_ready,
             "a native remote audio frame reached the CoreAudio renderer",
@@ -218,8 +222,20 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
             "a native SFU transport reached connected",
             "a live native SFU transport has not reached connected")},
     };
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     try {
+        const char* video_backend =
+#if defined(__APPLE__)
+            "screenCaptureKit";
+#else
+            "windowsGraphicsCapture";
+#endif
+        const char* audio_backend =
+#if defined(__APPLE__)
+            "screenAudio";
+#else
+            "wasapiProcessLoopback";
+#endif
         char* source_text = lib_dspeak_media_platform_capture_list_sources();
         if (!source_text) throw std::runtime_error("source enumeration returned no response");
         std::unique_ptr<char, decltype(&std::free)> source_guard(source_text, &std::free);
@@ -233,18 +249,18 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
                 if (capabilities.value("audio", false)) audio_sources.push_back(source);
             }
         }
-        caps["capture"]["screenCaptureKit"] = {
+        caps["capture"][video_backend] = {
             {"available", screen_video_ready},
             {"reason", screen_video_ready
-                ? "ScreenCaptureKit delivered a native video sample"
-                : "ScreenCaptureKit source enumeration requires an explicit delivery probe"},
+                ? "The native desktop capturer delivered a video sample"
+                : "Desktop source enumeration requires an explicit delivery probe"},
             {"sources", video_sources},
         };
-        caps["capture"]["screenAudio"] = {
+        caps["capture"][audio_backend] = {
             {"available", screen_audio_ready},
             {"reason", screen_audio_ready
-                ? "ScreenCaptureKit delivered validated stereo 48 kHz float PCM"
-                : "ScreenCaptureKit audio requires an explicit delivery probe"},
+                ? "The native desktop audio capturer delivered validated stereo 48 kHz float PCM"
+                : "Desktop audio source enumeration requires an explicit delivery probe"},
             {"sources", audio_sources},
         };
         char* device_caps_text = lib_dspeak_media_platform_capture_capabilities();
@@ -265,6 +281,10 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
                             : (std::string("Native device capture delivery probe has not passed: ") + enumerated_reason)},
                         {"sources", capability.value("sources", json::array())},
                     };
+                }
+                for (auto it = device_caps.begin(); it != device_caps.end(); ++it) {
+                    if (it.key() == "microphone" || it.key() == "camera") continue;
+                    caps["capture"][it.key()] = it.value();
                 }
             } catch (...) {
                 caps["capture"]["microphone"] = {
@@ -324,6 +344,38 @@ extern "C" const char* lib_dspeak_media_capture_error_message(int error_code)
             return "AVAudioEngine microphone graph failed during setup";
         case -225:
             return "selected microphone is not available";
+        case -201:
+            return "native desktop capture content enumeration failed";
+        case -202:
+            return "native desktop capture source is no longer available";
+        case -203:
+            return "native screen audio requires macOS 13 or newer";
+        case -204:
+            return "native screen audio returned an unsupported format";
+        case -205:
+            return "native screen capture stream stopped";
+        case -209:
+            return "native screen capture failed to start";
+        case -210:
+            return "screen recording permission was denied";
+        case -601:
+            return "Windows WASAPI capture initialization failed";
+        case -602:
+            return "Windows WASAPI capture failed to start";
+        case -603:
+            return "Windows WASAPI capture stopped delivering audio";
+        case -611:
+            return "Windows Media Foundation camera initialization failed";
+        case -612:
+            return "Windows Media Foundation camera stopped delivering frames";
+        case -624:
+            return "Windows system audio capture failed to start";
+        case -625:
+            return "Windows application audio process could not be resolved";
+        case -626:
+            return "Windows process loopback requires Windows 10 build 20348 or newer";
+        case -627:
+            return "Windows Graphics Capture stopped delivering frames";
         case -301:
             return "native capture health probe could not find a usable source";
         case -302:

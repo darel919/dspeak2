@@ -253,6 +253,7 @@
 import { defineAsyncComponent } from "vue";
 import { useSoundboardStore } from "~/stores/soundboard";
 import { useSettingsStore } from "~/stores/settings";
+import { useConfirmDialog } from "../composables/useConfirmDialog";
 
 const SoundboardUploadDialog = defineAsyncComponent(
   () => import("./SoundboardUploadDialog.vue"),
@@ -265,6 +266,7 @@ const props = defineProps({
 });
 const store = useSoundboardStore();
 const settingsStore = useSettingsStore();
+const { confirm: confirmDialog } = useConfirmDialog();
 const open = ref(false);
 const showUpload = ref(false);
 const showVolume = ref(false);
@@ -332,7 +334,15 @@ async function saveEdit() {
 }
 
 async function removeEditing() {
-  if (!window.confirm(`Delete “${editing.value.title}”?`)) return;
+  if (
+    !(await confirmDialog({
+      title: "Delete sound?",
+      message: `Delete “${editing.value.title}”?`,
+      confirmLabel: "Delete sound",
+      destructive: true,
+    }))
+  )
+    return;
   await store.remove(editing.value.id);
   editing.value = null;
 }

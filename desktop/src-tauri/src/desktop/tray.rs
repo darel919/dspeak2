@@ -44,16 +44,16 @@ pub(crate) fn create_tray(
 
 pub(crate) fn setup_global_shortcuts(app: &tauri::AppHandle) {
     let shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::Backquote);
-    if let Err(error) = app
-        .global_shortcut()
-        .on_shortcut(shortcut.clone(), |app, _event, state| match state.state {
-            ShortcutState::Pressed => {
-                let _ = app.emit("ptt:press", ());
-            }
-            ShortcutState::Released => {
-                let _ = app.emit("ptt:release", ());
-            }
-        })
+    if let Err(error) =
+        app.global_shortcut()
+            .on_shortcut(shortcut, |app, _event, state| match state.state {
+                ShortcutState::Pressed => {
+                    let _ = app.emit("ptt:press", ());
+                }
+                ShortcutState::Released => {
+                    let _ = app.emit("ptt:release", ());
+                }
+            })
     {
         eprintln!("[dspeak] PTT shortcut handler registration failed: {error}");
     }

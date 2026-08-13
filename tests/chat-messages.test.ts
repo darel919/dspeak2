@@ -597,3 +597,14 @@ test("API error parsing replaces an unstructured stack trace with a safe fallbac
     "Request failed (500)",
   );
 });
+
+test("API error parsing replaces an HTML document with a safe fallback", () => {
+  assert.equal(
+    apiErrorMessage(
+      "<!doctype html><html><head><style>body{color:red}</style></head><body>dSpeak</body></html>",
+      404,
+      "Failed to delete channel",
+    ),
+    "Failed to delete channel (404)",
+  );
+});

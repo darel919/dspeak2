@@ -76,6 +76,10 @@ test("RTP statistics include inbound audio playout details", () => {
         packetsLost: 2,
         bytesReceived: 9000,
         jitter: 0.004,
+        jitterBufferDelay: 0.75,
+        jitterBufferTargetDelay: 0.95,
+        jitterBufferMinimumDelay: 0.2,
+        jitterBufferEmittedCount: 100,
         totalSamplesReceived: 48_000,
         concealedSamples: 240,
         silentConcealedSamples: 120,
@@ -90,6 +94,9 @@ test("RTP statistics include inbound audio playout details", () => {
   assert.equal(stats.packetsLost, 2);
   assert.equal(stats.totalSamplesReceived, 48_000);
   assert.equal(stats.concealedSamples, 240);
+  assert.equal(stats.jitterBufferDelayMs, 750);
+  assert.equal(stats.jitterBufferTargetDelayMs, 950);
+  assert.equal(stats.jitterBufferMinimumDelayMs, 200);
 });
 
 test("matches RTP statistics to the requested media track", () => {

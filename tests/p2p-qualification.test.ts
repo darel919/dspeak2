@@ -6,8 +6,10 @@ import {
   DIRECT_VIDEO_MAX_PARTICIPANTS,
   AUTO_P2P_AUDIO_ONLY_MAX_PARTICIPANTS,
   AUTO_P2P_VIDEO_MAX_PARTICIPANTS,
+  AUTO_MODE_MAX_PARTICIPANTS,
   isVideoActive,
   getMaxParticipants,
+  getP2pMaxParticipants,
   checkEligibility,
   classifyICECandidate,
   getPreferredCandidateType,
@@ -15,10 +17,11 @@ import {
 
 describe("p2p-qualification", () => {
   it("exports capacity constants", () => {
-    assert.strictEqual(DIRECT_AUDIO_ONLY_MAX_PARTICIPANTS, 12);
+    assert.strictEqual(DIRECT_AUDIO_ONLY_MAX_PARTICIPANTS, 8);
     assert.strictEqual(DIRECT_VIDEO_MAX_PARTICIPANTS, 4);
     assert.strictEqual(AUTO_P2P_AUDIO_ONLY_MAX_PARTICIPANTS, 8);
     assert.strictEqual(AUTO_P2P_VIDEO_MAX_PARTICIPANTS, 4);
+    assert.strictEqual(AUTO_MODE_MAX_PARTICIPANTS, 100);
   });
 
   it("detects video from sources", () => {
@@ -30,10 +33,12 @@ describe("p2p-qualification", () => {
   });
 
   it("returns correct max participants", () => {
-    assert.strictEqual(getMaxParticipants("direct", false), 12);
+    assert.strictEqual(getMaxParticipants("direct", false), 8);
     assert.strictEqual(getMaxParticipants("direct", true), 4);
-    assert.strictEqual(getMaxParticipants("auto", false), 8);
-    assert.strictEqual(getMaxParticipants("auto", true), 4);
+    assert.strictEqual(getMaxParticipants("auto", false), 100);
+    assert.strictEqual(getMaxParticipants("auto", true), 100);
+    assert.strictEqual(getP2pMaxParticipants("auto", false), 8);
+    assert.strictEqual(getP2pMaxParticipants("auto", true), 4);
   });
 
   it("checks eligibility for direct mode", () => {
@@ -41,18 +46,22 @@ describe("p2p-qualification", () => {
     const unhealthy = { "cloudflare-realtime": { healthy: false } };
 
     assert.ok(checkEligibility("direct", 2, false, healthy).eligible);
+    assert.ok(checkEligibility("direct", 8, false, healthy).eligible);
     assert.ok(checkEligibility("direct", 4, true, healthy).eligible);
+    assert.ok(!checkEligibility("direct", 9, false, healthy).eligible);
     assert.ok(!checkEligibility("direct", 5, true, healthy).eligible);
-    assert.ok(!checkEligibility("direct", 13, false, healthy).eligible);
   });
 
   it("checks eligibility for auto mode", () => {
     const healthy = { "cloudflare-realtime": { healthy: true } };
 
     assert.ok(checkEligibility("auto", 2, false, healthy).eligible);
-    assert.ok(checkEligibility("auto", 8, false, healthy).eligible);
-    assert.ok(!checkEligibility("auto", 9, false, healthy).eligible);
-    assert.ok(!checkEligibility("auto", 5, true, healthy).eligible);
+    assert.ok(checkEligibility("auto", 9, false, healthy).eligible);
+    assert.ok(checkEligibility("auto", 5, true, healthy).eligible);
+    assert.ok(checkEligibility("auto", 100, false, healthy).eligible);
+    assert.ok(checkEligibility("auto", 100, true, healthy).eligible);
+    assert.ok(!checkEligibility("auto", 101, false, healthy).eligible);
+    assert.ok(!checkEligibility("auto", 101, true, healthy).eligible);
   });
 
   it("rejects server source in direct mode", () => {

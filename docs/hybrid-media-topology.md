@@ -33,7 +33,10 @@ The media-control WebSocket remains required while P2P media is active because i
 - **Auto:** choose among direct P2P, P2P through Cloudflare TURN, Cloudflare Realtime SFU, and a healthy standalone `dspeak-sfu` provider. Selection uses participant count, route qualification, measured quality, and provider health.
 - **Direct:** permit direct P2P with STUN only. TURN and all SFU providers are disabled. If every required pair cannot connect directly, the client receives a visible connection failure.
 
-Initial benchmark gates are 12 participants for direct audio only, 4 for direct video, 8 for Auto P2P audio only, and 4 for Auto P2P with video. These are eligibility ceilings, not guarantees; a room remains on or returns to an SFU/relay route when direct qualification fails.
+Direct P2P supports up to 8 audio-only participants or 4 participants when
+video is active. Auto mode supports up to 100 channel participants; it uses a
+direct mesh only when the active media mix qualifies and otherwise stays on or
+returns to a TURN or SFU route.
 
 ## Route transitions
 

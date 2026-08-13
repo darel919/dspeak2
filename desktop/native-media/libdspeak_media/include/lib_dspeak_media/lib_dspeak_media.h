@@ -184,7 +184,10 @@ lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
 void              lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* h, char** sdp_out);
 int               lib_dspeak_media_p2p_create_answer(lib_dspeak_media_p2p_handle_t* h, const char* remote_sdp, char** sdp_out);
-int               lib_dspeak_media_p2p_set_remote_description(lib_dspeak_media_p2p_handle_t* h, const char* sdp);
+int               lib_dspeak_media_p2p_set_remote_description(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* sdp_type,
+    const char* sdp);
 int               lib_dspeak_media_p2p_add_ice_candidate(lib_dspeak_media_p2p_handle_t* h, const char* candidate);
 char*             lib_dspeak_media_p2p_poll_ice_candidate(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_ice_connection_state(lib_dspeak_media_p2p_handle_t* h);
@@ -204,6 +207,19 @@ int  lib_dspeak_media_probe_capture(int timeout_ms, int* error_out);
 char* lib_dspeak_media_list_capture_sources(void);
 char* lib_dspeak_media_list_capture_devices(void);
 int  lib_dspeak_media_set_microphone_device(const char* device_id, int* error_out);
+int  lib_dspeak_media_set_camera_device(const char* device_id, int* error_out);
+int  lib_dspeak_media_set_output_device(const char* device_id);
+int  lib_dspeak_media_set_local_video_preview(const char* source, bool enabled);
+int  lib_dspeak_media_set_shared_audio_volume(double volume);
+int  lib_dspeak_media_set_shared_audio_attenuation(
+    int enabled,
+    double reduction_percent,
+    int attack_ms,
+    int release_ms);
+char* lib_dspeak_media_get_audio_levels(void);
+int lib_dspeak_media_start_microphone_check(void);
+uint8_t* lib_dspeak_media_stop_microphone_check(size_t* length_out);
+void lib_dspeak_media_free_buffer(uint8_t* buffer);
 int  lib_dspeak_media_start_microphone_capture(int* error_out);
 int  lib_dspeak_media_stop_microphone_capture(int* error_out);
 int  lib_dspeak_media_start_camera_capture(int* error_out);

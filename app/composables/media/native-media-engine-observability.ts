@@ -35,10 +35,7 @@ export async function handleSignal(
 export async function getDevices(
   engine: NativeMediaEngine,
 ): Promise<MediaDeviceInfo[]> {
-  if (
-    !engine._usesNativeCapture("nativeMicrophone") &&
-    !engine._usesNativeCapture("nativeCamera")
-  ) {
+  if (!engine.flags.nativeRtc || !engine.flags.nativeBackendReady) {
     if (engine.nativeOnly) throw nativeOnlyError("device enumeration");
     return (await engine.browserEngine.getDevices?.()) || [];
   }
@@ -57,11 +54,10 @@ export async function getDevices(
 export async function getCaptureSources(
   engine: NativeMediaEngine,
 ): Promise<unknown[]> {
-  if (
-    !engine._usesNativeCapture("nativeScreenShare") &&
-    !engine._usesNativeCapture("nativeScreenAudio")
-  )
+  if (!engine.flags.nativeRtc || !engine.flags.nativeBackendReady) {
+    if (engine.nativeOnly) throw nativeOnlyError("capture source enumeration");
     return [];
+  }
   return engine
     ._invoke("media_list_capture_sources")
     .then((sources) => (Array.isArray(sources) ? sources : []))
@@ -73,11 +69,10 @@ export async function getStats(engine: NativeMediaEngine): Promise<MediaStats> {
     if (engine.nativeOnly) throw nativeOnlyError("statistics");
     return (await engine.browserEngine.getStats?.()) || {};
   }
-  const nativeStats =
-    engine.nativeProvider === "p2p"
-      ? engine.nativeP2pSession?.stats?.()
-      : engine.nativeSession?.stats?.();
-  return (nativeStats || engine._invoke("media_get_stats"))
+  const statsSnapshot = (
+    engine as unknown as { getWebRTCStatsSnapshot: () => Promise<unknown> }
+  ).getWebRTCStatsSnapshot();
+  return statsSnapshot
     .then((stats: unknown) => {
       const snapshot = normalizeNativeStatsSnapshot(
         Array.isArray(stats)

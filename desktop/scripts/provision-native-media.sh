@@ -10,6 +10,7 @@ NATIVE_MEDIA_PROVISION_MODE="${NATIVE_MEDIA_PROVISION_MODE:-download}"
 NATIVE_MEDIA_ARTIFACT_ARCHIVE="${NATIVE_MEDIA_ARTIFACT_ARCHIVE:-}"
 NATIVE_MEDIA_ARTIFACT_URL="${NATIVE_MEDIA_ARTIFACT_URL:-}"
 NATIVE_MEDIA_ARTIFACT_SHA256="${NATIVE_MEDIA_ARTIFACT_SHA256:-}"
+NATIVE_MEDIA_BASE_ARTIFACT_ARCHIVE="${NATIVE_MEDIA_BASE_ARTIFACT_ARCHIVE:-}"
 NATIVE_MEDIA_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
 NATIVE_MEDIA_WITH_MEDIASOUP="${NATIVE_MEDIA_WITH_MEDIASOUP:-auto}"
 LIBWEBRTC_ARTIFACT_ARCHIVE="${LIBWEBRTC_ARTIFACT_ARCHIVE:-}"
@@ -447,7 +448,10 @@ download_libwebrtc_dependency() {
   local package_root
   local actual_sha256
 
-  if [[ -f "$source_bundle/lib/libwebrtc.a" && -d "$source_bundle/include" ]]; then
+  if [[ -d "$source_bundle/include" &&
+    ( -f "$source_bundle/lib/libwebrtc.a" ||
+      -f "$source_bundle/lib/webrtc.lib" ||
+      -f "$source_bundle/lib/libwebrtc.lib" ) ]]; then
     return 0
   fi
 
@@ -518,6 +522,52 @@ download_libwebrtc_dependency() {
     [[ -d "$source_bundle/include" && -f "$source_bundle/lib/libwebrtc.a" ]] ||
       fail "Extracted libwebrtc dependency is incomplete."
   }
+}
+
+seed_libwebrtc_from_native_bundle() {
+  local source_bundle="$1"
+  local archive
+  local temp_root
+  local extract_root
+  local package_root
+  local include_root
+  local webrtc_library
+  local platform
+
+  [[ -n "$NATIVE_MEDIA_BASE_ARTIFACT_ARCHIVE" ]] || return 1
+  archive="$(resolve_path "$NATIVE_MEDIA_BASE_ARTIFACT_ARCHIVE")"
+  [[ -f "$archive" ]] ||
+    fail "Configured native media base archive does not exist: $archive"
+  platform="$(native_platform)"
+  temp_root="$(mktemp -d "${TMPDIR:-/tmp}/dspeak-native-media-base.XXXXXX")"
+  extract_root="$temp_root/extracted"
+  mkdir -p "$extract_root"
+  if ! tar -xzf "$archive" -C "$extract_root"; then
+    rm -rf -- "$temp_root"
+    fail "Native media base archive could not be extracted."
+  fi
+  package_root="$extract_root/artifact"
+  [[ -d "$package_root" ]] || package_root="$extract_root"
+  include_root="$package_root/include"
+  if platform_uses_windows_libraries "$platform"; then
+    webrtc_library="$package_root/lib/webrtc.lib"
+    [[ -f "$webrtc_library" ]] || webrtc_library="$package_root/lib/libwebrtc.lib"
+  else
+    webrtc_library="$package_root/lib/libwebrtc.a"
+  fi
+  if [[ ! -f "$webrtc_library" || ! -d "$include_root" ]]; then
+    rm -rf -- "$temp_root"
+    fail "Native media base archive is missing the matching WebRTC library or headers."
+  fi
+  mkdir -p "$source_bundle/lib" "$source_bundle/include"
+  if platform_uses_windows_libraries "$platform"; then
+    cp "$webrtc_library" "$source_bundle/lib/webrtc.lib"
+  else
+    cp "$webrtc_library" "$source_bundle/lib/libwebrtc.a"
+  fi
+  cp -R "$include_root/." "$source_bundle/include/"
+  rm -rf -- "$temp_root"
+  printf 'Reusing libwebrtc from the existing native media bundle\n'
 }
 
 ensure_json_header() {
@@ -784,6 +834,7 @@ build_bundle_from_source() {
   local depot_tools
   local gn_args
   local with_mediasoup
+  local cmake_runtime_arguments=()
 
   if ! platform="$(native_platform)"; then
     fail "Automatic native media source builds are unsupported on $(uname -s)/$(uname -m)."
@@ -793,6 +844,7 @@ build_bundle_from_source() {
   fi
   if platform_uses_windows_libraries "$platform"; then
     export DEPOT_TOOLS_WIN_TOOLCHAIN="${DEPOT_TOOLS_WIN_TOOLCHAIN:-0}"
+    cmake_runtime_arguments=(-DCMAKE_MSVC_RUNTIME_LIBRARY='MultiThreaded$<$<CONFIG:Debug>:Debug>')
   fi
   if [[ -n "$NATIVE_MEDIA_TARGET_TRIPLE" ]]; then
     local host_platform
@@ -814,7 +866,9 @@ build_bundle_from_source() {
     install_bundle "$source_bundle"
     return
   fi
-  if ! download_libwebrtc_dependency "$source_bundle"; then
+  if seed_libwebrtc_from_native_bundle "$source_bundle"; then
+    :
+  elif ! download_libwebrtc_dependency "$source_bundle"; then
     export PATH="$depot_tools:$PATH"
     webrtc_source="$(clone_or_update_webrtc "$provision_root")"
     webrtc_output="$webrtc_source/out/$WEBRTC_REVISION"
@@ -868,6 +922,7 @@ build_bundle_from_source() {
     mediasoup_build="$mediasoup_source/build"
     printf 'Configuring libmediasoupclient\n'
     cmake -S "$mediasoup_source" -B "$mediasoup_build" \
+      "${cmake_runtime_arguments[@]}" \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
       -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
@@ -911,6 +966,7 @@ build_bundle_from_source() {
   env NATIVE_MEDIA_ARTIFACT_DIR="$source_bundle" NATIVE_MEDIA_BUILD_DIR="$mediasoup_build" \
     NATIVE_MEDIA_WITH_MEDIASOUP="$with_mediasoup" \
     cmake -S "$DESKTOP_ROOT/native-media/libdspeak_media" -B "$shim_build" \
+      "${cmake_runtime_arguments[@]}" \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   cmake --build "$shim_build" --config Release --parallel

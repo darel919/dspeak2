@@ -292,6 +292,7 @@ export async function joinSession(
   input: JoinSessionInput,
 ) {
   let phase = "initialize";
+  let nativeVoiceJoined = false;
   try {
     await initialize(engine);
     if (engine.flags.nativeRtc && hasNativeCapability(engine.flags)) {
@@ -300,13 +301,21 @@ export async function joinSession(
         input?.roomId || undefined,
       );
       phase = "native-connect";
-      await engine.nativeSession?.connect(String(input.channelId || ""));
+      const channelId = String(input.channelId || "");
+      await engine.nativeSession?.connect(channelId);
+      await engine._invoke("media_join", { channelId });
+      nativeVoiceJoined = true;
+      const outputDeviceId = engine.settingsStore?.outputDeviceId;
+      if (typeof outputDeviceId === "string" && outputDeviceId.length > 0)
+        await engine.setOutputDevice(outputDeviceId);
     } else if (engine.nativeOnly) {
       throw new Error("Native WebRTC is not ready for this desktop session");
     }
     phase = "browser-fallback";
     if (!engine.nativeOnly) await engine.browserEngine.joinSession?.(input);
   } catch (error) {
+    if (nativeVoiceJoined || phase === "native-connect")
+      await engine._invoke("media_leave").catch(() => {});
     const errorLike = error as NativeErrorLike;
     engine.flags.nativeBackendReady = false;
     const message = errorLike.message || String(error);
@@ -324,6 +333,7 @@ export async function joinSession(
 }
 
 export async function leaveSession(engine: NativeMediaEngine) {
+  engine._stopNativeAudioTelemetry();
   if (engine.qoeTimer) clearInterval(engine.qoeTimer);
   engine.qoeTimer = null;
   engine._stopNativeActionPump();
@@ -337,7 +347,10 @@ export async function leaveSession(engine: NativeMediaEngine) {
       if (nativeSession?.disconnect) await nativeSession.disconnect();
       else await engine._invoke("media_leave").catch(() => {});
     }
-  } catch {}
+  } catch {
+    if (engine.flags.nativeRtc && hasNativeCapability(engine.flags))
+      await engine._invoke("media_leave").catch(() => {});
+  }
   if (!engine.nativeOnly) {
     try {
       await engine.browserEngine.leaveSession?.();
@@ -391,6 +404,9 @@ async function setMicrophoneEnabledNow(
   if (enabled) {
     let nativeCaptureStarted = false;
     try {
+      const deviceId = engine.settingsStore?.micDeviceId;
+      if (typeof deviceId === "string" && deviceId.length > 0)
+        await engine._invoke("media_set_microphone_device", { deviceId });
       await engine._invoke("media_set_microphone", { enabled });
       nativeCaptureStarted = true;
       const entry = {
@@ -401,6 +417,7 @@ async function setMicrophoneEnabledNow(
       };
       await engine.nativeSession?.addSource(entry);
       await engine.nativeP2pSession?.addSource(entry);
+      engine._startNativeAudioTelemetry();
     } catch (error) {
       await engine._removeNativeSource("audio").catch(() => {});
       if (nativeCaptureStarted)
@@ -451,6 +468,9 @@ export async function setCameraEnabled(
   if (enabled) {
     let nativeCaptureStarted = false;
     try {
+      const deviceId = engine.settingsStore?.cameraDeviceId;
+      if (typeof deviceId === "string" && deviceId.length > 0)
+        await engine._invoke("media_set_camera_device", { deviceId });
       await engine._invoke("media_set_camera", { enabled });
       nativeCaptureStarted = true;
       const entry = {
@@ -515,7 +535,11 @@ export async function startScreenShare(
             : undefined,
       })
     : options;
-  if (!engine._usesNativeCapture("nativeScreenShare")) {
+  const nativeCaptureAttemptable =
+    engine._usesNativeCapture("nativeScreenShare") ||
+    (canAttemptNativeCapture(engine.flags) &&
+      (engine.nativeOnly || sourceAware));
+  if (!nativeCaptureAttemptable) {
     if (engine.nativeOnly) throw nativeOnlyError("screen share");
     if (sourceAware && !options.explicitBrowserFallback)
       throw new DesktopCaptureError(
@@ -580,6 +604,9 @@ export async function startScreenShare(
       };
       await engine.nativeSession?.addSource(audioEntry);
       await engine.nativeP2pSession?.addSource(audioEntry);
+      await engine.setSharedAudioVolume?.(
+        engine.settingsStore?.sharedAudioVolume ?? 100,
+      );
     }
     return producer || result;
   } catch (error) {

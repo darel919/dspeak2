@@ -17,12 +17,16 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+const MAX_LOADED_MESSAGES = 500;
+
 export const useDirectMessagesStore = defineStore("directMessages", () => {
   const conversations = ref<DirectConversation[]>([]);
   const messages = ref<DirectMessage[]>([]);
   const currentConversationId = ref("");
   const loading = ref(false);
   const messagesLoading = ref(false);
+  const loadingOlderMessages = ref(false);
+  const hasMoreMessages = ref(false);
   const sending = ref(false);
   const error = ref("");
   const config = useRuntimeConfig();
@@ -32,6 +36,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
   > = null;
   let initialization: Promise<DirectConversation[]> | null = null;
   let stopAuthWatcher: (() => void) | null = null;
+  let messageHistoryCursor: { created: string; id: string } | null = null;
 
   const unreadCount = computed(() =>
     conversations.value.reduce(
@@ -97,6 +102,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
         if (index !== pendingIndex && candidate?.id === serverMessage.id)
           messages.value.splice(index, 1);
       }
+      trimMessages();
       return pending;
     }
     const existing = messages.value.find(
@@ -104,7 +110,21 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     );
     if (existing) Object.assign(existing, serverMessage);
     else messages.value.push(serverMessage);
+    trimMessages();
     return existing || serverMessage;
+  }
+
+  function trimMessages() {
+    if (messages.value.length <= MAX_LOADED_MESSAGES) return;
+    messages.value.splice(0, messages.value.length - MAX_LOADED_MESSAGES);
+    const oldest = messages.value[0];
+    if (oldest) {
+      messageHistoryCursor = {
+        created: oldest.created,
+        id: String(oldest.id),
+      };
+      hasMoreMessages.value = true;
+    }
   }
 
   function updateConversationSummary(
@@ -286,6 +306,8 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
   async function fetchMessages(conversationId: string) {
     if (!conversationId) return [];
     currentConversationId.value = String(conversationId);
+    messageHistoryCursor = null;
+    hasMoreMessages.value = false;
     messagesLoading.value = true;
     error.value = "";
     try {
@@ -293,6 +315,14 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
       messages.value = Array.isArray(result.items)
         ? (result.items as DirectMessage[])
         : [];
+      hasMoreMessages.value = result.hasMore === true;
+      messageHistoryCursor =
+        result.nextBefore?.created && result.nextBefore.id
+          ? {
+              created: String(result.nextBefore.created),
+              id: String(result.nextBefore.id),
+            }
+          : null;
       const conversation = conversations.value.find(
         (item) => item.id === String(conversationId),
       );
@@ -303,6 +333,48 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
       throw cause;
     } finally {
       messagesLoading.value = false;
+    }
+  }
+
+  async function fetchOlderMessages() {
+    const conversationId = currentConversationId.value;
+    const cursor = messageHistoryCursor;
+    if (
+      !conversationId ||
+      !cursor ||
+      !hasMoreMessages.value ||
+      loadingOlderMessages.value
+    )
+      return messages.value;
+    loadingOlderMessages.value = true;
+    error.value = "";
+    try {
+      const result = await apiFetch(
+        `/${encodeURIComponent(conversationId)}?before=${encodeURIComponent(cursor.created)}&beforeId=${encodeURIComponent(cursor.id)}`,
+      );
+      const older = Array.isArray(result.items)
+        ? (result.items as DirectMessage[])
+        : [];
+      const existingIds = new Set(messages.value.map((message) => message.id));
+      messages.value = [
+        ...older.filter((message) => !existingIds.has(message.id)),
+        ...messages.value,
+      ];
+      hasMoreMessages.value = result.hasMore === true;
+      messageHistoryCursor =
+        result.nextBefore?.created && result.nextBefore.id
+          ? {
+              created: String(result.nextBefore.created),
+              id: String(result.nextBefore.id),
+            }
+          : null;
+      trimMessages();
+      return messages.value;
+    } catch (cause: unknown) {
+      error.value = errorMessage(cause);
+      throw cause;
+    } finally {
+      loadingOlderMessages.value = false;
     }
   }
 
@@ -325,6 +397,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
       status: "pending",
     };
     messages.value.push(pending);
+    trimMessages();
     sending.value = true;
     try {
       const result = await apiFetch(
@@ -369,6 +442,9 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     initialization = null;
     conversations.value = [];
     messages.value = [];
+    loadingOlderMessages.value = false;
+    hasMoreMessages.value = false;
+    messageHistoryCursor = null;
     currentConversationId.value = "";
     error.value = "";
   }
@@ -384,6 +460,8 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     currentConversationId,
     loading,
     messagesLoading,
+    loadingOlderMessages,
+    hasMoreMessages,
     sending,
     error,
     unreadCount,
@@ -391,6 +469,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     fetchConversations,
     openConversation,
     fetchMessages,
+    fetchOlderMessages,
     sendMessage,
     markRead,
     clear,

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSCameraUsageDescription</key>
+    <string>dSpeak uses the camera for video calls.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>dSpeak uses the microphone for voice calls.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>dSpeak captures shared system audio for screen sharing.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>dSpeak captures selected displays, windows, and applications for screen sharing.</string>
+</dict>
+</plist>

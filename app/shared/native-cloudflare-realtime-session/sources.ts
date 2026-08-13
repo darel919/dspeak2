@@ -13,6 +13,23 @@ import type {
   NativeCloudflareSourceEntry,
 } from "../types/native-cloudflare.ts";
 import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
+
+type NativeSessionDescriptionType = "offer" | "answer" | "pranswer";
+
+function requireNativeSessionDescription(
+  description: NativeCloudflareNegotiationResponse["sessionDescription"],
+) {
+  const type = description?.type;
+  const sdp = description?.sdp;
+  if (
+    (type !== "offer" && type !== "answer" && type !== "pranswer") ||
+    typeof sdp !== "string" ||
+    sdp.length === 0
+  )
+    throw new Error("Native Cloudflare session description is incomplete");
+  return { type: type as NativeSessionDescriptionType, sdp };
+}
+
 export interface NativeCloudflareSourcesMethods extends NativeCloudflareSessionSurface {}
 export class NativeCloudflareSourcesMethods {
   async addSource(entry: NativeCloudflareSourceEntry) {
@@ -136,11 +153,16 @@ export class NativeCloudflareSourcesMethods {
       tracks: [{ location: "local", mid, trackName }],
     })) as NativeCloudflareNegotiationResponse;
     this._assertCurrent(generation);
-    if (response.sessionDescription)
+    if (response.sessionDescription) {
+      const description = requireNativeSessionDescription(
+        response.sessionDescription,
+      );
       await this.invoke("media_p2p_set_remote_description", {
         p2pHandle: this.handle,
-        sdp: response.sessionDescription.sdp,
+        sdp: description.sdp,
+        sdpType: description.type,
       });
+    }
     this._assertCurrent(generation);
     const producer = {
       source,
@@ -215,11 +237,16 @@ export class NativeCloudflareSourcesMethods {
         force: false,
       })) as NativeCloudflareNegotiationResponse;
       this._assertCurrent(generation, handle);
-      if (response.sessionDescription)
+      if (response.sessionDescription) {
+        const description = requireNativeSessionDescription(
+          response.sessionDescription,
+        );
         await this.invoke("media_p2p_set_remote_description", {
           p2pHandle: handle,
-          sdp: response.sessionDescription.sdp,
+          sdp: description.sdp,
+          sdpType: description.type,
         });
+      }
       this._assertCurrent(generation, handle);
       this.producers.delete(key);
       if (
@@ -347,9 +374,12 @@ export class NativeCloudflareSourcesMethods {
     }
     this.lastReceivedConsumerParams = response;
     if (response.sessionDescription?.type === "offer") {
+      const description = requireNativeSessionDescription(
+        response.sessionDescription,
+      );
       const answer = await this.invoke("media_p2p_create_answer", {
         p2pHandle: this.handle,
-        remoteSdp: response.sessionDescription.sdp,
+        remoteSdp: description.sdp,
       });
       this._assertCurrent(generation, handle);
       await this.request("renegotiate", {
@@ -357,9 +387,13 @@ export class NativeCloudflareSourcesMethods {
       });
       this._assertCurrent(generation, handle);
     } else if (response.sessionDescription) {
+      const description = requireNativeSessionDescription(
+        response.sessionDescription,
+      );
       await this.invoke("media_p2p_set_remote_description", {
         p2pHandle: this.handle,
-        sdp: response.sessionDescription.sdp,
+        sdp: description.sdp,
+        sdpType: description.type,
       });
       this._assertCurrent(generation, handle);
     }

@@ -4,6 +4,7 @@ import type {
   HybridMediaDiagnosticsContext,
   MediaReadinessContext,
 } from "./types/hybrid-media-diagnostics.ts";
+import { getSharedStatsSnapshot } from "./rtc-stats-sampler.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -23,6 +24,7 @@ export function createHybridMediaDiagnostics({
   collectRtpStats,
   getActiveProvider,
   getActiveRouteProvider,
+  getAudioLatencySnapshot,
   getP2pMesh,
   getRequestedVideoSettings,
   getLifecycle,
@@ -42,6 +44,7 @@ export function createHybridMediaDiagnostics({
   updateP2pStats,
   rtpStatsSamples,
 }: HybridMediaDiagnosticsContext) {
+  const statsCacheOwner = {};
   function sfuProducerIds() {
     const sfu = getSfu() as DiagnosticProvider | null;
     return sfu?.producers
@@ -49,7 +52,7 @@ export function createHybridMediaDiagnostics({
       : [];
   }
 
-  async function getWebRTCStatsSnapshot() {
+  async function collectWebRTCStatsSnapshot() {
     const activeProvider = getActiveProvider();
     const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
     const sfu = getSfu() as DiagnosticProvider | null;
@@ -120,6 +123,18 @@ export function createHybridMediaDiagnostics({
               transport.jitterBufferDelayMs ??
               transport.inboundAudio?.jitterBufferDelay ??
               null,
+            jitterBufferTargetDelayMs:
+              transport.jitterBufferTargetDelayMs ??
+              transport.inboundAudio?.averageJitterBufferTargetDelayMs ??
+              null,
+            jitterBufferMinimumDelayMs:
+              transport.jitterBufferMinimumDelayMs ??
+              transport.inboundAudio?.averageJitterBufferMinimumDelayMs ??
+              null,
+            jitterBufferEmittedCount:
+              transport.jitterBufferEmittedCount ??
+              transport.inboundAudio?.jitterBufferEmittedCount ??
+              null,
             availableOutgoingBitrate:
               transport.availableOutgoingBitrate ??
               transport.candidatePair?.availableOutgoingBitrate ??
@@ -158,6 +173,7 @@ export function createHybridMediaDiagnostics({
         ).length,
         remoteAudioTracks: remoteAudioFeeds.value.size,
         playbackState: playbackState.value,
+        audioLatency: getAudioLatencySnapshot?.() || null,
       },
       peerRoundTripTime: Object.keys(peerRoundTripTimes.value).length
         ? Math.max(...(Object.values(peerRoundTripTimes.value) as number[]))
@@ -167,6 +183,10 @@ export function createHybridMediaDiagnostics({
       nodes: topologyGraph.value.nodes,
       edges: topologyGraph.value.edges,
     };
+  }
+
+  function getWebRTCStatsSnapshot() {
+    return getSharedStatsSnapshot(statsCacheOwner, collectWebRTCStatsSnapshot);
   }
 
   async function getOutboundRtpStats() {

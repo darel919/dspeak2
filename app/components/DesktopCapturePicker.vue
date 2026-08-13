@@ -360,16 +360,15 @@ async function loadSources() {
     );
     if (
       capabilities?.nativeRtc !== true ||
-      capabilities?.nativeBackendReady !== true ||
-      captureCapability.available !== true ||
-      (props.audioOnly
-        ? capabilities?.screenAudio !== true
-        : capabilities?.screenVideo !== true)
+      capabilities?.nativeBackendReady !== true
     ) {
       throw new Error(captureCapability.reason);
     }
-    sources.value = normalizeCaptureSources(
+    const listedSources = normalizeCaptureSources(
       await api.invoke("media_list_capture_sources"),
+    );
+    sources.value = listedSources.filter((source) =>
+      props.audioOnly ? source.capabilities.audio : source.capabilities.video,
     );
     const first = filteredSources.value[0];
     if (first)

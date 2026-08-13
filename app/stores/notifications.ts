@@ -14,6 +14,8 @@ import type {
   NotificationRealtimePayload,
 } from "../shared/types/notifications.ts";
 
+const MAX_INBOX_ITEMS = 100;
+
 export const useNotificationsStore = defineStore("notifications", () => {
   const notificationSupported = ref(false);
   const pushSupported = ref(false);
@@ -179,10 +181,23 @@ export const useNotificationsStore = defineStore("notifications", () => {
 
   async function fetchInbox() {
     const result = await authenticatedFetch("notifications");
-    inbox.value = Array.isArray(result.items)
-      ? (result.items as NotificationRecord[])
-      : [];
+    inbox.value = boundInbox(
+      Array.isArray(result.items) ? (result.items as NotificationRecord[]) : [],
+    );
     return inbox.value;
+  }
+
+  function boundInbox(items: NotificationRecord[]) {
+    const seen = new Set<string>();
+    return items
+      .filter((item) => {
+        const id = String(item?.id || "");
+        if (!id) return true;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .slice(0, MAX_INBOX_ITEMS);
   }
 
   async function dismiss(ids: string[] = []) {
@@ -236,7 +251,10 @@ export const useNotificationsStore = defineStore("notifications", () => {
       ) {
         return;
       }
-      inbox.value = [message.data, ...inbox.value];
+      inbox.value = boundInbox([
+        message.data,
+        ...inbox.value.filter((item) => item.id !== message.data?.id),
+      ]);
       if (preferences.value.push && preferences.value.mode !== "none") {
         void showNotification(message.data.title || "dSpeak Notification", {
           body:

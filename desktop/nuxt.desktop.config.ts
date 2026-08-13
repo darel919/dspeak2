@@ -7,7 +7,13 @@ import { createBuildIdentity } from "../shared/app-build.js";
 
 const desktopDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(desktopDir, "..");
-const apiBasePath = process.env.VITE_DSPEAK_API_PATH || "";
+const apiBasePath =
+  process.env.VITE_DSPEAK_API_PATH || process.env.DSPEAK_PUBLIC_ORIGIN || "";
+
+if (!apiBasePath)
+  throw new Error(
+    "Desktop API origin is required: set VITE_DSPEAK_API_PATH or DSPEAK_PUBLIC_ORIGIN",
+  );
 
 function gitValue(args) {
   try {
@@ -82,9 +88,7 @@ export default defineNuxtConfig({
     public: {
       baseApiPath: apiBasePath,
       sfuPath: process.env.VITE_DSPEAK_SFU_PATH || "",
-      apiPath: process.env.VITE_DSPEAK_API_PATH
-        ? `${process.env.VITE_DSPEAK_API_PATH.replace(/\/$/, "")}/api`
-        : "/api",
+      apiPath: `${apiBasePath.replace(/\/$/, "")}/api`,
       supabaseUrl: process.env.SUPABASE_URL || "",
       supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
       appVersion: buildIdentity.version,

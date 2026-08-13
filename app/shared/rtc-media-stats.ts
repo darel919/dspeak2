@@ -229,6 +229,18 @@ export function collectRtpStats(
           totalInterFrameDelay: finite(rtp.totalInterFrameDelay),
           jitterBufferDelay: finite(rtp.jitterBufferDelay),
           jitterBufferEmittedCount: finite(rtp.jitterBufferEmittedCount),
+          jitterBufferDelayMs:
+            finite(rtp.jitterBufferDelay) == null
+              ? null
+              : finite(rtp.jitterBufferDelay)! * 1000,
+          jitterBufferTargetDelayMs:
+            finite(rtp.jitterBufferTargetDelay) == null
+              ? null
+              : finite(rtp.jitterBufferTargetDelay)! * 1000,
+          jitterBufferMinimumDelayMs:
+            finite(rtp.jitterBufferMinimumDelay) == null
+              ? null
+              : finite(rtp.jitterBufferMinimumDelay)! * 1000,
           audioLevel: finite(rtp.audioLevel),
           totalAudioEnergy: finite(rtp.totalAudioEnergy),
           totalSamplesDuration: finite(rtp.totalSamplesDuration),
@@ -325,6 +337,7 @@ export async function collectPeerConnectionStats(
           packetsLost: stat.packetsLost ?? null,
           bytesReceived: stat.bytesReceived ?? null,
           jitter: stat.jitter ?? null,
+          jitterBufferEmittedCount: Number.isFinite(emitted) ? emitted : null,
           averageJitterBufferDelayMs: averageJitterDelay(
             stat.jitterBufferDelay,
             emitted,

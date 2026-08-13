@@ -299,9 +299,9 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
         d->signaling_thread->SetName("dspeak_signaling", nullptr);
         d->worker_thread = webrtc::Thread::Create().release();
         d->worker_thread->SetName("dspeak_worker", nullptr);
-        d->network_thread->Start();
-        d->signaling_thread->Start();
-        d->worker_thread->Start();
+        dspeak_native::start_media_thread(d->network_thread);
+        dspeak_native::start_media_thread(d->signaling_thread);
+        dspeak_native::start_media_thread(d->worker_thread);
         auto null_adm = webrtc::CreateAudioDeviceModule(
             webrtc::CreateEnvironment(),
             webrtc::AudioDeviceModule::kDummyAudio);
@@ -342,7 +342,8 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
         mediasoupclient::PeerConnection::Options options;
         options.factory = d->factory.get();
         d->device = std::make_unique<mediasoupclient::Device>();
-        d->device->Load(lib_dspeak_media_json_arg(router_rtp_capabilities_json), &options);
+        d->device->Load(
+            lib_dspeak_media_json_arg(router_rtp_capabilities_json), &options, false);
         return d.release();
     } catch (const std::exception& ex) {
         fprintf(stderr, "[dspeak:media] create-device exception: %s\n", ex.what());

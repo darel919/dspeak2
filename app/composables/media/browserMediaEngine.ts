@@ -394,6 +394,12 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.setSharedAudioVolume(...args);
   }
 
+  setSharedAudioAttenuation(
+    ...args: Parameters<BrowserMediaEngineSession["setSharedAudioAttenuation"]>
+  ) {
+    return this.session.setSharedAudioAttenuation(...args);
+  }
+
   setSystemAudioBitrate(
     ...args: Parameters<BrowserMediaEngineSession["setSystemAudioBitrate"]>
   ) {

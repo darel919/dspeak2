@@ -60,6 +60,7 @@ export interface HybridMediaSessionApiContext {
   sendParticipantVoiceState: HybridSessionDynamicFunction;
   setRemoteScreenReceiving: HybridSessionDynamicFunction;
   setRemoteSystemAudioReceiving: HybridSessionDynamicFunction;
+  setSharedAudioAttenuation: HybridSessionDynamicFunction;
   setSharedAudioVolume: HybridSessionDynamicFunction;
   setSystemAudioBitrate: HybridSessionDynamicFunction;
   startAudioProduction: HybridSessionDynamicFunction;

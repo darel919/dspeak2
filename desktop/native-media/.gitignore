@@ -11,5 +11,8 @@ libdspeak_media/build/
 libdspeak_media/build/**
 libdspeak_media/bundle/
 !platform/
+!platform/PlatformCapture.h
 !platform/macos/
 !platform/macos/**
+!platform/windows/
+!platform/windows/**

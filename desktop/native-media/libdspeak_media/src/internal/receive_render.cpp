@@ -9,19 +9,21 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <thread>
 #include <utility>
 
-#if defined(__APPLE__)
-#include <AudioToolbox/AudioToolbox.h>
-#include <CoreAudio/CoreAudioTypes.h>
-#endif
+#include "PlatformCapture.h"
+#include "../../../platform/AudioSpscRing.hpp"
 
 using json = nlohmann::json;
 
@@ -41,6 +43,8 @@ std::deque<ReceiveEvent> g_receive_events;
 std::atomic<uint64_t> g_receive_event_id{1};
 std::atomic<bool> g_video_frame_logged{false};
 std::atomic<bool> g_local_video_frame_logged{false};
+std::atomic<bool> g_local_camera_preview_enabled{true};
+std::atomic<bool> g_local_screen_preview_enabled{false};
 constexpr size_t kMaxReceiveEvents = 96;
 constexpr int kLocalPreviewMaxWidth = 640;
 constexpr int kLocalPreviewMaxHeight = 360;
@@ -99,227 +103,103 @@ void push_event(lib_dspeak_media_receive_event_kind_t kind,
     g_receive_events.push_back(std::move(event));
 }
 
-#if defined(__APPLE__)
-struct AudioOutput {
-    AudioUnit unit = nullptr;
-    std::mutex mutex;
-    std::deque<float> samples;
-    double volume = 1.0;
-    bool enabled = true;
-    bool running = false;
-    uint32_t sample_rate = 48000;
-    uint8_t channels = 2;
-    uint32_t target_frames = 0;
-    bool primed = true;
-};
-
-OSStatus render_audio(void* user_data,
-                      AudioUnitRenderActionFlags*,
-                      const AudioTimeStamp*,
-                      UInt32,
-                      UInt32 frame_count,
-                      AudioBufferList* io_data) {
-    auto* output = static_cast<AudioOutput*>(user_data);
-    if (!output || !io_data) return noErr;
-    std::lock_guard<std::mutex> lock(output->mutex);
-    if (!output->enabled) output->samples.clear();
-    const bool target_reached = output->target_frames == 0 ||
-        output->samples.size() >= static_cast<size_t>(output->target_frames) * 2;
-    if (target_reached) output->primed = true;
-    const bool ready = output->enabled && output->primed;
-    const bool interleaved = io_data->mNumberBuffers == 1;
-    if (interleaved) {
-        auto& buffer = io_data->mBuffers[0];
-        auto* destination = static_cast<float*>(buffer.mData);
-        if (!destination) return noErr;
-        const UInt32 channels = buffer.mNumberChannels ? buffer.mNumberChannels : 2;
-        for (UInt32 frame = 0; frame < frame_count; ++frame) {
-            for (UInt32 channel = 0; channel < channels; ++channel) {
-                float value = 0.0f;
-                if (ready && !output->samples.empty()) {
-                    value = output->samples.front() * static_cast<float>(output->volume);
-                    output->samples.pop_front();
-                }
-                destination[frame * channels + channel] = value;
-            }
-        }
-        if (output->target_frames > 0 && output->samples.empty()) output->primed = false;
-        return noErr;
-    }
-    for (UInt32 frame = 0; frame < frame_count; ++frame) {
-        float left = 0.0f;
-        float right = 0.0f;
-        if (ready && !output->samples.empty()) {
-            left = output->samples.front();
-            output->samples.pop_front();
-            right = output->samples.empty() ? left : output->samples.front();
-            if (!output->samples.empty()) output->samples.pop_front();
-        }
-        for (UInt32 buffer_index = 0; buffer_index < io_data->mNumberBuffers; ++buffer_index) {
-            auto& buffer = io_data->mBuffers[buffer_index];
-            auto* destination = static_cast<float*>(buffer.mData);
-            if (!destination) continue;
-            const UInt32 channels = buffer.mNumberChannels ? buffer.mNumberChannels : 1;
-            const float value = buffer_index == 0 ? left : right;
-            for (UInt32 channel = 0; channel < channels; ++channel)
-                destination[frame * channels + channel] = value;
-        }
-    }
-    if (output->target_frames > 0 && output->samples.empty()) output->primed = false;
-    return noErr;
+bool has_pending_video_frame(
+    lib_dspeak_media_receive_event_kind_t kind,
+    const char* id) {
+    if (!id) return false;
+    std::lock_guard<std::mutex> lock(g_receive_event_mutex);
+    return std::any_of(
+        g_receive_events.begin(), g_receive_events.end(),
+        [kind, id](const ReceiveEvent& event) {
+            return event.kind == kind && event.id && std::strcmp(event.id, id) == 0;
+        });
 }
-#endif
 
 }
 
-extern "C" void* lib_dspeak_media_audio_output_create(const char*) {
-#if defined(__APPLE__)
-    auto* output = new(std::nothrow) AudioOutput();
-    if (!output) return nullptr;
-    AudioComponentDescription description{};
-    description.componentType = kAudioUnitType_Output;
-    description.componentSubType = kAudioUnitSubType_DefaultOutput;
-    description.componentManufacturer = kAudioUnitManufacturer_Apple;
-    const AudioComponent component = AudioComponentFindNext(nullptr, &description);
-    if (!component || AudioComponentInstanceNew(component, &output->unit) != noErr) {
-        delete output;
-        return nullptr;
-    }
-    AudioStreamBasicDescription format{};
-    format.mSampleRate = 48000;
-    format.mFormatID = kAudioFormatLinearPCM;
-    format.mFormatFlags = kAudioFormatFlagsNativeFloatPacked;
-    format.mBytesPerPacket = sizeof(float) * 2;
-    format.mFramesPerPacket = 1;
-    format.mBytesPerFrame = sizeof(float) * 2;
-    format.mChannelsPerFrame = 2;
-    format.mBitsPerChannel = 32;
-    if (AudioUnitSetProperty(output->unit,
-                             kAudioUnitProperty_StreamFormat,
-                             kAudioUnitScope_Input,
-                             0,
-                             &format,
-                             sizeof(format)) != noErr) {
-        AudioComponentInstanceDispose(output->unit);
-        delete output;
-        return nullptr;
-    }
-    AURenderCallbackStruct callback{};
-    callback.inputProc = render_audio;
-    callback.inputProcRefCon = output;
-    if (AudioUnitSetProperty(output->unit,
-                             kAudioUnitProperty_SetRenderCallback,
-                             kAudioUnitScope_Input,
-                             0,
-                             &callback,
-                             sizeof(callback)) != noErr) {
-        AudioComponentInstanceDispose(output->unit);
-        delete output;
-        return nullptr;
-    }
-    if (AudioUnitInitialize(output->unit) != noErr) {
-        AudioComponentInstanceDispose(output->unit);
-        delete output;
-        return nullptr;
-    }
-    if (AudioOutputUnitStart(output->unit) != noErr) {
-        AudioUnitUninitialize(output->unit);
-        AudioComponentInstanceDispose(output->unit);
-        delete output;
-        return nullptr;
-    }
-    output->running = true;
-    return output;
-#else
+#if !defined(__APPLE__) && !defined(_WIN32)
+extern "C" int lib_dspeak_media_platform_set_output_device(const char*) {
+    return -1;
+}
+
+extern "C" void* lib_dspeak_media_platform_audio_output_create(const char*) {
     return nullptr;
+}
+
+extern "C" void lib_dspeak_media_platform_audio_output_destroy(void*) {}
+
+extern "C" int lib_dspeak_media_platform_audio_output_start(void*) {
+    return -1;
+}
+
+extern "C" void lib_dspeak_media_platform_audio_output_stop(void*) {}
+
+extern "C" void lib_dspeak_media_platform_audio_output_set_enabled(void*, bool) {}
+
+extern "C" void lib_dspeak_media_platform_audio_output_set_volume(void*, double) {}
+
+extern "C" void lib_dspeak_media_platform_audio_output_set_jitter_buffer(
+    void*,
+    int,
+    int) {}
+
+extern "C" void lib_dspeak_media_platform_audio_output_write(
+    void*,
+    const float*,
+    uint32_t,
+    uint32_t,
+    uint8_t) {}
+
+extern "C" void lib_dspeak_media_platform_audio_output_get_metrics(
+    uint32_t* device_period_frames,
+    uint32_t* render_period_frames,
+    uint32_t* queue_frames,
+    uint64_t* dropped_frames,
+    uint32_t* target_frames,
+    uint32_t* output_count) {
+    if (device_period_frames) *device_period_frames = 0;
+    if (render_period_frames) *render_period_frames = 0;
+    if (queue_frames) *queue_frames = 0;
+    if (dropped_frames) *dropped_frames = 0;
+    if (target_frames) *target_frames = 0;
+    if (output_count) *output_count = 0;
+}
 #endif
+
+extern "C" int lib_dspeak_media_set_output_device(const char* device_id) {
+    return lib_dspeak_media_platform_set_output_device(device_id);
+}
+
+extern "C" void* lib_dspeak_media_audio_output_create(const char* consumer_id) {
+    return lib_dspeak_media_platform_audio_output_create(consumer_id);
 }
 
 extern "C" void lib_dspeak_media_audio_output_destroy(void* value) {
-#if defined(__APPLE__)
-    auto* output = static_cast<AudioOutput*>(value);
-    if (!output) return;
-    if (output->running) AudioOutputUnitStop(output->unit);
-    AudioUnitUninitialize(output->unit);
-    AudioComponentInstanceDispose(output->unit);
-    delete output;
-#else
-    (void)value;
-#endif
+    lib_dspeak_media_platform_audio_output_destroy(value);
 }
 
 extern "C" int lib_dspeak_media_audio_output_start(void* value) {
-#if defined(__APPLE__)
-    auto* output = static_cast<AudioOutput*>(value);
-    if (!output) return -1;
-    std::lock_guard<std::mutex> lock(output->mutex);
-    if (output->running) return 0;
-    const auto result = AudioOutputUnitStart(output->unit);
-    output->running = result == noErr;
-    return result == noErr ? 0 : -1;
-#else
-    (void)value;
-    return -1;
-#endif
+    return lib_dspeak_media_platform_audio_output_start(value);
 }
 
 extern "C" void lib_dspeak_media_audio_output_stop(void* value) {
-#if defined(__APPLE__)
-    auto* output = static_cast<AudioOutput*>(value);
-    if (!output) return;
-    std::lock_guard<std::mutex> lock(output->mutex);
-    if (output->running) AudioOutputUnitStop(output->unit);
-    output->running = false;
-#else
-    (void)value;
-#endif
+    lib_dspeak_media_platform_audio_output_stop(value);
 }
 
 extern "C" void lib_dspeak_media_audio_output_set_enabled(void* value, bool enabled) {
-#if defined(__APPLE__)
-    auto* output = static_cast<AudioOutput*>(value);
-    if (!output) return;
-    std::lock_guard<std::mutex> lock(output->mutex);
-    output->enabled = enabled;
-    if (!enabled) {
-        output->samples.clear();
-        output->primed = output->target_frames == 0;
-    }
-#else
-    (void)value;
-    (void)enabled;
-#endif
+    lib_dspeak_media_platform_audio_output_set_enabled(value, enabled);
 }
 
 extern "C" void lib_dspeak_media_audio_output_set_volume(void* value, double volume) {
-#if defined(__APPLE__)
-    auto* output = static_cast<AudioOutput*>(value);
-    if (!output) return;
-    std::lock_guard<std::mutex> lock(output->mutex);
-    output->volume = std::max(0.0, std::min(2.0, volume));
-#else
-    (void)value;
-    (void)volume;
-#endif
+    lib_dspeak_media_platform_audio_output_set_volume(value, volume);
 }
 
 extern "C" void lib_dspeak_media_audio_output_set_jitter_buffer(
     void* value,
     int min_delay_ms,
     int target_delay_ms) {
-#if defined(__APPLE__)
-    auto* output = static_cast<AudioOutput*>(value);
-    if (!output) return;
-    const int effective_delay_ms = std::max(0, std::max(min_delay_ms, target_delay_ms));
-    std::lock_guard<std::mutex> lock(output->mutex);
-    output->target_frames = static_cast<uint32_t>(
-        std::min(2000, effective_delay_ms) * 48000 / 1000);
-    output->primed = output->target_frames == 0;
-#else
-    (void)value;
-    (void)min_delay_ms;
-    (void)target_delay_ms;
-#endif
+    lib_dspeak_media_platform_audio_output_set_jitter_buffer(
+        value, min_delay_ms, target_delay_ms);
 }
 
 extern "C" void lib_dspeak_media_audio_output_write(void* value,
@@ -327,40 +207,213 @@ extern "C" void lib_dspeak_media_audio_output_write(void* value,
                                                        uint32_t frame_count,
                                                        uint32_t sample_rate,
                                                        uint8_t channels) {
-#if defined(__APPLE__)
-    auto* output = static_cast<AudioOutput*>(value);
-    if (!output || !samples || !frame_count || !channels || sample_rate != 48000) return;
-    std::lock_guard<std::mutex> lock(output->mutex);
-    output->sample_rate = sample_rate;
-    output->channels = channels;
-    const size_t source_channels = channels;
-    for (uint32_t frame = 0; frame < frame_count; ++frame) {
-        const float left = samples[frame * source_channels];
-        const float right = source_channels > 1 ? samples[frame * source_channels + 1] : left;
-        output->samples.push_back(left);
-        output->samples.push_back(right);
+    lib_dspeak_media_platform_audio_output_write(
+        value, samples, frame_count, sample_rate, channels);
+}
+
+extern "C" int lib_dspeak_media_set_local_video_preview(
+    const char* source,
+    bool enabled) {
+    if (!source) return -1;
+    if (std::strcmp(source, "camera") == 0) {
+        g_local_camera_preview_enabled.store(enabled, std::memory_order_release);
+        return 0;
     }
-    const size_t maximum_samples = 48000 * 2 / 2;
-    while (output->samples.size() > maximum_samples) output->samples.pop_front();
-#else
-    (void)value;
-    (void)samples;
-    (void)frame_count;
-    (void)sample_rate;
-    (void)channels;
-#endif
+    if (std::strcmp(source, "screen") == 0) {
+        g_local_screen_preview_enabled.store(enabled, std::memory_order_release);
+        return 0;
+    }
+    return -1;
+}
+
+extern "C" bool lib_dspeak_media_local_video_preview_enabled(const char* source) {
+    if (!source) return false;
+    if (std::strcmp(source, "camera") == 0)
+        return g_local_camera_preview_enabled.load(std::memory_order_acquire);
+    if (std::strcmp(source, "screen") == 0)
+        return g_local_screen_preview_enabled.load(std::memory_order_acquire);
+    return false;
+}
+
+struct NativeAudioConsumerState {
+    StereoAudioSpscRing<9600> samples;
+    std::atomic<double> volume{1.0};
+    std::atomic<bool> enabled{true};
+    std::atomic<uint32_t> target_frames{0};
+    std::atomic<bool> primed{true};
+};
+
+namespace {
+
+constexpr uint32_t kNativeAudioSampleRate = 48000;
+constexpr uint32_t kNativeAudioMixFrames = 480;
+constexpr size_t kNativeAudioMaxQueueFrames = 9600;
+constexpr int kNativeAudioMixerPeriodMs = 10;
+constexpr int kNativePlatformPlayoutTargetMs = 10;
+
+class NativeAudioMixer final {
+public:
+    ~NativeAudioMixer() {
+        std::thread thread;
+        void* output = nullptr;
+        {
+            std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_requested_.store(true, std::memory_order_release);
+            wake_.notify_one();
+            thread = std::move(mixer_thread_);
+            output = output_;
+            output_ = nullptr;
+            consumers_.clear();
+        }
+        if (thread.joinable()) thread.join();
+        if (output) {
+            lib_dspeak_media_audio_output_stop(output);
+            lib_dspeak_media_audio_output_destroy(output);
+        }
+    }
+
+    std::shared_ptr<NativeAudioConsumerState> add_consumer() {
+        std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+        auto state = std::make_shared<NativeAudioConsumerState>();
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (consumers_.empty()) {
+            output_ = lib_dspeak_media_audio_output_create("shared-mixer");
+            if (!output_) return nullptr;
+            lib_dspeak_media_audio_output_set_jitter_buffer(
+                output_, 0, kNativePlatformPlayoutTargetMs);
+            if (lib_dspeak_media_audio_output_start(output_) != 0) {
+                lib_dspeak_media_audio_output_destroy(output_);
+                output_ = nullptr;
+                return nullptr;
+            }
+            stop_requested_.store(false, std::memory_order_release);
+            mixer_thread_ = std::thread(&NativeAudioMixer::run, this);
+        }
+        consumers_.push_back(state);
+        wake_.notify_one();
+        return state;
+    }
+
+    void remove_consumer(const std::shared_ptr<NativeAudioConsumerState>& state) {
+        if (!state) return;
+        std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+        std::thread thread;
+        void* output = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            consumers_.erase(
+                std::remove(consumers_.begin(), consumers_.end(), state),
+                consumers_.end());
+            if (!consumers_.empty()) return;
+            stop_requested_.store(true, std::memory_order_release);
+            wake_.notify_one();
+            thread = std::move(mixer_thread_);
+            output = output_;
+            output_ = nullptr;
+        }
+        if (thread.joinable()) thread.join();
+        if (output) {
+            lib_dspeak_media_audio_output_stop(output);
+            lib_dspeak_media_audio_output_destroy(output);
+        }
+    }
+
+private:
+    void run() {
+        std::array<float, kNativeAudioMixFrames * 2> mixed{};
+        while (!stop_requested_.load(std::memory_order_acquire)) {
+            const auto started = std::chrono::steady_clock::now();
+            void* output = nullptr;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                if (consumers_.empty()) {
+                    wake_.wait_for(
+                        lock,
+                        std::chrono::milliseconds(kNativeAudioMixerPeriodMs),
+                        [this] {
+                            return stop_requested_.load(std::memory_order_acquire) ||
+                                   !consumers_.empty();
+                        });
+                    continue;
+                }
+                output = output_;
+                mixed.fill(0.0f);
+                for (const auto& state : consumers_) mix_consumer(*state, mixed);
+                for (float& sample : mixed)
+                    sample = std::clamp(sample, -1.0f, 1.0f);
+            }
+            if (output)
+                lib_dspeak_media_audio_output_write(
+                    output, mixed.data(), kNativeAudioMixFrames,
+                    kNativeAudioSampleRate, 2);
+            const auto elapsed = std::chrono::steady_clock::now() - started;
+            const auto period = std::chrono::milliseconds(kNativeAudioMixerPeriodMs);
+            if (elapsed < period) {
+                std::unique_lock<std::mutex> lock(mutex_);
+                wake_.wait_for(lock, period - elapsed, [this] {
+                    return stop_requested_.load(std::memory_order_acquire);
+                });
+            }
+        }
+    }
+
+    static void mix_consumer(
+        NativeAudioConsumerState& state,
+        std::array<float, kNativeAudioMixFrames * 2>& mixed) {
+        if (!state.enabled.load(std::memory_order_acquire)) {
+            state.samples.reset();
+            state.primed.store(
+                state.target_frames.load(std::memory_order_acquire) == 0,
+                std::memory_order_release);
+            return;
+        }
+        const size_t queued = state.samples.available();
+        if (queued > kNativeAudioMaxQueueFrames)
+            state.samples.discard(queued - kNativeAudioMaxQueueFrames);
+        const uint32_t target = state.target_frames.load(std::memory_order_acquire);
+        if (!state.primed.load(std::memory_order_acquire)) {
+            if (state.samples.available() < target) return;
+            state.primed.store(true, std::memory_order_release);
+        }
+        const float volume = static_cast<float>(
+            state.volume.load(std::memory_order_relaxed));
+        bool underflow = false;
+        for (uint32_t frame = 0; frame < kNativeAudioMixFrames; ++frame) {
+            StereoAudioSpscRing<9600>::Frame sample;
+            if (!state.samples.pop(sample)) {
+                underflow = true;
+                break;
+            }
+            mixed[static_cast<size_t>(frame) * 2] += sample.left * volume;
+            mixed[static_cast<size_t>(frame) * 2 + 1] += sample.right * volume;
+        }
+        if (underflow) state.primed.store(false, std::memory_order_release);
+    }
+
+    std::mutex lifecycle_mutex_;
+    std::mutex mutex_;
+    std::condition_variable wake_;
+    std::vector<std::shared_ptr<NativeAudioConsumerState>> consumers_;
+    std::thread mixer_thread_;
+    std::atomic<bool> stop_requested_{false};
+    void* output_ = nullptr;
+};
+
+NativeAudioMixer& native_audio_mixer() {
+    static NativeAudioMixer mixer;
+    return mixer;
+}
+
 }
 
 NativeReceiveAudioSink::NativeReceiveAudioSink(std::string consumer_id)
     : consumer_id_(std::move(consumer_id)),
-      output_(lib_dspeak_media_audio_output_create(consumer_id_.c_str())) {}
+      state_(native_audio_mixer().add_consumer()) {}
 
 NativeReceiveAudioSink::~NativeReceiveAudioSink() {
-    if (output_) {
-        lib_dspeak_media_audio_output_stop(output_);
-        lib_dspeak_media_audio_output_destroy(output_);
-        output_ = nullptr;
-    }
+    native_audio_mixer().remove_consumer(state_);
+    state_.reset();
 }
 
 void NativeReceiveAudioSink::OnData(const void* audio_data,
@@ -369,49 +422,58 @@ void NativeReceiveAudioSink::OnData(const void* audio_data,
                                     size_t number_of_channels,
                                     size_t number_of_frames,
                                     std::optional<int64_t>) {
-    if (!output_ || !audio_data || sample_rate != 48000 || number_of_channels == 0 ||
+    if (!state_ || !audio_data || sample_rate != 48000 || number_of_channels == 0 ||
         number_of_channels > 2 || number_of_frames == 0) return;
-    std::vector<float> samples(number_of_frames * number_of_channels);
+    const size_t sample_count = number_of_frames * number_of_channels;
+    if (sample_count > samples_.size()) return;
     if (bits_per_sample == 32) {
         const auto* source = static_cast<const float*>(audio_data);
-        std::copy(source, source + samples.size(), samples.begin());
+        std::copy(source, source + sample_count, samples_.begin());
     } else if (bits_per_sample == 16) {
         const auto* source = static_cast<const int16_t*>(audio_data);
-        for (size_t index = 0; index < samples.size(); ++index)
-            samples[index] = static_cast<float>(source[index]) / 32768.0f;
+        for (size_t index = 0; index < sample_count; ++index)
+            samples_[index] = static_cast<float>(source[index]) / 32768.0f;
     } else {
         return;
     }
-    lib_dspeak_media_audio_output_write(output_, samples.data(),
-                                        static_cast<uint32_t>(number_of_frames),
-                                        static_cast<uint32_t>(sample_rate),
-                                        static_cast<uint8_t>(number_of_channels));
+    for (size_t frame = 0; frame < number_of_frames; ++frame) {
+        const float left = samples_[frame * number_of_channels];
+        const float right = number_of_channels > 1
+            ? samples_[frame * number_of_channels + 1]
+            : left;
+        state_->samples.push(left, right);
+    }
     dspeak_media_runtime::audio_receive_ready.store(true);
 }
 
 void NativeReceiveAudioSink::SetEnabled(bool enabled) {
-    lib_dspeak_media_audio_output_set_enabled(output_, enabled);
-    if (enabled) {
-        lib_dspeak_media_audio_output_start(output_);
-    } else {
-        lib_dspeak_media_audio_output_stop(output_);
-    }
+    if (!state_) return;
+    state_->enabled.store(enabled, std::memory_order_release);
+    if (!enabled) state_->samples.reset();
 }
 
 void NativeReceiveAudioSink::SetVolume(double volume) {
-    lib_dspeak_media_audio_output_set_volume(output_, volume);
+    if (state_)
+        state_->volume.store(std::clamp(volume, 0.0, 2.0), std::memory_order_release);
 }
 
 void NativeReceiveAudioSink::SetJitterBuffer(int min_delay_ms, int target_delay_ms) {
-    lib_dspeak_media_audio_output_set_jitter_buffer(
-        output_, min_delay_ms, target_delay_ms);
+    if (!state_) return;
+    const int effective_delay_ms = std::min(
+        200, std::max(0, std::max(min_delay_ms, target_delay_ms)));
+    state_->target_frames.store(
+        static_cast<uint32_t>(effective_delay_ms * kNativeAudioSampleRate / 1000),
+        std::memory_order_release);
+    state_->primed.store(effective_delay_ms == 0, std::memory_order_release);
 }
 
 NativeReceiveVideoSink::NativeReceiveVideoSink(std::string consumer_id, std::string handle)
     : consumer_id_(std::move(consumer_id)), handle_(std::move(handle)) {}
 
 void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
-    if (!enabled_) return;
+    if (!enabled_ || has_pending_video_frame(
+            LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME, consumer_id_.c_str()))
+        return;
     const auto buffer = frame.video_frame_buffer()->ToI420();
     if (!buffer) return;
     const int width = buffer->width();

@@ -33,6 +33,12 @@ function isStackTrace(value: string): boolean {
   return /^Error(?::|\s)/i.test(value) || /\n\s*at\s+/.test(value);
 }
 
+function isHtmlDocument(value: string): boolean {
+  return /<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>]|<style[\s>]|<script[\s>]/i.test(
+    value,
+  );
+}
+
 export function apiErrorMessage(
   value: unknown,
   status: number | null | undefined,
@@ -44,7 +50,7 @@ export function apiErrorMessage(
 
   if (!payload && typeof value === "string" && value.trim()) {
     const text = value.trim();
-    if (!isStackTrace(text)) return text;
+    if (!isStackTrace(text) && !isHtmlDocument(text)) return text;
   }
 
   return status ? `${fallback} (${status})` : fallback;

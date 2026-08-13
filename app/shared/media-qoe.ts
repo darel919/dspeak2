@@ -45,6 +45,13 @@ export function normalizeMediaPathMetrics(
     jitterBufferDelayMs: normalizeTimeMs(
       metrics.jitterBufferDelayMs ?? metrics.jitterBufferDelay,
     ),
+    jitterBufferTargetDelayMs: normalizeTimeMs(
+      metrics.jitterBufferTargetDelayMs ?? metrics.jitterBufferTargetDelay,
+    ),
+    jitterBufferMinimumDelayMs: normalizeTimeMs(
+      metrics.jitterBufferMinimumDelayMs ?? metrics.jitterBufferMinimumDelay,
+    ),
+    jitterBufferEmittedCount: finiteOrNull(metrics.jitterBufferEmittedCount),
     availableOutgoingBitrate: finiteOrNull(
       metrics.availableOutgoingBitrate ?? metrics.availableOutgoingBitrateBps,
     ),
@@ -99,6 +106,15 @@ export function mediaQoePathsFromStats(stats: unknown): MediaQoeRecord[] {
       jitterBufferDelayMs:
         transport.jitterBufferDelayMs ??
         inboundAudio?.averageJitterBufferDelayMs,
+      jitterBufferTargetDelayMs:
+        transport.jitterBufferTargetDelayMs ??
+        inboundAudio?.averageJitterBufferTargetDelayMs,
+      jitterBufferMinimumDelayMs:
+        transport.jitterBufferMinimumDelayMs ??
+        inboundAudio?.averageJitterBufferMinimumDelayMs,
+      jitterBufferEmittedCount:
+        transport.jitterBufferEmittedCount ??
+        inboundAudio?.jitterBufferEmittedCount,
       availableOutgoingBitrate:
         transport.availableOutgoingBitrate ??
         candidatePair?.availableOutgoingBitrate,

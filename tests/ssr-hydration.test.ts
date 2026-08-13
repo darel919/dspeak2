@@ -27,6 +27,10 @@ const authMiddleware = await readFile(
   new URL("../app/middleware/auth.global.ts", import.meta.url),
   "utf8",
 );
+const serviceWorkerPlugin = await readFile(
+  new URL("../app/plugins/sw-debug.client.ts", import.meta.url),
+  "utf8",
+);
 const authPage = await readFile(
   new URL("../app/pages/auth.vue", import.meta.url),
   "utf8",
@@ -41,6 +45,9 @@ test("persistent layout keeps NuxtPage mounted behind global route auth", () => 
     authMiddleware,
     /const authenticated = await authStore\.ensureSession\(\)/,
   );
+  assert.match(authMiddleware, /useAuthStore\(useNuxtApp\(\)\.\$pinia\)/);
+  assert.match(serviceWorkerPlugin, /dependsOn: \["pinia"\]/);
+  assert.match(serviceWorkerPlugin, /useAuthStore\(nuxtApp\.\$pinia\)/);
   assert.match(
     authMiddleware,
     /sessionStorage\.setItem\("redirectAfterAuth", to\.fullPath\)/,

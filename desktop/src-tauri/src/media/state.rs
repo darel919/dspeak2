@@ -92,6 +92,7 @@ impl Drop for NativeHandleRegistry {
 
 pub struct NativeMediaStore {
     pub(crate) state: Arc<Mutex<NativeMediaState>>,
+    pub(crate) stay_awake: crate::power::StayAwake,
     #[cfg(native_rtc)]
     pub(crate) handles: Arc<Mutex<NativeHandleRegistry>>,
 }
@@ -100,6 +101,7 @@ impl Default for NativeMediaStore {
     fn default() -> Self {
         Self {
             state: Arc::new(Mutex::new(NativeMediaState::default())),
+            stay_awake: crate::power::StayAwake::default(),
             #[cfg(native_rtc)]
             handles: Arc::new(Mutex::new(NativeHandleRegistry::default())),
         }

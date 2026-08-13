@@ -87,7 +87,7 @@ pub(crate) fn run() {
             app.listen("deep-link://new-url", move |event| {
                 let _ = window::open_main_window(&handle);
                 if let Some(window) = handle.get_webview_window("main") {
-                    let _ = window.eval(&format!(
+                    let _ = window.eval(format!(
                         "window.__TAURI_DEEP_LINK__ = {}",
                         serde_json::to_string(&event.payload()).unwrap_or_default()
                     ));
@@ -182,7 +182,14 @@ pub(crate) fn run() {
             media::media_remove_capture_producer,
             media::media_set_microphone,
             media::media_set_microphone_device,
+            media::media_set_camera_device,
             media::media_set_output_device,
+            media::media_set_local_video_preview,
+            media::media_set_shared_audio_volume,
+            media::media_set_shared_audio_attenuation,
+            media::media_get_audio_levels,
+            media::media_start_microphone_check,
+            media::media_stop_microphone_check,
             media::media_set_camera,
             media::media_start_screen_share,
             media::media_replace_screen_share,

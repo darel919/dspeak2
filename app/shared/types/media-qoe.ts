@@ -12,6 +12,11 @@ export type MediaQoeRecord = {
   jitter?: unknown;
   jitterBufferDelayMs?: unknown;
   jitterBufferDelay?: unknown;
+  jitterBufferTargetDelayMs?: unknown;
+  jitterBufferTargetDelay?: unknown;
+  jitterBufferMinimumDelayMs?: unknown;
+  jitterBufferMinimumDelay?: unknown;
+  jitterBufferEmittedCount?: unknown;
   availableOutgoingBitrate?: unknown;
   availableOutgoingBitrateBps?: unknown;
   concealedAudioRatio?: unknown;

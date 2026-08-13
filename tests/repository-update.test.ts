@@ -24,10 +24,22 @@ const [
   tauriConfig,
   tauriMain,
   workflow,
+  nativeMediaWorkflow,
   manifestScript,
   nativeMediaProvisioner,
   nativeMediaCmake,
+  nativeMediaBuild,
+  nativeMediaCargoConfig,
   nativeMediaRuntime,
+  nativeMediaWindowsSupport,
+  nativeMediaWindowsGraphics,
+  nativeMediaWindowsAudio,
+  nativeMediaWindowsSession,
+  nativeMediaWindowsOutput,
+  nativeMediaMacSupport,
+  nativeMediaMacScreen,
+  nativeMediaMacDevices,
+  nativeMediaMacDevice,
   settings,
   releaseVersionScript,
 ] = await Promise.all(
@@ -47,14 +59,40 @@ const [
     "../desktop/src-tauri/tauri.conf.json",
     "../desktop/src-tauri/src/desktop/updates.rs",
     "../.github/workflows/desktop-build.yml",
+    "../.github/workflows/native-media.yml",
     "../scripts/create-tauri-update-manifest.mjs",
     "../desktop/scripts/provision-native-media.sh",
     "../desktop/native-media/libdspeak_media/CMakeLists.txt",
+    "../desktop/src-tauri/build.rs",
+    "../desktop/.cargo/config.toml",
     "../desktop/native-media/libdspeak_media/src/internal/library_runtime.cpp",
+    "../desktop/native-media/platform/windows/PlatformCaptureWindowsSupport.cpp",
+    "../desktop/native-media/platform/windows/PlatformCaptureWindowsGraphics.cpp",
+    "../desktop/native-media/platform/windows/PlatformCaptureWindowsAudio.cpp",
+    "../desktop/native-media/platform/windows/PlatformCaptureWindowsSession.cpp",
+    "../desktop/native-media/platform/windows/PlatformCaptureWindowsOutput.cpp",
+    "../desktop/native-media/platform/macos/PlatformCaptureMacosSupport.mm",
+    "../desktop/native-media/platform/macos/PlatformCaptureScreen.mm",
+    "../desktop/native-media/platform/macos/PlatformCaptureDevices.mm",
+    "../desktop/native-media/platform/macos/PlatformCaptureDevice.mm",
     "../app/pages/settings.vue",
     "../scripts/sync-release-version.mjs",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
+
+const nativeMediaWindows = [
+  nativeMediaWindowsSupport,
+  nativeMediaWindowsGraphics,
+  nativeMediaWindowsAudio,
+  nativeMediaWindowsSession,
+  nativeMediaWindowsOutput,
+].join("\n");
+const nativeMediaMac = [
+  nativeMediaMacSupport,
+  nativeMediaMacScreen,
+  nativeMediaMacDevices,
+  nativeMediaMacDevice,
+].join("\n");
 
 test("build identity normalizes source metadata without exposing arbitrary values", () => {
   assert.equal(normalizeCommit("C".repeat(40)), "c".repeat(40));
@@ -198,6 +236,9 @@ test("desktop releases optionally publish signed updates and restart after insta
     nativeMediaProvisioner,
     /Windows WebRTC must use the MSVC-compatible standard library ABI/,
   );
+  assert.match(nativeMediaProvisioner, /NATIVE_MEDIA_BASE_ARTIFACT_ARCHIVE/);
+  assert.match(nativeMediaProvisioner, /seed_libwebrtc_from_native_bundle/);
+  assert.match(nativeMediaProvisioner, /CMAKE_MSVC_RUNTIME_LIBRARY/);
   assert.match(
     nativeMediaProvisioner,
     /python3 src\/build\/util\/lastchange\.py -o src\/build\/util\/LASTCHANGE/,
@@ -223,9 +264,9 @@ test("desktop releases optionally publish signed updates and restart after insta
     nativeMediaProvisioner,
     /validate_webrtc_headers "\$source_bundle"/,
   );
-  assert.doesNotMatch(
+  assert.match(
     nativeMediaCmake,
-    /platform\/(?:linux|windows)\/PlatformCapture\.cpp/,
+    /platform\/windows\/PlatformCaptureWindowsSession\.cpp/,
   );
   assert.doesNotMatch(
     nativeMediaCmake,
@@ -233,12 +274,27 @@ test("desktop releases optionally publish signed updates and restart after insta
   );
   assert.match(
     nativeMediaRuntime,
-    /#if defined\(__APPLE__\)\n#include "PlatformCapture\.h"/,
+    /#if defined\(__APPLE__\) \|\| defined\(_WIN32\)\n#include "PlatformCapture\.h"/,
   );
   assert.doesNotMatch(
     nativeMediaRuntime,
     /lib_dspeak_media_platform_capabilities_json/,
   );
+  assert.match(
+    nativeMediaWindows,
+    /Direct3D11CaptureFramePool::CreateFreeThreaded/,
+  );
+  assert.match(
+    nativeMediaWindows,
+    /AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK/,
+  );
+  assert.match(nativeMediaWindows, /MF_SOURCE_READER_FIRST_VIDEO_STREAM/);
+  assert.match(nativeMediaWindows, /D3D11CreateDevice/);
+  assert.match(nativeMediaMac, /AVCaptureDeviceDiscoverySession/);
+  assert.match(nativeMediaMac, /AVCaptureDeviceTypeExternalUnknown/);
+  assert.match(nativeMediaMac, /is_current_process\(application\)/);
+  assert.match(nativeMediaMac, /capture_session\.isRunning/);
+  assert.match(nativeMediaMac, /excludesCurrentProcessAudio/);
   assert.match(workflow, /mediasoup_mode=/);
   assert.match(workflow, /libraries=\(dspeak_media webrtc\)/);
   assert.match(workflow, /temp_root="\$\(cygpath -u "\$RUNNER_TEMP"\)"/);
@@ -250,7 +306,29 @@ test("desktop releases optionally publish signed updates and restart after insta
     workflow,
     /NATIVE_MEDIA_WITH_MEDIASOUP=\$mediasoup_mode.*GITHUB_ENV/,
   );
+  assert.match(nativeMediaWorkflow, /NATIVE_MEDIA_WITH_MEDIASOUP: "1"/);
   assert.match(nativeMediaCmake, /WEBRTC_WIN=1/);
+  assert.match(nativeMediaCmake, /CMAKE_MSVC_RUNTIME_LIBRARY/);
+  assert.match(nativeMediaCmake, /windows\.graphics\.capture\.interop\.h/);
+  assert.match(nativeMediaCmake, /audioclientactivationparams\.h/);
+  assert.match(nativeMediaCmake, /DSPEAK_MEDIA_WINDOWS_WGC_DEPS/);
+  assert.match(nativeMediaCmake, /mmdevapi/);
+  assert.match(nativeMediaCmake, /runtimeobject/);
+  assert.match(nativeMediaCmake, /strmiids/);
+  assert.match(nativeMediaBuild, /"strmiids"/);
+  assert.match(nativeMediaBuild, /"mmdevapi"/);
+  assert.match(nativeMediaBuild, /"runtimeobject"/);
+  assert.doesNotMatch(
+    nativeMediaBuild,
+    /remain unsupported until their frame\/PCM bridges are implemented/,
+  );
+  assert.match(nativeMediaCargoConfig, /target-feature=\+crt-static/);
+  assert.match(nativeMediaWorkflow, /reuse_webrtc/);
+  assert.match(nativeMediaWorkflow, /desktop\/native-media\/platform/);
+  assert.match(
+    nativeMediaWorkflow,
+    /Download native media base for WebRTC reuse/,
+  );
   assert.match(releaseVersionScript, /normalizeVersion/);
   assert.match(releaseVersionScript, /findVersionMismatches/);
 });

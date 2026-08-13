@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.15)
+cmake_policy(SET CMP0091 NEW)
 project(lib_dspeak_media LANGUAGES CXX)
 
 if(APPLE)
@@ -7,6 +8,10 @@ endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 # Native media dependency bundle path.
 # Must contain libwebrtc headers and libraries. Mediasoup headers and libraries
@@ -35,6 +40,10 @@ option(DSPEAK_MEDIA_WITH_MEDIASOUP
 if(DEFINED ENV{NATIVE_MEDIA_WITH_MEDIASOUP})
   set(DSPEAK_MEDIA_WITH_MEDIASOUP $ENV{NATIVE_MEDIA_WITH_MEDIASOUP} CACHE BOOL
     "Build the self-hosted mediasoup SFU transport" FORCE)
+endif()
+
+if((APPLE OR WIN32) AND NOT DSPEAK_MEDIA_WITH_MEDIASOUP)
+  message(FATAL_ERROR "Native macOS and Windows builds require the mediasoupclient and sdptransform transport libraries")
 endif()
 
 message(STATUS "NATIVE_MEDIA_ARTIFACT_DIR  : ${NATIVE_MEDIA_ARTIFACT_DIR}")
@@ -80,18 +89,28 @@ endif()
 
 if(WIN32)
   include(CheckIncludeFileCXX)
+  check_include_file_cxx("windows.graphics.capture.h" DSPEAK_MEDIA_HAS_WINRT_CAPTURE_ABI_HEADERS)
   check_include_file_cxx("winrt/Windows.Graphics.Capture.h" DSPEAK_MEDIA_HAS_WINRT_CAPTURE_HEADERS)
+  check_include_file_cxx("windows.graphics.capture.interop.h" DSPEAK_MEDIA_HAS_WGC_INTEROP_HEADERS)
+  check_include_file_cxx("windows.graphics.directx.direct3d11.interop.h" DSPEAK_MEDIA_HAS_D3D11_INTEROP_HEADERS)
   check_include_file_cxx("d3d11.h" DSPEAK_MEDIA_HAS_D3D11_HEADERS)
   check_include_file_cxx("audioclient.h" DSPEAK_MEDIA_HAS_WASAPI_HEADERS)
-  if(DSPEAK_MEDIA_HAS_WINRT_CAPTURE_HEADERS AND DSPEAK_MEDIA_HAS_D3D11_HEADERS)
+  check_include_file_cxx("audioclientactivationparams.h" DSPEAK_MEDIA_HAS_PROCESS_LOOPBACK_HEADERS)
+  if(DSPEAK_MEDIA_HAS_WINRT_CAPTURE_ABI_HEADERS AND DSPEAK_MEDIA_HAS_WINRT_CAPTURE_HEADERS AND DSPEAK_MEDIA_HAS_WGC_INTEROP_HEADERS AND DSPEAK_MEDIA_HAS_D3D11_INTEROP_HEADERS AND DSPEAK_MEDIA_HAS_D3D11_HEADERS)
     set(DSPEAK_MEDIA_WINDOWS_WGC_DEPS 1)
   else()
     set(DSPEAK_MEDIA_WINDOWS_WGC_DEPS 0)
   endif()
-  if(DSPEAK_MEDIA_HAS_WASAPI_HEADERS)
+  if(DSPEAK_MEDIA_HAS_WASAPI_HEADERS AND DSPEAK_MEDIA_HAS_PROCESS_LOOPBACK_HEADERS)
     set(DSPEAK_MEDIA_WINDOWS_WASAPI_DEPS 1)
   else()
     set(DSPEAK_MEDIA_WINDOWS_WASAPI_DEPS 0)
+  endif()
+  if(NOT DSPEAK_MEDIA_HAS_WASAPI_HEADERS OR NOT DSPEAK_MEDIA_HAS_PROCESS_LOOPBACK_HEADERS)
+    message(FATAL_ERROR "Windows SDK is missing WASAPI process-loopback headers required for native audio capture")
+  endif()
+  if(NOT DSPEAK_MEDIA_WINDOWS_WGC_DEPS)
+    message(FATAL_ERROR "Windows SDK is missing Windows Graphics Capture and Direct3D interop headers required for native video capture")
   endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(PkgConfig QUIET)
@@ -150,7 +169,18 @@ else()
 endif()
 if(APPLE)
   list(APPEND LIB_DSPEAK_MEDIA_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCapture.mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCaptureMacosSupport.mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCaptureScreen.mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCaptureDevices.mm
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos/PlatformCaptureDevice.mm
+  )
+elseif(WIN32)
+  list(APPEND LIB_DSPEAK_MEDIA_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsSupport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsGraphics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsAudio.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsSession.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform/windows/PlatformCaptureWindowsOutput.cpp
   )
 endif()
 add_library(lib_dspeak_media STATIC ${LIB_DSPEAK_MEDIA_SOURCES})
@@ -177,12 +207,16 @@ endif()
 target_include_directories(lib_dspeak_media
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include     # public lib_dspeak_media.h
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../platform
+    $<$<PLATFORM_ID:Darwin>:${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos>
+)
+target_include_directories(lib_dspeak_media SYSTEM PRIVATE
     ${LIBSDPTRANSFORM_INCLUDE_DIR}          # exact json.hpp used by mediasoupclient
     ${NATIVE_MEDIA_ARTIFACT_DIR}/include    # libmediasoupclient + libwebrtc headers
     ${NATIVE_MEDIA_ARTIFACT_DIR}/include/third_party/abseil-cpp
     ${NATIVE_MEDIA_ARTIFACT_DIR}/include/third_party/libyuv/include
     ${NATIVE_MEDIA_ARTIFACT_DIR}/include  # bundled json.hpp from libsdptransform
-    $<$<PLATFORM_ID:Darwin>:${CMAKE_CURRENT_SOURCE_DIR}/../platform/macos>
 )
 
 # ── Link native libraries ─────────────────────────────────
@@ -199,12 +233,51 @@ if(DSPEAK_MEDIA_WITH_MEDIASOUP)
   )
 endif()
 
+if(WIN32)
+  target_link_libraries(lib_dspeak_media PRIVATE
+    advapi32
+    bcrypt
+    combase
+    crypt32
+    d3d11
+    d3dcompiler
+    dxgi
+    iphlpapi
+    windowscodecs
+    mf
+    ole32
+    oleaut32
+    uuid
+    mfplat
+    mfreadwrite
+    mfuuid
+    mmdevapi
+    avrt
+    propsys
+    secur32
+    setupapi
+    shell32
+    shlwapi
+    user32
+    gdi32
+    dwmapi
+    shcore
+    userenv
+    version
+    winmm
+    ws2_32
+    runtimeobject
+    strmiids
+    windowsapp
+  )
+endif()
+
 # macOS-specific: define WEBRTC_MAC so libwebrtc headers resolve properly.
 if(APPLE)
   target_compile_definitions(lib_dspeak_media PRIVATE
     WEBRTC_MAC=1
     WEBRTC_POSIX=1
-    __MAC_OS_X_VERSION_MIN_REQUIRED=101500
+    __MAC_OS_X_VERSION_MIN_REQUIRED=130000
   )
 
   target_link_libraries(lib_dspeak_media PRIVATE

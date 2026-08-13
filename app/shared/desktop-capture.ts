@@ -119,6 +119,12 @@ export function getNativeCaptureCapability(
     (backend) => capabilities[backend]?.available === true,
   );
   if (available) return capabilities[available];
+  const enumerated = backends.find(
+    (backend) =>
+      Array.isArray(capabilities[backend]?.sources) &&
+      capabilities[backend].sources.length > 0,
+  );
+  if (enumerated) return capabilities[enumerated];
   const reasons = backends
     .map((backend) => capabilities[backend]?.reason || "")
     .filter((reason, index, all) => all.indexOf(reason) === index);

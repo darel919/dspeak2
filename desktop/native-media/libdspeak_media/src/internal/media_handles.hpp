@@ -5,6 +5,8 @@
 #include <json.hpp>
 
 #include <memory>
+#include <algorithm>
+#include <array>
 #include <vector>
 #include <mutex>
 #include <queue>
@@ -34,19 +36,13 @@
 #include <common_video/libyuv/include/webrtc_libyuv.h>
 #include <third_party/libyuv/include/libyuv/convert.h>
 #include "receive_render.hpp"
-
-#if defined(__APPLE__)
-#include <CoreVideo/CoreVideo.h>
-#else
-using CVPixelBufferRef = void*;
-#endif
+#include "NativeThreadScheduler.h"
 
 class CxxSendListener;
 class CxxRecvListener;
 class CxxConsumerListener;
 class P2pHealthDataChannelObserver;
 
-#if defined(__APPLE__)
 class NativeVideoSource : public webrtc::AdaptedVideoTrackSource {
 public:
     explicit NativeVideoSource(const char* track_id)
@@ -67,12 +63,17 @@ public:
         is_screencast_ = value;
     }
 
-    void OnCapturedFrame(CVPixelBufferRef pixel_buffer, int64_t timestamp_ms) {
+    void OnCapturedFrame(const uint8_t* data,
+                         uint32_t width,
+                         uint32_t height,
+                         uint32_t stride,
+                         int64_t timestamp_ms) {
         const bool camera = track_id_.find("camera") != std::string::npos;
-        const auto frame = ConvertPixelBuffer(pixel_buffer, timestamp_ms);
+        const auto frame = ConvertFrame(data, width, height, stride, timestamp_ms);
         if (!frame) return;
         const char* source = camera ? "camera" : "screen";
-        lib_dspeak_media_push_local_video_frame(source, *frame);
+        if (lib_dspeak_media_local_video_preview_enabled(source))
+            lib_dspeak_media_push_local_video_frame(source, *frame);
         OnFrame(*frame);
     }
 
@@ -94,39 +95,31 @@ private:
         webrtc::MediaSourceInterface::kLive;
     bool is_screencast_ RTC_GUARDED_BY(mutex_) = true;
 
-    std::optional<webrtc::VideoFrame> ConvertPixelBuffer(
-        CVPixelBufferRef pb, int64_t timestamp_ms) {
-        if (!pb) return std::nullopt;
-        const size_t width = CVPixelBufferGetWidth(pb);
-        const size_t height = CVPixelBufferGetHeight(pb);
-        if (width == 0 || height == 0 || width > 8192 || height > 8192)
+    std::optional<webrtc::VideoFrame> ConvertFrame(const uint8_t* data,
+                                                    uint32_t width,
+                                                    uint32_t height,
+                                                    uint32_t stride,
+                                                    int64_t timestamp_ms) {
+        if (!data || width == 0 || height == 0 || width > 8192 || height > 8192)
             return std::nullopt;
-        if (CVPixelBufferGetPixelFormatType(pb) != kCVPixelFormatType_32BGRA)
+        if (stride < width * 4)
             return std::nullopt;
-
-        if (CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly) !=
-            kCVReturnSuccess)
-            return std::nullopt;
-        void* base_addr = CVPixelBufferGetBaseAddress(pb);
-        const size_t bytes_per_row = CVPixelBufferGetBytesPerRow(pb);
         const int frame_width = static_cast<int>(width);
         const int frame_height = static_cast<int>(height);
 
         webrtc::scoped_refptr<webrtc::I420Buffer> i420_buffer =
             webrtc::I420Buffer::Create(frame_width, frame_height);
 
-        const bool valid_input = base_addr && i420_buffer &&
-            bytes_per_row >= width * 4;
+        const bool valid_input = i420_buffer.get() != nullptr;
         const int conversion_result = valid_input
             ? libyuv::ARGBToI420(
-                  static_cast<const uint8_t*>(base_addr), bytes_per_row,
+                  data, static_cast<int>(stride),
                   i420_buffer->MutableDataY(), i420_buffer->StrideY(),
                   i420_buffer->MutableDataU(), i420_buffer->StrideU(),
                   i420_buffer->MutableDataV(), i420_buffer->StrideV(),
                   frame_width, frame_height)
             : -1;
 
-        CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
         if (conversion_result != 0) return std::nullopt;
 
         return std::optional<webrtc::VideoFrame>(
@@ -183,19 +176,19 @@ public:
                         int sample_rate,
                         size_t number_of_channels,
                         size_t number_of_frames,
-                        std::optional<int64_t> absolute_capture_timestamp_ms) {
-        std::vector<int16_t> int16_data;
+        std::optional<int64_t> absolute_capture_timestamp_ms) {
         const void* output_data = audio_data;
         int output_bps = bits_per_sample;
 
         if (bits_per_sample == 32) {
-            int16_data.resize(number_of_frames * number_of_channels);
-            for (size_t i = 0; i < number_of_frames * number_of_channels; ++i) {
+            const size_t sample_count = number_of_frames * number_of_channels;
+            if (sample_count > capture_conversion_buffer_.size()) return;
+            for (size_t i = 0; i < sample_count; ++i) {
                 float sample = audio_data[i];
                 sample = std::max(-1.0f, std::min(1.0f, sample));
-                int16_data[i] = static_cast<int16_t>(sample * 32767.0f);
+                capture_conversion_buffer_[i] = static_cast<int16_t>(sample * 32767.0f);
             }
-            output_data = int16_data.data();
+            output_data = capture_conversion_buffer_.data();
             output_bps = 16;
         }
 
@@ -224,9 +217,8 @@ private:
     webrtc::MediaSourceInterface::SourceState state_ RTC_GUARDED_BY(mutex_) =
         webrtc::MediaSourceInterface::kLive;
     std::vector<webrtc::AudioTrackSinkInterface*> sinks_ RTC_GUARDED_BY(mutex_);
+    std::array<int16_t, 1920> capture_conversion_buffer_{};
 };
-
-#endif
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Opaque handle structs for the C API                                */
@@ -269,9 +261,7 @@ struct lib_dspeak_media_recv_transport {};
 #endif
 
 struct lib_dspeak_media_video_track {
-#if defined(__APPLE__)
     NativeVideoSource* source = nullptr;
-#endif
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
@@ -279,9 +269,7 @@ struct lib_dspeak_media_video_track {
 };
 
 struct lib_dspeak_media_audio_track {
-#if defined(__APPLE__)
     NativeAudioSource* source = nullptr;
-#endif
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;

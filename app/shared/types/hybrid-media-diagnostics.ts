@@ -53,6 +53,7 @@ export interface HybridMediaDiagnosticsContext {
   } | null;
   getActiveProvider: () => string | null;
   getActiveRouteProvider?: () => string | null;
+  getAudioLatencySnapshot?: () => Record<string, unknown>;
   getP2pMesh: () => unknown;
   getRequestedVideoSettings: (source: string) => { frameRate?: number };
   getLifecycle: () => unknown;

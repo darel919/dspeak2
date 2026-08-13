@@ -74,6 +74,30 @@ describe("native capture capability contract", () => {
     assert.deepEqual(audio.sources, []);
   });
 
+  it("retains enumerated sources before delivery health is proven", () => {
+    const capabilities = {
+      nativeRtc: true,
+      nativeBackendReady: true,
+      capture: {
+        screenCaptureKit: {
+          available: false,
+          reason: "Screen capture delivery has not been probed",
+          sources: [
+            {
+              sourceId: "display-1",
+              sourceType: "display",
+            },
+          ],
+        },
+      },
+    };
+
+    const video = getNativeCaptureCapability(capabilities, "video");
+
+    assert.equal(video.available, false);
+    assert.equal(video.sources.length, 1);
+  });
+
   it("keeps source enumeration empty and reasons stable when metadata is absent", () => {
     const normalized = normalizeNativeCaptureCapabilities({});
 

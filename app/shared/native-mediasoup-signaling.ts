@@ -291,7 +291,11 @@ export async function handleRtpCapabilities(
       session.sendOrThrow(
         {
           type: "create-transport",
-          data: { type: direction, requestId },
+          data: {
+            type: direction,
+            requestId,
+            mediaProfile: direction === "recv" ? "mixed" : session.mediaProfile,
+          },
         },
         `SFU ${direction} transport creation`,
       );

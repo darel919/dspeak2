@@ -43,6 +43,7 @@ import { createHybridMediaSessionRuntime } from "~/shared/hybrid-media-session-r
 import { createHybridMediaSessionOperations } from "~/shared/hybrid-media-session-operations.ts";
 import { bindMediaVisibility } from "~/shared/media-visibility.ts";
 import {
+  buildMediaAttenuationWatchKey,
   createMediaAttenuationReporter,
   resolveMediaAttenuation,
 } from "~/shared/media-attenuation-reporter.ts";
@@ -403,18 +404,19 @@ export function useHybridMediaSession() {
     voiceStore,
   });
   watch(
-    () => [
-      settingsStore.streamAttenuation,
-      voiceStore.currentRoomId
-        ? (
-            roomsStore.getRoomById(voiceStore.currentRoomId) as
-              HybridRoomRecord | null | undefined
-          )?.attenuation
-        : undefined,
-      [...voiceStore.connectedUsers.values()].some(
-        (participant) => participant.speaking === true,
-      ),
-    ],
+    () =>
+      buildMediaAttenuationWatchKey({
+        roomAttenuation: voiceStore.currentRoomId
+          ? (
+              roomsStore.getRoomById(voiceStore.currentRoomId) as
+                HybridRoomRecord | null | undefined
+            )?.attenuation
+          : undefined,
+        streamAttenuation: settingsStore.streamAttenuation,
+        speaking: [...voiceStore.connectedUsers.values()].some(
+          (participant) => participant.speaking === true,
+        ),
+      }),
     () => {
       const speaking = [...voiceStore.connectedUsers.values()].some(
         (participant) => participant.speaking === true,
@@ -429,11 +431,11 @@ export function useHybridMediaSession() {
                   HybridRoomRecord | null | undefined
               )?.attenuation
             : undefined,
-          { mode: "inherit" },
+          settingsStore.streamAttenuation,
         ),
       );
     },
-    { deep: true, immediate: true },
+    { immediate: true },
   );
   registerEchoWarning(echoDetected);
   watch(
@@ -547,6 +549,7 @@ export function useHybridMediaSession() {
     collectRtpStats,
     getActiveProvider: () => activeProvider,
     getActiveRouteProvider: () => selectedSfuProvider,
+    getAudioLatencySnapshot: () => registry.getAudioLatencySnapshot(),
     getP2pMesh: () => p2pMesh,
     getRequestedVideoSettings,
     getSfu: () => sfu,
@@ -863,6 +866,7 @@ export function useHybridMediaSession() {
       registry.setVideoReceiving(feedKey, receiving),
     setRemoteSystemAudioReceiving: (key: string, on: boolean) =>
       registry.setAudioReceiving(key, on),
+    setSharedAudioAttenuation,
     setSharedAudioVolume,
     setSystemAudioBitrate,
     startAudioProduction,

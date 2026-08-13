@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { NativeP2pMesh } from "../app/shared/native-p2p.ts";
+import { NativeP2pSession } from "../app/shared/native-p2p-session.ts";
 
 function createMesh() {
   return new NativeP2pMesh({
@@ -70,4 +71,76 @@ test("P2P preserves an initially muted source during publication", async () => {
 
   assert.equal(client.sourceTransmission.get("audio"), false);
   assert.equal(track.enabled, false);
+});
+
+test("native P2P receive toggles do not rebind an existing track", async () => {
+  const calls = [];
+  const signals = [];
+  let rebound = 0;
+  const session = new NativeP2pSession({
+    invoke: async (command, payload) => {
+      calls.push([command, payload]);
+      return {};
+    },
+    sendSignal: (signal) => signals.push(signal),
+    onRemoteTrack: () => {
+      rebound += 1;
+    },
+  });
+  session.peers.set("peer-1", {
+    peerId: "peer-1",
+    userId: "user-2",
+    handle: 9,
+    remoteReceiving: new Map([["camera", true]]),
+  });
+  session.trackEntries.set("track-1", {
+    key: "p2p:user-2:camera",
+    trackId: "track-1",
+    userId: "user-2",
+    source: "camera",
+    kind: "video",
+    receiving: true,
+    closed: false,
+  });
+
+  await session.setRemoteReceiving("user-2", "camera", true);
+  assert.deepEqual(calls, [
+    [
+      "media_p2p_set_receive_enabled",
+      { p2pHandle: 9, trackId: "track-1", enabled: true },
+    ],
+  ]);
+  assert.deepEqual(signals, [
+    {
+      targetPeerId: "peer-1",
+      epoch: 0,
+      signal: { sourceReceiving: { source: "camera", receiving: true } },
+    },
+  ]);
+  assert.equal(rebound, 0);
+
+  await session.setRemoteReceiving("user-2", "camera", false);
+  assert.deepEqual(calls, [
+    [
+      "media_p2p_set_receive_enabled",
+      { p2pHandle: 9, trackId: "track-1", enabled: true },
+    ],
+    [
+      "media_p2p_set_receive_enabled",
+      { p2pHandle: 9, trackId: "track-1", enabled: false },
+    ],
+  ]);
+  assert.deepEqual(signals, [
+    {
+      targetPeerId: "peer-1",
+      epoch: 0,
+      signal: { sourceReceiving: { source: "camera", receiving: true } },
+    },
+    {
+      targetPeerId: "peer-1",
+      epoch: 0,
+      signal: { sourceReceiving: { source: "camera", receiving: false } },
+    },
+  ]);
+  assert.equal(rebound, 0);
 });

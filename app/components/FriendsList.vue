@@ -293,7 +293,7 @@ function messageFriend(friend) {
 async function refresh() {
   await Promise.allSettled([
     friendsStore.fetchFriends(),
-    friendsStore.fetchFriendRequests(),
+    friendsStore.fetchFriendRequests({ force: true }),
   ]);
 }
 

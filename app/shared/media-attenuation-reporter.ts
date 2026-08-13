@@ -131,6 +131,36 @@ export function summarizeMediaAttenuation(
   };
 }
 
+export function buildMediaAttenuationWatchKey({
+  roomAttenuation,
+  streamAttenuation,
+  speaking,
+  connected = false,
+  sessionAvailable = false,
+}: {
+  roomAttenuation?: Record<string, unknown> | null;
+  streamAttenuation?: {
+    mode?: string;
+    reductionPercent?: number;
+  } | null;
+  speaking: boolean;
+  connected?: boolean;
+  sessionAvailable?: boolean;
+}) {
+  return [
+    streamAttenuation?.mode,
+    streamAttenuation?.reductionPercent,
+    roomAttenuation?.enabled,
+    roomAttenuation?.reductionPercent,
+    roomAttenuation?.sensitivity,
+    roomAttenuation?.attackMs,
+    roomAttenuation?.releaseMs,
+    speaking,
+    connected,
+    sessionAvailable,
+  ] as const;
+}
+
 export function resolveMediaAttenuation(
   roomValue: Record<string, unknown> | null | undefined,
   override: {

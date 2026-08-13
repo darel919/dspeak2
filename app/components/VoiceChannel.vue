@@ -268,6 +268,7 @@
               :own-camera-feed-key="ownCameraFeed?.key || null"
               @start-receiving="setScreenReceiving(tile.feed, true)"
               @stop-receiving="setScreenReceiving(tile.feed, false)"
+              @preview-change="setLocalPreview(tile.feed, $event)"
             />
             <div
               v-else-if="tile.type === 'broadcast'"
@@ -1035,6 +1036,13 @@ function setScreenReceiving(feed, receiving) {
   voiceStore.setRemoteScreenReceiving(feed.key, receiving);
 }
 
+function setLocalPreview(feed, enabled) {
+  if (!feed?.local || feed.native !== true || feed.source !== "screen") return;
+  Promise.resolve(
+    mediaSessionRef.value?.setLocalVideoPreview?.(feed.source, enabled),
+  ).catch(() => {});
+}
+
 function setSystemAudioReceiving(feed, receiving) {
   voiceStore.setRemoteSystemAudioReceiving(feed.key, receiving);
 }
@@ -1079,13 +1087,11 @@ async function requestSystemAudioShare() {
     await toggleSystemAudioShare();
     return;
   }
-  if (runtimeStore.isTauri) {
-    const api = await getDesktopCaptureApi();
-    if (api) {
-      capturePickerAudioOnly.value = true;
-      capturePickerOpen.value = true;
-      return;
-    }
+  const api = await getDesktopCaptureApi();
+  if (runtimeStore.isTauri || api) {
+    capturePickerAudioOnly.value = true;
+    capturePickerOpen.value = true;
+    return;
   }
   await toggleSystemAudioShare();
 }
@@ -1096,23 +1102,31 @@ function closeCapturePicker() {
 
 async function selectDesktopCapture(selection) {
   capturePickerOpen.value = false;
-  if (capturePickerAudioOnly.value) {
-    await voiceStore.toggleSystemAudioShare(selection);
-  } else {
-    await voiceStore.toggleScreenShare(selection);
+  try {
+    if (capturePickerAudioOnly.value) {
+      await voiceStore.toggleSystemAudioShare(selection);
+    } else {
+      await voiceStore.toggleScreenShare(selection);
+    }
+  } catch (error) {
+    console.error("[VoiceChannel] Desktop capture selection error:", error);
   }
 }
 
 async function useBrowserCaptureFallback() {
   capturePickerOpen.value = false;
-  if (capturePickerAudioOnly.value) {
-    await voiceStore.toggleSystemAudioShare(null, {
-      explicitBrowserFallback: true,
-    });
-  } else {
-    await voiceStore.toggleScreenShare(null, {
-      explicitBrowserFallback: true,
-    });
+  try {
+    if (capturePickerAudioOnly.value) {
+      await voiceStore.toggleSystemAudioShare(null, {
+        explicitBrowserFallback: true,
+      });
+    } else {
+      await voiceStore.toggleScreenShare(null, {
+        explicitBrowserFallback: true,
+      });
+    }
+  } catch (error) {
+    console.error("[VoiceChannel] Browser capture fallback error:", error);
   }
 }
 

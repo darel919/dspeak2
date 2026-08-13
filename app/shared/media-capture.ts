@@ -29,6 +29,7 @@ export function audioConstraints(
     ...captureConstraints.audio,
     channelCount: { ideal: stereo ? 2 : 1 },
     sampleRate: { ideal: 48000 },
+    latency: { ideal: 0.01 },
     ...(settings.audio || {}),
   };
   return settings.micDeviceId
@@ -438,6 +439,7 @@ export class MediaCaptureManager {
       stream.getTracks().forEach((candidate) => candidate.stop());
       throw this.cancelledStartError(source);
     }
+    if (source === "camera") track.contentHint = "motion";
     if (screen)
       track.contentHint =
         videoSettings.qualityPriority === "resolution" ? "detail" : "motion";

@@ -1,3 +1,5 @@
+import { buildTopologyGraph } from "./rtc-topology.ts";
+
 type StatsRecord = Record<string, unknown>;
 
 function finite(value: unknown) {
@@ -245,6 +247,144 @@ export function normalizeNativeStatsSnapshot(snapshot: unknown) {
       )
     : [];
   return { ...record, transports };
+}
+
+function asRecord(value: unknown): StatsRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as StatsRecord)
+    : null;
+}
+
+function milliseconds(value: unknown) {
+  const number = finite(value);
+  return number == null ? null : Math.abs(number) < 1 ? number * 1000 : number;
+}
+
+function transportState(transport: StatsRecord) {
+  const states = asRecord(transport.pcStates);
+  const connectionState = String(states?.connectionState || "");
+  if (connectionState === "failed" || connectionState === "closed")
+    return "failed";
+  if (connectionState === "connected" || connectionState === "completed")
+    return "active";
+  return "probing";
+}
+
+function edgeDetails(transport: StatsRecord) {
+  const pair = asRecord(transport.candidatePair);
+  const local = asRecord(pair?.local);
+  const remote = asRecord(pair?.remote);
+  return {
+    state: transportState(transport),
+    rtt:
+      finite(transport.rttMs) ??
+      milliseconds(pair?.currentRoundTripTime) ??
+      null,
+    network: transport.protocol || local?.protocol || remote?.protocol || null,
+    candidateType: transport.candidateType || local?.candidateType || null,
+    bitrate:
+      finite(transport.availableOutgoingBitrate) ??
+      finite(pair?.availableOutgoingBitrate) ??
+      null,
+    packetLoss:
+      finite(transport.packetLossPercent) ??
+      finite(transport.packetLoss) ??
+      finite(pair?.packetLoss) ??
+      null,
+  };
+}
+
+function p2pPeerId(transport: StatsRecord) {
+  const routeId = String(transport.peerOrProvider || transport.routeId || "");
+  if (routeId.startsWith("p2p:")) return routeId.slice(4);
+  if (transport.kind === "p2p") return routeId;
+  const id = String(transport.id || "");
+  return id.startsWith("p2p:") ? id.slice(4) : "";
+}
+
+export function buildNativeTopologyGraph({
+  topology = {},
+  provider,
+  localPeerId: fallbackLocalPeerId = null,
+  transports = [],
+}: {
+  topology?: StatsRecord | null;
+  provider: string;
+  localPeerId?: string | null;
+  transports?: unknown;
+}) {
+  const topologyRecord = topology || {};
+  const localPeerId = String(
+    topologyRecord.localPeerId || fallbackLocalPeerId || "",
+  );
+  const participantIds = Array.isArray(topologyRecord.peers)
+    ? topologyRecord.peers
+        .map(asRecord)
+        .filter((peer): peer is StatsRecord => Boolean(peer))
+        .map((peer) => String(peer.peerId || ""))
+        .filter(Boolean)
+    : [];
+  if (localPeerId && !participantIds.includes(localPeerId))
+    participantIds.unshift(localPeerId);
+
+  const edgeDetailsByPeer: Record<string, Record<string, unknown>> = {};
+  const nativeTransports = Array.isArray(transports)
+    ? transports
+        .map(asRecord)
+        .filter((entry): entry is StatsRecord => Boolean(entry))
+    : [];
+  let candidatePair: StatsRecord | null = null;
+  let sfuEdge: Record<string, unknown> | null = null;
+  for (const transport of nativeTransports) {
+    const peerId = p2pPeerId(transport);
+    if (peerId) {
+      if (localPeerId && !participantIds.includes(peerId))
+        participantIds.push(peerId);
+      if (localPeerId) {
+        const key = [localPeerId, peerId].sort().join(":");
+        edgeDetailsByPeer[key] = edgeDetails(transport);
+      }
+      continue;
+    }
+    const pair = asRecord(transport.candidatePair);
+    if (!candidatePair && pair) candidatePair = pair;
+    if (!sfuEdge || transport.id === "send" || transport.kind === "send")
+      sfuEdge = edgeDetails(transport);
+  }
+
+  const mode = String(
+    topologyRecord.mode || (provider === "p2p" ? "p2p" : "sfu"),
+  );
+  const topologyCandidatePair = candidatePair
+    ? {
+        remote: {
+          address:
+            asRecord(candidatePair.remote)?.address == null
+              ? null
+              : String(asRecord(candidatePair.remote)?.address),
+        },
+      }
+    : undefined;
+  return buildTopologyGraph({
+    mode,
+    currentMode: provider,
+    target: String(topologyRecord.target || "") || undefined,
+    epoch: Number(topologyRecord.epoch) || 0,
+    reason:
+      topologyRecord.reason == null ? null : String(topologyRecord.reason),
+    activatedAt:
+      topologyRecord.activatedAt == null
+        ? null
+        : String(topologyRecord.activatedAt),
+    participantIds,
+    localPeerId,
+    edgeDetails: edgeDetailsByPeer,
+    candidatePair: topologyCandidatePair,
+    sfuEdge: sfuEdge || undefined,
+    healthy: nativeTransports.every(
+      (transport) => transportState(transport) !== "failed",
+    ),
+  });
 }
 
 export function nativeFlowing(value: unknown, type: string) {

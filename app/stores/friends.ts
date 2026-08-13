@@ -12,12 +12,20 @@ import type {
   FriendRequestRecord,
 } from "../shared/types/friends.ts";
 
+const FRIEND_REQUESTS_TTL_MS = 5000;
+
 export const useFriendsStore = defineStore("friends", () => {
   const friends = ref<FriendRecord[]>([]);
   const friendRequests = ref<FriendRequestRecord[]>([]);
   const sentRequests = ref<FriendRequestRecord[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  let friendRequestsFetchedAt = 0;
+  let friendRequestsVersion = 0;
+  let friendRequestsInFlight: {
+    version: number;
+    promise: Promise<FriendRequestRecord[]>;
+  } | null = null;
   const config = useRuntimeConfig();
   const presenceStatusStore = usePresenceStatusStore();
   const friendsWithPresence = computed(() =>
@@ -81,33 +89,69 @@ export const useFriendsStore = defineStore("friends", () => {
     }
   }
 
-  async function fetchFriendRequests() {
-    loading.value = true;
-    error.value = null;
-    try {
-      const result = await apiFetch("?type=requests", { method: "GET" });
-      friendRequests.value = Array.isArray(result?.items) ? result.items : [];
-      if (import.meta.client) {
-        try {
-          localStorage.setItem(
-            STORAGE_KEYS.friendRequests,
-            JSON.stringify(friendRequests.value),
-          );
-        } catch {}
-      }
+  function invalidateFriendRequests() {
+    friendRequestsFetchedAt = 0;
+    friendRequestsVersion += 1;
+  }
+
+  async function fetchFriendRequests({
+    force = false,
+  }: { force?: boolean } = {}) {
+    if (force) invalidateFriendRequests();
+    const now = Date.now();
+    if (
+      !force &&
+      friendRequestsFetchedAt > 0 &&
+      now - friendRequestsFetchedAt < FRIEND_REQUESTS_TTL_MS
+    )
       return friendRequests.value;
-    } catch (cause: unknown) {
-      error.value = cause instanceof Error ? cause.message : String(cause);
-      if (import.meta.client) {
-        try {
-          const cached = localStorage.getItem(STORAGE_KEYS.friendRequests);
-          if (cached) friendRequests.value = JSON.parse(cached);
-        } catch {}
+    const version = friendRequestsVersion;
+    if (!force && friendRequestsInFlight?.version === version)
+      return friendRequestsInFlight.promise;
+    const requestState = {
+      version,
+      promise: Promise.resolve(friendRequests.value),
+    };
+    requestState.promise = (async () => {
+      loading.value = true;
+      error.value = null;
+      try {
+        const result = await apiFetch("?type=requests", { method: "GET" });
+        const items = Array.isArray(result?.items)
+          ? (result.items as FriendRequestRecord[])
+          : [];
+        if (requestState.version === friendRequestsVersion) {
+          friendRequests.value = items;
+          friendRequestsFetchedAt = Date.now();
+          if (import.meta.client) {
+            try {
+              localStorage.setItem(
+                STORAGE_KEYS.friendRequests,
+                JSON.stringify(friendRequests.value),
+              );
+            } catch {}
+          }
+        }
+        return friendRequests.value;
+      } catch (cause: unknown) {
+        if (requestState.version === friendRequestsVersion) {
+          error.value = cause instanceof Error ? cause.message : String(cause);
+          if (import.meta.client) {
+            try {
+              const cached = localStorage.getItem(STORAGE_KEYS.friendRequests);
+              if (cached) friendRequests.value = JSON.parse(cached);
+            } catch {}
+          }
+        }
+        throw cause;
+      } finally {
+        loading.value = false;
+        if (friendRequestsInFlight === requestState)
+          friendRequestsInFlight = null;
       }
-      throw cause;
-    } finally {
-      loading.value = false;
-    }
+    })();
+    friendRequestsInFlight = requestState;
+    return requestState.promise;
   }
 
   async function sendRequest(
@@ -117,6 +161,7 @@ export const useFriendsStore = defineStore("friends", () => {
       method: "POST",
       body: JSON.stringify({ action: "send", recipientHandle }),
     });
+    invalidateFriendRequests();
     if (result?.status === "pending" && result?.id) {
       const request = result as FriendRequestRecord;
       sentRequests.value = [
@@ -135,6 +180,7 @@ export const useFriendsStore = defineStore("friends", () => {
       method: "POST",
       body: JSON.stringify({ action: "respond", requestId, accept }),
     });
+    invalidateFriendRequests();
     if (accept) {
       await fetchFriends();
       friendRequests.value = friendRequests.value.filter(
@@ -153,6 +199,7 @@ export const useFriendsStore = defineStore("friends", () => {
       method: "DELETE",
       body: JSON.stringify({ friendId }),
     });
+    invalidateFriendRequests();
     friends.value = friends.value.filter((f) => f.id !== friendId);
   }
 
@@ -200,6 +247,7 @@ export const useFriendsStore = defineStore("friends", () => {
       method: "POST",
       body: JSON.stringify({ action: "send", targetUserId: userId }),
     });
+    invalidateFriendRequests();
     if (result?.status === "pending" && result?.id) {
       const request = result as FriendRequestRecord;
       sentRequests.value = [
@@ -215,6 +263,7 @@ export const useFriendsStore = defineStore("friends", () => {
       method: "POST",
       body: JSON.stringify({ action: "cancel", requestId }),
     });
+    invalidateFriendRequests();
     sentRequests.value = sentRequests.value.filter((r) => r.id !== requestId);
   }
 

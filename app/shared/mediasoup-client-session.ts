@@ -3,6 +3,7 @@ import type {
   MediasoupClientSessionLike,
   MediasoupDeviceLike,
   MediasoupMessage,
+  MediasoupMediaProfile,
   MediasoupPendingRequest,
   MediasoupSessionOptions,
   MediasoupTransportDirection,
@@ -64,6 +65,7 @@ export class MediasoupClientSession {
   getVideoSettings?: (source: string) => Record<string, unknown>;
   getAudioStereo?: (source: string) => boolean;
   requestTimeoutMs!: number;
+  mediaProfile!: MediasoupMediaProfile;
   consumerControlTimeoutMs!: number;
   recoveryTimeoutMs!: number;
   consumerRetryDelayMs!: number;
@@ -116,6 +118,7 @@ export class MediasoupClientSession {
   constructor({
     send,
     iceServers,
+    mediaProfile = "audio",
     onRemoteTrack,
     onRemoteTrackEnded,
     onStateChange,
@@ -129,6 +132,7 @@ export class MediasoupClientSession {
   }: MediasoupSessionOptions) {
     this.send = send;
     this.iceServers = iceServers;
+    this.mediaProfile = mediaProfile;
     this.onRemoteTrack = onRemoteTrack;
     this.onRemoteTrackEnded = onRemoteTrackEnded;
     this.onStateChange = onStateChange;
@@ -237,7 +241,12 @@ export class MediasoupClientSession {
           this.sendOrThrow(
             {
               type: "create-transport",
-              data: { type: direction, requestId },
+              data: {
+                type: direction,
+                requestId,
+                mediaProfile:
+                  direction === "recv" ? "mixed" : this.mediaProfile,
+              },
             },
             `SFU ${direction} transport creation`,
           );

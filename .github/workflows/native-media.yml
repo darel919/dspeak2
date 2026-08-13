@@ -16,7 +16,7 @@ env:
   LIBMEDIASOUPCLIENT_REPOSITORY: https://github.com/versatica/libmediasoupclient.git
   LIBMEDIASOUPCLIENT_REF: webrtc-m140
   LIBMEDIASOUPCLIENT_COMMIT: b9602ba50477d9a22b673fc3e6b5abff16c02deb
-  NATIVE_MEDIA_WITH_MEDIASOUP: "0"
+  NATIVE_MEDIA_WITH_MEDIASOUP: "1"
   NATIVE_MEDIA_TARGETS: macos-arm64,windows-x64
 
 defaults:
@@ -32,6 +32,7 @@ jobs:
       actions: read
     outputs:
       provision_mode: ${{ steps.resolve.outputs.provision_mode }}
+      reuse_webrtc: ${{ steps.resolve.outputs.reuse_webrtc }}
     steps:
       - name: Checkout dSpeak history
         uses: actions/checkout@v4
@@ -46,6 +47,7 @@ jobs:
           release_tag="webrtc-${WEBRTC_REVISION}"
           release_json="$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json body,assets 2>/dev/null || true)"
           provision_mode=source
+          reuse_webrtc=false
           reason="the durable native media release is unavailable"
 
           if [[ -n "$release_json" ]]; then
@@ -77,7 +79,8 @@ jobs:
               reason="the current release is not based on the native source baseline"
             elif ! git diff --quiet "$baseline_commit" "$GITHUB_SHA" -- \
               desktop/scripts/provision-native-media.sh \
-              desktop/native-media/libdspeak_media; then
+              desktop/native-media/libdspeak_media \
+              desktop/native-media/platform; then
               reason="native media source files changed since the last bundle"
             elif ! grep -Fqx "libwebrtc: ${WEBRTC_REVISION} (${WEBRTC_BRANCH})" <<<"$release_body"; then
               reason="the pinned libwebrtc input changed since the last bundle"
@@ -93,10 +96,19 @@ jobs:
               provision_mode=download
               reason="native media inputs are unchanged; reusing $release_tag"
             fi
+
+            if [[ -z "$missing_asset" ]] &&
+              grep -Fqx "libwebrtc: ${WEBRTC_REVISION} (${WEBRTC_BRANCH})" <<<"$release_body" &&
+              [[ -n "$baseline_commit" ]] &&
+              git cat-file -e "$baseline_commit^{commit}" 2>/dev/null &&
+              git merge-base --is-ancestor "$baseline_commit" "$GITHUB_SHA"; then
+              reuse_webrtc=true
+            fi
           fi
 
           printf 'Native media provisioning mode: %s (%s)\n' "$provision_mode" "$reason"
           echo "provision_mode=$provision_mode" >> "$GITHUB_OUTPUT"
+          echo "reuse_webrtc=$reuse_webrtc" >> "$GITHUB_OUTPUT"
 
   build-dev-native-media:
     name: Build native media with desktop provisioner (${{ matrix.platform }})
@@ -118,6 +130,28 @@ jobs:
     steps:
       - name: Checkout dSpeak
         uses: actions/checkout@v4
+
+      - name: Download native media base for WebRTC reuse
+        if: needs.resolve-native-media.outputs.provision_mode == 'source' && needs.resolve-native-media.outputs.reuse_webrtc == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          base_dir="$RUNNER_TEMP/native-base"
+          mkdir -p "$base_dir"
+          gh release download "webrtc-${WEBRTC_REVISION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            -p "lib-dspeak-media-${{ matrix.platform }}.tar.gz" \
+            -D "$base_dir" \
+            --clobber
+          if command -v cygpath >/dev/null 2>&1; then
+            base_dir="$(cygpath -u "$base_dir")"
+          fi
+          archive="$(find "$base_dir" -type f -name '*.tar.gz' -print -quit)"
+          [[ -n "$archive" ]] || {
+            echo "::error::The durable native media release did not provide a base archive for WebRTC reuse." >&2
+            exit 1
+          }
+          echo "NATIVE_MEDIA_BASE_ARTIFACT_ARCHIVE=$archive" >> "$GITHUB_ENV"
 
       - name: Provision native media with dev-desktop logic
         env:
@@ -171,7 +205,7 @@ jobs:
           - lib/libdspeak_media.a (.lib on Windows)
           - include/ (libwebrtc and shim build headers)
 
-          The self-hosted mediasoupclient transport is disabled in these bundles.
+          The self-hosted mediasoupclient transport is included in these desktop bundles.
 
           Use with desktop/native-media/dependencies.env pointing to the extracted artifact directory.
           EOF

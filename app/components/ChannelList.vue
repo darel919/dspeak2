@@ -137,7 +137,7 @@
                   <button
                     type="button"
                     class="text-error"
-                    @click="deleteChannel(channel)"
+                    @click="requestDeleteChannel(channel)"
                   >
                     Delete channel
                   </button>
@@ -225,7 +225,7 @@
                       <button
                         type="button"
                         class="text-error"
-                        @click="deleteChannel(channel)"
+                        @click="requestDeleteChannel(channel)"
                       >
                         Delete channel
                       </button>
@@ -561,6 +561,58 @@
         </template>
       </div>
     </Teleport>
+
+    <div
+      v-if="deleteConfirmationChannel"
+      ref="deleteDialogElement"
+      class="metro-modal modal-open px-3 py-4 sm:px-6"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="delete-channel-title"
+      aria-describedby="delete-channel-description"
+      @click.self="closeDeleteDialog"
+      @keydown.esc.prevent.stop="closeDeleteDialog"
+      @keydown.tab="trapModalFocus($event, deleteDialogElement)"
+    >
+      <section
+        class="metro-flyout w-full max-w-lg border border-base-300 border-l-4 border-l-error bg-base-100 p-5"
+      >
+        <h2 id="delete-channel-title" class="text-xl font-semibold">
+          Delete channel?
+        </h2>
+        <p id="delete-channel-description" class="mt-3 text-base-content/75">
+          This permanently deletes
+          <strong>#{{ deleteConfirmationChannel.name }}</strong> and its
+          messages.
+        </p>
+        <p
+          v-if="deleteChannelError"
+          class="mt-3 text-sm text-error"
+          role="alert"
+        >
+          {{ deleteChannelError }}
+        </p>
+        <div class="mt-6 flex justify-end gap-3">
+          <button
+            ref="deleteDialogFirstControl"
+            type="button"
+            class="metro-btn metro-btn--ghost"
+            :disabled="deleteChannelPending"
+            @click="closeDeleteDialog"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="metro-btn metro-btn--error"
+            :disabled="deleteChannelPending"
+            @click="confirmDeleteChannel"
+          >
+            {{ deleteChannelPending ? "Deleting..." : "Delete channel" }}
+          </button>
+        </div>
+      </section>
+    </div>
 
     <!-- Create Channel Modal -->
     <div
@@ -1132,6 +1184,7 @@ import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useVoiceStore } from "../stores/voice";
 import { useIdentityStore } from "../stores/identity";
+import { useConfirmDialog } from "../composables/useConfirmDialog";
 import {
   getConnectionQualityBars,
   getConnectionQualityColorClass,
@@ -1173,8 +1226,15 @@ const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const voiceStore = useVoiceStore();
 const identityStore = useIdentityStore();
+const { success: toastSuccess, error: toastError } = useToast();
+const { confirm: confirmDialog } = useConfirmDialog();
 const contextChannel = ref(null);
 const channelMenuElement = ref(null);
+const deleteConfirmationChannel = ref(null);
+const deleteDialogElement = ref(null);
+const deleteDialogFirstControl = ref(null);
+const deleteChannelError = ref("");
+const deleteChannelPending = ref(false);
 const channelMenuPosition = ref({ x: 0, y: 0 });
 const channelMenuStyle = computed(() => ({
   left: `${channelMenuPosition.value.x}px`,
@@ -1229,7 +1289,12 @@ async function openChannelMenu(channel, event) {
   };
 }
 
-function closeChannelMenu() {
+function closeChannelMenu(event) {
+  if (
+    event?.type === "pointerdown" &&
+    channelMenuElement.value?.contains(event.target)
+  )
+    return;
   contextChannel.value = null;
 }
 
@@ -1239,10 +1304,10 @@ function editContextChannel() {
   if (channel) editChannel(channel);
 }
 
-function deleteContextChannel() {
+async function deleteContextChannel() {
   const channel = contextChannel.value;
   closeChannelMenu();
-  if (channel) deleteChannel(channel);
+  if (channel) requestDeleteChannel(channel);
 }
 
 async function openParticipantMenu(userId, event) {
@@ -1401,9 +1466,12 @@ function hasPermission(permission) {
 async function handleDeleteRoom() {
   if (!props.room || !props.room.id) return;
   if (
-    !confirm(
-      `Are you sure you want to delete the room "${props.room.name}"? This cannot be undone.`,
-    )
+    !(await confirmDialog({
+      title: "Delete room?",
+      message: `Are you sure you want to delete the room "${props.room.name}"? This cannot be undone.`,
+      confirmLabel: "Delete room",
+      destructive: true,
+    }))
   )
     return;
   try {
@@ -1417,7 +1485,14 @@ async function handleDeleteRoom() {
 
 async function handleLeaveRoom() {
   if (!props.room || !props.room.id) return;
-  if (!confirm(`Are you sure you want to leave the room "${props.room.name}"?`))
+  if (
+    !(await confirmDialog({
+      title: "Leave room?",
+      message: `Are you sure you want to leave the room "${props.room.name}"?`,
+      confirmLabel: "Leave room",
+      destructive: true,
+    }))
+  )
     return;
   try {
     await leaveActiveVoiceChannel();
@@ -1525,14 +1600,48 @@ async function handleEditChannel() {
   }
 }
 
+let deleteReturnFocus = null;
+
+function requestDeleteChannel(channel) {
+  if (!channel || deleteChannelPending.value) return;
+  deleteReturnFocus = document.activeElement;
+  deleteChannelError.value = "";
+  deleteConfirmationChannel.value = channel;
+  nextTick(() => deleteDialogFirstControl.value?.focus());
+}
+
+async function confirmDeleteChannel() {
+  const channel = deleteConfirmationChannel.value;
+  if (channel) await deleteChannel(channel);
+}
+
 async function deleteChannel(channel) {
-  if (confirm(`Are you sure you want to delete #${channel.name}?`)) {
-    try {
-      await channelsStore.deleteChannel(channel.id);
-    } catch (error) {
-      console.error("Failed to delete channel:", error);
-    }
+  if (!channel || deleteChannelPending.value) return;
+  deleteChannelPending.value = true;
+  deleteChannelError.value = "";
+  try {
+    await channelsStore.deleteChannel(channel.id);
+    toastSuccess(`Deleted #${channel.name}.`);
+    deleteChannelPending.value = false;
+    closeDeleteDialog();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to delete channel.";
+    deleteChannelError.value = message;
+    toastError(message);
+    console.error("Failed to delete channel:", error);
+  } finally {
+    deleteChannelPending.value = false;
   }
+}
+
+function closeDeleteDialog() {
+  if (deleteChannelPending.value) return;
+  const returnFocus = deleteReturnFocus;
+  deleteConfirmationChannel.value = null;
+  deleteChannelError.value = "";
+  deleteReturnFocus = null;
+  nextTick(() => returnFocus?.isConnected && returnFocus.focus());
 }
 
 function canDeleteChannel(channel) {

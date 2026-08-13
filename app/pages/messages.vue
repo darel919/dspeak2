@@ -148,6 +148,23 @@
           </p>
         </div>
         <div v-else class="direct-messages-stream-inner">
+          <button
+            v-if="store.hasMoreMessages"
+            type="button"
+            class="metro-btn metro-btn--ghost metro-btn--sm self-center"
+            :disabled="store.loadingOlderMessages"
+            @click="loadOlderMessages"
+          >
+            <span
+              v-if="store.loadingOlderMessages"
+              class="metro-spinner metro-spinner--xs"
+            ></span>
+            {{
+              store.loadingOlderMessages
+                ? "Loading older messages…"
+                : "Load older messages"
+            }}
+          </button>
           <article
             v-for="message in store.messages"
             :key="message.id"
@@ -314,6 +331,18 @@ async function selectConversation(conversationId) {
   });
   await nextTick();
   messageList.value?.scrollTo({ top: messageList.value.scrollHeight });
+}
+
+async function loadOlderMessages() {
+  const element = messageList.value;
+  if (!element) return;
+  const previousHeight = element.scrollHeight;
+  const previousTop = element.scrollTop;
+  try {
+    await store.fetchOlderMessages();
+    await nextTick();
+    element.scrollTop = element.scrollHeight - previousHeight + previousTop;
+  } catch {}
 }
 
 function clearSelection() {

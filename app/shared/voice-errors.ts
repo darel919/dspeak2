@@ -16,6 +16,10 @@ const USER_SAFE_VOICE_ERROR_CODES = new Map([
     "Direct mode does not support this many participants.",
   ],
   [
+    "MEDIA_CHANNEL_PARTICIPANT_LIMIT_EXCEEDED",
+    "This media channel has reached its participant limit.",
+  ],
+  [
     "MEDIA_PROVIDER_UNAVAILABLE",
     "Voice media providers are temporarily unavailable.",
   ],

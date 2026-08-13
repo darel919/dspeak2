@@ -6,6 +6,42 @@ use serde_json::Value;
 use std::ffi::{CStr, CString};
 use tauri::{AppHandle, State};
 
+#[cfg(native_rtc)]
+fn native_capture_sources() -> Result<Vec<Value>, String> {
+    let pointer = unsafe { ffi::lib_dspeak_media_list_capture_sources() };
+    if pointer.is_null() {
+        return Err("native capture source enumeration failed".to_string());
+    }
+    let text = unsafe { CStr::from_ptr(pointer) }
+        .to_str()
+        .map(str::to_owned)
+        .map_err(|_| "native source JSON was not UTF-8".to_string());
+    unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+    let text = text?;
+    serde_json::from_str(&text).map_err(|_| "native source JSON was invalid".to_string())
+}
+
+#[cfg(native_rtc)]
+fn assert_native_capture_source(source_id: &str, operation: &str) -> Result<(), NativeMediaError> {
+    let available = native_capture_sources()
+        .map_err(|message| {
+            capture_error("DESKTOP_CAPTURE_ENUMERATION_FAILED", operation, &message)
+        })?
+        .into_iter()
+        .any(|source| {
+            source.get("sourceId").and_then(Value::as_str) == Some(source_id)
+                && source.get("available") == Some(&Value::Bool(true))
+        });
+    if available {
+        return Ok(());
+    }
+    Err(capture_error(
+        "DESKTOP_CAPTURE_SOURCE_UNAVAILABLE",
+        operation,
+        "The selected native capture source is no longer available",
+    ))
+}
+
 #[tauri::command]
 pub async fn media_list_capture_sources(
     store: State<'_, NativeMediaStore>,
@@ -27,31 +63,9 @@ pub async fn media_list_capture_sources(
     drop(state);
     #[cfg(native_rtc)]
     {
-        let pointer = unsafe { ffi::lib_dspeak_media_list_capture_sources() };
-        if pointer.is_null() {
-            return Err(capture_error(
-                "DESKTOP_CAPTURE_ENUMERATION_FAILED",
-                "enumerate",
-                "native capture source enumeration failed",
-            ));
-        }
-        let text = unsafe { CStr::from_ptr(pointer) }.to_str().map_err(|_| {
-            unsafe { ffi::lib_dspeak_media_free_string(pointer) };
-            capture_error(
-                "DESKTOP_CAPTURE_ENUMERATION_FAILED",
-                "enumerate",
-                "native source JSON was not UTF-8",
-            )
-        })?;
-        let result = serde_json::from_str::<Vec<Value>>(text).map_err(|_| {
-            capture_error(
-                "DESKTOP_CAPTURE_ENUMERATION_FAILED",
-                "enumerate",
-                "native source JSON was invalid",
-            )
-        });
-        unsafe { ffi::lib_dspeak_media_free_string(pointer) };
-        return result;
+        native_capture_sources().map_err(|message| {
+            capture_error("DESKTOP_CAPTURE_ENUMERATION_FAILED", "enumerate", &message)
+        })
     }
     #[cfg(not(native_rtc))]
     Err(capture_error(
@@ -63,10 +77,27 @@ pub async fn media_list_capture_sources(
 
 #[tauri::command]
 pub async fn media_select_capture_source(
-    _store: State<'_, NativeMediaStore>,
-    _source_id: String,
+    store: State<'_, NativeMediaStore>,
+    source_id: String,
 ) -> Result<(), String> {
-    Err("native capture source selection is unavailable".to_string())
+    let state = store
+        .state
+        .lock()
+        .map_err(|_| "native media state lock poisoned".to_string())?;
+    if !state.native_backend_ready || !state.capabilities.native_rtc {
+        return Err("native media backend is unavailable".to_string());
+    }
+    drop(state);
+    #[cfg(native_rtc)]
+    {
+        assert_native_capture_source(&source_id, "select").map_err(|error| error.message)?;
+        Ok(())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = source_id;
+        Err("native media backend not available".to_string())
+    }
 }
 
 #[tauri::command]
@@ -92,6 +123,16 @@ pub async fn media_start_screen_share(
         }
     }
     validate_capture_request(&request, "screen-video", "video")?;
+    #[cfg(native_rtc)]
+    assert_native_capture_source(
+        request
+            .as_ref()
+            .and_then(|value| value.get("captureSelection"))
+            .and_then(|value| value.get("sourceId"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "screen-video",
+    )?;
     eprintln!(
         "[dspeak:media] screen-share request source={} mode={}",
         request
@@ -139,7 +180,7 @@ pub async fn media_start_screen_share(
                 &message,
             ));
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(native_rtc))]
     Err(capture_error(
@@ -155,6 +196,33 @@ pub async fn media_replace_screen_share(
     store: State<'_, NativeMediaStore>,
     request: Option<Value>,
 ) -> Result<(), NativeMediaError> {
+    #[cfg(native_rtc)]
+    {
+        let state = store.state.lock().map_err(|_| {
+            capture_error(
+                "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+                "screen-video-replace",
+                "native media state lock poisoned",
+            )
+        })?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err(capture_error(
+                "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+                "screen-video-replace",
+                "native media backend is unavailable",
+            ));
+        }
+        drop(state);
+        let mut error = 0;
+        let result = unsafe { ffi::lib_dspeak_media_stop_capture(&mut error) };
+        if result != 0 {
+            return Err(capture_error(
+                "DESKTOP_CAPTURE_STOP_FAILED",
+                "screen-video-replace",
+                &format!("native screen capture could not be replaced (error {error})"),
+            ));
+        }
+    }
     media_start_screen_share(app, store, request).await
 }
 
@@ -215,7 +283,43 @@ pub async fn media_set_microphone_device(
                 error
             ));
         }
-        return Ok(());
+        Ok(())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = device_id;
+        Err("native media backend not available".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn media_set_camera_device(
+    store: State<'_, NativeMediaStore>,
+    device_id: String,
+) -> Result<(), String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let device_id =
+            CString::new(device_id).map_err(|_| "camera device id is invalid".to_string())?;
+        let mut error = 0;
+        let result =
+            unsafe { ffi::lib_dspeak_media_set_camera_device(device_id.as_ptr(), &mut error) };
+        if result != 0 {
+            return Err(format!(
+                "native camera device selection failed (error {})",
+                error
+            ));
+        }
+        Ok(())
     }
     #[cfg(not(native_rtc))]
     {
@@ -227,10 +331,229 @@ pub async fn media_set_microphone_device(
 
 #[tauri::command]
 pub async fn media_set_output_device(
-    _store: State<'_, NativeMediaStore>,
-    _device_id: String,
+    store: State<'_, NativeMediaStore>,
+    device_id: String,
 ) -> Result<(), String> {
-    Ok(())
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let device_id =
+            CString::new(device_id).map_err(|_| "output device id is invalid".to_string())?;
+        let result = unsafe { ffi::lib_dspeak_media_set_output_device(device_id.as_ptr()) };
+        if result != 0 {
+            return Err("native audio output selection failed".to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = device_id;
+        Err("native media backend not available".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn media_set_local_video_preview(
+    store: State<'_, NativeMediaStore>,
+    source: String,
+    enabled: bool,
+) -> Result<(), String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let source = CString::new(source)
+            .map_err(|_| "native local preview source is invalid".to_string())?;
+        let result =
+            unsafe { ffi::lib_dspeak_media_set_local_video_preview(source.as_ptr(), enabled) };
+        if result != 0 {
+            return Err("native local video preview could not be changed".to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = source;
+        let _ = enabled;
+        Err("native media backend not available".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn media_set_shared_audio_volume(
+    store: State<'_, NativeMediaStore>,
+    volume: f64,
+) -> Result<(), String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let result = unsafe { ffi::lib_dspeak_media_set_shared_audio_volume(volume) };
+        if result != 0 {
+            return Err("native shared audio volume could not be changed".to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = volume;
+        Err("native media backend not available".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn media_set_shared_audio_attenuation(
+    store: State<'_, NativeMediaStore>,
+    enabled: bool,
+    reduction_percent: f64,
+    attack_ms: i32,
+    release_ms: i32,
+) -> Result<(), String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let result = unsafe {
+            ffi::lib_dspeak_media_set_shared_audio_attenuation(
+                i32::from(enabled),
+                reduction_percent,
+                attack_ms,
+                release_ms,
+            )
+        };
+        if result != 0 {
+            return Err("native shared audio attenuation could not be changed".to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        let _ = enabled;
+        let _ = reduction_percent;
+        let _ = attack_ms;
+        let _ = release_ms;
+        Err("native media backend not available".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn media_get_audio_levels(store: State<'_, NativeMediaStore>) -> Result<Value, String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let pointer = unsafe { ffi::lib_dspeak_media_get_audio_levels() };
+        if pointer.is_null() {
+            return Err("native audio telemetry is unavailable".to_string());
+        }
+        let text = unsafe { CStr::from_ptr(pointer) }
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| "native audio telemetry was not UTF-8".to_string());
+        unsafe { ffi::lib_dspeak_media_free_string(pointer) };
+        let text = text?;
+        serde_json::from_str(&text)
+            .map_err(|_| "native audio telemetry was invalid JSON".to_string())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        Err("native media backend not available".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn media_start_microphone_check(
+    store: State<'_, NativeMediaStore>,
+) -> Result<(), String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let result = unsafe { ffi::lib_dspeak_media_start_microphone_check() };
+        if result != 0 {
+            return Err(format!(
+                "native microphone check could not start (error {result})"
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        Err("native media backend not available".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn media_stop_microphone_check(
+    store: State<'_, NativeMediaStore>,
+) -> Result<Vec<u8>, String> {
+    #[cfg(native_rtc)]
+    {
+        let state = store
+            .state
+            .lock()
+            .map_err(|_| "native media state lock poisoned".to_string())?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err("native media backend is unavailable".to_string());
+        }
+        drop(state);
+        let mut length = 0usize;
+        let pointer = unsafe { ffi::lib_dspeak_media_stop_microphone_check(&mut length) };
+        if pointer.is_null() {
+            return Err("native microphone check returned no recording".to_string());
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(pointer, length).to_vec() };
+        unsafe { ffi::lib_dspeak_media_free_buffer(pointer) };
+        Ok(bytes)
+    }
+    #[cfg(not(native_rtc))]
+    {
+        let _ = store;
+        Err("native media backend not available".to_string())
+    }
 }
 
 #[tauri::command]
@@ -255,8 +578,8 @@ pub async fn media_get_devices(store: State<'_, NativeMediaStore>) -> Result<Vec
             .map_err(|_| "native media device list was not UTF-8".to_string());
         unsafe { ffi::lib_dspeak_media_free_string(pointer) };
         let text = text?;
-        return serde_json::from_str(&text)
-            .map_err(|_| "native media device list was invalid JSON".to_string());
+        serde_json::from_str(&text)
+            .map_err(|_| "native media device list was invalid JSON".to_string())
     }
     #[cfg(not(native_rtc))]
     {
@@ -305,7 +628,7 @@ pub async fn media_set_microphone(
             ));
         }
         eprintln!("[dspeak:media] set-microphone success enabled={enabled}");
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(native_rtc))]
     {
@@ -342,7 +665,7 @@ pub async fn media_set_camera(
         if result != 0 {
             return Err(format!("native camera capture failed (error {})", error));
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(native_rtc))]
     {
@@ -374,6 +697,16 @@ pub async fn media_start_system_audio(
         }
     }
     validate_capture_request(&request, "system-audio", "audio")?;
+    #[cfg(native_rtc)]
+    assert_native_capture_source(
+        request
+            .as_ref()
+            .and_then(|value| value.get("captureSelection"))
+            .and_then(|value| value.get("sourceId"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "system-audio",
+    )?;
     #[cfg(native_rtc)]
     {
         let serialized = serde_json::to_string(&request).map_err(|_| {
@@ -408,7 +741,7 @@ pub async fn media_start_system_audio(
                 &message,
             ));
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(native_rtc))]
     Err(capture_error(
@@ -423,14 +756,41 @@ pub async fn media_replace_system_audio(
     store: State<'_, NativeMediaStore>,
     request: Option<Value>,
 ) -> Result<(), NativeMediaError> {
+    #[cfg(native_rtc)]
+    {
+        let state = store.state.lock().map_err(|_| {
+            capture_error(
+                "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+                "system-audio-replace",
+                "native media state lock poisoned",
+            )
+        })?;
+        if !state.native_backend_ready || !state.capabilities.native_rtc {
+            return Err(capture_error(
+                "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
+                "system-audio-replace",
+                "native media backend is unavailable",
+            ));
+        }
+        drop(state);
+        unsafe { ffi::lib_dspeak_media_stop_system_audio_capture() };
+    }
     media_start_system_audio(store, request).await
 }
 
 #[tauri::command]
 pub async fn media_stop_system_audio(
-    _store: State<'_, NativeMediaStore>,
+    store: State<'_, NativeMediaStore>,
     _source: Option<Value>,
 ) -> Result<(), String> {
+    let state = store
+        .state
+        .lock()
+        .map_err(|_| "native media state lock poisoned".to_string())?;
+    if !state.native_backend_ready || !state.capabilities.native_rtc {
+        return Err("native media backend is unavailable".to_string());
+    }
+    drop(state);
     #[cfg(native_rtc)]
     unsafe {
         ffi::lib_dspeak_media_stop_system_audio_capture();

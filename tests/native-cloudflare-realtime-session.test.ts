@@ -17,6 +17,54 @@ function localOffer(trackId, kind = "audio", includeTrackId = true) {
 }
 
 describe("NativeCloudflareRealtimeSession", () => {
+  it("does not rebind an existing native track on receive toggles", async () => {
+    const calls = [];
+    let rebound = 0;
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        return {};
+      },
+      onRemoteTrack: () => {
+        rebound += 1;
+      },
+      consumers: new Map([
+        [
+          "track-1",
+          {
+            userId: "user-2",
+            source: "camera",
+            trackId: "track-1",
+            receiving: true,
+          },
+        ],
+      ]),
+    });
+    session.handle = 6;
+
+    await session.setRemoteReceiving("user-2", "camera", true);
+    assert.deepEqual(calls, [
+      [
+        "media_p2p_set_receive_enabled",
+        { p2pHandle: 6, trackId: "track-1", enabled: true },
+      ],
+    ]);
+    assert.equal(rebound, 0);
+
+    await session.setRemoteReceiving("user-2", "camera", false);
+    assert.deepEqual(calls, [
+      [
+        "media_p2p_set_receive_enabled",
+        { p2pHandle: 6, trackId: "track-1", enabled: true },
+      ],
+      [
+        "media_p2p_set_receive_enabled",
+        { p2pHandle: 6, trackId: "track-1", enabled: false },
+      ],
+    ]);
+    assert.equal(rebound, 0);
+  });
+
   it("reports a bootstrapped session ready before media is added", async () => {
     let session;
     const invoke = async (command) => {
@@ -142,6 +190,13 @@ describe("NativeCloudflareRealtimeSession", () => {
           command === "send" &&
           payload.data.operation === "tracks-new" &&
           payload.data.body.tracks[0].location === "local",
+      ),
+    );
+    assert.ok(
+      calls.some(
+        ([command, payload]) =>
+          command === "media_p2p_set_remote_description" &&
+          payload.sdpType === "answer",
       ),
     );
 

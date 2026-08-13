@@ -1,6 +1,6 @@
 # dSpeak
 
-dSpeak is a communication platform for text chat, presence, voice, video, screen sharing, soundboards, and notifications. It runs as a Nuxt 4 + Nitro application deployed on Vercel with persistent media control on Cloudflare Workers/Durable Objects.
+dSpeak is a communication platform for text chat, presence, voice, video, screen sharing, soundboards, and notifications. It runs as a Nuxt 4 + Nitro application **optimized for serverless deployment** on Vercel with persistent media control on Cloudflare Workers/Durable Objects ([dspeak-media-control](https://github.com/darel919/dspeak-media-control)).
 
 The same interface is also shipped as a Tauri desktop client for macOS, Linux, and Windows. The desktop app renders the Nuxt frontend in a WebView and replaces browser capture and playback with a native C++ media engine (libwebrtc and libmediasoupclient).
 
@@ -17,10 +17,15 @@ If you modify dSpeak and run a modified version on a publicly accessible network
 - Room roles, branding, media policies, notifications, and member nicknames
 - Protected room soundboards and personal system-sound settings
 - **Connection modes:** `Auto` (system chooses best route) or `Direct` (P2P only, no relay/SFU fallback)
-- **Auto routing:** direct P2P, P2P via TURN relay, Cloudflare Realtime SFU, or self-hosted mediasoup fallback
-- Self-hosted mediasoup runs as a separate `dspeak-sfu` service (independent failure domain)
+- **Auto routing:** direct P2P, P2P via TURN relay, Cloudflare Realtime SFU
 - IPv6-first media with Cloudflare TURN and optional self-hosted Coturn/Playit fallbacks
 - RTC diagnostics, health checks, and Prometheus-compatible metrics
+
+### Self-hosted media fallback
+
+- Self-hosted mediasoup runs as a separate `dspeak-sfu` service (independent failure domain)
+- Deployed independently (Coolify, Docker, bare metal) on fixed port 40000
+- Communicates via signed short-lived provider tickets — no shared database or process
 
 ## Runtime architecture
 
@@ -38,7 +43,7 @@ If you modify dSpeak and run a modified version on a publicly accessible network
 | Supabase                   | Auth (Google OAuth), PostgreSQL, Realtime (app events only)                           |
 | Cloudflare                 | R2 (files), Durable Objects (media control), Realtime SFU/TURN, Workers               |
 
-The web application runs on Vercel (serverless-compatible). Persistent media control lives on Cloudflare Workers/Durable Objects with WebSocket hibernation. The self-hosted mediasoup provider is a fully independent `dspeak-sfu` project that can be deployed separately (Coolify, Docker, etc.) and communicates via signed short-lived provider tickets — no shared database or process.
+The web application runs on Vercel (serverless-optimized). Persistent media control lives on Cloudflare Workers/Durable Objects with WebSocket hibernation. The self-hosted mediasoup provider is a fully independent `dspeak-sfu` project that can be deployed separately (Coolify, Docker, etc.) and communicates via signed short-lived provider tickets — no shared database or process.
 
 The desktop client (`desktop/`) renders the same Nuxt interface in a Tauri WebView. Rust (`desktop/src-tauri/`) owns the window lifecycle, deep links, notifications, autostart, global shortcuts, and auto-updates. A prebuilt native media bundle (`NATIVE_MEDIA_ARTIFACT_DIR`) supplies capture, SFU, P2P, and playback instead of browser WebRTC. See the [native media build boundary](desktop/native-media/README.md).
 
@@ -46,17 +51,20 @@ The desktop client (`desktop/`) renders the same Nuxt interface in a Tauri WebVi
 
 Two user-facing connection modes:
 
-- **Auto (default):** System selects the best viable route per room — direct P2P, P2P via Cloudflare TURN relay, Cloudflare Realtime SFU, or self-hosted mediasoup fallback. Route selection minimizes the worst participant's practical voice experience (latency, jitter, packet loss).
+- **Auto (default):** System selects the best viable route per room — direct P2P, P2P via Cloudflare TURN relay, Cloudflare Realtime SFU. Route selection minimizes the worst participant's practical voice experience (latency, jitter, packet loss). Self-hosted mediasoup is available as an optional fallback (see [Self-hosted media fallback](#self-hosted-media-fallback)).
 - **Direct:** Force native/direct P2P only. STUN allowed. TURN relay, Cloudflare SFU, and mediasoup explicitly disabled. If any required direct pair cannot connect, a clear connection error is shown.
 
-Auto route eligibility (benchmark-gated starting values):
+Participant limits:
 
-| Scenario            | Max participants |
-| ------------------- | ---------------- |
-| Direct audio only   | 12               |
-| Direct with video   | 4                |
-| Auto P2P audio only | 8                |
-| Auto P2P with video | 4                |
+| Scenario                 | Max participants |
+| ------------------------ | ---------------- |
+| Direct P2P audio only    | 8                |
+| Direct P2P with video    | 4                |
+| Auto (P2P, TURN, or SFU) | 100              |
+
+Auto mode uses direct P2P only when the current media mix is eligible for a
+mesh; otherwise it moves to TURN or an SFU within the 100-participant channel
+ceiling.
 
 The authoritative media topology coordinator is a **Cloudflare Durable Object per channel** (`MediaRoomDO`). It owns live participant membership, active route/epoch, P2P signaling relay, provider health, and route commit state. Supabase Realtime handles normal app events (chat, typing, notifications) only — never media topology.
 
@@ -68,7 +76,7 @@ The authoritative media topology coordinator is a **Cloudflare Durable Object pe
 - Native media build tools and a first-run bundle provision for desktop development
 - Supabase project (PostgreSQL, Auth, Realtime)
 - Cloudflare account (Workers, Durable Objects, R2, Realtime SFU/TURN)
-- The sibling `dspeak-media-control` checkout for media control WebSockets and Durable Objects
+- The sibling [`dspeak-media-control`](https://github.com/darel919/dspeak-media-control) checkout for media control WebSockets and Durable Objects
 - FFmpeg and ffprobe when running outside Docker
 - A public IPv4 or IPv6 route for production WebRTC traffic (for self-hosted mediasoup)
 
@@ -166,6 +174,16 @@ bun run start
 | File storage     | Cloudflare R2                        | Direct-to-R2 uploads, signed URLs                  |
 | Auth/DB/Realtime | Supabase                             | Google OAuth only, PostgreSQL, private channels    |
 | Self-hosted SFU  | Coolify / Docker / bare metal        | Independent `dspeak-sfu` project, fixed port 40000 |
+
+### Serverless optimization
+
+The web application is designed for serverless deployment on Vercel:
+
+- No persistent WebSocket connections in the Nuxt/Nitro layer
+- All persistent state (media control WebSockets, presence) lives in Cloudflare Durable Objects and Supabase Realtime
+- Database connections use Supavisor transaction pooling (port 6543) for serverless compatibility
+- Short-lived media tickets (60-120s) eliminate the need for long-lived auth state
+- Cold-start optimized: minimal dependencies, lazy-loaded media bootstrap, no background workers in the web process
 
 For the complete Coolify, Docker Compose, DNS, firewall, and TURN setup, follow the [deployment runbook](docs/deployment.md). Do not expose a production instance until the runbook's external connectivity checks pass.
 

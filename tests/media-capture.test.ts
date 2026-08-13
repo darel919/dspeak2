@@ -20,6 +20,7 @@ test("microphone constraints preserve processing preferences and selected device
       autoGainControl: true,
       channelCount: { ideal: 1 },
       sampleRate: { ideal: 48000 },
+      latency: { ideal: 0.01 },
       deviceId: { exact: "microphone-1" },
     },
   );
@@ -29,6 +30,7 @@ test("HD microphone capture requests stereo", () => {
   const constraints = audioConstraints({}, true);
   assert.deepEqual(constraints.channelCount, { ideal: 2 });
   assert.equal(constraints.autoGainControl, true);
+  assert.deepEqual(constraints.latency, { ideal: 0.01 });
 });
 
 test("shared audio disables destructive speech processing", () => {

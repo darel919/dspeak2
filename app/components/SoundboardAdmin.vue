@@ -110,9 +110,11 @@
 
 <script setup>
 import { useSoundboardStore } from "~/stores/soundboard";
+import { useConfirmDialog } from "../composables/useConfirmDialog";
 
 const props = defineProps({ roomId: { type: String, required: true } });
 const store = useSoundboardStore();
+const { confirm: confirmDialog } = useConfirmDialog();
 const drafts = ref([]);
 const showUpload = ref(false);
 watch(
@@ -144,7 +146,15 @@ async function move(clip, targetIndex) {
 }
 
 async function remove(clip) {
-  if (window.confirm(`Delete “${clip.title}”?`)) await store.remove(clip.id);
+  if (
+    await confirmDialog({
+      title: "Delete sound?",
+      message: `Delete “${clip.title}”?`,
+      confirmLabel: "Delete sound",
+      destructive: true,
+    })
+  )
+    await store.remove(clip.id);
 }
 
 onMounted(() => store.load(props.roomId));

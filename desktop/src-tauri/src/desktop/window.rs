@@ -13,7 +13,7 @@ pub fn desktop_ready(app: tauri::AppHandle) -> Result<(), String> {
 
 pub(crate) fn attach_main_window_lifecycle(window: &tauri::WebviewWindow) {
     let window_clone = window.clone();
-    let _ = window.on_window_event(move |event| {
+    window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             if HIDE_ON_CLOSE.load(Ordering::Relaxed) {
                 api.prevent_close();

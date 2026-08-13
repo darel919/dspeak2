@@ -350,6 +350,9 @@ export async function setIceServers(
 }
 
 export async function shutdown(engine: NativeMediaEngine) {
+  engine._stopNativeAudioTelemetry();
+  if (engine.qoeTimer) clearInterval(engine.qoeTimer);
+  engine.qoeTimer = null;
   engine._stopNativeActionPump();
   engine.nativeTopologyGeneration =
     (Number(engine.nativeTopologyGeneration) || 0) + 1;
@@ -406,15 +409,28 @@ export function mergeNativeCapabilities(
   }
   const capture = capabilities.capture || {};
   const hasSources = (name: string) =>
-    Array.isArray(capture[name]?.sources) && capture[name].sources.length > 0;
+    capture[name]?.available === true &&
+    Array.isArray(capture[name]?.sources) &&
+    capture[name].sources.length > 0;
   if (Object.prototype.hasOwnProperty.call(capture, "microphone"))
     engine.flags.nativeMicrophone = hasSources("microphone");
   if (Object.prototype.hasOwnProperty.call(capture, "camera"))
     engine.flags.nativeCamera = hasSources("camera");
-  if (Object.prototype.hasOwnProperty.call(capture, "screenCaptureKit"))
-    engine.flags.nativeScreenShare = hasSources("screenCaptureKit");
-  if (Object.prototype.hasOwnProperty.call(capture, "screenAudio"))
-    engine.flags.nativeScreenAudio = hasSources("screenAudio");
+  const videoBackends = [
+    "screenCaptureKit",
+    "pipewirePortal",
+    "x11",
+    "windowsGraphicsCapture",
+  ];
+  const audioBackends = ["screenAudio", "systemAudio", "wasapiProcessLoopback"];
+  const videoBackend = videoBackends.find((name) =>
+    Object.prototype.hasOwnProperty.call(capture, name),
+  );
+  const audioBackend = audioBackends.find((name) =>
+    Object.prototype.hasOwnProperty.call(capture, name),
+  );
+  if (videoBackend) engine.flags.nativeScreenShare = hasSources(videoBackend);
+  if (audioBackend) engine.flags.nativeScreenAudio = hasSources(audioBackend);
   engine.flags.nativeBackendReady =
     capabilities.nativeRtc === true && capabilities.nativeBackendReady === true;
   if (!engine.flags.nativeBackendReady) {

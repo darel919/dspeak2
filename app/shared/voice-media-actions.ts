@@ -11,6 +11,7 @@ import {
 } from "./voice-join-readiness.ts";
 import { waitForOutboundSourceFlow } from "./media-source-flow.ts";
 import { STORAGE_KEYS } from "~/const/storage.ts";
+import { useConfirmDialog } from "~/composables/useConfirmDialog";
 import type {
   VoiceMediaActionOptions,
   VoiceMediaSessionLike,
@@ -80,6 +81,7 @@ export function createVoiceMediaActions({
 }: VoiceMediaActionOptions) {
   let voiceToggleOperation: Promise<unknown> = Promise.resolve();
   let captureToggleOperation: Promise<unknown> = Promise.resolve();
+  const { confirm: confirmDialog } = useConfirmDialog();
 
   function createJoinTimeoutError() {
     const timeout = new Error("Voice connection timed out");
@@ -696,14 +698,15 @@ export function createVoiceMediaActions({
       } else {
         const confirmed = captureSelection
           ? true
-          : typeof window === "undefined" ||
-            window.confirm(
-              "Share system audio only?\n\n" +
+          : await confirmDialog({
+              title: "Share system audio only?",
+              message:
                 "Your browser will show its regular screen-sharing dialog because that is how it gives access to system audio.\n\n" +
                 "1. Choose “Entire Screen” in the browser dialog.\n" +
                 "2. Make sure “Share audio” is enabled.\n\n" +
                 "Your screen video will not be shared—only the audio will be sent.",
-            );
+              confirmLabel: "Continue",
+            });
         if (!confirmed) return;
         const producer = await session.startSystemAudioProduction({
           ...(captureSelection ? { captureSelection } : {}),

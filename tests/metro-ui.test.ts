@@ -593,6 +593,29 @@ test("channel rows open a permission-aware menu at the pointer", async () => {
   assert.match(source, /window\.innerHeight - height - VIEWPORT_PADDING_PX/);
 });
 
+test("channel deletion reports server failures instead of failing silently", async () => {
+  const source = await readFile("app/components/ChannelList.vue", "utf8");
+  const store = await readFile("app/stores/channels.ts", "utf8");
+  assert.match(source, /async function deleteContextChannel\(\)/);
+  assert.match(source, /if \(channel\) requestDeleteChannel\(channel\);/);
+  assert.match(source, /deleteConfirmationChannel = ref\(null\);/);
+  assert.match(source, /@click="confirmDeleteChannel"/);
+  assert.match(
+    source,
+    /channelMenuElement\.value\?\.contains\(event\.target\)/,
+  );
+  assert.match(source, /toastSuccess\(`Deleted #\$\{channel\.name\}\.\`\);/);
+  assert.match(source, /toastError\(message\);/);
+  assert.doesNotMatch(
+    source,
+    /async function deleteChannel\(channel\) \{[\s\S]*?confirm\(/,
+  );
+  assert.match(
+    store,
+    /apiErrorMessage\(\s*errorText,\s*response\.status,\s*"Failed to delete channel",?\s*\)/,
+  );
+});
+
 test("account settings update the public dSpeak profile", async () => {
   const source = await readFile("app/pages/settings.vue", "utf8");
   const api = await readFile("server/utils/dspeak-profile-api.ts", "utf8");

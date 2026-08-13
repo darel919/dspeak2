@@ -1,3 +1,12 @@
+import type { AudioSettings } from "./settings.ts";
+import type { ChannelRoomRecord } from "./channel-room.ts";
+import type { MicrophoneGateSettings } from "./microphone-gate.ts";
+import type { VideoSettings } from "./video-settings.ts";
+import type {
+  NativeTauriLike,
+  NativeVoiceStoreLike,
+} from "./native-media-engine.ts";
+
 export interface NativeMediaFlags {
   nativeRtc: boolean;
   nativeBackendReady: boolean;
@@ -34,7 +43,10 @@ export type NativeErrorLike = {
   cause?: unknown;
 };
 export type NativeCapabilities = Partial<NativeMediaFlags> & {
-  capture?: Record<string, { sources?: unknown[] } | undefined>;
+  capture?: Record<
+    string,
+    { available?: boolean; sources?: unknown[] } | undefined
+  >;
 };
 export interface NativeFeed {
   key?: string;
@@ -48,11 +60,16 @@ export interface NativeFeed {
 export interface NativeMediaStore {
   currentChannelId?: string | null;
   loadedRoomId?: string | null;
+  micDeviceId?: string | null;
+  cameraDeviceId?: string | null;
   systemSoundVolume?: number;
   systemSoundTheme?: string;
   systemSoundsMuted?: boolean;
   outputDeviceId?: string | null;
+  sharedAudioVolume?: number;
   systemAudioBitrate?: number | null;
+  audio?: AudioSettings;
+  microphoneGate?: Required<MicrophoneGateSettings>;
   screenVideo?: VideoSettings;
   cameraVideo?: VideoSettings;
   getChannelById?: (channelId: string | null) =>
@@ -81,9 +98,3 @@ export interface NativeMediaEngineOptions {
     >,
   ) => void;
 }
-import type {
-  NativeTauriLike,
-  NativeVoiceStoreLike,
-} from "./native-media-engine.ts";
-import type { VideoSettings } from "./video-settings.ts";
-import type { ChannelRoomRecord } from "./channel-room.ts";

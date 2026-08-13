@@ -387,7 +387,7 @@ export class RemoteMediaRegistry {
     const AudioContextConstructor =
       window.AudioContext || window.webkitAudioContext;
     if (!AudioContextConstructor) throw new Error("Web Audio is unavailable");
-    const context = new AudioContextConstructor();
+    const context = new AudioContextConstructor({ latencyHint: "interactive" });
     const contextToken = this.audioContextToken + 1;
     this.audioContextToken = contextToken;
     this.audioContext = context;
@@ -410,6 +410,22 @@ export class RemoteMediaRegistry {
       }
     }
     return context;
+  }
+
+  getAudioLatencySnapshot() {
+    const context = this.audioContext;
+    return {
+      latencyHint: context ? "interactive" : null,
+      contextState: context?.state || null,
+      baseLatency:
+        context && Number.isFinite(Number(context.baseLatency))
+          ? Number(context.baseLatency) * 1000
+          : null,
+      outputLatency:
+        context && Number.isFinite(Number(context.outputLatency))
+          ? Number(context.outputLatency) * 1000
+          : null,
+    };
   }
 
   async preparePlayback() {

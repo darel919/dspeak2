@@ -4,9 +4,6 @@
 #include <api/video/video_frame.h>
 #include <common_video/libyuv/include/webrtc_libyuv.h>
 #include <media/base/adapted_video_track_source.h>
-#if defined(__APPLE__)
-#include <CoreVideo/CoreVideo.h>
-#endif
 #include "media_handles.hpp"
 
 #include <cstring>
@@ -57,12 +54,6 @@
 #include <rtc_base/ref_counted_object.h>
 #include <rtc_base/synchronization/mutex.h>
 #include <rtc_base/thread.h>
-
-#if defined(__APPLE__)
-#include <CoreMedia/CoreMedia.h>
-#include <CoreVideo/CoreVideo.h>
-#include "PlatformCapture.h"
-#endif
 
 using json = nlohmann::json;
 
@@ -153,12 +144,11 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
         return nullptr;
     }
 
-#if defined(__APPLE__)
     try {
         webrtc::Thread* signaling_thread = webrtc::Thread::Create().release();
-        signaling_thread->Start();
+        dspeak_native::start_media_thread(signaling_thread);
         webrtc::Thread* worker_thread = webrtc::Thread::Create().release();
-        worker_thread->Start();
+        dspeak_native::start_media_thread(worker_thread);
 
         auto null_adm = webrtc::CreateAudioDeviceModule(
             webrtc::CreateEnvironment(),
@@ -224,10 +214,6 @@ extern "C" lib_dspeak_media_video_track_t* lib_dspeak_media_create_video_track(c
         if (error_out) *error_out = -99;
         return nullptr;
     }
-#else
-    if (error_out) *error_out = -99;
-    return nullptr;
-#endif
 }
 
 extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(const char* track_id, int* error_out)
@@ -237,12 +223,11 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
         return nullptr;
     }
 
-#if defined(__APPLE__)
     try {
         webrtc::Thread* signaling_thread = webrtc::Thread::Create().release();
-        signaling_thread->Start();
+        dspeak_native::start_media_thread(signaling_thread);
         webrtc::Thread* worker_thread = webrtc::Thread::Create().release();
-        worker_thread->Start();
+        dspeak_native::start_media_thread(worker_thread);
 
         auto null_adm = webrtc::CreateAudioDeviceModule(
             webrtc::CreateEnvironment(),
@@ -303,16 +288,11 @@ extern "C" lib_dspeak_media_audio_track_t* lib_dspeak_media_create_audio_track(c
         if (error_out) *error_out = -99;
         return nullptr;
     }
-#else
-    if (error_out) *error_out = -99;
-    return nullptr;
-#endif
 }
 
 extern "C" void lib_dspeak_media_destroy_video_track(lib_dspeak_media_video_track_t* t)
 {
     if (!t) return;
-#if defined(__APPLE__)
     auto destroy = [t] {
         if (t->source)
             t->source->SetState(webrtc::MediaSourceInterface::kEnded);
@@ -323,10 +303,6 @@ extern "C" void lib_dspeak_media_destroy_video_track(lib_dspeak_media_video_trac
         t->signaling_thread->BlockingCall(destroy);
     else
         destroy();
-#else
-    t->track = nullptr;
-    t->factory = nullptr;
-#endif
     delete t->signaling_thread;
     delete t->worker_thread;
     delete t;
@@ -335,7 +311,6 @@ extern "C" void lib_dspeak_media_destroy_video_track(lib_dspeak_media_video_trac
 extern "C" void lib_dspeak_media_destroy_audio_track(lib_dspeak_media_audio_track_t* t)
 {
     if (!t) return;
-#if defined(__APPLE__)
     auto destroy = [t] {
         if (t->source)
             t->source->OnClose();
@@ -346,10 +321,6 @@ extern "C" void lib_dspeak_media_destroy_audio_track(lib_dspeak_media_audio_trac
         t->signaling_thread->BlockingCall(destroy);
     else
         destroy();
-#else
-    t->track = nullptr;
-    t->factory = nullptr;
-#endif
     delete t->signaling_thread;
     delete t->worker_thread;
     delete t;

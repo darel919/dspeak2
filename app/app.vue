@@ -10,6 +10,7 @@
     </ClientOnly>
     <PwaInstallPrompt />
     <UpdatePrompt />
+    <AppConfirmDialog />
     <DatabaseHealthPrompt />
     <FatalErrorPrompt />
     <CookieConsent />

@@ -98,12 +98,17 @@ pub async fn media_p2p_set_remote_description(
     store: State<'_, NativeMediaStore>,
     p2p_handle: u64,
     sdp: String,
+    sdp_type: String,
 ) -> Result<(), String> {
     let handles = store
         .handles
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
-    native::p2p_set_remote_description(owned_p2p_handle(&handles, p2p_handle)?, &sdp)
+    native::p2p_set_remote_description(
+        owned_p2p_handle(&handles, p2p_handle)?,
+        &sdp,
+        &sdp_type,
+    )
 }
 
 #[cfg(native_rtc)]
@@ -530,6 +535,7 @@ pub async fn media_p2p_set_remote_description(
     _store: State<'_, NativeMediaStore>,
     _p2p_handle: u64,
     _sdp: String,
+    _sdp_type: String,
 ) -> Result<(), String> {
     Err("native media backend not available".to_string())
 }

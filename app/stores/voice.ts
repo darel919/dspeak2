@@ -11,6 +11,10 @@ import { resolveVoicePreferences } from "~/shared/voice-preferences.ts";
 import { createVoiceParticipantState } from "~/shared/voice-participant-state.ts";
 import { createVoiceMediaActions } from "~/shared/voice-media-actions.ts";
 import {
+  buildMediaAttenuationWatchKey,
+  resolveMediaAttenuation,
+} from "~/shared/media-attenuation-reporter.ts";
+import {
   boundedStorageMap,
   reportBrowserStorageMetric,
 } from "~/shared/bounded-browser-storage.ts";
@@ -65,6 +69,7 @@ export const useVoiceStore = defineStore("voice", () => {
   const p2pQualification = ref<unknown>(null);
   const settingsStore = useSettingsStore();
   const channelsStore = useChannelsStore();
+  const roomsStore = useRoomsStore();
   function getAuthenticatedVoiceUser(): VoiceUserRecord | null {
     const profile = useAuthStore().getUserData();
     if (!profile?.id) return null;
@@ -297,6 +302,51 @@ export const useVoiceStore = defineStore("voice", () => {
     () => sfuComposable.value?.applyOutputDeviceToAll?.(),
   );
 
+  watch(
+    () => {
+      const roomAttenuation = currentRoomId.value
+        ? (roomsStore.getRoomById(currentRoomId.value)?.attenuation as
+            Record<string, unknown> | null | undefined)
+        : undefined;
+      return buildMediaAttenuationWatchKey({
+        roomAttenuation,
+        streamAttenuation: settingsStore.streamAttenuation,
+        speaking: [...connectedUsers.value.values()].some(
+          (participant) => participant.speaking === true,
+        ),
+        connected: connected.value,
+        sessionAvailable:
+          typeof sfuComposable.value?.setSharedAudioAttenuation === "function",
+      });
+    },
+    () => {
+      const session = sfuComposable.value;
+      if (!connected.value || !session?.setSharedAudioAttenuation) return;
+      const speaking = [...connectedUsers.value.values()].some(
+        (participant) => participant.speaking === true,
+      );
+      const roomAttenuation = currentRoomId.value
+        ? (roomsStore.getRoomById(currentRoomId.value)?.attenuation as
+            Record<string, unknown> | null | undefined)
+        : undefined;
+      Promise.resolve(
+        session.setSharedAudioAttenuation(
+          speaking,
+          resolveMediaAttenuation(
+            roomAttenuation,
+            settingsStore.streamAttenuation,
+          ),
+        ),
+      ).catch((cause: unknown) => {
+        error.value =
+          cause instanceof Error
+            ? cause.message
+            : "Unable to apply shared audio attenuation";
+      });
+    },
+    { immediate: true },
+  );
+
   function isInVoiceChannel() {
     return !!currentChannelId.value && !!connected.value;
   }
@@ -502,7 +552,6 @@ export const useVoiceStore = defineStore("voice", () => {
     onError: (message) => (error.value = message),
   });
   if (typeof window !== "undefined") {
-    const roomsStore = useRoomsStore();
     watch(
       [() => roomsStore.rooms, currentRoomId],
       ([rooms]) => {

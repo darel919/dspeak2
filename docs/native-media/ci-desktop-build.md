@@ -21,10 +21,11 @@ the download path. Before the matrix starts, CI compares the current native
 source files and pinned library metadata with the last bundle baseline. This
 keeps application releases from rebuilding native media. If those inputs
 changed, or the durable release is unavailable or missing a required platform
-asset, CI automatically selects the source path. macOS source refreshes use the
-pinned libwebrtc archive
-published by libmediasoupclient; Windows source refreshes build libwebrtc from
-the pinned WebRTC sources.
+asset, CI automatically selects the source path. When the pinned libwebrtc
+metadata still matches, source refreshes download the previous native bundle
+as a WebRTC base and rebuild only the changed native libraries. A full
+libwebrtc source build is used only when no compatible base exists or the
+pinned libwebrtc input changed.
 
 ## Trigger model
 
@@ -40,9 +41,10 @@ The workflow chains off the `Native Media Artifacts` workflow via
 
 When a native source file or pinned input changes, the same automatic resolver
 selects the source path and refreshes the durable `webrtc-m140` release after
-both platforms succeed. The desktop build then consumes the fresh artifact from
-that run. `workflow_dispatch` uses the same decision logic; no manual rebuild
-flag is required.
+both platforms succeed. Compatible WebRTC libraries are reused during source
+refreshes, while a changed WebRTC pin triggers the full WebRTC build. The
+desktop build then consumes the fresh artifact from that run. `workflow_dispatch`
+uses the same decision logic; no manual rebuild flag is required.
 
 `workflow_dispatch` on `desktop-build.yml` builds manually from the most recent
 successful native media run, falling back to the durable `webrtc-m140` GitHub

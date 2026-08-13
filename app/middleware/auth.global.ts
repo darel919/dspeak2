@@ -3,7 +3,7 @@ import { useAuthStore } from "../stores/auth";
 export default defineNuxtRouteMiddleware(async (to) => {
   if (import.meta.server || to.path === "/auth") return;
 
-  const authStore = useAuthStore();
+  const authStore = useAuthStore(useNuxtApp().$pinia);
   const authenticated = await authStore.ensureSession();
   const publicEntry =
     to.path === "/" ||

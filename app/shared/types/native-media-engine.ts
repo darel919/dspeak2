@@ -5,6 +5,7 @@ import type {
 } from "./native-media.ts";
 import type { VideoSettings } from "./video-settings.ts";
 import type { VoiceUserRecord } from "./voice-media-actions.ts";
+import type { NoiseFloorEstimator } from "./microphone-gate.ts";
 
 export interface NativeVoiceStoreLike {
   currentChannelId?: string | null;
@@ -19,6 +20,7 @@ export interface NativeVoiceStoreLike {
   isUserConnected?: (userId: string) => boolean;
   addConnectedUser?: (userId: string, user: VoiceUserRecord) => unknown;
   getConnectedUsersArray?: () => VoiceUserRecord[];
+  updateUserSpeaking?: (userId: string | number, speaking: boolean) => unknown;
   removeConnectedUser?: (userId: string | number) => unknown;
   updateUserVoiceState?: (
     userId: string | number,
@@ -65,6 +67,16 @@ export interface NativeMediaEngineState {
   remoteVideoFeedsRef: import("vue").Ref<Map<string, unknown>>;
   remoteAudioFeedsRef: import("vue").Ref<Map<string, unknown>>;
   localVideoFeedsRef: import("vue").Ref<Map<string, unknown>>;
+  sharedAudioAttenuationRef: import("vue").Ref<{
+    active: boolean;
+    effectivePercent: number;
+    expectedListeners: number;
+    reportingListeners: number;
+  }>;
+  sharedAudioDuckingRef: import("vue").Ref<{
+    active: boolean;
+    effectivePercent: number;
+  }>;
   nativeProvider: "sfu" | "p2p";
   nativeP2pFailureEpoch: number | null;
   nativeTopologyKey: string | null;
@@ -72,5 +84,19 @@ export interface NativeMediaEngineState {
   nativeTopologyOperation: Promise<unknown> | null;
   onQoe: import("./native-media.ts").NativeMediaEngineOptions["onQoe"];
   qoeTimer: ReturnType<typeof setInterval> | null;
+  nativeAudioTelemetryTimer: ReturnType<typeof setInterval> | null;
+  nativeAudioTelemetryPoll: Promise<unknown> | null;
+  nativeNoiseFloorEstimator: NoiseFloorEstimator | null;
+  nativeSpeaking: boolean;
+  nativeActiveSamples: number;
+  nativeQuietSamples: number;
+  nativeEchoDetector: {
+    sample: (input: {
+      active: boolean;
+      echoCancellation: boolean;
+      remoteSpeaking: boolean;
+    }) => void;
+    clear: () => void;
+  } | null;
   nativeAuthToken: string;
 }

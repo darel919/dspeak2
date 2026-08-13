@@ -27,8 +27,10 @@ export class NativeCloudflareRemoteMethods {
     const receiving = Boolean(receivingValue);
     const operations: Array<Promise<unknown>> = [];
     this.remoteReceiving.set(`${userId}:${source}`, receiving);
+    let changed = false;
     for (const entry of this.consumers.values()) {
       if (String(entry.userId) !== userId || entry.source !== source) continue;
+      if (entry.receiving !== receiving) changed = true;
       entry.receiving = receiving;
       operations.push(
         this.invoke("media_p2p_set_receive_enabled", {
@@ -37,10 +39,9 @@ export class NativeCloudflareRemoteMethods {
           enabled: receiving,
         }),
       );
-      this.onRemoteTrack?.(entry);
     }
     await Promise.all(operations);
-    this._emitState();
+    if (changed) this._emitState();
     return true;
   }
 

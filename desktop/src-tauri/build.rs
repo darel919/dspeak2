@@ -88,6 +88,12 @@ fn main() {
     let with_mediasoup = requested_mediasoup
         .or(marked_mediasoup)
         .unwrap_or(mediasoup_available);
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if matches!(target_os.as_str(), "macos" | "windows") && !with_mediasoup {
+        panic!(
+            "native macOS and Windows builds require the mediasoupclient and sdptransform transport libraries"
+        );
+    }
     let mut required_libraries = core_libraries;
     if with_mediasoup {
         required_libraries.extend(mediasoup_libraries.iter().cloned());
@@ -120,10 +126,6 @@ fn main() {
 
     if with_mediasoup {
         println!("cargo:rustc-cfg=native_mediasoup");
-    } else {
-        println!(
-            "cargo:warning=mediasoupclient is disabled; native Cloudflare/P2P transport remains available and self-hosted SFU commands fail closed"
-        );
     }
 
     if cfg!(target_os = "linux") {
@@ -138,12 +140,6 @@ fn main() {
             );
         }
     }
-    if cfg!(target_os = "windows") {
-        println!(
-            "cargo:warning=Windows Graphics Capture and WASAPI process-loopback are capability-gated and remain unsupported until their frame/PCM bridges are implemented"
-        );
-    }
-
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=dspeak_media");
     if with_mediasoup {
@@ -163,6 +159,7 @@ fn main() {
             "VideoToolbox",
             "CoreGraphics",
             "IOSurface",
+            "IOKit",
             "Foundation",
             "AppKit",
             "AVFoundation",
@@ -179,16 +176,40 @@ fn main() {
         println!("cargo:rustc-link-lib=pthread");
     } else if cfg!(target_os = "windows") {
         for library in [
+            "advapi32",
+            "bcrypt",
+            "crypt32",
+            "combase",
             "d3d11",
+            "d3dcompiler",
             "dxgi",
+            "iphlpapi",
             "windowscodecs",
             "mf",
             "mfplat",
+            "mfreadwrite",
             "mfuuid",
+            "mmdevapi",
+            "avrt",
             "propsys",
+            "secur32",
+            "setupapi",
+            "shell32",
+            "shlwapi",
             "ole32",
             "oleaut32",
             "uuid",
+            "user32",
+            "gdi32",
+            "dwmapi",
+            "shcore",
+            "userenv",
+            "version",
+            "winmm",
+            "ws2_32",
+            "runtimeobject",
+            "strmiids",
+            "windowsapp",
         ] {
             println!("cargo:rustc-link-lib={library}");
         }

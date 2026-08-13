@@ -18,6 +18,7 @@ pub(crate) fn stop_native_captures() {
 }
 
 pub(crate) fn shutdown_for_exit(store: &NativeMediaStore) {
+    store.stay_awake.release();
     #[cfg(native_rtc)]
     {
         if let Ok(mut handles) = store.handles.lock() {
@@ -86,12 +87,14 @@ pub async fn media_join(
         state.session = Some(input);
         state.clone()
     };
+    store.stay_awake.acquire();
     emit_state(&app, &snapshot);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn media_leave(app: AppHandle, store: State<'_, NativeMediaStore>) -> Result<(), String> {
+    store.stay_awake.release();
     #[cfg(native_rtc)]
     {
         let mut handles = store
@@ -121,6 +124,7 @@ pub async fn media_shutdown(
     app: AppHandle,
     store: State<'_, NativeMediaStore>,
 ) -> Result<(), String> {
+    store.stay_awake.release();
     #[cfg(native_rtc)]
     store
         .handles
@@ -193,7 +197,7 @@ pub async fn media_set_ice_servers(
 pub async fn media_get_stats(store: State<'_, NativeMediaStore>) -> Result<Value, String> {
     #[cfg(native_rtc)]
     {
-        return super::command_stats::collect_media_stats(&store);
+        super::command_stats::collect_media_stats(&store)
     }
     #[cfg(not(native_rtc))]
     {
@@ -238,7 +242,7 @@ pub async fn media_get_permissions(
                 .unwrap_or(false),
             _ => false,
         };
-        return Ok(if granted { "granted" } else { "prompt" }.to_string());
+        Ok(if granted { "granted" } else { "prompt" }.to_string())
     }
     #[cfg(not(native_rtc))]
     {

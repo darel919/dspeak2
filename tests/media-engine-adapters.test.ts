@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { BrowserMediaEngine } from "../app/composables/media/browserMediaEngine.ts";
 import { NativeMediaEngine } from "../app/composables/media/nativeMediaEngine.ts";
 import { handleNativeCaptureError } from "../app/composables/media/native-media-engine-session.ts";
@@ -8,6 +8,13 @@ import {
   resolveNativeMediaFlags,
   useMediaEngine,
 } from "../app/composables/media/useMediaEngine.ts";
+
+const activeEngines = new Set<{ shutdown: () => Promise<void> }>();
+
+function trackEngine<T extends { shutdown: () => Promise<void> }>(engine: T) {
+  activeEngines.add(engine);
+  return engine;
+}
 
 function createSession() {
   const calls = [];
@@ -27,6 +34,13 @@ function createSession() {
 }
 
 describe("MediaEngine adapters", () => {
+  afterEach(async () => {
+    await Promise.allSettled(
+      [...activeEngines].map((engine) => engine.shutdown()),
+    );
+    activeEngines.clear();
+  });
+
   it("selects Tauri before constructing the browser session", () => {
     let browserSessionConstructed = false;
     const sessionFactory = () => {
@@ -94,10 +108,12 @@ describe("MediaEngine adapters", () => {
   });
 
   it("fails explicitly when native-only media has no native session", async () => {
-    const engine = new NativeMediaEngine({
-      flags: { nativeRtc: false },
-      nativeOnly: true,
-    });
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: { nativeRtc: false },
+        nativeOnly: true,
+      }),
+    );
 
     await assert.rejects(
       () => engine.connect("channel-native-boundary"),
@@ -151,7 +167,7 @@ describe("MediaEngine adapters", () => {
 
   it("BrowserMediaEngine delegates session operations without changing them", async () => {
     const { calls, session } = createSession();
-    const engine = new BrowserMediaEngine(session);
+    const engine = trackEngine(new BrowserMediaEngine(session));
 
     await engine.joinSession({ channelId: "channel-1" });
     await engine.setMicrophoneEnabled(true);
@@ -196,7 +212,9 @@ describe("MediaEngine adapters", () => {
   it("NativeMediaEngine delegates all capabilities when native RTC is disabled", async () => {
     const { calls, session } = createSession();
     const browser = new BrowserMediaEngine(session);
-    const engine = new NativeMediaEngine({ browserEngine: browser });
+    const engine = trackEngine(
+      new NativeMediaEngine({ browserEngine: browser }),
+    );
 
     await engine.joinSession({ channelId: "channel-2" });
     await engine.setMicrophoneEnabled(false);
@@ -219,6 +237,89 @@ describe("MediaEngine adapters", () => {
     });
   });
 
+  it("returns an object topology graph for native SFU RTC snapshots", async () => {
+    const engine = new NativeMediaEngine({
+      flags: { nativeRtc: true, nativeBackendReady: true },
+      nativeOnly: true,
+    });
+    engine.nativeSession = {
+      localPeerId: "local",
+      topologyState: {
+        mode: "sfu",
+        epoch: 7,
+        localPeerId: "local",
+        peers: [{ peerId: "local" }, { peerId: "peer" }],
+      },
+      stats: async () => [
+        {
+          id: "send",
+          pcStates: { connectionState: "connected" },
+          candidatePair: {
+            remote: { address: "203.0.113.8" },
+            local: { candidateType: "host", protocol: "udp" },
+          },
+          rttMs: 24,
+          protocol: "udp",
+          candidateType: "host",
+        },
+      ],
+    } as never;
+
+    const snapshot = (await engine.getWebRTCStatsSnapshot()) as {
+      topology: Record<string, unknown>;
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(snapshot.topology.mode, "sfu");
+    assert.equal(snapshot.topology.label, "SFU (IPv4 fallback)");
+    assert.equal(
+      snapshot.nodes.some((node) => node.role === "sfu"),
+      true,
+    );
+    assert.equal(snapshot.edges.length, 3);
+  });
+
+  it("returns an object topology graph for native P2P RTC snapshots", async () => {
+    const engine = new NativeMediaEngine({
+      flags: { nativeRtc: true, nativeBackendReady: true },
+      nativeOnly: true,
+    });
+    engine.nativeProvider = "p2p";
+    engine.nativeP2pSession = {
+      mode: "p2p",
+      epoch: 8,
+      localPeerId: "local",
+      peers: new Map([["peer", { peerId: "peer" }]]),
+      stats: async () => [
+        {
+          id: "p2p:peer",
+          kind: "p2p",
+          routeId: "peer",
+          peerOrProvider: "peer",
+          pcStates: { connectionState: "connected" },
+          candidatePair: {
+            remote: { address: "192.0.2.8" },
+            local: { candidateType: "host", protocol: "udp" },
+          },
+          rttMs: 12,
+          protocol: "udp",
+          candidateType: "host",
+        },
+      ],
+    } as never;
+
+    const snapshot = (await engine.getWebRTCStatsSnapshot()) as {
+      topology: Record<string, unknown>;
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(snapshot.topology.mode, "p2p-direct");
+    assert.equal(snapshot.nodes.length, 2);
+    assert.equal(snapshot.edges.length, 1);
+  });
+
   it("NativeMediaEngine joins before live SFU health is proven", async () => {
     const calls = [];
     const tauri = {
@@ -237,11 +338,13 @@ describe("MediaEngine adapters", () => {
       },
       listen: async () => () => {},
     };
-    const engine = new NativeMediaEngine({
-      browserEngine: new BrowserMediaEngine(createSession().session),
-      flags: { nativeRtc: true, nativeScreenShare: true },
-      tauri,
-    });
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        browserEngine: new BrowserMediaEngine(createSession().session),
+        flags: { nativeRtc: true, nativeScreenShare: true },
+        tauri,
+      }),
+    );
 
     await engine.initialize();
     engine._stopNativeActionPump();
@@ -252,21 +355,45 @@ describe("MediaEngine adapters", () => {
     assert.deepEqual(calls, [
       ["media_initialize", { config: {} }],
       ["connect", "channel-3"],
+      ["media_join", { channelId: "channel-3" }],
     ]);
   });
 
-  it("NativeMediaEngine attempts microphone capture before callback health is proven", async () => {
+  it("releases native voice state when native disconnect fails", async () => {
     const calls = [];
     const engine = new NativeMediaEngine({
       flags: { nativeRtc: true, nativeBackendReady: true },
       nativeOnly: true,
       tauri: {
-        invoke: async (command) => {
-          calls.push(command);
-          return undefined;
-        },
+        invoke: async (command) => calls.push(command),
       },
     });
+    engine.initialized = true;
+    engine.nativeSession = {
+      disconnect: async () => {
+        throw new Error("disconnect failed");
+      },
+    };
+
+    await engine.leaveSession();
+
+    assert.deepEqual(calls, ["media_leave"]);
+  });
+
+  it("NativeMediaEngine attempts microphone capture before callback health is proven", async () => {
+    const calls = [];
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: { nativeRtc: true, nativeBackendReady: true },
+        nativeOnly: true,
+        tauri: {
+          invoke: async (command) => {
+            calls.push(command);
+            return undefined;
+          },
+        },
+      }),
+    );
     engine.nativeSession = {
       addSource: async () => {},
       removeSource: () => {},
@@ -278,6 +405,100 @@ describe("MediaEngine adapters", () => {
 
     await engine.startAudioProduction();
     assert.deepEqual(calls, ["media_set_microphone"]);
+  });
+
+  it("keeps native capture health flags fail-closed before callback health is proven", () => {
+    const engine = new NativeMediaEngine({ nativeOnly: true });
+
+    engine._mergeNativeCapabilities({
+      nativeRtc: true,
+      nativeBackendReady: true,
+      capture: {
+        camera: { available: false, sources: [{ sourceId: "camera-1" }] },
+        screenCaptureKit: {
+          available: false,
+          sources: [{ sourceId: "display-1" }],
+        },
+      },
+    });
+
+    assert.equal(engine.flags.nativeBackendReady, true);
+    assert.equal(engine.flags.nativeCamera, false);
+    assert.equal(engine.flags.nativeScreenShare, false);
+  });
+
+  it("NativeMediaEngine attempts camera capture before callback health is proven", async () => {
+    const calls = [];
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: { nativeRtc: true, nativeBackendReady: true },
+        nativeOnly: true,
+        tauri: {
+          invoke: async (command) => calls.push(command),
+        },
+      }),
+    );
+    engine.nativeSession = {
+      addSource: async (entry) => calls.push(["sfu-add", entry.source]),
+      removeSource: async () => {},
+    };
+
+    await engine.startVideoProduction("camera");
+
+    assert.deepEqual(calls, ["media_set_camera", ["sfu-add", "camera"]]);
+  });
+
+  it("NativeMediaEngine starts source-selected screen capture before callback health is proven", async () => {
+    const calls = [];
+    const selection = {
+      source: {
+        sourceId: "display-1",
+        sourceType: "display",
+        sourceKey: "display:display-1",
+      },
+      sourceId: "display-1",
+      sourceType: "display",
+      sourceKey: "display:display-1",
+      mode: "video",
+      excludeSelf: true,
+      excludeSelfAudio: true,
+      video: {
+        resolution: "original",
+        frameRate: 60,
+        qualityPriority: "framerate",
+      },
+      audio: {
+        channels: 2,
+        sampleRate: 48000,
+        stereo: true,
+        excludeSelfAudio: true,
+      },
+    };
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: { nativeRtc: true, nativeBackendReady: true },
+        nativeOnly: true,
+        tauri: {
+          invoke: async (command) => calls.push(command),
+        },
+      }),
+    );
+    engine.nativeSession = {
+      addSource: async (entry) => calls.push(["sfu-add", entry.source]),
+      removeSource: async (source) => calls.push(["sfu-remove", source]),
+    };
+
+    await engine.startVideoProduction("screen", {
+      captureSelection: selection,
+    });
+    await engine.stopVideoProduction("screen");
+
+    assert.deepEqual(calls, [
+      "media_start_screen_share",
+      ["sfu-add", "screen"],
+      ["sfu-remove", "screen"],
+      "media_stop_screen_share",
+    ]);
   });
 
   it("publishes native local video feeds through a reactive ref", () => {
@@ -492,21 +713,23 @@ describe("MediaEngine adapters", () => {
         calls.push(["p2p-remove", source]);
       },
     };
-    const engine = new NativeMediaEngine({
-      flags: {
-        nativeRtc: true,
-        nativeBackendReady: true,
-        nativeScreenShare: true,
-        nativeScreenAudio: true,
-      },
-      nativeOnly: true,
-      tauri: {
-        invoke: async (command) => {
-          calls.push(command);
-          return {};
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: {
+          nativeRtc: true,
+          nativeBackendReady: true,
+          nativeScreenShare: true,
+          nativeScreenAudio: true,
         },
-      },
-    });
+        nativeOnly: true,
+        tauri: {
+          invoke: async (command) => {
+            calls.push(command);
+            return {};
+          },
+        },
+      }),
+    );
     engine.nativeSession = nativeSession;
     engine.nativeP2pSession = nativeP2pSession;
 
@@ -517,6 +740,7 @@ describe("MediaEngine adapters", () => {
       "media_start_system_audio",
       ["sfu-add", "screen-audio"],
       ["p2p-add", "screen-audio"],
+      "media_set_shared_audio_volume",
       "media_start_screen_share",
       ["sfu-add", "screen"],
       ["p2p-add", "screen"],
@@ -555,21 +779,23 @@ describe("MediaEngine adapters", () => {
       },
       excludeSelfAudio: true,
     };
-    const engine = new NativeMediaEngine({
-      flags: {
-        nativeRtc: true,
-        nativeBackendReady: true,
-        nativeScreenShare: true,
-        nativeScreenAudio: true,
-      },
-      nativeOnly: true,
-      tauri: {
-        invoke: async (command) => {
-          calls.push(command);
-          return {};
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: {
+          nativeRtc: true,
+          nativeBackendReady: true,
+          nativeScreenShare: true,
+          nativeScreenAudio: true,
         },
-      },
-    });
+        nativeOnly: true,
+        tauri: {
+          invoke: async (command) => {
+            calls.push(command);
+            return {};
+          },
+        },
+      }),
+    );
     engine.nativeSession = {
       addSource: async (entry) => calls.push(["sfu-add", entry.source]),
       removeSource: (source) => calls.push(["sfu-remove", source]),
@@ -588,6 +814,7 @@ describe("MediaEngine adapters", () => {
       ["p2p-add", "screen"],
       ["sfu-add", "screen-audio"],
       ["p2p-add", "screen-audio"],
+      "media_set_shared_audio_volume",
       ["sfu-remove", "screen"],
       ["p2p-remove", "screen"],
       ["sfu-remove", "screen-audio"],
@@ -595,6 +822,88 @@ describe("MediaEngine adapters", () => {
       "media_stop_screen_share",
       "media_stop_system_audio",
     ]);
+  });
+
+  it("passes the validated system audio identity to the native command", async () => {
+    const calls = [];
+    const selection = {
+      source: {
+        sourceId: "macos:system-audio",
+        sourceType: "system-audio",
+        sourceKey: "system-audio:macos:system-audio",
+      },
+      sourceId: "macos:system-audio",
+      sourceType: "system-audio",
+      sourceKey: "system-audio:macos:system-audio",
+      mode: "audio",
+      excludeSelf: true,
+      video: {
+        resolution: "original",
+        frameRate: 60,
+        qualityPriority: "framerate",
+      },
+      audio: {
+        channels: 2,
+        sampleRate: 48000,
+        stereo: true,
+        excludeSelfAudio: true,
+      },
+      excludeSelfAudio: true,
+    };
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        flags: {
+          nativeRtc: true,
+          nativeBackendReady: true,
+          nativeScreenAudio: true,
+        },
+        nativeOnly: true,
+        tauri: {
+          invoke: async (command, payload) => {
+            calls.push([command, payload]);
+            return {};
+          },
+        },
+      }),
+    );
+    engine.nativeSession = {
+      addSource: async () => null,
+      removeSource: async () => {},
+    };
+    engine.nativeP2pSession = {
+      addSource: async () => null,
+      removeSource: async () => {},
+    };
+
+    await engine.startSystemAudioProduction({
+      captureSelection: selection,
+      roomBitrateBps: 128000,
+    });
+
+    assert.equal(calls[0][0], "media_start_system_audio");
+    assert.deepEqual(
+      calls[0][1].request.captureSelection.source,
+      selection.source,
+    );
+    assert.equal(
+      calls[0][1].request.captureSelection.sourceId,
+      selection.sourceId,
+    );
+    assert.equal(
+      calls[0][1].request.captureSelection.sourceType,
+      selection.sourceType,
+    );
+    assert.equal(
+      calls[0][1].request.captureSelection.sourceKey,
+      selection.sourceKey,
+    );
+    assert.equal(calls[0][1].request.captureSelection.mode, "audio");
+    assert.equal(
+      calls[0][1].request.captureSelection.audio.maxBitrateBps,
+      128000,
+    );
+
+    await engine.stopSystemAudioProduction();
   });
 
   it("reports native source state and removes stopped native sources", async () => {
@@ -655,19 +964,21 @@ describe("MediaEngine adapters", () => {
   it("NativeMediaEngine falls back when the native runtime reports no capabilities", async () => {
     const { calls, session } = createSession();
     const nativeCalls = [];
-    const engine = new NativeMediaEngine({
-      browserEngine: new BrowserMediaEngine(session),
-      flags: { nativeRtc: true },
-      tauri: {
-        invoke: async (...args) => {
-          nativeCalls.push(args);
-          return args[0] === "media_initialize"
-            ? { capabilities: {} }
-            : undefined;
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        browserEngine: new BrowserMediaEngine(session),
+        flags: { nativeRtc: true },
+        tauri: {
+          invoke: async (...args) => {
+            nativeCalls.push(args);
+            return args[0] === "media_initialize"
+              ? { capabilities: {} }
+              : undefined;
+          },
+          listen: async () => () => {},
         },
-        listen: async () => () => {},
-      },
-    });
+      }),
+    );
 
     await engine.joinSession({ channelId: "channel-fallback" });
 
@@ -681,14 +992,16 @@ describe("MediaEngine adapters", () => {
   it("NativeMediaEngine does not initialize or join native RTC without a native capability", async () => {
     const { calls, session } = createSession();
     const nativeCalls = [];
-    const engine = new NativeMediaEngine({
-      browserEngine: new BrowserMediaEngine(session),
-      flags: { nativeRtc: true },
-      tauri: {
-        invoke: async (...args) => nativeCalls.push(args),
-        listen: async () => () => {},
-      },
-    });
+    const engine = trackEngine(
+      new NativeMediaEngine({
+        browserEngine: new BrowserMediaEngine(session),
+        flags: { nativeRtc: true },
+        tauri: {
+          invoke: async (...args) => nativeCalls.push(args),
+          listen: async () => () => {},
+        },
+      }),
+    );
 
     await engine.joinSession({ channelId: "channel-4" });
 

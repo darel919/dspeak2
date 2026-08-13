@@ -1,4 +1,5 @@
 export type MediasoupTransportDirection = "send" | "recv";
+export type MediasoupMediaProfile = "audio" | "video" | "mixed";
 export type MediasoupTransportState =
   "new" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
 
@@ -197,6 +198,7 @@ export interface MediasoupClientSessionLike {
 export interface MediasoupSessionOptions {
   send: (message: Record<string, unknown>) => unknown;
   iceServers: unknown[];
+  mediaProfile?: MediasoupMediaProfile;
   onRemoteTrack?: (entry: MediasoupConsumerEntry) => unknown;
   onRemoteTrackEnded?: (entry: MediasoupConsumerEntry) => unknown;
   onStateChange?: (

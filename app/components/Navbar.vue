@@ -260,7 +260,7 @@
               <button
                 class="metro-menu-row"
                 type="button"
-                @click="voiceStore.toggleSystemAudioShare"
+                @click="requestSystemAudioShare"
               >
                 <Icon name="lucide:volume-2" />
                 <span>{{
@@ -448,6 +448,7 @@
   <DesktopCapturePicker
     v-if="capturePickerOpen"
     :open="capturePickerOpen"
+    :audio-only="capturePickerAudioOnly"
     @close="closeCapturePicker"
     @select="selectDesktopCapture"
     @fallback="useBrowserCaptureFallback"
@@ -501,6 +502,7 @@ const profile = computed(() => authStore.getUserData());
 const profileAvatar = computed(() => profile.value?.avatar || "");
 const broadcastDialogOpen = ref(false);
 const capturePickerOpen = ref(false);
+const capturePickerAudioOnly = ref(false);
 const presenceStatus = inject("presenceStatus", ref(null));
 const rtcSummaryVisible = useState("rtc-summary-visible", () => false);
 const callMenu = ref(null);
@@ -687,6 +689,7 @@ async function requestScreenShare() {
       return;
     }
     if (runtimeStore.isTauri || (await getDesktopCaptureApi())) {
+      capturePickerAudioOnly.value = false;
       capturePickerOpen.value = true;
       return;
     }
@@ -696,21 +699,48 @@ async function requestScreenShare() {
   }
 }
 
+async function requestSystemAudioShare() {
+  try {
+    if (voiceStore.systemAudioSharing) {
+      await voiceStore.toggleSystemAudioShare();
+      return;
+    }
+    const api = await getDesktopCaptureApi();
+    if (runtimeStore.isTauri || api) {
+      capturePickerAudioOnly.value = true;
+      capturePickerOpen.value = true;
+      return;
+    }
+    await voiceStore.toggleSystemAudioShare();
+  } catch (error) {
+    console.error("[Navbar] System audio share error:", error);
+  }
+}
+
 async function selectDesktopCapture(selection) {
   capturePickerOpen.value = false;
   try {
-    await voiceStore.toggleScreenShare(selection);
+    if (capturePickerAudioOnly.value)
+      await voiceStore.toggleSystemAudioShare(selection);
+    else await voiceStore.toggleScreenShare(selection);
   } catch (error) {
-    console.error("[Navbar] Screen share selection error:", error);
+    console.error("[Navbar] Desktop capture selection error:", error);
   }
 }
 
 async function useBrowserCaptureFallback() {
   capturePickerOpen.value = false;
   try {
-    await voiceStore.toggleScreenShare(null, { explicitBrowserFallback: true });
+    if (capturePickerAudioOnly.value)
+      await voiceStore.toggleSystemAudioShare(null, {
+        explicitBrowserFallback: true,
+      });
+    else
+      await voiceStore.toggleScreenShare(null, {
+        explicitBrowserFallback: true,
+      });
   } catch (error) {
-    console.error("[Navbar] Browser screen share fallback error:", error);
+    console.error("[Navbar] Browser capture fallback error:", error);
   }
 }
 

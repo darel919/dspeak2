@@ -377,7 +377,7 @@ describe("NativeMediasoupSfuSession", () => {
     );
   });
 
-  it("uses the selected native capture dimensions and cadence", async () => {
+  it("preserves explicit native capture preferences over picker defaults", async () => {
     const calls = [];
     const session = new NativeMediasoupSfuSession({
       invoke: async (command, payload) => {
@@ -403,11 +403,8 @@ describe("NativeMediasoupSfuSession", () => {
       },
     });
 
-    assert.equal(calls[0][1].appData.encodings[0].maxFramerate, 60);
-    assert.equal(
-      calls[0][1].appData.encodings[0].scaleResolutionDownBy,
-      1.3333333333333333,
-    );
+    assert.equal(calls[0][1].appData.encodings[0].maxFramerate, 30);
+    assert.equal(calls[0][1].appData.encodings[0].scaleResolutionDownBy, 1);
     assert.equal(
       calls[0][1].appData.degradationPreference,
       "maintain-resolution",

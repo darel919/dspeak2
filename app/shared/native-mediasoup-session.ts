@@ -8,6 +8,7 @@ import type {
   NativeMediasoupConstructorOptions,
   NativeMediasoupSfuSessionSurface,
   NativeDirection,
+  NativeMediaProfile,
   NativeSourceEntry,
   NativeProducerEntry,
   NativeCloudflareSessionLike,
@@ -18,6 +19,7 @@ import type {
   NativeReceiveEvent,
 } from "./types/native-mediasoup.ts";
 export class NativeMediasoupSfuSession {
+  mediaProfile: NativeMediaProfile;
   constructor({
     invoke,
     buildUrl,
@@ -40,6 +42,7 @@ export class NativeMediasoupSfuSession {
     getAudioBitrate,
     getAudioStereo,
     getVideoSettings,
+    mediaProfile = "audio",
   }: NativeMediasoupConstructorOptions) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeMediasoupSfuSession requires invoke");
@@ -73,6 +76,7 @@ export class NativeMediasoupSfuSession {
     this.getAudioBitrate = getAudioBitrate;
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
+    this.mediaProfile = mediaProfile;
     this.signaling = null;
     this.providerSignaling = null;
     this.controlTicket = "";

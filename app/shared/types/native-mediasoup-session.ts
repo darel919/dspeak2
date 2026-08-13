@@ -2,6 +2,7 @@ import type { NativeConsumerEntry } from "./native-mediasoup.ts";
 import type { VideoSettings } from "./video-settings.ts";
 
 export type NativeDirection = "send" | "recv";
+export type NativeMediaProfile = "audio" | "video" | "mixed";
 export type NativeTransportState =
   "new" | "connecting" | "connected" | "failed" | "disconnected";
 
@@ -105,6 +106,7 @@ export interface NativeCloudflareSessionLike {
 
 export interface NativeMediasoupConstructorOptions extends Partial<NativeMediasoupSfuSessionSurface> {
   invoke: NativeMediasoupSfuSessionSurface["invoke"];
+  mediaProfile?: NativeMediaProfile;
   buildUrl?: (channelId: string | null) => string;
   location?: Location;
 }

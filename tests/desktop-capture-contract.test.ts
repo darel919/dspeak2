@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import {
   createDesktopCaptureSelection,
@@ -167,5 +168,43 @@ describe("desktop capture contract", () => {
       width: 2560,
       height: 1440,
     });
+  });
+
+  it("builds the exact native request for macOS system audio", () => {
+    const selection = createDesktopCaptureSelection(
+      {
+        sourceId: "macos:system-audio",
+        sourceType: "system-audio",
+        title: "System audio",
+        selfExcluded: true,
+        capabilities: { audio: true, stereo: true },
+      },
+      "audio",
+    );
+    const request = desktopCaptureRequest(selection, {
+      operation: "system-audio",
+      roomBitrateBps: 128000,
+    });
+
+    assert.equal(request.captureSelection.sourceId, "macos:system-audio");
+    assert.equal(request.captureSelection.sourceType, "system-audio");
+    assert.equal(
+      request.captureSelection.sourceKey,
+      "system-audio:macos:system-audio",
+    );
+    assert.equal(request.captureSelection.mode, "audio");
+    assert.equal(request.captureSelection.excludeSelf, true);
+    assert.equal(request.captureSelection.excludeSelfAudio, true);
+    assert.equal(request.captureSelection.audio.channels, 2);
+    assert.equal(request.captureSelection.audio.sampleRate, 48000);
+    assert.equal(request.captureSelection.audio.stereo, true);
+    assert.equal(request.captureSelection.audio.excludeSelfAudio, true);
+  });
+
+  it("routes the desktop navbar system-audio action through the picker", async () => {
+    const source = await readFile("app/components/Navbar.vue", "utf8");
+    assert.match(source, /@click="requestSystemAudioShare"/);
+    assert.match(source, /:audio-only="capturePickerAudioOnly"/);
+    assert.doesNotMatch(source, /@click="voiceStore\.toggleSystemAudioShare"/);
   });
 });

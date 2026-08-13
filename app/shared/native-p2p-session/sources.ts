@@ -342,6 +342,7 @@ export class NativeP2pSessionSourcesMethods {
       await this.invoke("media_p2p_set_remote_description", {
         p2pHandle: peer.handle,
         sdp: description.sdp,
+        sdpType: description.type,
       });
       peer.remoteDescriptionSet = true;
       peer.negotiationInFlight = false;
@@ -719,10 +720,12 @@ export class NativeP2pSessionSourcesMethods {
     );
     if (!peer) return false;
     const operations: Array<Promise<unknown>> = [];
+    let changed = false;
     this.remoteReceiving.set(`${userId}:${source}`, receiving);
     peer.remoteReceiving.set(source, receiving);
     for (const entry of this.trackEntries.values()) {
       if (String(entry.userId) !== userId || entry.source !== source) continue;
+      if (entry.receiving !== receiving) changed = true;
       entry.receiving = receiving;
       operations.push(
         this.invoke("media_p2p_set_receive_enabled", {
@@ -731,13 +734,12 @@ export class NativeP2pSessionSourcesMethods {
           enabled: receiving,
         }),
       );
-      this.onRemoteTrack?.(entry);
     }
     this._sendSignal(peer.peerId, {
       sourceReceiving: { source, receiving },
     });
     await Promise.all(operations);
-    this._emitState();
+    if (changed) this._emitState();
     return true;
   }
 

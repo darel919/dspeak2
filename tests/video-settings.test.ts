@@ -25,7 +25,7 @@ import {
   VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN,
 } from "../app/shared/video-settings.ts";
 
-test("native capture settings preserve the selected source dimensions", () => {
+test("native capture settings preserve explicit user video preferences", () => {
   assert.deepEqual(
     resolveNativeCaptureVideoSettings(
       {
@@ -42,9 +42,46 @@ test("native capture settings preserve the selected source dimensions", () => {
       resolution: "original",
       width: 2560,
       height: 1440,
-      frameRate: 60,
+      frameRate: 30,
       qualityPriority: "resolution",
       maxBitrate: 2400000,
+    },
+  );
+});
+
+test("native capture settings use source dimensions when no user dimensions exist", () => {
+  assert.deepEqual(
+    resolveNativeCaptureVideoSettings(
+      {
+        bounds: { width: 2560, height: 1440 },
+        video: { resolution: "original", frameRate: 60 },
+      },
+      { qualityPriority: "resolution" },
+    ),
+    {
+      resolution: "original",
+      width: 2560,
+      height: 1440,
+      frameRate: 60,
+      qualityPriority: "resolution",
+    },
+  );
+});
+
+test("native capture settings resolve an explicit user resolution", () => {
+  assert.deepEqual(
+    resolveNativeCaptureVideoSettings(
+      {
+        bounds: { width: 2560, height: 1440 },
+        video: { resolution: "original", frameRate: 60 },
+      },
+      { resolution: "720p" },
+    ),
+    {
+      resolution: "720p",
+      width: 1280,
+      height: 720,
+      frameRate: 60,
     },
   );
 });

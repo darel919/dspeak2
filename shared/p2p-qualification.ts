@@ -1,7 +1,8 @@
-export const DIRECT_AUDIO_ONLY_MAX_PARTICIPANTS = 12;
+export const DIRECT_AUDIO_ONLY_MAX_PARTICIPANTS = 8;
 export const DIRECT_VIDEO_MAX_PARTICIPANTS = 4;
 export const AUTO_P2P_AUDIO_ONLY_MAX_PARTICIPANTS = 8;
 export const AUTO_P2P_VIDEO_MAX_PARTICIPANTS = 4;
+export const AUTO_MODE_MAX_PARTICIPANTS = 100;
 
 export const P2P_QUALIFICATION_TIMEOUT_MS = 10000;
 export const ROUTE_HYSTERESIS_STABILITY_MS = 10000;
@@ -17,7 +18,7 @@ export function isVideoActive(sources: readonly P2PSource[]) {
   return false;
 }
 
-export function getMaxParticipants(
+export function getP2pMaxParticipants(
   connectionMode: "auto" | "direct",
   hasVideo: boolean,
 ) {
@@ -29,6 +30,15 @@ export function getMaxParticipants(
   return hasVideo
     ? AUTO_P2P_VIDEO_MAX_PARTICIPANTS
     : AUTO_P2P_AUDIO_ONLY_MAX_PARTICIPANTS;
+}
+
+export function getMaxParticipants(
+  connectionMode: "auto" | "direct",
+  hasVideo: boolean,
+) {
+  return connectionMode === "auto"
+    ? AUTO_MODE_MAX_PARTICIPANTS
+    : getP2pMaxParticipants(connectionMode, hasVideo);
 }
 
 export function checkEligibility(

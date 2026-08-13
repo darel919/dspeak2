@@ -210,24 +210,32 @@ export function resolveNativeCaptureVideoSettings(
     captureSelection?.bounds && typeof captureSelection.bounds === "object"
       ? captureSelection.bounds
       : {};
+  const requestedResolution =
+    typeof requestedSettings.resolution === "string" &&
+    Object.hasOwn(VIDEO_RESOLUTIONS, requestedSettings.resolution) &&
+    requestedSettings.resolution !== "original"
+      ? VIDEO_RESOLUTIONS[requestedSettings.resolution]
+      : null;
   const positiveNumber = (value: unknown) => {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : null;
   };
   const width =
-    positiveNumber(captureVideo.width) ||
     positiveNumber(requestedSettings.width) ||
+    positiveNumber(requestedResolution?.width) ||
+    positiveNumber(captureVideo.width) ||
     positiveNumber(bounds.width);
   const height =
-    positiveNumber(captureVideo.height) ||
     positiveNumber(requestedSettings.height) ||
+    positiveNumber(requestedResolution?.height) ||
+    positiveNumber(captureVideo.height) ||
     positiveNumber(bounds.height);
   const frameRate =
-    positiveNumber(captureVideo.frameRate) ||
-    positiveNumber(requestedSettings.frameRate);
+    positiveNumber(requestedSettings.frameRate) ||
+    positiveNumber(captureVideo.frameRate);
   return {
-    ...requestedSettings,
     ...captureVideo,
+    ...requestedSettings,
     ...(width ? { width } : {}),
     ...(height ? { height } : {}),
     ...(frameRate ? { frameRate } : {}),

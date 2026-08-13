@@ -22,11 +22,13 @@ import {
   collectVideoRtpStats,
 } from "../app/shared/rtc-media-stats.ts";
 
-test("P2P participant limit accepts only two through four devices", () => {
+test("P2P participant limit follows the active media mix", () => {
   assert.equal(isP2pParticipantCount(1), false);
   assert.equal(isP2pParticipantCount(2), true);
-  assert.equal(isP2pParticipantCount(4), true);
-  assert.equal(isP2pParticipantCount(5), false);
+  assert.equal(isP2pParticipantCount(8), true);
+  assert.equal(isP2pParticipantCount(9), false);
+  assert.equal(isP2pParticipantCount(4, true), true);
+  assert.equal(isP2pParticipantCount(5, true), false);
 });
 
 test("topology reasons explain recovered providers instead of exposing cooldown state", () => {

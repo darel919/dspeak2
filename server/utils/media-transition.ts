@@ -1,17 +1,28 @@
-const maxP2pParticipants = 4;
 import type {
   PreparedActivation,
   TopologyEvent,
   TopologyReadiness,
 } from "../types/media-transition.ts";
 
-export function p2pRoutingPolicy(participantCount: number): {
+const DIRECT_AUDIO_ONLY_MAX_PARTICIPANTS = 8;
+const DIRECT_VIDEO_MAX_PARTICIPANTS = 4;
+
+function maxP2pParticipants(hasVideo = false): number {
+  return hasVideo
+    ? DIRECT_VIDEO_MAX_PARTICIPANTS
+    : DIRECT_AUDIO_ONLY_MAX_PARTICIPANTS;
+}
+
+export function p2pRoutingPolicy(
+  participantCount: number,
+  hasVideo = false,
+): {
   recoveryDelayMs: number;
   stabilityDelayMs: number;
 } {
   const count = Math.max(
     2,
-    Math.min(maxP2pParticipants, Number(participantCount) || 2),
+    Math.min(maxP2pParticipants(hasVideo), Number(participantCount) || 2),
   );
   return {
     recoveryDelayMs: count === 2 ? 3000 : count === 3 ? 6000 : 10000,
@@ -21,10 +32,11 @@ export function p2pRoutingPolicy(participantCount: number): {
 
 export function membershipTopology(
   participantCount: number,
+  hasVideo = false,
 ): "idle" | "sfu" | "probing" {
   if (participantCount < 1) return "idle";
   if (participantCount === 1) return "sfu";
-  if (participantCount > maxP2pParticipants) return "sfu";
+  if (participantCount > maxP2pParticipants(hasVideo)) return "sfu";
   return "probing";
 }
 

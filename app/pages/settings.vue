@@ -1020,6 +1020,7 @@ import ProfileAvatar from "../components/ProfileAvatar.vue";
 import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { useVoiceStore } from "../stores/voice";
+import { useRuntimeStore } from "../stores/runtime";
 import { useRuntimeConfig } from "#app";
 
 import { useToast } from "../composables/useToast";
@@ -1048,6 +1049,7 @@ import {
 const authStore = useAuthStore();
 const voiceStore = useVoiceStore();
 const settingsStore = useSettingsStore();
+const runtimeStore = useRuntimeStore();
 const channelsStore = useChannelsStore();
 
 const activeSection = ref("account");
@@ -1427,6 +1429,7 @@ let microphonePreviewGate = null;
 let microphonePreviewDestination = null;
 let microphonePreviewTimer = null;
 let microphonePreviewGeneration = 0;
+let nativeMicrophonePreviewOwnsCapture = false;
 const micCheckRecording = ref(false);
 const micCheckSeconds = ref(0);
 const micCheckUrl = ref("");
@@ -1436,6 +1439,8 @@ let micCheckRecorder = null;
 let micCheckChunks = [];
 let micCheckDurationTimer = null;
 let micCheckStopTimer = null;
+let nativeMicCheckRecording = false;
+let nativeMicCheckGeneration = 0;
 
 const effectiveGateEnabled = computed(
   () => microphoneGate.value.enabled && !hdAudioEnabled.value,
@@ -1475,6 +1480,40 @@ async function startMicrophonePreview() {
   microphonePreviewLoading.value = true;
   microphonePreviewError.value = "";
   try {
+    if (runtimeStore.isTauri) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      if (settingsStore.micDeviceId)
+        await invoke("media_set_microphone_device", {
+          deviceId: settingsStore.micDeviceId,
+        });
+      const shouldOwnCapture = !voiceStore.connected || voiceStore.micMuted;
+      if (shouldOwnCapture) {
+        await invoke("media_set_microphone", { enabled: true });
+        nativeMicrophonePreviewOwnsCapture = true;
+      }
+      const noiseFloorEstimator = createNoiseFloorEstimator();
+      microphonePreviewTimer = setInterval(async () => {
+        try {
+          const levels = await invoke("media_get_audio_levels");
+          const levelDb = Math.max(-60, Number(levels?.microphoneDbfs) || -60);
+          const thresholdDb = microphoneGate.value.automatic
+            ? automaticGateThreshold(noiseFloorEstimator.noiseFloorDb)
+            : microphoneGate.value.thresholdDb;
+          microphoneLevelDbValue.value = levelDb;
+          effectiveGateThresholdDb.value = thresholdDb;
+          updateNoiseFloor(
+            noiseFloorEstimator,
+            levelDb,
+            levelDb >= thresholdDb,
+          );
+        } catch {
+          microphoneLevelDbValue.value = -60;
+        }
+      }, 40);
+      if (generation !== microphonePreviewGeneration) return;
+      microphonePreviewReady.value = true;
+      return;
+    }
     const { stream } = await captureMicrophone({
       settings: settingsStore,
       stereo: hdAudioEnabled.value,
@@ -1535,6 +1574,12 @@ function stopMicrophonePreviewResources() {
   stopMicCheckRecorder(true);
   if (microphonePreviewTimer) clearInterval(microphonePreviewTimer);
   microphonePreviewTimer = null;
+  if (nativeMicrophonePreviewOwnsCapture) {
+    nativeMicrophonePreviewOwnsCapture = false;
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke("media_set_microphone", { enabled: false }))
+      .catch(() => {});
+  }
   microphonePreviewSource?.disconnect();
   microphonePreviewAnalyser?.disconnect();
   microphonePreviewGate?.disconnect();
@@ -1570,6 +1615,31 @@ function stopMicCheckTimers() {
 
 function stopMicCheckRecorder(discard = false) {
   stopMicCheckTimers();
+  if (nativeMicCheckRecording) {
+    nativeMicCheckRecording = false;
+    const generation = ++nativeMicCheckGeneration;
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke("media_stop_microphone_check"))
+      .then((bytes) => {
+        if (discard || generation !== nativeMicCheckGeneration) return;
+        const values = Array.isArray(bytes) ? bytes : [];
+        const sample = new Blob([new Uint8Array(values)], {
+          type: "audio/wav",
+        });
+        if (!sample.size) {
+          micCheckError.value = "No microphone audio was recorded. Try again.";
+          return;
+        }
+        micCheckUrl.value = URL.createObjectURL(sample);
+        nextTick(applyMicCheckOutput);
+      })
+      .catch((error) => {
+        if (!discard && generation === nativeMicCheckGeneration)
+          micCheckError.value = error?.message || "The mic check failed.";
+      });
+    micCheckRecording.value = false;
+    return;
+  }
   if (!micCheckRecorder) {
     micCheckRecording.value = false;
     return;
@@ -1590,6 +1660,29 @@ function stopMicCheck() {
 
 function startMicCheck() {
   micCheckError.value = "";
+  if (runtimeStore.isTauri) {
+    if (!microphonePreviewReady.value) {
+      micCheckError.value = "Wait for the microphone to become ready.";
+      return;
+    }
+    clearMicCheck();
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke("media_start_microphone_check"))
+      .then(() => {
+        nativeMicCheckRecording = true;
+        micCheckSeconds.value = 0;
+        micCheckRecording.value = true;
+        micCheckDurationTimer = setInterval(() => {
+          micCheckSeconds.value += 1;
+        }, 1000);
+        micCheckStopTimer = setTimeout(stopMicCheck, 10000);
+      })
+      .catch((error) => {
+        micCheckError.value =
+          error?.message || "The native mic check could not start.";
+      });
+    return;
+  }
   if (!microphonePreviewDestination || !microphonePreviewReady.value) {
     micCheckError.value = "Wait for the microphone to become ready.";
     return;
@@ -1661,6 +1754,8 @@ const videoDevices = ref([]);
 const devicesLoading = ref(false);
 const devicesError = ref("");
 const selectedDeviceId = ref("");
+let nativeDeviceRefreshTimer = null;
+let settingsMounted = false;
 const selectedMicrophoneUnavailable = computed(
   () =>
     Boolean(selectedDeviceId.value) &&
@@ -1668,11 +1763,15 @@ const selectedMicrophoneUnavailable = computed(
 );
 
 onMounted(async () => {
+  settingsMounted = true;
+  await runtimeStore.initialize();
   selectedDeviceId.value = settingsStore.micDeviceId || "";
   selectedOutputId.value = settingsStore.outputDeviceId || "";
   selectedCameraId.value = settingsStore.cameraDeviceId || "";
   if (activeSection.value === "voice") await startMicrophonePreview();
   await refreshDevices();
+  if (settingsMounted && runtimeStore.isTauri)
+    nativeDeviceRefreshTimer = setInterval(() => refreshDevices(), 3000);
 });
 
 watch(activeSection, (section) => {
@@ -1683,9 +1782,44 @@ watch(activeSection, (section) => {
 watch(hdAudioEnabled, restartMicrophonePreview);
 
 async function refreshDevices() {
+  if (devicesLoading.value) return;
   devicesLoading.value = true;
   devicesError.value = "";
   try {
+    if (runtimeStore.isTauri) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const nativeList = await invoke("media_get_devices");
+      const list = Array.isArray(nativeList)
+        ? nativeList.map((device) => {
+            const sourceType =
+              typeof device?.sourceType === "string" ? device.sourceType : "";
+            const kind =
+              typeof device?.kind === "string"
+                ? device.kind
+                : sourceType === "microphone"
+                  ? "audioinput"
+                  : sourceType === "camera"
+                    ? "videoinput"
+                    : sourceType === "audiooutput"
+                      ? "audiooutput"
+                      : "";
+            return {
+              deviceId: String(device?.deviceId || ""),
+              groupId: String(device?.groupId || ""),
+              kind,
+              label: String(device?.label || device?.title || ""),
+            };
+          })
+        : [];
+      devices.value = list.filter((device) => device.kind === "audioinput");
+      outputDevices.value = list.filter(
+        (device) => device.kind === "audiooutput",
+      );
+      videoDevices.value = list.filter(
+        (device) => device.kind === "videoinput",
+      );
+      return;
+    }
     if (!navigator.mediaDevices?.enumerateDevices) {
       devicesError.value = "Media devices not supported in this browser.";
       devices.value = [];
@@ -1717,9 +1851,21 @@ async function refreshDevices() {
   }
 }
 
-function onDeviceChange() {
+async function onDeviceChange() {
   const id = selectedDeviceId.value || null;
   settingsStore.setMicDeviceId(id);
+  if (runtimeStore.isTauri) {
+    if (!voiceStore.connected && !microphonePreviewReady.value) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("media_set_microphone_device", {
+        deviceId: selectedDeviceId.value || "",
+      });
+    } catch {
+      devicesError.value = "The selected microphone could not be used.";
+    }
+    return;
+  }
   restartMicrophonePreview();
 }
 
@@ -1735,27 +1881,51 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  settingsMounted = false;
+  if (nativeDeviceRefreshTimer) clearInterval(nativeDeviceRefreshTimer);
+  nativeDeviceRefreshTimer = null;
   navigator.mediaDevices?.removeEventListener?.(
     "devicechange",
     handleMediaDevicesChanged,
   );
 });
 
-const canSetSinkId =
-  typeof document !== "undefined" &&
-  typeof document.createElement("audio").setSinkId === "function";
+const canSetSinkId = computed(
+  () =>
+    runtimeStore.isTauri ||
+    (typeof document !== "undefined" &&
+      typeof document.createElement("audio").setSinkId === "function"),
+);
 const selectedOutputId = ref("");
 const selectedCameraId = ref("");
-function onCameraDeviceChange() {
+async function onCameraDeviceChange() {
   settingsStore.setCameraDeviceId(selectedCameraId.value || null);
+  if (!runtimeStore.isTauri || !voiceStore.connected) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("media_set_camera_device", {
+      deviceId: selectedCameraId.value || "",
+    });
+  } catch {
+    devicesError.value = "The selected camera could not be used.";
+  }
 }
-function onOutputChange() {
+async function onOutputChange() {
   const id = selectedOutputId.value || null;
   settingsStore.setOutputDeviceId(id);
+  if (runtimeStore.isTauri && voiceStore.connected) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("media_set_output_device", { deviceId: id || "" });
+    } catch {
+      devicesError.value = "The selected speakers could not be used.";
+      return;
+    }
+  }
   applyMicCheckOutput();
 
   if (voiceStore.sfuComposable && voiceStore.connected) {
-    voiceStore.sfuComposable.applyOutputDeviceToAll();
+    await voiceStore.sfuComposable.applyOutputDeviceToAll();
   }
 }
 </script>

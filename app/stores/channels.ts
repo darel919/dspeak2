@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { debugLog } from "../shared/debug";
+import { apiErrorMessage } from "../shared/api-errors.ts";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
@@ -111,6 +112,7 @@ export const useChannelsStore = defineStore("channels", () => {
 
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/channel/?roomId=${roomId}`, {
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -159,6 +161,7 @@ export const useChannelsStore = defineStore("channels", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/channel/`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -174,7 +177,11 @@ export const useChannelsStore = defineStore("channels", () => {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Failed to create channel: ${response.status} ${errorText}`,
+          apiErrorMessage(
+            errorText,
+            response.status,
+            "Failed to create channel",
+          ),
         );
       }
 
@@ -215,6 +222,7 @@ export const useChannelsStore = defineStore("channels", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/channel/`, {
         method: "PUT",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -229,7 +237,7 @@ export const useChannelsStore = defineStore("channels", () => {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Failed to edit channel: ${response.status} ${errorText}`,
+          apiErrorMessage(errorText, response.status, "Failed to edit channel"),
         );
       }
 
@@ -279,6 +287,7 @@ export const useChannelsStore = defineStore("channels", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/channel/`, {
         method: "DELETE",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -290,7 +299,11 @@ export const useChannelsStore = defineStore("channels", () => {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Failed to delete channel: ${response.status} ${errorText}`,
+          apiErrorMessage(
+            errorText,
+            response.status,
+            "Failed to delete channel",
+          ),
         );
       }
 
@@ -330,6 +343,7 @@ export const useChannelsStore = defineStore("channels", () => {
       const apiPath = config.public.apiPath;
       const response = await fetch(`${apiPath}/channel/join`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -341,7 +355,7 @@ export const useChannelsStore = defineStore("channels", () => {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Failed to join channel: ${response.status} ${errorText}`,
+          apiErrorMessage(errorText, response.status, "Failed to join channel"),
         );
       }
 
@@ -393,7 +407,11 @@ export const useChannelsStore = defineStore("channels", () => {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Failed to leave channel: ${response.status} ${errorText}`,
+          apiErrorMessage(
+            errorText,
+            response.status,
+            "Failed to leave channel",
+          ),
         );
       }
 

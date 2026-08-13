@@ -46,6 +46,23 @@ extern "C" {
         device_id: *const c_char,
         error_out: *mut c_int,
     ) -> c_int;
+    pub fn lib_dspeak_media_set_camera_device(
+        device_id: *const c_char,
+        error_out: *mut c_int,
+    ) -> c_int;
+    pub fn lib_dspeak_media_set_output_device(device_id: *const c_char) -> c_int;
+    pub fn lib_dspeak_media_set_local_video_preview(source: *const c_char, enabled: bool) -> c_int;
+    pub fn lib_dspeak_media_set_shared_audio_volume(volume: f64) -> c_int;
+    pub fn lib_dspeak_media_set_shared_audio_attenuation(
+        enabled: c_int,
+        reduction_percent: f64,
+        attack_ms: c_int,
+        release_ms: c_int,
+    ) -> c_int;
+    pub fn lib_dspeak_media_get_audio_levels() -> *mut c_char;
+    pub fn lib_dspeak_media_start_microphone_check() -> c_int;
+    pub fn lib_dspeak_media_stop_microphone_check(length_out: *mut usize) -> *mut u8;
+    pub fn lib_dspeak_media_free_buffer(buffer: *mut u8);
     pub fn lib_dspeak_media_start_microphone_capture(error_out: *mut c_int) -> c_int;
     pub fn lib_dspeak_media_stop_microphone_capture(error_out: *mut c_int) -> c_int;
     pub fn lib_dspeak_media_start_camera_capture(error_out: *mut c_int) -> c_int;
@@ -238,6 +255,7 @@ extern "C" {
     ) -> c_int;
     pub fn lib_dspeak_media_p2p_set_remote_description(
         handle: *mut lib_dspeak_media_p2p_handle_t,
+        sdp_type: *const c_char,
         sdp: *const c_char,
     ) -> c_int;
     pub fn lib_dspeak_media_p2p_add_ice_candidate(

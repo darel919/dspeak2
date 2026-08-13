@@ -221,7 +221,7 @@ test("state-changing audio operations publish or return failures", async () => {
   );
 });
 
-test("remote screen acceptance attaches the existing stream to its new video element", async () => {
+test("remote screen acceptance attaches the existing stream without a render tick", async () => {
   const videoFeed = await readFile(
     new URL("../app/components/VideoFeed.vue", import.meta.url),
     "utf8",
@@ -229,6 +229,7 @@ test("remote screen acceptance attaches the existing stream to its new video ele
 
   assert.match(
     videoFeed,
-    /watch\(\s*\(\) => props\.receiving,\s*\(receiving\) => \{\s*if \(receiving\) nextTick\(attachStream\);/,
+    /watch\(\s*\(\) => props\.receiving,\s*\(receiving\) => \{\s*if \(receiving\) attachStream\(\);/,
   );
+  assert.doesNotMatch(videoFeed, /nextTick\(attachStream\)/);
 });

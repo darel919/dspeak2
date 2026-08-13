@@ -80,6 +80,15 @@ export interface VoiceMediaSessionLike {
   ensureAudioElements?: () => unknown;
   applyOutputDeviceToAll?: () => unknown;
   setSharedAudioVolume?: (volume: number) => unknown;
+  setSharedAudioAttenuation?: (
+    speaking: boolean,
+    attenuation?: {
+      enabled?: boolean;
+      reductionPercent?: number;
+      attackMs?: number;
+      releaseMs?: number;
+    },
+  ) => unknown;
   setSystemAudioBitrate?: (bitrate: number) => unknown;
   applyVolumeForUser?: (userId: string, volume: number) => unknown;
   applyVolumeForTrack?: (

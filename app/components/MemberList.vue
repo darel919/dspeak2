@@ -606,9 +606,12 @@ async function kickMember() {
   const member = memberMenuUser.value;
   if (!canKickMember(member) || kickSaving.value) return;
   if (
-    !window.confirm(
-      `Kick ${memberDisplayName(member)} from ${props.room?.name || "this room"}?`,
-    )
+    !(await confirmDialog({
+      title: "Remove member?",
+      message: `Kick ${memberDisplayName(member)} from ${props.room?.name || "this room"}?`,
+      confirmLabel: "Remove member",
+      destructive: true,
+    }))
   )
     return;
   kickSaving.value = true;
@@ -648,6 +651,7 @@ import { useAuthStore } from "../stores/auth";
 import { useIdentityStore } from "../stores/identity";
 import { useFriendsStore } from "../stores/friends";
 import { useToast } from "../composables/useToast";
+import { useConfirmDialog } from "../composables/useConfirmDialog";
 
 const props = defineProps({
   members: {
@@ -674,6 +678,7 @@ const authStore = useAuthStore();
 const identityStore = useIdentityStore();
 const friendsStore = useFriendsStore();
 const presenceStatusStore = usePresenceStatusStore();
+const { confirm: confirmDialog } = useConfirmDialog();
 const {
   success: toastSuccess,
   info: toastInfo,
@@ -883,7 +888,14 @@ async function acceptFriendRequestFromMenu() {
 async function removeFriendFromMenu() {
   const member = memberMenuUser.value;
   if (!member || friendSaving.value) return;
-  if (!window.confirm(`Remove ${memberDisplayName(member)} from your friends?`))
+  if (
+    !(await confirmDialog({
+      title: "Remove friend?",
+      message: `Remove ${memberDisplayName(member)} from your friends?`,
+      confirmLabel: "Remove friend",
+      destructive: true,
+    }))
+  )
     return;
   friendSaving.value = true;
   try {

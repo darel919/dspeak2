@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "../db/client.ts";
 import {
   directConversations,
@@ -394,17 +394,46 @@ export async function openDirectConversation(
 export async function getDirectMessages(
   userId: DatabaseId,
   conversationId: DatabaseId,
+  cursor: { before?: unknown; beforeId?: unknown } = {},
 ) {
   const { conversation, friendId } = await findConversationForUser(
     userId,
     conversationId,
   );
+  const before = cursor.before ? new Date(String(cursor.before)) : null;
+  const beforeId = cursor.beforeId ? String(cursor.beforeId) : "";
+  if (
+    (cursor.before && (!before || !Number.isFinite(before.getTime()))) ||
+    (cursor.beforeId && !beforeId)
+  )
+    fail(400, "Invalid direct message history cursor");
+  const historyCondition =
+    before && beforeId
+      ? or(
+          lt(directMessages.createdAt, before),
+          and(
+            eq(directMessages.createdAt, before),
+            lt(directMessages.id, beforeId),
+          ),
+        )
+      : before
+        ? lt(directMessages.createdAt, before)
+        : null;
   const rows = await db
     .select()
     .from(directMessages)
-    .where(eq(directMessages.conversationId, conversation.id))
-    .orderBy(desc(directMessages.createdAt))
-    .limit(DIRECT_MESSAGE_LIMIT);
+    .where(
+      historyCondition
+        ? and(
+            eq(directMessages.conversationId, conversation.id),
+            historyCondition,
+          )
+        : eq(directMessages.conversationId, conversation.id),
+    )
+    .orderBy(desc(directMessages.createdAt), desc(directMessages.id))
+    .limit(DIRECT_MESSAGE_LIMIT + 1);
+  const hasMore = rows.length > DIRECT_MESSAGE_LIMIT;
+  if (hasMore) rows.pop();
   const orderedRows = rows.reverse();
   const profileMap = await profilesById([
     ...new Set(orderedRows.map((message) => String(message.authorId))),
@@ -425,6 +454,13 @@ export async function getDirectMessages(
     items: orderedRows.map((message) =>
       presentMessage(message, profileMap.get(String(message.authorId))),
     ),
+    hasMore,
+    nextBefore: orderedRows[0]
+      ? {
+          created: orderedRows[0].createdAt,
+          id: String(orderedRows[0].id),
+        }
+      : null,
   };
 }
 

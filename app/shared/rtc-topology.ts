@@ -1,8 +1,16 @@
-export const MAX_P2P_PARTICIPANTS = 4;
+export const MAX_P2P_PARTICIPANTS = 8;
+export const P2P_VIDEO_MAX_PARTICIPANTS = 4;
 export const P2P_QUALIFICATION_TIMEOUT_MS = 8000;
 
-export function isP2pParticipantCount(count: number | string) {
-  return Number(count) >= 2 && Number(count) <= MAX_P2P_PARTICIPANTS;
+export function isP2pParticipantCount(
+  count: number | string,
+  hasVideo = false,
+) {
+  return (
+    Number(count) >= 2 &&
+    Number(count) <=
+      (hasVideo ? P2P_VIDEO_MAX_PARTICIPANTS : MAX_P2P_PARTICIPANTS)
+  );
 }
 
 export function addressFamily(address: unknown) {

@@ -295,6 +295,13 @@ describe("NativeP2pSession", () => {
 
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(offers, 2);
+    assert.deepEqual(
+      calls.find(([command]) => command === "media_p2p_set_remote_description"),
+      [
+        "media_p2p_set_remote_description",
+        { p2pHandle: 15, sdp: "initial-answer", sdpType: "answer" },
+      ],
+    );
     assert.ok(
       messages.some(
         (message) => message.signal?.description?.sdp === "offer-2",

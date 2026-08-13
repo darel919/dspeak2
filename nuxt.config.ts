@@ -1,12 +1,27 @@
 import tailwindcss from "@tailwindcss/vite";
+import type { ModuleOptions as PwaOptions } from "@vite-pwa/nuxt";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+import type { ModuleOptions as NuxtSecurityOptions } from "nuxt-security";
 import packageMetadata from "./package.json" with { type: "json" };
 import { createBuildIdentity } from "./shared/app-build.ts";
+
+declare module "nuxt/schema" {
+  interface NuxtConfig {
+    pwa?: Partial<PwaOptions> | false;
+    security?: Partial<NuxtSecurityOptions> | false;
+  }
+}
 
 const isProduction = process.env.NODE_ENV === "production";
 const isDesktop = process.env.DSPEAK_DESKTOP === "1";
 const desktopApiBasePath = process.env.VITE_DSPEAK_API_PATH || "";
+const desktopOptimizeDeps = [
+  "@supabase/supabase-js",
+  "@tauri-apps/api/core",
+  "@tauri-apps/api/event",
+  "@tauri-apps/plugin-shell",
+];
 
 function gitValue(args: string[]) {
   try {
@@ -87,6 +102,7 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    optimizeDeps: isDesktop ? { include: desktopOptimizeDeps } : undefined,
     resolve: {
       alias: {
         "@legal": resolve("docs"),
@@ -156,6 +172,7 @@ export default defineNuxtConfig({
         geolocation: [],
         microphone: ["self"],
         "screen-wake-lock": ["self"],
+        "web-share": false,
       },
     },
     requestSizeLimiter: {

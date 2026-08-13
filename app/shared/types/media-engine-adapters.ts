@@ -50,6 +50,7 @@ export type BrowserMediaEngineSession = BrowserMediaSession & {
   shutdown?: () => Promise<void>;
   setMicrophoneDevice?: (deviceId: string) => Promise<void>;
   setOutputDevice?: (deviceId: string) => Promise<void>;
+  setLocalVideoPreview?: (source: string, enabled: boolean) => unknown;
   setJitterBufferConfig?: (config?: Record<string, unknown>) => unknown;
   isScreenSharing?: () => boolean;
   isMicrophoneEnabled?: () => boolean;
@@ -67,6 +68,7 @@ export type BrowserMediaEngineSession = BrowserMediaSession & {
   setRemoteScreenReceiving: BrowserMediaSession["setRemoteScreenReceiving"];
   setRemoteSystemAudioReceiving: BrowserMediaSession["setRemoteSystemAudioReceiving"];
   setSharedAudioVolume: BrowserMediaSession["setSharedAudioVolume"];
+  setSharedAudioAttenuation: BrowserMediaSession["setSharedAudioAttenuation"];
   setSystemAudioBitrate: BrowserMediaSession["setSystemAudioBitrate"];
   sendParticipantVoiceState: BrowserMediaSession["sendParticipantVoiceState"];
   applyOutputDeviceToAll: BrowserMediaSession["applyOutputDeviceToAll"];

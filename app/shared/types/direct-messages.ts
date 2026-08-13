@@ -34,6 +34,8 @@ export interface DirectMessageApiResponse extends Record<string, unknown> {
   items?: unknown;
   id?: string;
   friend?: Record<string, unknown>;
+  hasMore?: boolean;
+  nextBefore?: { created?: string; id?: string } | null;
 }
 
 export interface DirectMessageFetchOptions extends RequestInit {

@@ -406,6 +406,15 @@ void apply_ice_servers(
     } catch (...) {}
 }
 
+static std::optional<webrtc::SdpType> sdp_type_from_string(const char* value) {
+    if (!value) return std::nullopt;
+    const std::string type = value;
+    if (type == "offer") return webrtc::SdpType::kOffer;
+    if (type == "answer") return webrtc::SdpType::kAnswer;
+    if (type == "pranswer") return webrtc::SdpType::kPrAnswer;
+    return std::nullopt;
+}
+
 }
 
 extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
@@ -417,13 +426,13 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
 
         h->network_thread = webrtc::Thread::CreateWithSocketServer().release();
         h->network_thread->SetName("dspeak_p2p_network", nullptr);
-        h->network_thread->Start();
+        dspeak_native::start_media_thread(h->network_thread);
         h->signaling_thread = webrtc::Thread::Create().release();
         h->signaling_thread->SetName("dspeak_p2p_signaling", nullptr);
-        h->signaling_thread->Start();
+        dspeak_native::start_media_thread(h->signaling_thread);
         h->worker_thread = webrtc::Thread::Create().release();
         h->worker_thread->SetName("dspeak_p2p_worker", nullptr);
-        h->worker_thread->Start();
+        dspeak_native::start_media_thread(h->worker_thread);
 
         auto null_adm = webrtc::CreateAudioDeviceModule(
             webrtc::CreateEnvironment(),
@@ -643,16 +652,18 @@ extern "C" int lib_dspeak_media_p2p_create_answer(lib_dspeak_media_p2p_handle_t*
     }
 }
 
-extern "C" int lib_dspeak_media_p2p_set_remote_description(lib_dspeak_media_p2p_handle_t* h, const char* sdp)
+extern "C" int lib_dspeak_media_p2p_set_remote_description(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* sdp_type,
+    const char* sdp)
 {
-    if (!h || !h->pc || !sdp) return -1;
+    if (!h || !h->pc || !sdp_type || !sdp) return -1;
     try {
+        const auto type = sdp_type_from_string(sdp_type);
+        if (!type) return -1;
         webrtc::SdpParseError error;
-        auto desc = webrtc::CreateSessionDescription(webrtc::SdpType::kOffer, sdp, &error);
-        if (!desc) {
-            desc = webrtc::CreateSessionDescription(webrtc::SdpType::kAnswer, sdp, &error);
-            if (!desc) return -1;
-        }
+        auto desc = webrtc::CreateSessionDescription(*type, sdp, &error);
+        if (!desc) return -1;
         auto* obs = new webrtc::RefCountedObject<P2pSetObserver>();
         auto future = obs->GetFuture();
         h->signaling_thread->BlockingCall([h, obs, description = desc.release()] {

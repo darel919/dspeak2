@@ -280,6 +280,7 @@ import { useRoomsStore } from "../stores/rooms";
 import { PRESENCE_LABELS } from "~~/shared/presence-status.ts";
 import { profileAssetUrl } from "../shared/profile-assets.ts";
 import { useToast } from "../composables/useToast";
+import { useConfirmDialog } from "../composables/useConfirmDialog";
 
 const friendsStore = useFriendsStore();
 const presenceStatusStore = usePresenceStatusStore();
@@ -288,6 +289,7 @@ const roomsStore = useRoomsStore();
 const router = useRouter();
 const route = useRoute();
 const { success, error: toastError } = useToast();
+const { confirm: confirmDialog } = useConfirmDialog();
 
 const friendTabs = new Set(["friends", "incoming", "sent", "add"]);
 const requestedTab = computed(() => String(route.query.tab || "friends"));
@@ -424,9 +426,12 @@ async function cancelSentRequest(requestId) {
 
 async function removeFriend(friend) {
   if (
-    !window.confirm(
-      `Remove ${friend.display_name || friend.name} from your friends?`,
-    )
+    !(await confirmDialog({
+      title: "Remove friend?",
+      message: `Remove ${friend.display_name || friend.name} from your friends?`,
+      confirmLabel: "Remove friend",
+      destructive: true,
+    }))
   )
     return;
   await friendsStore.removeFriend(friend.id);

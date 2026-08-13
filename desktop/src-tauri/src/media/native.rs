@@ -288,7 +288,7 @@ pub fn create_send_transport(
     let c_ice_cands = CString::new(ice_candidates_json).map_err(|e| e.to_string())?;
     let c_dtls_params = CString::new(dtls_parameters_json).map_err(|e| e.to_string())?;
     let c_app_data = app_data_json
-        .map(|s| CString::new(s))
+        .map(CString::new)
         .transpose()
         .map_err(|e| e.to_string())?;
     let mut error: i32 = 0;
@@ -326,7 +326,7 @@ pub fn create_recv_transport(
     let c_ice_cands = CString::new(ice_candidates_json).map_err(|e| e.to_string())?;
     let c_dtls_params = CString::new(dtls_parameters_json).map_err(|e| e.to_string())?;
     let c_app_data = app_data_json
-        .map(|s| CString::new(s))
+        .map(CString::new)
         .transpose()
         .map_err(|e| e.to_string())?;
     let mut error: i32 = 0;
@@ -433,13 +433,24 @@ pub fn p2p_create_answer(
 pub fn p2p_set_remote_description(
     handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
     sdp: &str,
+    sdp_type: &str,
 ) -> Result<(), String> {
+    let description_type = sdp_type;
     let sdp = CString::new(sdp).map_err(|error| error.to_string())?;
-    let result = unsafe { ffi::lib_dspeak_media_p2p_set_remote_description(handle, sdp.as_ptr()) };
+    let sdp_type = CString::new(sdp_type).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_set_remote_description(
+            handle,
+            sdp_type.as_ptr(),
+            sdp.as_ptr(),
+        )
+    };
     if result == 0 {
         Ok(())
     } else {
-        Err("native P2P remote description failed".to_string())
+        Err(format!(
+            "native P2P {description_type} remote description failed"
+        ))
     }
 }
 

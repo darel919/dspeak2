@@ -123,6 +123,17 @@ export function createHybridMediaTopologyController({
         ? CloudflareRealtimeSession
         : MediasoupClientSession
     ) as new (options: Record<string, unknown>) => TopologySfuSession;
+    const hasLocalAudio = [...localSources.values()].some(
+      (entry) => entry.track.kind === "audio",
+    );
+    const hasLocalVideo = [...localSources.values()].some(
+      (entry) => entry.track.kind === "video",
+    );
+    const mediaProfile = hasLocalVideo
+      ? hasLocalAudio
+        ? "mixed"
+        : "video"
+      : "audio";
     const session = new SessionClass({
       send: (message: Record<string, unknown>) =>
         provider === "cloudflare-realtime"
@@ -170,6 +181,7 @@ export function createHybridMediaTopologyController({
       getAudioBitrate: getEffectiveAudioBitrate,
       getAudioStereo,
       getVideoSettings: getRequestedVideoSettings,
+      mediaProfile,
     });
     session.provider = provider;
     session.providerId = providerId;

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <atomic>
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,6 +14,8 @@
 #include <api/media_stream_interface.h>
 #include <api/video/video_frame.h>
 #include <api/video/video_sink_interface.h>
+
+struct NativeAudioConsumerState;
 
 class NativeReceiveAudioSink final : public webrtc::AudioTrackSinkInterface {
 public:
@@ -33,7 +36,8 @@ public:
 
 private:
     std::string consumer_id_;
-    void* output_ = nullptr;
+    std::shared_ptr<NativeAudioConsumerState> state_;
+    std::array<float, 1920> samples_{};
 };
 
 class NativeReceiveVideoSink final : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
@@ -54,6 +58,8 @@ private:
 extern "C" {
 
 void* lib_dspeak_media_audio_output_create(const char* consumer_id);
+int lib_dspeak_media_set_local_video_preview(const char* source, bool enabled);
+bool lib_dspeak_media_local_video_preview_enabled(const char* source);
 void lib_dspeak_media_audio_output_destroy(void* output);
 int lib_dspeak_media_audio_output_start(void* output);
 void lib_dspeak_media_audio_output_stop(void* output);
@@ -68,6 +74,7 @@ void lib_dspeak_media_audio_output_write(void* output,
                                          uint32_t frame_count,
                                          uint32_t sample_rate,
                                          uint8_t channels);
+int lib_dspeak_media_set_output_device(const char* device_id);
 
 void lib_dspeak_media_push_receive_track_event(const char* event_name,
                                                const char* consumer_id,
