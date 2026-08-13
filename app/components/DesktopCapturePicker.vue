@@ -49,6 +49,25 @@
           @keydown="onDialogKeydown"
         >
           <div
+            v-if="errorMessage"
+            class="border-l-4 border-error bg-error/10 p-4"
+            role="alert"
+          >
+            <div class="flex items-start gap-3">
+              <Icon
+                name="lucide:triangle-alert"
+                class="mt-0.5 size-5 shrink-0 text-error"
+              />
+              <div>
+                <p class="font-semibold">Sharing could not start</p>
+                <p class="mt-1 text-sm text-base-content/65">
+                  {{ errorMessage }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div
             v-if="loading"
             class="grid min-h-64 place-items-center border border-base-content/10 bg-base-200/30"
           >
@@ -137,7 +156,7 @@
                     ? 'border-primary ring-2 ring-primary/30'
                     : 'border-base-content/15 hover:border-primary/60'
                 "
-                @click="selectedSource = source"
+                @click="selectSource(source)"
               >
                 <div class="relative aspect-video overflow-hidden bg-base-300">
                   <img
@@ -268,6 +287,7 @@
             <button
               type="button"
               class="metro-btn metro-btn--ghost"
+              :disabled="busy"
               @click="close"
             >
               Cancel
@@ -275,11 +295,11 @@
             <button
               type="button"
               class="metro-btn"
-              :disabled="!selectedSource || !mode || loading"
+              :disabled="!selectedSource || !mode || loading || busy"
               @click="select"
             >
               <Icon name="lucide:radio-tower" class="size-4" />
-              Start sharing
+              {{ busy ? "Starting…" : "Start sharing" }}
             </button>
           </div>
         </footer>
@@ -300,26 +320,32 @@ import {
 const props = defineProps({
   open: { type: Boolean, default: false },
   audioOnly: { type: Boolean, default: false },
+  busy: { type: Boolean, default: false },
+  errorMessage: { type: String, default: "" },
 });
 const emit = defineEmits(["close", "select", "fallback"]);
 const sources = ref([]);
 const selectedSource = ref(null);
 const dialogContent = ref(null);
 const filter = ref("all");
-const mode = ref("both");
+const mode = ref("video");
 const loading = ref(false);
 const failure = ref("");
+const sourceRetryDelaysMs = [150, 400, 900, 1500, 2500];
+let loadGeneration = 0;
 const tabs = [
-  { value: "all", label: "Everything", icon: "lucide:layout-grid" },
   { value: "application", label: "Apps", icon: "lucide:app-window" },
   { value: "window", label: "Windows", icon: "lucide:panel-top" },
   { value: "display", label: "Displays", icon: "lucide:monitor" },
+  { value: "all", label: "All sources", icon: "lucide:layout-grid" },
   { value: "system-audio", label: "System audio", icon: "lucide:volume-2" },
 ];
 const filteredSources = computed(() =>
-  (filter.value === "all"
-    ? sources.value
-    : sources.value.filter((source) => source.sourceType === filter.value)
+  (props.audioOnly
+    ? sources.value.filter((source) => source.sourceType === "system-audio")
+    : filter.value === "all"
+      ? sources.value
+      : sources.value.filter((source) => source.sourceType === filter.value)
   ).filter((source) => props.audioOnly || source.sourceType !== "system-audio"),
 );
 const visibleTabs = computed(() =>
@@ -329,23 +355,30 @@ const visibleTabs = computed(() =>
 );
 
 watch(
-  () => props.open,
-  (open) => {
+  () => [props.open, props.audioOnly],
+  ([open, audioOnly]) => {
     if (open) {
-      filter.value = props.audioOnly ? "system-audio" : "all";
-      mode.value = props.audioOnly ? "audio" : "both";
+      filter.value = audioOnly ? "system-audio" : "all";
+      mode.value = audioOnly ? "audio" : "video";
       nextTick(() => dialogContent.value?.focus());
       loadSources();
     } else {
+      loadGeneration += 1;
+      loading.value = false;
       selectedSource.value = null;
     }
   },
+  { immediate: true },
 );
 
 onMounted(() => window.addEventListener("keydown", onWindowKeydown));
-onUnmounted(() => window.removeEventListener("keydown", onWindowKeydown));
+onUnmounted(() => {
+  loadGeneration += 1;
+  window.removeEventListener("keydown", onWindowKeydown);
+});
 
 async function loadSources() {
+  const generation = ++loadGeneration;
   loading.value = true;
   failure.value = "";
   selectedSource.value = null;
@@ -353,35 +386,41 @@ async function loadSources() {
     const api = await getDesktopCaptureApi();
     if (!api)
       throw new Error("This capture picker is available in desktop mode only.");
-    const prepared = await api.invoke("media_prepare_capture");
-    const capabilities = prepared?.capabilities || {};
-    const captureCapability = getNativeCaptureCapability(
-      capabilities,
-      props.audioOnly ? "audio" : "video",
-    );
-    if (
-      capabilities?.nativeRtc !== true ||
-      capabilities?.nativeBackendReady !== true
-    ) {
-      throw new Error(captureCapability.reason);
+    for (let attempt = 0; ; attempt += 1) {
+      const prepared = await api.invoke("media_prepare_capture");
+      if (generation !== loadGeneration || !props.open) return;
+      const capabilities = prepared?.capabilities || {};
+      const captureCapability = getNativeCaptureCapability(
+        capabilities,
+        props.audioOnly ? "audio" : "video",
+      );
+      if (
+        capabilities?.nativeRtc !== true ||
+        capabilities?.nativeBackendReady !== true
+      ) {
+        throw new Error(captureCapability.reason);
+      }
+      const listedSources = normalizeCaptureSources(prepared?.sources);
+      const nextSources = listedSources.filter((source) =>
+        props.audioOnly ? source.capabilities.audio : source.capabilities.video,
+      );
+      if (nextSources.length || attempt >= sourceRetryDelaysMs.length) {
+        sources.value = nextSources;
+        const first = filteredSources.value[0];
+        if (first) mode.value = first.capabilities.video ? "video" : "audio";
+        return;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, sourceRetryDelaysMs[attempt]),
+      );
+      if (generation !== loadGeneration || !props.open) return;
     }
-    const listedSources = normalizeCaptureSources(prepared?.sources);
-    sources.value = listedSources.filter((source) =>
-      props.audioOnly ? source.capabilities.audio : source.capabilities.video,
-    );
-    const first = filteredSources.value[0];
-    if (first)
-      mode.value =
-        first.capabilities.video && first.capabilities.audio
-          ? "both"
-          : first.capabilities.video
-            ? "video"
-            : "audio";
   } catch (error) {
-    failure.value =
-      error?.message || "Unable to enumerate desktop capture sources.";
+    if (generation === loadGeneration)
+      failure.value =
+        error?.message || "Unable to enumerate desktop capture sources.";
   } finally {
-    loading.value = false;
+    if (generation === loadGeneration) loading.value = false;
   }
 }
 
@@ -418,6 +457,7 @@ function sourceTypeLabel(type) {
 }
 
 function close() {
+  if (props.busy) return;
   emit("close");
 }
 
@@ -428,12 +468,19 @@ function useBrowserFallback() {
 function select() {
   if (!selectedSource.value) return;
   try {
+    const selectedMode = props.audioOnly ? "audio" : mode.value;
     emit(
       "select",
-      createDesktopCaptureSelection(selectedSource.value, mode.value),
+      createDesktopCaptureSelection(selectedSource.value, selectedMode),
     );
   } catch (error) {
     failure.value = error.message;
   }
+}
+
+function selectSource(source) {
+  selectedSource.value = source;
+  mode.value =
+    props.audioOnly || !source.capabilities.video ? "audio" : "video";
 }
 </script>

@@ -261,6 +261,50 @@ describe("desktop capture contract", () => {
     assert.match(desktop, /media::media_prepare_capture/);
   });
 
+  it("loads picker sources on mount, retries transient empty snapshots, and keeps all sources last", async () => {
+    const picker = await readFile(
+      "app/components/DesktopCapturePicker.vue",
+      "utf8",
+    );
+    assert.match(picker, /\{ immediate: true \}/);
+    assert.match(
+      picker,
+      /const sourceRetryDelaysMs = \[150, 400, 900, 1500, 2500\]/,
+    );
+    assert.match(picker, /await api\.invoke\("media_prepare_capture"\)/);
+    assert.match(
+      picker,
+      /if \(nextSources\.length \|\| attempt >= sourceRetryDelaysMs\.length\)/,
+    );
+    assert.equal(
+      picker.indexOf('{ value: "all", label: "All sources"'),
+      picker.lastIndexOf('{ value: "all", label: "All sources"'),
+    );
+    assert.ok(
+      picker.indexOf('{ value: "all", label: "All sources"') >
+        picker.indexOf('{ value: "display", label: "Displays"'),
+    );
+    assert.match(
+      picker,
+      /const selectedMode = props\.audioOnly \? "audio" : mode\.value/,
+    );
+    assert.match(picker, /mode\.value = audioOnly \? "audio" : "video"/);
+    assert.match(picker, /function selectSource\(source\)/);
+    assert.match(
+      picker,
+      /:disabled="!selectedSource \|\| !mode \|\| loading \|\| busy"/,
+    );
+    assert.match(picker, /errorMessage: \{ type: String, default: "" \}/);
+    assert.match(
+      await readFile("app/components/VoiceChannel.vue", "utf8"),
+      /capturePickerOpen\.value = false;[\s\S]*?finally \{\n    capturePickerStarting\.value = false;/,
+    );
+    assert.match(
+      await readFile("app/components/Navbar.vue", "utf8"),
+      /capturePickerOpen\.value = false;[\s\S]*?finally \{\n    capturePickerStarting\.value = false;/,
+    );
+  });
+
   it("enumerates native devices through a short-lived media preparation probe", async () => {
     const runtime = await readFile(
       "app/composables/media/native-media-engine-observability.ts",
