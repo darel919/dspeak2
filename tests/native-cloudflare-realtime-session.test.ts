@@ -17,6 +17,90 @@ function localOffer(trackId, kind = "audio", includeTrackId = true) {
 }
 
 describe("NativeCloudflareRealtimeSession", () => {
+  it("delivers local native video frames through the Cloudflare session", () => {
+    const localVideoFeeds = new Map([
+      [
+        "camera",
+        {
+          source: "camera",
+          producerId: "local:camera",
+          native: true,
+          frame: null,
+        },
+      ],
+    ]);
+    let stateChanges = 0;
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async () => ({}),
+      localVideoFeeds,
+      onStateChange: () => {
+        stateChanges += 1;
+      },
+    });
+
+    assert.equal(
+      session.handleReceiveEvent({
+        kind: 5,
+        id: "camera",
+        eventId: 11,
+        payload: { source: "camera", width: 2, height: 1 },
+        data: "AAAAAAAAAAA=",
+      }),
+      true,
+    );
+    assert.equal(localVideoFeeds.get("camera").frame.data, "AAAAAAAAAAA=");
+    assert.equal(localVideoFeeds.get("camera").frame.source, "camera");
+    assert.equal(stateChanges, 1);
+  });
+
+  it("retains a native video frame that arrives before source registration", async () => {
+    const localVideoFeeds = new Map();
+    let session;
+    const invoke = async (command) => {
+      if (command === "media_p2p_create") {
+        session.handleReceiveEvent({
+          kind: 5,
+          id: "camera",
+          eventId: 12,
+          payload: { source: "camera", width: 2, height: 1 },
+          data: "AQIDBA==",
+        });
+        return { handle: 10 };
+      }
+      if (command === "media_p2p_poll_ice_candidate") return null;
+      if (command === "media_p2p_add_track") return { trackId: "camera-1" };
+      if (command === "media_p2p_create_offer")
+        return localOffer("camera-1", "video");
+      return {};
+    };
+    const send = (message) => {
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation, body } = message.data;
+      const result =
+        operation === "new-session"
+          ? { sessionId: "native-session" }
+          : body?.tracks?.[0]?.location === "local"
+            ? { sessionDescription: { type: "answer", sdp: "answer" } }
+            : {};
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", { requestId, result }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({
+      invoke,
+      send,
+      localVideoFeeds,
+    });
+
+    await session.addSource({ source: "camera", kind: "video" });
+
+    assert.equal(localVideoFeeds.get("camera").frame.data, "AQIDBA==");
+    assert.equal(localVideoFeeds.get("camera").frame.eventId, 12);
+    assert.equal(session.pendingLocalVideoFrames.size, 0);
+    await session.closeMedia();
+  });
+
   it("does not rebind an existing native track on receive toggles", async () => {
     const calls = [];
     let rebound = 0;

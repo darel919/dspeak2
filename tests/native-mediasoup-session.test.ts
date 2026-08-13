@@ -273,7 +273,7 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(session.connectionPhase, "idle");
   });
 
-  it("attaches a native local video surface to the camera feed", async () => {
+  it("attaches native local video frames to the camera feed", async () => {
     const session = new NativeMediasoupSfuSession({
       invoke: async (command, payload) => {
         if (command === "media_create_capture_producer")
@@ -293,14 +293,14 @@ describe("NativeMediasoupSfuSession", () => {
         id: "camera",
         payload: {
           source: "camera",
-          surfaceId: "local:camera",
         },
+        data: "AAAAAAAAAAA=",
       }),
       true,
     );
     assert.equal(
-      session.localVideoFeeds.get("camera").surfaceId,
-      "local:camera",
+      session.localVideoFeeds.get("camera").frame.data,
+      "AAAAAAAAAAA=",
     );
   });
 
@@ -325,15 +325,15 @@ describe("NativeMediasoupSfuSession", () => {
         id: "camera",
         payload: {
           source: "camera",
-          surfaceId: "local:camera",
         },
+        data: "AAAAAAAAAAA=",
       }),
       true,
     );
     assert.equal(session.localVideoFeeds.get("camera").native, true);
     assert.equal(
-      session.localVideoFeeds.get("camera").surfaceId,
-      "local:camera",
+      session.localVideoFeeds.get("camera").frame.data,
+      "AAAAAAAAAAA=",
     );
   });
 
@@ -804,14 +804,14 @@ describe("NativeMediasoupSfuSession", () => {
         payload: {
           width: 2,
           height: 1,
-          surfaceId: "consumer-native",
         },
+        data: "AAAAAAAAAAA=",
       }),
       true,
     );
     assert.equal(
-      session.remoteVideoFeeds.get(entry.key).surfaceId,
-      "consumer-native",
+      session.remoteVideoFeeds.get(entry.key).frame.data,
+      "AAAAAAAAAAA=",
     );
     assert.equal(
       session.handleReceiveEvent({

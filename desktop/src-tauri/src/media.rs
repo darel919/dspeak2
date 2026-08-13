@@ -17,7 +17,6 @@ mod native;
 mod startup;
 mod state;
 mod types;
-mod video_surface;
 mod worker_client;
 
 pub const MEDIA_EVENT_STATE: &str = "media:state";
@@ -34,17 +33,7 @@ pub use command_signaling::*;
 pub use command_stats::*;
 use serde_json::Value;
 pub(crate) use state::{is_connected, NativeMediaStore};
-use tauri::{AppHandle, Manager, State};
-pub use video_surface::*;
-
-pub(crate) fn clear_video_surfaces(app: &AppHandle) {
-    let Some(store) = app.try_state::<NativeMediaStore>() else {
-        return;
-    };
-    let worker = store.worker.clone();
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || worker.clear_surfaces(&app_handle));
-}
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub async fn media_worker_invoke(

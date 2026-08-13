@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "lib_dspeak_media/lib_dspeak_media.h"
-#include "video_surface.hpp"
 
 #include <api/media_stream_interface.h>
 #include <api/video/video_frame.h>

@@ -212,7 +212,7 @@ test("active calls keep signaling alive until the media state disconnects", asyn
   ]);
 
   assert.match(windowSource, /media::is_connected/);
-  assert.match(windowSource, /media::clear_video_surfaces/);
+  assert.doesNotMatch(windowSource, /media::clear_video_surfaces/);
   assert.match(windowSource, /window_clone\.hide\(\)/);
   assert.match(desktopSource, /app\.listen\(media::MEDIA_EVENT_STATE/);
   assert.match(desktopSource, /!window\.is_visible\(\)\.unwrap_or\(true\)/);

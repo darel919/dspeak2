@@ -28,6 +28,8 @@ pub struct lib_dspeak_media_receive_event_t {
     pub event_id: u64,
     pub id: *mut c_char,
     pub payload_json: *mut c_char,
+    pub data: *mut u8,
+    pub data_len: u32,
 }
 
 extern "C" {
@@ -119,18 +121,6 @@ extern "C" {
     pub fn lib_dspeak_media_free_receive_event(event: *mut lib_dspeak_media_receive_event_t);
     pub fn lib_dspeak_media_wait_for_event(timeout_ms: u32) -> c_int;
     pub fn lib_dspeak_media_wake_event();
-    pub fn lib_dspeak_media_video_surface_run_loop();
-    pub fn lib_dspeak_media_video_surface_stop_loop();
-    pub fn lib_dspeak_media_video_surface_set_bounds(
-        surface_id: *const c_char,
-        x: c_int,
-        y: c_int,
-        width: c_int,
-        height: c_int,
-        visible: bool,
-    ) -> c_int;
-    pub fn lib_dspeak_media_video_surface_destroy(surface_id: *const c_char) -> c_int;
-    pub fn lib_dspeak_media_video_surface_clear();
     pub fn lib_dspeak_media_complete_connect(transport_ptr: *mut c_void);
     pub fn lib_dspeak_media_fail_connect(transport_ptr: *mut c_void, error_message: *const c_char);
     pub fn lib_dspeak_media_complete_produce(action_id: u64, producer_id: *const c_char);

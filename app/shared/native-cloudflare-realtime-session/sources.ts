@@ -98,6 +98,18 @@ export class NativeCloudflareSourcesMethods {
       throw new Error(
         `Native Cloudflare source kind cannot change for ${source}; remove it first`,
       );
+    if (kind === "video") {
+      const pendingFrame = this.takePendingLocalVideoFrame(source);
+      const currentFeed = this.localVideoFeeds.get(source);
+      if (!currentFeed || pendingFrame) {
+        this.localVideoFeeds.set(source, {
+          source,
+          producerId: currentFeed?.producerId || `local:${source}`,
+          native: true,
+          frame: pendingFrame || currentFeed?.frame || null,
+        });
+      }
+    }
     if (previous && String(previous.kind || kind) === kind) {
       const replacement = await this.invoke("media_p2p_replace_track", {
         p2pHandle: this.handle,
@@ -178,14 +190,15 @@ export class NativeCloudflareSourcesMethods {
       ownerSource: normalized.ownerSource || null,
     };
     this.producers.set(source, producer);
-    if (kind === "video")
+    if (kind === "video") {
+      const currentFeed = this.localVideoFeeds.get(source);
       this.localVideoFeeds.set(source, {
         source,
         producerId: trackName,
         native: true,
-        surfaceId: `local:${source}`,
-        frame: null,
+        frame: currentFeed?.frame || null,
       });
+    }
     if (
       !this.send?.({
         type: "cloudflare-publication",
@@ -215,6 +228,7 @@ export class NativeCloudflareSourcesMethods {
     const current = this.producers.get(key);
     this.sources.delete(key);
     this.localVideoFeeds.delete(key);
+    this.pendingLocalVideoFrames.delete(key);
     if (!current) return;
     if (!this.handle || !this.sessionId) {
       this.producers.delete(key);

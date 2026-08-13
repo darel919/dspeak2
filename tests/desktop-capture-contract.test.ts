@@ -240,6 +240,13 @@ describe("desktop capture contract", () => {
     assert.doesNotMatch(source, /@click="voiceStore\.toggleSystemAudioShare"/);
   });
 
+  it("routes the voice-channel screen action through the desktop picker", async () => {
+    const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+    assert.match(source, /const api = await getDesktopCaptureApi\(\);/);
+    assert.match(source, /if \(runtimeStore\.isTauri \|\| api\)/);
+    assert.match(source, /capturePickerOpen\.value = true;/);
+  });
+
   it("enumerates native sources through a short-lived media preparation probe", async () => {
     const picker = await readFile(
       "app/components/DesktopCapturePicker.vue",

@@ -377,7 +377,14 @@ export class NativeP2pSessionSourcesMethods {
       [...this.peers.values()].find(
         (candidate) => candidate.userId === entry.userId,
       );
-    entry.surfaceId = entry.surfaceId || trackId;
+    if (entry.kind === "video") {
+      if (typeof event.data !== "string" || !event.data) return false;
+      entry.frame = {
+        ...payload,
+        data: event.data,
+        eventId: event.eventId,
+      };
+    }
     this.onRemoteTrack?.(entry);
     if (framePeer) this._checkPeerQualification(framePeer);
     this._emitState();

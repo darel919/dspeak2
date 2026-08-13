@@ -193,11 +193,13 @@ describe("NativeP2pSession", () => {
     session.handleReceiveEvent({
       kind: 2,
       id: "camera_capture_video",
+      eventId: 12,
       payload: { width: 2, height: 1, timestampMs: 12 },
+      data: "AAAAAAAAAAA=",
     });
 
     assert.equal(tracks.at(-1)[0], "track");
-    assert.equal(tracks.at(-1)[1].surfaceId, "camera_capture_video");
+    assert.equal(tracks.at(-1)[1].frame.data, "AAAAAAAAAAA=");
     assert.equal(
       session.handleReceiveEvent({
         kind: 2,
@@ -637,7 +639,9 @@ describe("NativeP2pSession", () => {
     session.handleReceiveEvent({
       kind: 2,
       id: "camera_capture_video",
+      eventId: 12,
       payload: { width: 2, height: 1, timestampMs: 12 },
+      data: "AAAAAAAAAAA=",
     });
     event("health-received", "0");
     event("health-received", "1");

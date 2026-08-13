@@ -156,10 +156,6 @@ impl MediaWorkerClient {
         }
     }
 
-    pub(crate) fn clear_surfaces(&self, app: &AppHandle) {
-        let _ = self.call_existing(app, "media_video_surface_clear", json!({}));
-    }
-
     pub(crate) fn call_existing(
         &self,
         _app: &AppHandle,
@@ -511,33 +507,6 @@ pub(crate) async fn media_worker_invoke(
         }
     }
     result
-}
-
-pub(crate) async fn media_worker_surface_invoke(
-    app: AppHandle,
-    store: State<'_, NativeMediaStore>,
-    command: String,
-    payload: Value,
-) -> Result<Value, Value> {
-    let worker = store.worker.clone();
-    let worker_app = app;
-    let is_teardown = matches!(
-        command.as_str(),
-        "media_video_surface_destroy" | "media_video_surface_clear"
-    );
-    tauri::async_runtime::spawn_blocking(move || {
-        worker
-            .call_existing(&worker_app, &command, payload)
-            .unwrap_or_else(|| {
-                if is_teardown {
-                    Ok(Value::Null)
-                } else {
-                    Err(json!("native media worker is not running"))
-                }
-            })
-    })
-    .await
-    .map_err(|error| json!(format!("native media worker surface task failed: {error}")))?
 }
 
 fn sync_parent_state(store: &NativeMediaStore, command: &str, value: &Value) {

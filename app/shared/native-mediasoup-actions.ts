@@ -135,9 +135,15 @@ export function handleReceiveEvent(
       session.localVideoFeeds.set(source, feed);
     }
     if (!feed) return false;
+    if (typeof event.data !== "string" || !event.data) return false;
     session.localVideoFeeds.set(source, {
       ...feed,
-      surfaceId: String(payload.surfaceId || `local:${source}`),
+      frame: {
+        ...payload,
+        source,
+        data: event.data,
+        eventId: event.eventId,
+      },
     });
     session._emitState();
     return true;
@@ -150,10 +156,17 @@ export function handleReceiveEvent(
   if (event.kind === 1) return true;
   if (event.kind === 2) {
     if (entry.kind !== "video") return false;
+    if (typeof event.data !== "string" || !event.data) return false;
     const feed = session.remoteVideoFeeds.get(entry.key);
     if (!feed) return false;
-    feed.surfaceId = String(payload.surfaceId || entry.consumerId);
-    session.remoteVideoFeeds.set(entry.key, { ...feed });
+    session.remoteVideoFeeds.set(entry.key, {
+      ...feed,
+      frame: {
+        ...payload,
+        data: event.data,
+        eventId: event.eventId,
+      },
+    });
     session._emitState();
     return true;
   }

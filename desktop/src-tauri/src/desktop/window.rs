@@ -45,7 +45,6 @@ pub(crate) fn attach_main_window_lifecycle(window: &tauri::WebviewWindow) {
                 api.prevent_close();
                 let _ = save_window_state_sync(&window_clone);
                 if media::is_connected(&window_clone.app_handle()) {
-                    media::clear_video_surfaces(&window_clone.app_handle());
                     let _ = window_clone.hide();
                 } else {
                     let _ = window_clone.destroy();

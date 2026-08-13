@@ -42,6 +42,7 @@ export interface NativeCloudflareEvent {
   id?: string;
   eventId?: number | string;
   payload?: Record<string, unknown>;
+  data?: string;
 }
 
 export interface NativeCloudflareNegotiationResponse extends NativeCloudflareMessage {

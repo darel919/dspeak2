@@ -26,7 +26,6 @@
 #include <json.hpp>
 #include "runtime_health.hpp"
 #include "platform_video_codec_factories.hpp"
-#include "video_surface.hpp"
 
 #if defined(__APPLE__) || defined(_WIN32)
 #include "PlatformCapture.h"
@@ -299,7 +298,6 @@ extern "C" int lib_dspeak_media_stop_camera_capture(int* error_out);
 extern "C" void lib_dspeak_media_shutdown(void)
 {
     dspeak_native::release_shared_track_factory();
-    lib_dspeak_media_video_surface_clear();
 #if defined(__APPLE__) || defined(_WIN32)
     lib_dspeak_media_stop_screen_capture(nullptr);
     lib_dspeak_media_stop_system_audio_capture();

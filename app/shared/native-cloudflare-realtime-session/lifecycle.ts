@@ -239,6 +239,7 @@ export class NativeCloudflareLifecycleMethods {
     this.publications.clear();
     this.remoteByMid.clear();
     this.pendingRemoteTrackEvents.clear();
+    this.pendingLocalVideoFrames.clear();
     this.remoteVideoFeeds.clear();
     this.remoteAudioFeeds.clear();
     this.rtpSamples.clear();

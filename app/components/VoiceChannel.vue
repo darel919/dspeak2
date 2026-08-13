@@ -257,11 +257,6 @@
               :stream="tile.feed.stream"
               :native="tile.feed.native === true"
               :native-frame="tile.feed.frame || null"
-              :native-surface-id="
-                tile.feed.surfaceId ||
-                tile.feed.frame?.surfaceId ||
-                tile.feed.key
-              "
               :source="tile.feed.source"
               :label="tile.feed.label"
               :muted="true"
@@ -273,9 +268,6 @@
               :own-camera-feed-key="ownCameraFeed?.key || null"
               @start-receiving="setScreenReceiving(tile.feed, true)"
               @stop-receiving="setScreenReceiving(tile.feed, false)"
-              @visibility-receiving-change="
-                setVideoReceiving(tile.feed, $event)
-              "
               @preview-change="setLocalPreview(tile.feed, $event)"
             />
             <div
@@ -1044,12 +1036,6 @@ function setScreenReceiving(feed, receiving) {
   voiceStore.setRemoteScreenReceiving(feed.key, receiving);
 }
 
-function setVideoReceiving(feed, receiving) {
-  if (feed.local || (feed.source !== "camera" && feed.source !== "screen"))
-    return;
-  voiceStore.setRemoteScreenReceiving(feed.key, receiving);
-}
-
 function setLocalPreview(feed, enabled) {
   if (!feed?.local || feed.native !== true || feed.source !== "screen") return;
   Promise.resolve(
@@ -1085,13 +1071,11 @@ async function requestScreenShare() {
     await toggleScreenShare();
     return;
   }
-  if (runtimeStore.isTauri) {
-    const api = await getDesktopCaptureApi();
-    if (api) {
-      capturePickerAudioOnly.value = false;
-      capturePickerOpen.value = true;
-      return;
-    }
+  const api = await getDesktopCaptureApi();
+  if (runtimeStore.isTauri || api) {
+    capturePickerAudioOnly.value = false;
+    capturePickerOpen.value = true;
+    return;
   }
   await toggleScreenShare();
 }

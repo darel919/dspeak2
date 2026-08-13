@@ -116,8 +116,7 @@ export class NativeP2pSessionLifecycleMethods {
         ownerSource,
         kind,
         native: true,
-        playback: kind === "audio" ? "coreaudio" : "native-surface",
-        surfaceId: kind === "video" ? trackId : undefined,
+        playback: kind === "audio" ? "coreaudio" : "native-frame",
         frame: null,
         receiving:
           this.remoteReceiving.get(`${String(peer.userId)}:${source}`) ??
@@ -299,6 +298,7 @@ export class NativeP2pSessionLifecycleMethods {
           !candidate.closed,
       );
       if (!entry) return false;
+      if (entry.kind === "video" && !entry.frame) return false;
     }
     return true;
   }

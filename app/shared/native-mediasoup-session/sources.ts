@@ -84,7 +84,6 @@ export class NativeMediasoupSourcesMethods {
           source: normalized.source,
           producerId: existing.id || `local:${normalized.source}`,
           native: true,
-          surfaceId: `local:${normalized.source}`,
           frame: null,
         });
       this._sendSourceState();
@@ -100,7 +99,6 @@ export class NativeMediasoupSourcesMethods {
         source: normalized.source,
         producerId: `local:${normalized.source}`,
         native: true,
-        surfaceId: `local:${normalized.source}`,
         frame: null,
       });
     }
@@ -125,7 +123,6 @@ export class NativeMediasoupSourcesMethods {
         source: normalized.source,
         producerId: producer?.id || `local:${normalized.source}`,
         native: true,
-        surfaceId: `local:${normalized.source}`,
         frame: null,
       });
     }
@@ -142,7 +139,6 @@ export class NativeMediasoupSourcesMethods {
             source: entry.source,
             producerId: producer?.id || `local:${entry.source}`,
             native: true,
-            surfaceId: `local:${entry.source}`,
             frame: null,
           });
         }

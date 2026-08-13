@@ -56,6 +56,8 @@ typedef struct {
     uint64_t event_id;
     char* id;
     char* payload_json;
+    uint8_t* data;
+    uint32_t data_len;
 } lib_dspeak_media_receive_event_t;
 
 /* ── Lifecycle ──────────────────────────────────────── */
@@ -92,18 +94,6 @@ lib_dspeak_media_receive_event_t lib_dspeak_media_drain_receive_event(void);
 void lib_dspeak_media_free_receive_event(lib_dspeak_media_receive_event_t* event);
 int lib_dspeak_media_wait_for_event(uint32_t timeout_ms);
 void lib_dspeak_media_wake_event(void);
-
-/* ── Native video surfaces ─────────────────────────── */
-int lib_dspeak_media_video_surface_set_bounds(const char* surface_id,
-                                              int x,
-                                              int y,
-                                              int width,
-                                              int height,
-                                              bool visible);
-int lib_dspeak_media_video_surface_destroy(const char* surface_id);
-void lib_dspeak_media_video_surface_clear(void);
-void lib_dspeak_media_video_surface_run_loop(void);
-void lib_dspeak_media_video_surface_stop_loop(void);
 
 /* ── Connect completion ─────────────────────────────── */
 void lib_dspeak_media_complete_connect(void* transport_ptr);

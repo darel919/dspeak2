@@ -9,16 +9,22 @@ async function read(path: string) {
 }
 
 describe("native video transport contract", () => {
-  it("keeps live video pixels out of the receive event ABI", async () => {
+  it("carries bounded RGBA frames through the receive event ABI", async () => {
     const header = await read(
       "desktop/native-media/libdspeak_media/include/lib_dspeak_media/lib_dspeak_media.h",
     );
     const render = await read(
       "desktop/native-media/libdspeak_media/src/internal/receive_render.cpp",
     );
-    assert.doesNotMatch(header, /data_len|uint8_t\* data/);
-    assert.doesNotMatch(render, /I420ToRGBA/);
-    assert.match(render, /video_surface::render/);
+    assert.match(header, /uint8_t\* data/);
+    assert.match(header, /uint32_t data_len/);
+    assert.match(render, /I420ToARGB/);
+    assert.match(render, /packed_bgra/);
+    assert.match(render, /rgba\[index\] = packed_bgra\[index \+ 2\]/);
+    assert.doesNotMatch(render, /I420ToABGR/);
+    assert.match(render, /has_pending_video_frame/);
+    assert.match(render, /push_event\([\s\S]*rgba\.data\(\)/);
+    assert.doesNotMatch(render, /video_surface::render/);
   });
 
   it("uses push events for control delivery instead of a JavaScript poll loop", async () => {
@@ -37,30 +43,37 @@ describe("native video transport contract", () => {
     assert.match(common, /media:native-receive-event/);
   });
 
-  it("positions native surfaces from the shared Nuxt layout", async () => {
+  it("renders native frames inside the WebView layout", async () => {
     const feed = await read("app/components/VideoFeed.vue");
     const voiceChannel = await read("app/components/VoiceChannel.vue");
-    const surface = await read("desktop/src-tauri/src/media/video_surface.rs");
+    const desktopWindow = await read("desktop/src-tauri/src/desktop/window.rs");
+    const mediaState = await read("desktop/src-tauri/src/media/state.rs");
     const worker = await read("desktop/src-tauri/src/media_worker_server.rs");
-    assert.doesNotMatch(feed, /<canvas/);
-    assert.doesNotMatch(feed, /ImageData|atob\(/);
-    assert.match(feed, /media_video_surface_set_bounds/);
-    assert.match(feed, /media_video_surface_destroy/);
-    assert.match(feed, /visibility-receiving-change/);
-    assert.match(feed, /updateNativeReceivingVisibility/);
-    assert.match(voiceChannel, /setVideoReceiving\(tile\.feed, \$event\)/);
-    assert.match(surface, /inner_position/);
-    assert.match(surface, /scale_factor/);
-    assert.doesNotMatch(surface, /RawWindowHandle/);
-    assert.match(worker, /lib_dspeak_media_video_surface_set_bounds/);
+    assert.match(feed, /<canvas/);
+    assert.match(feed, /ImageData|atob\(/);
+    assert.match(feed, /scheduleNativeFrame/);
+    assert.doesNotMatch(feed, /media_video_surface|native-surface/);
+    assert.doesNotMatch(
+      voiceChannel,
+      /native-surface|visibility-receiving-change/,
+    );
+    assert.doesNotMatch(
+      desktopWindow,
+      /WindowEvent::Moved|sync_video_surfaces/,
+    );
+    assert.doesNotMatch(mediaState, /video_surface/);
+    assert.match(
+      worker,
+      /borrowed_native_bytes\(event\.data, event\.data_len\)/,
+    );
+    assert.doesNotMatch(worker, /lib_dspeak_media_video_surface/);
   });
 
-  it("keeps native media and native surfaces in the on-demand worker", async () => {
+  it("keeps native media in the on-demand worker without a surface window", async () => {
     const build = await read("desktop/src-tauri/build.rs");
     const workerClient = await read(
       "desktop/src-tauri/src/media/worker_client.rs",
     );
-    const surface = await read("desktop/src-tauri/src/media/video_surface.rs");
     const workerBuild = await read("scripts/build-desktop-worker.mjs");
     const devScript = await read("desktop/scripts/dev-desktop.sh");
     const cargo = await read("desktop/src-tauri/Cargo.toml");
@@ -69,8 +82,10 @@ describe("native video transport contract", () => {
     assert.match(build, /is_media_worker && with_mediasoup/);
     assert.match(workerClient, /dspeak-media-\{target\}/);
     assert.match(workerClient, /media_worker_invoke/);
-    assert.match(workerClient, /media_worker_surface_invoke/);
-    assert.match(surface, /media_worker_surface_invoke/);
+    assert.doesNotMatch(
+      workerClient,
+      /media_worker_surface_invoke|video_surface/,
+    );
     assert.match(cargo, /required-features = \["media-worker"\]/);
     assert.match(workerBuild, /"--features",\s*"media-worker"/);
     assert.match(workerBuild, /"--bin",\s*"dspeak-media"/);
@@ -187,24 +202,14 @@ describe("native video transport contract", () => {
     assert.doesNotMatch(diagnostics, /video_codec_entry\("AV1"/);
   });
 
-  it("uses worker-owned platform surfaces instead of parent-window embedding", async () => {
-    const mac = await read(
-      "desktop/native-media/platform/macos/VideoSurfaceMacos.mm",
+  it("does not build detached platform video surfaces", async () => {
+    const cmake = await read(
+      "desktop/native-media/libdspeak_media/CMakeLists.txt",
     );
-    const windows = await read(
-      "desktop/native-media/platform/windows/VideoSurfaceWindows.cpp",
+    const library = await read(
+      "desktop/native-media/libdspeak_media/src/internal/library_runtime.cpp",
     );
-    assert.match(mac, /AVSampleBufferDisplayLayer/);
-    assert.match(mac, /kCVPixelBufferIOSurfacePropertiesKey/);
-    assert.match(mac, /pending_sample/);
-    assert.match(mac, /render_scheduled/);
-    assert.doesNotMatch(mac, /set_parent|RawWindowHandle/);
-    assert.match(windows, /D3D11CreateDeviceAndSwapChain/);
-    assert.match(windows, /ResizeBuffers/);
-    assert.doesNotMatch(
-      windows,
-      /StretchDIBits|SetDIBitsToDevice|CreateDIBSection/,
-    );
-    assert.doesNotMatch(windows, /set_parent|RawWindowHandle/);
+    assert.doesNotMatch(cmake, /VideoSurface|video_surface/);
+    assert.doesNotMatch(library, /VideoSurface|video_surface/);
   });
 });

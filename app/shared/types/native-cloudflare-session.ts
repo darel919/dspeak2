@@ -15,6 +15,7 @@ export interface NativeCloudflareSessionOptions {
   sourceTransmission?: NativeCloudflareSessionSurface["sourceTransmission"];
   remoteReceiving?: NativeCloudflareSessionSurface["remoteReceiving"];
   localVideoFeeds?: NativeCloudflareSessionSurface["localVideoFeeds"];
+  pendingLocalVideoFrames?: NativeCloudflareSessionSurface["pendingLocalVideoFrames"];
   remoteVideoFeeds?: NativeCloudflareSessionSurface["remoteVideoFeeds"];
   remoteAudioFeeds?: NativeCloudflareSessionSurface["remoteAudioFeeds"];
 }
@@ -41,6 +42,7 @@ export interface NativeCloudflareSessionSurface {
   sourceTransmission: Map<string, boolean>;
   remoteReceiving: Map<string, boolean>;
   localVideoFeeds: Map<string, Record<string, unknown>>;
+  pendingLocalVideoFrames: Map<string, Record<string, unknown>>;
   remoteVideoFeeds: Map<string, Record<string, unknown>>;
   remoteAudioFeeds: Map<string, Record<string, unknown>>;
   publications: Map<string, Record<string, unknown>>;
@@ -112,6 +114,9 @@ export interface NativeCloudflareSessionSurface {
   request: (operation: string, body?: unknown) => Promise<unknown>;
   enqueueNegotiation: (operation: () => Promise<unknown>) => Promise<unknown>;
   applyJitterBufferConfig: (entry: Record<string, unknown>) => unknown;
+  takePendingLocalVideoFrame: (
+    source: string,
+  ) => Record<string, unknown> | null;
   initialize: () => Promise<unknown>;
   _handleTrackAdded: (
     payload: Record<string, unknown>,

@@ -1,5 +1,3 @@
-import type { InvokeArgs } from "@tauri-apps/api/core";
-
 export const DESKTOP_CAPTURE_KINDS = Object.freeze([
   "application",
   "window",
@@ -453,9 +451,7 @@ export async function getDesktopCaptureApi() {
     const { invoke } = await import("@tauri-apps/api/core");
     return {
       invoke: (command: string, payload: unknown = {}) =>
-        command.startsWith("media_video_surface_")
-          ? invoke(command, payload as InvokeArgs)
-          : invoke("media_worker_invoke", { command, payload }),
+        invoke("media_worker_invoke", { command, payload }),
     };
   } catch {
     return null;

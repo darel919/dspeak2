@@ -599,7 +599,6 @@ export function syncLocalFeeds(engine: NativeMediaEngine) {
       source,
       producerId: `local:${source}`,
       native: true,
-      surfaceId: `local:${source}`,
       frame: null,
     });
   }
@@ -712,20 +711,25 @@ export async function bindNativeEvents(engine: NativeMediaEngine) {
       eventName,
       ({ payload }: { payload: unknown }) => {
         const event = EVENT_ALIASES[eventName as keyof typeof EVENT_ALIASES];
+        if (event === "native-receive-event") {
+          try {
+            dispatchNativeReceiveEvent(engine, payload as NativeCaptureRequest);
+          } catch (error) {
+            engine._emit("error", {
+              source: "native",
+              operation: "native-receive-event",
+              error,
+            });
+          }
+          return;
+        }
         const task =
           event === "native-action"
             ? () =>
                 dispatchNativeAction(engine, payload as NativeCaptureRequest)
-            : event === "native-receive-event"
-              ? () => {
-                  dispatchNativeReceiveEvent(
-                    engine,
-                    payload as NativeCaptureRequest,
-                  );
-                }
-              : () => {
-                  engine._emit(event, payload);
-                };
+            : () => {
+                engine._emit(event, payload);
+              };
         const previous = engine.nativeEventOperation || Promise.resolve();
         const operation = previous.catch(() => {}).then(task);
         engine.nativeEventOperation = operation;

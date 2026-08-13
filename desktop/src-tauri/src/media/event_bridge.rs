@@ -1,7 +1,10 @@
 use super::ffi;
 use super::state::NativeEventDispatcher;
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde_json::Value;
 use std::ffi::CStr;
+use std::slice;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -30,6 +33,14 @@ fn borrow_string(pointer: *mut std::ffi::c_char) -> Option<String> {
             .to_string_lossy()
             .into_owned(),
     )
+}
+
+fn borrow_bytes(pointer: *mut u8, length: u32) -> Option<String> {
+    if pointer.is_null() || length == 0 {
+        return None;
+    }
+    let bytes = unsafe { slice::from_raw_parts(pointer, length as usize) };
+    Some(STANDARD.encode(bytes))
 }
 
 fn drain_native_events(app: &AppHandle) {
@@ -62,6 +73,7 @@ fn drain_native_events(app: &AppHandle) {
             }
             drained = true;
             let id = borrow_string(receive.id);
+            let data = borrow_bytes(receive.data, receive.data_len);
             let payload = borrow_string(receive.payload_json)
                 .and_then(|value| serde_json::from_str::<Value>(&value).ok())
                 .unwrap_or_else(|| serde_json::json!({}));
@@ -70,6 +82,7 @@ fn drain_native_events(app: &AppHandle) {
                 "eventId": receive.event_id,
                 "id": id,
                 "payload": payload,
+                "data": data,
             });
             unsafe { ffi::lib_dspeak_media_free_receive_event(&mut receive) };
             let _ = app.emit(MEDIA_EVENT_NATIVE_RECEIVE, event);

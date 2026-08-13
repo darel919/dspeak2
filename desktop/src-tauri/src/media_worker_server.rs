@@ -1,9 +1,12 @@
 use crate::ffi;
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::{c_void, CStr, CString};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::ptr;
+use std::slice;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -256,24 +259,15 @@ pub fn run() -> Result<(), String> {
                     if let Ok(mut state) = reader_state.lock() {
                         state.shutdown();
                     }
-                    unsafe {
-                        ffi::lib_dspeak_media_video_surface_stop_loop();
-                    }
                     break;
                 }
             }
             if let Ok(mut state) = reader_state.lock() {
                 state.shutdown();
             }
-            unsafe {
-                ffi::lib_dspeak_media_video_surface_stop_loop();
-            }
             Ok(())
         })
         .map_err(|error| format!("native media worker command thread failed to start: {error}"))?;
-    unsafe {
-        ffi::lib_dspeak_media_video_surface_run_loop();
-    }
     reader
         .join()
         .map_err(|_| "native media worker command thread panicked".to_string())??;
@@ -384,9 +378,6 @@ fn dispatch(
         "media_replace_producer_track" => replace_producer_track(state, payload),
         "media_set_consumer_jitter_buffer" => set_consumer_jitter_buffer(state, payload),
         "media_get_stats" => get_stats(state),
-        "media_video_surface_set_bounds" => video_surface_set_bounds(state, payload),
-        "media_video_surface_destroy" => video_surface_destroy(state, payload),
-        "media_video_surface_clear" => video_surface_clear(state),
         _ => Err(json!(format!(
             "native media worker command is unsupported: {command}"
         ))),
@@ -1931,45 +1922,6 @@ fn get_stats(state: &mut WorkerState) -> WorkerResult {
     }))
 }
 
-fn video_surface_set_bounds(state: &mut WorkerState, payload: Value) -> WorkerResult {
-    state.ensure_initialized()?;
-    let surface_id = CString::new(payload_string(&payload, "surfaceId")?)
-        .map_err(|_| json!("native video surface id contains a NUL byte"))?;
-    let result = unsafe {
-        ffi::lib_dspeak_media_video_surface_set_bounds(
-            surface_id.as_ptr(),
-            payload_i32(&payload, "x")?,
-            payload_i32(&payload, "y")?,
-            payload_i32(&payload, "width")?,
-            payload_i32(&payload, "height")?,
-            payload_bool(&payload, "visible")?,
-        )
-    };
-    if result == 0 {
-        Ok(Value::Null)
-    } else {
-        Err(json!("native video surface could not be positioned"))
-    }
-}
-
-fn video_surface_destroy(state: &mut WorkerState, payload: Value) -> WorkerResult {
-    state.ensure_initialized()?;
-    let surface_id = CString::new(payload_string(&payload, "surfaceId")?)
-        .map_err(|_| json!("native video surface id contains a NUL byte"))?;
-    let result = unsafe { ffi::lib_dspeak_media_video_surface_destroy(surface_id.as_ptr()) };
-    if result == 0 {
-        Ok(Value::Null)
-    } else {
-        Err(json!("native video surface could not be destroyed"))
-    }
-}
-
-fn video_surface_clear(state: &mut WorkerState) -> WorkerResult {
-    state.ensure_initialized()?;
-    unsafe { ffi::lib_dspeak_media_video_surface_clear() };
-    Ok(Value::Null)
-}
-
 fn validate_capture_request(request: &Value, operation: &str, required_mode: &str) -> WorkerResult {
     let selection = request.get("captureSelection").ok_or_else(|| {
         capture_error(
@@ -2168,6 +2120,7 @@ fn drain_events(output: &Arc<Mutex<BufWriter<io::Stdout>>>) {
         }
         let id = borrowed_native_text(event.id);
         let payload = borrowed_native_json(event.payload_json);
+        let data = borrowed_native_bytes(event.data, event.data_len);
         let _ = write_message(
             output,
             &json!({
@@ -2178,6 +2131,7 @@ fn drain_events(output: &Arc<Mutex<BufWriter<io::Stdout>>>) {
                     "eventId": event.event_id,
                     "id": id,
                     "payload": payload,
+                    "data": data,
                 },
             }),
         );
@@ -2211,4 +2165,12 @@ fn borrowed_native_json(pointer: *mut std::ffi::c_char) -> Value {
     borrowed_native_text(pointer)
         .and_then(|value| serde_json::from_str(&value).ok())
         .unwrap_or_else(|| json!({}))
+}
+
+fn borrowed_native_bytes(pointer: *mut u8, length: u32) -> Option<String> {
+    if pointer.is_null() || length == 0 {
+        return None;
+    }
+    let bytes = unsafe { slice::from_raw_parts(pointer, length as usize) };
+    Some(STANDARD.encode(bytes))
 }

@@ -54,7 +54,6 @@ export interface NativeFeed {
   userId?: unknown;
   source?: unknown;
   kind?: string;
-  surfaceId?: string;
   closed?: boolean;
   frame?: unknown;
 }

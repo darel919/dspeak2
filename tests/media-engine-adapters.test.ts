@@ -76,6 +76,11 @@ describe("MediaEngine adapters", () => {
       /dispatchNativeAction\(engine, payload as NativeCaptureRequest\)/,
     );
     assert.match(source, /engine\.nativeEventOperation/);
+    const receiveDispatch = source.indexOf(
+      'if (event === "native-receive-event")',
+    );
+    const queuedTask = source.indexOf("const task", receiveDispatch);
+    assert.ok(receiveDispatch >= 0 && receiveDispatch < queuedTask);
     assert.doesNotMatch(source, /media_poll_action/);
     assert.doesNotMatch(source, /media_poll_receive_event/);
     assert.doesNotMatch(source, /media_p2p_poll_ice_candidate/);
@@ -556,7 +561,6 @@ describe("MediaEngine adapters", () => {
       source: "camera",
       producerId: "local:camera",
       native: true,
-      surfaceId: "local:camera",
       frame: null,
     });
   });

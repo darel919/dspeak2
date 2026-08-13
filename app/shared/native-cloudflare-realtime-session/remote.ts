@@ -108,9 +108,37 @@ export class NativeCloudflareRemoteMethods {
     );
   }
 
+  takePendingLocalVideoFrame(source: string) {
+    const frame = this.pendingLocalVideoFrames.get(source) || null;
+    if (frame) this.pendingLocalVideoFrames.delete(source);
+    return frame;
+  }
+
   handleReceiveEvent(event: NativeCloudflareEvent = {}) {
     const payload = event.payload || {};
     const eventHandle = payload.handle == null ? null : String(payload.handle);
+    if (event.kind === 5) {
+      const source = String(payload.source || event.id || "");
+      if (!source || typeof event.data !== "string" || !event.data)
+        return false;
+      const frame = {
+        ...payload,
+        source,
+        data: event.data,
+        eventId: event.eventId,
+      };
+      const feed = this.localVideoFeeds.get(source);
+      if (!feed) {
+        this.pendingLocalVideoFrames.set(source, frame);
+        return true;
+      }
+      this.localVideoFeeds.set(source, {
+        ...feed,
+        frame,
+      });
+      this._emitState();
+      return true;
+    }
     if (event.kind === 4) {
       if (eventHandle !== null && eventHandle !== String(this.handle))
         return false;
@@ -139,8 +167,12 @@ export class NativeCloudflareRemoteMethods {
       (candidate) => candidate.trackId === trackId,
     );
     if (!entry) return false;
-    if (entry.kind === "video") {
-      entry.surfaceId = entry.surfaceId || trackId;
+    if (entry.kind === "video" && event.data) {
+      entry.frame = {
+        ...payload,
+        data: event.data,
+        eventId: event.eventId,
+      };
       this.remoteVideoFeeds.set(String(entry.key || ""), { ...entry });
     }
     this.onRemoteTrack?.(entry);
@@ -206,8 +238,7 @@ export class NativeCloudflareRemoteMethods {
       trackName: publication.trackName,
       provider: "sfu",
       native: true,
-      playback: kind === "audio" ? "coreaudio" : "native-surface",
-      surfaceId: kind === "video" ? trackId : undefined,
+      playback: kind === "audio" ? "coreaudio" : "native-frame",
       frame: null,
       receiving:
         this.remoteReceiving.get(`${String(publication.userId)}:${source}`) ??

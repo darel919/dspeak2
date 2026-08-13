@@ -75,13 +75,12 @@
         </button>
       </div>
       <div v-else-if="native" class="relative h-full w-full bg-black">
-        <div
-          ref="nativeSurfaceElement"
-          class="native-video-surface h-full w-full"
-          :data-native-surface-id="nativeSurfaceId"
-        ></div>
+        <canvas
+          ref="nativeCanvasElement"
+          class="block h-full w-full object-contain"
+        />
         <span
-          v-if="!nativeSurfaceReady"
+          v-if="!nativeFrame"
           class="absolute inset-0 flex items-center justify-center bg-base-300 text-sm text-base-content/60"
         >
           Waiting for native video…
@@ -138,7 +137,6 @@
 <script setup>
 import { useSettingsStore } from "~/stores/settings";
 import { playSystemSound } from "~/shared/system-sounds.ts";
-import { invokeNativeDesktopMedia } from "~/shared/desktop-capture.ts";
 
 const settingsStore = useSettingsStore();
 const props = defineProps({
@@ -146,7 +144,6 @@ const props = defineProps({
   stream: { type: Object, default: null },
   native: { type: Boolean, default: false },
   nativeFrame: { type: Object, default: null },
-  nativeSurfaceId: { type: String, default: "" },
   source: { type: String, required: true },
   label: { type: String, required: true },
   muted: { type: Boolean, default: false },
@@ -160,23 +157,24 @@ const props = defineProps({
 const emit = defineEmits([
   "start-receiving",
   "stop-receiving",
-  "visibility-receiving-change",
   "preview-change",
 ]);
 
 const videoElement = ref(null);
-const nativeSurfaceElement = ref(null);
+const nativeCanvasElement = ref(null);
 const feedElement = ref(null);
 const ownCameraElement = ref(null);
 const isFullscreen = ref(false);
 const previewEnabled = ref(!(props.local && props.source === "screen"));
+let nativeCanvasContext = null;
+let nativeCanvasWidth = 0;
+let nativeCanvasHeight = 0;
+let nativePixelBuffer = null;
+let nativeImageData = null;
+let nativePendingFrame = null;
+let nativeFrameAnimation = 0;
 let nativeIntersectionObserver = null;
-let nativeResizeObserver = null;
 let nativeFeedVisible = true;
-let nativeVisibilityPaused = false;
-const nativeSurfaceReady = ref(false);
-let nativeSurfaceAnimation = 0;
-let nativeSurfaceGeneration = 0;
 let lastTouchAt = 0;
 let fullscreenStateInitialized = false;
 let playbackRecoveryTimer = null;
@@ -252,82 +250,77 @@ function playVideoElement(element, label) {
   );
 }
 
-const nativeSurfaceKey = computed(
-  () => props.nativeSurfaceId || props.nativeFrame?.surfaceId || props.feedKey,
-);
-const nativeSurfaceVisible = computed(
-  () =>
-    props.native &&
-    props.receiving &&
-    (!props.local || props.source !== "screen" || previewEnabled.value) &&
-    (typeof document === "undefined" || !document.hidden) &&
-    nativeFeedVisible,
-);
-
-function cancelNativeSurfacePosition() {
-  if (nativeSurfaceAnimation && typeof cancelAnimationFrame === "function")
-    cancelAnimationFrame(nativeSurfaceAnimation);
-  nativeSurfaceAnimation = 0;
+function drawNativeFrame(frame = nativePendingFrame) {
+  const canvas = nativeCanvasElement.value;
+  if (!frame || !canvas || typeof atob !== "function") return;
+  const width = Number(frame.width);
+  const height = Number(frame.height);
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0
+  )
+    return;
+  const binary = atob(frame.data || "");
+  if (!nativePixelBuffer || nativePixelBuffer.length !== binary.length)
+    nativePixelBuffer = new Uint8ClampedArray(binary.length);
+  const pixels = nativePixelBuffer;
+  for (let index = 0; index < binary.length; index += 1)
+    pixels[index] = binary.charCodeAt(index);
+  if (pixels.length !== width * height * 4) return;
+  if (nativeCanvasWidth !== width || nativeCanvasHeight !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    nativeCanvasWidth = width;
+    nativeCanvasHeight = height;
+    nativeCanvasContext = canvas.getContext("2d");
+    nativeImageData = new ImageData(pixels, width, height);
+  } else if (!nativeCanvasContext) {
+    nativeCanvasContext = canvas.getContext("2d");
+    nativeImageData = new ImageData(pixels, width, height);
+  } else if (!nativeImageData) {
+    nativeImageData = new ImageData(pixels, width, height);
+  } else {
+    nativeImageData.data.set(pixels);
+  }
+  nativeCanvasContext?.putImageData(nativeImageData, 0, 0);
 }
 
-async function destroyNativeSurface() {
-  const generation = ++nativeSurfaceGeneration;
-  nativeSurfaceReady.value = false;
-  if (!props.native || !nativeSurfaceKey.value) return;
-  try {
-    if (generation !== nativeSurfaceGeneration) return;
-    await invokeNativeDesktopMedia("media_video_surface_destroy", {
-      surfaceId: nativeSurfaceKey.value,
-    });
-  } catch {}
+function cancelNativeFrameAnimation() {
+  if (nativeFrameAnimation && typeof cancelAnimationFrame === "function")
+    cancelAnimationFrame(nativeFrameAnimation);
+  nativeFrameAnimation = 0;
 }
 
-async function positionNativeSurface() {
-  if (!nativeSurfaceVisible.value || !nativeSurfaceElement.value) {
-    nativeSurfaceReady.value = false;
+function scheduleNativeFrame() {
+  nativePendingFrame = props.nativeFrame;
+  if (
+    !props.native ||
+    !props.receiving ||
+    document.hidden ||
+    !nativeFeedVisible ||
+    !nativePendingFrame ||
+    nativeFrameAnimation
+  )
     return;
-  }
-  const rect = nativeSurfaceElement.value.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    nativeSurfaceReady.value = false;
-    return;
-  }
-  const generation = ++nativeSurfaceGeneration;
-  try {
-    await invokeNativeDesktopMedia("media_video_surface_set_bounds", {
-      surfaceId: nativeSurfaceKey.value,
-      x: rect.left,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
-      visible: true,
-    });
-    if (generation === nativeSurfaceGeneration) nativeSurfaceReady.value = true;
-  } catch {
-    if (generation === nativeSurfaceGeneration)
-      nativeSurfaceReady.value = false;
-  }
-}
-
-function scheduleNativeSurfacePosition() {
-  cancelNativeSurfacePosition();
-  if (!nativeSurfaceVisible.value) {
-    destroyNativeSurface();
-    return;
-  }
   if (typeof requestAnimationFrame !== "function") {
-    positionNativeSurface();
+    drawNativeFrame();
+    nativePendingFrame = null;
     return;
   }
-  nativeSurfaceAnimation = requestAnimationFrame(() => {
-    nativeSurfaceAnimation = 0;
-    positionNativeSurface();
+  nativeFrameAnimation = requestAnimationFrame(() => {
+    nativeFrameAnimation = 0;
+    const frame = nativePendingFrame;
+    nativePendingFrame = null;
+    drawNativeFrame(frame);
+    if (nativePendingFrame) scheduleNativeFrame();
   });
 }
 
 function attachStream() {
   if (props.native) {
-    scheduleNativeSurfacePosition();
+    scheduleNativeFrame();
     return;
   }
   if (previewEnabled.value && videoElement.value) {
@@ -367,30 +360,8 @@ function recoverVideoPlayback() {
   }, 750);
 }
 
-function updateNativeReceivingVisibility(visible) {
-  if (
-    !props.native ||
-    props.local ||
-    !["camera", "screen"].includes(props.source)
-  )
-    return;
-  if (!visible) {
-    if (props.receiving && !nativeVisibilityPaused) {
-      nativeVisibilityPaused = true;
-      emit("visibility-receiving-change", false);
-    }
-    return;
-  }
-  if (nativeVisibilityPaused) {
-    nativeVisibilityPaused = false;
-    emit("visibility-receiving-change", true);
-  }
-}
-
 function handlePageVisible() {
-  const visible = !document.hidden;
-  updateNativeReceivingVisibility(visible);
-  if (visible) attachStream();
+  if (!document.hidden) attachStream();
 }
 
 function enablePreview() {
@@ -405,13 +376,8 @@ function notifyPreviewDemand() {
     emit("preview-change", previewEnabled.value);
 }
 
-function handleNativeLayoutChange() {
-  if (props.native) scheduleNativeSurfacePosition();
-}
-
 onMounted(() => {
   notifyPreviewDemand();
-  updateNativeReceivingVisibility(!document.hidden && nativeFeedVisible);
   attachStream();
   syncFullscreenState();
   document.addEventListener("fullscreenchange", syncFullscreenState);
@@ -421,34 +387,19 @@ onMounted(() => {
   if (props.native && typeof IntersectionObserver === "function") {
     nativeIntersectionObserver = new IntersectionObserver(([entry]) => {
       nativeFeedVisible = entry?.isIntersecting === true;
-      updateNativeReceivingVisibility(nativeFeedVisible && !document.hidden);
-      scheduleNativeSurfacePosition();
+      if (nativeFeedVisible) scheduleNativeFrame();
+      else {
+        nativePendingFrame = null;
+        cancelNativeFrameAnimation();
+      }
     });
     if (feedElement.value)
       nativeIntersectionObserver.observe(feedElement.value);
-  }
-  if (props.native) {
-    window.addEventListener("resize", handleNativeLayoutChange);
-    window.addEventListener("scroll", handleNativeLayoutChange, true);
-    window.visualViewport?.addEventListener("resize", handleNativeLayoutChange);
-    if (typeof ResizeObserver === "function" && feedElement.value) {
-      nativeResizeObserver = new ResizeObserver(handleNativeLayoutChange);
-      nativeResizeObserver.observe(feedElement.value);
-    }
   }
 });
 onBeforeUnmount(() => {
   if (props.local && props.native && props.source === "screen")
     emit("preview-change", false);
-  if (
-    props.native &&
-    !props.local &&
-    props.receiving &&
-    !nativeVisibilityPaused
-  ) {
-    nativeVisibilityPaused = true;
-    emit("visibility-receiving-change", false);
-  }
 });
 watch(
   () => props.stream,
@@ -457,14 +408,15 @@ watch(
     attachStream();
   },
 );
-watch(() => props.nativeFrame, scheduleNativeSurfacePosition);
-watch(() => props.nativeSurfaceId, scheduleNativeSurfacePosition);
-watch(previewEnabled, scheduleNativeSurfacePosition);
+watch(() => props.nativeFrame, scheduleNativeFrame);
 watch(
   () => props.receiving,
   (receiving) => {
     if (receiving) attachStream();
-    else scheduleNativeSurfacePosition();
+    else {
+      nativePendingFrame = null;
+      cancelNativeFrameAnimation();
+    }
   },
 );
 watch(() => props.ownCameraStream, attachStream);
@@ -475,18 +427,10 @@ onBeforeUnmount(() => {
   document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
   document.removeEventListener("visibilitychange", handlePageVisible);
   window.removeEventListener("pageshow", handlePageVisible);
-  window.removeEventListener("resize", handleNativeLayoutChange);
-  window.removeEventListener("scroll", handleNativeLayoutChange, true);
-  window.visualViewport?.removeEventListener(
-    "resize",
-    handleNativeLayoutChange,
-  );
-  cancelNativeSurfacePosition();
-  destroyNativeSurface();
+  nativePendingFrame = null;
+  cancelNativeFrameAnimation();
   nativeIntersectionObserver?.disconnect();
   nativeIntersectionObserver = null;
-  nativeResizeObserver?.disconnect();
-  nativeResizeObserver = null;
   clearTimeout(playbackRecoveryTimer);
   if (videoElement.value) videoElement.value.srcObject = null;
   if (ownCameraElement.value) ownCameraElement.value.srcObject = null;

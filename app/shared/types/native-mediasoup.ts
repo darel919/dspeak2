@@ -10,6 +10,7 @@ export interface NativeReceiveEvent {
   kind?: number;
   id?: string;
   payload?: Record<string, unknown>;
+  data?: string;
   eventId?: number | string;
 }
 

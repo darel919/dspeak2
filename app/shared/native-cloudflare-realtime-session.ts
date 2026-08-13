@@ -24,6 +24,7 @@ export class NativeCloudflareRealtimeSession {
     sourceTransmission = new Map(),
     remoteReceiving = new Map(),
     localVideoFeeds = new Map(),
+    pendingLocalVideoFrames = new Map(),
     remoteVideoFeeds = new Map(),
     remoteAudioFeeds = new Map(),
   }: NativeCloudflareSessionOptions) {
@@ -45,6 +46,7 @@ export class NativeCloudflareRealtimeSession {
     this.sourceTransmission = sourceTransmission;
     this.remoteReceiving = remoteReceiving;
     this.localVideoFeeds = localVideoFeeds;
+    this.pendingLocalVideoFrames = pendingLocalVideoFrames;
     this.remoteVideoFeeds = remoteVideoFeeds;
     this.remoteAudioFeeds = remoteAudioFeeds;
     this.publications = new Map();
