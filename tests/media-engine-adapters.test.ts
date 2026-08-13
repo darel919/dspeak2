@@ -721,8 +721,10 @@ describe("MediaEngine adapters", () => {
 
   it("NativeMediaEngine keeps screen video and system audio in parity", async () => {
     const calls = [];
+    const entries = [];
     const nativeSession = {
       async addSource(entry) {
+        entries.push(["sfu", entry]);
         calls.push(["sfu-add", entry.source]);
       },
       removeSource(source) {
@@ -731,6 +733,7 @@ describe("MediaEngine adapters", () => {
     };
     const nativeP2pSession = {
       async addSource(entry) {
+        entries.push(["p2p", entry]);
         calls.push(["p2p-add", entry.source]);
       },
       async removeSource(source) {
@@ -775,10 +778,13 @@ describe("MediaEngine adapters", () => {
       ["p2p-remove", "screen-audio"],
       "media_stop_system_audio",
     ]);
+    assert.equal(entries[0][1].ownerSource, "system-audio");
+    assert.equal(entries[1][1].ownerSource, "system-audio");
   });
 
   it("publishes both tracks from one native combined capture", async () => {
     const calls = [];
+    const entries = [];
     const selection = {
       source: {
         sourceId: "display-1",
@@ -821,11 +827,17 @@ describe("MediaEngine adapters", () => {
       }),
     );
     engine.nativeSession = {
-      addSource: async (entry) => calls.push(["sfu-add", entry.source]),
+      addSource: async (entry) => {
+        entries.push(["sfu", entry]);
+        calls.push(["sfu-add", entry.source]);
+      },
       removeSource: (source) => calls.push(["sfu-remove", source]),
     };
     engine.nativeP2pSession = {
-      addSource: async (entry) => calls.push(["p2p-add", entry.source]),
+      addSource: async (entry) => {
+        entries.push(["p2p", entry]);
+        calls.push(["p2p-add", entry.source]);
+      },
       removeSource: async (source) => calls.push(["p2p-remove", source]),
     };
 
@@ -846,10 +858,13 @@ describe("MediaEngine adapters", () => {
       "media_stop_screen_share",
       "media_stop_system_audio",
     ]);
+    assert.equal(entries[2][1].ownerSource, "screen");
+    assert.equal(entries[3][1].ownerSource, "screen");
   });
 
   it("passes the validated system audio identity to the native command", async () => {
     const calls = [];
+    const entries = [];
     const selection = {
       source: {
         sourceId: "macos:system-audio",
@@ -891,7 +906,7 @@ describe("MediaEngine adapters", () => {
       }),
     );
     engine.nativeSession = {
-      addSource: async () => null,
+      addSource: async (entry) => entries.push(entry),
       removeSource: async () => {},
     };
     engine.nativeP2pSession = {
@@ -926,6 +941,7 @@ describe("MediaEngine adapters", () => {
       calls[0][1].request.captureSelection.audio.maxBitrateBps,
       128000,
     );
+    assert.equal(entries[0].ownerSource, "system-audio");
 
     await engine.stopSystemAudioProduction();
   });

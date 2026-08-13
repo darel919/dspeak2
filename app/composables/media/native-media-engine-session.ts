@@ -628,6 +628,7 @@ export async function startScreenShare(
       };
       const audioEntry = {
         source: "screen-audio",
+        ownerSource: "screen",
         track: { kind: "audio" },
         captureSelection: sourceCaptureSelection,
         audioBitrate: engine.getAudioBitrate?.("screen-audio"),

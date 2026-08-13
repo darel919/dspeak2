@@ -81,6 +81,7 @@ export function startSystemAudioProduction(
         selection;
       const entry = {
         source: "screen-audio",
+        ownerSource: "system-audio",
         track: { kind: "audio" },
         captureSelection: sourceCaptureSelection,
         audioBitrate: engine.getAudioBitrate?.("screen-audio"),
