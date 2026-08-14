@@ -270,6 +270,17 @@ describe("native video transport contract", () => {
     assert.match(workerInfo, /NSCameraUsageDescription/);
   });
 
+  it("hardens the macOS hardware encoder callback boundary", async () => {
+    const videoToolbox = await read(
+      "desktop/native-media/platform/macos/VideoToolboxCodecsMacos.mm",
+    );
+    assert.match(videoToolbox, /CMBlockBufferCopyDataBytes/);
+    assert.match(videoToolbox, /pending_contexts_/);
+    assert.match(videoToolbox, /mark_encode_returned/);
+    assert.match(videoToolbox, /mark_callback_completed/);
+    assert.match(videoToolbox, /catch \(\.\.\.\) \{\}/);
+  });
+
   it("keeps native video migration metadata on one logical stream identity", async () => {
     const consumers = await read("app/shared/native-mediasoup-consumers.ts");
     const actions = await read("app/shared/native-mediasoup-actions.ts");

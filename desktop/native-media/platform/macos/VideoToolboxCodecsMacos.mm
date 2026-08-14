@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -29,6 +30,8 @@ struct EncodeContext {
     int width = 0;
     int height = 0;
     bool key_frame = false;
+    bool callback_completed = false;
+    bool encode_returned = false;
 };
 
 struct H264ParameterSets {
@@ -239,45 +242,56 @@ public:
         VTCompressionSessionInvalidate(session_);
         CFRelease(session_);
         session_ = nullptr;
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        for (auto* context : pending_contexts_) delete context;
+        pending_contexts_.clear();
         return 0;
     }
 
     int32_t Encode(const webrtc::VideoFrame& frame,
                    const std::vector<VideoFrameType>* frame_types) override {
-        if (!session_ || !callback_) return -1;
-        const auto pixel_buffer = make_nv12_buffer(frame);
-        if (!pixel_buffer) return -1;
-        auto* context = new EncodeContext{
-            frame.rtp_timestamp(),
-            frame.width(),
-            frame.height(),
-            frame_types && !frame_types->empty() &&
-                (*frame_types)[0] == VideoFrameType::kVideoFrameKey,
-        };
-        CFDictionaryRef properties = nullptr;
-        if (context->key_frame) {
-            const void* keys[] = {kVTEncodeFrameOptionKey_ForceKeyFrame};
-            const void* values[] = {kCFBooleanTrue};
-            properties = CFDictionaryCreate(
-                kCFAllocatorDefault,
-                keys,
-                values,
-                1,
-                &kCFTypeDictionaryKeyCallBacks,
-                &kCFTypeDictionaryValueCallBacks);
+        try {
+            if (!session_ || !callback_) return -1;
+            const auto pixel_buffer = make_nv12_buffer(frame);
+            if (!pixel_buffer) return -1;
+            auto* context = new EncodeContext{
+                frame.rtp_timestamp(),
+                frame.width(),
+                frame.height(),
+                frame_types && !frame_types->empty() &&
+                    (*frame_types)[0] == VideoFrameType::kVideoFrameKey,
+            };
+            {
+                std::lock_guard<std::mutex> lock(context_mutex_);
+                pending_contexts_.insert(context);
+            }
+            CFDictionaryRef properties = nullptr;
+            if (context->key_frame) {
+                const void* keys[] = {kVTEncodeFrameOptionKey_ForceKeyFrame};
+                const void* values[] = {kCFBooleanTrue};
+                properties = CFDictionaryCreate(
+                    kCFAllocatorDefault,
+                    keys,
+                    values,
+                    1,
+                    &kCFTypeDictionaryKeyCallBacks,
+                    &kCFTypeDictionaryValueCallBacks);
+            }
+            const OSStatus result = VTCompressionSessionEncodeFrame(
+                session_,
+                pixel_buffer,
+                CMTimeMake(frame.rtp_timestamp(), 90000),
+                CMTimeMake(1, std::max(1, framerate_)),
+                properties,
+                context,
+                nullptr);
+            if (properties) CFRelease(properties);
+            CFRelease(pixel_buffer);
+            mark_encode_returned(context, result == noErr);
+            return result == noErr ? 0 : -1;
+        } catch (...) {
+            return -1;
         }
-        const OSStatus result = VTCompressionSessionEncodeFrame(
-            session_,
-            pixel_buffer,
-            CMTimeMake(frame.rtp_timestamp(), 90000),
-            CMTimeMake(1, std::max(1, framerate_)),
-            properties,
-            context,
-            nullptr);
-        if (properties) CFRelease(properties);
-        CFRelease(pixel_buffer);
-        if (result != noErr) delete context;
-        return result == noErr ? 0 : -1;
     }
 
     void SetRates(const RateControlParameters& parameters) override {
@@ -329,66 +343,99 @@ private:
                                 CMSampleBufferRef sample_buffer) {
         auto* encoder = static_cast<VideoToolboxEncoder*>(refcon);
         auto* context = static_cast<EncodeContext*>(source_frame_refcon);
-        std::unique_ptr<EncodeContext> context_guard(context);
-        if (!encoder || !context || status != noErr || !sample_buffer || !encoder->callback_)
-            return;
-        std::vector<uint8_t> encoded;
-        const auto format = CMSampleBufferGetFormatDescription(sample_buffer);
-        bool key_frame = context->key_frame;
-        CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample_buffer, false);
-        if (attachments && CFArrayGetCount(attachments) > 0) {
-            auto dictionary = static_cast<CFDictionaryRef>(
-                const_cast<void*>(CFArrayGetValueAtIndex(attachments, 0)));
-            const auto not_sync = static_cast<CFBooleanRef>(
-                CFDictionaryGetValue(dictionary, kCMSampleAttachmentKey_NotSync));
-            if (not_sync) key_frame = !CFBooleanGetValue(not_sync);
-        }
-        if (key_frame && format) {
-            size_t count = 0;
-            size_t parameter_size = 0;
-            int header_length = 0;
-            if (CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                    format, 0, nullptr, &parameter_size, &count, &header_length) == noErr) {
-                for (size_t index = 0; index < count; ++index) {
-                    const uint8_t* parameter = nullptr;
-                    size_t length = 0;
-                    if (CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                            format, index, &parameter, &length, nullptr, nullptr) != noErr)
-                        continue;
-                    append_start_code(encoded);
-                    encoded.insert(encoded.end(), parameter, parameter + length);
+        if (!encoder || !context) return;
+        try {
+            [&] {
+                if (status != noErr || !sample_buffer || !encoder->callback_)
+                    return;
+                std::vector<uint8_t> encoded;
+                const auto format = CMSampleBufferGetFormatDescription(sample_buffer);
+                bool key_frame = context->key_frame;
+                CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample_buffer, false);
+                if (attachments && CFArrayGetCount(attachments) > 0) {
+                    auto dictionary = static_cast<CFDictionaryRef>(
+                        const_cast<void*>(CFArrayGetValueAtIndex(attachments, 0)));
+                    const auto not_sync = static_cast<CFBooleanRef>(
+                        CFDictionaryGetValue(dictionary, kCMSampleAttachmentKey_NotSync));
+                    if (not_sync) key_frame = !CFBooleanGetValue(not_sync);
                 }
-            }
+                if (key_frame && format) {
+                    size_t count = 0;
+                    size_t parameter_size = 0;
+                    int header_length = 0;
+                    if (CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                            format, 0, nullptr, &parameter_size, &count, &header_length) == noErr) {
+                        for (size_t index = 0; index < count; ++index) {
+                            const uint8_t* parameter = nullptr;
+                            size_t length = 0;
+                            if (CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                                    format, index, &parameter, &length, nullptr, nullptr) != noErr)
+                                continue;
+                            append_start_code(encoded);
+                            encoded.insert(encoded.end(), parameter, parameter + length);
+                        }
+                    }
+                }
+                CMBlockBufferRef block = CMSampleBufferGetDataBuffer(sample_buffer);
+                if (!block) return;
+                const size_t total_length = CMBlockBufferGetDataLength(block);
+                if (total_length == 0) return;
+                std::vector<uint8_t> block_data(total_length);
+                if (CMBlockBufferCopyDataBytes(
+                        block, 0, total_length, block_data.data()) != noErr)
+                    return;
+                size_t cursor = 0;
+                while (cursor + 4 <= total_length) {
+                    const uint32_t length =
+                        (static_cast<uint32_t>(block_data[cursor]) << 24) |
+                        (static_cast<uint32_t>(block_data[cursor + 1]) << 16) |
+                        (static_cast<uint32_t>(block_data[cursor + 2]) << 8) |
+                        static_cast<uint32_t>(block_data[cursor + 3]);
+                    cursor += 4;
+                    if (length == 0 || length > total_length - cursor) return;
+                    append_start_code(encoded);
+                    encoded.insert(
+                        encoded.end(), block_data.data() + cursor,
+                        block_data.data() + cursor + length);
+                    cursor += length;
+                }
+                if (cursor != total_length || encoded.empty()) return;
+                auto buffer = EncodedImageBuffer::Create(encoded.data(), encoded.size());
+                if (!buffer) return;
+                EncodedImage image;
+                image.SetEncodedData(buffer);
+                image.SetRtpTimestamp(context->rtp_timestamp);
+                image._encodedWidth = context->width;
+                image._encodedHeight = context->height;
+                image.SetFrameType(key_frame ? VideoFrameType::kVideoFrameKey
+                                             : VideoFrameType::kVideoFrameDelta);
+                encoder->callback_->OnEncodedImage(image, nullptr);
+            }();
+        } catch (...) {}
+        encoder->mark_callback_completed(context);
+    }
+
+    void mark_encode_returned(EncodeContext* context, bool success) {
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        const auto found = pending_contexts_.find(context);
+        if (found == pending_contexts_.end()) return;
+        context->encode_returned = true;
+        if (!success) context->callback_completed = true;
+        if (context->callback_completed) {
+            pending_contexts_.erase(found);
+            delete context;
         }
-        CMBlockBufferRef block = CMSampleBufferGetDataBuffer(sample_buffer);
-        size_t total_length = 0;
-        char* data = nullptr;
-        if (!block || CMBlockBufferGetDataPointer(
-                          block, 0, nullptr, &total_length, &data) != kCMBlockBufferNoErr ||
-            !data)
-            return;
-        size_t cursor = 0;
-        while (cursor + 4 <= total_length) {
-            const uint32_t length = (static_cast<uint32_t>(static_cast<uint8_t>(data[cursor])) << 24) |
-                (static_cast<uint32_t>(static_cast<uint8_t>(data[cursor + 1])) << 16) |
-                (static_cast<uint32_t>(static_cast<uint8_t>(data[cursor + 2])) << 8) |
-                static_cast<uint32_t>(static_cast<uint8_t>(data[cursor + 3]));
-            cursor += 4;
-            if (length == 0 || length > total_length - cursor) break;
-            append_start_code(encoded);
-            encoded.insert(encoded.end(), data + cursor, data + cursor + length);
-            cursor += length;
+    }
+
+    void mark_callback_completed(EncodeContext* context) {
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        const auto found = pending_contexts_.find(context);
+        if (found == pending_contexts_.end()) return;
+        context->callback_completed = true;
+        if (context->encode_returned) {
+            pending_contexts_.erase(found);
+            delete context;
         }
-        if (encoded.empty()) return;
-        auto buffer = EncodedImageBuffer::Create(encoded.data(), encoded.size());
-        EncodedImage image;
-        image.SetEncodedData(buffer);
-        image.SetRtpTimestamp(context->rtp_timestamp);
-        image._encodedWidth = context->width;
-        image._encodedHeight = context->height;
-        image.SetFrameType(key_frame ? VideoFrameType::kVideoFrameKey
-                                     : VideoFrameType::kVideoFrameDelta);
-        encoder->callback_->OnEncodedImage(image, nullptr);
     }
 
     webrtc::SdpVideoFormat format_;
@@ -398,6 +445,8 @@ private:
     int height_ = 0;
     int framerate_ = 30;
     int32_t bitrate_bps_ = 0;
+    std::mutex context_mutex_;
+    std::unordered_set<EncodeContext*> pending_contexts_;
 };
 
 class VideoToolboxDecoder final : public webrtc::VideoDecoder {
