@@ -1,3 +1,4 @@
+mod media_popups;
 mod notifications;
 mod oauth;
 mod state;
@@ -35,6 +36,7 @@ pub(crate) fn run() {
             enabled: std::sync::Arc::new(AtomicBool::new(false)),
             wake: std::sync::Arc::new(tokio::sync::Notify::new()),
         })
+        .manage(media_popups::MediaPopupState::default())
         .manage(media::NativeMediaStore::default())
         .setup(|app| {
             maintain_log_directory(app.handle());
@@ -91,6 +93,10 @@ pub(crate) fn run() {
                 if connected {
                     return;
                 }
+                media_popups::close_all(
+                    &media_app,
+                    media_app.state::<media_popups::MediaPopupState>().inner(),
+                );
                 if let Some(window) = media_app.get_webview_window("main") {
                     if !window.is_visible().unwrap_or(true) {
                         let _ = window.destroy();
@@ -132,6 +138,10 @@ pub(crate) fn run() {
             oauth::get_oauth_callback_url,
             oauth::get_pending_oauth_callback,
             window::desktop_ready,
+            media_popups::desktop_open_media_popup,
+            media_popups::desktop_get_media_popup,
+            media_popups::desktop_focus_media_popup,
+            media_popups::desktop_close_media_popup,
             media::media_worker_invoke,
             notifications::register_background_notifications,
             notifications::clear_background_notifications,

@@ -3,6 +3,7 @@ import {
   closeConsumer,
   closeConsumerByProducer,
   createConsumer,
+  adaptVideoReceiver,
   producersHasId,
   requestConsumer,
   resolveConsumerControl,
@@ -24,10 +25,27 @@ import type { NativeConsumerEntry } from "../types/native-mediasoup.ts";
 import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
 import type { NativeMediasoupSfuSessionSurface } from "../types/native-mediasoup-session.ts";
 export class NativeMediasoupConsumersMethods {
-  requestConsumer(this: NativeMediasoupSfuSession, producerId: string) {
+  requestConsumer(
+    this: NativeMediasoupSfuSession,
+    producerId: string,
+    metadata: Record<string, unknown> = {},
+  ) {
     return requestConsumer(
       this as unknown as NativeMediasoupSfuSession,
       producerId,
+      metadata,
+    );
+  }
+
+  adaptVideoReceiver(
+    this: NativeMediasoupSfuSession,
+    logicalStreamId: string,
+    preferredLayers: { spatialLayer?: number; temporalLayer?: number },
+  ) {
+    return adaptVideoReceiver(
+      this as unknown as NativeMediasoupSfuSession,
+      logicalStreamId,
+      preferredLayers,
     );
   }
 

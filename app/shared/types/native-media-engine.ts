@@ -6,6 +6,7 @@ import type {
 import type { VideoSettings } from "./video-settings.ts";
 import type { VoiceUserRecord } from "./voice-media-actions.ts";
 import type { NoiseFloorEstimator } from "./microphone-gate.ts";
+import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 
 export interface NativeVoiceStoreLike {
   currentChannelId?: string | null;
@@ -90,6 +91,14 @@ export interface NativeMediaEngineState {
     string,
     { totalEncodeTime: number; framesEncoded: number }
   >;
+  nativeVideoDecodeAdaptationStates: Map<
+    string,
+    import("../video-codec-overload.ts").DecodeAdaptationState
+  >;
+  nativeVideoDecodeAdaptationCounters: Map<
+    string,
+    import("../video-codec-overload.ts").DecodeAdaptationCounters
+  >;
   nativeNoiseFloorEstimator: NoiseFloorEstimator | null;
   nativeSpeaking: boolean;
   nativeActiveSamples: number;
@@ -103,4 +112,5 @@ export interface NativeMediaEngineState {
     clear: () => void;
   } | null;
   nativeAuthToken: string;
+  mediaCapabilities: ParticipantMediaCapabilities | null;
 }

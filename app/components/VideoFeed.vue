@@ -4,20 +4,51 @@
       ref="feedElement"
       class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden bg-black shadow-lg"
       :class="[
-        receiving ? 'cursor-zoom-in' : '',
+        receiving && !poppedOut ? 'cursor-zoom-in' : '',
         { 'fullscreen-feed-active': isFullscreen },
       ]"
       :data-feed-key="feedKey"
       :title="
-        receiving && !isFullscreen
+        receiving && !isFullscreen && !poppedOut
           ? 'Double-click to view fullscreen'
           : undefined
       "
-      @dblclick.prevent="toggleFullscreen"
+      @dblclick.prevent="handleDoubleClick"
       @touchend="handleTouchEnd"
     >
       <div
+        v-if="poppedOut"
+        class="flex h-full w-full flex-col items-center justify-center gap-4 bg-base-300 px-6 text-center"
+      >
+        <Icon name="lucide:picture-in-picture-2" class="size-10 text-primary" />
+        <div>
+          <div class="font-medium">{{ label }} is popped out</div>
+          <div class="mt-1 text-sm text-base-content/60">
+            This participant is being shown in a separate window.
+          </div>
+        </div>
+        <div class="flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            class="metro-btn metro-btn--sm"
+            @click.stop="$emit('focus-popup')"
+          >
+            <Icon name="lucide:focus" class="size-4" />
+            Show popup
+          </button>
+          <button
+            type="button"
+            class="metro-btn metro-btn--sm btn-outline"
+            @click.stop="$emit('pop-in')"
+          >
+            <Icon name="lucide:log-in" class="size-4" />
+            Pop in
+          </button>
+        </div>
+      </div>
+      <div
         v-if="
+          !poppedOut &&
           compact &&
           source === 'screen' &&
           (localScreenPreviewPaused || !receiving)
@@ -37,7 +68,7 @@
         </span>
       </div>
       <div
-        v-else-if="localScreenPreviewPaused"
+        v-else-if="!poppedOut && localScreenPreviewPaused"
         class="flex h-full w-full flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
       >
         <Icon name="lucide:monitor-pause" class="size-10 text-primary" />
@@ -56,7 +87,7 @@
         </button>
       </div>
       <div
-        v-else-if="source === 'screen' && !receiving"
+        v-else-if="!poppedOut && source === 'screen' && !receiving"
         class="flex h-full w-full flex-col items-center justify-center gap-3 bg-base-300 px-6 text-center"
       >
         <Icon name="lucide:monitor-play" class="size-10 text-primary" />
@@ -67,6 +98,7 @@
           </div>
         </div>
         <button
+          v-if="showReceivingControls"
           type="button"
           class="metro-btn metro-btn--sm"
           @click="$emit('start-receiving')"
@@ -74,7 +106,10 @@
           Start screen share
         </button>
       </div>
-      <div v-else-if="native" class="relative h-full w-full bg-black">
+      <div
+        v-else-if="!poppedOut && native"
+        class="relative h-full w-full bg-black"
+      >
         <canvas
           ref="nativeCanvasElement"
           class="block h-full w-full object-contain"
@@ -87,7 +122,7 @@
         </span>
       </div>
       <video
-        v-else
+        v-else-if="!poppedOut"
         ref="videoElement"
         autoplay
         playsinline
@@ -114,9 +149,26 @@
         <Icon name="lucide:minimize-2" class="size-4" />
       </button>
       <button
-        v-if="source === 'screen' && !local && receiving && !isFullscreen"
+        v-if="canPopOut && !poppedOut && !isFullscreen"
         type="button"
-        class="metro-btn metro-btn--sm absolute right-3 top-3 bg-black/70 text-white hover:bg-black/90"
+        class="metro-btn metro-btn--sm absolute right-3 top-3 border-white/30 bg-black/70 text-white hover:bg-black/90"
+        title="Pop out participant"
+        @click.stop="$emit('pop-out')"
+      >
+        <Icon name="lucide:picture-in-picture-2" class="size-4" />
+        Pop out
+      </button>
+      <button
+        v-if="
+          showReceivingControls &&
+          source === 'screen' &&
+          !local &&
+          receiving &&
+          !isFullscreen
+        "
+        type="button"
+        class="metro-btn metro-btn--sm absolute top-3 bg-black/70 text-white hover:bg-black/90"
+        :class="canPopOut ? 'right-28' : 'right-3'"
         @click.stop="$emit('stop-receiving')"
       >
         <Icon name="lucide:monitor-off" class="size-4" />
@@ -144,11 +196,14 @@ const props = defineProps({
   stream: { type: Object, default: null },
   native: { type: Boolean, default: false },
   nativeFrame: { type: Object, default: null },
+  canPopOut: { type: Boolean, default: false },
+  poppedOut: { type: Boolean, default: false },
   source: { type: String, required: true },
   label: { type: String, required: true },
   muted: { type: Boolean, default: false },
   local: { type: Boolean, default: false },
   receiving: { type: Boolean, default: true },
+  showReceivingControls: { type: Boolean, default: true },
   ownCameraStream: { type: Object, default: null },
   ownCameraFeedKey: { type: String, default: null },
   compact: { type: Boolean, default: false },
@@ -158,6 +213,9 @@ const emit = defineEmits([
   "start-receiving",
   "stop-receiving",
   "preview-change",
+  "pop-out",
+  "focus-popup",
+  "pop-in",
 ]);
 
 const videoElement = ref(null);
@@ -214,7 +272,7 @@ async function exitFullscreen() {
 }
 
 async function toggleFullscreen() {
-  if (!props.receiving || !feedElement.value) return;
+  if (props.poppedOut || !props.receiving || !feedElement.value) return;
   try {
     if (isFullscreen.value) {
       await exitFullscreen();
@@ -231,11 +289,17 @@ async function toggleFullscreen() {
   }
 }
 
+function handleDoubleClick() {
+  if (props.poppedOut) emit("focus-popup");
+  else toggleFullscreen();
+}
+
 function handleTouchEnd(event) {
   const now = Date.now();
   if (now - lastTouchAt <= 320) {
     event.preventDefault();
-    toggleFullscreen();
+    if (props.poppedOut) emit("focus-popup");
+    else toggleFullscreen();
     lastTouchAt = 0;
     return;
   }
@@ -294,6 +358,11 @@ function cancelNativeFrameAnimation() {
 }
 
 function scheduleNativeFrame() {
+  if (props.poppedOut) {
+    nativePendingFrame = null;
+    cancelNativeFrameAnimation();
+    return;
+  }
   nativePendingFrame = props.nativeFrame;
   if (
     !props.native ||
@@ -319,6 +388,12 @@ function scheduleNativeFrame() {
 }
 
 function attachStream() {
+  if (props.poppedOut) {
+    nativePendingFrame = null;
+    cancelNativeFrameAnimation();
+    if (videoElement.value) videoElement.value.srcObject = null;
+    return;
+  }
   if (props.native) {
     scheduleNativeFrame();
     return;
@@ -409,6 +484,16 @@ watch(
   },
 );
 watch(() => props.nativeFrame, scheduleNativeFrame);
+watch(
+  () => props.poppedOut,
+  (poppedOut) => {
+    if (poppedOut) {
+      nativePendingFrame = null;
+      cancelNativeFrameAnimation();
+      if (videoElement.value) videoElement.value.srcObject = null;
+    } else attachStream();
+  },
+);
 watch(
   () => props.receiving,
   (receiving) => {

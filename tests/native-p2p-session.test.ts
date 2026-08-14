@@ -1,8 +1,241 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NativeP2pSession } from "../app/shared/native-p2p-session.ts";
+import { finalizeP2pVideoMigration } from "../app/shared/native-p2p-session/lifecycle.ts";
+import { emptyVideoCodecCapabilities } from "../app/shared/types/video-codec-capabilities.ts";
 
 describe("NativeP2pSession", () => {
+  it("waits for the peer codec matrix before creating the initial offer", async () => {
+    const calls = [];
+    const messages = [];
+    const videoCodecs = emptyVideoCodecCapabilities();
+    videoCodecs.H264.encode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+    };
+    videoCodecs.H264.decode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+    };
+    const mediaCapabilities = {
+      videoCodecs,
+      concurrentEncode: {
+        supported: true,
+        maxHardwareSessions: 1,
+      },
+      source: "native-runtime-probe" as const,
+    };
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 31 };
+        if (command === "media_p2p_create_offer") return "native-offer";
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+      mediaCapabilities,
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 31,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    assert.equal(
+      calls.some(([command]) => command === "media_p2p_create_offer"),
+      false,
+    );
+    assert.ok(messages.some((message) => message.signal?.capabilities));
+
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 31,
+      signal: {
+        capabilities: { mediaCapabilities },
+      },
+    });
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_create_offer").length,
+      1,
+    );
+  });
+
+  it("waits for the peer codec matrix before answering an early offer", async () => {
+    const calls = [];
+    const messages = [];
+    const videoCodecs = emptyVideoCodecCapabilities();
+    videoCodecs.H264.encode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+    };
+    videoCodecs.H264.decode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+    };
+    const mediaCapabilities = {
+      videoCodecs,
+      concurrentEncode: {
+        supported: true,
+        maxHardwareSessions: 1,
+      },
+      source: "native-runtime-probe" as const,
+    };
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 32 };
+        if (command === "media_p2p_create_answer") return "native-answer";
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+      mediaCapabilities,
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 32,
+      localPeerId: "peer-z",
+      peers: [{ peerId: "peer-a", userId: "user-a" }],
+    });
+    await session.handleSignal({
+      fromPeerId: "peer-a",
+      epoch: 32,
+      signal: {
+        description: { type: "offer", sdp: "early-offer" },
+      },
+    });
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_create_answer").length,
+      0,
+    );
+
+    await session.handleSignal({
+      fromPeerId: "peer-a",
+      epoch: 32,
+      signal: {
+        capabilities: { mediaCapabilities },
+      },
+    });
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_create_answer").length,
+      1,
+    );
+    assert.deepEqual(
+      messages.find(
+        (message) => message.signal?.description?.type === "answer",
+      ),
+      {
+        targetPeerId: "peer-a",
+        epoch: 32,
+        signal: { description: { type: "answer", sdp: "native-answer" } },
+      },
+    );
+  });
+
+  it("respects the publisher hardware encoder session budget across P2P peers", async () => {
+    const calls = [];
+    const videoCodecs = emptyVideoCodecCapabilities();
+    videoCodecs.H264.encode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+    };
+    videoCodecs.H264.decode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+    };
+    videoCodecs.VP8.encode = {
+      supported: true,
+      acceleration: "software",
+      realtimeEfficiency: "acceptable",
+    };
+    videoCodecs.VP8.decode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "good",
+    };
+    const mediaCapabilities = {
+      videoCodecs,
+      concurrentEncode: {
+        supported: true,
+        maxHardwareSessions: 1,
+      },
+      source: "native-runtime-probe" as const,
+    };
+    const h264OnlyCodecs = emptyVideoCodecCapabilities();
+    h264OnlyCodecs.H264.decode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+    };
+    const h264OnlyCapabilities = {
+      videoCodecs: h264OnlyCodecs,
+      concurrentEncode: {
+        supported: false,
+        maxHardwareSessions: 1,
+      },
+      source: "native-runtime-probe" as const,
+    };
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create")
+          return { handle: calls.filter(([name]) => name === command).length };
+        if (command === "media_p2p_add_track")
+          return { trackId: `${payload.source}-${payload.p2pHandle}` };
+        if (command === "media_p2p_create_offer") return "offer";
+        return null;
+      },
+      sendSignal() {},
+      mediaCapabilities,
+    });
+
+    await session.addSource({ source: "camera", kind: "video" });
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 33,
+      localPeerId: "peer-a",
+      peers: [
+        { peerId: "peer-b", userId: "user-b", mediaCapabilities },
+        {
+          peerId: "peer-c",
+          userId: "user-c",
+          mediaCapabilities: h264OnlyCapabilities,
+        },
+      ],
+    });
+
+    const initialTracks = calls
+      .filter(([command]) => command === "media_p2p_add_track")
+      .map(([, payload]) => payload.preferredCodec);
+    assert.deepEqual(initialTracks, ["H264"]);
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 33,
+      localPeerId: "peer-a",
+      peers: [
+        {
+          peerId: "peer-c",
+          userId: "user-c",
+          mediaCapabilities: h264OnlyCapabilities,
+        },
+      ],
+    });
+
+    const allTracks = calls
+      .filter(([command]) => command === "media_p2p_add_track")
+      .map(([, payload]) => payload.preferredCodec);
+    assert.deepEqual(allTracks, ["H264", "H264"]);
+    await session.closeAll();
+  });
+
   it("buffers an early signal until the matching peer is created", async () => {
     const calls = [];
     const messages = [];
@@ -211,6 +444,196 @@ describe("NativeP2pSession", () => {
 
     await session.closeAll();
     assert.ok(calls.some(([command]) => command === "media_p2p_destroy"));
+  });
+
+  it("keeps the previous P2P video generation visible during candidate warm-up", async () => {
+    const tracks = [];
+    const session = new NativeP2pSession({
+      invoke: async (command) =>
+        command === "media_p2p_create" ? { handle: 10 } : null,
+      onRemoteTrack: (entry) => tracks.push(["track", entry.trackId]),
+      onRemoteTrackEnded: (entry) => tracks.push(["ended", entry.trackId]),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 20,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    const peer = session.peers.get("peer-b");
+    peer.sourceByTrackId.set("video-a", "camera");
+    peer.logicalStreamByTrackId.set("video-a", "user:user-b/camera");
+    peer.generationByTrackId.set("video-a", 1);
+    peer.variantByTrackId.set("video-a", "user:user-b/camera:h264");
+    peer.codecByTrackId.set("video-a", "H264");
+    session.handleReceiveEvent({
+      kind: 4,
+      payload: {
+        event: "track-added",
+        handle: 10,
+        trackId: "video-a",
+        kind: "video",
+      },
+    });
+    assert.equal(session.trackEntries.get("video-a").visible, true);
+
+    peer.sourceByTrackId.set("video-b", "camera");
+    peer.logicalStreamByTrackId.set("video-b", "user:user-b/camera");
+    peer.generationByTrackId.set("video-b", 2);
+    peer.variantByTrackId.set("video-b", "user:user-b/camera:vp8");
+    peer.codecByTrackId.set("video-b", "VP8");
+    session.handleReceiveEvent({
+      kind: 4,
+      payload: {
+        event: "track-added",
+        handle: 10,
+        trackId: "video-b",
+        kind: "video",
+      },
+    });
+    assert.equal(session.trackEntries.get("video-a").visible, true);
+    assert.equal(session.trackEntries.get("video-b").visible, false);
+    assert.deepEqual(tracks, [["track", "video-a"]]);
+
+    for (const timestamp of [1, 2, 3])
+      session.handleReceiveEvent({
+        kind: 2,
+        id: "video-b",
+        payload: { width: 2, height: 2, timestamp },
+        data: `frame-${timestamp}`,
+      });
+
+    assert.equal(session.trackEntries.get("video-b").visible, true);
+    assert.equal(session.trackEntries.get("video-a").visible, false);
+    assert.equal(
+      session.trackEntries.get("video-b").migrationState,
+      "committing",
+    );
+    assert.equal(session.trackEntries.has("video-a"), true);
+    assert.deepEqual(tracks, [
+      ["track", "video-a"],
+      ["track", "video-b"],
+    ]);
+    assert.equal(
+      finalizeP2pVideoMigration(session, session.trackEntries.get("video-b")),
+      true,
+    );
+    assert.equal(session.trackEntries.has("video-a"), false);
+    assert.equal(session.trackEntries.get("video-b").migrationState, "stable");
+    await session.closeAll();
+  });
+
+  it("requests receiver layer reduction without renegotiating the P2P track", async () => {
+    const calls = [];
+    const messages = [];
+    const session = new NativeP2pSession({
+      invoke: async (command, payload) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_create") return { handle: 22 };
+        if (command === "media_p2p_add_track")
+          return { trackId: "camera-capture" };
+        return null;
+      },
+      sendSignal: (message) => messages.push(message),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 22,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    await session.addSource({
+      source: "camera",
+      kind: "video",
+      logicalStreamId: "source:camera",
+      videoSettings: { frameRate: 30 },
+    });
+    const offersBeforeAdaptation = calls.filter(
+      ([command]) => command === "media_p2p_create_offer",
+    ).length;
+
+    const peer = session.peers.get("peer-b");
+    assert.ok(peer);
+    await session.handleSignal({
+      fromPeerId: "peer-b",
+      epoch: 22,
+      signal: {
+        receiverAdaptation: {
+          source: "camera",
+          logicalStreamId: "source:camera",
+          preferredLayers: { spatialLayer: 0, temporalLayer: 0 },
+        },
+      },
+    });
+
+    const update = calls
+      .filter(
+        ([command, payload]) =>
+          command === "media_p2p_set_track_parameters" &&
+          payload.source === "camera",
+      )
+      .at(-1);
+    assert.deepEqual(update[1].parameters, {
+      maxFramerate: 10,
+      scaleResolutionDownBy: 4,
+    });
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_create_offer").length,
+      offersBeforeAdaptation,
+    );
+    assert.equal(
+      messages.some((message) => message.signal?.receiverAdaptation),
+      false,
+    );
+    await session.closeAll();
+  });
+
+  it("sends receiver layer preferences for the stable logical P2P stream", async () => {
+    const messages = [];
+    const session = new NativeP2pSession({
+      invoke: async (command) =>
+        command === "media_p2p_create" ? { handle: 23 } : null,
+      sendSignal: (message) => messages.push(message),
+    });
+
+    await session.applyTopology({
+      mode: "p2p",
+      epoch: 23,
+      localPeerId: "peer-a",
+      peers: [{ peerId: "peer-b", userId: "user-b" }],
+    });
+    const peer = session.peers.get("peer-b");
+    assert.ok(peer);
+    peer.logicalStreamByTrackId.set("remote-camera", "user:user-b/camera");
+    peer.sourceByTrackId.set("remote-camera", "camera");
+    session.trackEntries.set("remote-camera", {
+      key: "user-b:camera",
+      trackId: "remote-camera",
+      userId: "user-b",
+      source: "camera",
+      kind: "video",
+      receiving: true,
+      closed: false,
+      p2pHandle: 23,
+      logicalStreamId: "user:user-b/camera",
+      visible: true,
+    });
+
+    assert.equal(
+      await session.adaptVideoReceiver("user:user-b/camera", {
+        spatialLayer: 1,
+        temporalLayer: 0,
+      }),
+      true,
+    );
+    assert.deepEqual(messages.at(-1).signal.receiverAdaptation, {
+      source: "camera",
+      logicalStreamId: "user:user-b/camera",
+      preferredLayers: { spatialLayer: 1, temporalLayer: 0 },
+    });
+    await session.closeAll();
   });
 
   it("asks the browser peer to renegotiate when native is the answerer", async () => {

@@ -65,6 +65,7 @@ import {
 } from "./native-media-engine-adaptation.ts";
 import type {
   NativeCaptureRequest,
+  NativeCapabilities,
   NativeErrorLike,
   NativeMediaEngineOptions,
   NativeMediaFlags,
@@ -245,12 +246,15 @@ export class NativeMediaEngine extends MediaEngine {
     this.nativeVideoAdaptationOperation = null;
     this.nativeVideoAdaptationStates = new Map();
     this.nativeVideoAdaptationCounters = new Map();
+    this.nativeVideoDecodeAdaptationStates = new Map();
+    this.nativeVideoDecodeAdaptationCounters = new Map();
     this.nativeNoiseFloorEstimator = null;
     this.nativeSpeaking = false;
     this.nativeActiveSamples = 0;
     this.nativeQuietSamples = 0;
     this.nativeEchoDetector = null;
     this.nativeAuthToken = "";
+    this.mediaCapabilities = null;
   }
 
   override async initialize(config: NativeCaptureRequest = {}): Promise<void> {
@@ -980,7 +984,7 @@ export class NativeMediaEngine extends MediaEngine {
     if (failure) throw failure;
   }
 
-  _mergeNativeCapabilities(capabilities: NativeMediaFlags = this.flags) {
+  _mergeNativeCapabilities(capabilities: NativeCapabilities = this.flags) {
     return mergeNativeCapabilities(this, capabilities);
   }
 

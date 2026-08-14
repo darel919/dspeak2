@@ -1,12 +1,23 @@
 #include "platform_video_codec_factories.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <cstdint>
+#include <condition_variable>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <api/environment/environment_factory.h>
+#include <api/video/i420_buffer.h>
+#include <api/video/video_frame.h>
+#include <api/video/video_frame_type.h>
+#include <api/video/video_codec_type.h>
+#include <api/video_codecs/video_decoder.h>
+#include <api/video_codecs/video_encoder.h>
 #include <api/video_codecs/video_decoder_factory_template.h>
 #include <api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h>
 #include <api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h>
@@ -17,32 +28,6 @@
 #include <api/video_codecs/video_encoder_factory_template_open_h264_adapter.h>
 
 namespace dspeak_native {
-
-namespace {
-
-std::mutex g_diagnostics_mutex;
-std::string g_active_encoder_implementation = "not-created";
-std::string g_active_decoder_implementation = "not-created";
-bool g_active_hardware_encoder = false;
-bool g_active_hardware_decoder = false;
-uint64_t g_encoder_creations = 0;
-uint64_t g_decoder_creations = 0;
-
-void record_encoder(const std::string& implementation, bool hardware) {
-    std::lock_guard<std::mutex> lock(g_diagnostics_mutex);
-    g_active_encoder_implementation = implementation;
-    g_active_hardware_encoder = hardware;
-    ++g_encoder_creations;
-}
-
-void record_decoder(const std::string& implementation, bool hardware) {
-    std::lock_guard<std::mutex> lock(g_diagnostics_mutex);
-    g_active_decoder_implementation = implementation;
-    g_active_hardware_decoder = hardware;
-    ++g_decoder_creations;
-}
-
-}
 
 #if defined(__APPLE__)
 std::unique_ptr<webrtc::VideoEncoder> create_video_toolbox_encoder(
@@ -65,6 +50,433 @@ std::unique_ptr<webrtc::VideoDecoder> create_media_foundation_decoder(
     const webrtc::Environment& environment,
     const webrtc::SdpVideoFormat& format);
 #endif
+
+namespace {
+
+std::mutex g_diagnostics_mutex;
+std::string g_active_encoder_implementation = "not-created";
+std::string g_active_decoder_implementation = "not-created";
+bool g_active_hardware_encoder = false;
+bool g_active_hardware_decoder = false;
+uint64_t g_encoder_creations = 0;
+uint64_t g_decoder_creations = 0;
+std::mutex g_runtime_probe_mutex;
+bool g_runtime_probe_complete = false;
+std::map<std::string, VideoCodecRuntimeDiagnostics> g_runtime_codecs;
+bool g_concurrent_hardware_sessions_tested = false;
+int g_max_hardware_encode_sessions = 0;
+std::vector<std::pair<std::string, std::string>> g_tested_codec_pairs;
+
+void record_encoder(const std::string& implementation, bool hardware) {
+    std::lock_guard<std::mutex> lock(g_diagnostics_mutex);
+    g_active_encoder_implementation = implementation;
+    g_active_hardware_encoder = hardware;
+    ++g_encoder_creations;
+}
+
+void record_decoder(const std::string& implementation, bool hardware) {
+    std::lock_guard<std::mutex> lock(g_diagnostics_mutex);
+    g_active_decoder_implementation = implementation;
+    g_active_hardware_decoder = hardware;
+    ++g_decoder_creations;
+}
+
+class ProbeEncodedCallback final : public webrtc::EncodedImageCallback {
+public:
+    Result OnEncodedImage(
+        const webrtc::EncodedImage& encoded_image,
+        const webrtc::CodecSpecificInfo*) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!encoded_image.GetEncodedData() || encoded_image.size() == 0) {
+            failed_ = true;
+            condition_.notify_all();
+            return Result(Result::ERROR_SEND_FAILED);
+        }
+        encoded_image_ = encoded_image;
+        encoded_ = true;
+        condition_.notify_all();
+        return Result(Result::OK);
+    }
+
+    bool Wait(std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait_for(lock, timeout, [this] { return encoded_ || failed_; });
+        return encoded_ && !failed_;
+    }
+
+    webrtc::EncodedImage image() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return encoded_image_;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable condition_;
+    webrtc::EncodedImage encoded_image_;
+    bool encoded_ = false;
+    bool failed_ = false;
+};
+
+class ProbeDecodedCallback final : public webrtc::DecodedImageCallback {
+public:
+    int32_t Decoded(webrtc::VideoFrame& frame) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        width_ = frame.width();
+        height_ = frame.height();
+        decoded_ = width_ > 0 && height_ > 0;
+        condition_.notify_all();
+        return decoded_ ? 0 : -1;
+    }
+
+    bool Wait(std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait_for(lock, timeout, [this] { return decoded_; });
+        return decoded_;
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    int width_ = 0;
+    int height_ = 0;
+    bool decoded_ = false;
+};
+
+std::string uppercase(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::toupper(character));
+    });
+    return value;
+}
+
+std::optional<webrtc::SdpVideoFormat> find_format(
+    const std::vector<webrtc::SdpVideoFormat>& formats,
+    const std::string& codec) {
+    const auto wanted = uppercase(codec);
+    for (const auto& format : formats)
+        if (uppercase(format.name) == wanted) return format;
+    return std::nullopt;
+}
+
+std::optional<webrtc::VideoCodecType> codec_type(const std::string& codec) {
+    const auto value = uppercase(codec);
+    if (value == "VP8") return webrtc::kVideoCodecVP8;
+    if (value == "VP9") return webrtc::kVideoCodecVP9;
+    if (value == "AV1") return webrtc::kVideoCodecAV1;
+    if (value == "H264") return webrtc::kVideoCodecH264;
+    if (value == "H265") return webrtc::kVideoCodecH265;
+    return std::nullopt;
+}
+
+webrtc::VideoCodec make_codec_settings(
+    webrtc::VideoCodecType type,
+    int width,
+    int height,
+    int fps) {
+    webrtc::VideoCodec settings;
+    settings.codecType = type;
+    settings.width = static_cast<uint16_t>(width);
+    settings.height = static_cast<uint16_t>(height);
+    settings.startBitrate = 800;
+    settings.maxBitrate = 1200;
+    settings.minBitrate = 300;
+    settings.maxFramerate = static_cast<uint32_t>(fps);
+    settings.active = true;
+    settings.numberOfSimulcastStreams = 1;
+    settings.qpMax = 56;
+    settings.mode = webrtc::VideoCodecMode::kRealtimeVideo;
+    settings.SetFrameDropEnabled(false);
+    if (type == webrtc::kVideoCodecVP8) {
+        settings.VP8()->numberOfTemporalLayers = 1;
+        settings.VP8()->keyFrameInterval = 1;
+    } else if (type == webrtc::kVideoCodecVP9) {
+        settings.VP9()->numberOfTemporalLayers = 1;
+        settings.VP9()->numberOfSpatialLayers = 1;
+        settings.VP9()->keyFrameInterval = 1;
+    } else if (type == webrtc::kVideoCodecH264) {
+        settings.H264()->numberOfTemporalLayers = 1;
+        settings.H264()->keyFrameInterval = 1;
+    } else if (type == webrtc::kVideoCodecAV1) {
+        settings.AV1()->automatic_resize_on = false;
+    }
+    return settings;
+}
+
+webrtc::VideoFrame make_probe_frame(int width, int height) {
+    auto buffer = webrtc::I420Buffer::Create(width, height);
+    for (int row = 0; row < height; ++row)
+        std::fill(buffer->MutableDataY() + row * buffer->StrideY(),
+                  buffer->MutableDataY() + row * buffer->StrideY() + width,
+                  static_cast<uint8_t>(row % 2 ? 96 : 160));
+    for (int row = 0; row < (height + 1) / 2; ++row) {
+        std::fill(buffer->MutableDataU() + row * buffer->StrideU(),
+                  buffer->MutableDataU() + row * buffer->StrideU() + (width + 1) / 2,
+                  static_cast<uint8_t>(96));
+        std::fill(buffer->MutableDataV() + row * buffer->StrideV(),
+                  buffer->MutableDataV() + row * buffer->StrideV() + (width + 1) / 2,
+                  static_cast<uint8_t>(160));
+    }
+    return webrtc::VideoFrame::Builder()
+        .set_video_frame_buffer(buffer)
+        .set_timestamp_us(1'000'000)
+        .set_rotation(webrtc::kVideoRotation_0)
+        .build();
+}
+
+bool probe_encoder(
+    webrtc::VideoEncoderFactory* factory,
+    const std::string& codec,
+    int width,
+    int height,
+    int fps,
+    webrtc::EncodedImage* encoded_image,
+    VideoCodecRuntimeDiagnostics* result) {
+    const auto type = codec_type(codec);
+    const auto format = find_format(factory->GetSupportedFormats(), codec);
+    if (!type || !format) {
+        result->encoder_failure = "encoder factory does not expose codec";
+        return false;
+    }
+    auto encoder = factory->Create(webrtc::CreateEnvironment(), *format);
+    if (!encoder) {
+        result->encoder_failure = "encoder factory returned no instance";
+        return false;
+    }
+    auto settings = make_codec_settings(*type, width, height, fps);
+    webrtc::VideoEncoder::Settings encoder_settings(
+        webrtc::VideoEncoder::Capabilities(false), 1, 1200);
+    if (encoder->InitEncode(&settings, encoder_settings) < 0) {
+        result->encoder_failure = "encoder initialization failed";
+        encoder->Release();
+        return false;
+    }
+    ProbeEncodedCallback callback;
+    if (encoder->RegisterEncodeCompleteCallback(&callback) < 0) {
+        result->encoder_failure = "encoder callback registration failed";
+        encoder->Release();
+        return false;
+    }
+    webrtc::VideoBitrateAllocation allocation;
+    allocation.SetBitrate(0, 0, 800'000);
+    encoder->SetRates(webrtc::VideoEncoder::RateControlParameters(allocation, fps));
+    const auto frame = make_probe_frame(width, height);
+    const std::vector<webrtc::VideoFrameType> frame_types = {
+        webrtc::VideoFrameType::kVideoFrameKey};
+    const int encode_result = encoder->Encode(frame, &frame_types);
+    const bool received = encode_result >= 0 && callback.Wait(std::chrono::milliseconds(1500));
+    const auto info = encoder->GetEncoderInfo();
+    result->encoder_implementation = info.implementation_name.empty()
+        ? "unknown"
+        : info.implementation_name;
+    result->encoder_hardware = info.is_hardware_accelerated;
+    if (!received) {
+        result->encoder_failure = encode_result < 0
+            ? "encoder rejected validation frame"
+            : "encoder produced no validation frame";
+        encoder->Release();
+        return false;
+    }
+    *encoded_image = callback.image();
+    result->encoder_supported = true;
+    result->encoder_frame_validated = true;
+    result->encoder_tested_width = width;
+    result->encoder_tested_height = height;
+    result->encoder_tested_fps = fps;
+    encoder->Release();
+    return true;
+}
+
+bool probe_decoder(
+    webrtc::VideoDecoderFactory* factory,
+    const std::string& codec,
+    int width,
+    int height,
+    int fps,
+    const webrtc::EncodedImage* encoded_image,
+    VideoCodecRuntimeDiagnostics* result) {
+    const auto type = codec_type(codec);
+    const auto format = find_format(factory->GetSupportedFormats(), codec);
+    if (!type || !format) {
+        result->decoder_failure = "decoder factory does not expose codec";
+        return false;
+    }
+    auto decoder = factory->Create(webrtc::CreateEnvironment(), *format);
+    if (!decoder) {
+        result->decoder_failure = "decoder factory returned no instance";
+        return false;
+    }
+    webrtc::VideoDecoder::Settings decoder_settings;
+    decoder_settings.set_codec_type(*type);
+    decoder_settings.set_number_of_cores(1);
+    if (!decoder->Configure(decoder_settings)) {
+        result->decoder_failure = "decoder initialization failed";
+        decoder->Release();
+        return false;
+    }
+    result->decoder_configured = true;
+    ProbeDecodedCallback callback;
+    if (decoder->RegisterDecodeCompleteCallback(&callback) < 0) {
+        result->decoder_failure = "decoder callback registration failed";
+        decoder->Release();
+        return false;
+    }
+    const auto info = decoder->GetDecoderInfo();
+    result->decoder_implementation = info.implementation_name.empty()
+        ? "unknown"
+        : info.implementation_name;
+    result->decoder_hardware = info.is_hardware_accelerated;
+    if (!encoded_image || !encoded_image->GetEncodedData() || encoded_image->size() == 0) {
+        result->decoder_failure = "decoder validation frame unavailable";
+        decoder->Release();
+        return false;
+    }
+    const int decode_result = decoder->Decode(*encoded_image, 0);
+    const bool received = decode_result >= 0 && callback.Wait(std::chrono::milliseconds(1500));
+    const auto validated_info = decoder->GetDecoderInfo();
+    result->decoder_implementation = validated_info.implementation_name.empty()
+        ? "unknown"
+        : validated_info.implementation_name;
+    result->decoder_hardware = validated_info.is_hardware_accelerated;
+    if (!received) {
+        result->decoder_failure = decode_result < 0
+            ? "decoder rejected validation frame"
+            : "decoder produced no validation frame";
+        result->decoder_supported = false;
+        decoder->Release();
+        return false;
+    }
+    result->decoder_supported = true;
+    result->decoder_frame_validated = true;
+    result->decoder_tested_width = width;
+    result->decoder_tested_height = height;
+    result->decoder_tested_fps = fps;
+    decoder->Release();
+    return true;
+}
+
+std::unique_ptr<webrtc::VideoEncoder> create_initialized_hardware_encoder(
+    webrtc::VideoEncoderFactory* factory,
+    const std::string& codec,
+    const VideoCodecRuntimeDiagnostics& runtime) {
+    const auto type = codec_type(codec);
+    const auto format = find_format(factory->GetSupportedFormats(), codec);
+    if (!type || !format) return nullptr;
+    auto encoder = factory->Create(webrtc::CreateEnvironment(), *format);
+    if (!encoder) return nullptr;
+    const int width = runtime.encoder_tested_width > 0
+        ? runtime.encoder_tested_width
+        : 640;
+    const int height = runtime.encoder_tested_height > 0
+        ? runtime.encoder_tested_height
+        : 360;
+    const int fps = runtime.encoder_tested_fps > 0
+        ? runtime.encoder_tested_fps
+        : 15;
+    auto settings = make_codec_settings(*type, width, height, fps);
+    webrtc::VideoEncoder::Settings encoder_settings(
+        webrtc::VideoEncoder::Capabilities(false), 1, 1200);
+    if (encoder->InitEncode(&settings, encoder_settings) < 0 ||
+        !encoder->GetEncoderInfo().is_hardware_accelerated) {
+        encoder->Release();
+        return nullptr;
+    }
+    return encoder;
+}
+
+void probe_concurrent_hardware_sessions(webrtc::VideoEncoderFactory* factory) {
+    g_concurrent_hardware_sessions_tested = false;
+    g_max_hardware_encode_sessions = 0;
+    g_tested_codec_pairs.clear();
+    if (!factory) return;
+    std::vector<std::string> hardware_codecs;
+    for (const auto& [codec, runtime] : g_runtime_codecs)
+        if (runtime.encoder_supported && runtime.encoder_hardware)
+            hardware_codecs.push_back(codec);
+    if (hardware_codecs.empty()) {
+        g_concurrent_hardware_sessions_tested = true;
+        return;
+    }
+    for (size_t index = 0; index < hardware_codecs.size(); ++index)
+        for (size_t next = index + 1; next < hardware_codecs.size(); ++next) {
+            const auto left = g_runtime_codecs.find(hardware_codecs[index]);
+            const auto right = g_runtime_codecs.find(hardware_codecs[next]);
+            if (left == g_runtime_codecs.end() || right == g_runtime_codecs.end())
+                continue;
+            auto first = create_initialized_hardware_encoder(
+                factory, left->first, left->second);
+            auto second = create_initialized_hardware_encoder(
+                factory, right->first, right->second);
+            if (first && second)
+                g_tested_codec_pairs.emplace_back(left->first, right->first);
+            if (first) first->Release();
+            if (second) second->Release();
+        }
+    for (size_t count = 1; count <= hardware_codecs.size(); ++count) {
+        std::vector<std::unique_ptr<webrtc::VideoEncoder>> encoders;
+        bool all_initialized = true;
+        for (size_t index = 0; index < count; ++index) {
+            const auto found = g_runtime_codecs.find(hardware_codecs[index]);
+            if (found == g_runtime_codecs.end()) {
+                all_initialized = false;
+                break;
+            }
+            auto encoder = create_initialized_hardware_encoder(
+                factory, found->first, found->second);
+            if (!encoder) {
+                all_initialized = false;
+                break;
+            }
+            encoders.push_back(std::move(encoder));
+        }
+        for (auto& encoder : encoders) encoder->Release();
+        if (!all_initialized) break;
+        g_max_hardware_encode_sessions = static_cast<int>(count);
+    }
+    g_concurrent_hardware_sessions_tested = true;
+}
+
+void run_runtime_probe() {
+    std::lock_guard<std::mutex> probe_lock(g_runtime_probe_mutex);
+    if (g_runtime_probe_complete) return;
+    g_runtime_codecs.clear();
+    const std::vector<std::string> codec_names = {"H264", "H265", "VP8", "VP9", "AV1"};
+    auto encoder_factory = create_video_encoder_factory();
+    auto decoder_factory = create_video_decoder_factory();
+    for (const auto& codec : codec_names) {
+        VideoCodecRuntimeDiagnostics result;
+        const bool hardware_hint =
+#if defined(__APPLE__)
+            codec == "H264" && video_toolbox_encoder_available();
+#elif defined(_WIN32)
+            codec == "H264" && media_foundation_encoder_available();
+#else
+            false;
+#endif
+        const int width = hardware_hint ? 1920 : 640;
+        const int height = hardware_hint ? 1080 : 360;
+        const int fps = hardware_hint ? 30 : 15;
+        webrtc::EncodedImage encoded_image;
+        if (!encoder_factory) {
+            result.encoder_failure = "video encoder factory unavailable";
+        } else {
+            probe_encoder(encoder_factory.get(), codec, width, height, fps,
+                          &encoded_image, &result);
+        }
+        if (!decoder_factory) {
+            result.decoder_failure = "video decoder factory unavailable";
+        } else {
+            probe_decoder(
+                decoder_factory.get(), codec, width, height, fps,
+                result.encoder_frame_validated ? &encoded_image : nullptr,
+                &result);
+        }
+        g_runtime_codecs.emplace(codec, std::move(result));
+    }
+    probe_concurrent_hardware_sessions(encoder_factory.get());
+    g_runtime_probe_complete = true;
+}
+
+}
 
 using SoftwareEncoderFactory = webrtc::VideoEncoderFactoryTemplate<
     webrtc::LibvpxVp8EncoderTemplateAdapter,
@@ -364,6 +776,7 @@ std::unique_ptr<webrtc::VideoDecoderFactory> create_video_decoder_factory() {
 }
 
 VideoCodecFactoryDiagnostics video_codec_factory_diagnostics() {
+    run_runtime_probe();
     VideoCodecFactoryDiagnostics diagnostics;
 #if defined(__APPLE__)
     diagnostics.platform = "macOS";
@@ -395,10 +808,40 @@ VideoCodecFactoryDiagnostics video_codec_factory_diagnostics() {
         diagnostics.encoder_creations = g_encoder_creations;
         diagnostics.decoder_creations = g_decoder_creations;
     }
+    {
+        std::lock_guard<std::mutex> lock(g_runtime_probe_mutex);
+        diagnostics.codecs = g_runtime_codecs;
+        diagnostics.concurrent_hardware_sessions_tested =
+            g_concurrent_hardware_sessions_tested;
+        diagnostics.max_hardware_encode_sessions = g_max_hardware_encode_sessions;
+        diagnostics.tested_codec_pairs = g_tested_codec_pairs;
+        diagnostics.hardware_encoder = std::any_of(
+            diagnostics.codecs.begin(), diagnostics.codecs.end(),
+            [](const auto& entry) {
+                return entry.second.encoder_supported &&
+                    entry.second.encoder_frame_validated &&
+                    entry.second.encoder_hardware;
+            });
+        diagnostics.hardware_decoder = std::any_of(
+            diagnostics.codecs.begin(), diagnostics.codecs.end(),
+            [](const auto& entry) {
+                return entry.second.decoder_supported &&
+                    entry.second.decoder_frame_validated &&
+                    entry.second.decoder_hardware;
+            });
+    }
     return diagnostics;
 }
 
 void reset_video_codec_factory_diagnostics() {
+    {
+        std::lock_guard<std::mutex> lock(g_runtime_probe_mutex);
+        g_runtime_probe_complete = false;
+        g_runtime_codecs.clear();
+        g_concurrent_hardware_sessions_tested = false;
+        g_max_hardware_encode_sessions = 0;
+        g_tested_codec_pairs.clear();
+    }
     std::lock_guard<std::mutex> lock(g_diagnostics_mutex);
     g_active_encoder_implementation = "not-created";
     g_active_decoder_implementation = "not-created";

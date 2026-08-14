@@ -41,7 +41,21 @@ export class NativeP2pSessionDiagnosticsMethods {
   }
 
   async diagnosticStats() {
-    return this.stats();
+    return [
+      ...(await this.stats()),
+      {
+        type: "native-codec-routing",
+        mediaCapabilities: this.mediaCapabilities,
+        variantCount: new Set(
+          [...this.sources.values()]
+            .filter((entry) => entry.kind === "video")
+            .map((entry) => entry.variantId || entry.source),
+        ).size,
+        migrations: this.codecMigrationTelemetry.slice(-32),
+        decodeOverload: this.videoDecodeOverloadTelemetry.slice(-32),
+        runtimeTelemetry: this.codecRuntimeTelemetry.slice(-128),
+      },
+    ];
   }
 
   async getOutboundRtpStats() {
@@ -54,6 +68,16 @@ export class NativeP2pSessionDiagnosticsMethods {
           peerId: peer.peerId,
           source,
           kind: entry?.kind,
+          logicalStreamId: entry?.logicalStreamId || null,
+          generation: entry?.generation || 1,
+          variantId: entry?.variantId || null,
+          codec: entry?.codec || null,
+          codecAcceleration: entry?.codecAcceleration || null,
+          codecImplementation: entry?.codecImplementation || null,
+          width: entry?.width || null,
+          height: entry?.height || null,
+          fps: entry?.fps || null,
+          bitrate: entry?.bitrate || null,
           stats:
             nativeRtpStatForTrack(raw, "outbound-rtp", {
               kind: entry?.kind,
@@ -73,9 +97,22 @@ export class NativeP2pSessionDiagnosticsMethods {
         if (entry.p2pHandle !== peer.handle) continue;
         results.push({
           peerId: peer.peerId,
+          userId: entry.userId,
           consumerId: entry.key,
           source: entry.source,
           kind: entry.kind,
+          logicalStreamId: entry.logicalStreamId || null,
+          generation: entry.generation || 1,
+          variantId: entry.variantId || null,
+          codec: entry.codec || null,
+          codecAcceleration: entry.codecAcceleration || null,
+          codecImplementation: entry.codecImplementation || null,
+          width: entry.width || null,
+          height: entry.height || null,
+          fps: entry.fps || null,
+          bitrate: entry.bitrate || null,
+          migrationState: entry.migrationState || null,
+          visible: entry.visible !== false,
           stats: nativeRtpStatForTrack(raw, "inbound-rtp", entry) || null,
         });
       }

@@ -2,6 +2,7 @@ import type { AudioSettings } from "./settings.ts";
 import type { ChannelRoomRecord } from "./channel-room.ts";
 import type { MicrophoneGateSettings } from "./microphone-gate.ts";
 import type { VideoSettings } from "./video-settings.ts";
+import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 import type {
   NativeTauriLike,
   NativeVoiceStoreLike,
@@ -48,9 +49,22 @@ export type NativeCapabilities = Partial<NativeMediaFlags> & {
     { available?: boolean; sources?: unknown[] } | undefined
   >;
   videoCodecDiagnostics?: Record<string, unknown>;
+  videoCodecCapabilities?: Record<string, unknown>;
+  concurrentEncode?: Record<string, unknown>;
+  mediaCapabilities?: ParticipantMediaCapabilities;
 };
 export interface NativeFeed {
   key?: string;
+  logicalStreamId?: string;
+  generation?: number;
+  variantId?: string | null;
+  codec?: string | null;
+  codecAcceleration?: string | null;
+  codecImplementation?: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  bitrate?: number | null;
   userId?: unknown;
   source?: unknown;
   kind?: string;

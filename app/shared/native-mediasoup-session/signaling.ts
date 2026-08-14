@@ -88,18 +88,22 @@ export class NativeMediasoupSignalingMethods {
       getAudioBitrate: this.getAudioBitrate,
       getAudioStereo: this.getAudioStereo,
       getVideoSettings: this.getVideoSettings,
+      localPeerId: this.localPeerId,
       requestTimeoutMs: Math.max(
         this.requestTimeoutMs,
         CLOUDFLARE_REQUEST_TIMEOUT_MS,
       ),
       sources: this.sources,
       producers: this.producers,
+      producerVariants: this.producerVariants,
       consumers: this.consumers,
       sourceTransmission: this.sourceTransmission,
       remoteReceiving: this.remoteReceiving,
       localVideoFeeds: this.localVideoFeeds,
+      pendingLocalVideoFrames: this.pendingLocalVideoFrames,
       remoteVideoFeeds: this.remoteVideoFeeds,
       remoteAudioFeeds: this.remoteAudioFeeds,
+      mediaCapabilities: this.mediaCapabilities,
     });
     if (!this.cloudflareSession)
       throw new Error("Cloudflare media session was not created");
@@ -132,6 +136,9 @@ export class NativeMediasoupSignalingMethods {
       if (!wasInitialized)
         for (const entry of this.sources.values())
           await cloudflare.addSource(entry);
+      if (!wasInitialized)
+        for (const plan of this.codecRoutingPlans.values())
+          await this.applyCodecRoutingPlan(plan);
       await cloudflare.startSubscriptions();
       this.transportStates.set("send", "connected");
       this.transportStates.set("recv", "connected");

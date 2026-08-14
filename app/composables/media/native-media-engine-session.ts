@@ -19,7 +19,7 @@ import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
 import type {
   NativeCaptureRequest,
   NativeErrorLike,
-  NativeMediaFlags,
+  NativeCapabilities,
   NativeTopology,
 } from "../../shared/types/native-media.ts";
 import type { JoinSessionInput } from "../../shared/media/types.ts";
@@ -39,7 +39,7 @@ export async function initialize(
         config: resolvedConfig,
       });
       engine._mergeNativeCapabilities(
-        nativeState?.capabilities as NativeMediaFlags | undefined,
+        nativeState?.capabilities as NativeCapabilities | undefined,
       );
       const signalingToken = await engine._loadSignalingToken(resolvedConfig);
       engine.nativeAuthToken = signalingToken;
@@ -49,6 +49,7 @@ export async function initialize(
         getAudioBitrate: engine.getAudioBitrate,
         getAudioStereo: engine.getAudioStereo,
         getVideoSettings: engine.getVideoSettings,
+        mediaCapabilities: engine.mediaCapabilities,
         signalingPath:
           typeof resolvedConfig.signalingPath === "string"
             ? resolvedConfig.signalingPath
@@ -110,6 +111,7 @@ export async function initialize(
         getAudioBitrate: engine.getAudioBitrate,
         getAudioStereo: engine.getAudioStereo,
         getVideoSettings: engine.getVideoSettings,
+        mediaCapabilities: engine.mediaCapabilities,
         sendSignal: (data: NativeCaptureRequest) =>
           engine.nativeSession?.signaling?.send?.({
             type: "p2p-signal",

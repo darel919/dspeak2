@@ -14,6 +14,7 @@
 #include <map>
 #include <optional>
 #include <cstddef>
+#include <cstdio>
 #include <media/base/adapted_video_track_source.h>
 #include <media/base/audio_source.h>
 #include <rtc_base/synchronization/mutex.h>
@@ -164,6 +165,11 @@ public:
     void AddSink(webrtc::AudioTrackSinkInterface* sink) override {
         webrtc::MutexLock lock(&mutex_);
         sinks_.push_back(sink);
+        if (!sink_log_emitted_) {
+            std::fprintf(stderr, "[dspeak:media] native audio sink attached track=%s\n",
+                         track_id_.c_str());
+            sink_log_emitted_ = true;
+        }
     }
     void RemoveSink(webrtc::AudioTrackSinkInterface* sink) override {
         webrtc::MutexLock lock(&mutex_);
@@ -197,6 +203,12 @@ public:
         }
 
         webrtc::MutexLock lock(&mutex_);
+        if (!frame_log_emitted_) {
+            std::fprintf(stderr,
+                         "[dspeak:media] native audio frame reached source track=%s frames=%zu sinks=%zu\n",
+                         track_id_.c_str(), number_of_frames, sinks_.size());
+            frame_log_emitted_ = true;
+        }
         for (auto* sink : sinks_) {
             sink->OnData(output_data, output_bps, sample_rate, number_of_channels,
                          number_of_frames, absolute_capture_timestamp_ms);
@@ -222,6 +234,8 @@ private:
         webrtc::MediaSourceInterface::kLive;
     std::vector<webrtc::AudioTrackSinkInterface*> sinks_ RTC_GUARDED_BY(mutex_);
     std::array<int16_t, 1920> capture_conversion_buffer_{};
+    bool sink_log_emitted_ RTC_GUARDED_BY(mutex_) = false;
+    bool frame_log_emitted_ RTC_GUARDED_BY(mutex_) = false;
 };
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -298,6 +312,8 @@ struct lib_dspeak_media_p2p_handle {
     std::vector<std::unique_ptr<NativeReceiveAudioSink>> audio_sinks;
     std::vector<std::unique_ptr<NativeReceiveVideoSink>> video_sinks;
     std::map<std::string, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>> audio_receivers;
+    std::map<std::string, webrtc::scoped_refptr<webrtc::RtpSenderInterface>> audio_senders;
+    std::map<std::string, webrtc::scoped_refptr<webrtc::RtpSenderInterface>> video_senders;
     std::map<std::string, NativeReceiveAudioSink*> audio_sinks_by_id;
     std::map<std::string, NativeReceiveVideoSink*> video_sinks_by_id;
     webrtc::PeerConnectionObserver* p2p_observer_raw = nullptr;

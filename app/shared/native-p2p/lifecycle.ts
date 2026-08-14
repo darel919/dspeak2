@@ -177,6 +177,7 @@ export class NativeP2pLifecycleMethods {
     this.connections.delete(peerId);
     if (state.disconnectTimer) clearTimeout(state.disconnectTimer);
     if (state.negotiationTimer) clearTimeout(state.negotiationTimer);
+    if (state.capabilityWaitTimer) clearTimeout(state.capabilityWaitTimer);
     for (const entry of state.remoteTracks.values()) {
       try {
         this.onRemoteTrackEnded(entry);

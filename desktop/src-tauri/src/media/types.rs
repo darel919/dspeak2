@@ -109,6 +109,10 @@ pub struct NativeMediaCapabilities {
     pub health: NativeMediaHealth,
     #[serde(default)]
     pub video_codec_diagnostics: Value,
+    #[serde(default)]
+    pub video_codec_capabilities: Value,
+    #[serde(default)]
+    pub concurrent_encode: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

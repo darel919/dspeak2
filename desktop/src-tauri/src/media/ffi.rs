@@ -200,7 +200,11 @@ extern "C" {
         error_out: *mut c_int,
     ) -> *mut lib_dspeak_media_producer_t;
 
-    pub fn lib_dspeak_media_p2p_add_video_track(handle: *mut c_void, track: *mut c_void) -> c_int;
+    pub fn lib_dspeak_media_p2p_add_video_track(
+        handle: *mut c_void,
+        track: *mut c_void,
+        preferred_codec: *const c_char,
+    ) -> c_int;
     pub fn lib_dspeak_media_p2p_add_audio_track(handle: *mut c_void, track: *mut c_void) -> c_int;
     pub fn lib_dspeak_media_p2p_remove_video_track(
         handle: *mut c_void,
@@ -223,6 +227,44 @@ extern "C" {
     pub fn lib_dspeak_media_p2p_set_track_parameters(
         handle: *mut c_void,
         track_id: *const c_char,
+        parameters_json: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_add_video_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        preferred_codec: *const c_char,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_add_audio_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_remove_video_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_remove_audio_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_replace_video_track_with_key(
+        handle: *mut c_void,
+        old_track: *mut c_void,
+        new_track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_replace_audio_track_with_key(
+        handle: *mut c_void,
+        old_track: *mut c_void,
+        new_track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_set_track_parameters_with_key(
+        handle: *mut c_void,
+        track_key: *const c_char,
         parameters_json: *const c_char,
     ) -> c_int;
     pub fn lib_dspeak_media_p2p_set_audio_stereo(handle: *mut c_void, stereo: bool) -> c_int;

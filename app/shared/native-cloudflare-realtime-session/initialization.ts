@@ -106,8 +106,9 @@ export class NativeCloudflareInitializationMethods {
           this.pendingRemoteTrackEvents.delete(mid);
         }
       }
-      const entry = this.consumers.get(trackName);
-      if (entry) this._closeConsumer(entry);
+      for (const entry of [...this.consumers.values()])
+        if (String(entry.trackName || "") === trackName)
+          this._closeConsumer(entry);
       return true;
     }
     const publication = { ...data, trackName };

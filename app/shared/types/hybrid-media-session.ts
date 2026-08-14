@@ -39,6 +39,7 @@ export interface HybridMediaSessionApiContext {
   lifecycle: Ref<unknown>;
   localVideoFeeds: Ref<unknown>;
   mediaConnectionState: Ref<unknown>;
+  mediaCapabilities: Ref<unknown>;
   mediaPathMetrics: Ref<unknown>;
   microphoneDeviceState: Ref<unknown>;
   participantSfuRoundTripTimes: Ref<unknown>;
@@ -58,6 +59,7 @@ export interface HybridMediaSessionApiContext {
   sharedAudioStats: Ref<unknown>;
   sfuRoundTripTime: Ref<unknown>;
   sendParticipantVoiceState: HybridSessionDynamicFunction;
+  setMediaCapabilities: HybridSessionDynamicFunction;
   setRemoteScreenReceiving: HybridSessionDynamicFunction;
   setRemoteSystemAudioReceiving: HybridSessionDynamicFunction;
   setSharedAudioAttenuation: HybridSessionDynamicFunction;

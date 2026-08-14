@@ -65,7 +65,7 @@ export class NativeMediasoupDiagnosticsMethods {
   }
 
   get isProducing() {
-    return this.producers.size > 0;
+    return this.producers.size > 0 || this.producerVariants.size > 0;
   }
 
   get remoteProducersCount() {
@@ -114,7 +114,23 @@ export class NativeMediasoupDiagnosticsMethods {
   async diagnosticStats(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.diagnosticStats?.() || [];
-    return this.stats();
+    const stats = (await this.stats()) as unknown[];
+    return [
+      ...stats,
+      {
+        type: "native-codec-routing",
+        mediaCapabilities: this.mediaCapabilities,
+        variantCount: new Set(
+          [...this.producers.values()]
+            .concat([...this.producerVariants.values()])
+            .filter((entry) => entry.kind === "video")
+            .map((entry) => entry.entry.variantId || entry.source),
+        ).size,
+        migrations: this.codecMigrationTelemetry.slice(-32),
+        decodeOverload: this.videoDecodeOverloadTelemetry.slice(-32),
+        runtimeTelemetry: this.codecRuntimeTelemetry.slice(-128),
+      },
+    ];
   }
 
   expectedInboundFlowCount(this: NativeMediasoupSfuSession) {
@@ -139,9 +155,10 @@ export class NativeMediasoupDiagnosticsMethods {
           inboundFlowing: 0,
         }
       );
-    const outboundEntries = [...this.producers.values()].filter(
-      (entry) => this.sourceTransmission?.get(entry.source) !== false,
-    );
+    const outboundEntries = [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ].filter((entry) => this.sourceTransmission?.get(entry.source) !== false);
     const outboundExpected = outboundEntries.length;
     const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
     if (!this.sendTransport || !this.recvTransport) {
@@ -221,9 +238,12 @@ export class NativeMediasoupDiagnosticsMethods {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.getOutboundRtpStats?.() || [];
     const results: Array<Record<string, unknown>> = [];
-    for (const entry of this.sources.values()) {
-      const producer = this.producers.get(entry.source);
-      if (!producer) continue;
+    const producerEntries = [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ];
+    for (const producer of producerEntries) {
+      const entry = producer.entry;
       let report = null;
       try {
         report = await this.invoke("media_get_producer_stats", {
@@ -233,6 +253,16 @@ export class NativeMediasoupDiagnosticsMethods {
       results.push({
         source: entry.source,
         kind: entry.kind,
+        logicalStreamId: entry.logicalStreamId || null,
+        generation: entry.generation || 1,
+        variantId: entry.variantId || null,
+        codec: entry.codec || null,
+        codecAcceleration: entry.codecAcceleration || null,
+        codecImplementation: entry.codecImplementation || null,
+        width: entry.width || null,
+        height: entry.height || null,
+        fps: entry.fps || null,
+        bitrate: entry.bitrate || null,
         stats:
           nativeRtpStatForTrack(report, "outbound-rtp", {
             kind: entry.kind,
@@ -256,8 +286,21 @@ export class NativeMediasoupDiagnosticsMethods {
       } catch {}
       results.push({
         consumerId: entry.key,
+        userId: entry.userId,
         source: entry.source,
         kind: entry.kind,
+        logicalStreamId: entry.logicalStreamId || null,
+        generation: entry.generation || 1,
+        variantId: entry.variantId || null,
+        codec: entry.codec || null,
+        codecAcceleration: entry.codecAcceleration || null,
+        codecImplementation: entry.codecImplementation || null,
+        width: entry.width || null,
+        height: entry.height || null,
+        fps: entry.fps || null,
+        bitrate: entry.bitrate || null,
+        migrationState: entry.migrationState || null,
+        visible: entry.visible !== false,
         stats:
           nativeRtpStatForTrack(report, "inbound-rtp", {
             kind: entry.kind,

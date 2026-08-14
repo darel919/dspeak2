@@ -34,6 +34,8 @@ std::atomic<int> g_capture_error{0};
 std::atomic<uint64_t> g_probe_video_frames{0};
 std::atomic<uint64_t> g_probe_audio_frames{0};
 std::atomic<bool> g_screen_frame_logged{false};
+std::atomic<bool> g_screen_audio_callback_logged{false};
+std::atomic<bool> g_screen_audio_emitted_logged{false};
 std::atomic<bool> g_camera_frame_logged{false};
 CaptureRoute g_desktop_route = CaptureRoute::kDesktop;
 CaptureRoute g_microphone_route = CaptureRoute::kMicrophone;

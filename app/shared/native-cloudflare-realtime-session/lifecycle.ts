@@ -16,7 +16,8 @@ export class NativeCloudflareLifecycleMethods {
     const connected = this.iceState === 2 || this.iceState === 3;
     const failed = this.iceState === 4;
     const state = connected ? "connected" : failed ? "failed" : "new";
-    const sendRequired = this.producers.size > 0;
+    const sendRequired =
+      this.producers.size > 0 || this.producerVariants.size > 0;
     const receiveRequired = this.publications.size > 0;
     return {
       ready:
@@ -108,7 +109,21 @@ export class NativeCloudflareLifecycleMethods {
   }
 
   async diagnosticStats() {
-    return this.stats();
+    return [
+      ...(await this.stats()),
+      {
+        type: "native-codec-routing",
+        mediaCapabilities: this.mediaCapabilities,
+        variantCount: new Set(
+          [...this.producers.values(), ...this.producerVariants.values()]
+            .filter((entry) => entry.kind === "video")
+            .map((entry) => entry.variantId || entry.source),
+        ).size,
+        migrations: this.codecMigrationTelemetry.slice(-32),
+        decodeOverload: this.videoDecodeOverloadTelemetry.slice(-32),
+        runtimeTelemetry: this.codecRuntimeTelemetry.slice(-128),
+      },
+    ];
   }
 
   async _rawStats() {
@@ -123,7 +138,10 @@ export class NativeCloudflareLifecycleMethods {
   }
 
   async mediaReadiness(expectedInbound: number) {
-    const outboundEntries = [...this.producers.values()].filter(
+    const outboundEntries = [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ].filter(
       (entry) => this.sourceTransmission.get(String(entry.source)) !== false,
     );
     const inboundEntries = [...this.consumers.values()].filter(
@@ -187,19 +205,44 @@ export class NativeCloudflareLifecycleMethods {
 
   async getOutboundRtpStats() {
     const raw = await this._rawStats();
-    return [...this.producers.values()].map((entry) => ({
-      source: entry.source,
-      kind: entry.kind,
-      stats: nativeRtpStatForTrack(raw, "outbound-rtp", entry) || null,
-    }));
+    return [...this.producers.values(), ...this.producerVariants.values()].map(
+      (entry) => ({
+        source: entry.source,
+        kind: entry.kind,
+        logicalStreamId: entry.logicalStreamId || null,
+        generation: entry.generation || 1,
+        variantId: entry.variantId || null,
+        codec: entry.codec || null,
+        codecAcceleration: entry.codecAcceleration || null,
+        codecImplementation: entry.codecImplementation || null,
+        width: entry.width || null,
+        height: entry.height || null,
+        fps: entry.fps || null,
+        bitrate: entry.bitrate || null,
+        stats: nativeRtpStatForTrack(raw, "outbound-rtp", entry) || null,
+      }),
+    );
   }
 
   async getInboundRtpStats() {
     const raw = await this._rawStats();
     return [...this.consumers.values()].map((entry) => ({
       consumerId: entry.key,
+      userId: entry.userId,
       source: entry.source,
       kind: entry.kind,
+      logicalStreamId: entry.logicalStreamId || null,
+      generation: entry.generation || 1,
+      variantId: entry.variantId || null,
+      codec: entry.codec || null,
+      codecAcceleration: entry.codecAcceleration || null,
+      codecImplementation: entry.codecImplementation || null,
+      width: entry.width || null,
+      height: entry.height || null,
+      fps: entry.fps || null,
+      bitrate: entry.bitrate || null,
+      migrationState: entry.migrationState || null,
+      visible: entry.visible !== false,
       stats: nativeRtpStatForTrack(raw, "inbound-rtp", entry) || null,
     }));
   }
@@ -212,7 +255,10 @@ export class NativeCloudflareLifecycleMethods {
     this.sessionId = null;
     this.initializing = null;
     this.subscriptionsStarted = false;
-    for (const entry of this.producers.values()) {
+    for (const entry of [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ]) {
       try {
         this.send?.({
           type: "cloudflare-publication",
@@ -235,6 +281,7 @@ export class NativeCloudflareLifecycleMethods {
       }
     }
     this.producers.clear();
+    this.producerVariants.clear();
     this.consumers.clear();
     this.publications.clear();
     this.remoteByMid.clear();
@@ -242,6 +289,8 @@ export class NativeCloudflareLifecycleMethods {
     this.pendingLocalVideoFrames.clear();
     this.remoteVideoFeeds.clear();
     this.remoteAudioFeeds.clear();
+    this.logicalVideoStreams.clear();
+    this.codecMigrationTelemetry.length = 0;
     this.rtpSamples.clear();
     this.subscriptionTasks.clear();
     this.subscribedTrackNames.clear();
@@ -279,14 +328,28 @@ export class NativeCloudflareLifecycleMethods {
   _closeConsumer(entry: Record<string, unknown>) {
     if (!entry || entry.closed) return;
     entry.closed = true;
-    this.consumers.delete(String(entry.consumerId || entry.trackName || ""));
+    const consumerId = String(entry.consumerId || entry.trackName || "");
+    for (const [key, current] of this.consumers)
+      if (current === entry || key === consumerId) this.consumers.delete(key);
     const key = String(entry.key || "");
-    this.remoteAudioFeeds.delete(key);
-    this.remoteVideoFeeds.delete(key);
-    try {
-      this.onRemoteTrackEnded?.(entry);
-    } catch (error) {
-      this.onError?.(error);
+    const audioFeed = this.remoteAudioFeeds.get(key);
+    if (
+      audioFeed &&
+      String(audioFeed.consumerId || audioFeed.trackId || "") === consumerId
+    )
+      this.remoteAudioFeeds.delete(key);
+    const videoFeed = this.remoteVideoFeeds.get(key);
+    if (
+      videoFeed &&
+      String(videoFeed.consumerId || videoFeed.trackId || "") === consumerId
+    )
+      this.remoteVideoFeeds.delete(key);
+    if (entry.visible !== false && entry.superseded !== true) {
+      try {
+        this.onRemoteTrackEnded?.(entry);
+      } catch (error) {
+        this.onError?.(error);
+      }
     }
   }
 

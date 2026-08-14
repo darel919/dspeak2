@@ -280,9 +280,13 @@ extern "C" lib_dspeak_media_producer_t* lib_dspeak_media_produce_video_track(
         auto app_data = app_data_json ? nlohmann::json::parse(app_data_json) : nlohmann::json::object();
         auto encodings = parse_encodings(app_data);
         const auto codec_options = app_data.value("codecOptions", nlohmann::json::object());
+        const auto codec_parameters = app_data.value("codecParameters", nlohmann::json::object());
+        const auto* codec = codec_parameters.is_object() && !codec_parameters.empty()
+            ? &codec_parameters
+            : nullptr;
         auto* producer = transport->transport->Produce(
             nullptr, track->track.get(), encodings.empty() ? nullptr : &encodings,
-            &codec_options, nullptr, app_data);
+            &codec_options, codec, app_data);
         apply_degradation_preference(producer, app_data);
         return reinterpret_cast<lib_dspeak_media_producer_t*>(producer);
     } catch (...) {

@@ -50,6 +50,8 @@ extern std::atomic<int> g_capture_error;
 extern std::atomic<uint64_t> g_probe_video_frames;
 extern std::atomic<uint64_t> g_probe_audio_frames;
 extern std::atomic<bool> g_screen_frame_logged;
+extern std::atomic<bool> g_screen_audio_callback_logged;
+extern std::atomic<bool> g_screen_audio_emitted_logged;
 extern std::atomic<bool> g_camera_frame_logged;
 extern CaptureRoute g_desktop_route;
 extern CaptureRoute g_microphone_route;

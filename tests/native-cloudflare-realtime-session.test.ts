@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NativeCloudflareRealtimeSession } from "../app/shared/native-cloudflare-realtime-session.ts";
+import { finalizeVideoMigration as finalizeCloudflareVideoMigration } from "../app/shared/native-cloudflare-realtime-session/remote.ts";
+import { emptyVideoCodecCapabilities } from "../app/shared/types/video-codec-capabilities.ts";
 
 function localOffer(trackId, kind = "audio", includeTrackId = true) {
   return [
@@ -17,6 +19,73 @@ function localOffer(trackId, kind = "audio", includeTrackId = true) {
 }
 
 describe("NativeCloudflareRealtimeSession", () => {
+  it("subscribes only to an efficient Cloudflare receiver cohort variant", async () => {
+    const requests = [];
+    const videoCodecs = emptyVideoCodecCapabilities();
+    videoCodecs.VP8.decode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "good",
+    };
+    const mediaCapabilities = {
+      videoCodecs,
+      concurrentEncode: { supported: false },
+      source: "native-runtime-probe" as const,
+    };
+    let session;
+    const send = (message) => {
+      if (message.type !== "cloudflare-request") return true;
+      requests.push(message);
+      const { requestId, operation, body } = message.data;
+      if (operation === "tracks-new")
+        queueMicrotask(() =>
+          session.handleMessage("cloudflare-response", {
+            requestId,
+            result: {
+              tracks: body.tracks.map((track) => ({
+                trackName: track.trackName,
+                mid: "0",
+              })),
+            },
+          }),
+        );
+      return true;
+    };
+    const h264 = {
+      trackName: "alice-h264",
+      kind: "video",
+      userId: "alice",
+      source: "camera",
+      logicalStreamId: "user:alice/camera",
+      codec: "H264",
+      receivers: ["bob"],
+    };
+    const vp8 = {
+      ...h264,
+      trackName: "alice-vp8",
+      codec: "VP8",
+      receivers: ["dave"],
+    };
+    session = new NativeCloudflareRealtimeSession({
+      invoke: async () => ({}),
+      send,
+      localPeerId: "dave",
+      mediaCapabilities,
+    });
+    session.sessionId = "cloudflare-session";
+    session.handle = 10;
+    session.closed = false;
+    session.publications.set(h264.trackName, h264);
+    session.publications.set(vp8.trackName, vp8);
+
+    await session.subscribePublications([h264, vp8]);
+
+    assert.deepEqual(
+      requests[0].data.body.tracks.map((track) => track.trackName),
+      ["alice-vp8"],
+    );
+  });
+
   it("delivers local native video frames through the Cloudflare session", () => {
     const localVideoFeeds = new Map([
       [
@@ -449,5 +518,398 @@ describe("NativeCloudflareRealtimeSession", () => {
       initialPublicationCount,
     );
     await session.closeMedia();
+  });
+
+  it("keeps the active Cloudflare session when a new variant cannot negotiate", async () => {
+    const calls = [];
+    let closeMediaCalls = 0;
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async (command, payload = {}) => {
+        calls.push([command, payload]);
+        if (command === "media_p2p_add_track")
+          return { trackId: "candidate-track" };
+        if (command === "media_p2p_create_offer")
+          throw new Error("candidate negotiation failed");
+        return {};
+      },
+      send: () => true,
+    });
+    session.closed = false;
+    session.handle = 11;
+    session.sessionId = "native-session";
+    const originalCloseMedia = session.closeMedia.bind(session);
+    session.closeMedia = () => {
+      closeMediaCalls += 1;
+      return originalCloseMedia();
+    };
+
+    await assert.rejects(
+      session.addSource({
+        source: "camera",
+        kind: "video",
+        logicalStreamId: "user:alice/camera",
+        variantId: "user:alice/camera:av1",
+        codec: "AV1",
+      }),
+      /candidate negotiation failed/,
+    );
+
+    assert.equal(closeMediaCalls, 0);
+    assert.equal(session.closed, false);
+    assert.equal(session.producerVariants.size, 0);
+    assert.equal(session.sources.has("camera"), false);
+    assert.deepEqual(
+      calls
+        .filter(([command]) => command === "media_p2p_remove_track")
+        .map(([, payload]) => payload.trackKey),
+      ["user:alice/camera:av1"],
+    );
+    await originalCloseMedia();
+  });
+
+  it("publishes independent native codec variants from one capture source", async () => {
+    const calls = [];
+    const publications = [];
+    let session;
+    const offer = (trackIds) =>
+      [
+        "v=0",
+        "o=- 1 1 IN IP4 127.0.0.1",
+        "s=-",
+        "t=0 0",
+        ...trackIds.flatMap((trackId, index) => [
+          "m=video 9 UDP/TLS/RTP/SAVPF 96",
+          `a=mid:${index}`,
+          "a=sendrecv",
+          `a=msid:stream0 ${trackId}`,
+        ]),
+        "",
+      ].join("\r\n");
+    const invoke = async (command, payload = {}) => {
+      calls.push([command, payload]);
+      if (command === "media_p2p_create") return { handle: 12 };
+      if (command === "media_p2p_poll_ice_candidate") return null;
+      if (command === "media_p2p_add_track")
+        return { trackId: `${payload.trackKey}-track` };
+      if (command === "media_p2p_create_offer")
+        return offer([
+          "user:alice/camera:h264-track",
+          "user:alice/camera:vp8-track",
+        ]);
+      return {};
+    };
+    const send = (message) => {
+      if (message.type === "cloudflare-publication") publications.push(message);
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation, body } = message.data;
+      const result =
+        operation === "new-session"
+          ? { sessionId: "native-session" }
+          : body?.tracks?.[0]?.location === "local"
+            ? { sessionDescription: { type: "answer", sdp: "answer" } }
+            : {};
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", { requestId, result }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({ invoke, send });
+
+    await session.addSource({
+      source: "camera",
+      kind: "video",
+      logicalStreamId: "user:alice/camera",
+      variantId: "user:alice/camera:h264",
+      codec: "H264",
+    });
+    await session.addSource({
+      source: "camera",
+      kind: "video",
+      logicalStreamId: "user:alice/camera",
+      variantId: "user:alice/camera:vp8",
+      codec: "VP8",
+    });
+
+    assert.equal(session.producers.size, 0);
+    assert.deepEqual(
+      [...session.producerVariants.keys()],
+      ["user:alice/camera:h264", "user:alice/camera:vp8"],
+    );
+    assert.equal(session.localVideoFeeds.has("camera"), true);
+    assert.deepEqual(
+      calls
+        .filter(([command]) => command === "media_p2p_add_track")
+        .map(([, payload]) => payload.trackKey),
+      ["user:alice/camera:h264", "user:alice/camera:vp8"],
+    );
+    assert.deepEqual(
+      publications.map((message) => message.data.variantId),
+      ["user:alice/camera:h264", "user:alice/camera:vp8"],
+    );
+    await session.closeMedia();
+  });
+
+  it("updates an existing variant without replacing its native track", async () => {
+    const calls = [];
+    const publications = [];
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async (command, payload = {}) => {
+        calls.push([command, payload]);
+        return {};
+      },
+      send: (message) => {
+        if (message.type === "cloudflare-publication")
+          publications.push(message);
+        return true;
+      },
+    });
+    session.closed = false;
+    session.handle = 13;
+    session.sessionId = "native-session";
+    session.sources.set("camera", {
+      source: "camera",
+      kind: "video",
+      videoSettings: { resolution: "720p", frameRate: 30 },
+    });
+    session.producerVariants.set("camera:h264", {
+      source: "camera",
+      kind: "video",
+      trackId: "camera-h264-track",
+      trackName: "camera-h264-publication",
+      mid: "0",
+      logicalStreamId: "user:alice/camera",
+      variantId: "camera:h264",
+      generation: 1,
+      codec: "H264",
+      receivers: ["bob"],
+    });
+
+    await session.updateVariantMetadata({
+      source: "camera",
+      kind: "video",
+      logicalStreamId: "user:alice/camera",
+      variantId: "camera:h264",
+      generation: 2,
+      codec: "H264",
+      receivers: ["carol"],
+      target: { width: 640, height: 360, fps: 15 },
+      score: 8,
+    });
+
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_replace_track").length,
+      0,
+    );
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_add_track").length,
+      0,
+    );
+    assert.ok(
+      calls.some(
+        ([command, payload]) =>
+          command === "media_p2p_set_track_parameters" &&
+          payload.trackKey === "camera:h264" &&
+          payload.parameters.maxFramerate === 15,
+      ),
+    );
+    assert.equal(
+      session.producerVariants.get("camera:h264").trackId,
+      "camera-h264-track",
+    );
+    assert.deepEqual(session.producerVariants.get("camera:h264").receivers, [
+      "carol",
+    ]);
+    assert.equal(publications.at(-1).data.generation, 2);
+
+    session.consumers.set("consumer-1", {
+      variantId: "camera:h264",
+      migrationState: "warming",
+    });
+    assert.equal(await session.removeVariant("camera:h264"), false);
+    assert.equal(
+      calls.filter(([command]) => command === "media_p2p_remove_track").length,
+      0,
+    );
+  });
+
+  it("removes a base producer when its routing variant is retired", async () => {
+    const calls = [];
+    let session;
+    const invoke = async (command, payload = {}) => {
+      calls.push([command, payload]);
+      if (command === "media_p2p_create_offer") return "offer";
+      return {};
+    };
+    const send = (message) => {
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId } = message.data;
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", {
+          requestId,
+          result: {},
+        }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({ invoke, send });
+    session.closed = false;
+    session.handle = 12;
+    session.sessionId = "native-session";
+    session.producers.set("camera", {
+      source: "camera",
+      kind: "video",
+      trackName: "camera-h264",
+      trackId: "camera-track",
+      mid: "0",
+      variantId: "user:alice/camera:h264",
+      logicalStreamId: "user:alice/camera",
+      codec: "H264",
+    });
+
+    assert.equal(await session.removeVariant("user:alice/camera:h264"), true);
+    assert.equal(session.producers.has("camera"), false);
+    assert.equal(
+      calls.some(([command]) => command === "media_p2p_remove_track"),
+      true,
+    );
+  });
+
+  it("keeps the visible video consumer until a replacement presents advancing frames", () => {
+    const remoteVideoFeeds = new Map();
+    const events = [];
+    const migrationMessages = [];
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async () => ({}),
+      send: (message) => {
+        migrationMessages.push(message);
+        return true;
+      },
+      localPeerId: "peer-1",
+      onRemoteTrack: (entry) => events.push(["track", entry.trackId]),
+      onRemoteTrackEnded: (entry) => events.push(["ended", entry.trackId]),
+      remoteVideoFeeds,
+    });
+    session.closed = false;
+    session.handle = 7;
+    session.remoteByMid.set("1", {
+      trackName: "remote-video",
+      userId: "user-2",
+      peerId: "peer-2",
+      source: "camera",
+      logicalStreamId: "user:user-2/camera",
+      generation: 1,
+      variantId: "user:user-2/camera:h264",
+      codec: "H264",
+    });
+
+    assert.equal(
+      session.handleReceiveEvent({
+        kind: 4,
+        payload: {
+          handle: 7,
+          event: "track-added",
+          trackId: "video-a",
+          kind: "video",
+          mid: "1",
+        },
+      }),
+      true,
+    );
+    assert.equal(
+      remoteVideoFeeds.get("remote:user-2:camera").trackId,
+      "video-a",
+    );
+    assert.deepEqual(migrationMessages[0], {
+      type: "codec-migration-state",
+      data: {
+        receiverId: "peer-1",
+        logicalStreamId: "user:user-2/camera",
+        variantId: "user:user-2/camera:h264",
+        generation: 1,
+        state: "stable",
+      },
+    });
+    assert.deepEqual(events, [["track", "video-a"]]);
+
+    session.remoteByMid.set("1", {
+      trackName: "remote-video",
+      userId: "user-2",
+      peerId: "peer-2",
+      source: "camera",
+      logicalStreamId: "user:user-2/camera",
+      generation: 2,
+      variantId: "user:user-2/camera:vp8",
+      codec: "VP8",
+    });
+    assert.equal(
+      session.handleReceiveEvent({
+        kind: 4,
+        payload: {
+          handle: 7,
+          event: "track-added",
+          trackId: "video-b",
+          kind: "video",
+          mid: "1",
+        },
+      }),
+      true,
+    );
+    assert.equal(
+      remoteVideoFeeds.get("remote:user-2:camera").trackId,
+      "video-a",
+    );
+    assert.equal(session.consumers.get("remote-video").closed, false);
+    assert.deepEqual(events, [["track", "video-a"]]);
+
+    for (const timestamp of [1, 2, 3])
+      assert.equal(
+        session.handleReceiveEvent({
+          kind: 2,
+          id: "video-b",
+          payload: {
+            handle: 7,
+            trackId: "video-b",
+            width: 2,
+            height: 2,
+            timestamp,
+          },
+          data: `frame-${timestamp}`,
+        }),
+        true,
+      );
+
+    assert.equal(
+      remoteVideoFeeds.get("remote:user-2:camera").trackId,
+      "video-b",
+    );
+    assert.equal(session.consumers.get("remote-video").closed, false);
+    assert.deepEqual(events, [
+      ["track", "video-a"],
+      ["track", "video-b"],
+    ]);
+    assert.equal(
+      session.codecMigrationTelemetry.at(-1)?.state,
+      "warming-receivers",
+    );
+    assert.equal(
+      session.logicalVideoStreams.get("user:user-2/camera")?.state,
+      "committing",
+    );
+    const candidate = session.consumers.get("remote-video:video-b");
+    assert.ok(candidate);
+    assert.equal(finalizeCloudflareVideoMigration(session, candidate), true);
+    assert.equal(session.codecMigrationTelemetry.at(-1)?.state, "stable");
+    assert.deepEqual(migrationMessages.at(-1), {
+      type: "codec-migration-state",
+      data: {
+        receiverId: "peer-1",
+        logicalStreamId: "user:user-2/camera",
+        variantId: "user:user-2/camera:vp8",
+        generation: 2,
+        state: "stable",
+      },
+    });
+    assert.equal(session.consumers.has("remote-video"), false);
+    session.closeMedia();
   });
 });

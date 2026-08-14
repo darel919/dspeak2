@@ -108,7 +108,7 @@ const char*   lib_dspeak_media_video_track_get_id(lib_dspeak_media_video_track_t
 const char*   lib_dspeak_media_audio_track_get_id(lib_dspeak_media_audio_track_t* t);
 
 /* ── P2P track attachment ───────────────────────────── */
-int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track);
+int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track, const char* preferred_codec);
 int lib_dspeak_media_p2p_add_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
 int lib_dspeak_media_p2p_remove_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track);
 int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
@@ -123,6 +123,37 @@ int lib_dspeak_media_p2p_replace_audio_track(
 int lib_dspeak_media_p2p_set_track_parameters(
     lib_dspeak_media_p2p_handle_t* h,
     const char* track_id,
+    const char* parameters_json);
+int lib_dspeak_media_p2p_add_video_track_with_key(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_video_track_t* track,
+    const char* preferred_codec,
+    const char* track_key);
+int lib_dspeak_media_p2p_add_audio_track_with_key(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_audio_track_t* track,
+    const char* track_key);
+int lib_dspeak_media_p2p_remove_video_track_with_key(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_video_track_t* track,
+    const char* track_key);
+int lib_dspeak_media_p2p_remove_audio_track_with_key(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_audio_track_t* track,
+    const char* track_key);
+int lib_dspeak_media_p2p_replace_video_track_with_key(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_video_track_t* old_track,
+    lib_dspeak_media_video_track_t* new_track,
+    const char* track_key);
+int lib_dspeak_media_p2p_replace_audio_track_with_key(
+    lib_dspeak_media_p2p_handle_t* h,
+    lib_dspeak_media_audio_track_t* old_track,
+    lib_dspeak_media_audio_track_t* new_track,
+    const char* track_key);
+int lib_dspeak_media_p2p_set_track_parameters_with_key(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_key,
     const char* parameters_json);
 int lib_dspeak_media_p2p_set_audio_stereo(
     lib_dspeak_media_p2p_handle_t* h,
@@ -293,19 +324,23 @@ const char* lib_dspeak_media_audio_track_get_id(lib_dspeak_media_audio_track_t* 
 
 /* Attach a native video track to a P2P PeerConnection.
  * Returns 0 on success, negative on error. */
-int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track);
+int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track, const char* preferred_codec);
+int lib_dspeak_media_p2p_add_video_track_with_key(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track, const char* preferred_codec, const char* track_key);
 
 /* Attach a native audio track to a P2P PeerConnection.
  * Returns 0 on success, negative on error. */
 int lib_dspeak_media_p2p_add_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
+int lib_dspeak_media_p2p_add_audio_track_with_key(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track, const char* track_key);
 
 /* Remove a native video track from a P2P PeerConnection.
  * Returns 0 on success, negative on error. */
 int lib_dspeak_media_p2p_remove_video_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track);
+int lib_dspeak_media_p2p_remove_video_track_with_key(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_video_track_t* track, const char* track_key);
 
 /* Remove a native audio track from a P2P PeerConnection.
  * Returns 0 on success, negative on error. */
 int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track);
+int lib_dspeak_media_p2p_remove_audio_track_with_key(lib_dspeak_media_p2p_handle_t* h, lib_dspeak_media_audio_track_t* track, const char* track_key);
 
 /* Produce a native video track on a mediasoup send transport.
  * Returns producer handle or NULL. */

@@ -11,6 +11,7 @@ export function createTopologyProviderActions({
   ensureSfu,
   getActiveProvider,
   getHighestQueuedEpoch,
+  getMediaCapabilities = () => null,
   getMessageHandler,
   getProviderSocket,
   getSelectedSfuProvider,
@@ -178,6 +179,8 @@ export function createTopologyProviderActions({
       await socket.connect({
         signalingUrl: data.signalingUrl,
         ticket: data.ticket,
+        mediaCapabilities: getMediaCapabilities(),
+        capabilityProtocol: "video-codec-matrix-v1",
       });
       sendProviderReady();
       settleTicketWaiter(true);

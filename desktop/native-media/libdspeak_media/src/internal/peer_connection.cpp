@@ -548,6 +548,8 @@ extern "C" void lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h)
             h->audio_sinks_by_id.clear();
             h->video_sinks_by_id.clear();
             h->audio_receivers.clear();
+            h->audio_senders.clear();
+            h->video_senders.clear();
             h->audio_sinks.clear();
             h->video_sinks.clear();
             h->factory = nullptr;

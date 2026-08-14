@@ -5,6 +5,15 @@ import {
   VIDEO_RESOLUTIONS,
 } from "../video-settings.ts";
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
+import {
+  efficientEncodeCodecs,
+  efficiencyRank,
+  isEmergencyUsable,
+  isRealtimeEfficient,
+  normalizeParticipantMediaCapabilities,
+  normalizeVideoCodecName,
+} from "../types/video-codec-capabilities.ts";
+import { supportsCodecDirectionTarget } from "../video-codec-routing.ts";
 
 import { requestIdentifier, sourceKind, midForTrack } from "./helpers.ts";
 import type {
@@ -16,6 +25,78 @@ import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-
 import type { VideoSettings } from "../types/video-settings.ts";
 
 type NativeSessionDescriptionType = "offer" | "answer" | "pranswer";
+
+function positiveMetadataNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
+}
+
+function publicationTarget(publication: NativeCloudflarePublication) {
+  const nestedTarget =
+    publication.target && typeof publication.target === "object"
+      ? (publication.target as Record<string, unknown>)
+      : null;
+  const target: { width?: number; height?: number; fps?: number } = {};
+  for (const key of ["width", "height", "fps"] as const) {
+    const value = positiveMetadataNumber(
+      nestedTarget?.[key] ?? publication[key],
+    );
+    if (value) target[key] = value;
+  }
+  return Object.keys(target).length ? target : undefined;
+}
+
+function sourceVideoMetadata(
+  entry: NativeCloudflareSourceEntry,
+): Pick<NativeCloudflareSourceEntry, "width" | "height" | "fps" | "bitrate"> {
+  if (sourceKind(entry) !== "video")
+    return { width: null, height: null, fps: null, bitrate: null };
+  const video = resolveNativeCaptureVideoSettings(
+    entry.captureSelection,
+    entry.videoSettings || undefined,
+  );
+  const resolutionKey = String(
+    video.resolution || "",
+  ) as keyof typeof VIDEO_RESOLUTIONS;
+  const resolution = VIDEO_RESOLUTIONS[resolutionKey];
+  const width = Number(entry.width || video.width || resolution?.width || 1920);
+  const height = Number(
+    entry.height || video.height || resolution?.height || 1080,
+  );
+  const options = buildVideoProduceOptions({
+    width,
+    height,
+    frameRate: video.frameRate || 30,
+    screen: entry.source === "screen",
+    maxBitrate: video.maxBitrate,
+    lowSpec: video.lowSpec === true,
+  });
+  const encoding = options.encodings?.[0];
+  return {
+    width: positiveMetadataNumber(width),
+    height: positiveMetadataNumber(height),
+    fps: positiveMetadataNumber(entry.fps || encoding?.maxFramerate),
+    bitrate: positiveMetadataNumber(entry.bitrate || encoding?.maxBitrate),
+  };
+}
+
+function producerTrackKey(entry: NativeCloudflareSourceEntry) {
+  return String(entry.variantId || entry.source || "");
+}
+
+function sourceProducers(
+  session: NativeCloudflareSessionSurface,
+  source: string,
+) {
+  return [
+    ...[...session.producers.values()].filter(
+      (producer) => String(producer.source || "") === source,
+    ),
+    ...[...session.producerVariants.values()].filter(
+      (producer) => String(producer.source || "") === source,
+    ),
+  ];
+}
 
 function requireNativeSessionDescription(
   description: NativeCloudflareNegotiationResponse["sessionDescription"],
@@ -31,12 +112,225 @@ function requireNativeSessionDescription(
   return { type: type as NativeSessionDescriptionType, sdp };
 }
 
+function publicationDecodeScore(
+  session: NativeCloudflareSessionSurface,
+  publication: NativeCloudflarePublication,
+) {
+  const codec = normalizeVideoCodecName(publication.codec);
+  if (!codec || !session.mediaCapabilities) return null;
+  const capability = session.mediaCapabilities.videoCodecs[codec].decode;
+  if (!isRealtimeEfficient(capability)) return null;
+  return (
+    efficiencyRank(capability.realtimeEfficiency) +
+    (capability.acceleration === "hardware" ? 2 : 0)
+  );
+}
+
+function shouldSubscribePublication(
+  session: NativeCloudflareSessionSurface,
+  publication: NativeCloudflarePublication,
+) {
+  const receiverValues = Array.isArray(publication.receivers)
+    ? publication.receivers
+    : null;
+  const hasReceiverCohort = receiverValues !== null;
+  const receivers = receiverValues ? receiverValues.map(String) : [];
+  if (
+    hasReceiverCohort &&
+    session.localPeerId &&
+    !receivers.includes(session.localPeerId)
+  )
+    return false;
+  const codec = normalizeVideoCodecName(publication.codec);
+  if (codec && session.mediaCapabilities) {
+    const capability = session.mediaCapabilities.videoCodecs[codec].decode;
+    const target = publicationTarget(publication);
+    if (!supportsCodecDirectionTarget(capability, target)) return false;
+    if (
+      !isRealtimeEfficient(capability) &&
+      !(publication.emergency === true && isEmergencyUsable(capability))
+    )
+      return false;
+  }
+  const logicalStreamId = String(publication.logicalStreamId || "");
+  const isVideo =
+    publication.kind === "video" ||
+    Boolean(publication.codec && publication.logicalStreamId);
+  if (!logicalStreamId || !isVideo) return true;
+  const logicalState = session.logicalVideoStreams.get(logicalStreamId);
+  if (logicalState?.candidateConsumerId) return false;
+  const current = logicalState?.currentConsumerId
+    ? session.consumers.get(logicalState.currentConsumerId)
+    : [...session.consumers.values()].find(
+        (entry) =>
+          entry.kind === "video" &&
+          entry.logicalStreamId === logicalStreamId &&
+          entry.visible !== false &&
+          !entry.closed,
+      );
+  if (!current) return true;
+  if (receivers.length > 0 && receivers.includes(session.localPeerId))
+    return true;
+  const currentCodec = normalizeVideoCodecName(current.codec);
+  const currentScore =
+    currentCodec && session.mediaCapabilities
+      ? (() => {
+          const capability =
+            session.mediaCapabilities.videoCodecs[currentCodec].decode;
+          return isRealtimeEfficient(capability)
+            ? efficiencyRank(capability.realtimeEfficiency) +
+                (capability.acceleration === "hardware" ? 2 : 0)
+            : null;
+        })()
+      : null;
+  const candidateScore = publicationDecodeScore(session, publication);
+  if (candidateScore === null) return currentScore === null;
+  if (currentScore === null) return true;
+  return candidateScore > currentScore;
+}
+
 export interface NativeCloudflareSourcesMethods extends NativeCloudflareSessionSurface {}
 export class NativeCloudflareSourcesMethods {
+  hasVariant(variantId: string) {
+    const key = String(variantId || "");
+    return Boolean(
+      this.producerVariants.has(key) ||
+      [...this.producers.values()].some(
+        (producer) => String(producer.variantId || "") === key,
+      ),
+    );
+  }
+
+  async updateVariantMetadata(entry: NativeCloudflareSourceEntry) {
+    if (!entry?.source) return false;
+    const source = String(entry.source);
+    return this.enqueueSourceOperation(source, () =>
+      this.enqueueNegotiation(() => this.updateVariantMetadataInternal(entry)),
+    );
+  }
+
+  async updateVariantMetadataInternal(entry: NativeCloudflareSourceEntry) {
+    const source = String(entry.source || "");
+    const variantId = String(entry.variantId || "");
+    const trackKey = producerTrackKey(entry);
+    const producer = variantId
+      ? this.producerVariants.get(trackKey) ||
+        [...this.producers.values()].find(
+          (candidate) => String(candidate.variantId || "") === variantId,
+        )
+      : this.producers.get(source);
+    if (!producer || sourceKind(producer) !== "video") return false;
+    const base = this.sources.get(source) || {};
+    const normalized = {
+      ...base,
+      ...entry,
+      source,
+      kind: "video" as const,
+      generation: Math.max(1, Math.floor(Number(entry.generation) || 1)),
+      variantId: variantId || null,
+      codec:
+        normalizeVideoCodecName(entry.codec) ||
+        normalizeVideoCodecName(producer.codec) ||
+        null,
+      ...sourceVideoMetadata({ ...base, ...entry, source, kind: "video" }),
+    };
+    const codec = normalizeVideoCodecName(normalized.codec);
+    if (!codec) return false;
+    const capability = normalizeParticipantMediaCapabilities(
+      this.mediaCapabilities,
+    ).videoCodecs[codec].encode;
+    if (
+      this.mediaCapabilities &&
+      !isRealtimeEfficient(capability) &&
+      !(normalized.emergency === true && isEmergencyUsable(capability))
+    )
+      return false;
+    normalized.codec = codec;
+    const parametersReady = await this._setSourceParameters(
+      {
+        ...normalized,
+        ...producer,
+      } as NativeCloudflareSourceEntry,
+      this.sessionGeneration,
+    );
+    if (!parametersReady) return false;
+    const previous = { ...producer };
+    const score = Number(
+      entry.score ?? (entry as Record<string, unknown>).routingScore,
+    );
+    Object.assign(producer, {
+      ownerSource: normalized.ownerSource || null,
+      logicalStreamId: normalized.logicalStreamId || null,
+      generation: normalized.generation,
+      variantId: normalized.variantId,
+      codec: normalized.codec,
+      codecAcceleration: capability?.acceleration || null,
+      codecImplementation: capability?.implementation || null,
+      width: normalized.width,
+      height: normalized.height,
+      fps: normalized.fps,
+      bitrate: normalized.bitrate,
+      target: normalized.target ? { ...normalized.target } : undefined,
+      targetAdjusted: normalized.targetAdjusted === true,
+      receivers: Array.isArray(normalized.receivers)
+        ? [...normalized.receivers]
+        : [],
+      emergency: normalized.emergency === true,
+      score: Number.isFinite(score) ? score : undefined,
+      paused: this.sourceTransmission.get(source) === false,
+    });
+    if (variantId) this.producerVariants.set(trackKey, producer);
+    else this.producers.set(source, producer);
+    if (
+      !this.send?.({
+        type: "cloudflare-publication",
+        data: {
+          trackName: producer.trackName,
+          source,
+          kind: "video",
+          ownerSource: normalized.ownerSource || null,
+          logicalStreamId: normalized.logicalStreamId || null,
+          generation: normalized.generation,
+          variantId: normalized.variantId,
+          codec: normalized.codec,
+          codecAcceleration: capability?.acceleration || null,
+          codecImplementation: capability?.implementation || null,
+          width: normalized.width,
+          height: normalized.height,
+          fps: normalized.fps,
+          bitrate: normalized.bitrate,
+          ...(normalized.target ? { target: { ...normalized.target } } : {}),
+          ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
+          receivers: Array.isArray(normalized.receivers)
+            ? [...normalized.receivers]
+            : [],
+          emergency: normalized.emergency === true,
+          ...(Number.isFinite(score) ? { score } : {}),
+        },
+      })
+    ) {
+      Object.assign(producer, previous);
+      throw new Error("Media control is unavailable");
+    }
+    this._emitState();
+    return producer;
+  }
+
   async addSource(entry: NativeCloudflareSourceEntry) {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     const source = String(entry.source);
+    const variantId = String(entry.variantId || "");
+    const hadExistingSource = sourceProducers(this, source).length > 0;
+    const hadExistingSourceMetadata = this.sources.has(source);
+    const hadExistingVideoFeed = this.localVideoFeeds.has(source);
+    const hadExistingVariant = Boolean(
+      variantId &&
+      (this.producerVariants.has(variantId) ||
+        [...this.producers.values()].some(
+          (producer) => String(producer.variantId || "") === variantId,
+        )),
+    );
     return this.enqueueSourceOperation(source, async () => {
       await this.initialize();
       return this.enqueueNegotiation(async () => {
@@ -45,11 +339,35 @@ export class NativeCloudflareSourcesMethods {
           return await this.addSourceInternal(entry);
         } catch (error) {
           if (
+            variantId &&
+            !hadExistingVariant &&
+            this.handle &&
+            this.sessionGeneration === generation &&
+            !this.closed
+          )
+            await this.invoke("media_p2p_remove_track", {
+              p2pHandle: this.handle,
+              source,
+              trackKey: variantId,
+            }).catch((cleanupError: unknown) => this.onError?.(cleanupError));
+          else if (
+            !variantId &&
+            !hadExistingSource &&
             this.handle &&
             this.sessionGeneration === generation &&
             !this.closed
           )
             this.closeMedia();
+          if (
+            variantId &&
+            !hadExistingSource &&
+            !hadExistingSourceMetadata &&
+            sourceProducers(this, source).length === 0
+          ) {
+            this.sources.delete(source);
+            this.sourceTransmission.delete(source);
+            if (!hadExistingVideoFeed) this.localVideoFeeds.delete(source);
+          }
           throw error;
         }
       });
@@ -89,12 +407,53 @@ export class NativeCloudflareSourcesMethods {
       audioStereo: entry.audioStereo ?? this.getAudioStereo?.(source) ?? false,
       videoSettings:
         entry.videoSettings || this.getVideoSettings?.(source) || null,
+      logicalStreamId:
+        entry.logicalStreamId || (kind === "video" ? `source:${source}` : null),
+      generation: Math.max(1, Math.floor(Number(entry.generation) || 1)),
+      variantId: entry.variantId || null,
+      codec:
+        kind === "video"
+          ? String(entry.codec || "").toUpperCase() || null
+          : null,
+      ...sourceVideoMetadata({ ...entry, source, kind }),
     };
-    this.sources.set(source, normalized);
+    const requestedCodec = normalizeVideoCodecName(normalized.codec);
+    const requestedCapability = requestedCodec
+      ? normalizeParticipantMediaCapabilities(this.mediaCapabilities)
+          .videoCodecs[requestedCodec].encode
+      : null;
+    const requestedIsSafe = Boolean(
+      requestedCodec &&
+      requestedCapability &&
+      (isRealtimeEfficient(requestedCapability) ||
+        (normalized.emergency === true &&
+          isEmergencyUsable(requestedCapability))),
+    );
+    const normalizedCodec = requestedIsSafe
+      ? requestedCodec
+      : requestedCodec && normalized.variantId
+        ? null
+        : efficientEncodeCodecs(
+            normalizeParticipantMediaCapabilities(this.mediaCapabilities),
+          )[0] || null;
+    normalized.codec = normalizedCodec;
+    const selectedCapability = normalizedCodec
+      ? normalizeParticipantMediaCapabilities(this.mediaCapabilities)
+          .videoCodecs[normalizedCodec].encode
+      : null;
+    const codecAcceleration = selectedCapability?.acceleration || null;
+    const codecImplementation = selectedCapability?.implementation || null;
+    const variantId = String(normalized.variantId || "");
+    const trackKey = producerTrackKey(normalized);
+    if (!variantId || !this.sources.has(source))
+      this.sources.set(source, normalized);
     const generation = this.sessionGeneration;
     this._assertCurrent(generation);
-    const previous = this.producers.get(source);
-    if (previous && String(previous.kind || "") !== kind)
+    const previous = variantId
+      ? this.producerVariants.get(trackKey)
+      : this.producers.get(source);
+    const sourceProducer = sourceProducers(this, source)[0];
+    if (sourceProducer && String(sourceProducer.kind || "") !== kind)
       throw new Error(
         `Native Cloudflare source kind cannot change for ${source}; remove it first`,
       );
@@ -115,6 +474,7 @@ export class NativeCloudflareSourcesMethods {
         p2pHandle: this.handle,
         source,
         kind,
+        trackKey,
       });
       this._assertCurrent(generation);
       const trackId = String(
@@ -126,8 +486,54 @@ export class NativeCloudflareSourcesMethods {
       previous.track = normalized.track || null;
       previous.trackId = trackId;
       previous.ownerSource = normalized.ownerSource || null;
+      previous.logicalStreamId = normalized.logicalStreamId || null;
+      previous.generation = normalized.generation;
+      previous.variantId = normalized.variantId || null;
+      previous.codec = normalized.codec || null;
+      previous.codecAcceleration = codecAcceleration;
+      previous.codecImplementation = codecImplementation;
+      previous.width = normalized.width;
+      previous.height = normalized.height;
+      previous.fps = normalized.fps;
+      previous.bitrate = normalized.bitrate;
+      previous.target = normalized.target
+        ? { ...normalized.target }
+        : undefined;
+      previous.targetAdjusted = normalized.targetAdjusted === true;
+      previous.receivers = normalized.receivers || [];
+      previous.emergency = normalized.emergency === true;
+      previous.score = normalized.score;
       previous.paused = this.sourceTransmission.get(source) === false;
-      this.producers.set(source, previous);
+      if (variantId) this.producerVariants.set(trackKey, previous);
+      else this.producers.set(source, previous);
+      if (
+        kind === "video" &&
+        !this.send?.({
+          type: "cloudflare-publication",
+          data: {
+            trackName: previous.trackName,
+            source,
+            kind,
+            ownerSource: normalized.ownerSource || null,
+            logicalStreamId: normalized.logicalStreamId || null,
+            generation: normalized.generation,
+            variantId: normalized.variantId || null,
+            codec: normalized.codec || null,
+            codecAcceleration,
+            codecImplementation,
+            width: normalized.width,
+            height: normalized.height,
+            fps: normalized.fps,
+            bitrate: normalized.bitrate,
+            ...(normalized.target ? { target: { ...normalized.target } } : {}),
+            ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
+            receivers: normalized.receivers || [],
+            emergency: normalized.emergency === true,
+            score: normalized.score,
+          },
+        })
+      )
+        throw new Error("Media control is unavailable");
       this._emitState();
       return previous;
     }
@@ -135,6 +541,10 @@ export class NativeCloudflareSourcesMethods {
       p2pHandle: this.handle,
       source,
       kind,
+      trackKey,
+      ...(kind === "video" && normalized.codec
+        ? { preferredCodec: normalized.codec }
+        : {}),
     });
     this._assertCurrent(generation);
     const trackId = String(
@@ -153,7 +563,7 @@ export class NativeCloudflareSourcesMethods {
     });
     this._assertCurrent(generation);
     const usedMids = new Set<string>(
-      [...this.producers.values()]
+      [...this.producers.values(), ...this.producerVariants.values()]
         .map((producer) => String(producer.mid || ""))
         .filter(Boolean),
     );
@@ -188,13 +598,31 @@ export class NativeCloudflareSourcesMethods {
       paused: this.sourceTransmission.get(source) === false,
       native: true,
       ownerSource: normalized.ownerSource || null,
+      logicalStreamId: normalized.logicalStreamId || null,
+      generation: normalized.generation,
+      variantId: normalized.variantId || null,
+      codec: normalized.codec || null,
+      codecAcceleration,
+      codecImplementation,
+      width: normalized.width,
+      height: normalized.height,
+      fps: normalized.fps,
+      bitrate: normalized.bitrate,
+      ...(normalized.target ? { target: { ...normalized.target } } : {}),
+      ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
+      receivers: normalized.receivers || [],
+      emergency: normalized.emergency === true,
+      score: normalized.score,
     };
-    this.producers.set(source, producer);
+    if (variantId) this.producerVariants.set(trackKey, producer);
+    else this.producers.set(source, producer);
     if (kind === "video") {
       const currentFeed = this.localVideoFeeds.get(source);
       this.localVideoFeeds.set(source, {
         source,
-        producerId: trackName,
+        producerId: variantId
+          ? currentFeed?.producerId || trackName
+          : trackName,
         native: true,
         frame: currentFeed?.frame || null,
       });
@@ -205,11 +633,28 @@ export class NativeCloudflareSourcesMethods {
         data: {
           trackName,
           source,
+          kind,
           ownerSource: normalized.ownerSource || null,
+          logicalStreamId: normalized.logicalStreamId || null,
+          generation: normalized.generation,
+          variantId: normalized.variantId || null,
+          codec: normalized.codec || null,
+          codecAcceleration,
+          codecImplementation,
+          width: normalized.width,
+          height: normalized.height,
+          fps: normalized.fps,
+          bitrate: normalized.bitrate,
+          ...(normalized.target ? { target: { ...normalized.target } } : {}),
+          ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
+          receivers: normalized.receivers || [],
+          emergency: normalized.emergency === true,
+          score: normalized.score,
         },
       })
     ) {
-      this.producers.delete(source);
+      if (variantId) this.producerVariants.delete(trackKey);
+      else this.producers.delete(source);
       throw new Error("Media control is unavailable");
     }
     this._emitState();
@@ -225,30 +670,35 @@ export class NativeCloudflareSourcesMethods {
 
   async removeSourceInternal(source: string) {
     const key = String(source || "");
-    const current = this.producers.get(key);
+    const current = sourceProducers(this, key);
     this.sources.delete(key);
     this.localVideoFeeds.delete(key);
     this.pendingLocalVideoFrames.delete(key);
-    if (!current) return;
+    if (!current.length) return;
     if (!this.handle || !this.sessionId) {
       this.producers.delete(key);
+      for (const producer of current)
+        if (producer.variantId)
+          this.producerVariants.delete(String(producer.variantId));
       return;
     }
     const generation = this.sessionGeneration;
     const handle = this.handle;
     try {
       this._assertCurrent(generation, handle);
-      await this.invoke("media_p2p_remove_track", {
-        p2pHandle: handle,
-        source: key,
-      });
+      for (const producer of current)
+        await this.invoke("media_p2p_remove_track", {
+          p2pHandle: handle,
+          source: key,
+          trackKey: producerTrackKey(producer as NativeCloudflareSourceEntry),
+        });
       this._assertCurrent(generation, handle);
       const offer = await this.invoke("media_p2p_create_offer", {
         p2pHandle: handle,
       });
       this._assertCurrent(generation, handle);
       const response = (await this.request("tracks-close", {
-        tracks: [{ mid: current.mid }],
+        tracks: current.map((producer) => ({ mid: producer.mid })),
         sessionDescription: { type: "offer", sdp: offer },
         force: false,
       })) as NativeCloudflareNegotiationResponse;
@@ -265,24 +715,137 @@ export class NativeCloudflareSourcesMethods {
       }
       this._assertCurrent(generation, handle);
       this.producers.delete(key);
-      if (
-        !this.send?.({
-          type: "cloudflare-publication",
-          data: {
-            trackName: current.trackName,
-            source: key,
-            ownerSource: current.ownerSource || null,
-            closed: true,
-          },
-        })
-      )
-        throw new Error("Media control is unavailable");
+      for (const producer of current) {
+        if (producer.variantId)
+          this.producerVariants.delete(String(producer.variantId));
+        if (
+          !this.send?.({
+            type: "cloudflare-publication",
+            data: {
+              trackName: producer.trackName,
+              source: key,
+              ownerSource: producer.ownerSource || null,
+              logicalStreamId: producer.logicalStreamId || null,
+              variantId: producer.variantId || null,
+              closed: true,
+            },
+          })
+        )
+          throw new Error("Media control is unavailable");
+      }
     } catch (error) {
       if (this.handle === handle && this.sessionGeneration === generation)
         this.closeMedia();
       throw error;
     }
     this._emitState();
+  }
+
+  async removeVariant(variantId: string, force = false) {
+    const key = String(variantId || "");
+    const candidate =
+      this.producerVariants.get(key) ||
+      this.producers.get(key) ||
+      [...this.producers.values()].find(
+        (producer) => String(producer.variantId || "") === key,
+      );
+    if (!candidate) return false;
+    const migrationActive =
+      [...this.logicalVideoStreams.values()].some(
+        (stream) =>
+          (stream.currentVariantId === key ||
+            stream.candidateVariantId === key) &&
+          stream.state !== "stable",
+      ) ||
+      [...this.consumers.values()].some(
+        (consumer) =>
+          String(consumer.variantId || "") === key &&
+          consumer.migrationState !== "stable",
+      );
+    if (!force && migrationActive) return false;
+    const source = String(candidate.source || "");
+    return this.enqueueSourceOperation(source, () =>
+      this.enqueueNegotiation(async () => {
+        const generation = this.sessionGeneration;
+        const handle = this.handle;
+        if (!handle || !this.sessionId) return false;
+        try {
+          this._assertCurrent(generation, handle);
+          await this.invoke("media_p2p_remove_track", {
+            p2pHandle: handle,
+            source,
+            trackKey: producerTrackKey(
+              candidate as NativeCloudflareSourceEntry,
+            ),
+          });
+          this._assertCurrent(generation, handle);
+          const offer = await this.invoke("media_p2p_create_offer", {
+            p2pHandle: handle,
+          });
+          this._assertCurrent(generation, handle);
+          const response = (await this.request("tracks-close", {
+            tracks: [{ mid: candidate.mid }],
+            sessionDescription: { type: "offer", sdp: offer },
+            force: false,
+          })) as NativeCloudflareNegotiationResponse;
+          this._assertCurrent(generation, handle);
+          if (response.sessionDescription) {
+            const description = requireNativeSessionDescription(
+              response.sessionDescription,
+            );
+            await this.invoke("media_p2p_set_remote_description", {
+              p2pHandle: handle,
+              sdp: description.sdp,
+              sdpType: description.type,
+            });
+          }
+          this._assertCurrent(generation, handle);
+          const isBaseProducer = this.producers.get(source) === candidate;
+          if (isBaseProducer) this.producers.delete(source);
+          else if (candidate.variantId)
+            this.producerVariants.delete(String(candidate.variantId));
+          else this.producers.delete(source);
+          if (
+            !this.send?.({
+              type: "cloudflare-publication",
+              data: {
+                trackName: candidate.trackName,
+                source,
+                ownerSource: candidate.ownerSource || null,
+                logicalStreamId: candidate.logicalStreamId || null,
+                variantId: candidate.variantId || null,
+                closed: true,
+              },
+            })
+          )
+            throw new Error("Media control is unavailable");
+          this._emitState();
+          return true;
+        } catch (error) {
+          this.onError?.(
+            asError(error, "Native Cloudflare codec variant close failed"),
+          );
+          return false;
+        }
+      }),
+    );
+  }
+
+  async retireVariants(logicalStreamId: string, desiredVariantIds: string[]) {
+    const desired = new Set(desiredVariantIds.map(String));
+    const stale = [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ].filter(
+      (producer) =>
+        String(producer.logicalStreamId || "") === String(logicalStreamId) &&
+        !desired.has(String(producer.variantId || "")),
+    );
+    for (const producer of stale)
+      await this.removeVariant(
+        String(producer.variantId || producer.source || ""),
+      );
+    return stale.length > 0;
   }
 
   async subscribe(
@@ -309,9 +872,10 @@ export class NativeCloudflareSourcesMethods {
     publications: NativeCloudflarePublication[],
     generation = this.sessionGeneration,
   ) {
-    const eligible = publications.filter((publication) => {
+    const candidates = publications.filter((publication) => {
       const trackName = publication?.trackName;
       return (
+        shouldSubscribePublication(this, publication) &&
         trackName &&
         generation === this.sessionGeneration &&
         this.sessionId &&
@@ -321,6 +885,22 @@ export class NativeCloudflareSourcesMethods {
         !this.subscriptionTasks.has(trackName)
       );
     });
+    const grouped = new Map<string, NativeCloudflarePublication>();
+    for (const publication of candidates) {
+      const logicalStreamId = String(
+        publication.logicalStreamId || publication.trackName,
+      );
+      const current = grouped.get(logicalStreamId);
+      if (!current) {
+        grouped.set(logicalStreamId, publication);
+        continue;
+      }
+      const currentScore = publicationDecodeScore(this, current) ?? -1;
+      const candidateScore = publicationDecodeScore(this, publication) ?? -1;
+      if (candidateScore > currentScore)
+        grouped.set(logicalStreamId, publication);
+    }
+    const eligible = [...grouped.values()];
     if (!eligible.length) return Promise.resolve(false);
     const task = this.enqueueNegotiation(() =>
       this._subscribePublicationBatch(eligible, generation),
@@ -420,13 +1000,18 @@ export class NativeCloudflareSourcesMethods {
     const key = String(source || "");
     const value = Boolean(enabled);
     this.sourceTransmission.set(key, value);
-    if (!this.producers.has(key) || !this.handle) return false;
-    await this._setSourceParameters(
-      (this.sources.get(key) || { source: key }) as NativeCloudflareSourceEntry,
-      this.sessionGeneration,
-    );
-    const producer = this.producers.get(key);
-    if (producer) producer.paused = !value;
+    const producers = sourceProducers(this, key);
+    if (!producers.length || !this.handle) return false;
+    for (const producer of producers) {
+      await this._setSourceParameters(
+        {
+          ...(this.sources.get(key) || { source: key }),
+          ...producer,
+        } as NativeCloudflareSourceEntry,
+        this.sessionGeneration,
+      );
+      producer.paused = !value;
+    }
     this._emitState();
     return true;
   }
@@ -467,7 +1052,48 @@ export class NativeCloudflareSourcesMethods {
     if (Number.isFinite(scaleResolutionDownBy) && scaleResolutionDownBy >= 1)
       next.scaleResolutionDownBy = scaleResolutionDownBy;
     entry.videoSettings = next;
-    return this._setSourceParameters(entry as NativeCloudflareSourceEntry);
+    const producers = sourceProducers(this, String(source || ""));
+    let updated = false;
+    for (const producer of producers)
+      updated =
+        (await this._setSourceParameters({
+          ...entry,
+          ...producer,
+          videoSettings: next,
+        } as NativeCloudflareSourceEntry)) || updated;
+    return updated;
+  }
+
+  async updateVariantVideoParameters(
+    variantId: string,
+    parameters: Record<string, unknown>,
+  ) {
+    const key = String(variantId || "");
+    const producer =
+      this.producerVariants.get(key) ||
+      [...this.producers.values()].find(
+        (candidate) => String(candidate.variantId || "") === key,
+      );
+    if (!producer || sourceKind(producer) !== "video") return false;
+    const source = String(producer.source || "");
+    const base = this.sources.get(source) || producer;
+    const overrides = Object.fromEntries(
+      ["maxBitrate", "maxFramerate", "scaleResolutionDownBy"].flatMap(
+        (name) => {
+          const value = Number(parameters[name]);
+          return Number.isFinite(value) && value > 0 ? [[name, value]] : [];
+        },
+      ),
+    );
+    if (!Object.keys(overrides).length) return false;
+    return this._setSourceParameters(
+      {
+        ...base,
+        ...producer,
+      } as NativeCloudflareSourceEntry,
+      this.sessionGeneration,
+      overrides,
+    );
   }
 
   async _updateBitrate(
@@ -490,12 +1116,21 @@ export class NativeCloudflareSourcesMethods {
         ...(entry.videoSettings || {}),
         maxBitrate: value,
       };
-    return this._setSourceParameters(entry as NativeCloudflareSourceEntry);
+    const producers = sourceProducers(this, String(source || ""));
+    let updated = false;
+    for (const producer of producers)
+      updated =
+        (await this._setSourceParameters({
+          ...entry,
+          ...producer,
+        } as NativeCloudflareSourceEntry)) || updated;
+    return updated;
   }
 
   async _setSourceParameters(
     entry: NativeCloudflareSourceEntry,
     generation = this.sessionGeneration,
+    overrides: Record<string, unknown> = {},
   ) {
     if (!entry?.source || !this.handle) return false;
     this._assertCurrent(generation);
@@ -513,32 +1148,56 @@ export class NativeCloudflareSourcesMethods {
       | undefined;
     const kind = sourceKind(entry);
     if (kind === "video") {
+      const captureEntry = (this.sources.get(entry.source) ||
+        entry) as NativeCloudflareSourceEntry;
       const video = resolveNativeCaptureVideoSettings(
-        entry.captureSelection,
-        entry.videoSettings || undefined,
+        captureEntry.captureSelection,
+        captureEntry.videoSettings || undefined,
       );
       const resolutionKey = String(
         video.resolution || "",
       ) as keyof typeof VIDEO_RESOLUTIONS;
       const resolution = VIDEO_RESOLUTIONS[resolutionKey];
+      const captureWidth =
+        Number(captureEntry.width) || video.width || resolution?.width || 1920;
+      const captureHeight =
+        Number(captureEntry.height) ||
+        video.height ||
+        resolution?.height ||
+        1080;
+      const captureFrameRate =
+        Number(captureEntry.fps) || video.frameRate || 30;
+      const targetWidth = Number(entry.target?.width) || captureWidth;
+      const targetHeight = Number(entry.target?.height) || captureHeight;
+      const targetFrameRate = Math.min(
+        Number(entry.target?.fps) || Number(entry.fps) || captureFrameRate,
+        captureFrameRate,
+      );
+      const targetBitrate =
+        Number(entry.target?.bitrate) ||
+        Number(entry.bitrate) ||
+        Number(video.maxBitrate) ||
+        Number(captureSelection?.video?.maxBitrateBps);
       const options = buildVideoProduceOptions({
-        width: video.width || resolution?.width || 1920,
-        height: video.height || resolution?.height || 1080,
-        frameRate: video.frameRate || 30,
+        width: captureWidth,
+        height: captureHeight,
+        frameRate: captureFrameRate,
         qualityPriority: video.qualityPriority || "framerate",
         screen: entry.source === "screen",
-        maxBitrate: video.maxBitrate || captureSelection?.video?.maxBitrateBps,
+        maxBitrate: Number(captureEntry.bitrate) || Number(video.maxBitrate),
         lowSpec: video.lowSpec === true,
       });
       const encoding = options.encodings?.[0];
       if (encoding) {
-        parameters.maxBitrate = encoding.maxBitrate;
-        parameters.maxFramerate = encoding.maxFramerate;
-        parameters.scaleResolutionDownBy = Number.isFinite(
-          Number(video.scaleResolutionDownBy),
-        )
-          ? Math.max(1, Number(video.scaleResolutionDownBy))
-          : encoding.scaleResolutionDownBy;
+        parameters.maxBitrate = targetBitrate || encoding.maxBitrate;
+        parameters.maxFramerate = targetFrameRate;
+        parameters.scaleResolutionDownBy = Math.max(
+          Number.isFinite(Number(video.scaleResolutionDownBy))
+            ? Math.max(1, Number(video.scaleResolutionDownBy))
+            : Number(encoding.scaleResolutionDownBy) || 1,
+          captureWidth / Math.max(1, targetWidth),
+          captureHeight / Math.max(1, targetHeight),
+        );
         parameters.degradationPreference = options.degradationPreference;
       }
     } else {
@@ -558,7 +1217,14 @@ export class NativeCloudflareSourcesMethods {
       await this.invoke("media_p2p_set_track_parameters", {
         p2pHandle: this.handle,
         source: entry.source,
-        parameters,
+        trackKey: producerTrackKey(entry),
+        parameters: {
+          ...parameters,
+          ...overrides,
+          ...(kind === "video" && entry.codec
+            ? { preferredCodec: entry.codec }
+            : {}),
+        },
       });
       this._assertCurrent(generation);
       return true;

@@ -8,6 +8,7 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -29,25 +30,72 @@
 
 using json = nlohmann::json;
 
-static size_t video_codec_priority(const webrtc::RtpCodecCapability& codec) {
+static std::string normalized_video_codec_name(std::string value) {
+    if (value.rfind("video/", 0) == 0) value.erase(0, 6);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    if (value == "HEVC" || value == "H.265") return "H265";
+    return value;
+}
+
+static bool is_auxiliary_video_codec(const webrtc::RtpCodecCapability& codec) {
+    const auto name = normalized_video_codec_name(codec.mime_type());
+    return name == "RTX" || name == "RED" || name == "ULPFEC" ||
+        name == "FLEXFEC";
+}
+
+static bool is_preferred_primary_video_codec(
+    const webrtc::RtpCodecCapability& codec,
+    const std::string& preferred_codec) {
+    return !preferred_codec.empty() && !is_auxiliary_video_codec(codec) &&
+        normalized_video_codec_name(codec.mime_type()) ==
+            normalized_video_codec_name(preferred_codec);
+}
+
+static size_t video_codec_priority(
+    const webrtc::RtpCodecCapability& codec,
+    const std::string& preferred_codec) {
     const auto mime_type = codec.mime_type();
-    if (mime_type == "video/H264") return 0;
-    if (mime_type == "video/VP9") return 1;
-    if (mime_type == "video/VP8") return 2;
-    return 3;
+    if (!preferred_codec.empty() &&
+        mime_type == "video/" + preferred_codec)
+        return 0;
+    if (mime_type == "video/AV1") return preferred_codec == "AV1" ? 0 : 1;
+    if (mime_type == "video/H265") return preferred_codec == "H265" ? 0 : 2;
+    if (mime_type == "video/H264") return preferred_codec == "H264" ? 0 : 3;
+    if (mime_type == "video/VP9") return preferred_codec == "VP9" ? 0 : 4;
+    if (mime_type == "video/VP8") return preferred_codec == "VP8" ? 0 : 5;
+    return 6;
 }
 
 static void apply_video_codec_preferences(
     webrtc::PeerConnectionFactoryInterface* factory,
-    const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>& transceiver) {
+    const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>& transceiver,
+    const std::string& preferred_codec) {
     if (!factory || !transceiver || !transceiver->sender() ||
         !transceiver->sender()->track() ||
         transceiver->sender()->track()->kind() != "video") return;
     auto capabilities = factory->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO).codecs;
     std::stable_sort(capabilities.begin(), capabilities.end(),
-                     [](const auto& left, const auto& right) {
-                         return video_codec_priority(left) < video_codec_priority(right);
+                     [&preferred_codec](const auto& left, const auto& right) {
+                         return video_codec_priority(left, preferred_codec) <
+                             video_codec_priority(right, preferred_codec);
                      });
+    const bool preferred_codec_available = std::any_of(
+        capabilities.begin(), capabilities.end(),
+        [&preferred_codec](const auto& codec) {
+            return is_preferred_primary_video_codec(codec, preferred_codec);
+        });
+    if (preferred_codec_available) {
+        capabilities.erase(
+            std::remove_if(capabilities.begin(), capabilities.end(),
+                           [&preferred_codec](const auto& codec) {
+                               return !is_auxiliary_video_codec(codec) &&
+                                   !is_preferred_primary_video_codec(
+                                       codec, preferred_codec);
+                           }),
+            capabilities.end());
+    }
     transceiver->SetCodecPreferences(capabilities);
 }
 
@@ -73,95 +121,179 @@ static double native_priority_value(const json& value)
     return 2.0;
 }
 
-extern "C" int lib_dspeak_media_p2p_add_video_track(lib_dspeak_media_p2p_handle_t* handle,
-                                                      lib_dspeak_media_video_track_t* track) {
+static std::string p2p_sender_key(const char* key, const std::string& fallback) {
+    return key && *key ? std::string(key) : fallback;
+}
+
+extern "C" int lib_dspeak_media_p2p_add_video_track_with_key(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_video_track_t* track,
+    const char* preferred_codec,
+    const char* track_key) {
     try {
-        if (!handle || !handle->pc || !track || !track->track) return -1;
-        return handle->signaling_thread->BlockingCall([handle, track] {
+        if (!handle || !handle->pc || !handle->signaling_thread || !track ||
+            !track->track)
+            return -1;
+        const std::string preferred = preferred_codec ? preferred_codec : "";
+        const std::string key = p2p_sender_key(track_key, track->track->id());
+        return handle->signaling_thread->BlockingCall([handle, track, preferred, key] {
             auto result = handle->pc->AddTrack(track->track, {"stream0"});
             if (!result.ok()) return -1;
             const auto sender = result.value();
             for (const auto& transceiver : handle->pc->GetTransceivers()) {
                 if (transceiver->sender() == sender) {
-                    apply_video_codec_preferences(handle->factory.get(), transceiver);
+                    apply_video_codec_preferences(
+                        handle->factory.get(), transceiver, preferred);
                     break;
                 }
             }
-            return result.ok() ? 0 : -1;
+            handle->video_senders[key] = sender;
+            return 0;
         });
     } catch (...) {
         return -1;
     }
 }
 
-extern "C" int lib_dspeak_media_p2p_add_audio_track(lib_dspeak_media_p2p_handle_t* handle,
-                                                      lib_dspeak_media_audio_track_t* track) {
+extern "C" int lib_dspeak_media_p2p_add_video_track(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_video_track_t* track,
+    const char* preferred_codec) {
+    return lib_dspeak_media_p2p_add_video_track_with_key(
+        handle, track, preferred_codec, nullptr);
+}
+
+extern "C" int lib_dspeak_media_p2p_add_audio_track_with_key(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_audio_track_t* track,
+    const char* track_key) {
     try {
-        if (!handle || !handle->pc || !track || !track->track) return -1;
-        return handle->signaling_thread->BlockingCall([handle, track] {
+        if (!handle || !handle->pc || !handle->signaling_thread || !track ||
+            !track->track)
+            return -1;
+        const std::string key = p2p_sender_key(track_key, track->track->id());
+        return handle->signaling_thread->BlockingCall([handle, track, key] {
             auto result = handle->pc->AddTrack(track->track, {"stream0"});
-            return result.ok() ? 0 : -1;
+            if (!result.ok()) return -1;
+            handle->audio_senders[key] = result.value();
+            return 0;
         });
     } catch (...) {
         return -1;
     }
 }
 
-extern "C" int lib_dspeak_media_p2p_remove_video_track(lib_dspeak_media_p2p_handle_t* handle,
-                                                         lib_dspeak_media_video_track_t* track) {
+extern "C" int lib_dspeak_media_p2p_add_audio_track(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_audio_track_t* track) {
+    return lib_dspeak_media_p2p_add_audio_track_with_key(handle, track, nullptr);
+}
+
+template <typename TrackHandle>
+static int remove_p2p_track_with_key(
+    lib_dspeak_media_p2p_handle_t* handle,
+    TrackHandle* track,
+    const char* track_key) {
     try {
-        if (!handle || !handle->pc || !track || !track->track) return -1;
-        return handle->signaling_thread->BlockingCall([handle, track] {
-            auto senders = handle->pc->GetSenders();
-            for (auto& sender : senders) {
-                if (sender->track() && sender->track()->id() == track->track->id()) {
-                    auto error = handle->pc->RemoveTrackOrError(sender);
-                    return error.ok() ? 0 : -1;
+        if (!handle || !handle->pc || !handle->signaling_thread || !track ||
+            !track->track)
+            return -1;
+        const std::string key = p2p_sender_key(track_key, track->track->id());
+        const bool video = track->track->kind() == "video";
+        return handle->signaling_thread->BlockingCall([handle, track, key, video] {
+            webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
+            if (video) {
+                const auto found = handle->video_senders.find(key);
+                if (found != handle->video_senders.end()) sender = found->second;
+            } else {
+                const auto found = handle->audio_senders.find(key);
+                if (found != handle->audio_senders.end()) sender = found->second;
+            }
+            if (!sender) {
+                for (const auto& candidate : handle->pc->GetSenders()) {
+                    if (candidate->track() &&
+                        candidate->track()->id() == track->track->id()) {
+                        sender = candidate;
+                        break;
+                    }
                 }
             }
-            return -1;
+            if (!sender) return -1;
+            const auto error = handle->pc->RemoveTrackOrError(sender);
+            if (!error.ok()) return -1;
+            if (video)
+                handle->video_senders.erase(key);
+            else
+                handle->audio_senders.erase(key);
+            return 0;
         });
     } catch (...) {
         return -1;
     }
 }
 
-extern "C" int lib_dspeak_media_p2p_remove_audio_track(lib_dspeak_media_p2p_handle_t* handle,
-                                                         lib_dspeak_media_audio_track_t* track) {
-    try {
-        if (!handle || !handle->pc || !track || !track->track) return -1;
-        return handle->signaling_thread->BlockingCall([handle, track] {
-            auto senders = handle->pc->GetSenders();
-            for (auto& sender : senders) {
-                if (sender->track() && sender->track()->id() == track->track->id()) {
-                    auto error = handle->pc->RemoveTrackOrError(sender);
-                    return error.ok() ? 0 : -1;
-                }
-            }
-            return -1;
-        });
-    } catch (...) {
-        return -1;
-    }
+extern "C" int lib_dspeak_media_p2p_remove_video_track_with_key(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_video_track_t* track,
+    const char* track_key) {
+    return remove_p2p_track_with_key(handle, track, track_key);
+}
+
+extern "C" int lib_dspeak_media_p2p_remove_video_track(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_video_track_t* track) {
+    return lib_dspeak_media_p2p_remove_video_track_with_key(handle, track, nullptr);
+}
+
+extern "C" int lib_dspeak_media_p2p_remove_audio_track_with_key(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_audio_track_t* track,
+    const char* track_key) {
+    return remove_p2p_track_with_key(handle, track, track_key);
+}
+
+extern "C" int lib_dspeak_media_p2p_remove_audio_track(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_audio_track_t* track) {
+    return lib_dspeak_media_p2p_remove_audio_track_with_key(handle, track, nullptr);
 }
 
 template <typename TrackHandle>
 static int replace_p2p_track(lib_dspeak_media_p2p_handle_t* handle,
                              TrackHandle* old_track,
-                             TrackHandle* new_track) {
+                             TrackHandle* new_track,
+                             const char* track_key) {
     try {
         if (!handle || !handle->pc || !handle->signaling_thread || !old_track ||
             !old_track->track || !new_track || !new_track->track)
             return -1;
         const std::string expected_id = old_track->track->id();
+        const std::string key = p2p_sender_key(track_key, expected_id);
+        const bool video = old_track->track->kind() == "video";
         return handle->signaling_thread->BlockingCall(
-            [handle, expected_id, new_track] {
-                for (const auto& sender : handle->pc->GetSenders()) {
-                    if (!sender->track() || sender->track()->id() != expected_id)
-                        continue;
-                    return sender->SetTrack(new_track->track.get()) ? 0 : -1;
+            [handle, expected_id, key, video, new_track] {
+                webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
+                if (video) {
+                    const auto found = handle->video_senders.find(key);
+                    if (found != handle->video_senders.end()) sender = found->second;
+                } else {
+                    const auto found = handle->audio_senders.find(key);
+                    if (found != handle->audio_senders.end()) sender = found->second;
                 }
-                return -1;
+                if (!sender) {
+                    for (const auto& candidate : handle->pc->GetSenders()) {
+                        if (candidate->track() && candidate->track()->id() == expected_id) {
+                            sender = candidate;
+                            break;
+                        }
+                    }
+                }
+                if (!sender || !sender->SetTrack(new_track->track.get())) return -1;
+                if (video)
+                    handle->video_senders[key] = sender;
+                else
+                    handle->audio_senders[key] = sender;
+                return 0;
             });
     } catch (...) {
         return -1;
@@ -172,29 +304,61 @@ extern "C" int lib_dspeak_media_p2p_replace_video_track(
     lib_dspeak_media_p2p_handle_t* handle,
     lib_dspeak_media_video_track_t* old_track,
     lib_dspeak_media_video_track_t* new_track) {
-    return replace_p2p_track(handle, old_track, new_track);
+    return replace_p2p_track(handle, old_track, new_track, nullptr);
+}
+
+extern "C" int lib_dspeak_media_p2p_replace_video_track_with_key(
+    lib_dspeak_media_p2p_handle_t* handle,
+    lib_dspeak_media_video_track_t* old_track,
+    lib_dspeak_media_video_track_t* new_track,
+    const char* track_key) {
+    return replace_p2p_track(handle, old_track, new_track, track_key);
 }
 
 extern "C" int lib_dspeak_media_p2p_replace_audio_track(
     lib_dspeak_media_p2p_handle_t* handle,
     lib_dspeak_media_audio_track_t* old_track,
     lib_dspeak_media_audio_track_t* new_track) {
-    return replace_p2p_track(handle, old_track, new_track);
+    return replace_p2p_track(handle, old_track, new_track, nullptr);
 }
 
-extern "C" int lib_dspeak_media_p2p_set_track_parameters(
+extern "C" int lib_dspeak_media_p2p_replace_audio_track_with_key(
     lib_dspeak_media_p2p_handle_t* handle,
-    const char* track_id,
+    lib_dspeak_media_audio_track_t* old_track,
+    lib_dspeak_media_audio_track_t* new_track,
+    const char* track_key) {
+    return replace_p2p_track(handle, old_track, new_track, track_key);
+}
+
+extern "C" int lib_dspeak_media_p2p_set_track_parameters_with_key(
+    lib_dspeak_media_p2p_handle_t* handle,
+    const char* track_key,
     const char* parameters_json) {
     try {
-        if (!handle || !handle->pc || !track_id || !parameters_json) return -1;
-        const std::string expected_id(track_id);
+        if (!handle || !handle->pc || !handle->signaling_thread || !track_key ||
+            !parameters_json)
+            return -1;
+        const std::string expected_key(track_key);
         const std::string parameters(parameters_json);
-        return handle->signaling_thread->BlockingCall([handle, expected_id, parameters] {
+        return handle->signaling_thread->BlockingCall([handle, expected_key, parameters] {
             const auto value = json::parse(parameters);
             if (!value.is_object()) return -1;
-            for (const auto& sender : handle->pc->GetSenders()) {
-                if (!sender->track() || sender->track()->id() != expected_id) continue;
+            webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
+            const auto video = handle->video_senders.find(expected_key);
+            if (video != handle->video_senders.end()) sender = video->second;
+            if (!sender) {
+                const auto audio = handle->audio_senders.find(expected_key);
+                if (audio != handle->audio_senders.end()) sender = audio->second;
+            }
+            if (!sender || !sender->track()) {
+                for (const auto& candidate : handle->pc->GetSenders()) {
+                    if (candidate->track() && candidate->track()->id() == expected_key) {
+                        sender = candidate;
+                        break;
+                    }
+                }
+            }
+            if (sender && sender->track()) {
                 auto current = sender->GetParameters();
                 for (auto& encoding : current.encodings) {
                     if (value.contains("active") && value["active"].is_boolean())
@@ -223,6 +387,19 @@ extern "C" int lib_dspeak_media_p2p_set_track_parameters(
                         current.degradation_preference =
                             webrtc::DegradationPreference::BALANCED;
                 }
+                if (value.contains("preferredCodec") &&
+                    value["preferredCodec"].is_string() &&
+                    sender->track()->kind() == "video") {
+                    const auto preferred =
+                        value["preferredCodec"].get<std::string>();
+                    for (const auto& transceiver : handle->pc->GetTransceivers()) {
+                        if (transceiver->sender() == sender) {
+                            apply_video_codec_preferences(
+                                handle->factory.get(), transceiver, preferred);
+                            break;
+                        }
+                    }
+                }
                 return sender->SetParameters(current).ok() ? 0 : -1;
             }
             return -1;
@@ -230,6 +407,14 @@ extern "C" int lib_dspeak_media_p2p_set_track_parameters(
     } catch (...) {
         return -1;
     }
+}
+
+extern "C" int lib_dspeak_media_p2p_set_track_parameters(
+    lib_dspeak_media_p2p_handle_t* handle,
+    const char* track_id,
+    const char* parameters_json) {
+    return lib_dspeak_media_p2p_set_track_parameters_with_key(
+        handle, track_id, parameters_json);
 }
 
 extern "C" int lib_dspeak_media_p2p_set_receive_enabled(

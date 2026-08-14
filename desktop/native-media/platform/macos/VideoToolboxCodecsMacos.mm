@@ -611,6 +611,65 @@ private:
 
 namespace dspeak_native {
 
+void decoder_probe_callback(void*,
+                            void*,
+                            OSStatus,
+                            VTDecodeInfoFlags,
+                            CVImageBufferRef,
+                            CMTime,
+                            CMTime) {}
+
+bool probe_hardware_decoder() {
+    if (!VTIsHardwareDecodeSupported(kCMVideoCodecType_H264)) return false;
+    const uint8_t sps[] = {
+        0x67, 0x42, 0x00, 0x1e, 0xe9, 0x01, 0x40, 0x7b,
+        0x20, 0x11, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00,
+        0x00, 0x03, 0x00, 0x32,
+    };
+    const uint8_t pps[] = {0x68, 0xce, 0x3c, 0x80};
+    const uint8_t* parameter_sets[] = {sps, pps};
+    const size_t parameter_sizes[] = {sizeof(sps), sizeof(pps)};
+    CMVideoFormatDescriptionRef format_description = nullptr;
+    if (CMVideoFormatDescriptionCreateFromH264ParameterSets(
+            kCFAllocatorDefault,
+            2,
+            parameter_sets,
+            parameter_sizes,
+            4,
+            &format_description) != noErr ||
+        !format_description)
+        return false;
+    const void* keys[] = {
+        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder,
+    };
+    const void* values[] = {kCFBooleanTrue};
+    CFDictionaryRef specification = CFDictionaryCreate(
+        kCFAllocatorDefault,
+        keys,
+        values,
+        1,
+        &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks);
+    VTDecompressionOutputCallbackRecord callback_record = {
+        &decoder_probe_callback,
+        nullptr,
+    };
+    VTDecompressionSessionRef session = nullptr;
+    const auto result = VTDecompressionSessionCreate(
+        kCFAllocatorDefault,
+        format_description,
+        specification,
+        nullptr,
+        &callback_record,
+        &session);
+    if (specification) CFRelease(specification);
+    CFRelease(format_description);
+    if (result != noErr || !session) return false;
+    VTDecompressionSessionInvalidate(session);
+    CFRelease(session);
+    return true;
+}
+
 bool video_toolbox_encoder_available() {
     static std::once_flag once;
     static bool available = false;
@@ -629,8 +688,8 @@ bool video_toolbox_encoder_available() {
             &kCFTypeDictionaryValueCallBacks);
         const auto result = VTCompressionSessionCreate(
             kCFAllocatorDefault,
-            640,
-            360,
+            1920,
+            1080,
             kCMVideoCodecType_H264,
             specification,
             nullptr,
@@ -650,9 +709,7 @@ bool video_toolbox_encoder_available() {
 bool video_toolbox_decoder_available() {
     static std::once_flag once;
     static bool available = false;
-    std::call_once(once, [] {
-        available = VTIsHardwareDecodeSupported(kCMVideoCodecType_H264);
-    });
+    std::call_once(once, [] { available = probe_hardware_decoder(); });
     return available;
 }
 

@@ -893,9 +893,14 @@ fn create_capture_producer(state: &mut WorkerState, payload: Value) -> WorkerRes
             "native capture source '{source}' is invalid for {kind} producer"
         )));
     }
-    if state.producers.contains_key(&source) {
+    let producer_key = app_data
+        .get("producerKey")
+        .and_then(Value::as_str)
+        .unwrap_or(&source)
+        .to_string();
+    if state.producers.contains_key(&producer_key) {
         return Err(json!(format!(
-            "native {kind} producer already exists for source '{source}'"
+            "native {kind} producer already exists for key '{producer_key}'"
         )));
     }
     let source_c = CString::new(source.clone())
@@ -941,7 +946,7 @@ fn create_capture_producer(state: &mut WorkerState, payload: Value) -> WorkerRes
     );
     match producer_id {
         Ok(producer_id) => {
-            state.producers.insert(source, producer);
+            state.producers.insert(producer_key, producer);
             Ok(json!({ "id": producer_id }))
         }
         Err(error) => {
@@ -978,7 +983,12 @@ fn producer_by_id(
 
 fn set_producer_paused(state: &mut WorkerState, payload: Value) -> WorkerResult {
     state.ensure_initialized()?;
-    let producer = producer_pointer(state, &payload_string(&payload, "source")?)?;
+    let key = payload
+        .get("producerKey")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("source").and_then(Value::as_str))
+        .ok_or_else(|| json!("native producer source or key is required"))?;
+    let producer = producer_pointer(state, key)?;
     let paused = payload_bool(&payload, "paused")?;
     let result = unsafe { ffi::lib_dspeak_media_producer_set_paused(producer, paused) };
     if result == 0 {
@@ -990,7 +1000,12 @@ fn set_producer_paused(state: &mut WorkerState, payload: Value) -> WorkerResult 
 
 fn set_producer_parameters(state: &mut WorkerState, payload: Value) -> WorkerResult {
     state.ensure_initialized()?;
-    let producer = producer_pointer(state, &payload_string(&payload, "source")?)?;
+    let key = payload
+        .get("producerKey")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("source").and_then(Value::as_str))
+        .ok_or_else(|| json!("native producer source or key is required"))?;
+    let producer = producer_pointer(state, key)?;
     let parameters = CString::new(
         payload
             .get("parameters")
@@ -1010,8 +1025,12 @@ fn set_producer_parameters(state: &mut WorkerState, payload: Value) -> WorkerRes
 
 fn remove_capture_producer(state: &mut WorkerState, payload: Value) -> WorkerResult {
     state.ensure_initialized()?;
-    let source = payload_string(&payload, "source")?;
-    if let Some(producer) = state.producers.remove(&source) {
+    let key = payload
+        .get("producerKey")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("source").and_then(Value::as_str))
+        .ok_or_else(|| json!("native producer source or key is required"))?;
+    if let Some(producer) = state.producers.remove(key) {
         unsafe { ffi::lib_dspeak_media_destroy_producer(producer) };
     }
     Ok(Value::Null)
@@ -1131,11 +1150,20 @@ fn p2p_add_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
     let key = payload_u64(&payload, "p2pHandle")?;
     let handle = p2p_pointer(state, key)?;
     let source = payload_string(&payload, "source")?;
+    let track_key = payload
+        .get("trackKey")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| source.clone());
     let kind = payload_string(&payload, "kind")?;
+    let preferred_codec = payload
+        .get("preferredCodec")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     if kind != "audio" && kind != "video" {
         return Err(json!("native P2P track kind is invalid"));
     }
-    if state.p2p_tracks.contains_key(&(key, source.clone())) {
+    if state.p2p_tracks.contains_key(&(key, track_key.clone())) {
         return Err(json!("native P2P source is already attached"));
     }
     let source_c =
@@ -1152,16 +1180,36 @@ fn p2p_add_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
     }
     let result = unsafe {
         if kind == "video" {
-            ffi::lib_dspeak_media_p2p_add_video_track(handle, track)
+            let preferred = preferred_codec
+                .as_deref()
+                .map(|value| CString::new(value.to_owned()))
+                .transpose()
+                .map_err(|error| json!(error.to_string()))?;
+            let track_key = CString::new(track_key.clone())
+                .map_err(|error| json!(error.to_string()))?;
+            ffi::lib_dspeak_media_p2p_add_video_track_with_key(
+                handle,
+                track,
+                preferred
+                    .as_ref()
+                    .map_or(ptr::null(), |value| value.as_ptr()),
+                track_key.as_ptr(),
+            )
         } else {
-            ffi::lib_dspeak_media_p2p_add_audio_track(handle, track)
+            let track_key = CString::new(track_key.clone())
+                .map_err(|error| json!(error.to_string()))?;
+            ffi::lib_dspeak_media_p2p_add_audio_track_with_key(
+                handle,
+                track,
+                track_key.as_ptr(),
+            )
         }
     };
     if result != 0 {
         return Err(json!(format!("native P2P {kind} track attachment failed")));
     }
     let track_id = track_id(track, &kind)?;
-    state.p2p_tracks.insert((key, source), (kind, track));
+    state.p2p_tracks.insert((key, track_key), (kind, track));
     Ok(json!({ "trackId": track_id }))
 }
 
@@ -1170,22 +1218,39 @@ fn p2p_remove_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
     let key = payload_u64(&payload, "p2pHandle")?;
     let handle = p2p_pointer(state, key)?;
     let source = payload_string(&payload, "source")?;
+    let track_key = payload
+        .get("trackKey")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| source.clone());
     let (kind, track) = state
         .p2p_tracks
-        .get(&(key, source.clone()))
+        .get(&(key, track_key.clone()))
         .cloned()
         .ok_or_else(|| json!("native P2P source is not attached"))?;
     let result = unsafe {
         if kind == "video" {
-            ffi::lib_dspeak_media_p2p_remove_video_track(handle, track)
+            let track_key = CString::new(track_key.clone())
+                .map_err(|error| json!(error.to_string()))?;
+            ffi::lib_dspeak_media_p2p_remove_video_track_with_key(
+                handle,
+                track,
+                track_key.as_ptr(),
+            )
         } else {
-            ffi::lib_dspeak_media_p2p_remove_audio_track(handle, track)
+            let track_key = CString::new(track_key.clone())
+                .map_err(|error| json!(error.to_string()))?;
+            ffi::lib_dspeak_media_p2p_remove_audio_track_with_key(
+                handle,
+                track,
+                track_key.as_ptr(),
+            )
         }
     };
     if result != 0 {
         return Err(json!(format!("native P2P {kind} track removal failed")));
     }
-    state.p2p_tracks.remove(&(key, source));
+    state.p2p_tracks.remove(&(key, track_key));
     Ok(Value::Null)
 }
 
@@ -1195,9 +1260,14 @@ fn p2p_replace_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
     let handle = p2p_pointer(state, key)?;
     let source = payload_string(&payload, "source")?;
     let kind = payload_string(&payload, "kind")?;
+    let track_key = payload
+        .get("trackKey")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| source.clone());
     let (attached_kind, old_track) = state
         .p2p_tracks
-        .get(&(key, source.clone()))
+        .get(&(key, track_key.clone()))
         .cloned()
         .ok_or_else(|| json!("native P2P source is not attached"))?;
     if attached_kind != kind {
@@ -1222,9 +1292,23 @@ fn p2p_replace_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
     if new_track != old_track {
         let result = unsafe {
             if kind == "video" {
-                ffi::lib_dspeak_media_p2p_replace_video_track(handle, old_track, new_track)
+                let track_key = CString::new(track_key.clone())
+                    .map_err(|error| json!(error.to_string()))?;
+                ffi::lib_dspeak_media_p2p_replace_video_track_with_key(
+                    handle,
+                    old_track,
+                    new_track,
+                    track_key.as_ptr(),
+                )
             } else {
-                ffi::lib_dspeak_media_p2p_replace_audio_track(handle, old_track, new_track)
+                let track_key = CString::new(track_key.clone())
+                    .map_err(|error| json!(error.to_string()))?;
+                ffi::lib_dspeak_media_p2p_replace_audio_track_with_key(
+                    handle,
+                    old_track,
+                    new_track,
+                    track_key.as_ptr(),
+                )
             }
         };
         if result != 0 {
@@ -1233,7 +1317,7 @@ fn p2p_replace_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
     }
     let track_id = track_id(new_track, &kind)?;
     state.p2p_tracks.insert(
-        (key, payload_string(&payload, "source")?),
+        (key, track_key),
         (kind, new_track),
     );
     Ok(json!({ "trackId": track_id }))
@@ -1244,12 +1328,19 @@ fn p2p_set_track_parameters(state: &mut WorkerState, payload: Value) -> WorkerRe
     let key = payload_u64(&payload, "p2pHandle")?;
     let handle = p2p_pointer(state, key)?;
     let source = payload_string(&payload, "source")?;
+    let track_key = payload
+        .get("trackKey")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| source.clone());
     let (kind, track) = state
         .p2p_tracks
-        .get(&(key, source))
+        .get(&(key, track_key.clone()))
         .cloned()
         .ok_or_else(|| json!("native P2P source is not attached"))?;
-    let track_id = track_id(track, &kind)?;
+    if track.is_null() {
+        return Err(json!(format!("native P2P {kind} track is invalid")));
+    }
     let parameters = CString::new(
         payload
             .get("parameters")
@@ -1258,12 +1349,12 @@ fn p2p_set_track_parameters(state: &mut WorkerState, payload: Value) -> WorkerRe
             .to_string(),
     )
     .map_err(|_| json!("native P2P parameters contain a NUL byte"))?;
-    let track_id =
-        CString::new(track_id).map_err(|_| json!("native P2P track id contains a NUL byte"))?;
+    let track_key = CString::new(track_key)
+        .map_err(|_| json!("native P2P track key contains a NUL byte"))?;
     let result = unsafe {
-        ffi::lib_dspeak_media_p2p_set_track_parameters(
+        ffi::lib_dspeak_media_p2p_set_track_parameters_with_key(
             handle,
-            track_id.as_ptr(),
+            track_key.as_ptr(),
             parameters.as_ptr(),
         )
     };
@@ -1919,6 +2010,8 @@ fn get_stats(state: &mut WorkerState) -> WorkerResult {
         "consumers": consumers,
         "videoStreams": video_streams,
         "videoCodecDiagnostics": capabilities.get("videoCodecDiagnostics").cloned().unwrap_or(Value::Null),
+        "videoCodecCapabilities": capabilities.get("videoCodecCapabilities").cloned().unwrap_or(Value::Null),
+        "concurrentEncode": capabilities.get("concurrentEncode").cloned().unwrap_or(Value::Null),
     }))
 }
 

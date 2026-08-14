@@ -20,6 +20,8 @@ export class MediasoupProviderSocket {
   connect({
     signalingUrl,
     ticket,
+    mediaCapabilities,
+    capabilityProtocol,
   }: MediasoupProviderConnectOptions): Promise<void> {
     this.close();
     this.ready = new Promise<void>((resolve, reject) => {
@@ -58,6 +60,8 @@ export class MediasoupProviderSocket {
               type: "hello919",
               protocolRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
               ticket,
+              ...(mediaCapabilities ? { mediaCapabilities } : {}),
+              ...(capabilityProtocol ? { capabilityProtocol } : {}),
             }),
           );
         } catch (error) {

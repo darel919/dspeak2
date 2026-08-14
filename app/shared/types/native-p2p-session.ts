@@ -1,3 +1,9 @@
+import type {
+  CodecMigrationTelemetry,
+  PresentableVideoFrame,
+  VideoCodecRuntimeTelemetry,
+} from "../video-codec-migration.ts";
+
 export interface NativeP2pSource extends Record<string, unknown> {
   source: string;
   kind?: "audio" | "video";
@@ -7,6 +13,18 @@ export interface NativeP2pSource extends Record<string, unknown> {
   audioBitrate?: number | null;
   roomBitrateBps?: number | null;
   videoSettings?: import("./video-settings.ts").VideoSettings | null;
+  logicalStreamId?: string | null;
+  generation?: number;
+  variantId?: string | null;
+  codec?: string | null;
+  codecAcceleration?: string | null;
+  codecImplementation?: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  bitrate?: number | null;
+  target?: import("../video-codec-routing.ts").CodecRoutingTarget;
+  targetAdjusted?: boolean;
 }
 
 export interface NativeP2pTrackEntry extends Record<string, unknown> {
@@ -20,7 +38,28 @@ export interface NativeP2pTrackEntry extends Record<string, unknown> {
   receiving: boolean;
   closed: boolean;
   p2pHandle: string | number;
-  frame?: Record<string, unknown> | null;
+  frame?: PresentableVideoFrame | null;
+  logicalStreamId?: string;
+  generation?: number;
+  variantId?: string | null;
+  codec?: string | null;
+  codecAcceleration?: string | null;
+  codecImplementation?: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  bitrate?: number | null;
+  target?: import("../video-codec-routing.ts").CodecRoutingTarget;
+  targetAdjusted?: boolean;
+  migrationState?: string;
+  presentableFrames?: number;
+  lastFrameTimestamp?: number | null;
+  lastFrameAt?: number | null;
+  visible?: boolean;
+  superseded?: boolean;
+  transportEnded?: boolean;
+  migrationStartedAt?: number | null;
+  migrationTimer?: ReturnType<typeof setTimeout> | null;
 }
 
 export interface NativeP2pSessionPeer extends Record<string, unknown> {
@@ -32,6 +71,23 @@ export interface NativeP2pSessionPeer extends Record<string, unknown> {
   connected: boolean;
   sourceByTrackId: Map<string, string>;
   ownerSourceByTrackId: Map<string, string | null>;
+  logicalStreamByTrackId: Map<string, string>;
+  generationByTrackId: Map<string, number>;
+  variantByTrackId: Map<string, string | null>;
+  codecByTrackId: Map<string, string | null>;
+  codecAccelerationByTrackId: Map<string, string | null>;
+  codecImplementationByTrackId: Map<string, string | null>;
+  metadataByTrackId: Map<
+    string,
+    {
+      width: number | null;
+      height: number | null;
+      fps: number | null;
+      bitrate: number | null;
+      target?: import("../video-codec-routing.ts").CodecRoutingTarget;
+      targetAdjusted?: boolean;
+    }
+  >;
   offerCreated: boolean;
   negotiationInFlight: boolean;
   negotiationRequested: boolean;
@@ -47,9 +103,17 @@ export interface NativeP2pSessionPeer extends Record<string, unknown> {
   restarted: boolean;
   failureReported: boolean;
   readyReported: boolean;
+  capabilitiesSent?: boolean;
+  capabilityWaitTimer?: ReturnType<typeof setTimeout> | null;
+  pendingOffer?: string | null;
   remoteSourceNames: Set<string>;
   sourceReceiving: Map<string, boolean>;
   remoteReceiving: Map<string, boolean>;
+  mediaCapabilities?:
+    import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
+  remoteMediaCapabilities?:
+    import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
+  selectedCodec?: string | null;
 }
 
 export interface NativeP2pSessionOptions {
@@ -70,6 +134,8 @@ export interface NativeP2pSessionOptions {
   ) => import("./video-settings.ts").VideoSettings;
   disconnectGraceMs?: number;
   iceRestartTimeoutMs?: number;
+  mediaCapabilities?:
+    import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
 }
 
 export interface NativeP2pSessionSurface {
@@ -83,6 +149,7 @@ export interface NativeP2pSessionSurface {
   getAudioBitrate?: NativeP2pSessionOptions["getAudioBitrate"];
   getAudioStereo?: NativeP2pSessionOptions["getAudioStereo"];
   getVideoSettings?: NativeP2pSessionOptions["getVideoSettings"];
+  mediaCapabilities: NativeP2pSessionOptions["mediaCapabilities"];
   disconnectGraceMs: number;
   iceRestartTimeoutMs: number;
   peers: Map<string, NativeP2pSessionPeer>;
@@ -91,6 +158,9 @@ export interface NativeP2pSessionSurface {
   remoteReceiving: Map<string, boolean>;
   trackEntries: Map<string, NativeP2pTrackEntry>;
   retiredTrackEntries: Map<string, NativeP2pTrackEntry>;
+  codecMigrationTelemetry: CodecMigrationTelemetry[];
+  videoDecodeOverloadTelemetry: import("../video-codec-migration.ts").VideoDecodeOverloadTelemetry[];
+  codecRuntimeTelemetry: VideoCodecRuntimeTelemetry[];
   jitterBufferMinimumDelay: number;
   jitterBufferTargetDelay: number;
   mode: string;
@@ -112,7 +182,15 @@ export interface NativeP2pSessionSurface {
     peerId: string,
     userId: string | number | null,
     sources?: string[],
+    remoteMediaCapabilities?:
+      | import("./video-codec-capabilities.ts").ParticipantMediaCapabilities
+      | null,
   ) => Promise<NativeP2pSessionPeer>;
+  _selectPeerCodec: (
+    peer: NativeP2pSessionPeer,
+    source?: NativeP2pSource | null,
+  ) => string | null;
+  _reconcilePendingVideoSources: () => Promise<unknown>;
   _applyJitterBufferConfig: (entry: NativeP2pTrackEntry) => unknown;
   _updateSourceParameters: (
     source: string,
@@ -135,6 +213,13 @@ export interface NativeP2pSessionSurface {
     source: string,
     parameters: Record<string, unknown>,
   ) => Promise<unknown>;
+  adaptVideoReceiver: (
+    logicalStreamId: string,
+    preferredLayers: {
+      spatialLayer?: number;
+      temporalLayer?: number;
+    },
+  ) => Promise<unknown>;
   setConsumerVolume: (
     userId: string | number,
     source: string | null,
@@ -153,6 +238,7 @@ export interface NativeP2pSessionSurface {
     targetDelayMs?: number;
   }) => unknown;
   _closePeer: (peerId: string) => Promise<unknown>;
+  _acceptOffer: (peer: NativeP2pSessionPeer, sdp: unknown) => Promise<unknown>;
   _attachSource: (
     peer: NativeP2pSessionPeer,
     source: NativeP2pSource,
@@ -170,10 +256,12 @@ export interface NativeP2pSessionSurface {
     peer: NativeP2pSessionPeer,
     source: string,
     parameters: Record<string, unknown>,
+    preferredCodec?: string | null,
   ) => Promise<unknown>;
   _sourceParameters: (
     source: NativeP2pSource,
     overrides?: Record<string, unknown>,
+    target?: import("../video-codec-routing.ts").CodecRoutingTarget,
   ) => Record<string, unknown>;
   _sendSignal: (
     targetPeerId: string,

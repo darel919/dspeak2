@@ -1,0 +1,6 @@
+{
+  "identifier": "media-popup",
+  "description": "Core window and event access for native media popout windows",
+  "windows": ["media-popup-*"],
+  "permissions": ["core:default"]
+}

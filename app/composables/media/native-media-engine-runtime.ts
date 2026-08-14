@@ -17,6 +17,7 @@ import type {
   NativeTopology,
 } from "../../shared/types/native-media.ts";
 import { resolveMediaProviderIdentity } from "../../shared/media-provider-identity.ts";
+import { normalizeParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
 
 const NATIVE_MEDIA_READINESS_TIMEOUT_MS = 10_000;
 const NATIVE_MEDIA_READINESS_POLL_MS = 100;
@@ -371,6 +372,7 @@ export async function shutdown(engine: NativeMediaEngine) {
   engine.initialized = false;
   engine.nativeSession = null;
   engine.nativeP2pSession = null;
+  engine.mediaCapabilities = null;
   engine.nativeActionHandler = null;
   engine.remoteVideoFeedsRef.value = new Map();
   engine.remoteAudioFeedsRef.value = new Map();
@@ -382,6 +384,41 @@ export function mergeNativeCapabilities(
   engine: NativeMediaEngine,
   capabilities: NativeCapabilities = {},
 ) {
+  engine.mediaCapabilities = normalizeParticipantMediaCapabilities({
+    ...capabilities,
+    ...(capabilities.mediaCapabilities || {}),
+    videoCodecs:
+      capabilities.videoCodecCapabilities ||
+      capabilities.mediaCapabilities?.videoCodecs ||
+      (
+        capabilities.videoCodecDiagnostics as
+          Record<string, unknown> | undefined
+      )?.capabilities,
+    concurrentEncode:
+      capabilities.concurrentEncode ||
+      capabilities.mediaCapabilities?.concurrentEncode ||
+      (
+        capabilities.videoCodecDiagnostics as
+          Record<string, unknown> | undefined
+      )?.concurrentEncode,
+    source: "native-runtime-probe",
+  });
+  if (engine.nativeSession)
+    engine.nativeSession.mediaCapabilities = engine.mediaCapabilities;
+  if (engine.nativeSession?.cloudflareSession)
+    engine.nativeSession.cloudflareSession.mediaCapabilities =
+      engine.mediaCapabilities;
+  if (engine.nativeP2pSession)
+    engine.nativeP2pSession.mediaCapabilities = engine.mediaCapabilities;
+  const capabilityMessage = {
+    type: "media-capabilities",
+    data: {
+      mediaCapabilities: engine.mediaCapabilities,
+      capabilityProtocol: "video-codec-matrix-v1",
+    },
+  };
+  engine.nativeSession?.signaling?.send?.(capabilityMessage);
+  engine.nativeSession?.providerSignaling?.send?.(capabilityMessage);
   const mapping = {
     nativeRtc: "nativeRtc",
     nativeBackendReady: "nativeBackendReady",
@@ -548,13 +585,15 @@ export function syncNativeFeeds(engine: NativeMediaEngine) {
   const p2pVideoFeeds =
     engine.nativeProvider === "p2p"
       ? [...(engine.nativeP2pSession?.trackEntries?.values() || [])].filter(
-          (entry) => entry.kind === "video" && !entry.closed,
+          (entry) =>
+            entry.kind === "video" && !entry.closed && entry.visible !== false,
         )
       : [];
   const p2pAudioFeeds =
     engine.nativeProvider === "p2p"
       ? [...(engine.nativeP2pSession?.trackEntries?.values() || [])].filter(
-          (entry) => entry.kind === "audio" && !entry.closed,
+          (entry) =>
+            entry.kind === "audio" && !entry.closed && entry.visible !== false,
         )
       : [];
   const mergeFeeds = (
@@ -565,13 +604,26 @@ export function syncNativeFeeds(engine: NativeMediaEngine) {
     for (const [key, entry] of nativeFeeds)
       merged.set(`${String(entry.userId)}:${String(entry.source)}`, [
         key,
-        entry,
+        {
+          ...entry,
+          logicalStreamId:
+            entry.logicalStreamId ||
+            `user:${String(entry.userId ?? "unknown")}/${String(entry.source || "video")}`,
+        },
       ]);
     for (const entry of p2pFeeds) {
       const logicalKey = `${String(entry.userId)}:${String(entry.source)}`;
       const current = merged.get(logicalKey)?.[1];
       if (current?.kind === "video" && current.frame && !entry.frame) continue;
-      merged.set(logicalKey, [entry.key || logicalKey, entry]);
+      merged.set(logicalKey, [
+        entry.key || logicalKey,
+        {
+          ...entry,
+          logicalStreamId:
+            entry.logicalStreamId ||
+            `user:${String(entry.userId ?? "unknown")}/${String(entry.source || "video")}`,
+        },
+      ]);
     }
     return new Map(merged.values());
   };

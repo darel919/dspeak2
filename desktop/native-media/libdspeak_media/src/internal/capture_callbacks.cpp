@@ -63,8 +63,21 @@ void on_audio_frame(void* user_data,
     CaptureRoute route = user_data ? *capture_route(user_data) : CaptureRoute::kDesktop;
     std::unique_lock<std::mutex> track_lock(g_track_mutex);
     lib_dspeak_media_audio_track_t* track = audio_track_for_route(route);
-    if (!track || !track->source || !track->worker_thread || !data || frame_count == 0 ||
-        channels != 2 || sample_rate != 48000) return;
+    const bool valid = track && track->source && track->worker_thread && data &&
+        frame_count > 0 && channels == 2 && sample_rate == 48000;
+    if (!valid) {
+        if (route == CaptureRoute::kDesktop && !g_screen_audio_callback_logged.exchange(true))
+            std::fprintf(stderr,
+                         "[dspeak:media] native screen audio callback rejected track=%d source=%d worker=%d data=%d frames=%u rate=%u channels=%u\n",
+                         track != nullptr, track && track->source != nullptr,
+                         track && track->worker_thread != nullptr, data != nullptr,
+                         frame_count, sample_rate, channels);
+        return;
+    }
+    if (route == CaptureRoute::kDesktop && !g_screen_audio_callback_logged.exchange(true))
+        std::fprintf(stderr,
+                     "[dspeak:media] native screen audio callback accepted frames=%u rate=%u channels=%u\n",
+                     frame_count, sample_rate, channels);
     double input_sum = 0.0;
     for (size_t index = 0; index < static_cast<size_t>(frame_count) * channels; ++index) {
         const double sample = static_cast<double>(data[index]);
@@ -171,6 +184,12 @@ void on_audio_frame(void* user_data,
     track_lock.unlock();
 
     if (emitted_frames > 0 && route == CaptureRoute::kDesktop) {
+        if (!g_screen_audio_emitted_logged.exchange(true))
+            std::fprintf(stderr,
+                         "[dspeak:media] native screen audio frame delivered frames=%zu inputRms=%.5f outputRms=%.5f\n",
+                         emitted_frames, input_rms,
+                         std::sqrt(output_sum /
+                                   std::max<size_t>(1, static_cast<size_t>(frame_count) * channels)));
         g_probe_audio_frames.fetch_add(1);
         dspeak_media_runtime::screen_audio_ready.store(true);
     } else if (emitted_frames > 0 && route == CaptureRoute::kMicrophone) {

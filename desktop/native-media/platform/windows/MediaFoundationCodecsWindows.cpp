@@ -657,7 +657,7 @@ bool encoder_available_uncached() {
     auto transform = create_hardware_transform(input_info, output_info);
     ComPtr<IMFMediaType> output_type;
     return transform && configure_encoder_transform(
-        transform.Get(), 640, 360, 15, 400000, &output_type);
+        transform.Get(), 1920, 1080, 30, 4500000, &output_type);
 }
 
 bool decoder_available_uncached() {
@@ -670,7 +670,7 @@ bool decoder_available_uncached() {
     auto transform = create_hardware_decoder_transform(input_info, output_info);
     ComPtr<IMFMediaType> output_type;
     return transform && configure_decoder_transform(
-        transform.Get(), 640, 360, &output_type);
+        transform.Get(), 1920, 1080, &output_type);
 }
 
 }

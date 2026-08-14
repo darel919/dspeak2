@@ -18,8 +18,10 @@ export class NativeCloudflareRealtimeSession {
     getAudioStereo,
     getVideoSettings,
     requestTimeoutMs = 15000,
+    localPeerId = "",
     sources = new Map(),
     producers = new Map(),
+    producerVariants = new Map(),
     consumers = new Map(),
     sourceTransmission = new Map(),
     remoteReceiving = new Map(),
@@ -27,6 +29,7 @@ export class NativeCloudflareRealtimeSession {
     pendingLocalVideoFrames = new Map(),
     remoteVideoFeeds = new Map(),
     remoteAudioFeeds = new Map(),
+    mediaCapabilities = null,
   }: NativeCloudflareSessionOptions) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeCloudflareRealtimeSession requires invoke");
@@ -40,8 +43,10 @@ export class NativeCloudflareRealtimeSession {
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.localPeerId = String(localPeerId || "");
     this.sources = sources;
     this.producers = producers;
+    this.producerVariants = producerVariants;
     this.consumers = consumers;
     this.sourceTransmission = sourceTransmission;
     this.remoteReceiving = remoteReceiving;
@@ -49,6 +54,11 @@ export class NativeCloudflareRealtimeSession {
     this.pendingLocalVideoFrames = pendingLocalVideoFrames;
     this.remoteVideoFeeds = remoteVideoFeeds;
     this.remoteAudioFeeds = remoteAudioFeeds;
+    this.mediaCapabilities = mediaCapabilities;
+    this.logicalVideoStreams = new Map();
+    this.codecMigrationTelemetry = [];
+    this.videoDecodeOverloadTelemetry = [];
+    this.codecRuntimeTelemetry = [];
     this.publications = new Map();
     this.remoteByMid = new Map();
     this.pendingRemoteTrackEvents = new Map();

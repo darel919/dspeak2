@@ -166,17 +166,122 @@ static json video_codec_factory_entry(const char* encoder_factory,
     };
 }
 
+static const char* runtime_efficiency(
+    const std::string& codec,
+    bool supported,
+    bool hardware,
+    bool tested) {
+    if (!supported || !tested) return "unusable";
+    if (hardware) return "excellent";
+    if (codec == "VP9" || codec == "H265") return "poor";
+    if (codec == "AV1") return "unusable";
+    return "acceptable";
+}
+
+static json runtime_codec_direction_entry(
+    const std::string& codec,
+    const dspeak_native::VideoCodecRuntimeDiagnostics& diagnostics,
+    bool encoder) {
+    const bool supported = encoder
+        ? diagnostics.encoder_supported
+        : diagnostics.decoder_supported;
+    const bool hardware = encoder
+        ? diagnostics.encoder_hardware
+        : diagnostics.decoder_hardware;
+    const bool tested = encoder
+        ? diagnostics.encoder_frame_validated
+        : diagnostics.decoder_frame_validated;
+    const std::string implementation = encoder
+        ? diagnostics.encoder_implementation
+        : diagnostics.decoder_implementation;
+    const int testedWidth = encoder
+        ? diagnostics.encoder_tested_width
+        : diagnostics.decoder_tested_width;
+    const int testedHeight = encoder
+        ? diagnostics.encoder_tested_height
+        : diagnostics.decoder_tested_height;
+    const int testedFps = encoder
+        ? diagnostics.encoder_tested_fps
+        : diagnostics.decoder_tested_fps;
+    const std::string failure = encoder
+        ? diagnostics.encoder_failure
+        : diagnostics.decoder_failure;
+    json entry = {
+        {"supported", supported},
+        {"acceleration", supported ? (hardware ? "hardware" : "software")
+                                    : "unsupported"},
+        {"implementation", implementation.empty() ? "unknown" : implementation},
+        {"realtimeEfficiency", runtime_efficiency(codec, supported, hardware, tested)},
+        {"powerClass", supported && hardware ? "low" : "high"},
+        {"tested", tested},
+        {"configured", encoder ? supported : diagnostics.decoder_configured},
+    };
+    if (tested && testedWidth > 0 && testedHeight > 0 && testedFps > 0) {
+        entry["maxWidth"] = testedWidth;
+        entry["maxHeight"] = testedHeight;
+        entry["maxFps"] = testedFps;
+    }
+    if (tested)
+        entry["testedProfile"] = codec + " / " +
+            std::to_string(testedWidth) + "x" +
+            std::to_string(testedHeight) + "@" +
+            std::to_string(testedFps);
+    if (!failure.empty()) entry["failureReason"] = failure;
+    return entry;
+}
+
+static json video_codec_capabilities(const dspeak_native::VideoCodecFactoryDiagnostics& diagnostics) {
+    json result = json::object();
+    for (const auto* codec : {"H264", "H265", "VP8", "VP9", "AV1"}) {
+        const auto found = diagnostics.codecs.find(codec);
+        dspeak_native::VideoCodecRuntimeDiagnostics empty;
+        const auto& runtime = found == diagnostics.codecs.end() ? empty : found->second;
+        result[codec] = {
+            {"encode", runtime_codec_direction_entry(codec, runtime, true)},
+            {"decode", runtime_codec_direction_entry(codec, runtime, false)},
+        };
+    }
+    return result;
+}
+
 static json video_codec_diagnostics() {
     const auto diagnostics = dspeak_native::video_codec_factory_diagnostics();
+    const auto capabilities = video_codec_capabilities(diagnostics);
+    json encoders = json::array();
+    json decoders = json::array();
+    for (const auto& [codec, runtime] : diagnostics.codecs) {
+        if (runtime.encoder_supported)
+            encoders.push_back(video_codec_entry(
+                codec.c_str(), runtime.encoder_implementation,
+                runtime.encoder_hardware));
+        if (runtime.decoder_supported)
+            decoders.push_back(video_codec_entry(
+                codec.c_str(), runtime.decoder_implementation,
+                runtime.decoder_hardware));
+    }
     return {
         {"reportKind", "native-video-codec-factory"},
-        {"configurationSource", "native libwebrtc factory construction"},
+        {"configurationSource", "on-demand native libwebrtc encode/decode validation"},
         {"platform", diagnostics.platform},
         {"factoryMode", diagnostics.hardware_encoder || diagnostics.hardware_decoder
             ? "platform-hardware-with-software-fallback"
             : "software-fallback"},
         {"hardwareEncoder", diagnostics.hardware_encoder},
         {"hardwareDecoder", diagnostics.hardware_decoder},
+        {"capabilities", capabilities},
+        {"concurrentEncode", {
+            {"supported", diagnostics.hardware_encoder},
+            {"maxHardwareSessions", diagnostics.max_hardware_encode_sessions},
+            {"confidence", diagnostics.concurrent_hardware_sessions_tested
+                ? "tested"
+                : "conservative-default"},
+            {"testedCodecPairs", [&diagnostics] {
+                json pairs = json::array();
+                for (const auto& [left, right] : diagnostics.tested_codec_pairs)
+                    pairs.push_back({left, right});
+                return pairs;
+            }()},
+        }},
         {"fallbackPolicy", {
             {"hardwareCodec", "H264"},
             {"softwareEncoder", "VP8/H264"},
@@ -184,20 +289,8 @@ static json video_codec_diagnostics() {
             {"softwareAv1Encoder", false},
             {"softwareAv1Decoder", false},
         }},
-        {"encoders", json::array({
-            video_codec_entry("H264", diagnostics.encoder_implementation,
-                              diagnostics.hardware_encoder),
-            video_codec_entry("VP8", "libvpx", false),
-            video_codec_entry("VP9", "libvpx", false),
-            video_codec_entry("H264", "OpenH264", false),
-        })},
-        {"decoders", json::array({
-            video_codec_entry("H264", diagnostics.decoder_implementation,
-                              diagnostics.hardware_decoder),
-            video_codec_entry("VP8", "libvpx", false),
-            video_codec_entry("VP9", "libvpx", false),
-            video_codec_entry("H264", "OpenH264", false),
-        })},
+        {"encoders", encoders},
+        {"decoders", decoders},
         {"factories", {
             {"p2p", video_codec_factory_entry(
                 "CompositeVideoEncoderFactory", "CompositeVideoDecoderFactory",
@@ -340,7 +433,10 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
     caps["p2p"] = p2p_ready;
     caps["sfu"] = sfu_ready;
     caps["capture"] = json::object();
-    caps["videoCodecDiagnostics"] = video_codec_diagnostics();
+    const auto codec_diagnostics = video_codec_diagnostics();
+    caps["videoCodecDiagnostics"] = codec_diagnostics;
+    caps["videoCodecCapabilities"] = codec_diagnostics["capabilities"];
+    caps["concurrentEncode"] = codec_diagnostics["concurrentEncode"];
     caps["health"] = {
         {"nativeRtc", runtime_health_record(core_ready,
             "libwebrtc initialized and peer-connection factory probe passed",

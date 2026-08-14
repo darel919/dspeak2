@@ -151,6 +151,27 @@ pub fn p2p_set_track_parameters(
     }
 }
 
+pub fn p2p_set_track_parameters_with_key(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    track_key: &str,
+    parameters: &str,
+) -> Result<(), String> {
+    let track_key = CString::new(track_key).map_err(|error| error.to_string())?;
+    let parameters = CString::new(parameters).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_set_track_parameters_with_key(
+            handle,
+            track_key.as_ptr(),
+            parameters.as_ptr(),
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P sender RTP parameters update failed".to_string())
+    }
+}
+
 pub fn p2p_replace_video_track(
     handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
     old_track: *mut std::ffi::c_void,
@@ -165,6 +186,28 @@ pub fn p2p_replace_video_track(
     }
 }
 
+pub fn p2p_replace_video_track_with_key(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    old_track: *mut std::ffi::c_void,
+    new_track: *mut std::ffi::c_void,
+    track_key: &str,
+) -> Result<(), String> {
+    let track_key = CString::new(track_key).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_replace_video_track_with_key(
+            handle,
+            old_track,
+            new_track,
+            track_key.as_ptr(),
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P video track replacement failed".to_string())
+    }
+}
+
 pub fn p2p_replace_audio_track(
     handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
     old_track: *mut std::ffi::c_void,
@@ -172,6 +215,28 @@ pub fn p2p_replace_audio_track(
 ) -> Result<(), String> {
     let result =
         unsafe { ffi::lib_dspeak_media_p2p_replace_audio_track(handle, old_track, new_track) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err("native P2P audio track replacement failed".to_string())
+    }
+}
+
+pub fn p2p_replace_audio_track_with_key(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    old_track: *mut std::ffi::c_void,
+    new_track: *mut std::ffi::c_void,
+    track_key: &str,
+) -> Result<(), String> {
+    let track_key = CString::new(track_key).map_err(|error| error.to_string())?;
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_replace_audio_track_with_key(
+            handle,
+            old_track,
+            new_track,
+            track_key.as_ptr(),
+        )
+    };
     if result == 0 {
         Ok(())
     } else {

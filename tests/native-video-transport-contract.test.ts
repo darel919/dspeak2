@@ -24,6 +24,7 @@ describe("native video transport contract", () => {
     assert.doesNotMatch(render, /I420ToABGR/);
     assert.match(render, /has_pending_video_frame/);
     assert.match(render, /push_event\([\s\S]*rgba\.data\(\)/);
+    assert.match(render, /"timestamp", frame\.timestamp_us\(\)/);
     assert.doesNotMatch(render, /video_surface::render/);
   });
 
@@ -200,6 +201,35 @@ describe("native video transport contract", () => {
     assert.match(codecs, /SoftwareDecoderFactory/);
     assert.doesNotMatch(codecs, /Dav1d|dav1d/);
     assert.doesNotMatch(diagnostics, /video_codec_entry\("AV1"/);
+  });
+
+  it("reports independent encode/decode capability matrices and conservative encoder limits", async () => {
+    const diagnostics = await read(
+      "desktop/native-media/libdspeak_media/src/internal/library_runtime.cpp",
+    );
+    const types = await read("desktop/src-tauri/src/media/types.rs");
+    const signaling = await read("app/shared/native-mediasoup-signaling.ts");
+    assert.match(diagnostics, /video_codec_capabilities/);
+    assert.match(diagnostics, /\{"encode", runtime_codec_direction_entry/);
+    assert.match(diagnostics, /\{"decode", runtime_codec_direction_entry/);
+    assert.match(diagnostics, /"H264".*"H265".*"VP8".*"VP9".*"AV1"/s);
+    assert.match(diagnostics, /maxHardwareSessions/);
+    assert.match(diagnostics, /testedCodecPairs/);
+    assert.match(diagnostics, /confidence/);
+    assert.match(types, /video_codec_capabilities/);
+    assert.match(types, /concurrent_encode/);
+    assert.match(signaling, /mediaCapabilities: session\.mediaCapabilities/);
+  });
+
+  it("keeps native video migration metadata on one logical stream identity", async () => {
+    const consumers = await read("app/shared/native-mediasoup-consumers.ts");
+    const actions = await read("app/shared/native-mediasoup-actions.ts");
+    const voiceChannel = await read("app/components/VoiceChannel.vue");
+    assert.match(consumers, /logicalVideoStreamId/);
+    assert.match(consumers, /NATIVE_CODEC_MIGRATION_REQUIRED_FRAMES/);
+    assert.match(actions, /commitVideoMigration/);
+    assert.match(actions, /presentableFrames/);
+    assert.match(voiceChannel, /logicalStreamId \|\| feed\.key/);
   });
 
   it("does not build detached platform video surfaces", async () => {

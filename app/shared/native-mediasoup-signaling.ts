@@ -142,6 +142,8 @@ export async function handleProviderTicket(
     await providerSignaling.connect({
       signalingUrl: String(data.signalingUrl || ""),
       ticket: String(data.ticket || ""),
+      mediaCapabilities: session.mediaCapabilities,
+      capabilityProtocol: "video-codec-matrix-v1",
     });
     await session._startNegotiation();
     session.activeSfuProvider = "mediasoup";
@@ -178,6 +180,8 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
       contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
       mediaSessionId: session.mediaSessionId,
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
+      mediaCapabilities: session.mediaCapabilities,
+      capabilityProtocol: "video-codec-matrix-v1",
       ticket: session.controlTicket,
     }),
     connectionTimeoutMs: session.requestTimeoutMs,
@@ -277,6 +281,7 @@ export async function handleRtpCapabilities(
   };
   session.device = device;
   session.lastSentClientRtpCapabilities = device.rtpCapabilities;
+  session.scheduleCodecRoutingEvaluation();
   try {
     session.sendOrThrow(
       {
@@ -355,6 +360,7 @@ export async function handleTransportParams(
     session.mediaConnectionState = "ready-no-active-media";
     session._emitState();
     await session._republishSources();
+    session.scheduleCodecRoutingEvaluation();
     for (const producerId of new Set([
       ...session.pendingConsumers,
       ...session.requestedConsumers,
