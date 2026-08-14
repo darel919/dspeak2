@@ -1,5 +1,6 @@
 <script setup>
-const { active, message, refresh } = useFatalClientError();
+const { active, descriptor, recoveryError, recoveryPending, recover } =
+  useFatalClientError();
 </script>
 
 <template>
@@ -12,13 +13,36 @@ const { active, message, refresh } = useFatalClientError();
     aria-describedby="fatal-error-message"
   >
     <div class="fatal-error-flyout metro-flyout text-base-content">
-      <h2 id="fatal-error-title" class="text-lg font-bold">Fatal error</h2>
+      <h2 id="fatal-error-title" class="text-lg font-bold">
+        {{ descriptor?.title }}
+      </h2>
       <p id="fatal-error-message" class="mt-3 text-base-content/70">
-        {{ message }}
+        {{ descriptor?.message }}
+      </p>
+      <p
+        v-if="recoveryError"
+        class="mt-3 text-error"
+        role="status"
+        aria-live="polite"
+      >
+        {{ recoveryError }}
       </p>
       <div class="fatal-error-actions flex justify-end gap-3">
-        <button class="metro-btn" type="button" autofocus @click="refresh">
-          Refresh page
+        <button
+          class="metro-btn"
+          type="button"
+          autofocus
+          :disabled="recoveryPending"
+          :aria-busy="recoveryPending"
+          @click="recover"
+        >
+          {{
+            recoveryPending
+              ? descriptor?.recoveryAction === "restart-app"
+                ? "Restarting…"
+                : "Refreshing…"
+              : descriptor?.recoveryLabel
+          }}
         </button>
       </div>
     </div>

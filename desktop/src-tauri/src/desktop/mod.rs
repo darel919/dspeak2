@@ -6,6 +6,11 @@ mod tray;
 mod updates;
 mod window;
 
+#[tauri::command]
+fn desktop_restart_app(app: tauri::AppHandle) {
+    app.restart()
+}
+
 use crate::media;
 use state::{BackgroundNotificationState, OAuthState};
 use std::sync::atomic::AtomicBool;
@@ -143,6 +148,7 @@ pub(crate) fn run() {
             media_popups::desktop_focus_media_popup,
             media_popups::desktop_close_media_popup,
             media::media_worker_invoke,
+            desktop_restart_app,
             notifications::register_background_notifications,
             notifications::clear_background_notifications,
             notifications::set_background_notifications_enabled,

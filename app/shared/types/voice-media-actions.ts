@@ -144,6 +144,7 @@ export interface VoiceMediaActionOptions {
   joinGenerationState: { value: number };
   leaveChannel: (channelId: string) => unknown;
   micMuted: Ref<boolean>;
+  nativeMediaInvalidated: Ref<boolean>;
   pageLifecycle: VoicePageLifecycleLike;
   p2pQualification: Ref<unknown>;
   playFatalError: (error: unknown) => void;

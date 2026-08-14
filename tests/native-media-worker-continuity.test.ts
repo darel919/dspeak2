@@ -2,13 +2,40 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
+const workerServerSources = [
+  "desktop/src-tauri/src/media_worker_server.rs",
+  "desktop/src-tauri/src/media_worker_server/capture.rs",
+  "desktop/src-tauri/src/media_worker_server/command.rs",
+  "desktop/src-tauri/src/media_worker_server/core.rs",
+  "desktop/src-tauri/src/media_worker_server/p2p.rs",
+  "desktop/src-tauri/src/media_worker_server/protocol.rs",
+  "desktop/src-tauri/src/media_worker_server/runtime.rs",
+  "desktop/src-tauri/src/media_worker_server/sfu.rs",
+  "desktop/src-tauri/src/media_worker_server/state.rs",
+];
+
+const workerClientSources = [
+  "desktop/src-tauri/src/media/worker_client.rs",
+  "desktop/src-tauri/src/media/worker_client/client.rs",
+  "desktop/src-tauri/src/media/worker_client/connection.rs",
+  "desktop/src-tauri/src/media/worker_client/diagnostics.rs",
+  "desktop/src-tauri/src/media/worker_client/process.rs",
+  "desktop/src-tauri/src/media/worker_client/routing.rs",
+];
+
+async function readSources(paths: string[]) {
+  return (await Promise.all(paths.map((path) => readFile(path, "utf8")))).join(
+    "\n",
+  );
+}
+
 const [render, workerServer, workerClient, session] = await Promise.all([
   readFile(
     "desktop/native-media/libdspeak_media/src/internal/receive_render.cpp",
     "utf8",
   ),
-  readFile("desktop/src-tauri/src/media_worker_server.rs", "utf8"),
-  readFile("desktop/src-tauri/src/media/worker_client.rs", "utf8"),
+  readSources(workerServerSources),
+  readSources(workerClientSources),
   readFile("app/composables/media/native-media-engine-session.ts", "utf8"),
 ]);
 

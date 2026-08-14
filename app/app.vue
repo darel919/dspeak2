@@ -14,10 +14,10 @@
       <UpdatePrompt />
       <AppConfirmDialog />
       <DatabaseHealthPrompt />
-      <FatalErrorPrompt />
       <CookieConsent />
     </NuxtLayout>
   </template>
+  <FatalErrorPrompt />
 </template>
 
 <script setup>

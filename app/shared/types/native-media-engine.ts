@@ -15,6 +15,7 @@ export interface NativeVoiceStoreLike {
   cameraEnabled?: boolean;
   screenSharing?: boolean;
   systemAudioSharing?: boolean;
+  invalidateAfterFatalMediaError?: () => unknown;
   getChannelById?: NativeMediaStore["getChannelById"];
   getAuthenticatedUser?: () => { id?: string | number } | null;
   upsertUserProfile?: (profile: Record<string, unknown>) => unknown;

@@ -8,6 +8,39 @@ async function read(path: string) {
   return readFile(new URL(path, root), "utf8");
 }
 
+const workerServerSources = [
+  "desktop/src-tauri/src/media_worker_server.rs",
+  "desktop/src-tauri/src/media_worker_server/capture.rs",
+  "desktop/src-tauri/src/media_worker_server/command.rs",
+  "desktop/src-tauri/src/media_worker_server/core.rs",
+  "desktop/src-tauri/src/media_worker_server/p2p.rs",
+  "desktop/src-tauri/src/media_worker_server/protocol.rs",
+  "desktop/src-tauri/src/media_worker_server/runtime.rs",
+  "desktop/src-tauri/src/media_worker_server/sfu.rs",
+  "desktop/src-tauri/src/media_worker_server/state.rs",
+];
+
+const workerClientSources = [
+  "desktop/src-tauri/src/media/worker_client.rs",
+  "desktop/src-tauri/src/media/worker_client/client.rs",
+  "desktop/src-tauri/src/media/worker_client/connection.rs",
+  "desktop/src-tauri/src/media/worker_client/diagnostics.rs",
+  "desktop/src-tauri/src/media/worker_client/process.rs",
+  "desktop/src-tauri/src/media/worker_client/routing.rs",
+];
+
+async function readSources(paths: string[]) {
+  return (await Promise.all(paths.map((path) => read(path)))).join("\n");
+}
+
+async function readWorkerServer() {
+  return readSources(workerServerSources);
+}
+
+async function readWorkerClient() {
+  return readSources(workerClientSources);
+}
+
 describe("native video transport contract", () => {
   it("carries bounded RGBA frames through the receive event ABI", async () => {
     const header = await read(
@@ -49,7 +82,7 @@ describe("native video transport contract", () => {
     const voiceChannel = await read("app/components/VoiceChannel.vue");
     const desktopWindow = await read("desktop/src-tauri/src/desktop/window.rs");
     const mediaState = await read("desktop/src-tauri/src/media/state.rs");
-    const worker = await read("desktop/src-tauri/src/media_worker_server.rs");
+    const worker = await readWorkerServer();
     assert.match(feed, /<canvas/);
     assert.match(feed, /ImageData|atob\(/);
     assert.match(feed, /scheduleNativeFrame/);
@@ -72,9 +105,7 @@ describe("native video transport contract", () => {
 
   it("keeps native media in the on-demand worker without a surface window", async () => {
     const build = await read("desktop/src-tauri/build.rs");
-    const workerClient = await read(
-      "desktop/src-tauri/src/media/worker_client.rs",
-    );
+    const workerClient = await readWorkerClient();
     const workerBuild = await read("scripts/build-desktop-worker.mjs");
     const devScript = await read("desktop/scripts/dev-desktop.sh");
     const cargo = await read("desktop/src-tauri/Cargo.toml");
@@ -97,9 +128,7 @@ describe("native video transport contract", () => {
   });
 
   it("reinitializes the worker before joining after a clean worker release", async () => {
-    const workerClient = await read(
-      "desktop/src-tauri/src/media/worker_client.rs",
-    );
+    const workerClient = await readWorkerClient();
     assert.match(workerClient, /call_with_initialize/);
     assert.match(workerClient, /worker_command == "media_join"/);
     assert.match(workerClient, /connection\.send\("media_initialize"/);
@@ -107,9 +136,7 @@ describe("native video transport contract", () => {
   });
 
   it("reinitializes the worker before source-aware capture starts after a probe release", async () => {
-    const workerClient = await read(
-      "desktop/src-tauri/src/media/worker_client.rs",
-    );
+    const workerClient = await readWorkerClient();
     assert.match(workerClient, /let capture_start_command = matches!\(/);
     assert.match(workerClient, /"media_start_screen_share"/);
     assert.match(workerClient, /"media_start_system_audio"/);
@@ -121,7 +148,7 @@ describe("native video transport contract", () => {
   });
 
   it("owns receive-event strings exactly once and preserves logical P2P handles", async () => {
-    const worker = await read("desktop/src-tauri/src/media_worker_server.rs");
+    const worker = await readWorkerServer();
     const header = await read(
       "desktop/native-media/libdspeak_media/include/lib_dspeak_media/lib_dspeak_media.h",
     );
@@ -138,10 +165,8 @@ describe("native video transport contract", () => {
   });
 
   it("keeps the media worker alive for active-call device and capture probes", async () => {
-    const worker = await read("desktop/src-tauri/src/media_worker_server.rs");
-    const workerClient = await read(
-      "desktop/src-tauri/src/media/worker_client.rs",
-    );
+    const worker = await readWorkerServer();
+    const workerClient = await readWorkerClient();
     const settings = await read("app/pages/settings.vue");
     assert.match(
       worker,
@@ -170,9 +195,7 @@ describe("native video transport contract", () => {
   });
 
   it("resets parent state when the native worker exits unexpectedly", async () => {
-    const workerClient = await read(
-      "desktop/src-tauri/src/media/worker_client.rs",
-    );
+    const workerClient = await readWorkerClient();
     assert.match(workerClient, /NativeMediaState::default\(\)/);
     assert.match(workerClient, /MEDIA_EVENT_STATE/);
     assert.match(workerClient, /MEDIA_WORKER_EXITED/);
