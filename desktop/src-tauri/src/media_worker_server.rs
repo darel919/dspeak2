@@ -41,6 +41,8 @@ struct WorkerState {
     event_pump: Option<EventPump>,
 }
 
+const NATIVE_EVENT_PREFIX: &[u8] = b"DSPEAK_NATIVE_EVENT ";
+
 unsafe impl Send for WorkerState {}
 
 impl Default for WorkerState {
@@ -77,7 +79,7 @@ impl WorkerState {
         Ok(Value::Null)
     }
 
-    fn start_events(&mut self, output: Arc<Mutex<BufWriter<io::Stdout>>>) -> WorkerResult {
+    fn start_events(&mut self, output: Arc<Mutex<BufWriter<io::Stderr>>>) -> WorkerResult {
         if self.event_pump.is_some() {
             return Ok(Value::Null);
         }
@@ -199,10 +201,12 @@ impl Drop for WorkerState {
 
 pub fn run() -> Result<(), String> {
     let output = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
+    let event_output = Arc::new(Mutex::new(BufWriter::new(io::stderr())));
     let stdin = io::stdin();
     let state = Arc::new(Mutex::new(WorkerState::default()));
     let reader_state = state.clone();
     let reader_output = output.clone();
+    let reader_event_output = event_output.clone();
     let reader = thread::Builder::new()
         .name("dspeak-media-worker-commands".to_string())
         .spawn(move || -> Result<(), String> {
@@ -238,7 +242,12 @@ pub fn run() -> Result<(), String> {
                     let mut state = reader_state
                         .lock()
                         .map_err(|_| "native media worker state lock poisoned".to_string())?;
-                    dispatch(&mut state, command, payload, reader_output.clone())
+                        dispatch(
+                            &mut state,
+                            command,
+                            payload,
+                            reader_event_output.clone(),
+                        )
                 };
                 let response = match &dispatched.result {
                     Ok(value) => json!({
@@ -278,10 +287,10 @@ fn dispatch(
     state: &mut WorkerState,
     command: &str,
     payload: Value,
-    output: Arc<Mutex<BufWriter<io::Stdout>>>,
+    event_output: Arc<Mutex<BufWriter<io::Stderr>>>,
 ) -> DispatchResult {
     if command == "media_initialize" {
-        return initialize(state, output);
+        return initialize(state, event_output);
     }
     if command == "media_shutdown" {
         let result = state.ensure_initialized().and_then(|_| state_value(state));
@@ -291,7 +300,7 @@ fn dispatch(
         };
     }
     if command == "media_join" {
-        return join(state, payload, output);
+        return join(state, payload, event_output);
     }
     if command == "media_leave" {
         return DispatchResult {
@@ -336,6 +345,7 @@ fn dispatch(
         "media_p2p_create_offer" => p2p_create_offer(state, payload),
         "media_p2p_create_answer" => p2p_create_answer(state, payload),
         "media_p2p_set_remote_description" => p2p_set_remote_description(state, payload),
+        "media_p2p_rollback_local_description" => p2p_rollback_local_description(state, payload),
         "media_p2p_add_ice_candidate" => p2p_add_ice_candidate(state, payload),
         "media_p2p_ice_state" => p2p_ice_state(state, payload),
         "media_p2p_restart_ice" => p2p_restart_ice(state, payload),
@@ -394,11 +404,11 @@ fn ready(state: &mut WorkerState) -> WorkerResult {
 
 fn initialize(
     state: &mut WorkerState,
-    output: Arc<Mutex<BufWriter<io::Stdout>>>,
+    event_output: Arc<Mutex<BufWriter<io::Stderr>>>,
 ) -> DispatchResult {
     let result = state
         .ensure_initialized()
-        .and_then(|_| state.start_events(output))
+        .and_then(|_| state.start_events(event_output))
         .and_then(|_| state_value(state));
     DispatchResult {
         result,
@@ -409,11 +419,11 @@ fn initialize(
 fn join(
     state: &mut WorkerState,
     payload: Value,
-    output: Arc<Mutex<BufWriter<io::Stdout>>>,
+    event_output: Arc<Mutex<BufWriter<io::Stderr>>>,
 ) -> DispatchResult {
     let result = state
         .ensure_initialized()
-        .and_then(|_| state.start_events(output))
+        .and_then(|_| state.start_events(event_output))
         .map(|_| {
             state.connected = true;
             state.session = Some(payload);
@@ -483,7 +493,7 @@ fn prepare_devices(state: &mut WorkerState) -> DispatchResult {
         .map(|devices| devices);
     DispatchResult {
         result,
-        shutdown_after: !state.connected,
+        shutdown_after: false,
     }
 }
 
@@ -497,7 +507,7 @@ fn prepare_capture(state: &mut WorkerState) -> DispatchResult {
     });
     DispatchResult {
         result,
-        shutdown_after: !state.connected,
+        shutdown_after: false,
     }
 }
 
@@ -1084,7 +1094,7 @@ fn p2p_create_offer(state: &mut WorkerState, payload: Value) -> WorkerResult {
     let handle = p2p_pointer(state, payload_u64(&payload, "p2pHandle")?)?;
     let mut output = ptr::null_mut();
     let result = unsafe { ffi::lib_dspeak_media_p2p_create_offer(handle, &mut output) };
-    p2p_sdp_result(result, output, "offer")
+    p2p_sdp_result(handle, result, output, "offer")
 }
 
 fn p2p_create_answer(state: &mut WorkerState, payload: Value) -> WorkerResult {
@@ -1096,7 +1106,7 @@ fn p2p_create_answer(state: &mut WorkerState, payload: Value) -> WorkerResult {
     let result = unsafe {
         ffi::lib_dspeak_media_p2p_create_answer(handle, remote_sdp.as_ptr(), &mut output)
     };
-    p2p_sdp_result(result, output, "answer")
+    p2p_sdp_result(handle, result, output, "answer")
 }
 
 fn p2p_set_remote_description(state: &mut WorkerState, payload: Value) -> WorkerResult {
@@ -1112,7 +1122,45 @@ fn p2p_set_remote_description(state: &mut WorkerState, payload: Value) -> Worker
     if result == 0 {
         Ok(Value::Null)
     } else {
-        Err(json!("native P2P remote description failed"))
+        let native_error = unsafe { ffi::lib_dspeak_media_p2p_last_error(handle) };
+        let native_error = if native_error.is_null() {
+            "native remote description failed".to_string()
+        } else {
+            unsafe { CStr::from_ptr(native_error) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        Err(json!({
+            "code": "NATIVE_P2P_REMOTE_DESCRIPTION_FAILED",
+            "message": "native P2P remote description failed",
+            "details": {
+                "sdpType": sdp_type.to_string_lossy().into_owned(),
+                "nativeError": native_error,
+            },
+        }))
+    }
+}
+
+fn p2p_rollback_local_description(state: &mut WorkerState, payload: Value) -> WorkerResult {
+    state.ensure_initialized()?;
+    let handle = p2p_pointer(state, payload_u64(&payload, "p2pHandle")?)?;
+    let result = unsafe { ffi::lib_dspeak_media_p2p_rollback_local_description(handle) };
+    if result == 0 {
+        Ok(Value::Null)
+    } else {
+        let native_error = unsafe { ffi::lib_dspeak_media_p2p_last_error(handle) };
+        let native_error = if native_error.is_null() {
+            "native local rollback failed".to_string()
+        } else {
+            unsafe { CStr::from_ptr(native_error) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        Err(json!({
+            "code": "NATIVE_P2P_LOCAL_ROLLBACK_FAILED",
+            "message": "native P2P local description rollback failed",
+            "details": { "nativeError": native_error }
+        }))
     }
 }
 
@@ -1142,7 +1190,7 @@ fn p2p_restart_ice(state: &mut WorkerState, payload: Value) -> WorkerResult {
     let handle = p2p_pointer(state, payload_u64(&payload, "p2pHandle")?)?;
     let mut output = ptr::null_mut();
     let result = unsafe { ffi::lib_dspeak_media_p2p_restart_ice(handle, &mut output) };
-    p2p_sdp_result(result, output, "ICE restart")
+    p2p_sdp_result(handle, result, output, "ICE restart")
 }
 
 fn p2p_add_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
@@ -1185,8 +1233,8 @@ fn p2p_add_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
                 .map(|value| CString::new(value.to_owned()))
                 .transpose()
                 .map_err(|error| json!(error.to_string()))?;
-            let track_key = CString::new(track_key.clone())
-                .map_err(|error| json!(error.to_string()))?;
+            let track_key =
+                CString::new(track_key.clone()).map_err(|error| json!(error.to_string()))?;
             ffi::lib_dspeak_media_p2p_add_video_track_with_key(
                 handle,
                 track,
@@ -1196,13 +1244,9 @@ fn p2p_add_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
                 track_key.as_ptr(),
             )
         } else {
-            let track_key = CString::new(track_key.clone())
-                .map_err(|error| json!(error.to_string()))?;
-            ffi::lib_dspeak_media_p2p_add_audio_track_with_key(
-                handle,
-                track,
-                track_key.as_ptr(),
-            )
+            let track_key =
+                CString::new(track_key.clone()).map_err(|error| json!(error.to_string()))?;
+            ffi::lib_dspeak_media_p2p_add_audio_track_with_key(handle, track, track_key.as_ptr())
         }
     };
     if result != 0 {
@@ -1230,21 +1274,13 @@ fn p2p_remove_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
         .ok_or_else(|| json!("native P2P source is not attached"))?;
     let result = unsafe {
         if kind == "video" {
-            let track_key = CString::new(track_key.clone())
-                .map_err(|error| json!(error.to_string()))?;
-            ffi::lib_dspeak_media_p2p_remove_video_track_with_key(
-                handle,
-                track,
-                track_key.as_ptr(),
-            )
+            let track_key =
+                CString::new(track_key.clone()).map_err(|error| json!(error.to_string()))?;
+            ffi::lib_dspeak_media_p2p_remove_video_track_with_key(handle, track, track_key.as_ptr())
         } else {
-            let track_key = CString::new(track_key.clone())
-                .map_err(|error| json!(error.to_string()))?;
-            ffi::lib_dspeak_media_p2p_remove_audio_track_with_key(
-                handle,
-                track,
-                track_key.as_ptr(),
-            )
+            let track_key =
+                CString::new(track_key.clone()).map_err(|error| json!(error.to_string()))?;
+            ffi::lib_dspeak_media_p2p_remove_audio_track_with_key(handle, track, track_key.as_ptr())
         }
     };
     if result != 0 {
@@ -1292,8 +1328,8 @@ fn p2p_replace_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
     if new_track != old_track {
         let result = unsafe {
             if kind == "video" {
-                let track_key = CString::new(track_key.clone())
-                    .map_err(|error| json!(error.to_string()))?;
+                let track_key =
+                    CString::new(track_key.clone()).map_err(|error| json!(error.to_string()))?;
                 ffi::lib_dspeak_media_p2p_replace_video_track_with_key(
                     handle,
                     old_track,
@@ -1301,8 +1337,8 @@ fn p2p_replace_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
                     track_key.as_ptr(),
                 )
             } else {
-                let track_key = CString::new(track_key.clone())
-                    .map_err(|error| json!(error.to_string()))?;
+                let track_key =
+                    CString::new(track_key.clone()).map_err(|error| json!(error.to_string()))?;
                 ffi::lib_dspeak_media_p2p_replace_audio_track_with_key(
                     handle,
                     old_track,
@@ -1316,10 +1352,7 @@ fn p2p_replace_track(state: &mut WorkerState, payload: Value) -> WorkerResult {
         }
     }
     let track_id = track_id(new_track, &kind)?;
-    state.p2p_tracks.insert(
-        (key, track_key),
-        (kind, new_track),
-    );
+    state.p2p_tracks.insert((key, track_key), (kind, new_track));
     Ok(json!({ "trackId": track_id }))
 }
 
@@ -1349,8 +1382,8 @@ fn p2p_set_track_parameters(state: &mut WorkerState, payload: Value) -> WorkerRe
             .to_string(),
     )
     .map_err(|_| json!("native P2P parameters contain a NUL byte"))?;
-    let track_key = CString::new(track_key)
-        .map_err(|_| json!("native P2P track key contains a NUL byte"))?;
+    let track_key =
+        CString::new(track_key).map_err(|_| json!("native P2P track key contains a NUL byte"))?;
     let result = unsafe {
         ffi::lib_dspeak_media_p2p_set_track_parameters_with_key(
             handle,
@@ -1461,12 +1494,32 @@ fn track_id(track: *mut c_void, kind: &str) -> Result<String, Value> {
     native_text(pointer, "native track id")
 }
 
-fn p2p_sdp_result(result: i32, pointer: *mut std::ffi::c_char, operation: &str) -> WorkerResult {
+fn p2p_sdp_result(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+    result: i32,
+    pointer: *mut std::ffi::c_char,
+    operation: &str,
+) -> WorkerResult {
     if result != 0 || pointer.is_null() {
         if !pointer.is_null() {
             unsafe { ffi::lib_dspeak_media_free_string(pointer) };
         }
-        return Err(json!(format!("native P2P {operation} failed")));
+        let native_error = unsafe { ffi::lib_dspeak_media_p2p_last_error(handle) };
+        let native_error = if native_error.is_null() {
+            "unknown native SDP error".to_string()
+        } else {
+            unsafe { CStr::from_ptr(native_error) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        return Err(json!({
+            "code": "NATIVE_P2P_SDP_FAILED",
+            "message": format!("native P2P {operation} failed: {native_error}"),
+            "details": {
+                "operation": operation,
+                "nativeError": native_error,
+            },
+        }));
     }
     native_text(pointer, &format!("native P2P {operation}")).map(Value::String)
 }
@@ -1671,8 +1724,16 @@ fn set_camera(state: &mut WorkerState, payload: Value) -> WorkerResult {
     if result == 0 {
         Ok(Value::Null)
     } else {
+        let detail = unsafe { ffi::lib_dspeak_media_capture_error_message(error) };
+        let detail = if detail.is_null() {
+            "native capture failed".to_string()
+        } else {
+            unsafe { CStr::from_ptr(detail) }
+                .to_string_lossy()
+                .into_owned()
+        };
         Err(json!(format!(
-            "native camera capture failed (error {error})"
+            "native camera capture failed (error {error}): {detail}"
         )))
     }
 }
@@ -2092,7 +2153,14 @@ fn capture_native_error(code: &str, operation: &str, error_code: i32) -> Value {
             .to_string_lossy()
             .into_owned()
     };
-    capture_error(code, operation, &message)
+    let mut error = capture_error(code, operation, &message);
+    if let Some(object) = error.as_object_mut() {
+        object.insert(
+            "details".to_string(),
+            json!({ "nativeErrorCode": error_code }),
+        );
+    }
+    error
 }
 
 fn c_payload_string(payload: &Value, name: &str) -> Result<String, Value> {
@@ -2183,7 +2251,38 @@ fn write_message(
         .map_err(|error| format!("native media worker response flush failed: {error}"))
 }
 
-fn drain_events(output: &Arc<Mutex<BufWriter<io::Stdout>>>) {
+fn write_event_message(
+    output: &Arc<Mutex<BufWriter<io::Stderr>>>,
+    message: &Value,
+) -> Result<(), String> {
+    let mut output = output
+        .lock()
+        .map_err(|_| "native media worker event output lock poisoned".to_string())?;
+    output
+        .write_all(NATIVE_EVENT_PREFIX)
+        .map_err(|error| format!("native media worker event prefix write failed: {error}"))?;
+    serde_json::to_writer(&mut *output, message)
+        .map_err(|error| format!("native media worker event encoding failed: {error}"))?;
+    output
+        .write_all(b"\n")
+        .map_err(|error| format!("native media worker event write failed: {error}"))?;
+    output
+        .flush()
+        .map_err(|error| format!("native media worker event flush failed: {error}"))
+}
+
+const MAX_NATIVE_VIDEO_FRAME_BYTES: usize = 600_000;
+const NATIVE_VIDEO_FRAME_EVENT_KIND: i32 = 2;
+const NATIVE_LOCAL_VIDEO_FRAME_EVENT_KIND: i32 = 5;
+
+fn is_video_frame_event(kind: i32) -> bool {
+    matches!(
+        kind,
+        NATIVE_VIDEO_FRAME_EVENT_KIND | NATIVE_LOCAL_VIDEO_FRAME_EVENT_KIND
+    )
+}
+
+fn drain_events(output: &Arc<Mutex<BufWriter<io::Stderr>>>) {
     loop {
         let action = unsafe { ffi::lib_dspeak_media_drain_action() };
         let params_json = optional_native_text(action.params_json);
@@ -2191,7 +2290,7 @@ fn drain_events(output: &Arc<Mutex<BufWriter<io::Stdout>>>) {
         if action.kind == 0 && params_json.is_none() && state.is_none() {
             break;
         }
-        let _ = write_message(
+        let _ = write_event_message(
             output,
             &json!({
                 "type": "event",
@@ -2213,8 +2312,15 @@ fn drain_events(output: &Arc<Mutex<BufWriter<io::Stdout>>>) {
         }
         let id = borrowed_native_text(event.id);
         let payload = borrowed_native_json(event.payload_json);
-        let data = borrowed_native_bytes(event.data, event.data_len);
-        let _ = write_message(
+        let data_bytes = event.data_len as usize;
+        let data_dropped =
+            is_video_frame_event(event.kind) && data_bytes > MAX_NATIVE_VIDEO_FRAME_BYTES;
+        let data = if data_dropped {
+            None
+        } else {
+            borrowed_native_bytes(event.data, event.data_len)
+        };
+        let _ = write_event_message(
             output,
             &json!({
                 "type": "event",
@@ -2225,6 +2331,8 @@ fn drain_events(output: &Arc<Mutex<BufWriter<io::Stdout>>>) {
                     "id": id,
                     "payload": payload,
                     "data": data,
+                    "dataBytes": data_bytes,
+                    "dataDropped": data_dropped,
                 },
             }),
         );

@@ -56,6 +56,8 @@ export function configureControl(
   };
   session.controlTicket = String(config.ticket || "");
   session.mediaSessionId = String(config.mediaSessionId || "");
+  if (typeof config.refreshControl === "function")
+    session.refreshControl = config.refreshControl as () => Promise<unknown>;
 }
 
 export async function handleProviderTicket(
@@ -209,7 +211,8 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
       );
       session._fail(error);
     },
-    onReconnect: () => {
+    onReconnect: async () => {
+      await session.refreshControl?.();
       session.connectionPhase = "reconnecting";
       session._emitState();
     },

@@ -236,23 +236,36 @@ export function nativeCaptureFailure(
   if (error instanceof DesktopCaptureError) return error;
   const errorRecord =
     error && typeof error === "object" ? (error as UnknownRecord) : null;
-  const details = errorRecord?.details || null;
-  return new DesktopCaptureError(
-    typeof errorRecord?.message === "string"
-      ? errorRecord.message
-      : "Native desktop capture is unavailable.",
-    {
-      code:
-        typeof errorRecord?.code === "string"
-          ? errorRecord.code
+  const nestedError =
+    errorRecord?.error && typeof errorRecord.error === "object"
+      ? (errorRecord.error as UnknownRecord)
+      : null;
+  const nestedMessage =
+    typeof errorRecord?.error === "string" ? errorRecord.error : null;
+  const message =
+    typeof error === "string"
+      ? error
+      : typeof errorRecord?.message === "string"
+        ? errorRecord.message
+        : typeof nestedError?.message === "string"
+          ? nestedError.message
+          : nestedMessage || "Native desktop capture is unavailable.";
+  const details = errorRecord?.details || nestedError?.details || null;
+  return new DesktopCaptureError(message, {
+    code:
+      typeof errorRecord?.code === "string"
+        ? errorRecord.code
+        : typeof nestedError?.code === "string"
+          ? nestedError.code
           : DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNAVAILABLE,
-      operation:
-        typeof errorRecord?.operation === "string"
-          ? errorRecord.operation
+    operation:
+      typeof errorRecord?.operation === "string"
+        ? errorRecord.operation
+        : typeof nestedError?.operation === "string"
+          ? nestedError.operation
           : operation,
-      details: details || (selection ? { selection } : null),
-    },
-  );
+    details: details || (selection ? { selection } : null),
+  });
 }
 
 export function desktopCaptureRequest(

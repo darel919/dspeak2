@@ -789,7 +789,17 @@ pub async fn media_set_camera(
             }
         };
         if result != 0 {
-            return Err(format!("native camera capture failed (error {})", error));
+            let detail = unsafe { ffi::lib_dspeak_media_capture_error_message(error) };
+            let detail = if detail.is_null() {
+                "native capture failed".to_string()
+            } else {
+                unsafe { CStr::from_ptr(detail) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            return Err(format!(
+                "native camera capture failed (error {error}): {detail}"
+            ));
         }
         Ok(())
     }

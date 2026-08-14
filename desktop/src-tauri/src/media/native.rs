@@ -455,6 +455,7 @@ pub fn p2p_destroy(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) {
 }
 
 fn p2p_sdp_result(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
     result: i32,
     pointer: *mut std::ffi::c_char,
     operation: &str,
@@ -463,7 +464,15 @@ fn p2p_sdp_result(
         if !pointer.is_null() {
             unsafe { ffi::lib_dspeak_media_free_string(pointer) };
         }
-        return Err(format!("native P2P {operation} failed"));
+        let native_error = unsafe { ffi::lib_dspeak_media_p2p_last_error(handle) };
+        let native_error = if native_error.is_null() {
+            "unknown native SDP error".to_string()
+        } else {
+            unsafe { CStr::from_ptr(native_error) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        return Err(format!("native P2P {operation} failed: {native_error}"));
     }
     let value = unsafe { CStr::from_ptr(pointer) }
         .to_str()
@@ -476,7 +485,7 @@ fn p2p_sdp_result(
 pub fn p2p_create_offer(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Result<String, String> {
     let mut pointer = ptr::null_mut();
     let result = unsafe { ffi::lib_dspeak_media_p2p_create_offer(handle, &mut pointer) };
-    p2p_sdp_result(result, pointer, "offer")
+    p2p_sdp_result(handle, result, pointer, "offer")
 }
 
 pub fn p2p_create_answer(
@@ -488,7 +497,7 @@ pub fn p2p_create_answer(
     let result = unsafe {
         ffi::lib_dspeak_media_p2p_create_answer(handle, remote_sdp.as_ptr(), &mut pointer)
     };
-    p2p_sdp_result(result, pointer, "answer")
+    p2p_sdp_result(handle, result, pointer, "answer")
 }
 
 pub fn p2p_set_remote_description(
@@ -505,8 +514,37 @@ pub fn p2p_set_remote_description(
     if result == 0 {
         Ok(())
     } else {
+        let native_error = unsafe { ffi::lib_dspeak_media_p2p_last_error(handle) };
+        let native_error = if native_error.is_null() {
+            "native remote description failed".to_string()
+        } else {
+            unsafe { CStr::from_ptr(native_error) }
+                .to_string_lossy()
+                .into_owned()
+        };
         Err(format!(
-            "native P2P {description_type} remote description failed"
+            "native P2P {description_type} remote description failed: {native_error}"
+        ))
+    }
+}
+
+pub fn p2p_rollback_local_description(
+    handle: *mut ffi::lib_dspeak_media_p2p_handle_t,
+) -> Result<(), String> {
+    let result = unsafe { ffi::lib_dspeak_media_p2p_rollback_local_description(handle) };
+    if result == 0 {
+        Ok(())
+    } else {
+        let native_error = unsafe { ffi::lib_dspeak_media_p2p_last_error(handle) };
+        let native_error = if native_error.is_null() {
+            "native local rollback failed".to_string()
+        } else {
+            unsafe { CStr::from_ptr(native_error) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        Err(format!(
+            "native P2P local description rollback failed: {native_error}"
         ))
     }
 }
@@ -531,7 +569,7 @@ pub fn p2p_ice_state(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> i32 {
 pub fn p2p_restart_ice(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Result<String, String> {
     let mut pointer = ptr::null_mut();
     let result = unsafe { ffi::lib_dspeak_media_p2p_restart_ice(handle, &mut pointer) };
-    p2p_sdp_result(result, pointer, "ICE restart")
+    p2p_sdp_result(handle, result, pointer, "ICE restart")
 }
 
 pub fn p2p_get_stats(handle: *mut ffi::lib_dspeak_media_p2p_handle_t) -> Result<String, String> {

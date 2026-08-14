@@ -223,6 +223,10 @@ int               lib_dspeak_media_p2p_set_remote_description(
     lib_dspeak_media_p2p_handle_t* h,
     const char* sdp_type,
     const char* sdp);
+int               lib_dspeak_media_p2p_rollback_local_description(
+    lib_dspeak_media_p2p_handle_t* h);
+const char*       lib_dspeak_media_p2p_last_error(
+    lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_add_ice_candidate(lib_dspeak_media_p2p_handle_t* h, const char* candidate);
 int               lib_dspeak_media_p2p_ice_connection_state(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_restart_ice(lib_dspeak_media_p2p_handle_t* h, char** sdp_out);

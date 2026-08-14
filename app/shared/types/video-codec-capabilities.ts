@@ -38,6 +38,8 @@ export interface CodecDirectionCapability {
   powerClass?: CodecPowerClass;
   tested?: boolean;
   testedProfile?: string;
+  testedProfiles?: string[];
+  limitsAre?: "maximum-successfully-tested-profile";
   failureReason?: string;
 }
 
@@ -180,6 +182,15 @@ export function normalizeCodecDirectionCapability(
   ] as const)
     if (typeof record[key] === "string" && record[key])
       normalized[key] = record[key];
+  if (Array.isArray(record.testedProfiles)) {
+    const testedProfiles = record.testedProfiles.filter(
+      (profile): profile is string =>
+        typeof profile === "string" && profile.length > 0,
+    );
+    if (testedProfiles.length) normalized.testedProfiles = testedProfiles;
+  }
+  if (record.limitsAre === "maximum-successfully-tested-profile")
+    normalized.limitsAre = record.limitsAre;
   if (
     record.powerClass === "low" ||
     record.powerClass === "medium" ||

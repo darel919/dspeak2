@@ -13,6 +13,8 @@ export interface NativeReceiveEvent {
   id?: string;
   payload?: Record<string, unknown>;
   data?: string;
+  dataBytes?: number;
+  dataDropped?: boolean;
   eventId?: number | string;
 }
 

@@ -53,6 +53,7 @@ private:
     std::string consumer_id_;
     std::string handle_;
     std::atomic_bool enabled_{true};
+    std::atomic<int64_t> last_frame_emit_us_{0};
 };
 
 extern "C" {

@@ -1,6 +1,6 @@
 import { asError } from "../native-mediasoup-utils.ts";
 import {
-  nativeRtpStatForTrack,
+  nativeRtpCodecMetadata,
   normalizeNativeTransportStats,
 } from "../native-mediasoup-diagnostics.ts";
 
@@ -206,45 +206,45 @@ export class NativeCloudflareLifecycleMethods {
   async getOutboundRtpStats() {
     const raw = await this._rawStats();
     return [...this.producers.values(), ...this.producerVariants.values()].map(
-      (entry) => ({
-        source: entry.source,
-        kind: entry.kind,
-        logicalStreamId: entry.logicalStreamId || null,
-        generation: entry.generation || 1,
-        variantId: entry.variantId || null,
-        codec: entry.codec || null,
-        codecAcceleration: entry.codecAcceleration || null,
-        codecImplementation: entry.codecImplementation || null,
-        width: entry.width || null,
-        height: entry.height || null,
-        fps: entry.fps || null,
-        bitrate: entry.bitrate || null,
-        stats: nativeRtpStatForTrack(raw, "outbound-rtp", entry) || null,
-      }),
+      (entry) => {
+        const codec = nativeRtpCodecMetadata(raw, "outbound-rtp", entry);
+        return {
+          source: entry.source,
+          kind: entry.kind,
+          logicalStreamId: entry.logicalStreamId || null,
+          generation: entry.generation || 1,
+          variantId: entry.variantId || null,
+          ...codec,
+          width: entry.width || null,
+          height: entry.height || null,
+          fps: entry.fps || null,
+          bitrate: entry.bitrate || null,
+        };
+      },
     );
   }
 
   async getInboundRtpStats() {
     const raw = await this._rawStats();
-    return [...this.consumers.values()].map((entry) => ({
-      consumerId: entry.key,
-      userId: entry.userId,
-      source: entry.source,
-      kind: entry.kind,
-      logicalStreamId: entry.logicalStreamId || null,
-      generation: entry.generation || 1,
-      variantId: entry.variantId || null,
-      codec: entry.codec || null,
-      codecAcceleration: entry.codecAcceleration || null,
-      codecImplementation: entry.codecImplementation || null,
-      width: entry.width || null,
-      height: entry.height || null,
-      fps: entry.fps || null,
-      bitrate: entry.bitrate || null,
-      migrationState: entry.migrationState || null,
-      visible: entry.visible !== false,
-      stats: nativeRtpStatForTrack(raw, "inbound-rtp", entry) || null,
-    }));
+    return [...this.consumers.values()].map((entry) => {
+      const codec = nativeRtpCodecMetadata(raw, "inbound-rtp", entry);
+      return {
+        consumerId: entry.key,
+        userId: entry.userId,
+        source: entry.source,
+        kind: entry.kind,
+        logicalStreamId: entry.logicalStreamId || null,
+        generation: entry.generation || 1,
+        variantId: entry.variantId || null,
+        ...codec,
+        width: entry.width || null,
+        height: entry.height || null,
+        fps: entry.fps || null,
+        bitrate: entry.bitrate || null,
+        migrationState: entry.migrationState || null,
+        visible: entry.visible !== false,
+      };
+    });
   }
 
   closeMedia() {

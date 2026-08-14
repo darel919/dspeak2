@@ -10,6 +10,7 @@ export class NativeCloudflareRealtimeSession {
   constructor({
     invoke,
     send,
+    ensureControlReady,
     onRemoteTrack,
     onRemoteTrackEnded,
     onStateChange,
@@ -35,6 +36,7 @@ export class NativeCloudflareRealtimeSession {
       throw new TypeError("NativeCloudflareRealtimeSession requires invoke");
     this.invoke = invoke;
     this.send = send;
+    this.ensureControlReady = ensureControlReady;
     this.onRemoteTrack = onRemoteTrack;
     this.onRemoteTrackEnded = onRemoteTrackEnded;
     this.onStateChange = onStateChange;

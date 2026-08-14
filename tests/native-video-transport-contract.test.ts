@@ -106,6 +106,20 @@ describe("native video transport contract", () => {
     assert.match(workerClient, /ensure_connection/);
   });
 
+  it("reinitializes the worker before source-aware capture starts after a probe release", async () => {
+    const workerClient = await read(
+      "desktop/src-tauri/src/media/worker_client.rs",
+    );
+    assert.match(workerClient, /let capture_start_command = matches!\(/);
+    assert.match(workerClient, /"media_start_screen_share"/);
+    assert.match(workerClient, /"media_start_system_audio"/);
+    assert.match(
+      workerClient,
+      /worker_command == "media_join" \|\| capture_start_command/,
+    );
+    assert.match(workerClient, /call_with_initialize/);
+  });
+
   it("owns receive-event strings exactly once and preserves logical P2P handles", async () => {
     const worker = await read("desktop/src-tauri/src/media_worker_server.rs");
     const header = await read(
@@ -133,14 +147,8 @@ describe("native video transport contract", () => {
       worker,
       /command == "media_get_devices"[\s\S]*shutdown_after: false/,
     );
-    assert.match(
-      worker,
-      /fn prepare_devices[\s\S]*shutdown_after: !state\.connected/,
-    );
-    assert.match(
-      worker,
-      /fn prepare_capture[\s\S]*shutdown_after: !state\.connected/,
-    );
+    assert.match(worker, /fn prepare_devices[\s\S]*shutdown_after: false/);
+    assert.match(worker, /fn prepare_capture[\s\S]*shutdown_after: false/);
     assert.match(settings, /media_prepare_devices/);
     assert.match(settings, /media:native-receive-event/);
     assert.match(settings, /media_initialize/);
@@ -219,6 +227,47 @@ describe("native video transport contract", () => {
     assert.match(types, /video_codec_capabilities/);
     assert.match(types, /concurrent_encode/);
     assert.match(signaling, /mediaCapabilities: session\.mediaCapabilities/);
+  });
+
+  it("probes hardware profiles beyond the legacy 1080p30 ceiling", async () => {
+    const codecs = await read(
+      "desktop/native-media/libdspeak_media/src/internal/platform_video_codec_factories.cpp",
+    );
+    const runtime = await read(
+      "desktop/native-media/libdspeak_media/src/internal/library_runtime.cpp",
+    );
+    const bridge = await read(
+      "desktop/native-media/libdspeak_media/src/internal/p2p_track_bridge.cpp",
+    );
+    const videoToolbox = await read(
+      "desktop/native-media/platform/macos/VideoToolboxCodecsMacos.mm",
+    );
+    const build = await read("desktop/src-tauri/build.rs");
+    const workerInfo = await read("desktop/src-tauri/MediaWorkerInfo.plist");
+    const peer = await read(
+      "desktop/native-media/libdspeak_media/src/internal/peer_connection.cpp",
+    );
+    assert.match(codecs, /\{3840, 2160, 60\}/);
+    assert.match(codecs, /max_probe_sessions = 4/);
+    assert.match(codecs, /native_h264_format/);
+    assert.match(codecs, /profile-level-id.*42e01f/);
+    assert.match(runtime, /maximum-successfully-tested-profile/);
+    assert.match(runtime, /"activeStream", nullptr/);
+    assert.match(runtime, /"factoryProbe"/);
+    assert.match(bridge, /SetCodecPreferences\(capabilities\)\.ok\(\)/);
+    assert.match(bridge, /rtx_targets_primary_codec/);
+    assert.match(bridge, /preference_changed/);
+    assert.match(peer, /preferred_video_codecs_are_in_sdp/);
+    assert.match(peer, /const auto& sdp = generated_sdp/);
+    assert.match(codecs, /profile-level-id.*42e01f/);
+    assert.doesNotMatch(
+      peer,
+      /apply_native_(opus_profile|h264_compatibility_profiles)/,
+    );
+    assert.doesNotMatch(peer, /profile-level-id=42e032/);
+    assert.match(videoToolbox, /if \(next \+ 3 >= size\) next = size;/);
+    assert.match(build, /rustc-link-arg-bin=dspeak-media=-Wl,-sectcreate/);
+    assert.match(workerInfo, /NSCameraUsageDescription/);
   });
 
   it("keeps native video migration metadata on one logical stream identity", async () => {

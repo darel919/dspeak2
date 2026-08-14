@@ -42,6 +42,9 @@ export type NativeErrorLike = {
   code?: unknown;
   message?: unknown;
   cause?: unknown;
+  details?: unknown;
+  nativeCommand?: unknown;
+  nativeResponse?: unknown;
 };
 export type NativeCapabilities = Partial<NativeMediaFlags> & {
   capture?: Record<

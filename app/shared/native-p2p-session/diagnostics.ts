@@ -1,4 +1,5 @@
 import {
+  nativeRtpCodecMetadata,
   nativeRtpStatForTrack,
   normalizeNativeTransportStats,
 } from "../native-mediasoup-diagnostics.ts";
@@ -64,6 +65,14 @@ export class NativeP2pSessionDiagnosticsMethods {
       const raw = await this._rawStats(peer);
       for (const source of peer.sources) {
         const entry = this.sources.get(source);
+        const codec = nativeRtpCodecMetadata(raw, "outbound-rtp", {
+          kind: entry?.kind,
+          codec: entry?.codec,
+          codecAcceleration: entry?.codecAcceleration,
+          codecImplementation: entry?.codecImplementation,
+          trackId: peer.trackIds.get(source),
+          source,
+        });
         results.push({
           peerId: peer.peerId,
           source,
@@ -71,18 +80,12 @@ export class NativeP2pSessionDiagnosticsMethods {
           logicalStreamId: entry?.logicalStreamId || null,
           generation: entry?.generation || 1,
           variantId: entry?.variantId || null,
-          codec: entry?.codec || null,
-          codecAcceleration: entry?.codecAcceleration || null,
-          codecImplementation: entry?.codecImplementation || null,
+          ...codec,
           width: entry?.width || null,
           height: entry?.height || null,
           fps: entry?.fps || null,
           bitrate: entry?.bitrate || null,
-          stats:
-            nativeRtpStatForTrack(raw, "outbound-rtp", {
-              kind: entry?.kind,
-              trackId: peer.trackIds.get(source),
-            }) || null,
+          stats: codec.stats,
         });
       }
     }
@@ -95,6 +98,7 @@ export class NativeP2pSessionDiagnosticsMethods {
       const raw = await this._rawStats(peer);
       for (const entry of this.trackEntries.values()) {
         if (entry.p2pHandle !== peer.handle) continue;
+        const codec = nativeRtpCodecMetadata(raw, "inbound-rtp", entry);
         results.push({
           peerId: peer.peerId,
           userId: entry.userId,
@@ -104,16 +108,14 @@ export class NativeP2pSessionDiagnosticsMethods {
           logicalStreamId: entry.logicalStreamId || null,
           generation: entry.generation || 1,
           variantId: entry.variantId || null,
-          codec: entry.codec || null,
-          codecAcceleration: entry.codecAcceleration || null,
-          codecImplementation: entry.codecImplementation || null,
+          ...codec,
           width: entry.width || null,
           height: entry.height || null,
           fps: entry.fps || null,
           bitrate: entry.bitrate || null,
           migrationState: entry.migrationState || null,
           visible: entry.visible !== false,
-          stats: nativeRtpStatForTrack(raw, "inbound-rtp", entry) || null,
+          stats: codec.stats,
         });
       }
     }

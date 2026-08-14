@@ -55,6 +55,8 @@ export interface NativeMediaEngineState {
   activeScreenCapture: NativeCaptureRequest | null;
   activeSystemAudioCapture: NativeCaptureRequest | null;
   microphoneOperation: Promise<unknown>;
+  cameraOperation: Promise<unknown>;
+  screenOperation: Promise<unknown>;
   nativeEventOperation: Promise<unknown> | null;
   nativeActionHandler: ((action: NativeCaptureRequest) => unknown) | null;
   nativeReceiveEventHandler: ((event: NativeCaptureRequest) => void) | null;

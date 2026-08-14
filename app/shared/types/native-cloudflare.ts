@@ -1,6 +1,6 @@
 export interface NativeCloudflareMessage extends Record<string, unknown> {
   requestId?: string;
-  error?: string;
+  error?: unknown;
   result?: unknown;
   trackName?: string;
   closed?: boolean;

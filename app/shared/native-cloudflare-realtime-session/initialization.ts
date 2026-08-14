@@ -4,6 +4,32 @@ import { requestIdentifier, sessionClosedError } from "./helpers.ts";
 import type { NativeCloudflareMessage } from "../types/native-cloudflare.ts";
 import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
 export interface NativeCloudflareInitializationMethods extends NativeCloudflareSessionSurface {}
+
+function nativeCloudflareResponseError(value: unknown) {
+  if (value instanceof Error) return value;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const message =
+      typeof record.message === "string"
+        ? record.message
+        : typeof record.error === "string"
+          ? record.error
+          : "Native Cloudflare request failed";
+    const error = new Error(message);
+    Object.assign(error, {
+      ...(typeof record.code === "string" ? { code: record.code } : {}),
+      ...(record.details !== undefined ? { details: record.details } : {}),
+      nativeResponse: value,
+    });
+    return error;
+  }
+  return new Error(
+    typeof value === "string" && value
+      ? value
+      : "Native Cloudflare request failed",
+  );
+}
+
 export class NativeCloudflareInitializationMethods {
   async initialize() {
     if (this.initializing) return this.initializing;
@@ -45,8 +71,9 @@ export class NativeCloudflareInitializationMethods {
     });
   }
 
-  request(operation: string, body: unknown = undefined) {
+  async request(operation: string, body: unknown = undefined) {
     if (this.closed) throw sessionClosedError();
+    if (this.ensureControlReady) await this.ensureControlReady();
     const requestId = requestIdentifier();
     let timer = null;
     const waiting = new Promise<unknown>((resolve, reject) => {
@@ -90,7 +117,7 @@ export class NativeCloudflareInitializationMethods {
       if (!waiting) return false;
       clearTimeout(waiting.timer);
       this.pending.delete(data.requestId);
-      if (data.error) waiting.reject(new Error(data.error));
+      if (data.error) waiting.reject(nativeCloudflareResponseError(data.error));
       else waiting.resolve(data.result || {});
       return true;
     }

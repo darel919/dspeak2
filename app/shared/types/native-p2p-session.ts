@@ -114,6 +114,7 @@ export interface NativeP2pSessionPeer extends Record<string, unknown> {
   remoteMediaCapabilities?:
     import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
   selectedCodec?: string | null;
+  videoCodecFallbackAttempted?: boolean;
 }
 
 export interface NativeP2pSessionOptions {
@@ -279,6 +280,10 @@ export interface NativeP2pSessionSurface {
   ) => Promise<unknown>;
   _flushCandidates: (peer: NativeP2pSessionPeer) => Promise<unknown>;
   _createOffer: (peer: NativeP2pSessionPeer) => Promise<unknown>;
+  retryP2pOfferWithSoftwareFallback: (
+    peer: NativeP2pSessionPeer,
+    error: unknown,
+  ) => Promise<boolean>;
   _requestOffer: (peer: NativeP2pSessionPeer) => unknown;
   _handleIceState: (peer: NativeP2pSessionPeer, state: number) => unknown;
   _restartIce: (peer: NativeP2pSessionPeer) => Promise<unknown>;

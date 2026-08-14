@@ -481,7 +481,62 @@ export async function invoke(
   payload: NativeCaptureRequest = {},
 ): Promise<NativeCaptureRequest> {
   const tauri = await getTauri(engine);
-  return (await tauri.invoke(command, payload)) as NativeCaptureRequest;
+  try {
+    return (await tauri.invoke(command, payload)) as NativeCaptureRequest;
+  } catch (error) {
+    throw normalizeNativeInvokeError(command, error);
+  }
+}
+
+export function normalizeNativeInvokeError(
+  command: string,
+  value: unknown,
+): Error {
+  if (value instanceof Error) {
+    Object.assign(value, { nativeCommand: command });
+    return value;
+  }
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null;
+  const nested =
+    record?.error && typeof record.error === "object"
+      ? (record.error as Record<string, unknown>)
+      : null;
+  const details = record?.details ?? nested?.details;
+  const nativeError =
+    details &&
+    typeof details === "object" &&
+    typeof (details as Record<string, unknown>).nativeError === "string"
+      ? String((details as Record<string, unknown>).nativeError).trim()
+      : "";
+  const baseMessage =
+    typeof record?.message === "string"
+      ? record.message
+      : typeof nested?.message === "string"
+        ? nested.message
+        : typeof record?.error === "string"
+          ? record.error
+          : typeof value === "string" && value
+            ? value
+            : `Native media command failed: ${command}`;
+  const message =
+    nativeError && !baseMessage.includes(nativeError)
+      ? `${baseMessage}: ${nativeError}`
+      : baseMessage;
+  const error = new Error(message);
+  Object.assign(error, {
+    ...(typeof record?.code === "string"
+      ? { code: record.code }
+      : typeof nested?.code === "string"
+        ? { code: nested.code }
+        : {}),
+    ...(details !== undefined ? { details } : {}),
+    nativeCommand: command,
+    nativeResponse: value,
+  });
+  return error;
 }
 
 export async function configureNativeIceServers(engine: NativeMediaEngine) {
@@ -559,9 +614,12 @@ export async function configureNativeControl(
     error.status = response.status;
     throw error;
   }
+  const bootstrap = await response.json();
   engine.nativeSession?.configureControl({
-    ...(await response.json()),
+    ...bootstrap,
     channelId,
+    refreshControl: () =>
+      configureNativeControl(engine, channelId, resolvedRoomId),
   });
 }
 
@@ -742,7 +800,8 @@ export function dispatchNativeReceiveEvent(
   engine: NativeMediaEngine,
   receiveEvent: NativeCaptureRequest,
 ) {
-  if (Number(receiveEvent.kind) === 7) {
+  const kind = Number(receiveEvent.kind);
+  if (kind === 7) {
     handleNativeAudioTelemetry(
       engine,
       (receiveEvent.payload || {}) as Record<string, unknown>,
@@ -750,9 +809,11 @@ export function dispatchNativeReceiveEvent(
     return;
   }
   engine.nativeReceiveEventHandler?.(receiveEvent);
-  syncLocalFeeds(engine);
-  syncNativeFeeds(engine);
-  engine._emit("native-receive-event", receiveEvent);
+  if (kind === 5) syncLocalFeeds(engine);
+  if (kind === 2 || kind === 3 || kind === 4) {
+    syncNativeFeeds(engine);
+    engine._emit("native-receive-event", receiveEvent);
+  }
 }
 
 export async function bindNativeEvents(engine: NativeMediaEngine) {

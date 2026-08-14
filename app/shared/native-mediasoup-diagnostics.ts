@@ -1,6 +1,24 @@
 import { buildTopologyGraph } from "./rtc-topology.ts";
+import {
+  normalizeVideoCodecName,
+  type CodecAcceleration,
+  type VideoCodecName,
+} from "./types/video-codec-capabilities.ts";
 
 type StatsRecord = Record<string, unknown>;
+
+type NativeCodecEntry = {
+  kind?: string | null;
+  codec?: unknown;
+  codecAcceleration?: unknown;
+  codecImplementation?: unknown;
+  trackId?: string | number | null;
+  trackName?: string | number | null;
+  source?: string | null;
+  consumerId?: string | number | null;
+  mid?: string | number | null;
+  trackIdentifier?: string | null;
+};
 
 function finite(value: unknown) {
   return Number.isFinite(Number(value)) ? Number(value) : null;
@@ -39,38 +57,211 @@ export function nativeRtpStat(value: unknown, type: string, kind?: string) {
 export function nativeRtpStatForTrack(
   value: unknown,
   type: string,
-  entry: {
-    trackId?: string | number | null;
-    mid?: string | number | null;
-    trackIdentifier?: string | null;
-    kind?: string | null;
-  } = {},
+  entry: NativeCodecEntry = {},
 ) {
   const stats = asStatObjects(value);
-  const identifiers = [entry.trackId, entry.mid, entry.trackIdentifier]
-    .map((identifier) => String(identifier || ""))
-    .filter(Boolean);
+  const identifiers = new Set(
+    [
+      entry.trackId,
+      entry.trackName,
+      entry.consumerId,
+      entry.mid,
+      entry.trackIdentifier,
+      entry.source,
+    ]
+      .map((identifier) =>
+        identifier == null ? "" : String(identifier).trim(),
+      )
+      .filter(Boolean),
+  );
+  const source = String(entry.source || "")
+    .trim()
+    .toLowerCase();
+  if (source) {
+    const sourceAliases: Record<string, string[]> = {
+      audio: ["microphone_capture_audio"],
+      camera: ["camera_capture_video"],
+      screen: ["desktop_capture_video"],
+      "screen-audio": ["desktop_capture_audio"],
+    };
+    for (const alias of sourceAliases[source] || []) identifiers.add(alias);
+  }
   const byId = new Map(
     stats
       .filter((stat) => stat?.id != null)
       .map((stat) => [String(stat.id), stat]),
   );
+  const identityValues = (stat: StatsRecord) => {
+    const relatedTrack =
+      stat.trackId == null ? null : byId.get(String(stat.trackId));
+    const mediaSource =
+      stat.mediaSourceId == null ? null : byId.get(String(stat.mediaSourceId));
+    return [
+      stat.id,
+      stat.trackIdentifier,
+      stat.trackId,
+      stat.mid,
+      stat.mediaSourceId,
+      relatedTrack?.id,
+      relatedTrack?.trackIdentifier,
+      mediaSource?.id,
+      mediaSource?.trackIdentifier,
+    ]
+      .map((identifier) =>
+        identifier == null ? "" : String(identifier).trim(),
+      )
+      .filter(Boolean);
+  };
   const candidates = stats.filter((stat) => {
     if (stat.type !== type || stat.isRemote) return false;
     const statKind = stat.kind || stat.mediaType;
     return !entry.kind || !statKind || statKind === entry.kind;
   });
   const matching = candidates.find((stat) => {
-    const related: StatsRecord | null | undefined =
-      stat.trackId == null ? null : byId.get(String(stat.trackId));
-    return [
-      stat.trackIdentifier,
-      stat.trackId,
-      stat.mid,
-      related?.trackIdentifier,
-    ].some((identifier) => identifiers.includes(String(identifier || "")));
+    return identityValues(stat).some((identifier) =>
+      identifiers.has(identifier),
+    );
   });
   return matching || (candidates.length === 1 ? candidates[0] : null);
+}
+
+function codecStatForRtp(stats: StatsRecord[], rtpStat: StatsRecord | null) {
+  const codecId = rtpStat?.codecId;
+  if (codecId == null) return null;
+  return (
+    stats.find(
+      (stat) =>
+        stat.type === "codec" && String(stat.id || "") === String(codecId),
+    ) || null
+  );
+}
+
+function implementationString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function actualAcceleration(
+  implementation: string | null,
+  powerEfficient: unknown,
+): CodecAcceleration | null {
+  const normalized = String(implementation || "").toLowerCase();
+  if (
+    normalized.includes("libvpx") ||
+    normalized.includes("openh264") ||
+    normalized.includes("dav1d") ||
+    normalized.includes("software") ||
+    powerEfficient === false
+  )
+    return "software";
+  if (
+    normalized.includes("videotoolbox") ||
+    normalized.includes("media foundation") ||
+    normalized.includes("mediafoundation") ||
+    normalized.includes("nvenc") ||
+    normalized.includes("quick sync") ||
+    normalized.includes("quicksync") ||
+    normalized.includes("vaapi") ||
+    normalized.includes("amf") ||
+    normalized.includes("hardware") ||
+    powerEfficient === true
+  )
+    return "hardware";
+  return null;
+}
+
+function nativeCodecMetadata(
+  value: unknown,
+  type: string,
+  entry: NativeCodecEntry,
+) {
+  const isVideo = String(entry.kind || "") === "video";
+  const plannedCodec = isVideo ? normalizeVideoCodecName(entry.codec) : null;
+  const plannedCodecAcceleration = isVideo
+    ? entry.codecAcceleration === "hardware" ||
+      entry.codecAcceleration === "software"
+      ? entry.codecAcceleration
+      : null
+    : null;
+  const plannedCodecImplementation = isVideo
+    ? implementationString(entry.codecImplementation)
+    : null;
+  const stats = nativeStatsObjects(value);
+  const rtpStat = nativeRtpStatForTrack(value, type, entry);
+  const codecStat = codecStatForRtp(stats, rtpStat || null);
+  const actualCodec = isVideo
+    ? normalizeVideoCodecName(
+        codecStat?.mimeType || rtpStat?.mimeType || rtpStat?.codec,
+      )
+    : null;
+  const implementation = isVideo
+    ? implementationString(
+        type === "outbound-rtp"
+          ? rtpStat?.encoderImplementation
+          : rtpStat?.decoderImplementation,
+      )
+    : null;
+  const powerEfficient = isVideo
+    ? type === "outbound-rtp"
+      ? typeof rtpStat?.powerEfficientEncoder === "boolean"
+        ? rtpStat.powerEfficientEncoder
+        : null
+      : typeof rtpStat?.powerEfficientDecoder === "boolean"
+        ? rtpStat.powerEfficientDecoder
+        : null
+    : null;
+  const acceleration = actualCodec
+    ? actualAcceleration(implementation, powerEfficient)
+    : null;
+  const hasRtpStat = Boolean(rtpStat);
+  const codecSource = actualCodec
+    ? "rtp-stats"
+    : hasRtpStat
+      ? "rtp-stats-unresolved"
+      : plannedCodec
+        ? "routing-plan"
+        : "unknown";
+  const codec = actualCodec || (hasRtpStat ? null : plannedCodec);
+  return {
+    codec,
+    codecAcceleration:
+      acceleration || (hasRtpStat ? null : plannedCodecAcceleration),
+    codecImplementation:
+      implementation || (hasRtpStat ? null : plannedCodecImplementation),
+    plannedCodec,
+    plannedCodecAcceleration,
+    plannedCodecImplementation,
+    actualCodec,
+    actualCodecAcceleration: acceleration,
+    actualCodecImplementation: implementation,
+    codecSource,
+    codecMismatch: Boolean(
+      actualCodec && plannedCodec && actualCodec !== plannedCodec,
+    ),
+    stats: rtpStat || null,
+    codecStats: codecStat,
+  } as {
+    codec: VideoCodecName | null;
+    codecAcceleration: CodecAcceleration | null;
+    codecImplementation: string | null;
+    plannedCodec: VideoCodecName | null;
+    plannedCodecAcceleration: CodecAcceleration | null;
+    plannedCodecImplementation: string | null;
+    actualCodec: VideoCodecName | null;
+    actualCodecAcceleration: CodecAcceleration | null;
+    actualCodecImplementation: string | null;
+    codecSource: string;
+    codecMismatch: boolean;
+    stats: StatsRecord | null;
+    codecStats: StatsRecord | null;
+  };
+}
+
+export function nativeRtpCodecMetadata(
+  value: unknown,
+  type: string,
+  entry: NativeCodecEntry,
+) {
+  return nativeCodecMetadata(value, type, entry);
 }
 
 function candidateDetails(candidate: StatsRecord | null) {

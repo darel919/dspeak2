@@ -190,7 +190,9 @@ describe("NativeMediasoupSfuSession", () => {
       invoke: async () => undefined,
     });
     session.selectedProvider = "cloudflare-realtime";
+    session.activeSfuProvider = "cloudflare-realtime";
     session.cloudflareSession = {
+      sessionId: "cloudflare-session",
       addSource: async (entry) => {
         added.push(entry.variantId);
         if (entry.variantId === "camera:vp8")
@@ -236,6 +238,80 @@ describe("NativeMediasoupSfuSession", () => {
     );
     assert.deepEqual(added, ["camera:h264", "camera:vp8"]);
     assert.deepEqual(removed, [["camera:h264", true]]);
+  });
+
+  it("queues Cloudflare sources until provider activation is complete", async () => {
+    let releaseInitialization;
+    const initialization = new Promise((resolve) => {
+      releaseInitialization = resolve;
+    });
+    const added = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.closed = false;
+    const cloudflare = {
+      closed: false,
+      sessionId: null,
+      initialize: async () => {
+        await initialization;
+        cloudflare.sessionId = "cloudflare-session";
+      },
+      startSubscriptions: async () => undefined,
+      addSource: async (entry) => {
+        added.push(entry.source);
+        const producer = { ...entry, id: `${entry.source}-producer` };
+        session.producers.set(entry.source, producer);
+        return producer;
+      },
+    };
+    session.cloudflareSession = cloudflare;
+    session._createCloudflareSession = () => cloudflare;
+
+    const activation = session.activateProvider("cloudflare-realtime");
+    const source = session.addSource({ source: "camera", kind: "video" });
+    await Promise.resolve();
+    assert.deepEqual(added, []);
+
+    releaseInitialization();
+    await Promise.all([activation, source]);
+    assert.deepEqual(added, ["camera"]);
+    assert.equal(session.activeSfuProvider, "cloudflare-realtime");
+  });
+
+  it("starts Cloudflare activation when a source arrives before activation is registered", async () => {
+    const added = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.closed = false;
+    session.selectedProvider = "cloudflare-realtime";
+    const cloudflare = {
+      closed: false,
+      sessionId: null,
+      initialize: async () => {
+        cloudflare.sessionId = "cloudflare-session";
+      },
+      startSubscriptions: async () => undefined,
+      addSource: async (entry) => {
+        added.push(entry.source);
+        const producer = { ...entry, id: `${entry.source}-producer` };
+        session.producers.set(entry.source, producer);
+        return producer;
+      },
+    };
+    session.cloudflareSession = cloudflare;
+    session._createCloudflareSession = () => cloudflare;
+
+    const producer = await session.addSource({
+      source: "camera",
+      kind: "video",
+    });
+
+    assert.deepEqual(added, ["camera"]);
+    assert.equal(producer.id, "camera-producer");
+    assert.equal(session.activeSfuProvider, "cloudflare-realtime");
+    assert.equal(session.providerActivationPromise, null);
   });
 
   it("publishes browser-compatible media kinds for every native source", async () => {

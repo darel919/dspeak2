@@ -6,6 +6,7 @@ import {
   desktopCaptureRequest,
   hasTauriRuntimeMarker,
   isDesktopCaptureSelection,
+  nativeCaptureFailure,
   normalizeCaptureSources,
   assertDesktopCaptureMode,
 } from "../app/shared/desktop-capture.ts";
@@ -73,6 +74,26 @@ describe("desktop capture contract", () => {
       maxBitrateBps: 96000,
     });
     assert.equal(selection.video.frameRate, 60);
+  });
+
+  it("preserves structured native errors across the Tauri boundary", () => {
+    const failure = nativeCaptureFailure(
+      {
+        code: "DESKTOP_CAPTURE_START_FAILED",
+        operation: "screen-video",
+        message: "native screen capture failed to start",
+        details: { nativeErrorCode: -209 },
+      },
+      { operation: "screen-video" },
+    );
+
+    assert.equal(failure.message, "native screen capture failed to start");
+    assert.equal(failure.code, "DESKTOP_CAPTURE_START_FAILED");
+    assert.deepEqual(failure.details, { nativeErrorCode: -209 });
+    assert.equal(
+      nativeCaptureFailure("native media worker is not running").message,
+      "native media worker is not running",
+    );
   });
 
   it("rejects a capture selection when its operation requires another mode", () => {

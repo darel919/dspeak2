@@ -159,6 +159,22 @@ fn main() {
             println!("cargo:rustc-link-lib=static=sdptransform");
         }
         println!("cargo:rustc-link-lib=static=webrtc");
+        if target_os == "macos" {
+            let worker_info_plist = std::path::PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is required"),
+            )
+            .join("MediaWorkerInfo.plist");
+            if !worker_info_plist.is_file() {
+                panic!(
+                    "media worker Info.plist is missing: {}",
+                    worker_info_plist.display()
+                );
+            }
+            println!(
+                "cargo:rustc-link-arg-bin=dspeak-media=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+                worker_info_plist.display()
+            );
+        }
     }
 
     if target_os == "macos" {

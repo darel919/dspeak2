@@ -174,6 +174,7 @@ pub(crate) fn run() {
             media::media_p2p_create_offer,
             media::media_p2p_create_answer,
             media::media_p2p_set_remote_description,
+            media::media_p2p_rollback_local_description,
             media::media_p2p_add_ice_candidate,
             media::media_p2p_ice_state,
             media::media_p2p_restart_ice,

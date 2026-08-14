@@ -19,6 +19,72 @@ function localOffer(trackId, kind = "audio", includeTrackId = true) {
 }
 
 describe("NativeCloudflareRealtimeSession", () => {
+  it("waits for native control recovery before sending a request", async () => {
+    let releaseReady;
+    const sent = [];
+    const ready = new Promise((resolve) => {
+      releaseReady = resolve;
+    });
+    let session;
+    const request = new NativeCloudflareRealtimeSession({
+      invoke: async () => ({}),
+      ensureControlReady: () => ready,
+      send: (message) => {
+        sent.push(message);
+        queueMicrotask(() =>
+          session.handleMessage("cloudflare-response", {
+            requestId: message.data.requestId,
+            result: { sessionId: "recovered-session" },
+          }),
+        );
+        return true;
+      },
+    });
+    session = request;
+    session.closed = false;
+
+    const pending = session.request("new-session");
+    await Promise.resolve();
+    assert.equal(sent.length, 0);
+
+    releaseReady();
+    await pending;
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].data.operation, "new-session");
+  });
+
+  it("preserves structured native SDP failures for callers", async () => {
+    let requestId = "";
+    const session = new NativeCloudflareRealtimeSession({
+      requestTimeoutMs: 100,
+      invoke: async () => ({}),
+      send: (message) => {
+        requestId = message.data.requestId;
+        return true;
+      },
+    });
+    session.closed = false;
+
+    const pending = session.request("tracks-new");
+    await session.handleMessage("cloudflare-response", {
+      requestId,
+      error: {
+        code: "NATIVE_P2P_REMOTE_DESCRIPTION_FAILED",
+        message: "native P2P remote description failed",
+        details: { sdpType: "answer", nativeError: "m-line mismatch" },
+      },
+    });
+
+    await assert.rejects(pending, (error) => {
+      assert.equal(error.code, "NATIVE_P2P_REMOTE_DESCRIPTION_FAILED");
+      assert.deepEqual(error.details, {
+        sdpType: "answer",
+        nativeError: "m-line mismatch",
+      });
+      return true;
+    });
+  });
+
   it("subscribes only to an efficient Cloudflare receiver cohort variant", async () => {
     const requests = [];
     const videoCodecs = emptyVideoCodecCapabilities();
@@ -86,7 +152,7 @@ describe("NativeCloudflareRealtimeSession", () => {
     );
   });
 
-  it("delivers local native video frames through the Cloudflare session", () => {
+  it("delivers local native video frames without emitting session state", () => {
     const localVideoFeeds = new Map([
       [
         "camera",
@@ -119,7 +185,7 @@ describe("NativeCloudflareRealtimeSession", () => {
     );
     assert.equal(localVideoFeeds.get("camera").frame.data, "AAAAAAAAAAA=");
     assert.equal(localVideoFeeds.get("camera").frame.source, "camera");
-    assert.equal(stateChanges, 1);
+    assert.equal(stateChanges, 0);
   });
 
   it("retains a native video frame that arrives before source registration", async () => {
@@ -565,6 +631,186 @@ describe("NativeCloudflareRealtimeSession", () => {
       ["user:alice/camera:av1"],
     );
     await originalCloseMedia();
+  });
+
+  it("keeps an existing audio producer when a new base source cannot negotiate", async () => {
+    const calls = [];
+    let session;
+    let addedTracks = 0;
+    const offer = (includeVideo) =>
+      [
+        "v=0",
+        "o=- 1 1 IN IP4 127.0.0.1",
+        "s=-",
+        "t=0 0",
+        "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+        "a=mid:0",
+        "a=sendrecv",
+        "a=msid:stream0 audio-track",
+        ...(includeVideo
+          ? [
+              "m=video 9 UDP/TLS/RTP/SAVPF 96",
+              "a=mid:1",
+              "a=sendrecv",
+              "a=msid:stream0 camera-track",
+            ]
+          : []),
+        "",
+      ].join("\r\n");
+    const invoke = async (command, payload = {}) => {
+      calls.push([command, payload]);
+      if (command === "media_p2p_create") return { handle: 14 };
+      if (command === "media_p2p_poll_ice_candidate") return null;
+      if (command === "media_p2p_add_track") {
+        addedTracks += 1;
+        return { trackId: addedTracks === 1 ? "audio-track" : "camera-track" };
+      }
+      if (command === "media_p2p_create_offer") return offer(addedTracks > 1);
+      if (command === "media_p2p_set_remote_description" && addedTracks > 1)
+        throw new Error("camera negotiation failed");
+      return {};
+    };
+    const send = (message) => {
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation } = message.data;
+      const result =
+        operation === "new-session"
+          ? { sessionId: "native-session" }
+          : { sessionDescription: { type: "answer", sdp: "answer" } };
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", { requestId, result }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({ invoke, send });
+
+    await session.addSource({ source: "audio", kind: "audio" });
+    await assert.rejects(
+      session.addSource({ source: "camera", kind: "video" }),
+      /camera negotiation failed/,
+    );
+
+    assert.equal(session.closed, false);
+    assert.equal(session.producers.has("audio"), true);
+    assert.equal(session.sources.has("camera"), false);
+    assert.equal(
+      calls.some(([command]) => command === "media_p2p_destroy"),
+      false,
+    );
+    assert.deepEqual(
+      calls
+        .filter(([command]) => command === "media_p2p_remove_track")
+        .map(([, payload]) => payload.trackKey),
+      ["camera"],
+    );
+    await session.closeMedia();
+  });
+
+  it("constrains a software VP8 fallback after an H264 remote description rejection", async () => {
+    const calls = [];
+    let session;
+    let rejectedH264 = false;
+    const videoCodecs = emptyVideoCodecCapabilities();
+    videoCodecs.H264.encode = {
+      supported: true,
+      acceleration: "hardware",
+      realtimeEfficiency: "excellent",
+      implementation: "VideoToolbox",
+    };
+    videoCodecs.VP8.encode = {
+      supported: true,
+      acceleration: "software",
+      realtimeEfficiency: "acceptable",
+      implementation: "libvpx",
+      maxWidth: 640,
+      maxHeight: 360,
+      maxFps: 15,
+    };
+    const offer = (trackId) =>
+      [
+        "v=0",
+        "o=- 1 1 IN IP4 127.0.0.1",
+        "s=-",
+        "t=0 0",
+        "m=video 9 UDP/TLS/RTP/SAVPF 96",
+        "a=mid:1",
+        "a=sendrecv",
+        `a=msid:stream0 ${trackId}`,
+        "",
+      ].join("\r\n");
+    const invoke = async (command, payload = {}) => {
+      calls.push([command, payload]);
+      if (command === "media_p2p_create") return { handle: 21 };
+      if (command === "media_p2p_poll_ice_candidate") return null;
+      if (command === "media_p2p_add_track")
+        return { trackId: `${payload.trackKey}-track` };
+      if (command === "media_p2p_create_offer") {
+        const trackKey = String(
+          calls.filter(([name]) => name === "media_p2p_add_track").at(-1)?.[1]
+            ?.trackKey || "camera",
+        );
+        return offer(`${trackKey}-track`);
+      }
+      if (command === "media_p2p_set_remote_description" && !rejectedH264) {
+        rejectedH264 = true;
+        throw new Error(
+          "native P2P remote description failed: Failed to set remote answer sdp: Failed to set remote video description send parameters for m-section with mid='1'.",
+        );
+      }
+      return {};
+    };
+    const send = (message) => {
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation, body } = message.data;
+      const result =
+        operation === "new-session"
+          ? { sessionId: "native-session" }
+          : body?.tracks?.[0]?.location === "local"
+            ? { sessionDescription: { type: "answer", sdp: "answer" } }
+            : {};
+      queueMicrotask(() =>
+        session.handleMessage("cloudflare-response", { requestId, result }),
+      );
+      return true;
+    };
+    session = new NativeCloudflareRealtimeSession({
+      invoke,
+      send,
+      mediaCapabilities: {
+        videoCodecs,
+        concurrentEncode: { supported: true, maxHardwareSessions: 1 },
+        source: "native-runtime-probe",
+      },
+    });
+
+    await session.addSource({
+      source: "camera",
+      kind: "video",
+      logicalStreamId: "user:alice/camera",
+      codec: "H264",
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      bitrate: 1_500_000,
+    });
+
+    const producer = session.producers.get("camera");
+    assert.equal(rejectedH264, true);
+    assert.equal(session.sources.get("camera")?.codec, "VP8");
+    assert.equal(producer.codec, "VP8");
+    assert.equal(producer.emergency, true);
+    assert.equal(producer.targetAdjusted, true);
+    assert.equal(producer.width, 640);
+    assert.equal(producer.height, 360);
+    assert.equal(producer.fps, 15);
+    assert.equal(producer.bitrate, 600_000);
+    assert.deepEqual(
+      calls
+        .filter(([command]) => command === "media_p2p_add_track")
+        .map(([, payload]) => payload.preferredCodec),
+      ["H264", "VP8"],
+    );
+    await session.closeMedia();
   });
 
   it("publishes independent native codec variants from one capture source", async () => {

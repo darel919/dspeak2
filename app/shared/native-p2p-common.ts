@@ -69,6 +69,11 @@ export function applyOpusAudioProfile(sdp: string, stereo = true) {
       if (!section.startsWith("m=audio ")) return section;
       const match = section.match(/^a=rtpmap:(\d+) opus\/48000\/2\r?$/im);
       if (!match) return section;
+      const firstLineFeed = section.indexOf("\n");
+      const lineEnd =
+        firstLineFeed > 0 && section[firstLineFeed - 1] === "\r"
+          ? "\r\n"
+          : "\n";
       const payloadType = match[1];
       const required = {
         stereo: stereo ? "1" : "0",
@@ -98,10 +103,13 @@ export function applyOpusAudioProfile(sdp: string, stereo = true) {
         .join(";")}`;
       section = fmtp
         ? section.replace(fmtpPattern, nextFmtp)
-        : section.replace(match[0], `${match[0]}\r\n${nextFmtp}`);
+        : section.replace(
+            match[0],
+            `${match[0].replace(/\r$/, "")}${lineEnd}${nextFmtp}`,
+          );
       return /^a=ptime:/im.test(section)
         ? section.replace(/^a=ptime:[^\r\n]*/im, "a=ptime:10")
-        : `${section.replace(/\s*$/, "")}\r\na=ptime:10\r\n`;
+        : `${section.replace(/(?:\r?\n)+$/, "")}${lineEnd}a=ptime:10${lineEnd}`;
     })
     .join("");
 }

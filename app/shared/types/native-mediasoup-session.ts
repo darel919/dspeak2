@@ -70,6 +70,7 @@ export interface NativePendingRequest {
 
 export interface NativeSignalingSocket {
   open: () => Promise<unknown>;
+  waitForReady?: () => Promise<unknown>;
   stop?: () => unknown;
   send: (message: unknown) => boolean | void;
   acknowledgeHeartbeat?: (sequence: number, timestamp: number) => unknown;
@@ -211,6 +212,7 @@ export interface NativeMediasoupSfuSessionSurface {
   signalingPath?: string;
   signalingToken?: string;
   controlTicket: string;
+  refreshControl: (() => Promise<unknown>) | null;
   mediaSessionId: string;
   requestTimeoutMs: number;
   consumerControlTimeoutMs: number;
@@ -294,6 +296,7 @@ export interface NativeMediasoupSfuSessionSurface {
   initializationTimer: ReturnType<typeof setTimeout> | null;
   transportRequestIds: Map<NativeDirection, string>;
   cloudflareSession: NativeCloudflareSessionLike | null;
+  providerActivationPromise: Promise<unknown> | null;
   lastProviderFailureKey: string | null;
   onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
   onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;

@@ -109,6 +109,19 @@ pub async fn media_p2p_set_remote_description(
 
 #[cfg(native_rtc)]
 #[tauri::command]
+pub async fn media_p2p_rollback_local_description(
+    store: State<'_, NativeMediaStore>,
+    p2p_handle: u64,
+) -> Result<(), String> {
+    let handles = store
+        .handles
+        .lock()
+        .map_err(|_| "native media handle lock poisoned".to_string())?;
+    native::p2p_rollback_local_description(owned_p2p_handle(&handles, p2p_handle)?)
+}
+
+#[cfg(native_rtc)]
+#[tauri::command]
 pub async fn media_p2p_add_ice_candidate(
     store: State<'_, NativeMediaStore>,
     p2p_handle: u64,
@@ -335,19 +348,9 @@ pub async fn media_p2p_replace_track(
     }
     if new_track != old_track {
         if kind == "video" {
-            native::p2p_replace_video_track_with_key(
-                handle,
-                old_track,
-                new_track,
-                &track_key,
-            )?;
+            native::p2p_replace_video_track_with_key(handle, old_track, new_track, &track_key)?;
         } else {
-            native::p2p_replace_audio_track_with_key(
-                handle,
-                old_track,
-                new_track,
-                &track_key,
-            )?;
+            native::p2p_replace_audio_track_with_key(handle, old_track, new_track, &track_key)?;
         }
     }
     let pointer = unsafe {
@@ -393,11 +396,7 @@ pub async fn media_p2p_set_track_parameters(
     if track.is_null() {
         return Err(format!("native P2P {kind} track is invalid"));
     }
-    native::p2p_set_track_parameters_with_key(
-        handle,
-        &track_key,
-        &parameters.to_string(),
-    )
+    native::p2p_set_track_parameters_with_key(handle, &track_key, &parameters.to_string())
 }
 
 #[cfg(native_rtc)]
@@ -564,6 +563,15 @@ pub async fn media_p2p_set_remote_description(
     _p2p_handle: u64,
     _sdp: String,
     _sdp_type: String,
+) -> Result<(), String> {
+    Err("native media backend not available".to_string())
+}
+
+#[cfg(not(native_rtc))]
+#[tauri::command]
+pub async fn media_p2p_rollback_local_description(
+    _store: State<'_, NativeMediaStore>,
+    _p2p_handle: u64,
 ) -> Result<(), String> {
     Err("native media backend not available".to_string())
 }

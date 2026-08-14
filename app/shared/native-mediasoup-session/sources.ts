@@ -1243,6 +1243,30 @@ export class NativeMediasoupSourcesMethods {
     if (!entry?.source)
       throw new Error("A native source identifier is required");
     if (this.selectedProvider === "cloudflare-realtime") {
+      const source = String(entry.source);
+      let activation = this.providerActivationPromise;
+      if (
+        this.activeSfuProvider !== "cloudflare-realtime" ||
+        !this.cloudflareSession?.sessionId
+      ) {
+        this.sources.set(source, entry);
+        if (!activation && !this.closed)
+          activation = this.activateProvider("cloudflare-realtime");
+        if (activation) await activation;
+        if (
+          this.activeSfuProvider !== "cloudflare-realtime" ||
+          !this.cloudflareSession?.sessionId
+        )
+          throw new Error("Cloudflare media provider is not active");
+        const existing = entry.variantId
+          ? [...this.producerVariants.values()].find(
+              (producer) =>
+                String(producer.variantId || "") ===
+                String(entry.variantId || ""),
+            )
+          : this.producers.get(source);
+        if (existing) return existing;
+      }
       const cloudflare = this._createCloudflareSession();
       const logicalStreamId =
         entry.logicalStreamId || `source:${String(entry.source)}`;
@@ -1334,7 +1358,11 @@ export class NativeMediasoupSourcesMethods {
       logicalStreamId:
         entry.logicalStreamId ||
         (kind === "audio" ? null : defaultLogicalStreamId(entry.source)),
-      codec: kind === "audio" ? entry.codec || null : null,
+      codec: kind === "video" ? entry.codec || null : null,
+      codecAcceleration:
+        kind === "video" ? entry.codecAcceleration || null : null,
+      codecImplementation:
+        kind === "video" ? entry.codecImplementation || null : null,
       producerKey: entry.producerKey || null,
     };
     if (kind === "video") {

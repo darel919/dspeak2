@@ -1,7 +1,7 @@
 import { asError, waitFor } from "../native-mediasoup-utils.ts";
 import {
   nativeFlowing,
-  nativeRtpStatForTrack,
+  nativeRtpCodecMetadata,
   normalizeNativeTransportStats,
 } from "../native-mediasoup-diagnostics.ts";
 import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
@@ -250,24 +250,26 @@ export class NativeMediasoupDiagnosticsMethods {
           producerId: producer.id,
         });
       } catch {}
+      const codec = nativeRtpCodecMetadata(report, "outbound-rtp", {
+        kind: entry.kind,
+        codec: entry.codec,
+        codecAcceleration: entry.codecAcceleration,
+        codecImplementation: entry.codecImplementation,
+        trackId: producer.id,
+        source: entry.source,
+      });
       results.push({
         source: entry.source,
         kind: entry.kind,
         logicalStreamId: entry.logicalStreamId || null,
         generation: entry.generation || 1,
         variantId: entry.variantId || null,
-        codec: entry.codec || null,
-        codecAcceleration: entry.codecAcceleration || null,
-        codecImplementation: entry.codecImplementation || null,
+        ...codec,
         width: entry.width || null,
         height: entry.height || null,
         fps: entry.fps || null,
         bitrate: entry.bitrate || null,
-        stats:
-          nativeRtpStatForTrack(report, "outbound-rtp", {
-            kind: entry.kind,
-            trackId: producer.id,
-          }) || null,
+        stats: codec.stats,
       });
     }
     return results;
@@ -284,6 +286,14 @@ export class NativeMediasoupDiagnosticsMethods {
           consumerId: entry.consumerId,
         });
       } catch {}
+      const codec = nativeRtpCodecMetadata(report, "inbound-rtp", {
+        kind: entry.kind,
+        codec: entry.codec,
+        codecAcceleration: entry.codecAcceleration,
+        codecImplementation: entry.codecImplementation,
+        trackId: entry.consumerId,
+        source: entry.source,
+      });
       results.push({
         consumerId: entry.key,
         userId: entry.userId,
@@ -292,20 +302,14 @@ export class NativeMediasoupDiagnosticsMethods {
         logicalStreamId: entry.logicalStreamId || null,
         generation: entry.generation || 1,
         variantId: entry.variantId || null,
-        codec: entry.codec || null,
-        codecAcceleration: entry.codecAcceleration || null,
-        codecImplementation: entry.codecImplementation || null,
+        ...codec,
         width: entry.width || null,
         height: entry.height || null,
         fps: entry.fps || null,
         bitrate: entry.bitrate || null,
         migrationState: entry.migrationState || null,
         visible: entry.visible !== false,
-        stats:
-          nativeRtpStatForTrack(report, "inbound-rtp", {
-            kind: entry.kind,
-            trackId: entry.consumerId,
-          }) || null,
+        stats: codec.stats,
       });
     }
     return results;

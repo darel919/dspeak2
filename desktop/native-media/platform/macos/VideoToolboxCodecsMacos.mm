@@ -71,6 +71,7 @@ bool annex_b_nalus(const uint8_t* data,
                 break;
             ++next;
         }
+        if (next + 3 >= size) next = size;
         if (next > payload_start)
             nalus.emplace_back(data + payload_start, data + next);
         cursor = next;

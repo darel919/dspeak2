@@ -73,13 +73,15 @@ public:
                          uint32_t height,
                          uint32_t stride,
                          int64_t timestamp_ms) {
-        const bool camera = track_id_.find("camera") != std::string::npos;
-        const auto frame = ConvertFrame(data, width, height, stride, timestamp_ms);
-        if (!frame) return;
-        const char* source = camera ? "camera" : "screen";
-        if (lib_dspeak_media_local_video_preview_enabled(source))
-            lib_dspeak_media_push_local_video_frame(source, *frame);
-        OnFrame(*frame);
+        try {
+            const bool camera = track_id_.find("camera") != std::string::npos;
+            const auto frame = ConvertFrame(data, width, height, stride, timestamp_ms);
+            if (!frame) return;
+            const char* source = camera ? "camera" : "screen";
+            if (lib_dspeak_media_local_video_preview_enabled(source))
+                lib_dspeak_media_push_local_video_frame(source, *frame);
+            OnFrame(*frame);
+        } catch (...) {}
     }
 
     void SetState(webrtc::MediaSourceInterface::SourceState new_state) {
@@ -314,6 +316,8 @@ struct lib_dspeak_media_p2p_handle {
     std::map<std::string, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>> audio_receivers;
     std::map<std::string, webrtc::scoped_refptr<webrtc::RtpSenderInterface>> audio_senders;
     std::map<std::string, webrtc::scoped_refptr<webrtc::RtpSenderInterface>> video_senders;
+    std::map<std::string, std::string> video_preferred_codecs;
+    std::string last_error;
     std::map<std::string, NativeReceiveAudioSink*> audio_sinks_by_id;
     std::map<std::string, NativeReceiveVideoSink*> video_sinks_by_id;
     webrtc::PeerConnectionObserver* p2p_observer_raw = nullptr;

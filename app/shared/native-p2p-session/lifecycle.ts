@@ -4,17 +4,71 @@ import {
   isPresentableVideoFrame,
   logicalVideoStreamId,
 } from "../video-codec-migration.ts";
+import { codecTargetForPath } from "../video-codec-routing.ts";
+import {
+  normalizeParticipantMediaCapabilities,
+  normalizeVideoCodecName,
+} from "../types/video-codec-capabilities.ts";
 
 import { sourceFromTrackId } from "./helpers.ts";
 import type {
   NativeP2pSessionPeer,
   NativeP2pSessionSurface,
+  NativeP2pSource,
   NativeP2pTrackEntry,
 } from "../types/native-p2p-session.ts";
 
 export const NATIVE_P2P_CODEC_MIGRATION_TIMEOUT_MS = 5000;
 export const NATIVE_P2P_CODEC_MIGRATION_STABILIZATION_MS = 1500;
 export const NATIVE_P2P_CODEC_MIGRATION_MAX_FRAME_GAP_MS = 1000;
+
+function positiveMetadataNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
+}
+
+function p2pSourceTarget(source: NativeP2pSource) {
+  const target: Record<string, number> = {};
+  const requested =
+    source.target && typeof source.target === "object" ? source.target : {};
+  for (const key of ["width", "height", "fps", "bitrate"] as const) {
+    const value = positiveMetadataNumber(requested[key] ?? source[key]);
+    if (value) target[key] = value;
+  }
+  return Object.keys(target).length ? target : undefined;
+}
+
+function selectedOfferTarget(
+  session: NativeP2pSessionSurface,
+  peer: NativeP2pSessionPeer,
+  source: NativeP2pSource,
+) {
+  const codec = normalizeVideoCodecName(peer.selectedCodec);
+  if (
+    source.kind !== "video" ||
+    !codec ||
+    !session.mediaCapabilities ||
+    !peer.remoteMediaCapabilities
+  )
+    return p2pSourceTarget(source);
+  return codecTargetForPath(
+    {
+      participantId: session.localPeerId || "local",
+      logicalStreamId: source.logicalStreamId || `source:${source.source}`,
+      mediaCapabilities: normalizeParticipantMediaCapabilities(
+        session.mediaCapabilities,
+      ),
+    },
+    {
+      participantId: peer.userId || peer.peerId,
+      mediaCapabilities: normalizeParticipantMediaCapabilities(
+        peer.remoteMediaCapabilities,
+      ),
+    },
+    codec,
+    p2pSourceTarget(source),
+  );
+}
 
 function clearTrackMetadata(
   session: NativeP2pSessionSurface,
@@ -230,52 +284,105 @@ export class NativeP2pSessionLifecycleMethods {
     peer: NativeP2pSessionPeer,
     sdp: unknown,
   ) {
+    const hadRemoteDescription = peer.remoteDescriptionSet;
     const remoteSdp = typeof sdp === "string" ? sdp : String(sdp || "");
     if (
       !remoteSdp ||
       peer.closed ||
       this.closed ||
-      this.peers.get(peer.peerId) !== peer ||
-      peer.remoteDescriptionSet
+      this.peers.get(peer.peerId) !== peer
     )
       return false;
-    const answer = await this.invoke("media_p2p_create_answer", {
-      p2pHandle: peer.handle,
-      remoteSdp,
-    });
-    if (this.closed || peer.closed || this.peers.get(peer.peerId) !== peer)
+    if (peer.negotiationInFlight) {
+      if (peer.offerCreated && !peer.remoteDescriptionSet) {
+        try {
+          await this.invoke("media_p2p_rollback_local_description", {
+            p2pHandle: peer.handle,
+          });
+          peer.negotiationInFlight = false;
+          peer.negotiationRequested = false;
+        } catch (error) {
+          this.onError?.(error);
+          return false;
+        }
+      } else {
+        peer.pendingOffer = remoteSdp;
+        return true;
+      }
+    }
+    let requestOfferAfterAnswer = false;
+    peer.negotiationInFlight = true;
+    try {
+      const answer = await this.invoke("media_p2p_create_answer", {
+        p2pHandle: peer.handle,
+        remoteSdp,
+      });
+      if (this.closed || peer.closed || this.peers.get(peer.peerId) !== peer)
+        return false;
+      peer.offerCreated = true;
+      peer.remoteDescriptionSet = true;
+      peer.pendingOffer = null;
+      await this._flushCandidates(peer);
+      this._sendSignal(peer.peerId, {
+        description: { type: "answer", sdp: answer },
+      });
+      requestOfferAfterAnswer =
+        !hadRemoteDescription &&
+        this.localPeerId > peer.peerId &&
+        this.sources.size > 0;
+      return true;
+    } catch (error) {
+      peer.pendingOffer = null;
+      peer.negotiationRequested = false;
+      try {
+        await this.invoke("media_p2p_rollback_local_description", {
+          p2pHandle: peer.handle,
+        });
+      } catch (rollbackError) {
+        this.onError?.(rollbackError);
+      }
+      this.onError?.(error);
       return false;
-    peer.offerCreated = true;
-    peer.remoteDescriptionSet = true;
-    peer.negotiationInFlight = false;
-    peer.pendingOffer = null;
-    await this._flushCandidates(peer);
-    this._sendSignal(peer.peerId, {
-      description: { type: "answer", sdp: answer },
-    });
-    if (this.localPeerId > peer.peerId) this._requestOffer(peer);
-    return true;
+    } finally {
+      const pendingOffer = peer.pendingOffer;
+      peer.pendingOffer = null;
+      peer.negotiationInFlight = false;
+      if (requestOfferAfterAnswer) this._requestOffer(peer);
+      if (
+        pendingOffer &&
+        pendingOffer !== remoteSdp &&
+        !peer.closed &&
+        this.peers.get(peer.peerId) === peer
+      )
+        await this._acceptOffer(peer, pendingOffer);
+    }
   }
 
   async _createOffer(
     this: NativeP2pSessionSurface,
     peer: NativeP2pSessionPeer,
   ) {
+    await Promise.all(
+      [...this.sources.values()].map((source) =>
+        this._setSourceParameters(
+          peer,
+          source.source,
+          this._sourceParameters(
+            source,
+            {},
+            selectedOfferTarget(this, peer, source),
+          ),
+          source.kind === "video" ? peer.selectedCodec : null,
+        ),
+      ),
+    );
     const sdp = await this.invoke("media_p2p_create_offer", {
       p2pHandle: peer.handle,
     });
     if (this.closed || this.peers.get(peer.peerId) !== peer) return false;
     peer.offerCreated = true;
     this._sendSignal(peer.peerId, { description: { type: "offer", sdp } });
-    await Promise.all(
-      [...this.sources.values()].map((source) =>
-        this._setSourceParameters(
-          peer,
-          source.source,
-          this._sourceParameters(source),
-        ),
-      ),
-    );
+    return true;
   }
 
   _sendSignal(
@@ -686,14 +793,25 @@ export class NativeP2pSessionLifecycleMethods {
     peer.negotiationRequested = false;
     peer.negotiationInFlight = true;
     this._createOffer(peer)
-      .then(() => {
+      .then((created) => {
         peer.negotiationInFlight = false;
-        if (peer.negotiationRequested) this._requestOffer(peer);
+        if (created && peer.negotiationRequested) this._requestOffer(peer);
       })
       .catch((error: unknown) => {
         peer.negotiationInFlight = false;
-        peer.negotiationRequested = true;
-        this.onError?.(error);
+        this.retryP2pOfferWithSoftwareFallback(peer, error)
+          .then((recovered) => {
+            if (recovered) {
+              peer.negotiationRequested = false;
+              return;
+            }
+            peer.negotiationRequested = true;
+            this.onError?.(error);
+          })
+          .catch((fallbackError: unknown) => {
+            peer.negotiationRequested = true;
+            this.onError?.(fallbackError);
+          });
       });
   }
 

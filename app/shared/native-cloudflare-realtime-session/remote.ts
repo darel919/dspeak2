@@ -435,7 +435,6 @@ export class NativeCloudflareRemoteMethods {
         ...feed,
         frame,
       });
-      this._emitState();
       return true;
     }
     if (event.kind === 4) {

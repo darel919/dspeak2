@@ -220,12 +220,17 @@ static json runtime_codec_direction_entry(
         entry["maxWidth"] = testedWidth;
         entry["maxHeight"] = testedHeight;
         entry["maxFps"] = testedFps;
+        entry["limitsAre"] = "maximum-successfully-tested-profile";
     }
     if (tested)
         entry["testedProfile"] = codec + " / " +
             std::to_string(testedWidth) + "x" +
             std::to_string(testedHeight) + "@" +
             std::to_string(testedFps);
+    const auto& testedProfiles = encoder
+        ? diagnostics.encoder_tested_profiles
+        : diagnostics.decoder_tested_profiles;
+    if (!testedProfiles.empty()) entry["testedProfiles"] = testedProfiles;
     if (!failure.empty()) entry["failureReason"] = failure;
     return entry;
 }
@@ -308,16 +313,17 @@ static json video_codec_diagnostics() {
                 {"hardwareDecoder", false},
             }},
         }},
-        {"activeStream", {
+        {"activeStream", nullptr},
+        {"factoryProbe", {
             {"encoderImplementation", diagnostics.active_encoder_implementation},
             {"decoderImplementation", diagnostics.active_decoder_implementation},
             {"hardwareEncoder", diagnostics.active_hardware_encoder},
             {"hardwareDecoder", diagnostics.active_hardware_decoder},
             {"encoderCreations", diagnostics.encoder_creations},
             {"decoderCreations", diagnostics.decoder_creations},
-            {"source", "RTP outbound/inbound stats"},
+            {"source", "native-video-codec-factory"},
             {"status", diagnostics.encoder_creations || diagnostics.decoder_creations
-                ? "observed_during_factory_creation"
+                ? "observed_during_factory_probe"
                 : "not-created"},
         }},
     };
@@ -575,7 +581,9 @@ extern "C" const char* lib_dspeak_media_capture_error_message(int error_code)
         case -102:
             return "native capture request is invalid";
         case -103:
-            return "native capture is not running";
+            return "native capture session could not be created";
+        case -200:
+            return "native screen capture session is invalid";
         case -220:
             return "microphone or camera permission was denied";
         case -221:
@@ -598,6 +606,12 @@ extern "C" const char* lib_dspeak_media_capture_error_message(int error_code)
             return "native screen audio returned an unsupported format";
         case -205:
             return "native screen capture stream stopped";
+        case -206:
+            return "native screen capture stream could not be created";
+        case -207:
+            return "native screen capture video output could not be added";
+        case -208:
+            return "native screen capture audio output could not be added";
         case -209:
             return "native screen capture failed to start";
         case -210:

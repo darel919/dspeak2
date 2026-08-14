@@ -256,7 +256,8 @@ mod tests {
         let capabilities = NativeMediaCapabilities {
             video_codec_diagnostics: json!({
                 "factoryMode": "software-only",
-                "activeStream": {
+                "activeStream": null,
+                "factoryProbe": {
                     "encoderImplementation": null,
                 },
             }),
@@ -267,7 +268,8 @@ mod tests {
             value["videoCodecDiagnostics"]["factoryMode"],
             "software-only"
         );
-        assert!(value["videoCodecDiagnostics"]["activeStream"]
+        assert!(value["videoCodecDiagnostics"]["activeStream"].is_null());
+        assert!(value["videoCodecDiagnostics"]["factoryProbe"]
             .get("encoderImplementation")
             .is_some());
     }

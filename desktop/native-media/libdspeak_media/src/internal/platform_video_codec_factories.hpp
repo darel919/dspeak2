@@ -31,6 +31,8 @@ struct VideoCodecRuntimeDiagnostics {
     int decoder_tested_width = 0;
     int decoder_tested_height = 0;
     int decoder_tested_fps = 0;
+    std::vector<std::string> encoder_tested_profiles;
+    std::vector<std::string> decoder_tested_profiles;
 };
 
 struct VideoCodecFactoryDiagnostics {

@@ -83,6 +83,7 @@ export class NativeMediasoupSfuSession {
     this.signaling = null;
     this.providerSignaling = null;
     this.controlTicket = "";
+    this.refreshControl = null;
     this.mediaSessionId = "";
     this.messageHandlers = new Map();
     this.pending = new Map();
@@ -178,6 +179,7 @@ export class NativeMediasoupSfuSession {
     this.initializationTimer = null;
     this.transportRequestIds = new Map();
     this.cloudflareSession = null;
+    this.providerActivationPromise = null;
     this.lastProviderFailureKey = null;
     this._installHandlers();
   }

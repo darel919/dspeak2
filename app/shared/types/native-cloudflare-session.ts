@@ -1,6 +1,7 @@
 export interface NativeCloudflareSessionOptions {
   invoke: NativeCloudflareSessionSurface["invoke"];
   send?: NativeCloudflareSessionSurface["send"];
+  ensureControlReady?: NativeCloudflareSessionSurface["ensureControlReady"];
   onRemoteTrack?: NativeCloudflareSessionSurface["onRemoteTrack"];
   onRemoteTrackEnded?: NativeCloudflareSessionSurface["onRemoteTrackEnded"];
   onStateChange?: NativeCloudflareSessionSurface["onStateChange"];
@@ -30,6 +31,7 @@ export interface NativeCloudflareSessionSurface {
     payload?: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
   send?: (message: unknown) => unknown;
+  ensureControlReady?: () => Promise<unknown>;
   onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
   onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;
   onStateChange?: (...args: unknown[]) => unknown;

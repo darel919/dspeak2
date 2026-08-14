@@ -306,6 +306,12 @@ extern "C" {
         sdp_type: *const c_char,
         sdp: *const c_char,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_rollback_local_description(
+        handle: *mut lib_dspeak_media_p2p_handle_t,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_last_error(
+        handle: *mut lib_dspeak_media_p2p_handle_t,
+    ) -> *const c_char;
     pub fn lib_dspeak_media_p2p_add_ice_candidate(
         handle: *mut lib_dspeak_media_p2p_handle_t,
         candidate: *const c_char,

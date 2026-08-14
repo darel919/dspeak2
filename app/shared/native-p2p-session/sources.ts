@@ -13,6 +13,7 @@ import {
   codecVariantCost,
   codecTargetForPath,
   compatibleCodecs,
+  supportsCodecDirectionTarget,
   type CodecRoutingTarget,
 } from "../video-codec-routing.ts";
 import {
@@ -247,7 +248,169 @@ function selectedPairCodec(
   );
 }
 
+function nativeVideoDescriptionFailure(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const details =
+    record.details && typeof record.details === "object"
+      ? (record.details as Record<string, unknown>)
+      : {};
+  const text = [
+    record.code,
+    record.message,
+    record.error,
+    details.code,
+    details.message,
+    details.nativeError,
+  ]
+    .filter((value) => value !== undefined && value !== null)
+    .join(" ")
+    .toLowerCase();
+  return (
+    text.includes("remote") &&
+    text.includes("video") &&
+    (text.includes("description") || text.includes("sdp"))
+  );
+}
+
+function p2pFallbackCodec(
+  session: NativeP2pSessionSurface,
+  peer: NativeP2pSessionPeer,
+  source: NativeP2pSource,
+) {
+  if (
+    source.kind !== "video" ||
+    !session.mediaCapabilities ||
+    !peer.remoteMediaCapabilities
+  )
+    return null;
+  const local = normalizeParticipantMediaCapabilities(
+    session.mediaCapabilities,
+  );
+  const remote = normalizeParticipantMediaCapabilities(
+    peer.remoteMediaCapabilities,
+  );
+  if (
+    !isEmergencyUsable(local.videoCodecs.VP8.encode) ||
+    !isEmergencyUsable(remote.videoCodecs.VP8.decode)
+  )
+    return null;
+  const target = codecTargetForPath(
+    {
+      participantId: session.localPeerId || "local",
+      logicalStreamId: source.logicalStreamId || `source:${source.source}`,
+      mediaCapabilities: local,
+    },
+    {
+      participantId: peer.userId || peer.peerId,
+      mediaCapabilities: remote,
+    },
+    "VP8",
+    sourceRoutingTarget(source),
+  );
+  if (
+    target &&
+    (!supportsCodecDirectionTarget(local.videoCodecs.VP8.encode, target) ||
+      !supportsCodecDirectionTarget(remote.videoCodecs.VP8.decode, target))
+  )
+    return null;
+  return "VP8";
+}
+
+function announceP2pSourceCodec(
+  session: NativeP2pSessionSurface,
+  peer: NativeP2pSessionPeer,
+  source: NativeP2pSource,
+  codec: string,
+  target?: CodecRoutingTarget,
+) {
+  const trackId = peer.trackIds.get(source.source);
+  if (!trackId) return false;
+  const codecMetadata = codecEncodeMetadata(session, codec);
+  session._sendSignal(peer.peerId, {
+    source: {
+      trackId,
+      source: source.source,
+      ownerSource: source.ownerSource || null,
+      logicalStreamId:
+        source.logicalStreamId ||
+        logicalVideoStreamId(peer.userId, source.source),
+      generation: source.generation || 1,
+      variantId: source.variantId || null,
+      codec,
+      codecAcceleration: codecMetadata.acceleration,
+      codecImplementation: codecMetadata.implementation,
+      ...peerSourceMetadata({ ...source, targetAdjusted: true }, target),
+      emergency: true,
+    },
+  });
+  return true;
+}
+
+async function retryP2pOfferWithSoftwareFallback(
+  session: NativeP2pSessionSurface,
+  peer: NativeP2pSessionPeer,
+) {
+  if (peer.videoCodecFallbackAttempted) return false;
+  const videoSources = [...session.sources.values()].filter(
+    (source) => source.kind === "video" && peer.sources.has(source.source),
+  );
+  if (!videoSources.length) return false;
+  const fallbackCodec = videoSources.every(
+    (source) => p2pFallbackCodec(session, peer, source) === "VP8",
+  )
+    ? "VP8"
+    : null;
+  if (!fallbackCodec) return false;
+  const previousOfferCreated = peer.offerCreated;
+  const previousRemoteDescriptionSet = peer.remoteDescriptionSet;
+  const previousSelectedCodec = peer.selectedCodec;
+  peer.videoCodecFallbackAttempted = true;
+  peer.selectedCodec = fallbackCodec;
+  try {
+    for (const source of videoSources) {
+      const target = selectedPeerCodecTarget(
+        session,
+        peer,
+        source,
+        fallbackCodec,
+      );
+      await session._setSourceParameters(
+        peer,
+        source.source,
+        session._sourceParameters(source, {}, target),
+        fallbackCodec,
+      );
+      announceP2pSourceCodec(session, peer, source, fallbackCodec, target);
+    }
+    peer.offerCreated = false;
+    peer.remoteDescriptionSet = previousRemoteDescriptionSet;
+    peer.negotiationRequested = false;
+    peer.negotiationInFlight = true;
+    try {
+      return Boolean(await session._createOffer(peer));
+    } finally {
+      peer.negotiationInFlight = false;
+    }
+  } catch (error) {
+    peer.offerCreated = previousOfferCreated;
+    peer.remoteDescriptionSet = previousRemoteDescriptionSet;
+    peer.selectedCodec = previousSelectedCodec;
+    peer.videoCodecFallbackAttempted = false;
+    throw error;
+  }
+}
+
 export class NativeP2pSessionSourcesMethods {
+  async retryP2pOfferWithSoftwareFallback(
+    this: NativeP2pSessionSurface,
+    peer: NativeP2pSessionPeer,
+    error: unknown,
+  ) {
+    if (!nativeVideoDescriptionFailure(error)) return false;
+    return retryP2pOfferWithSoftwareFallback(this, peer);
+  }
+
   async applyTopology(
     this: NativeP2pSessionSurface,
     topology: Record<string, unknown> = {},
@@ -837,11 +1000,33 @@ export class NativeP2pSessionSourcesMethods {
       return this._acceptOffer(peer, remoteSdp);
     }
     if (description.type === "answer") {
-      await this.invoke("media_p2p_set_remote_description", {
-        p2pHandle: peer.handle,
-        sdp: description.sdp,
-        sdpType: description.type,
-      });
+      try {
+        await this.invoke("media_p2p_set_remote_description", {
+          p2pHandle: peer.handle,
+          sdp: description.sdp,
+          sdpType: description.type,
+        });
+      } catch (error) {
+        peer.negotiationInFlight = false;
+        peer.negotiationRequested = false;
+        try {
+          await this.invoke("media_p2p_rollback_local_description", {
+            p2pHandle: peer.handle,
+          });
+        } catch (rollbackError) {
+          this.onError?.(rollbackError);
+        }
+        if (nativeVideoDescriptionFailure(error)) {
+          try {
+            if (await retryP2pOfferWithSoftwareFallback(this, peer))
+              return true;
+          } catch (fallbackError) {
+            this.onError?.(fallbackError);
+          }
+        }
+        this.onError?.(error);
+        return false;
+      }
       peer.remoteDescriptionSet = true;
       peer.negotiationInFlight = false;
       await this._flushCandidates(peer);
@@ -1037,6 +1222,7 @@ export class NativeP2pSessionSourcesMethods {
       mediaCapabilities: this.mediaCapabilities,
       remoteMediaCapabilities,
       selectedCodec: null,
+      videoCodecFallbackAttempted: false,
     };
     peer.selectedCodec = this._selectPeerCodec(peer);
     this.peers.set(peerId, peer);
@@ -1071,9 +1257,12 @@ export class NativeP2pSessionSourcesMethods {
             if (peer.offerCreated) return;
             peer.negotiationInFlight = true;
             this._createOffer(peer)
-              .catch((error: unknown) => this.onError?.(error))
-              .finally(() => {
+              .then((created) => {
+                if (!created) peer.negotiationInFlight = false;
+              })
+              .catch((error: unknown) => {
                 peer.negotiationInFlight = false;
+                this.onError?.(error);
               });
           }, NATIVE_P2P_CAPABILITY_WAIT_MS);
           peer.capabilityWaitTimer.unref?.();
@@ -1081,7 +1270,6 @@ export class NativeP2pSessionSourcesMethods {
           peer.negotiationInFlight = true;
           try {
             await this._createOffer(peer);
-            peer.negotiationInFlight = false;
           } catch (error) {
             peer.negotiationInFlight = false;
             throw error;

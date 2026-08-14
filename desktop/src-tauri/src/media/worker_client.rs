@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -31,10 +31,7 @@ impl WorkerConnection {
             return Err(json!("native media worker is not running"));
         }
         let request_id = self.next_request.fetch_add(1, Ordering::Relaxed);
-        if matches!(
-            command,
-            "media_shutdown" | "media_prepare_devices" | "media_prepare_capture"
-        ) {
+        if command == "media_shutdown" {
             self.shutdown_requested.store(true, Ordering::Release);
         }
         let (sender, receiver) = mpsc::channel();
@@ -97,10 +94,15 @@ impl WorkerConnection {
         fail_pending(&self.pending, json!("native media worker stopped"));
     }
 
-    fn reap(&self) {
+    fn reap_status(&self) -> Option<ExitStatus> {
         if let Ok(mut child) = self.child.lock() {
-            let _ = child.wait();
+            return child.wait().ok();
         }
+        None
+    }
+
+    fn reap(&self) {
+        let _ = self.reap_status();
     }
 }
 
@@ -119,10 +121,7 @@ impl MediaWorkerClient {
     ) -> WorkerResult {
         let connection = self.connection_for(app, state)?;
         let result = connection.send(command, payload);
-        if matches!(
-            command,
-            "media_shutdown" | "media_prepare_devices" | "media_prepare_capture"
-        ) {
+        if command == "media_shutdown" {
             connection.alive.store(false, Ordering::Release);
             connection.reap();
         }
@@ -178,12 +177,6 @@ impl MediaWorkerClient {
                     *slot = None;
                 }
             }
-        } else if matches!(command, "media_prepare_devices" | "media_prepare_capture")
-            && connection.alive.load(Ordering::Acquire)
-        {
-            connection
-                .shutdown_requested
-                .store(false, Ordering::Release);
         }
         Some(result)
     }
@@ -276,13 +269,10 @@ fn spawn_worker(
             ))
         })?;
     if let Some(stderr) = stderr {
+        let event_app = app.clone();
         thread::Builder::new()
             .name("dspeak-media-worker-log".to_string())
-            .spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    eprintln!("[dspeak:media-worker] {line}");
-                }
-            })
+            .spawn(move || read_worker_stderr(stderr, event_app))
             .map_err(|error| {
                 json!(format!(
                     "native media worker logger failed to start: {error}"
@@ -292,23 +282,50 @@ fn spawn_worker(
     Ok(connection)
 }
 
+fn read_worker_stderr(stderr: impl std::io::Read, app: AppHandle) {
+    const EVENT_PREFIX: &str = "DSPEAK_NATIVE_EVENT ";
+    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+        if let Some(serialized) = line.strip_prefix(EVENT_PREFIX) {
+            match serde_json::from_str::<Value>(serialized) {
+                Ok(value) => emit_worker_event(&app, &value),
+                Err(error) => eprintln!(
+                    "[dspeak:media-worker] invalid native event bytes={}: {error}",
+                    serialized.len()
+                ),
+            }
+        } else {
+            eprintln!("[dspeak:media-worker] {line}");
+        }
+    }
+}
+
 fn read_worker_output(
     stdout: impl std::io::Read,
     connection: Arc<WorkerConnection>,
     app: AppHandle,
     state: Arc<Mutex<NativeMediaState>>,
 ) {
+    const MAX_PROTOCOL_LINE_BYTES: usize = 2_000_000;
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
     loop {
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => break,
-            Ok(_) => {
+            Ok(bytes_read) => {
+                if bytes_read > MAX_PROTOCOL_LINE_BYTES {
+                    eprintln!(
+                        "[dspeak:media-worker] protocol line exceeded {} bytes: {}",
+                        MAX_PROTOCOL_LINE_BYTES, bytes_read
+                    );
+                    continue;
+                }
                 let parsed = match serde_json::from_str::<Value>(line.trim()) {
                     Ok(value) => value,
                     Err(error) => {
-                        eprintln!("[dspeak:media-worker] invalid protocol line: {error}");
+                        eprintln!(
+                            "[dspeak:media-worker] invalid protocol line bytes={bytes_read}: {error}"
+                        );
                         continue;
                     }
                 };
@@ -344,7 +361,8 @@ fn read_worker_output(
         &connection.pending,
         json!("native media worker exited unexpectedly"),
     );
-    connection.reap();
+    let exit_status = connection.reap_status();
+    eprintln!("[dspeak:media-worker] worker stdout closed exit_status={exit_status:?}");
     if !connection.shutdown_requested.load(Ordering::Acquire) {
         let disconnected = NativeMediaState::default();
         if let Ok(mut current) = state.lock() {
@@ -357,6 +375,7 @@ fn read_worker_output(
                 "code": "MEDIA_WORKER_EXITED",
                 "source": "native-media-worker",
                 "message": "The native media worker exited unexpectedly",
+                "exitStatus": exit_status.map(|status| format!("{status:?}")),
             }),
         );
     }
@@ -465,6 +484,13 @@ pub(crate) async fn media_worker_invoke(
                 .call_existing(&worker_app, &worker_command, payload)
                 .unwrap_or(Ok(Value::Null));
         }
+        let capture_start_command = matches!(
+            worker_command.as_str(),
+            "media_start_screen_share"
+                | "media_replace_screen_share"
+                | "media_start_system_audio"
+                | "media_replace_system_audio"
+        );
         let can_spawn = matches!(
             worker_command.as_str(),
             "media_initialize" | "media_prepare_devices" | "media_prepare_capture"
@@ -480,7 +506,7 @@ pub(crate) async fn media_worker_invoke(
                 .call_existing(&worker_app, &worker_command, payload)
                 .unwrap_or_else(|| Err(json!("native media worker is not running")));
         }
-        if worker_command == "media_join" {
+        if worker_command == "media_join" || capture_start_command {
             return worker.call_with_initialize(
                 &worker_app,
                 &worker_state,

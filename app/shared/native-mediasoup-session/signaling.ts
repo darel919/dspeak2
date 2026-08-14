@@ -55,6 +55,9 @@ export class NativeMediasoupSignalingMethods {
     this.cloudflareSession = new NativeCloudflareRealtimeSession({
       invoke: this.invoke,
       send: (message: unknown) => this.signaling?.send?.(message),
+      ensureControlReady: async () => {
+        await this.signaling?.waitForReady?.();
+      },
       onRemoteTrack: (entry: Record<string, unknown>) => {
         this.onRemoteTrack?.(entry);
         this._emitState();
@@ -120,50 +123,113 @@ export class NativeMediasoupSignalingMethods {
   ) {
     const nextProvider = String(provider || "mediasoup");
     this.selectedProvider = nextProvider;
-    if (nextProvider === "cloudflare-realtime") {
-      if (this.sendTransport || this.recvTransport || this.device) {
-        await this._closeMedia(false);
-        this.activeSfuProvider = null;
+    const currentActivation = this.providerActivationPromise;
+    if (currentActivation) {
+      let activationError: unknown = null;
+      try {
+        await currentActivation;
+      } catch (error) {
+        activationError = error;
       }
-      const cloudflare = this._createCloudflareSession();
-      const wasInitialized = Boolean(cloudflare.sessionId);
-      await cloudflare.initialize();
-      for (const publication of this.pendingCloudflarePublications.values())
-        await cloudflare.handleMessage(
-          "cloudflare-publication-available",
-          publication,
+      if (
+        activationError &&
+        this.selectedProvider === nextProvider &&
+        !this.closed
+      )
+        throw activationError;
+      if (this.activeSfuProvider === nextProvider)
+        return this.cloudflareSession;
+    }
+    let activation: Promise<unknown>;
+    activation = (async () => {
+      if (this.closed)
+        throw Object.assign(new Error("Native SFU session is closed"), {
+          code: "NATIVE_SFU_SESSION_CLOSED",
+        });
+      let mediaRevision = this.mediaRevision;
+      const assertCurrentActivation = () => {
+        if (
+          !this.closed &&
+          this.selectedProvider === nextProvider &&
+          this.mediaRevision === mediaRevision
+        )
+          return;
+        throw Object.assign(
+          new Error("Native SFU provider activation was superseded"),
+          { code: "NATIVE_PROVIDER_ACTIVATION_SUPERSEDED" },
         );
-      if (!wasInitialized)
-        for (const entry of this.sources.values())
-          await cloudflare.addSource(entry);
-      if (!wasInitialized)
-        for (const plan of this.codecRoutingPlans.values())
-          await this.applyCodecRoutingPlan(plan);
-      await cloudflare.startSubscriptions();
-      this.transportStates.set("send", "connected");
-      this.transportStates.set("recv", "connected");
-      this.mediaConnectionState = "transport-connecting";
-      this.activeSfuProvider = "cloudflare-realtime";
-      this._emitState();
-      return cloudflare;
-    }
-    if (this.cloudflareSession || closeMedia) {
-      await this._closeMedia(false);
-      this.mediaConnectionState = "disconnected";
-    }
-    if (
-      nextProvider === "mediasoup" &&
-      ensureMedia &&
-      !this.sendTransport &&
-      !this.recvTransport &&
-      !this.device
-    )
-      await this._startNegotiation();
-    this.activeSfuProvider =
-      this.sendTransport || this.recvTransport || this.device
-        ? "mediasoup"
-        : null;
-    return null;
+      };
+      if (nextProvider === "cloudflare-realtime") {
+        if (this.sendTransport || this.recvTransport || this.device) {
+          await this._closeMedia(false);
+          mediaRevision = this.mediaRevision;
+          this.activeSfuProvider = null;
+        }
+        assertCurrentActivation();
+        const cloudflare = this._createCloudflareSession();
+        const wasInitialized = Boolean(cloudflare.sessionId);
+        try {
+          await cloudflare.initialize();
+          assertCurrentActivation();
+          for (const publication of this.pendingCloudflarePublications.values())
+            await cloudflare.handleMessage(
+              "cloudflare-publication-available",
+              publication,
+            );
+          assertCurrentActivation();
+          if (!wasInitialized)
+            for (const entry of this.sources.values()) {
+              await cloudflare.addSource(entry);
+              assertCurrentActivation();
+            }
+          if (!wasInitialized)
+            for (const plan of this.codecRoutingPlans.values()) {
+              await this.applyCodecRoutingPlan(plan);
+              assertCurrentActivation();
+            }
+          await cloudflare.startSubscriptions();
+          assertCurrentActivation();
+        } catch (error) {
+          if (this.cloudflareSession === cloudflare)
+            this.cloudflareSession = null;
+          await Promise.resolve(cloudflare.closeMedia()).catch(() => {});
+          throw error;
+        }
+        this.transportStates.set("send", "connected");
+        this.transportStates.set("recv", "connected");
+        this.mediaConnectionState = "transport-connecting";
+        this.activeSfuProvider = "cloudflare-realtime";
+        this.activeSfuProviderId = this.selectedProviderId;
+        this._emitState();
+        return cloudflare;
+      }
+      if (this.cloudflareSession || closeMedia) {
+        await this._closeMedia(false);
+        mediaRevision = this.mediaRevision;
+        this.mediaConnectionState = "disconnected";
+      }
+      assertCurrentActivation();
+      if (
+        nextProvider === "mediasoup" &&
+        ensureMedia &&
+        !this.sendTransport &&
+        !this.recvTransport &&
+        !this.device
+      )
+        await this._startNegotiation();
+      this.activeSfuProvider =
+        this.sendTransport || this.recvTransport || this.device
+          ? "mediasoup"
+          : null;
+      this.activeSfuProviderId =
+        this.activeSfuProvider === "mediasoup" ? this.selectedProviderId : null;
+      return null;
+    })().finally(() => {
+      if (this.providerActivationPromise === activation)
+        this.providerActivationPromise = null;
+    });
+    this.providerActivationPromise = activation;
+    return activation;
   }
 
   async _startNegotiation(this: NativeMediasoupSfuSession) {

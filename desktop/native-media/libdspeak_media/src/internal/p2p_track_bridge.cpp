@@ -53,28 +53,43 @@ static bool is_preferred_primary_video_codec(
             normalized_video_codec_name(preferred_codec);
 }
 
+static bool rtx_targets_primary_codec(
+    const webrtc::RtpCodecCapability& codec,
+    const std::vector<int>& primary_payload_types) {
+    const auto apt = codec.parameters.find("apt");
+    if (apt == codec.parameters.end() || apt->second.empty()) return false;
+    char* end = nullptr;
+    const auto payload_type = std::strtol(apt->second.c_str(), &end, 10);
+    if (end == apt->second.c_str() || *end != '\0' || payload_type < 0 ||
+        payload_type > 127)
+        return false;
+    return std::find(
+               primary_payload_types.begin(), primary_payload_types.end(),
+               static_cast<int>(payload_type)) != primary_payload_types.end();
+}
+
 static size_t video_codec_priority(
     const webrtc::RtpCodecCapability& codec,
     const std::string& preferred_codec) {
-    const auto mime_type = codec.mime_type();
-    if (!preferred_codec.empty() &&
-        mime_type == "video/" + preferred_codec)
+    const auto mime_type = normalized_video_codec_name(codec.mime_type());
+    const auto preferred = normalized_video_codec_name(preferred_codec);
+    if (!preferred.empty() && mime_type == preferred)
         return 0;
-    if (mime_type == "video/AV1") return preferred_codec == "AV1" ? 0 : 1;
-    if (mime_type == "video/H265") return preferred_codec == "H265" ? 0 : 2;
-    if (mime_type == "video/H264") return preferred_codec == "H264" ? 0 : 3;
-    if (mime_type == "video/VP9") return preferred_codec == "VP9" ? 0 : 4;
-    if (mime_type == "video/VP8") return preferred_codec == "VP8" ? 0 : 5;
+    if (mime_type == "AV1") return 1;
+    if (mime_type == "H265") return 2;
+    if (mime_type == "H264") return 3;
+    if (mime_type == "VP9") return 4;
+    if (mime_type == "VP8") return 5;
     return 6;
 }
 
-static void apply_video_codec_preferences(
+static bool apply_video_codec_preferences(
     webrtc::PeerConnectionFactoryInterface* factory,
     const webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>& transceiver,
     const std::string& preferred_codec) {
     if (!factory || !transceiver || !transceiver->sender() ||
         !transceiver->sender()->track() ||
-        transceiver->sender()->track()->kind() != "video") return;
+        transceiver->sender()->track()->kind() != "video") return false;
     auto capabilities = factory->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO).codecs;
     std::stable_sort(capabilities.begin(), capabilities.end(),
                      [&preferred_codec](const auto& left, const auto& right) {
@@ -86,6 +101,7 @@ static void apply_video_codec_preferences(
         [&preferred_codec](const auto& codec) {
             return is_preferred_primary_video_codec(codec, preferred_codec);
         });
+    if (!preferred_codec.empty() && !preferred_codec_available) return false;
     if (preferred_codec_available) {
         capabilities.erase(
             std::remove_if(capabilities.begin(), capabilities.end(),
@@ -95,8 +111,24 @@ static void apply_video_codec_preferences(
                                        codec, preferred_codec);
                            }),
             capabilities.end());
+        std::vector<int> primary_payload_types;
+        for (const auto& codec : capabilities) {
+            if (!is_auxiliary_video_codec(codec) &&
+                codec.preferred_payload_type.has_value())
+                primary_payload_types.push_back(*codec.preferred_payload_type);
+        }
+        capabilities.erase(
+            std::remove_if(capabilities.begin(), capabilities.end(),
+                           [&primary_payload_types](const auto& codec) {
+                               if (!is_auxiliary_video_codec(codec)) return false;
+                               return normalized_video_codec_name(codec.mime_type()) !=
+                                          "RTX" ||
+                                   !rtx_targets_primary_codec(
+                                       codec, primary_payload_types);
+                           }),
+            capabilities.end());
     }
-    transceiver->SetCodecPreferences(capabilities);
+    return transceiver->SetCodecPreferences(capabilities).ok();
 }
 
 static webrtc::Priority native_priority(const json& value, webrtc::Priority fallback)
@@ -140,14 +172,22 @@ extern "C" int lib_dspeak_media_p2p_add_video_track_with_key(
             auto result = handle->pc->AddTrack(track->track, {"stream0"});
             if (!result.ok()) return -1;
             const auto sender = result.value();
+            bool preferences_applied = false;
             for (const auto& transceiver : handle->pc->GetTransceivers()) {
                 if (transceiver->sender() == sender) {
-                    apply_video_codec_preferences(
+                    preferences_applied = apply_video_codec_preferences(
                         handle->factory.get(), transceiver, preferred);
                     break;
                 }
             }
+            if (!preferences_applied) {
+                handle->pc->RemoveTrackOrError(sender);
+                return -1;
+            }
             handle->video_senders[key] = sender;
+            if (!preferred.empty())
+                handle->video_preferred_codecs[key] =
+                    normalized_video_codec_name(preferred);
             return 0;
         });
     } catch (...) {
@@ -225,6 +265,7 @@ static int remove_p2p_track_with_key(
                 handle->video_senders.erase(key);
             else
                 handle->audio_senders.erase(key);
+            if (video) handle->video_preferred_codecs.erase(key);
             return 0;
         });
     } catch (...) {
@@ -392,10 +433,26 @@ extern "C" int lib_dspeak_media_p2p_set_track_parameters_with_key(
                     sender->track()->kind() == "video") {
                     const auto preferred =
                         value["preferredCodec"].get<std::string>();
+                    const auto normalized_preferred =
+                        normalized_video_codec_name(preferred);
+                    const auto existing_preference =
+                        handle->video_preferred_codecs.find(expected_key);
+                    const bool preference_changed =
+                        existing_preference == handle->video_preferred_codecs.end()
+                            ? !normalized_preferred.empty()
+                            : existing_preference->second != normalized_preferred;
                     for (const auto& transceiver : handle->pc->GetTransceivers()) {
                         if (transceiver->sender() == sender) {
-                            apply_video_codec_preferences(
-                                handle->factory.get(), transceiver, preferred);
+                            if (preference_changed) {
+                                if (!apply_video_codec_preferences(
+                                        handle->factory.get(), transceiver, preferred))
+                                    return -1;
+                                if (!normalized_preferred.empty())
+                                    handle->video_preferred_codecs[expected_key] =
+                                        normalized_preferred;
+                                else
+                                    handle->video_preferred_codecs.erase(expected_key);
+                            }
                             break;
                         }
                     }

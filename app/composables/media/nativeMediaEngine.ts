@@ -218,6 +218,8 @@ export class NativeMediaEngine extends MediaEngine {
     this.activeScreenCapture = null;
     this.activeSystemAudioCapture = null;
     this.microphoneOperation = Promise.resolve();
+    this.cameraOperation = Promise.resolve();
+    this.screenOperation = Promise.resolve();
     this.nativeEventOperation = null;
     this.nativeSession = null;
     this.nativeP2pSession = null;
