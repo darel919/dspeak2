@@ -15,12 +15,14 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <mfapi.h>
+#include <mferror.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mmdeviceapi.h>
 #include <propvarutil.h>
 #include <wrl.h>
 #include <wrl/client.h>
+#include <wrl/implements.h>
 #include <windows.graphics.capture.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
@@ -28,6 +30,11 @@
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include <winrt/base.h>
+
+#ifdef StrCat
+#undef StrCat
+#endif
+#define StrCat StrCat
 
 #include <modules/desktop_capture/desktop_capturer.h>
 #include <modules/desktop_capture/desktop_frame.h>
@@ -58,6 +65,7 @@ using Microsoft::WRL::ComPtr;
 using json = nlohmann::json;
 using Microsoft::WRL::ClassicCom;
 using Microsoft::WRL::FtmBase;
+using Microsoft::WRL::Make;
 using Microsoft::WRL::RuntimeClass;
 using Microsoft::WRL::RuntimeClassFlags;
 using winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool;

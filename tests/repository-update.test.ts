@@ -40,6 +40,7 @@ const [
   nativeMediaWindowsSupport,
   nativeMediaWindowsGraphics,
   nativeMediaWindowsAudio,
+  nativeMediaWindowsCodecs,
   nativeMediaWindowsSession,
   nativeMediaWindowsOutput,
   nativeMediaMacSupport,
@@ -81,6 +82,7 @@ const [
     "../desktop/native-media/platform/windows/PlatformCaptureWindowsSupport.cpp",
     "../desktop/native-media/platform/windows/PlatformCaptureWindowsGraphics.cpp",
     "../desktop/native-media/platform/windows/PlatformCaptureWindowsAudio.cpp",
+    "../desktop/native-media/platform/windows/MediaFoundationCodecsWindows.cpp",
     "../desktop/native-media/platform/windows/PlatformCaptureWindowsSession.cpp",
     "../desktop/native-media/platform/windows/PlatformCaptureWindowsOutput.cpp",
     "../desktop/native-media/platform/macos/PlatformCaptureMacosSupport.mm",
@@ -299,6 +301,9 @@ test("desktop releases optionally publish signed updates and restart after insta
     nativeMediaWindowsInternal,
     /#include <propkeydef\.h>\n#include <functiondiscoverykeys_devpkey\.h>/,
   );
+  assert.match(nativeMediaWindowsInternal, /#include <mferror\.h>/);
+  assert.match(nativeMediaWindowsInternal, /#define StrCat StrCat/);
+  assert.match(nativeMediaWindowsInternal, /using Microsoft::WRL::Make;/);
   assert.doesNotMatch(nativeMediaWindowsInternal, /#define NOMINMAX/);
   assert.doesNotMatch(
     nativeMediaCmake,
@@ -322,6 +327,19 @@ test("desktop releases optionally publish signed updates and restart after insta
   );
   assert.match(nativeMediaWindows, /MF_SOURCE_READER_FIRST_VIDEO_STREAM/);
   assert.match(nativeMediaWindows, /D3D11CreateDevice/);
+  assert.match(nativeMediaWindowsSupport, /audio_device_json\(device\.Get\(\)/);
+  assert.match(nativeMediaWindowsGraphics, /winrt::com_ptr<IInspectable>/);
+  assert.match(nativeMediaWindowsGraphics, /inspectable_device\.put\(\)/);
+  assert.match(nativeMediaWindowsAudio, /MF_E_NOT_FOUND/);
+  assert.match(
+    nativeMediaWindowsCodecs,
+    /std::max\(1u, codec_settings->maxFramerate\)/,
+  );
+  assert.match(nativeMediaWindowsCodecs, /encoded_max_length/);
+  assert.doesNotMatch(
+    nativeMediaWindowsSession,
+    /namespace \{\n\nstruct lib_dspeak_media_capture_session/,
+  );
   assert.match(nativeMediaMac, /AVCaptureDeviceDiscoverySession/);
   assert.match(nativeMediaMac, /AVCaptureDeviceTypeExternalUnknown/);
   assert.match(nativeMediaMac, /is_current_process\(application\)/);

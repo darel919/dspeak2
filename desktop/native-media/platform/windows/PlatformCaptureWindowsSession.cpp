@@ -4,8 +4,6 @@
 
 using namespace dspeak_windows;
 
-namespace {
-
 struct lib_dspeak_media_capture_session;
 
 class DesktopFrameCallback final : public webrtc::DesktopCapturer::Callback {
@@ -96,6 +94,8 @@ void DesktopFrameCallback::OnCaptureResult(
                             std::chrono::duration_cast<std::chrono::milliseconds>(
                                 std::chrono::steady_clock::now().time_since_epoch()).count()));
 }
+
+namespace {
 
 void capture_error(lib_dspeak_media_capture_session* session,
                    int code,

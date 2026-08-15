@@ -361,9 +361,9 @@ public:
         width_ = codec_settings->width;
         height_ = codec_settings->height;
         framerate_ = static_cast<unsigned>(
-            std::max(1, codec_settings->maxFramerate));
+            std::max(1u, codec_settings->maxFramerate));
         bitrate_ = static_cast<unsigned>(
-            std::max(1, codec_settings->startBitrate)) * 1000u;
+            std::max(1u, codec_settings->startBitrate)) * 1000u;
         MFT_REGISTER_TYPE_INFO input_info = {
             MFMediaType_Video, MFVideoFormat_NV12};
         MFT_REGISTER_TYPE_INFO output_info = {
@@ -467,11 +467,12 @@ public:
         ComPtr<IMFMediaBuffer> encoded_buffer;
         if (!extract_sample_buffer(output_sample.Get(), &encoded_buffer)) return -1;
         BYTE* data = nullptr;
-        DWORD max_length = 0;
-        DWORD current_length = 0;
-        if (FAILED(encoded_buffer->Lock(&data, &max_length, &current_length)))
+        DWORD encoded_max_length = 0;
+        DWORD encoded_current_length = 0;
+        if (FAILED(encoded_buffer->Lock(
+                &data, &encoded_max_length, &encoded_current_length)))
             return -1;
-        auto encoded = to_annex_b(data, current_length);
+        auto encoded = to_annex_b(data, encoded_current_length);
         encoded_buffer->Unlock();
         if (encoded.empty()) return 0;
         const bool key_frame =

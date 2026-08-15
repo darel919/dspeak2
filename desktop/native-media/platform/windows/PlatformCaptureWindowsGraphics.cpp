@@ -86,9 +86,9 @@ private:
         if (FAILED(result)) return false;
         ComPtr<IDXGIDevice> dxgi_device;
         if (FAILED(device.As(&dxgi_device))) return false;
-        ComPtr<IInspectable> inspectable_device;
+        winrt::com_ptr<IInspectable> inspectable_device;
         if (FAILED(CreateDirect3D11DeviceFromDXGIDevice(
-                dxgi_device.Get(), &inspectable_device)))
+                dxgi_device.Get(), inspectable_device.put())))
             return false;
         auto direct_device = inspectable_device.as<IDirect3DDevice>();
         auto interop_factory = winrt::get_activation_factory<
@@ -623,4 +623,3 @@ json list_desktop_sources() {
 }
 
 #endif
-

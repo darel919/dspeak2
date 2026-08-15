@@ -264,7 +264,7 @@ void append_audio_devices(json& result, EDataFlow flow,
         const std::string device_id = wide_to_utf8(raw_id);
         CoTaskMemFree(raw_id);
         if (!device_id.empty())
-            result.push_back(audio_device_json(device, device_id, kind,
+            result.push_back(audio_device_json(device.Get(), device_id, kind,
                                                source_type, true));
     }
 }
@@ -481,4 +481,3 @@ bool audio_format_details(const WAVEFORMATEX* format,
 }
 
 #endif
-
