@@ -121,7 +121,7 @@ describe("Voice store broadcast contract", () => {
 
   it("voice store creates an authenticated DJ session", () => {
     const source = readFileSync("app/stores/voice.ts", "utf-8");
-    assert.ok(source.includes('$fetch("/api/dj/session"'));
+    assert.ok(source.includes("${config.public.apiPath}/dj/session"));
     assert.ok(source.includes("body: { channelId: currentChannelId.value }"));
     assert.ok(source.includes('next.status === "live"'));
   });

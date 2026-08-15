@@ -57,18 +57,20 @@
               I have read and agree to the
               <a
                 class="metro-link"
-                href="/terms"
+                :href="termsUrl"
                 target="_blank"
                 rel="noopener noreferrer"
+                @click.prevent="openLegalUrl('/terms')"
               >
                 Terms of Service
               </a>
               and
               <a
                 class="metro-link"
-                href="/privacy"
+                :href="privacyUrl"
                 target="_blank"
                 rel="noopener noreferrer"
+                @click.prevent="openLegalUrl('/privacy')"
               >
                 Privacy Policy </a
               >.
@@ -112,12 +114,21 @@
 import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useRuntimeStore } from "../stores/runtime";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
+import {
+  buildPublicUrl,
+  openExternalUrl,
+} from "../shared/desktop-external-url.ts";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
 const runtimeStore = useRuntimeStore();
+const runtimeConfig = useRuntimeConfig();
 const router = useRouter();
 const route = useRoute();
+const desktopRuntime = computed(
+  () => runtimeStore.isTauri || hasTauriRuntimeMarker(),
+);
 const status = ref("working");
 const showTerms = ref(false);
 const termsAccepted = ref(false);
@@ -128,6 +139,17 @@ let loginUrl = "";
 let signInTimeout;
 let signInPoll;
 let signInCheckInFlight = false;
+
+const termsUrl = computed(() =>
+  desktopRuntime.value
+    ? buildPublicUrl(runtimeConfig.public.publicOrigin, "/terms")
+    : "/terms",
+);
+const privacyUrl = computed(() =>
+  desktopRuntime.value
+    ? buildPublicUrl(runtimeConfig.public.publicOrigin, "/privacy")
+    : "/privacy",
+);
 
 function clearSignInTimeout() {
   if (!signInTimeout) return;
@@ -185,6 +207,37 @@ function internalRedirect(value) {
   }
 }
 
+function signInFailureMessage(error, fallback) {
+  const code = error?.code || error?.name;
+  if (code === "DESKTOP_OAUTH_BROWSER_OPEN_FAILED")
+    return "dSpeak could not open your browser. Please try again.";
+  if (code === "DESKTOP_OAUTH_CALLBACK_SERVER_UNAVAILABLE")
+    return "Could not start sign-in. Please try again.";
+  if (
+    code === "DESKTOP_OAUTH_URL_GENERATION_FAILED" ||
+    code === "DESKTOP_OAUTH_PROVIDER_REJECTED" ||
+    code === "DESKTOP_OAUTH_STATE_MISMATCH"
+  )
+    return "Could not start sign-in. Please try again.";
+  if (
+    code === "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED" ||
+    code === "DESKTOP_API_SESSION_BRIDGE_FAILED"
+  )
+    return "Authentication completed, but dSpeak could not finish signing you in.";
+  return fallback;
+}
+
+async function openLegalUrl(path) {
+  const url = desktopRuntime.value
+    ? buildPublicUrl(runtimeConfig.public.publicOrigin, path)
+    : new URL(path, window.location.origin).toString();
+  try {
+    await openExternalUrl(url, desktopRuntime.value);
+  } catch (error) {
+    console.error("[Auth] Could not open legal URL:", error);
+  }
+}
+
 async function startSignIn() {
   status.value = "working";
   showTerms.value = false;
@@ -200,16 +253,26 @@ async function startSignIn() {
   } catch (error) {
     console.error("[Auth] Could not start sign-in:", error);
     status.value = "failed";
-    failureMessage.value =
-      "The authentication service is unavailable. Please try again.";
+    failureMessage.value = signInFailureMessage(
+      error,
+      "The authentication service is unavailable. Please try again.",
+    );
   }
 }
 
 async function reopenBrowser() {
   if (!loginUrl) return;
-  const { open } = await import("@tauri-apps/plugin-shell");
-  await open(loginUrl);
-  startSignInTimeout();
+  try {
+    await openExternalUrl(loginUrl, true);
+    startSignInTimeout();
+  } catch (error) {
+    console.error("[Auth] DESKTOP_OAUTH_BROWSER_OPEN_FAILED:", error);
+    status.value = "failed";
+    failureMessage.value = signInFailureMessage(
+      error,
+      "dSpeak could not open your browser. Please try again.",
+    );
+  }
 }
 
 async function checkSignIn(manual = true) {
@@ -232,13 +295,21 @@ async function checkSignIn(manual = true) {
   } catch (error) {
     if (!manual) {
       console.warn("[Auth] Automatic desktop sign-in check failed:", error);
+      clearSignInPolling();
+      status.value = "failed";
+      failureMessage.value = signInFailureMessage(
+        error,
+        "The completed browser sign-in could not be transferred to dSpeak. Start sign-in again.",
+      );
       return;
     }
     console.error("[Auth] Could not complete desktop sign-in:", error);
     clearSignInPolling();
     status.value = "failed";
-    failureMessage.value =
-      "The completed browser sign-in could not be transferred to dSpeak. Start sign-in again.";
+    failureMessage.value = signInFailureMessage(
+      error,
+      "The completed browser sign-in could not be transferred to dSpeak. Start sign-in again.",
+    );
   } finally {
     signInCheckInFlight = false;
   }

@@ -8,12 +8,15 @@ use tokio::sync::Notify;
 pub(crate) struct OAuthState {
     pub(crate) callback_url: std::sync::Arc<Mutex<Option<String>>>,
     pub(crate) pending_callback: std::sync::Arc<Mutex<Option<OAuthCallback>>>,
+    pub(crate) ready: std::sync::Arc<tokio::sync::Notify>,
 }
 
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct OAuthCallback {
     pub(crate) code: String,
     pub(crate) state: String,
+    pub(crate) error: Option<String>,
+    pub(crate) error_description: Option<String>,
 }
 
 #[derive(Clone)]

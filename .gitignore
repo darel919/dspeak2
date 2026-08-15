@@ -30,6 +30,8 @@ logs
 /desktop/native-media/libdspeak_media/build/
 /desktop/src-tauri/target/
 /desktop/src-tauri/gen/
+/desktop/src-tauri/capabilities/generated-api.json
+/desktop/keys
 
 # Local env files
 .env

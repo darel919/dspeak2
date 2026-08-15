@@ -102,5 +102,6 @@ if [[ -n "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]]; then
 fi
 NATIVE_MEDIA_WORKER_BUILD=1 cargo "${WORKER_CARGO_ARGS[@]}"
 
+node "$PROJECT_ROOT/scripts/generate-tauri-capabilities.mjs"
 cd "$ROOT_DIR"
 exec npx tauri dev "$@"

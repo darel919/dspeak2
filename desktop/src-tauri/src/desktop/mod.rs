@@ -22,8 +22,8 @@ use tokio::time::sleep;
 
 pub(crate) fn run() {
     let result = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_keyring_store::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -31,10 +31,12 @@ pub(crate) fn run() {
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(OAuthState {
             callback_url: std::sync::Arc::new(Mutex::new(None)),
             pending_callback: std::sync::Arc::new(Mutex::new(None)),
+            ready: std::sync::Arc::new(tokio::sync::Notify::new()),
         })
         .manage(BackgroundNotificationState {
             session: std::sync::Arc::new(Mutex::new(None)),

@@ -67,9 +67,11 @@ export function useDesktopUpdate() {
       return update || null;
     })()
       .catch((error) => {
+        console.warn("[DesktopUpdate] DESKTOP_UPDATE_CHECK_FAILED", error);
         state.value = {
           ...state.value,
           status: "error",
+          update: null,
           error,
         };
         return null;
@@ -129,6 +131,7 @@ export function useDesktopUpdate() {
       };
       return true;
     } catch (error) {
+      console.warn("[DesktopUpdate] DESKTOP_UPDATE_INSTALL_FAILED", error);
       state.value = {
         ...state.value,
         status: "error",

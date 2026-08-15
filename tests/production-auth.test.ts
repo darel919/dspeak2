@@ -50,6 +50,14 @@ const securityMiddleware = await readFile(
   new URL("../server/middleware/security.ts", import.meta.url),
   "utf8",
 );
+const authTokenMiddleware = await readFile(
+  new URL("../server/middleware/01.auth-token.ts", import.meta.url),
+  "utf8",
+);
+const desktopSession = await readFile(
+  new URL("../server/routes/api/auth/desktop-session.post.ts", import.meta.url),
+  "utf8",
+);
 const authPage = await readFile(
   new URL("../app/pages/auth.vue", import.meta.url),
   "utf8",
@@ -188,7 +196,11 @@ test("OAuth first login allocates usernames across account and profile records",
 });
 
 test("client session restoration targets the registered auth session route", () => {
-  assert.match(authStore, /apiPath}\/auth\/session/);
+  assert.match(authStore, /sessionBridgePath/);
+  assert.match(
+    authStore,
+    /return runtimeStore\.isTauri \? "desktop-session" : "session"/,
+  );
   assert.doesNotMatch(authStore, /apiPath}\/session/);
   assert.doesNotMatch(authStore, /event !== "SIGNED_IN"/);
   assert.doesNotMatch(authStore, /restoreDesktopNotificationSession/);
@@ -234,14 +246,26 @@ test("failed SSO callbacks stop with an actionable error instead of looping", ()
 });
 
 test("desktop sign-in opens the system browser and exposes startup failures", () => {
-  assert.match(
-    authStore,
-    /const \{ open \} = await import\("@tauri-apps\/plugin-shell"\)/,
-  );
-  assert.match(authStore, /await open\(result\.url\)/);
-  assert.doesNotMatch(authStore, /const \{ shell \}/);
+  assert.match(authStore, /get_oauth_callback_url/);
+  assert.match(authStore, /signInWithOAuth\(/);
+  assert.match(authStore, /skipBrowserRedirect: true/);
+  assert.match(authStore, /openExternalUrl\(data\.url, true\)/);
+  assert.doesNotMatch(authStore, /@tauri-apps\/plugin-shell/);
   assert.match(authPage, /showTerms\.value = false/);
-  assert.match(authPage, /console\.error\("\[Auth\] Could not start sign-in:"/);
+  assert.match(authPage, /console\.error\("\[Auth\] Could not start sign-in:/);
+});
+
+test("desktop session bridge verifies the Supabase user and provisions a profile", () => {
+  assert.match(desktopSession, /extractBearerToken/);
+  assert.match(desktopSession, /verifyAccessToken/);
+  assert.match(desktopSession, /getUserFromToken/);
+  assert.match(desktopSession, /provisionOAuthProfile\(supabaseUser\)/);
+  assert.match(desktopSession, /persistAuthenticatedSession/);
+  assert.match(desktopSession, /persistCookie: false/);
+  assert.match(authTokenMiddleware, /event\.context\.authToken = token/);
+  assert.match(authTokenMiddleware, /event\.context\.authPayload = payload/);
+  assert.match(securityMiddleware, /verifiedBearer/);
+  assert.match(securityMiddleware, /!verifiedBearer/);
 });
 
 test("authentication state changes do not remount and replay the callback", () => {

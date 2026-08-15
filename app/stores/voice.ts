@@ -42,6 +42,7 @@ const MAX_USER_VOLUME_ENTRIES = 200;
 const MAX_TRACK_VOLUME_ENTRIES = 400;
 
 export const useVoiceStore = defineStore("voice", () => {
+  const config = useRuntimeConfig();
   const currentChannelId = ref<string | null>(null);
   const currentRoomId = ref<string | null>(null);
   const connectedUsers = ref<Map<string, VoiceUserRecord>>(new Map());
@@ -439,7 +440,7 @@ export const useVoiceStore = defineStore("voice", () => {
         url: string,
         options: Record<string, unknown>,
       ) => Promise<unknown>;
-      const next = (await fetchUnknown("/api/dj/session", {
+      const next = (await fetchUnknown(`${config.public.apiPath}/dj/session`, {
         query: { sessionId },
       })) as { id: string; status: string };
       if (!djSession.value || djSession.value.id !== sessionId) return;
@@ -470,7 +471,7 @@ export const useVoiceStore = defineStore("voice", () => {
       url: string,
       options: Record<string, unknown>,
     ) => Promise<unknown>;
-    const session = (await fetchUnknown("/api/dj/session", {
+    const session = (await fetchUnknown(`${config.public.apiPath}/dj/session`, {
       method: "POST",
       body: { channelId: currentChannelId.value },
     })) as { id: string; status?: string };
@@ -484,7 +485,7 @@ export const useVoiceStore = defineStore("voice", () => {
     const sessionId = djSession.value?.id;
     clearDjStatusTimer();
     if (sessionId)
-      await $fetch("/api/dj/session", {
+      await $fetch(`${config.public.apiPath}/dj/session`, {
         method: "DELETE",
         query: { sessionId },
       });

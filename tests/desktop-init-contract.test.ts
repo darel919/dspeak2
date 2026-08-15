@@ -41,6 +41,8 @@ describe("desktop initialization contract", () => {
     assert.match(frontendBuild, /DSPEAK_DESKTOP: "1"/);
     assert.match(frontendBuild, /rootEnvValue/);
     assert.match(frontendBuild, /VITE_DSPEAK_API_PATH: desktopApiOrigin/);
+    assert.match(frontendBuild, /SUPABASE_URL: desktopSupabaseUrl/);
+    assert.match(frontendBuild, /SUPABASE_ANON_KEY: desktopSupabaseAnonKey/);
     assert.match(frontendBuild, /rmSync/);
     assert.match(frontendBuild, /cwd: desktopRoot/);
     assert.match(frontendBuild, /desktopEntry/);
@@ -49,6 +51,7 @@ describe("desktop initialization contract", () => {
     assert.match(desktopConfig, /process\.env\.DSPEAK_PUBLIC_ORIGIN/);
     assert.match(desktopConfig, /apiPath: `\$\{apiBasePath\.replace/);
     assert.match(desktopConfig, /Desktop API origin is required/);
+    assert.match(desktopConfig, /Desktop Supabase configuration is required/);
     assert.doesNotMatch(
       desktopConfig,
       /serverDir: resolve\(rootDir, "server"\)/,
@@ -64,7 +67,8 @@ describe("desktop initialization contract", () => {
       "@supabase/supabase-js",
       "@tauri-apps/api/core",
       "@tauri-apps/api/event",
-      "@tauri-apps/plugin-shell",
+      "@tauri-apps/plugin-http",
+      "@tauri-apps/plugin-opener",
     ]) {
       assert.match(rootConfig, new RegExp(dependency.replace("/", "\\/")));
     }

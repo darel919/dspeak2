@@ -13,8 +13,13 @@
           dSpeak uses a session cookie to keep you signed in. This cookie is
           strictly necessary for the application to function. No tracking or
           analytics cookies are used.
-          <NuxtLink class="metro-link whitespace-nowrap" to="/privacy"
-            >Learn more</NuxtLink
+          <a
+            class="metro-link whitespace-nowrap"
+            :href="privacyUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            @click.prevent="openPrivacyPolicy"
+            >Learn more</a
           >.
         </p>
         <button
@@ -30,8 +35,32 @@
 </template>
 
 <script setup>
+import { useRuntimeStore } from "../stores/runtime";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
+import {
+  buildPublicUrl,
+  openExternalUrl,
+} from "../shared/desktop-external-url.ts";
+
 const CONSENT_KEY = "dspeak_cookie_consent";
 const visible = ref(false);
+const runtimeStore = useRuntimeStore();
+const runtimeConfig = useRuntimeConfig();
+const desktopRuntime = computed(
+  () => runtimeStore.isTauri || hasTauriRuntimeMarker(),
+);
+const privacyUrl = computed(() =>
+  desktopRuntime.value
+    ? buildPublicUrl(runtimeConfig.public.publicOrigin, "/privacy")
+    : "/privacy",
+);
+
+async function openPrivacyPolicy() {
+  const url = desktopRuntime.value
+    ? buildPublicUrl(runtimeConfig.public.publicOrigin, "/privacy")
+    : new URL("/privacy", window.location.origin).toString();
+  await openExternalUrl(url, desktopRuntime.value);
+}
 
 function dismiss() {
   visible.value = false;

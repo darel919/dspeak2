@@ -14,6 +14,10 @@ const desktopCallback = await readFile(
   new URL("../app/composables/useDeepLinkAuth.ts", import.meta.url),
   "utf8",
 );
+const externalUrl = await readFile(
+  new URL("../app/shared/desktop-external-url.ts", import.meta.url),
+  "utf8",
+);
 
 const tauriMain = await readFile(
   new URL("../desktop/src-tauri/src/desktop/mod.rs", import.meta.url),
@@ -21,12 +25,9 @@ const tauriMain = await readFile(
 );
 
 test("desktop sign-in opens the system browser", () => {
-  assert.match(
-    authStore,
-    /const \{ open \} = await import\("@tauri-apps\/plugin-shell"\)/,
-  );
-  assert.match(authStore, /await open\(result\.url\)/);
-  assert.doesNotMatch(authStore, /const \{ shell \}/);
+  assert.match(authStore, /openExternalUrl\(data\.url, true\)/);
+  assert.match(externalUrl, /@tauri-apps\/plugin-opener/);
+  assert.doesNotMatch(authStore, /@tauri-apps\/plugin-shell/);
 });
 
 test("sign-in startup failures replace the terms form", () => {
@@ -35,14 +36,24 @@ test("sign-in startup failures replace the terms form", () => {
 });
 
 test("desktop sign-in uses Supabase OAuth PKCE flow", () => {
-  assert.match(authStore, /\/auth\/google/);
-  assert.match(authStore, /X-Desktop-App/);
-  assert.match(authPage, /authStore\.completePendingDesktopSignIn\(\)/);
+  assert.match(authStore, /get_oauth_callback_url/);
   assert.match(
     authStore,
-    /desktop-callback-session[\s\S]*credentials: "include"/,
+    /callbackUrl\.searchParams\.set\("state", desktopOAuthState\)/,
   );
-  assert.match(authStore, /completedDesktopCallbackCode/);
+  assert.match(authStore, /signInWithOAuth\(\{/);
+  assert.match(authStore, /redirectTo: desktopRedirect/);
+  assert.match(authStore, /skipBrowserRedirect: true/);
+  assert.match(authStore, /exchangeCodeForSession\(callbackCode\)/);
+  assert.match(
+    authStore,
+    /!desktopOAuthState \|\| desktopOAuthState !== state/,
+  );
+  assert.match(authStore, /desktop-session/);
+  assert.doesNotMatch(authStore, /X-Desktop-App/);
+  assert.doesNotMatch(authStore, /desktop-callback-session/);
+  assert.match(authPage, /authStore\.completePendingDesktopSignIn\(\)/);
+  assert.match(authStore, /desktopOAuthSessionExchanged/);
 });
 
 test("desktop sign-in registers native callbacks and background notifications without exposing browser cookies", () => {
@@ -61,7 +72,11 @@ test("desktop sign-in provides a recoverable browser waiting state", () => {
   assert.match(authPage, /Cancel/);
   assert.match(authPage, /180_000/);
   assert.match(authPage, /Sign-in was not completed/);
-  assert.match(authStore, /return \{ isDesktop, loginUrl: result\.url \}/);
+  assert.match(authStore, /return \{ isDesktop: true, loginUrl: data\.url \}/);
+  assert.match(
+    authStore,
+    /return \{ isDesktop: false, loginUrl: result\.url \}/,
+  );
 });
 
 test("desktop sign-in polls for the native callback while waiting", () => {

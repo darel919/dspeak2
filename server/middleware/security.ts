@@ -15,6 +15,9 @@ export default defineEventHandler(async (event) => {
     path === "/api/dj/ingest-auth" &&
     Boolean(ingestAuthSecret) &&
     getQuery(event).secret === ingestAuthSecret;
+  const verifiedBearer = Boolean(
+    event.context.authToken && event.context.authPayload,
+  );
   if (path.startsWith("/api")) {
     setHeader(event, "Cache-Control", "no-store");
     setHeader(event, "Pragma", "no-cache");
@@ -22,6 +25,7 @@ export default defineEventHandler(async (event) => {
     if (
       Boolean(fetchSite && ["same-site", "cross-site"].includes(fetchSite)) &&
       ["GET", "HEAD"].includes(event.method) &&
+      !verifiedBearer &&
       !oauthCallbackPaths.has(path) &&
       !internalCronPaths.has(path)
     )
@@ -49,8 +53,9 @@ export default defineEventHandler(async (event) => {
       originAllowed = false;
     }
     if (
-      fetchSite === "cross-site" ||
-      (fetchSite !== "same-origin" && !originAllowed)
+      !verifiedBearer &&
+      (fetchSite === "cross-site" ||
+        (fetchSite !== "same-origin" && !originAllowed))
     )
       throw createError({
         statusCode: 403,

@@ -64,9 +64,12 @@ for (const { target, pattern } of targets) {
   const signaturePath = `${bundle}.sig`;
   if (!assets.includes(signaturePath))
     throw new Error(`No updater signature found for ${basename(bundle)}`);
+  const signature = (await readFile(signaturePath, "utf8")).trim();
+  if (!signature)
+    throw new Error(`Updater signature is empty for ${basename(bundle)}`);
   platforms[target] = {
     url: `${releaseBaseUrl}/${encodeURIComponent(basename(bundle))}`,
-    signature: (await readFile(signaturePath, "utf8")).trim(),
+    signature,
   };
 }
 

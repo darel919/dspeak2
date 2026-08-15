@@ -42,6 +42,12 @@ const desktopApiOrigin =
   process.env.DSPEAK_PUBLIC_ORIGIN ||
   rootEnvValue("VITE_DSPEAK_API_PATH") ||
   rootEnvValue("DSPEAK_PUBLIC_ORIGIN");
+const desktopPublicOrigin =
+  process.env.DSPEAK_PUBLIC_ORIGIN || rootEnvValue("DSPEAK_PUBLIC_ORIGIN");
+const desktopSupabaseUrl =
+  process.env.SUPABASE_URL || rootEnvValue("SUPABASE_URL");
+const desktopSupabaseAnonKey =
+  process.env.SUPABASE_ANON_KEY || rootEnvValue("SUPABASE_ANON_KEY");
 
 if (!existsSync(nuxi)) {
   throw new Error(`Nuxt CLI is missing at ${nuxi}`);
@@ -56,6 +62,13 @@ const result = spawnSync(process.execPath, [nuxi, "generate"], {
     DSPEAK_DESKTOP: "1",
     NITRO_PRESET: "static",
     ...(desktopApiOrigin ? { VITE_DSPEAK_API_PATH: desktopApiOrigin } : {}),
+    ...(desktopPublicOrigin
+      ? { DSPEAK_PUBLIC_ORIGIN: desktopPublicOrigin }
+      : {}),
+    ...(desktopSupabaseUrl ? { SUPABASE_URL: desktopSupabaseUrl } : {}),
+    ...(desktopSupabaseAnonKey
+      ? { SUPABASE_ANON_KEY: desktopSupabaseAnonKey }
+      : {}),
   },
   stdio: "inherit",
 });

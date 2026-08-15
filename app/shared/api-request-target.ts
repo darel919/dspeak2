@@ -1,5 +1,7 @@
 import type { ApiRequestTarget } from "./types/api.ts";
 
+export type { ApiRequestTarget } from "./types/api.ts";
+
 export function resolveApiRequestTarget(
   apiPath = "/api",
   baseOrigin = "http://localhost",

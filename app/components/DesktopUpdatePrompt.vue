@@ -11,11 +11,16 @@
       >
         <Icon name="lucide:download" class="h-6 w-6 shrink-0 text-info" />
         <div class="min-w-0 flex-1">
-          <h2 class="font-semibold">A dSpeak update is ready</h2>
+          <h2 class="font-semibold">
+            {{ desktopUpdatePromptTitle(status, update) }}
+          </h2>
           <p v-if="status === 'installed'" class="text-sm text-base-content/70">
             dSpeak will restart to finish installing the update.
           </p>
-          <p v-else-if="status === 'error'" class="text-sm text-error">
+          <p
+            v-else-if="status === 'error' && update"
+            class="text-sm text-error"
+          >
             We couldn’t install the update. You can try again later.
           </p>
           <p v-else-if="updateAvailable" class="text-sm text-base-content/70">
@@ -60,6 +65,10 @@
 
 <script setup>
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
+import {
+  desktopUpdatePromptTitle,
+  shouldShowDesktopUpdatePrompt,
+} from "../shared/desktop-update-state.ts";
 
 const {
   status,
@@ -76,13 +85,13 @@ const desktopRuntime = computed(
   () => runtimeStore.isTauri || hasTauriRuntimeMarker(),
 );
 
-const visible = computed(
-  () =>
-    desktopRuntime.value &&
-    !deferred.value &&
-    (updateAvailable.value ||
-      status.value === "installed" ||
-      status.value === "error"),
+const visible = computed(() =>
+  shouldShowDesktopUpdatePrompt({
+    desktopRuntime: desktopRuntime.value,
+    deferred: deferred.value,
+    status: status.value,
+    update: update.value,
+  }),
 );
 </script>
 
