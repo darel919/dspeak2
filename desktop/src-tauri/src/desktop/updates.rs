@@ -10,7 +10,8 @@ pub(crate) struct UpdateInfo {
 
 #[tauri::command]
 pub async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
-    let updater = create_updater(&app)?;
+    let updater =
+        create_updater(&app).map_err(|error| format!("DESKTOP_UPDATE_CHECK_FAILED: {error}"))?;
     match updater.check().await {
         Ok(Some(update)) => Ok(Some(UpdateInfo {
             version: update.version,
@@ -23,28 +24,34 @@ pub async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<UpdateInf
                 .map(|value| value.to_string()),
         })),
         Ok(None) => Ok(None),
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(format!("DESKTOP_UPDATE_CHECK_FAILED: {error}")),
     }
 }
 
 #[tauri::command]
 pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
-    let updater = create_updater(&app)?;
-    if let Some(update) = updater.check().await.map_err(|error| error.to_string())? {
+    let updater =
+        create_updater(&app).map_err(|error| format!("DESKTOP_UPDATE_INSTALL_FAILED: {error}"))?;
+    if let Some(update) = updater
+        .check()
+        .await
+        .map_err(|error| format!("DESKTOP_UPDATE_INSTALL_FAILED: {error}"))?
+    {
         update
             .download_and_install(|_chunk, _total| {}, || {})
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("DESKTOP_UPDATE_INSTALL_FAILED: {error}"))?;
         app.restart();
     }
     Ok(())
 }
 
 fn create_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
-    let builder = if let Some(public_key) = option_env!("DSPEAK_TAURI_PUBLIC_KEY") {
-        app.updater_builder().pubkey(public_key)
-    } else {
-        app.updater_builder()
-    };
-    builder.build().map_err(|error| error.to_string())
+    let public_key = option_env!("DSPEAK_TAURI_PUBLIC_KEY")
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "DESKTOP_UPDATE_NOT_CONFIGURED".to_string())?;
+    app.updater_builder()
+        .pubkey(public_key)
+        .build()
+        .map_err(|error| error.to_string())
 }

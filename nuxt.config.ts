@@ -20,7 +20,8 @@ const desktopOptimizeDeps = [
   "@supabase/supabase-js",
   "@tauri-apps/api/core",
   "@tauri-apps/api/event",
-  "@tauri-apps/plugin-shell",
+  "@tauri-apps/plugin-http",
+  "@tauri-apps/plugin-opener",
 ];
 
 function gitValue(args: string[]) {
@@ -311,6 +312,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       baseApiPath: isDesktop ? desktopApiBasePath : "",
+      publicOrigin: process.env.DSPEAK_PUBLIC_ORIGIN || "",
 
       mediaControlUrl: process.env.CF_MEDIA_CONTROL_URL || "",
       apiPath:

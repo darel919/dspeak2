@@ -201,11 +201,11 @@ test("startup and prompts expose useful release details without file listings", 
     /DesktopUpdatePrompt v-else-if="runtimeReady && desktopRuntime"/,
   );
   assert.match(updatePrompt, /runtimeStore\.initialize\(\)/);
-  assert.match(desktopPrompt, /desktopRuntime\.value &&/);
+  assert.match(desktopPrompt, /shouldShowDesktopUpdatePrompt/);
   assert.doesNotMatch(desktopPrompt, /repositoryUpdateAvailable/);
 });
 
-test("desktop releases optionally publish signed updates and restart after installation", () => {
+test("desktop releases publish signed updates and fail when the updater contract is incomplete", () => {
   assert.match(tauriConfig, /releases\/latest\/download\/latest\.json/);
   assert.match(tauriMain, /download_and_install/);
   assert.match(tauriMain, /app\.restart\(\)/);
@@ -213,11 +213,15 @@ test("desktop releases optionally publish signed updates and restart after insta
   assert.match(tauriMain, /DSPEAK_TAURI_PUBLIC_KEY/);
   assert.match(workflow, /Configure signed updater artifacts/);
   assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY/);
-  assert.match(workflow, /building installers without updater artifacts/);
-  assert.match(workflow, /Detect signed updater artifacts/);
-  assert.match(workflow, /steps\.updater\.outputs\.enabled == 'true'/);
-  assert.match(workflow, /publishing installers without latest\.json/);
+  assert.match(
+    workflow,
+    /Tagged desktop releases require DSPEAK_TAURI_PUBLIC_KEY/,
+  );
+  assert.match(workflow, /Verify signed updater artifacts/);
+  assert.doesNotMatch(workflow, /steps\.updater\.outputs\.enabled/);
+  assert.doesNotMatch(workflow, /publishing installers without latest\.json/);
   assert.match(workflow, /create-tauri-update-manifest\.mjs/);
+  assert.match(workflow, /Verify updater manifest/);
   assert.match(workflow, /release:check/);
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);

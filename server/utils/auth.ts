@@ -53,21 +53,13 @@ function publicUserMetadata(user: AuthProfile): Record<string, string> {
   };
 }
 
-function isDesktopClientRequest(event: H3Event): boolean {
-  if (getHeader(event, "x-desktop-app") !== "true") return false;
-  const origin = getHeader(event, "origin") || "";
-  return (
-    origin === "tauri://localhost" ||
-    /^https?:\/\/tauri\.localhost(?::\d+)?$/.test(origin)
-  );
-}
-
 export async function persistAuthenticatedSession(
   event: H3Event,
   userId: string,
   deviceId: string,
   accessToken: string,
   profileOverride: AuthProfile | null = null,
+  options: { persistCookie?: boolean } = {},
 ): Promise<{ user: { user_metadata: Record<string, string> } }> {
   if (!userId || !deviceId || !accessToken) {
     throw createError({
@@ -99,8 +91,10 @@ export async function persistAuthenticatedSession(
   event.context.userId = userId;
   event.context.deviceId = deviceId;
 
-  setCookie(event, SESSION_COOKIE, accessToken, sessionCookieOptions());
-  exposeCsrfToken(event, userId);
+  if (options.persistCookie !== false) {
+    setCookie(event, SESSION_COOKIE, accessToken, sessionCookieOptions());
+    exposeCsrfToken(event, userId);
+  }
 
   return {
     user: { user_metadata: publicUserMetadata(profile) },

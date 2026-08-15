@@ -9,10 +9,30 @@ const desktopDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(desktopDir, "..");
 const apiBasePath =
   process.env.VITE_DSPEAK_API_PATH || process.env.DSPEAK_PUBLIC_ORIGIN || "";
+const configuredPublicOrigin =
+  process.env.DSPEAK_PUBLIC_ORIGIN ||
+  process.env.VITE_DSPEAK_PUBLIC_ORIGIN ||
+  "";
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
+let publicOrigin = configuredPublicOrigin;
+try {
+  publicOrigin = new URL(publicOrigin).origin;
+} catch {
+  publicOrigin = "";
+}
 
 if (!apiBasePath)
   throw new Error(
     "Desktop API origin is required: set VITE_DSPEAK_API_PATH or DSPEAK_PUBLIC_ORIGIN",
+  );
+if (!configuredPublicOrigin)
+  throw new Error(
+    "Desktop public origin is required: set DSPEAK_PUBLIC_ORIGIN",
+  );
+if (!supabaseUrl || !supabaseAnonKey)
+  throw new Error(
+    "Desktop Supabase configuration is required: set SUPABASE_URL and SUPABASE_ANON_KEY",
   );
 
 function gitValue(args) {
@@ -87,10 +107,11 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       baseApiPath: apiBasePath,
+      publicOrigin,
       sfuPath: process.env.VITE_DSPEAK_SFU_PATH || "",
       apiPath: `${apiBasePath.replace(/\/$/, "")}/api`,
-      supabaseUrl: process.env.SUPABASE_URL || "",
-      supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
+      supabaseUrl,
+      supabaseAnonKey,
       appVersion: buildIdentity.version,
       appBuild: buildIdentity,
       VAPID_PUBLIC_KEY:

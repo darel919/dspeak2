@@ -8,13 +8,27 @@ export function useDeepLinkAuth() {
   let unlistenOAuthCallback: (() => void) | undefined;
 
   async function exchangeCallback(
-    payload: { code?: string } | null | undefined,
+    payload:
+      | {
+          code?: string;
+          state?: string;
+          error?: string;
+        }
+      | null
+      | undefined,
   ) {
+    if (payload?.error) {
+      console.error(
+        "[DesktopAuth] DESKTOP_OAUTH_PROVIDER_REJECTED",
+        payload.error,
+      );
+      return false;
+    }
     const code = payload?.code;
     if (!code) return false;
 
     try {
-      return await authStore.completeDesktopSignIn(code);
+      return await authStore.completeDesktopSignIn(code, payload?.state || "");
     } catch (error) {
       console.error("[DesktopAuth] Failed to exchange callback:", error);
       return false;
@@ -32,7 +46,9 @@ export function useDeepLinkAuth() {
 
     unlistenOAuthCallback = await listen(
       "oauth-callback",
-      (event: { payload: { code?: string } }) => {
+      (event: {
+        payload: { code?: string; state?: string; error?: string };
+      }) => {
         void exchangeCallback(event.payload);
       },
     );
