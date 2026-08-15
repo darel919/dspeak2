@@ -1,13 +1,19 @@
 import {
   getUserFromToken,
   verifySupabaseAccessToken,
+  supabaseProjectRef,
+  configuredSupabaseProjectRef,
+  SupabaseTokenIssuerMismatchError,
 } from "../../../auth/supabase.ts";
 import {
   extractBearerToken,
   hasVerifiedBearerContext,
 } from "../../../auth/middleware.ts";
 import { provisionOAuthProfile } from "../../../auth/oauth-profile.ts";
-import { profileRepository } from "../../../db/repositories/profiles.ts";
+import {
+  profileRepository,
+  EmailIdentityConflictError,
+} from "../../../db/repositories/profiles.ts";
 import { persistAuthenticatedSession } from "../../../utils/auth.ts";
 
 function safeErrorDetails(error: unknown): {
@@ -40,10 +46,13 @@ export default defineEventHandler(async (event) => {
       : "";
   if (serverBuildCommit)
     setHeader(event, "X-dSpeak-Build-Commit", serverBuildCommit);
+  if (configuredSupabaseProjectRef)
+    setHeader(event, "X-dSpeak-Supabase-Project", configuredSupabaseProjectRef);
 
   const hasAuthorization = Boolean(getHeader(event, "authorization"));
   console.info("[DesktopAuth] DESKTOP_SESSION_REQUEST_RECEIVED", {
     hasAuthorization,
+    projectRef: configuredSupabaseProjectRef,
   });
   console.info("[DesktopAuth] DESKTOP_SESSION_BEARER_PRESENT", {
     hasAuthorization,
@@ -61,13 +70,35 @@ export default defineEventHandler(async (event) => {
         ? event.context.authPayload
         : await verifySupabaseAccessToken(token);
   } catch (error) {
+    if (error instanceof SupabaseTokenIssuerMismatchError) {
+      console.error("[DesktopAuth] DESKTOP_SUPABASE_PROJECT_MISMATCH", {
+        tokenProjectRef: supabaseProjectRef(error.receivedIssuer || ""),
+        configuredProjectRef: configuredSupabaseProjectRef,
+      });
+      return desktopAuthFailure("DESKTOP_SUPABASE_PROJECT_MISMATCH", 401);
+    }
     return desktopAuthFailure("DESKTOP_SESSION_TOKEN_INVALID", 401, error);
   }
   if (!payload.sub)
     return desktopAuthFailure("DESKTOP_SESSION_TOKEN_INVALID", 401);
   console.info("[DesktopAuth] DESKTOP_SESSION_TOKEN_VERIFIED", {
     hasSubject: Boolean(payload.sub),
+    tokenIssuerProjectRef: supabaseProjectRef(String(payload.iss || "")),
+    configuredProjectRef: configuredSupabaseProjectRef,
   });
+
+  const tokenProjectRef = supabaseProjectRef(String(payload.iss || ""));
+  if (
+    tokenProjectRef &&
+    configuredSupabaseProjectRef &&
+    tokenProjectRef !== configuredSupabaseProjectRef
+  ) {
+    console.error("[DesktopAuth] DESKTOP_SUPABASE_PROJECT_MISMATCH", {
+      tokenProjectRef,
+      configuredProjectRef: configuredSupabaseProjectRef,
+    });
+    return desktopAuthFailure("DESKTOP_SUPABASE_PROJECT_MISMATCH", 401);
+  }
 
   let supabaseUser;
   try {
@@ -89,6 +120,13 @@ export default defineEventHandler(async (event) => {
   try {
     await provisionOAuthProfile(supabaseUser);
   } catch (error) {
+    if (error instanceof EmailIdentityConflictError) {
+      return desktopAuthFailure(
+        "DESKTOP_ACCOUNT_EMAIL_IDENTITY_CONFLICT",
+        409,
+        error,
+      );
+    }
     return desktopAuthFailure("DESKTOP_PROFILE_PROVISION_FAILED", 500, error);
   }
   console.info("[DesktopAuth] DESKTOP_SESSION_PROFILE_PROVISION_SUCCEEDED");

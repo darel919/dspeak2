@@ -2,11 +2,14 @@ import { db } from "../client.ts";
 import { profiles, users } from "../schema/index.ts";
 import { and, eq, ne } from "drizzle-orm";
 import { generateRandomUsername } from "../../auth/random-username.ts";
+import { EmailIdentityConflictError } from "../../auth/email-identity-conflict.ts";
 import type {
   FirstLoginInput,
   ProfileInsertInput,
   ProfileUpdateInput,
 } from "../../types/profile-repository.ts";
+
+export { EmailIdentityConflictError } from "../../auth/email-identity-conflict.ts";
 
 type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -48,6 +51,17 @@ function isUsernameConflict(error: unknown): boolean {
     constraint === "profiles_username_unique"
   );
 }
+
+function isEmailConflict(error: unknown): boolean {
+  const value = error as {
+    constraint_name?: string;
+    cause?: { constraint_name?: string };
+  };
+  const constraint =
+    value.constraint_name || value.cause?.constraint_name || "";
+  return constraint === "users_email_unique";
+}
+
 export class ProfileRepository {
   async findById(id: string) {
     const result = await db
@@ -148,6 +162,7 @@ export class ProfileRepository {
           throw new Error("OAuth profile could not be created");
         });
       } catch (error: unknown) {
+        if (isEmailConflict(error)) throw new EmailIdentityConflictError(email);
         if (!isUsernameConflict(error) || attempt === usernameRetryLimit - 1)
           throw error;
       }

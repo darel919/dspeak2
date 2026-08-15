@@ -15,7 +15,16 @@ export default defineNitroPlugin(async (nitroApp) => {
   )
     return;
   try {
-    await validateRuntimeEnvironment();
+    const environment = await validateRuntimeEnvironment();
+    if (environment?.supabaseUrl) {
+      const projectRef = new URL(environment.supabaseUrl).hostname.split(
+        ".",
+      )[0];
+      console.info(
+        `[Startup] Supabase project: ${projectRef}`,
+        `API origin: ${process.env.VITE_DSPEAK_API_PATH || "/api"}`,
+      );
+    }
     if (isPersistentEnvironment()) {
       startPushDispatcher();
     }

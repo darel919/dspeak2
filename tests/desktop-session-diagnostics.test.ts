@@ -7,7 +7,10 @@ test("desktop session diagnostics preserve the server category and build", async
     JSON.stringify({ statusMessage: "DESKTOP_SESSION_TOKEN_INVALID" }),
     {
       status: 401,
-      headers: { "X-dSpeak-Build-Commit": "server-commit" },
+      headers: {
+        "X-dSpeak-Build-Commit": "server-commit",
+        "X-dSpeak-Supabase-Project": "crmucqnebwlssqzthnek",
+      },
     },
   );
 
@@ -16,6 +19,8 @@ test("desktop session diagnostics preserve the server category and build", async
   assert.deepEqual(diagnostic, {
     diagnosticCategory: "DESKTOP_SESSION_TOKEN_INVALID",
     serverBuildCommit: "server-commit",
+    httpStatus: 401,
+    serverProjectRef: "crmucqnebwlssqzthnek",
   });
 });
 
@@ -30,5 +35,7 @@ test("desktop session diagnostics fall back safely for non-JSON responses", asyn
   assert.deepEqual(diagnostic, {
     diagnosticCategory: "Bad Gateway",
     serverBuildCommit: "",
+    httpStatus: 502,
+    serverProjectRef: "",
   });
 });

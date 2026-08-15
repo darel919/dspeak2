@@ -5,7 +5,10 @@ import {
   exchangeDesktopOAuthCode,
   isDesktopOAuthStateValid,
 } from "../shared/desktop-oauth-flow.ts";
-import { readDesktopSessionDiagnostic } from "../shared/desktop-session-diagnostics.ts";
+import {
+  readDesktopSessionDiagnostic,
+  supabaseProjectRef,
+} from "../shared/desktop-session-diagnostics.ts";
 import { deviceHeaders } from "~/shared/device-identity";
 import { openExternalUrl } from "~/shared/desktop-external-url";
 import { purgeUserLocalData } from "~/utils/idb";
@@ -16,6 +19,7 @@ import type {
   AuthStorageValue,
   AuthTokenResponse,
 } from "../shared/types/auth.ts";
+import { isAuthSessionRecord } from "../shared/types/auth.ts";
 
 type AuthError = Error & { code?: string };
 
@@ -292,9 +296,13 @@ export const useAuthStore = defineStore("auths", () => {
       typeof config.public?.appBuild?.shortCommit === "string"
         ? config.public.appBuild.shortCommit
         : "";
+    const clientProjectRef = supabaseProjectRef(
+      String(config.public?.supabaseUrl || ""),
+    );
     console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_STARTED", {
       hasAuthorization: Boolean(accessToken),
       clientBuildCommit,
+      clientProjectRef,
     });
     let response: Response;
     try {
@@ -317,21 +325,45 @@ export const useAuthStore = defineStore("auths", () => {
       );
     }
     if (!response.ok) {
-      const { diagnosticCategory, serverBuildCommit } =
-        await readDesktopSessionDiagnostic(response);
+      const diagnostic = await readDesktopSessionDiagnostic(response);
       console.error("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_FAILED", {
-        status: response.status,
-        diagnosticCategory,
-        serverBuildCommit,
+        status: diagnostic.httpStatus,
+        diagnosticCategory: diagnostic.diagnosticCategory,
+        serverBuildCommit: diagnostic.serverBuildCommit,
+        serverProjectRef: diagnostic.serverProjectRef,
+        clientProjectRef,
       });
-      throw createAuthError(
+      const error = createAuthError(
         "DESKTOP_API_SESSION_BRIDGE_FAILED",
         "Your Google sign-in succeeded, but dSpeak could not create your app session.",
-      );
+      ) as AuthError & {
+        stage: string;
+        httpStatus: number;
+        serverDiagnostic: string;
+        serverBuildCommit: string;
+        serverProjectRef: string;
+      };
+      error.stage = "session-bridge";
+      error.httpStatus = diagnostic.httpStatus;
+      error.serverDiagnostic = diagnostic.diagnosticCategory;
+      error.serverBuildCommit = diagnostic.serverBuildCommit;
+      error.serverProjectRef = diagnostic.serverProjectRef;
+      if (
+        clientProjectRef &&
+        diagnostic.serverProjectRef &&
+        clientProjectRef !== diagnostic.serverProjectRef
+      ) {
+        error.serverDiagnostic = "DESKTOP_SUPABASE_PROJECT_MISMATCH";
+      }
+      throw error;
     }
     let session: AuthSessionRecord;
     try {
-      session = (await response.json()) as AuthSessionRecord;
+      const parsed: unknown = await response.json();
+      if (!isAuthSessionRecord(parsed)) {
+        throw new Error("Session payload failed runtime validation");
+      }
+      session = parsed;
     } catch {
       console.error("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_FAILED", {
         status: response.status,

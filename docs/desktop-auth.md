@@ -43,6 +43,38 @@ whether a flow selector exists, safe Supabase error metadata, HTTP status, and
 server diagnostic category; authorization codes, verifiers, and tokens are not
 logged.
 
+The session bridge responses carry two non-secret fingerprint headers:
+
+- `X-dSpeak-Build-Commit` — server build commit
+- `X-dSpeak-Supabase-Project` — Supabase project ref (e.g. `crmucqnebwlssqzthnek`)
+
+When the client's configured Supabase project differs from the server's, the
+client reports `DESKTOP_SUPABASE_PROJECT_MISMATCH` instead of the generic
+bridge error. The server also emits `DESKTOP_SUPABASE_PROJECT_MISMATCH` when
+the token issuer project ref differs from the configured one, and
+`DESKTOP_ACCOUNT_EMAIL_IDENTITY_CONFLICT` (HTTP 409) when a verified email
+already belongs to a different dSpeak user id.
+
+A public diagnostics endpoint reports only non-secret configuration state:
+
+```text
+GET /api/diagnostics/auth-config
+```
+
+It returns the build commit, Supabase project ref, and booleans for whether
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+`DATABASE_URL` are configured, plus a database connectivity probe result.
+Never return keys, tokens, or connection strings.
+
+Before release, verify the environment fingerprints match:
+
+```bash
+node scripts/verify-auth-environment.mjs
+```
+
+It prints the API origin, public origin, Supabase project ref, and normalized
+Supabase URL — never keys. Desktop and server must report the same project ref.
+
 Tagged releases require these repository secrets:
 
 - `DSPEAK_TAURI_PUBLIC_KEY`

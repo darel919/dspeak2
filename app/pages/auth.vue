@@ -97,6 +97,19 @@
           We couldn't complete authentication
         </h1>
         <p class="mt-3 text-base-content/70">{{ failureMessage }}</p>
+        <div
+          v-if="failureDiagnostic"
+          class="mt-4 rounded-lg bg-base-200 p-3 font-mono text-xs text-base-content/75"
+        >
+          <p>HTTP {{ failureDiagnostic.httpStatus }}</p>
+          <p>{{ failureDiagnostic.serverDiagnostic }}</p>
+          <p v-if="failureDiagnostic.serverBuildCommit">
+            Server {{ failureDiagnostic.serverBuildCommit }}
+          </p>
+          <p v-if="failureDiagnostic.serverProjectRef">
+            Supabase project {{ failureDiagnostic.serverProjectRef }}
+          </p>
+        </div>
         <div class="mt-6 flex flex-wrap gap-3">
           <button class="metro-btn" type="button" @click="showTerms = true">
             Try sign-in again
@@ -133,6 +146,7 @@ const status = ref("working");
 const showTerms = ref(false);
 const termsAccepted = ref(false);
 const failureMessage = ref("");
+const failureDiagnostic = ref(null);
 let completionPromise = null;
 
 let loginUrl = "";
@@ -222,8 +236,17 @@ function signInFailureMessage(error, fallback) {
     return "Could not start sign-in. Please try again.";
   if (code === "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED")
     return "Authentication completed, but dSpeak could not verify the sign-in.";
-  if (code === "DESKTOP_API_SESSION_BRIDGE_FAILED")
+  if (code === "DESKTOP_API_SESSION_BRIDGE_FAILED") {
+    if (error?.serverDiagnostic) {
+      failureDiagnostic.value = {
+        httpStatus: error.httpStatus || 0,
+        serverDiagnostic: error.serverDiagnostic,
+        serverBuildCommit: error.serverBuildCommit || "",
+        serverProjectRef: error.serverProjectRef || "",
+      };
+    }
     return "Your Google sign-in succeeded, but dSpeak could not create your app session.";
+  }
   return fallback;
 }
 
@@ -242,6 +265,7 @@ async function startSignIn() {
   status.value = "working";
   showTerms.value = false;
   failureMessage.value = "";
+  failureDiagnostic.value = null;
   try {
     const result = await authStore.beginExternalSignIn(termsAccepted.value);
     if (result.isDesktop) {

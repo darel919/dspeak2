@@ -13,7 +13,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
     "SUPABASE_URL and SUPABASE_ANON_KEY environment variables are required",
   );
 }
-const requiredSupabaseUrl = supabaseUrl;
+const requiredSupabaseUrl = new URL(supabaseUrl).origin;
 const requiredSupabaseAnonKey = supabaseAnonKey;
 const requiredSupabaseIssuer = `${requiredSupabaseUrl}/auth/v1`;
 
@@ -22,6 +22,34 @@ export type SupabaseAccessTokenClaims = JWTPayload & {
   email?: string;
   role?: string;
 };
+
+export class SupabaseTokenIssuerMismatchError extends Error {
+  readonly receivedIssuer: string | undefined;
+
+  constructor(expectedIssuer: string, receivedIssuer: string | undefined) {
+    super(
+      `Supabase access token issuer is invalid: expected ${expectedIssuer}, received ${receivedIssuer ?? "(missing)"}`,
+    );
+    this.name = "SupabaseTokenIssuerMismatchError";
+    this.receivedIssuer = receivedIssuer;
+  }
+}
+
+/**
+ * Extract the non-secret Supabase project reference from a Supabase URL.
+ * Example: https://crmucqnebwlssqzthnek.supabase.co -> crmucqnebwlssqzthnek
+ */
+export function supabaseProjectRef(url: string): string {
+  try {
+    return new URL(url).hostname.split(".")[0] || "";
+  } catch {
+    return "";
+  }
+}
+
+export const configuredSupabaseProjectRef = supabaseProjectRef(
+  process.env.SUPABASE_URL || "",
+);
 
 const oauthStorageKey = "dspeak-oauth";
 const oauthCookiePrefix = "dspeak_oauth_";
@@ -168,7 +196,10 @@ export async function verifySupabaseAccessToken(
     throw new Error("Supabase access token has no subject");
   }
   if (claims.iss !== requiredSupabaseIssuer) {
-    throw new Error("Supabase access token issuer is invalid");
+    throw new SupabaseTokenIssuerMismatchError(
+      requiredSupabaseIssuer,
+      typeof claims.iss === "string" ? claims.iss : undefined,
+    );
   }
   const audience = claims.aud;
   if (
