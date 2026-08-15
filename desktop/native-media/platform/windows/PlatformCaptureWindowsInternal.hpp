@@ -1,7 +1,6 @@
 #ifndef LIB_DSPEAK_MEDIA_PLATFORM_WINDOWS_INTERNAL_HPP_
 #define LIB_DSPEAK_MEDIA_PLATFORM_WINDOWS_INTERNAL_HPP_
 
-#define NOMINMAX
 #include "../PlatformCapture.h"
 #include "NativeThreadScheduler.h"
 
@@ -12,6 +11,7 @@
 #include <dwmapi.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <propkeydef.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 #include <mfapi.h>

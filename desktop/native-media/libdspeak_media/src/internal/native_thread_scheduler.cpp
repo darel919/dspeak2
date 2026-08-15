@@ -3,7 +3,6 @@
 #include <memory>
 
 #if defined(_WIN32)
-#define NOMINMAX
 #include <avrt.h>
 #include <windows.h>
 #elif defined(__APPLE__)

@@ -33,6 +33,7 @@ const [
   nativeMediaCaptureState,
   nativeMediaReceiveRender,
   nativeMediaCmake,
+  nativeMediaWindowsInternal,
   nativeMediaBuild,
   nativeMediaCargoConfig,
   nativeMediaRuntime,
@@ -73,6 +74,7 @@ const [
     "../desktop/native-media/libdspeak_media/src/internal/capture_state.hpp",
     "../desktop/native-media/libdspeak_media/src/internal/receive_render.cpp",
     "../desktop/native-media/libdspeak_media/CMakeLists.txt",
+    "../desktop/native-media/platform/windows/PlatformCaptureWindowsInternal.hpp",
     "../desktop/src-tauri/build.rs",
     "../desktop/.cargo/config.toml",
     "../desktop/native-media/libdspeak_media/src/internal/library_runtime.cpp",
@@ -293,6 +295,11 @@ test("desktop releases optionally publish signed updates and restart after insta
     nativeMediaCmake,
     /platform\/windows\/PlatformCaptureWindowsSession\.cpp/,
   );
+  assert.match(
+    nativeMediaWindowsInternal,
+    /#include <propkeydef\.h>\n#include <functiondiscoverykeys_devpkey\.h>/,
+  );
+  assert.doesNotMatch(nativeMediaWindowsInternal, /#define NOMINMAX/);
   assert.doesNotMatch(
     nativeMediaCmake,
     /DSPEAK_MEDIA_CORE_LIBRARIES[\s\S]*?dspeak_media\.(?:lib|a)/,
