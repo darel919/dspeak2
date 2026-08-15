@@ -36,6 +36,7 @@ defaults:
 jobs:
   desktop:
     name: Build dSpeak Desktop (${{ matrix.platform }})
+    environment: Production
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
