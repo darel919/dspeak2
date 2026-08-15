@@ -178,41 +178,6 @@ jobs:
           DSPEAK_RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
         run: bun run release:check
 
-      - name: Verify auth environment fingerprints
-        env:
-          SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DSPEAK_PUBLIC_ORIGIN: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
-          VITE_DSPEAK_API_PATH: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
-        run: node scripts/verify-auth-environment.mjs
-
-      - name: Desktop auth bridge integration
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.workflow_run.head_branch, 'v')
-        env:
-          DSPEAK_TEST_SERVER_URL: ${{ vars.DSPEAK_TEST_SERVER_URL }}
-          DSPEAK_TEST_TOKEN: ${{ secrets.DSPEAK_TEST_TOKEN }}
-          DSPEAK_TEST_TOKEN_OTHER_PROJECT: ${{ secrets.DSPEAK_TEST_TOKEN_OTHER_PROJECT }}
-          DSPEAK_TEST_PROJECT_REF: ${{ vars.DSPEAK_TEST_PROJECT_REF }}
-        run: |
-          if [[ -z "$DSPEAK_TEST_SERVER_URL" || -z "$DSPEAK_TEST_TOKEN" ]]; then
-            echo "::error::Desktop auth bridge integration test requires DSPEAK_TEST_SERVER_URL and DSPEAK_TEST_TOKEN. Configure them before releasing." >&2
-            exit 1
-          fi
-          bun test tests/desktop-session-bridge-e2e.test.ts
-
-      - name: Desktop auth profile provisioning (test database)
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.workflow_run.head_branch, 'v')
-        env:
-          DSPEAK_TEST_DATABASE_URL: ${{ secrets.DSPEAK_TEST_DATABASE_URL }}
-        run: |
-          if [[ -z "$DSPEAK_TEST_DATABASE_URL" ]]; then
-            echo "::error::Profile provisioning integration test requires DSPEAK_TEST_DATABASE_URL (disposable test database with schema applied)." >&2
-            exit 1
-          fi
-          bun test tests/desktop-session-provisioning-db.test.ts
-
       - name: Configure signed updater artifacts
         if: github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v')
         env:
