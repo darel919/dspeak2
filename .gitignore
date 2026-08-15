@@ -11,6 +11,7 @@ AGENTS.md
 IDEA.md
 .hermes
 .vercel
+.agents
 
 # Node dependencies
 node_modules

@@ -113,7 +113,7 @@ pub(super) fn native_crash_diagnostics(stderr_tail: &[String]) -> Value {
         }
     }
 
-    let signal_name = {
+    let signal_name: Option<&'static str> = {
         #[cfg(unix)]
         {
             signal.and_then(unix_signal_name)
