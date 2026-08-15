@@ -65,7 +65,10 @@ extern "C" {
     pub fn lib_dspeak_media_free_buffer(buffer: *mut u8);
     pub fn lib_dspeak_media_start_microphone_capture(error_out: *mut c_int) -> c_int;
     pub fn lib_dspeak_media_stop_microphone_capture(error_out: *mut c_int) -> c_int;
-    pub fn lib_dspeak_media_start_camera_capture(error_out: *mut c_int) -> c_int;
+    pub fn lib_dspeak_media_start_camera_capture(
+        settings_json: *const c_char,
+        error_out: *mut c_int,
+    ) -> c_int;
     pub fn lib_dspeak_media_stop_camera_capture(error_out: *mut c_int) -> c_int;
     pub fn lib_dspeak_media_start_capture(
         request_json: *const c_char,
@@ -113,9 +116,11 @@ extern "C" {
         transport: *mut lib_dspeak_media_recv_transport_t,
     );
 
-    pub fn lib_dspeak_media_poll_action() -> lib_dspeak_media_action_t;
-    pub fn lib_dspeak_media_poll_receive_event() -> lib_dspeak_media_receive_event_t;
+    pub fn lib_dspeak_media_drain_action() -> lib_dspeak_media_action_t;
+    pub fn lib_dspeak_media_drain_receive_event() -> lib_dspeak_media_receive_event_t;
     pub fn lib_dspeak_media_free_receive_event(event: *mut lib_dspeak_media_receive_event_t);
+    pub fn lib_dspeak_media_wait_for_event(timeout_ms: u32) -> c_int;
+    pub fn lib_dspeak_media_wake_event();
     pub fn lib_dspeak_media_complete_connect(transport_ptr: *mut c_void);
     pub fn lib_dspeak_media_fail_connect(transport_ptr: *mut c_void, error_message: *const c_char);
     pub fn lib_dspeak_media_complete_produce(action_id: u64, producer_id: *const c_char);
@@ -195,7 +200,11 @@ extern "C" {
         error_out: *mut c_int,
     ) -> *mut lib_dspeak_media_producer_t;
 
-    pub fn lib_dspeak_media_p2p_add_video_track(handle: *mut c_void, track: *mut c_void) -> c_int;
+    pub fn lib_dspeak_media_p2p_add_video_track(
+        handle: *mut c_void,
+        track: *mut c_void,
+        preferred_codec: *const c_char,
+    ) -> c_int;
     pub fn lib_dspeak_media_p2p_add_audio_track(handle: *mut c_void, track: *mut c_void) -> c_int;
     pub fn lib_dspeak_media_p2p_remove_video_track(
         handle: *mut c_void,
@@ -220,6 +229,44 @@ extern "C" {
         track_id: *const c_char,
         parameters_json: *const c_char,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_add_video_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        preferred_codec: *const c_char,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_add_audio_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_remove_video_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_remove_audio_track_with_key(
+        handle: *mut c_void,
+        track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_replace_video_track_with_key(
+        handle: *mut c_void,
+        old_track: *mut c_void,
+        new_track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_replace_audio_track_with_key(
+        handle: *mut c_void,
+        old_track: *mut c_void,
+        new_track: *mut c_void,
+        track_key: *const c_char,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_set_track_parameters_with_key(
+        handle: *mut c_void,
+        track_key: *const c_char,
+        parameters_json: *const c_char,
+    ) -> c_int;
     pub fn lib_dspeak_media_p2p_set_audio_stereo(handle: *mut c_void, stereo: bool) -> c_int;
     pub fn lib_dspeak_media_p2p_set_receive_enabled(
         handle: *mut c_void,
@@ -242,6 +289,7 @@ extern "C" {
     pub fn lib_dspeak_media_p2p_create(
         ice_servers_json: *const c_char,
         offerer: bool,
+        event_handle: u64,
     ) -> *mut lib_dspeak_media_p2p_handle_t;
     pub fn lib_dspeak_media_p2p_destroy(handle: *mut lib_dspeak_media_p2p_handle_t);
     pub fn lib_dspeak_media_p2p_create_offer(
@@ -258,13 +306,16 @@ extern "C" {
         sdp_type: *const c_char,
         sdp: *const c_char,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_rollback_local_description(
+        handle: *mut lib_dspeak_media_p2p_handle_t,
+    ) -> c_int;
+    pub fn lib_dspeak_media_p2p_last_error(
+        handle: *mut lib_dspeak_media_p2p_handle_t,
+    ) -> *const c_char;
     pub fn lib_dspeak_media_p2p_add_ice_candidate(
         handle: *mut lib_dspeak_media_p2p_handle_t,
         candidate: *const c_char,
     ) -> c_int;
-    pub fn lib_dspeak_media_p2p_poll_ice_candidate(
-        handle: *mut lib_dspeak_media_p2p_handle_t,
-    ) -> *mut c_char;
     pub fn lib_dspeak_media_p2p_ice_connection_state(
         handle: *mut lib_dspeak_media_p2p_handle_t,
     ) -> c_int;

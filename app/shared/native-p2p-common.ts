@@ -1,6 +1,10 @@
 import { applyRtpSenderSettings } from "./rtp-sender-settings.ts";
 import { findRtpStat } from "./rtc-media-stats.ts";
 import { sortP2pVideoCodecPreferences } from "./video-settings.ts";
+import {
+  normalizeVideoCodecName,
+  type VideoCodecName,
+} from "./types/video-codec-capabilities.ts";
 import type { VideoCodec } from "./types/video-settings.ts";
 
 type P2pStat = RTCStats & Record<string, unknown>;
@@ -65,6 +69,11 @@ export function applyOpusAudioProfile(sdp: string, stereo = true) {
       if (!section.startsWith("m=audio ")) return section;
       const match = section.match(/^a=rtpmap:(\d+) opus\/48000\/2\r?$/im);
       if (!match) return section;
+      const firstLineFeed = section.indexOf("\n");
+      const lineEnd =
+        firstLineFeed > 0 && section[firstLineFeed - 1] === "\r"
+          ? "\r\n"
+          : "\n";
       const payloadType = match[1];
       const required = {
         stereo: stereo ? "1" : "0",
@@ -94,22 +103,54 @@ export function applyOpusAudioProfile(sdp: string, stereo = true) {
         .join(";")}`;
       section = fmtp
         ? section.replace(fmtpPattern, nextFmtp)
-        : section.replace(match[0], `${match[0]}\r\n${nextFmtp}`);
+        : section.replace(
+            match[0],
+            `${match[0].replace(/\r$/, "")}${lineEnd}${nextFmtp}`,
+          );
       return /^a=ptime:/im.test(section)
         ? section.replace(/^a=ptime:[^\r\n]*/im, "a=ptime:10")
-        : `${section.replace(/\s*$/, "")}\r\na=ptime:10\r\n`;
+        : `${section.replace(/(?:\r?\n)+$/, "")}${lineEnd}a=ptime:10${lineEnd}`;
     })
     .join("");
 }
 
-export function applyP2pVideoCodecPreferences(pc: RTCPeerConnection) {
+function p2pCodecNameFromMimeType(value: unknown) {
+  const mimeType =
+    String(value || "")
+      .replace(/^video\//i, "")
+      .split(/[;\s]/, 1)[0] || "";
+  if (/^(HEVC|H\.265)$/i.test(mimeType)) return "H265" as const;
+  return normalizeVideoCodecName(mimeType);
+}
+
+function isAuxiliaryP2pVideoCodec(value: unknown) {
+  return /^(video\/)?(rtx|red|ulpfec|flexfec)/i.test(String(value || ""));
+}
+
+export function applyP2pVideoCodecPreferences(
+  pc: RTCPeerConnection,
+  allowedCodecs?: Iterable<VideoCodecName> | null,
+) {
   const capabilities =
     globalThis.RTCRtpReceiver?.getCapabilities?.("video")?.codecs ||
     globalThis.RTCRtpSender?.getCapabilities?.("video")?.codecs;
   if (!capabilities?.length) return false;
-  const preferences = sortP2pVideoCodecPreferences(
+  const sortedPreferences = sortP2pVideoCodecPreferences(
     capabilities as unknown as VideoCodec[],
   );
+  const allowed = new Set(allowedCodecs || []);
+  const preferences = allowed.size
+    ? sortedPreferences.filter(
+        (codec) =>
+          isAuxiliaryP2pVideoCodec(codec.mimeType) ||
+          allowed.has(
+            p2pCodecNameFromMimeType(codec.mimeType) as VideoCodecName,
+          ),
+      )
+    : sortedPreferences;
+  const selectedPreferences = preferences.length
+    ? preferences
+    : sortedPreferences;
   let applied = false;
   for (const transceiver of pc.getTransceivers?.() || []) {
     const kind =
@@ -117,7 +158,7 @@ export function applyP2pVideoCodecPreferences(pc: RTCPeerConnection) {
     if (kind !== "video" || !transceiver.setCodecPreferences) continue;
     try {
       transceiver.setCodecPreferences(
-        preferences as unknown as Parameters<
+        selectedPreferences as unknown as Parameters<
           RTCRtpTransceiver["setCodecPreferences"]
         >[0],
       );

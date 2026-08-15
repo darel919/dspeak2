@@ -1,6 +1,7 @@
 export interface NativeCloudflareSessionOptions {
   invoke: NativeCloudflareSessionSurface["invoke"];
   send?: NativeCloudflareSessionSurface["send"];
+  ensureControlReady?: NativeCloudflareSessionSurface["ensureControlReady"];
   onRemoteTrack?: NativeCloudflareSessionSurface["onRemoteTrack"];
   onRemoteTrackEnded?: NativeCloudflareSessionSurface["onRemoteTrackEnded"];
   onStateChange?: NativeCloudflareSessionSurface["onStateChange"];
@@ -9,14 +10,19 @@ export interface NativeCloudflareSessionOptions {
   getAudioStereo?: NativeCloudflareSessionSurface["getAudioStereo"];
   getVideoSettings?: NativeCloudflareSessionSurface["getVideoSettings"];
   requestTimeoutMs?: number;
+  localPeerId?: string | null;
   sources?: NativeCloudflareSessionSurface["sources"];
   producers?: NativeCloudflareSessionSurface["producers"];
+  producerVariants?: NativeCloudflareSessionSurface["producerVariants"];
   consumers?: NativeCloudflareSessionSurface["consumers"];
   sourceTransmission?: NativeCloudflareSessionSurface["sourceTransmission"];
   remoteReceiving?: NativeCloudflareSessionSurface["remoteReceiving"];
   localVideoFeeds?: NativeCloudflareSessionSurface["localVideoFeeds"];
+  pendingLocalVideoFrames?: NativeCloudflareSessionSurface["pendingLocalVideoFrames"];
   remoteVideoFeeds?: NativeCloudflareSessionSurface["remoteVideoFeeds"];
   remoteAudioFeeds?: NativeCloudflareSessionSurface["remoteAudioFeeds"];
+  mediaCapabilities?:
+    import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
 }
 
 export interface NativeCloudflareSessionSurface {
@@ -25,6 +31,7 @@ export interface NativeCloudflareSessionSurface {
     payload?: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
   send?: (message: unknown) => unknown;
+  ensureControlReady?: () => Promise<unknown>;
   onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
   onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;
   onStateChange?: (...args: unknown[]) => unknown;
@@ -35,14 +42,26 @@ export interface NativeCloudflareSessionSurface {
     source: string,
   ) => import("./video-settings.ts").VideoSettings;
   requestTimeoutMs: number;
+  localPeerId: string;
   sources: Map<string, Record<string, unknown>>;
   producers: Map<string, Record<string, unknown>>;
+  producerVariants: Map<string, Record<string, unknown>>;
   consumers: Map<string, Record<string, unknown>>;
   sourceTransmission: Map<string, boolean>;
   remoteReceiving: Map<string, boolean>;
   localVideoFeeds: Map<string, Record<string, unknown>>;
+  pendingLocalVideoFrames: Map<string, Record<string, unknown>>;
   remoteVideoFeeds: Map<string, Record<string, unknown>>;
   remoteAudioFeeds: Map<string, Record<string, unknown>>;
+  mediaCapabilities:
+    import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
+  logicalVideoStreams: Map<
+    string,
+    import("../video-codec-migration.ts").LogicalVideoStreamState
+  >;
+  codecMigrationTelemetry: import("../video-codec-migration.ts").CodecMigrationTelemetry[];
+  videoDecodeOverloadTelemetry: import("../video-codec-migration.ts").VideoDecodeOverloadTelemetry[];
+  codecRuntimeTelemetry: import("../video-codec-migration.ts").VideoCodecRuntimeTelemetry[];
   publications: Map<string, Record<string, unknown>>;
   remoteByMid: Map<string, Record<string, unknown>>;
   pendingRemoteTrackEvents: Map<string, Array<Record<string, unknown>>>;
@@ -66,18 +85,33 @@ export interface NativeCloudflareSessionSurface {
   sessionGeneration: number;
   closed: boolean;
   iceState: number;
-  candidateTimer: ReturnType<typeof setTimeout> | null;
   jitterBufferMinimumDelay: number;
   jitterBufferTargetDelay: number;
   lastReceivedConsumerParams: unknown;
-  _startCandidateDrain: () => unknown;
   _assertCurrent: (generation: number, handle?: string | number | null) => void;
   _emitState: () => unknown;
   closeMedia: () => unknown;
   removeSource: (source: string) => unknown;
+  removeVariant: (variantId: string, force?: boolean) => unknown;
+  retireVariants: (
+    logicalStreamId: string,
+    desiredVariantIds: string[],
+  ) => unknown;
+  hasVariant: (variantId: string) => boolean;
+  updateVariantMetadata: (
+    entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
+  ) => Promise<unknown>;
   setSourceTransmission: (source: string, enabled: boolean) => unknown;
   updateAudioBitrate: (source: string, bitrate: number) => unknown;
   updateVideoBitrate: (source: string, bitrate: number) => unknown;
+  updateVideoParameters: (
+    source: string,
+    parameters: Record<string, unknown>,
+  ) => unknown;
+  updateVariantVideoParameters: (
+    variantId: string,
+    parameters: Record<string, unknown>,
+  ) => unknown;
   setRemoteReceiving: (
     userIdOrKey: string,
     sourceOrReceiving: string | boolean,
@@ -110,6 +144,9 @@ export interface NativeCloudflareSessionSurface {
   request: (operation: string, body?: unknown) => Promise<unknown>;
   enqueueNegotiation: (operation: () => Promise<unknown>) => Promise<unknown>;
   applyJitterBufferConfig: (entry: Record<string, unknown>) => unknown;
+  takePendingLocalVideoFrame: (
+    source: string,
+  ) => Record<string, unknown> | null;
   initialize: () => Promise<unknown>;
   _handleTrackAdded: (
     payload: Record<string, unknown>,

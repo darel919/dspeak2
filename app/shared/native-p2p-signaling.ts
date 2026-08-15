@@ -2,6 +2,8 @@ import {
   applyOpusAudioProfile,
   applyP2pVideoCodecPreferences,
 } from "./native-p2p-common.ts";
+import { normalizeParticipantMediaCapabilities } from "./types/video-codec-capabilities.ts";
+import { selectBestPairCodec } from "./video-codec-routing.ts";
 import type {
   NativeP2pConnectionState,
   NativeP2pSignalingMesh,
@@ -79,10 +81,31 @@ export function schedulePeerNegotiation(
         retryPeerNegotiation(mesh, state);
         return false;
       }
+      if (mesh.mediaCapabilities && !state.remoteMediaCapabilities) {
+        if (!state.capabilityWaitTimer) {
+          state.capabilityWaitTimer = setTimeout(() => {
+            state.capabilityWaitTimer = null;
+            if (
+              state.negotiationRequested &&
+              !state.closed &&
+              mesh.connections.get(state.peerId) === state
+            )
+              schedulePeerNegotiation(mesh, state);
+          }, 1500);
+        }
+        return false;
+      }
+      if (state.capabilityWaitTimer) {
+        clearTimeout(state.capabilityWaitTimer);
+        state.capabilityWaitTimer = null;
+      }
       state.negotiationRequested = false;
       state.makingOffer = true;
       try {
-        applyP2pVideoCodecPreferences(state.pc);
+        applyP2pVideoCodecPreferences(
+          state.pc,
+          state.selectedCodec ? [state.selectedCodec] : null,
+        );
         const offer = await state.pc.createOffer();
         await state.pc.setLocalDescription({
           type: offer.type,
@@ -114,6 +137,27 @@ export function retryPeerNegotiation(
     if (state.negotiationRequested && state.pc.connectionState !== "closed")
       schedulePeerNegotiation(mesh, state);
   }, 50);
+}
+
+function selectPeerCodec(
+  mesh: NativeP2pSignalingMesh,
+  state: NativeP2pConnectionState,
+) {
+  if (!mesh.mediaCapabilities || !state.remoteMediaCapabilities) return null;
+  return selectBestPairCodec(
+    {
+      participantId: mesh.localPeerId || "local",
+      logicalStreamId: "p2p",
+      mediaCapabilities: mesh.mediaCapabilities,
+    },
+    {
+      participantId: state.userId || state.peerId,
+      mediaCapabilities: normalizeParticipantMediaCapabilities(
+        state.remoteMediaCapabilities,
+      ),
+    },
+    { allowEmergencySoftware: true },
+  );
 }
 
 export async function receiveSignal(
@@ -150,6 +194,31 @@ export async function applyPeerSignal(
   signalValue: Record<string, unknown>,
 ) {
   const pc = state.pc;
+  const capabilitiesSignal =
+    signalValue.capabilities && typeof signalValue.capabilities === "object"
+      ? (signalValue.capabilities as Record<string, unknown>)
+      : null;
+  if (capabilitiesSignal) {
+    state.remoteMediaCapabilities =
+      capabilitiesSignal.mediaCapabilities &&
+      typeof capabilitiesSignal.mediaCapabilities === "object"
+        ? normalizeParticipantMediaCapabilities(
+            capabilitiesSignal.mediaCapabilities,
+          )
+        : null;
+    if (state.capabilityWaitTimer) {
+      clearTimeout(state.capabilityWaitTimer);
+      state.capabilityWaitTimer = null;
+    }
+    state.selectedCodec = selectPeerCodec(mesh, state);
+    if (
+      !state.polite &&
+      state.negotiationRequested &&
+      pc.signalingState === "stable"
+    )
+      schedulePeerNegotiation(mesh, state);
+    return true;
+  }
   if (signalValue.renegotiationNeeded === true) {
     schedulePeerNegotiation(mesh, state);
     return;
@@ -286,7 +355,10 @@ export async function applyPeerSignal(
         state.signalingStep = "remote-description";
         await pc.setRemoteDescription(description);
       }
-      applyP2pVideoCodecPreferences(pc);
+      applyP2pVideoCodecPreferences(
+        pc,
+        state.selectedCodec ? [state.selectedCodec] : null,
+      );
     } finally {
       state.settingRemoteAnswer = false;
     }

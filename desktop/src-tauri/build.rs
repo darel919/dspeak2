@@ -20,13 +20,19 @@ fn artifact_mediasoup_mode(artifact_dir: &std::path::Path) -> Option<bool> {
 }
 
 fn main() {
-    tauri_build::build();
+    let is_media_worker = std::env::var("NATIVE_MEDIA_WORKER_BUILD")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+    if !is_media_worker {
+        tauri_build::build();
+    }
     println!("cargo:rustc-check-cfg=cfg(native_rtc)");
     println!("cargo:rustc-check-cfg=cfg(native_mediasoup)");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=NATIVE_MEDIA_ARTIFACT_DIR");
     println!("cargo:rerun-if-env-changed=NATIVE_MEDIA_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=NATIVE_MEDIA_WITH_MEDIASOUP");
+    println!("cargo:rerun-if-env-changed=NATIVE_MEDIA_WORKER_BUILD");
 
     let artifact_dir = std::env::var_os("NATIVE_MEDIA_ARTIFACT_DIR").unwrap_or_else(|| {
         panic!(
@@ -34,6 +40,7 @@ fn main() {
         )
     });
     let artifact_dir = std::path::PathBuf::from(artifact_dir);
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let include_dir = artifact_dir.join("include");
     let lib_dir = artifact_dir.join("lib");
     let build_dir = std::env::var_os("NATIVE_MEDIA_BUILD_DIR").map(std::path::PathBuf::from);
@@ -41,7 +48,7 @@ fn main() {
     let json_from_build = build_dir
         .as_ref()
         .map(|path| path.join("_deps/libsdptransform-src/include/json.hpp"));
-    let core_libraries = if cfg!(target_os = "windows") {
+    let core_libraries = if target_os == "windows" {
         vec![
             vec![
                 lib_dir.join("dspeak_media.lib"),
@@ -55,7 +62,7 @@ fn main() {
             vec![lib_dir.join("libwebrtc.a")],
         ]
     };
-    let mediasoup_libraries = if cfg!(target_os = "windows") {
+    let mediasoup_libraries = if target_os == "windows" {
         vec![
             vec![
                 lib_dir.join("mediasoupclient.lib"),
@@ -88,7 +95,6 @@ fn main() {
     let with_mediasoup = requested_mediasoup
         .or(marked_mediasoup)
         .unwrap_or(mediasoup_available);
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if matches!(target_os.as_str(), "macos" | "windows") && !with_mediasoup {
         panic!(
             "native macOS and Windows builds require the mediasoupclient and sdptransform transport libraries"
@@ -124,11 +130,15 @@ fn main() {
         );
     }
 
-    if with_mediasoup {
+    if let Ok(target) = std::env::var("TARGET") {
+        println!("cargo:rustc-env=DSPEAK_TARGET_TRIPLE={target}");
+    }
+
+    if is_media_worker && with_mediasoup {
         println!("cargo:rustc-cfg=native_mediasoup");
     }
 
-    if cfg!(target_os = "linux") {
+    if target_os == "linux" {
         let pipewire = std::process::Command::new("pkg-config")
             .args(["--exists", "libpipewire-0.3", "libspa-0.2"])
             .status()
@@ -140,15 +150,34 @@ fn main() {
             );
         }
     }
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=static=dspeak_media");
-    if with_mediasoup {
-        println!("cargo:rustc-link-lib=static=mediasoupclient");
-        println!("cargo:rustc-link-lib=static=sdptransform");
+    if is_media_worker {
+        println!("cargo:rustc-cfg=native_rtc");
+        println!("cargo:rustc-link-search=native={}", lib_dir.display());
+        println!("cargo:rustc-link-lib=static=dspeak_media");
+        if with_mediasoup {
+            println!("cargo:rustc-link-lib=static=mediasoupclient");
+            println!("cargo:rustc-link-lib=static=sdptransform");
+        }
+        println!("cargo:rustc-link-lib=static=webrtc");
+        if target_os == "macos" {
+            let worker_info_plist = std::path::PathBuf::from(
+                std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is required"),
+            )
+            .join("MediaWorkerInfo.plist");
+            if !worker_info_plist.is_file() {
+                panic!(
+                    "media worker Info.plist is missing: {}",
+                    worker_info_plist.display()
+                );
+            }
+            println!(
+                "cargo:rustc-link-arg-bin=dspeak-media=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+                worker_info_plist.display()
+            );
+        }
     }
-    println!("cargo:rustc-link-lib=static=webrtc");
 
-    if cfg!(target_os = "macos") {
+    if target_os == "macos" {
         println!("cargo:rustc-link-lib=dylib=c++");
         for framework in [
             "CoreFoundation",
@@ -171,10 +200,10 @@ fn main() {
         ] {
             println!("cargo:rustc-link-lib=framework={framework}");
         }
-    } else if cfg!(target_os = "linux") {
+    } else if target_os == "linux" {
         println!("cargo:rustc-link-lib=dl");
         println!("cargo:rustc-link-lib=pthread");
-    } else if cfg!(target_os = "windows") {
+    } else if target_os == "windows" {
         for library in [
             "advapi32",
             "bcrypt",
@@ -214,6 +243,4 @@ fn main() {
             println!("cargo:rustc-link-lib={library}");
         }
     }
-
-    println!("cargo:rustc-cfg=native_rtc");
 }

@@ -72,6 +72,7 @@ export function createMediaSignalingSocket({
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
   let reconnectStartedAt = 0;
+  let reconnectOperation: Promise<void> | null = null;
   let heartbeatSequence = 0;
   let lastHeartbeatAckSequence = 0;
   let lastHeartbeatAckAt = 0;
@@ -206,7 +207,9 @@ export function createMediaSignalingSocket({
           const closeError = new Error(
             event.code === protocol.closeCode
               ? protocol.closeReason
-              : "Media signaling connection closed",
+              : event.reason
+                ? `Media signaling connection closed (${event.code}): ${event.reason}`
+                : "Media signaling connection closed",
           );
           closeError.code =
             event.code === protocol.closeCode
@@ -304,14 +307,7 @@ export function createMediaSignalingSocket({
     reconnectTimer = setTimeout(async () => {
       reconnectTimer = null;
       try {
-        await onReconnect?.();
-      } catch (error) {
-        reportError(error);
-        if (!isIntentionalClose()) scheduleReconnect();
-        return;
-      }
-      try {
-        await open();
+        await reconnectNow();
       } catch (error) {
         if (!isIntentionalClose()) {
           reportError(error);
@@ -319,6 +315,38 @@ export function createMediaSignalingSocket({
         }
       }
     }, delay);
+  }
+
+  function reconnectNow() {
+    if (reconnectOperation) return reconnectOperation;
+    const operation = (async () => {
+      await onReconnect?.();
+      await open();
+    })();
+    reconnectOperation = operation;
+    operation
+      .finally(() => {
+        if (reconnectOperation === operation) reconnectOperation = null;
+      })
+      .catch(() => {});
+    return operation;
+  }
+
+  async function waitForReady() {
+    if (isIntentionalClose())
+      throw new Error("Media signaling connection stopped");
+    if (socket?.readyState === WebSocket.OPEN && protocolState) return;
+    if (pendingReady?.promise) return pendingReady.promise;
+    if (reconnectTimer) stopReconnect();
+    if (reconnectAttempt > 0 || reconnectStartedAt) {
+      try {
+        return await reconnectNow();
+      } catch (error) {
+        if (!isIntentionalClose()) scheduleReconnect();
+        throw error;
+      }
+    }
+    return open();
   }
 
   function stop() {
@@ -347,6 +375,7 @@ export function createMediaSignalingSocket({
     open,
     send,
     stop,
+    waitForReady,
   };
 }
 

@@ -61,6 +61,8 @@ fi
 export NATIVE_MEDIA_ARTIFACT_DIR NATIVE_MEDIA_BUILD_DIR NATIVE_MEDIA_PROVISION_MODE NATIVE_MEDIA_WITH_MEDIASOUP
 NATIVE_MEDIA_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-}"
 export NATIVE_MEDIA_TARGET_TRIPLE
+DSPEAK_DESKTOP_SHOW="${DSPEAK_DESKTOP_SHOW:-1}"
+export DSPEAK_DESKTOP_SHOW
 
 bash "$ROOT_DIR/scripts/provision-native-media.sh"
 
@@ -77,7 +79,7 @@ if [[ "$LOCAL_MEDIA_WITH_MEDIASOUP" == "auto" ]]; then
   fi
 fi
 if [[ -f "$LOCAL_MEDIA_LIBRARY" && -f "$ARTIFACT_MEDIA_LIBRARY" ]] && \
-  find "$ROOT_DIR/native-media/libdspeak_media" -type f \
+  find "$ROOT_DIR/native-media/libdspeak_media" "$ROOT_DIR/native-media/platform" -type f \
     \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
     -newer "$ARTIFACT_MEDIA_LIBRARY" -print -quit | grep -q .; then
   env NATIVE_MEDIA_ARTIFACT_DIR="$NATIVE_MEDIA_ARTIFACT_DIR" \
@@ -86,8 +88,19 @@ if [[ -f "$LOCAL_MEDIA_LIBRARY" && -f "$ARTIFACT_MEDIA_LIBRARY" ]] && \
       -DCMAKE_BUILD_TYPE=Release \
       -DDSPEAK_MEDIA_WITH_MEDIASOUP="$LOCAL_MEDIA_WITH_MEDIASOUP"
   cmake --build "$LOCAL_MEDIA_BUILD" -j2
-  cp "$LOCAL_MEDIA_LIBRARY" "$ARTIFACT_MEDIA_LIBRARY"
+    cp "$LOCAL_MEDIA_LIBRARY" "$ARTIFACT_MEDIA_LIBRARY"
 fi
+
+WORKER_CARGO_ARGS=(
+  build
+  --manifest-path "$ROOT_DIR/src-tauri/Cargo.toml"
+  --features media-worker
+  --bin dspeak-media
+)
+if [[ -n "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]]; then
+  WORKER_CARGO_ARGS+=(--target "$NATIVE_MEDIA_TARGET_TRIPLE")
+fi
+NATIVE_MEDIA_WORKER_BUILD=1 cargo "${WORKER_CARGO_ARGS[@]}"
 
 cd "$ROOT_DIR"
 exec npx tauri dev "$@"

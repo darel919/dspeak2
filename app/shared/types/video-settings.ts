@@ -1,5 +1,5 @@
 export type VideoResolutionName =
-  "original" | "720p" | "1080p" | "1440p" | "2160p";
+  "original" | "360p" | "720p" | "1080p" | "1440p" | "2160p";
 export type VideoQualityPriority = "framerate" | "resolution";
 
 export interface VideoSettings {
@@ -12,6 +12,7 @@ export interface VideoSettings {
   width?: number;
   height?: number;
   screen?: boolean;
+  lowSpec?: boolean;
 }
 
 export type VideoSettingsInput = Partial<VideoSettings> &
@@ -44,6 +45,7 @@ export interface VideoSenderOptions {
   maxBitrate?: number | null;
   bitrate?: number;
   framerate?: number;
+  lowSpec?: boolean;
 }
 export interface VideoAdaptationState {
   scale?: number;

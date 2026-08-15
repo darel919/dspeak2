@@ -7,7 +7,7 @@ async function read(path) {
 }
 
 describe("desktop initialization contract", () => {
-  it("uses one visible Nuxt startup surface", async () => {
+  it("creates Nuxt only when the shell opens the desktop window", async () => {
     const [tauriConfig, desktopConfig, initComponent, frontendBuild] =
       await Promise.all([
         read("desktop/src-tauri/tauri.conf.json"),
@@ -17,13 +17,22 @@ describe("desktop initialization contract", () => {
       ]);
     const rootConfig = await read("nuxt.config.ts");
 
-    assert.match(tauriConfig, /"label": "main"[\s\S]*"visible": true/);
+    assert.match(tauriConfig, /"windows": \[\]/);
     assert.doesNotMatch(tauriConfig, /"label": "init"/);
     assert.match(
       tauriConfig,
-      /"beforeBuildCommand": "node \.\.\/scripts\/build-desktop-frontend\.mjs"/,
+      /"beforeBuildCommand": "node \.\.\/scripts\/build-desktop-frontend\.mjs && node \.\.\/scripts\/build-desktop-worker\.mjs"/,
     );
+    assert.match(tauriConfig, /"externalBin": \["binaries\/dspeak-media"\]/);
     assert.doesNotMatch(tauriConfig, /NITRO_PRESET=|rm -rf|cp -R/);
+    assert.match(
+      await read("desktop/src-tauri/src/desktop/mod.rs"),
+      /argument == "--show"/,
+    );
+    assert.match(
+      await read("desktop/src-tauri/src/desktop/mod.rs"),
+      /argument == "--minimized"/,
+    );
     assert.match(frontendBuild, /spawnSync\(process\.execPath/);
     assert.match(frontendBuild, /NITRO_PRESET: "static"/);
     assert.match(frontendBuild, /DSPEAK_DESKTOP: "1"/);

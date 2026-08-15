@@ -18,6 +18,8 @@ import type {
   MediaEngineConfig,
   MediaStats,
 } from "../../shared/media/types.ts";
+import { probeBrowserVideoCodecCapabilities } from "../../shared/browser-video-codec-capabilities.ts";
+import type { ParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
 
 const BROWSER_CAPABILITIES = Object.freeze({
   microphone: "browser",
@@ -38,6 +40,7 @@ export class BrowserMediaEngine extends MediaEngine {
   screenSharing: boolean;
   onQoe?: (report: MediaQoeReport) => void;
   qoeTimer: ReturnType<typeof setInterval> | null;
+  mediaCapabilities: ParticipantMediaCapabilities | null;
 
   constructor(
     session: BrowserMediaEngineSession,
@@ -54,11 +57,18 @@ export class BrowserMediaEngine extends MediaEngine {
     this.screenSharing = false;
     this.onQoe = onQoe;
     this.qoeTimer = null;
+    this.mediaCapabilities = null;
   }
 
   override async initialize(_config?: MediaEngineConfig): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+    try {
+      this.mediaCapabilities = await probeBrowserVideoCodecCapabilities();
+    } catch {
+      this.mediaCapabilities = null;
+    }
+    await this.session.setMediaCapabilities?.(this.mediaCapabilities);
     this.qoeTimer = setInterval(() => {
       this.getStats().catch(() => {});
     }, 5000);
@@ -164,6 +174,8 @@ export class BrowserMediaEngine extends MediaEngine {
     await this.leaveSession();
     this.listeners.clear();
     this.initialized = false;
+    this.mediaCapabilities = null;
+    await this.session.setMediaCapabilities?.(null);
     if (this.qoeTimer) clearInterval(this.qoeTimer);
     this.qoeTimer = null;
   }

@@ -19,10 +19,20 @@ import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
 import type {
   NativeCaptureRequest,
   NativeErrorLike,
-  NativeMediaFlags,
+  NativeCapabilities,
   NativeTopology,
 } from "../../shared/types/native-media.ts";
 import type { JoinSessionInput } from "../../shared/media/types.ts";
+
+async function waitForNativeTopology(engine: NativeMediaEngine) {
+  let operation = engine.nativeTopologyOperation;
+  while (operation) {
+    await operation.catch(() => {});
+    const next = engine.nativeTopologyOperation;
+    if (!next || next === operation) return;
+    operation = next;
+  }
+}
 
 export async function initialize(
   engine: NativeMediaEngine,
@@ -39,7 +49,7 @@ export async function initialize(
         config: resolvedConfig,
       });
       engine._mergeNativeCapabilities(
-        nativeState?.capabilities as NativeMediaFlags | undefined,
+        nativeState?.capabilities as NativeCapabilities | undefined,
       );
       const signalingToken = await engine._loadSignalingToken(resolvedConfig);
       engine.nativeAuthToken = signalingToken;
@@ -49,6 +59,7 @@ export async function initialize(
         getAudioBitrate: engine.getAudioBitrate,
         getAudioStereo: engine.getAudioStereo,
         getVideoSettings: engine.getVideoSettings,
+        mediaCapabilities: engine.mediaCapabilities,
         signalingPath:
           typeof resolvedConfig.signalingPath === "string"
             ? resolvedConfig.signalingPath
@@ -110,6 +121,7 @@ export async function initialize(
         getAudioBitrate: engine.getAudioBitrate,
         getAudioStereo: engine.getAudioStereo,
         getVideoSettings: engine.getVideoSettings,
+        mediaCapabilities: engine.mediaCapabilities,
         sendSignal: (data: NativeCaptureRequest) =>
           engine.nativeSession?.signaling?.send?.({
             type: "p2p-signal",
@@ -152,19 +164,46 @@ export async function initialize(
   } catch (error) {
     engine.flags.nativeBackendReady = false;
     engine._emit("error", { source: "native", operation: "initialize", error });
-    if (engine.nativeOnly) throw error;
+    if (engine.nativeOnly) {
+      await engine._invoke("media_shutdown").catch(() => {});
+      throw error;
+    }
   }
 
   if (!engine.nativeOnly) await engine.browserEngine.initialize?.(config);
   engine.initialized = true;
-  if (engine.flags.nativeRtc) engine._startNativeActionPump();
-  engine.qoeTimer = setInterval(() => {
-    engine.getStats().catch(() => {});
-  }, 5000);
-  engine.qoeTimer?.unref?.();
 }
 
 export async function handleNativeCaptureError(
+  engine: NativeMediaEngine,
+  payload: NativeCaptureRequest = {},
+) {
+  const route = String(payload.route || payload.source || "unknown");
+  if (route === "microphone") {
+    const operation = (engine.microphoneOperation || Promise.resolve())
+      .catch(() => {})
+      .then(() => handleNativeCaptureErrorNow(engine, payload));
+    engine.microphoneOperation = operation.catch(() => {});
+    return operation;
+  }
+  if (route === "camera") {
+    const operation = (engine.cameraOperation || Promise.resolve())
+      .catch(() => {})
+      .then(() => handleNativeCaptureErrorNow(engine, payload));
+    engine.cameraOperation = operation.catch(() => {});
+    return operation;
+  }
+  if (route === "desktop" || route === "screen") {
+    const operation = (engine.screenOperation || Promise.resolve())
+      .catch(() => {})
+      .then(() => handleNativeCaptureErrorNow(engine, payload));
+    engine.screenOperation = operation.catch(() => {});
+    return operation;
+  }
+  return handleNativeCaptureErrorNow(engine, payload);
+}
+
+async function handleNativeCaptureErrorNow(
   engine: NativeMediaEngine,
   payload: NativeCaptureRequest = {},
 ) {
@@ -305,6 +344,7 @@ export async function joinSession(
       await engine.nativeSession?.connect(channelId);
       await engine._invoke("media_join", { channelId });
       nativeVoiceJoined = true;
+      engine._startNativeVideoAdaptation();
       const outputDeviceId = engine.settingsStore?.outputDeviceId;
       if (typeof outputDeviceId === "string" && outputDeviceId.length > 0)
         await engine.setOutputDevice(outputDeviceId);
@@ -313,9 +353,34 @@ export async function joinSession(
     }
     phase = "browser-fallback";
     if (!engine.nativeOnly) await engine.browserEngine.joinSession?.(input);
+    engine.qoeTimer = setInterval(() => {
+      engine.getStats().catch(() => {});
+    }, 5000);
+    engine.qoeTimer?.unref?.();
   } catch (error) {
-    if (nativeVoiceJoined || phase === "native-connect")
+    if (nativeVoiceJoined || phase === "native-connect") {
+      engine._stopNativeVideoAdaptation();
+      await engine.nativeP2pSession?.shutdown?.().catch(() => {});
       await engine._invoke("media_leave").catch(() => {});
+      await engine._invoke("media_shutdown").catch(() => {});
+      await engine.nativeEventOperation?.catch(() => {});
+      await Promise.allSettled(
+        engine.unlisten.splice(0).map((unlisten: () => void) => unlisten()),
+      );
+      try {
+        engine.nativeSession?.signaling?.stop?.();
+      } catch {}
+      if (engine.qoeTimer) clearInterval(engine.qoeTimer);
+      engine.qoeTimer = null;
+      if (!engine.nativeOnly)
+        await engine.browserEngine.leaveSession?.().catch(() => {});
+      engine.nativeSession = null;
+      engine.nativeP2pSession = null;
+      engine.nativeActionHandler = null;
+      engine.nativeReceiveEventHandler = null;
+      engine.initialized = false;
+      engine.flags.nativeBackendReady = false;
+    }
     const errorLike = error as NativeErrorLike;
     engine.flags.nativeBackendReady = false;
     const message = errorLike.message || String(error);
@@ -333,10 +398,15 @@ export async function joinSession(
 }
 
 export async function leaveSession(engine: NativeMediaEngine) {
+  await Promise.all([
+    (engine.microphoneOperation || Promise.resolve()).catch(() => {}),
+    (engine.cameraOperation || Promise.resolve()).catch(() => {}),
+    (engine.screenOperation || Promise.resolve()).catch(() => {}),
+  ]);
   engine._stopNativeAudioTelemetry();
+  engine._stopNativeVideoAdaptation();
   if (engine.qoeTimer) clearInterval(engine.qoeTimer);
   engine.qoeTimer = null;
-  engine._stopNativeActionPump();
   const nativeSession = engine.nativeSession;
   const nativeP2pSession = engine.nativeP2pSession;
   try {
@@ -351,6 +421,8 @@ export async function leaveSession(engine: NativeMediaEngine) {
     if (engine.flags.nativeRtc && hasNativeCapability(engine.flags))
       await engine._invoke("media_leave").catch(() => {});
   }
+  if (engine.flags.nativeRtc && hasNativeCapability(engine.flags))
+    await engine._invoke("media_shutdown").catch(() => {});
   if (!engine.nativeOnly) {
     try {
       await engine.browserEngine.leaveSession?.();
@@ -359,6 +431,7 @@ export async function leaveSession(engine: NativeMediaEngine) {
   try {
     nativeSession?.signaling?.stop?.();
   } catch {}
+  await engine.nativeEventOperation?.catch(() => {});
   await Promise.allSettled(
     engine.unlisten.splice(0).map((unlisten: () => void) => unlisten()),
   );
@@ -375,6 +448,9 @@ export async function leaveSession(engine: NativeMediaEngine) {
   engine.nativeTopologyOperation = null;
   engine.activeScreenCapture = null;
   engine.activeSystemAudioCapture = null;
+  engine.microphoneOperation = Promise.resolve();
+  engine.cameraOperation = Promise.resolve();
+  engine.screenOperation = Promise.resolve();
   engine.localVideoFeedsRef.value = new Map();
   engine.remoteVideoFeedsRef.value = new Map();
   engine.remoteAudioFeedsRef.value = new Map();
@@ -386,7 +462,7 @@ export function setMicrophoneEnabled(
   engine: NativeMediaEngine,
   enabled: boolean,
 ) {
-  const operation = engine.microphoneOperation
+  const operation = (engine.microphoneOperation || Promise.resolve())
     .catch(() => {})
     .then(() => setMicrophoneEnabledNow(engine, enabled));
   engine.microphoneOperation = operation.catch(() => {});
@@ -461,6 +537,17 @@ export async function setCameraEnabled(
   engine: NativeMediaEngine,
   enabled: boolean,
 ) {
+  const operation = (engine.cameraOperation || Promise.resolve())
+    .catch(() => {})
+    .then(() => setCameraEnabledNow(engine, enabled));
+  engine.cameraOperation = operation.catch(() => {});
+  return operation;
+}
+
+async function setCameraEnabledNow(
+  engine: NativeMediaEngine,
+  enabled: boolean,
+) {
   if (!canAttemptNativeCapture(engine.flags)) {
     if (engine.nativeOnly) throw nativeOnlyError("camera");
     return engine.browserEngine.setCameraEnabled?.(enabled);
@@ -468,10 +555,14 @@ export async function setCameraEnabled(
   if (enabled) {
     let nativeCaptureStarted = false;
     try {
+      await waitForNativeTopology(engine);
       const deviceId = engine.settingsStore?.cameraDeviceId;
       if (typeof deviceId === "string" && deviceId.length > 0)
         await engine._invoke("media_set_camera_device", { deviceId });
-      await engine._invoke("media_set_camera", { enabled });
+      await engine._invoke("media_set_camera", {
+        enabled,
+        videoSettings: engine.getVideoSettings?.("camera"),
+      });
       nativeCaptureStarted = true;
       const entry = {
         source: "camera",
@@ -515,6 +606,17 @@ export async function startScreenShare(
   engine: NativeMediaEngine,
   options: NativeCaptureRequest = {},
 ) {
+  const operation = (engine.screenOperation || Promise.resolve())
+    .catch(() => {})
+    .then(() => startScreenShareNow(engine, options));
+  engine.screenOperation = operation.catch(() => {});
+  return operation;
+}
+
+async function startScreenShareNow(
+  engine: NativeMediaEngine,
+  options: NativeCaptureRequest = {},
+) {
   const selection =
     (options.captureSelection as NativeCaptureRequest | undefined) || null;
   if (selection)
@@ -533,6 +635,7 @@ export async function startScreenShare(
           typeof options.roomBitrateBps === "number"
             ? options.roomBitrateBps
             : undefined,
+        video: engine.getVideoSettings?.("screen"),
       })
     : options;
   const nativeCaptureAttemptable =
@@ -566,7 +669,7 @@ export async function startScreenShare(
           operation: "screen-video",
         },
       );
-    if (engine.activeScreenCapture) await stopScreenShare(engine);
+    if (engine.activeScreenCapture) await stopScreenShareNow(engine);
     if (combinedAudio && engine.activeSystemAudioCapture)
       await engine.stopSystemAudioProduction();
     if (options.includeSystemAudio && !combinedAudio)
@@ -597,6 +700,7 @@ export async function startScreenShare(
       };
       const audioEntry = {
         source: "screen-audio",
+        ownerSource: "screen",
         track: { kind: "audio" },
         captureSelection: sourceCaptureSelection,
         audioBitrate: engine.getAudioBitrate?.("screen-audio"),
@@ -651,6 +755,14 @@ export async function startScreenShare(
 }
 
 export async function stopScreenShare(engine: NativeMediaEngine) {
+  const operation = (engine.screenOperation || Promise.resolve())
+    .catch(() => {})
+    .then(() => stopScreenShareNow(engine));
+  engine.screenOperation = operation.catch(() => {});
+  return operation;
+}
+
+async function stopScreenShareNow(engine: NativeMediaEngine) {
   const nativeCaptureActive =
     engine._usesNativeCapture("nativeScreenShare") ||
     engine.activeScreenCapture !== null;

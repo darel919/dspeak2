@@ -1,4 +1,5 @@
 import {
+  nativeRtpCodecMetadata,
   nativeRtpStatForTrack,
   normalizeNativeTransportStats,
 } from "../native-mediasoup-diagnostics.ts";
@@ -41,7 +42,21 @@ export class NativeP2pSessionDiagnosticsMethods {
   }
 
   async diagnosticStats() {
-    return this.stats();
+    return [
+      ...(await this.stats()),
+      {
+        type: "native-codec-routing",
+        mediaCapabilities: this.mediaCapabilities,
+        variantCount: new Set(
+          [...this.sources.values()]
+            .filter((entry) => entry.kind === "video")
+            .map((entry) => entry.variantId || entry.source),
+        ).size,
+        migrations: this.codecMigrationTelemetry.slice(-32),
+        decodeOverload: this.videoDecodeOverloadTelemetry.slice(-32),
+        runtimeTelemetry: this.codecRuntimeTelemetry.slice(-128),
+      },
+    ];
   }
 
   async getOutboundRtpStats() {
@@ -50,15 +65,27 @@ export class NativeP2pSessionDiagnosticsMethods {
       const raw = await this._rawStats(peer);
       for (const source of peer.sources) {
         const entry = this.sources.get(source);
+        const codec = nativeRtpCodecMetadata(raw, "outbound-rtp", {
+          kind: entry?.kind,
+          codec: entry?.codec,
+          codecAcceleration: entry?.codecAcceleration,
+          codecImplementation: entry?.codecImplementation,
+          trackId: peer.trackIds.get(source),
+          source,
+        });
         results.push({
           peerId: peer.peerId,
           source,
           kind: entry?.kind,
-          stats:
-            nativeRtpStatForTrack(raw, "outbound-rtp", {
-              kind: entry?.kind,
-              trackId: peer.trackIds.get(source),
-            }) || null,
+          logicalStreamId: entry?.logicalStreamId || null,
+          generation: entry?.generation || 1,
+          variantId: entry?.variantId || null,
+          ...codec,
+          width: entry?.width || null,
+          height: entry?.height || null,
+          fps: entry?.fps || null,
+          bitrate: entry?.bitrate || null,
+          stats: codec.stats,
         });
       }
     }
@@ -71,12 +98,24 @@ export class NativeP2pSessionDiagnosticsMethods {
       const raw = await this._rawStats(peer);
       for (const entry of this.trackEntries.values()) {
         if (entry.p2pHandle !== peer.handle) continue;
+        const codec = nativeRtpCodecMetadata(raw, "inbound-rtp", entry);
         results.push({
           peerId: peer.peerId,
+          userId: entry.userId,
           consumerId: entry.key,
           source: entry.source,
           kind: entry.kind,
-          stats: nativeRtpStatForTrack(raw, "inbound-rtp", entry) || null,
+          logicalStreamId: entry.logicalStreamId || null,
+          generation: entry.generation || 1,
+          variantId: entry.variantId || null,
+          ...codec,
+          width: entry.width || null,
+          height: entry.height || null,
+          fps: entry.fps || null,
+          bitrate: entry.bitrate || null,
+          migrationState: entry.migrationState || null,
+          visible: entry.visible !== false,
+          stats: codec.stats,
         });
       }
     }
@@ -173,8 +212,14 @@ export class NativeP2pSessionDiagnosticsMethods {
   ) {
     const normalizedSource = String(source || "");
     const maxBitrate = Number(parameters.maxBitrate);
+    const maxFramerate = Number(parameters.maxFramerate);
+    const scaleResolutionDownBy = Number(parameters.scaleResolutionDownBy);
     const entry = this.sources.get(normalizedSource);
-    if (!entry || !Number.isFinite(maxBitrate) || maxBitrate <= 0) return false;
+    const hasValidParameter =
+      (Number.isFinite(maxBitrate) && maxBitrate > 0) ||
+      (Number.isFinite(maxFramerate) && maxFramerate > 0) ||
+      (Number.isFinite(scaleResolutionDownBy) && scaleResolutionDownBy >= 1);
+    if (!entry || !hasValidParameter) return false;
     await Promise.all(
       [...this.peers.values()].map((peer) =>
         this._setSourceParameters(peer, normalizedSource, parameters),

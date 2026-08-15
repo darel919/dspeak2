@@ -1,5 +1,6 @@
 import type { Ref } from "vue";
 import type { JitterBufferConfig } from "./adaptive-media.ts";
+import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 import type { VideoSettings } from "./video-settings.ts";
 
 export interface TopologyPeer {
@@ -42,6 +43,8 @@ export interface TopologyProviderSocket {
   connect: (options: {
     signalingUrl: string;
     ticket: string;
+    mediaCapabilities?: ParticipantMediaCapabilities | null;
+    capabilityProtocol?: string;
   }) => Promise<unknown>;
   send: (data: unknown) => unknown;
   close: () => void;
@@ -67,6 +70,7 @@ export interface TopologyNativeP2pOptions {
     source: string,
     track: MediaStreamTrack,
   ) => Record<string, unknown>;
+  mediaCapabilities?: ParticipantMediaCapabilities | null;
 }
 
 export interface TopologyProviderActionsContext {
@@ -83,6 +87,7 @@ export interface TopologyProviderActionsContext {
   ) => ((data: Record<string, unknown>) => unknown) | undefined;
   getProviderSocket: () => TopologyProviderSocket | null;
   getSelectedSfuProvider: () => string;
+  getMediaCapabilities?: () => ParticipantMediaCapabilities | null;
   getSfu: () => TopologySfuSession | null;
   handleProviderFailure: (data: Record<string, unknown>) => unknown;
   replayCloudflarePublications: (
@@ -111,6 +116,7 @@ export interface TopologyResourceHelpersContext {
   getAudioStereo: (source: string) => boolean;
   getEffectiveAudioBitrate: (source: string) => number | null;
   getIceServers: () => unknown[];
+  getMediaCapabilities?: () => ParticipantMediaCapabilities | null;
   getP2pMesh: () => TopologyP2pMesh | null;
   getRequestedVideoSettings: (source: string) => VideoSettings;
   getSelectedSfuProvider: () => string;
@@ -248,6 +254,7 @@ export interface TopologyControllerOptions {
   getAudioStereo: (source: string) => boolean;
   getEffectiveAudioBitrate: (source: string) => number | null;
   getIceServers: () => unknown[];
+  getMediaCapabilities?: () => ParticipantMediaCapabilities | null;
   getLocalPeerId: () => string | null;
   getMessageHandler: (
     type: string,

@@ -143,6 +143,8 @@ static int start_capture_request(const char* request_json, int* error_out) {
 
     g_capture_error.store(0);
     g_screen_frame_logged.store(false);
+    g_screen_audio_callback_logged.store(false);
+    g_screen_audio_emitted_logged.store(false);
     std::fprintf(stderr,
                  "[dspeak:media] native capture start source=%s type=%s mode=%s video=%ux%u@%u\n",
                  source_id.c_str(), source_type.c_str(), mode.c_str(), video_width,

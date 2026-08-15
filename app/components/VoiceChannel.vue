@@ -4,6 +4,8 @@
       v-if="capturePickerOpen"
       :open="capturePickerOpen"
       :audio-only="capturePickerAudioOnly"
+      :busy="capturePickerStarting"
+      :error-message="capturePickerError"
       @close="closeCapturePicker"
       @fallback="useBrowserCaptureFallback"
       @select="selectDesktopCapture"
@@ -253,10 +255,16 @@
           >
             <VideoFeed
               v-if="tile.type === 'feed'"
-              :feed-key="tile.feed.key"
+              :feed-key="tile.feed.logicalStreamId || tile.feed.key"
               :stream="tile.feed.stream"
               :native="tile.feed.native === true"
               :native-frame="tile.feed.frame || null"
+              :can-pop-out="
+                runtimeStore.isTauri &&
+                tile.feed.native === true &&
+                !tile.feed.local
+              "
+              :popped-out="isPoppedOut(tile.feed)"
               :source="tile.feed.source"
               :label="tile.feed.label"
               :muted="true"
@@ -269,6 +277,9 @@
               @start-receiving="setScreenReceiving(tile.feed, true)"
               @stop-receiving="setScreenReceiving(tile.feed, false)"
               @preview-change="setLocalPreview(tile.feed, $event)"
+              @pop-out="openMediaPopout(tile.feed)"
+              @focus-popup="focusMediaPopout(tile.feed)"
+              @pop-in="closeMediaPopout(tile.feed)"
             />
             <div
               v-else-if="tile.type === 'broadcast'"
@@ -813,6 +824,7 @@ import { useChannelsStore } from "~/stores/channels";
 import { useRuntimeStore } from "~/stores/runtime";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
 import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
+import { useDesktopMediaPopouts } from "../composables/useDesktopMediaPopouts";
 
 const DesktopCapturePicker = defineAsyncComponent(
   () => import("./DesktopCapturePicker.vue"),
@@ -837,6 +849,8 @@ const authStore = useAuthStore();
 const identityStore = useIdentityStore();
 const channelsStore = useChannelsStore();
 const runtimeStore = useRuntimeStore();
+const { openPopout, closePopout, focusPopout, isPoppedOut, syncPopoutFeeds } =
+  useDesktopMediaPopouts();
 const router = useRouter();
 const config = useRuntimeConfig();
 const viewMode = ref("overview");
@@ -910,7 +924,7 @@ const roomTiles = computed(() => {
     videoFeeds.value.map((feed) => String(feed.userId)),
   );
   const feeds = videoFeeds.value.map((feed) => ({
-    key: `feed-${feed.key}`,
+    key: `feed-${feed.logicalStreamId || feed.key}`,
     type: "feed",
     feed,
   }));
@@ -941,6 +955,10 @@ const ownCameraFeed = computed(
     videoFeeds.value.find((feed) => feed.local && feed.source === "camera") ||
     null,
 );
+
+watch(mediaFeedRevision, () => syncPopoutFeeds(videoFeeds.value), {
+  immediate: true,
+});
 
 const settingsStore = useSettingsStore();
 
@@ -1043,6 +1061,24 @@ function setLocalPreview(feed, enabled) {
   ).catch(() => {});
 }
 
+function openMediaPopout(feed) {
+  openPopout(feed).catch((error) => {
+    console.error("[VoiceChannel] Media popup error:", error);
+  });
+}
+
+function focusMediaPopout(feed) {
+  focusPopout(feed).catch((error) => {
+    console.error("[VoiceChannel] Media popup focus error:", error);
+  });
+}
+
+function closeMediaPopout(feed) {
+  closePopout(feed).catch((error) => {
+    console.error("[VoiceChannel] Media popup close error:", error);
+  });
+}
+
 function setSystemAudioReceiving(feed, receiving) {
   voiceStore.setRemoteSystemAudioReceiving(feed.key, receiving);
 }
@@ -1065,19 +1101,20 @@ async function toggleScreenShare() {
 
 const capturePickerOpen = ref(false);
 const capturePickerAudioOnly = ref(false);
+const capturePickerStarting = ref(false);
+const capturePickerError = ref("");
 
 async function requestScreenShare() {
   if (voiceStore.screenSharing) {
     await toggleScreenShare();
     return;
   }
-  if (runtimeStore.isTauri) {
-    const api = await getDesktopCaptureApi();
-    if (api) {
-      capturePickerAudioOnly.value = false;
-      capturePickerOpen.value = true;
-      return;
-    }
+  const api = await getDesktopCaptureApi();
+  if (runtimeStore.isTauri || api) {
+    capturePickerAudioOnly.value = false;
+    capturePickerError.value = "";
+    capturePickerOpen.value = true;
+    return;
   }
   await toggleScreenShare();
 }
@@ -1090,6 +1127,7 @@ async function requestSystemAudioShare() {
   const api = await getDesktopCaptureApi();
   if (runtimeStore.isTauri || api) {
     capturePickerAudioOnly.value = true;
+    capturePickerError.value = "";
     capturePickerOpen.value = true;
     return;
   }
@@ -1098,23 +1136,31 @@ async function requestSystemAudioShare() {
 
 function closeCapturePicker() {
   capturePickerOpen.value = false;
+  capturePickerError.value = "";
 }
 
 async function selectDesktopCapture(selection) {
-  capturePickerOpen.value = false;
+  capturePickerStarting.value = true;
+  capturePickerError.value = "";
   try {
     if (capturePickerAudioOnly.value) {
       await voiceStore.toggleSystemAudioShare(selection);
     } else {
       await voiceStore.toggleScreenShare(selection);
     }
+    capturePickerOpen.value = false;
   } catch (error) {
+    capturePickerError.value =
+      error?.message || "Native desktop sharing could not be started.";
     console.error("[VoiceChannel] Desktop capture selection error:", error);
+  } finally {
+    capturePickerStarting.value = false;
   }
 }
 
 async function useBrowserCaptureFallback() {
-  capturePickerOpen.value = false;
+  capturePickerStarting.value = true;
+  capturePickerError.value = "";
   try {
     if (capturePickerAudioOnly.value) {
       await voiceStore.toggleSystemAudioShare(null, {
@@ -1125,8 +1171,13 @@ async function useBrowserCaptureFallback() {
         explicitBrowserFallback: true,
       });
     }
+    capturePickerOpen.value = false;
   } catch (error) {
+    capturePickerError.value =
+      error?.message || "Browser capture could not be started.";
     console.error("[VoiceChannel] Browser capture fallback error:", error);
+  } finally {
+    capturePickerStarting.value = false;
   }
 }
 

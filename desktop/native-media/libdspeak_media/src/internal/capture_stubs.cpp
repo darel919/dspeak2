@@ -80,7 +80,10 @@ extern "C" int lib_dspeak_media_stop_microphone_capture(int* error_out) {
     return 0;
 }
 
-extern "C" int lib_dspeak_media_start_camera_capture(int* error_out) {
+extern "C" int lib_dspeak_media_start_camera_capture(
+    const char* settings_json,
+    int* error_out) {
+    (void)settings_json;
     if (error_out) *error_out = -100;
     return -1;
 }
@@ -137,4 +140,3 @@ extern "C" void lib_dspeak_media_stop_system_audio_capture(void) {}
 
 
 #endif
-

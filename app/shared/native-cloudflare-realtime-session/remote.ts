@@ -1,7 +1,306 @@
 import { asError, nativeRemoteFeedKey } from "../native-mediasoup-utils.ts";
 import { isPairedScreenAudio } from "../media-source-ownership.ts";
+import {
+  candidateFrameCount,
+  createCodecMigrationTelemetry,
+  hasAdvancingTimestamp,
+  isPresentableVideoFrame,
+  logicalVideoStreamId,
+} from "../video-codec-migration.ts";
 import type { NativeCloudflareEvent } from "../types/native-cloudflare.ts";
 import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
+
+export const NATIVE_CLOUDFLARE_CODEC_MIGRATION_TIMEOUT_MS = 5000;
+export const NATIVE_CLOUDFLARE_CODEC_MIGRATION_STABILIZATION_MS = 1500;
+export const NATIVE_CLOUDFLARE_CODEC_MIGRATION_REQUIRED_FRAMES = 3;
+export const NATIVE_CLOUDFLARE_CODEC_MIGRATION_MAX_FRAME_GAP_MS = 1000;
+
+function migrationTimer(value: unknown) {
+  return value as ReturnType<typeof setTimeout> | null;
+}
+
+function reportCodecMigrationState(
+  session: NativeCloudflareSessionSurface,
+  entry: Record<string, unknown>,
+  state: "stable" | "abort",
+  reason?: string,
+) {
+  if (!entry.variantId || !entry.logicalStreamId) return false;
+  try {
+    return session.send?.({
+      type: "codec-migration-state",
+      data: {
+        receiverId: session.localPeerId,
+        logicalStreamId: entry.logicalStreamId,
+        variantId: entry.variantId,
+        generation: Math.max(1, Math.floor(Number(entry.generation) || 1)),
+        state,
+        ...(reason ? { reason } : {}),
+      },
+    });
+  } catch (error) {
+    session.onError?.(
+      asError(error, "Cloudflare codec migration report failed"),
+    );
+    return false;
+  }
+}
+
+function abortVideoMigration(
+  session: NativeCloudflareSessionSurface,
+  candidate: Record<string, unknown>,
+  reason: string,
+) {
+  if (candidate.closed) return false;
+  const logicalStreamId = String(candidate.logicalStreamId || "");
+  const logicalState = session.logicalVideoStreams.get(logicalStreamId);
+  const current = logicalState?.currentConsumerId
+    ? session.consumers.get(logicalState.currentConsumerId)
+    : null;
+  const timer = migrationTimer(candidate.migrationTimer);
+  if (timer) clearTimeout(timer);
+  candidate.migrationTimer = null;
+  candidate.migrationState = "abort";
+  if (
+    logicalState &&
+    logicalState.candidateConsumerId === candidate.consumerId
+  ) {
+    logicalState.candidateConsumerId = null;
+    logicalState.candidateVariantId = null;
+    logicalState.state = "stable";
+    if (current) logicalState.generation = Number(current.generation) || 1;
+  }
+  session.codecMigrationTelemetry.push(
+    createCodecMigrationTelemetry(logicalStreamId, "abort", {
+      codec: String(candidate.codec || "") || undefined,
+      generation: Number(candidate.generation) || undefined,
+      durationMs: Number.isFinite(Number(candidate.migrationStartedAt))
+        ? Math.max(0, Date.now() - Number(candidate.migrationStartedAt))
+        : undefined,
+      abortReason: reason,
+      frameCount: Number(candidate.presentableFrames) || 0,
+    }),
+  );
+  reportCodecMigrationState(session, candidate, "abort", reason);
+  void session
+    .invoke("media_p2p_set_receive_enabled", {
+      p2pHandle: candidate.p2pHandle,
+      trackId: candidate.trackId,
+      enabled: false,
+    })
+    .catch(() => {});
+  session._closeConsumer(candidate);
+  if (current?.transportEnded) session._closeConsumer(current);
+  session._emitState();
+  return true;
+}
+
+function rollbackVideoMigration(
+  session: NativeCloudflareSessionSurface,
+  candidate: Record<string, unknown>,
+  reason: string,
+) {
+  if (candidate.closed) return false;
+  const logicalStreamId = String(candidate.logicalStreamId || "");
+  const logicalState = session.logicalVideoStreams.get(logicalStreamId);
+  const previous = [...session.consumers.values()].find(
+    (entry) =>
+      entry !== candidate &&
+      entry.kind === "video" &&
+      entry.logicalStreamId === logicalStreamId &&
+      entry.visible === false &&
+      entry.superseded === true &&
+      entry.migrationState === "committing" &&
+      entry.closed !== true,
+  );
+  if (!previous) return false;
+  const timer = migrationTimer(candidate.migrationTimer);
+  if (timer) clearTimeout(timer);
+  candidate.migrationTimer = null;
+  candidate.visible = false;
+  candidate.superseded = true;
+  candidate.migrationState = "abort";
+  if (logicalState) {
+    logicalState.currentConsumerId = String(previous.consumerId || "");
+    logicalState.currentVariantId = String(previous.variantId || "") || null;
+    logicalState.candidateConsumerId = null;
+    logicalState.candidateVariantId = null;
+    logicalState.state = "stable";
+    logicalState.generation =
+      Number(previous.generation) || logicalState.generation;
+  }
+  const candidateKey = String(candidate.key || "");
+  const candidateFeed = session.remoteVideoFeeds.get(candidateKey);
+  if (candidateFeed?.consumerId === candidate.consumerId)
+    session.remoteVideoFeeds.delete(candidateKey);
+  const previousKey = String(previous.key || "");
+  session.remoteVideoFeeds.set(previousKey, { ...previous });
+  session.codecMigrationTelemetry.push(
+    createCodecMigrationTelemetry(logicalStreamId, "abort", {
+      codec: String(candidate.codec || "") || undefined,
+      previousCodec: String(previous.codec || "") || undefined,
+      generation: Number(candidate.generation) || undefined,
+      durationMs: Number.isFinite(Number(candidate.migrationStartedAt))
+        ? Math.max(0, Date.now() - Number(candidate.migrationStartedAt))
+        : undefined,
+      abortReason: reason,
+      frameCount: Number(candidate.presentableFrames) || 0,
+    }),
+  );
+  reportCodecMigrationState(session, candidate, "abort", reason);
+  session._closeConsumer(candidate);
+  previous.visible = true;
+  previous.superseded = false;
+  previous.migrationState = "stable";
+  session.remoteVideoFeeds.set(previousKey, { ...previous });
+  session.onRemoteTrack?.(previous);
+  session._emitState();
+  return true;
+}
+
+export function finalizeVideoMigration(
+  session: NativeCloudflareSessionSurface,
+  candidate: Record<string, unknown>,
+) {
+  if (candidate.closed || candidate.migrationState !== "committing")
+    return false;
+  const healthy = Boolean(
+    isPresentableVideoFrame(
+      candidate.frame as Parameters<typeof isPresentableVideoFrame>[0],
+    ) &&
+    Number(candidate.presentableFrames) >=
+      NATIVE_CLOUDFLARE_CODEC_MIGRATION_REQUIRED_FRAMES &&
+    Number.isFinite(Number(candidate.lastFrameAt)) &&
+    Date.now() - Number(candidate.lastFrameAt) <=
+      NATIVE_CLOUDFLARE_CODEC_MIGRATION_MAX_FRAME_GAP_MS,
+  );
+  if (!healthy) {
+    if (rollbackVideoMigration(session, candidate, "candidate-stalled"))
+      return true;
+    const logicalStreamId = String(candidate.logicalStreamId || "");
+    const logicalState = session.logicalVideoStreams.get(logicalStreamId);
+    if (
+      !logicalState ||
+      String(logicalState.currentConsumerId) !== String(candidate.consumerId)
+    )
+      return false;
+    const timer = migrationTimer(candidate.migrationTimer);
+    if (timer) clearTimeout(timer);
+    candidate.migrationTimer = null;
+    candidate.migrationState = "stable";
+    logicalState.state = "stable";
+    const previous = [...session.consumers.values()].find(
+      (entry) =>
+        entry !== candidate &&
+        entry.kind === "video" &&
+        entry.logicalStreamId === logicalStreamId &&
+        entry.visible === false &&
+        entry.superseded === true &&
+        entry.closed !== true,
+    );
+    if (previous) session._closeConsumer(previous);
+    session.codecMigrationTelemetry.push(
+      createCodecMigrationTelemetry(logicalStreamId, "stable", {
+        codec: String(candidate.codec || "") || undefined,
+        generation: Number(candidate.generation) || undefined,
+        durationMs: Number.isFinite(Number(candidate.migrationStartedAt))
+          ? Math.max(0, Date.now() - Number(candidate.migrationStartedAt))
+          : undefined,
+        frameCount: Number(candidate.presentableFrames) || 0,
+      }),
+    );
+    reportCodecMigrationState(session, candidate, "stable");
+    session._emitState();
+    return true;
+  }
+  const logicalStreamId = String(candidate.logicalStreamId || "");
+  const logicalState = session.logicalVideoStreams.get(logicalStreamId);
+  if (
+    !logicalState ||
+    String(logicalState.currentConsumerId) !== String(candidate.consumerId)
+  )
+    return false;
+  const timer = migrationTimer(candidate.migrationTimer);
+  if (timer) clearTimeout(timer);
+  candidate.migrationTimer = null;
+  const previous = [...session.consumers.values()].find(
+    (entry) =>
+      entry !== candidate &&
+      entry.kind === "video" &&
+      entry.logicalStreamId === logicalStreamId &&
+      entry.visible === false &&
+      entry.superseded === true &&
+      entry.closed !== true,
+  );
+  candidate.migrationState = "stable";
+  logicalState.state = "stable";
+  if (previous) session._closeConsumer(previous);
+  session.codecMigrationTelemetry.push(
+    createCodecMigrationTelemetry(logicalStreamId, "stable", {
+      codec: String(candidate.codec || "") || undefined,
+      previousCodec: String(previous?.codec || "") || undefined,
+      generation: Number(candidate.generation) || undefined,
+      durationMs: Number.isFinite(Number(candidate.migrationStartedAt))
+        ? Math.max(0, Date.now() - Number(candidate.migrationStartedAt))
+        : undefined,
+      frameCount: Number(candidate.presentableFrames) || 0,
+    }),
+  );
+  reportCodecMigrationState(session, candidate, "stable");
+  session._emitState();
+  return true;
+}
+
+function commitVideoMigration(
+  session: NativeCloudflareSessionSurface,
+  candidate: Record<string, unknown>,
+) {
+  const logicalStreamId = String(candidate.logicalStreamId || "");
+  const logicalState = session.logicalVideoStreams.get(logicalStreamId);
+  if (
+    !logicalState ||
+    logicalState.candidateConsumerId !== candidate.consumerId
+  )
+    return false;
+  const previous = logicalState.currentConsumerId
+    ? session.consumers.get(logicalState.currentConsumerId)
+    : null;
+  const timer = migrationTimer(candidate.migrationTimer);
+  if (timer) clearTimeout(timer);
+  candidate.migrationTimer = null;
+  candidate.visible = true;
+  candidate.migrationState = "committing";
+  logicalState.currentConsumerId = String(candidate.consumerId);
+  logicalState.currentVariantId = String(candidate.variantId || "") || null;
+  logicalState.candidateConsumerId = null;
+  logicalState.candidateVariantId = null;
+  logicalState.state = "committing";
+  logicalState.generation =
+    Number(candidate.generation) || logicalState.generation;
+  for (const [key, feed] of session.remoteVideoFeeds) {
+    if (
+      key !== String(candidate.key || "") &&
+      feed.logicalStreamId === logicalStreamId
+    )
+      session.remoteVideoFeeds.delete(key);
+  }
+  session.remoteVideoFeeds.set(String(candidate.key || ""), { ...candidate });
+  if (previous && previous.consumerId !== candidate.consumerId) {
+    previous.superseded = true;
+    previous.visible = false;
+    previous.migrationState = "committing";
+  }
+  const stabilizationTimer = setTimeout(
+    () => finalizeVideoMigration(session, candidate),
+    NATIVE_CLOUDFLARE_CODEC_MIGRATION_STABILIZATION_MS,
+  );
+  candidate.migrationTimer = stabilizationTimer;
+  stabilizationTimer.unref?.();
+  session.onRemoteTrack?.(candidate);
+  session._emitState();
+  return true;
+}
+
 export interface NativeCloudflareRemoteMethods extends NativeCloudflareSessionSurface {}
 export class NativeCloudflareRemoteMethods {
   async setRemoteReceiving(
@@ -108,9 +407,36 @@ export class NativeCloudflareRemoteMethods {
     );
   }
 
+  takePendingLocalVideoFrame(source: string) {
+    const frame = this.pendingLocalVideoFrames.get(source) || null;
+    if (frame) this.pendingLocalVideoFrames.delete(source);
+    return frame;
+  }
+
   handleReceiveEvent(event: NativeCloudflareEvent = {}) {
     const payload = event.payload || {};
     const eventHandle = payload.handle == null ? null : String(payload.handle);
+    if (event.kind === 5) {
+      const source = String(payload.source || event.id || "");
+      if (!source || typeof event.data !== "string" || !event.data)
+        return false;
+      const frame = {
+        ...payload,
+        source,
+        data: event.data,
+        eventId: event.eventId,
+      };
+      const feed = this.localVideoFeeds.get(source);
+      if (!feed) {
+        this.pendingLocalVideoFrames.set(source, frame);
+        return true;
+      }
+      this.localVideoFeeds.set(source, {
+        ...feed,
+        frame,
+      });
+      return true;
+    }
     if (event.kind === 4) {
       if (eventHandle !== null && eventHandle !== String(this.handle))
         return false;
@@ -126,7 +452,44 @@ export class NativeCloudflareRemoteMethods {
         const entry = [...this.consumers.values()].find(
           (candidate) => candidate.trackId === trackId,
         );
-        if (entry) this._closeConsumer(entry);
+        if (entry) {
+          const replacement =
+            entry.kind === "video"
+              ? [...this.consumers.values()].find(
+                  (candidate) =>
+                    candidate !== entry &&
+                    candidate.kind === "video" &&
+                    candidate.logicalStreamId === entry.logicalStreamId &&
+                    candidate.visible === false &&
+                    candidate.migrationState === "warming-receivers" &&
+                    !candidate.closed,
+                )
+              : null;
+          if (replacement) {
+            entry.receiving = false;
+            entry.transportEnded = true;
+            this._emitState();
+            return true;
+          }
+          if (
+            entry.kind === "video" &&
+            entry.visible === false &&
+            entry.migrationState === "warming-receivers"
+          ) {
+            abortVideoMigration(this, entry, "candidate-track-removed");
+            return true;
+          }
+          if (
+            entry.kind === "video" &&
+            entry.visible !== false &&
+            entry.migrationState === "committing"
+          ) {
+            if (!rollbackVideoMigration(this, entry, "candidate-track-removed"))
+              this._closeConsumer(entry);
+            return true;
+          }
+          this._closeConsumer(entry);
+        }
         return true;
       }
       return true;
@@ -140,14 +503,43 @@ export class NativeCloudflareRemoteMethods {
     );
     if (!entry) return false;
     if (entry.kind === "video" && event.data) {
-      entry.frame = {
+      const timestamp = Number(payload.timestamp ?? payload.timestampMs);
+      const frame = {
         ...payload,
         data: event.data,
         eventId: event.eventId,
+        ...(Number.isFinite(timestamp) ? { timestamp } : {}),
       };
+      const previousTimestamp =
+        entry.lastFrameTimestamp == null
+          ? null
+          : Number(entry.lastFrameTimestamp);
+      entry.presentableFrames = candidateFrameCount(
+        Number(entry.presentableFrames) || 0,
+        previousTimestamp,
+        frame,
+      );
+      if (Number.isFinite(timestamp)) entry.lastFrameTimestamp = timestamp;
+      entry.lastFrameAt = Date.now();
+      entry.frame = frame;
+      if (
+        entry.visible === false &&
+        entry.migrationState === "warming-receivers"
+      ) {
+        if (
+          Number(entry.presentableFrames) >=
+            NATIVE_CLOUDFLARE_CODEC_MIGRATION_REQUIRED_FRAMES &&
+          hasAdvancingTimestamp(previousTimestamp, timestamp) &&
+          isPresentableVideoFrame(frame)
+        )
+          commitVideoMigration(this, entry);
+        this._emitState();
+        return true;
+      }
+      if (entry.visible === false || entry.superseded === true) return true;
       this.remoteVideoFeeds.set(String(entry.key || ""), { ...entry });
     }
-    this.onRemoteTrack?.(entry);
+    if (entry.visible !== false) this.onRemoteTrack?.(entry);
     this._emitState();
     return true;
   }
@@ -185,25 +577,47 @@ export class NativeCloudflareRemoteMethods {
     const kind = payload.kind === "video" ? "video" : "audio";
     const source = String(publication.source || kind);
     const trackName = String(publication.trackName || "");
-    const previous = this.consumers.get(trackName);
+    const userId =
+      typeof publication.userId === "string" ||
+      typeof publication.userId === "number"
+        ? publication.userId
+        : null;
+    const logicalStream = String(
+      publication.logicalStreamId || logicalVideoStreamId(userId, source),
+    );
+    const logicalState = this.logicalVideoStreams.get(logicalStream);
+    const previous =
+      kind === "video" && logicalState?.currentConsumerId
+        ? this.consumers.get(logicalState.currentConsumerId)
+        : [...this.consumers.values()].find(
+            (candidate) =>
+              candidate.trackName === trackName && !candidate.closed,
+          );
     if (previous?.trackId === trackId) return true;
-    if (previous) this._closeConsumer(previous);
-    const entry = {
-      key: nativeRemoteFeedKey(
-        typeof publication.userId === "string" ||
-          typeof publication.userId === "number"
-          ? publication.userId
-          : null,
-        source,
-        trackName,
-      ),
+    const isVideoMigration = Boolean(
+      kind === "video" && previous && previous.trackId !== trackId,
+    );
+    if (previous && !isVideoMigration) this._closeConsumer(previous);
+    const consumerId = isVideoMigration ? `${trackName}:${trackId}` : trackName;
+    const generation = Math.max(
+      1,
+      Math.floor(Number(publication.generation) || 1),
+    );
+    const variantId =
+      typeof publication.variantId === "string" ? publication.variantId : null;
+    const codec =
+      typeof publication.codec === "string" ? publication.codec : null;
+    const previousVariantId =
+      typeof previous?.variantId === "string" ? previous.variantId : null;
+    const entry: Record<string, unknown> = {
+      key: nativeRemoteFeedKey(userId, source, trackName),
       id: trackId,
-      consumerId: trackName,
+      consumerId,
       producerId: trackName,
       trackId,
       mid,
-      userId: publication.userId,
-      peerId: publication.peerId,
+      userId,
+      peerId: publication.peerId == null ? null : String(publication.peerId),
       source,
       ownerSource: publication.ownerSource || null,
       kind,
@@ -220,10 +634,86 @@ export class NativeCloudflareRemoteMethods {
         }),
       closed: false,
       p2pHandle: this.handle,
+      logicalStreamId: logicalStream,
+      generation,
+      variantId,
+      codec,
+      codecAcceleration:
+        typeof publication.codecAcceleration === "string"
+          ? publication.codecAcceleration
+          : null,
+      codecImplementation:
+        typeof publication.codecImplementation === "string"
+          ? publication.codecImplementation
+          : null,
+      width: Number.isFinite(Number(publication.width))
+        ? Math.floor(Number(publication.width))
+        : null,
+      height: Number.isFinite(Number(publication.height))
+        ? Math.floor(Number(publication.height))
+        : null,
+      fps: Number.isFinite(Number(publication.fps))
+        ? Math.floor(Number(publication.fps))
+        : null,
+      bitrate: Number.isFinite(Number(publication.bitrate))
+        ? Math.floor(Number(publication.bitrate))
+        : null,
+      target:
+        publication.target && typeof publication.target === "object"
+          ? { ...publication.target }
+          : null,
+      targetAdjusted: publication.targetAdjusted === true,
+      migrationState: isVideoMigration ? "warming-receivers" : "stable",
+      presentableFrames: 0,
+      lastFrameTimestamp: null,
+      lastFrameAt: null,
+      visible: !isVideoMigration,
+      superseded: false,
+      migrationStartedAt: isVideoMigration ? Date.now() : null,
+      migrationTimer: null,
     };
-    this.consumers.set(trackName, entry);
-    if (kind === "audio") this.remoteAudioFeeds.set(entry.key, entry);
-    else this.remoteVideoFeeds.set(entry.key, entry);
+    this.consumers.set(consumerId, entry);
+    if (kind === "audio")
+      this.remoteAudioFeeds.set(String(entry.key || ""), entry);
+    else if (isVideoMigration && previous) {
+      const currentCandidateId = logicalState?.candidateConsumerId;
+      if (currentCandidateId) {
+        const currentCandidate = this.consumers.get(currentCandidateId);
+        if (currentCandidate) this._closeConsumer(currentCandidate);
+      }
+      this.logicalVideoStreams.set(logicalStream, {
+        logicalStreamId: logicalStream,
+        generation,
+        currentVariantId: previousVariantId,
+        candidateVariantId: variantId,
+        state: "warming-receivers",
+        currentConsumerId: String(previous.consumerId),
+        candidateConsumerId: consumerId,
+      });
+      const migrationTimerHandle = setTimeout(() => {
+        abortVideoMigration(this, entry, "candidate-timeout");
+      }, NATIVE_CLOUDFLARE_CODEC_MIGRATION_TIMEOUT_MS);
+      entry.migrationTimer = migrationTimerHandle;
+      migrationTimerHandle.unref?.();
+      this.codecMigrationTelemetry.push(
+        createCodecMigrationTelemetry(logicalStream, "warming-receivers", {
+          codec: String(entry.codec || "") || undefined,
+          previousCodec: String(previous.codec || "") || undefined,
+          generation,
+        }),
+      );
+    } else {
+      this.logicalVideoStreams.set(logicalStream, {
+        logicalStreamId: logicalStream,
+        generation,
+        currentVariantId: variantId,
+        candidateVariantId: null,
+        state: "stable",
+        currentConsumerId: consumerId,
+        candidateConsumerId: null,
+      });
+      this.remoteVideoFeeds.set(String(entry.key || ""), entry);
+    }
     if (!entry.receiving)
       void this.invoke("media_p2p_set_receive_enabled", {
         p2pHandle: this.handle,
@@ -231,7 +721,9 @@ export class NativeCloudflareRemoteMethods {
         enabled: false,
       }).catch((error: unknown) => this.onError?.(error));
     this.applyJitterBufferConfig(entry);
-    this.onRemoteTrack?.(entry);
+    if (entry.kind === "video" && !isVideoMigration)
+      reportCodecMigrationState(this, entry, "stable");
+    if (entry.visible !== false) this.onRemoteTrack?.(entry);
     this._emitState();
     return true;
   }

@@ -27,6 +27,7 @@ describe("native media authentication", () => {
   it("does not duplicate the absolute API base during bootstrap", async () => {
     const originalFetch = globalThis.fetch;
     let request;
+    let configured;
     globalThis.fetch = async (input, init) => {
       request = { input, init };
       return {
@@ -43,7 +44,11 @@ describe("native media authentication", () => {
             apiPath: "https://api.example.test/api",
           },
           nativeAuthToken: "access-token",
-          nativeSession: { configureControl() {} },
+          nativeSession: {
+            configureControl(value) {
+              configured = value;
+            },
+          },
         },
         "channel-id",
         "room-id",
@@ -54,5 +59,6 @@ describe("native media authentication", () => {
 
     assert.equal(request.input, "https://api.example.test/api/media/bootstrap");
     assert.equal(request.init.headers.Authorization, "Bearer access-token");
+    assert.equal(typeof configured.refreshControl, "function");
   });
 });

@@ -48,7 +48,7 @@ extern "C" lib_dspeak_media_recv_transport_t* lib_dspeak_media_create_recv_trans
 extern "C" void lib_dspeak_media_destroy_recv_transport(
     lib_dspeak_media_recv_transport_t*) {}
 
-extern "C" lib_dspeak_media_action_t lib_dspeak_media_poll_action(void)
+extern "C" lib_dspeak_media_action_t lib_dspeak_media_drain_action(void)
 {
     return {};
 }

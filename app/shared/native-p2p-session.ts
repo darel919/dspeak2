@@ -21,6 +21,7 @@ export class NativeP2pSession {
     getAudioBitrate,
     getAudioStereo,
     getVideoSettings,
+    mediaCapabilities = null,
     disconnectGraceMs = P2P_DISCONNECT_GRACE_MS,
     iceRestartTimeoutMs = P2P_ICE_RESTART_TIMEOUT_MS,
   }: NativeP2pSessionOptions) {
@@ -36,6 +37,7 @@ export class NativeP2pSession {
     this.getAudioBitrate = getAudioBitrate;
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
+    this.mediaCapabilities = mediaCapabilities;
     this.disconnectGraceMs = disconnectGraceMs;
     this.iceRestartTimeoutMs = iceRestartTimeoutMs;
     this.peers = new Map();
@@ -44,6 +46,9 @@ export class NativeP2pSession {
     this.remoteReceiving = new Map();
     this.trackEntries = new Map();
     this.retiredTrackEntries = new Map();
+    this.codecMigrationTelemetry = [];
+    this.videoDecodeOverloadTelemetry = [];
+    this.codecRuntimeTelemetry = [];
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
     this.mode = "idle";

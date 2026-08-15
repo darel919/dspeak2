@@ -2,7 +2,11 @@ import { shallowRef } from "vue";
 import { MediaEngine } from "../../shared/media/contracts.ts";
 import { mediaSignalingUrl } from "../../shared/media-signaling-socket.ts";
 import { getAudioBitrateBps } from "../../shared/voice-transport.ts";
-import { resolveRequestedVideoSettings } from "../../shared/video-settings.ts";
+import {
+  applyLowSpecNativeVideoProfile,
+  isLowSpecNativeRuntime,
+  resolveRequestedVideoSettings,
+} from "../../shared/video-settings.ts";
 import {
   DEFAULT_FLAGS,
   channelMediaPolicy,
@@ -35,8 +39,6 @@ import {
   setIceServers,
   setTopology,
   shutdown,
-  startNativeActionPump,
-  stopNativeActionPump,
   syncLocalFeeds,
   syncNativeFeeds,
 } from "./native-media-engine-runtime.ts";
@@ -57,8 +59,13 @@ import {
   startNativeAudioTelemetry,
   stopNativeAudioTelemetry,
 } from "./native-media-engine-audio.ts";
+import {
+  startNativeVideoAdaptation,
+  stopNativeVideoAdaptation,
+} from "./native-media-engine-adaptation.ts";
 import type {
   NativeCaptureRequest,
+  NativeCapabilities,
   NativeErrorLike,
   NativeMediaEngineOptions,
   NativeMediaFlags,
@@ -178,7 +185,9 @@ export class NativeMediaEngine extends MediaEngine {
         source === "screen-audio" ||
         channelMediaPolicy(this.channelsStore, this.voiceStore)?.hdAudio ===
           true);
-    this.getVideoSettings =
+    const lowSpecNativeRuntime =
+      (nativeOnly || Boolean(tauri)) && isLowSpecNativeRuntime();
+    const requestedVideoSettings =
       getVideoSettings ||
       ((source: string) =>
         resolveRequestedVideoSettings({
@@ -197,13 +206,21 @@ export class NativeMediaEngine extends MediaEngine {
           },
           source,
         }));
+    this.getVideoSettings = (source: string) =>
+      applyLowSpecNativeVideoProfile(
+        requestedVideoSettings(source),
+        source,
+        lowSpecNativeRuntime,
+      );
     this.listeners = new Map();
     this.unlisten = [];
     this.initialized = false;
     this.activeScreenCapture = null;
     this.activeSystemAudioCapture = null;
     this.microphoneOperation = Promise.resolve();
-    this.nativeActionPump = null;
+    this.cameraOperation = Promise.resolve();
+    this.screenOperation = Promise.resolve();
+    this.nativeEventOperation = null;
     this.nativeSession = null;
     this.nativeP2pSession = null;
     this.nativeActionHandler = null;
@@ -227,14 +244,19 @@ export class NativeMediaEngine extends MediaEngine {
     this.nativeTopologyOperation = null;
     this.onQoe = onQoe;
     this.qoeTimer = null;
-    this.nativeAudioTelemetryTimer = null;
-    this.nativeAudioTelemetryPoll = null;
+    this.nativeVideoAdaptationTimer = null;
+    this.nativeVideoAdaptationOperation = null;
+    this.nativeVideoAdaptationStates = new Map();
+    this.nativeVideoAdaptationCounters = new Map();
+    this.nativeVideoDecodeAdaptationStates = new Map();
+    this.nativeVideoDecodeAdaptationCounters = new Map();
     this.nativeNoiseFloorEstimator = null;
     this.nativeSpeaking = false;
     this.nativeActiveSamples = 0;
     this.nativeQuietSamples = 0;
     this.nativeEchoDetector = null;
     this.nativeAuthToken = "";
+    this.mediaCapabilities = null;
   }
 
   override async initialize(config: NativeCaptureRequest = {}): Promise<void> {
@@ -247,6 +269,14 @@ export class NativeMediaEngine extends MediaEngine {
 
   _stopNativeAudioTelemetry() {
     stopNativeAudioTelemetry(this);
+  }
+
+  _startNativeVideoAdaptation() {
+    startNativeVideoAdaptation(this);
+  }
+
+  _stopNativeVideoAdaptation() {
+    stopNativeVideoAdaptation(this);
   }
 
   async setMicrophoneDevice(deviceId: string) {
@@ -536,6 +566,7 @@ export class NativeMediaEngine extends MediaEngine {
         await this._configureNativeControl(input.channelId, input.roomId);
         phase = "native-connect";
         await this.nativeSession?.connect(input.channelId);
+        await this._invoke("media_join", { channelId: input.channelId });
         const outputDeviceId = this.settingsStore?.outputDeviceId;
         if (typeof outputDeviceId === "string" && outputDeviceId.length > 0)
           await this.setOutputDevice(outputDeviceId);
@@ -955,7 +986,7 @@ export class NativeMediaEngine extends MediaEngine {
     if (failure) throw failure;
   }
 
-  _mergeNativeCapabilities(capabilities: NativeMediaFlags = this.flags) {
+  _mergeNativeCapabilities(capabilities: NativeCapabilities = this.flags) {
     return mergeNativeCapabilities(this, capabilities);
   }
 
@@ -984,14 +1015,6 @@ export class NativeMediaEngine extends MediaEngine {
 
   _syncLocalFeeds() {
     return syncLocalFeeds(this);
-  }
-
-  _startNativeActionPump() {
-    return startNativeActionPump(this);
-  }
-
-  _stopNativeActionPump() {
-    return stopNativeActionPump(this);
   }
 
   async _bindNativeEvents() {

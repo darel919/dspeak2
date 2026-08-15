@@ -95,6 +95,11 @@ test("error and toast overlays own their Metro geometry", async () => {
   assert.match(fatalPrompt, /fatal-error-flyout/);
   assert.match(fatalPrompt, /width: min\(100%, 32rem\)/);
   assert.match(fatalPrompt, /padding: var\(--metro-space-6\)/);
+  assert.match(fatalPrompt, /descriptor\?\.title/);
+  assert.match(fatalPrompt, /descriptor\?\.recoveryLabel/);
+  assert.match(fatalPrompt, /Restarting…/);
+  assert.match(fatalPrompt, /v-if="recoveryError"/);
+  assert.doesNotMatch(fatalPrompt, /modal-close|@click="close|@click="dismiss/);
   assert.match(toastContainer, /metro-toast-region/);
   assert.match(
     toastContainer,

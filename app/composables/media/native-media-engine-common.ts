@@ -1,6 +1,3 @@
-export const NATIVE_ACTION_POLL_IDLE_MS = 100;
-export const NATIVE_ACTION_POLL_ACTIVE_MS = 5;
-
 export const NATIVE_EVENT_NAMES = [
   "media:state",
   "media:local-track",
@@ -13,6 +10,8 @@ export const NATIVE_EVENT_NAMES = [
   "media:device-change",
   "media:permission",
   "media:error",
+  "media:native-action",
+  "media:native-receive-event",
 ];
 
 export const EVENT_ALIASES = Object.freeze({
@@ -27,6 +26,8 @@ export const EVENT_ALIASES = Object.freeze({
   "media:device-change": "device-change",
   "media:permission": "permission",
   "media:error": "error",
+  "media:native-action": "native-action",
+  "media:native-receive-event": "native-receive-event",
 });
 
 export const DEFAULT_FLAGS = Object.freeze({

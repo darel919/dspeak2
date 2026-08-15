@@ -262,7 +262,10 @@ export class NativeP2pSourcesMethods {
         entry.track,
         entry.stream || new MediaStream([entry.track]),
       );
-      applyP2pVideoCodecPreferences(state.pc);
+      applyP2pVideoCodecPreferences(
+        state.pc,
+        state.selectedCodec ? [state.selectedCodec] : null,
+      );
       state.senders.set(source, sender);
       this.signal(state.peerId, {
         source: {

@@ -6,6 +6,7 @@ import {
   desktopCaptureRequest,
   hasTauriRuntimeMarker,
   isDesktopCaptureSelection,
+  nativeCaptureFailure,
   normalizeCaptureSources,
   assertDesktopCaptureMode,
 } from "../app/shared/desktop-capture.ts";
@@ -73,6 +74,26 @@ describe("desktop capture contract", () => {
       maxBitrateBps: 96000,
     });
     assert.equal(selection.video.frameRate, 60);
+  });
+
+  it("preserves structured native errors across the Tauri boundary", () => {
+    const failure = nativeCaptureFailure(
+      {
+        code: "DESKTOP_CAPTURE_START_FAILED",
+        operation: "screen-video",
+        message: "native screen capture failed to start",
+        details: { nativeErrorCode: -209 },
+      },
+      { operation: "screen-video" },
+    );
+
+    assert.equal(failure.message, "native screen capture failed to start");
+    assert.equal(failure.code, "DESKTOP_CAPTURE_START_FAILED");
+    assert.deepEqual(failure.details, { nativeErrorCode: -209 });
+    assert.equal(
+      nativeCaptureFailure("native media worker is not running").message,
+      "native media worker is not running",
+    );
   });
 
   it("rejects a capture selection when its operation requires another mode", () => {
@@ -170,6 +191,38 @@ describe("desktop capture contract", () => {
     });
   });
 
+  it("allows the native low-spec profile to cap screen capture before capture starts", () => {
+    const selection = createDesktopCaptureSelection(
+      {
+        sourceId: "display:main",
+        sourceType: "display",
+        bounds: { width: 2560, height: 1440 },
+        selfExcluded: true,
+        capabilities: { video: true, audio: true, stereo: true },
+      },
+      "video",
+    );
+    const request = desktopCaptureRequest(selection, {
+      video: {
+        resolution: "720p",
+        width: 1280,
+        height: 720,
+        frameRate: 15,
+        lowSpec: true,
+      },
+    });
+
+    assert.deepEqual(request.video, {
+      resolution: "720p",
+      frameRate: 15,
+      qualityPriority: "framerate",
+      width: 1280,
+      height: 720,
+      lowSpec: true,
+    });
+    assert.deepEqual(request.captureSelection.video, request.video);
+  });
+
   it("builds the exact native request for macOS system audio", () => {
     const selection = createDesktopCaptureSelection(
       {
@@ -206,5 +259,106 @@ describe("desktop capture contract", () => {
     assert.match(source, /@click="requestSystemAudioShare"/);
     assert.match(source, /:audio-only="capturePickerAudioOnly"/);
     assert.doesNotMatch(source, /@click="voiceStore\.toggleSystemAudioShare"/);
+  });
+
+  it("routes the voice-channel screen action through the desktop picker", async () => {
+    const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+    assert.match(source, /const api = await getDesktopCaptureApi\(\);/);
+    assert.match(source, /if \(runtimeStore\.isTauri \|\| api\)/);
+    assert.match(source, /capturePickerOpen\.value = true;/);
+  });
+
+  it("enumerates native sources through a short-lived media preparation probe", async () => {
+    const picker = await readFile(
+      "app/components/DesktopCapturePicker.vue",
+      "utf8",
+    );
+    const desktop = await readFile(
+      "desktop/src-tauri/src/desktop/mod.rs",
+      "utf8",
+    );
+    assert.match(picker, /media_prepare_capture/);
+    assert.doesNotMatch(picker, /media_list_capture_sources/);
+    assert.match(desktop, /media::media_prepare_capture/);
+  });
+
+  it("loads picker sources on mount, retries transient empty snapshots, and keeps all sources last", async () => {
+    const picker = await readFile(
+      "app/components/DesktopCapturePicker.vue",
+      "utf8",
+    );
+    assert.match(picker, /\{ immediate: true \}/);
+    assert.match(
+      picker,
+      /const sourceRetryDelaysMs = \[150, 400, 900, 1500, 2500\]/,
+    );
+    assert.match(picker, /await api\.invoke\("media_prepare_capture"\)/);
+    assert.match(
+      picker,
+      /if \(nextSources\.length \|\| attempt >= sourceRetryDelaysMs\.length\)/,
+    );
+    assert.equal(
+      picker.indexOf('{ value: "all", label: "All sources"'),
+      picker.lastIndexOf('{ value: "all", label: "All sources"'),
+    );
+    assert.ok(
+      picker.indexOf('{ value: "all", label: "All sources"') >
+        picker.indexOf('{ value: "display", label: "Displays"'),
+    );
+    assert.match(
+      picker,
+      /const selectedMode = props\.audioOnly \? "audio" : mode\.value/,
+    );
+    assert.match(picker, /mode\.value = audioOnly \? "audio" : "video"/);
+    assert.match(picker, /function selectSource\(source\)/);
+    assert.match(
+      picker,
+      /:disabled="!selectedSource \|\| !mode \|\| loading \|\| busy"/,
+    );
+    assert.match(picker, /errorMessage: \{ type: String, default: "" \}/);
+    assert.match(
+      await readFile("app/components/VoiceChannel.vue", "utf8"),
+      /capturePickerOpen\.value = false;[\s\S]*?finally \{\n    capturePickerStarting\.value = false;/,
+    );
+    assert.match(
+      await readFile("app/components/Navbar.vue", "utf8"),
+      /capturePickerOpen\.value = false;[\s\S]*?finally \{\n    capturePickerStarting\.value = false;/,
+    );
+  });
+
+  it("enumerates native devices through a short-lived media preparation probe", async () => {
+    const runtime = await readFile(
+      "app/composables/media/native-media-engine-observability.ts",
+      "utf8",
+    );
+    const command = await readFile(
+      "desktop/src-tauri/src/media/command_capture.rs",
+      "utf8",
+    );
+    assert.match(runtime, /media_prepare_devices/);
+    assert.match(command, /pub async fn media_prepare_devices/);
+    assert.match(command, /call_native_shutdown\(\)/);
+  });
+
+  it("passes the bounded camera profile into native capture", async () => {
+    const session = await readFile(
+      "app/composables/media/native-media-engine-session.ts",
+      "utf8",
+    );
+    const command = await readFile(
+      "desktop/src-tauri/src/media/command_capture.rs",
+      "utf8",
+    );
+    const bridge = await readFile(
+      "desktop/native-media/libdspeak_media/src/internal/device_capture_bridge.cpp",
+      "utf8",
+    );
+    assert.match(
+      session,
+      /videoSettings: engine\.getVideoSettings\?\.\("camera"\)/,
+    );
+    assert.match(command, /start_camera_capture\(settings\.as_ptr\(\)/);
+    assert.match(bridge, /camera_profile_from_json/);
+    assert.match(bridge, /std::clamp\(profile\.frame_rate, 15u, 60u\)/);
   });
 });

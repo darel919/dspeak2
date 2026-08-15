@@ -1,7 +1,7 @@
 import { asError, waitFor } from "../native-mediasoup-utils.ts";
 import {
   nativeFlowing,
-  nativeRtpStatForTrack,
+  nativeRtpCodecMetadata,
   normalizeNativeTransportStats,
 } from "../native-mediasoup-diagnostics.ts";
 import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
@@ -65,7 +65,7 @@ export class NativeMediasoupDiagnosticsMethods {
   }
 
   get isProducing() {
-    return this.producers.size > 0;
+    return this.producers.size > 0 || this.producerVariants.size > 0;
   }
 
   get remoteProducersCount() {
@@ -114,7 +114,23 @@ export class NativeMediasoupDiagnosticsMethods {
   async diagnosticStats(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.diagnosticStats?.() || [];
-    return this.stats();
+    const stats = (await this.stats()) as unknown[];
+    return [
+      ...stats,
+      {
+        type: "native-codec-routing",
+        mediaCapabilities: this.mediaCapabilities,
+        variantCount: new Set(
+          [...this.producers.values()]
+            .concat([...this.producerVariants.values()])
+            .filter((entry) => entry.kind === "video")
+            .map((entry) => entry.entry.variantId || entry.source),
+        ).size,
+        migrations: this.codecMigrationTelemetry.slice(-32),
+        decodeOverload: this.videoDecodeOverloadTelemetry.slice(-32),
+        runtimeTelemetry: this.codecRuntimeTelemetry.slice(-128),
+      },
+    ];
   }
 
   expectedInboundFlowCount(this: NativeMediasoupSfuSession) {
@@ -139,9 +155,10 @@ export class NativeMediasoupDiagnosticsMethods {
           inboundFlowing: 0,
         }
       );
-    const outboundEntries = [...this.producers.values()].filter(
-      (entry) => this.sourceTransmission?.get(entry.source) !== false,
-    );
+    const outboundEntries = [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ].filter((entry) => this.sourceTransmission?.get(entry.source) !== false);
     const outboundExpected = outboundEntries.length;
     const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
     if (!this.sendTransport || !this.recvTransport) {
@@ -221,23 +238,38 @@ export class NativeMediasoupDiagnosticsMethods {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.getOutboundRtpStats?.() || [];
     const results: Array<Record<string, unknown>> = [];
-    for (const entry of this.sources.values()) {
-      const producer = this.producers.get(entry.source);
-      if (!producer) continue;
+    const producerEntries = [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ];
+    for (const producer of producerEntries) {
+      const entry = producer.entry;
       let report = null;
       try {
         report = await this.invoke("media_get_producer_stats", {
           producerId: producer.id,
         });
       } catch {}
+      const codec = nativeRtpCodecMetadata(report, "outbound-rtp", {
+        kind: entry.kind,
+        codec: entry.codec,
+        codecAcceleration: entry.codecAcceleration,
+        codecImplementation: entry.codecImplementation,
+        trackId: producer.id,
+        source: entry.source,
+      });
       results.push({
         source: entry.source,
         kind: entry.kind,
-        stats:
-          nativeRtpStatForTrack(report, "outbound-rtp", {
-            kind: entry.kind,
-            trackId: producer.id,
-          }) || null,
+        logicalStreamId: entry.logicalStreamId || null,
+        generation: entry.generation || 1,
+        variantId: entry.variantId || null,
+        ...codec,
+        width: entry.width || null,
+        height: entry.height || null,
+        fps: entry.fps || null,
+        bitrate: entry.bitrate || null,
+        stats: codec.stats,
       });
     }
     return results;
@@ -254,15 +286,30 @@ export class NativeMediasoupDiagnosticsMethods {
           consumerId: entry.consumerId,
         });
       } catch {}
+      const codec = nativeRtpCodecMetadata(report, "inbound-rtp", {
+        kind: entry.kind,
+        codec: entry.codec,
+        codecAcceleration: entry.codecAcceleration,
+        codecImplementation: entry.codecImplementation,
+        trackId: entry.consumerId,
+        source: entry.source,
+      });
       results.push({
         consumerId: entry.key,
+        userId: entry.userId,
         source: entry.source,
         kind: entry.kind,
-        stats:
-          nativeRtpStatForTrack(report, "inbound-rtp", {
-            kind: entry.kind,
-            trackId: entry.consumerId,
-          }) || null,
+        logicalStreamId: entry.logicalStreamId || null,
+        generation: entry.generation || 1,
+        variantId: entry.variantId || null,
+        ...codec,
+        width: entry.width || null,
+        height: entry.height || null,
+        fps: entry.fps || null,
+        bitrate: entry.bitrate || null,
+        migrationState: entry.migrationState || null,
+        visible: entry.visible !== false,
+        stats: codec.stats,
       });
     }
     return results;

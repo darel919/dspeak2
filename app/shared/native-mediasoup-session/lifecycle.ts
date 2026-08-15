@@ -10,6 +10,9 @@ export class NativeMediasoupLifecycleMethods {
     this.signaling?.stop?.();
     this.providerSignaling?.close();
     this.providerSignaling = null;
+    if (this.codecRoutingEvaluationTimer)
+      clearTimeout(this.codecRoutingEvaluationTimer);
+    this.codecRoutingEvaluationTimer = null;
     await this._beginNativeTeardown(this._closeMedia(false));
     this.connectionPhase = "closed";
     this.mediaConnectionState = "disconnected";
@@ -49,6 +52,7 @@ export class NativeMediasoupLifecycleMethods {
       this.sendTransport ||
       this.recvTransport ||
       this.producers.size ||
+      this.producerVariants.size ||
       this.consumers.size
     )
       this.signaling?.send?.({ type: "close-media" });
@@ -61,6 +65,12 @@ export class NativeMediasoupLifecycleMethods {
     this.localVideoFeeds.clear();
     this.remoteReceiving.clear();
     this.producers.clear();
+    this.producerVariants.clear();
+    this.remoteProducerMetadata.clear();
+    this.logicalVideoStreams.clear();
+    this.codecMigrationAcks.clear();
+    this.codecMigrationTelemetry.length = 0;
+    this.videoDecodeOverloadTelemetry.length = 0;
     this.requestedConsumers.clear();
     this.pendingConsumers.clear();
     this.transportRequestIds.clear();
@@ -80,7 +90,10 @@ export class NativeMediasoupLifecycleMethods {
     this.readyResolve = null;
     this.readyReject = null;
     this.initializationRequestId = null;
-    if (clearSources) this.sources.clear();
+    if (clearSources) {
+      this.sources.clear();
+      this.codecRoutingPlans.clear();
+    }
     const onNativeMediaClose = this.onNativeMediaClose;
     if (onNativeMediaClose)
       cleanup.push(Promise.resolve().then(() => onNativeMediaClose()));

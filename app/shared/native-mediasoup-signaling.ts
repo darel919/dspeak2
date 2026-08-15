@@ -56,6 +56,8 @@ export function configureControl(
   };
   session.controlTicket = String(config.ticket || "");
   session.mediaSessionId = String(config.mediaSessionId || "");
+  if (typeof config.refreshControl === "function")
+    session.refreshControl = config.refreshControl as () => Promise<unknown>;
 }
 
 export async function handleProviderTicket(
@@ -142,6 +144,8 @@ export async function handleProviderTicket(
     await providerSignaling.connect({
       signalingUrl: String(data.signalingUrl || ""),
       ticket: String(data.ticket || ""),
+      mediaCapabilities: session.mediaCapabilities,
+      capabilityProtocol: "video-codec-matrix-v1",
     });
     await session._startNegotiation();
     session.activeSfuProvider = "mediasoup";
@@ -178,6 +182,8 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
       contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
       mediaSessionId: session.mediaSessionId,
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
+      mediaCapabilities: session.mediaCapabilities,
+      capabilityProtocol: "video-codec-matrix-v1",
       ticket: session.controlTicket,
     }),
     connectionTimeoutMs: session.requestTimeoutMs,
@@ -205,7 +211,8 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
       );
       session._fail(error);
     },
-    onReconnect: () => {
+    onReconnect: async () => {
+      await session.refreshControl?.();
       session.connectionPhase = "reconnecting";
       session._emitState();
     },
@@ -277,6 +284,7 @@ export async function handleRtpCapabilities(
   };
   session.device = device;
   session.lastSentClientRtpCapabilities = device.rtpCapabilities;
+  session.scheduleCodecRoutingEvaluation();
   try {
     session.sendOrThrow(
       {
@@ -355,6 +363,7 @@ export async function handleTransportParams(
     session.mediaConnectionState = "ready-no-active-media";
     session._emitState();
     await session._republishSources();
+    session.scheduleCodecRoutingEvaluation();
     for (const producerId of new Set([
       ...session.pendingConsumers,
       ...session.requestedConsumers,

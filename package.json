@@ -17,7 +17,8 @@
     "release:sync": "node scripts/sync-release-version.mjs --write",
     "test": "node --test tests/*.test.ts",
     "typecheck": "nuxt typecheck && node scripts/check-unused.mjs",
-    "benchmark:audio": "node scripts/audio-codec-benchmark.mjs"
+    "benchmark:audio": "node scripts/audio-codec-benchmark.mjs",
+    "benchmark:desktop": "node scripts/desktop-performance-benchmark.mjs"
   },
   "imports": {
     "#shared/*": "./shared/*"

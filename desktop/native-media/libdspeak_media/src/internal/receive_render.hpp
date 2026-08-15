@@ -53,6 +53,7 @@ private:
     std::string consumer_id_;
     std::string handle_;
     std::atomic_bool enabled_{true};
+    std::atomic<int64_t> last_frame_emit_us_{0};
 };
 
 extern "C" {
@@ -89,6 +90,7 @@ void lib_dspeak_media_push_local_video_frame(const char* source,
 void lib_dspeak_media_push_capture_error_event(const char* route,
                                                int error_code,
                                                const char* message);
+void lib_dspeak_media_push_audio_levels_event(const char* payload_json);
 void lib_dspeak_media_push_p2p_event(uint64_t p2p_handle,
                                      const char* event_name,
                                      const char* track_id,

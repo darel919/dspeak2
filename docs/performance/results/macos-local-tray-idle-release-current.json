@@ -1,0 +1,479 @@
+{
+  "schema": 1,
+  "scenario": "tray-idle",
+  "platform": "darwin",
+  "node": "v22.23.1",
+  "commit": "6c756d7993395397df5c4a276f5b9187488700eb",
+  "rootPid": 5675,
+  "durationSeconds": 60,
+  "intervalSeconds": 1,
+  "warmupSeconds": 5,
+  "summary": {
+    "cpuPercentAverage": 0,
+    "cpuPercentP95": 0,
+    "rssKbAverage": 74092.66666666667,
+    "rssKbP95": 74624,
+    "privateMemoryKbAverage": null,
+    "privateMemoryKbP95": null,
+    "threadsAverage": 13.083333333333334,
+    "processCountMaximum": 1
+  },
+  "samples": [
+    {
+      "timestamp": "2026-08-13T18:09:40.843Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74720,
+      "privateMemoryKb": null,
+      "threads": 15,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74720,
+          "privateMemoryKb": null,
+          "threads": 15,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:09:43.223Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:09:45.647Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:09:48.176Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:09:50.705Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:09:53.195Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:09:55.623Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:09:58.089Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:00.481Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:02.907Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:05.593Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:08.177Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:10.955Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:13.623Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:16.670Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:19.358Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:21.962Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:24.530Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:27.157Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:29.758Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:32.512Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:35.202Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:38.048Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 74624,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 74624,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-08-13T18:10:40.683Z",
+      "processCount": 1,
+      "cpuPercent": 0,
+      "rssKb": 61776,
+      "privateMemoryKb": null,
+      "threads": 13,
+      "processes": [
+        {
+          "pid": 5675,
+          "parentPid": 5674,
+          "cpuPercent": 0,
+          "rssKb": 61776,
+          "privateMemoryKb": null,
+          "threads": 13,
+          "command": "/Users/darelisme/Documents/Development/dspeak2/desktop/src-tauri/target/release/dspeak-desktop"
+        }
+      ]
+    }
+  ]
+}

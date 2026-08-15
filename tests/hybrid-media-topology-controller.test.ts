@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ref } from "vue";
 import { createHybridMediaTopologyController } from "../app/shared/hybrid-media-topology-controller.ts";
+import {
+  emptyVideoCodecCapabilities,
+  type ParticipantMediaCapabilities,
+} from "../app/shared/types/video-codec-capabilities.ts";
 
 test("SFU provider failure retires the active provider before recovery", async () => {
   let activeProvider = "sfu";
@@ -123,4 +127,76 @@ test("failed provider tickets do not leave a stale mediasoup socket", async () =
   assert.equal(closed, true);
   assert.equal(providerSocket, null);
   assert.equal(error.value, "provider unavailable");
+});
+
+test("direct browser mediasoup provider receives the full codec capability matrix", async () => {
+  let providerSocket = null;
+  let connectedOptions = null;
+  const error = ref(null);
+  const videoCodecs = emptyVideoCodecCapabilities();
+  videoCodecs.H264.encode = {
+    supported: true,
+    acceleration: "hardware",
+    implementation: "browser-test",
+    realtimeEfficiency: "excellent",
+  };
+  videoCodecs.H264.decode = {
+    supported: true,
+    acceleration: "hardware",
+    implementation: "browser-test",
+    realtimeEfficiency: "excellent",
+  };
+  const mediaCapabilities: ParticipantMediaCapabilities = {
+    videoCodecs,
+    concurrentEncode: {
+      supported: true,
+      maxHardwareSessions: 1,
+      confidence: "conservative-default",
+    },
+    source: "browser-probe",
+  };
+
+  class FakeProviderSocket {
+    connect(options) {
+      connectedOptions = options;
+      return Promise.resolve();
+    }
+
+    send() {
+      return true;
+    }
+
+    close() {}
+  }
+
+  const controller = createHybridMediaTopologyController({
+    CloudflareRealtimeSession: class {},
+    MediasoupClientSession: class {},
+    MediasoupProviderSocket: FakeProviderSocket,
+    error,
+    getActiveProvider: () => null,
+    getMediaCapabilities: () => mediaCapabilities,
+    getProviderSocket: () => providerSocket,
+    getSelectedSfuProvider: () => "mediasoup",
+    getSfu: () => null,
+    send: () => true,
+    setProviderSocket: (value) => {
+      providerSocket = value;
+    },
+    setSelectedSfuProvider() {},
+    setSfu() {},
+    topologyState: ref({ epoch: 0, sourceRevision: 0 }),
+  });
+
+  const result = await controller.handleProviderTicket({
+    provider: "mediasoup",
+    epoch: 1,
+    sourceRevision: 0,
+    signalingUrl: "wss://media.test/socket",
+    ticket: "ticket",
+  });
+
+  assert.equal(result, undefined);
+  assert.equal(connectedOptions.mediaCapabilities, mediaCapabilities);
+  assert.equal(connectedOptions.capabilityProtocol, "video-codec-matrix-v1");
 });

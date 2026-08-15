@@ -107,6 +107,12 @@ pub struct NativeMediaCapabilities {
     pub capture: NativeCaptureMatrix,
     #[serde(default)]
     pub health: NativeMediaHealth,
+    #[serde(default)]
+    pub video_codec_diagnostics: Value,
+    #[serde(default)]
+    pub video_codec_capabilities: Value,
+    #[serde(default)]
+    pub concurrent_encode: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -246,15 +252,26 @@ mod tests {
     }
 
     #[test]
-    fn missing_optional_paths_do_not_become_required_startup_components() {
+    fn capability_json_preserves_video_codec_diagnostics() {
         let capabilities = NativeMediaCapabilities {
-            native_rtc: true,
-            native_backend_ready: true,
+            video_codec_diagnostics: json!({
+                "factoryMode": "software-only",
+                "activeStream": null,
+                "factoryProbe": {
+                    "encoderImplementation": null,
+                },
+            }),
             ..Default::default()
         };
-        assert!(
-            crate::media::startup::missing_required_native_components(&capabilities).is_empty()
+        let value = serde_json::to_value(capabilities).expect("capability JSON should serialize");
+        assert_eq!(
+            value["videoCodecDiagnostics"]["factoryMode"],
+            "software-only"
         );
+        assert!(value["videoCodecDiagnostics"]["activeStream"].is_null());
+        assert!(value["videoCodecDiagnostics"]["factoryProbe"]
+            .get("encoderImplementation")
+            .is_some());
     }
 
     #[test]

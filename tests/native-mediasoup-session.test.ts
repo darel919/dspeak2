@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../shared/media-signaling-protocol.ts";
 import { NativeMediasoupSfuSession } from "../app/shared/native-mediasoup-session.ts";
+import type {
+  ParticipantMediaCapabilities,
+  VideoCodecName,
+} from "../app/shared/types/video-codec-capabilities.ts";
 
 const serverHello = {
   protocolVersion: 919,
@@ -11,6 +15,42 @@ const serverHello = {
   serverTime: Date.now(),
   mediaSessionId: "native-session",
 };
+
+function receiverCapabilities(
+  decode: VideoCodecName[],
+): ParticipantMediaCapabilities {
+  const codecs = ["H264", "H265", "VP8", "VP9", "AV1"] as const;
+  return {
+    videoCodecs: Object.fromEntries(
+      codecs.map((codec) => [
+        codec,
+        {
+          encode: {
+            supported: false,
+            acceleration: "unsupported",
+            realtimeEfficiency: "unusable",
+          },
+          decode: decode.includes(codec)
+            ? {
+                supported: true,
+                acceleration: codec === "VP8" ? "hardware" : "software",
+                realtimeEfficiency: codec === "VP8" ? "good" : "poor",
+              }
+            : {
+                supported: false,
+                acceleration: "unsupported",
+                realtimeEfficiency: "unusable",
+              },
+        },
+      ]),
+    ) as ParticipantMediaCapabilities["videoCodecs"],
+    concurrentEncode: {
+      supported: false,
+      confidence: "unknown",
+    },
+    source: "native-runtime-probe",
+  };
+}
 
 function createSocketHarness() {
   const sockets = [];
@@ -129,6 +169,151 @@ describe("NativeMediasoupSfuSession", () => {
     );
   });
 
+  it("shares codec variants and early local frames with Cloudflare", () => {
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+
+    const cloudflare = session._createCloudflareSession();
+
+    assert.equal(cloudflare.producerVariants, session.producerVariants);
+    assert.equal(
+      cloudflare.pendingLocalVideoFrames,
+      session.pendingLocalVideoFrames,
+    );
+  });
+
+  it("rolls back Cloudflare variants created before a later variant fails", async () => {
+    const added = [];
+    const removed = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.selectedProvider = "cloudflare-realtime";
+    session.activeSfuProvider = "cloudflare-realtime";
+    session.cloudflareSession = {
+      sessionId: "cloudflare-session",
+      addSource: async (entry) => {
+        added.push(entry.variantId);
+        if (entry.variantId === "camera:vp8")
+          throw new Error("candidate encoder failed");
+        return entry;
+      },
+      removeVariant: async (variantId, force) => {
+        removed.push([variantId, force]);
+        return true;
+      },
+    };
+    session.codecRoutingPlans.set("user:alice/camera", {
+      publisher: "alice",
+      logicalStreamId: "user:alice/camera",
+      source: "camera",
+      desiredVariants: [
+        {
+          codec: "H264",
+          variantId: "camera:h264",
+          receivers: ["bob"],
+          score: 1,
+        },
+        {
+          codec: "VP8",
+          variantId: "camera:vp8",
+          receivers: ["dave"],
+          score: 2,
+        },
+      ],
+      uncoveredReceivers: [],
+      emergencyReceivers: [],
+      totalCost: 1,
+      variantCount: 2,
+    });
+
+    await assert.rejects(
+      session.addSource({
+        source: "camera",
+        kind: "video",
+        logicalStreamId: "user:alice/camera",
+      }),
+      /candidate encoder failed/,
+    );
+    assert.deepEqual(added, ["camera:h264", "camera:vp8"]);
+    assert.deepEqual(removed, [["camera:h264", true]]);
+  });
+
+  it("queues Cloudflare sources until provider activation is complete", async () => {
+    let releaseInitialization;
+    const initialization = new Promise((resolve) => {
+      releaseInitialization = resolve;
+    });
+    const added = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.closed = false;
+    const cloudflare = {
+      closed: false,
+      sessionId: null,
+      initialize: async () => {
+        await initialization;
+        cloudflare.sessionId = "cloudflare-session";
+      },
+      startSubscriptions: async () => undefined,
+      addSource: async (entry) => {
+        added.push(entry.source);
+        const producer = { ...entry, id: `${entry.source}-producer` };
+        session.producers.set(entry.source, producer);
+        return producer;
+      },
+    };
+    session.cloudflareSession = cloudflare;
+    session._createCloudflareSession = () => cloudflare;
+
+    const activation = session.activateProvider("cloudflare-realtime");
+    const source = session.addSource({ source: "camera", kind: "video" });
+    await Promise.resolve();
+    assert.deepEqual(added, []);
+
+    releaseInitialization();
+    await Promise.all([activation, source]);
+    assert.deepEqual(added, ["camera"]);
+    assert.equal(session.activeSfuProvider, "cloudflare-realtime");
+  });
+
+  it("starts Cloudflare activation when a source arrives before activation is registered", async () => {
+    const added = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+    });
+    session.closed = false;
+    session.selectedProvider = "cloudflare-realtime";
+    const cloudflare = {
+      closed: false,
+      sessionId: null,
+      initialize: async () => {
+        cloudflare.sessionId = "cloudflare-session";
+      },
+      startSubscriptions: async () => undefined,
+      addSource: async (entry) => {
+        added.push(entry.source);
+        const producer = { ...entry, id: `${entry.source}-producer` };
+        session.producers.set(entry.source, producer);
+        return producer;
+      },
+    };
+    session.cloudflareSession = cloudflare;
+    session._createCloudflareSession = () => cloudflare;
+
+    const producer = await session.addSource({
+      source: "camera",
+      kind: "video",
+    });
+
+    assert.deepEqual(added, ["camera"]);
+    assert.equal(producer.id, "camera-producer");
+    assert.equal(session.activeSfuProvider, "cloudflare-realtime");
+    assert.equal(session.providerActivationPromise, null);
+  });
+
   it("publishes browser-compatible media kinds for every native source", async () => {
     const calls = [];
     const session = new NativeMediasoupSfuSession({
@@ -160,7 +345,7 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(session.producers.get("camera").kind, "video");
     assert.equal(session.producers.get("screen").kind, "video");
     assert.equal(calls[0][1].appData.encodings[0].priority, "high");
-    assert.equal(calls[2][1].appData.encodings[0].maxFramerate, 60);
+    assert.equal(calls[2][1].appData.encodings[0].maxFramerate, 30);
   });
 
   it("passes the provider signaling URL under the provider socket contract", async () => {
@@ -293,22 +478,15 @@ describe("NativeMediasoupSfuSession", () => {
         id: "camera",
         payload: {
           source: "camera",
-          width: 640,
-          height: 360,
-          pixelFormat: "rgba",
         },
-        data: new Uint8Array([1, 2, 3, 4]),
+        data: "AAAAAAAAAAA=",
       }),
       true,
     );
-    assert.deepEqual(session.localVideoFeeds.get("camera").frame, {
-      source: "camera",
-      width: 640,
-      height: 360,
-      pixelFormat: "rgba",
-      data: new Uint8Array([1, 2, 3, 4]),
-      eventId: 12,
-    });
+    assert.equal(
+      session.localVideoFeeds.get("camera").frame.data,
+      "AAAAAAAAAAA=",
+    );
   });
 
   it("recreates a native local video feed if transport state cleared its map", async () => {
@@ -332,16 +510,16 @@ describe("NativeMediasoupSfuSession", () => {
         id: "camera",
         payload: {
           source: "camera",
-          width: 640,
-          height: 360,
-          pixelFormat: "rgba",
         },
-        data: new Uint8Array([1, 2, 3, 4]),
+        data: "AAAAAAAAAAA=",
       }),
       true,
     );
     assert.equal(session.localVideoFeeds.get("camera").native, true);
-    assert.equal(session.localVideoFeeds.get("camera").frame.eventId, 13);
+    assert.equal(
+      session.localVideoFeeds.get("camera").frame.data,
+      "AAAAAAAAAAA=",
+    );
   });
 
   it("uses the shared audio and screen video producer policy", async () => {
@@ -732,6 +910,97 @@ describe("NativeMediasoupSfuSession", () => {
     ]);
   });
 
+  it("notifies the SFU before releasing a native consumer", () => {
+    const calls = [];
+    const messages = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => calls.push([command, payload]),
+    });
+    session.closed = false;
+    session.providerSignaling = {
+      send(message) {
+        messages.push(message);
+        return true;
+      },
+    };
+    const entry = {
+      consumerId: "consumer-native",
+      producerId: "producer-remote",
+      key: "remote:user-remote:camera",
+      userId: "user-remote",
+      source: "camera",
+      kind: "video",
+      closed: false,
+      visible: true,
+      superseded: false,
+    };
+    session.consumers.set(entry.consumerId, entry);
+
+    assert.equal(session.closeConsumer(entry), true);
+    assert.deepEqual(messages, [
+      {
+        type: "close-consumer",
+        data: { consumerId: entry.consumerId },
+      },
+    ]);
+    assert.deepEqual(calls, [
+      ["media_close_consumer", { consumerId: entry.consumerId }],
+    ]);
+  });
+
+  it("closes every native consumer attached to a retired producer", async () => {
+    const sent = [];
+    const closed = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command, payload) => {
+        if (command === "media_close_consumer") closed.push(payload.consumerId);
+        return undefined;
+      },
+    });
+    session.providerSignaling = {
+      send(message) {
+        sent.push(message);
+      },
+    };
+    const first = {
+      consumerId: "consumer-current",
+      producerId: "producer-retired",
+      key: "alice:camera:current",
+      source: "camera",
+      kind: "video",
+      logicalStreamId: "alice/camera",
+      visible: true,
+      migrationState: "stable",
+      closed: false,
+    };
+    const second = {
+      consumerId: "consumer-candidate",
+      producerId: "producer-retired",
+      key: "alice:camera:candidate",
+      source: "camera",
+      kind: "video",
+      logicalStreamId: "alice/camera",
+      visible: false,
+      migrationState: "warming-receivers",
+      closed: false,
+    };
+    session.consumers.set(first.consumerId, first);
+    session.consumers.set(second.consumerId, second);
+
+    session.closeConsumerByProducer("producer-retired");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(closed.sort(), ["consumer-candidate", "consumer-current"]);
+    assert.deepEqual(
+      sent
+        .filter((message) => message.type === "close-consumer")
+        .map((message) => message.data.consumerId)
+        .sort(),
+      ["consumer-candidate", "consumer-current"],
+    );
+    assert.equal(session.consumers.size, 0);
+  });
+
   it("applies native transport state actions after JSON decoding", async () => {
     const session = new NativeMediasoupSfuSession({
       invoke: async () => undefined,
@@ -812,13 +1081,13 @@ describe("NativeMediasoupSfuSession", () => {
           width: 2,
           height: 1,
         },
-        data: "AQIDBA==",
+        data: "AAAAAAAAAAA=",
       }),
       true,
     );
     assert.equal(
       session.remoteVideoFeeds.get(entry.key).frame.data,
-      "AQIDBA==",
+      "AAAAAAAAAAA=",
     );
     assert.equal(
       session.handleReceiveEvent({
@@ -830,7 +1099,6 @@ describe("NativeMediasoupSfuSession", () => {
           producerId: "stale-producer",
           kind: "video",
         },
-        data: "BQYH",
       }),
       false,
     );
@@ -865,7 +1133,6 @@ describe("NativeMediasoupSfuSession", () => {
           producerId: "producer-remote",
           kind: "video",
         },
-        data: "CAkK",
       }),
       false,
     );
@@ -1112,6 +1379,129 @@ describe("NativeMediasoupSfuSession", () => {
     assert.equal(consumeRequests.length, 2);
     assert.equal(session.error, null);
     session._closeMedia(false);
+  });
+
+  it("requests only the efficient receiver cohort variant", () => {
+    const messages = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+      mediaCapabilities: receiverCapabilities(["VP8"]),
+    });
+    session.closed = false;
+    session.localPeerId = "dave";
+    session.recvTransport = { id: "recv-transport" };
+    session.device = {};
+    session.signaling = {
+      send(message) {
+        messages.push(message);
+        return true;
+      },
+    };
+
+    assert.equal(
+      session.requestConsumer("h264-variant", {
+        logicalStreamId: "user:alice/camera",
+        codec: "H264",
+        receivers: ["bob", "carol"],
+      }),
+      false,
+    );
+    assert.equal(
+      session.requestConsumer("vp8-variant", {
+        logicalStreamId: "user:alice/camera",
+        codec: "VP8",
+        receivers: ["dave"],
+      }),
+      true,
+    );
+    assert.deepEqual(
+      messages
+        .filter((message) => message.type === "consume")
+        .map((message) => [
+          message.data.producerId,
+          message.data.preferredCodec,
+          message.data.preferredCodecs,
+        ]),
+      [["vp8-variant", "VP8", ["VP8"]]],
+    );
+  });
+
+  it("acknowledges a reused base variant after metadata promotion", () => {
+    const messages = [];
+    const session = new NativeMediasoupSfuSession({
+      invoke: async () => undefined,
+      mediaCapabilities: receiverCapabilities(["VP8"]),
+    });
+    session.closed = false;
+    session.localPeerId = "dave";
+    session.providerSignaling = {
+      send(message) {
+        messages.push(message);
+        return true;
+      },
+    };
+    const entry = {
+      key: "remote:alice:camera",
+      id: "consumer-vp8",
+      consumerId: "consumer-vp8",
+      producerId: "base-producer",
+      userId: "alice",
+      source: "camera",
+      kind: "video",
+      track: null,
+      stream: null,
+      native: true,
+      playback: "native-frame",
+      frame: null,
+      receiving: true,
+      desiredReceiving: true,
+      receivingRevision: 0,
+      closed: false,
+      logicalStreamId: "user:alice/camera",
+      generation: 1,
+      variantId: null,
+      codec: "VP8",
+      migrationState: "stable",
+      presentableFrames: 3,
+      lastFrameTimestamp: 3,
+      visible: true,
+      superseded: false,
+      migrationStartedAt: null,
+      migrationTimer: null,
+    };
+    session.consumers.set(entry.consumerId, entry);
+    session.logicalVideoStreams.set("user:alice/camera", {
+      logicalStreamId: "user:alice/camera",
+      generation: 1,
+      currentVariantId: null,
+      candidateVariantId: null,
+      state: "stable",
+      currentConsumerId: entry.consumerId,
+      candidateConsumerId: null,
+    });
+
+    assert.equal(
+      session.requestConsumer("base-producer", {
+        logicalStreamId: "user:alice/camera",
+        generation: 2,
+        variantId: "user:alice/camera:vp8",
+        codec: "VP8",
+        receivers: ["dave"],
+      }),
+      false,
+    );
+    assert.equal(entry.variantId, "user:alice/camera:vp8");
+    assert.equal(entry.generation, 2);
+    assert.deepEqual(messages.at(-1), {
+      type: "codec-migration-state",
+      data: {
+        receiverId: "dave",
+        logicalStreamId: "user:alice/camera",
+        variantId: "user:alice/camera:vp8",
+        generation: 2,
+        state: "stable",
+      },
+    });
   });
 
   it("reports native transport stats and requires increasing RTP bytes", async () => {

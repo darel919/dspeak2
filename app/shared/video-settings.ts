@@ -14,6 +14,7 @@ import type {
 } from "./types/video-settings.ts";
 
 export const VIDEO_FRAME_RATE_MIN = 25;
+export const LOW_SPEC_VIDEO_FRAME_RATE_MIN = 15;
 export const VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN = 24;
 export const VIDEO_FRAME_RATE_MAX = 60;
 export const VIDEO_FRAME_RATE_PRESETS = Object.freeze([25, 30, 50, 60]);
@@ -30,6 +31,7 @@ export const VIDEO_QUALITY_PRIORITIES = Object.freeze([
 
 export const VIDEO_RESOLUTIONS = Object.freeze({
   original: null,
+  "360p": { width: 640, height: 360 },
   "720p": { width: 1280, height: 720 },
   "1080p": { width: 1920, height: 1080 },
   "1440p": { width: 2560, height: 1440 },
@@ -49,6 +51,7 @@ export function resolveRequestedVideoSettings({
     source === "screen" ? settings.screenVideo : settings.cameraVideo;
   return {
     ...base,
+    ...(base.lowSpec === true ? { lowSpec: true } : {}),
     maxBitrate:
       Number(source === "screen" ? policy?.screenKbps : policy?.cameraKbps) *
         1000 || null,
@@ -64,8 +67,12 @@ export function normalizeVideoSettings(
       ? (value.resolution as VideoSettings["resolution"])
       : "original";
   const requestedFrameRate = Number(value.frameRate);
+  const frameRatePresets =
+    value.lowSpec === true
+      ? [LOW_SPEC_VIDEO_FRAME_RATE_MIN, ...VIDEO_FRAME_RATE_PRESETS]
+      : VIDEO_FRAME_RATE_PRESETS;
   const frameRate = Number.isFinite(requestedFrameRate)
-    ? VIDEO_FRAME_RATE_PRESETS.reduce((closest, preset) =>
+    ? frameRatePresets.reduce((closest, preset) =>
         Math.abs(preset - requestedFrameRate) <
         Math.abs(closest - requestedFrameRate)
           ? preset
@@ -78,7 +85,57 @@ export function normalizeVideoSettings(
       ? value.qualityPriority
       : "framerate";
 
-  return { resolution, frameRate, qualityPriority };
+  return {
+    resolution,
+    frameRate,
+    qualityPriority,
+    ...(value.lowSpec === true ? { lowSpec: true } : {}),
+  };
+}
+
+export function isLowSpecNativeRuntime(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const hardwareConcurrency = Number(navigator.hardwareConcurrency);
+  const deviceMemory = Number(
+    (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+  );
+  return (
+    (Number.isFinite(hardwareConcurrency) && hardwareConcurrency <= 4) ||
+    (Number.isFinite(deviceMemory) && deviceMemory <= 4)
+  );
+}
+
+export function applyLowSpecNativeVideoProfile(
+  settings: VideoSettings,
+  source: string,
+  enabled: boolean,
+): VideoSettings {
+  if (!enabled || (source !== "camera" && source !== "screen")) return settings;
+  const screen = source === "screen";
+  const maximum = screen
+    ? { width: 1280, height: 720, resolution: "720p" as const }
+    : { width: 640, height: 360, resolution: "360p" as const };
+  const width = Number(settings.width);
+  const height = Number(settings.height);
+  const requestedWidth = Number.isFinite(width) && width > 0 ? width : null;
+  const requestedHeight = Number.isFinite(height) && height > 0 ? height : null;
+  const requestedFrameRate = Number(settings.frameRate);
+  const frameRate = Number.isFinite(requestedFrameRate)
+    ? Math.min(15, requestedFrameRate)
+    : 15;
+  const maxBitrate = Number(settings.maxBitrate);
+  const bitrateCeiling = screen ? 1_800_000 : 900_000;
+  return {
+    ...settings,
+    resolution: maximum.resolution,
+    width: Math.min(requestedWidth || maximum.width, maximum.width),
+    height: Math.min(requestedHeight || maximum.height, maximum.height),
+    frameRate: Math.max(LOW_SPEC_VIDEO_FRAME_RATE_MIN, frameRate),
+    lowSpec: true,
+    ...(Number.isFinite(maxBitrate) && maxBitrate > 0
+      ? { maxBitrate: Math.min(maxBitrate, bitrateCeiling) }
+      : { maxBitrate: bitrateCeiling }),
+  };
 }
 
 export function buildVideoConstraints(
@@ -88,9 +145,11 @@ export function buildVideoConstraints(
   const normalized = normalizeVideoSettings(settings);
   const resolution = VIDEO_RESOLUTIONS[normalized.resolution];
   const minimumFrameRate =
-    normalized.qualityPriority === "resolution"
-      ? VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN
-      : VIDEO_FRAME_RATE_MIN;
+    normalized.lowSpec === true
+      ? LOW_SPEC_VIDEO_FRAME_RATE_MIN
+      : normalized.qualityPriority === "resolution"
+        ? VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN
+        : VIDEO_FRAME_RATE_MIN;
   const constraints: MediaTrackConstraints = {
     frameRate: display
       ? { ideal: normalized.frameRate, max: normalized.frameRate }
@@ -117,24 +176,37 @@ export function buildVideoProduceOptions({
   screen = false,
   qualityPriority = "framerate",
   maxBitrate: requestedMaxBitrate,
+  lowSpec = false,
 }: VideoSenderOptions = {}) {
   const pixels =
     Math.max(1, Number(width) || 1280) * Math.max(1, Number(height) || 720);
+  const minimumFrameRate = lowSpec
+    ? LOW_SPEC_VIDEO_FRAME_RATE_MIN
+    : VIDEO_FRAME_RATE_MIN;
   const fps = Math.min(
     VIDEO_FRAME_RATE_MAX,
-    Math.max(VIDEO_FRAME_RATE_MIN, Number(frameRate) || 30),
+    Math.max(minimumFrameRate, Number(frameRate) || 30),
   );
   const bitsPerPixel = screen ? 0.06 : 0.05;
+  const calculatedMinimum = lowSpec ? (screen ? 300_000 : 200_000) : 2_000_000;
+  const calculatedMaximum = lowSpec
+    ? screen
+      ? 1_800_000
+      : 900_000
+    : SFU_VIDEO_MAX_BITRATE;
   const calculatedMaxBitrate = Math.min(
-    SFU_VIDEO_MAX_BITRATE,
-    Math.max(2_000_000, Math.round(pixels * fps * bitsPerPixel)),
+    calculatedMaximum,
+    Math.max(calculatedMinimum, Math.round(pixels * fps * bitsPerPixel)),
   );
   const configuredMaxBitrate = Number(requestedMaxBitrate);
   const maxBitrate =
     Number.isFinite(configuredMaxBitrate) && configuredMaxBitrate > 0
       ? Math.min(
-          SFU_VIDEO_MAX_BITRATE,
-          Math.max(100_000, Math.floor(configuredMaxBitrate)),
+          calculatedMaximum,
+          Math.max(
+            lowSpec ? 100_000 : 100_000,
+            Math.floor(configuredMaxBitrate),
+          ),
         )
       : calculatedMaxBitrate;
   const scaleResolutionDownBy = Math.max(
@@ -173,18 +245,31 @@ export function buildP2pVideoSenderOptions(options: VideoSenderOptions = {}) {
     Math.max(1, Number(options.height) || 720);
   const fps = Math.min(
     VIDEO_FRAME_RATE_MAX,
-    Math.max(VIDEO_FRAME_RATE_MIN, Number(options.frameRate) || 30),
+    Math.max(
+      options.lowSpec ? LOW_SPEC_VIDEO_FRAME_RATE_MIN : VIDEO_FRAME_RATE_MIN,
+      Number(options.frameRate) || 30,
+    ),
   );
   const bitsPerPixel = options.screen ? 0.065 : 0.055;
+  const calculatedMinimum = options.lowSpec
+    ? options.screen
+      ? 400_000
+      : 250_000
+    : 2_000_000;
+  const calculatedMaximum = options.lowSpec
+    ? options.screen
+      ? 2_000_000
+      : 1_000_000
+    : P2P_VIDEO_MAX_BITRATE;
   const calculatedMaxBitrate = Math.min(
-    P2P_VIDEO_MAX_BITRATE,
-    Math.max(2_000_000, Math.round(pixels * fps * bitsPerPixel)),
+    calculatedMaximum,
+    Math.max(calculatedMinimum, Math.round(pixels * fps * bitsPerPixel)),
   );
   const configuredMaxBitrate = Number(options.maxBitrate);
   const maxBitrate =
     Number.isFinite(configuredMaxBitrate) && configuredMaxBitrate > 0
       ? Math.min(
-          P2P_VIDEO_MAX_BITRATE,
+          calculatedMaximum,
           Math.max(100_000, Math.floor(configuredMaxBitrate)),
         )
       : calculatedMaxBitrate;

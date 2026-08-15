@@ -1,9 +1,10 @@
 #include "receive_render.hpp"
 #include "runtime_health.hpp"
+#include "event_bridge.hpp"
 
 #include <json.hpp>
+#include <api/scoped_refptr.h>
 #include <api/video/i420_buffer.h>
-#include <common_video/libyuv/include/webrtc_libyuv.h>
 #include <third_party/libyuv/include/libyuv/convert_argb.h>
 #include <third_party/libyuv/include/libyuv/scale.h>
 
@@ -45,9 +46,102 @@ std::atomic<bool> g_video_frame_logged{false};
 std::atomic<bool> g_local_video_frame_logged{false};
 std::atomic<bool> g_local_camera_preview_enabled{true};
 std::atomic<bool> g_local_screen_preview_enabled{false};
+std::atomic<int64_t> g_local_camera_preview_last_emit_us{0};
+std::atomic<int64_t> g_local_screen_preview_last_emit_us{0};
 constexpr size_t kMaxReceiveEvents = 96;
-constexpr int kLocalPreviewMaxWidth = 640;
-constexpr int kLocalPreviewMaxHeight = 360;
+constexpr int kFrameEventMaxWidth = 480;
+constexpr int kFrameEventMaxHeight = 270;
+constexpr int kLocalCameraFrameEventMaxWidth = 480;
+constexpr int kLocalCameraFrameEventMaxHeight = 270;
+constexpr int kLocalScreenFrameEventMaxWidth = 320;
+constexpr int kLocalScreenFrameEventMaxHeight = 180;
+constexpr int64_t kFrameEventIntervalUs = 66000;
+constexpr int64_t kLocalCameraFrameEventIntervalUs = 33333;
+constexpr int64_t kLocalScreenFrameEventIntervalUs = 100000;
+
+int64_t monotonic_now_us() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+bool claim_frame_slot(std::atomic<int64_t>& last_emit_us) {
+    const int64_t now_us = monotonic_now_us();
+    int64_t previous_us = last_emit_us.load(std::memory_order_acquire);
+    while (true) {
+        if (previous_us != 0 && now_us - previous_us < kFrameEventIntervalUs)
+            return false;
+        if (last_emit_us.compare_exchange_weak(
+                previous_us, now_us, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            return true;
+    }
+}
+
+webrtc::scoped_refptr<webrtc::I420BufferInterface> scale_frame_for_event(
+    const webrtc::scoped_refptr<webrtc::I420BufferInterface>& input,
+    int max_width = kFrameEventMaxWidth,
+    int max_height = kFrameEventMaxHeight) {
+    if (!input) return nullptr;
+    const int input_width = input->width();
+    const int input_height = input->height();
+    if (input_width <= 0 || input_height <= 0) return nullptr;
+    const double scale = std::min(
+        1.0,
+        std::min(static_cast<double>(max_width) / input_width,
+                 static_cast<double>(max_height) / input_height));
+    if (scale >= 1.0) return input;
+    const int width = std::max(
+        2, std::min(max_width,
+                    static_cast<int>(input_width * scale) & ~1));
+    const int height = std::max(
+        2, std::min(max_height,
+                    static_cast<int>(input_height * scale) & ~1));
+    const auto scaled = webrtc::I420Buffer::Create(width, height);
+    if (!scaled) return nullptr;
+    if (libyuv::I420Scale(
+            input->DataY(), input->StrideY(),
+            input->DataU(), input->StrideU(),
+            input->DataV(), input->StrideV(),
+            input_width, input_height,
+            scaled->MutableDataY(), scaled->StrideY(),
+            scaled->MutableDataU(), scaled->StrideU(),
+            scaled->MutableDataV(), scaled->StrideV(),
+            width, height, libyuv::kFilterBox) != 0)
+        return nullptr;
+    return scaled;
+}
+
+bool convert_i420_to_rgba(const uint8_t* data_y,
+                          int stride_y,
+                          const uint8_t* data_u,
+                          int stride_u,
+                          const uint8_t* data_v,
+                          int stride_v,
+                          int width,
+                          int height,
+                          std::vector<uint8_t>& rgba) {
+    if (width <= 0 || height <= 0) return false;
+    const size_t width_size = static_cast<size_t>(width);
+    const size_t height_size = static_cast<size_t>(height);
+    if (width_size > std::numeric_limits<size_t>::max() / height_size / 4)
+        return false;
+    std::vector<uint8_t> packed_bgra(width_size * height_size * 4);
+    if (libyuv::I420ToARGB(
+            data_y, stride_y,
+            data_u, stride_u,
+            data_v, stride_v,
+            packed_bgra.data(), width * 4, width, height) != 0)
+        return false;
+    rgba.resize(packed_bgra.size());
+    for (size_t index = 0; index < packed_bgra.size(); index += 4) {
+        rgba[index] = packed_bgra[index + 2];
+        rgba[index + 1] = packed_bgra[index + 1];
+        rgba[index + 2] = packed_bgra[index];
+        rgba[index + 3] = packed_bgra[index + 3];
+    }
+    return true;
+}
 
 char* duplicate_string(const char* value) {
     if (!value) return nullptr;
@@ -71,36 +165,43 @@ void push_event(lib_dspeak_media_receive_event_kind_t kind,
                 const uint8_t* data = nullptr,
                 uint32_t data_len = 0) {
     ReceiveEvent event;
-    event.kind = kind;
-    event.event_id = g_receive_event_id.fetch_add(1);
-    event.id = duplicate_string(id);
-    const auto serialized = payload.dump();
-    event.payload_json = duplicate_string(serialized.c_str());
-    if (data && data_len) {
-        event.data = static_cast<uint8_t*>(std::malloc(data_len));
-        if (!event.data) {
-            release_event(event);
-            return;
+    try {
+        event.kind = kind;
+        event.event_id = g_receive_event_id.fetch_add(1);
+        event.id = duplicate_string(id);
+        const auto serialized = payload.dump();
+        event.payload_json = duplicate_string(serialized.c_str());
+        if (data && data_len) {
+            event.data = static_cast<uint8_t*>(std::malloc(data_len));
+            if (!event.data) {
+                release_event(event);
+                return;
+            }
+            std::memcpy(event.data, data, data_len);
+            event.data_len = data_len;
         }
-        std::memcpy(event.data, data, data_len);
-        event.data_len = data_len;
-    }
-    std::lock_guard<std::mutex> lock(g_receive_event_mutex);
-    if ((kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME ||
-         kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME) && id) {
-        for (auto it = g_receive_events.begin(); it != g_receive_events.end(); ++it) {
-            if (it->kind == kind && it->id && std::strcmp(it->id, id) == 0) {
-                release_event(*it);
-                g_receive_events.erase(it);
-                break;
+        std::lock_guard<std::mutex> lock(g_receive_event_mutex);
+        if ((kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME ||
+             kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME ||
+             kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_AUDIO_LEVELS) && id) {
+            for (auto it = g_receive_events.begin(); it != g_receive_events.end(); ++it) {
+                if (it->kind == kind && it->id && std::strcmp(it->id, id) == 0) {
+                    release_event(*it);
+                    g_receive_events.erase(it);
+                    break;
+                }
             }
         }
+        while (g_receive_events.size() >= kMaxReceiveEvents) {
+            release_event(g_receive_events.front());
+            g_receive_events.pop_front();
+        }
+        g_receive_events.push_back(event);
+        event = {};
+        lib_dspeak_media_signal_event();
+    } catch (...) {
+        release_event(event);
     }
-    while (g_receive_events.size() >= kMaxReceiveEvents) {
-        release_event(g_receive_events.front());
-        g_receive_events.pop_front();
-    }
-    g_receive_events.push_back(std::move(event));
 }
 
 bool has_pending_video_frame(
@@ -109,7 +210,8 @@ bool has_pending_video_frame(
     if (!id) return false;
     std::lock_guard<std::mutex> lock(g_receive_event_mutex);
     return std::any_of(
-        g_receive_events.begin(), g_receive_events.end(),
+        g_receive_events.begin(),
+        g_receive_events.end(),
         [kind, id](const ReceiveEvent& event) {
             return event.kind == kind && event.id && std::strcmp(event.id, id) == 0;
         });
@@ -217,10 +319,34 @@ extern "C" int lib_dspeak_media_set_local_video_preview(
     if (!source) return -1;
     if (std::strcmp(source, "camera") == 0) {
         g_local_camera_preview_enabled.store(enabled, std::memory_order_release);
+        if (!enabled) {
+            std::lock_guard<std::mutex> lock(g_receive_event_mutex);
+            for (auto it = g_receive_events.begin(); it != g_receive_events.end();) {
+                if (it->kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME &&
+                    it->id && std::strcmp(it->id, "camera") == 0) {
+                    release_event(*it);
+                    it = g_receive_events.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
         return 0;
     }
     if (std::strcmp(source, "screen") == 0) {
         g_local_screen_preview_enabled.store(enabled, std::memory_order_release);
+        if (!enabled) {
+            std::lock_guard<std::mutex> lock(g_receive_event_mutex);
+            for (auto it = g_receive_events.begin(); it != g_receive_events.end();) {
+                if (it->kind == LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME &&
+                    it->id && std::strcmp(it->id, "screen") == 0) {
+                    release_event(*it);
+                    it = g_receive_events.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
         return 0;
     }
     return -1;
@@ -474,30 +600,34 @@ void NativeReceiveVideoSink::OnFrame(const webrtc::VideoFrame& frame) {
     if (!enabled_ || has_pending_video_frame(
             LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME, consumer_id_.c_str()))
         return;
-    const auto buffer = frame.video_frame_buffer()->ToI420();
+    if (!claim_frame_slot(last_frame_emit_us_)) return;
+    const auto buffer = scale_frame_for_event(frame.video_frame_buffer()->ToI420());
     if (!buffer) return;
     const int width = buffer->width();
     const int height = buffer->height();
     if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return;
-    const size_t width_size = static_cast<size_t>(width);
-    const size_t height_size = static_cast<size_t>(height);
-    if (width_size > std::numeric_limits<size_t>::max() / height_size / 4)
+    std::vector<uint8_t> rgba;
+    if (!convert_i420_to_rgba(
+            buffer->DataY(), buffer->StrideY(),
+            buffer->DataU(), buffer->StrideU(),
+            buffer->DataV(), buffer->StrideV(),
+            width, height, rgba))
         return;
-    std::vector<uint8_t> rgba(width_size * height_size * 4);
-    if (libyuv::I420ToRGBA(buffer->DataY(), buffer->StrideY(),
-                           buffer->DataU(), buffer->StrideU(),
-                           buffer->DataV(), buffer->StrideV(),
-                           rgba.data(), width * 4, width, height) != 0) return;
     json payload = {
         {"consumerId", consumer_id_},
         {"width", width},
         {"height", height},
+        {"timestamp", frame.timestamp_us()},
         {"timestampMs", frame.timestamp_us() / 1000},
         {"pixelFormat", "rgba"},
     };
     if (!handle_.empty()) payload["handle"] = handle_;
-    push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME, consumer_id_.c_str(), payload, rgba.data(),
-               static_cast<uint32_t>(rgba.size()));
+    push_event(
+        LIB_DSPEAK_MEDIA_RECEIVE_EVENT_VIDEO_FRAME,
+        consumer_id_.c_str(),
+        payload,
+        rgba.data(),
+        static_cast<uint32_t>(rgba.size()));
     if (!g_video_frame_logged.exchange(true))
         std::fprintf(stderr, "[dspeak:media] native video frame received consumer=%s size=%dx%d\n",
                      consumer_id_.c_str(), width, height);
@@ -510,48 +640,58 @@ void NativeReceiveVideoSink::SetEnabled(bool enabled) {
 
 extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
                                                           const webrtc::VideoFrame& frame) {
-    const auto input = frame.video_frame_buffer()->ToI420();
-    if (!input) return;
-    const int input_width = input->width();
-    const int input_height = input->height();
-    if (input_width <= 0 || input_height <= 0) return;
+    if (!source || !lib_dspeak_media_local_video_preview_enabled(source)) return;
+    auto& last_emit_us = std::strcmp(source, "screen") == 0
+        ? g_local_screen_preview_last_emit_us
+        : g_local_camera_preview_last_emit_us;
+    const bool is_screen_preview = std::strcmp(source, "screen") == 0;
+    const int64_t preview_interval_us = is_screen_preview
+        ? kLocalScreenFrameEventIntervalUs
+        : kLocalCameraFrameEventIntervalUs;
+    const int preview_max_width = is_screen_preview
+        ? kLocalScreenFrameEventMaxWidth
+        : kLocalCameraFrameEventMaxWidth;
+    const int preview_max_height = is_screen_preview
+        ? kLocalScreenFrameEventMaxHeight
+        : kLocalCameraFrameEventMaxHeight;
+    const int64_t now_us = monotonic_now_us();
+    int64_t previous_us = last_emit_us.load(std::memory_order_acquire);
+    while (true) {
+        if (previous_us != 0 && now_us - previous_us < preview_interval_us)
+            return;
+        if (last_emit_us.compare_exchange_weak(
+                previous_us, now_us, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            break;
+    }
+    const auto scaled = scale_frame_for_event(
+        frame.video_frame_buffer()->ToI420(),
+        preview_max_width,
+        preview_max_height);
+    if (!scaled) return;
+    const int width = scaled->width();
+    const int height = scaled->height();
 
-    const double scale = std::min(
-        1.0,
-        std::min(static_cast<double>(kLocalPreviewMaxWidth) / input_width,
-                 static_cast<double>(kLocalPreviewMaxHeight) / input_height));
-    int width = std::max(2, static_cast<int>(input_width * scale) & ~1);
-    int height = std::max(2, static_cast<int>(input_height * scale) & ~1);
-    width = std::min(width, kLocalPreviewMaxWidth);
-    height = std::min(height, kLocalPreviewMaxHeight);
-
-    const auto scaled = webrtc::I420Buffer::Create(width, height);
-    if (libyuv::I420Scale(input->DataY(), input->StrideY(),
-                          input->DataU(), input->StrideU(),
-                          input->DataV(), input->StrideV(),
-                          input_width, input_height,
-                          scaled->MutableDataY(), scaled->StrideY(),
-                          scaled->MutableDataU(), scaled->StrideU(),
-                          scaled->MutableDataV(), scaled->StrideV(),
-                          width, height, libyuv::kFilterBox) != 0)
+    std::vector<uint8_t> rgba;
+    if (!convert_i420_to_rgba(
+            scaled->DataY(), scaled->StrideY(),
+            scaled->DataU(), scaled->StrideU(),
+            scaled->DataV(), scaled->StrideV(),
+            width, height, rgba))
         return;
-
-    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
-    if (libyuv::I420ToRGBA(scaled->DataY(), scaled->StrideY(),
-                           scaled->DataU(), scaled->StrideU(),
-                           scaled->DataV(), scaled->StrideV(),
-                           rgba.data(), width * 4, width, height) != 0)
-        return;
-    push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME,
-               source,
-               {
-                   {"source", source ? source : ""},
-                   {"width", width},
-                   {"height", height},
-                   {"timestampMs", frame.timestamp_us() / 1000},
-                   {"pixelFormat", "rgba"},
-               },
-               rgba.data(), static_cast<uint32_t>(rgba.size()));
+    push_event(
+        LIB_DSPEAK_MEDIA_RECEIVE_EVENT_LOCAL_VIDEO_FRAME,
+        source,
+        {
+            {"source", source},
+            {"width", width},
+            {"height", height},
+            {"timestamp", frame.timestamp_us()},
+            {"timestampMs", frame.timestamp_us() / 1000},
+            {"pixelFormat", "rgba"},
+        },
+        rgba.data(),
+        static_cast<uint32_t>(rgba.size()));
     if (!g_local_video_frame_logged.exchange(true))
         std::fprintf(stderr, "[dspeak:media] native local video frame source=%s size=%dx%d\n",
                      source ? source : "", width, height);
@@ -570,6 +710,14 @@ extern "C" void lib_dspeak_media_push_capture_error_event(const char* route,
         });
 }
 
+extern "C" void lib_dspeak_media_push_audio_levels_event(const char* payload_json) {
+    if (!payload_json) return;
+    try {
+        const auto payload = json::parse(payload_json);
+        push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_AUDIO_LEVELS, "audio-levels", payload);
+    } catch (...) {}
+}
+
 extern "C" void lib_dspeak_media_push_receive_track_event(const char* event_name,
                                                             const char* consumer_id,
                                                             const char* producer_id,
@@ -581,7 +729,7 @@ extern "C" void lib_dspeak_media_push_receive_track_event(const char* event_name
         {"producerId", producer_id ? producer_id : ""},
         {"kind", kind ? kind : ""},
         {"native", true},
-        {"playback", kind && std::strcmp(kind, "audio") == 0 ? "coreaudio" : "canvas"},
+        {"playback", kind && std::strcmp(kind, "audio") == 0 ? "coreaudio" : "native-frame"},
     };
     if (app_data_json) {
         try {
@@ -627,13 +775,20 @@ extern "C" void lib_dspeak_media_push_p2p_event(uint64_t p2p_handle,
     push_event(LIB_DSPEAK_MEDIA_RECEIVE_EVENT_P2P, track_id, payload);
 }
 
-extern "C" lib_dspeak_media_receive_event_t lib_dspeak_media_poll_receive_event(void) {
+extern "C" lib_dspeak_media_receive_event_t lib_dspeak_media_drain_receive_event(void) {
     std::lock_guard<std::mutex> lock(g_receive_event_mutex);
     if (g_receive_events.empty())
         return {LIB_DSPEAK_MEDIA_RECEIVE_EVENT_NONE, 0, nullptr, nullptr, nullptr, 0};
     ReceiveEvent event = std::move(g_receive_events.front());
     g_receive_events.pop_front();
-    return {event.kind, event.event_id, event.id, event.payload_json, event.data, event.data_len};
+    return {
+        event.kind,
+        event.event_id,
+        event.id,
+        event.payload_json,
+        event.data,
+        event.data_len,
+    };
 }
 
 extern "C" void lib_dspeak_media_free_receive_event(lib_dspeak_media_receive_event_t* event) {

@@ -54,6 +54,9 @@ struct lib_dspeak_media_capture_session {
     id<SCStreamDelegate> delegate = nil;
     NSString* source_id = nil;
     NSString* source_type = nil;
+    std::atomic<bool> audio_sample_logged{false};
+    std::atomic<bool> audio_normalization_error_logged{false};
+    std::atomic<bool> audio_normalized_sample_logged{false};
 };
 
 static NSString* source_id_for_display(CGDirectDisplayID display_id) {
@@ -385,125 +388,122 @@ static bool normalize_audio_sample(CMSampleBufferRef sample_buffer,
         return false;
     }
 
-    AVAudioFormat* input_format = [[AVAudioFormat alloc] initWithStreamDescription:asbd];
-    AVAudioFormat* output_format = [[AVAudioFormat alloc]
-        initStandardFormatWithSampleRate:48000
-                                channels:2];
-    if (!input_format || !output_format || frames > UINT32_MAX) {
-        [input_format release];
-        [output_format release];
+    const uint32_t channels = asbd->mChannelsPerFrame;
+    const bool non_interleaved = (asbd->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
+    const uint32_t bits_per_channel = asbd->mBitsPerChannel;
+    const size_t bytes_per_sample = bits_per_channel > 0
+        ? (static_cast<size_t>(bits_per_channel) + 7) / 8
+        : 0;
+    const bool big_endian = (asbd->mFormatFlags & kAudioFormatFlagIsBigEndian) != 0;
+    const bool is_float = (asbd->mFormatFlags & kAudioFormatFlagIsFloat) != 0;
+    const bool is_signed = (asbd->mFormatFlags & kAudioFormatFlagIsSignedInteger) != 0;
+    const bool is_unsigned = !is_float && !is_signed;
+    if (bytes_per_sample == 0 || bytes_per_sample > sizeof(uint64_t) ||
+        (!is_float && !is_signed && !is_unsigned) ||
+        (is_float && bits_per_channel != 32 && bits_per_channel != 64)) {
         CFRelease(block_buffer);
         return false;
     }
 
-    AVAudioPCMBuffer* input_buffer = [[AVAudioPCMBuffer alloc]
-        initWithPCMFormat:input_format
-             frameCapacity:static_cast<AVAudioFrameCount>(frames)];
-    if (!input_buffer) {
-        [input_format release];
-        [output_format release];
-        CFRelease(block_buffer);
-        return false;
-    }
-
-    AudioBufferList* destination_list = input_buffer.mutableAudioBufferList;
-    bool valid = destination_list &&
-        destination_list->mNumberBuffers == buffer_list->mNumberBuffers;
-    if (valid) {
-        for (UInt32 index = 0; index < buffer_list->mNumberBuffers; ++index) {
-            const AudioBuffer& source = buffer_list->mBuffers[index];
-            AudioBuffer& destination = destination_list->mBuffers[index];
-            if (!source.mData || !destination.mData ||
-                source.mDataByteSize > destination.mDataByteSize) {
-                valid = false;
-                break;
-            }
-            std::memcpy(destination.mData, source.mData, source.mDataByteSize);
+    auto read_word = [big_endian](const uint8_t* data, size_t bytes) {
+        uint64_t value = 0;
+        if (big_endian) {
+            for (size_t index = 0; index < bytes; ++index)
+                value = (value << 8) | data[index];
+        } else {
+            for (size_t index = 0; index < bytes; ++index)
+                value |= static_cast<uint64_t>(data[index]) << (index * 8);
         }
+        return value;
+    };
+
+    auto sample_to_float = [&](const uint8_t* data) {
+        const uint64_t value = read_word(data, bytes_per_sample);
+        if (is_float && bits_per_channel == 32) {
+            const uint32_t bits = static_cast<uint32_t>(value);
+            float sample = 0.0f;
+            std::memcpy(&sample, &bits, sizeof(sample));
+            return std::isfinite(sample) ? std::max(-1.0f, std::min(1.0f, sample)) : 0.0f;
+        }
+        if (is_float && bits_per_channel == 64) {
+            double sample = 0.0;
+            std::memcpy(&sample, &value, sizeof(sample));
+            if (!std::isfinite(sample)) return 0.0f;
+            return static_cast<float>(std::max(-1.0, std::min(1.0, sample)));
+        }
+        const uint32_t bits = std::min<uint32_t>(bits_per_channel, 32);
+        if (bits == 0) return 0.0f;
+        const double scale = std::ldexp(1.0, static_cast<int>(bits - 1));
+        if (is_unsigned)
+            return static_cast<float>((static_cast<double>(value) - scale) / scale);
+        const uint64_t mask = bits == 32
+            ? UINT64_C(0xffffffff)
+            : (UINT64_C(1) << bits) - 1;
+        const uint64_t masked = value & mask;
+        const int64_t signed_value = masked & (UINT64_C(1) << (bits - 1))
+            ? static_cast<int64_t>(masked | (~mask))
+            : static_cast<int64_t>(masked);
+        return static_cast<float>(std::max(-1.0, std::min(1.0,
+            static_cast<double>(signed_value) / scale)));
+    };
+
+    auto sample_pointer = [&](size_t frame, size_t channel) -> const uint8_t* {
+        const AudioBuffer* buffer = nullptr;
+        size_t sample_offset = 0;
+        if (non_interleaved && buffer_list->mNumberBuffers >= channels) {
+            buffer = &buffer_list->mBuffers[channel];
+            sample_offset = frame * bytes_per_sample;
+        } else if (buffer_list->mNumberBuffers > 0) {
+            buffer = &buffer_list->mBuffers[0];
+            const size_t channels_in_buffer = buffer->mNumberChannels > 0
+                ? buffer->mNumberChannels
+                : channels;
+            sample_offset = (frame * channels_in_buffer + channel) * bytes_per_sample;
+        }
+        if (!buffer || !buffer->mData || sample_offset > buffer->mDataByteSize ||
+            bytes_per_sample > buffer->mDataByteSize - sample_offset)
+            return nullptr;
+        return static_cast<const uint8_t*>(buffer->mData) + sample_offset;
+    };
+
+    std::vector<float> source(static_cast<size_t>(frames) * 2);
+    for (size_t frame = 0; frame < frames; ++frame) {
+        const uint8_t* left = sample_pointer(frame, 0);
+        const uint8_t* right = sample_pointer(frame, channels > 1 ? 1 : 0);
+        if (!left || !right) {
+            CFRelease(block_buffer);
+            return false;
+        }
+        source[frame * 2] = sample_to_float(left);
+        source[frame * 2 + 1] = sample_to_float(right);
     }
-    if (!valid) {
-        [input_buffer release];
-        [input_format release];
-        [output_format release];
-        CFRelease(block_buffer);
-        return false;
-    }
-    input_buffer.frameLength = static_cast<AVAudioFrameCount>(frames);
 
     const double output_frame_count = std::ceil(
-        static_cast<double>(frames) * 48000.0 / asbd->mSampleRate) + 32.0;
+        static_cast<double>(frames) * 48000.0 / asbd->mSampleRate);
     if (!std::isfinite(output_frame_count) || output_frame_count <= 0.0 ||
         output_frame_count > static_cast<double>(UINT32_MAX)) {
-        [input_buffer release];
-        [input_format release];
-        [output_format release];
         CFRelease(block_buffer);
         return false;
     }
-    AVAudioPCMBuffer* output_buffer = [[AVAudioPCMBuffer alloc]
-        initWithPCMFormat:output_format
-             frameCapacity:static_cast<AVAudioFrameCount>(output_frame_count)];
-    AVAudioConverter* converter = [[AVAudioConverter alloc]
-        initFromFormat:input_format
-             toFormat:output_format];
-    if (!output_buffer || !converter) {
-        [output_buffer release];
-        [converter release];
-        [input_buffer release];
-        [input_format release];
-        [output_format release];
-        CFRelease(block_buffer);
-        return false;
+    const size_t output_frames = static_cast<size_t>(output_frame_count);
+    output.resize(output_frames * 2);
+    const double source_step = asbd->mSampleRate / 48000.0;
+    for (size_t frame = 0; frame < output_frames; ++frame) {
+        const double source_position = static_cast<double>(frame) * source_step;
+        const size_t first = std::min(frames - 1, static_cast<size_t>(source_position));
+        const size_t second = std::min(frames - 1, first + 1);
+        const float blend = static_cast<float>(source_position - first);
+        output[frame * 2] = source[first * 2] +
+            (source[second * 2] - source[first * 2]) * blend;
+        output[frame * 2 + 1] = source[first * 2 + 1] +
+            (source[second * 2 + 1] - source[first * 2 + 1]) * blend;
     }
-
-    __block bool supplied_input = false;
-    NSError* conversion_error = nil;
-    [converter convertToBuffer:output_buffer
-                         error:&conversion_error
-          withInputFromBlock:^AVAudioBuffer*(AVAudioPacketCount packet_count,
-                                             AVAudioConverterInputStatus* status) {
-              (void)packet_count;
-              if (supplied_input) {
-                  *status = AVAudioConverterInputStatus_EndOfStream;
-                  return nil;
-              }
-              supplied_input = true;
-              *status = AVAudioConverterInputStatus_HaveData;
-              return input_buffer;
-          }];
-
-    const AVAudioFrameCount converted_frames = output_buffer.frameLength;
-    float* const* channel_data = output_buffer.floatChannelData;
-    const bool converted = conversion_error == nil && converted_frames > 0 &&
-        channel_data && channel_data[0] &&
-        (output_format.isInterleaved || channel_data[1]);
-    if (converted) {
-        output.resize(static_cast<size_t>(converted_frames) * 2);
-        if (output_format.isInterleaved) {
-            const float* interleaved = channel_data[0];
-            for (AVAudioFrameCount index = 0; index < converted_frames; ++index) {
-                output[static_cast<size_t>(index) * 2] = interleaved[index * 2];
-                output[static_cast<size_t>(index) * 2 + 1] = interleaved[index * 2 + 1];
-            }
-        } else {
-            const float* left = channel_data[0];
-            const float* right = channel_data[1];
-            for (AVAudioFrameCount index = 0; index < converted_frames; ++index) {
-                output[static_cast<size_t>(index) * 2] = left[index];
-                output[static_cast<size_t>(index) * 2 + 1] = right[index];
-            }
-        }
-    } else {
-        output.clear();
-    }
-    [output_buffer release];
-    [converter release];
-    [input_buffer release];
-    [input_format release];
-    [output_format release];
     CFRelease(block_buffer);
-    if (!converted) return false;
-    frame_count = static_cast<uint32_t>(converted_frames);
+    if (output_frames == 0 || output_frames > UINT32_MAX) {
+        output.clear();
+        return false;
+    }
+    frame_count = static_cast<uint32_t>(output_frames);
     return true;
 }
 
@@ -568,14 +568,33 @@ static bool normalize_audio_sample(CMSampleBufferRef sample_buffer,
     }
 
     if (type != SCStreamOutputTypeAudio || !audio_cb) return;
+    const CMFormatDescriptionRef format_description =
+        CMSampleBufferGetFormatDescription(sample_buffer);
+    const AudioStreamBasicDescription* asbd = format_description
+        ? CMAudioFormatDescriptionGetStreamBasicDescription(format_description)
+        : nullptr;
+    if (!_session->audio_sample_logged.exchange(true)) {
+        const uint32_t format_id = asbd ? asbd->mFormatID : 0;
+        const uint32_t format_flags = asbd ? asbd->mFormatFlags : 0;
+        const double sample_rate = asbd ? asbd->mSampleRate : 0.0;
+        const uint32_t channels = asbd ? asbd->mChannelsPerFrame : 0;
+        const uint32_t bits = asbd ? asbd->mBitsPerChannel : 0;
+        std::fprintf(stderr,
+                     "[dspeak:capture] screen audio sample format=%u flags=0x%x rate=%.2f channels=%u bits=%u frames=%lld\n",
+                     format_id, format_flags, sample_rate, channels, bits,
+                     static_cast<long long>(CMSampleBufferGetNumSamples(sample_buffer)));
+    }
     std::vector<float> normalized;
     uint32_t frame_count = 0;
     if (!normalize_audio_sample(sample_buffer, normalized, frame_count)) {
-        if (error_cb) {
-            error_cb(user_data, -204, "ScreenCaptureKit audio was not stereo 48 kHz float PCM");
+        if (error_cb && !_session->audio_normalization_error_logged.exchange(true)) {
+            error_cb(user_data, -204, "ScreenCaptureKit audio sample could not be normalized");
         }
         return;
     }
+    if (!_session->audio_normalized_sample_logged.exchange(true))
+        std::fprintf(stderr, "[dspeak:capture] screen audio normalized frames=%u\n",
+                     frame_count);
     audio_cb(user_data, normalized.data(), frame_count, 48000, 2);
 }
 @end

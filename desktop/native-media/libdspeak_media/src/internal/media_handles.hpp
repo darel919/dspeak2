@@ -7,13 +7,16 @@
 #include <memory>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <vector>
 #include <mutex>
-#include <queue>
 #include <string>
 #include <map>
 #include <optional>
 #include <cstddef>
+#include <cstdio>
+#include <functional>
+#include <thread>
 #include <media/base/adapted_video_track_source.h>
 #include <media/base/audio_source.h>
 #include <rtc_base/synchronization/mutex.h>
@@ -43,6 +46,10 @@ class CxxRecvListener;
 class CxxConsumerListener;
 class P2pHealthDataChannelObserver;
 
+namespace dspeak_native {
+struct SharedTrackFactory;
+}
+
 class NativeVideoSource : public webrtc::AdaptedVideoTrackSource {
 public:
     explicit NativeVideoSource(const char* track_id)
@@ -68,13 +75,58 @@ public:
                          uint32_t height,
                          uint32_t stride,
                          int64_t timestamp_ms) {
-        const bool camera = track_id_.find("camera") != std::string::npos;
-        const auto frame = ConvertFrame(data, width, height, stride, timestamp_ms);
-        if (!frame) return;
-        const char* source = camera ? "camera" : "screen";
-        if (lib_dspeak_media_local_video_preview_enabled(source))
-            lib_dspeak_media_push_local_video_frame(source, *frame);
-        OnFrame(*frame);
+        static std::atomic<bool> source_entered_logged{false};
+        static std::atomic<bool> frame_converted_logged{false};
+        static std::atomic<bool> preview_entered_logged{false};
+        static std::atomic<bool> preview_completed_logged{false};
+        static std::atomic<bool> on_frame_entered_logged{false};
+        static std::atomic<bool> on_frame_completed_logged{false};
+        static std::atomic<bool> source_exception_logged{false};
+        try {
+            const bool camera = track_id_.find("camera") != std::string::npos;
+            if (!source_entered_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=source-enter track=%s thread=%zu\n",
+                             track_id_.c_str(),
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            const auto frame = ConvertFrame(data, width, height, stride, timestamp_ms);
+            if (!frame) return;
+            if (!frame_converted_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=frame-converted source=%s size=%ux%u thread=%zu\n",
+                             camera ? "camera" : "screen", width, height,
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            const char* source = camera ? "camera" : "screen";
+            if (lib_dspeak_media_local_video_preview_enabled(source)) {
+                if (!preview_entered_logged.exchange(true))
+                    std::fprintf(stderr,
+                                 "[dspeak:media] native video pipeline stage=preview-enter source=%s thread=%zu\n",
+                                 source,
+                                 std::hash<std::thread::id>{}(std::this_thread::get_id()));
+                lib_dspeak_media_push_local_video_frame(source, *frame);
+                if (!preview_completed_logged.exchange(true))
+                    std::fprintf(stderr,
+                                 "[dspeak:media] native video pipeline stage=preview-complete source=%s thread=%zu\n",
+                                 source,
+                                 std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            }
+            if (!on_frame_entered_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=webrtc-source-enter source=%s thread=%zu\n",
+                             source,
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            OnFrame(*frame);
+            if (!on_frame_completed_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=webrtc-source-complete source=%s thread=%zu\n",
+                             source,
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
+        } catch (...) {
+            if (!source_exception_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=cpp-exception track=%s\n",
+                             track_id_.c_str());
+        }
     }
 
     void SetState(webrtc::MediaSourceInterface::SourceState new_state) {
@@ -160,6 +212,11 @@ public:
     void AddSink(webrtc::AudioTrackSinkInterface* sink) override {
         webrtc::MutexLock lock(&mutex_);
         sinks_.push_back(sink);
+        if (!sink_log_emitted_) {
+            std::fprintf(stderr, "[dspeak:media] native audio sink attached track=%s\n",
+                         track_id_.c_str());
+            sink_log_emitted_ = true;
+        }
     }
     void RemoveSink(webrtc::AudioTrackSinkInterface* sink) override {
         webrtc::MutexLock lock(&mutex_);
@@ -193,6 +250,12 @@ public:
         }
 
         webrtc::MutexLock lock(&mutex_);
+        if (!frame_log_emitted_) {
+            std::fprintf(stderr,
+                         "[dspeak:media] native audio frame reached source track=%s frames=%zu sinks=%zu\n",
+                         track_id_.c_str(), number_of_frames, sinks_.size());
+            frame_log_emitted_ = true;
+        }
         for (auto* sink : sinks_) {
             sink->OnData(output_data, output_bps, sample_rate, number_of_channels,
                          number_of_frames, absolute_capture_timestamp_ms);
@@ -218,6 +281,8 @@ private:
         webrtc::MediaSourceInterface::kLive;
     std::vector<webrtc::AudioTrackSinkInterface*> sinks_ RTC_GUARDED_BY(mutex_);
     std::array<int16_t, 1920> capture_conversion_buffer_{};
+    bool sink_log_emitted_ RTC_GUARDED_BY(mutex_) = false;
+    bool frame_log_emitted_ RTC_GUARDED_BY(mutex_) = false;
 };
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -265,6 +330,7 @@ struct lib_dspeak_media_video_track {
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
+    std::shared_ptr<dspeak_native::SharedTrackFactory> runtime;
     webrtc::scoped_refptr<webrtc::VideoTrackInterface> track;
 };
 
@@ -273,6 +339,7 @@ struct lib_dspeak_media_audio_track {
     webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
+    std::shared_ptr<dspeak_native::SharedTrackFactory> runtime;
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> track;
 };
 
@@ -282,17 +349,20 @@ struct lib_dspeak_media_p2p_handle {
     webrtc::Thread* network_thread = nullptr;
     webrtc::Thread* signaling_thread = nullptr;
     webrtc::Thread* worker_thread = nullptr;
-    std::queue<std::string> ice_candidates;
-    std::mutex ice_mutex;
-    bool connected = false;
-    bool failed = false;
-    bool closed = false;
+    std::atomic<uint64_t> event_handle{0};
+    std::atomic<bool> connected{false};
+    std::atomic<bool> failed{false};
+    std::atomic<bool> closed{false};
     bool audio_stereo = false;
     webrtc::scoped_refptr<webrtc::DataChannelInterface> health_channel;
     std::unique_ptr<P2pHealthDataChannelObserver> health_observer;
     std::vector<std::unique_ptr<NativeReceiveAudioSink>> audio_sinks;
     std::vector<std::unique_ptr<NativeReceiveVideoSink>> video_sinks;
     std::map<std::string, webrtc::scoped_refptr<webrtc::RtpReceiverInterface>> audio_receivers;
+    std::map<std::string, webrtc::scoped_refptr<webrtc::RtpSenderInterface>> audio_senders;
+    std::map<std::string, webrtc::scoped_refptr<webrtc::RtpSenderInterface>> video_senders;
+    std::map<std::string, std::string> video_preferred_codecs;
+    std::string last_error;
     std::map<std::string, NativeReceiveAudioSink*> audio_sinks_by_id;
     std::map<std::string, NativeReceiveVideoSink*> video_sinks_by_id;
     webrtc::PeerConnectionObserver* p2p_observer_raw = nullptr;
@@ -314,7 +384,7 @@ uint64_t lib_dspeak_media_next_action_id();
 void lib_dspeak_media_push_action(lib_dspeak_media_action_kind_t kind, void* transport,
                                   uint64_t action_id, const lib_dspeak_media_json* params,
                                   const lib_dspeak_media_json* state);
-lib_dspeak_media_action_t lib_dspeak_media_poll_action_impl();
+lib_dspeak_media_action_t lib_dspeak_media_drain_action_impl();
 
 
 

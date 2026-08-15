@@ -1,5 +1,15 @@
-import { closeConsumer } from "./native-mediasoup-consumers.ts";
+import {
+  closeConsumer,
+  commitVideoMigration,
+  NATIVE_CODEC_MIGRATION_REQUIRED_FRAMES,
+  rollbackVideoMigration,
+} from "./native-mediasoup-consumers.ts";
 import { receiveEventMatches, waitFor } from "./native-mediasoup-utils.ts";
+import {
+  candidateFrameCount,
+  hasAdvancingTimestamp,
+  isPresentableVideoFrame,
+} from "./video-codec-migration.ts";
 import type {
   NativeAction,
   NativeReceiveEvent,
@@ -134,11 +144,13 @@ export function handleReceiveEvent(
       };
       session.localVideoFeeds.set(source, feed);
     }
-    if (!feed || !event.data) return false;
+    if (!feed) return false;
+    if (typeof event.data !== "string" || !event.data) return false;
     session.localVideoFeeds.set(source, {
       ...feed,
       frame: {
         ...payload,
+        source,
         data: event.data,
         eventId: event.eventId,
       },
@@ -153,18 +165,60 @@ export function handleReceiveEvent(
   if (!receiveEventMatches(entry, { ...payload, consumerId })) return false;
   if (event.kind === 1) return true;
   if (event.kind === 2) {
-    if (entry.kind !== "video" || !event.data) return false;
-    const feed = session.remoteVideoFeeds.get(entry.key);
-    if (!feed) return false;
-    feed.frame = {
+    if (entry.kind !== "video") return false;
+    if (typeof event.data !== "string" || !event.data) return false;
+    const timestamp = Number(payload.timestamp ?? payload.timestampMs);
+    const frame = {
       ...payload,
       data: event.data,
       eventId: event.eventId,
+      ...(Number.isFinite(timestamp) ? { timestamp } : {}),
     };
-    session.remoteVideoFeeds.set(entry.key, { ...feed });
+    if (!isPresentableVideoFrame(frame)) return false;
+    const previousTimestamp = entry.lastFrameTimestamp;
+    const nextTimestamp = Number(payload.timestamp ?? payload.timestampMs);
+    entry.presentableFrames = candidateFrameCount(
+      entry.presentableFrames || 0,
+      previousTimestamp,
+      frame,
+    );
+    if (Number.isFinite(nextTimestamp))
+      entry.lastFrameTimestamp = nextTimestamp;
+    entry.lastFrameAt = Date.now();
+    entry.frame = frame;
+    if (
+      entry.visible === false &&
+      entry.migrationState === "warming-receivers"
+    ) {
+      if (
+        entry.presentableFrames >= NATIVE_CODEC_MIGRATION_REQUIRED_FRAMES &&
+        hasAdvancingTimestamp(previousTimestamp, nextTimestamp)
+      )
+        commitVideoMigration(session, entry);
+      session._emitState();
+      return true;
+    }
+    if (entry.visible === false || entry.superseded === true) return true;
+    const feed = session.remoteVideoFeeds.get(entry.key);
+    if (!feed) return false;
+    session.remoteVideoFeeds.set(entry.key, {
+      ...feed,
+      ...entry,
+      frame,
+    });
     session._emitState();
     return true;
   }
+  if (
+    event.kind === 3 &&
+    entry?.kind === "video" &&
+    entry.visible !== false &&
+    entry.migrationState === "committing"
+  )
+    return (
+      rollbackVideoMigration(session, entry, "candidate-ended") ||
+      closeConsumer(session, entry)
+    );
   if (event.kind === 3 && entry) return closeConsumer(session, entry);
   return false;
 }

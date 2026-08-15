@@ -23,7 +23,9 @@ class FakeWebSocket {
     for (const listener of this.listeners.get(type) || []) listener(event);
   }
 
-  send() {}
+  send(value) {
+    this.sent = value;
+  }
 
   close(code, reason) {
     this.readyState = FakeWebSocket.CLOSED;
@@ -94,6 +96,49 @@ test("provider handshake send failures reject the connection safely", async () =
 
     await assert.rejects(opening, /socket send failed/);
     assert.equal(failures.length, 1);
+  } finally {
+    globalThis.WebSocket = previousWebSocket;
+  }
+});
+
+test("provider hello carries the independent codec capability matrix", async () => {
+  const previousWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  try {
+    const provider = new MediasoupProviderSocket({ onMessage: () => {} });
+    const opening = provider.connect({
+      signalingUrl: "wss://provider.example",
+      ticket: "ticket",
+      capabilityProtocol: "video-codec-matrix-v1",
+      mediaCapabilities: {
+        videoCodecs: {
+          H264: {
+            encode: {
+              supported: true,
+              acceleration: "hardware",
+              realtimeEfficiency: "excellent",
+            },
+            decode: {
+              supported: true,
+              acceleration: "software",
+              realtimeEfficiency: "acceptable",
+            },
+          },
+        },
+        concurrentEncode: { supported: true, maxHardwareSessions: 1 },
+      },
+    });
+    const socket = provider.socket;
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.emit("open");
+    const hello = JSON.parse(socket.sent);
+    assert.equal(hello.capabilityProtocol, "video-codec-matrix-v1");
+    assert.equal(
+      hello.mediaCapabilities.videoCodecs.H264.encode.acceleration,
+      "hardware",
+    );
+    socket.emit("message", { data: JSON.stringify({ type: "hi919" }) });
+    await opening;
   } finally {
     globalThis.WebSocket = previousWebSocket;
   }

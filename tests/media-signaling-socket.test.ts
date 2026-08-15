@@ -401,6 +401,41 @@ test("media signaling waits for asynchronous reconnect preparation", async () =>
   }
 });
 
+test("media signaling exposes a ready wait that refreshes before reconnecting", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  let refreshes = 0;
+  try {
+    const signaling = harness({
+      onReconnect: async () => {
+        refreshes += 1;
+      },
+      reconnectBaseDelayMs: 1,
+      reconnectJitterMs: 0,
+      reconnectMaxDelayMs: 1,
+    });
+    const opening = signaling.open();
+    FakeWebSocket.instances[0].onclose({
+      code: 4000,
+      reason: "network changed",
+    });
+    await assert.rejects(opening, /connection closed/);
+
+    const reopening = signaling.waitForReady();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const replacement = FakeWebSocket.instances[1];
+    replacement.readyState = FakeWebSocket.OPEN;
+    assert.equal(signaling.markReady(), true);
+    await reopening;
+
+    assert.equal(refreshes, 1);
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
 test("message handler failures close the socket through recovery lifecycle", async () => {
   const originalWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket;

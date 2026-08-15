@@ -1,3 +1,8 @@
+import type {
+  ParticipantMediaCapabilities,
+  VideoCodecName,
+} from "./video-codec-capabilities.ts";
+
 export interface NativeP2pFlowEntry {
   key: string;
   bytes: number;
@@ -55,6 +60,11 @@ export interface NativeP2pConnectionState {
   settingRemoteAnswer: boolean;
   polite: boolean;
   ignoreOffer: boolean;
+  mediaCapabilities?: ParticipantMediaCapabilities | null;
+  remoteMediaCapabilities?: ParticipantMediaCapabilities | null;
+  selectedCodec?: VideoCodecName | null;
+  capabilitiesSent?: boolean;
+  capabilityWaitTimer?: ReturnType<typeof setTimeout> | null;
   candidates: RTCIceCandidateInit[];
   remoteDescription: RTCSessionDescription | null;
   closed: boolean;
@@ -89,6 +99,7 @@ export interface NativeP2pMeshOptions {
     track: MediaStreamTrack,
   ) => Record<string, unknown> | null;
   getAudioStereo: (source: string) => boolean;
+  mediaCapabilities?: ParticipantMediaCapabilities | null;
 }
 
 export interface NativeP2pSignalingMesh {
@@ -99,6 +110,7 @@ export interface NativeP2pSignalingMesh {
   mode: string;
   epoch: number;
   localPeerId: string | null;
+  mediaCapabilities: ParticipantMediaCapabilities | null;
   fail: (reason: string, error?: unknown) => unknown;
   emitSnapshot: () => unknown;
   sendControl: (data: Record<string, unknown>) => boolean;
@@ -136,6 +148,7 @@ export interface NativeP2pMeshSurface
     track: MediaStreamTrack,
   ) => Record<string, unknown> | null;
   getAudioStereo: (source: string) => boolean;
+  mediaCapabilities: ParticipantMediaCapabilities | null;
   onFailure: (reason: string, error?: unknown) => unknown;
   onSnapshot: (snapshot: unknown) => unknown;
   closeConnection: (peerId: string) => void;

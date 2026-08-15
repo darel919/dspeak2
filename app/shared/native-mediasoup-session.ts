@@ -18,6 +18,7 @@ import type {
   NativeConsumerEntry,
   NativeReceiveEvent,
 } from "./types/native-mediasoup.ts";
+import type { CodecRoutingPlan } from "./video-codec-routing.ts";
 export class NativeMediasoupSfuSession {
   mediaProfile: NativeMediaProfile;
   constructor({
@@ -42,6 +43,7 @@ export class NativeMediasoupSfuSession {
     getAudioBitrate,
     getAudioStereo,
     getVideoSettings,
+    mediaCapabilities = null,
     mediaProfile = "audio",
   }: NativeMediasoupConstructorOptions) {
     if (typeof invoke !== "function")
@@ -77,9 +79,11 @@ export class NativeMediasoupSfuSession {
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
     this.mediaProfile = mediaProfile;
+    this.mediaCapabilities = mediaCapabilities;
     this.signaling = null;
     this.providerSignaling = null;
     this.controlTicket = "";
+    this.refreshControl = null;
     this.mediaSessionId = "";
     this.messageHandlers = new Map();
     this.pending = new Map();
@@ -91,12 +95,25 @@ export class NativeMediasoupSfuSession {
     this.transportPointers = new Map();
     this.sources = new Map();
     this.producers = new Map();
+    this.producerVariants = new Map();
+    this.pendingLocalVideoFrames = new Map();
+    this.remoteProducerMetadata = new Map();
     this.sourcePublications = new Map();
     this.sourceOperations = new Map();
     this.pendingCloudflarePublications = new Map();
     this.sourceTransmission = new Map();
     this.producerRemovals = new Map();
     this.consumers = new Map();
+    this.remoteParticipantCapabilities = new Map();
+    this.logicalVideoStreams = new Map();
+    this.codecMigrationTelemetry = [];
+    this.videoDecodeOverloadTelemetry = [];
+    this.codecRuntimeTelemetry = [];
+    this.codecRoutingPlans = new Map();
+    this.codecRoutingCandidatePlans = new Map();
+    this.codecMigrationAcks = new Map();
+    this.codecRoutingEvaluationTimer = null;
+    this.codecRoutingEvaluationOperation = null;
     this.transportStates = new Map([
       ["send", "new"],
       ["recv", "new"],
@@ -162,6 +179,7 @@ export class NativeMediasoupSfuSession {
     this.initializationTimer = null;
     this.transportRequestIds = new Map();
     this.cloudflareSession = null;
+    this.providerActivationPromise = null;
     this.lastProviderFailureKey = null;
     this._installHandlers();
   }
@@ -253,7 +271,14 @@ export interface NativeMediasoupSfuSession extends NativeMediasoupSfuSessionSurf
     entry: NativeConsumerEntry,
     options?: { releaseNative?: boolean },
   ) => unknown;
-  requestConsumer: (producerId: string) => unknown;
+  requestConsumer: (
+    producerId: string,
+    metadata?: Record<string, unknown>,
+  ) => unknown;
+  adaptVideoReceiver: (
+    logicalStreamId: string,
+    preferredLayers: { spatialLayer?: number; temporalLayer?: number },
+  ) => Promise<unknown>;
   closeConsumerByProducer: (producerId: string) => unknown;
   setJitterBufferConfig: (config?: {
     minDelayMs?: number;
@@ -262,6 +287,38 @@ export interface NativeMediasoupSfuSession extends NativeMediasoupSfuSessionSurf
   _publishSource: (
     entry: NativeSourceEntry,
   ) => Promise<NativeProducerEntry | null>;
+  publishVariant: (
+    source: string,
+    variant: {
+      codec: string;
+      variantId?: string;
+      generation?: number;
+      receivers?: string[];
+      emergency?: boolean;
+      score?: number;
+      target?: import("./video-codec-routing.ts").CodecRoutingTarget;
+      targetAdjusted?: boolean;
+    },
+  ) => Promise<NativeProducerEntry | null>;
+  removeVariant: (variantId: string, force?: boolean) => Promise<unknown>;
+  applyCodecRoutingPlan: (plan: CodecRoutingPlan) => Promise<unknown>;
+  codecRoutingEvaluationTimer: ReturnType<typeof setTimeout> | null;
+  codecRoutingEvaluationOperation: Promise<unknown> | null;
+  codecMigrationAcks: Map<
+    string,
+    Map<
+      string,
+      {
+        variantId: string;
+        state: "stable" | "abort";
+        generation: number;
+        updatedAt: number;
+      }
+    >
+  >;
+  handleCodecMigrationState: (data: Record<string, unknown>) => unknown;
+  scheduleCodecRoutingEvaluation: () => unknown;
+  evaluateCodecRoutingPlans: () => Promise<unknown>;
 }
 
 const nativeMediasoupMethodGroups = [

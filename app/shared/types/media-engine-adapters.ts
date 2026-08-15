@@ -17,6 +17,7 @@ import type {
   NativeTauriLike,
   NativeVoiceStoreLike,
 } from "./native-media-engine.ts";
+import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 
 export type BrowserMediaSession = ReturnType<typeof useHybridMediaSession>;
 export type MediaQoeReport = ReturnType<typeof createMediaQoeReport>;
@@ -47,6 +48,9 @@ export type BrowserMediaEngineSession = BrowserMediaSession & {
   handleSignal?: (message: MediaSignalMessage) => Promise<void>;
   getDevices?: () => Promise<MediaDeviceInfo[]>;
   getStats?: () => Promise<MediaStats>;
+  setMediaCapabilities?: (
+    capabilities: ParticipantMediaCapabilities | null,
+  ) => unknown;
   shutdown?: () => Promise<void>;
   setMicrophoneDevice?: (deviceId: string) => Promise<void>;
   setOutputDevice?: (deviceId: string) => Promise<void>;

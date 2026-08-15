@@ -1,3 +1,4 @@
+mod media_popups;
 mod notifications;
 mod oauth;
 mod state;
@@ -5,14 +6,18 @@ mod tray;
 mod updates;
 mod window;
 
+#[tauri::command]
+fn desktop_restart_app(app: tauri::AppHandle) {
+    app.restart()
+}
+
 use crate::media;
 use state::{BackgroundNotificationState, OAuthState};
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tauri::Listener;
 use tauri::Manager;
-use tauri_plugin_notification::NotificationExt;
 use tokio::time::sleep;
 
 pub(crate) fn run() {
@@ -34,26 +39,13 @@ pub(crate) fn run() {
         .manage(BackgroundNotificationState {
             session: std::sync::Arc::new(Mutex::new(None)),
             enabled: std::sync::Arc::new(AtomicBool::new(false)),
+            wake: std::sync::Arc::new(tokio::sync::Notify::new()),
         })
+        .manage(media_popups::MediaPopupState::default())
         .manage(media::NativeMediaStore::default())
         .setup(|app| {
             maintain_log_directory(app.handle());
-            if let Err(error) =
-                media::strict_startup_check(app.state::<media::NativeMediaStore>().inner())
-            {
-                report_fatal(
-                    app.handle(),
-                    "Native media startup failed",
-                    &error.to_string(),
-                );
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.close();
-                }
-                if let Some(window) = app.get_webview_window("init") {
-                    let _ = window.close();
-                }
-                return Err(error.into());
-            }
+            window::load_preferences(app.handle());
 
             let log_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -97,15 +89,40 @@ pub(crate) fn run() {
             let _ = tray::create_tray(app.handle())?;
             tray::setup_global_shortcuts(app.handle());
 
-            if let Some(window) = app.get_webview_window("main") {
-                let state_window = window.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = window::restore_window_state(state_window).await;
-                });
-            }
+            let media_app = app.handle().clone();
+            app.listen(media::MEDIA_EVENT_STATE, move |event| {
+                let connected = serde_json::from_str::<serde_json::Value>(event.payload())
+                    .ok()
+                    .and_then(|payload| payload.get("connected").and_then(|value| value.as_bool()))
+                    .unwrap_or(false);
+                if connected {
+                    return;
+                }
+                media_popups::close_all(
+                    &media_app,
+                    media_app.state::<media_popups::MediaPopupState>().inner(),
+                );
+                if let Some(window) = media_app.get_webview_window("main") {
+                    if !window.is_visible().unwrap_or(true) {
+                        let _ = window.destroy();
+                    }
+                }
+            });
 
-            if let Some(window) = app.get_webview_window("main") {
-                window::attach_main_window_lifecycle(&window);
+            let launched_minimized = std::env::args().any(|argument| argument == "--minimized");
+            let explicitly_show = std::env::args().any(|argument| argument == "--show");
+            let environment_show_override =
+                std::env::var("DSPEAK_DESKTOP_SHOW").ok().and_then(|value| {
+                    match value.to_ascii_lowercase().as_str() {
+                        "1" | "true" => Some(true),
+                        "0" | "false" => Some(false),
+                        _ => None,
+                    }
+                });
+            let show_on_start = explicitly_show
+                || (!launched_minimized && environment_show_override.unwrap_or(true));
+            if show_on_start {
+                window::open_main_window(app.handle())?;
             }
 
             Ok(())
@@ -126,6 +143,12 @@ pub(crate) fn run() {
             oauth::get_oauth_callback_url,
             oauth::get_pending_oauth_callback,
             window::desktop_ready,
+            media_popups::desktop_open_media_popup,
+            media_popups::desktop_get_media_popup,
+            media_popups::desktop_focus_media_popup,
+            media_popups::desktop_close_media_popup,
+            media::media_worker_invoke,
+            desktop_restart_app,
             notifications::register_background_notifications,
             notifications::clear_background_notifications,
             notifications::set_background_notifications_enabled,
@@ -138,6 +161,8 @@ pub(crate) fn run() {
             media::media_set_ice_servers,
             media::media_handle_signal,
             media::media_get_devices,
+            media::media_prepare_capture,
+            media::media_prepare_devices,
             media::media_list_capture_sources,
             media::media_get_permissions,
             media::media_select_capture_source,
@@ -155,8 +180,8 @@ pub(crate) fn run() {
             media::media_p2p_create_offer,
             media::media_p2p_create_answer,
             media::media_p2p_set_remote_description,
+            media::media_p2p_rollback_local_description,
             media::media_p2p_add_ice_candidate,
-            media::media_p2p_poll_ice_candidate,
             media::media_p2p_ice_state,
             media::media_p2p_restart_ice,
             media::media_p2p_add_track,
@@ -169,9 +194,6 @@ pub(crate) fn run() {
             media::media_p2p_set_jitter_buffer,
             media::media_p2p_send_health,
             media::media_p2p_get_stats,
-            media::media_p2p_poll_event,
-            media::media_poll_action,
-            media::media_poll_receive_event,
             media::media_complete_connect,
             media::media_fail_connect,
             media::media_complete_produce,
@@ -205,7 +227,20 @@ pub(crate) fn run() {
             media::media_replace_producer_track,
             media::media_set_consumer_jitter_buffer,
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!())
+        .map(|app| {
+            app.run(|app_handle, event| {
+                #[cfg(target_os = "macos")]
+                if let tauri::RunEvent::Reopen { .. } = event {
+                    if let Err(error) = window::open_main_window(app_handle) {
+                        eprintln!("[dspeak] failed to open main window from Dock: {error}");
+                    }
+                }
+
+                #[cfg(not(target_os = "macos"))]
+                let _ = (app_handle, event);
+            });
+        });
 
     if let Err(error) = result {
         let fallback = std::env::temp_dir().join("dspeak-fatal.log");
@@ -235,28 +270,6 @@ fn maintain_log_directory(app: &tauri::AppHandle) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
-}
-
-fn report_fatal(app: &tauri::AppHandle, title: &str, detail: &str) {
-    if let Ok(directory) = app.path().app_log_dir() {
-        let _ = std::fs::create_dir_all(&directory);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let _ = std::fs::write(
-            directory.join(format!("fatal-{timestamp}.log")),
-            format!("{title}\n\n{detail}"),
-        );
-    }
-    let _ = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(detail)
-        .show();
-    show_native_fatal_dialog(title, detail);
-    std::thread::sleep(Duration::from_millis(500));
 }
 
 fn show_native_fatal_dialog(title: &str, detail: &str) {

@@ -138,6 +138,7 @@ export function getNativeCaptureCapability(
 export const DESKTOP_CAPTURE_ERROR_CODES = Object.freeze({
   INVALID_REQUEST: "DESKTOP_CAPTURE_INVALID_REQUEST",
   SOURCE_CONFLICT: "DESKTOP_CAPTURE_SOURCE_CONFLICT",
+  TRACK_UNAVAILABLE: "DESKTOP_CAPTURE_TRACK_UNAVAILABLE",
   NATIVE_UNAVAILABLE: "DESKTOP_CAPTURE_NATIVE_UNAVAILABLE",
   NATIVE_UNSUPPORTED: "DESKTOP_CAPTURE_NATIVE_UNSUPPORTED",
 });
@@ -236,28 +237,45 @@ export function nativeCaptureFailure(
   if (error instanceof DesktopCaptureError) return error;
   const errorRecord =
     error && typeof error === "object" ? (error as UnknownRecord) : null;
-  const details = errorRecord?.details || null;
-  return new DesktopCaptureError(
-    typeof errorRecord?.message === "string"
-      ? errorRecord.message
-      : "Native desktop capture is unavailable.",
-    {
-      code:
-        typeof errorRecord?.code === "string"
-          ? errorRecord.code
+  const nestedError =
+    errorRecord?.error && typeof errorRecord.error === "object"
+      ? (errorRecord.error as UnknownRecord)
+      : null;
+  const nestedMessage =
+    typeof errorRecord?.error === "string" ? errorRecord.error : null;
+  const message =
+    typeof error === "string"
+      ? error
+      : typeof errorRecord?.message === "string"
+        ? errorRecord.message
+        : typeof nestedError?.message === "string"
+          ? nestedError.message
+          : nestedMessage || "Native desktop capture is unavailable.";
+  const details = errorRecord?.details || nestedError?.details || null;
+  return new DesktopCaptureError(message, {
+    code:
+      typeof errorRecord?.code === "string"
+        ? errorRecord.code
+        : typeof nestedError?.code === "string"
+          ? nestedError.code
           : DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNAVAILABLE,
-      operation:
-        typeof errorRecord?.operation === "string"
-          ? errorRecord.operation
+    operation:
+      typeof errorRecord?.operation === "string"
+        ? errorRecord.operation
+        : typeof nestedError?.operation === "string"
+          ? nestedError.operation
           : operation,
-      details: details || (selection ? { selection } : null),
-    },
-  );
+    details: details || (selection ? { selection } : null),
+  });
 }
 
 export function desktopCaptureRequest(
   selection: unknown,
-  options: { operation?: string; roomBitrateBps?: number } = {},
+  options: {
+    operation?: string;
+    roomBitrateBps?: number;
+    video?: UnknownRecord;
+  } = {},
 ) {
   const validatedSelection = assertDesktopCaptureSelection(
     selection,
@@ -272,6 +290,9 @@ export function desktopCaptureRequest(
       : null;
   const captureSelection = {
     ...validatedSelection,
+    ...(options.video
+      ? { video: { ...validatedSelection.video, ...options.video } }
+      : {}),
     ...(roomBitrateBps
       ? {
           roomBitrateBps,
@@ -442,7 +463,34 @@ export async function getDesktopCaptureApi() {
   if (!(await isDesktopClient())) return null;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    return { invoke };
+    return {
+      invoke: (command: string, payload: unknown = {}) =>
+        invoke("media_worker_invoke", { command, payload }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function invokeNativeDesktopMedia(
+  command: string,
+  payload: unknown = {},
+) {
+  const api = await getDesktopCaptureApi();
+  if (!api) throw new Error("Native desktop media is unavailable");
+  return api.invoke(command, payload);
+}
+
+export async function listenNativeDesktopMedia(
+  eventName: string,
+  handler: (payload: unknown) => void,
+) {
+  if (!(await isDesktopClient())) return null;
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    return await listen(eventName, ({ payload }: { payload: unknown }) => {
+      handler(payload);
+    });
   } catch {
     return null;
   }

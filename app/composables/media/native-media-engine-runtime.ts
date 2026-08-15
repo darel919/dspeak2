@@ -3,13 +3,12 @@ import { getDeviceId } from "../../shared/device-identity.ts";
 import { resolveChannelRoomId } from "../../shared/media/channel-room.ts";
 import {
   EVENT_ALIASES,
-  NATIVE_ACTION_POLL_ACTIVE_MS,
-  NATIVE_ACTION_POLL_IDLE_MS,
   NATIVE_EVENT_NAMES,
   channelMediaPolicy,
   hasNativeCapability,
 } from "./native-media-engine-common.ts";
 import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
+import { handleNativeAudioTelemetry } from "./native-media-engine-audio.ts";
 import type {
   NativeCaptureRequest,
   NativeCapabilities,
@@ -18,6 +17,7 @@ import type {
   NativeTopology,
 } from "../../shared/types/native-media.ts";
 import { resolveMediaProviderIdentity } from "../../shared/media-provider-identity.ts";
+import { normalizeParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
 
 const NATIVE_MEDIA_READINESS_TIMEOUT_MS = 10_000;
 const NATIVE_MEDIA_READINESS_POLL_MS = 100;
@@ -351,9 +351,9 @@ export async function setIceServers(
 
 export async function shutdown(engine: NativeMediaEngine) {
   engine._stopNativeAudioTelemetry();
+  engine._stopNativeVideoAdaptation();
   if (engine.qoeTimer) clearInterval(engine.qoeTimer);
   engine.qoeTimer = null;
-  engine._stopNativeActionPump();
   engine.nativeTopologyGeneration =
     (Number(engine.nativeTopologyGeneration) || 0) + 1;
   engine.nativeTopologyKey = null;
@@ -372,6 +372,7 @@ export async function shutdown(engine: NativeMediaEngine) {
   engine.initialized = false;
   engine.nativeSession = null;
   engine.nativeP2pSession = null;
+  engine.mediaCapabilities = null;
   engine.nativeActionHandler = null;
   engine.remoteVideoFeedsRef.value = new Map();
   engine.remoteAudioFeedsRef.value = new Map();
@@ -383,6 +384,41 @@ export function mergeNativeCapabilities(
   engine: NativeMediaEngine,
   capabilities: NativeCapabilities = {},
 ) {
+  engine.mediaCapabilities = normalizeParticipantMediaCapabilities({
+    ...capabilities,
+    ...(capabilities.mediaCapabilities || {}),
+    videoCodecs:
+      capabilities.videoCodecCapabilities ||
+      capabilities.mediaCapabilities?.videoCodecs ||
+      (
+        capabilities.videoCodecDiagnostics as
+          Record<string, unknown> | undefined
+      )?.capabilities,
+    concurrentEncode:
+      capabilities.concurrentEncode ||
+      capabilities.mediaCapabilities?.concurrentEncode ||
+      (
+        capabilities.videoCodecDiagnostics as
+          Record<string, unknown> | undefined
+      )?.concurrentEncode,
+    source: "native-runtime-probe",
+  });
+  if (engine.nativeSession)
+    engine.nativeSession.mediaCapabilities = engine.mediaCapabilities;
+  if (engine.nativeSession?.cloudflareSession)
+    engine.nativeSession.cloudflareSession.mediaCapabilities =
+      engine.mediaCapabilities;
+  if (engine.nativeP2pSession)
+    engine.nativeP2pSession.mediaCapabilities = engine.mediaCapabilities;
+  const capabilityMessage = {
+    type: "media-capabilities",
+    data: {
+      mediaCapabilities: engine.mediaCapabilities,
+      capabilityProtocol: "video-codec-matrix-v1",
+    },
+  };
+  engine.nativeSession?.signaling?.send?.(capabilityMessage);
+  engine.nativeSession?.providerSignaling?.send?.(capabilityMessage);
   const mapping = {
     nativeRtc: "nativeRtc",
     nativeBackendReady: "nativeBackendReady",
@@ -445,7 +481,62 @@ export async function invoke(
   payload: NativeCaptureRequest = {},
 ): Promise<NativeCaptureRequest> {
   const tauri = await getTauri(engine);
-  return (await tauri.invoke(command, payload)) as NativeCaptureRequest;
+  try {
+    return (await tauri.invoke(command, payload)) as NativeCaptureRequest;
+  } catch (error) {
+    throw normalizeNativeInvokeError(command, error);
+  }
+}
+
+export function normalizeNativeInvokeError(
+  command: string,
+  value: unknown,
+): Error {
+  if (value instanceof Error) {
+    Object.assign(value, { nativeCommand: command });
+    return value;
+  }
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null;
+  const nested =
+    record?.error && typeof record.error === "object"
+      ? (record.error as Record<string, unknown>)
+      : null;
+  const details = record?.details ?? nested?.details;
+  const nativeError =
+    details &&
+    typeof details === "object" &&
+    typeof (details as Record<string, unknown>).nativeError === "string"
+      ? String((details as Record<string, unknown>).nativeError).trim()
+      : "";
+  const baseMessage =
+    typeof record?.message === "string"
+      ? record.message
+      : typeof nested?.message === "string"
+        ? nested.message
+        : typeof record?.error === "string"
+          ? record.error
+          : typeof value === "string" && value
+            ? value
+            : `Native media command failed: ${command}`;
+  const message =
+    nativeError && !baseMessage.includes(nativeError)
+      ? `${baseMessage}: ${nativeError}`
+      : baseMessage;
+  const error = new Error(message);
+  Object.assign(error, {
+    ...(typeof record?.code === "string"
+      ? { code: record.code }
+      : typeof nested?.code === "string"
+        ? { code: nested.code }
+        : {}),
+    ...(details !== undefined ? { details } : {}),
+    nativeCommand: command,
+    nativeResponse: value,
+  });
+  return error;
 }
 
 export async function configureNativeIceServers(engine: NativeMediaEngine) {
@@ -523,9 +614,12 @@ export async function configureNativeControl(
     error.status = response.status;
     throw error;
   }
+  const bootstrap = await response.json();
   engine.nativeSession?.configureControl({
-    ...(await response.json()),
+    ...bootstrap,
     channelId,
+    refreshControl: () =>
+      configureNativeControl(engine, channelId, resolvedRoomId),
   });
 }
 
@@ -549,13 +643,15 @@ export function syncNativeFeeds(engine: NativeMediaEngine) {
   const p2pVideoFeeds =
     engine.nativeProvider === "p2p"
       ? [...(engine.nativeP2pSession?.trackEntries?.values() || [])].filter(
-          (entry) => entry.kind === "video" && !entry.closed,
+          (entry) =>
+            entry.kind === "video" && !entry.closed && entry.visible !== false,
         )
       : [];
   const p2pAudioFeeds =
     engine.nativeProvider === "p2p"
       ? [...(engine.nativeP2pSession?.trackEntries?.values() || [])].filter(
-          (entry) => entry.kind === "audio" && !entry.closed,
+          (entry) =>
+            entry.kind === "audio" && !entry.closed && entry.visible !== false,
         )
       : [];
   const mergeFeeds = (
@@ -566,13 +662,26 @@ export function syncNativeFeeds(engine: NativeMediaEngine) {
     for (const [key, entry] of nativeFeeds)
       merged.set(`${String(entry.userId)}:${String(entry.source)}`, [
         key,
-        entry,
+        {
+          ...entry,
+          logicalStreamId:
+            entry.logicalStreamId ||
+            `user:${String(entry.userId ?? "unknown")}/${String(entry.source || "video")}`,
+        },
       ]);
     for (const entry of p2pFeeds) {
       const logicalKey = `${String(entry.userId)}:${String(entry.source)}`;
       const current = merged.get(logicalKey)?.[1];
       if (current?.kind === "video" && current.frame && !entry.frame) continue;
-      merged.set(logicalKey, [entry.key || logicalKey, entry]);
+      merged.set(logicalKey, [
+        entry.key || logicalKey,
+        {
+          ...entry,
+          logicalStreamId:
+            entry.logicalStreamId ||
+            `user:${String(entry.userId ?? "unknown")}/${String(entry.source || "video")}`,
+        },
+      ]);
     }
     return new Map(merged.values());
   };
@@ -607,115 +716,104 @@ export function syncLocalFeeds(engine: NativeMediaEngine) {
   triggerRef(engine.localVideoFeedsRef);
 }
 
-export function startNativeActionPump(engine: NativeMediaEngine) {
-  if (engine.nativeActionPump || !engine.flags.nativeRtc) return;
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const schedule = (delay: number) => {
-    timer = setTimeout(pump, delay);
-    timer?.unref?.();
-  };
-  const pump = async () => {
-    if (stopped || !engine.initialized) return;
-    let active = false;
-    let action = null;
+function decodeNativeAction(
+  engine: NativeMediaEngine,
+  action: NativeCaptureRequest,
+): NativeCaptureRequest | null {
+  if (!action.kind && !action.state) return null;
+  let params = null;
+  if (typeof action.paramsJson === "string") {
     try {
-      action = await engine._invoke("media_poll_action");
-      active = Boolean(action?.kind || action?.state);
-      if (action?.kind || action?.state) {
-        let params = null;
-        if (typeof action.paramsJson === "string") {
-          try {
-            params = JSON.parse(action.paramsJson);
-          } catch (error) {
-            engine._emit("error", {
-              source: "native",
-              operation: "action-pump",
-              error,
-            });
-          }
-        }
-        let state = action.state;
-        if (typeof state === "string") {
-          try {
-            state = JSON.parse(state);
-          } catch {}
-        }
-        const nativeAction = {
-          ...action,
-          type:
-            action.kind === 1
-              ? "transport-connect"
-              : action.kind === 2
-                ? "produce"
-                : action.kind === 3 || action.kind === 4
-                  ? "consumer-event"
-                  : "transport-state",
-          params,
-          state,
-        };
-        engine._emit("native-action", nativeAction);
-        await engine.nativeActionHandler?.(nativeAction);
-        if (state)
-          engine._emit("ice-state", {
-            transportPtr: action.transportPtr,
-            state,
-          });
-      }
-      const receiveEvent = await engine._invoke("media_poll_receive_event");
-      active = active || Boolean(receiveEvent?.kind);
-      if (receiveEvent?.kind) {
-        engine.nativeReceiveEventHandler?.(receiveEvent);
-        syncLocalFeeds(engine);
-        syncNativeFeeds(engine);
-        engine._emit("native-receive-event", receiveEvent);
-      }
+      params = JSON.parse(action.paramsJson);
     } catch (error) {
-      if (!stopped) {
-        engine._emit("error", {
-          source: "native",
-          operation: "action-pump",
-          error,
-        });
-        if (action?.kind === 1) {
-          await engine
-            ._invoke("media_fail_connect", {
-              transportPtr: action.transportPtr,
-              error:
-                (error as NativeErrorLike).message ||
-                "Native transport connection failed",
-            })
-            .catch(() => {});
-        } else if (action?.kind === 2) {
-          await engine
-            ._invoke("media_fail_produce", {
-              actionId: action.actionId,
-              error:
-                (error as NativeErrorLike).message ||
-                "Native producer creation failed",
-            })
-            .catch(() => {});
-        }
-      }
+      engine._emit("error", {
+        source: "native",
+        operation: "native-event",
+        error,
+      });
     }
-    if (!stopped)
-      schedule(
-        active ? NATIVE_ACTION_POLL_ACTIVE_MS : NATIVE_ACTION_POLL_IDLE_MS,
-      );
-  };
-  schedule(0);
-  engine.nativeActionPump = {
-    stop: () => {
-      stopped = true;
-      if (timer !== null) clearTimeout(timer);
-      engine.nativeActionPump = null;
-    },
+  }
+  let state = action.state;
+  if (typeof state === "string") {
+    try {
+      state = JSON.parse(state);
+    } catch {}
+  }
+  return {
+    ...action,
+    type:
+      action.kind === 1
+        ? "transport-connect"
+        : action.kind === 2
+          ? "produce"
+          : action.kind === 3 || action.kind === 4
+            ? "consumer-event"
+            : "transport-state",
+    params,
+    state,
   };
 }
 
-export function stopNativeActionPump(engine: NativeMediaEngine) {
-  engine.nativeActionPump?.stop?.();
-  engine.nativeActionPump = null;
+export async function dispatchNativeAction(
+  engine: NativeMediaEngine,
+  action: NativeCaptureRequest,
+) {
+  const nativeAction = decodeNativeAction(engine, action);
+  if (!nativeAction) return;
+  engine._emit("native-action", nativeAction);
+  try {
+    await engine.nativeActionHandler?.(nativeAction);
+    if (nativeAction.state)
+      engine._emit("ice-state", {
+        transportPtr: nativeAction.transportPtr,
+        state: nativeAction.state,
+      });
+  } catch (error) {
+    engine._emit("error", {
+      source: "native",
+      operation: "native-event",
+      error,
+    });
+    if (nativeAction.kind === 1) {
+      await engine
+        ._invoke("media_fail_connect", {
+          transportPtr: nativeAction.transportPtr,
+          error:
+            (error as NativeErrorLike).message ||
+            "Native transport connection failed",
+        })
+        .catch(() => {});
+    } else if (nativeAction.kind === 2) {
+      await engine
+        ._invoke("media_fail_produce", {
+          actionId: nativeAction.actionId,
+          error:
+            (error as NativeErrorLike).message ||
+            "Native producer creation failed",
+        })
+        .catch(() => {});
+    }
+  }
+}
+
+export function dispatchNativeReceiveEvent(
+  engine: NativeMediaEngine,
+  receiveEvent: NativeCaptureRequest,
+) {
+  const kind = Number(receiveEvent.kind);
+  if (kind === 7) {
+    handleNativeAudioTelemetry(
+      engine,
+      (receiveEvent.payload || {}) as Record<string, unknown>,
+    );
+    return;
+  }
+  engine.nativeReceiveEventHandler?.(receiveEvent);
+  if (kind === 5) syncLocalFeeds(engine);
+  if (kind === 2 || kind === 3 || kind === 4) {
+    syncNativeFeeds(engine);
+    engine._emit("native-receive-event", receiveEvent);
+  }
 }
 
 export async function bindNativeEvents(engine: NativeMediaEngine) {
@@ -726,7 +824,34 @@ export async function bindNativeEvents(engine: NativeMediaEngine) {
       eventName,
       ({ payload }: { payload: unknown }) => {
         const event = EVENT_ALIASES[eventName as keyof typeof EVENT_ALIASES];
-        engine._emit(event, payload);
+        if (event === "native-receive-event") {
+          try {
+            dispatchNativeReceiveEvent(engine, payload as NativeCaptureRequest);
+          } catch (error) {
+            engine._emit("error", {
+              source: "native",
+              operation: "native-receive-event",
+              error,
+            });
+          }
+          return;
+        }
+        const task =
+          event === "native-action"
+            ? () =>
+                dispatchNativeAction(engine, payload as NativeCaptureRequest)
+            : () => {
+                engine._emit(event, payload);
+              };
+        const previous = engine.nativeEventOperation || Promise.resolve();
+        const operation = previous.catch(() => {}).then(task);
+        engine.nativeEventOperation = operation;
+        operation
+          .finally(() => {
+            if (engine.nativeEventOperation === operation)
+              engine.nativeEventOperation = null;
+          })
+          .catch(() => {});
       },
     );
     engine.unlisten.push(unlisten);
@@ -739,6 +864,10 @@ export async function getTauri(engine: NativeMediaEngine) {
     import("@tauri-apps/api/core"),
     import("@tauri-apps/api/event"),
   ]);
-  engine.tauri = { invoke, listen };
+  engine.tauri = {
+    invoke: (command, payload = {}) =>
+      invoke("media_worker_invoke", { command, payload }),
+    listen,
+  };
   return engine.tauri;
 }

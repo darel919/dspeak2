@@ -44,18 +44,22 @@ pub async fn media_create_capture_producer(
         .and_then(Value::as_str)
         .unwrap_or(if kind == "audio" { "audio" } else { "screen" });
     validate_capture_producer_source(&kind, source)?;
-    if handles.producers.contains_key(source) {
+    let producer_key = app_data
+        .get("producerKey")
+        .and_then(Value::as_str)
+        .unwrap_or(source);
+    if handles.producers.contains_key(producer_key) {
         return Err(format!(
-            "native {kind} producer already exists for source '{source}'"
+            "native {kind} producer already exists for key '{producer_key}'"
         ));
     }
     let producer =
         native::produce_capture(handles.send_transport, &kind, source, &app_data.to_string())?;
     eprintln!("[dspeak:media] capture producer created source={source} kind={kind}");
-    handles.producers.insert(source.to_string(), producer);
+    handles.producers.insert(producer_key.to_string(), producer);
     let id = unsafe { ffi::lib_dspeak_media_producer_get_id(producer) };
     if id.is_null() {
-        handles.producers.remove(source);
+        handles.producers.remove(producer_key);
         unsafe { ffi::lib_dspeak_media_destroy_producer(producer) };
         return Err("native producer did not return an identifier".to_string());
     }
@@ -67,7 +71,7 @@ pub async fn media_create_capture_producer(
     match producer_id {
         Ok(producer_id) => Ok(serde_json::json!({ "id": producer_id })),
         Err(error) => {
-            handles.producers.remove(source);
+            handles.producers.remove(producer_key);
             unsafe { ffi::lib_dspeak_media_destroy_producer(producer) };
             Err(error)
         }
@@ -79,17 +83,19 @@ pub async fn media_create_capture_producer(
 pub async fn media_set_producer_paused(
     store: State<'_, NativeMediaStore>,
     source: String,
+    producer_key: Option<String>,
     paused: bool,
 ) -> Result<(), String> {
     let handles = store
         .handles
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let key = producer_key.unwrap_or(source.clone());
     let producer = handles
         .producers
-        .get(&source)
+        .get(&key)
         .copied()
-        .ok_or_else(|| format!("native producer is not available for source '{source}'"))?;
+        .ok_or_else(|| format!("native producer is not available for key '{key}'"))?;
     native::producer_set_paused(producer, paused)
 }
 
@@ -98,17 +104,19 @@ pub async fn media_set_producer_paused(
 pub async fn media_set_producer_parameters(
     store: State<'_, NativeMediaStore>,
     source: String,
+    producer_key: Option<String>,
     parameters: Value,
 ) -> Result<(), String> {
     let handles = store
         .handles
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
+    let key = producer_key.unwrap_or(source.clone());
     let producer = handles
         .producers
-        .get(&source)
+        .get(&key)
         .copied()
-        .ok_or_else(|| format!("native producer is not available for source '{source}'"))?;
+        .ok_or_else(|| format!("native producer is not available for key '{key}'"))?;
     native::producer_set_parameters(producer, &parameters.to_string())
 }
 
@@ -117,12 +125,14 @@ pub async fn media_set_producer_parameters(
 pub async fn media_remove_capture_producer(
     store: State<'_, NativeMediaStore>,
     source: String,
+    producer_key: Option<String>,
 ) -> Result<(), String> {
     let mut handles = store
         .handles
         .lock()
         .map_err(|_| "native media handle lock poisoned".to_string())?;
-    if let Some(producer) = handles.producers.remove(&source) {
+    let key = producer_key.unwrap_or(source);
+    if let Some(producer) = handles.producers.remove(&key) {
         unsafe { ffi::lib_dspeak_media_destroy_producer(producer) };
     }
     Ok(())
@@ -143,6 +153,7 @@ pub async fn media_create_capture_producer(
 pub async fn media_set_producer_paused(
     _store: State<'_, NativeMediaStore>,
     _source: String,
+    _producer_key: Option<String>,
     _paused: bool,
 ) -> Result<(), String> {
     Err("native media backend not available".to_string())
@@ -153,6 +164,7 @@ pub async fn media_set_producer_paused(
 pub async fn media_set_producer_parameters(
     _store: State<'_, NativeMediaStore>,
     _source: String,
+    _producer_key: Option<String>,
     _parameters: Value,
 ) -> Result<(), String> {
     Err("native media backend not available".to_string())
@@ -163,6 +175,7 @@ pub async fn media_set_producer_parameters(
 pub async fn media_remove_capture_producer(
     _store: State<'_, NativeMediaStore>,
     _source: String,
+    _producer_key: Option<String>,
 ) -> Result<(), String> {
     Err("native media backend not available".to_string())
 }

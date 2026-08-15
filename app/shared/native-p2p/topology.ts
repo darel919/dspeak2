@@ -136,6 +136,18 @@ export class NativeP2pTopologyMethods {
           this.signal(state.peerId, { sourceRemoved: { source } });
         }
       }
+      state.capabilitiesSent = false;
+      state.remoteMediaCapabilities = null;
+      state.selectedCodec = null;
+      if (this.mediaCapabilities) {
+        this.signal(state.peerId, {
+          capabilities: {
+            capabilityProtocol: "video-codec-matrix-v1",
+            mediaCapabilities: this.mediaCapabilities,
+          },
+        });
+        state.capabilitiesSent = true;
+      }
       if (
         state.pc.signalingState === "have-local-offer" &&
         state.pc.localDescription?.type === "offer"
@@ -204,8 +216,22 @@ export class NativeP2pTopologyMethods {
       negotiationTimer: null,
       remoteDescription: null,
       closed: false,
+      mediaCapabilities: this.mediaCapabilities,
+      remoteMediaCapabilities: null,
+      selectedCodec: null,
+      capabilitiesSent: false,
+      capabilityWaitTimer: null,
     };
     this.connections.set(peerId, state);
+    if (this.mediaCapabilities) {
+      this.signal(peerId, {
+        capabilities: {
+          capabilityProtocol: "video-codec-matrix-v1",
+          mediaCapabilities: this.mediaCapabilities,
+        },
+      });
+      state.capabilitiesSent = true;
+    }
 
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) this.signal(peerId, { candidate: candidate.toJSON() });

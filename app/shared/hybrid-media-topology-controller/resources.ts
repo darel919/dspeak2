@@ -15,6 +15,7 @@ export function createTopologyResourceHelpers({
   getAudioStereo,
   getEffectiveAudioBitrate,
   getIceServers,
+  getMediaCapabilities = () => null,
   getP2pMesh,
   getRequestedVideoSettings,
   getSelectedSfuProvider,
@@ -62,6 +63,7 @@ export function createTopologyResourceHelpers({
       onSnapshot: (snapshot: unknown) =>
         updateP2pStats(Array.isArray(snapshot) ? snapshot : []),
       getAudioStereo,
+      mediaCapabilities: getMediaCapabilities(),
       getSenderOptions: (source, track) => {
         if (track.kind === "audio") {
           const options = buildVoiceProducerOptions(

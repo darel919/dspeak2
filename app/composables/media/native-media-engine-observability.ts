@@ -35,9 +35,18 @@ export async function handleSignal(
 export async function getDevices(
   engine: NativeMediaEngine,
 ): Promise<MediaDeviceInfo[]> {
-  if (!engine.flags.nativeRtc || !engine.flags.nativeBackendReady) {
+  if (!engine.flags.nativeRtc) {
     if (engine.nativeOnly) throw nativeOnlyError("device enumeration");
     return (await engine.browserEngine.getDevices?.()) || [];
+  }
+  if (!engine.flags.nativeBackendReady || !engine.nativeSession) {
+    try {
+      const devices = await engine._invoke("media_prepare_devices");
+      return Array.isArray(devices) ? (devices as MediaDeviceInfo[]) : [];
+    } catch (error: unknown) {
+      if (engine.nativeOnly) throw error;
+      return engine.browserEngine.getDevices?.() || [];
+    }
   }
   return engine
     ._invoke("media_get_devices")

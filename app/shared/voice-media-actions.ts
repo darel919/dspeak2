@@ -1,6 +1,9 @@
 import { mediaDebug } from "./media-debug.ts";
 import { unref } from "vue";
-import { isFatalClientError } from "./fatal-client-error.ts";
+import {
+  isFatalClientError,
+  isNativeMediaWorkerFatalError,
+} from "./fatal-client-error.ts";
 import { playSystemSound } from "./system-sounds.ts";
 import { voiceJoinErrorMessage } from "./voice-errors.ts";
 import { resolveChannelRoomId } from "./media/channel-room.ts";
@@ -66,6 +69,7 @@ export function createVoiceMediaActions({
   joinGenerationState,
   leaveChannel,
   micMuted,
+  nativeMediaInvalidated,
   pageLifecycle,
   p2pQualification,
   playFatalError,
@@ -142,6 +146,63 @@ export function createVoiceMediaActions({
       muted: Boolean(micMuted.value),
       deafened: Boolean(deafened.value),
     });
+  }
+
+  function invalidateAfterFatalMediaError() {
+    if (nativeMediaInvalidated.value) return false;
+    nativeMediaInvalidated.value = true;
+    joinGenerationState.value += 1;
+    cameraToggleGenerationState.value += 1;
+    micMuted.value = true;
+    cameraEnabled.value = false;
+    screenSharing.value = false;
+    systemAudioSharing.value = false;
+    broadcastAudioSharing.value = false;
+    connecting.value = false;
+    connected.value = false;
+    connectedAt.value = null;
+    p2pQualification.value = null;
+    const session = sfuComposable.value;
+    sfuComposable.value = null;
+    connectedUsers.value.clear();
+    clearUserDirectory?.();
+    const leavingChannelId = currentChannelId.value;
+    setCurrentChannel(null);
+    currentRoomId.value = null;
+    pageLifecycle.unregister();
+    if (leavingChannelId)
+      Promise.resolve(leaveChannel(leavingChannelId)).catch((error) => {
+        console.warn(
+          "[VoiceStore] Failed to leave the channel after native media failure:",
+          error,
+        );
+      });
+    if (typeof document !== "undefined") {
+      try {
+        const container = document.getElementById("webrtc-audio-global");
+        if (container) {
+          for (const audio of container.querySelectorAll("audio")) {
+            audio.pause();
+            audio.srcObject = null;
+            audio.remove();
+          }
+        }
+      } catch (error) {
+        console.warn(
+          "[VoiceStore] Failed to clear audio after native media failure:",
+          error,
+        );
+      }
+    }
+    if (session?.disconnect) {
+      Promise.resolve(session.disconnect()).catch((error) => {
+        console.warn(
+          "[VoiceStore] Failed to dispose the stale native media session:",
+          error,
+        );
+      });
+    }
+    return true;
   }
 
   async function waitForAudioSourceFlow(session: VoiceMediaSessionLike) {
@@ -267,6 +328,13 @@ export function createVoiceMediaActions({
   }
 
   async function joinVoiceChannel(channelId: string) {
+    if (nativeMediaInvalidated.value) {
+      const failure = new Error(
+        "The native media engine failed and dSpeak must be restarted.",
+      );
+      (failure as Error & { code?: string }).code = "MEDIA_WORKER_EXITED";
+      throw failure;
+    }
     if (
       currentChannelId.value === channelId &&
       connected.value &&
@@ -411,9 +479,14 @@ export function createVoiceMediaActions({
     } catch (joinError: unknown) {
       const details = voiceError(joinError);
       const timedOut = details.code === "VOICE_JOIN_TIMEOUT";
+      const nativeWorkerFatal = isNativeMediaWorkerFatalError(joinError);
       if (timedOut) joinGenerationState.value += 1;
       if (details.code === "MEDIA_PROTOCOL_UPDATE_REQUIRED")
         protocolUpdateRequired.value = true;
+      if (nativeWorkerFatal) {
+        invalidateAfterFatalMediaError();
+        playFatalError(joinError);
+      }
       await disposeFailedSession(session);
       if (timedOut) connecting.value = false;
       if (details.code === "VOICE_JOIN_CANCELLED") return;
@@ -424,8 +497,8 @@ export function createVoiceMediaActions({
         error: details.message,
       });
       console.error("[VoiceStore] Failed to join voice channel:", joinError);
-      if (isFatalClientError(joinError)) {
-        playFatalError(joinError);
+      if (isFatalClientError(joinError) || nativeWorkerFatal) {
+        if (!nativeWorkerFatal) playFatalError(joinError);
         return;
       }
       error.value =
@@ -486,6 +559,7 @@ export function createVoiceMediaActions({
   }
 
   async function toggleMicInternal() {
+    if (nativeMediaInvalidated.value) return false;
     if (!connected.value) {
       micMuted.value = !micMuted.value;
       if (!micMuted.value) deafened.value = false;
@@ -546,6 +620,10 @@ export function createVoiceMediaActions({
     } catch (toggleError: unknown) {
       const details = voiceError(toggleError);
       if (details.code === "MEDIA_SESSION_CLOSED") return false;
+      if (details.code === "MEDIA_WORKER_EXITED") {
+        invalidateAfterFatalMediaError();
+        return false;
+      }
       console.error("[VoiceStore] Error toggling microphone:", toggleError);
       error.value = details.message || String(toggleError);
       if (typeof window !== "undefined") {
@@ -588,7 +666,8 @@ export function createVoiceMediaActions({
   }
 
   async function toggleCameraInternal() {
-    if (!connected.value || !sfuComposable.value) return;
+    if (nativeMediaInvalidated.value) return false;
+    if (!connected.value || !sfuComposable.value) return false;
     const session = sfuComposable.value;
     const generation = ++cameraToggleGenerationState.value;
     const enable = !cameraEnabled.value;
@@ -603,6 +682,10 @@ export function createVoiceMediaActions({
     } catch (toggleError: unknown) {
       const details = voiceError(toggleError);
       if (generation !== cameraToggleGenerationState.value) return;
+      if (details.code === "MEDIA_WORKER_EXITED") {
+        invalidateAfterFatalMediaError();
+        return false;
+      }
       cameraEnabled.value = previous;
       syncLocalVoiceState();
       if (
@@ -621,7 +704,8 @@ export function createVoiceMediaActions({
       import("./desktop-capture.ts").DesktopCaptureSelection | null = null,
     options: import("./types/voice-media-actions.ts").VoiceCaptureToggleOptions = {},
   ) {
-    if (!connected.value || !sfuComposable.value) return;
+    if (nativeMediaInvalidated.value) return false;
+    if (!connected.value || !sfuComposable.value) return false;
     const previousSharing = Boolean(
       screenSharing.value ||
       unref(sfuComposable.value.localVideoFeeds)?.has?.("screen"),
@@ -671,6 +755,10 @@ export function createVoiceMediaActions({
       error.value = null;
     } catch (shareError: unknown) {
       const details = voiceError(shareError);
+      if (details.code === "MEDIA_WORKER_EXITED") {
+        invalidateAfterFatalMediaError();
+        return false;
+      }
       if (details.name !== "NotAllowedError")
         error.value = details.message || "Unable to share the screen";
       screenSharing.value = previousSharing;
@@ -687,7 +775,8 @@ export function createVoiceMediaActions({
       import("./desktop-capture.ts").DesktopCaptureSelection | null = null,
     options: import("./types/voice-media-actions.ts").VoiceCaptureToggleOptions = {},
   ) {
-    if (!connected.value || !sfuComposable.value) return;
+    if (nativeMediaInvalidated.value) return false;
+    if (!connected.value || !sfuComposable.value) return false;
     const previousSharing = systemAudioSharing.value;
     const session = sfuComposable.value;
     try {
@@ -733,6 +822,10 @@ export function createVoiceMediaActions({
       error.value = null;
     } catch (shareError: unknown) {
       const details = voiceError(shareError);
+      if (details.code === "MEDIA_WORKER_EXITED") {
+        invalidateAfterFatalMediaError();
+        return false;
+      }
       if (details.name !== "NotAllowedError")
         error.value = details.message || "Unable to share system audio";
       systemAudioSharing.value = previousSharing;
@@ -771,6 +864,7 @@ export function createVoiceMediaActions({
     disposeFailedSession,
     ensureMicrophonePermission,
     isNativeMicrophonePermissionError,
+    invalidateAfterFatalMediaError,
     joinVoiceChannel,
     leaveVoiceChannel,
     restorePersistedVoiceState,

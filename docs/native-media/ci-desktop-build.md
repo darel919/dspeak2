@@ -61,6 +61,9 @@ with a clear message: run `native-media.yml` first.
 - Installs the Rust stable toolchain and bun.
 - Installs root dependencies with `bun install --frozen-lockfile` and desktop
   dependencies with `npm ci` (the desktop package uses `package-lock.json`).
+- Builds the release `dspeak-media` sidecar from the same Rust target and native
+  bundle, then stages the target-suffixed executable under
+  `desktop/src-tauri/binaries/` for Tauri's `externalBin` packaging.
 - Runs `bun run build:desktop` with `NATIVE_MEDIA_ARTIFACT_DIR` set.
 
 ## Artifacts

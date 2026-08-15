@@ -108,6 +108,7 @@ import type {
   TopologyState,
 } from "~/shared/types/topology-controller.ts";
 import type { VideoSettings } from "~/shared/types/video-settings.ts";
+import type { ParticipantMediaCapabilities } from "~/shared/types/video-codec-capabilities.ts";
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig();
   const authStore = useAuthStore();
@@ -120,6 +121,7 @@ export function useHybridMediaSession() {
   const transportReady = ref(false);
   const iceConnectedBoth = ref(false);
   const mediaConnectionState = ref<string>("disconnected");
+  const mediaCapabilities = ref<ParticipantMediaCapabilities | null>(null);
   const protocolUpdateRequired = ref(false);
   const protocolState = ref<Record<string, unknown> | null>(null);
   const playbackState = ref("idle");
@@ -203,6 +205,12 @@ export function useHybridMediaSession() {
     buildClientHelloData: ({ mediaSessionId }: { mediaSessionId: string }) => ({
       mediaSessionId,
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
+      ...(mediaCapabilities.value
+        ? {
+            mediaCapabilities: mediaCapabilities.value,
+            capabilityProtocol: "video-codec-matrix-v1",
+          }
+        : {}),
       ...(mediaControlTicketState.value
         ? { ticket: mediaControlTicketState.value }
         : {}),
@@ -650,6 +658,7 @@ export function useHybridMediaSession() {
     getAudioStereo,
     getEffectiveAudioBitrate,
     getIceServers: () => iceServers,
+    getMediaCapabilities: () => mediaCapabilities.value,
     getLocalPeerId: () => localPeerId,
     getMessageHandler: (type: string) => messageHandlers.get(type),
     getProviderSocket: () => providerSocket,
@@ -843,6 +852,7 @@ export function useHybridMediaSession() {
     lifecycle: lifecycleState.lifecycle,
     localVideoFeeds,
     mediaConnectionState,
+    mediaCapabilities,
     mediaPathMetrics,
     microphoneDeviceState,
     participantSfuRoundTripTimes,
@@ -862,6 +872,9 @@ export function useHybridMediaSession() {
     sharedAudioStats,
     sfuRoundTripTime,
     sendParticipantVoiceState,
+    setMediaCapabilities: (value: unknown) => {
+      mediaCapabilities.value = value as ParticipantMediaCapabilities | null;
+    },
     setRemoteScreenReceiving: (feedKey: string, receiving: boolean) =>
       registry.setVideoReceiving(feedKey, receiving),
     setRemoteSystemAudioReceiving: (key: string, on: boolean) =>

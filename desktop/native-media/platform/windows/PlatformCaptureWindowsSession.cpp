@@ -44,6 +44,9 @@ struct lib_dspeak_media_capture_session {
 struct lib_dspeak_media_device_capture_session {
     bool microphone = false;
     std::wstring device_id;
+    uint32_t video_width = 1280;
+    uint32_t video_height = 720;
+    uint32_t video_frame_rate = 30;
     void* audio_capture = nullptr;
     void* camera_capture = nullptr;
 };
@@ -320,13 +323,19 @@ char* lib_dspeak_media_platform_capture_capabilities(void) {
 
 struct lib_dspeak_media_device_capture_session*
 lib_dspeak_media_platform_device_capture_create(const char* device_id,
-                                                const char* kind) {
+                                                const char* kind,
+                                                uint32_t video_width,
+                                                uint32_t video_height,
+                                                uint32_t video_frame_rate) {
     if (!kind || (std::strcmp(kind, "microphone") != 0 &&
                   std::strcmp(kind, "camera") != 0)) return nullptr;
     auto* session = new(std::nothrow) lib_dspeak_media_device_capture_session();
     if (!session) return nullptr;
     session->microphone = std::strcmp(kind, "microphone") == 0;
     session->device_id = utf8_to_wide(device_id);
+    session->video_width = video_width;
+    session->video_height = video_height;
+    session->video_frame_rate = video_frame_rate;
     return session;
 }
 
@@ -348,7 +357,11 @@ int lib_dspeak_media_platform_device_capture_start(
         return result;
     }
     session->camera_capture = create_camera_capture(
-        session->device_id, screen_cb, error_cb, user_data);
+        session->device_id,
+        session->video_width,
+        session->video_height,
+        session->video_frame_rate,
+        screen_cb, error_cb, user_data);
     const int result = start_camera_capture(session->camera_capture);
     if (result != 0) {
         destroy_camera_capture(session->camera_capture);

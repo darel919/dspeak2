@@ -1,5 +1,13 @@
 import type { NativeConsumerEntry } from "./native-mediasoup.ts";
 import type { VideoSettings } from "./video-settings.ts";
+import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
+import type {
+  CodecMigrationTelemetry,
+  LogicalVideoStreamState,
+  VideoCodecRuntimeTelemetry,
+  VideoDecodeOverloadTelemetry,
+} from "../video-codec-migration.ts";
+import type { CodecRoutingPlan } from "../video-codec-routing.ts";
 
 export type NativeDirection = "send" | "recv";
 export type NativeMediaProfile = "audio" | "video" | "mixed";
@@ -15,6 +23,22 @@ export interface NativeSourceEntry extends Record<string, unknown> {
   audioBitrate?: number | null;
   audioStereo?: boolean | null;
   videoSettings?: VideoSettings | null;
+  logicalStreamId?: string | null;
+  generation?: number;
+  variantId?: string | null;
+  codec?: string | null;
+  codecAcceleration?: string | null;
+  codecImplementation?: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  bitrate?: number | null;
+  receivers?: string[];
+  emergency?: boolean;
+  routingScore?: number;
+  target?: import("../video-codec-routing.ts").CodecRoutingTarget;
+  targetAdjusted?: boolean;
+  producerKey?: string | null;
 }
 
 export interface NativeProducerEntry extends Record<string, unknown> {
@@ -23,6 +47,7 @@ export interface NativeProducerEntry extends Record<string, unknown> {
   kind: "audio" | "video";
   entry: NativeSourceEntry;
   paused: boolean;
+  producerKey?: string;
 }
 
 export interface NativeTransportEntry extends Record<string, unknown> {
@@ -45,6 +70,7 @@ export interface NativePendingRequest {
 
 export interface NativeSignalingSocket {
   open: () => Promise<unknown>;
+  waitForReady?: () => Promise<unknown>;
   stop?: () => unknown;
   send: (message: unknown) => boolean | void;
   acknowledgeHeartbeat?: (sequence: number, timestamp: number) => unknown;
@@ -57,12 +83,17 @@ export interface NativeProviderSignaling {
   connect: (options: {
     signalingUrl: string;
     ticket: string;
+    mediaCapabilities?: ParticipantMediaCapabilities | null;
+    capabilityProtocol?: string;
   }) => Promise<unknown>;
   close: () => unknown;
   send: (message: unknown) => boolean | void;
 }
 
 export interface NativeCloudflareSessionLike {
+  localPeerId?: string;
+  mediaCapabilities?:
+    import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
   sessionId?: string | null;
   handle?: string | number | null;
   closed?: boolean;
@@ -71,9 +102,28 @@ export interface NativeCloudflareSessionLike {
   startSubscriptions: () => Promise<unknown>;
   addSource: (entry: NativeSourceEntry) => Promise<unknown>;
   removeSource: (source: string) => unknown;
+  removeVariant: (variantId: string, force?: boolean) => unknown;
+  retireVariants?: (
+    logicalStreamId: string,
+    desiredVariantIds: string[],
+  ) => unknown;
+  hasVariant?: (variantId: string) => boolean;
+  producers?: Map<string, Record<string, unknown>>;
+  producerVariants?: Map<string, Record<string, unknown>>;
+  updateVariantMetadata?: (
+    entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
+  ) => Promise<unknown>;
   setSourceTransmission: (source: string, enabled: boolean) => unknown;
   updateAudioBitrate: (source: string, bitrate: number) => unknown;
   updateVideoBitrate: (source: string, bitrate: number) => unknown;
+  updateVideoParameters: (
+    source: string,
+    parameters: Record<string, unknown>,
+  ) => unknown;
+  updateVariantVideoParameters?: (
+    variantId: string,
+    parameters: Record<string, unknown>,
+  ) => unknown;
   setRemoteReceiving: (
     userIdOrKey: string,
     sourceOrReceiving: string | boolean,
@@ -102,6 +152,7 @@ export interface NativeCloudflareSessionLike {
   mediaReadiness?: (expectedInbound: number) => unknown;
   getOutboundRtpStats?: () => unknown;
   getInboundRtpStats?: () => unknown;
+  codecRuntimeTelemetry?: import("../video-codec-migration.ts").VideoCodecRuntimeTelemetry[];
 }
 
 export interface NativeMediasoupConstructorOptions extends Partial<NativeMediasoupSfuSessionSurface> {
@@ -109,6 +160,7 @@ export interface NativeMediasoupConstructorOptions extends Partial<NativeMediaso
   mediaProfile?: NativeMediaProfile;
   buildUrl?: (channelId: string | null) => string;
   location?: Location;
+  mediaCapabilities?: ParticipantMediaCapabilities | null;
 }
 
 export interface NativeMediasoupSfuSessionSurface {
@@ -137,6 +189,17 @@ export interface NativeMediasoupSfuSessionSurface {
   setSourceTransmission: (source: string, enabled: boolean) => Promise<unknown>;
   updateAudioBitrate: (source: string, bitrate: number) => Promise<unknown>;
   updateVideoBitrate: (source: string, bitrate: number) => Promise<unknown>;
+  updateVideoParameters: (
+    source: string,
+    parameters: Record<string, unknown>,
+  ) => Promise<unknown>;
+  adaptVideoReceiver: (
+    logicalStreamId: string,
+    preferredLayers: {
+      spatialLayer?: number;
+      temporalLayer?: number;
+    },
+  ) => Promise<unknown>;
   setJitterBufferConfig: (config?: {
     minDelayMs?: number;
     targetDelayMs?: number;
@@ -149,6 +212,7 @@ export interface NativeMediasoupSfuSessionSurface {
   signalingPath?: string;
   signalingToken?: string;
   controlTicket: string;
+  refreshControl: (() => Promise<unknown>) | null;
   mediaSessionId: string;
   requestTimeoutMs: number;
   consumerControlTimeoutMs: number;
@@ -167,6 +231,9 @@ export interface NativeMediasoupSfuSessionSurface {
   transportPointers: Map<number, NativeDirection>;
   sources: Map<string, NativeSourceEntry>;
   producers: Map<string, NativeProducerEntry>;
+  producerVariants: Map<string, NativeProducerEntry>;
+  pendingLocalVideoFrames: Map<string, Record<string, unknown>>;
+  remoteProducerMetadata: Map<string, Record<string, unknown>>;
   sourcePublications: Map<string, Promise<NativeProducerEntry | null>>;
   sourceOperations: Map<string, Promise<unknown>>;
   pendingCloudflarePublications: Map<string, Record<string, unknown>>;
@@ -229,6 +296,7 @@ export interface NativeMediasoupSfuSessionSurface {
   initializationTimer: ReturnType<typeof setTimeout> | null;
   transportRequestIds: Map<NativeDirection, string>;
   cloudflareSession: NativeCloudflareSessionLike | null;
+  providerActivationPromise: Promise<unknown> | null;
   lastProviderFailureKey: string | null;
   onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
   onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;
@@ -241,4 +309,15 @@ export interface NativeMediasoupSfuSessionSurface {
   getAudioBitrate?: (source: string) => number | null;
   getAudioStereo?: (source: string) => boolean | null;
   getVideoSettings?: (source: string) => VideoSettings;
+  mediaCapabilities: ParticipantMediaCapabilities | null;
+  remoteParticipantCapabilities: Map<string, ParticipantMediaCapabilities>;
+  logicalVideoStreams: Map<string, LogicalVideoStreamState>;
+  codecMigrationTelemetry: CodecMigrationTelemetry[];
+  videoDecodeOverloadTelemetry: VideoDecodeOverloadTelemetry[];
+  codecRuntimeTelemetry: VideoCodecRuntimeTelemetry[];
+  codecRoutingPlans: Map<string, CodecRoutingPlan>;
+  codecRoutingCandidatePlans: Map<
+    string,
+    { signature: string; firstSeenAt: number }
+  >;
 }

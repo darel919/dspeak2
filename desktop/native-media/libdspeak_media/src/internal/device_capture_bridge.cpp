@@ -20,6 +20,36 @@
 
 using json = nlohmann::json;
 
+struct CameraProfile {
+    uint32_t width = 1280;
+    uint32_t height = 720;
+    uint32_t frame_rate = 30;
+};
+
+static CameraProfile camera_profile_from_json(const char* settings_json) {
+    CameraProfile profile;
+    if (!settings_json || !settings_json[0]) return profile;
+    try {
+        const auto settings = json::parse(settings_json);
+        const auto width = settings.value("width", 0u);
+        const auto height = settings.value("height", 0u);
+        const auto frame_rate = settings.value("frameRate", 0u);
+        const bool low_spec = settings.value("lowSpec", false);
+        if (width > 0) profile.width = width;
+        if (height > 0) profile.height = height;
+        if (frame_rate > 0) profile.frame_rate = frame_rate;
+        if (low_spec && width == 0 && height == 0) {
+            profile.width = 640;
+            profile.height = 360;
+        }
+        profile.width = std::clamp(profile.width, 320u, 1920u);
+        profile.height = std::clamp(profile.height, 180u, 1080u);
+        profile.frame_rate = std::clamp(profile.frame_rate, 15u, 60u);
+    } catch (...) {
+    }
+    return profile;
+}
+
 static int start_microphone_request(const char* device_id, int* error_out) {
     if (error_out) *error_out = 0;
     std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
@@ -37,7 +67,7 @@ static int start_microphone_request(const char* device_id, int* error_out) {
         }
     }
     auto* capture = lib_dspeak_media_platform_device_capture_create(
-        device_id && device_id[0] ? device_id : nullptr, "microphone");
+        device_id && device_id[0] ? device_id : nullptr, "microphone", 0, 0, 0);
     if (!capture) {
         fprintf(stderr, "[dspeak:capture] microphone session creation returned null device=%s\n",
                 device_id ? device_id : "<default>");
@@ -62,7 +92,10 @@ static int start_microphone_request(const char* device_id, int* error_out) {
     return 0;
 }
 
-static int start_camera_request(const char* device_id, int* error_out) {
+static int start_camera_request(
+    const char* device_id,
+    const char* settings_json,
+    int* error_out) {
     if (error_out) *error_out = 0;
     std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
     if (g_camera_capture) return 0;
@@ -81,8 +114,9 @@ static int start_camera_request(const char* device_id, int* error_out) {
     const char* requested_device = device_id && device_id[0]
         ? device_id
         : (g_camera_device_id.empty() ? nullptr : g_camera_device_id.c_str());
+    const CameraProfile profile = camera_profile_from_json(settings_json);
     auto* capture = lib_dspeak_media_platform_device_capture_create(
-        requested_device, "camera");
+        requested_device, "camera", profile.width, profile.height, profile.frame_rate);
     if (!capture) {
         std::lock_guard<std::mutex> track_lock(g_track_mutex);
         lib_dspeak_media_destroy_video_track(g_camera_track);
@@ -309,7 +343,15 @@ extern "C" int lib_dspeak_media_set_camera_device(const char* device_id, int* er
                 if (error_out) *error_out = stop_error;
                 return -1;
             }
-            return start_camera_request(g_camera_device_id.c_str(), error_out);
+            std::string settings_json;
+            std::string selected_device;
+            {
+                std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
+                selected_device = g_camera_device_id;
+                settings_json = g_camera_settings_json;
+            }
+            return start_camera_request(
+                selected_device.c_str(), settings_json.c_str(), error_out);
         }
         return 0;
     } catch (...) {
@@ -338,9 +380,17 @@ extern "C" int lib_dspeak_media_stop_microphone_capture(int* error_out) {
 
 }
 
-extern "C" int lib_dspeak_media_start_camera_capture(int* error_out) {
+extern "C" int lib_dspeak_media_start_camera_capture(
+    const char* settings_json,
+    int* error_out) {
     try {
-        return start_camera_request(nullptr, error_out);
+        std::string effective_settings;
+        {
+            std::lock_guard<std::mutex> capture_lock(g_capture_mutex);
+            g_camera_settings_json = settings_json ? settings_json : "";
+            effective_settings = g_camera_settings_json;
+        }
+        return start_camera_request(nullptr, effective_settings.c_str(), error_out);
     } catch (...) {
         if (error_out) *error_out = -1;
         return -1;

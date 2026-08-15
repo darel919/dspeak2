@@ -64,6 +64,7 @@ export const useVoiceStore = defineStore("voice", () => {
   const cameraEnabled = ref(false);
   const screenSharing = ref(false);
   const systemAudioSharing = ref(false);
+  const nativeMediaInvalidated = ref(false);
   const broadcastAudioSharing = ref(false);
   const djSession = ref<Record<string, unknown> | null>(null);
   const p2pQualification = ref<unknown>(null);
@@ -386,6 +387,7 @@ export const useVoiceStore = defineStore("voice", () => {
     toggleMic,
     toggleScreenShare,
     toggleSystemAudioShare,
+    invalidateAfterFatalMediaError,
   } = createVoiceMediaActions({
     addConnectedUser,
     broadcastAudioSharing,
@@ -410,6 +412,7 @@ export const useVoiceStore = defineStore("voice", () => {
     joinGenerationState,
     leaveChannel: (channelId) => channelsStore.leaveChannel(channelId),
     micMuted,
+    nativeMediaInvalidated,
     pageLifecycle,
     p2pQualification,
     playFatalError: (joinError) => useFatalClientError().report(joinError),
@@ -621,6 +624,7 @@ export const useVoiceStore = defineStore("voice", () => {
     cameraEnabled,
     screenSharing,
     systemAudioSharing,
+    nativeMediaInvalidated,
     broadcastAudioSharing,
     djSession,
     p2pQualification,
@@ -670,5 +674,6 @@ export const useVoiceStore = defineStore("voice", () => {
     userVolumes,
     trackVolumes,
     applyOutputDevice,
+    invalidateAfterFatalMediaError,
   };
 });

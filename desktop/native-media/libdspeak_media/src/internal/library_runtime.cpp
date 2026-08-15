@@ -1,4 +1,5 @@
 #include "lib_dspeak_media/lib_dspeak_media.h"
+#include "library_runtime.hpp"
 #include "media_handles.hpp"
 #include <cstring>
 #include <cstdlib>
@@ -11,6 +12,12 @@
 #include <stdexcept>
 #include <vector>
 #include <memory>
+#include <cstdint>
+#if defined(__unix__) || defined(__APPLE__)
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
 #if DSPEAK_MEDIA_WITH_MEDIASOUP
 #include <mediasoupclient.hpp>
 #endif
@@ -24,6 +31,7 @@
 #include <rtc_base/thread.h>
 #include <json.hpp>
 #include "runtime_health.hpp"
+#include "platform_video_codec_factories.hpp"
 
 #if defined(__APPLE__) || defined(_WIN32)
 #include "PlatformCapture.h"
@@ -31,7 +39,120 @@
 
 using json = nlohmann::json;
 
+#if defined(__unix__) || defined(__APPLE__)
+namespace {
+
+volatile sig_atomic_t g_native_crash_handler_entered = 0;
+
+void write_crash_literal(const char* value) {
+    if (!value) return;
+    size_t length = 0;
+    while (value[length] != '\0') ++length;
+    (void)::write(STDERR_FILENO, value, length);
+}
+
+void write_crash_unsigned(unsigned long long value) {
+    char buffer[32];
+    size_t index = sizeof(buffer);
+    do {
+        buffer[--index] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0 && index > 0);
+    (void)::write(STDERR_FILENO, buffer + index, sizeof(buffer) - index);
+}
+
+void native_crash_signal_handler(int signal_number, siginfo_t* info, void*) {
+    if (g_native_crash_handler_entered != 0)
+        _exit(128 + signal_number);
+    g_native_crash_handler_entered = 1;
+    write_crash_literal("[dspeak:crash] native media worker signal=");
+    write_crash_unsigned(static_cast<unsigned long long>(signal_number));
+    if (info && info->si_addr) {
+        write_crash_literal(" address=");
+        write_crash_unsigned(
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->si_addr)));
+    }
+    write_crash_literal("\n[dspeak:crash] native backtrace follows\n");
+    void* frames[64];
+    const int frame_count = backtrace(frames, 64);
+    if (frame_count > 0)
+        backtrace_symbols_fd(frames, frame_count, STDERR_FILENO);
+    (void)::kill(::getpid(), signal_number);
+    _exit(128 + signal_number);
+}
+
+void install_native_crash_handlers() {
+    struct sigaction action {};
+    sigemptyset(&action.sa_mask);
+    action.sa_sigaction = native_crash_signal_handler;
+    action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    const int signals[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
+    for (const int signal_number : signals)
+        (void)sigaction(signal_number, &action, nullptr);
+}
+
+}
+#else
+static void install_native_crash_handlers() {}
+#endif
+
 static std::atomic<bool> g_initialized{false};
+
+namespace dspeak_native {
+
+SharedTrackFactory::~SharedTrackFactory() {
+    factory = nullptr;
+    delete signaling_thread;
+    delete worker_thread;
+    signaling_thread = nullptr;
+    worker_thread = nullptr;
+}
+
+static std::mutex g_shared_track_factory_mutex;
+static std::weak_ptr<SharedTrackFactory> g_shared_track_factory;
+
+std::shared_ptr<SharedTrackFactory> get_shared_track_factory() {
+    std::lock_guard<std::mutex> lock(g_shared_track_factory_mutex);
+    if (auto existing = g_shared_track_factory.lock()) return existing;
+
+    auto signaling_thread = std::unique_ptr<webrtc::Thread>(webrtc::Thread::Create().release());
+    auto worker_thread = std::unique_ptr<webrtc::Thread>(webrtc::Thread::Create().release());
+    if (!signaling_thread || !worker_thread ||
+        !start_media_thread(signaling_thread.get()) ||
+        !start_media_thread(worker_thread.get()))
+        return nullptr;
+
+    auto null_adm = webrtc::CreateAudioDeviceModule(
+        webrtc::CreateEnvironment(),
+        webrtc::AudioDeviceModule::kDummyAudio);
+    if (!null_adm) return nullptr;
+
+    auto runtime = std::make_shared<SharedTrackFactory>();
+    runtime->factory = webrtc::CreatePeerConnectionFactory(
+        nullptr,
+        worker_thread.get(),
+        signaling_thread.get(),
+        null_adm,
+        webrtc::CreateBuiltinAudioEncoderFactory(),
+        webrtc::CreateBuiltinAudioDecoderFactory(),
+        create_video_encoder_factory(),
+        create_video_decoder_factory(),
+        nullptr,
+        nullptr);
+    if (!runtime->factory) return nullptr;
+
+    runtime->signaling_thread = signaling_thread.release();
+    runtime->worker_thread = worker_thread.release();
+    g_shared_track_factory = runtime;
+    return runtime;
+}
+
+void release_shared_track_factory() {
+    std::lock_guard<std::mutex> lock(g_shared_track_factory_mutex);
+    g_shared_track_factory.reset();
+}
+
+}
 
 static bool probe_core_runtime() {
     try {
@@ -86,6 +207,191 @@ static json runtime_health_record(bool available,
     };
 }
 
+static json video_codec_entry(const char* codec,
+                              const std::string& implementation,
+                              bool hardware) {
+    return {
+        {"codec", codec},
+        {"implementation", implementation},
+        {"hardware", hardware},
+    };
+}
+
+static json video_codec_factory_entry(const char* encoder_factory,
+                                      const char* decoder_factory,
+                                      bool hardware_encoder,
+                                      bool hardware_decoder) {
+    return {
+        {"encoderFactory", encoder_factory},
+        {"decoderFactory", decoder_factory},
+        {"hardwareEncoder", hardware_encoder},
+        {"hardwareDecoder", hardware_decoder},
+    };
+}
+
+static const char* runtime_efficiency(
+    const std::string& codec,
+    bool supported,
+    bool hardware,
+    bool tested) {
+    if (!supported || !tested) return "unusable";
+    if (hardware) return "excellent";
+    if (codec == "VP9" || codec == "H265") return "poor";
+    if (codec == "AV1") return "unusable";
+    return "acceptable";
+}
+
+static json runtime_codec_direction_entry(
+    const std::string& codec,
+    const dspeak_native::VideoCodecRuntimeDiagnostics& diagnostics,
+    bool encoder) {
+    const bool supported = encoder
+        ? diagnostics.encoder_supported
+        : diagnostics.decoder_supported;
+    const bool hardware = encoder
+        ? diagnostics.encoder_hardware
+        : diagnostics.decoder_hardware;
+    const bool tested = encoder
+        ? diagnostics.encoder_frame_validated
+        : diagnostics.decoder_frame_validated;
+    const std::string implementation = encoder
+        ? diagnostics.encoder_implementation
+        : diagnostics.decoder_implementation;
+    const int testedWidth = encoder
+        ? diagnostics.encoder_tested_width
+        : diagnostics.decoder_tested_width;
+    const int testedHeight = encoder
+        ? diagnostics.encoder_tested_height
+        : diagnostics.decoder_tested_height;
+    const int testedFps = encoder
+        ? diagnostics.encoder_tested_fps
+        : diagnostics.decoder_tested_fps;
+    const std::string failure = encoder
+        ? diagnostics.encoder_failure
+        : diagnostics.decoder_failure;
+    json entry = {
+        {"supported", supported},
+        {"acceleration", supported ? (hardware ? "hardware" : "software")
+                                    : "unsupported"},
+        {"implementation", implementation.empty() ? "unknown" : implementation},
+        {"realtimeEfficiency", runtime_efficiency(codec, supported, hardware, tested)},
+        {"powerClass", supported && hardware ? "low" : "high"},
+        {"tested", tested},
+        {"configured", encoder ? supported : diagnostics.decoder_configured},
+    };
+    if (tested && testedWidth > 0 && testedHeight > 0 && testedFps > 0) {
+        entry["maxWidth"] = testedWidth;
+        entry["maxHeight"] = testedHeight;
+        entry["maxFps"] = testedFps;
+        entry["limitsAre"] = "maximum-successfully-tested-profile";
+    }
+    if (tested)
+        entry["testedProfile"] = codec + " / " +
+            std::to_string(testedWidth) + "x" +
+            std::to_string(testedHeight) + "@" +
+            std::to_string(testedFps);
+    const auto& testedProfiles = encoder
+        ? diagnostics.encoder_tested_profiles
+        : diagnostics.decoder_tested_profiles;
+    if (!testedProfiles.empty()) entry["testedProfiles"] = testedProfiles;
+    if (!failure.empty()) entry["failureReason"] = failure;
+    return entry;
+}
+
+static json video_codec_capabilities(const dspeak_native::VideoCodecFactoryDiagnostics& diagnostics) {
+    json result = json::object();
+    for (const auto* codec : {"H264", "H265", "VP8", "VP9", "AV1"}) {
+        const auto found = diagnostics.codecs.find(codec);
+        dspeak_native::VideoCodecRuntimeDiagnostics empty;
+        const auto& runtime = found == diagnostics.codecs.end() ? empty : found->second;
+        result[codec] = {
+            {"encode", runtime_codec_direction_entry(codec, runtime, true)},
+            {"decode", runtime_codec_direction_entry(codec, runtime, false)},
+        };
+    }
+    return result;
+}
+
+static json video_codec_diagnostics() {
+    const auto diagnostics = dspeak_native::video_codec_factory_diagnostics();
+    const auto capabilities = video_codec_capabilities(diagnostics);
+    json encoders = json::array();
+    json decoders = json::array();
+    for (const auto& [codec, runtime] : diagnostics.codecs) {
+        if (runtime.encoder_supported)
+            encoders.push_back(video_codec_entry(
+                codec.c_str(), runtime.encoder_implementation,
+                runtime.encoder_hardware));
+        if (runtime.decoder_supported)
+            decoders.push_back(video_codec_entry(
+                codec.c_str(), runtime.decoder_implementation,
+                runtime.decoder_hardware));
+    }
+    return {
+        {"reportKind", "native-video-codec-factory"},
+        {"configurationSource", "on-demand native libwebrtc encode/decode validation"},
+        {"platform", diagnostics.platform},
+        {"factoryMode", diagnostics.hardware_encoder || diagnostics.hardware_decoder
+            ? "platform-hardware-with-software-fallback"
+            : "software-fallback"},
+        {"hardwareEncoder", diagnostics.hardware_encoder},
+        {"hardwareDecoder", diagnostics.hardware_decoder},
+        {"capabilities", capabilities},
+        {"concurrentEncode", {
+            {"supported", diagnostics.hardware_encoder},
+            {"maxHardwareSessions", diagnostics.max_hardware_encode_sessions},
+            {"confidence", diagnostics.concurrent_hardware_sessions_tested
+                ? "tested"
+                : "conservative-default"},
+            {"testedCodecPairs", [&diagnostics] {
+                json pairs = json::array();
+                for (const auto& [left, right] : diagnostics.tested_codec_pairs)
+                    pairs.push_back({left, right});
+                return pairs;
+            }()},
+        }},
+        {"fallbackPolicy", {
+            {"hardwareCodec", "H264"},
+            {"softwareEncoder", "VP8/H264"},
+            {"softwareDecoder", "VP8/VP9/H264"},
+            {"softwareAv1Encoder", false},
+            {"softwareAv1Decoder", false},
+        }},
+        {"encoders", encoders},
+        {"decoders", decoders},
+        {"factories", {
+            {"p2p", video_codec_factory_entry(
+                "CompositeVideoEncoderFactory", "CompositeVideoDecoderFactory",
+                diagnostics.hardware_encoder, diagnostics.hardware_decoder)},
+            {"sfu", video_codec_factory_entry(
+                "CompositeVideoEncoderFactory", "CompositeVideoDecoderFactory",
+                diagnostics.hardware_encoder, diagnostics.hardware_decoder)},
+            {"nativeVideoTrack", video_codec_factory_entry(
+                "CompositeVideoEncoderFactory", "CompositeVideoDecoderFactory",
+                diagnostics.hardware_encoder, diagnostics.hardware_decoder)},
+            {"nativeAudioTrack", {
+                {"encoderFactory", nullptr},
+                {"decoderFactory", nullptr},
+                {"hardwareEncoder", false},
+                {"hardwareDecoder", false},
+            }},
+        }},
+        {"activeStream", nullptr},
+        {"factoryProbe", {
+            {"encoderImplementation", diagnostics.active_encoder_implementation},
+            {"decoderImplementation", diagnostics.active_decoder_implementation},
+            {"hardwareEncoder", diagnostics.active_hardware_encoder},
+            {"hardwareDecoder", diagnostics.active_hardware_decoder},
+            {"encoderCreations", diagnostics.encoder_creations},
+            {"decoderCreations", diagnostics.decoder_creations},
+            {"source", "native-video-codec-factory"},
+            {"status", diagnostics.encoder_creations || diagnostics.decoder_creations
+                ? "observed_during_factory_probe"
+                : "not-created"},
+        }},
+    };
+}
+
 /* ── Internal helpers ────────────────────────────── */
 
 char* lib_dspeak_media_strdup(const char* s)
@@ -109,7 +415,9 @@ char* lib_dspeak_media_json_to_cstr(const json& j)
 
 extern "C" int lib_dspeak_media_initialize(void)
 {
+    install_native_crash_handlers();
     try {
+        dspeak_native::reset_video_codec_factory_diagnostics();
 #if DSPEAK_MEDIA_WITH_MEDIASOUP
         mediasoupclient::Initialize();
 #endif
@@ -152,6 +460,7 @@ extern "C" int lib_dspeak_media_stop_camera_capture(int* error_out);
 
 extern "C" void lib_dspeak_media_shutdown(void)
 {
+    dspeak_native::release_shared_track_factory();
 #if defined(__APPLE__) || defined(_WIN32)
     lib_dspeak_media_stop_screen_capture(nullptr);
     lib_dspeak_media_stop_system_audio_capture();
@@ -165,6 +474,7 @@ extern "C" void lib_dspeak_media_shutdown(void)
     } catch (...) {}
     g_initialized = false;
     dspeak_media_runtime::reset();
+    dspeak_native::reset_video_codec_factory_diagnostics();
 }
 
 /* ── Capabilities ─────────────────────────────────── */
@@ -193,6 +503,10 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
     caps["p2p"] = p2p_ready;
     caps["sfu"] = sfu_ready;
     caps["capture"] = json::object();
+    const auto codec_diagnostics = video_codec_diagnostics();
+    caps["videoCodecDiagnostics"] = codec_diagnostics;
+    caps["videoCodecCapabilities"] = codec_diagnostics["capabilities"];
+    caps["concurrentEncode"] = codec_diagnostics["concurrentEncode"];
     caps["health"] = {
         {"nativeRtc", runtime_health_record(core_ready,
             "libwebrtc initialized and peer-connection factory probe passed",
@@ -331,7 +645,9 @@ extern "C" const char* lib_dspeak_media_capture_error_message(int error_code)
         case -102:
             return "native capture request is invalid";
         case -103:
-            return "native capture is not running";
+            return "native capture session could not be created";
+        case -200:
+            return "native screen capture session is invalid";
         case -220:
             return "microphone or camera permission was denied";
         case -221:
@@ -354,6 +670,12 @@ extern "C" const char* lib_dspeak_media_capture_error_message(int error_code)
             return "native screen audio returned an unsupported format";
         case -205:
             return "native screen capture stream stopped";
+        case -206:
+            return "native screen capture stream could not be created";
+        case -207:
+            return "native screen capture video output could not be added";
+        case -208:
+            return "native screen capture audio output could not be added";
         case -209:
             return "native screen capture failed to start";
         case -210:

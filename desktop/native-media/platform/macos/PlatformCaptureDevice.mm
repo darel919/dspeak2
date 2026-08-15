@@ -68,6 +68,9 @@ struct lib_dspeak_media_device_capture_session {
     AVCaptureDeviceInput* camera_input = nil;
     AVCaptureVideoDataOutput* camera_output = nil;
     id camera_delegate = nil;
+    uint32_t camera_width = 1280;
+    uint32_t camera_height = 720;
+    uint32_t camera_frame_rate = 30;
     dispatch_queue_t queue = nullptr;
     StereoAudioSpscRing<9600> audio_samples;
     std::atomic<bool> audio_worker_stop{false};
@@ -388,7 +391,10 @@ static void device_capture_cleanup(lib_dspeak_media_device_capture_session* sess
 
 struct lib_dspeak_media_device_capture_session*
 lib_dspeak_media_platform_device_capture_create(const char* device_id,
-                                                const char* kind) {
+                                                const char* kind,
+                                                uint32_t video_width,
+                                                uint32_t video_height,
+                                                uint32_t video_frame_rate) {
     @autoreleasepool {
         NSString* device_id_string = macos_string_from_utf8(device_id);
         NSString* kind_string = macos_string_from_utf8(kind);
@@ -403,6 +409,11 @@ lib_dspeak_media_platform_device_capture_create(const char* device_id,
             return nullptr;
         }
         session->microphone = [kind_string isEqualToString:@"microphone"];
+        if (!session->microphone) {
+            session->camera_width = video_width >= 320 ? video_width : 1280;
+            session->camera_height = video_height >= 180 ? video_height : 720;
+            session->camera_frame_rate = video_frame_rate >= 15 ? video_frame_rate : 30;
+        }
         session->device_id = [device_id_string retain];
         dispatch_queue_attr_t capture_queue_attributes =
             dispatch_queue_attr_make_with_qos_class(
@@ -573,8 +584,16 @@ int lib_dspeak_media_platform_device_capture_start(
             }
             @try {
                 [capture_session beginConfiguration];
-                if ([capture_session canSetSessionPreset:AVCaptureSessionPresetHigh]) {
-                    capture_session.sessionPreset = AVCaptureSessionPresetHigh;
+                NSString* preset = AVCaptureSessionPresetHigh;
+                if (session->camera_width <= 640 &&
+                    [capture_session canSetSessionPreset:AVCaptureSessionPreset640x480]) {
+                    preset = AVCaptureSessionPreset640x480;
+                } else if (session->camera_width <= 1280 &&
+                           [capture_session canSetSessionPreset:AVCaptureSessionPreset1280x720]) {
+                    preset = AVCaptureSessionPreset1280x720;
+                }
+                if ([capture_session canSetSessionPreset:preset]) {
+                    capture_session.sessionPreset = preset;
                 }
                 output.videoSettings = @{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)};
                 output.alwaysDiscardsLateVideoFrames = YES;
@@ -591,6 +610,12 @@ int lib_dspeak_media_platform_device_capture_start(
                 [capture_session addInput:input];
                 [capture_session addOutput:output];
                 [capture_session commitConfiguration];
+                if ([device lockForConfiguration:&input_error]) {
+                    const CMTime frame_duration = CMTimeMake(1, session->camera_frame_rate);
+                    device.activeVideoMinFrameDuration = frame_duration;
+                    device.activeVideoMaxFrameDuration = frame_duration;
+                    [device unlockForConfiguration];
+                }
                 [output setSampleBufferDelegate:delegate queue:session->queue];
             } @catch (NSException* exception) {
                 [capture_session commitConfiguration];

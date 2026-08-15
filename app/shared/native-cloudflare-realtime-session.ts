@@ -10,6 +10,7 @@ export class NativeCloudflareRealtimeSession {
   constructor({
     invoke,
     send,
+    ensureControlReady,
     onRemoteTrack,
     onRemoteTrackEnded,
     onStateChange,
@@ -18,19 +19,24 @@ export class NativeCloudflareRealtimeSession {
     getAudioStereo,
     getVideoSettings,
     requestTimeoutMs = 15000,
+    localPeerId = "",
     sources = new Map(),
     producers = new Map(),
+    producerVariants = new Map(),
     consumers = new Map(),
     sourceTransmission = new Map(),
     remoteReceiving = new Map(),
     localVideoFeeds = new Map(),
+    pendingLocalVideoFrames = new Map(),
     remoteVideoFeeds = new Map(),
     remoteAudioFeeds = new Map(),
+    mediaCapabilities = null,
   }: NativeCloudflareSessionOptions) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeCloudflareRealtimeSession requires invoke");
     this.invoke = invoke;
     this.send = send;
+    this.ensureControlReady = ensureControlReady;
     this.onRemoteTrack = onRemoteTrack;
     this.onRemoteTrackEnded = onRemoteTrackEnded;
     this.onStateChange = onStateChange;
@@ -39,14 +45,22 @@ export class NativeCloudflareRealtimeSession {
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.localPeerId = String(localPeerId || "");
     this.sources = sources;
     this.producers = producers;
+    this.producerVariants = producerVariants;
     this.consumers = consumers;
     this.sourceTransmission = sourceTransmission;
     this.remoteReceiving = remoteReceiving;
     this.localVideoFeeds = localVideoFeeds;
+    this.pendingLocalVideoFrames = pendingLocalVideoFrames;
     this.remoteVideoFeeds = remoteVideoFeeds;
     this.remoteAudioFeeds = remoteAudioFeeds;
+    this.mediaCapabilities = mediaCapabilities;
+    this.logicalVideoStreams = new Map();
+    this.codecMigrationTelemetry = [];
+    this.videoDecodeOverloadTelemetry = [];
+    this.codecRuntimeTelemetry = [];
     this.publications = new Map();
     this.remoteByMid = new Map();
     this.pendingRemoteTrackEvents = new Map();
@@ -63,7 +77,6 @@ export class NativeCloudflareRealtimeSession {
     this.sessionGeneration = 0;
     this.closed = true;
     this.iceState = 0;
-    this.candidateTimer = null;
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
     this.lastReceivedConsumerParams = null;
