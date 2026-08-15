@@ -373,10 +373,18 @@ test("desktop releases optionally publish signed updates and restart after insta
   assert.match(nativeMediaBuild, /"strmiids"/);
   assert.match(nativeMediaBuild, /"mmdevapi"/);
   assert.match(nativeMediaBuild, /"runtimeobject"/);
+  assert.match(nativeMediaBuild, /"dmoguids"/);
+  assert.match(nativeMediaBuild, /"wmcodecdspuuid"/);
+  assert.match(nativeMediaBuild, /"amstrmid"/);
   assert.match(nativeMediaBuild, /"msdmo"/);
+  assert.match(nativeMediaBuild, /"oleaut32"/);
   assert.doesNotMatch(nativeMediaBuild, /"combase"/);
   assert.doesNotMatch(nativeMediaCmake, /\n\s+combase\n/);
+  assert.match(nativeMediaCmake, /\n\s+dmoguids\n/);
+  assert.match(nativeMediaCmake, /\n\s+wmcodecdspuuid\n/);
+  assert.match(nativeMediaCmake, /\n\s+amstrmid\n/);
   assert.match(nativeMediaCmake, /\n\s+msdmo\n/);
+  assert.match(nativeMediaCmake, /\n\s+oleaut32\n/);
   assert.doesNotMatch(
     nativeMediaBuild,
     /remain unsupported until their frame\/PCM bridges are implemented/,

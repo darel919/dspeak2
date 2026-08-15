@@ -252,6 +252,9 @@ if(WIN32)
     mfplat
     mfreadwrite
     mfuuid
+    dmoguids
+    wmcodecdspuuid
+    amstrmid
     msdmo
     mmdevapi
     avrt
