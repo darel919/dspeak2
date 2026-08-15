@@ -239,7 +239,6 @@ if(WIN32)
   target_link_libraries(lib_dspeak_media PRIVATE
     advapi32
     bcrypt
-    combase
     crypt32
     d3d11
     d3dcompiler

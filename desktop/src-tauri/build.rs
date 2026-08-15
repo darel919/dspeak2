@@ -208,7 +208,6 @@ fn main() {
             "advapi32",
             "bcrypt",
             "crypt32",
-            "combase",
             "d3d11",
             "d3dcompiler",
             "dxgi",

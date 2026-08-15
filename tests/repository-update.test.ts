@@ -372,6 +372,8 @@ test("desktop releases optionally publish signed updates and restart after insta
   assert.match(nativeMediaBuild, /"strmiids"/);
   assert.match(nativeMediaBuild, /"mmdevapi"/);
   assert.match(nativeMediaBuild, /"runtimeobject"/);
+  assert.doesNotMatch(nativeMediaBuild, /"combase"/);
+  assert.doesNotMatch(nativeMediaCmake, /\n\s+combase\n/);
   assert.doesNotMatch(
     nativeMediaBuild,
     /remain unsupported until their frame\/PCM bridges are implemented/,
