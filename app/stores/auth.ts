@@ -9,6 +9,10 @@ import {
   readDesktopSessionDiagnostic,
   supabaseProjectRef,
 } from "../shared/desktop-session-diagnostics.ts";
+import {
+  createDesktopAuthError,
+  isDesktopAuthError,
+} from "../shared/desktop-auth-error";
 import { deviceHeaders } from "~/shared/device-identity";
 import { openExternalUrl } from "~/shared/desktop-external-url";
 import { purgeUserLocalData } from "~/utils/idb";
@@ -18,15 +22,31 @@ import type {
   AuthSessionRecord,
   AuthStorageValue,
   AuthTokenResponse,
+  DesktopAuthError,
 } from "../shared/types/auth.ts";
 import { isAuthSessionRecord } from "../shared/types/auth.ts";
 
-type AuthError = Error & { code?: string };
+function clientFingerprint(config: ReturnType<typeof useRuntimeConfig>) {
+  const clientBuildCommit =
+    typeof config.public?.appBuild?.shortCommit === "string"
+      ? config.public.appBuild.shortCommit
+      : "";
+  const clientProjectRef = supabaseProjectRef(
+    String(config.public?.supabaseUrl || ""),
+  );
+  return { clientBuildCommit, clientProjectRef };
+}
 
-function createAuthError(code: string, message: string): AuthError {
-  const error = new Error(message) as AuthError;
-  error.code = code;
-  return error;
+function withDesktopDiagnostics(
+  config: ReturnType<typeof useRuntimeConfig>,
+  code: string,
+  message: string,
+  metadata: Partial<DesktopAuthError>,
+): DesktopAuthError {
+  return createDesktopAuthError(code, message, {
+    ...clientFingerprint(config),
+    ...metadata,
+  });
 }
 
 export const useAuthStore = defineStore("auths", () => {
@@ -38,6 +58,7 @@ export const useAuthStore = defineStore("auths", () => {
   let supabaseAuthSubscription: Subscription | null = null;
   let desktopCallbackPromise: Promise<boolean> | null = null;
   let desktopCallbackCode = "";
+  let desktopCallbackPromiseError: unknown = null;
   const desktopOAuth = createDesktopOAuthStateStore();
   let desktopOAuthCallbackReceived = false;
   let desktopOAuthSessionExchanged = false;
@@ -118,9 +139,11 @@ export const useAuthStore = defineStore("auths", () => {
           "[DesktopAuth] DESKTOP_OAUTH_CALLBACK_SERVER_UNAVAILABLE",
           error,
         );
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_CALLBACK_SERVER_UNAVAILABLE",
           "Could not start the local sign-in callback.",
+          { stage: "oauth-callback" },
         );
       }
       try {
@@ -134,9 +157,11 @@ export const useAuthStore = defineStore("auths", () => {
           "[DesktopAuth] DESKTOP_OAUTH_URL_GENERATION_FAILED",
           error,
         );
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_URL_GENERATION_FAILED",
           "Authentication URL is unavailable.",
+          { stage: "oauth-browser" },
         );
       }
 
@@ -144,9 +169,11 @@ export const useAuthStore = defineStore("auths", () => {
       const client = getSupabaseClient();
       if (!client) {
         clearDesktopOAuthAttempt();
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_URL_GENERATION_FAILED",
           "Supabase is not configured for desktop sign-in.",
+          { stage: "oauth-browser" },
         );
       }
 
@@ -169,9 +196,11 @@ export const useAuthStore = defineStore("auths", () => {
             "[DesktopAuth] DESKTOP_OAUTH_PROVIDER_REJECTED",
             error instanceof Error ? error.message : "unknown error",
           );
-          throw createAuthError(
+          throw withDesktopDiagnostics(
+            config,
             "DESKTOP_OAUTH_PROVIDER_REJECTED",
             "The authentication provider rejected the sign-in request.",
+            { stage: "oauth-browser" },
           );
         });
       const { data, error } = oauthResult;
@@ -181,25 +210,31 @@ export const useAuthStore = defineStore("auths", () => {
           "[DesktopAuth] DESKTOP_OAUTH_PROVIDER_REJECTED",
           error.message,
         );
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_PROVIDER_REJECTED",
           "The authentication provider rejected the sign-in request.",
+          { stage: "oauth-browser" },
         );
       }
       if (!data?.url) {
         clearDesktopOAuthAttempt();
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_URL_GENERATION_FAILED",
           "Authentication URL is unavailable.",
+          { stage: "oauth-browser" },
         );
       }
 
       const desktopOAuthFlowId = String(data.flowId || "");
       if (desktopOAuthFlowId && !desktopOAuth.setFlowId(desktopOAuthFlowId)) {
         clearDesktopOAuthAttempt();
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_URL_GENERATION_FAILED",
           "Could not prepare the desktop sign-in flow.",
+          { stage: "oauth-browser" },
         );
       }
       console.info("[DesktopAuth] DESKTOP_OAUTH_FLOW_CREATED", {
@@ -212,9 +247,11 @@ export const useAuthStore = defineStore("auths", () => {
       } catch (error) {
         clearDesktopOAuthAttempt();
         console.error("[DesktopAuth] DESKTOP_OAUTH_BROWSER_OPEN_FAILED", error);
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_BROWSER_OPEN_FAILED",
           "Could not open the system browser.",
+          { stage: "oauth-browser" },
         );
       }
       return { isDesktop: true, loginUrl: data.url };
@@ -292,13 +329,7 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function bridgeDesktopSession(accessToken: string) {
-    const clientBuildCommit =
-      typeof config.public?.appBuild?.shortCommit === "string"
-        ? config.public.appBuild.shortCommit
-        : "";
-    const clientProjectRef = supabaseProjectRef(
-      String(config.public?.supabaseUrl || ""),
-    );
+    const { clientBuildCommit, clientProjectRef } = clientFingerprint(config);
     console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_STARTED", {
       hasAuthorization: Boolean(accessToken),
       clientBuildCommit,
@@ -313,15 +344,22 @@ export const useAuthStore = defineStore("auths", () => {
           Authorization: `Bearer ${accessToken}`,
         }),
       });
-    } catch (error) {
-      console.error("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_FAILED", {
-        status: "transport-error",
-        diagnosticCategory:
-          error instanceof Error ? error.name : "unknown-transport-error",
+    } catch (cause) {
+      console.error("[DesktopAuth] DESKTOP_API_SESSION_TRANSPORT_ERROR", {
+        causeName: cause instanceof Error ? cause.name : "unknown",
+        clientBuildCommit,
+        clientProjectRef,
       });
-      throw createAuthError(
+      throw createDesktopAuthError(
         "DESKTOP_API_SESSION_BRIDGE_FAILED",
         "Your Google sign-in succeeded, but dSpeak could not create your app session.",
+        {
+          stage: "session-bridge",
+          httpStatus: 0,
+          serverDiagnostic: "DESKTOP_API_SESSION_TRANSPORT_ERROR",
+          clientBuildCommit,
+          clientProjectRef,
+        },
       );
     }
     if (!response.ok) {
@@ -333,33 +371,25 @@ export const useAuthStore = defineStore("auths", () => {
         serverProjectRef: diagnostic.serverProjectRef,
         clientProjectRef,
       });
-      const error = createAuthError(
-        "DESKTOP_API_SESSION_BRIDGE_FAILED",
-        "Your Google sign-in succeeded, but dSpeak could not create your app session.",
-      ) as AuthError & {
-        stage: string;
-        httpStatus: number;
-        serverDiagnostic: string;
-        serverBuildCommit: string;
-        serverProjectRef: string;
-        clientBuildCommit: string;
-        clientProjectRef: string;
-      };
-      error.stage = "session-bridge";
-      error.httpStatus = diagnostic.httpStatus;
-      error.serverDiagnostic = diagnostic.diagnosticCategory;
-      error.serverBuildCommit = diagnostic.serverBuildCommit;
-      error.serverProjectRef = diagnostic.serverProjectRef;
-      error.clientBuildCommit = clientBuildCommit;
-      error.clientProjectRef = clientProjectRef;
-      if (
+      const projectMismatch =
         clientProjectRef &&
         diagnostic.serverProjectRef &&
-        clientProjectRef !== diagnostic.serverProjectRef
-      ) {
-        error.serverDiagnostic = "DESKTOP_SUPABASE_PROJECT_MISMATCH";
-      }
-      throw error;
+        clientProjectRef !== diagnostic.serverProjectRef;
+      throw createDesktopAuthError(
+        "DESKTOP_API_SESSION_BRIDGE_FAILED",
+        "Your Google sign-in succeeded, but dSpeak could not create your app session.",
+        {
+          stage: "server-session",
+          httpStatus: diagnostic.httpStatus,
+          serverDiagnostic: projectMismatch
+            ? "DESKTOP_SUPABASE_PROJECT_MISMATCH"
+            : diagnostic.diagnosticCategory,
+          serverBuildCommit: diagnostic.serverBuildCommit,
+          serverProjectRef: diagnostic.serverProjectRef,
+          clientBuildCommit,
+          clientProjectRef,
+        },
+      );
     }
     let session: AuthSessionRecord;
     try {
@@ -373,28 +403,21 @@ export const useAuthStore = defineStore("auths", () => {
         status: response.status,
         serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
       });
-      const error = createAuthError(
-        "DESKTOP_API_SESSION_BRIDGE_FAILED",
+      throw createDesktopAuthError(
+        "DESKTOP_SESSION_PAYLOAD_INVALID",
         "Your Google sign-in succeeded, but dSpeak could not create your app session.",
-      ) as AuthError & {
-        stage: string;
-        httpStatus: number;
-        serverDiagnostic: string;
-        serverBuildCommit: string;
-        serverProjectRef: string;
-        clientBuildCommit: string;
-        clientProjectRef: string;
-      };
-      error.stage = "session-bridge";
-      error.httpStatus = response.status;
-      error.serverDiagnostic = "DESKTOP_SESSION_PAYLOAD_INVALID";
-      error.serverBuildCommit =
-        response.headers.get("X-dSpeak-Build-Commit") || "";
-      error.serverProjectRef =
-        response.headers.get("X-dSpeak-Supabase-Project") || "";
-      error.clientBuildCommit = clientBuildCommit;
-      error.clientProjectRef = clientProjectRef;
-      throw error;
+        {
+          stage: "session-payload",
+          httpStatus: response.status,
+          serverDiagnostic: "DESKTOP_SESSION_PAYLOAD_INVALID",
+          serverBuildCommit:
+            response.headers.get("X-dSpeak-Build-Commit") || "",
+          serverProjectRef:
+            response.headers.get("X-dSpeak-Supabase-Project") || "",
+          clientBuildCommit,
+          clientProjectRef,
+        },
+      );
     }
     setUser(session);
     console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_SUCCEEDED", {
@@ -407,17 +430,27 @@ export const useAuthStore = defineStore("auths", () => {
     const callbackCode = String(code || "");
     if (!callbackCode) {
       clearDesktopOAuthAttempt();
-      throw createAuthError(
+      throw withDesktopDiagnostics(
+        config,
         "DESKTOP_OAUTH_PROVIDER_REJECTED",
         "Missing desktop authorization code.",
+        { stage: "oauth-callback" },
       );
     }
     if (desktopOAuthSessionExchanged) {
       if (getUserData()?.id) return true;
       if (await restoreSession()) return true;
-      throw createAuthError(
-        "DESKTOP_API_SESSION_BRIDGE_FAILED",
+      if (
+        desktopCallbackPromiseError &&
+        isDesktopAuthError(desktopCallbackPromiseError)
+      ) {
+        throw desktopCallbackPromiseError;
+      }
+      throw withDesktopDiagnostics(
+        config,
+        "DESKTOP_API_SESSION_RESTORE_FAILED",
         "Your Google sign-in succeeded, but dSpeak could not create your app session.",
+        { stage: "session-restore" },
       );
     }
     if (desktopCallbackPromise && desktopCallbackCode === callbackCode)
@@ -430,9 +463,11 @@ export const useAuthStore = defineStore("auths", () => {
     const expectedState = desktopOAuth.getState();
     if (!isDesktopOAuthStateValid(expectedState, state)) {
       clearDesktopOAuthAttempt();
-      throw createAuthError(
+      throw withDesktopDiagnostics(
+        config,
         "DESKTOP_OAUTH_STATE_MISMATCH",
         "The sign-in callback could not be verified.",
+        { stage: "oauth-state" },
       );
     }
     console.info("[DesktopAuth] DESKTOP_OAUTH_STATE_VALIDATED");
@@ -443,9 +478,11 @@ export const useAuthStore = defineStore("auths", () => {
       const client = getSupabaseClient();
       if (!client) {
         clearDesktopOAuthAttempt();
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED",
           "Supabase is not configured for desktop sign-in.",
+          { stage: "oauth-code-exchange" },
         );
       }
       console.info("[DesktopAuth] DESKTOP_OAUTH_CODE_EXCHANGE_STARTED");
@@ -473,9 +510,11 @@ export const useAuthStore = defineStore("auths", () => {
               : "unknown error",
           hasFlowId: Boolean(flowId),
         });
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED",
           "Authentication completed, but dSpeak could not verify the sign-in.",
+          { stage: "oauth-code-exchange" },
         );
       }
       const { data, error } = exchangeResult;
@@ -487,9 +526,11 @@ export const useAuthStore = defineStore("auths", () => {
           message: error?.message || "session missing",
           hasFlowId: Boolean(flowId),
         });
-        throw createAuthError(
+        throw withDesktopDiagnostics(
+          config,
           "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED",
           "Authentication completed, but dSpeak could not verify the sign-in.",
+          { stage: "oauth-code-exchange" },
         );
       }
       desktopOAuthSessionExchanged = true;
@@ -513,7 +554,10 @@ export const useAuthStore = defineStore("auths", () => {
       desktopCallbackPromise = null;
       desktopCallbackCode = "";
     };
-    request.then(clearRequest, clearRequest);
+    request.then(clearRequest, (error) => {
+      desktopCallbackPromiseError = error;
+      clearRequest();
+    });
     return request;
   }
 
@@ -529,9 +573,11 @@ export const useAuthStore = defineStore("auths", () => {
     if (!pending) return false;
     if (pending.error) {
       clearDesktopOAuthAttempt();
-      throw createAuthError(
+      throw withDesktopDiagnostics(
+        config,
         "DESKTOP_OAUTH_PROVIDER_REJECTED",
         "The authentication provider did not complete sign-in.",
+        { stage: "oauth-callback" },
       );
     }
     if (!pending.code) return false;

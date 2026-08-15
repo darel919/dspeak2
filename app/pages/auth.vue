@@ -101,8 +101,12 @@
           v-if="failureDiagnostic"
           class="mt-4 rounded-lg bg-base-200 p-3 font-mono text-xs text-base-content/75"
         >
-          <p>HTTP {{ failureDiagnostic.httpStatus }}</p>
-          <p>{{ failureDiagnostic.serverDiagnostic }}</p>
+          <p>Code: {{ failureDiagnostic.code }}</p>
+          <p>Stage: {{ failureDiagnostic.stage }}</p>
+          <p v-if="failureDiagnostic.httpStatus">
+            HTTP {{ failureDiagnostic.httpStatus }}
+          </p>
+          <p v-else>HTTP: no response</p>
           <p v-if="failureDiagnostic.serverBuildCommit">
             Server {{ failureDiagnostic.serverBuildCommit }}
           </p>
@@ -110,7 +114,7 @@
             Client {{ failureDiagnostic.clientBuildCommit }}
           </p>
           <p v-if="failureDiagnostic.serverProjectRef">
-            Supabase project {{ failureDiagnostic.serverProjectRef }}
+            Server project {{ failureDiagnostic.serverProjectRef }}
           </p>
           <p v-if="failureDiagnostic.clientProjectRef">
             Client project {{ failureDiagnostic.clientProjectRef }}
@@ -134,6 +138,7 @@ import { useAuthStore } from "../stores/auth";
 import { useRoomsStore } from "../stores/rooms";
 import { useRuntimeStore } from "../stores/runtime";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
+import { mapFailureDiagnostic } from "../shared/desktop-session-diagnostics.ts";
 import {
   buildPublicUrl,
   openExternalUrl,
@@ -230,6 +235,8 @@ function internalRedirect(value) {
 
 function signInFailureMessage(error, fallback) {
   const code = error?.code || error?.name;
+  const mapped = mapFailureDiagnostic(error);
+  if (mapped) failureDiagnostic.value = mapped;
   if (code === "DESKTOP_OAUTH_BROWSER_OPEN_FAILED")
     return "dSpeak could not open your browser. Please try again.";
   if (code === "DESKTOP_OAUTH_CALLBACK_SERVER_UNAVAILABLE")
@@ -242,19 +249,12 @@ function signInFailureMessage(error, fallback) {
     return "Could not start sign-in. Please try again.";
   if (code === "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED")
     return "Authentication completed, but dSpeak could not verify the sign-in.";
-  if (code === "DESKTOP_API_SESSION_BRIDGE_FAILED") {
-    if (error?.serverDiagnostic) {
-      failureDiagnostic.value = {
-        httpStatus: error.httpStatus || 0,
-        serverDiagnostic: error.serverDiagnostic,
-        serverBuildCommit: error.serverBuildCommit || "",
-        serverProjectRef: error.serverProjectRef || "",
-        clientBuildCommit: error.clientBuildCommit || "",
-        clientProjectRef: error.clientProjectRef || "",
-      };
-    }
+  if (
+    code === "DESKTOP_API_SESSION_BRIDGE_FAILED" ||
+    code === "DESKTOP_API_SESSION_RESTORE_FAILED" ||
+    code === "DESKTOP_SESSION_PAYLOAD_INVALID"
+  )
     return "Your Google sign-in succeeded, but dSpeak could not create your app session.";
-  }
   return fallback;
 }
 

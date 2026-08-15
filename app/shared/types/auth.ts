@@ -39,3 +39,25 @@ export interface AuthStorageValue {
   id?: string | number;
   [key: string]: unknown;
 }
+
+export type DesktopAuthFailureStage =
+  | "oauth-browser"
+  | "oauth-callback"
+  | "oauth-state"
+  | "oauth-code-exchange"
+  | "session-bridge"
+  | "server-session"
+  | "session-payload"
+  | "session-restore"
+  | "unknown";
+
+export type DesktopAuthError = Error & {
+  code: string;
+  stage: DesktopAuthFailureStage;
+  httpStatus: number;
+  serverDiagnostic: string;
+  serverBuildCommit: string;
+  serverProjectRef: string;
+  clientBuildCommit: string;
+  clientProjectRef: string;
+};
