@@ -258,6 +258,7 @@ test("desktop releases optionally publish signed updates and restart after insta
   assert.match(nativeMediaProvisioner, /seed_libwebrtc_from_native_bundle/);
   assert.match(nativeMediaProvisioner, /CMAKE_MSVC_RUNTIME_LIBRARY/);
   assert.match(nativeMediaProvisioner, /local cmake_runtime_argument=""/);
+  assert.match(nativeMediaProvisioner, /CMAKE_POLICY_DEFAULT_CMP0091=NEW/);
   assert.doesNotMatch(nativeMediaProvisioner, /cmake_runtime_arguments/);
   assert.match(nativeMediaProvisioner, /missing\[\*\]-/);
   assert.match(nativeMediaIgnore, /!platform\/AudioSpscRing\.hpp/);
@@ -372,8 +373,10 @@ test("desktop releases optionally publish signed updates and restart after insta
   assert.match(nativeMediaBuild, /"strmiids"/);
   assert.match(nativeMediaBuild, /"mmdevapi"/);
   assert.match(nativeMediaBuild, /"runtimeobject"/);
+  assert.match(nativeMediaBuild, /"msdmo"/);
   assert.doesNotMatch(nativeMediaBuild, /"combase"/);
   assert.doesNotMatch(nativeMediaCmake, /\n\s+combase\n/);
+  assert.match(nativeMediaCmake, /\n\s+msdmo\n/);
   assert.doesNotMatch(
     nativeMediaBuild,
     /remain unsupported until their frame\/PCM bridges are implemented/,

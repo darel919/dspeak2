@@ -252,6 +252,7 @@ if(WIN32)
     mfplat
     mfreadwrite
     mfuuid
+    msdmo
     mmdevapi
     avrt
     propsys

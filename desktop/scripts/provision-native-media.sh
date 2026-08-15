@@ -924,6 +924,7 @@ build_bundle_from_source() {
     if [[ -n "$cmake_runtime_argument" ]]; then
       cmake -S "$mediasoup_source" -B "$mediasoup_build" \
         "$cmake_runtime_argument" \
+        -DCMAKE_POLICY_DEFAULT_CMP0091=NEW \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
@@ -978,6 +979,7 @@ build_bundle_from_source() {
       NATIVE_MEDIA_WITH_MEDIASOUP="$with_mediasoup" \
       cmake -S "$DESKTOP_ROOT/native-media/libdspeak_media" -B "$shim_build" \
         "$cmake_runtime_argument" \
+        -DCMAKE_POLICY_DEFAULT_CMP0091=NEW \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   else

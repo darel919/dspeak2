@@ -217,6 +217,7 @@ fn main() {
             "mfplat",
             "mfreadwrite",
             "mfuuid",
+            "msdmo",
             "mmdevapi",
             "avrt",
             "propsys",
