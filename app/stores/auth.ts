@@ -5,6 +5,7 @@ import {
   exchangeDesktopOAuthCode,
   isDesktopOAuthStateValid,
 } from "../shared/desktop-oauth-flow.ts";
+import { readDesktopSessionDiagnostic } from "../shared/desktop-session-diagnostics.ts";
 import { deviceHeaders } from "~/shared/device-identity";
 import { openExternalUrl } from "~/shared/desktop-external-url";
 import { purgeUserLocalData } from "~/utils/idb";
@@ -287,7 +288,14 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function bridgeDesktopSession(accessToken: string) {
-    console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_STARTED");
+    const clientBuildCommit =
+      typeof config.public?.appBuild?.shortCommit === "string"
+        ? config.public.appBuild.shortCommit
+        : "";
+    console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_STARTED", {
+      hasAuthorization: Boolean(accessToken),
+      clientBuildCommit,
+    });
     let response: Response;
     try {
       response = await fetch(`${config.public.apiPath}/auth/desktop-session`, {
@@ -309,19 +317,12 @@ export const useAuthStore = defineStore("auths", () => {
       );
     }
     if (!response.ok) {
-      let diagnosticCategory = response.statusText || "http-error";
-      try {
-        const payload = (await response.clone().json()) as {
-          statusMessage?: unknown;
-          message?: unknown;
-        };
-        const category = payload.statusMessage || payload.message;
-        if (typeof category === "string" && category)
-          diagnosticCategory = category;
-      } catch {}
+      const { diagnosticCategory, serverBuildCommit } =
+        await readDesktopSessionDiagnostic(response);
       console.error("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_FAILED", {
         status: response.status,
         diagnosticCategory,
+        serverBuildCommit,
       });
       throw createAuthError(
         "DESKTOP_API_SESSION_BRIDGE_FAILED",
@@ -335,6 +336,7 @@ export const useAuthStore = defineStore("auths", () => {
       console.error("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_FAILED", {
         status: response.status,
         diagnosticCategory: "invalid-session-payload",
+        serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
       });
       throw createAuthError(
         "DESKTOP_API_SESSION_BRIDGE_FAILED",
@@ -342,7 +344,9 @@ export const useAuthStore = defineStore("auths", () => {
       );
     }
     setUser(session);
-    console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_SUCCEEDED");
+    console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_SUCCEEDED", {
+      serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
+    });
     return true;
   }
 

@@ -1,5 +1,5 @@
 import { persistAuthenticatedSession } from "../../../utils/auth.ts";
-import { verifyAccessToken } from "../../../auth/middleware.ts";
+import { verifySupabaseAccessToken } from "../../../auth/supabase.ts";
 import { profileRepository } from "../../../db/repositories/profiles.ts";
 
 export default defineEventHandler(async (event) => {
@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
     const payload =
       event.context.authToken === token && event.context.authPayload
         ? event.context.authPayload
-        : await verifyAccessToken(token);
+        : await verifySupabaseAccessToken(token);
     const profile =
       event.context.authToken === token && event.context.authProfile
         ? event.context.authProfile

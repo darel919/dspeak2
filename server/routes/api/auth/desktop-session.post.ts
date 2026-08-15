@@ -1,55 +1,97 @@
-import { getUserFromToken } from "../../../auth/supabase.ts";
+import {
+  getUserFromToken,
+  verifySupabaseAccessToken,
+} from "../../../auth/supabase.ts";
 import {
   extractBearerToken,
-  verifyAccessToken,
+  hasVerifiedBearerContext,
 } from "../../../auth/middleware.ts";
 import { provisionOAuthProfile } from "../../../auth/oauth-profile.ts";
 import { profileRepository } from "../../../db/repositories/profiles.ts";
 import { persistAuthenticatedSession } from "../../../utils/auth.ts";
+
+function safeErrorDetails(error: unknown): {
+  name: string;
+  message: string;
+} {
+  return {
+    name: error instanceof Error ? error.name : "unknown",
+    message: error instanceof Error ? error.message : "unknown",
+  };
+}
 
 function desktopAuthFailure(
   code: string,
   statusCode: number,
   error?: unknown,
 ): never {
-  console.error(
-    `[DesktopAuth] ${code}`,
-    error instanceof Error ? error.message : error || "",
-  );
+  console.error(`[DesktopAuth] ${code}`, {
+    statusCode,
+    ...(error ? safeErrorDetails(error) : {}),
+  });
   throw createError({ statusCode, statusMessage: code });
 }
 
 export default defineEventHandler(async (event) => {
-  const token = extractBearerToken(event);
-  if (!token)
-    return desktopAuthFailure("DESKTOP_API_SESSION_BRIDGE_FAILED", 401);
+  const runtimeConfig = useRuntimeConfig(event);
+  const serverBuildCommit =
+    typeof runtimeConfig.public?.appBuild?.shortCommit === "string"
+      ? runtimeConfig.public.appBuild.shortCommit
+      : "";
+  if (serverBuildCommit)
+    setHeader(event, "X-dSpeak-Build-Commit", serverBuildCommit);
 
-  let payload: Awaited<ReturnType<typeof verifyAccessToken>>;
+  const hasAuthorization = Boolean(getHeader(event, "authorization"));
+  console.info("[DesktopAuth] DESKTOP_SESSION_REQUEST_RECEIVED", {
+    hasAuthorization,
+  });
+  console.info("[DesktopAuth] DESKTOP_SESSION_BEARER_PRESENT", {
+    hasAuthorization,
+  });
+
+  const token = extractBearerToken(event);
+  if (!token) return desktopAuthFailure("DESKTOP_SESSION_MISSING_BEARER", 401);
+
+  let payload: Awaited<ReturnType<typeof verifySupabaseAccessToken>>;
   try {
     payload =
-      event.context.authToken === token && event.context.authPayload
+      hasVerifiedBearerContext(event) &&
+      event.context.authToken === token &&
+      event.context.authPayload
         ? event.context.authPayload
-        : await verifyAccessToken(token);
+        : await verifySupabaseAccessToken(token);
   } catch (error) {
-    return desktopAuthFailure("DESKTOP_API_SESSION_BRIDGE_FAILED", 401, error);
+    return desktopAuthFailure("DESKTOP_SESSION_TOKEN_INVALID", 401, error);
   }
   if (!payload.sub)
-    return desktopAuthFailure("DESKTOP_API_SESSION_BRIDGE_FAILED", 401);
+    return desktopAuthFailure("DESKTOP_SESSION_TOKEN_INVALID", 401);
+  console.info("[DesktopAuth] DESKTOP_SESSION_TOKEN_VERIFIED", {
+    hasSubject: Boolean(payload.sub),
+  });
 
   let supabaseUser;
   try {
     supabaseUser = await getUserFromToken(token);
   } catch (error) {
-    return desktopAuthFailure("DESKTOP_API_SESSION_BRIDGE_FAILED", 502, error);
+    return desktopAuthFailure(
+      "DESKTOP_SESSION_SUPABASE_USER_LOOKUP_FAILED",
+      502,
+      error,
+    );
   }
+  console.info("[DesktopAuth] DESKTOP_SESSION_SUPABASE_USER_RESOLVED", {
+    hasUser: Boolean(supabaseUser),
+  });
   if (!supabaseUser || supabaseUser.id !== payload.sub)
-    return desktopAuthFailure("DESKTOP_API_SESSION_BRIDGE_FAILED", 401);
+    return desktopAuthFailure("DESKTOP_SESSION_USER_MISMATCH", 401);
 
+  console.info("[DesktopAuth] DESKTOP_SESSION_PROFILE_PROVISION_STARTED");
   try {
     await provisionOAuthProfile(supabaseUser);
   } catch (error) {
     return desktopAuthFailure("DESKTOP_PROFILE_PROVISION_FAILED", 500, error);
   }
+  console.info("[DesktopAuth] DESKTOP_SESSION_PROFILE_PROVISION_SUCCEEDED");
 
   let profile;
   try {
@@ -57,15 +99,17 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     return desktopAuthFailure("DESKTOP_PROFILE_PROVISION_FAILED", 500, error);
   }
-  if (!profile)
-    return desktopAuthFailure("DESKTOP_PROFILE_PROVISION_FAILED", 500);
+  console.info("[DesktopAuth] DESKTOP_SESSION_PROFILE_RESOLVED", {
+    hasProfile: Boolean(profile),
+  });
+  if (!profile) return desktopAuthFailure("DESKTOP_PROFILE_NOT_FOUND", 500);
 
   try {
     const deviceId =
       getHeader(event, "x-device-id") ||
       getHeader(event, "x-dspeak-device") ||
       "unknown";
-    return await persistAuthenticatedSession(
+    const session = await persistAuthenticatedSession(
       event,
       supabaseUser.id,
       deviceId,
@@ -73,7 +117,9 @@ export default defineEventHandler(async (event) => {
       profile,
       { persistCookie: false },
     );
+    console.info("[DesktopAuth] DESKTOP_SESSION_CREATED");
+    return session;
   } catch (error) {
-    return desktopAuthFailure("DESKTOP_API_SESSION_BRIDGE_FAILED", 500, error);
+    return desktopAuthFailure("DESKTOP_SESSION_PERSIST_FAILED", 500, error);
   }
 });

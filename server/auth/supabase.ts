@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { createLocalJWKSet } from "jose";
+import type { JWTPayload } from "jose";
 import { getCookie, setCookie } from "h3";
 import type { H3Event } from "h3";
 
@@ -15,6 +15,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 const requiredSupabaseUrl = supabaseUrl;
 const requiredSupabaseAnonKey = supabaseAnonKey;
+const requiredSupabaseIssuer = `${requiredSupabaseUrl}/auth/v1`;
+
+export type SupabaseAccessTokenClaims = JWTPayload & {
+  sub: string;
+  email?: string;
+  role?: string;
+};
 
 const oauthStorageKey = "dspeak-oauth";
 const oauthCookiePrefix = "dspeak_oauth_";
@@ -140,18 +147,36 @@ export async function getUserFromToken(
   accessToken: string,
 ): Promise<User | null> {
   const { data, error } = await supabase.auth.getUser(accessToken);
-  if (error || !data.user) return null;
+  if (error) throw error;
+  if (!data.user) return null;
   return data.user;
 }
 
-export async function verifyJWTLocally(
+export async function verifySupabaseAccessToken(
   token: string,
-  jwks: ReturnType<typeof createLocalJWKSet>,
-) {
-  const jose = await import("jose");
-  const { payload } = await jose.jwtVerify(token, jwks, {
-    issuer: `${supabaseUrl}/auth/v1`,
-    audience: "authenticated",
-  });
-  return payload;
+  auth: Pick<SupabaseClient["auth"], "getClaims"> = supabase.auth,
+): Promise<SupabaseAccessTokenClaims> {
+  if (!token) throw new Error("Missing Supabase access token");
+
+  const { data, error } = await auth.getClaims(token);
+  if (error) throw error;
+
+  const claims = data?.claims as
+    | (Record<string, unknown> & { aud?: string | string[]; sub?: unknown })
+    | undefined;
+  if (!claims || typeof claims.sub !== "string" || !claims.sub) {
+    throw new Error("Supabase access token has no subject");
+  }
+  if (claims.iss !== requiredSupabaseIssuer) {
+    throw new Error("Supabase access token issuer is invalid");
+  }
+  const audience = claims.aud;
+  if (
+    audience !== "authenticated" &&
+    !(Array.isArray(audience) && audience.includes("authenticated"))
+  ) {
+    throw new Error("Supabase access token audience is invalid");
+  }
+
+  return claims as SupabaseAccessTokenClaims;
 }

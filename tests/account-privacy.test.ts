@@ -65,8 +65,8 @@ test("legal Markdown links reject executable URL schemes", () => {
   assert.match(inlineTokens, /new URL\(href, "https:\/\/dspeak\.invalid"\)/);
 });
 
-test("auth.ts uses Supabase Auth with local JWT verification", () => {
-  assert.match(auth, /verifyAccessToken/);
+test("auth.ts uses the canonical Supabase claims verifier", () => {
+  assert.match(auth, /verifySupabaseAccessToken/);
 
   assert.doesNotMatch(auth, /ACCOUNT_URL/);
 });

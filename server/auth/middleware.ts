@@ -1,45 +1,67 @@
-import { createLocalJWKSet, jwtVerify } from "jose";
 import type { H3Event } from "h3";
+import {
+  verifySupabaseAccessToken,
+  type SupabaseAccessTokenClaims,
+} from "./supabase.ts";
 import type { AuthEvent } from "../types/auth.ts";
 
-type LocalKeySet = ReturnType<typeof createLocalJWKSet>;
-let cachedJWKS: Record<string, unknown> | null = null;
-let cachedKeySet: LocalKeySet | null = null;
-let jwksFetchedAt = 0;
-let jwksRequest: Promise<LocalKeySet> | null = null;
-const JWKS_CACHE_TTL = 3600000;
-
-async function getJWKS() {
-  const now = Date.now();
-  if (cachedKeySet && now - jwksFetchedAt < JWKS_CACHE_TTL) return cachedKeySet;
-  if (jwksRequest) return jwksRequest;
-  jwksRequest = (async () => {
-    try {
-      const response = await fetch(
-        `${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`,
-      );
-      if (!response.ok) throw new Error("Failed to fetch JWKS");
-      cachedJWKS = (await response.json()) as Record<string, unknown>;
-      cachedKeySet = createLocalJWKSet(cachedJWKS as never);
-      jwksFetchedAt = Date.now();
-      return cachedKeySet;
-    } catch (error) {
-      if (cachedKeySet) return cachedKeySet;
-      throw error;
-    } finally {
-      jwksRequest = null;
-    }
-  })();
-  return jwksRequest;
+export function hasVerifiedBearerContext(
+  event: Pick<H3Event, "context">,
+): boolean {
+  return Boolean(event.context.authToken && event.context.authPayload);
 }
 
-export async function verifyAccessToken(token: string) {
-  const keySet = await getJWKS();
-  const { payload } = await jwtVerify(token, keySet, {
-    issuer: `${process.env.SUPABASE_URL}/auth/v1`,
-    audience: "authenticated",
-  });
+function setBearerAuthContext(
+  event: AuthEvent,
+  token: string,
+  payload: SupabaseAccessTokenClaims,
+) {
+  event.context.authToken = token;
+  event.context.authPayload = payload;
+  event.context.token = token;
+  event.context.user = {
+    id: payload.sub,
+    email: payload.email || "",
+    role: payload.role,
+  };
   return payload;
+}
+
+function requireBearerClaims(payload: unknown): SupabaseAccessTokenClaims {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    typeof (payload as { sub?: unknown }).sub !== "string" ||
+    !(payload as { sub: string }).sub
+  ) {
+    throw new Error("Supabase access token has no subject");
+  }
+  return payload as SupabaseAccessTokenClaims;
+}
+
+export async function ensureVerifiedBearer(
+  event: AuthEvent,
+  verifier: (
+    token: string,
+  ) => Promise<SupabaseAccessTokenClaims> = verifySupabaseAccessToken,
+) {
+  if (hasVerifiedBearerContext(event))
+    return event.context.authPayload as SupabaseAccessTokenClaims;
+
+  const token = extractBearerToken(event);
+  if (!token) return null;
+
+  const pending = event.context.authVerification;
+  const verificationPromise =
+    pending?.token === token && pending.promise
+      ? pending.promise
+      : verifier(token);
+  event.context.authVerification = {
+    token,
+    promise: verificationPromise,
+  };
+  const payload = requireBearerClaims(await verificationPromise);
+  return setBearerAuthContext(event, token, payload);
 }
 
 export function extractBearerToken(event: Pick<H3Event, "headers">) {
@@ -58,7 +80,7 @@ export async function requireAuth(event: AuthEvent) {
     });
   }
   try {
-    const payload = await verifyAccessToken(token);
+    const payload = await verifySupabaseAccessToken(token);
     event.context.user = {
       id: payload.sub,
       email: payload.email,
@@ -77,7 +99,7 @@ export async function optionalAuth(event: AuthEvent) {
   const token = extractBearerToken(event);
   if (!token) return null;
   try {
-    const payload = await verifyAccessToken(token);
+    const payload = await verifySupabaseAccessToken(token);
     event.context.user = {
       id: payload.sub,
       email: payload.email,

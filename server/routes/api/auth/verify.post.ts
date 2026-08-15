@@ -1,4 +1,4 @@
-import { verifyAccessToken } from "../../../auth/middleware.ts";
+import { verifySupabaseAccessToken } from "../../../auth/supabase.ts";
 
 export default defineEventHandler(async (event) => {
   const { accessToken } = await readBody(event);
@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const payload = await verifyAccessToken(accessToken);
+    const payload = await verifySupabaseAccessToken(accessToken);
     return { user: { id: payload.sub, email: payload.email } };
   } catch (error) {
     throw createError({

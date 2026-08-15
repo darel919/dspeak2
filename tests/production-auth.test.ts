@@ -131,12 +131,14 @@ test("protected browser routes stay on the cookie-owning origin", () => {
   assert.doesNotMatch(runtimeConfig, /DSPEAK_(API|WS|SFU)_URL/);
 });
 
-test("auth.ts uses Supabase Auth with local JWT verification", () => {
-  assert.match(auth, /verifyAccessToken/);
+test("auth.ts uses the canonical Supabase claims verifier", () => {
+  assert.match(auth, /verifySupabaseAccessToken/);
   assert.match(auth, /createHmac/);
   assert.match(auth, /setCookie\(event, SESSION_COOKIE, accessToken/);
 
   assert.doesNotMatch(auth, /ACCOUNT_URL/);
+  assert.match(supabaseAuth, /auth\.getClaims/);
+  assert.doesNotMatch(supabaseAuth, /createLocalJWKSet|jwks\.json/);
 });
 
 test("valid bearer-authenticated requests do not need cookie CSRF state", () => {
@@ -257,15 +259,23 @@ test("desktop sign-in opens the system browser and exposes startup failures", ()
 
 test("desktop session bridge verifies the Supabase user and provisions a profile", () => {
   assert.match(desktopSession, /extractBearerToken/);
-  assert.match(desktopSession, /verifyAccessToken/);
+  assert.match(desktopSession, /verifySupabaseAccessToken/);
   assert.match(desktopSession, /getUserFromToken/);
   assert.match(desktopSession, /provisionOAuthProfile\(supabaseUser\)/);
   assert.match(desktopSession, /persistAuthenticatedSession/);
   assert.match(desktopSession, /persistCookie: false/);
-  assert.match(authTokenMiddleware, /event\.context\.authToken = token/);
-  assert.match(authTokenMiddleware, /event\.context\.authPayload = payload/);
+  assert.match(authTokenMiddleware, /ensureVerifiedBearer\(event\)/);
+  assert.match(authTokenMiddleware, /BEARER_VERIFICATION_FAILED/);
+  assert.doesNotMatch(authTokenMiddleware, /catch\s*\{\s*\}/);
   assert.match(securityMiddleware, /verifiedBearer/);
+  assert.match(securityMiddleware, /hasVerifiedBearerContext/);
   assert.match(securityMiddleware, /!verifiedBearer/);
+  assert.match(desktopSession, /DESKTOP_SESSION_REQUEST_RECEIVED/);
+  assert.match(desktopSession, /DESKTOP_SESSION_TOKEN_VERIFIED/);
+  assert.match(desktopSession, /DESKTOP_SESSION_PROFILE_PROVISION_STARTED/);
+  assert.match(desktopSession, /DESKTOP_SESSION_CREATED/);
+  assert.match(desktopSession, /DESKTOP_SESSION_TOKEN_INVALID/);
+  assert.match(desktopSession, /DESKTOP_SESSION_PERSIST_FAILED/);
 });
 
 test("authentication state changes do not remount and replay the callback", () => {

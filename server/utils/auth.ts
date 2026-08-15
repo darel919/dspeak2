@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readBody } from "h3";
-import { verifyAccessToken } from "../auth/middleware.ts";
+import { verifySupabaseAccessToken } from "../auth/supabase.ts";
 import { profileRepository } from "../db/repositories/profiles.ts";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
 import type { H3Event } from "h3";
@@ -133,7 +133,7 @@ function verifiedPayloadForEvent(
     event.context.authVerification.promise
   )
     return event.context.authVerification.promise;
-  const promise = verifyAccessToken(token).catch(() => null);
+  const promise = verifySupabaseAccessToken(token).catch(() => null);
   event.context.authVerification = { token, promise };
   return promise;
 }
