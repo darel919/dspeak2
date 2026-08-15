@@ -23,7 +23,10 @@ describe("desktop initialization contract", () => {
       tauriConfig,
       /"beforeBuildCommand": "node \.\.\/scripts\/build-desktop-frontend\.mjs && node \.\.\/scripts\/build-desktop-worker\.mjs"/,
     );
-    assert.match(tauriConfig, /"externalBin": \["binaries\/dspeak-media"\]/);
+    assert.match(
+      tauriConfig,
+      /"externalBin":\s*\[\s*"binaries\/dspeak-media"\s*\]/,
+    );
     assert.doesNotMatch(tauriConfig, /NITRO_PRESET=|rm -rf|cp -R/);
     assert.match(
       await read("desktop/src-tauri/src/desktop/mod.rs"),

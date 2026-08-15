@@ -29,6 +29,42 @@ export function normalizeVersion(value) {
   return version;
 }
 
+function parseMsiComponent(raw, name, maximum) {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value > maximum)
+    throw new Error(`MSI ${name} version cannot exceed ${maximum}: ${raw}`);
+  return value;
+}
+
+export function wixVersionFromSemver(value) {
+  const version = normalizeVersion(value);
+  const match = version.match(
+    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+  );
+  if (!match)
+    throw new Error(
+      `Application version cannot be represented as an MSI version: ${version}`,
+    );
+
+  const [, majorRaw, minorRaw, patchRaw, prerelease] = match;
+  const major = parseMsiComponent(majorRaw, "major", 255);
+  const minor = parseMsiComponent(minorRaw, "minor", 255);
+  const patch = parseMsiComponent(patchRaw, "patch", 65535);
+
+  if (prerelease === undefined) return `${major}.${minor}.${patch}`;
+
+  const alphaMatch = prerelease.match(/^alpha\.(0|[1-9]\d*)$/);
+  if (!alphaMatch)
+    throw new Error(
+      `Application prerelease cannot be represented as an MSI version: ${version}`,
+    );
+  const buildRaw = alphaMatch[1];
+  const build = Number(buildRaw);
+  if (!Number.isSafeInteger(build) || build > 65535)
+    throw new Error(`Unsupported MSI prerelease build number: ${buildRaw}`);
+  return `${major}.${minor}.${patch}.${build}`;
+}
+
 export function releaseVersionFromTag(value) {
   const tag = String(value || "").trim();
   if (!/^v/i.test(tag))
@@ -105,6 +141,15 @@ export function findVersionMismatches(state) {
     .map(([file, version]) => `${file}=${version || "missing"}`);
 }
 
+export function findWixVersionMismatches({ canonicalVersion, tauriConfig }) {
+  const expectedVersion = wixVersionFromSemver(canonicalVersion);
+  const actualVersion = tauriConfig.bundle?.windows?.wix?.version;
+  if (actualVersion === expectedVersion) return [];
+  return [
+    `tauriConfig.bundle.windows.wix.version=${actualVersion || "missing"} (expected ${expectedVersion})`,
+  ];
+}
+
 export function synchronizeVersionContents({
   version,
   packageJson,
@@ -114,6 +159,7 @@ export function synchronizeVersionContents({
   cargoLock,
 }) {
   const normalizedVersion = normalizeVersion(version);
+  const wixVersion = wixVersionFromSemver(normalizedVersion);
   return {
     packageJson: {
       ...packageJson,
@@ -133,6 +179,16 @@ export function synchronizeVersionContents({
     tauriConfig: {
       ...tauriConfig,
       version: normalizedVersion,
+      bundle: {
+        ...(tauriConfig.bundle ?? {}),
+        windows: {
+          ...(tauriConfig.bundle?.windows ?? {}),
+          wix: {
+            ...(tauriConfig.bundle?.windows?.wix ?? {}),
+            version: wixVersion,
+          },
+        },
+      },
     },
     cargoToml: replaceCargoPackageVersion(cargoToml, normalizedVersion),
     cargoLock: replaceCargoLockPackageVersion(cargoLock, normalizedVersion),
@@ -234,6 +290,14 @@ export async function main(args = process.argv.slice(2)) {
   if (mismatches.length)
     throw new Error(
       `Release versions are not synchronized with package.json: ${mismatches.join(", ")}`,
+    );
+  const wixMismatches = findWixVersionMismatches({
+    canonicalVersion: nextFiles.state.packageJson,
+    tauriConfig: nextFiles.parsed.tauriConfig,
+  });
+  if (wixMismatches.length)
+    throw new Error(
+      `WiX release version is not synchronized with package.json: ${wixMismatches.join(", ")}`,
     );
 
   console.log(

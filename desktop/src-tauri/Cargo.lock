@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "dspeak-desktop"
-version = "3.0.0-alpha.1"
+version = "3.0.1-alpha.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
