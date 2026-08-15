@@ -12,6 +12,7 @@ pub(crate) async fn media_worker_invoke(
         return Err(json!("native media worker rejected a non-media command"));
     }
     let worker = store.worker.clone();
+    let event_worker = worker.clone();
     let worker_state = store.state.clone();
     let worker_app = app.clone();
     let worker_command = command.clone();
@@ -66,7 +67,9 @@ pub(crate) async fn media_worker_invoke(
     .await
     .map_err(|error| json!(format!("native media worker task failed: {error}")))?;
     if let Err(error) = &result {
-        if error.get("code").and_then(Value::as_str) == Some("MEDIA_WORKER_EXITED") {
+        if error.get("code").and_then(Value::as_str) == Some("MEDIA_WORKER_EXITED")
+            && event_worker.claim_fatal_event()
+        {
             let _ = app.emit("media:error", error.clone());
         }
     }

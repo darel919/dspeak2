@@ -79,7 +79,7 @@ if [[ "$LOCAL_MEDIA_WITH_MEDIASOUP" == "auto" ]]; then
   fi
 fi
 if [[ -f "$LOCAL_MEDIA_LIBRARY" && -f "$ARTIFACT_MEDIA_LIBRARY" ]] && \
-  find "$ROOT_DIR/native-media/libdspeak_media" -type f \
+  find "$ROOT_DIR/native-media/libdspeak_media" "$ROOT_DIR/native-media/platform" -type f \
     \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
     -newer "$ARTIFACT_MEDIA_LIBRARY" -print -quit | grep -q .; then
   env NATIVE_MEDIA_ARTIFACT_DIR="$NATIVE_MEDIA_ARTIFACT_DIR" \

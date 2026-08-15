@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   FATAL_CLIENT_ERROR_MESSAGE,
@@ -6,6 +7,7 @@ import {
   classifyFatalClientError,
   isFatalClientError,
   isNativeMediaWorkerFatalError,
+  nativeMediaWorkerFatalDescriptor,
 } from "../app/shared/fatal-client-error.ts";
 
 test("recognizes failures that require a page refresh", () => {
@@ -50,10 +52,41 @@ test("classifies native worker exits by structured code", () => {
   assert.equal(descriptor?.recoveryAction, "restart-app");
   assert.equal(descriptor?.recoveryLabel, "Restart dSpeak");
   assert.equal(descriptor?.code, NATIVE_MEDIA_WORKER_FATAL_CODE);
+  assert.equal(descriptor?.title, "Media engine crashed");
+  assert.match(descriptor?.message || "", /cannot recover in this session/);
   assert.equal(
     classifyFatalClientError("native media worker is not running"),
     null,
   );
+});
+
+test("native fatal descriptors preserve structured diagnostics without changing copy", () => {
+  const details = { signal: 6, signalName: "SIGABRT" };
+  const descriptor = nativeMediaWorkerFatalDescriptor(details);
+  assert.deepEqual(descriptor.details, details);
+  assert.equal(descriptor.recoveryAction, "restart-app");
+  assert.equal(descriptor.recoveryLabel, "Restart dSpeak");
+});
+
+test("native worker fatal events are handled once at the app-global boundary", async () => {
+  const plugin = await readFile(
+    "app/plugins/fatal-client-error.client.ts",
+    "utf8",
+  );
+  const recovery = await readFile(
+    "app/composables/useFatalClientError.ts",
+    "utf8",
+  );
+  assert.match(plugin, /listen\(\s*"media:error"/);
+  assert.match(plugin, /isNativeMediaWorkerFatalError\(payload\)/);
+  assert.match(plugin, /__DSPEAK_NATIVE_FATAL_LISTENER__/);
+  assert.match(plugin, /listenerState\.handled/);
+  assert.match(plugin, /Native crash evidence/);
+  assert.match(plugin, /invalidateVoiceMediaState/);
+  assert.match(plugin, /nuxtApp\.vueApp\.onUnmount\(dispose\)/);
+  assert.doesNotMatch(plugin, /native media worker is not running/);
+  assert.match(recovery, /invoke\("desktop_restart_app"\)/);
+  assert.match(recovery, /shouldReplaceWithNativeFatal/);
 });
 
 test("uses one stable user-facing fatal error message", () => {

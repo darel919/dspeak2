@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, BufWriter};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -17,6 +17,7 @@ pub(super) fn spawn_worker(
     state: &Arc<Mutex<NativeMediaState>>,
     crashed: Arc<AtomicBool>,
     crash_details: Arc<Mutex<Option<Value>>>,
+    fatal_event_emitted: Arc<AtomicBool>,
 ) -> Result<Arc<WorkerConnection>, Value> {
     let worker_path = resolve_worker_path(app)?;
     let mut child = Command::new(&worker_path)
@@ -41,6 +42,8 @@ pub(super) fn spawn_worker(
     let stderr = child.stderr.take();
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let stderr_tail = Arc::new(Mutex::new(VecDeque::new()));
+    let native_crash_lines = Arc::new(Mutex::new(Vec::new()));
+    let stderr_drained = Arc::new((Mutex::new(stderr.is_none()), Condvar::new()));
     let connection = Arc::new(WorkerConnection {
         child: Mutex::new(child),
         writer: Mutex::new(BufWriter::new(stdin)),
@@ -51,11 +54,15 @@ pub(super) fn spawn_worker(
         forced_termination: AtomicBool::new(false),
         crashed,
         crash_details,
+        fatal_event_emitted,
         last_command: Mutex::new(None),
         last_request_id: AtomicU64::new(0),
         last_command_started_at: AtomicU64::new(0),
         command_history: Mutex::new(VecDeque::new()),
         stderr_tail: stderr_tail.clone(),
+        native_crash_lines,
+        native_crash_started: AtomicBool::new(false),
+        stderr_drained: stderr_drained.clone(),
     });
     let reader_connection = connection.clone();
     let event_app = app.clone();
@@ -71,9 +78,17 @@ pub(super) fn spawn_worker(
     if let Some(stderr) = stderr {
         let event_app = app.clone();
         let stderr_connection = connection.clone();
+        let stderr_drained = stderr_drained.clone();
         thread::Builder::new()
             .name("dspeak-media-worker-log".to_string())
-            .spawn(move || read_worker_stderr(stderr, event_app, stderr_connection))
+            .spawn(move || {
+                read_worker_stderr(stderr, event_app, stderr_connection);
+                let (complete, wake) = &*stderr_drained;
+                if let Ok(mut complete) = complete.lock() {
+                    *complete = true;
+                    wake.notify_all();
+                }
+            })
             .map_err(|error| {
                 json!(format!(
                     "native media worker logger failed to start: {error}"
@@ -173,6 +188,7 @@ fn read_worker_output(
     let exit_status = connection.reap_status();
     eprintln!("[dspeak:media-worker] worker stdout closed exit_status={exit_status:?}");
     if unexpected {
+        connection.wait_for_stderr();
         let error = worker_exited_error(&connection, exit_status.as_ref());
         connection.mark_crashed(error.clone());
         fail_pending(&connection.pending, error.clone());
@@ -181,7 +197,9 @@ fn read_worker_output(
             *current = disconnected.clone();
         }
         let _ = app.emit(MEDIA_EVENT_STATE, &disconnected);
-        let _ = app.emit("media:error", error);
+        if connection.claim_fatal_event() {
+            let _ = app.emit("media:error", error);
+        }
     } else {
         fail_pending(
             &connection.pending,

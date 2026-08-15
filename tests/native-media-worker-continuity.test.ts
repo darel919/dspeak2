@@ -44,9 +44,15 @@ describe("native media worker continuity contract", () => {
     assert.match(render, /kFrameEventMaxWidth = 480/);
     assert.match(render, /kFrameEventMaxHeight = 270/);
     assert.match(render, /kFrameEventIntervalUs = 66000/);
-    assert.match(render, /kLocalFrameEventMaxWidth = 320/);
-    assert.match(render, /kLocalFrameEventMaxHeight = 180/);
-    assert.match(render, /kLocalFrameEventIntervalUs = 100000/);
+    assert.match(render, /kLocalCameraFrameEventMaxWidth = 480/);
+    assert.match(render, /kLocalCameraFrameEventMaxHeight = 270/);
+    assert.match(render, /kLocalCameraFrameEventIntervalUs = 33333/);
+    assert.match(render, /kLocalScreenFrameEventMaxWidth = 320/);
+    assert.match(render, /kLocalScreenFrameEventMaxHeight = 180/);
+    assert.match(render, /kLocalScreenFrameEventIntervalUs = 100000/);
+    assert.match(render, /preview_interval_us = is_screen_preview/);
+    assert.match(render, /preview_max_width = is_screen_preview/);
+    assert.match(render, /preview_max_height = is_screen_preview/);
     assert.match(render, /I420Scale/);
     assert.match(workerServer, /MAX_NATIVE_VIDEO_FRAME_BYTES: usize = 600_000/);
     assert.match(workerServer, /"dataDropped": data_dropped/);

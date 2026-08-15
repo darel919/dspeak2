@@ -25,7 +25,14 @@ export function useFatalClientError() {
   }
 
   function reportDescriptor(descriptor: FatalClientErrorDescriptor) {
-    if (fatal.value) return false;
+    if (fatal.value) {
+      const shouldReplaceWithNativeFatal =
+        descriptor.kind === "native-media-worker" &&
+        fatal.value.kind !== "native-media-worker";
+      if (!shouldReplaceWithNativeFatal) return false;
+      recoveryPending.value = false;
+      recoveryError.value = null;
+    }
     fatal.value = descriptor;
     console.error(
       "[FatalClientError] The application cannot recover:",

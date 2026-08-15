@@ -11,6 +11,7 @@ pub(crate) struct MediaWorkerClient {
     pub(super) connection: Mutex<Option<Arc<WorkerConnection>>>,
     pub(super) crashed: Arc<AtomicBool>,
     pub(super) crash_details: Arc<Mutex<Option<Value>>>,
+    pub(super) fatal_event_emitted: Arc<AtomicBool>,
 }
 
 impl Default for MediaWorkerClient {
@@ -19,6 +20,7 @@ impl Default for MediaWorkerClient {
             connection: Mutex::new(None),
             crashed: Arc::new(AtomicBool::new(false)),
             crash_details: Arc::new(Mutex::new(None)),
+            fatal_event_emitted: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -150,8 +152,13 @@ impl MediaWorkerClient {
             }
             *slot = None;
         }
-        let connection =
-            spawn_worker(app, state, self.crashed.clone(), self.crash_details.clone())?;
+        let connection = spawn_worker(
+            app,
+            state,
+            self.crashed.clone(),
+            self.crash_details.clone(),
+            self.fatal_event_emitted.clone(),
+        )?;
         if self.is_crashed() {
             connection.stop();
             return Err(self.crashed_error());
@@ -202,5 +209,9 @@ impl MediaWorkerClient {
             "message": "The native media worker is not running",
             "recoverable": false,
         })
+    }
+
+    pub(super) fn claim_fatal_event(&self) -> bool {
+        !self.fatal_event_emitted.swap(true, Ordering::AcqRel)
     }
 }

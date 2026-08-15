@@ -4,10 +4,34 @@ import {
   nativeMediaWorkerFatalDescriptor,
 } from "~/shared/fatal-client-error.ts";
 
+type NativeFatalListenerState = {
+  handled: boolean;
+  owners: number;
+  unlisten: (() => void) | null;
+  installation: Promise<void> | null;
+  handle: ((payload: unknown) => void) | null;
+};
+
+type NativeFatalListenerWindow = Window & {
+  __DSPEAK_NATIVE_FATAL_LISTENER__?: NativeFatalListenerState;
+};
+
+function nativeFatalListenerState() {
+  const target = window as NativeFatalListenerWindow;
+  return (target.__DSPEAK_NATIVE_FATAL_LISTENER__ ??= {
+    handled: false,
+    owners: 0,
+    unlisten: null,
+    installation: null,
+    handle: null,
+  });
+}
+
 export default defineNuxtPlugin((nuxtApp) => {
   const { reportDescriptor } = useFatalClientError();
   let disposed = false;
-  let nativeUnlisten: (() => void) | null = null;
+  const listenerState = nativeFatalListenerState();
+  listenerState.owners += 1;
 
   function handleError(event: ErrorEvent | PromiseRejectionEvent) {
     const error =
@@ -38,32 +62,33 @@ export default defineNuxtPlugin((nuxtApp) => {
         isTauri = typeof detectTauri === "function" && detectTauri();
       } catch {}
     }
-    if (!isTauri || disposed) return;
-    try {
-      const { listen } = await import("@tauri-apps/api/event");
-      const unlisten = await listen(
-        "media:error",
-        ({ payload }: { payload: unknown }) => {
-          console.error("[FatalClientError] Native media event:", payload);
-          if (!isNativeMediaWorkerFatalError(payload)) return;
-          reportDescriptor(
-            nativeMediaWorkerFatalDescriptor(
-              payload && typeof payload === "object"
-                ? (payload as Record<string, unknown>)
-                : {},
-            ),
-          );
-          void invalidateVoiceMediaState();
-        },
-      );
-      if (disposed) unlisten();
-      else nativeUnlisten = unlisten;
-    } catch (error) {
-      console.warn(
-        "[FatalClientError] Native media event listener unavailable:",
-        error,
-      );
-    }
+    if (!isTauri || listenerState.owners === 0) return;
+    if (listenerState.installation) return listenerState.installation;
+    if (listenerState.unlisten) return;
+    listenerState.installation = (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const unlisten = await listen(
+          "media:error",
+          ({ payload }: { payload: unknown }) => {
+            listenerState.handle?.(payload);
+          },
+        );
+        if (listenerState.owners === 0) {
+          unlisten();
+          return;
+        }
+        listenerState.unlisten = unlisten;
+      } catch (error) {
+        console.warn(
+          "[FatalClientError] Native media event listener unavailable:",
+          error,
+        );
+      }
+    })().finally(() => {
+      listenerState.installation = null;
+    });
+    return listenerState.installation;
   }
 
   async function invalidateVoiceMediaState() {
@@ -79,19 +104,44 @@ export default defineNuxtPlugin((nuxtApp) => {
   }
 
   function dispose() {
+    if (disposed) return;
     disposed = true;
     window.removeEventListener("error", handleError);
     window.removeEventListener("unhandledrejection", handleError);
-    nativeUnlisten?.();
-    nativeUnlisten = null;
+    listenerState.owners = Math.max(0, listenerState.owners - 1);
+    if (listenerState.owners === 0) {
+      listenerState.unlisten?.();
+      listenerState.unlisten = null;
+      listenerState.installation = null;
+      listenerState.handle = null;
+      listenerState.handled = false;
+    }
   }
 
+  listenerState.handle = (payload) => {
+    if (!isNativeMediaWorkerFatalError(payload)) return;
+    if (listenerState.handled) return;
+    listenerState.handled = true;
+    console.error("[FatalClientError] Native media event:", payload);
+    const details =
+      payload && typeof payload === "object"
+        ? (payload as Record<string, unknown>)
+        : {};
+    const diagnostics =
+      details.diagnostics && typeof details.diagnostics === "object"
+        ? (details.diagnostics as Record<string, unknown>)
+        : {};
+    if (diagnostics.nativeCrash) {
+      console.error(
+        "[FatalClientError] Native crash evidence:",
+        diagnostics.nativeCrash,
+      );
+    }
+    reportDescriptor(nativeMediaWorkerFatalDescriptor(details));
+    void invalidateVoiceMediaState();
+  };
   window.addEventListener("error", handleError);
   window.addEventListener("unhandledrejection", handleError);
   void installNativeWorkerListener();
-  const registerHook = nuxtApp.hook as unknown as (
-    name: string,
-    callback: () => void,
-  ) => void;
-  registerHook("app:beforeUnmount", dispose);
+  nuxtApp.vueApp.onUnmount(dispose);
 });

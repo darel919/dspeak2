@@ -9,6 +9,7 @@
 #include <api/video/encoded_image.h>
 #include <api/video/i420_buffer.h>
 #include <api/video/video_frame.h>
+#include <modules/video_coding/include/video_codec_interface.h>
 #include <api/video_codecs/video_codec.h>
 #include <third_party/libyuv/include/libyuv/convert.h>
 
@@ -493,7 +494,14 @@ public:
         image._encodedHeight = frame.height();
         image.SetFrameType(key_frame ? VideoFrameType::kVideoFrameKey
                                      : VideoFrameType::kVideoFrameDelta);
-        callback_->OnEncodedImage(image, nullptr);
+        CodecSpecificInfo codec_specific;
+        codec_specific.codecType = kVideoCodecH264;
+        codec_specific.codecSpecific.H264.packetization_mode =
+            H264PacketizationMode::NonInterleaved;
+        codec_specific.codecSpecific.H264.temporal_idx = 0xff;
+        codec_specific.codecSpecific.H264.base_layer_sync = false;
+        codec_specific.codecSpecific.H264.idr_frame = key_frame;
+        callback_->OnEncodedImage(image, &codec_specific);
         return 0;
     }
 

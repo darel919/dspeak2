@@ -7,11 +7,13 @@
 #include <api/video/encoded_image.h>
 #include <api/video/i420_buffer.h>
 #include <api/video/video_frame.h>
+#include <modules/video_coding/include/video_codec_interface.h>
 #include <api/video_codecs/video_codec.h>
 #include <third_party/libyuv/include/libyuv/convert.h>
 #include <third_party/libyuv/include/libyuv/convert_argb.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -181,9 +183,12 @@ public:
         if (!codec_settings || codec_settings->width <= 0 || codec_settings->height <= 0)
             return -1;
         Release();
-        width_ = codec_settings->width;
-        height_ = codec_settings->height;
-        framerate_ = std::max(1, static_cast<int>(codec_settings->maxFramerate));
+        const int width = codec_settings->width;
+        const int height = codec_settings->height;
+        const int framerate = std::max(1, static_cast<int>(codec_settings->maxFramerate));
+        std::unique_lock<std::mutex> state_lock(state_mutex_);
+        const int32_t bitrate = bitrate_bps_;
+        VTCompressionSessionRef session = nullptr;
         const void* keys[] = {
             kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder,
         };
@@ -197,75 +202,116 @@ public:
             &kCFTypeDictionaryValueCallBacks);
         const OSStatus result = VTCompressionSessionCreate(
             kCFAllocatorDefault,
-            width_,
-            height_,
+            width,
+            height,
             kCMVideoCodecType_H264,
             specification,
             nullptr,
             nullptr,
             &VideoToolboxEncoder::output_callback,
             this,
-            &session_);
+            &session);
         if (specification) CFRelease(specification);
-        if (result != noErr || !session_) {
-            session_ = nullptr;
+        if (result != noErr || !session) {
+            if (session) CFRelease(session);
             return -1;
         }
         VTSessionSetProperty(
-            session_,
+            session,
             kVTCompressionPropertyKey_RealTime,
             kCFBooleanTrue);
         VTSessionSetProperty(
-            session_,
+            session,
             kVTCompressionPropertyKey_AllowFrameReordering,
             kCFBooleanFalse);
         VTSessionSetProperty(
-            session_,
+            session,
             kVTCompressionPropertyKey_ProfileLevel,
             kVTProfileLevel_H264_Baseline_AutoLevel);
         set_number_property(
-            session_, kVTCompressionPropertyKey_ExpectedFrameRate, framerate_);
-        if (bitrate_bps_ > 0) set_bitrate(bitrate_bps_);
-        VTCompressionSessionPrepareToEncodeFrames(session_);
+            session, kVTCompressionPropertyKey_ExpectedFrameRate, framerate);
+        if (bitrate > 0) set_bitrate(session, bitrate);
+        VTCompressionSessionPrepareToEncodeFrames(session);
+        width_ = width;
+        height_ = height;
+        framerate_ = framerate;
+        session_ = session;
+        state_lock.unlock();
         return 0;
     }
 
     int32_t RegisterEncodeCompleteCallback(
         EncodedImageCallback* callback) override {
+        std::lock_guard<std::mutex> lock(state_mutex_);
         callback_ = callback;
         return 0;
     }
 
     int32_t Release() override {
-        if (!session_) return 0;
-        VTCompressionSessionCompleteFrames(session_, kCMTimeInvalid);
-        VTCompressionSessionInvalidate(session_);
-        CFRelease(session_);
-        session_ = nullptr;
-        std::lock_guard<std::mutex> lock(context_mutex_);
-        for (auto* context : pending_contexts_) delete context;
-        pending_contexts_.clear();
+        VTCompressionSessionRef session = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(state_mutex_);
+            if (releasing_) {
+                state_condition_.wait(lock, [this] { return !releasing_; });
+                return 0;
+            }
+            releasing_ = true;
+            state_condition_.wait(lock, [this] { return active_calls_ == 0; });
+            session = session_;
+            session_ = nullptr;
+        }
+        if (session) {
+            VTCompressionSessionCompleteFrames(session, kCMTimeInvalid);
+            VTCompressionSessionInvalidate(session);
+            CFRelease(session);
+        }
+        {
+            std::unique_lock<std::mutex> lock(state_mutex_);
+            state_condition_.wait(lock, [this] { return active_callbacks_ == 0; });
+            for (auto* context : pending_contexts_) delete context;
+            pending_contexts_.clear();
+            callback_ = nullptr;
+            releasing_ = false;
+            state_condition_.notify_all();
+        }
         return 0;
     }
 
     int32_t Encode(const webrtc::VideoFrame& frame,
                    const std::vector<VideoFrameType>* frame_types) override {
+        CVPixelBufferRef pixel_buffer = nullptr;
+        CFDictionaryRef properties = nullptr;
+        EncodeContext* context = nullptr;
+        bool registered = false;
         try {
-            if (!session_ || !callback_) return -1;
-            const auto pixel_buffer = make_nv12_buffer(frame);
+            pixel_buffer = make_nv12_buffer(frame);
             if (!pixel_buffer) return -1;
-            auto* context = new EncodeContext{
+            context = new EncodeContext{
                 frame.rtp_timestamp(),
                 frame.width(),
                 frame.height(),
                 frame_types && !frame_types->empty() &&
                     (*frame_types)[0] == VideoFrameType::kVideoFrameKey,
             };
+            VTCompressionSessionRef session = nullptr;
+            int framerate = 0;
             {
-                std::lock_guard<std::mutex> lock(context_mutex_);
-                pending_contexts_.insert(context);
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                if (!releasing_ && session_ && callback_) {
+                    session = session_;
+                    framerate = framerate_;
+                    pending_contexts_.insert(context);
+                    ++active_calls_;
+                    registered = true;
+                }
             }
-            CFDictionaryRef properties = nullptr;
+            if (!registered) {
+                delete context;
+                context = nullptr;
+                CFRelease(pixel_buffer);
+                pixel_buffer = nullptr;
+                return -1;
+            }
             if (context->key_frame) {
                 const void* keys[] = {kVTEncodeFrameOptionKey_ForceKeyFrame};
                 const void* values[] = {kCFBooleanTrue};
@@ -278,18 +324,26 @@ public:
                     &kCFTypeDictionaryValueCallBacks);
             }
             const OSStatus result = VTCompressionSessionEncodeFrame(
-                session_,
+                session,
                 pixel_buffer,
                 CMTimeMake(frame.rtp_timestamp(), 90000),
-                CMTimeMake(1, std::max(1, framerate_)),
+                CMTimeMake(1, std::max(1, framerate)),
                 properties,
                 context,
                 nullptr);
             if (properties) CFRelease(properties);
+            properties = nullptr;
             CFRelease(pixel_buffer);
+            pixel_buffer = nullptr;
             mark_encode_returned(context, result == noErr);
+            context = nullptr;
+            registered = false;
             return result == noErr ? 0 : -1;
         } catch (...) {
+            if (properties) CFRelease(properties);
+            if (pixel_buffer) CFRelease(pixel_buffer);
+            if (registered) mark_encode_returned(context, false);
+            else delete context;
             return -1;
         }
     }
@@ -297,10 +351,23 @@ public:
     void SetRates(const RateControlParameters& parameters) override {
         const uint32_t bitrate = parameters.bitrate.get_sum_bps();
         if (bitrate == 0) return;
-        bitrate_bps_ = static_cast<int32_t>(std::min<uint32_t>(bitrate, INT32_MAX));
-        if (session_) set_bitrate(bitrate_bps_);
-        if (parameters.framerate_fps > 0)
-            framerate_ = std::max(1, static_cast<int>(parameters.framerate_fps));
+        VTCompressionSessionRef session = nullptr;
+        int32_t bounded_bitrate = static_cast<int32_t>(
+            std::min<uint32_t>(bitrate, INT32_MAX));
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (releasing_) return;
+            bitrate_bps_ = bounded_bitrate;
+            if (parameters.framerate_fps > 0)
+                framerate_ = std::max(1, static_cast<int>(parameters.framerate_fps));
+            session = session_;
+            if (session) ++active_calls_;
+        }
+        if (!session) return;
+        try {
+            set_bitrate(session, bounded_bitrate);
+        } catch (...) {}
+        finish_session_call();
     }
 
     EncoderInfo GetEncoderInfo() const override {
@@ -313,8 +380,8 @@ public:
     }
 
 private:
-    void set_bitrate(int32_t bitrate) {
-        set_number_property(session_, kVTCompressionPropertyKey_AverageBitRate, bitrate);
+    void set_bitrate(VTCompressionSessionRef session, int32_t bitrate) {
+        set_number_property(session, kVTCompressionPropertyKey_AverageBitRate, bitrate);
         int32_t limit = bitrate;
         CFNumberRef limit_number = CFNumberCreate(
             kCFAllocatorDefault, kCFNumberSInt32Type, &limit);
@@ -329,7 +396,7 @@ private:
             &kCFTypeArrayCallBacks);
         if (limits) {
             VTSessionSetProperty(
-                session_, kVTCompressionPropertyKey_DataRateLimits, limits);
+                session, kVTCompressionPropertyKey_DataRateLimits, limits);
             CFRelease(limits);
         }
         if (limit_number) CFRelease(limit_number);
@@ -344,13 +411,26 @@ private:
         auto* encoder = static_cast<VideoToolboxEncoder*>(refcon);
         auto* context = static_cast<EncodeContext*>(source_frame_refcon);
         if (!encoder || !context) return;
+        EncodedImageCallback* callback = nullptr;
+        uint32_t rtp_timestamp = 0;
+        int width = 0;
+        int height = 0;
+        bool key_frame_requested = false;
+        if (!encoder->begin_callback(
+                context,
+                &callback,
+                &rtp_timestamp,
+                &width,
+                &height,
+                &key_frame_requested))
+            return;
         try {
             [&] {
-                if (status != noErr || !sample_buffer || !encoder->callback_)
+                if (status != noErr || !sample_buffer || !callback)
                     return;
                 std::vector<uint8_t> encoded;
                 const auto format = CMSampleBufferGetFormatDescription(sample_buffer);
-                bool key_frame = context->key_frame;
+                bool key_frame = key_frame_requested;
                 CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample_buffer, false);
                 if (attachments && CFArrayGetCount(attachments) > 0) {
                     auto dictionary = static_cast<CFDictionaryRef>(
@@ -404,38 +484,75 @@ private:
                 if (!buffer) return;
                 EncodedImage image;
                 image.SetEncodedData(buffer);
-                image.SetRtpTimestamp(context->rtp_timestamp);
-                image._encodedWidth = context->width;
-                image._encodedHeight = context->height;
+                image.SetRtpTimestamp(rtp_timestamp);
+                image._encodedWidth = width;
+                image._encodedHeight = height;
                 image.SetFrameType(key_frame ? VideoFrameType::kVideoFrameKey
                                              : VideoFrameType::kVideoFrameDelta);
-                encoder->callback_->OnEncodedImage(image, nullptr);
+                CodecSpecificInfo codec_specific;
+                codec_specific.codecType = kVideoCodecH264;
+                codec_specific.codecSpecific.H264.packetization_mode =
+                    H264PacketizationMode::NonInterleaved;
+                codec_specific.codecSpecific.H264.temporal_idx = 0xff;
+                codec_specific.codecSpecific.H264.base_layer_sync = false;
+                codec_specific.codecSpecific.H264.idr_frame = key_frame;
+                callback->OnEncodedImage(image, &codec_specific);
             }();
         } catch (...) {}
-        encoder->mark_callback_completed(context);
+        encoder->finish_callback(context);
     }
 
     void mark_encode_returned(EncodeContext* context, bool success) {
-        std::lock_guard<std::mutex> lock(context_mutex_);
+        std::lock_guard<std::mutex> lock(state_mutex_);
         const auto found = pending_contexts_.find(context);
-        if (found == pending_contexts_.end()) return;
-        context->encode_returned = true;
-        if (!success) context->callback_completed = true;
-        if (context->callback_completed) {
-            pending_contexts_.erase(found);
-            delete context;
+        if (found != pending_contexts_.end()) {
+            context->encode_returned = true;
+            if (!success) context->callback_completed = true;
+            if (context->callback_completed) {
+                pending_contexts_.erase(found);
+                delete context;
+            }
         }
+        if (active_calls_ > 0) --active_calls_;
+        state_condition_.notify_all();
     }
 
-    void mark_callback_completed(EncodeContext* context) {
-        std::lock_guard<std::mutex> lock(context_mutex_);
+    bool begin_callback(EncodeContext* context,
+                        EncodedImageCallback** callback,
+                        uint32_t* rtp_timestamp,
+                        int* width,
+                        int* height,
+                        bool* key_frame) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
         const auto found = pending_contexts_.find(context);
-        if (found == pending_contexts_.end()) return;
-        context->callback_completed = true;
-        if (context->encode_returned) {
-            pending_contexts_.erase(found);
-            delete context;
+        if (found == pending_contexts_.end()) return false;
+        *callback = callback_;
+        *rtp_timestamp = context->rtp_timestamp;
+        *width = context->width;
+        *height = context->height;
+        *key_frame = context->key_frame;
+        ++active_callbacks_;
+        return true;
+    }
+
+    void finish_callback(EncodeContext* context) {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        const auto found = pending_contexts_.find(context);
+        if (found != pending_contexts_.end()) {
+            context->callback_completed = true;
+            if (context->encode_returned) {
+                pending_contexts_.erase(found);
+                delete context;
+            }
         }
+        if (active_callbacks_ > 0) --active_callbacks_;
+        state_condition_.notify_all();
+    }
+
+    void finish_session_call() {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (active_calls_ > 0) --active_calls_;
+        state_condition_.notify_all();
     }
 
     webrtc::SdpVideoFormat format_;
@@ -445,7 +562,11 @@ private:
     int height_ = 0;
     int framerate_ = 30;
     int32_t bitrate_bps_ = 0;
-    std::mutex context_mutex_;
+    std::mutex state_mutex_;
+    std::condition_variable state_condition_;
+    bool releasing_ = false;
+    size_t active_calls_ = 0;
+    size_t active_callbacks_ = 0;
     std::unordered_set<EncodeContext*> pending_contexts_;
 };
 

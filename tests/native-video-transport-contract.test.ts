@@ -124,6 +124,7 @@ describe("native video transport contract", () => {
     assert.match(devScript, /NATIVE_MEDIA_WORKER_BUILD=1 cargo/);
     assert.match(devScript, /--features media-worker/);
     assert.match(devScript, /--bin dspeak-media/);
+    assert.match(devScript, /native-media\/platform/);
     assert.match(config, /externalBin/);
   });
 
@@ -300,8 +301,54 @@ describe("native video transport contract", () => {
     assert.match(videoToolbox, /CMBlockBufferCopyDataBytes/);
     assert.match(videoToolbox, /pending_contexts_/);
     assert.match(videoToolbox, /mark_encode_returned/);
-    assert.match(videoToolbox, /mark_callback_completed/);
+    assert.match(videoToolbox, /finish_callback/);
     assert.match(videoToolbox, /catch \(\.\.\.\) \{\}/);
+    assert.match(videoToolbox, /std::condition_variable/);
+    assert.match(videoToolbox, /active_calls_/);
+    assert.match(videoToolbox, /active_callbacks_/);
+    assert.match(
+      videoToolbox,
+      /VTCompressionSessionCreate\(\s*kCFAllocatorDefault,\s*width,\s*height,/s,
+    );
+    assert.match(videoToolbox, /state_condition_\.wait/);
+    assert.match(videoToolbox, /VTCompressionSessionCompleteFrames\(session,/);
+    assert.match(videoToolbox, /session_ = nullptr/);
+  });
+
+  it("passes H264 packetization metadata from native hardware encoders", async () => {
+    const videoToolbox = await read(
+      "desktop/native-media/platform/macos/VideoToolboxCodecsMacos.mm",
+    );
+    const mediaFoundation = await read(
+      "desktop/native-media/platform/windows/MediaFoundationCodecsWindows.cpp",
+    );
+    for (const source of [videoToolbox, mediaFoundation]) {
+      assert.match(
+        source,
+        /modules\/video_coding\/include\/video_codec_interface\.h/,
+      );
+      assert.match(source, /codec_specific\.codecType = kVideoCodecH264/);
+      assert.match(
+        source,
+        /codec_specific\.codecSpecific\.H264\.packetization_mode =\s*H264PacketizationMode::NonInterleaved/s,
+      );
+      assert.match(
+        source,
+        /codec_specific\.codecSpecific\.H264\.temporal_idx = 0xff/,
+      );
+      assert.match(source, /OnEncodedImage\(image, &codec_specific\)/);
+      assert.doesNotMatch(source, /OnEncodedImage\(image, nullptr\)/);
+    }
+  });
+
+  it("transfers receive-event ownership before signaling the event bridge", async () => {
+    const render = await read(
+      "desktop/native-media/libdspeak_media/src/internal/receive_render.cpp",
+    );
+    assert.match(
+      render,
+      /g_receive_events\.push_back\(event\);\s*event = \{\};/,
+    );
   });
 
   it("keeps native video migration metadata on one logical stream identity", async () => {

@@ -15,11 +15,12 @@ mod routing;
 pub(crate) use client::MediaWorkerClient;
 pub(crate) use routing::media_worker_invoke;
 
+#[cfg(test)]
 mod tests {
     use super::client::MediaWorkerClient;
     use super::diagnostics::{
-        exit_status_diagnostics, worker_connection_can_be_replaced, worker_exit_is_unexpected,
-        worker_exited_error_payload,
+        exit_status_diagnostics, native_crash_diagnostics, worker_connection_can_be_replaced,
+        worker_exit_is_unexpected, worker_exited_error_payload,
     };
     use serde_json::{json, Value};
     #[cfg(unix)]
@@ -63,6 +64,13 @@ mod tests {
     }
 
     #[test]
+    fn fatal_event_is_claimed_only_once() {
+        let client = MediaWorkerClient::default();
+        assert!(client.claim_fatal_event());
+        assert!(!client.claim_fatal_event());
+    }
+
+    #[test]
     fn unexpected_exit_builds_structured_error_with_diagnostics() {
         let error = worker_exited_error_payload(
             json!({
@@ -78,6 +86,7 @@ mod tests {
                 "recentCommands": [],
             }),
             vec!["camera assertion failed".to_string()],
+            Vec::new(),
         );
         assert_eq!(
             error.get("code").and_then(Value::as_str),
@@ -103,6 +112,7 @@ mod tests {
         #[cfg(unix)]
         {
             assert_eq!(diagnostics.get("signal"), Some(&Value::Null));
+            assert_eq!(diagnostics.get("signalName"), Some(&Value::Null));
             assert_eq!(diagnostics.get("coreDumped"), Some(&Value::Bool(false)));
         }
     }
@@ -114,5 +124,46 @@ mod tests {
         let diagnostics = exit_status_diagnostics(Some(&status));
         assert_eq!(diagnostics.get("exitCode"), Some(&Value::Null));
         assert_eq!(diagnostics.get("signal"), Some(&json!(6)));
+        assert_eq!(diagnostics.get("signalName"), Some(&json!("SIGABRT")));
+    }
+
+    #[test]
+    fn native_crash_stderr_is_exposed_as_structured_evidence() {
+        let diagnostics = native_crash_diagnostics(&[
+            "[dspeak:crash] native media worker signal=6 address=0x1234".to_string(),
+            "[dspeak:crash] native backtrace follows".to_string(),
+            "frame one".to_string(),
+            "frame two".to_string(),
+        ]);
+        assert_eq!(diagnostics.get("signal"), Some(&json!(6)));
+        assert_eq!(diagnostics.get("signalName"), Some(&json!("SIGABRT")));
+        assert_eq!(diagnostics.get("address"), Some(&json!("0x1234")));
+        assert_eq!(
+            diagnostics.get("backtrace"),
+            Some(&json!(["frame one", "frame two"])),
+        );
+    }
+
+    #[test]
+    fn native_crash_evidence_is_not_lost_when_the_stderr_tail_is_longer() {
+        let error = worker_exited_error_payload(
+            json!({"exitCode": 134}),
+            json!({}),
+            vec!["recent worker line".to_string()],
+            vec![
+                "[dspeak:crash] native media worker signal=6 address=0x1234".to_string(),
+                "[dspeak:crash] native backtrace follows".to_string(),
+                "frame one".to_string(),
+            ],
+        );
+        assert_eq!(
+            error
+                .get("diagnostics")
+                .and_then(|value| value.get("nativeCrash"))
+                .and_then(|value| value.get("signalName")),
+            Some(&json!("SIGABRT")),
+        );
+        assert_eq!(error.get("signal"), Some(&json!(6)));
+        assert_eq!(error.get("signalName"), Some(&json!("SIGABRT")));
     }
 }

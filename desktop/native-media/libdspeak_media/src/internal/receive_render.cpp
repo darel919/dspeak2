@@ -51,10 +51,13 @@ std::atomic<int64_t> g_local_screen_preview_last_emit_us{0};
 constexpr size_t kMaxReceiveEvents = 96;
 constexpr int kFrameEventMaxWidth = 480;
 constexpr int kFrameEventMaxHeight = 270;
-constexpr int kLocalFrameEventMaxWidth = 320;
-constexpr int kLocalFrameEventMaxHeight = 180;
+constexpr int kLocalCameraFrameEventMaxWidth = 480;
+constexpr int kLocalCameraFrameEventMaxHeight = 270;
+constexpr int kLocalScreenFrameEventMaxWidth = 320;
+constexpr int kLocalScreenFrameEventMaxHeight = 180;
 constexpr int64_t kFrameEventIntervalUs = 66000;
-constexpr int64_t kLocalFrameEventIntervalUs = 100000;
+constexpr int64_t kLocalCameraFrameEventIntervalUs = 33333;
+constexpr int64_t kLocalScreenFrameEventIntervalUs = 100000;
 
 int64_t monotonic_now_us() {
     return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -193,7 +196,8 @@ void push_event(lib_dspeak_media_receive_event_kind_t kind,
             release_event(g_receive_events.front());
             g_receive_events.pop_front();
         }
-        g_receive_events.push_back(std::move(event));
+        g_receive_events.push_back(event);
+        event = {};
         lib_dspeak_media_signal_event();
     } catch (...) {
         release_event(event);
@@ -640,10 +644,20 @@ extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
     auto& last_emit_us = std::strcmp(source, "screen") == 0
         ? g_local_screen_preview_last_emit_us
         : g_local_camera_preview_last_emit_us;
+    const bool is_screen_preview = std::strcmp(source, "screen") == 0;
+    const int64_t preview_interval_us = is_screen_preview
+        ? kLocalScreenFrameEventIntervalUs
+        : kLocalCameraFrameEventIntervalUs;
+    const int preview_max_width = is_screen_preview
+        ? kLocalScreenFrameEventMaxWidth
+        : kLocalCameraFrameEventMaxWidth;
+    const int preview_max_height = is_screen_preview
+        ? kLocalScreenFrameEventMaxHeight
+        : kLocalCameraFrameEventMaxHeight;
     const int64_t now_us = monotonic_now_us();
     int64_t previous_us = last_emit_us.load(std::memory_order_acquire);
     while (true) {
-        if (previous_us != 0 && now_us - previous_us < kLocalFrameEventIntervalUs)
+        if (previous_us != 0 && now_us - previous_us < preview_interval_us)
             return;
         if (last_emit_us.compare_exchange_weak(
                 previous_us, now_us, std::memory_order_acq_rel,
@@ -652,8 +666,8 @@ extern "C" void lib_dspeak_media_push_local_video_frame(const char* source,
     }
     const auto scaled = scale_frame_for_event(
         frame.video_frame_buffer()->ToI420(),
-        kLocalFrameEventMaxWidth,
-        kLocalFrameEventMaxHeight);
+        preview_max_width,
+        preview_max_height);
     if (!scaled) return;
     const int width = scaled->width();
     const int height = scaled->height();

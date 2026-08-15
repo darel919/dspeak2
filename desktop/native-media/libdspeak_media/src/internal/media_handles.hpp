@@ -15,6 +15,8 @@
 #include <optional>
 #include <cstddef>
 #include <cstdio>
+#include <functional>
+#include <thread>
 #include <media/base/adapted_video_track_source.h>
 #include <media/base/audio_source.h>
 #include <rtc_base/synchronization/mutex.h>
@@ -73,15 +75,58 @@ public:
                          uint32_t height,
                          uint32_t stride,
                          int64_t timestamp_ms) {
+        static std::atomic<bool> source_entered_logged{false};
+        static std::atomic<bool> frame_converted_logged{false};
+        static std::atomic<bool> preview_entered_logged{false};
+        static std::atomic<bool> preview_completed_logged{false};
+        static std::atomic<bool> on_frame_entered_logged{false};
+        static std::atomic<bool> on_frame_completed_logged{false};
+        static std::atomic<bool> source_exception_logged{false};
         try {
             const bool camera = track_id_.find("camera") != std::string::npos;
+            if (!source_entered_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=source-enter track=%s thread=%zu\n",
+                             track_id_.c_str(),
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
             const auto frame = ConvertFrame(data, width, height, stride, timestamp_ms);
             if (!frame) return;
+            if (!frame_converted_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=frame-converted source=%s size=%ux%u thread=%zu\n",
+                             camera ? "camera" : "screen", width, height,
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
             const char* source = camera ? "camera" : "screen";
-            if (lib_dspeak_media_local_video_preview_enabled(source))
+            if (lib_dspeak_media_local_video_preview_enabled(source)) {
+                if (!preview_entered_logged.exchange(true))
+                    std::fprintf(stderr,
+                                 "[dspeak:media] native video pipeline stage=preview-enter source=%s thread=%zu\n",
+                                 source,
+                                 std::hash<std::thread::id>{}(std::this_thread::get_id()));
                 lib_dspeak_media_push_local_video_frame(source, *frame);
+                if (!preview_completed_logged.exchange(true))
+                    std::fprintf(stderr,
+                                 "[dspeak:media] native video pipeline stage=preview-complete source=%s thread=%zu\n",
+                                 source,
+                                 std::hash<std::thread::id>{}(std::this_thread::get_id()));
+            }
+            if (!on_frame_entered_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=webrtc-source-enter source=%s thread=%zu\n",
+                             source,
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
             OnFrame(*frame);
-        } catch (...) {}
+            if (!on_frame_completed_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=webrtc-source-complete source=%s thread=%zu\n",
+                             source,
+                             std::hash<std::thread::id>{}(std::this_thread::get_id()));
+        } catch (...) {
+            if (!source_exception_logged.exchange(true))
+                std::fprintf(stderr,
+                             "[dspeak:media] native video pipeline stage=cpp-exception track=%s\n",
+                             track_id_.c_str());
+        }
     }
 
     void SetState(webrtc::MediaSourceInterface::SourceState new_state) {

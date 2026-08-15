@@ -12,6 +12,12 @@
 #include <stdexcept>
 #include <vector>
 #include <memory>
+#include <cstdint>
+#if defined(__unix__) || defined(__APPLE__)
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
 #if DSPEAK_MEDIA_WITH_MEDIASOUP
 #include <mediasoupclient.hpp>
 #endif
@@ -32,6 +38,63 @@
 #endif
 
 using json = nlohmann::json;
+
+#if defined(__unix__) || defined(__APPLE__)
+namespace {
+
+volatile sig_atomic_t g_native_crash_handler_entered = 0;
+
+void write_crash_literal(const char* value) {
+    if (!value) return;
+    size_t length = 0;
+    while (value[length] != '\0') ++length;
+    (void)::write(STDERR_FILENO, value, length);
+}
+
+void write_crash_unsigned(unsigned long long value) {
+    char buffer[32];
+    size_t index = sizeof(buffer);
+    do {
+        buffer[--index] = static_cast<char>('0' + value % 10);
+        value /= 10;
+    } while (value != 0 && index > 0);
+    (void)::write(STDERR_FILENO, buffer + index, sizeof(buffer) - index);
+}
+
+void native_crash_signal_handler(int signal_number, siginfo_t* info, void*) {
+    if (g_native_crash_handler_entered != 0)
+        _exit(128 + signal_number);
+    g_native_crash_handler_entered = 1;
+    write_crash_literal("[dspeak:crash] native media worker signal=");
+    write_crash_unsigned(static_cast<unsigned long long>(signal_number));
+    if (info && info->si_addr) {
+        write_crash_literal(" address=");
+        write_crash_unsigned(
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(info->si_addr)));
+    }
+    write_crash_literal("\n[dspeak:crash] native backtrace follows\n");
+    void* frames[64];
+    const int frame_count = backtrace(frames, 64);
+    if (frame_count > 0)
+        backtrace_symbols_fd(frames, frame_count, STDERR_FILENO);
+    (void)::kill(::getpid(), signal_number);
+    _exit(128 + signal_number);
+}
+
+void install_native_crash_handlers() {
+    struct sigaction action {};
+    sigemptyset(&action.sa_mask);
+    action.sa_sigaction = native_crash_signal_handler;
+    action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    const int signals[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
+    for (const int signal_number : signals)
+        (void)sigaction(signal_number, &action, nullptr);
+}
+
+}
+#else
+static void install_native_crash_handlers() {}
+#endif
 
 static std::atomic<bool> g_initialized{false};
 
@@ -352,6 +415,7 @@ char* lib_dspeak_media_json_to_cstr(const json& j)
 
 extern "C" int lib_dspeak_media_initialize(void)
 {
+    install_native_crash_handlers();
     try {
         dspeak_native::reset_video_codec_factory_diagnostics();
 #if DSPEAK_MEDIA_WITH_MEDIASOUP

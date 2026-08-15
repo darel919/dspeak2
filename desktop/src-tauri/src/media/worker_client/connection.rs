@@ -8,12 +8,13 @@ use std::io::{BufWriter, Write};
 use std::process::{Child, ChildStdin, ExitStatus};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 const MAX_COMMAND_HISTORY: usize = 10;
 const MAX_STDERR_TAIL_LINES: usize = 80;
 const MAX_STDERR_LINE_CHARS: usize = 2048;
+const MAX_NATIVE_CRASH_LINES: usize = 66;
 
 pub(super) struct CommandBreadcrumb {
     command: String,
@@ -31,11 +32,15 @@ pub(super) struct WorkerConnection {
     pub(super) forced_termination: AtomicBool,
     pub(super) crashed: Arc<AtomicBool>,
     pub(super) crash_details: Arc<Mutex<Option<Value>>>,
+    pub(super) fatal_event_emitted: Arc<AtomicBool>,
     pub(super) last_command: Mutex<Option<String>>,
     pub(super) last_request_id: AtomicU64,
     pub(super) last_command_started_at: AtomicU64,
     pub(super) command_history: Mutex<VecDeque<CommandBreadcrumb>>,
     pub(super) stderr_tail: Arc<Mutex<VecDeque<String>>>,
+    pub(super) native_crash_lines: Arc<Mutex<Vec<String>>>,
+    pub(super) native_crash_started: AtomicBool,
+    pub(super) stderr_drained: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl WorkerConnection {
@@ -193,6 +198,18 @@ impl WorkerConnection {
         }
     }
 
+    pub(super) fn wait_for_stderr(&self) {
+        let (complete, wake) = &*self.stderr_drained;
+        let Ok(complete) = complete.lock() else {
+            return;
+        };
+        let _ = wake.wait_timeout_while(complete, Duration::from_millis(500), |done| !*done);
+    }
+
+    pub(super) fn claim_fatal_event(&self) -> bool {
+        !self.fatal_event_emitted.swap(true, Ordering::AcqRel)
+    }
+
     pub(super) fn record_command(&self, command: &str, request_id: u64) {
         let started_at_ms = current_time_millis();
         if let Ok(mut last_command) = self.last_command.lock() {
@@ -253,9 +270,19 @@ impl WorkerConnection {
     pub(super) fn record_stderr(&self, line: &str) {
         let value = line.chars().take(MAX_STDERR_LINE_CHARS).collect::<String>();
         if let Ok(mut tail) = self.stderr_tail.lock() {
-            tail.push_back(value);
+            tail.push_back(value.clone());
             while tail.len() > MAX_STDERR_TAIL_LINES {
                 tail.pop_front();
+            }
+        }
+        if value.starts_with("[dspeak:crash] native media worker signal=") {
+            self.native_crash_started.store(true, Ordering::Release);
+        }
+        if self.native_crash_started.load(Ordering::Acquire) {
+            if let Ok(mut lines) = self.native_crash_lines.lock() {
+                if lines.len() < MAX_NATIVE_CRASH_LINES {
+                    lines.push(value);
+                }
             }
         }
     }
@@ -265,6 +292,14 @@ impl WorkerConnection {
             .lock()
             .ok()
             .map(|tail| tail.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn native_crash_diagnostics(&self) -> Vec<String> {
+        self.native_crash_lines
+            .lock()
+            .ok()
+            .map(|lines| lines.clone())
             .unwrap_or_default()
     }
 }
