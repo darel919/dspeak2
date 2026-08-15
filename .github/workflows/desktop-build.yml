@@ -59,9 +59,9 @@ jobs:
             native_artifact: lib-dspeak-media-windows-x64
             upload_pattern: |
               desktop/src-tauri/target/release/bundle/msi/*.msi
+              desktop/src-tauri/target/release/bundle/msi/*.msi.sig
               desktop/src-tauri/target/release/bundle/nsis/*.exe
-              desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip
-              desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+              desktop/src-tauri/target/release/bundle/nsis/*.exe.sig
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -242,7 +242,7 @@ jobs:
       - name: Verify signed updater artifacts
         run: |
           mac_signature="$(find release-assets -type f -name '*.app.tar.gz.sig' -print -quit)"
-          windows_signature="$(find release-assets -type f -name '*.nsis.zip.sig' -print -quit)"
+          windows_signature="$(find release-assets -type f -name '*.exe.sig' -print -quit)"
           [[ -n "$mac_signature" ]] || {
             echo "::error::Signed macOS updater artifact is missing." >&2
             exit 1

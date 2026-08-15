@@ -53,7 +53,7 @@ const targets = [
   },
   {
     target: "windows-x86_64",
-    pattern: /(?:x64|x86_64|amd64).*\.nsis\.zip$/i,
+    pattern: /(?:x64|x86_64|amd64).*\.exe$/i,
   },
 ];
 

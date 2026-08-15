@@ -230,7 +230,8 @@ test("desktop releases publish signed updates and fail when the updater contract
     /DSPEAK_PUBLIC_ORIGIN: \$\{\{ vars\.DSPEAK_PUBLIC_ORIGIN \|\| 'https:\/\/dspeak\.darelisme\.my\.id' \}\}/,
   );
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
-  assert.match(workflow, /\.nsis\.zip\.sig/);
+  assert.match(workflow, /nsis\/\*\.exe\.sig/);
+  assert.doesNotMatch(workflow, /\.nsis\.zip\.sig/);
   assert.match(workflow, /windows-x64/);
   assert.doesNotMatch(workflow, /windows-arm64|windows-11-arm/);
   assert.match(manifestScript, /platforms/);
@@ -239,6 +240,8 @@ test("desktop releases publish signed updates and fail when the updater contract
   assert.match(manifestScript, /commit/);
   assert.match(manifestScript, /signature/);
   assert.match(manifestScript, /windows-x86_64/);
+  assert.match(manifestScript, /(?:x64\|x86_64\|amd64).*\\\.exe/);
+  assert.doesNotMatch(manifestScript, /\.nsis\\?\.zip/);
   assert.doesNotMatch(manifestScript, /windows-aarch64/);
   assert.equal(nativeMediaProvisioner.match(/gclient sync/g)?.length, 1);
   assert.match(nativeMediaProvisioner, /--reset/);
