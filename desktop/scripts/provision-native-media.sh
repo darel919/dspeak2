@@ -245,7 +245,7 @@ bundle_missing_items() {
   if [[ "$(uname -s)" == Darwin ]] && ! bundle_architecture_is_valid "$bundle"; then
     missing+=("native libraries for the selected architecture")
   fi
-  printf '%s' "${missing[*]}"
+  printf '%s' "${missing[*]-}"
 }
 
 validate_bundle() {
@@ -834,7 +834,7 @@ build_bundle_from_source() {
   local depot_tools
   local gn_args
   local with_mediasoup
-  local cmake_runtime_arguments=()
+  local cmake_runtime_argument=""
 
   if ! platform="$(native_platform)"; then
     fail "Automatic native media source builds are unsupported on $(uname -s)/$(uname -m)."
@@ -844,7 +844,7 @@ build_bundle_from_source() {
   fi
   if platform_uses_windows_libraries "$platform"; then
     export DEPOT_TOOLS_WIN_TOOLCHAIN="${DEPOT_TOOLS_WIN_TOOLCHAIN:-0}"
-    cmake_runtime_arguments=(-DCMAKE_MSVC_RUNTIME_LIBRARY='MultiThreaded$<$<CONFIG:Debug>:Debug>')
+    cmake_runtime_argument='-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>'
   fi
   if [[ -n "$NATIVE_MEDIA_TARGET_TRIPLE" ]]; then
     local host_platform
@@ -921,14 +921,24 @@ build_bundle_from_source() {
     mediasoup_source="$(clone_or_update_libmediasoupclient "$provision_root")"
     mediasoup_build="$mediasoup_source/build"
     printf 'Configuring libmediasoupclient\n'
-    cmake -S "$mediasoup_source" -B "$mediasoup_build" \
-      "${cmake_runtime_arguments[@]}" \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-      -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
-      -DLIBWEBRTC_BINARY_PATH="$source_bundle/lib" \
-      -DMEDIASOUPCLIENT_BUILD_TESTS=OFF \
-      -DMEDIASOUPCLIENT_BUILD_DEMO=OFF
+    if [[ -n "$cmake_runtime_argument" ]]; then
+      cmake -S "$mediasoup_source" -B "$mediasoup_build" \
+        "$cmake_runtime_argument" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+        -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
+        -DLIBWEBRTC_BINARY_PATH="$source_bundle/lib" \
+        -DMEDIASOUPCLIENT_BUILD_TESTS=OFF \
+        -DMEDIASOUPCLIENT_BUILD_DEMO=OFF
+    else
+      cmake -S "$mediasoup_source" -B "$mediasoup_build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+        -DLIBWEBRTC_INCLUDE_PATH="$source_bundle/include" \
+        -DLIBWEBRTC_BINARY_PATH="$source_bundle/lib" \
+        -DMEDIASOUPCLIENT_BUILD_TESTS=OFF \
+        -DMEDIASOUPCLIENT_BUILD_DEMO=OFF
+    fi
     printf 'Building libmediasoupclient\n'
     cmake --build "$mediasoup_build" --config Release --parallel
     if platform_uses_windows_libraries "$platform"; then
@@ -963,12 +973,20 @@ build_bundle_from_source() {
 
   shim_build="$DESKTOP_ROOT/native-media/libdspeak_media/build"
   printf 'Building the dSpeak native media shim\n'
-  env NATIVE_MEDIA_ARTIFACT_DIR="$source_bundle" NATIVE_MEDIA_BUILD_DIR="$mediasoup_build" \
-    NATIVE_MEDIA_WITH_MEDIASOUP="$with_mediasoup" \
-    cmake -S "$DESKTOP_ROOT/native-media/libdspeak_media" -B "$shim_build" \
-      "${cmake_runtime_arguments[@]}" \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  if [[ -n "$cmake_runtime_argument" ]]; then
+    env NATIVE_MEDIA_ARTIFACT_DIR="$source_bundle" NATIVE_MEDIA_BUILD_DIR="$mediasoup_build" \
+      NATIVE_MEDIA_WITH_MEDIASOUP="$with_mediasoup" \
+      cmake -S "$DESKTOP_ROOT/native-media/libdspeak_media" -B "$shim_build" \
+        "$cmake_runtime_argument" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  else
+    env NATIVE_MEDIA_ARTIFACT_DIR="$source_bundle" NATIVE_MEDIA_BUILD_DIR="$mediasoup_build" \
+      NATIVE_MEDIA_WITH_MEDIASOUP="$with_mediasoup" \
+      cmake -S "$DESKTOP_ROOT/native-media/libdspeak_media" -B "$shim_build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  fi
   cmake --build "$shim_build" --config Release --parallel
   if platform_uses_windows_libraries "$platform"; then
     shim_library="$(find "$shim_build" -type f \( -name 'dspeak_media.lib' -o -name 'libdspeak_media.lib' \) -print -quit)"

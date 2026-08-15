@@ -12,6 +12,8 @@ libdspeak_media/build/**
 libdspeak_media/bundle/
 !platform/
 !platform/PlatformCapture.h
+!platform/AudioSpscRing.hpp
+!platform/NativeThreadScheduler.h
 !platform/macos/
 !platform/macos/**
 !platform/windows/

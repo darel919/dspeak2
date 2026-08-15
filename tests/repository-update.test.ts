@@ -27,6 +27,11 @@ const [
   nativeMediaWorkflow,
   manifestScript,
   nativeMediaProvisioner,
+  nativeMediaIgnore,
+  nativeMediaAudioRing,
+  nativeMediaThreadScheduler,
+  nativeMediaCaptureState,
+  nativeMediaReceiveRender,
   nativeMediaCmake,
   nativeMediaBuild,
   nativeMediaCargoConfig,
@@ -62,6 +67,11 @@ const [
     "../.github/workflows/native-media.yml",
     "../scripts/create-tauri-update-manifest.mjs",
     "../desktop/scripts/provision-native-media.sh",
+    "../desktop/native-media/.gitignore",
+    "../desktop/native-media/platform/AudioSpscRing.hpp",
+    "../desktop/native-media/platform/NativeThreadScheduler.h",
+    "../desktop/native-media/libdspeak_media/src/internal/capture_state.hpp",
+    "../desktop/native-media/libdspeak_media/src/internal/receive_render.cpp",
     "../desktop/native-media/libdspeak_media/CMakeLists.txt",
     "../desktop/src-tauri/build.rs",
     "../desktop/.cargo/config.toml",
@@ -239,6 +249,21 @@ test("desktop releases optionally publish signed updates and restart after insta
   assert.match(nativeMediaProvisioner, /NATIVE_MEDIA_BASE_ARTIFACT_ARCHIVE/);
   assert.match(nativeMediaProvisioner, /seed_libwebrtc_from_native_bundle/);
   assert.match(nativeMediaProvisioner, /CMAKE_MSVC_RUNTIME_LIBRARY/);
+  assert.match(nativeMediaProvisioner, /local cmake_runtime_argument=""/);
+  assert.doesNotMatch(nativeMediaProvisioner, /cmake_runtime_arguments/);
+  assert.match(nativeMediaProvisioner, /missing\[\*\]-/);
+  assert.match(nativeMediaIgnore, /!platform\/AudioSpscRing\.hpp/);
+  assert.match(nativeMediaIgnore, /!platform\/NativeThreadScheduler\.h/);
+  assert.match(
+    nativeMediaCaptureState,
+    /#include "\.\.\/\.\.\/\.\.\/platform\/AudioSpscRing\.hpp"/,
+  );
+  assert.match(
+    nativeMediaReceiveRender,
+    /#include "\.\.\/\.\.\/\.\.\/platform\/AudioSpscRing\.hpp"/,
+  );
+  assert.match(nativeMediaAudioRing, /class StereoAudioSpscRing/);
+  assert.match(nativeMediaThreadScheduler, /namespace dspeak_native/);
   assert.match(
     nativeMediaProvisioner,
     /python3 src\/build\/util\/lastchange\.py -o src\/build\/util\/LASTCHANGE/,
