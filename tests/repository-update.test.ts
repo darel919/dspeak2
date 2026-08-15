@@ -221,6 +221,10 @@ test("desktop releases optionally publish signed updates and restart after insta
   assert.match(workflow, /release:check/);
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
+  assert.match(
+    workflow,
+    /DSPEAK_PUBLIC_ORIGIN: \$\{\{ vars\.DSPEAK_PUBLIC_ORIGIN \|\| 'https:\/\/dspeak\.darelisme\.my\.id' \}\}/,
+  );
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
   assert.match(workflow, /\.nsis\.zip\.sig/);
   assert.match(workflow, /windows-x64/);

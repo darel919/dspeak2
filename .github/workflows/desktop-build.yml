@@ -191,6 +191,7 @@ jobs:
 
       - name: Build dSpeak Desktop
         env:
+          DSPEAK_PUBLIC_ORIGIN: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
           DSPEAK_TAURI_PUBLIC_KEY: ${{ secrets.DSPEAK_TAURI_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
