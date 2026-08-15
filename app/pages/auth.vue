@@ -106,8 +106,14 @@
           <p v-if="failureDiagnostic.serverBuildCommit">
             Server {{ failureDiagnostic.serverBuildCommit }}
           </p>
+          <p v-if="failureDiagnostic.clientBuildCommit">
+            Client {{ failureDiagnostic.clientBuildCommit }}
+          </p>
           <p v-if="failureDiagnostic.serverProjectRef">
             Supabase project {{ failureDiagnostic.serverProjectRef }}
+          </p>
+          <p v-if="failureDiagnostic.clientProjectRef">
+            Client project {{ failureDiagnostic.clientProjectRef }}
           </p>
         </div>
         <div class="mt-6 flex flex-wrap gap-3">
@@ -243,6 +249,8 @@ function signInFailureMessage(error, fallback) {
         serverDiagnostic: error.serverDiagnostic,
         serverBuildCommit: error.serverBuildCommit || "",
         serverProjectRef: error.serverProjectRef || "",
+        clientBuildCommit: error.clientBuildCommit || "",
+        clientProjectRef: error.clientProjectRef || "",
       };
     }
     return "Your Google sign-in succeeded, but dSpeak could not create your app session.";

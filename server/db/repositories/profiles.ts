@@ -42,10 +42,13 @@ async function findAvailableUsername(
 function isUsernameConflict(error: unknown): boolean {
   const value = error as {
     constraint_name?: string;
-    cause?: { constraint_name?: string };
+    cause?: { constraint_name?: string; code?: string };
+    code?: string;
   };
   const constraint =
     value.constraint_name || value.cause?.constraint_name || "";
+  const sqlState = value.code || value.cause?.code || "";
+  if (sqlState !== "23505") return false;
   return (
     constraint === "users_username_unique" ||
     constraint === "profiles_username_unique"
@@ -55,10 +58,13 @@ function isUsernameConflict(error: unknown): boolean {
 function isEmailConflict(error: unknown): boolean {
   const value = error as {
     constraint_name?: string;
-    cause?: { constraint_name?: string };
+    cause?: { constraint_name?: string; code?: string };
+    code?: string;
   };
   const constraint =
     value.constraint_name || value.cause?.constraint_name || "";
+  const sqlState = value.code || value.cause?.code || "";
+  if (sqlState !== "23505") return false;
   return constraint === "users_email_unique";
 }
 

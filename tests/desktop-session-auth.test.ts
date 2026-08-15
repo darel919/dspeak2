@@ -8,7 +8,7 @@ const testSupabaseUrl = previousSupabaseUrl || "https://project.supabase.co";
 if (!previousSupabaseUrl) process.env.SUPABASE_URL = testSupabaseUrl;
 if (!previousSupabaseAnonKey) process.env.SUPABASE_ANON_KEY = "test-anon-key";
 
-const { verifySupabaseAccessToken } =
+const { verifySupabaseAccessToken, SupabaseTokenIssuerMismatchError } =
   await import("../server/auth/supabase.ts");
 const { ensureVerifiedBearer, hasVerifiedBearerContext } =
   await import("../server/auth/middleware.ts");
@@ -50,6 +50,35 @@ test("invalid Supabase access tokens are rejected by the shared verifier", async
   await assert.rejects(
     () => verifySupabaseAccessToken("invalid-token", auth),
     /invalid token/,
+  );
+});
+
+test("a verified token from another Supabase project maps to issuer mismatch", async () => {
+  const auth = {
+    getClaims: async () => ({
+      data: {
+        claims: {
+          ...validClaims,
+          iss: "https://other-project.supabase.co/auth/v1",
+        },
+      },
+      error: null,
+    }),
+  } as Parameters<typeof verifySupabaseAccessToken>[1];
+
+  await assert.rejects(
+    () => verifySupabaseAccessToken("cross-project-token", auth),
+    (error: unknown) => {
+      assert.ok(error instanceof SupabaseTokenIssuerMismatchError);
+      const mismatch = error as InstanceType<
+        typeof SupabaseTokenIssuerMismatchError
+      >;
+      assert.equal(
+        mismatch.receivedIssuer,
+        "https://other-project.supabase.co/auth/v1",
+      );
+      return true;
+    },
   );
 });
 

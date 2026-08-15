@@ -63,8 +63,33 @@ GET /api/diagnostics/auth-config
 
 It returns the build commit, Supabase project ref, and booleans for whether
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
-`DATABASE_URL` are configured, plus a database connectivity probe result.
-Never return keys, tokens, or connection strings.
+`DATABASE_URL` are configured. It does not probe the database and never
+returns keys, tokens, or connection strings.
+
+## Email identity conflict policy
+
+A verified email maps to exactly one dSpeak account. When a Supabase OAuth
+identity presents an email that already belongs to a different dSpeak user id
+(the historical `users.id` / `users.email` divergence case), provisioning does
+**not** rewrite primary keys. It returns HTTP 409 with
+`DESKTOP_ACCOUNT_EMAIL_IDENTITY_CONFLICT`, which the desktop surfaces as an
+actionable diagnostic.
+
+Repair is a deliberate, one-off database decision by an administrator (link the
+new Supabase UUID to the existing account, or re-create the old identity),
+because user ids are foreign-key referenced throughout the schema. Automatic
+migration is intentionally not implemented.
+
+Conflict classification uses the PostgreSQL unique-violation SQLSTATE `23505`
+plus the constraint name (`users_email_unique`, `users_username_unique`,
+`profiles_username_unique`). If a historical migration renamed a constraint,
+run:
+
+```sql
+select conname from pg_constraint where conrelid = 'users'::regclass;
+```
+
+and update `server/db/repositories/profiles.ts` accordingly.
 
 Before release, verify the environment fingerprints match:
 

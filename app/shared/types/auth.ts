@@ -18,14 +18,12 @@ export function isAuthSessionRecord(
 ): value is AuthSessionRecord {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
-  if (!("user" in record)) return false;
   const user = record.user;
-  if (user === null || user === undefined) return true;
-  if (typeof user !== "object") return false;
-  return (
-    typeof (user as { id?: unknown }).id !== "undefined" ||
-    "user_metadata" in user
-  );
+  if (!user || typeof user !== "object") return false;
+  const metadata = (user as Record<string, unknown>).user_metadata;
+  if (!metadata || typeof metadata !== "object") return false;
+  const id = (metadata as Record<string, unknown>).id;
+  return typeof id === "string" && id.length > 0;
 }
 
 export interface AuthTokenResponse {

@@ -342,12 +342,16 @@ export const useAuthStore = defineStore("auths", () => {
         serverDiagnostic: string;
         serverBuildCommit: string;
         serverProjectRef: string;
+        clientBuildCommit: string;
+        clientProjectRef: string;
       };
       error.stage = "session-bridge";
       error.httpStatus = diagnostic.httpStatus;
       error.serverDiagnostic = diagnostic.diagnosticCategory;
       error.serverBuildCommit = diagnostic.serverBuildCommit;
       error.serverProjectRef = diagnostic.serverProjectRef;
+      error.clientBuildCommit = clientBuildCommit;
+      error.clientProjectRef = clientProjectRef;
       if (
         clientProjectRef &&
         diagnostic.serverProjectRef &&
@@ -365,15 +369,32 @@ export const useAuthStore = defineStore("auths", () => {
       }
       session = parsed;
     } catch {
-      console.error("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_FAILED", {
+      console.error("[DesktopAuth] DESKTOP_SESSION_PAYLOAD_INVALID", {
         status: response.status,
-        diagnosticCategory: "invalid-session-payload",
         serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
       });
-      throw createAuthError(
+      const error = createAuthError(
         "DESKTOP_API_SESSION_BRIDGE_FAILED",
         "Your Google sign-in succeeded, but dSpeak could not create your app session.",
-      );
+      ) as AuthError & {
+        stage: string;
+        httpStatus: number;
+        serverDiagnostic: string;
+        serverBuildCommit: string;
+        serverProjectRef: string;
+        clientBuildCommit: string;
+        clientProjectRef: string;
+      };
+      error.stage = "session-bridge";
+      error.httpStatus = response.status;
+      error.serverDiagnostic = "DESKTOP_SESSION_PAYLOAD_INVALID";
+      error.serverBuildCommit =
+        response.headers.get("X-dSpeak-Build-Commit") || "";
+      error.serverProjectRef =
+        response.headers.get("X-dSpeak-Supabase-Project") || "";
+      error.clientBuildCommit = clientBuildCommit;
+      error.clientProjectRef = clientProjectRef;
+      throw error;
     }
     setUser(session);
     console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_SUCCEEDED", {

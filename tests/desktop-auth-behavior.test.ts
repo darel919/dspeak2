@@ -53,9 +53,21 @@ test("auth session payload validator accepts valid server responses", () => {
     isAuthSessionRecord({ user: { user_metadata: { id: "1" } } }),
     true,
   );
-  assert.equal(isAuthSessionRecord({ user: { id: "1" } }), true);
-  assert.equal(isAuthSessionRecord({ user: null }), true);
-  assert.equal(isAuthSessionRecord({ user: undefined }), true);
+  assert.equal(
+    isAuthSessionRecord({
+      user: {
+        user_metadata: {
+          id: "user-id",
+          name: "A",
+          username: "b",
+          display_name: "A",
+          handle: "b",
+          avatar: "",
+        },
+      },
+    }),
+    true,
+  );
 });
 
 test("auth session payload validator rejects malformed responses", () => {
@@ -64,6 +76,18 @@ test("auth session payload validator rejects malformed responses", () => {
   assert.equal(isAuthSessionRecord("nope"), false);
   assert.equal(isAuthSessionRecord({}), false);
   assert.equal(isAuthSessionRecord({ user: "nope" }), false);
+  assert.equal(isAuthSessionRecord({ user: null }), false);
+  assert.equal(isAuthSessionRecord({ user: undefined }), false);
+  assert.equal(isAuthSessionRecord({ user: {} }), false);
+  assert.equal(isAuthSessionRecord({ user: { user_metadata: {} } }), false);
+  assert.equal(
+    isAuthSessionRecord({ user: { user_metadata: { id: "" } } }),
+    false,
+  );
+  assert.equal(
+    isAuthSessionRecord({ user: { user_metadata: { id: 5 } } }),
+    false,
+  );
 });
 
 test("issuer mismatch error carries a non-secret received issuer for classification", () => {

@@ -4,6 +4,7 @@ import { supabaseProjectRef } from "../app/shared/desktop-session-diagnostics.ts
 
 const serverUrl = process.env.DSPEAK_TEST_SERVER_URL || "";
 const accessToken = process.env.DSPEAK_TEST_TOKEN || "";
+const otherProjectToken = process.env.DSPEAK_TEST_TOKEN_OTHER_PROJECT || "";
 const configuredProjectRef = process.env.DSPEAK_TEST_PROJECT_REF || "";
 
 const enabled = Boolean(serverUrl && accessToken);
@@ -44,36 +45,18 @@ test(
 );
 
 test(
-  "desktop-session bridge rejects a wrong-issuer token with a clear diagnostic",
+  "desktop-session bridge rejects a valid token from another Supabase project",
   {
-    skip: !enabled && "set DSPEAK_TEST_SERVER_URL and DSPEAK_TEST_TOKEN",
+    skip:
+      !enabled &&
+      "set DSPEAK_TEST_SERVER_URL, DSPEAK_TEST_TOKEN, and DSPEAK_TEST_TOKEN_OTHER_PROJECT",
   },
   async () => {
-    const otherProject =
-      configuredProjectRef === "crmucqnebwlssqzthnek"
-        ? "another-project"
-        : "crmucqnebwlssqzthnek";
-    const otherIssuer = `https://${otherProject}.supabase.co/auth/v1`;
-
-    const header = JSON.parse(
-      Buffer.from(accessToken.split(".")[0], "base64url").toString("utf8"),
-    ) as { kid?: string };
-    const claims = JSON.parse(
-      Buffer.from(accessToken.split(".")[1], "base64url").toString("utf8"),
-    ) as Record<string, unknown>;
-    const forged = [
-      Buffer.from(JSON.stringify({ ...header }), "utf8").toString("base64url"),
-      Buffer.from(
-        JSON.stringify({ ...claims, iss: otherIssuer }),
-        "utf8",
-      ).toString("base64url"),
-      accessToken.split(".")[2],
-    ].join(".");
-
+    if (!otherProjectToken) return;
     const response = await fetch(`${serverUrl}/api/auth/desktop-session`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${forged}`,
+        Authorization: `Bearer ${otherProjectToken}`,
         "Content-Type": "application/json",
         "X-Device-Id": "integration-test-device",
       },
@@ -86,6 +69,39 @@ test(
       "DESKTOP_SUPABASE_PROJECT_MISMATCH",
       `expected PROJECT_MISMATCH, got ${payload.statusMessage}`,
     );
+  },
+);
+
+test(
+  "desktop-session bridge rejects a tampered JWT as invalid",
+  {
+    skip: !enabled && "set DSPEAK_TEST_SERVER_URL and DSPEAK_TEST_TOKEN",
+  },
+  async () => {
+    const parts = accessToken.split(".");
+    if (parts.length !== 3) return;
+    const claims = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8"),
+    ) as Record<string, unknown>;
+    const tampered = [
+      parts[0],
+      Buffer.from(
+        JSON.stringify({ ...claims, sub: "tampered-sub" }),
+        "utf8",
+      ).toString("base64url"),
+      parts[2],
+    ].join(".");
+
+    const response = await fetch(`${serverUrl}/api/auth/desktop-session`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tampered}`,
+        "Content-Type": "application/json",
+        "X-Device-Id": "integration-test-device",
+      },
+    });
+
+    assert.equal(response.status, 401);
   },
 );
 
