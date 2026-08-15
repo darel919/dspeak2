@@ -18,6 +18,7 @@ export function useDeepLinkAuth() {
       | undefined,
   ) {
     if (payload?.error) {
+      authStore.cancelDesktopSignIn();
       console.error(
         "[DesktopAuth] DESKTOP_OAUTH_PROVIDER_REJECTED",
         payload.error,
@@ -30,7 +31,12 @@ export function useDeepLinkAuth() {
     try {
       return await authStore.completeDesktopSignIn(code, payload?.state || "");
     } catch (error) {
-      console.error("[DesktopAuth] Failed to exchange callback:", error);
+      console.error(
+        "[DesktopAuth] Desktop callback handling failed",
+        error instanceof Error
+          ? (error as Error & { code?: string }).code || error.name
+          : "unknown",
+      );
       return false;
     }
   }

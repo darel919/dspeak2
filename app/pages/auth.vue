@@ -173,6 +173,7 @@ function startSignInTimeout() {
   signInTimeout = setTimeout(() => {
     if (status.value !== "waiting") return;
     clearSignInPolling();
+    authStore.cancelDesktopSignIn();
     status.value = "failed";
     failureMessage.value =
       "Sign-in was not completed. The browser may have been closed. Try again when you're ready.";
@@ -219,11 +220,10 @@ function signInFailureMessage(error, fallback) {
     code === "DESKTOP_OAUTH_STATE_MISMATCH"
   )
     return "Could not start sign-in. Please try again.";
-  if (
-    code === "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED" ||
-    code === "DESKTOP_API_SESSION_BRIDGE_FAILED"
-  )
-    return "Authentication completed, but dSpeak could not finish signing you in.";
+  if (code === "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED")
+    return "Authentication completed, but dSpeak could not verify the sign-in.";
+  if (code === "DESKTOP_API_SESSION_BRIDGE_FAILED")
+    return "Your Google sign-in succeeded, but dSpeak could not create your app session.";
   return fallback;
 }
 
@@ -318,6 +318,7 @@ async function checkSignIn(manual = true) {
 function cancelSignIn() {
   clearSignInTimeout();
   clearSignInPolling();
+  authStore.cancelDesktopSignIn();
   loginUrl = "";
   status.value = "idle";
   showTerms.value = true;
@@ -365,6 +366,13 @@ onMounted(async () => {
 
   if (await authStore.restoreSession()) {
     await finishAuthentication();
+    return;
+  }
+
+  if (runtimeStore.isTauri && authStore.hasPendingDesktopOAuthAttempt()) {
+    status.value = "waiting";
+    startSignInTimeout();
+    startSignInPolling();
     return;
   }
 

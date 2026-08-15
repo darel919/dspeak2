@@ -5,8 +5,23 @@ import {
   isConfiguredApiRequest,
   resolveApiRequestTarget,
 } from "../app/shared/api-request-target.ts";
-import { isDesktopApiRequest } from "../app/shared/desktop-api-fetch.ts";
+import {
+  isDesktopApiRequest,
+  withDesktopAuthorization,
+} from "../app/shared/desktop-api-fetch.ts";
 import { buildPublicUrl } from "../app/shared/desktop-external-url.ts";
+
+const defaultCapability = JSON.parse(
+  await import("node:fs/promises").then(({ readFile }) =>
+    readFile(
+      new URL(
+        "../desktop/src-tauri/capabilities/default.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ),
+);
 
 const securityFetch = await import("node:fs/promises").then(({ readFile }) =>
   readFile(
@@ -47,6 +62,7 @@ describe("desktop first-run URL and transport boundaries", () => {
   it("uses native HTTP only for desktop API requests", () => {
     assert.match(securityFetch, /@tauri-apps\/plugin-http/);
     assert.match(securityFetch, /options\.credentials = "omit"/);
+    assert.match(securityFetch, /withDesktopAuthorization/);
     assert.match(
       securityFetch,
       /const transport = desktop \? await getDesktopHttpFetch\(\) : browserFetch/,
@@ -55,5 +71,45 @@ describe("desktop first-run URL and transport boundaries", () => {
       securityFetch,
       /isDesktopApiRequest\(desktopRuntime, url, apiTarget\)/,
     );
+  });
+
+  it("attaches the Supabase bearer to native API requests", () => {
+    const init = withDesktopAuthorization(
+      "https://dspeak.darelisme.my.id/api/rooms",
+      { method: "GET", headers: { "X-Device-Id": "device-id" } },
+      "test-token",
+    );
+    const headers = new Headers(init.headers);
+
+    assert.equal(headers.get("Authorization"), "Bearer test-token");
+    assert.equal(headers.get("X-Device-Id"), "device-id");
+    assert.equal(init.credentials, "omit");
+  });
+
+  it("keeps the checked-in native scopes narrow and production-specific", () => {
+    const permissions = defaultCapability.permissions.filter(
+      (permission: unknown) => typeof permission === "object",
+    ) as Array<{
+      identifier: string;
+      allow?: Array<{ url?: string }>;
+    }>;
+    const httpPermission = permissions.find(
+      (permission) => permission.identifier === "http:default",
+    );
+    const openerPermission = permissions.find(
+      (permission) => permission.identifier === "opener:allow-open-url",
+    );
+
+    assert.ok(httpPermission);
+    assert.deepEqual(httpPermission.allow, [
+      { url: "https://dspeak.darelisme.my.id/api/**" },
+    ]);
+    assert.ok(openerPermission);
+    assert.deepEqual(openerPermission.allow, [
+      { url: "https://dspeak.darelisme.my.id/terms" },
+      { url: "https://dspeak.darelisme.my.id/privacy" },
+      { url: "https://crmucqnebwlssqzthnek.supabase.co/auth/v1/**" },
+    ]);
+    assert.doesNotMatch(JSON.stringify(defaultCapability), /https?:\/\/\*\*/);
   });
 });

@@ -1,5 +1,8 @@
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
-import { isDesktopApiRequest } from "../shared/desktop-api-fetch.ts";
+import {
+  isDesktopApiRequest,
+  withDesktopAuthorization,
+} from "../shared/desktop-api-fetch.ts";
 import {
   isConfiguredApiRequest,
   resolveApiRequestTarget,
@@ -142,7 +145,7 @@ export default defineNuxtPlugin(() => {
       init.method || request?.method || "GET",
     ).toUpperCase();
     const desktop = isDesktopApiRequest(desktopRuntime, url, apiTarget);
-    const options: RequestInit = { ...init };
+    let options: RequestInit = { ...init };
     const configuredApiRequest = isConfiguredApiRequest(url, apiTarget);
 
     if (configuredApiRequest && mutatingMethods.has(method)) {
@@ -151,10 +154,8 @@ export default defineNuxtPlugin(() => {
       options.headers = headers;
     }
     if (desktop) {
-      const headers = requestHeaders(input, options);
       const accessToken = await getDesktopAccessToken();
-      if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-      options.headers = headers;
+      options = withDesktopAuthorization(input, options, accessToken);
       options.credentials = "omit";
       if (!desktopTransportLogged) {
         desktopTransportLogged = true;

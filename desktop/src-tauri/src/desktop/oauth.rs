@@ -65,6 +65,7 @@ pub(crate) async fn start_oauth_callback_server(
         Query(params): Query<HashMap<String, String>>,
     ) -> Html<String> {
         let callback = parse_oauth_callback(&params);
+        eprintln!("[DesktopAuth] DESKTOP_OAUTH_CALLBACK_RECEIVED");
         *server.oauth.pending_callback.lock().unwrap() = Some(callback.clone());
         let _ = open_main_window(&server.app);
         let _ = server.app.emit("oauth-callback", callback.clone());

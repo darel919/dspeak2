@@ -6,6 +6,28 @@
     "core:default",
     "keyring-store:default",
     "deep-link:default",
-    "notification:default"
+    "notification:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://dspeak.darelisme.my.id/api/**"
+        }
+      ]
+    },
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://dspeak.darelisme.my.id/terms"
+        },
+        {
+          "url": "https://dspeak.darelisme.my.id/privacy"
+        },
+        {
+          "url": "https://crmucqnebwlssqzthnek.supabase.co/auth/v1/**"
+        }
+      ]
+    }
   ]
 }

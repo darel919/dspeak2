@@ -5,6 +5,14 @@ callback listener for a loopback URL, starts Google OAuth with the browser
 Supabase client, exchanges the returned code in that same client, and sends the
 resulting access token to `/api/auth/desktop-session` as a Bearer token.
 
+Supabase returns a `flowId` with the desktop `signInWithOAuth` result. dSpeak
+stores that selector and its own callback `state` in local storage for the
+short-lived OAuth attempt, then passes `{ flowId }` to
+`exchangeCodeForSession`. Both values are cleared when an attempt completes,
+fails, is cancelled, or expires. The callback page shown by the browser only
+confirms that Rust received the redirect; it does not confirm the PKCE exchange
+or the dSpeak session bridge.
+
 ## Supabase redirect URL
 
 Add this redirect URL to Supabase Auth URL Configuration:
@@ -25,7 +33,15 @@ Set `DSPEAK_PUBLIC_ORIGIN` and set `VITE_DSPEAK_API_PATH` when the API origin di
 and `SUPABASE_URL`/`SUPABASE_ANON_KEY` for the generated desktop runtime
 configuration. Desktop builds fail if the Supabase values are missing. The
 build generates a Tauri capability file scoped to the configured dSpeak API,
-legal URLs, and Supabase Auth URL.
+legal URLs, and Supabase Auth URL. The checked-in default capability also keeps
+the production dSpeak API and legal URL scopes available when the generated
+capability has not yet been produced.
+
+Desktop diagnostics use separate stage markers for callback receipt, state
+validation, PKCE exchange, and the dSpeak API session bridge. They report only
+whether a flow selector exists, safe Supabase error metadata, HTTP status, and
+server diagnostic category; authorization codes, verifiers, and tokens are not
+logged.
 
 Tagged releases require these repository secrets:
 

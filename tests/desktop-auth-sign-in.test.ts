@@ -37,22 +37,28 @@ test("sign-in startup failures replace the terms form", () => {
 
 test("desktop sign-in uses Supabase OAuth PKCE flow", () => {
   assert.match(authStore, /get_oauth_callback_url/);
-  assert.match(
-    authStore,
-    /callbackUrl\.searchParams\.set\("state", desktopOAuthState\)/,
-  );
+  assert.match(authStore, /callbackUrl\.searchParams\.set\("state", state\)/);
   assert.match(authStore, /signInWithOAuth\(\{/);
   assert.match(authStore, /redirectTo: desktopRedirect/);
   assert.match(authStore, /skipBrowserRedirect: true/);
-  assert.match(authStore, /exchangeCodeForSession\(callbackCode\)/);
-  assert.match(
-    authStore,
-    /!desktopOAuthState \|\| desktopOAuthState !== state/,
-  );
+  assert.match(authStore, /exchangeDesktopOAuthCode/);
+  assert.match(authStore, /desktopOAuth\.setFlowId\(desktopOAuthFlowId\)/);
+  assert.match(authStore, /desktopOAuth\.getFlowId\(\)/);
+  assert.match(authStore, /createDesktopOAuthStateStore/);
+  assert.doesNotMatch(authStore, /exchangeCodeForSession\(callbackCode\)/);
+  assert.match(authStore, /isDesktopOAuthStateValid\(expectedState, state\)/);
+  assert.match(authStore, /DESKTOP_OAUTH_CALLBACK_RECEIVED/);
+  assert.match(authStore, /DESKTOP_OAUTH_STATE_VALIDATED/);
+  assert.match(authStore, /DESKTOP_OAUTH_CODE_EXCHANGE_SUCCEEDED/);
+  assert.match(authStore, /DESKTOP_API_SESSION_BRIDGE_STARTED/);
+  assert.match(authStore, /DESKTOP_API_SESSION_BRIDGE_SUCCEEDED/);
+  assert.match(authStore, /DESKTOP_SIGN_IN_COMPLETE/);
   assert.match(authStore, /desktop-session/);
   assert.doesNotMatch(authStore, /X-Desktop-App/);
   assert.doesNotMatch(authStore, /desktop-callback-session/);
   assert.match(authPage, /authStore\.completePendingDesktopSignIn\(\)/);
+  assert.match(authPage, /authStore\.hasPendingDesktopOAuthAttempt\(\)/);
+  assert.match(authPage, /authStore\.cancelDesktopSignIn\(\)/);
   assert.match(authStore, /desktopOAuthSessionExchanged/);
 });
 
@@ -87,6 +93,16 @@ test("desktop sign-in polls for the native callback while waiting", () => {
   );
   assert.match(authPage, /if \(signInCheckInFlight\) return/);
   assert.match(authPage, /clearSignInPolling\(\)/);
+});
+
+test("desktop sign-in keeps PKCE and API bridge failures distinct", () => {
+  assert.match(authStore, /DESKTOP_OAUTH_CODE_EXCHANGE_FAILED/);
+  assert.match(authStore, /DESKTOP_API_SESSION_BRIDGE_FAILED/);
+  assert.match(authPage, /could not verify the sign-in/);
+  assert.match(authPage, /could not create your app session/);
+  assert.match(authStore, /hasFlowId/);
+  assert.match(authStore, /diagnosticCategory/);
+  assert.doesNotMatch(authStore, /console\.(log|info|error)[^\n]*callbackCode/);
 });
 
 test("web sign-in finishes after exchanging the callback", () => {
