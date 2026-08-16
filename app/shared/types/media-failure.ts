@@ -195,3 +195,23 @@ export function isFailureSourceScoped(code: string): boolean {
   const scope = getFailureScope(code);
   return scope === "source-operation" || scope === "remote-consumer";
 }
+
+export interface OperationError extends Error {
+  code: string;
+  retryable: boolean;
+  canonicalState?: unknown;
+}
+
+export function createOperationError(
+  data: Record<string, unknown>,
+): OperationError {
+  const error = new Error(
+    `${data.code}: ${
+      typeof data.error === "string" ? data.error : "operation rejected"
+    }`,
+  ) as OperationError;
+  error.code = String(data.code);
+  error.retryable = data.retryable === true;
+  error.canonicalState = data.canonicalState;
+  return error;
+}

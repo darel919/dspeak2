@@ -8,6 +8,7 @@ import {
   getFailureScope,
   isFailureRetryable,
   isFailureSessionFatal,
+  createOperationError,
 } from "./types/media-failure.ts";
 import type { TopologyController } from "./types/topology-controller.ts";
 
@@ -33,11 +34,14 @@ export function setupMediaMessageHandlers({
   onProviderTicket,
   onProviderFailure,
   onProviderRecovering,
+  onProviderRecoveryTopology,
   onP2pQualification,
   onOperationAck,
   onOperationError,
   onRoomRevisionApplied,
   onSnapshotRequested,
+  queueTargetedReconciliation,
+  onConnectionEpochUpdated,
 }: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
     handlers: [
@@ -55,17 +59,44 @@ export function setupMediaMessageHandlers({
   registerHandler("hi919", onServerHello);
   registerHandler("connected", (data: MediaMessage) => {
     setLocalPeerId(String(data.peerId));
+    if (typeof data.connectionEpoch === "number") {
+      onConnectionEpochUpdated?.(data.connectionEpoch);
+    }
     onServerConnected?.();
     if (typeof data.roomRevision === "string")
       onRoomRevisionApplied?.(data.roomRevision);
   });
   registerHandler("heartbeat-ack", (data: MediaMessage) => {
     acknowledgeHeartbeat(data);
+    if (typeof data.connectionEpoch === "number") {
+      onConnectionEpochUpdated?.(data.connectionEpoch);
+    }
   });
   registerHandler("operation-ack", (data: MediaMessage) => {
     const operationId =
       typeof data.operationId === "string" ? data.operationId : "";
     if (operationId) {
+      if (data.accepted === false) {
+        const error = createOperationError(data);
+        onOperationError?.(operationId, error);
+        if (data.canonicalState) {
+          const topology =
+            typeof data.canonicalState === "object" &&
+            data.canonicalState !== null
+              ? (data.canonicalState as MediaMessage)
+              : null;
+          if (topology) {
+            syncTopologyParticipants(topology);
+            queueTopology(
+              topology as import("./types/topology-controller.ts").TopologyData,
+            );
+          }
+        }
+        if (data.retryable === true) {
+          queueTargetedReconciliation?.(operationId, data);
+        }
+        return;
+      }
       onOperationAck?.(operationId, data);
       const roomRevision =
         typeof data.roomRevision === "string" ? data.roomRevision : null;
@@ -99,6 +130,9 @@ export function setupMediaMessageHandlers({
     }
     if (typeof data.roomRevision === "string")
       onRoomRevisionApplied?.(data.roomRevision);
+    if (typeof data.connectionEpoch === "number") {
+      onConnectionEpochUpdated?.(data.connectionEpoch);
+    }
   });
   registerHandler("state-nack", (data: MediaMessage) => {
     const topology =
@@ -115,9 +149,15 @@ export function setupMediaMessageHandlers({
       onRoomRevisionApplied?.(data.roomRevision);
     // state-nack counts as heartbeat ACK for liveness
     if (typeof data.sequence === "number") acknowledgeHeartbeat(data);
+    if (typeof data.connectionEpoch === "number") {
+      onConnectionEpochUpdated?.(data.connectionEpoch);
+    }
   });
   registerHandler("topology-state", (data: MediaMessage) => {
     syncTopologyParticipants(data);
+    if (typeof data.connectionEpoch === "number") {
+      onConnectionEpochUpdated?.(data.connectionEpoch);
+    }
     return queueTopology(data);
   });
   registerHandler("route-commit", (data: MediaMessage) => {
@@ -152,6 +192,9 @@ export function setupMediaMessageHandlers({
       data.code === "STALE_CONNECTION_EPOCH"
     )
       onSnapshotRequested?.();
+    if (typeof data.connectionEpoch === "number") {
+      onConnectionEpochUpdated?.(data.connectionEpoch);
+    }
     // Use typed failure taxonomy to determine scope
     const scope = getFailureScope(data.code as string);
     const retryable = isFailureRetryable(data.code as string);
@@ -183,7 +226,7 @@ export function setupMediaMessageHandlers({
     });
     onProviderRecovering?.(data);
     // Trigger topology controller to attempt return to recovered provider
-    topologyController?.handleProviderRecovering?.(data);
+    onProviderRecoveryTopology?.(data);
   });
   registerHandler("participant-voice-state", (data: MediaMessage) => {
     if (

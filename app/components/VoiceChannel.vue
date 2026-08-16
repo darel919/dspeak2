@@ -865,7 +865,7 @@ const { openPopout, closePopout, focusPopout, isPoppedOut, syncPopoutFeeds } =
 const router = useRouter();
 const config = useRuntimeConfig();
 const viewMode = ref("overview");
-const videoStage = (ref < HTMLElement) | (null > null);
+const videoStage = ref(null);
 const { layout: adaptiveLayout } = useAdaptiveVideoGrid(
   videoStage,
   computed(() => displayedRoomTiles.value.length),

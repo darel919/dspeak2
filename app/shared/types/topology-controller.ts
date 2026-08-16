@@ -153,6 +153,9 @@ export interface TopologyState {
   preparedEpoch?: number | null;
   peers: TopologyPeer[];
   activatedAt?: number | null;
+  canonicalMode?: "idle" | "probing" | "switching" | "p2p" | "sfu";
+  activeTransport?: "p2p" | "sfu" | null;
+  targetTransport?: "p2p" | "sfu" | null;
   [key: string]: unknown;
 }
 export interface TopologySourceEntry {
@@ -279,9 +282,15 @@ export interface TopologyControllerOptions {
     state: TopologyState,
   ) => unknown;
   peerConnectionMetrics: Ref<Record<string, unknown>>;
+  publishLocalSources: (
+    provider: TopologyP2pMesh | TopologySfuSession,
+  ) => Promise<unknown>;
   refreshPublicMaps: () => unknown;
   refreshTopologyGraph: () => unknown;
   reportedSfuFailureState: Ref<Record<string, unknown> | string | null>;
+  replayCloudflarePublications: (
+    session: TopologySfuSession | null,
+  ) => Promise<unknown>;
   send: (message: Record<string, unknown>) => unknown;
   sfuRoundTripTime: Ref<number | null>;
   setActiveProvider: (provider: "p2p" | "sfu" | null) => void;

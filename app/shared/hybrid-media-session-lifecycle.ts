@@ -56,6 +56,15 @@ export function createHybridMediaSessionLifecycle({
   let lifecycleGeneration = 0;
   let activeConnectionGeneration = 0;
   let reconcileTimer: ReturnType<typeof setInterval> | null = null;
+  let sessionConnectionEpoch = 1;
+
+  function getConnectionEpoch() {
+    return sessionConnectionEpoch;
+  }
+
+  function setConnectionEpoch(epoch: number) {
+    sessionConnectionEpoch = epoch;
+  }
 
   function startReconciliation() {
     stopReconciliation();
@@ -321,6 +330,11 @@ export function createHybridMediaSessionLifecycle({
       onRoomRevisionApplied: (roomRevision: string) =>
         mediaSessionSetup.applyRoomRevision(roomRevision),
       onSnapshotRequested: () => mediaSessionSetup.requestSnapshot(),
+      queueTargetedReconciliation: (operationId: string, data: unknown) =>
+        mediaSessionSetup.queueTargetedReconciliation(operationId, data),
+      onConnectionEpochUpdated: (connectionEpoch: number) => {
+        setConnectionEpoch(connectionEpoch);
+      },
       onServerConnected: () => {
         if (
           activeConnectionGeneration !== lifecycleGeneration ||
@@ -344,6 +358,7 @@ export function createHybridMediaSessionLifecycle({
       onAttenuationState: mediaSessionSetup.receiveAttenuation,
       onProviderFailure: mediaSessionSetup.handleProviderFailure,
       onProviderRecovering: providerRecovery.receive,
+      onProviderRecoveryTopology: mediaSessionSetup.handleProviderRecovering,
       onP2pQualification: mediaSessionSetup.handleP2pQualification,
       onProviderTicket: (data: unknown) =>
         mediaSessionSetup.handleProviderTicket(data),

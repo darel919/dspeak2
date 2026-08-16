@@ -69,6 +69,7 @@ export interface LifecycleDependencyContext {
     requestSnapshot: () => unknown;
     receiveAttenuation: (data: unknown) => unknown;
     handleProviderFailure: (data: unknown) => unknown;
+    handleProviderRecovering: (data: unknown) => unknown;
     handleP2pQualification: (data: unknown) => unknown;
     handleProviderTicket: (data: unknown) => unknown;
     sfuProducerIds: () => string[];
@@ -77,6 +78,11 @@ export interface LifecycleDependencyContext {
     ensureP2p: () => unknown;
     ensureSfu: () => unknown;
     sendParticipantVoiceState: () => unknown;
+    queueTargetedReconciliation: (
+      operationId: string,
+      data: unknown,
+    ) => unknown;
+    onConnectionEpochUpdated?: (connectionEpoch: number) => unknown;
   };
   messageHandlers: Map<string, (data: unknown) => unknown>;
   participantSfuRoundTripTimes: Ref<unknown>;
@@ -118,6 +124,8 @@ export interface LifecycleDependencyContext {
   topologyState: Ref<{ epoch: number; mode: string }>;
   transportReady: Ref<boolean>;
   voiceStore: unknown;
+  getConnectionEpoch: () => number;
+  setConnectionEpoch: (epoch: number) => void;
 }
 
 export interface RuntimeDependencyContext extends LifecycleDependencyContext {
@@ -133,6 +141,7 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   ) => Promise<{ mediaControlUrl?: string; ticket: string }>;
   handleP2pQualification: (data: unknown) => unknown;
   handleProviderFailure: (data: unknown) => unknown;
+  handleProviderRecovering: (data: unknown) => unknown;
   handleProviderTicket: (data: unknown) => unknown;
   mediaPathMetrics: Ref<unknown>;
   peerConnectionMetrics: Ref<unknown>;
@@ -146,10 +155,12 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   resolveOperationAck: (operationId: string) => unknown;
   rejectOperationAck: (operationId: string, error: unknown) => unknown;
   getConnectionEpoch: () => number;
+  setConnectionEpoch: (epoch: number) => void;
   getLastAppliedRoomRevision: () => string;
   applyRoomRevision: (roomRevision: string) => unknown;
   requestSnapshot: () => unknown;
   setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => void;
   setupMessageHandlers: (options: Record<string, unknown>) => void;
   queueCloudflarePublication: (data: unknown) => unknown;
+  queueTargetedReconciliation: (operationId: string, data: unknown) => unknown;
 }

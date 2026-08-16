@@ -155,7 +155,7 @@ export class RemoteMediaRegistry {
         ...entry,
         stream: null,
         receiving,
-        phase: "announced",
+        phase: "announced" as const,
         connectionEpoch: entry.connectionEpoch,
         sourceGeneration: entry.sourceGeneration,
       };
@@ -177,7 +177,7 @@ export class RemoteMediaRegistry {
       entry.sourceGeneration !== undefined &&
       entry.connectionEpoch !== undefined
     ) {
-      trackEntry.phase = "renderable";
+      trackEntry.phase = "renderable" as const;
       trackEntry.firstFrameAt = Date.now();
     }
     this.remoteSourcePhases.set(entry.key, "renderable");

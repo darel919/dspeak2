@@ -534,6 +534,8 @@ export function createMediaSourceController({
     resolveOperationAck,
     rejectOperationAck,
     leave,
+    queueTargetedReconciliation: (operationId: string, data: unknown) =>
+      Promise.resolve(),
     getSourceFsmDigest: sourceFsmDigest,
   };
 }

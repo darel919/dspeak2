@@ -54,6 +54,7 @@ export function createHybridMediaSessionRuntime({
   getBootstrap,
   handleP2pQualification,
   handleProviderFailure,
+  handleProviderRecovering,
   handleProviderTicket,
   mediaPathMetrics,
   peerConnectionMetrics,
@@ -68,12 +69,14 @@ export function createHybridMediaSessionRuntime({
   resolveOperationAck,
   rejectOperationAck,
   getConnectionEpoch,
+  setConnectionEpoch,
   getLastAppliedRoomRevision,
   applyRoomRevision,
   requestSnapshot,
   setTopologyWaiter,
   setupMessageHandlers,
   queueCloudflarePublication,
+  queueTargetedReconciliation,
 }: RuntimeDependencyContext) {
   return createHybridMediaSessionLifecycle({
     authStore,
@@ -119,6 +122,8 @@ export function createHybridMediaSessionRuntime({
     topologyState,
     transportReady,
     voiceStore,
+    getConnectionEpoch,
+    setConnectionEpoch,
     mediaSessionSetup: {
       closeProviders,
       ensureP2p,
@@ -130,6 +135,7 @@ export function createHybridMediaSessionRuntime({
       getBootstrap,
       handleP2pQualification,
       handleProviderFailure,
+      handleProviderRecovering,
       handleProviderTicket,
       mediaPathMetrics,
       peerConnectionMetrics,
@@ -150,6 +156,7 @@ export function createHybridMediaSessionRuntime({
       setTopologyWaiter,
       setupMessageHandlers,
       queueCloudflarePublication,
+      queueTargetedReconciliation,
     },
   });
 }

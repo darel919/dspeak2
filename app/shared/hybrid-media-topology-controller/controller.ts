@@ -13,7 +13,6 @@ import type {
   TopologyControllerOptions,
   TopologyData,
   TopologyConnectionState,
-  TopologyP2pMesh,
   TopologySfuSession,
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
@@ -49,12 +48,13 @@ export function createHybridMediaTopologyController({
   mediaReadinessPollMs,
   mediaHandoffTimeoutMs,
   onP2pQualification,
-  onRemotePublication,
   onTopologyStateUpdated,
   peerConnectionMetrics,
+  publishLocalSources,
   refreshPublicMaps,
   refreshTopologyGraph,
   reportedSfuFailureState,
+  replayCloudflarePublications,
   send,
   sfuRoundTripTime,
   setActiveProvider,
@@ -194,30 +194,27 @@ export function createHybridMediaTopologyController({
     return session;
   }
 
-  const {
-    handleProviderTicket,
-    reset: resetProviderActions,
-    waitForProviderTicket,
-  } = createTopologyProviderActions({
-    MediasoupProviderSocket,
-    closeSfuSafely,
-    ensureSfu,
-    error,
-    getActiveProvider,
-    getHighestQueuedEpoch: () => highestQueuedEpoch,
-    getMediaCapabilities,
-    getMessageHandler,
-    getProviderSocket,
-    getSelectedSfuProvider,
-    getSfu,
-    handleProviderFailure,
-    replayCloudflarePublications,
-    send,
-    setProviderSocket,
-    setSelectedSfuProvider,
-    topologyState,
-    waitForMediaTimeoutMs,
-  });
+  const { handleProviderTicket, reset: resetProviderActions } =
+    createTopologyProviderActions({
+      MediasoupProviderSocket,
+      closeSfuSafely,
+      ensureSfu,
+      error,
+      getActiveProvider,
+      getHighestQueuedEpoch: () => highestQueuedEpoch,
+      getMediaCapabilities,
+      getMessageHandler,
+      getProviderSocket,
+      getSelectedSfuProvider,
+      getSfu,
+      handleProviderFailure,
+      replayCloudflarePublications,
+      send,
+      setProviderSocket,
+      setSelectedSfuProvider,
+      topologyState,
+      waitForMediaTimeoutMs,
+    });
 
   function queueTopology(data: TopologyData): Promise<unknown> {
     setConnectionPhase("topology-selecting", {
@@ -292,8 +289,39 @@ export function createHybridMediaTopologyController({
       return;
     const previousProvider = getActiveProvider();
     const previousSfu = getSfu();
+    const previousActiveTransport = topologyState.value.activeTransport;
+
+    // Determine canonical mode and active/target transport
+    const incomingMode = (data.mode || "idle") as
+      "idle" | "probing" | "switching" | "p2p" | "sfu";
+    let canonicalMode: "idle" | "probing" | "switching" | "p2p" | "sfu" =
+      incomingMode;
+    let activeTransport: "p2p" | "sfu" | null = previousActiveTransport ?? null;
+    let targetTransport: "p2p" | "sfu" | null = null;
+
+    if (incomingMode === "switching") {
+      // switching is a control mode - preserve active transport, set target
+      canonicalMode = "switching";
+      targetTransport = data.target === "sfu" ? "sfu" : "p2p";
+      activeTransport = previousActiveTransport ?? null;
+    } else if (incomingMode === "probing") {
+      canonicalMode = "probing";
+      targetTransport = "p2p";
+    } else if (incomingMode === "p2p" || incomingMode === "sfu") {
+      canonicalMode = incomingMode;
+      activeTransport = incomingMode;
+      targetTransport = null;
+    } else {
+      canonicalMode = "idle";
+      activeTransport = null;
+      targetTransport = null;
+    }
+
     topologyState.value = {
-      mode: data.mode || "idle",
+      mode: incomingMode,
+      canonicalMode,
+      activeTransport,
+      targetTransport,
       epoch: Number(data.epoch),
       provider: data.provider || data.targetProvider || null,
       providerId:
@@ -392,7 +420,7 @@ export function createHybridMediaTopologyController({
       ? AbortSignal.any([signal, abort.signal])
       : abort.signal;
     mediaGeneration.assert(generation);
-    const provider = getActiveProvider() || data.mode;
+    const provider = getActiveProvider() === "sfu" ? "sfu" : "p2p";
     waitForRemoteTracks(provider, data, convergenceSignal)
       .then(() => {
         if (convergenceSignal.aborted) return;
@@ -439,6 +467,7 @@ export function createHybridMediaTopologyController({
       : abort.signal;
     mediaGeneration.assert(generation);
     const transitionPromise = (async () => {
+      const targetMode = data.mode === "sfu" ? "sfu" : "p2p";
       if (data.mode === "p2p") {
         await closeP2pSafely();
         handoff.retire("p2p");
@@ -458,7 +487,13 @@ export function createHybridMediaTopologyController({
         await ensureQualificationFallback(data, generation);
       }
       mediaGeneration.assert(generation);
-      setActiveProvider(data.mode === "p2p" ? "p2p" : "sfu");
+      // Only switch active provider after provider setup succeeds
+      setActiveProvider(targetMode);
+      topologyState.value = {
+        ...topologyState.value,
+        activeTransport: targetMode,
+        targetTransport: null,
+      };
       transportReady.value = getActiveProvider() !== null;
       iceConnectedBoth.value = false;
       mediaConnectionState.value = "topology-connecting";
@@ -496,50 +531,6 @@ export function createHybridMediaTopologyController({
         await closeSfuSafely();
       throw fallbackError;
     }
-  }
-
-  async function updateActiveTopology(
-    data: TopologyData,
-    generation: number,
-    signal?: AbortSignal,
-  ) {
-    if (data.mode === "p2p") {
-      await getP2pMesh()?.applyTopology({
-        ...data,
-        localPeerId: getLocalPeerId(),
-      });
-      await publishLocalSources(getP2pMesh());
-      await waitForRemoteTracks("p2p", data, signal);
-      mediaGeneration.assert(generation);
-    } else if (data.mode === "sfu") {
-      await closeP2pSafely();
-      handoff.retire("p2p");
-      await waitForRemoteTracks("sfu", data, signal);
-    }
-    const readiness =
-      data.mode === "sfu" ? getSfu()?.connectionState() : { ready: true };
-    transportReady.value = readiness?.ready === true;
-    iceConnectedBoth.value =
-      data.mode === "sfu"
-        ? readiness?.sendRequired === true &&
-          readiness?.receiveRequired === true &&
-          readiness?.send === "connected" &&
-          readiness?.recv === "connected"
-        : getP2pMesh()?.isMediaReady() === true;
-    setRouteConnectionState(
-      transportReady.value
-        ? iceConnectedBoth.value
-          ? "media-flowing"
-          : "ready-no-active-media"
-        : "transport-connecting",
-    );
-    setConnectionPhase("media-ready", {
-      topologyEpoch: Number(data.epoch),
-      topologyMode: data.mode,
-    });
-    error.value = null;
-    refreshPublicMaps();
-    refreshTopologyGraph();
   }
 
   function handleTopologyFailure(data: TopologyData, topologyError: unknown) {
@@ -636,221 +627,6 @@ export function createHybridMediaTopologyController({
     mediaConnectionState.value = "recovering";
     setConnectionPhase("reconnecting", { reason });
     mediaDebug("topology.sfu-failure-reported", { epoch, reason });
-  }
-
-  async function prepareTransition(
-    data: TopologyData,
-    generation: number,
-    signal?: AbortSignal,
-  ) {
-    let destinationSfu: TopologySfuSession | null = null;
-    try {
-      transportReady.value = getActiveProvider() !== null;
-      if (data.target === "p2p") {
-        const mesh = ensureP2p();
-        if (!mesh) throw new Error("Native WebRTC is unavailable");
-        await mesh.applyTopology({
-          ...data,
-          mode: "p2p",
-          localPeerId: getLocalPeerId(),
-        });
-        await publishLocalSources(mesh);
-        await waitForRemoteTracks("p2p", data, signal);
-      } else if (data.target === "sfu") {
-        const targetProvider = data.targetProvider;
-        if (!targetProvider)
-          throw new Error("SFU topology transition has no provider");
-        const existingSfu = getSfu();
-        const sameActiveProvider =
-          getActiveProvider() === "sfu" &&
-          existingSfu &&
-          getSelectedSfuProvider() === targetProvider &&
-          (!data.targetProviderId ||
-            existingSfu.providerId === data.targetProviderId);
-        if (targetProvider === "cloudflare-realtime") {
-          setSelectedSfuProvider(targetProvider);
-          if (!sameActiveProvider) {
-            closeSocket();
-            setProviderSocket(null);
-            await closeSfuSafely();
-          }
-        } else if (
-          !getSfu() ||
-          getSelectedSfuProvider() !== targetProvider ||
-          (data.targetProviderId &&
-            getSfu()?.providerId !== data.targetProviderId)
-        ) {
-          await waitForProviderTicket(
-            Number(data.epoch),
-            targetProvider,
-            data.targetProviderId || data.providerId || null,
-          );
-        }
-        destinationSfu = ensureSfu();
-        if (getActiveProvider() === "sfu" && destinationSfu !== existingSfu) {
-          await closeSfuSafely();
-          destinationSfu = ensureSfu();
-        }
-        await destinationSfu.initialize();
-        for (const entry of localSources.values())
-          await destinationSfu.addSource(entry);
-        await replayCloudflarePublications(destinationSfu);
-        await destinationSfu.startSubscriptions?.();
-        await waitForRemoteTracks("sfu", data, signal);
-      } else throw new Error("The server requested an invalid media topology");
-      mediaGeneration.assert(generation);
-      send({
-        type: "topology-ready",
-        data: {
-          epoch: data.epoch,
-          target: data.target,
-          sourceRevision: data.sourceRevision,
-          ...(data.target === "sfu"
-            ? {
-                provider: data.targetProvider || data.provider,
-                providerId:
-                  data.targetProviderId ||
-                  data.providerId ||
-                  data.targetRoute?.providerId ||
-                  null,
-              }
-            : {}),
-        },
-      });
-      mediaDebug("topology.prepared", {
-        target: data.target,
-        provider: data.targetProvider,
-        epoch: data.epoch,
-      });
-      refreshPublicMaps();
-      refreshTopologyGraph();
-    } catch (transitionError: unknown) {
-      if (getActiveProvider() === null) transportReady.value = false;
-      if (destinationSfu && destinationSfu === getSfu()) await closeSfuSafely();
-      if (
-        transitionError &&
-        typeof transitionError === "object" &&
-        "code" in transitionError &&
-        transitionError.code === "MEDIA_SESSION_CLOSED"
-      )
-        return;
-      if (topologyEventKey(data) !== latestTopologyKey) return;
-      send({
-        type: "topology-failed",
-        data: {
-          epoch: data.epoch,
-          target: data.target,
-          sourceRevision: data.sourceRevision,
-          ...(data.target === "sfu"
-            ? {
-                provider: data.targetProvider || data.provider,
-                providerId:
-                  data.targetProviderId ||
-                  data.providerId ||
-                  data.targetRoute?.providerId ||
-                  null,
-              }
-            : {}),
-          reason:
-            transitionError instanceof Error
-              ? transitionError.message
-              : String(transitionError),
-        },
-      });
-      mediaDebug("topology.handoff-failed", {
-        target: data.target,
-        provider: data.targetProvider,
-        epoch: data.epoch,
-        reason:
-          transitionError instanceof Error
-            ? transitionError.message
-            : String(transitionError),
-      });
-    }
-  }
-
-  async function activateP2p(
-    data: TopologyData,
-    generation: number,
-    signal?: AbortSignal,
-  ) {
-    const mesh = ensureP2p();
-    if (!mesh) throw new Error("Native WebRTC is unavailable");
-    await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
-    await publishLocalSources(mesh);
-    await waitForRemoteTracks("p2p", data, signal);
-    mediaGeneration.assert(generation);
-    handoff.bind("p2p");
-    setActiveProvider("p2p");
-    handoff.retire("sfu");
-    await closeSfuSafely();
-    transportReady.value = true;
-    iceConnectedBoth.value = getP2pMesh()?.isMediaReady?.() === true;
-    setRouteConnectionState(
-      iceConnectedBoth.value ? "media-flowing" : "ready-no-active-media",
-    );
-    setConnectionPhase("media-ready", {
-      topologyEpoch: Number(data.epoch),
-      topologyMode: "p2p",
-    });
-    error.value = null;
-    refreshPublicMaps();
-    refreshTopologyGraph();
-  }
-
-  async function activateSfu(
-    data: TopologyData,
-    generation: number,
-    signal?: AbortSignal,
-  ) {
-    transportReady.value = false;
-    mediaConnectionState.value = "transport-connecting";
-    setConnectionPhase("transport-connecting", {
-      topologyEpoch: Number(data.epoch),
-      topologyMode: "sfu",
-    });
-    const currentSfu = getSfu();
-    if (
-      currentSfu?.provider &&
-      data.provider &&
-      currentSfu.provider !== data.provider
-    )
-      await closeSfuSafely();
-    if (
-      currentSfu?.providerId &&
-      data.providerId &&
-      currentSfu.providerId !== data.providerId
-    )
-      await closeSfuSafely();
-    const session = ensureSfu();
-    await session.initialize();
-    for (const entry of localSources.values()) await session.addSource(entry);
-    await replayCloudflarePublications(session);
-    await session.startSubscriptions?.();
-    await waitForRemoteTracks("sfu", data, signal);
-    mediaGeneration.assert(generation);
-    handoff.bind("sfu");
-    setActiveProvider("sfu");
-    reportedSfuFailureState.value = null;
-    handoff.retire("p2p");
-    await closeP2pSafely();
-    transportReady.value = true;
-    const readiness = session.connectionState();
-    iceConnectedBoth.value =
-      readiness?.sendRequired === true &&
-      readiness?.receiveRequired === true &&
-      readiness.send === "connected" &&
-      readiness.recv === "connected";
-    setRouteConnectionState(
-      iceConnectedBoth.value ? "media-flowing" : "ready-no-active-media",
-    );
-    setConnectionPhase("media-ready", {
-      topologyEpoch: Number(data.epoch),
-      topologyMode: "sfu",
-    });
-    error.value = null;
-    refreshPublicMaps();
-    refreshTopologyGraph();
   }
 
   function waitForRemoteTracks(

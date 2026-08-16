@@ -11,6 +11,7 @@ import { createHybridMediaAudioState } from "~/shared/hybrid-media-audio-state.t
 import { RemoteMediaHandoff } from "~/shared/remote-media-handoff.ts";
 import { createHybridMediaTopologyController } from "~/shared/hybrid-media-topology-controller.ts";
 import { createHybridMediaSessionTermination } from "~/shared/hybrid-media-session-termination.ts";
+import { mediaDebug } from "~/shared/media-debug.ts";
 import {
   createHybridMediaDiagnostics,
   mediaReadinessSnapshot,
@@ -724,9 +725,56 @@ export function useHybridMediaSession() {
       }
     },
     peerConnectionMetrics,
+    publishLocalSources: async (provider: unknown) => {
+      const p2pMeshLocal = p2pMesh as HybridP2pMesh | null;
+      const sfuLocal = sfu as HybridSfuSession | null;
+      if (provider === p2pMeshLocal && p2pMeshLocal) {
+        for (const entry of localSources.values()) {
+          await p2pMeshLocal.publishSource(
+            entry.source,
+            entry.track,
+            entry.stream,
+            entry,
+          );
+        }
+      } else if (provider === sfuLocal && sfuLocal) {
+        for (const entry of localSources.values()) {
+          await (sfuLocal as any).addSource(entry);
+        }
+        await (sfuLocal as any).startSubscriptions?.();
+      }
+    },
     refreshPublicMaps,
     refreshTopologyGraph,
     reportedSfuFailureState,
+    replayCloudflarePublications: async (session) => {
+      if (!session) return;
+      for (const publication of cloudflarePublications.values()) {
+        const trackName = publication.trackName;
+        const peerId = publication.peerId;
+        const source = publication.source;
+        const track = (publication as Record<string, unknown>).track as
+          MediaStreamTrack | undefined;
+        const stream = (publication as Record<string, unknown>).stream as
+          MediaStream | undefined;
+        if (!trackName || !peerId || !source || !track) continue;
+        try {
+          await session.publishSource(source, track, stream, {
+            source,
+            track,
+            key: trackName,
+            provider: "sfu",
+            userId: peerId,
+            peerId: peerId,
+          });
+        } catch (err) {
+          mediaDebug("cloudflare-replay-failed", {
+            trackName,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    },
     send,
     sfuRoundTripTime,
     setActiveProvider,
@@ -840,6 +888,9 @@ export function useHybridMediaSession() {
     resolveOperationAck,
     rejectOperationAck,
     getConnectionEpoch: () => sessionConnectionEpoch,
+    setConnectionEpoch: (epoch: number) => {
+      sessionConnectionEpoch = epoch;
+    },
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
     applyRoomRevision,
     requestSnapshot,
@@ -849,6 +900,10 @@ export function useHybridMediaSession() {
     setupMessageHandlers: setupMediaMessageHandlers,
     queueCloudflarePublication: (data: Record<string, unknown>) =>
       cloudflarePublications.update(data),
+    queueTargetedReconciliation: (
+      operationId: string,
+      data: Record<string, unknown>,
+    ) => sourceController.queueTargetedReconciliation(operationId, data),
   } as unknown as RuntimeDependencyContext);
   watch(
     () => [peerConnectionMetrics.value, sfuRoundTripTime.value],

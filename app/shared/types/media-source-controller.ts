@@ -52,6 +52,7 @@ export interface MediaSourceControllerContext {
   stopLocalVoiceDetection: () => unknown;
   stopSharedAudioMeter: () => unknown;
   topologyState: Ref<TopologyState>;
+  queueTargetedReconciliation?: (operationId: string, data: unknown) => unknown;
   voiceStore: {
     micMuted: boolean;
     deafened: boolean;
