@@ -529,12 +529,21 @@ export const useAuthStore = defineStore("auths", () => {
       ) {
         throw desktopCallbackPromiseError;
       }
-      if (await restoreSessionDetailed()) return true;
+      const restoreResult = await restoreSessionDetailed();
+      if (restoreResult.ok) return true;
       throw withDesktopDiagnostics(
         config,
         "DESKTOP_API_SESSION_RESTORE_FAILED",
         "Your Google sign-in succeeded, but dSpeak could not create your app session.",
-        { stage: "session-restore" },
+        {
+          stage: "session-restore",
+          httpStatus: restoreResult.httpStatus ?? 0,
+          serverDiagnostic:
+            restoreResult.serverDiagnostic ||
+            `DESKTOP_SESSION_RESTORE_${restoreResult.reason}`,
+          serverBuildCommit: restoreResult.serverBuildCommit || "",
+          serverProjectRef: restoreResult.serverProjectRef || "",
+        },
       );
     }
 

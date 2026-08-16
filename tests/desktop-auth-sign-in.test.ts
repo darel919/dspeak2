@@ -125,7 +125,9 @@ test("duplicate callback joins the in-flight promise before exchange-state logic
 test("duplicate callback cannot start a restore while the bridge is in flight", () => {
   assert.ok(
     authStore.indexOf("return desktopCallbackPromise;") <
-      authStore.indexOf("if (await restoreSessionDetailed())"),
+      authStore.indexOf(
+        "const restoreResult = await restoreSessionDetailed();",
+      ),
     "in-flight promise join must come before restore fallback",
   );
 });
@@ -181,9 +183,30 @@ test("restore failures carry diagnostic reasons", () => {
 test("restore-only fallback is last resort with no preserved bridge error", () => {
   assert.match(
     authStore,
-    /desktopCallbackPromiseError &&\n\s*isDesktopAuthError\(desktopCallbackPromiseError\)\n\s*\) \{[\s\S]*?throw desktopCallbackPromiseError;\n\s*\}\n\s*if \(await restoreSessionDetailed\(\)\) return true;/,
+    /desktopCallbackPromiseError &&\n\s*isDesktopAuthError\(desktopCallbackPromiseError\)\n\s*\) \{[\s\S]*?throw desktopCallbackPromiseError;\n\s*\}\n\s*const restoreResult = await restoreSessionDetailed\(\);/,
+  );
+  assert.match(
+    authStore,
+    /const restoreResult = await restoreSessionDetailed\(\);\n\s*if \(restoreResult\.ok\) return true;/,
   );
   assert.match(authStore, /DESKTOP_API_SESSION_RESTORE_FAILED/);
+  assert.doesNotMatch(authStore, /if \(await restoreSessionDetailed\(\)\)/);
+});
+
+test("restore failure surfaces diagnostic reason instead of truthy collapse", () => {
+  assert.match(authStore, /httpStatus: restoreResult\.httpStatus \?\? 0,/);
+  assert.match(
+    authStore,
+    /serverDiagnostic:\n\s*restoreResult\.serverDiagnostic \|\|\n\s*`DESKTOP_SESSION_RESTORE_\$\{restoreResult\.reason\}`,/,
+  );
+  assert.match(
+    authStore,
+    /serverBuildCommit: restoreResult\.serverBuildCommit \|\| "",/,
+  );
+  assert.match(
+    authStore,
+    /serverProjectRef: restoreResult\.serverProjectRef \|\| "",/,
+  );
 });
 
 test("event and polling both converge on completeDesktopSignIn", () => {
