@@ -35,6 +35,7 @@ export function createHybridMediaSessionTermination({
   setP2pMesh,
   setProviderSocket,
   setSfu,
+  sendLeave,
   signaling,
   stopLocalVoiceDetection,
   stopSharedAudioMeter,
@@ -61,6 +62,18 @@ export function createHybridMediaSessionTermination({
     resolveTopologyWaiter(new Error("Media signaling connection stopped"));
     setChannelId(null);
     disposeVisibility();
+    if (connected.value) {
+      try {
+        sendLeave();
+      } catch (leaveError: unknown) {
+        mediaDebug("session.leave-failed", {
+          error:
+            leaveError instanceof Error
+              ? leaveError.message
+              : String(leaveError),
+        });
+      }
+    }
     signaling.stop();
     stopLocalVoiceDetection();
     stopSharedAudioMeter();

@@ -18,6 +18,7 @@ export function waitForMediaHandoff({
   localSources,
   pollIntervalMs,
   provider,
+  signal,
   timeoutMs,
   topology,
   topologyEventKey,
@@ -29,6 +30,8 @@ export function waitForMediaHandoff({
     epoch: topology?.epoch,
     sourceRevision: topology?.sourceRevision,
   });
+  if (signal?.aborted)
+    return Promise.reject(signal.reason || new Error("Topology superseded"));
   if (provider === "sfu") {
     return waitForSfuHandoff({
       getLatestTopologyKey,
@@ -37,6 +40,7 @@ export function waitForMediaHandoff({
       handoff,
       localSources,
       pollIntervalMs,
+      signal,
       timeoutMs,
       topology,
       topologyEventKey,
@@ -50,6 +54,7 @@ export function waitForMediaHandoff({
     getP2pMesh,
     handoff,
     localSources,
+    signal,
     timeoutMs,
     topology,
     topologyEventKey,
@@ -65,6 +70,7 @@ function waitForSfuHandoff({
   handoff,
   localSources,
   pollIntervalMs,
+  signal,
   timeoutMs,
   topology,
   topologyEventKey,
@@ -78,7 +84,11 @@ function waitForSfuHandoff({
   const expected = countExpectedFeeds(topologyState, localPeerId);
   if (expected === 0 && localSources.size === 0) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
+    const onAbort = () =>
+      reject(signal?.reason || new Error("Topology superseded"));
+    signal?.addEventListener("abort", onAbort, { once: true });
     const poll = async () => {
+      if (signal?.aborted) return onAbort();
       const key = topologyEventKey(topology);
       if (key !== getLatestTopologyKey()) {
         reject(new Error("Topology handoff was superseded"));
@@ -159,6 +169,7 @@ function waitForP2pHandoff({
   getP2pMesh,
   handoff,
   localSources,
+  signal,
   timeoutMs,
   topology,
   topologyEventKey,
@@ -173,7 +184,11 @@ function waitForP2pHandoff({
 }) {
   const localPeerId = getLocalPeerId();
   return new Promise<void>((resolve, reject) => {
+    const onAbort = () =>
+      reject(signal?.reason || new Error("Topology superseded"));
+    signal?.addEventListener("abort", onAbort, { once: true });
     const poll = () => {
+      if (signal?.aborted) return onAbort();
       if (topologyEventKey(topology) !== getLatestTopologyKey()) {
         reject(new Error("Topology handoff was superseded"));
         return;

@@ -2,6 +2,7 @@ import {
   adaptiveTrackConstraints,
   createAdaptiveVideoController,
 } from "./adaptive-video-controller.ts";
+import { mediaDebug } from "./media-debug.ts";
 import { resolveMediaProviderIdentity } from "./media-provider-identity.ts";
 import type { MediaCaptureStartOptions } from "./types/media-capture.ts";
 import type {
@@ -17,7 +18,9 @@ export function createMediaSourceController({
   createSharedAudioSource,
   error,
   getActiveProvider,
+  getConnectionEpoch,
   getIntentionalClose,
+  getLastAppliedRoomRevision,
   getP2pMesh,
   getSfu,
   getVideoReport = async () => null,
@@ -43,6 +46,63 @@ export function createMediaSourceController({
 }: MediaSourceControllerContext) {
   const asProvider = (value: unknown): SourceProvider | null =>
     value && typeof value === "object" ? (value as SourceProvider) : null;
+  type SourceFsmPhase =
+    "idle" | "starting" | "live" | "stopping" | "failed" | "reconciling";
+  interface SourceFsmState {
+    phase: SourceFsmPhase;
+    generation: number;
+    desiredState: "active" | "inactive";
+    provider: string | null;
+    failedAt: number | null;
+  }
+  const sourceFsms = new Map<string, SourceFsmState>();
+  function bumpSourceGeneration(source: string) {
+    const current = sourceFsms.get(source);
+    sourceFsms.set(source, {
+      phase: current?.phase || "idle",
+      generation: (current?.generation || 0) + 1,
+      desiredState: current?.desiredState || "inactive",
+      provider: current?.provider || null,
+      failedAt: current?.failedAt || null,
+    });
+  }
+  function setSourcePhase(
+    source: string,
+    phase: SourceFsmPhase,
+    provider: string | null = null,
+  ) {
+    const current = sourceFsms.get(source) || {
+      phase: "idle",
+      generation: 0,
+      desiredState: "inactive",
+      provider: null,
+      failedAt: null,
+    };
+    sourceFsms.set(source, {
+      ...current,
+      phase,
+      generation:
+        phase === "starting" || phase === "stopping"
+          ? current.generation + 1
+          : current.generation,
+      provider: provider ?? current.provider,
+      failedAt: phase === "failed" ? Date.now() : null,
+    });
+  }
+  function sourceFsmDigest() {
+    return [...sourceFsms.entries()].reduce<Record<string, unknown>>(
+      (digest, [source, state]) => {
+        digest[source] = {
+          phase: state.phase,
+          generation: state.generation,
+          desiredState: state.desiredState,
+          provider: state.provider,
+        };
+        return digest;
+      },
+      {},
+    );
+  }
   const adaptiveVideo = createAdaptiveVideoController({
     apply: async (entry, state, settings) => {
       const mediaEntry = entry as AdaptiveVideoEntry;
@@ -108,6 +168,8 @@ export function createMediaSourceController({
       sourceEntry.source === "screen-audio"
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
+    setSourcePhase(entry.source, "starting", getActiveProvider());
+    const generation = sourceFsms.get(entry.source)?.generation || 0;
     if (entry.source === "audio" && voiceStore.micMuted)
       entry.track.enabled = false;
     const previous = localSources.get(entry.source);
@@ -162,7 +224,17 @@ export function createMediaSourceController({
         entry.track.readyState === "ended"
       )
         throw new Error(`The ${entry.source} track ended during publication`);
+      if (sourceFsms.get(entry.source)?.generation !== generation) {
+        await Promise.allSettled([
+          p2pRequired
+            ? asProvider(getP2pMesh())?.unpublishSource(entry.source)
+            : null,
+          sfuRequired ? asProvider(getSfu())?.removeSource(entry.source) : null,
+        ]);
+        return;
+      }
     } catch (sourceError: unknown) {
+      setSourcePhase(entry.source, "failed", getActiveProvider());
       const reason = `source-${entry.source}-failed-${sourceError instanceof Error ? sourceError.message : String(sourceError)}`;
       if (previous) {
         await Promise.allSettled([
@@ -216,6 +288,12 @@ export function createMediaSourceController({
       throw sourceError;
     }
     localSources.set(entry.source, entry);
+    if (sourceFsms.get(entry.source)?.generation !== generation) {
+      if (localSources.get(entry.source)?.track === entry.track)
+        localSources.delete(entry.source);
+      return;
+    }
+    setSourcePhase(entry.source, "live", getActiveProvider());
     if (entry.source === "screen-audio" && entry.ownerSource === "screen")
       voiceStore.systemAudioSharing = true;
     if (entry.captureTrack && entry.track !== entry.captureTrack)
@@ -253,6 +331,8 @@ export function createMediaSourceController({
       publishedEntry?.captureTrack !== entry.track
     )
       return Promise.resolve(false);
+    bumpSourceGeneration(entry.source);
+    setSourcePhase(entry.source, "stopping", getActiveProvider());
     const pairedScreenAudio =
       entry.source === "screen" ? localSources.get("screen-audio") : null;
     localSources.delete(entry.source);
@@ -304,17 +384,71 @@ export function createMediaSourceController({
     );
   }
 
+  let operationSequence = 0;
+  function nextOperationId() {
+    operationSequence += 1;
+    return `${Date.now().toString(36)}-${operationSequence}`;
+  }
+  const pendingAcks = new Map<
+    string,
+    { resolve: () => void; reject: (error: unknown) => void }
+  >();
+  function awaitOperationAck(
+    operationId: string,
+    timeoutMs = 5000,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingAcks.delete(operationId);
+        resolve();
+      }, timeoutMs);
+      pendingAcks.set(operationId, {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+    });
+  }
+  function resolveOperationAck(operationId: string) {
+    pendingAcks.get(operationId)?.resolve();
+    pendingAcks.delete(operationId);
+  }
+  function rejectOperationAck(operationId: string, error: unknown) {
+    pendingAcks.get(operationId)?.reject(error);
+    pendingAcks.delete(operationId);
+  }
+
   function sendSourceState() {
+    const operationId = nextOperationId();
     send({
       type: "media-sources",
-      data: { sources: [...localSources.keys()] },
+      data: {
+        sources: [...localSources.keys()],
+        operationId,
+        requestId: operationId,
+        connectionEpoch: getConnectionEpoch(),
+        expectedRoomRevision: getLastAppliedRoomRevision(),
+        sourceStates: sourceFsmDigest(),
+      },
+    });
+    void awaitOperationAck(operationId).catch((error: unknown) => {
+      mediaDebug("source-state.ack-failed", {
+        operationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
   }
 
   function sendParticipantVoiceState(
     state: { muted?: boolean; deafened?: boolean } = {},
   ) {
-    return send({
+    const operationId = nextOperationId();
+    send({
       type: "participant-voice-state",
       data: {
         muted:
@@ -325,8 +459,13 @@ export function createMediaSourceController({
           typeof state.deafened === "boolean"
             ? state.deafened
             : Boolean(voiceStore.deafened),
+        operationId,
+        requestId: operationId,
+        connectionEpoch: getConnectionEpoch(),
+        expectedRoomRevision: getLastAppliedRoomRevision(),
       },
     });
+    return awaitOperationAck(operationId);
   }
 
   async function startAudioProduction() {
@@ -361,6 +500,19 @@ export function createMediaSourceController({
       .then((entry) => (entry ? producerFacade(entry) : null));
   }
 
+  function leave() {
+    const operationId = nextOperationId();
+    send({
+      type: "leave",
+      data: {
+        operationId,
+        requestId: operationId,
+        connectionEpoch: getConnectionEpoch(),
+      },
+    });
+    return awaitOperationAck(operationId);
+  }
+
   return {
     publishSource,
     removeSource,
@@ -376,5 +528,9 @@ export function createMediaSourceController({
       if (entry?.ownerSource === "system-audio") capture.stop("screen-audio");
     },
     stopVideoProduction: (source: "camera" | "screen") => capture.stop(source),
+    resolveOperationAck,
+    rejectOperationAck,
+    leave,
+    getSourceFsmDigest: sourceFsmDigest,
   };
 }

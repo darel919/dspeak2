@@ -176,6 +176,7 @@ export interface HybridSessionTerminationContext {
   setP2pMesh: (value: HybridP2pMesh | null) => unknown;
   setProviderSocket: (value: HybridProviderSocket | null) => unknown;
   setSfu: (value: HybridSfuSession | null) => unknown;
+  sendLeave: () => unknown;
   signaling: {
     getSocket: () => WebSocket | null;
     stop: () => unknown;

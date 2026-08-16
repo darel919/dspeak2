@@ -30,7 +30,9 @@ export interface MediaSourceControllerContext {
   ) => Promise<TopologySourceEntry>;
   error: Ref<string | null>;
   getActiveProvider: () => string | null;
+  getConnectionEpoch: () => number;
   getIntentionalClose: () => boolean;
+  getLastAppliedRoomRevision: () => string;
   getP2pMesh: () => unknown;
   getSfu: () => unknown;
   getVideoReport?: (

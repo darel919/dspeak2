@@ -74,6 +74,7 @@ export class RemoteMediaRegistry {
   audioContextToken: number;
   voiceDetectionTimer: ReturnType<typeof setTimeout> | null;
   externalSpeakingUsers: Set<string>;
+  remoteSourcePhases: Map<string, "announced" | "renderable">;
 
   constructor({
     audioFeeds,
@@ -109,6 +110,7 @@ export class RemoteMediaRegistry {
     this.audioContextToken = 0;
     this.voiceDetectionTimer = null;
     this.externalSpeakingUsers = new Set();
+    this.remoteSourcePhases = new Map();
   }
 
   bind(entry: RemoteMediaEntry, { staged = false }: { staged?: boolean } = {}) {
@@ -141,6 +143,7 @@ export class RemoteMediaRegistry {
       };
       feeds.value.set(entry.key, normalized);
       triggerRef(feeds);
+      this.remoteSourcePhases.set(entry.key, "announced");
       if (entry.kind === "video") {
         this.onVideoReceivingChange?.(normalized, Boolean(receiving));
         if (entry.source === "screen")
@@ -151,6 +154,7 @@ export class RemoteMediaRegistry {
     }
     if (!entry?.track) return;
     const trackEntry = { ...entry, track: entry.track };
+    this.remoteSourcePhases.set(entry.key, "renderable");
     if (entry.track.kind === "video") {
       const current = this.videoFeeds.value.get(entry.key);
       const stream =
@@ -286,6 +290,7 @@ export class RemoteMediaRegistry {
     if (owner?.track && current.track !== owner.track) return;
     this.audioFeeds.value.delete(key);
     this.videoFeeds.value.delete(key);
+    this.remoteSourcePhases.delete(key);
     triggerRef(this.audioFeeds);
     triggerRef(this.videoFeeds);
     if (audio) this.removeAudioTrack(audio);

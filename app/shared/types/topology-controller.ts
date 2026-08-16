@@ -29,6 +29,7 @@ export interface TopologyData {
   } | null;
   epoch?: number | string;
   sourceRevision?: number | string;
+  roomRevision?: string | number;
   preparedEpoch?: number | string | null;
   reason?: string | null;
   transitionFailure?: unknown;

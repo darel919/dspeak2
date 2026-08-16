@@ -61,6 +61,12 @@ export interface LifecycleDependencyContext {
     sfuRoundTripTime: Ref<unknown>;
     sendSourceState: () => unknown;
     setupMessageHandlers: (options: Record<string, unknown>) => void;
+    resolveOperationAck: (operationId: string) => unknown;
+    rejectOperationAck: (operationId: string, error: unknown) => unknown;
+    getConnectionEpoch: () => number;
+    getLastAppliedRoomRevision: () => string;
+    applyRoomRevision: (roomRevision: string) => unknown;
+    requestSnapshot: () => unknown;
     receiveAttenuation: (data: unknown) => unknown;
     handleProviderFailure: (data: unknown) => unknown;
     handleP2pQualification: (data: unknown) => unknown;
@@ -137,6 +143,12 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   sfuProducerIds: () => string[];
   sendParticipantVoiceState: () => unknown;
   sendSourceState: () => unknown;
+  resolveOperationAck: (operationId: string) => unknown;
+  rejectOperationAck: (operationId: string, error: unknown) => unknown;
+  getConnectionEpoch: () => number;
+  getLastAppliedRoomRevision: () => string;
+  applyRoomRevision: (roomRevision: string) => unknown;
+  requestSnapshot: () => unknown;
   setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => void;
   setupMessageHandlers: (options: Record<string, unknown>) => void;
   queueCloudflarePublication: (data: unknown) => unknown;

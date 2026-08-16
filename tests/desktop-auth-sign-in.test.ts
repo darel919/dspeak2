@@ -112,3 +112,95 @@ test("web sign-in finishes after exchanging the callback", () => {
     /window\.location\.replace\([\s\S]*tauri:\/\/callback/,
   );
 });
+
+test("duplicate callback joins the in-flight promise before exchange-state logic", () => {
+  assert.ok(
+    authStore.indexOf(
+      "if (desktopCallbackPromise && desktopCallbackCode === callbackCode) {",
+    ) < authStore.indexOf("if (desktopOAuthSessionExchanged) {"),
+    "same-callback promise check must precede desktopOAuthSessionExchanged",
+  );
+});
+
+test("duplicate callback cannot start a restore while the bridge is in flight", () => {
+  assert.ok(
+    authStore.indexOf("return desktopCallbackPromise;") <
+      authStore.indexOf("if (await restoreSessionDetailed())"),
+    "in-flight promise join must come before restore fallback",
+  );
+});
+
+test("original bridge error is rethrown through the restore fallback", () => {
+  assert.match(
+    authStore,
+    /catch \(error\) \{[\s\S]*?if \(await restoreSession\(\)\) \{[\s\S]*?return true;\s*\}[\s\S]*?throw error;/,
+  );
+  assert.match(authStore, /throw error;/);
+  assert.match(
+    authStore,
+    /if \(\n\s*desktopCallbackPromiseError &&\n\s*isDesktopAuthError\(desktopCallbackPromiseError\)\n\s*\) \{[\s\S]*?throw desktopCallbackPromiseError;/,
+  );
+});
+
+test("stale promise error resets on clear and new attempts", () => {
+  assert.match(
+    authStore,
+    /function clearDesktopOAuthAttempt\(\) \{[\s\S]*?desktopCallbackPromiseError = null;/,
+  );
+  assert.match(
+    authStore,
+    /desktopCallbackCode = callbackCode;\n\s*desktopCallbackPromiseError = null;/,
+  );
+  assert.match(
+    authStore,
+    /request\.then\(\s*\(\) => \{[\s\S]*?desktopCallbackPromiseError = null;\s*\},/,
+  );
+});
+
+test("callback ownership is explicit and atomic", () => {
+  assert.match(authStore, /const request = \(async \(\) => \{/);
+  assert.match(
+    authStore,
+    /desktopCallbackCode = callbackCode;\n\s*desktopCallbackPromiseError = null;\n\s*const request/,
+  );
+  assert.match(
+    authStore,
+    /desktopCallbackPromise = request;\n\s*request\.then\(/,
+  );
+});
+
+test("restore failures carry diagnostic reasons", () => {
+  assert.match(authStore, /type RestoreSessionResult/);
+  assert.match(
+    authStore,
+    /"NO_SUPABASE_SESSION"|"TRANSPORT_ERROR"|"HTTP_ERROR"|"INVALID_PAYLOAD"|"UNKNOWN"/,
+  );
+  assert.match(authStore, /restoreSessionDetailed/);
+});
+
+test("restore-only fallback is last resort with no preserved bridge error", () => {
+  assert.match(
+    authStore,
+    /desktopCallbackPromiseError &&\n\s*isDesktopAuthError\(desktopCallbackPromiseError\)\n\s*\) \{[\s\S]*?throw desktopCallbackPromiseError;\n\s*\}\n\s*if \(await restoreSessionDetailed\(\)\) return true;/,
+  );
+  assert.match(authStore, /DESKTOP_API_SESSION_RESTORE_FAILED/);
+});
+
+test("event and polling both converge on completeDesktopSignIn", () => {
+  assert.match(
+    desktopCallback,
+    /authStore\.completeDesktopSignIn\(code, payload\?\.state/,
+  );
+  assert.match(authPage, /authStore\.completePendingDesktopSignIn\(\)/);
+  assert.match(
+    authStore,
+    /return completeDesktopSignIn\(pending\.code, pending\.state/,
+  );
+});
+
+test("different callback code while a promise is in flight is rejected", () => {
+  assert.match(
+    authStore,
+    /if \(desktopCallbackPromise && desktopCallbackCode === callbackCode\) \{[\s\S]*?return desktopCallbackPromise;[\s\S]*?\}\n\s*if \(desktopCallbackPromise && desktopCallbackCode !== callbackCode\) \{[\s\S]*?throw withDesktopDiagnostics\(/,
+  );
+});

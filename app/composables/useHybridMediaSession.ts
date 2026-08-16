@@ -142,6 +142,8 @@ export function useHybridMediaSession() {
   const participantSfuRoundTripTimes = ref<Record<string, unknown>>({});
   const activeProviderState = ref<string | null>(null);
   const topologyState = ref<HybridTopologyState>(initialMediaTopologyState());
+  const lastAppliedRoomRevision = ref("0");
+  let sessionConnectionEpoch = 1;
   const topologyGraph = ref(
     buildTopologyGraph({ mode: "idle", participantIds: [] }),
   );
@@ -204,6 +206,8 @@ export function useHybridMediaSession() {
   const signaling = createHybridMediaSignaling({
     buildClientHelloData: ({ mediaSessionId }: { mediaSessionId: string }) => ({
       mediaSessionId,
+      connectionEpoch: sessionConnectionEpoch,
+      lastAppliedRoomRevision: lastAppliedRoomRevision.value,
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
       ...(mediaCapabilities.value
         ? {
@@ -217,8 +221,11 @@ export function useHybridMediaSession() {
     }),
     buildHeartbeatData: (sequence: number) => ({
       sequence,
+      connectionEpoch: sessionConnectionEpoch,
       topologyEpoch: topologyState.value.epoch,
       sourceRevision: topologyState.value.sourceRevision || 0,
+      lastAppliedRoomRevision: lastAppliedRoomRevision.value,
+      localSourceDigest: sourceController.getSourceFsmDigest(),
     }),
     buildUrl: () => {
       if (!mediaControlSocketUrlState.value)
@@ -495,7 +502,9 @@ export function useHybridMediaSession() {
     createSharedAudioSource,
     error,
     getActiveProvider: () => activeProvider,
+    getConnectionEpoch: () => sessionConnectionEpoch,
     getIntentionalClose: () => intentionalClose,
+    getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
     getP2pMesh: () => p2pMesh,
     getSfu: () => sfu,
     getVideoReport: (source: string) => {
@@ -540,6 +549,8 @@ export function useHybridMediaSession() {
   const {
     restartAudioProduction,
     sendParticipantVoiceState,
+    resolveOperationAck,
+    rejectOperationAck,
     startAudioProduction,
     startSystemAudioProduction,
     startVideoProduction,
@@ -547,6 +558,16 @@ export function useHybridMediaSession() {
     stopSystemAudioProduction,
     stopVideoProduction,
   } = sourceController;
+  function applyRoomRevision(roomRevision: string) {
+    if (Number(roomRevision) > Number(lastAppliedRoomRevision.value))
+      lastAppliedRoomRevision.value = roomRevision;
+  }
+  function requestSnapshot() {
+    send({
+      type: "request-snapshot",
+      data: { connectionEpoch: sessionConnectionEpoch },
+    });
+  }
   const {
     getInboundRtpStats,
     getOutboundRtpStats,
@@ -631,6 +652,7 @@ export function useHybridMediaSession() {
     setProviderSocket: (value: HybridProviderSocket | null) => {
       providerSocket = value;
     },
+    sendLeave: () => sourceController.leave(),
     setSfu: (value: HybridSfuSession | null) => {
       sfu = value;
     },
@@ -813,6 +835,12 @@ export function useHybridMediaSession() {
     sfuProducerIds,
     sendParticipantVoiceState,
     sendSourceState: () => sourceController.sendSourceState(),
+    resolveOperationAck,
+    rejectOperationAck,
+    getConnectionEpoch: () => sessionConnectionEpoch,
+    getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
+    applyRoomRevision,
+    requestSnapshot,
     setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => {
       topologyWaiter = waiter;
     },

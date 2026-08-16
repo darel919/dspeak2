@@ -55,6 +55,21 @@ export function createHybridMediaSessionLifecycle({
   let refreshTicketPromise: Promise<unknown> | null = null;
   let lifecycleGeneration = 0;
   let activeConnectionGeneration = 0;
+  let reconcileTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startReconciliation() {
+    stopReconciliation();
+    reconcileTimer = setInterval(() => {
+      if (getIntentionalClose() || !signaling.getSocket()) return;
+      mediaSessionSetup.requestSnapshot();
+    }, 15000);
+  }
+  function stopReconciliation() {
+    if (reconcileTimer) {
+      clearInterval(reconcileTimer);
+      reconcileTimer = null;
+    }
+  }
 
   function createCancellationError() {
     const cancellation = new Error("Media signaling connection stopped");
@@ -213,6 +228,7 @@ export function createHybridMediaSessionLifecycle({
       timeoutMs: runtimeConnectionTimeoutMs,
     });
     assertCurrent(generation);
+    startReconciliation();
     mediaDebug("session.lifecycle-ready", {
       channelId: nextChannelId,
       topologyEpoch: topologyState.value.epoch,
@@ -224,11 +240,13 @@ export function createHybridMediaSessionLifecycle({
     lifecycleGeneration += 1;
     activeConnectionGeneration = 0;
     activeBootstrapContext = null;
+    stopReconciliation();
   }
 
   function handleSignalingClose(event: CloseEvent, protocolRejected: boolean) {
     connected.value = false;
     protocolState.value = null;
+    stopReconciliation();
     mediaDebug("session.signaling-close", {
       code: event?.code,
       reason: event?.reason,
@@ -296,6 +314,13 @@ export function createHybridMediaSessionLifecycle({
       registerHandler: (type: string, handler: (data: unknown) => unknown) =>
         messageHandlers.set(type, handler),
       remoteProducersCount,
+      onOperationAck: (operationId: string) =>
+        mediaSessionSetup.resolveOperationAck(operationId),
+      onOperationError: (operationId: string, error: unknown) =>
+        mediaSessionSetup.rejectOperationAck(operationId, error),
+      onRoomRevisionApplied: (roomRevision: string) =>
+        mediaSessionSetup.applyRoomRevision(roomRevision),
+      onSnapshotRequested: () => mediaSessionSetup.requestSnapshot(),
       onServerConnected: () => {
         if (
           activeConnectionGeneration !== lifecycleGeneration ||

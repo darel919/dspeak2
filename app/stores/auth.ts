@@ -67,6 +67,7 @@ export const useAuthStore = defineStore("auths", () => {
     desktopOAuth.clear();
     desktopOAuthCallbackReceived = false;
     desktopOAuthSessionExchanged = false;
+    desktopCallbackPromiseError = null;
   }
 
   function sessionBridgePath() {
@@ -304,6 +305,75 @@ export const useAuthStore = defineStore("auths", () => {
     }
   }
 
+  type RestoreSessionResult =
+    | { ok: true }
+    | {
+        ok: false;
+        reason:
+          | "NO_SUPABASE_SESSION"
+          | "TRANSPORT_ERROR"
+          | "HTTP_ERROR"
+          | "INVALID_PAYLOAD"
+          | "UNKNOWN";
+        httpStatus?: number;
+        serverDiagnostic?: string;
+        serverBuildCommit?: string;
+        serverProjectRef?: string;
+      };
+
+  async function restoreSessionDetailed(): Promise<RestoreSessionResult> {
+    const { captureSupabaseSession, getSupabaseClient } =
+      await import("~/utils/supabase-client");
+    if (import.meta.client && !runtimeStore.initialized)
+      await runtimeStore.initialize();
+    await captureSupabaseSession().catch(() => null);
+    try {
+      const supabaseClient = getSupabaseClient();
+      bridgeSupabaseSession(supabaseClient);
+      const sessionResult = await supabaseClient?.auth.getSession();
+      const accessToken = sessionResult?.data?.session?.access_token;
+      if (!accessToken) return { ok: false, reason: "NO_SUPABASE_SESSION" };
+      let response: Response;
+      try {
+        response = await fetch(
+          `${config.public.apiPath}/auth/${sessionBridgePath()}`,
+          {
+            method: "POST",
+            credentials: runtimeStore.isTauri ? "omit" : "include",
+            headers: deviceHeaders({
+              Authorization: `Bearer ${accessToken}`,
+            }),
+          },
+        );
+      } catch {
+        return { ok: false, reason: "TRANSPORT_ERROR" };
+      }
+      if (!response.ok) {
+        const diagnostic = await readDesktopSessionDiagnostic(response);
+        return {
+          ok: false,
+          reason: "HTTP_ERROR",
+          httpStatus: diagnostic.httpStatus,
+          serverDiagnostic: diagnostic.diagnosticCategory,
+          serverBuildCommit: diagnostic.serverBuildCommit,
+          serverProjectRef: diagnostic.serverProjectRef,
+        };
+      }
+      try {
+        const session = (await response.json()) as AuthSessionRecord;
+        if (!isAuthSessionRecord(session)) {
+          return { ok: false, reason: "INVALID_PAYLOAD" };
+        }
+        setUser(session);
+        return { ok: true };
+      } catch {
+        return { ok: false, reason: "INVALID_PAYLOAD" };
+      }
+    } catch {
+      return { ok: false, reason: "UNKNOWN" };
+    }
+  }
+
   async function completeWebSignIn(code: string) {
     const fetchUnknown = $fetch as unknown as (
       url: string,
@@ -437,15 +507,29 @@ export const useAuthStore = defineStore("auths", () => {
         { stage: "oauth-callback" },
       );
     }
+
+    if (desktopCallbackPromise && desktopCallbackCode === callbackCode) {
+      return desktopCallbackPromise;
+    }
+
+    if (desktopCallbackPromise && desktopCallbackCode !== callbackCode) {
+      throw withDesktopDiagnostics(
+        config,
+        "DESKTOP_OAUTH_STATE_MISMATCH",
+        "The sign-in callback could not be verified.",
+        { stage: "oauth-state" },
+      );
+    }
+
     if (desktopOAuthSessionExchanged) {
       if (getUserData()?.id) return true;
-      if (await restoreSession()) return true;
       if (
         desktopCallbackPromiseError &&
         isDesktopAuthError(desktopCallbackPromiseError)
       ) {
         throw desktopCallbackPromiseError;
       }
+      if (await restoreSessionDetailed()) return true;
       throw withDesktopDiagnostics(
         config,
         "DESKTOP_API_SESSION_RESTORE_FAILED",
@@ -453,8 +537,6 @@ export const useAuthStore = defineStore("auths", () => {
         { stage: "session-restore" },
       );
     }
-    if (desktopCallbackPromise && desktopCallbackCode === callbackCode)
-      return desktopCallbackPromise;
 
     if (!desktopOAuthCallbackReceived) {
       console.info("[DesktopAuth] DESKTOP_OAUTH_CALLBACK_RECEIVED");
@@ -473,6 +555,7 @@ export const useAuthStore = defineStore("auths", () => {
     console.info("[DesktopAuth] DESKTOP_OAUTH_STATE_VALIDATED");
 
     desktopCallbackCode = callbackCode;
+    desktopCallbackPromiseError = null;
     const request = (async () => {
       const { getSupabaseClient } = await import("~/utils/supabase-client");
       const client = getSupabaseClient();
@@ -549,15 +632,20 @@ export const useAuthStore = defineStore("auths", () => {
       }
     })();
     desktopCallbackPromise = request;
-    const clearRequest = () => {
-      if (desktopCallbackPromise !== request) return;
-      desktopCallbackPromise = null;
-      desktopCallbackCode = "";
-    };
-    request.then(clearRequest, (error) => {
-      desktopCallbackPromiseError = error;
-      clearRequest();
-    });
+    request.then(
+      () => {
+        if (desktopCallbackPromise !== request) return;
+        desktopCallbackPromise = null;
+        desktopCallbackCode = "";
+        desktopCallbackPromiseError = null;
+      },
+      (error) => {
+        if (desktopCallbackPromise !== request) return;
+        desktopCallbackPromiseError = error;
+        desktopCallbackPromise = null;
+        desktopCallbackCode = "";
+      },
+    );
     return request;
   }
 

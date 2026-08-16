@@ -23,6 +23,7 @@ export interface MediaHandoffReadinessContext {
   localSources: Map<string, TopologySourceEntry>;
   pollIntervalMs: number;
   provider: "p2p" | "sfu";
+  signal?: AbortSignal;
   timeoutMs: number;
   topology: TopologyData;
   topologyEventKey: (data: TopologyData) => string;

@@ -28,6 +28,10 @@ export function setupMediaMessageHandlers({
   onProviderFailure,
   onProviderRecovering,
   onP2pQualification,
+  onOperationAck,
+  onOperationError,
+  onRoomRevisionApplied,
+  onSnapshotRequested,
 }: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
     handlers: [
@@ -50,6 +54,29 @@ export function setupMediaMessageHandlers({
   registerHandler("heartbeat-ack", (data: MediaMessage) => {
     acknowledgeHeartbeat(data);
   });
+  registerHandler("operation-ack", (data: MediaMessage) => {
+    const operationId =
+      typeof data.operationId === "string" ? data.operationId : "";
+    if (operationId) {
+      onOperationAck?.(operationId, data);
+      const roomRevision =
+        typeof data.roomRevision === "string" ? data.roomRevision : null;
+      if (roomRevision) onRoomRevisionApplied?.(roomRevision);
+      if (data.canonicalState) {
+        const topology =
+          typeof data.canonicalState === "object" &&
+          data.canonicalState !== null
+            ? (data.canonicalState as MediaMessage)
+            : null;
+        if (topology) {
+          syncTopologyParticipants(topology);
+          queueTopology(
+            topology as import("./types/topology-controller.ts").TopologyData,
+          );
+        }
+      }
+    }
+  });
   registerHandler("heartbeat-nack", (data: MediaMessage) => {
     if (acknowledgeHeartbeat(data) && data.topology) {
       const topology =
@@ -62,6 +89,22 @@ export function setupMediaMessageHandlers({
         topology as import("./types/topology-controller.ts").TopologyData,
       );
     }
+    if (typeof data.roomRevision === "string")
+      onRoomRevisionApplied?.(data.roomRevision);
+  });
+  registerHandler("state-nack", (data: MediaMessage) => {
+    const topology =
+      typeof data.topology === "object" && data.topology !== null
+        ? (data.topology as MediaMessage)
+        : null;
+    if (topology) {
+      syncTopologyParticipants(topology);
+      queueTopology(
+        topology as import("./types/topology-controller.ts").TopologyData,
+      );
+    }
+    if (typeof data.roomRevision === "string")
+      onRoomRevisionApplied?.(data.roomRevision);
   });
   registerHandler("topology-state", (data: MediaMessage) => {
     syncTopologyParticipants(data);
@@ -78,6 +121,26 @@ export function setupMediaMessageHandlers({
       code: data?.code,
       error: data?.error,
     });
+    if (
+      typeof data.operationId === "string" &&
+      data.operationId &&
+      typeof data.code === "string"
+    )
+      onOperationError?.(
+        data.operationId,
+        new Error(
+          `${data.code}: ${
+            typeof data.error === "string" ? data.error : "operation failed"
+          }`,
+        ),
+      );
+    if (typeof data.roomRevision === "string")
+      onRoomRevisionApplied?.(data.roomRevision);
+    if (
+      data.code === "ROOM_REVISION_CONFLICT" ||
+      data.code === "STALE_CONNECTION_EPOCH"
+    )
+      onSnapshotRequested?.();
     const error = new Error(
       typeof data.error === "string" ? data.error : "Media control error",
     );

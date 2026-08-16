@@ -16,7 +16,9 @@ function controller(overrides = {}) {
     createSharedAudioSource: async (entry) => entry,
     error,
     getActiveProvider: () => "sfu",
+    getConnectionEpoch: () => 1,
     getIntentionalClose: () => false,
+    getLastAppliedRoomRevision: () => "0",
     getP2pMesh: () => null,
     getSfu: () => null,
     localSources,
@@ -87,11 +89,12 @@ test("unexpected microphone capture loss marks the local participant muted", asy
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(voiceStore.micMuted, true);
-  assert.deepEqual(
-    harness.sent.find((message) => message.type === "participant-voice-state")
-      ?.data,
-    { muted: true, deafened: false },
-  );
+  const voiceMessage = harness.sent.find(
+    (message) => message.type === "participant-voice-state",
+  )?.data;
+  assert.equal(voiceMessage?.muted, true);
+  assert.equal(voiceMessage?.deafened, false);
+  assert.equal(typeof voiceMessage?.operationId, "string");
   assert.match(harness.error.value, /capture ended/i);
 });
 
@@ -348,4 +351,29 @@ test("new sources publish to the active and preparing transports", async () => {
   });
 
   assert.deepEqual(published, ["p2p:screen-audio", "sfu:screen-audio"]);
+});
+
+test("leave sends a clean leave mutation with operationId and epoch", async () => {
+  const harness = controller();
+  const promise = harness.instance.leave();
+  const leaveMessage = harness.sent.find(
+    (message) => message.type === "leave",
+  )?.data;
+  assert.equal(typeof leaveMessage?.operationId, "string");
+  assert.equal(leaveMessage?.requestId, leaveMessage?.operationId);
+  assert.equal(leaveMessage?.connectionEpoch, 1);
+  harness.instance.resolveOperationAck(leaveMessage.operationId);
+  await promise;
+});
+
+test("source-state mutation carries the connection envelope and FSM digest", async () => {
+  const harness = controller();
+  harness.instance.sendSourceState();
+  const sourceMessage = harness.sent.find(
+    (message) => message.type === "media-sources",
+  )?.data;
+  assert.equal(typeof sourceMessage?.operationId, "string");
+  assert.equal(sourceMessage?.connectionEpoch, 1);
+  assert.equal(sourceMessage?.expectedRoomRevision, "0");
+  assert.ok(sourceMessage?.sourceStates);
 });

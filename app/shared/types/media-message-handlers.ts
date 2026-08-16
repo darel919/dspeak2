@@ -37,4 +37,8 @@ export interface MediaMessageHandlersContext {
   onProviderFailure: (data: MediaMessage) => unknown;
   onProviderRecovering: (data: MediaMessage) => unknown;
   onP2pQualification: (data: MediaMessage) => unknown;
+  onOperationAck?: (operationId: string, data?: MediaMessage) => unknown;
+  onOperationError?: (operationId: string, error: unknown) => unknown;
+  onRoomRevisionApplied?: (roomRevision: string) => unknown;
+  onSnapshotRequested?: () => unknown;
 }
