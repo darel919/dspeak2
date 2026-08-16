@@ -15,6 +15,8 @@ export function createDesktopAuthError(
   error.serverProjectRef = metadata.serverProjectRef || "";
   error.clientBuildCommit = metadata.clientBuildCommit || "";
   error.clientProjectRef = metadata.clientProjectRef || "";
+  error.requestId = metadata.requestId || "";
+  error.transport = metadata.transport || "webview-fetch";
 
   return error;
 }

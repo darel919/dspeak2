@@ -24,6 +24,7 @@ export class CloudflareRealtimeSession {
   declare negotiationQueue: Promise<unknown>;
   declare sourceOperations: CloudflareSessionLike["sourceOperations"];
   declare sessionGeneration: number;
+  declare connectionEpoch: number;
   declare lastSentClientRtpCapabilities: unknown;
   declare lastReceivedConsumerParams: CloudflareSessionLike["lastReceivedConsumerParams"];
   constructor({
@@ -58,6 +59,7 @@ export class CloudflareRealtimeSession {
     this.negotiationQueue = Promise.resolve();
     this.sourceOperations = new Map();
     this.sessionGeneration = 0;
+    this.connectionEpoch = 0;
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
   }

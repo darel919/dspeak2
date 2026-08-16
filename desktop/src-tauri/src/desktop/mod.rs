@@ -142,6 +142,8 @@ pub(crate) fn run() {
             window::restore_window_state,
             window::set_hide_on_close,
             window::get_hide_on_close,
+            window::desktop_open_devtools,
+            window::desktop_close_devtools,
             oauth::get_oauth_callback_url,
             oauth::get_pending_oauth_callback,
             window::desktop_ready,

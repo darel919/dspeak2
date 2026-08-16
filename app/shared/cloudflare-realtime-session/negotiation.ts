@@ -252,6 +252,22 @@ export class CloudflareNegotiationMethods {
       }
       const publication = data as CloudflarePublication;
       publication.trackName = trackName;
+
+      // Generation/epoch fencing: ignore stale publications for retired generations
+      const existingPublication = this.publications.get(trackName);
+      if (existingPublication) {
+        const existingGen = Number(existingPublication.generation || 0);
+        const newGen = Number(publication.generation || 0);
+        const existingEpoch = Number(existingPublication.connectionEpoch || 0);
+        const newEpoch = Number(publication.connectionEpoch || 0);
+        if (
+          newGen < existingGen ||
+          (newGen === existingGen && newEpoch < existingEpoch)
+        ) {
+          return true; // stale publication, ignore
+        }
+      }
+
       this.publications.set(trackName, publication);
       if (this.sessionId && this.subscriptionsStarted)
         await this.subscribe(publication, this.sessionGeneration);

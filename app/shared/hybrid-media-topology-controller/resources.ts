@@ -149,6 +149,25 @@ export function createTopologyResourceHelpers({
     });
   }
 
+  function handleProviderRecovering(data: Record<string, unknown> = {}) {
+    const retryAt = Number(data.retryAt);
+    const reason = data.reason || "provider-recovering";
+    if (!Number.isSafeInteger(retryAt) || retryAt <= Date.now()) return;
+    mediaConnectionState.value = "recovering";
+    setConnectionPhase("reconnecting", {
+      topologyEpoch: topologyState.value.epoch,
+      reason,
+      retryAt,
+    });
+    mediaDebug("topology.provider-recovering", {
+      retryAt,
+      retryAfterMs: data.retryAfterMs,
+      reason,
+    });
+    // Queue a topology check - the provider will be retried when alarm fires on server
+    // and sends a new route-commit with the recovered provider
+  }
+
   function handleP2pQualification(data: Record<string, unknown> = {}) {
     const epoch = Number(data.epoch);
     if (!Number.isSafeInteger(epoch) || epoch < topologyState.value.epoch)
@@ -173,5 +192,6 @@ export function createTopologyResourceHelpers({
     ensureP2p,
     handleP2pQualification,
     handleProviderFailure,
+    handleProviderRecovering,
   };
 }

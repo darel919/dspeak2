@@ -193,6 +193,7 @@ jobs:
       - name: Build dSpeak Desktop
         env:
           DSPEAK_PUBLIC_ORIGIN: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
+          VITE_DSPEAK_API_PATH: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
           SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           DSPEAK_TAURI_PUBLIC_KEY: ${{ secrets.DSPEAK_TAURI_PUBLIC_KEY }}

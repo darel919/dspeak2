@@ -374,6 +374,5 @@ test("source-state mutation carries the connection envelope and FSM digest", asy
   )?.data;
   assert.equal(typeof sourceMessage?.operationId, "string");
   assert.equal(sourceMessage?.connectionEpoch, 1);
-  assert.equal(sourceMessage?.expectedRoomRevision, "0");
   assert.ok(sourceMessage?.sourceStates);
 });

@@ -107,6 +107,39 @@
             HTTP {{ failureDiagnostic.httpStatus }}
           </p>
           <p v-else>HTTP: no response</p>
+          <p v-if="failureDiagnostic.transport">
+            Transport: {{ failureDiagnostic.transport }}
+          </p>
+          <p v-if="failureDiagnostic.requestId">
+            Request ID: {{ failureDiagnostic.requestId }}
+          </p>
+          <p v-if="failureDiagnostic.requestUrl">
+            Request: {{ failureDiagnostic.requestUrl }}
+          </p>
+          <p v-if="failureDiagnostic.responseUrl">
+            Response: {{ failureDiagnostic.responseUrl }}
+          </p>
+          <p v-if="failureDiagnostic.redirected !== undefined">
+            Redirected: {{ failureDiagnostic.redirected ? "yes" : "no" }}
+          </p>
+          <p v-if="failureDiagnostic.statusText">
+            Response status text: {{ failureDiagnostic.statusText }}
+          </p>
+          <p v-if="failureDiagnostic.retryAfter">
+            Retry-After: {{ failureDiagnostic.retryAfter }}
+          </p>
+          <p v-if="failureDiagnostic.serverHeader">
+            Server: {{ failureDiagnostic.serverHeader }}
+          </p>
+          <p v-if="failureDiagnostic.viaHeader">
+            Via: {{ failureDiagnostic.viaHeader }}
+          </p>
+          <p v-if="failureDiagnostic.vercelRequestId">
+            Vercel ID: {{ failureDiagnostic.vercelRequestId }}
+          </p>
+          <p v-if="failureDiagnostic.cloudflareRay">
+            CF-Ray: {{ failureDiagnostic.cloudflareRay }}
+          </p>
           <p v-if="failureDiagnostic.serverBuildCommit">
             Server {{ failureDiagnostic.serverBuildCommit }}
           </p>
@@ -121,6 +154,9 @@
           </p>
         </div>
         <div class="mt-6 flex flex-wrap gap-3">
+          <button class="metro-btn" type="button" @click="copyDiagnostics">
+            Copy diagnostics
+          </button>
           <button class="metro-btn" type="button" @click="showTerms = true">
             Try sign-in again
           </button>
@@ -256,6 +292,40 @@ function signInFailureMessage(error, fallback) {
   )
     return "Your Google sign-in succeeded, but dSpeak could not create your app session.";
   return fallback;
+}
+
+function copyDiagnostics() {
+  const diag = failureDiagnostic.value;
+  if (!diag) return;
+
+  const lines = [
+    `Code: ${diag.code}`,
+    `Stage: ${diag.stage}`,
+    diag.httpStatus !== null && diag.httpStatus !== undefined
+      ? `HTTP: ${diag.httpStatus}`
+      : "HTTP: no response",
+    diag.transport ? `Transport: ${diag.transport}` : "",
+    diag.requestId ? `Request ID: ${diag.requestId}` : "",
+    diag.requestUrl ? `Request URL: ${diag.requestUrl}` : "",
+    diag.responseUrl ? `Response URL: ${diag.responseUrl}` : "",
+    diag.redirected !== undefined
+      ? `Redirected: ${diag.redirected ? "yes" : "no"}`
+      : "",
+    diag.statusText ? `Response status text: ${diag.statusText}` : "",
+    diag.retryAfter ? `Retry-After: ${diag.retryAfter}` : "",
+    diag.serverHeader ? `Server: ${diag.serverHeader}` : "",
+    diag.viaHeader ? `Via: ${diag.viaHeader}` : "",
+    diag.vercelRequestId ? `Vercel ID: ${diag.vercelRequestId}` : "",
+    diag.cloudflareRay ? `CF-Ray: ${diag.cloudflareRay}` : "",
+    diag.serverBuildCommit ? `Server build: ${diag.serverBuildCommit}` : "",
+    diag.clientBuildCommit ? `Client build: ${diag.clientBuildCommit}` : "",
+    diag.serverProjectRef ? `Server project: ${diag.serverProjectRef}` : "",
+    diag.clientProjectRef ? `Client project: ${diag.clientProjectRef}` : "",
+  ].filter(Boolean);
+
+  navigator.clipboard.writeText(lines.join("\n")).catch((err) => {
+    console.error("[Auth] Failed to copy diagnostics:", err);
+  });
 }
 
 async function openLegalUrl(path) {

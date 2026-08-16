@@ -112,7 +112,8 @@
       >
         <canvas
           ref="nativeCanvasElement"
-          class="block h-full w-full object-contain"
+          class="block h-full w-full"
+          :class="source === 'camera' ? 'object-cover' : 'object-contain'"
         />
         <span
           v-if="!nativeFrame"
@@ -131,7 +132,8 @@
         @canplay="handleVideoReady"
         @stalled="recoverVideoPlayback"
         @waiting="recoverVideoPlayback"
-        class="block h-full w-full object-contain"
+        class="block h-full w-full"
+        :class="source === 'camera' ? 'object-cover' : 'object-contain'"
       />
       <figcaption
         class="absolute bottom-2 left-2 bg-black/70 px-2 py-1 text-xs text-white"

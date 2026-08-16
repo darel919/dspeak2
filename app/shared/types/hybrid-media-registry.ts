@@ -18,6 +18,27 @@ export interface RemoteMediaEntry extends RegistryEntry {
   track?: MediaStreamTrack | null;
   stream?: MediaStream | null;
   receiving?: boolean;
+  // Full receiver FSM for each logical remote source generation
+  connectionEpoch?: number;
+  sourceGeneration?: number;
+  phase?:
+    | "not-announced"
+    | "announced"
+    | "publication-discovered"
+    | "subscription-requested"
+    | "consumer-created"
+    | "transport-connected"
+    | "rtp-flowing"
+    | "first-frame"
+    | "renderable"
+    | "stalled"
+    | "recovering"
+    | "retired"
+    | "failed";
+  rtpActivityAt?: number;
+  firstFrameAt?: number;
+  stallDetectedAt?: number;
+  recoveryAttempts?: number;
 }
 
 export interface AudioGraphTrack {

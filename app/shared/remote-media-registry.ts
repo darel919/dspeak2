@@ -74,7 +74,22 @@ export class RemoteMediaRegistry {
   audioContextToken: number;
   voiceDetectionTimer: ReturnType<typeof setTimeout> | null;
   externalSpeakingUsers: Set<string>;
-  remoteSourcePhases: Map<string, "announced" | "renderable">;
+  remoteSourcePhases: Map<
+    string,
+    | "not-announced"
+    | "announced"
+    | "publication-discovered"
+    | "subscription-requested"
+    | "consumer-created"
+    | "transport-connected"
+    | "rtp-flowing"
+    | "first-frame"
+    | "renderable"
+    | "stalled"
+    | "recovering"
+    | "retired"
+    | "failed"
+  >;
 
   constructor({
     audioFeeds,
@@ -140,6 +155,9 @@ export class RemoteMediaRegistry {
         ...entry,
         stream: null,
         receiving,
+        phase: "announced",
+        connectionEpoch: entry.connectionEpoch,
+        sourceGeneration: entry.sourceGeneration,
       };
       feeds.value.set(entry.key, normalized);
       triggerRef(feeds);
@@ -154,6 +172,14 @@ export class RemoteMediaRegistry {
     }
     if (!entry?.track) return;
     const trackEntry = { ...entry, track: entry.track };
+    // Update FSM phase to renderable when track is available
+    if (
+      entry.sourceGeneration !== undefined &&
+      entry.connectionEpoch !== undefined
+    ) {
+      trackEntry.phase = "renderable";
+      trackEntry.firstFrameAt = Date.now();
+    }
     this.remoteSourcePhases.set(entry.key, "renderable");
     if (entry.track.kind === "video") {
       const current = this.videoFeeds.value.get(entry.key);

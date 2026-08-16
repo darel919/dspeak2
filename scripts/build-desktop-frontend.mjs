@@ -53,6 +53,19 @@ if (!existsSync(nuxi)) {
   throw new Error(`Nuxt CLI is missing at ${nuxi}`);
 }
 
+const supabaseProjectRef = desktopSupabaseUrl
+  ? new URL(desktopSupabaseUrl).hostname.split(".")[0]
+  : "";
+
+console.info("[DesktopBuild] API origin:", desktopApiOrigin);
+console.info("[DesktopBuild] Public origin:", desktopPublicOrigin);
+console.info("[DesktopBuild] Supabase project:", supabaseProjectRef);
+
+const apiUrl = new URL(desktopApiOrigin);
+if (apiUrl.protocol !== "https:") {
+  throw new Error("Desktop production API origin must use HTTPS");
+}
+
 rmSync(desktopOutput, { force: true, recursive: true });
 
 const result = spawnSync(process.execPath, [nuxi, "generate"], {

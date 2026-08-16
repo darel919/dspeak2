@@ -35,6 +35,8 @@ test("Cloudflare publication replacement and closure remove stale tracks", () =>
     trackName: "track-old",
     peerId: "peer-1",
     source: "screen",
+    connectionEpoch: 1,
+    generation: 1,
     closed: true,
   });
   assert.deepEqual(registry.values(), [replacement]);

@@ -206,7 +206,10 @@ export const methods: Record<string, unknown> = {
     entry.producer.close();
     entry.track.stop();
     if (sent === false) {
-      this.closeMedia();
+      // Only close media if the entire session is actually invalid
+      // For individual source failures, we should only mark that source as failed
+      // rather than destroying all media
+      // The recovery layer will handle this appropriately
       throw new Error("Media control is unavailable");
     }
   },

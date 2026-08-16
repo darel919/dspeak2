@@ -49,8 +49,13 @@ export default defineEventHandler(async (event) => {
   if (configuredSupabaseProjectRef)
     setHeader(event, "X-dSpeak-Supabase-Project", configuredSupabaseProjectRef);
 
+  const requestId =
+    getHeader(event, "x-dspeak-request-id") || crypto.randomUUID();
+  setHeader(event, "X-dSpeak-Request-ID", requestId);
+
   const hasAuthorization = Boolean(getHeader(event, "authorization"));
   console.info("[DesktopAuth] DESKTOP_SESSION_REQUEST_RECEIVED", {
+    requestId,
     hasAuthorization,
     projectRef: configuredSupabaseProjectRef,
   });

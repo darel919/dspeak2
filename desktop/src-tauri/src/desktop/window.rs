@@ -3,8 +3,19 @@ use crate::media;
 use std::sync::atomic::Ordering;
 use tauri::Manager;
 use tauri::WebviewUrl;
+use tauri::WebviewWindow;
 
 const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.json";
+
+#[tauri::command]
+pub fn desktop_open_devtools(window: WebviewWindow) {
+    window.open_devtools();
+}
+
+#[tauri::command]
+pub fn desktop_close_devtools(window: WebviewWindow) {
+    window.close_devtools();
+}
 
 #[tauri::command]
 pub fn desktop_ready(app: tauri::AppHandle) -> Result<(), String> {
@@ -90,6 +101,7 @@ pub(crate) fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
 
     let window =
         tauri::WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            .devtools(true)
             .title("dSpeak")
             .inner_size(1200.0, 800.0)
             .resizable(true)

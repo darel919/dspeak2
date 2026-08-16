@@ -3,6 +3,15 @@ export type DesktopSessionDiagnostic = {
   serverBuildCommit: string;
   httpStatus: number;
   serverProjectRef: string;
+  requestUrl: string;
+  responseUrl: string;
+  redirected: boolean;
+  statusText: string;
+  retryAfter: string;
+  serverHeader: string;
+  viaHeader: string;
+  vercelRequestId: string;
+  cloudflareRay: string;
 };
 
 export type DesktopFailureDiagnostic = {
@@ -13,6 +22,8 @@ export type DesktopFailureDiagnostic = {
   clientBuildCommit: string;
   serverProjectRef: string;
   clientProjectRef: string;
+  requestId: string;
+  transport: "webview-fetch" | "tauri-http";
 };
 
 export function mapFailureDiagnostic(
@@ -54,6 +65,13 @@ export function mapFailureDiagnostic(
       typeof record.clientProjectRef === "string"
         ? record.clientProjectRef
         : "",
+    requestId: typeof record.requestId === "string" ? record.requestId : "",
+    transport:
+      typeof record.transport === "string" &&
+      (record.transport === "webview-fetch" ||
+        record.transport === "tauri-http")
+        ? record.transport
+        : "webview-fetch",
   };
 }
 
@@ -67,6 +85,7 @@ export function supabaseProjectRef(url: string): string {
 
 export async function readDesktopSessionDiagnostic(
   response: Response,
+  requestUrl: string = "",
 ): Promise<DesktopSessionDiagnostic> {
   let diagnosticCategory = response.statusText || "http-error";
   try {
@@ -82,5 +101,14 @@ export async function readDesktopSessionDiagnostic(
     serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
     httpStatus: response.status,
     serverProjectRef: response.headers.get("X-dSpeak-Supabase-Project") || "",
+    requestUrl,
+    responseUrl: response.url,
+    redirected: response.redirected,
+    statusText: response.statusText,
+    retryAfter: response.headers.get("retry-after") || "",
+    serverHeader: response.headers.get("server") || "",
+    viaHeader: response.headers.get("via") || "",
+    vercelRequestId: response.headers.get("x-vercel-id") || "",
+    cloudflareRay: response.headers.get("cf-ray") || "",
   };
 }

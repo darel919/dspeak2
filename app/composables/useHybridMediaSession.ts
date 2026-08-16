@@ -559,7 +559,7 @@ export function useHybridMediaSession() {
     stopVideoProduction,
   } = sourceController;
   function applyRoomRevision(roomRevision: string) {
-    if (Number(roomRevision) > Number(lastAppliedRoomRevision.value))
+    if (BigInt(roomRevision) > BigInt(lastAppliedRoomRevision.value))
       lastAppliedRoomRevision.value = roomRevision;
   }
   function requestSnapshot() {
@@ -820,6 +820,8 @@ export function useHybridMediaSession() {
     getBootstrap: getMediaControlBootstrap,
     handleP2pQualification,
     handleProviderFailure,
+    handleProviderRecovering: (data: Record<string, unknown>) =>
+      topologyController?.handleProviderRecovering(data),
     handleProviderTicket: (data: Record<string, unknown>) =>
       topologyController?.handleProviderTicket(data),
     mediaPathMetrics,

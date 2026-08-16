@@ -29,6 +29,8 @@ export function useGlobalKeyboardShortcuts() {
   function init() {
     if (!import.meta.client) return;
 
+    const runtimeStore = useRuntimeStore();
+
     cleanups = [
       register("toggle-mic", ["Mod+Shift+m"], () => {
         runVoiceAction((voiceStore) => voiceStore.toggleMic());
@@ -60,7 +62,17 @@ export function useGlobalKeyboardShortcuts() {
         }
       }),
 
-      register("toggle-rtc-debug", ["Mod+Shift+i"], () => {
+      register("open-devtools", ["Mod+Shift+i", "F12"], () => {
+        if (!runtimeStore.isTauri) return false;
+
+        void import("@tauri-apps/api/core")
+          .then(({ invoke }) => invoke("desktop_open_devtools"))
+          .catch((error) => {
+            console.error("[DesktopDebug] DEVTOOLS_OPEN_FAILED", error);
+          });
+      }),
+
+      register("toggle-rtc-debug", ["Mod+Shift+r"], () => {
         const visible = useState("rtc-summary-visible");
         visible.value = !visible.value;
       }),

@@ -84,6 +84,7 @@ export function createHybridMediaTopologyController({
     ensureP2p,
     handleP2pQualification,
     handleProviderFailure,
+    handleProviderRecovering,
   } = createTopologyResourceHelpers({
     NativeP2pMesh: NativeP2pMesh as never,
     buildP2pVideoSenderOptions,
@@ -338,7 +339,8 @@ export function createHybridMediaTopologyController({
       data.mode === getActiveProvider() &&
       (data.mode !== "sfu" || activeSfuMatches)
     ) {
-      await updateActiveTopology(data, generation, signal);
+      // Same provider - start convergence without blocking pipeline
+      startConvergence(data, generation, signal);
       return;
     }
     if (data.mode === "idle") {
@@ -371,37 +373,106 @@ export function createHybridMediaTopologyController({
       iceConnectedBoth.value = false;
       mediaConnectionState.value = "topology-probing";
       refreshTopologyGraph();
+      // Start P2P convergence without blocking pipeline
+      startConvergence(data, generation, signal);
       return;
     }
-    if (data.mode === "switching") {
-      mediaConnectionState.value = "recovering";
-      await prepareTransition(data, generation, signal);
-      return;
-    }
-    if (data.mode === "p2p") {
-      await activateP2p(data, generation, signal);
-      return;
-    }
-    if (data.mode === "sfu") await activateSfu(data, generation, signal);
+    // Mode switch (p2p <-> sfu) - transition with async convergence
+    startTopologyTransition(data, generation, signal);
   }
 
-  async function publishLocalSources(
-    provider: TopologyP2pMesh | TopologySfuSession | null,
+  function startConvergence(
+    data: TopologyData,
+    generation: number,
+    signal?: AbortSignal,
   ) {
-    if (!provider) return;
-    await Promise.all(
-      [...localSources.values()].map((entry) =>
-        provider.publishSource(entry.source, entry.track, entry.stream, entry),
-      ),
-    );
+    // Spawn convergence as independent task - doesn't block topology pipeline
+    const abort = new AbortController();
+    const convergenceSignal = signal
+      ? AbortSignal.any([signal, abort.signal])
+      : abort.signal;
+    mediaGeneration.assert(generation);
+    const provider = getActiveProvider() || data.mode;
+    waitForRemoteTracks(provider, data, convergenceSignal)
+      .then(() => {
+        if (convergenceSignal.aborted) return;
+        const readiness =
+          data.mode === "sfu" ? getSfu()?.connectionState() : { ready: true };
+        transportReady.value = readiness?.ready === true;
+        iceConnectedBoth.value =
+          data.mode === "sfu"
+            ? readiness?.sendRequired === true &&
+              readiness?.receiveRequired === true &&
+              readiness?.send === "connected" &&
+              readiness?.recv === "connected"
+            : getP2pMesh()?.isMediaReady() === true;
+        setRouteConnectionState(
+          transportReady.value
+            ? iceConnectedBoth.value
+              ? "media-flowing"
+              : "ready-no-active-media"
+            : "transport-connecting",
+        );
+        setConnectionPhase("media-ready", {
+          topologyEpoch: Number(data.epoch),
+          topologyMode: data.mode,
+        });
+        error.value = null;
+        refreshPublicMaps();
+        refreshTopologyGraph();
+      })
+      .catch((err) => {
+        if (convergenceSignal.aborted) return;
+        handleTopologyFailure(data, err);
+      });
   }
 
-  async function replayCloudflarePublications(
-    session: TopologySfuSession | null,
+  function startTopologyTransition(
+    data: TopologyData,
+    generation: number,
+    signal?: AbortSignal,
   ) {
-    if (session?.provider !== "cloudflare-realtime") return;
-    for (const publication of onRemotePublication())
-      await session.handle("cloudflare-publication-available", publication);
+    // Mode switch - cleanup old provider, start new one
+    const abort = new AbortController();
+    const transitionSignal = signal
+      ? AbortSignal.any([signal, abort.signal])
+      : abort.signal;
+    mediaGeneration.assert(generation);
+    const transitionPromise = (async () => {
+      if (data.mode === "p2p") {
+        await closeP2pSafely();
+        handoff.retire("p2p");
+        const mesh = ensureP2p();
+        if (!mesh) {
+          send({
+            type: "p2p-failed",
+            data: { epoch: data.epoch, reason: "webrtc-unavailable" },
+          });
+          return;
+        }
+        await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
+        await publishLocalSources(mesh);
+      } else if (data.mode === "sfu") {
+        await closeP2pSafely();
+        handoff.retire("p2p");
+        await ensureQualificationFallback(data, generation);
+      }
+      mediaGeneration.assert(generation);
+      setActiveProvider(data.mode === "p2p" ? "p2p" : "sfu");
+      transportReady.value = getActiveProvider() !== null;
+      iceConnectedBoth.value = false;
+      mediaConnectionState.value = "topology-connecting";
+      setConnectionPhase("media-connecting", {
+        topologyEpoch: Number(data.epoch),
+        topologyMode: data.mode,
+      });
+      // Start convergence after provider setup
+      startConvergence(data, generation, transitionSignal);
+    })();
+    transitionPromise.catch((err) => {
+      if (transitionSignal.aborted) return;
+      handleTopologyFailure(data, err);
+    });
   }
 
   async function ensureQualificationFallback(
@@ -874,6 +945,7 @@ export function createHybridMediaTopologyController({
     ensureSfu,
     handleP2pQualification,
     handleProviderFailure,
+    handleProviderRecovering,
     handleProviderTicket,
     queueTopology,
     reportSfuFailure,

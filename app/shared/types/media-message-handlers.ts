@@ -1,5 +1,6 @@
 import type { Ref } from "vue";
 import type { TopologyData } from "./topology-controller.ts";
+import type { TopologyController } from "./topology-controller.ts";
 
 export type MediaMessage = Record<string, unknown>;
 

@@ -4,6 +4,12 @@ import type {
   MediaMessage,
   MediaMessageHandlersContext,
 } from "./types/media-message-handlers.ts";
+import {
+  getFailureScope,
+  isFailureRetryable,
+  isFailureSessionFatal,
+} from "./types/media-failure.ts";
+import type { TopologyController } from "./types/topology-controller.ts";
 
 export function setupMediaMessageHandlers({
   getHeartbeatSequence,
@@ -50,6 +56,8 @@ export function setupMediaMessageHandlers({
   registerHandler("connected", (data: MediaMessage) => {
     setLocalPeerId(String(data.peerId));
     onServerConnected?.();
+    if (typeof data.roomRevision === "string")
+      onRoomRevisionApplied?.(data.roomRevision);
   });
   registerHandler("heartbeat-ack", (data: MediaMessage) => {
     acknowledgeHeartbeat(data);
@@ -105,6 +113,8 @@ export function setupMediaMessageHandlers({
     }
     if (typeof data.roomRevision === "string")
       onRoomRevisionApplied?.(data.roomRevision);
+    // state-nack counts as heartbeat ACK for liveness
+    if (typeof data.sequence === "number") acknowledgeHeartbeat(data);
   });
   registerHandler("topology-state", (data: MediaMessage) => {
     syncTopologyParticipants(data);
@@ -136,16 +146,25 @@ export function setupMediaMessageHandlers({
       );
     if (typeof data.roomRevision === "string")
       onRoomRevisionApplied?.(data.roomRevision);
+    // Also trigger snapshot request for NACK codes
     if (
       data.code === "ROOM_REVISION_CONFLICT" ||
       data.code === "STALE_CONNECTION_EPOCH"
     )
       onSnapshotRequested?.();
-    const error = new Error(
-      typeof data.error === "string" ? data.error : "Media control error",
-    );
-    if (typeof data.code === "string") error.code = data.code;
-    throw error;
+    // Use typed failure taxonomy to determine scope
+    const scope = getFailureScope(data.code as string);
+    const retryable = isFailureRetryable(data.code as string);
+    // Only throw/fail session for control-session or protocol-fatal scope
+    if (scope === "control-session" || scope === "protocol-fatal") {
+      const error = new Error(
+        typeof data.error === "string" ? data.error : "Media control error",
+      );
+      if (typeof data.code === "string") error.code = data.code;
+      throw error;
+    }
+    // For operation/reconciliation scope, do not throw - let caller handle
+    // The onOperationError callback was already invoked above
   });
   registerHandler("provider-ticket", onProviderTicket);
   registerHandler("provider-failure", (data: MediaMessage) => {
@@ -162,7 +181,9 @@ export function setupMediaMessageHandlers({
       retryAfterMs: data?.retryAfterMs,
       reason: data?.reason,
     });
-    return onProviderRecovering?.(data);
+    onProviderRecovering?.(data);
+    // Trigger topology controller to attempt return to recovered provider
+    topologyController?.handleProviderRecovering?.(data);
   });
   registerHandler("participant-voice-state", (data: MediaMessage) => {
     if (

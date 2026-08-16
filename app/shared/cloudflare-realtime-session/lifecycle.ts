@@ -187,6 +187,7 @@ export class CloudflareLifecycleMethods {
       consumers: this.consumers.size,
     });
     this.sessionGeneration += 1;
+    this.connectionEpoch += 1;
     const peerConnection = this.peerConnection;
     this.peerConnection = null;
     this.sessionId = null;
@@ -200,6 +201,8 @@ export class CloudflareLifecycleMethods {
             trackName: entry.trackName,
             source: entry.source,
             ownerSource: entry.ownerSource || null,
+            generation: this.sessionGeneration,
+            connectionEpoch: this.connectionEpoch,
             closed: true,
           },
         });

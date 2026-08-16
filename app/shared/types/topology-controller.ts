@@ -305,3 +305,19 @@ export interface TopologyControllerOptions {
   updateP2pStats: (data: unknown[]) => unknown;
   waitForMediaTimeoutMs: () => number;
 }
+
+export interface TopologyController {
+  applyAdaptiveJitterBuffer: () => unknown;
+  ensureP2p: () => {
+    receiveSignal: (data: Record<string, unknown>) => Promise<unknown>;
+    fail: (reason: string, error: unknown) => unknown;
+  } | null;
+  ensureSfu: () => unknown;
+  handleP2pQualification: (data?: Record<string, unknown>) => unknown;
+  handleProviderFailure: (data?: Record<string, unknown>) => unknown;
+  handleProviderRecovering: (data?: Record<string, unknown>) => unknown;
+  handleProviderTicket: (data: Record<string, unknown>) => unknown;
+  queueTopology: (data: TopologyData) => unknown;
+  reportSfuFailure: (reason: string) => unknown;
+  reset: () => unknown;
+}

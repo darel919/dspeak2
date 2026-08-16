@@ -85,6 +85,12 @@ export function createMediaSourceController({
         phase === "starting" || phase === "stopping"
           ? current.generation + 1
           : current.generation,
+      desiredState:
+        phase === "starting"
+          ? "active"
+          : phase === "stopping"
+            ? "inactive"
+            : current.desiredState,
       provider: provider ?? current.provider,
       failedAt: phase === "failed" ? Date.now() : null,
     });
@@ -331,7 +337,7 @@ export function createMediaSourceController({
       publishedEntry?.captureTrack !== entry.track
     )
       return Promise.resolve(false);
-    bumpSourceGeneration(entry.source);
+    // Only bump generation once - setSourcePhase with "stopping" will handle it
     setSourcePhase(entry.source, "stopping", getActiveProvider());
     const pairedScreenAudio =
       entry.source === "screen" ? localSources.get("screen-audio") : null;
@@ -386,8 +392,7 @@ export function createMediaSourceController({
 
   let operationSequence = 0;
   function nextOperationId() {
-    operationSequence += 1;
-    return `${Date.now().toString(36)}-${operationSequence}`;
+    return crypto.randomUUID();
   }
   const pendingAcks = new Map<
     string,
@@ -400,7 +405,7 @@ export function createMediaSourceController({
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pendingAcks.delete(operationId);
-        resolve();
+        reject(new Error("MEDIA_OPERATION_ACK_TIMEOUT"));
       }, timeoutMs);
       pendingAcks.set(operationId, {
         resolve: () => {
@@ -432,7 +437,6 @@ export function createMediaSourceController({
         operationId,
         requestId: operationId,
         connectionEpoch: getConnectionEpoch(),
-        expectedRoomRevision: getLastAppliedRoomRevision(),
         sourceStates: sourceFsmDigest(),
       },
     });
@@ -462,7 +466,6 @@ export function createMediaSourceController({
         operationId,
         requestId: operationId,
         connectionEpoch: getConnectionEpoch(),
-        expectedRoomRevision: getLastAppliedRoomRevision(),
       },
     });
     return awaitOperationAck(operationId);

@@ -140,6 +140,8 @@ export class CloudflareSourcesMethods {
             trackName,
             source: entry.source,
             ownerSource: entry.ownerSource || null,
+            generation: this.sessionGeneration,
+            connectionEpoch: this.connectionEpoch,
           },
         })
       )
@@ -148,8 +150,18 @@ export class CloudflareSourcesMethods {
       if (
         this.peerConnection === peerConnection &&
         this.sessionGeneration === generation
-      )
-        this.closeMedia();
+      ) {
+        // Only close media if the entire session is actually invalid
+        // For individual source failures, we should only mark that source as failed
+        // rather than destroying all media
+        if (
+          error instanceof Error &&
+          error.message.includes("MEDIA_SESSION_CLOSED")
+        ) {
+          this.closeMedia();
+        }
+        // Otherwise, just mark the source as failed and let the recovery layer handle it
+      }
       throw error;
     }
   }
@@ -321,6 +333,8 @@ export class CloudflareSourcesMethods {
             trackName: current.trackName,
             source,
             ownerSource: current.ownerSource || null,
+            generation: this.sessionGeneration,
+            connectionEpoch: this.connectionEpoch,
             closed: true,
           },
         })
@@ -330,8 +344,18 @@ export class CloudflareSourcesMethods {
       if (
         this.peerConnection === peerConnection &&
         this.sessionGeneration === generation
-      )
-        this.closeMedia();
+      ) {
+        // Only close media if the entire session is actually invalid
+        // For individual source failures, we should only mark that source as failed
+        // rather than destroying all media
+        if (
+          error instanceof Error &&
+          error.message.includes("MEDIA_SESSION_CLOSED")
+        ) {
+          this.closeMedia();
+        }
+        // Otherwise, just mark the source as failed and let the recovery layer handle it
+      }
       throw error;
     }
   }

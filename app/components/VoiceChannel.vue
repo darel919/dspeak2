@@ -222,8 +222,18 @@
         class="screen-feed-area min-h-0 flex-1 overflow-hidden p-4 md:p-6"
       >
         <div
+          ref="videoStage"
           class="voice-room-grid h-full min-h-0 w-full"
           :class="{ 'voice-room-grid-focused': viewMode === 'focused' }"
+          :style="
+            viewMode === 'overview'
+              ? {
+                  '--video-tile-width': `${adaptiveLayout.tileWidth}px`,
+                  '--video-tile-height': `${adaptiveLayout.tileHeight}px`,
+                  '--video-grid-gap': `${adaptiveLayout.gap}px`,
+                }
+              : undefined
+          "
         >
           <div
             v-for="tile in displayedRoomTiles"
@@ -825,6 +835,7 @@ import { useRuntimeStore } from "~/stores/runtime";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
 import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
 import { useDesktopMediaPopouts } from "../composables/useDesktopMediaPopouts";
+import { useAdaptiveVideoGrid } from "../composables/useAdaptiveVideoGrid";
 
 const DesktopCapturePicker = defineAsyncComponent(
   () => import("./DesktopCapturePicker.vue"),
@@ -854,6 +865,11 @@ const { openPopout, closePopout, focusPopout, isPoppedOut, syncPopoutFeeds } =
 const router = useRouter();
 const config = useRuntimeConfig();
 const viewMode = ref("overview");
+const videoStage = (ref < HTMLElement) | (null > null);
+const { layout: adaptiveLayout } = useAdaptiveVideoGrid(
+  videoStage,
+  computed(() => displayedRoomTiles.value.length),
+);
 const { status: voiceConnectionStatus } = useVoiceConnectionStatus(voiceStore);
 function reloadForMediaUpdate() {
   window.location.reload();
@@ -1327,17 +1343,28 @@ onUnmounted(() => {
   container-type: size;
 }
 
-.voice-room-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-auto-rows: minmax(0, 1fr);
-  place-content: center;
-  gap: 0.75rem;
+.voice-room-grid:not(.voice-room-grid-focused) {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: var(--video-grid-gap);
 }
 
-.voice-room-grid:not(.voice-room-grid-focused)
-  .voice-room-tile:last-child:nth-child(odd) {
-  justify-self: center;
+.voice-room-grid:not(.voice-room-grid-focused) .voice-room-tile {
+  flex: 0 0 auto;
+  width: var(--video-tile-width);
+  height: var(--video-tile-height);
+  min-width: 0;
+  min-height: 0;
+}
+
+.voice-room-grid.voice-room-grid-focused {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 14rem));
+  grid-template-rows: minmax(0, 1fr) 8rem;
+  justify-content: center;
+  gap: 0.75rem;
 }
 
 .voice-room-tile {
@@ -1356,12 +1383,6 @@ onUnmounted(() => {
   outline-offset: 2px;
 }
 
-.voice-room-grid-focused {
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 14rem));
-  grid-template-rows: minmax(0, 1fr) 8rem;
-  justify-content: center;
-}
-
 .voice-room-tile-focused {
   grid-column: 1 / -1;
   width: 100%;
@@ -1375,32 +1396,6 @@ onUnmounted(() => {
 
 .participant-audio-tile-compact {
   min-height: 0;
-}
-
-.screen-feed-frame-single {
-  width: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  aspect-ratio: 16 / 9;
-  contain: size layout paint;
-}
-
-@supports (width: 1cqw) and (height: 1cqh) {
-  .screen-feed-frame-single {
-    width: min(100cqw, calc(100cqh * 16 / 9));
-  }
-}
-
-@container (min-width: 36.75rem) {
-  .voice-room-grid:not(.voice-room-grid-focused) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .voice-room-grid:not(.voice-room-grid-focused)
-    .voice-room-tile:last-child:nth-child(odd) {
-    grid-column: 1 / -1;
-    width: calc(50% - 0.375rem);
-  }
 }
 
 .participant-grid {

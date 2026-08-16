@@ -25,6 +25,53 @@ import type {
   DesktopAuthError,
 } from "../shared/types/auth.ts";
 import { isAuthSessionRecord } from "../shared/types/auth.ts";
+import {
+  nativeHttpFetch,
+  extractProvenance,
+  type DesktopHttpProvenance,
+} from "~/shared/desktop-http";
+
+function validateDesktopApiConfig(
+  config: ReturnType<typeof useRuntimeConfig>,
+  runtimeStore: ReturnType<typeof useRuntimeStore>,
+) {
+  if (!import.meta.client || !runtimeStore.isTauri) return;
+  const apiPath = String(config.public?.apiPath || "");
+  if (!apiPath) {
+    throw createDesktopAuthError(
+      "DESKTOP_API_CONFIGURATION_INVALID",
+      "Desktop API configuration is missing.",
+      { stage: "client-config" },
+    );
+  }
+  try {
+    const parsed = new URL(apiPath);
+    if (parsed.protocol !== "https:") {
+      throw createDesktopAuthError(
+        "DESKTOP_API_CONFIGURATION_INVALID",
+        "Desktop API must use HTTPS in production.",
+        { stage: "client-config" },
+      );
+    }
+    const publicOrigin = String(config.public?.publicOrigin || "");
+    if (publicOrigin) {
+      const publicParsed = new URL(publicOrigin);
+      if (parsed.origin !== publicParsed.origin) {
+        console.warn("[DesktopAuth] API origin differs from public origin", {
+          apiOrigin: parsed.origin,
+          publicOrigin: publicParsed.origin,
+        });
+      }
+    }
+  } catch (error) {
+    if (isDesktopAuthError(error)) throw error;
+    throw createDesktopAuthError(
+      "DESKTOP_API_CONFIGURATION_INVALID",
+      "Desktop API configuration is invalid.",
+      { stage: "client-config" },
+    );
+  }
+}
 
 function clientFingerprint(config: ReturnType<typeof useRuntimeConfig>) {
   const clientBuildCommit =
@@ -282,21 +329,43 @@ export const useAuthStore = defineStore("auths", () => {
       await runtimeStore.initialize();
     await captureSupabaseSession().catch(() => null);
     try {
+      validateDesktopApiConfig(config, runtimeStore);
+      const { clientBuildCommit, clientProjectRef } = clientFingerprint(config);
       const supabaseClient = getSupabaseClient();
       bridgeSupabaseSession(supabaseClient);
       const sessionResult = await supabaseClient?.auth.getSession();
       const accessToken = sessionResult?.data?.session?.access_token;
       if (!accessToken) return false;
-      const response = await fetch(
-        `${config.public.apiPath}/auth/${sessionBridgePath()}`,
-        {
-          method: "POST",
-          credentials: runtimeStore.isTauri ? "omit" : "include",
-          headers: deviceHeaders({
-            Authorization: `Bearer ${accessToken}`,
-          }),
-        },
-      );
+      const requestUrl = `${config.public.apiPath}/auth/${sessionBridgePath()}`;
+      const requestId = crypto.randomUUID();
+      let response: Response;
+      try {
+        if (runtimeStore.isTauri) {
+          response = await nativeHttpFetch(requestUrl, {
+            method: "POST",
+            credentials: runtimeStore.isTauri ? "omit" : "include",
+            headers: deviceHeaders({
+              Authorization: `Bearer ${accessToken}`,
+              "X-dSpeak-Request-ID": requestId,
+              "X-dSpeak-Client-Build": clientBuildCommit,
+              "X-dSpeak-Client-Platform": "tauri",
+            }),
+          });
+        } else {
+          response = await fetch(requestUrl, {
+            method: "POST",
+            credentials: runtimeStore.isTauri ? "omit" : "include",
+            headers: deviceHeaders({
+              Authorization: `Bearer ${accessToken}`,
+              "X-dSpeak-Request-ID": requestId,
+              "X-dSpeak-Client-Build": clientBuildCommit,
+              "X-dSpeak-Client-Platform": "web",
+            }),
+          });
+        }
+      } catch {
+        return false;
+      }
       if (!response.ok) return false;
       setUser((await response.json()) as AuthSessionRecord);
       return true;
@@ -328,23 +397,40 @@ export const useAuthStore = defineStore("auths", () => {
       await runtimeStore.initialize();
     await captureSupabaseSession().catch(() => null);
     try {
+      validateDesktopApiConfig(config, runtimeStore);
+      const { clientBuildCommit, clientProjectRef } = clientFingerprint(config);
       const supabaseClient = getSupabaseClient();
       bridgeSupabaseSession(supabaseClient);
       const sessionResult = await supabaseClient?.auth.getSession();
       const accessToken = sessionResult?.data?.session?.access_token;
       if (!accessToken) return { ok: false, reason: "NO_SUPABASE_SESSION" };
+      const requestUrl = `${config.public.apiPath}/auth/${sessionBridgePath()}`;
+      const requestId = crypto.randomUUID();
       let response: Response;
       try {
-        response = await fetch(
-          `${config.public.apiPath}/auth/${sessionBridgePath()}`,
-          {
+        if (runtimeStore.isTauri) {
+          response = await nativeHttpFetch(requestUrl, {
             method: "POST",
             credentials: runtimeStore.isTauri ? "omit" : "include",
             headers: deviceHeaders({
               Authorization: `Bearer ${accessToken}`,
+              "X-dSpeak-Request-ID": requestId,
+              "X-dSpeak-Client-Build": clientBuildCommit,
+              "X-dSpeak-Client-Platform": "tauri",
             }),
-          },
-        );
+          });
+        } else {
+          response = await fetch(requestUrl, {
+            method: "POST",
+            credentials: runtimeStore.isTauri ? "omit" : "include",
+            headers: deviceHeaders({
+              Authorization: `Bearer ${accessToken}`,
+              "X-dSpeak-Request-ID": requestId,
+              "X-dSpeak-Client-Build": clientBuildCommit,
+              "X-dSpeak-Client-Platform": "web",
+            }),
+          });
+        }
       } catch {
         return { ok: false, reason: "TRANSPORT_ERROR" };
       }
@@ -399,23 +485,45 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function bridgeDesktopSession(accessToken: string) {
+    validateDesktopApiConfig(config, runtimeStore);
     const { clientBuildCommit, clientProjectRef } = clientFingerprint(config);
-    console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_STARTED", {
-      hasAuthorization: Boolean(accessToken),
+    const requestId = crypto.randomUUID();
+    const requestUrl = `${config.public.apiPath}/auth/desktop-session`;
+    console.info("[DesktopAuth] SESSION_BRIDGE_REQUEST", {
+      requestId,
+      transport: runtimeStore.isTauri ? "tauri-http" : "webview-fetch",
+      requestUrl,
       clientBuildCommit,
       clientProjectRef,
     });
     let response: Response;
     try {
-      response = await fetch(`${config.public.apiPath}/auth/desktop-session`, {
-        method: "POST",
-        credentials: "omit",
-        headers: deviceHeaders({
-          Authorization: `Bearer ${accessToken}`,
-        }),
-      });
+      if (runtimeStore.isTauri) {
+        response = await nativeHttpFetch(requestUrl, {
+          method: "POST",
+          credentials: "omit",
+          headers: deviceHeaders({
+            Authorization: `Bearer ${accessToken}`,
+            "X-dSpeak-Request-ID": requestId,
+            "X-dSpeak-Client-Build": clientBuildCommit,
+            "X-dSpeak-Client-Platform": "tauri",
+          }),
+        });
+      } else {
+        response = await fetch(requestUrl, {
+          method: "POST",
+          credentials: "omit",
+          headers: deviceHeaders({
+            Authorization: `Bearer ${accessToken}`,
+            "X-dSpeak-Request-ID": requestId,
+            "X-dSpeak-Client-Build": clientBuildCommit,
+            "X-dSpeak-Client-Platform": "web",
+          }),
+        });
+      }
     } catch (cause) {
       console.error("[DesktopAuth] DESKTOP_API_SESSION_TRANSPORT_ERROR", {
+        requestId,
         causeName: cause instanceof Error ? cause.name : "unknown",
         clientBuildCommit,
         clientProjectRef,
@@ -429,12 +537,37 @@ export const useAuthStore = defineStore("auths", () => {
           serverDiagnostic: "DESKTOP_API_SESSION_TRANSPORT_ERROR",
           clientBuildCommit,
           clientProjectRef,
+          requestId,
+          transport: runtimeStore.isTauri ? "tauri-http" : "webview-fetch",
         },
       );
     }
+    const provenance = extractProvenance(response, requestUrl);
+    console.info("[DesktopAuth] SESSION_BRIDGE_RESPONSE", {
+      requestId,
+      transport: runtimeStore.isTauri ? "tauri-http" : "webview-fetch",
+      requestUrl: provenance.requestUrl,
+      responseUrl: provenance.responseUrl,
+      status: provenance.status,
+      statusText: provenance.statusText,
+      redirected: provenance.redirected,
+      retryAfter: provenance.retryAfter,
+      server: provenance.serverHeader,
+      via: provenance.viaHeader,
+      vercelRequestId: provenance.vercelRequestId,
+      cloudflareRay: provenance.cloudflareRay,
+      serverBuildCommit: provenance.serverBuildCommit,
+      serverProjectRef: provenance.serverProjectRef,
+      clientBuildCommit,
+      clientProjectRef,
+    });
     if (!response.ok) {
-      const diagnostic = await readDesktopSessionDiagnostic(response);
+      const diagnostic = await readDesktopSessionDiagnostic(
+        response,
+        requestUrl,
+      );
       console.error("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_FAILED", {
+        requestId,
         status: diagnostic.httpStatus,
         diagnosticCategory: diagnostic.diagnosticCategory,
         serverBuildCommit: diagnostic.serverBuildCommit,
@@ -458,6 +591,8 @@ export const useAuthStore = defineStore("auths", () => {
           serverProjectRef: diagnostic.serverProjectRef,
           clientBuildCommit,
           clientProjectRef,
+          requestId,
+          transport: runtimeStore.isTauri ? "tauri-http" : "webview-fetch",
         },
       );
     }
@@ -470,6 +605,7 @@ export const useAuthStore = defineStore("auths", () => {
       session = parsed;
     } catch {
       console.error("[DesktopAuth] DESKTOP_SESSION_PAYLOAD_INVALID", {
+        requestId,
         status: response.status,
         serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
       });
@@ -486,11 +622,14 @@ export const useAuthStore = defineStore("auths", () => {
             response.headers.get("X-dSpeak-Supabase-Project") || "",
           clientBuildCommit,
           clientProjectRef,
+          requestId,
+          transport: runtimeStore.isTauri ? "tauri-http" : "webview-fetch",
         },
       );
     }
     setUser(session);
     console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_SUCCEEDED", {
+      requestId,
       serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
     });
     return true;
@@ -633,10 +772,6 @@ export const useAuthStore = defineStore("auths", () => {
         console.info("[DesktopAuth] DESKTOP_SIGN_IN_COMPLETE");
         return completed;
       } catch (error) {
-        if (await restoreSession()) {
-          console.info("[DesktopAuth] DESKTOP_SIGN_IN_COMPLETE");
-          return true;
-        }
         throw error;
       }
     })();

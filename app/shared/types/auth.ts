@@ -49,6 +49,7 @@ export type DesktopAuthFailureStage =
   | "server-session"
   | "session-payload"
   | "session-restore"
+  | "client-config"
   | "unknown";
 
 export type DesktopAuthError = Error & {
@@ -60,4 +61,6 @@ export type DesktopAuthError = Error & {
   serverProjectRef: string;
   clientBuildCommit: string;
   clientProjectRef: string;
+  requestId: string;
+  transport: "webview-fetch" | "tauri-http";
 };
