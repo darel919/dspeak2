@@ -868,8 +868,10 @@ export function useHybridMediaSession() {
     getBootstrap: getMediaControlBootstrap,
     handleP2pQualification,
     handleProviderFailure,
-    handleProviderRecovering: (data: Record<string, unknown>) =>
-      topologyController?.handleProviderRecovering(data),
+    handleProviderRecovering: (data: Record<string, unknown>) => {
+      topologyController?.handleProviderRecovering(data);
+      return sourceController.handleProviderRecovering(data);
+    },
     handleProviderTicket: (data: Record<string, unknown>) =>
       topologyController?.handleProviderTicket(data),
     mediaPathMetrics,

@@ -852,6 +852,16 @@ export class NativeP2pSessionSourcesMethods {
         : null;
     if (removedSignal) {
       const source = String(removedSignal.source || "");
+      // Fence old sourceRemoved signals: a removal carrying a generation that is
+      // older than the currently-signaled generation for that source is stale and
+      // must not retire the current generation.
+      const removalGeneration = Number(removedSignal.generation);
+      const removalIsStale =
+        Number.isFinite(removalGeneration) &&
+        [...peer.generationByTrackId.values()].some(
+          (generation) => removalGeneration < generation,
+        );
+      if (removalIsStale) return true;
       for (const [trackId, mappedSource] of peer.sourceByTrackId) {
         if (mappedSource !== source) continue;
         peer.sourceByTrackId.delete(trackId);

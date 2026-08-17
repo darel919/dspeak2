@@ -272,6 +272,10 @@ export class NativeP2pSourcesMethods {
           trackId: entry.track.id,
           source,
           ownerSource: entry.ownerSource || null,
+          ...(Number.isFinite(Number(entry.generation)) &&
+          Number(entry.generation) > 0
+            ? { generation: Math.floor(Number(entry.generation)) }
+            : {}),
         },
       });
       announced = true;

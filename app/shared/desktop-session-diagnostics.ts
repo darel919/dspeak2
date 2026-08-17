@@ -24,6 +24,15 @@ export type DesktopFailureDiagnostic = {
   clientProjectRef: string;
   requestId: string;
   transport: "webview-fetch" | "tauri-http";
+  requestUrl: string;
+  responseUrl: string;
+  redirected: boolean;
+  statusText: string;
+  retryAfter: string;
+  serverHeader: string;
+  viaHeader: string;
+  vercelRequestId: string;
+  cloudflareRay: string;
 };
 
 export function mapFailureDiagnostic(
@@ -32,6 +41,8 @@ export function mapFailureDiagnostic(
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   const serverDiagnostic =
+    typeof record.serverDiagnostic === "string" ? record.serverDiagnostic : "";
+  const rawDiagnosticCategory =
     typeof record.serverDiagnostic === "string" ? record.serverDiagnostic : "";
   const code =
     serverDiagnostic ||
@@ -42,13 +53,24 @@ export function mapFailureDiagnostic(
   const hasCode =
     code || typeof record.message === "string" || error instanceof Error;
   if (!hasCode) return null;
+
+  const httpStatus =
+    typeof record.httpStatus === "number" && record.httpStatus > 0
+      ? record.httpStatus
+      : null;
+
+  const diagnosticCode = rawDiagnosticCategory.startsWith("DESKTOP_")
+    ? rawDiagnosticCategory
+    : httpStatus === 429
+      ? "DESKTOP_API_SESSION_HTTP_429"
+      : httpStatus
+        ? `DESKTOP_API_SESSION_HTTP_${httpStatus}`
+        : code || "DESKTOP_AUTH_UNKNOWN_ERROR";
+
   return {
-    code: code || "DESKTOP_AUTH_UNKNOWN_ERROR",
+    code: diagnosticCode,
     stage: typeof record.stage === "string" ? record.stage : "unknown",
-    httpStatus:
-      typeof record.httpStatus === "number" && record.httpStatus > 0
-        ? record.httpStatus
-        : null,
+    httpStatus,
     serverBuildCommit:
       typeof record.serverBuildCommit === "string"
         ? record.serverBuildCommit
@@ -72,6 +94,20 @@ export function mapFailureDiagnostic(
         record.transport === "tauri-http")
         ? record.transport
         : "webview-fetch",
+    requestUrl: typeof record.requestUrl === "string" ? record.requestUrl : "",
+    responseUrl:
+      typeof record.responseUrl === "string" ? record.responseUrl : "",
+    redirected:
+      typeof record.redirected === "boolean" ? record.redirected : false,
+    statusText: typeof record.statusText === "string" ? record.statusText : "",
+    retryAfter: typeof record.retryAfter === "string" ? record.retryAfter : "",
+    serverHeader:
+      typeof record.serverHeader === "string" ? record.serverHeader : "",
+    viaHeader: typeof record.viaHeader === "string" ? record.viaHeader : "",
+    vercelRequestId:
+      typeof record.vercelRequestId === "string" ? record.vercelRequestId : "",
+    cloudflareRay:
+      typeof record.cloudflareRay === "string" ? record.cloudflareRay : "",
   };
 }
 

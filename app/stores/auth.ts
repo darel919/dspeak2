@@ -126,13 +126,19 @@ export const useAuthStore = defineStore("auths", () => {
     const result = client.auth.onAuthStateChange((event, session) => {
       if (!session?.access_token) return;
       if (event !== "TOKEN_REFRESHED") return;
-      fetch(`${config.public.apiPath}/auth/${sessionBridgePath()}`, {
-        method: "POST",
-        credentials: runtimeStore.isTauri ? "omit" : "include",
-        headers: deviceHeaders({
-          Authorization: `Bearer ${session.access_token}`,
-        }),
-      }).catch(() => {});
+      const sessionFetch = runtimeStore.isTauri
+        ? nativeHttpFetch
+        : globalThis.fetch;
+      void sessionFetch(
+        `${config.public.apiPath}/auth/${sessionBridgePath()}`,
+        {
+          method: "POST",
+          credentials: runtimeStore.isTauri ? "omit" : "include",
+          headers: deviceHeaders({
+            Authorization: `Bearer ${session.access_token}`,
+          }),
+        },
+      ).catch(() => {});
     });
     supabaseAuthSubscription = result.data.subscription;
   }
@@ -593,6 +599,15 @@ export const useAuthStore = defineStore("auths", () => {
           clientProjectRef,
           requestId,
           transport: runtimeStore.isTauri ? "tauri-http" : "webview-fetch",
+          requestUrl: diagnostic.requestUrl,
+          responseUrl: diagnostic.responseUrl,
+          redirected: diagnostic.redirected,
+          statusText: diagnostic.statusText,
+          retryAfter: diagnostic.retryAfter,
+          serverHeader: diagnostic.serverHeader,
+          viaHeader: diagnostic.viaHeader,
+          vercelRequestId: diagnostic.vercelRequestId,
+          cloudflareRay: diagnostic.cloudflareRay,
         },
       );
     }

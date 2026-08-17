@@ -3,6 +3,7 @@ import {
   createAdaptiveVideoController,
 } from "./adaptive-video-controller.ts";
 import { mediaDebug } from "./media-debug.ts";
+import { isFailureSourceScoped } from "./types/media-failure.ts";
 import { resolveMediaProviderIdentity } from "./media-provider-identity.ts";
 import type { MediaCaptureStartOptions } from "./types/media-capture.ts";
 import type {
@@ -138,7 +139,10 @@ export function createMediaSourceController({
           : {};
       if (details.code === "MEDIA_SESSION_CLOSED") return;
       error.value = details.message || `Unable to stop ${source} publication`;
-      if (getActiveProvider() === "sfu" || topologyState.value.mode === "sfu")
+      if (
+        details.code === "MEDIA_SOURCE_TRANSPORT_FAILED" ||
+        details.code === "MEDIA_PROVIDER_DEAD"
+      )
         reportSfuFailure(
           `source-${source}-remove-failed-${details.message || "unknown"}`,
         );
@@ -176,6 +180,7 @@ export function createMediaSourceController({
         : sourceEntry;
     setSourcePhase(entry.source, "starting", getActiveProvider());
     const generation = sourceFsms.get(entry.source)?.generation || 0;
+    entry.generation = generation;
     if (entry.source === "audio" && voiceStore.micMuted)
       entry.track.enabled = false;
     const previous = localSources.get(entry.source);
@@ -230,6 +235,8 @@ export function createMediaSourceController({
         entry.track.readyState === "ended"
       )
         throw new Error(`The ${entry.source} track ended during publication`);
+      // If the source changed generation while publishing, fence this
+      // publication: tear down the stale side and keep the newer generation.
       if (sourceFsms.get(entry.source)?.generation !== generation) {
         await Promise.allSettled([
           p2pRequired
@@ -273,7 +280,40 @@ export function createMediaSourceController({
         else localVideoFeeds.value.delete(entry.source);
         localVideoFeeds.value = new Map(localVideoFeeds.value);
       }
-      if (topologyState.value.mode === "sfu") reportSfuFailure(reason);
+      if (
+        sourceError &&
+        typeof sourceError === "object" &&
+        "code" in sourceError &&
+        (sourceError.code === "MEDIA_PROVIDER_DEAD" ||
+          sourceError.code === "MEDIA_SESSION_CLOSED" ||
+          sourceError.code === "MEDIA_SOURCE_TRANSPORT_FAILED")
+      ) {
+        if (topologyState.value.mode === "sfu")
+          reportSfuFailure(`source-${entry.source}-failed-${sourceError.code}`);
+        else if (topologyState.value.target === "sfu") {
+          const { provider, providerId } = resolveMediaProviderIdentity(
+            topologyState.value,
+            true,
+          );
+          send({
+            type: "topology-failed",
+            data: {
+              provider,
+              ...(providerId ? { providerId } : {}),
+              epoch: topologyState.value.epoch,
+              target: "sfu",
+              sourceRevision: topologyState.value.sourceRevision,
+              reason,
+            },
+          });
+        }
+        throw sourceError;
+      }
+      // An unexpected non-source-scoped failure (e.g. transport died mid
+      // publication) is a provider-level fault: escalate once so the topology
+      // controller can fail over, then rethrow.
+      if (topologyState.value.mode === "sfu")
+        reportSfuFailure(`source-${entry.source}-failed-${reason}`);
       else if (topologyState.value.target === "sfu") {
         const { provider, providerId } = resolveMediaProviderIdentity(
           topologyState.value,
@@ -291,6 +331,7 @@ export function createMediaSourceController({
           },
         });
       }
+      setSourcePhase(entry.source, "idle", getActiveProvider());
       throw sourceError;
     }
     localSources.set(entry.source, entry);
@@ -344,7 +385,13 @@ export function createMediaSourceController({
     localSources.delete(entry.source);
     if (entry.source === "audio" && unexpected) {
       voiceStore.micMuted = true;
-      sendParticipantVoiceState({ muted: true });
+      void sendParticipantVoiceState({ muted: true }).catch(
+        (error: unknown) => {
+          mediaDebug("source-state.voice-ack-failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      );
     }
     if (entry.source === "screen") {
       voiceStore.screenSharing = false;
@@ -503,7 +550,34 @@ export function createMediaSourceController({
       .then((entry) => (entry ? producerFacade(entry) : null));
   }
 
-  function leave() {
+  function queueTargetedReconciliation(operationId: string, data: unknown) {
+    const payload =
+      data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const source = String(payload.source || "");
+    if (!source || !localSources.has(source)) return Promise.resolve(false);
+    const entry = localSources.get(source);
+    if (!entry) return Promise.resolve(false);
+    mediaDebug("source-state.reconcile", {
+      operationId,
+      source,
+      generation: entry.generation,
+    });
+    return Promise.resolve(publishSource(entry)).catch(
+      (sourceError: unknown) => {
+        mediaDebug("source-state.reconcile-failed", {
+          operationId,
+          source,
+          error:
+            sourceError instanceof Error
+              ? sourceError.message
+              : String(sourceError),
+        });
+        return false;
+      },
+    );
+  }
+
+  async function leave() {
     const operationId = nextOperationId();
     send({
       type: "leave",
@@ -514,6 +588,34 @@ export function createMediaSourceController({
       },
     });
     return awaitOperationAck(operationId);
+  }
+
+  async function handleProviderRecovering(data: Record<string, unknown> = {}) {
+    const retryAt = Number(data.retryAt);
+    if (!Number.isSafeInteger(retryAt) || retryAt <= Date.now()) return;
+    const recoveryDelay = Math.max(0, retryAt - Date.now());
+    mediaDebug("source-state.provider-recovering", {
+      retryAt,
+      retryAfterMs: recoveryDelay,
+      reason: data.reason || "provider-recovering",
+    });
+    // Re-publish local sources once the provider-session recovery window has
+    // elapsed. Re-publishing idempotently re-creates producer side state on
+    // the recovered provider session.
+    await new Promise((resolve) => setTimeout(resolve, recoveryDelay));
+    for (const entry of [...localSources.values()]) {
+      try {
+        await publishSource(entry);
+      } catch (sourceError) {
+        mediaDebug("source-state.provider-recover-publish-failed", {
+          source: entry.source,
+          error:
+            sourceError instanceof Error
+              ? sourceError.message
+              : String(sourceError),
+        });
+      }
+    }
   }
 
   return {
@@ -534,8 +636,8 @@ export function createMediaSourceController({
     resolveOperationAck,
     rejectOperationAck,
     leave,
-    queueTargetedReconciliation: (operationId: string, data: unknown) =>
-      Promise.resolve(),
+    queueTargetedReconciliation,
+    handleProviderRecovering,
     getSourceFsmDigest: sourceFsmDigest,
   };
 }

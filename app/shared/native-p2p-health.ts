@@ -63,6 +63,9 @@ export function handleConnectionState(
   state: NativeP2pConnectionState,
 ) {
   const connectionState = state.pc.connectionState;
+  // `disconnected` can be transient — ICE restart can restore connectivity.
+  // Only `failed` (stronger) triggers failure here; `closed` is terminal only
+  // when liveness is actually required.
   if (connectionState === "failed") mesh.fail("peer-connection-failed");
   if (
     connectionState === "closed" &&

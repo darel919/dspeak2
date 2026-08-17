@@ -17,6 +17,15 @@ export function createDesktopAuthError(
   error.clientProjectRef = metadata.clientProjectRef || "";
   error.requestId = metadata.requestId || "";
   error.transport = metadata.transport || "webview-fetch";
+  error.requestUrl = metadata.requestUrl || "";
+  error.responseUrl = metadata.responseUrl || "";
+  error.redirected = metadata.redirected || false;
+  error.statusText = metadata.statusText || "";
+  error.retryAfter = metadata.retryAfter || "";
+  error.serverHeader = metadata.serverHeader || "";
+  error.viaHeader = metadata.viaHeader || "";
+  error.vercelRequestId = metadata.vercelRequestId || "";
+  error.cloudflareRay = metadata.cloudflareRay || "";
 
   return error;
 }

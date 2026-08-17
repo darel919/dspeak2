@@ -276,8 +276,12 @@ export class NativeMediasoupConsumersMethods {
         : this.connectionState().ready
           ? "media-flowing"
           : "transport-connecting";
-    if (state === "failed" && this.activeSfuProvider === "mediasoup")
+    if (state === "failed" && this.activeSfuProvider === "mediasoup") {
+      // `failed` is stronger than `disconnected`: ICE restart may still restore
+      // connectivity, so report a retryable provider-transport failure and let
+      // handleTransportRecovery drive the ICE restart.
       this.reportProviderFailure(`native-${direction}-transport-failed`);
+    }
     this._emitState();
     this.handleTransportRecovery(direction, state);
     return true;

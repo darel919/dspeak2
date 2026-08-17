@@ -166,9 +166,20 @@ export function createHybridMediaTopologyController({
       ) => {
         const fallbackActive = getActiveProvider() === "sfu";
         if (topologyState.value.mode !== "sfu" && !fallbackActive) return;
-        if (state === "failed" || state === "closed") {
+        if (state === "closed") {
           mediaConnectionState.value = "failed";
           setConnectionPhase("failed", {
+            direction,
+            reason: `transport-${state}`,
+          });
+          reportSfuFailure("media-transport-failed", provider);
+          return;
+        }
+        if (state === "failed") {
+          // `failed` is stronger than `disconnected` — ICE restart can restore
+          // connectivity; treat as provider-transport failure (retryable)
+          mediaConnectionState.value = "recovering";
+          setConnectionPhase("reconnecting", {
             direction,
             reason: `transport-${state}`,
           });
@@ -467,7 +478,59 @@ export function createHybridMediaTopologyController({
       : abort.signal;
     mediaGeneration.assert(generation);
     const transitionPromise = (async () => {
-      const targetMode = data.mode === "sfu" ? "sfu" : "p2p";
+      const targetMode =
+        data.mode === "sfu" ? "sfu" : data.target === "sfu" ? "sfu" : "p2p";
+      if (data.mode === "switching") {
+        // switching is a control mode, not a provider: keep the current
+        // active provider until the target is actually ready.
+        const currentProvider = getActiveProvider();
+        const currentMesh = ensureP2p();
+        const currentSfu = getSfu();
+        const hasCurrentTransport =
+          (currentProvider === "p2p" && currentMesh != null) ||
+          (currentProvider === "sfu" && currentSfu != null);
+        if (!hasCurrentTransport && targetMode === "sfu")
+          await ensureQualificationFallback(data, generation);
+        mediaGeneration.assert(generation);
+        if (targetMode === "sfu") {
+          const session = ensureSfu();
+          if (session && currentProvider !== "sfu") {
+            await session.initialize();
+            for (const entry of localSources.values())
+              await session.addSource(entry);
+            await replayCloudflarePublications(session);
+            await session.startSubscriptions?.();
+            mediaGeneration.assert(generation);
+            handoff.bind("sfu");
+          }
+        } else {
+          const mesh = ensureP2p();
+          if (mesh) {
+            await mesh.applyTopology({
+              ...data,
+              localPeerId: getLocalPeerId(),
+            });
+            await publishLocalSources(mesh);
+          }
+        }
+        mediaGeneration.assert(generation);
+        // Only switch active provider after target setup succeeded
+        if (getActiveProvider() !== targetMode) setActiveProvider(targetMode);
+        topologyState.value = {
+          ...topologyState.value,
+          activeTransport: targetMode,
+          targetTransport: null,
+        };
+        transportReady.value = getActiveProvider() !== null;
+        iceConnectedBoth.value = false;
+        mediaConnectionState.value = "topology-connecting";
+        setConnectionPhase("media-connecting", {
+          topologyEpoch: Number(data.epoch),
+          topologyMode: data.mode,
+        });
+        startConvergence(data, generation, transitionSignal);
+        return;
+      }
       if (data.mode === "p2p") {
         await closeP2pSafely();
         handoff.retire("p2p");

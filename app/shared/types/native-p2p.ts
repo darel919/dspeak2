@@ -23,6 +23,7 @@ export interface NativeP2pLocalSourceEntry {
   track: MediaStreamTrack;
   stream?: MediaStream;
   ownerSource?: string | null;
+  generation?: number;
 }
 
 export interface NativeP2pConnectionState {

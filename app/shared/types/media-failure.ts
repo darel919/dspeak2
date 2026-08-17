@@ -96,6 +96,11 @@ export const MEDIA_FAILURE_CODES = {
     scope: "peer-connection" as const,
     retryable: true,
   },
+  MEDIA_SOURCE_TRANSPORT_FAILED: {
+    code: "MEDIA_SOURCE_TRANSPORT_FAILED",
+    scope: "source-operation" as const,
+    retryable: true,
+  },
   DTLS_FAILED: {
     code: "DTLS_FAILED",
     scope: "peer-connection" as const,

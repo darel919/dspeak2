@@ -63,4 +63,13 @@ export type DesktopAuthError = Error & {
   clientProjectRef: string;
   requestId: string;
   transport: "webview-fetch" | "tauri-http";
+  requestUrl: string;
+  responseUrl: string;
+  redirected: boolean;
+  statusText: string;
+  retryAfter: string;
+  serverHeader: string;
+  viaHeader: string;
+  vercelRequestId: string;
+  cloudflareRay: string;
 };

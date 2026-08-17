@@ -166,6 +166,7 @@ export interface TopologySourceEntry {
   userId?: string | number | null;
   peerId?: string | number | null;
   stream?: MediaStream;
+  generation?: number;
   [key: string]: unknown;
 }
 export interface TopologyConnectionState {

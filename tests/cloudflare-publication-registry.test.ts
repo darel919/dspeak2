@@ -52,7 +52,13 @@ test("every Cloudflare activation path replays retained publications", async () 
     ),
     "utf8",
   );
+  const composable = await readFile(
+    new URL("../app/composables/useHybridMediaSession.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(source, /replayCloudflarePublications\(destinationSfu\)/);
+  // ensureQualificationFallback + provider ticket activation both replay
   assert.match(source, /replayCloudflarePublications\(session\)/);
+  // provider-session recovery replay
+  assert.match(composable, /replayCloudflarePublications: async \(session\)/);
 });
