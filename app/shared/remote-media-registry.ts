@@ -172,15 +172,11 @@ export class RemoteMediaRegistry {
     }
     if (!entry?.track) return;
     const trackEntry = { ...entry, track: entry.track };
-    // Update FSM phase to renderable when track is available
-    if (
-      entry.sourceGeneration !== undefined &&
-      entry.connectionEpoch !== undefined
-    ) {
-      trackEntry.phase = "renderable" as const;
-      trackEntry.firstFrameAt = Date.now();
-    }
-    this.remoteSourcePhases.set(entry.key, "renderable");
+    // ontrack proves a MediaStreamTrack exists, not that RTP is flowing or
+    // frames are decodable. Stay at transport-connected until real decode
+    // evidence (canplay/first-frame) arrives via markFirstFrame.
+    trackEntry.phase = "transport-connected" as const;
+    this.remoteSourcePhases.set(entry.key, "transport-connected");
     if (entry.track.kind === "video") {
       const current = this.videoFeeds.value.get(entry.key);
       const stream =
@@ -228,6 +224,32 @@ export class RemoteMediaRegistry {
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     if (entry.source === "screen" && persistPreference)
       this.setPairedScreenAudioReceiving(entry.userId, receiving);
+    return true;
+  }
+
+  // Real convergence evidence: the receiver decoded and presented a frame
+  // (canplay/loadedmetadata). Promotes the phase from transport-connected to
+  // renderable. Until this fires, the FSM stays at transport-connected even
+  // though the track exists.
+  markFirstFrame(key: string) {
+    const phase = this.remoteSourcePhases.get(key);
+    if (
+      phase === "renderable" ||
+      phase === "retired" ||
+      phase === "failed" ||
+      phase === undefined
+    )
+      return false;
+    this.remoteSourcePhases.set(key, "renderable");
+    const video = this.videoFeeds.value.get(key);
+    if (video) {
+      if (!video.firstFrameAt) video.firstFrameAt = Date.now();
+      this.videoFeeds.value.set(key, {
+        ...video,
+        firstFrameAt: video.firstFrameAt,
+      });
+      triggerRef(this.videoFeeds);
+    }
     return true;
   }
 

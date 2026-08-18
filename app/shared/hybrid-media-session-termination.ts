@@ -63,18 +63,26 @@ export function createHybridMediaSessionTermination({
     setChannelId(null);
     disposeVisibility();
     if (connected.value) {
-      try {
-        sendLeave();
-      } catch (leaveError: unknown) {
-        mediaDebug("session.leave-failed", {
-          error:
-            leaveError instanceof Error
-              ? leaveError.message
-              : String(leaveError),
+      const leavePromise = Promise.resolve()
+        .then(() => sendLeave())
+        .catch((leaveError: unknown) => {
+          mediaDebug("session.leave-failed", {
+            error:
+              leaveError instanceof Error
+                ? leaveError.message
+                : String(leaveError),
+          });
         });
-      }
+      const timeout = new Promise((resolve) => setTimeout(resolve, 750));
+      // Bounded clean leave: signaling stays open until the server has a
+      // chance to process the leave, but never blocks indefinitely. The rest
+      // of teardown (audio stop, transport close, state reset) runs now.
+      void Promise.race([leavePromise, timeout]).then(() => {
+        signaling.stop();
+      });
+    } else {
+      signaling.stop();
     }
-    signaling.stop();
     stopLocalVoiceDetection();
     stopSharedAudioMeter();
     clearAttenuation();

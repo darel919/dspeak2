@@ -97,7 +97,18 @@ export class NativeP2pSourcesMethods {
         await this.updateTrack(sender, () => sender.replaceTrack(null));
         state.senders.delete(source);
         state.sourceReceiving.delete(source);
-        this.signal(state.peerId, { sourceRemoved: { source } });
+        const rollbackGeneration =
+          Number(
+            (previous as NativeP2pLocalSourceEntry | undefined)?.generation,
+          ) || 0;
+        this.signal(state.peerId, {
+          sourceRemoved: {
+            source,
+            ...(rollbackGeneration > 0
+              ? { generation: rollbackGeneration }
+              : {}),
+          },
+        });
       }),
     );
     const rollbackFailure = rollbackResults.find(
@@ -291,7 +302,15 @@ export class NativeP2pSourcesMethods {
       try {
         await sender?.replaceTrack(null);
       } catch {}
-      if (announced) this.signal(state.peerId, { sourceRemoved: { source } });
+      if (announced) {
+        const removalGeneration = Number(entry.generation) || 0;
+        this.signal(state.peerId, {
+          sourceRemoved: {
+            source,
+            ...(removalGeneration > 0 ? { generation: removalGeneration } : {}),
+          },
+        });
+      }
       this.fail("sender-configuration-failed", error);
       throw error;
     }
@@ -322,6 +341,7 @@ export class NativeP2pSourcesMethods {
   }
 
   async unpublishSourceInternal(this: NativeP2pMeshSurface, source: string) {
+    const entry = this.localSources.get(source);
     this.localSources.delete(source);
     await Promise.all(
       [...this.connections.values()].map(async (state) => {
@@ -335,7 +355,13 @@ export class NativeP2pSourcesMethods {
         }
         state.senders.delete(source);
         state.sourceReceiving.delete(source);
-        this.signal(state.peerId, { sourceRemoved: { source } });
+        const removalGeneration = Number(entry?.generation) || 0;
+        this.signal(state.peerId, {
+          sourceRemoved: {
+            source,
+            ...(removalGeneration > 0 ? { generation: removalGeneration } : {}),
+          },
+        });
       }),
     );
   }

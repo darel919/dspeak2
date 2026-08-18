@@ -80,7 +80,10 @@ export class NativeCloudflareRealtimeSession {
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
     this.lastReceivedConsumerParams = null;
+    this.controlConnectionEpoch = 0;
   }
+
+  getControlConnectionEpoch = () => this.controlConnectionEpoch;
 }
 
 export interface NativeCloudflareRealtimeSession extends NativeCloudflareSessionSurface {}

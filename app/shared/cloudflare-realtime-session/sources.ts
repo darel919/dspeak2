@@ -128,6 +128,8 @@ export class CloudflareSourcesMethods {
         trackName,
         mid,
         ownerSource: entry.ownerSource || null,
+        generation:
+          typeof entry.generation === "number" ? entry.generation : undefined,
       });
       await this.setSourceTransmission(
         entry.source,
@@ -140,8 +142,8 @@ export class CloudflareSourcesMethods {
             trackName,
             source: entry.source,
             ownerSource: entry.ownerSource || null,
-            generation: this.sessionGeneration,
-            connectionEpoch: this.connectionEpoch,
+            generation: entry.generation,
+            connectionEpoch: this.getControlConnectionEpoch(),
           },
         })
       )
@@ -333,8 +335,8 @@ export class CloudflareSourcesMethods {
             trackName: current.trackName,
             source,
             ownerSource: current.ownerSource || null,
-            generation: this.sessionGeneration,
-            connectionEpoch: this.connectionEpoch,
+            generation: current.generation,
+            connectionEpoch: this.getControlConnectionEpoch(),
             closed: true,
           },
         })

@@ -188,7 +188,9 @@ test("failed SFU publication never advertises a local source", async () => {
     harness.sent.some((message) => message.type === "media-sources"),
     false,
   );
-  assert.equal(harness.failures.length, 1);
+  // An untyped source error (tracks-new, sender config, renegotiation) is
+  // source-scoped, not a provider fault: it must NOT escalate to failover.
+  assert.equal(harness.failures.length, 0);
 });
 
 test("local screen preview is available while route publication is pending", async () => {

@@ -290,6 +290,7 @@
               @pop-out="openMediaPopout(tile.feed)"
               @focus-popup="focusMediaPopout(tile.feed)"
               @pop-in="closeMediaPopout(tile.feed)"
+              @first-frame="onRemoteFirstFrame"
             />
             <div
               v-else-if="tile.type === 'broadcast'"
@@ -1068,6 +1069,10 @@ const remoteSystemAudioShares = computed(() => {
 function setScreenReceiving(feed, receiving) {
   if (feed.local || feed.source !== "screen") return;
   voiceStore.setRemoteScreenReceiving(feed.key, receiving);
+}
+
+function onRemoteFirstFrame(feedKey) {
+  mediaSessionRef.value?.markRemoteFirstFrame?.(feedKey);
 }
 
 function setLocalPreview(feed, enabled) {

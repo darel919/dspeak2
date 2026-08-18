@@ -60,7 +60,10 @@ export const MEDIA_FAILURE_CODES = {
   STALE_SOURCE_GENERATION: {
     code: "STALE_SOURCE_GENERATION",
     scope: "source-operation" as const,
-    retryable: true,
+    // Not blindly retryable: the client adopts the canonical generation
+    // from the NACK and re-announces the latest desired state with a new
+    // fenced operation instead of re-sending the rejected bytes.
+    retryable: false,
   },
   INVALID_OPERATION: {
     code: "INVALID_OPERATION",

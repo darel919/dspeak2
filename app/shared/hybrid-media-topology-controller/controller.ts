@@ -396,24 +396,33 @@ export function createHybridMediaTopologyController({
       return;
     }
     if (data.mode === "probing") {
-      await ensureQualificationFallback(data, generation);
-      const mesh = ensureP2p();
-      if (!mesh) {
-        send({
-          type: "p2p-failed",
-          data: { epoch: data.epoch, reason: "webrtc-unavailable" },
+      // Canonical state applied immediately; transport convergence runs as an
+      // independently cancellable task so probing never blocks the queue.
+      void ensureQualificationFallback(data, generation)
+        .then(async () => {
+          mediaGeneration.assert(generation);
+          const mesh = ensureP2p();
+          if (!mesh) {
+            send({
+              type: "p2p-failed",
+              data: { epoch: data.epoch, reason: "webrtc-unavailable" },
+            });
+            return;
+          }
+          await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
+          await publishLocalSources(mesh);
+          mediaGeneration.assert(generation);
+          if (signal?.aborted) return;
+          transportReady.value = getActiveProvider() !== null;
+          iceConnectedBoth.value = false;
+          mediaConnectionState.value = "topology-probing";
+          refreshTopologyGraph();
+          startConvergence(data, generation, signal);
+        })
+        .catch((err) => {
+          if (signal?.aborted) return;
+          handleTopologyFailure(data, err);
         });
-        return;
-      }
-      await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
-      await publishLocalSources(mesh);
-      mediaGeneration.assert(generation);
-      transportReady.value = getActiveProvider() !== null;
-      iceConnectedBoth.value = false;
-      mediaConnectionState.value = "topology-probing";
-      refreshTopologyGraph();
-      // Start P2P convergence without blocking pipeline
-      startConvergence(data, generation, signal);
       return;
     }
     // Mode switch (p2p <-> sfu) - transition with async convergence
@@ -435,16 +444,17 @@ export function createHybridMediaTopologyController({
     waitForRemoteTracks(provider, data, convergenceSignal)
       .then(() => {
         if (convergenceSignal.aborted) return;
-        const readiness =
-          data.mode === "sfu" ? getSfu()?.connectionState() : { ready: true };
+        const activeIsSfu = getActiveProvider() === "sfu";
+        const readiness = activeIsSfu
+          ? getSfu()?.connectionState()
+          : { ready: true };
         transportReady.value = readiness?.ready === true;
-        iceConnectedBoth.value =
-          data.mode === "sfu"
-            ? readiness?.sendRequired === true &&
-              readiness?.receiveRequired === true &&
-              readiness?.send === "connected" &&
-              readiness?.recv === "connected"
-            : getP2pMesh()?.isMediaReady() === true;
+        iceConnectedBoth.value = activeIsSfu
+          ? readiness?.sendRequired === true &&
+            readiness?.receiveRequired === true &&
+            readiness?.send === "connected" &&
+            readiness?.recv === "connected"
+          : getP2pMesh()?.isMediaReady() === true;
         setRouteConnectionState(
           transportReady.value
             ? iceConnectedBoth.value
@@ -482,7 +492,8 @@ export function createHybridMediaTopologyController({
         data.mode === "sfu" ? "sfu" : data.target === "sfu" ? "sfu" : "p2p";
       if (data.mode === "switching") {
         // switching is a control mode, not a provider: keep the current
-        // active provider until the target is actually ready.
+        // active provider authoritative until a committed route arrives.
+        // Prepare the target asynchronously, but never activate it.
         const currentProvider = getActiveProvider();
         const currentMesh = ensureP2p();
         const currentSfu = getSfu();
@@ -492,9 +503,9 @@ export function createHybridMediaTopologyController({
         if (!hasCurrentTransport && targetMode === "sfu")
           await ensureQualificationFallback(data, generation);
         mediaGeneration.assert(generation);
-        if (targetMode === "sfu") {
+        if (targetMode === "sfu" && currentProvider !== "sfu") {
           const session = ensureSfu();
-          if (session && currentProvider !== "sfu") {
+          if (session) {
             await session.initialize();
             for (const entry of localSources.values())
               await session.addSource(entry);
@@ -503,7 +514,7 @@ export function createHybridMediaTopologyController({
             mediaGeneration.assert(generation);
             handoff.bind("sfu");
           }
-        } else {
+        } else if (targetMode === "p2p" && currentProvider !== "p2p") {
           const mesh = ensureP2p();
           if (mesh) {
             await mesh.applyTopology({
@@ -514,21 +525,18 @@ export function createHybridMediaTopologyController({
           }
         }
         mediaGeneration.assert(generation);
-        // Only switch active provider after target setup succeeded
-        if (getActiveProvider() !== targetMode) setActiveProvider(targetMode);
+        // Record target intent only. The active provider stays unchanged;
+        // setActiveProvider happens on the committed mode event.
         topologyState.value = {
           ...topologyState.value,
-          activeTransport: targetMode,
-          targetTransport: null,
+          activeTransport:
+            currentProvider === "p2p" || currentProvider === "sfu"
+              ? currentProvider
+              : null,
+          targetTransport: targetMode,
         };
-        transportReady.value = getActiveProvider() !== null;
-        iceConnectedBoth.value = false;
-        mediaConnectionState.value = "topology-connecting";
-        setConnectionPhase("media-connecting", {
-          topologyEpoch: Number(data.epoch),
-          topologyMode: data.mode,
-        });
-        startConvergence(data, generation, transitionSignal);
+        refreshPublicMaps();
+        refreshTopologyGraph();
         return;
       }
       if (data.mode === "p2p") {

@@ -218,6 +218,7 @@ const emit = defineEmits([
   "pop-out",
   "focus-popup",
   "pop-in",
+  "first-frame",
 ]);
 
 const videoElement = ref(null);
@@ -416,6 +417,9 @@ function handleVideoReady() {
   clearTimeout(playbackRecoveryTimer);
   playbackRecoveryTimer = null;
   playVideoElement(videoElement.value, "Remote preview");
+  // Real decode evidence: the element reached canplay/loadedmetadata with
+  // frames available. This is the first-frame convergence signal, not ontrack.
+  if (props.feedKey) emit("first-frame", props.feedKey);
 }
 
 function recoverVideoPlayback() {

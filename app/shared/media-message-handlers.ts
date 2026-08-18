@@ -42,6 +42,7 @@ export function setupMediaMessageHandlers({
   onSnapshotRequested,
   queueTargetedReconciliation,
   onConnectionEpochUpdated,
+  onPublicationsDigest,
 }: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
     handlers: [
@@ -71,6 +72,9 @@ export function setupMediaMessageHandlers({
     if (typeof data.connectionEpoch === "number") {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
+    if (Array.isArray(data.publishedSourcesDigest)) {
+      onPublicationsDigest?.(data.publishedSourcesDigest);
+    }
   });
   registerHandler("operation-ack", (data: MediaMessage) => {
     const operationId =
@@ -79,6 +83,14 @@ export function setupMediaMessageHandlers({
       if (data.accepted === false) {
         const error = createOperationError(data);
         onOperationError?.(operationId, error);
+        // Adopt canonical metadata before reconciliation so retries are
+        // fenced against the correct incarnation.
+        const nackRoomRevision =
+          typeof data.roomRevision === "string" ? data.roomRevision : null;
+        if (nackRoomRevision) onRoomRevisionApplied?.(nackRoomRevision);
+        if (typeof data.connectionEpoch === "number") {
+          onConnectionEpochUpdated?.(data.connectionEpoch);
+        }
         if (data.canonicalState) {
           const topology =
             typeof data.canonicalState === "object" &&
@@ -92,7 +104,10 @@ export function setupMediaMessageHandlers({
             );
           }
         }
-        if (data.retryable === true) {
+        if (
+          data.retryable === true ||
+          data.code === "STALE_SOURCE_GENERATION"
+        ) {
           queueTargetedReconciliation?.(operationId, data);
         }
         return;

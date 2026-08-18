@@ -869,8 +869,9 @@ export function useHybridMediaSession() {
     handleP2pQualification,
     handleProviderFailure,
     handleProviderRecovering: (data: Record<string, unknown>) => {
-      topologyController?.handleProviderRecovering(data);
-      return sourceController.handleProviderRecovering(data);
+      // Informational: record recovery state only. Re-publication happens in
+      // the committed provider convergence path, never from this message.
+      return topologyController?.handleProviderRecovering(data);
     },
     handleProviderTicket: (data: Record<string, unknown>) =>
       topologyController?.handleProviderTicket(data),
@@ -892,6 +893,10 @@ export function useHybridMediaSession() {
     getConnectionEpoch: () => sessionConnectionEpoch,
     setConnectionEpoch: (epoch: number) => {
       sessionConnectionEpoch = epoch;
+      const cloudflareSession = ensureSfu?.() as
+        { controlConnectionEpoch?: number } | undefined;
+      if (cloudflareSession && "controlConnectionEpoch" in cloudflareSession)
+        cloudflareSession.controlConnectionEpoch = epoch;
     },
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
     applyRoomRevision,
@@ -964,6 +969,7 @@ export function useHybridMediaSession() {
     },
     setRemoteScreenReceiving: (feedKey: string, receiving: boolean) =>
       registry.setVideoReceiving(feedKey, receiving),
+    markRemoteFirstFrame: (key: string) => registry.markFirstFrame(key),
     setRemoteSystemAudioReceiving: (key: string, on: boolean) =>
       registry.setAudioReceiving(key, on),
     setSharedAudioAttenuation,

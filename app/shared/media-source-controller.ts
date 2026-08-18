@@ -309,27 +309,42 @@ export function createMediaSourceController({
         }
         throw sourceError;
       }
-      // An unexpected non-source-scoped failure (e.g. transport died mid
-      // publication) is a provider-level fault: escalate once so the topology
-      // controller can fail over, then rethrow.
-      if (topologyState.value.mode === "sfu")
-        reportSfuFailure(`source-${entry.source}-failed-${reason}`);
-      else if (topologyState.value.target === "sfu") {
-        const { provider, providerId } = resolveMediaProviderIdentity(
-          topologyState.value,
-          true,
-        );
-        send({
-          type: "topology-failed",
-          data: {
-            provider,
-            ...(providerId ? { providerId } : {}),
-            epoch: topologyState.value.epoch,
-            target: "sfu",
-            sourceRevision: topologyState.value.sourceRevision,
-            reason,
-          },
-        });
+      // Only provider-session-scoped failures escalate to provider failover.
+      // Ordinary source errors (tracks-new, sender config, renegotiation)
+      // stay source-scoped; Cloudflare operations throw plain Error objects,
+      // so the fallback must not promote them to a provider fault.
+      const errorCode =
+        sourceError &&
+        typeof sourceError === "object" &&
+        "code" in sourceError &&
+        typeof (sourceError as { code?: unknown }).code === "string"
+          ? (sourceError as { code: string }).code
+          : null;
+      const escalationScope = errorCode
+        ? isFailureSourceScoped(errorCode)
+          ? "source-scoped"
+          : "provider-session"
+        : "source-scoped";
+      if (escalationScope === "provider-session") {
+        if (topologyState.value.mode === "sfu")
+          reportSfuFailure(`source-${entry.source}-failed-${reason}`);
+        else if (topologyState.value.target === "sfu") {
+          const { provider, providerId } = resolveMediaProviderIdentity(
+            topologyState.value,
+            true,
+          );
+          send({
+            type: "topology-failed",
+            data: {
+              provider,
+              ...(providerId ? { providerId } : {}),
+              epoch: topologyState.value.epoch,
+              target: "sfu",
+              sourceRevision: topologyState.value.sourceRevision,
+              reason,
+            },
+          });
+        }
       }
       setSourcePhase(entry.source, "idle", getActiveProvider());
       throw sourceError;
@@ -557,24 +572,35 @@ export function createMediaSourceController({
     if (!source || !localSources.has(source)) return Promise.resolve(false);
     const entry = localSources.get(source);
     if (!entry) return Promise.resolve(false);
+    // Adopt the canonical generation before re-announcing so the retry is
+    // fenced against the server's current incarnation of this source.
+    const expectedGeneration = Number(payload.expectedGeneration);
+    if (
+      payload.code === "STALE_SOURCE_GENERATION" &&
+      Number.isSafeInteger(expectedGeneration) &&
+      expectedGeneration > 0 &&
+      expectedGeneration !== Number(entry.generation)
+    ) {
+      entry.generation = expectedGeneration;
+    }
     mediaDebug("source-state.reconcile", {
       operationId,
       source,
       generation: entry.generation,
+      retryable: payload.retryable,
     });
-    return Promise.resolve(publishSource(entry)).catch(
-      (sourceError: unknown) => {
-        mediaDebug("source-state.reconcile-failed", {
-          operationId,
-          source,
-          error:
-            sourceError instanceof Error
-              ? sourceError.message
-              : String(sourceError),
-        });
-        return false;
-      },
-    );
+    publishSource(entry).catch((sourceError: unknown) => {
+      mediaDebug("source-state.reconcile-failed", {
+        operationId,
+        source,
+        error:
+          sourceError instanceof Error
+            ? sourceError.message
+            : String(sourceError),
+      });
+      return false;
+    });
+    return Promise.resolve(true);
   }
 
   async function leave() {
@@ -590,32 +616,16 @@ export function createMediaSourceController({
     return awaitOperationAck(operationId);
   }
 
-  async function handleProviderRecovering(data: Record<string, unknown> = {}) {
+  function handleProviderRecovering(data: Record<string, unknown> = {}) {
     const retryAt = Number(data.retryAt);
-    if (!Number.isSafeInteger(retryAt) || retryAt <= Date.now()) return;
-    const recoveryDelay = Math.max(0, retryAt - Date.now());
     mediaDebug("source-state.provider-recovering", {
-      retryAt,
-      retryAfterMs: recoveryDelay,
+      retryAt: Number.isSafeInteger(retryAt) ? retryAt : null,
       reason: data.reason || "provider-recovering",
     });
-    // Re-publish local sources once the provider-session recovery window has
-    // elapsed. Re-publishing idempotently re-creates producer side state on
-    // the recovered provider session.
-    await new Promise((resolve) => setTimeout(resolve, recoveryDelay));
-    for (const entry of [...localSources.values()]) {
-      try {
-        await publishSource(entry);
-      } catch (sourceError) {
-        mediaDebug("source-state.provider-recover-publish-failed", {
-          source: entry.source,
-          error:
-            sourceError instanceof Error
-              ? sourceError.message
-              : String(sourceError),
-        });
-      }
-    }
+    // Informational only. Actual re-publication happens as part of the
+    // committed provider convergence path (a later topology event), so a
+    // provider recovery never invents a new logical source incarnation.
+    return Promise.resolve(true);
   }
 
   return {

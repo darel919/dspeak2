@@ -88,6 +88,8 @@ export interface NativeCloudflareSessionSurface {
   jitterBufferMinimumDelay: number;
   jitterBufferTargetDelay: number;
   lastReceivedConsumerParams: unknown;
+  controlConnectionEpoch: number;
+  getControlConnectionEpoch: () => number;
   _assertCurrent: (generation: number, handle?: string | number | null) => void;
   _emitState: () => unknown;
   closeMedia: () => unknown;

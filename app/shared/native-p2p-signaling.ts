@@ -235,8 +235,15 @@ export async function applyPeerSignal(
       typeof sourceSignal.ownerSource === "string"
         ? sourceSignal.ownerSource
         : null;
+    const generation = Number(sourceSignal.generation) || 0;
+    const previousGeneration =
+      mesh.remoteSourceGenerations?.get(sourceKey) || 0;
+    // Fence by generation: a stale announce must not overwrite a newer
+    // incarnation of the same logical source.
+    if (generation > 0 && generation < previousGeneration) return;
     mesh.remoteSources.set(sourceKey, source);
     mesh.remoteSourceOwners.set(sourceKey, ownerSource);
+    mesh.remoteSourceGenerations?.set(sourceKey, generation);
     let current = [...state.remoteTracks.values()].find(
       (entry) => String(entry.track?.id) === trackId,
     );
@@ -279,12 +286,19 @@ export async function applyPeerSignal(
       : null;
   if (removedSignal) {
     const source = String(removedSignal.source || "");
+    const removedGeneration = Number(removedSignal.generation) || 0;
     state.retiredRemoteTracks ||= new Map();
     for (const [key, mappedSource] of mesh.remoteSources) {
-      if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
-        mesh.remoteSourceOwners.delete(key);
-      if (key.startsWith(`${state.peerId}:`) && mappedSource === source)
-        mesh.remoteSources.delete(key);
+      if (!key.startsWith(`${state.peerId}:`) || mappedSource !== source)
+        continue;
+      // Fence by participant + source + generation: a removal for an older
+      // incarnation must not retire the current incarnation of this source.
+      const currentGeneration = mesh.remoteSourceGenerations?.get(key) || 0;
+      if (removedGeneration > 0 && currentGeneration > removedGeneration)
+        continue;
+      mesh.remoteSourceOwners.delete(key);
+      mesh.remoteSources.delete(key);
+      mesh.remoteSourceGenerations?.delete(key);
     }
     const currentEntry = [...state.remoteTracks.entries()].find(
       ([, entry]) => entry.source === source,

@@ -17,6 +17,7 @@ export interface CloudflareSourceEntry extends Record<string, unknown> {
   trackName: string;
   mid: string;
   ownerSource?: string | null;
+  generation?: number;
 }
 export interface CloudflareSourceInput extends Record<string, unknown> {
   source: string;
@@ -90,6 +91,8 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   sourceOperations: Map<string, Promise<unknown>>;
   sessionGeneration: number;
   connectionEpoch: number;
+  controlConnectionEpoch: number;
+  getControlConnectionEpoch: () => number;
   lastSentClientRtpCapabilities: unknown;
   lastReceivedConsumerParams: CloudflareRequestResult | null;
   connectionState: () => Record<string, unknown>;

@@ -97,6 +97,7 @@ export interface VoiceMediaSessionLike {
     volume: number,
   ) => unknown;
   setRemoteScreenReceiving?: (feedKey: string, receiving: boolean) => unknown;
+  markRemoteFirstFrame?: (key: string) => unknown;
   setRemoteSystemAudioReceiving?: (
     feedKey: string,
     receiving: boolean,

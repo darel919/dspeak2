@@ -130,10 +130,22 @@ export class NativeP2pTopologyMethods {
               trackId: entry.track.id,
               source,
               ownerSource: entry.ownerSource || null,
+              ...(Number.isFinite(Number(entry.generation)) &&
+              Number(entry.generation) > 0
+                ? { generation: Math.floor(Number(entry.generation)) }
+                : {}),
             },
           });
         } else if (!sender.track) {
-          this.signal(state.peerId, { sourceRemoved: { source } });
+          const removalGeneration = Number(entry?.generation) || 0;
+          this.signal(state.peerId, {
+            sourceRemoved: {
+              source,
+              ...(removalGeneration > 0
+                ? { generation: removalGeneration }
+                : {}),
+            },
+          });
         }
       }
       state.capabilitiesSent = false;

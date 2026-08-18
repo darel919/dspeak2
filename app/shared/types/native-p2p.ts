@@ -117,6 +117,7 @@ export interface NativeP2pSignalingMesh {
   sendControl: (data: Record<string, unknown>) => boolean;
   remoteSources: Map<string, string>;
   remoteSourceOwners: Map<string, string | null>;
+  remoteSourceGenerations?: Map<string, number>;
   onRemoteTrack: (entry: Record<string, unknown>) => unknown;
   onRemoteTrackEnded: (entry: Record<string, unknown>) => unknown;
   queuePendingSignal: (data: Record<string, unknown>) => boolean;

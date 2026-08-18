@@ -60,9 +60,12 @@ export class CloudflareRealtimeSession {
     this.sourceOperations = new Map();
     this.sessionGeneration = 0;
     this.connectionEpoch = 0;
+    this.controlConnectionEpoch = 0;
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
   }
+
+  getControlConnectionEpoch = () => this.controlConnectionEpoch;
 }
 
 export interface CloudflareRealtimeSession extends CloudflareSessionLike {}
