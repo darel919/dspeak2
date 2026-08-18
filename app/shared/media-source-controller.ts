@@ -358,48 +358,75 @@ export function createMediaSourceController({
           });
         }
       }
+      // Send compensation mutation and wait for ACK
       await sendMediaSourcesMutation(
         entry.source,
         isReplacement ? "active" : "inactive",
         currentSourceFsm,
         previous,
-      ).catch((error: unknown) => {
-        mediaDebug("compensation-ack-failed", {
-          source: entry.source,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
-      });
+      );
+      // Compensation ACK succeeded - persist recovery generation into canonical localSources
       const previousEntry: TopologySourceEntry | undefined = localSources.get(
         entry.source,
       );
       if (previousEntry) {
-        // Re-announce previous with the recovery generation
-        const previousWithRecoveryGen = {
+        // Update localSources with the recovery generation so future topology transitions use it
+        const recoveredEntry = {
           ...previousEntry,
-          generation: isReplacement
-            ? recoveryGeneration
-            : (previousEntry.generation ?? 1),
+          generation: recoveryGeneration,
         } as TopologySourceEntry;
-        await Promise.allSettled([
-          p2pRequired
-            ? asProvider(getP2pMesh())?.publishSource(
-                previousWithRecoveryGen.source,
-                previousWithRecoveryGen.track,
-                previousWithRecoveryGen.stream,
-                previousWithRecoveryGen,
-              )
-            : null,
-          sfuRequired
-            ? asProvider(getSfu())?.addSource(previousWithRecoveryGen)
-            : null,
-        ]);
+        localSources.set(entry.source, recoveredEntry);
+        // Re-announce previous with the recovery generation on required transports
+        const p2pResult = p2pRequired
+          ? asProvider(getP2pMesh())?.publishSource(
+              recoveredEntry.source,
+              recoveredEntry.track,
+              recoveredEntry.stream,
+              recoveredEntry,
+            )
+          : Promise.resolve();
+        const sfuResult = sfuRequired
+          ? asProvider(getSfu())?.addSource(recoveredEntry)
+          : Promise.resolve();
+        const results = await Promise.allSettled([p2pResult, sfuResult]);
+        // Check if required transports succeeded
+        const requiredResults = [
+          p2pRequired ? results[0] : { status: "fulfilled" as const },
+          sfuRequired ? results[1] : { status: "fulfilled" as const },
+        ];
+        const failedRequired = requiredResults.find(
+          (r): r is PromiseRejectedResult => r.status === "rejected",
+        );
+        if (failedRequired) {
+          // Required transport failed - don't leave source as active
+          mediaDebug("recovery.provider-restore-failed", {
+            source: entry.source,
+            error:
+              failedRequired.reason instanceof Error
+                ? failedRequired.reason.message
+                : String(failedRequired.reason),
+          });
+          // Clean up the failed source from providers
+          await Promise.allSettled([
+            p2pRequired
+              ? asProvider(getP2pMesh())?.unpublishSource(entry.source)
+              : null,
+            sfuRequired ? removeSfuSource(entry.source) : null,
+          ]);
+          if (entry.source === "screen-audio") stopSharedAudioMeter();
+          // Remove from localSources since recovery failed
+          localSources.delete(entry.source);
+          setSourcePhase(entry.source, "idle", getActiveProvider());
+          throw failedRequired.reason;
+        }
       } else {
+        // Brand-new source that failed - clean up any partial provider state
         await Promise.allSettled([
           asProvider(getP2pMesh())?.unpublishSource(entry.source),
           removeSfuSource(entry.source),
         ]);
         if (entry.source === "screen-audio") stopSharedAudioMeter();
+        setSourcePhase(entry.source, "idle", getActiveProvider());
       }
       if (
         isVideo &&
@@ -680,32 +707,19 @@ export function createMediaSourceController({
       string,
       { generation: number; desiredState: "active" | "inactive" }
     > = {};
-    // Use localSources for actual active sources, FSM for generation/tombstone tracking
+    // sources[] = active local sources (membership)
     const activeSources = new Set(localSources.keys());
-    // For brand-new source failure: don't include it in sources[]
-    // For replacement failure: keep the source (previous will be restored)
     const isNewFailure = !previousSource;
     const sourcesToSend = isNewFailure
       ? [...activeSources].filter((s) => s !== source)
       : [...activeSources];
-    for (const src of sourcesToSend) {
-      const fsm = currentSourceFsm.get(src);
-      if (fsm) {
-        sourceStates[src] = {
-          generation: fsm.generation,
-          desiredState: src === source ? desiredState : fsm.desiredState,
-        };
-      }
-    }
-    // Also include the failed source with its updated generation if it's a replacement
-    if (!isNewFailure) {
-      const fsm = currentSourceFsm.get(source);
-      if (fsm) {
-        sourceStates[source] = {
-          generation: fsm.generation,
-          desiredState,
-        };
-      }
+    // sourceStates = ALL FSM entries with their generations (including tombstones)
+    // This ensures failed brand-new sources send their retirement generation
+    for (const [src, fsm] of currentSourceFsm) {
+      sourceStates[src] = {
+        generation: fsm.generation,
+        desiredState: src === source ? desiredState : fsm.desiredState,
+      };
     }
     send({
       type: "media-sources",
@@ -777,6 +791,14 @@ export function createMediaSourceController({
       expectedGeneration !== Number(entry.generation)
     ) {
       entry.generation = expectedGeneration;
+      // Also adopt the generation into sourceFsms so commitSourceIntent uses the correct generation
+      const fsm = sourceFsms.get(source);
+      if (fsm) {
+        sourceFsms.set(source, {
+          ...fsm,
+          generation: expectedGeneration,
+        });
+      }
     }
     mediaDebug("source-state.reconcile", {
       operationId,

@@ -165,13 +165,24 @@ export class NativeCloudflareInitializationMethods {
     publications: Record<string, unknown>[],
   ) {
     if (!Array.isArray(publications)) return;
+
+    // Build authoritative server publication map by trackName
+    const serverPublications = new Map<string, Record<string, unknown>>();
     for (const pub of publications) {
       const trackName = String(pub.trackName || "");
       if (!trackName) continue;
+      serverPublications.set(trackName, pub);
+    }
+
+    // Track which local publications are in the server snapshot
+    const seenTrackNames = new Set(serverPublications.keys());
+
+    // 1. Process authoritative additions/repairs from server
+    for (const [trackName, pub] of serverPublications) {
       const existingPublication = this.publications.get(trackName);
 
       if (pub.closed === true) {
-        // Close with full publication metadata to pass epoch/generation check
+        // Server explicitly closed this publication - process if not stale
         if (existingPublication) {
           const incomingEpoch = Number(pub.connectionEpoch || 0);
           const incomingGen = Number(pub.generation || 0);
@@ -197,10 +208,45 @@ export class NativeCloudflareInitializationMethods {
           }
         }
       } else {
-        // Addition/repair
+        // Addition/repair - update with authoritative server state
+        // Check incarnation to prevent delayed heartbeat from downgrading newer publications
+        const existingPublication = this.publications.get(trackName);
+        if (existingPublication) {
+          const incomingEpoch = Number(pub.connectionEpoch || 0);
+          const incomingGen = Number(pub.generation || 0);
+          const currentEpoch = Number(existingPublication.connectionEpoch || 0);
+          const currentGen = Number(existingPublication.generation || 0);
+          if (
+            incomingEpoch < currentEpoch ||
+            (incomingEpoch === currentEpoch && incomingGen < currentGen)
+          ) {
+            // Stale publication from delayed heartbeat - ignore
+            continue;
+          }
+        }
         this.publications.set(trackName, { ...pub, trackName });
         if (this.sessionId && this.subscriptionsStarted)
           await this.subscribe({ ...pub, trackName });
+      }
+    }
+
+    // 2. Detect local publications MISSING from server snapshot (ghost tracks)
+    // These must be retired locally even without explicit closed=true from server
+    for (const [trackName, _localPub] of this.publications) {
+      if (!seenTrackNames.has(trackName)) {
+        // Local publication not in server snapshot - retire it
+        this.publications.delete(trackName);
+        this.subscribedTrackNames.delete(trackName);
+        for (const [mid, publication] of this.remoteByMid) {
+          if (publication.trackName === trackName) {
+            this.remoteByMid.delete(mid);
+            this.pendingRemoteTrackEvents.delete(mid);
+          }
+        }
+        for (const entry of [...this.consumers.values()]) {
+          if (String(entry.trackName || "") === trackName)
+            this._closeConsumer(entry);
+        }
       }
     }
   }
