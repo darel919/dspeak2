@@ -1,6 +1,7 @@
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
 import { buildVideoProduceOptions } from "../video-settings.ts";
 import { applyRtpSenderSettings } from "../rtp-sender-settings.ts";
+import { mediaDebug } from "../media-debug.ts";
 import type {
   CloudflarePublication,
   CloudflareSessionLike,
@@ -166,6 +167,41 @@ export class CloudflareSourcesMethods {
       }
       throw error;
     }
+  }
+
+  reannounceLocalPublications(
+    this: CloudflareSessionLike,
+    { connectionEpoch }: { connectionEpoch: number },
+  ) {
+    // Update control connection epoch for new control-plane identity
+    this.controlConnectionEpoch = connectionEpoch;
+
+    // Re-send cloudflare-publication for all local producers with the new epoch
+    for (const [source, producer] of this.producers) {
+      const trackName = producer.trackName;
+      if (!trackName) continue;
+      const track = producer.track;
+      const ownerSource = producer.ownerSource || null;
+      const generation = producer.generation || 0;
+      // Resend publication metadata with updated controlConnectionEpoch
+      const sent = this.send({
+        type: "cloudflare-publication",
+        data: {
+          trackName,
+          source,
+          ownerSource,
+          generation,
+          connectionEpoch: this.controlConnectionEpoch,
+          sessionId: this.sessionId,
+          variantId: producer.variantId,
+          codec: producer.codec,
+        },
+      });
+      if (!sent) {
+        mediaDebug("cloudflare.reannounce-send-failed", { source, trackName });
+      }
+    }
+    return Promise.resolve(true);
   }
 
   subscribe(

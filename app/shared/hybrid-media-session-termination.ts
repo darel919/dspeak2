@@ -69,16 +69,17 @@ export function createHybridMediaSessionTermination({
     // (signaling.send() checks isIntentionalClose() and blocks if true)
     let leavePromise: Promise<unknown> | null = null;
     if (wasConnected) {
-      leavePromise = Promise.resolve()
-        .then(() => sendLeave())
-        .catch((leaveError: unknown) => {
-          mediaDebug("session.leave-failed", {
-            error:
-              leaveError instanceof Error
-                ? leaveError.message
-                : String(leaveError),
-          });
+      try {
+        leavePromise = Promise.resolve(sendLeave());
+      } catch (leaveError: unknown) {
+        leavePromise = Promise.reject(leaveError);
+        mediaDebug("session.leave-failed", {
+          error:
+            leaveError instanceof Error
+              ? leaveError.message
+              : String(leaveError),
         });
+      }
     }
 
     // Phase 2: Mark intentional close (blocks further signaling sends)

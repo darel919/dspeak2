@@ -138,6 +138,21 @@ export class NativeCloudflareInitializationMethods {
           this._closeConsumer(entry);
       return true;
     }
+    // Generation/epoch fencing: compare epoch FIRST, then generation.
+    // Epoch dominates (control-plane identity), generation breaks ties within the same epoch.
+    const existingPublication = this.publications.get(trackName);
+    if (existingPublication) {
+      const incomingEpoch = Number(data.connectionEpoch || 0);
+      const incomingGen = Number(data.generation || 0);
+      const currentEpoch = Number(existingPublication.connectionEpoch || 0);
+      const currentGen = Number(existingPublication.generation || 0);
+      if (
+        incomingEpoch < currentEpoch ||
+        (incomingEpoch === currentEpoch && incomingGen < currentGen)
+      ) {
+        return true; // stale publication, ignore
+      }
+    }
     const publication = { ...data, trackName };
     this.publications.set(trackName, publication);
     if (this.sessionId && this.subscriptionsStarted)

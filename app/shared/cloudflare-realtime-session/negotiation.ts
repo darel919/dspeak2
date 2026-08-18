@@ -254,15 +254,17 @@ export class CloudflareNegotiationMethods {
       publication.trackName = trackName;
 
       // Generation/epoch fencing: ignore stale publications for retired generations
+      // Compare epoch FIRST, then generation. Epoch dominates (control-plane identity),
+      // generation breaks ties within the same epoch.
       const existingPublication = this.publications.get(trackName);
       if (existingPublication) {
-        const existingGen = Number(existingPublication.generation || 0);
-        const newGen = Number(publication.generation || 0);
-        const existingEpoch = Number(existingPublication.connectionEpoch || 0);
-        const newEpoch = Number(publication.connectionEpoch || 0);
+        const incomingEpoch = Number(publication.connectionEpoch || 0);
+        const incomingGen = Number(publication.generation || 0);
+        const currentEpoch = Number(existingPublication.connectionEpoch || 0);
+        const currentGen = Number(existingPublication.generation || 0);
         if (
-          newGen < existingGen ||
-          (newGen === existingGen && newEpoch < existingEpoch)
+          incomingEpoch < currentEpoch ||
+          (incomingEpoch === currentEpoch && incomingGen < currentGen)
         ) {
           return true; // stale publication, ignore
         }

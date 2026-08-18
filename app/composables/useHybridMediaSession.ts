@@ -751,28 +751,24 @@ export function useHybridMediaSession() {
     replayCloudflarePublications: async (session) => {
       if (!session) return;
       for (const publication of cloudflarePublications.values()) {
-        const trackName = publication.trackName;
-        const peerId = publication.peerId;
-        const source = publication.source;
-        const track = (publication as Record<string, unknown>).track as
-          MediaStreamTrack | undefined;
-        const stream = (publication as Record<string, unknown>).stream as
-          MediaStream | undefined;
-        if (!trackName || !peerId || !source || !track) continue;
-        try {
-          await session.publishSource(source, track, stream, {
-            source,
-            track,
-            key: trackName,
-            provider: "sfu",
-            userId: peerId,
-            peerId: peerId,
-          });
-        } catch (err) {
-          mediaDebug("cloudflare-replay-failed", {
-            trackName,
-            error: err instanceof Error ? err.message : String(err),
-          });
+        const pub = publication as Record<string, unknown>;
+        const trackName = pub.trackName;
+        const peerId = pub.peerId;
+        const source = pub.source;
+        if (!trackName || !peerId || !source) continue;
+        // Remote publications should be subscribed via the canonical
+        // cloudflare-publication-available handler, not publishSource().
+        // This repairs subscriptions for publications that arrived before
+        // the Cloudflare session existed.
+        if ("handle" in session && typeof session.handle === "function") {
+          try {
+            await session.handle("cloudflare-publication-available", pub);
+          } catch (err) {
+            mediaDebug("cloudflare-replay-failed", {
+              trackName,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
     },
@@ -915,6 +911,7 @@ export function useHybridMediaSession() {
       data: Record<string, unknown>,
     ) => sourceController.queueTargetedReconciliation(operationId, data),
     handlePublicationsDigest,
+    sourceController,
   } as unknown as RuntimeDependencyContext);
 
   // Handle publications digest - called by hybrid-media-session-lifecycle
@@ -922,6 +919,9 @@ export function useHybridMediaSession() {
     if (!Array.isArray(digest)) return;
     const session = sfu;
     if (!session) return;
+
+    // Build server publication map by trackName for authoritative comparison
+    const serverPublications = new Map<string, Record<string, unknown>>();
     for (const entry of digest) {
       if (
         !entry ||
@@ -934,19 +934,44 @@ export function useHybridMediaSession() {
       )
         continue;
       const pub = entry as Record<string, unknown>;
+      serverPublications.set(String(pub.trackName), pub);
+    }
+
+    // Upsert server publications (additions/repairs)
+    for (const [trackName, pub] of serverPublications) {
       // Update registry so publications survive reconnect
       cloudflarePublications.update(pub);
       // Subscription repair: call the session's cloudflare-publication-available handler
-      // which installs the canonical publication and then subscribes. This is the proper
-      // repair entrypoint — not calling subscribe() directly.
+      // which installs the canonical publication and then subscribes.
       if ("handle" in session && typeof session.handle === "function") {
         try {
           await session.handle("cloudflare-publication-available", pub);
         } catch (err) {
           mediaDebug("publications-digest-handle-failed", {
-            trackName: String(pub.trackName),
+            trackName,
             error: err instanceof Error ? err.message : String(err),
           });
+        }
+      }
+    }
+
+    // Remove local publications absent from server digest (authoritative removals)
+    for (const localPub of cloudflarePublications.values()) {
+      const trackName = String(localPub.trackName || "");
+      if (trackName && !serverPublications.has(trackName)) {
+        // Server no longer has this publication - retire it locally
+        if ("handle" in session && typeof session.handle === "function") {
+          try {
+            await session.handle("cloudflare-publication-available", {
+              trackName,
+              closed: true,
+            });
+          } catch (err) {
+            mediaDebug("publications-digest-retire-failed", {
+              trackName,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
     }

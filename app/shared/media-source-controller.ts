@@ -307,6 +307,9 @@ export function createMediaSourceController({
     } catch (sourceError: unknown) {
       setSourcePhase(entry.source, "failed", getActiveProvider());
       const reason = `source-${entry.source}-failed-${sourceError instanceof Error ? sourceError.message : String(sourceError)}`;
+      // Send compensating media-sources mutation to retire the canonical source
+      // that was committed before provider publication failed.
+      await sendMediaSourcesMutation(entry.source, "inactive", 0);
       if (previous) {
         await Promise.allSettled([
           p2pRequired
@@ -591,6 +594,33 @@ export function createMediaSourceController({
     return awaitOperationAck(operationId);
   }
 
+  async function sendMediaSourcesMutation(
+    source: string,
+    desiredState: "active" | "inactive",
+    generation: number,
+  ) {
+    const operationId = nextOperationId();
+    send({
+      type: "media-sources",
+      data: {
+        sources: [source],
+        operationId,
+        requestId: operationId,
+        connectionEpoch: getConnectionEpoch(),
+        sourceStates: {
+          [source]: { generation, desiredState },
+        },
+      },
+    });
+    return awaitOperationAck(operationId).catch((error: unknown) => {
+      mediaDebug("media-sources-mutation.ack-failed", {
+        source,
+        operationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   async function startAudioProduction() {
     await Promise.all(
       [
@@ -692,6 +722,7 @@ export function createMediaSourceController({
     restartAudioProduction,
     sendParticipantVoiceState,
     sendSourceState,
+    sendMediaSourcesMutation,
     startAudioProduction,
     startSystemAudioProduction,
     startVideoProduction,

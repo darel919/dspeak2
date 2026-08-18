@@ -239,6 +239,7 @@ let nativeFeedVisible = true;
 let lastTouchAt = 0;
 let fullscreenStateInitialized = false;
 let playbackRecoveryTimer = null;
+let nativeFirstFrameEmitted = false;
 const localScreenPreviewPaused = computed(
   () => props.local && props.source === "screen" && !previewEnabled.value,
 );
@@ -352,6 +353,11 @@ function drawNativeFrame(frame = nativePendingFrame) {
     nativeImageData.data.set(pixels);
   }
   nativeCanvasContext?.putImageData(nativeImageData, 0, 0);
+  // Native first-frame: we just rendered a real decoded frame
+  if (props.feedKey && !nativeFirstFrameEmitted) {
+    nativeFirstFrameEmitted = true;
+    emit("first-frame", props.feedKey);
+  }
 }
 
 function cancelNativeFrameAnimation() {

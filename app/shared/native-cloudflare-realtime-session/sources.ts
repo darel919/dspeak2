@@ -5,6 +5,7 @@ import {
   VIDEO_RESOLUTIONS,
 } from "../video-settings.ts";
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
+import { mediaDebug } from "../media-debug.ts";
 import {
   efficientEncodeCodecs,
   efficiencyRank,
@@ -1046,6 +1047,95 @@ export class NativeCloudflareSourcesMethods {
         String(producer.variantId || producer.source || ""),
       );
     return stale.length > 0;
+  }
+
+  reannounceLocalPublications({
+    connectionEpoch,
+  }: {
+    connectionEpoch: number;
+  }) {
+    // Update control connection epoch for new control-plane identity
+    this.controlConnectionEpoch = connectionEpoch;
+
+    // Re-send cloudflare-publication for all local producers with the new epoch
+    for (const [source, producer] of this.producers) {
+      const trackName = producer.trackName;
+      if (!trackName) continue;
+      const ownerSource = producer.ownerSource || null;
+      const generation = producer.generation || 0;
+      const variantId = producer.variantId || null;
+      const codec = producer.codec || null;
+      const codecAcceleration = producer.codecAcceleration || null;
+      const codecImplementation = producer.codecImplementation || null;
+      const width = producer.width;
+      const height = producer.height;
+      const fps = producer.fps;
+      const bitrate = producer.bitrate;
+      const target = producer.target;
+      const targetAdjusted = producer.targetAdjusted;
+      const receivers = producer.receivers || [];
+      const emergency = producer.emergency === true;
+      const score = producer.score;
+      // Resend publication metadata with updated controlConnectionEpoch
+      const sent = this.send?.({
+        type: "cloudflare-publication",
+        data: {
+          trackName,
+          source,
+          kind: "video",
+          ownerSource,
+          logicalStreamId: producer.logicalStreamId || null,
+          generation,
+          connectionEpoch: this.controlConnectionEpoch,
+          variantId,
+          codec,
+          codecAcceleration,
+          codecImplementation,
+          width,
+          height,
+          fps,
+          bitrate,
+          ...(target ? { target } : {}),
+          ...(targetAdjusted ? { targetAdjusted } : {}),
+          receivers,
+          emergency,
+          score,
+        },
+      });
+      if (!sent) {
+        mediaDebug("native-cloudflare.reannounce-send-failed", {
+          source,
+          trackName,
+        });
+      }
+    }
+    // Also reannounce audio producers
+    for (const [source, producer] of this.producers) {
+      if (producer.kind === "audio") {
+        const trackName = producer.trackName;
+        if (!trackName) continue;
+        const ownerSource = producer.ownerSource || null;
+        const generation = producer.generation || 0;
+        const sent = this.send?.({
+          type: "cloudflare-publication",
+          data: {
+            trackName,
+            source,
+            kind: "audio",
+            ownerSource,
+            generation,
+            connectionEpoch: this.controlConnectionEpoch,
+          },
+        });
+        if (!sent) {
+          mediaDebug("native-cloudflare.reannounce-send-failed", {
+            source,
+            trackName,
+          });
+        }
+      }
+    }
+    return Promise.resolve(true);
   }
 
   async subscribe(

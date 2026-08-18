@@ -3,7 +3,20 @@ import type { CloudflarePublication } from "./types/cloudflare-media.ts";
 function logicalSlot(publication: CloudflarePublication): string | null {
   const peerId = String(publication?.peerId || "");
   const source = String(publication?.source || "");
-  return peerId && source ? `${peerId}:${source}` : null;
+  const variantId = publication?.variantId
+    ? String(publication.variantId)
+    : null;
+  const logicalStreamId = publication?.logicalStreamId
+    ? String(publication.logicalStreamId)
+    : null;
+  // Variant-aware slot: peerId:source:variantId OR peerId:source:logicalStreamId
+  // This allows multiple codec variants of the same source to coexist
+  if (peerId && source) {
+    if (variantId) return `${peerId}:${source}:${variantId}`;
+    if (logicalStreamId) return `${peerId}:${source}:${logicalStreamId}`;
+    return `${peerId}:${source}`;
+  }
+  return null;
 }
 
 function incarnationValue(publication: CloudflarePublication): number {
