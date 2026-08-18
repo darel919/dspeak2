@@ -94,6 +94,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   connectionEpoch: number;
   controlConnectionEpoch: number;
   getControlConnectionEpoch: () => number;
+  localPeerId: string | null;
   lastSentClientRtpCapabilities: unknown;
   lastReceivedConsumerParams: CloudflareRequestResult | null;
   connectionState: () => Record<string, unknown>;

@@ -57,6 +57,37 @@ export class CloudflareSourcesMethods {
         this.assertCurrentSession(peerConnection, generation);
         current.track = entry.track;
         current.ownerSource = entry.ownerSource || null;
+        // Update generation and re-announce publication with new incarnation
+        current.generation = entry.generation;
+        if (typeof this.send === "function") {
+          this.send({
+            type: "cloudflare-publication",
+            data: {
+              trackName: current.trackName,
+              source: entry.source,
+              kind: "video",
+              ownerSource: entry.ownerSource || null,
+              logicalStreamId: current.logicalStreamId || null,
+              generation: entry.generation,
+              connectionEpoch: this.getControlConnectionEpoch?.() || 0,
+              variantId: current.variantId || null,
+              codec: current.codec || null,
+              codecAcceleration: current.codecAcceleration || null,
+              codecImplementation: current.codecImplementation || null,
+              width: current.width ?? 0,
+              height: current.height ?? 0,
+              fps: current.fps ?? 0,
+              bitrate: current.bitrate ?? 0,
+              ...(current.target ? { target: current.target } : {}),
+              ...(current.targetAdjusted
+                ? { targetAdjusted: current.targetAdjusted }
+                : {}),
+              receivers: current.receivers || [],
+              emergency: current.emergency === true,
+              score: current.score ?? 0,
+            },
+          });
+        }
         await this.configureVideoSender(current.sender, entry);
         await this.setSourceTransmission(
           entry.source,

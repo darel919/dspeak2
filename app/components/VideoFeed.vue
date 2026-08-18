@@ -240,6 +240,9 @@ let lastTouchAt = 0;
 let fullscreenStateInitialized = false;
 let playbackRecoveryTimer = null;
 let nativeFirstFrameEmitted = false;
+
+// Track the feedKey to reset first-frame when stream incarnation changes
+let currentFeedKey = props.feedKey;
 const localScreenPreviewPaused = computed(
   () => props.local && props.source === "screen" && !previewEnabled.value,
 );
@@ -518,6 +521,16 @@ watch(
 );
 watch(() => props.ownCameraStream, attachStream);
 watch(isFullscreen, attachStream);
+// Reset first-frame when feedKey changes (new stream incarnation)
+watch(
+  () => props.feedKey,
+  (newFeedKey) => {
+    if (newFeedKey !== currentFeedKey) {
+      currentFeedKey = newFeedKey;
+      nativeFirstFrameEmitted = false;
+    }
+  },
+);
 
 onBeforeUnmount(() => {
   document.removeEventListener("fullscreenchange", syncFullscreenState);

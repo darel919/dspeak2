@@ -675,8 +675,8 @@ export class NativeCloudflareSourcesMethods {
       previous.paused = this.sourceTransmission.get(source) === false;
       if (variantId) this.producerVariants.set(trackKey, previous);
       else this.producers.set(source, previous);
+      // Always re-announce for both audio and video (not just video)
       if (
-        kind === "video" &&
         !this.send?.({
           type: "cloudflare-publication",
           data: {
@@ -1057,10 +1057,18 @@ export class NativeCloudflareSourcesMethods {
     // Update control connection epoch for new control-plane identity
     this.controlConnectionEpoch = connectionEpoch;
 
-    // Re-send cloudflare-publication for all local producers with the new epoch
-    for (const [source, producer] of this.producers) {
+    // Re-send cloudflare-publication for all local producers + variants with the new epoch
+    // Single pass over both producers and producerVariants to avoid double-announcement
+    const allProducers = [
+      ...this.producers.values(),
+      ...this.producerVariants.values(),
+    ];
+    for (const producer of allProducers) {
       const trackName = producer.trackName;
       if (!trackName) continue;
+      const source = producer.source;
+      const kind =
+        producer.kind || (producer.track?.kind === "audio" ? "audio" : "video");
       const ownerSource = producer.ownerSource || null;
       const generation = producer.generation || 0;
       const variantId = producer.variantId || null;
@@ -1082,7 +1090,7 @@ export class NativeCloudflareSourcesMethods {
         data: {
           trackName,
           source,
-          kind: "video",
+          kind,
           ownerSource,
           logicalStreamId: producer.logicalStreamId || null,
           generation,
@@ -1107,32 +1115,6 @@ export class NativeCloudflareSourcesMethods {
           source,
           trackName,
         });
-      }
-    }
-    // Also reannounce audio producers
-    for (const [source, producer] of this.producers) {
-      if (producer.kind === "audio") {
-        const trackName = producer.trackName;
-        if (!trackName) continue;
-        const ownerSource = producer.ownerSource || null;
-        const generation = producer.generation || 0;
-        const sent = this.send?.({
-          type: "cloudflare-publication",
-          data: {
-            trackName,
-            source,
-            kind: "audio",
-            ownerSource,
-            generation,
-            connectionEpoch: this.controlConnectionEpoch,
-          },
-        });
-        if (!sent) {
-          mediaDebug("native-cloudflare.reannounce-send-failed", {
-            source,
-            trackName,
-          });
-        }
       }
     }
     return Promise.resolve(true);

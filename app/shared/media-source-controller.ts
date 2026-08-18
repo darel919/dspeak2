@@ -309,7 +309,25 @@ export function createMediaSourceController({
       const reason = `source-${entry.source}-failed-${sourceError instanceof Error ? sourceError.message : String(sourceError)}`;
       // Send compensating media-sources mutation to retire the canonical source
       // that was committed before provider publication failed.
-      await sendMediaSourcesMutation(entry.source, "inactive", 0);
+      // Use the full canonical desired-state builder (sendSourceState pattern)
+      // to avoid partial mutations and generation 0.
+      const currentSourceFsm = new Map(sourceFsms);
+      // The failed source's generation was already committed; bump it for retirement
+      const fsm = currentSourceFsm.get(entry.source);
+      if (fsm) {
+        currentSourceFsm.set(entry.source, {
+          ...fsm,
+          generation: fsm.generation + 1,
+          desiredState: "inactive",
+          phase: "failed",
+          failedAt: Date.now(),
+        });
+      }
+      await sendMediaSourcesMutation(
+        entry.source,
+        "inactive",
+        currentSourceFsm,
+      );
       if (previous) {
         await Promise.allSettled([
           p2pRequired
@@ -597,19 +615,29 @@ export function createMediaSourceController({
   async function sendMediaSourcesMutation(
     source: string,
     desiredState: "active" | "inactive",
-    generation: number,
+    currentSourceFsm: Map<string, SourceFsmState> = new Map(),
   ) {
     const operationId = nextOperationId();
+    // Build full canonical desired state from source FSMs
+    // This matches sendSourceState() structure: full source set + complete digest
+    const sourceStates: Record<
+      string,
+      { generation: number; desiredState: "active" | "inactive" }
+    > = {};
+    for (const [src, fsm] of currentSourceFsm) {
+      sourceStates[src] = {
+        generation: fsm.generation,
+        desiredState: src === source ? desiredState : fsm.desiredState,
+      };
+    }
     send({
       type: "media-sources",
       data: {
-        sources: [source],
+        sources: [...currentSourceFsm.keys()],
         operationId,
         requestId: operationId,
         connectionEpoch: getConnectionEpoch(),
-        sourceStates: {
-          [source]: { generation, desiredState },
-        },
+        sourceStates,
       },
     });
     return awaitOperationAck(operationId).catch((error: unknown) => {

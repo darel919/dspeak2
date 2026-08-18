@@ -232,26 +232,19 @@ export class CloudflareNegotiationMethods {
       const trackName =
         typeof data.trackName === "string" ? data.trackName : null;
       if (!trackName) return false;
-      if (data.closed === true) {
-        this.publications.delete(trackName);
-        this.subscribedTrackNames.delete(trackName);
-        for (const [mid, publication] of this.remoteByMid) {
-          if (publication.trackName === trackName) {
-            this.remoteByMid.delete(mid);
-            this.pendingRemoteTracks.delete(mid);
-          }
-        }
-        const current = this.consumers.get(trackName);
-        if (current) {
-          try {
-            this.onRemoteTrackEnded?.(current);
-          } catch {}
-        }
-        this.consumers.delete(trackName);
-        return true;
-      }
       const publication = data as CloudflarePublication;
       publication.trackName = trackName;
+
+      // Self-publication fence: publishers must never subscribe to themselves
+      if (publication.peerId === this.localPeerId) {
+        // Still track our own publication metadata locally for reference
+        if (publication.closed === true) {
+          this.publications.delete(trackName);
+        } else {
+          this.publications.set(trackName, publication);
+        }
+        return true;
+      }
 
       // Generation/epoch fencing: ignore stale publications for retired generations
       // Compare epoch FIRST, then generation. Epoch dominates (control-plane identity),
@@ -268,6 +261,25 @@ export class CloudflareNegotiationMethods {
         ) {
           return true; // stale publication, ignore
         }
+      }
+
+      if (publication.closed === true) {
+        this.publications.delete(trackName);
+        this.subscribedTrackNames.delete(trackName);
+        for (const [mid, pub] of this.remoteByMid) {
+          if (pub.trackName === trackName) {
+            this.remoteByMid.delete(mid);
+            this.pendingRemoteTracks.delete(mid);
+          }
+        }
+        const current = this.consumers.get(trackName);
+        if (current) {
+          try {
+            this.onRemoteTrackEnded?.(current);
+          } catch {}
+        }
+        this.consumers.delete(trackName);
+        return true;
       }
 
       this.publications.set(trackName, publication);

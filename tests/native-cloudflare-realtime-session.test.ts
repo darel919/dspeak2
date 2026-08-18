@@ -574,15 +574,14 @@ describe("NativeCloudflareRealtimeSession", () => {
     assert.equal(current.trackName, previous.trackName);
     assert.equal(current.mid, previous.mid);
     assert.equal(current.trackId, "native-audio-2");
-    assert.equal(
-      calls.filter(
-        ([command, payload]) =>
-          command === "send" &&
-          payload.type === "cloudflare-publication" &&
-          !payload.data.closed,
-      ).length,
-      initialPublicationCount,
-    );
+    // Replacement now re-announces publication with updated generation
+    const newPublicationCount = calls.filter(
+      ([command, payload]) =>
+        command === "send" &&
+        payload.type === "cloudflare-publication" &&
+        !payload.data.closed,
+    ).length;
+    assert.equal(newPublicationCount, initialPublicationCount + 1);
     await session.closeMedia();
   });
 

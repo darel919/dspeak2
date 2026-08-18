@@ -146,6 +146,7 @@ export function createHybridMediaTopologyController({
           : Boolean(getProviderSocket()?.send(message)),
       iceServers: getIceServers(),
       getControlConnectionEpoch: () => getConnectionEpoch(),
+      localPeerId: getLocalPeerId(),
       onRemoteTrack: (entry: TopologySourceEntry) =>
         handoff.stage(
           {
