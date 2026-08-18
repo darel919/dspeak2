@@ -347,6 +347,9 @@ export function createHybridMediaSessionLifecycle({
             );
         }
       },
+      handlePublicationsDigest: async (publications: unknown[]) => {
+        await mediaSessionSetup.handlePublicationsDigest(publications);
+      },
       onServerConnected: () => {
         if (
           activeConnectionGeneration !== lifecycleGeneration ||
@@ -362,6 +365,31 @@ export function createHybridMediaSessionLifecycle({
         }
         mediaSessionSetup.sendSourceState();
         sendParticipantVoiceState();
+
+        // Re-announce existing local Cloudflare publications after reconnect.
+        // A fresh control WebSocket gets a new random peerId, so the server
+        // replaces the participant session and retires old publications.
+        // We must re-announce all live local sources to the new connectionEpoch.
+        const localSources = mediaSessionSetup.getLocalSources?.();
+        if (localSources) {
+          for (const [source, entry] of localSources) {
+            const sfu = mediaSessionSetup.getSfu?.();
+            if (
+              sfu &&
+              typeof sfu === "object" &&
+              "addSource" in sfu &&
+              typeof sfu.addSource === "function"
+            ) {
+              // Re-publish to the active provider with the new epoch
+              void sfu.addSource(entry).catch((err: unknown) => {
+                mediaDebug("reconnect.reannounce-failed", {
+                  source,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+            }
+          }
+        }
       },
       onServerHello: (data: unknown) => {
         if (signaling.acceptServerHello(data))

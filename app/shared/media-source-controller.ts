@@ -110,6 +110,57 @@ export function createMediaSourceController({
       {},
     );
   }
+
+  // Commit source intent to server (media-sources) and wait for ACK.
+  // This must happen BEFORE provider publication so the server has the
+  // canonical sourceStates entry when the provider announces.
+  async function commitSourceIntent(
+    source: string,
+    options: { isVideo?: boolean; ownerSource?: string } = {},
+  ) {
+    const operationId = nextOperationId();
+    const currentState = sourceFsms.get(source);
+    const generation = (currentState?.generation || 0) + 1;
+    const desiredState = "active";
+
+    // Bump generation and set desiredState optimistically
+    sourceFsms.set(source, {
+      phase: "starting",
+      generation,
+      desiredState,
+      provider: getActiveProvider(),
+      failedAt: null,
+    });
+
+    const sourcesArray = [...localSources.keys()];
+    if (!sourcesArray.includes(source)) sourcesArray.push(source);
+
+    const promise = awaitOperationAck(operationId);
+    send({
+      type: "media-sources",
+      data: {
+        sources: sourcesArray,
+        operationId,
+        requestId: operationId,
+        connectionEpoch: getConnectionEpoch(),
+        sourceStates: sourceFsmDigest(),
+      },
+    });
+
+    try {
+      await promise;
+    } catch (error) {
+      // On failure, rollback optimistic state
+      if (currentState) {
+        sourceFsms.set(source, currentState);
+      } else {
+        sourceFsms.delete(source);
+      }
+      throw error;
+    }
+    return generation;
+  }
+
   const adaptiveVideo = createAdaptiveVideoController({
     apply: async (entry, state, settings) => {
       const mediaEntry = entry as AdaptiveVideoEntry;
@@ -178,11 +229,18 @@ export function createMediaSourceController({
       sourceEntry.source === "screen-audio"
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
-    setSourcePhase(entry.source, "starting", getActiveProvider());
-    const generation = sourceFsms.get(entry.source)?.generation || 0;
-    entry.generation = generation;
+
+    // Commit source intent FIRST (media-sources with generation) and wait for ACK.
+    // This ensures server has canonical sourceStates before provider announces.
+    const committedGeneration = await commitSourceIntent(entry.source, {
+      isVideo: entry.source === "camera" || entry.source === "screen",
+      ownerSource: entry.ownerSource ?? undefined,
+    });
+    entry.generation = committedGeneration;
+
     if (entry.source === "audio" && voiceStore.micMuted)
       entry.track.enabled = false;
+
     const previous = localSources.get(entry.source);
     const isVideo = entry.source === "camera" || entry.source === "screen";
     const previousVideoFeed = isVideo
@@ -237,7 +295,7 @@ export function createMediaSourceController({
         throw new Error(`The ${entry.source} track ended during publication`);
       // If the source changed generation while publishing, fence this
       // publication: tear down the stale side and keep the newer generation.
-      if (sourceFsms.get(entry.source)?.generation !== generation) {
+      if (sourceFsms.get(entry.source)?.generation !== entry.generation) {
         await Promise.allSettled([
           p2pRequired
             ? asProvider(getP2pMesh())?.unpublishSource(entry.source)
@@ -350,7 +408,7 @@ export function createMediaSourceController({
       throw sourceError;
     }
     localSources.set(entry.source, entry);
-    if (sourceFsms.get(entry.source)?.generation !== generation) {
+    if (sourceFsms.get(entry.source)?.generation !== entry.generation) {
       if (localSources.get(entry.source)?.track === entry.track)
         localSources.delete(entry.source);
       return;
@@ -649,5 +707,6 @@ export function createMediaSourceController({
     queueTargetedReconciliation,
     handleProviderRecovering,
     getSourceFsmDigest: sourceFsmDigest,
+    getLocalSources: () => localSources,
   };
 }

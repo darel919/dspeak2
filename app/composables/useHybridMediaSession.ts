@@ -901,58 +901,6 @@ export function useHybridMediaSession() {
       if (existing && "controlConnectionEpoch" in existing)
         existing.controlConnectionEpoch = epoch;
     },
-    handlePublicationsDigest: async (digest: unknown[]) => {
-      if (!Array.isArray(digest)) return;
-      const session = sfu;
-      if (!session) return;
-      for (const entry of digest) {
-        if (
-          !entry ||
-          typeof entry !== "object" ||
-          !("trackName" in entry) ||
-          !("peerId" in entry) ||
-          !("source" in entry) ||
-          !("generation" in entry) ||
-          !("connectionEpoch" in entry)
-        )
-          continue;
-        const pub = entry as Record<string, unknown>;
-        // Update registry so publications survive reconnect
-        cloudflarePublications.update(pub);
-        // Subscription repair only applies to Cloudflare SFU (native/browser).
-        // Mediasoup handles incoming via onRemoteTrack automatically.
-        if ("subscribe" in session && typeof session.subscribe === "function") {
-          const sfuSession = session as unknown as {
-            subscribe: (
-              publication: Record<string, unknown>,
-              generation: number,
-            ) => Promise<unknown>;
-            sessionGeneration: number;
-          };
-          try {
-            await sfuSession.subscribe(
-              {
-                trackName: String(pub.trackName),
-                source: String(pub.source),
-                peerId: String(pub.peerId),
-                generation: Number(pub.generation),
-                connectionEpoch: Number(pub.connectionEpoch),
-                sessionId: String(pub.sessionId || ""),
-                ownerSource: (pub.ownerSource as string) || undefined,
-                variantId: (pub.variantId as string) || undefined,
-                codec: (pub.codec as string) || undefined,
-              },
-              sfuSession.sessionGeneration,
-            );
-          } catch (err) {
-            mediaDebug("publications-digest-subscribe-failed", {
-              trackName: String(pub.trackName),
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
-      }
-    },
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
     applyRoomRevision,
     requestSnapshot,
@@ -966,7 +914,44 @@ export function useHybridMediaSession() {
       operationId: string,
       data: Record<string, unknown>,
     ) => sourceController.queueTargetedReconciliation(operationId, data),
+    handlePublicationsDigest,
   } as unknown as RuntimeDependencyContext);
+
+  // Handle publications digest - called by hybrid-media-session-lifecycle
+  async function handlePublicationsDigest(digest: unknown[]) {
+    if (!Array.isArray(digest)) return;
+    const session = sfu;
+    if (!session) return;
+    for (const entry of digest) {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        !("trackName" in entry) ||
+        !("peerId" in entry) ||
+        !("source" in entry) ||
+        !("generation" in entry) ||
+        !("connectionEpoch" in entry)
+      )
+        continue;
+      const pub = entry as Record<string, unknown>;
+      // Update registry so publications survive reconnect
+      cloudflarePublications.update(pub);
+      // Subscription repair: call the session's cloudflare-publication-available handler
+      // which installs the canonical publication and then subscribes. This is the proper
+      // repair entrypoint — not calling subscribe() directly.
+      if ("handle" in session && typeof session.handle === "function") {
+        try {
+          await session.handle("cloudflare-publication-available", pub);
+        } catch (err) {
+          mediaDebug("publications-digest-handle-failed", {
+            trackName: String(pub.trackName),
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+  }
+
   watch(
     () => [peerConnectionMetrics.value, sfuRoundTripTime.value],
     () => {

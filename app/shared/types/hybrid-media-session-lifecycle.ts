@@ -83,6 +83,11 @@ export interface LifecycleDependencyContext {
       data: unknown,
     ) => unknown;
     onConnectionEpochUpdated?: (connectionEpoch: number) => unknown;
+    handlePublicationsDigest: (publications: unknown[]) => Promise<unknown>;
+    getLocalSources: () => Map<string, unknown>;
+    sourceController: {
+      getLocalSources?: () => Map<string, unknown>;
+    };
   };
   messageHandlers: Map<string, (data: unknown) => unknown>;
   participantSfuRoundTripTimes: Ref<unknown>;
@@ -163,4 +168,9 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   setupMessageHandlers: (options: Record<string, unknown>) => void;
   queueCloudflarePublication: (data: unknown) => unknown;
   queueTargetedReconciliation: (operationId: string, data: unknown) => unknown;
+  handlePublicationsDigest: (publications: unknown[]) => Promise<unknown>;
+  getLocalSources: () => Map<string, unknown>;
+  sourceController: {
+    getLocalSources?: () => Map<string, unknown>;
+  };
 }

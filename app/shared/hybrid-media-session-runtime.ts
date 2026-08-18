@@ -77,6 +77,8 @@ export function createHybridMediaSessionRuntime({
   setupMessageHandlers,
   queueCloudflarePublication,
   queueTargetedReconciliation,
+  handlePublicationsDigest,
+  sourceController,
 }: RuntimeDependencyContext) {
   return createHybridMediaSessionLifecycle({
     authStore,
@@ -157,6 +159,9 @@ export function createHybridMediaSessionRuntime({
       setupMessageHandlers,
       queueCloudflarePublication,
       queueTargetedReconciliation,
+      handlePublicationsDigest,
+      getLocalSources: () => sourceController?.getLocalSources?.() ?? new Map(),
+      sourceController,
     },
   });
 }

@@ -167,7 +167,8 @@ export interface TopologySourceEntry {
   peerId?: string | number | null;
   stream?: MediaStream;
   generation?: number;
-  [key: string]: unknown;
+  captureTrack?: MediaStreamTrack;
+  ownerSource?: string | null;
 }
 export interface TopologyConnectionState {
   ready?: boolean;

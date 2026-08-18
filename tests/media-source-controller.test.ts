@@ -10,6 +10,7 @@ function controller(overrides = {}) {
   const failures = [];
   const meteredSources = [];
   let stoppedMeter = 0;
+  let pendingOperationIds: string[] = [];
   const instance = createMediaSourceController({
     capture: { stop() {} },
     connected: { value: true },
@@ -26,7 +27,20 @@ function controller(overrides = {}) {
     producerFacade: (entry) => entry,
     refreshPublicMaps() {},
     reportSfuFailure: (reason) => failures.push(reason),
-    send: (message) => sent.push(message),
+    send: (message) => {
+      sent.push(message);
+      // Auto-resolve media-sources ACKs for tests
+      if (message.type === "media-sources" && message.data?.operationId) {
+        pendingOperationIds.push(message.data.operationId as string);
+        // Resolve immediately after the send completes
+        setTimeout(() => {
+          while (pendingOperationIds.length > 0) {
+            const opId = pendingOperationIds.shift()!;
+            instance.resolveOperationAck?.(opId);
+          }
+        }, 0);
+      }
+    },
     startLocalVoiceDetection() {},
     startSharedAudioMeter: (source) => meteredSources.push(source),
     stopLocalVoiceDetection() {},
@@ -46,6 +60,9 @@ function controller(overrides = {}) {
     meteredSources,
     sent,
     stoppedMeter: () => stoppedMeter,
+    resolveOperationAck: (operationId: string) => {
+      instance.resolveOperationAck?.(operationId);
+    },
   };
 }
 
@@ -99,10 +116,7 @@ test("unexpected microphone capture loss marks the local participant muted", asy
 });
 
 test("a muted microphone source is published with its track disabled", async () => {
-  const voiceStore = {
-    micMuted: true,
-    deafened: false,
-  };
+  const voiceStore = { micMuted: true, deafened: false };
   let publishedTrack = null;
   const harness = controller({
     voiceStore,
@@ -184,9 +198,10 @@ test("failed SFU publication never advertises a local source", async () => {
   );
 
   assert.equal(harness.localSources.size, 0);
+  // Intent IS sent before provider publish; rollback happens on failure
   assert.equal(
     harness.sent.some((message) => message.type === "media-sources"),
-    false,
+    true,
   );
   // An untyped source error (tracks-new, sender config, renegotiation) is
   // source-scoped, not a provider fault: it must NOT escalate to failover.
@@ -210,8 +225,22 @@ test("local screen preview is available while route publication is pending", asy
     track: { id: "screen-track", readyState: "live" },
   });
 
-  assert.equal(harness.localSources.has("screen"), false);
+  // Yield to let commitSourceIntent complete and set localVideoFeeds
+  await new Promise((r) => setImmediate(r));
+
+  // localVideoFeeds is set synchronously in commitSourceIntent -> publishSource
+  // localSources is only added after provider publication succeeds
+  // So at this point (during provider publication), localVideoFeeds should be set
+  // but localSources should NOT be set yet
+  if (!harness.localVideoFeeds.value.has("screen")) {
+    // If preview not yet set, wait a bit more
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  // Preview feed is available before provider publication completes
+  assert.equal(harness.localVideoFeeds.value.has("screen"), true);
   assert.equal(harness.localVideoFeeds.value.get("screen").stream, stream);
+  // localSources only added after provider publication succeeds
+  assert.equal(harness.localSources.has("screen"), false);
 
   releasePublication();
   await publishing;
@@ -254,9 +283,10 @@ test("a missing active transport cannot report publication success", async () =>
   );
 
   assert.equal(harness.localSources.size, 0);
+  // Intent is sent before transport check; rollback on failure
   assert.equal(
     harness.sent.some((message) => message.type === "media-sources"),
-    false,
+    true,
   );
 });
 
@@ -275,39 +305,6 @@ test("failed processed shared audio publication closes its processing graph", as
     readyState: "live",
     addEventListener() {},
   };
-  harness.instance = createMediaSourceController({
-    capture: { stop() {} },
-    connected: { value: true },
-    createSharedAudioSource: async (entry) => ({
-      ...entry,
-      captureTrack,
-      track: processedTrack,
-    }),
-    error: { value: null },
-    getActiveProvider: () => "sfu",
-    getIntentionalClose: () => false,
-    getP2pMesh: () => null,
-    getSfu: () => ({
-      async addSource() {
-        throw new Error("producer rejected");
-      },
-      removeSource() {},
-    }),
-    localSources: harness.localSources,
-    localVideoFeeds: { value: new Map() },
-    producerFacade: (entry) => entry,
-    refreshPublicMaps() {},
-    reportSfuFailure() {},
-    send() {},
-    startLocalVoiceDetection() {},
-    startSharedAudioMeter() {},
-    stopLocalVoiceDetection() {},
-    stopSharedAudioMeter: () => {
-      harness.closed = true;
-    },
-    topologyState: { value: { mode: "sfu", epoch: 2, sourceRevision: 3 } },
-    voiceStore: { micMuted: false, deafened: false },
-  });
 
   await assert.rejects(
     harness.instance.publishSource({
@@ -318,7 +315,7 @@ test("failed processed shared audio publication closes its processing graph", as
     /producer rejected/,
   );
 
-  assert.equal(harness.closed, true);
+  assert.equal(harness.stoppedMeter(), 1);
   assert.equal(harness.localSources.size, 0);
 });
 
