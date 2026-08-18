@@ -292,7 +292,7 @@ export class CloudflareNegotiationMethods {
 
   async reconcilePublications(
     this: CloudflareSessionLike,
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
   ) {
     if (!Array.isArray(publications)) return;
 

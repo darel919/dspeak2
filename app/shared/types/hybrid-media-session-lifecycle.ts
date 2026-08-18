@@ -85,6 +85,8 @@ export interface LifecycleDependencyContext {
     onConnectionEpochUpdated?: (connectionEpoch: number) => unknown;
     handlePublicationsDigest: (publications: unknown[]) => Promise<unknown>;
     getLocalSources: () => Map<string, unknown>;
+    getLastAppliedPublicationRevision: () => string;
+    setLastAppliedPublicationRevision: (value: string) => void;
     sourceController: {
       getLocalSources?: () => Map<string, unknown>;
     };
@@ -162,6 +164,8 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   getConnectionEpoch: () => number;
   setConnectionEpoch: (epoch: number) => void;
   getLastAppliedRoomRevision: () => string;
+  getLastAppliedPublicationRevision: () => string;
+  setLastAppliedPublicationRevision: (value: string) => void;
   applyRoomRevision: (roomRevision: string) => unknown;
   requestSnapshot: () => unknown;
   setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => void;

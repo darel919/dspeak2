@@ -1,3 +1,5 @@
+import type { CloudflarePublication } from "./cloudflare-media.ts";
+
 export interface NativeCloudflareSessionOptions {
   invoke: NativeCloudflareSessionSurface["invoke"];
   send?: NativeCloudflareSessionSurface["send"];
@@ -140,7 +142,8 @@ export interface NativeCloudflareSessionSurface {
   ) => Promise<unknown>;
   handleMessage: (type: string, data: Record<string, unknown>) => unknown;
   reconcilePublications: (
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
   ) => Promise<unknown>;
   subscribe: (
     publication: import("./native-cloudflare.ts").NativeCloudflarePublication,

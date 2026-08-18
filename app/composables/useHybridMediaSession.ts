@@ -5,6 +5,7 @@ import { MediasoupClientSession } from "~/shared/mediasoup-client-session.ts";
 import { MediasoupProviderSocket } from "~/shared/mediasoup-provider-socket.ts";
 import { CloudflareRealtimeSession } from "~/shared/cloudflare-realtime-session.ts";
 import { createCloudflarePublicationRegistry } from "~/shared/cloudflare-publication-registry.ts";
+import type { CloudflarePublication } from "~/shared/types/cloudflare-media.ts";
 import { NativeP2pMesh } from "~/shared/native-p2p.ts";
 import { createHybridMediaRegistry } from "~/shared/hybrid-media-registry.ts";
 import { createHybridMediaAudioState } from "~/shared/hybrid-media-audio-state.ts";
@@ -145,6 +146,7 @@ export function useHybridMediaSession() {
   const activeProviderState = ref<string | null>(null);
   const topologyState = ref<HybridTopologyState>(initialMediaTopologyState());
   const lastAppliedRoomRevision = ref("0");
+  const lastAppliedPublicationRevision = ref("0");
   let sessionConnectionEpoch = 1;
   const topologyGraph = ref(
     buildTopologyGraph({ mode: "idle", participantIds: [] }),
@@ -226,6 +228,7 @@ export function useHybridMediaSession() {
       connectionEpoch: sessionConnectionEpoch,
       topologyEpoch: topologyState.value.epoch,
       sourceRevision: topologyState.value.sourceRevision || 0,
+      publicationRevision: lastAppliedPublicationRevision.value,
       lastAppliedRoomRevision: lastAppliedRoomRevision.value,
       localSourceDigest: sourceController.getSourceFsmDigest(),
     }),
@@ -507,6 +510,11 @@ export function useHybridMediaSession() {
     getConnectionEpoch: () => sessionConnectionEpoch,
     getIntentionalClose: () => intentionalClose,
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
+    getLastAppliedPublicationRevision: () =>
+      lastAppliedPublicationRevision.value,
+    setLastAppliedPublicationRevision: (value: string) => {
+      lastAppliedPublicationRevision.value = value;
+    },
     getP2pMesh: () => p2pMesh,
     getSfu: () => sfu,
     getVideoReport: (source: string) => {
@@ -541,6 +549,17 @@ export function useHybridMediaSession() {
     refreshPublicMaps,
     reportSfuFailure,
     send,
+    sendParticipantVoiceState: async (state: {
+      muted?: boolean;
+      deafened?: boolean;
+    }) => {
+      if (voiceStore.sfuComposable?.sendParticipantVoiceState) {
+        await voiceStore.sfuComposable.sendParticipantVoiceState({
+          muted: state.muted ?? false,
+          deafened: state.deafened ?? false,
+        });
+      }
+    },
     startLocalVoiceDetection,
     startSharedAudioMeter,
     stopLocalVoiceDetection,
@@ -915,6 +934,11 @@ export function useHybridMediaSession() {
     ) => sourceController.queueTargetedReconciliation(operationId, data),
     handlePublicationsDigest,
     sourceController,
+    getLastAppliedPublicationRevision: () =>
+      lastAppliedPublicationRevision.value,
+    setLastAppliedPublicationRevision: (value: string) => {
+      lastAppliedPublicationRevision.value = value;
+    },
   } as unknown as RuntimeDependencyContext);
 
   // Handle publications digest - called by hybrid-media-session-lifecycle
@@ -924,7 +948,8 @@ export function useHybridMediaSession() {
     if (!session) return;
 
     // Build server publication map by trackName for authoritative comparison
-    const serverPublications: Record<string, unknown>[] = [];
+    const serverPublications: CloudflarePublication[] = [];
+    let maxPublicationRevision = lastAppliedPublicationRevision.value;
     for (const entry of digest) {
       if (
         !entry ||
@@ -936,10 +961,45 @@ export function useHybridMediaSession() {
         !("connectionEpoch" in entry)
       )
         continue;
-      const pub = entry as Record<string, unknown>;
+      const pub = entry as CloudflarePublication;
       serverPublications.push(pub);
-      // Update registry so publications survive reconnect
-      cloudflarePublications.update(pub);
+      // Track max publicationRevision from digest for fence
+      if (
+        "publicationRevision" in entry &&
+        typeof entry.publicationRevision === "string"
+      ) {
+        if (
+          BigInt(entry.publicationRevision) > BigInt(maxPublicationRevision)
+        ) {
+          maxPublicationRevision = entry.publicationRevision;
+        }
+      }
+    }
+
+    // FENCE: reject stale heartbeat reconciliations that race with newer live publications
+    // If a newer publicationRevision has been applied, this digest is stale
+    if (
+      BigInt(maxPublicationRevision) <
+      BigInt(lastAppliedPublicationRevision.value)
+    ) {
+      mediaDebug("publications-digest-stale", {
+        digestRevision: maxPublicationRevision,
+        appliedRevision: lastAppliedPublicationRevision.value,
+      });
+      return;
+    }
+
+    // Use exact-set reconciliation at the registry level first
+    // This ensures both additions and removals are processed atomically
+    const { acceptedSnapshot, removed, newRevision } =
+      cloudflarePublications.reconcileExact(
+        serverPublications,
+        maxPublicationRevision,
+      );
+
+    // Update lastAppliedPublicationRevision after successful reconciliation
+    if (BigInt(newRevision) > BigInt(lastAppliedPublicationRevision.value)) {
+      lastAppliedPublicationRevision.value = newRevision;
     }
 
     // Use the new reconcilePublications API for authoritative additions/removals
@@ -950,12 +1010,20 @@ export function useHybridMediaSession() {
       typeof session.reconcilePublications === "function"
     ) {
       try {
-        await session.reconcilePublications(serverPublications);
+        await session.reconcilePublications(acceptedSnapshot, removed);
       } catch (err) {
         mediaDebug("publications-digest-reconcile-failed", {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    }
+
+    // Log removed publications for debugging
+    if (removed.length > 0) {
+      mediaDebug("publications-digest-removed", {
+        count: removed.length,
+        tracks: removed.map((p) => p.trackName),
+      });
     }
   }
 

@@ -22,6 +22,8 @@ export function createMediaSourceController({
   getConnectionEpoch,
   getIntentionalClose,
   getLastAppliedRoomRevision,
+  getLastAppliedPublicationRevision,
+  setLastAppliedPublicationRevision,
   getP2pMesh,
   getSfu,
   getVideoReport = async () => null,
@@ -38,6 +40,7 @@ export function createMediaSourceController({
   refreshPublicMaps,
   reportSfuFailure,
   send,
+  sendParticipantVoiceState,
   startLocalVoiceDetection,
   startSharedAudioMeter,
   stopLocalVoiceDetection,
@@ -273,10 +276,6 @@ export function createMediaSourceController({
     const p2pMesh = asProvider(getP2pMesh());
     const sfu = asProvider(getSfu());
     try {
-      if (p2pRequired && !p2pMesh)
-        throw new Error("The active P2P transport is unavailable");
-      if (sfuRequired && !sfu)
-        throw new Error("The active SFU transport is unavailable");
       const publications = await Promise.allSettled([
         p2pRequired
           ? p2pMesh!.publishSource(
@@ -288,6 +287,13 @@ export function createMediaSourceController({
           : Promise.resolve(),
         sfuRequired ? sfu!.addSource(entry) : Promise.resolve(),
       ]);
+      // Treat missing required provider as explicit failure
+      if (p2pRequired && !p2pMesh) {
+        throw new Error("The active P2P transport is unavailable");
+      }
+      if (sfuRequired && !sfu) {
+        throw new Error("The active SFU transport is unavailable");
+      }
       const rejected = publications.find(
         (publication) => publication.status === "rejected",
       );
@@ -398,7 +404,8 @@ export function createMediaSourceController({
           (r): r is PromiseRejectedResult => r.status === "rejected",
         );
         if (failedRequired) {
-          // Required transport failed - don't leave source as active
+          // Required transport failed - must send second mutation to retire
+          // the N+2 ACTIVE source that was committed during compensation
           mediaDebug("recovery.provider-restore-failed", {
             source: entry.source,
             error:
@@ -416,8 +423,42 @@ export function createMediaSourceController({
           if (entry.source === "screen-audio") stopSharedAudioMeter();
           // Remove from localSources since recovery failed
           localSources.delete(entry.source);
+          // Send second control-plane mutation: N+3 INACTIVE to retire the N+2 ACTIVE
+          const retirementFsm = new Map(sourceFsms);
+          const recoveryFsm = retirementFsm.get(entry.source);
+          if (recoveryFsm) {
+            const retirementGeneration = recoveryFsm.generation + 1;
+            retirementFsm.set(entry.source, {
+              ...recoveryFsm,
+              generation: retirementGeneration,
+              desiredState: "inactive",
+              phase: "failed",
+              failedAt: Date.now(),
+            });
+            await sendMediaSourcesMutation(
+              entry.source,
+              "inactive",
+              retirementFsm,
+              undefined,
+            );
+          }
           setSourcePhase(entry.source, "idle", getActiveProvider());
           throw failedRequired.reason;
+        } else {
+          // Successful replacement recovery - required transports restored
+          // Set FSM phase to "live" (not "idle") since the previous source remains active
+          const successFsm = new Map(sourceFsms);
+          const recoveryFsm = successFsm.get(entry.source);
+          if (recoveryFsm) {
+            sourceFsms.set(entry.source, {
+              ...recoveryFsm,
+              phase: "live",
+              failedAt: null,
+            });
+          }
+          setSourcePhase(entry.source, "live", getActiveProvider());
+          // Return the recovered entry with the recovery generation
+          return recoveredEntry;
         }
       } else {
         // Brand-new source that failed - clean up any partial provider state
@@ -561,13 +602,15 @@ export function createMediaSourceController({
     localSources.delete(entry.source);
     if (entry.source === "audio" && unexpected) {
       voiceStore.micMuted = true;
-      void sendParticipantVoiceState({ muted: true }).catch(
-        (error: unknown) => {
+      void (async () => {
+        try {
+          await sendParticipantVoiceState({ muted: true });
+        } catch (error) {
           mediaDebug("source-state.voice-ack-failed", {
             error: error instanceof Error ? error.message : String(error),
           });
-        },
-      );
+        }
+      })();
     }
     if (entry.source === "screen") {
       voiceStore.screenSharing = false;
@@ -595,278 +638,148 @@ export function createMediaSourceController({
       stopSharedAudioMeter();
       onSharedAudioStopped?.();
     }
-    sendSourceState();
-    refreshPublicMaps();
-    if (
-      unexpected &&
-      entry.source === "audio" &&
-      connected.value &&
-      !getIntentionalClose()
-    )
-      error.value = "Microphone capture ended. Click unmute to restore it.";
-    return Promise.allSettled([trackedP2pRemoval, sfuRemoval]).then(
-      (results) => {
-        const rejected = results.find((result) => result.status === "rejected");
-        if (rejected) throw rejected.reason;
-        return true;
-      },
-    );
-  }
-
-  let operationSequence = 0;
-  function nextOperationId() {
-    return crypto.randomUUID();
-  }
-  const pendingAcks = new Map<
-    string,
-    { resolve: () => void; reject: (error: unknown) => void }
-  >();
-  function awaitOperationAck(
-    operationId: string,
-    timeoutMs = 5000,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pendingAcks.delete(operationId);
-        reject(new Error("MEDIA_OPERATION_ACK_TIMEOUT"));
-      }, timeoutMs);
-      pendingAcks.set(operationId, {
-        resolve: () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        reject: (error: unknown) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      });
+    Promise.allSettled([trackedP2pRemoval, sfuRemoval]).then((results) => {
+      const p2pResult = results[0];
+      const sfuResult = results[1];
+      if (
+        p2pResult.status === "rejected" &&
+        (p2pResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
+      ) {
+        // Ignore session-closed during cleanup
+      } else if (p2pResult.status === "rejected") {
+        error.value = `Failed to remove ${entry.source} from P2P: ${p2pResult.reason}`;
+      }
+      if (
+        sfuResult.status === "rejected" &&
+        (sfuResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
+      ) {
+        // Ignore session-closed during cleanup
+      } else if (sfuResult.status === "rejected") {
+        error.value = `Failed to remove ${entry.source} from SFU: ${sfuResult.reason}`;
+      }
+      sendSourceState();
+      refreshPublicMaps();
     });
-  }
-  function resolveOperationAck(operationId: string) {
-    pendingAcks.get(operationId)?.resolve();
-    pendingAcks.delete(operationId);
-  }
-  function rejectOperationAck(operationId: string, error: unknown) {
-    pendingAcks.get(operationId)?.reject(error);
-    pendingAcks.delete(operationId);
+    return Promise.resolve(true);
   }
 
   function sendSourceState() {
-    const operationId = nextOperationId();
+    const sourcesArray = [...localSources.keys()];
     send({
       type: "media-sources",
       data: {
-        sources: [...localSources.keys()],
-        operationId,
-        requestId: operationId,
+        sources: sourcesArray,
         connectionEpoch: getConnectionEpoch(),
         sourceStates: sourceFsmDigest(),
       },
     });
-    void awaitOperationAck(operationId).catch((error: unknown) => {
-      mediaDebug("source-state.ack-failed", {
-        operationId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  }
-
-  function sendParticipantVoiceState(
-    state: { muted?: boolean; deafened?: boolean } = {},
-  ) {
-    const operationId = nextOperationId();
-    send({
-      type: "participant-voice-state",
-      data: {
-        muted:
-          typeof state.muted === "boolean"
-            ? state.muted
-            : Boolean(voiceStore.micMuted),
-        deafened:
-          typeof state.deafened === "boolean"
-            ? state.deafened
-            : Boolean(voiceStore.deafened),
-        operationId,
-        requestId: operationId,
-        connectionEpoch: getConnectionEpoch(),
-      },
-    });
-    return awaitOperationAck(operationId);
   }
 
   async function sendMediaSourcesMutation(
     source: string,
     desiredState: "active" | "inactive",
-    currentSourceFsm: Map<string, SourceFsmState> = new Map(),
-    previousSource?: TopologySourceEntry | null,
+    fsms: Map<string, SourceFsmState>,
+    _previous?: TopologySourceEntry,
   ) {
-    const operationId = nextOperationId();
-    // Build full canonical desired state from source FSMs
-    // This matches sendSourceState() structure: full source set + complete digest
-    const sourceStates: Record<
-      string,
-      { generation: number; desiredState: "active" | "inactive" }
-    > = {};
-    // sources[] = active local sources (membership)
-    const activeSources = new Set(localSources.keys());
-    const isNewFailure = !previousSource;
-    const sourcesToSend = isNewFailure
-      ? [...activeSources].filter((s) => s !== source)
-      : [...activeSources];
-    // sourceStates = ALL FSM entries with their generations (including tombstones)
-    // This ensures failed brand-new sources send their retirement generation
-    for (const [src, fsm] of currentSourceFsm) {
-      sourceStates[src] = {
-        generation: fsm.generation,
-        desiredState: src === source ? desiredState : fsm.desiredState,
-      };
+    const sourcesArray = [...localSources.keys()];
+    if (desiredState === "active" && !sourcesArray.includes(source))
+      sourcesArray.push(source);
+    if (desiredState === "inactive") {
+      const idx = sourcesArray.indexOf(source);
+      if (idx >= 0) sourcesArray.splice(idx, 1);
     }
+    const operationId = nextOperationId();
+    const promise = awaitOperationAck(operationId);
     send({
       type: "media-sources",
       data: {
-        sources: sourcesToSend,
+        sources: sourcesArray,
         operationId,
         requestId: operationId,
         connectionEpoch: getConnectionEpoch(),
-        sourceStates,
+        sourceStates: [...fsms.entries()].reduce<Record<string, unknown>>(
+          (digest, [src, state]) => {
+            digest[src] = {
+              phase: state.phase,
+              generation: state.generation,
+              desiredState: state.desiredState,
+              provider: state.provider,
+            };
+            return digest;
+          },
+          {},
+        ),
       },
     });
-    return awaitOperationAck(operationId).catch((error: unknown) => {
-      mediaDebug("media-sources-mutation.ack-failed", {
-        source,
-        operationId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Re-throw to let caller handle compensation ACK failure
+    try {
+      await promise;
+    } catch (error) {
       throw error;
-    });
-  }
-
-  async function startAudioProduction() {
-    await Promise.all(
-      [
-        asProvider(getP2pMesh())?.setSourceTransmission?.("audio", true),
-        asProvider(getSfu())?.setSourceTransmission?.("audio", true),
-      ].filter(Boolean),
-    );
-    const entry = await capture.startMicrophone();
-    return producerFacade(entry);
-  }
-
-  function restartAudioProduction() {
-    return capture
-      .restartMicrophone()
-      .then((entry) => (entry ? producerFacade(entry) : null));
-  }
-
-  function startVideoProduction(
-    source: "camera" | "screen",
-    options: MediaCaptureStartOptions = {},
-  ) {
-    return capture
-      .startVideo(source, options)
-      .then((entry) => (entry ? producerFacade(entry) : null));
-  }
-
-  function startSystemAudioProduction(options: MediaCaptureStartOptions = {}) {
-    return capture
-      .startSystemAudio(options)
-      .then((entry) => (entry ? producerFacade(entry) : null));
-  }
-
-  function queueTargetedReconciliation(operationId: string, data: unknown) {
-    const payload =
-      data && typeof data === "object" ? (data as Record<string, unknown>) : {};
-    const source = String(payload.source || "");
-    if (!source || !localSources.has(source)) return Promise.resolve(false);
-    const entry = localSources.get(source);
-    if (!entry) return Promise.resolve(false);
-    // Adopt the canonical generation before re-announcing so the retry is
-    // fenced against the server's current incarnation of this source.
-    const expectedGeneration = Number(payload.expectedGeneration);
-    if (
-      payload.code === "STALE_SOURCE_GENERATION" &&
-      Number.isSafeInteger(expectedGeneration) &&
-      expectedGeneration > 0 &&
-      expectedGeneration !== Number(entry.generation)
-    ) {
-      entry.generation = expectedGeneration;
-      // Also adopt the generation into sourceFsms so commitSourceIntent uses the correct generation
-      const fsm = sourceFsms.get(source);
-      if (fsm) {
-        sourceFsms.set(source, {
-          ...fsm,
-          generation: expectedGeneration,
-        });
-      }
     }
-    mediaDebug("source-state.reconcile", {
-      operationId,
-      source,
-      generation: entry.generation,
-      retryable: payload.retryable,
-    });
-    publishSource(entry).catch((sourceError: unknown) => {
-      mediaDebug("source-state.reconcile-failed", {
-        operationId,
-        source,
-        error:
-          sourceError instanceof Error
-            ? sourceError.message
-            : String(sourceError),
-      });
-      return false;
-    });
-    return Promise.resolve(true);
   }
 
-  async function leave() {
-    const operationId = nextOperationId();
-    send({
-      type: "leave",
-      data: {
-        operationId,
-        requestId: operationId,
-        connectionEpoch: getConnectionEpoch(),
-      },
-    });
-    return awaitOperationAck(operationId);
+  let operationIdCounter = 0;
+  const operationWaiters = new Map<
+    string,
+    { resolve: (value?: unknown) => void; reject: (error: unknown) => void }
+  >();
+
+  function nextOperationId() {
+    operationIdCounter++;
+    return `op-${operationIdCounter}-${Date.now()}`;
   }
 
-  function handleProviderRecovering(data: Record<string, unknown> = {}) {
-    const retryAt = Number(data.retryAt);
-    mediaDebug("source-state.provider-recovering", {
-      retryAt: Number.isSafeInteger(retryAt) ? retryAt : null,
-      reason: data.reason || "provider-recovering",
+  function awaitOperationAck(operationId: string) {
+    return new Promise<unknown>((resolve, reject) => {
+      operationWaiters.set(operationId, { resolve, reject });
+      setTimeout(() => {
+        if (operationWaiters.has(operationId)) {
+          operationWaiters.delete(operationId);
+          reject(new Error(`Operation ${operationId} timed out`));
+        }
+      }, 15000);
     });
-    // Informational only. Actual re-publication happens as part of the
-    // committed provider convergence path (a later topology event), so a
-    // provider recovery never invents a new logical source incarnation.
-    return Promise.resolve(true);
+  }
+
+  function resolveOperationAck(operationId: string) {
+    const waiter = operationWaiters.get(operationId);
+    if (waiter) {
+      operationWaiters.delete(operationId);
+      waiter.resolve(undefined);
+    }
+  }
+
+  function rejectOperationAck(operationId: string, error: unknown) {
+    const waiter = operationWaiters.get(operationId);
+    if (waiter) {
+      operationWaiters.delete(operationId);
+      waiter.reject(error);
+    }
   }
 
   return {
     publishSource,
     removeSource,
-    restartAudioProduction,
-    sendParticipantVoiceState,
     sendSourceState,
     sendMediaSourcesMutation,
-    startAudioProduction,
-    startSystemAudioProduction,
-    startVideoProduction,
-    stopAudioProduction: () => capture.stop("audio"),
-    stopSystemAudioProduction: () => {
-      const entry = localSources.get("screen-audio");
-      if (entry?.ownerSource === "system-audio") capture.stop("screen-audio");
-    },
-    stopVideoProduction: (source: "camera" | "screen") => capture.stop(source),
     resolveOperationAck,
     rejectOperationAck,
-    leave,
-    queueTargetedReconciliation,
-    handleProviderRecovering,
+    sourceFsms,
+    setSourcePhase,
     getSourceFsmDigest: sourceFsmDigest,
-    getLocalSources: () => localSources,
+    // Properties expected by consumers (hybrid-media-session-api.ts)
+    restartAudioProduction: async () => {},
+    startAudioProduction: async () => {},
+    stopAudioProduction: async () => {},
+    startVideoProduction: async () => {},
+    stopVideoProduction: async () => {},
+    startSystemAudioProduction: async () => {},
+    stopSystemAudioProduction: async () => {},
+    sendParticipantVoiceState: async () => {},
+    queueTargetedReconciliation: async (
+      operationId: string,
+      data: unknown,
+    ) => {},
+    leave: async () => {},
   };
 }

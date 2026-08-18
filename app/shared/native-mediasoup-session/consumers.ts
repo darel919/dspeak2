@@ -1,4 +1,5 @@
 import { asError } from "../native-mediasoup-utils.ts";
+import type { CloudflarePublication } from "../types/cloudflare-media.ts";
 import {
   closeConsumer,
   closeConsumerByProducer,
@@ -228,7 +229,8 @@ export class NativeMediasoupConsumersMethods {
 
   async reconcilePublications(
     this: NativeMediasoupSfuSession,
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
   ) {
     if (!Array.isArray(publications)) return;
     // Delegate to Cloudflare session if it's the active provider
@@ -236,7 +238,10 @@ export class NativeMediasoupConsumersMethods {
       this.selectedProvider === "cloudflare-realtime" &&
       this.cloudflareSession
     ) {
-      await this.cloudflareSession.reconcilePublications(publications);
+      await this.cloudflareSession.reconcilePublications(
+        publications,
+        removedPublications,
+      );
       return;
     }
     // For mediasoup provider, there's no equivalent heartbeat repair mechanism

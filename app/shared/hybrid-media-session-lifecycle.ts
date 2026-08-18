@@ -406,12 +406,30 @@ export function createHybridMediaSessionLifecycle({
       sfuProducerIds: mediaSessionSetup.sfuProducerIds,
       syncConnectedUsers,
       voiceStore,
+      getLastAppliedPublicationRevision: () =>
+        mediaSessionSetup.getLastAppliedPublicationRevision?.() || "0",
+      setLastAppliedPublicationRevision: (value: string) =>
+        mediaSessionSetup.setLastAppliedPublicationRevision?.(value),
     });
     messageHandlers.set("cloudflare-response", (data: unknown) =>
       getSfu()?.handle("cloudflare-response", data),
     );
     messageHandlers.set("cloudflare-publication-available", (data: unknown) => {
       mediaSessionSetup.queueCloudflarePublication(data);
+      // Update lastAppliedPublicationRevision from live publication push
+      if (
+        data &&
+        typeof data === "object" &&
+        "publicationRevision" in data &&
+        typeof data.publicationRevision === "string"
+      ) {
+        const rev = data.publicationRevision;
+        const currentRev =
+          mediaSessionSetup.getLastAppliedPublicationRevision?.();
+        if (currentRev && BigInt(rev) > BigInt(currentRev)) {
+          mediaSessionSetup.setLastAppliedPublicationRevision?.(rev);
+        }
+      }
       return getSfu()?.handle("cloudflare-publication-available", data);
     });
   }

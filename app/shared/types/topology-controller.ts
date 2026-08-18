@@ -2,6 +2,7 @@ import type { Ref } from "vue";
 import type { JitterBufferConfig } from "./adaptive-media.ts";
 import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 import type { VideoSettings } from "./video-settings.ts";
+import type { CloudflarePublication } from "./cloudflare-media.ts";
 
 export interface TopologyPeer {
   peerId?: string;
@@ -194,7 +195,8 @@ export interface TopologySfuSession {
   expectedInboundFlowCount?: () => number;
   handle: (type: string, data: unknown) => Promise<unknown>;
   reconcilePublications: (
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
   ) => Promise<unknown>;
   setJitterBufferConfig: (config: JitterBufferConfig) => unknown;
   [key: string]: unknown;

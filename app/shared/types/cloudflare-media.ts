@@ -158,6 +158,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
     updates: Record<string, unknown>,
   ) => Promise<boolean>;
   reconcilePublications: (
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
   ) => Promise<unknown>;
 }

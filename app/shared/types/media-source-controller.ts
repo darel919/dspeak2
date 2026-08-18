@@ -33,6 +33,8 @@ export interface MediaSourceControllerContext {
   getConnectionEpoch: () => number;
   getIntentionalClose: () => boolean;
   getLastAppliedRoomRevision: () => string;
+  getLastAppliedPublicationRevision: () => string;
+  setLastAppliedPublicationRevision: (value: string) => void;
   getP2pMesh: () => unknown;
   getSfu: () => unknown;
   getVideoReport?: (
@@ -53,6 +55,10 @@ export interface MediaSourceControllerContext {
   stopSharedAudioMeter: () => unknown;
   topologyState: Ref<TopologyState>;
   queueTargetedReconciliation?: (operationId: string, data: unknown) => unknown;
+  sendParticipantVoiceState: (state: {
+    muted?: boolean;
+    deafened?: boolean;
+  }) => unknown;
   voiceStore: {
     micMuted: boolean;
     deafened: boolean;

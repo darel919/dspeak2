@@ -1,3 +1,4 @@
+import type { CloudflarePublication } from "../types/cloudflare-media.ts";
 import type { NativeConsumerEntry } from "./native-mediasoup.ts";
 import type { VideoSettings } from "./video-settings.ts";
 import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
@@ -139,7 +140,8 @@ export interface NativeCloudflareSessionLike {
     deafened?: boolean;
   }) => unknown;
   reconcilePublications: (
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
   ) => Promise<unknown>;
   applyJitterBufferConfig: (entry: NativeConsumerEntry) => unknown;
   setJitterBufferConfig: (config: {
@@ -188,7 +190,8 @@ export interface NativeMediasoupSfuSessionSurface {
   connect: (channelId: string) => Promise<unknown>;
   handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
   reconcilePublications: (
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
   ) => Promise<unknown>;
   configureControl: (config: Record<string, unknown>) => unknown;
   addSource: (entry: NativeSourceEntry) => Promise<unknown>;

@@ -3,6 +3,7 @@ import { asError } from "../native-mediasoup-utils.ts";
 import { requestIdentifier, sessionClosedError } from "./helpers.ts";
 import type { NativeCloudflareMessage } from "../types/native-cloudflare.ts";
 import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
+import type { CloudflarePublication } from "../types/cloudflare-media.ts";
 export interface NativeCloudflareInitializationMethods extends NativeCloudflareSessionSurface {}
 
 function nativeCloudflareResponseError(value: unknown) {
@@ -162,7 +163,7 @@ export class NativeCloudflareInitializationMethods {
 
   async reconcilePublications(
     this: NativeCloudflareSessionSurface,
-    publications: Record<string, unknown>[],
+    publications: CloudflarePublication[],
   ) {
     if (!Array.isArray(publications)) return;
 
