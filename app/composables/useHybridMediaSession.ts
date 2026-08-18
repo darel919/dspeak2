@@ -10,6 +10,7 @@ import { createHybridMediaRegistry } from "~/shared/hybrid-media-registry.ts";
 import { createHybridMediaAudioState } from "~/shared/hybrid-media-audio-state.ts";
 import { RemoteMediaHandoff } from "~/shared/remote-media-handoff.ts";
 import { createHybridMediaTopologyController } from "~/shared/hybrid-media-topology-controller.ts";
+import type { TopologyHandoff } from "~/shared/types/topology-controller.ts";
 import { createHybridMediaSessionTermination } from "~/shared/hybrid-media-session-termination.ts";
 import { mediaDebug } from "~/shared/media-debug.ts";
 import {
@@ -690,7 +691,7 @@ export function useHybridMediaSession() {
     getSelectedSfuProvider: () => selectedSfuProvider,
     getSfu: () => sfu as unknown as TopologySfuSession | null,
     getP2pMesh: () => p2pMesh as unknown as TopologyP2pMesh | null,
-    handoff,
+    handoff: handoff as unknown as TopologyHandoff,
     iceConnectedBoth,
     localSources,
     mediaConnectionState,
@@ -735,12 +736,12 @@ export function useHybridMediaSession() {
             entry.source,
             entry.track,
             entry.stream,
-            entry,
+            entry as any,
           );
         }
       } else if (provider === sfuLocal && sfuLocal) {
         for (const entry of localSources.values()) {
-          await (sfuLocal as any).addSource(entry);
+          await (sfuLocal as any).addSourceInternal(entry as any);
         }
         await (sfuLocal as any).startSubscriptions?.();
       }
@@ -973,6 +974,8 @@ export function useHybridMediaSession() {
             });
           }
         }
+        // Also update the local registry to mark as closed
+        cloudflarePublications.update({ trackName, closed: true });
       }
     }
   }

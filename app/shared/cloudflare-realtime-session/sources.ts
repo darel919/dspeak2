@@ -52,12 +52,19 @@ export class CloudflareSourcesMethods {
     const current = this.producers.get(entry.source);
     if (current) {
       const previousTrack = current.track;
+      const previousGeneration = current.generation;
       try {
         await current.sender.replaceTrack(entry.track);
         this.assertCurrentSession(peerConnection, generation);
+        // Configure sender and transmission state FIRST, before mutating canonical state
+        await this.configureVideoSender(current.sender, entry);
+        await this.setSourceTransmission(
+          entry.source,
+          this.sourceTransmission.get(entry.source) ?? true,
+        );
+        // All validations passed - now mutate canonical state and announce
         current.track = entry.track;
         current.ownerSource = entry.ownerSource || null;
-        // Update generation and re-announce publication with new incarnation
         current.generation = entry.generation;
         if (typeof this.send === "function") {
           this.send({
@@ -88,16 +95,12 @@ export class CloudflareSourcesMethods {
             },
           });
         }
-        await this.configureVideoSender(current.sender, entry);
-        await this.setSourceTransmission(
-          entry.source,
-          this.sourceTransmission.get(entry.source) ?? true,
-        );
       } catch (error) {
         try {
           await current.sender.replaceTrack(previousTrack);
         } catch {}
         current.track = previousTrack;
+        current.generation = previousGeneration;
         throw error;
       }
       return;
@@ -160,8 +163,7 @@ export class CloudflareSourcesMethods {
         trackName,
         mid,
         ownerSource: entry.ownerSource || null,
-        generation:
-          typeof entry.generation === "number" ? entry.generation : undefined,
+        generation: entry.generation,
       });
       await this.setSourceTransmission(
         entry.source,
@@ -211,7 +213,6 @@ export class CloudflareSourcesMethods {
     for (const [source, producer] of this.producers) {
       const trackName = producer.trackName;
       if (!trackName) continue;
-      const track = producer.track;
       const ownerSource = producer.ownerSource || null;
       const generation = producer.generation || 0;
       // Resend publication metadata with updated controlConnectionEpoch

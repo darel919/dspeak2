@@ -45,8 +45,8 @@ export interface NativeCloudflareSessionSurface {
   requestTimeoutMs: number;
   localPeerId: string;
   sources: Map<string, Record<string, unknown>>;
-  producers: Map<string, Record<string, unknown>>;
-  producerVariants: Map<string, Record<string, unknown>>;
+  producers: Map<string, Record<string, unknown> & { kind?: string }>;
+  producerVariants: Map<string, Record<string, unknown> & { kind?: string }>;
   consumers: Map<string, Record<string, unknown>>;
   sourceTransmission: Map<string, boolean>;
   remoteReceiving: Map<string, boolean>;

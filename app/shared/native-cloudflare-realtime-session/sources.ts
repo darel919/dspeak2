@@ -1064,26 +1064,29 @@ export class NativeCloudflareSourcesMethods {
       ...this.producerVariants.values(),
     ];
     for (const producer of allProducers) {
-      const trackName = producer.trackName;
+      const p = producer as Record<string, unknown> & {
+        kind?: string;
+        track?: { kind?: string };
+      };
+      const trackName = p.trackName;
       if (!trackName) continue;
-      const source = producer.source;
-      const kind =
-        producer.kind || (producer.track?.kind === "audio" ? "audio" : "video");
-      const ownerSource = producer.ownerSource || null;
-      const generation = producer.generation || 0;
-      const variantId = producer.variantId || null;
-      const codec = producer.codec || null;
-      const codecAcceleration = producer.codecAcceleration || null;
-      const codecImplementation = producer.codecImplementation || null;
-      const width = producer.width;
-      const height = producer.height;
-      const fps = producer.fps;
-      const bitrate = producer.bitrate;
-      const target = producer.target;
-      const targetAdjusted = producer.targetAdjusted;
-      const receivers = producer.receivers || [];
-      const emergency = producer.emergency === true;
-      const score = producer.score;
+      const source = p.source;
+      const kind = p.kind || (p.track?.kind === "audio" ? "audio" : "video");
+      const ownerSource = p.ownerSource || null;
+      const generation = p.generation || 0;
+      const variantId = p.variantId || null;
+      const codec = p.codec || null;
+      const codecAcceleration = p.codecAcceleration || null;
+      const codecImplementation = p.codecImplementation || null;
+      const width = p.width;
+      const height = p.height;
+      const fps = p.fps;
+      const bitrate = p.bitrate;
+      const target = p.target;
+      const targetAdjusted = p.targetAdjusted;
+      const receivers = p.receivers || [];
+      const emergency = p.emergency === true;
+      const score = p.score;
       // Resend publication metadata with updated controlConnectionEpoch
       const sent = this.send?.({
         type: "cloudflare-publication",
@@ -1092,7 +1095,7 @@ export class NativeCloudflareSourcesMethods {
           source,
           kind,
           ownerSource,
-          logicalStreamId: producer.logicalStreamId || null,
+          logicalStreamId: p.logicalStreamId || null,
           generation,
           connectionEpoch: this.controlConnectionEpoch,
           variantId,

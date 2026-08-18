@@ -17,7 +17,7 @@ export interface CloudflareSourceEntry extends Record<string, unknown> {
   trackName: string;
   mid: string;
   ownerSource?: string | null;
-  generation?: number;
+  generation: number;
 }
 export interface CloudflareSourceInput extends Record<string, unknown> {
   source: string;
@@ -26,6 +26,7 @@ export interface CloudflareSourceInput extends Record<string, unknown> {
   ownerSource?: string | null;
   audioBitrate?: number;
   audioStereo?: boolean;
+  generation: number;
 }
 export interface CloudflareConsumerEntry extends Record<string, unknown> {
   track: MediaStreamTrack;

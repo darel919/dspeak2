@@ -327,6 +327,7 @@ export function createMediaSourceController({
         entry.source,
         "inactive",
         currentSourceFsm,
+        previous,
       );
       if (previous) {
         await Promise.allSettled([
@@ -455,7 +456,8 @@ export function createMediaSourceController({
         producerId: `${getActiveProvider() || "local"}:${entry.track.id}`,
       });
       localVideoFeeds.value = new Map(localVideoFeeds.value);
-      if (entry.source === "screen") adaptiveVideo.start(entry);
+      if (entry.source === "screen")
+        adaptiveVideo.start(entry as AdaptiveVideoEntry);
     }
     sendSourceState();
     refreshPublicMaps();
@@ -616,6 +618,7 @@ export function createMediaSourceController({
     source: string,
     desiredState: "active" | "inactive",
     currentSourceFsm: Map<string, SourceFsmState> = new Map(),
+    previousSource?: TopologySourceEntry | null,
   ) {
     const operationId = nextOperationId();
     // Build full canonical desired state from source FSMs
@@ -624,16 +627,37 @@ export function createMediaSourceController({
       string,
       { generation: number; desiredState: "active" | "inactive" }
     > = {};
-    for (const [src, fsm] of currentSourceFsm) {
-      sourceStates[src] = {
-        generation: fsm.generation,
-        desiredState: src === source ? desiredState : fsm.desiredState,
-      };
+    // Use localSources for actual active sources, FSM for generation/tombstone tracking
+    const activeSources = new Set(localSources.keys());
+    // For brand-new source failure: don't include it in sources[]
+    // For replacement failure: keep the source (previous will be restored)
+    const isNewFailure = !previousSource;
+    const sourcesToSend = isNewFailure
+      ? [...activeSources].filter((s) => s !== source)
+      : [...activeSources];
+    for (const src of sourcesToSend) {
+      const fsm = currentSourceFsm.get(src);
+      if (fsm) {
+        sourceStates[src] = {
+          generation: fsm.generation,
+          desiredState: src === source ? desiredState : fsm.desiredState,
+        };
+      }
+    }
+    // Also include the failed source with its updated generation if it's a replacement
+    if (!isNewFailure) {
+      const fsm = currentSourceFsm.get(source);
+      if (fsm) {
+        sourceStates[source] = {
+          generation: fsm.generation,
+          desiredState,
+        };
+      }
     }
     send({
       type: "media-sources",
       data: {
-        sources: [...currentSourceFsm.keys()],
+        sources: sourcesToSend,
         operationId,
         requestId: operationId,
         connectionEpoch: getConnectionEpoch(),
