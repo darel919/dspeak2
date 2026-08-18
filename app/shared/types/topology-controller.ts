@@ -193,6 +193,9 @@ export interface TopologySfuSession {
   mediaReadiness?: (count: number) => Promise<Record<string, unknown>>;
   expectedInboundFlowCount?: () => number;
   handle: (type: string, data: unknown) => Promise<unknown>;
+  reconcilePublications: (
+    publications: Record<string, unknown>[],
+  ) => Promise<unknown>;
   setJitterBufferConfig: (config: JitterBufferConfig) => unknown;
   [key: string]: unknown;
 }

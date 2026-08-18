@@ -139,6 +139,9 @@ export interface NativeCloudflareSessionSurface {
     entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
   ) => Promise<unknown>;
   handleMessage: (type: string, data: Record<string, unknown>) => unknown;
+  reconcilePublications: (
+    publications: Record<string, unknown>[],
+  ) => Promise<unknown>;
   subscribe: (
     publication: import("./native-cloudflare.ts").NativeCloudflarePublication,
     generation?: number,

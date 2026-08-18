@@ -556,6 +556,10 @@ export interface MediasoupClientSession {
     minDelayMs?: number;
     targetDelayMs?: number;
   }) => unknown;
+  addSource: (
+    entry: import("./types/mediasoup-client.ts").MediasoupSourceEntry,
+  ) => Promise<unknown>;
+  startSubscriptions?: () => Promise<unknown>;
 }
 
 Object.assign(

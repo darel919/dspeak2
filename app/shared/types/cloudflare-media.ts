@@ -157,4 +157,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
     entry: CloudflareSourceEntry,
     updates: Record<string, unknown>,
   ) => Promise<boolean>;
+  reconcilePublications: (
+    publications: Record<string, unknown>[],
+  ) => Promise<unknown>;
 }

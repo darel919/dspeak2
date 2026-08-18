@@ -138,6 +138,9 @@ export interface NativeCloudflareSessionLike {
     muted?: boolean;
     deafened?: boolean;
   }) => unknown;
+  reconcilePublications: (
+    publications: Record<string, unknown>[],
+  ) => Promise<unknown>;
   applyJitterBufferConfig: (entry: NativeConsumerEntry) => unknown;
   setJitterBufferConfig: (config: {
     minDelayMs?: number;
@@ -184,6 +187,9 @@ export interface NativeMediasoupSfuSessionSurface {
   expectedInboundFlowCount: () => number;
   connect: (channelId: string) => Promise<unknown>;
   handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
+  reconcilePublications: (
+    publications: Record<string, unknown>[],
+  ) => Promise<unknown>;
   configureControl: (config: Record<string, unknown>) => unknown;
   addSource: (entry: NativeSourceEntry) => Promise<unknown>;
   removeSource: (source: string) => Promise<unknown>;

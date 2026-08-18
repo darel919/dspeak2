@@ -289,4 +289,55 @@ export class CloudflareNegotiationMethods {
     }
     return false;
   }
+
+  async reconcilePublications(
+    this: CloudflareSessionLike,
+    publications: Record<string, unknown>[],
+  ) {
+    if (!Array.isArray(publications)) return;
+    for (const pub of publications) {
+      const trackName = String(pub.trackName || "");
+      if (!trackName) continue;
+      const existingPublication = this.publications.get(trackName);
+
+      if (pub.closed === true) {
+        // Close with full publication metadata to pass epoch/generation check
+        if (existingPublication) {
+          const incomingEpoch = Number(pub.connectionEpoch || 0);
+          const incomingGen = Number(pub.generation || 0);
+          const currentEpoch = Number(existingPublication.connectionEpoch || 0);
+          const currentGen = Number(existingPublication.generation || 0);
+          // Only process if incoming is not stale
+          if (
+            incomingEpoch > currentEpoch ||
+            (incomingEpoch === currentEpoch && incomingGen >= currentGen)
+          ) {
+            this.publications.delete(trackName);
+            this.subscribedTrackNames.delete(trackName);
+            for (const [mid, p] of this.remoteByMid) {
+              if (p.trackName === trackName) {
+                this.remoteByMid.delete(mid);
+                this.pendingRemoteTracks.delete(mid);
+              }
+            }
+            const current = this.consumers.get(trackName);
+            if (current) {
+              try {
+                this.onRemoteTrackEnded?.(current);
+              } catch {}
+            }
+            this.consumers.delete(trackName);
+          }
+        }
+      } else {
+        // Addition/repair
+        this.publications.set(trackName, pub as CloudflarePublication);
+        if (this.sessionId && this.subscriptionsStarted)
+          await this.subscribe(
+            pub as CloudflarePublication,
+            this.sessionGeneration,
+          );
+      }
+    }
+  }
 }

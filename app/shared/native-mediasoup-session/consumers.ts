@@ -226,6 +226,24 @@ export class NativeMediasoupConsumersMethods {
     }
   }
 
+  async reconcilePublications(
+    this: NativeMediasoupSfuSession,
+    publications: Record<string, unknown>[],
+  ) {
+    if (!Array.isArray(publications)) return;
+    // Delegate to Cloudflare session if it's the active provider
+    if (
+      this.selectedProvider === "cloudflare-realtime" &&
+      this.cloudflareSession
+    ) {
+      await this.cloudflareSession.reconcilePublications(publications);
+      return;
+    }
+    // For mediasoup provider, there's no equivalent heartbeat repair mechanism
+    // because mediasoup uses explicit consumer management. The Cloudflare path
+    // handles this via the heartbeat digest reconciliation in useHybridMediaSession.
+  }
+
   async handleNativeAction(
     this: NativeMediasoupSfuSession,
     action: import("../types/native-mediasoup.ts").NativeAction,

@@ -159,4 +159,49 @@ export class NativeCloudflareInitializationMethods {
       await this.subscribe(publication);
     return true;
   }
+
+  async reconcilePublications(
+    this: NativeCloudflareSessionSurface,
+    publications: Record<string, unknown>[],
+  ) {
+    if (!Array.isArray(publications)) return;
+    for (const pub of publications) {
+      const trackName = String(pub.trackName || "");
+      if (!trackName) continue;
+      const existingPublication = this.publications.get(trackName);
+
+      if (pub.closed === true) {
+        // Close with full publication metadata to pass epoch/generation check
+        if (existingPublication) {
+          const incomingEpoch = Number(pub.connectionEpoch || 0);
+          const incomingGen = Number(pub.generation || 0);
+          const currentEpoch = Number(existingPublication.connectionEpoch || 0);
+          const currentGen = Number(existingPublication.generation || 0);
+          // Only process if incoming is not stale
+          if (
+            incomingEpoch > currentEpoch ||
+            (incomingEpoch === currentEpoch && incomingGen >= currentGen)
+          ) {
+            this.publications.delete(trackName);
+            this.subscribedTrackNames.delete(trackName);
+            for (const [mid, publication] of this.remoteByMid) {
+              if (publication.trackName === trackName) {
+                this.remoteByMid.delete(mid);
+                this.pendingRemoteTrackEvents.delete(mid);
+              }
+            }
+            for (const entry of [...this.consumers.values()]) {
+              if (String(entry.trackName || "") === trackName)
+                this._closeConsumer(entry);
+            }
+          }
+        }
+      } else {
+        // Addition/repair
+        this.publications.set(trackName, { ...pub, trackName });
+        if (this.sessionId && this.subscriptionsStarted)
+          await this.subscribe({ ...pub, trackName });
+      }
+    }
+  }
 }

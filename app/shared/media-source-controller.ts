@@ -48,7 +48,13 @@ export function createMediaSourceController({
   const asProvider = (value: unknown): SourceProvider | null =>
     value && typeof value === "object" ? (value as SourceProvider) : null;
   type SourceFsmPhase =
-    "idle" | "starting" | "live" | "stopping" | "failed" | "reconciling";
+    | "idle"
+    | "starting"
+    | "live"
+    | "stopping"
+    | "failed"
+    | "reconciling"
+    | "recovering";
   interface SourceFsmState {
     phase: SourceFsmPhase;
     generation: number;
@@ -312,34 +318,81 @@ export function createMediaSourceController({
       // Use the full canonical desired-state builder (sendSourceState pattern)
       // to avoid partial mutations and generation 0.
       const currentSourceFsm = new Map(sourceFsms);
-      // The failed source's generation was already committed; bump it for retirement
+      // The failed source's generation was already committed by commitSourceIntent; bump it for retirement/recovery
       const fsm = currentSourceFsm.get(entry.source);
+      const isReplacement = !!previous;
+      let recoveryGeneration = fsm ? fsm.generation + 1 : 1;
       if (fsm) {
-        currentSourceFsm.set(entry.source, {
-          ...fsm,
-          generation: fsm.generation + 1,
-          desiredState: "inactive",
-          phase: "failed",
-          failedAt: Date.now(),
-        });
+        if (isReplacement) {
+          // Replacement failure: recovery generation is ACTIVE, keep source in sources[]
+          // Update the REAL FSM with recovery generation
+          sourceFsms.set(entry.source, {
+            ...fsm,
+            generation: recoveryGeneration,
+            desiredState: "active",
+            phase: "recovering",
+            failedAt: Date.now(),
+          });
+          currentSourceFsm.set(entry.source, {
+            ...fsm,
+            generation: recoveryGeneration,
+            desiredState: "active",
+            phase: "recovering",
+            failedAt: Date.now(),
+          });
+        } else {
+          // Brand-new source failure: retirement generation is INACTIVE, omit from sources[]
+          sourceFsms.set(entry.source, {
+            ...fsm,
+            generation: recoveryGeneration,
+            desiredState: "inactive",
+            phase: "failed",
+            failedAt: Date.now(),
+          });
+          currentSourceFsm.set(entry.source, {
+            ...fsm,
+            generation: recoveryGeneration,
+            desiredState: "inactive",
+            phase: "failed",
+            failedAt: Date.now(),
+          });
+        }
       }
       await sendMediaSourcesMutation(
         entry.source,
-        "inactive",
+        isReplacement ? "active" : "inactive",
         currentSourceFsm,
         previous,
+      ).catch((error: unknown) => {
+        mediaDebug("compensation-ack-failed", {
+          source: entry.source,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      });
+      const previousEntry: TopologySourceEntry | undefined = localSources.get(
+        entry.source,
       );
-      if (previous) {
+      if (previousEntry) {
+        // Re-announce previous with the recovery generation
+        const previousWithRecoveryGen = {
+          ...previousEntry,
+          generation: isReplacement
+            ? recoveryGeneration
+            : (previousEntry.generation ?? 1),
+        } as TopologySourceEntry;
         await Promise.allSettled([
           p2pRequired
             ? asProvider(getP2pMesh())?.publishSource(
-                previous.source,
-                previous.track,
-                previous.stream,
-                previous,
+                previousWithRecoveryGen.source,
+                previousWithRecoveryGen.track,
+                previousWithRecoveryGen.stream,
+                previousWithRecoveryGen,
               )
             : null,
-          sfuRequired ? asProvider(getSfu())?.addSource(previous) : null,
+          sfuRequired
+            ? asProvider(getSfu())?.addSource(previousWithRecoveryGen)
+            : null,
         ]);
       } else {
         await Promise.allSettled([
@@ -670,6 +723,8 @@ export function createMediaSourceController({
         operationId,
         error: error instanceof Error ? error.message : String(error),
       });
+      // Re-throw to let caller handle compensation ACK failure
+      throw error;
     });
   }
 

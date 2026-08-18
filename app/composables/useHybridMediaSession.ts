@@ -741,9 +741,11 @@ export function useHybridMediaSession() {
         }
       } else if (provider === sfuLocal && sfuLocal) {
         for (const entry of localSources.values()) {
-          await (sfuLocal as any).addSourceInternal(entry as any);
+          await sfuLocal.addSource(entry);
         }
-        await (sfuLocal as any).startSubscriptions?.();
+        if (typeof sfuLocal.startSubscriptions === "function") {
+          await sfuLocal.startSubscriptions();
+        }
       }
     },
     refreshPublicMaps,
@@ -922,7 +924,7 @@ export function useHybridMediaSession() {
     if (!session) return;
 
     // Build server publication map by trackName for authoritative comparison
-    const serverPublications = new Map<string, Record<string, unknown>>();
+    const serverPublications: Record<string, unknown>[] = [];
     for (const entry of digest) {
       if (
         !entry ||
@@ -935,47 +937,24 @@ export function useHybridMediaSession() {
       )
         continue;
       const pub = entry as Record<string, unknown>;
-      serverPublications.set(String(pub.trackName), pub);
-    }
-
-    // Upsert server publications (additions/repairs)
-    for (const [trackName, pub] of serverPublications) {
+      serverPublications.push(pub);
       // Update registry so publications survive reconnect
       cloudflarePublications.update(pub);
-      // Subscription repair: call the session's cloudflare-publication-available handler
-      // which installs the canonical publication and then subscribes.
-      if ("handle" in session && typeof session.handle === "function") {
-        try {
-          await session.handle("cloudflare-publication-available", pub);
-        } catch (err) {
-          mediaDebug("publications-digest-handle-failed", {
-            trackName,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
     }
 
-    // Remove local publications absent from server digest (authoritative removals)
-    for (const localPub of cloudflarePublications.values()) {
-      const trackName = String(localPub.trackName || "");
-      if (trackName && !serverPublications.has(trackName)) {
-        // Server no longer has this publication - retire it locally
-        if ("handle" in session && typeof session.handle === "function") {
-          try {
-            await session.handle("cloudflare-publication-available", {
-              trackName,
-              closed: true,
-            });
-          } catch (err) {
-            mediaDebug("publications-digest-retire-failed", {
-              trackName,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
-        // Also update the local registry to mark as closed
-        cloudflarePublications.update({ trackName, closed: true });
+    // Use the new reconcilePublications API for authoritative additions/removals
+    // This passes the complete retained publication incarnation with epoch/generation
+    // so the provider can properly process close events that would otherwise be rejected as stale
+    if (
+      "reconcilePublications" in session &&
+      typeof session.reconcilePublications === "function"
+    ) {
+      try {
+        await session.reconcilePublications(serverPublications);
+      } catch (err) {
+        mediaDebug("publications-digest-reconcile-failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
