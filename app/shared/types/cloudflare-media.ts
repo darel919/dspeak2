@@ -69,6 +69,7 @@ export interface CloudflareSessionOptions {
     summary: Record<string, unknown>,
   ) => unknown;
   getVideoSettings: (source: string) => Record<string, unknown>;
+  getControlConnectionEpoch?: () => number;
 }
 
 export interface CloudflareSessionLike extends CloudflareSessionOptions {

@@ -34,6 +34,7 @@ export class CloudflareRealtimeSession {
     onRemoteTrackEnded,
     onStateChange,
     getVideoSettings,
+    getControlConnectionEpoch,
   }: CloudflareSessionOptions) {
     this.send = send;
     this.iceServers = iceServers;
@@ -63,6 +64,8 @@ export class CloudflareRealtimeSession {
     this.controlConnectionEpoch = 0;
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
+    if (getControlConnectionEpoch)
+      this.getControlConnectionEpoch = getControlConnectionEpoch;
   }
 
   getControlConnectionEpoch = () => this.controlConnectionEpoch;

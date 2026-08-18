@@ -13,6 +13,18 @@ function incarnationValue(publication: CloudflarePublication): number {
   return epoch * 1_000_000 + generation;
 }
 
+function isStaleIncarnation(
+  incoming: CloudflarePublication,
+  current: CloudflarePublication,
+): boolean {
+  const incomingEpoch = Number(incoming.connectionEpoch || 0);
+  const incomingGen = Number(incoming.generation || 0);
+  const currentEpoch = Number(current.connectionEpoch || 0);
+  const currentGen = Number(current.generation || 0);
+  if (incomingEpoch !== currentEpoch) return incomingEpoch < currentEpoch;
+  return incomingGen < currentGen;
+}
+
 export function createCloudflarePublicationRegistry() {
   const publications = new Map<string, CloudflarePublication>();
 
@@ -29,31 +41,26 @@ export function createCloudflarePublicationRegistry() {
       for (const [currentTrackName, current] of publications) {
         if (slot !== null && slot !== logicalSlot(current)) continue;
         if (trackName && currentTrackName !== trackName) continue;
-        if (
-          slot !== null &&
-          incarnationValue(publication) < incarnationValue(current)
-        )
-          continue; // stale close: current incarnation is newer
+        if (slot !== null && isStaleIncarnation(publication, current)) continue; // stale close: current incarnation is newer
         publications.delete(currentTrackName);
         removed = true;
       }
       return removed;
     }
     // A newer incarnation replaces the logical slot; an older one is ignored.
-    let replaced = false;
+    let stale = false;
     for (const [currentTrackName, current] of publications) {
       if (currentTrackName !== trackName && slot !== logicalSlot(current))
         continue;
-      if (
-        slot !== null &&
-        incarnationValue(publication) < incarnationValue(current)
-      )
-        continue; // stale update: keep current incarnation
+      if (isStaleIncarnation(publication, current)) {
+        stale = true;
+        break;
+      }
       publications.delete(currentTrackName);
-      replaced = true;
     }
+    if (stale) return false;
     publications.set(trackName, publication);
-    return replaced || true;
+    return true;
   }
 
   return {

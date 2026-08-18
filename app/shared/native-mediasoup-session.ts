@@ -45,6 +45,7 @@ export class NativeMediasoupSfuSession {
     getVideoSettings,
     mediaCapabilities = null,
     mediaProfile = "audio",
+    getControlConnectionEpoch,
   }: NativeMediasoupConstructorOptions) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeMediasoupSfuSession requires invoke");
@@ -78,6 +79,8 @@ export class NativeMediasoupSfuSession {
     this.getAudioBitrate = getAudioBitrate;
     this.getAudioStereo = getAudioStereo;
     this.getVideoSettings = getVideoSettings;
+    this.getControlConnectionEpoch =
+      getControlConnectionEpoch || (() => this.controlConnectionEpoch ?? 0);
     this.mediaProfile = mediaProfile;
     this.mediaCapabilities = mediaCapabilities;
     this.signaling = null;

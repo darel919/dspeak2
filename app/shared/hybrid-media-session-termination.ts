@@ -62,27 +62,11 @@ export function createHybridMediaSessionTermination({
     resolveTopologyWaiter(new Error("Media signaling connection stopped"));
     setChannelId(null);
     disposeVisibility();
-    if (connected.value) {
-      const leavePromise = Promise.resolve()
-        .then(() => sendLeave())
-        .catch((leaveError: unknown) => {
-          mediaDebug("session.leave-failed", {
-            error:
-              leaveError instanceof Error
-                ? leaveError.message
-                : String(leaveError),
-          });
-        });
-      const timeout = new Promise((resolve) => setTimeout(resolve, 750));
-      // Bounded clean leave: signaling stays open until the server has a
-      // chance to process the leave, but never blocks indefinitely. The rest
-      // of teardown (audio stop, transport close, state reset) runs now.
-      void Promise.race([leavePromise, timeout]).then(() => {
-        signaling.stop();
-      });
-    } else {
-      signaling.stop();
-    }
+
+    // Preserve connection state for clean leave
+    const wasConnected = connected.value;
+
+    // Phase 1: Immediate teardown of media/capture (audio stop before error-prone I/O per AGENTS.md)
     stopLocalVoiceDetection();
     stopSharedAudioMeter();
     clearAttenuation();
@@ -92,7 +76,7 @@ export function createHybridMediaSessionTermination({
       getP2pMesh,
       getSfu,
       handoff,
-      socket: signaling.getSocket(),
+      socket: null, // Do NOT close control socket yet — wait for leave ACK/timeout
     });
     getProviderSocket()?.close();
     setProviderSocket(null);
@@ -117,6 +101,27 @@ export function createHybridMediaSessionTermination({
     refreshPublicMaps();
     refreshTopologyGraph();
     mediaDebug("session.disconnected");
+
+    // Phase 2: Clean leave on control socket (bounded 750ms)
+    if (wasConnected) {
+      const leavePromise = Promise.resolve()
+        .then(() => sendLeave())
+        .catch((leaveError: unknown) => {
+          mediaDebug("session.leave-failed", {
+            error:
+              leaveError instanceof Error
+                ? leaveError.message
+                : String(leaveError),
+          });
+        });
+      const timeout = new Promise((resolve) => setTimeout(resolve, 750));
+      // Wait for leave ACK or timeout, then close signaling
+      Promise.race([leavePromise, timeout]).then(() => {
+        signaling.stop();
+      });
+    } else {
+      signaling.stop();
+    }
   }
 
   return { disconnect, failSession };

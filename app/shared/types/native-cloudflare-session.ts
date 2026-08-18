@@ -23,6 +23,7 @@ export interface NativeCloudflareSessionOptions {
   remoteAudioFeeds?: NativeCloudflareSessionSurface["remoteAudioFeeds"];
   mediaCapabilities?:
     import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
+  getControlConnectionEpoch?: () => number;
 }
 
 export interface NativeCloudflareSessionSurface {

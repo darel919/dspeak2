@@ -33,6 +33,7 @@ export function createHybridMediaTopologyController({
   getEffectiveAudioBitrate,
   getIceServers,
   getMediaCapabilities = () => null,
+  getConnectionEpoch = () => 0,
   getLocalPeerId,
   getMessageHandler,
   getProviderSocket,
@@ -144,6 +145,7 @@ export function createHybridMediaTopologyController({
           ? send(message)
           : Boolean(getProviderSocket()?.send(message)),
       iceServers: getIceServers(),
+      getControlConnectionEpoch: () => getConnectionEpoch(),
       onRemoteTrack: (entry: TopologySourceEntry) =>
         handoff.stage(
           {

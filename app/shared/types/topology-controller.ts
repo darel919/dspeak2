@@ -260,6 +260,7 @@ export interface TopologyControllerOptions {
   getEffectiveAudioBitrate: (source: string) => number | null;
   getIceServers: () => unknown[];
   getMediaCapabilities?: () => ParticipantMediaCapabilities | null;
+  getConnectionEpoch?: () => number;
   getLocalPeerId: () => string | null;
   getMessageHandler: (
     type: string,

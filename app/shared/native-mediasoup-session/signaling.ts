@@ -107,6 +107,7 @@ export class NativeMediasoupSignalingMethods {
       remoteVideoFeeds: this.remoteVideoFeeds,
       remoteAudioFeeds: this.remoteAudioFeeds,
       mediaCapabilities: this.mediaCapabilities,
+      getControlConnectionEpoch: this.getControlConnectionEpoch,
     });
     if (!this.cloudflareSession)
       throw new Error("Cloudflare media session was not created");

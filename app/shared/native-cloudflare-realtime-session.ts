@@ -31,6 +31,7 @@ export class NativeCloudflareRealtimeSession {
     remoteVideoFeeds = new Map(),
     remoteAudioFeeds = new Map(),
     mediaCapabilities = null,
+    getControlConnectionEpoch,
   }: NativeCloudflareSessionOptions) {
     if (typeof invoke !== "function")
       throw new TypeError("NativeCloudflareRealtimeSession requires invoke");
@@ -81,6 +82,8 @@ export class NativeCloudflareRealtimeSession {
     this.jitterBufferTargetDelay = 20;
     this.lastReceivedConsumerParams = null;
     this.controlConnectionEpoch = 0;
+    if (getControlConnectionEpoch)
+      this.getControlConnectionEpoch = getControlConnectionEpoch;
   }
 
   getControlConnectionEpoch = () => this.controlConnectionEpoch;

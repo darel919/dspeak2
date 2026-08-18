@@ -43,6 +43,7 @@ export function setupMediaMessageHandlers({
   queueTargetedReconciliation,
   onConnectionEpochUpdated,
   onPublicationsDigest,
+  handlePublicationsDigest,
 }: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
     handlers: [
@@ -67,13 +68,14 @@ export function setupMediaMessageHandlers({
     if (typeof data.roomRevision === "string")
       onRoomRevisionApplied?.(data.roomRevision);
   });
-  registerHandler("heartbeat-ack", (data: MediaMessage) => {
+  registerHandler("heartbeat-ack", async (data: MediaMessage) => {
     acknowledgeHeartbeat(data);
     if (typeof data.connectionEpoch === "number") {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
     if (Array.isArray(data.publishedSourcesDigest)) {
       onPublicationsDigest?.(data.publishedSourcesDigest);
+      await handlePublicationsDigest?.(data.publishedSourcesDigest);
     }
   });
   registerHandler("operation-ack", (data: MediaMessage) => {

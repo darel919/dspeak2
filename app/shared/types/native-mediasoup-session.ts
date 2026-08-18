@@ -161,6 +161,7 @@ export interface NativeMediasoupConstructorOptions extends Partial<NativeMediaso
   buildUrl?: (channelId: string | null) => string;
   location?: Location;
   mediaCapabilities?: ParticipantMediaCapabilities | null;
+  getControlConnectionEpoch?: () => number;
 }
 
 export interface NativeMediasoupSfuSessionSurface {
@@ -309,6 +310,8 @@ export interface NativeMediasoupSfuSessionSurface {
   getAudioBitrate?: (source: string) => number | null;
   getAudioStereo?: (source: string) => boolean | null;
   getVideoSettings?: (source: string) => VideoSettings;
+  getControlConnectionEpoch?: () => number;
+  controlConnectionEpoch?: number;
   mediaCapabilities: ParticipantMediaCapabilities | null;
   remoteParticipantCapabilities: Map<string, ParticipantMediaCapabilities>;
   logicalVideoStreams: Map<string, LogicalVideoStreamState>;

@@ -682,6 +682,7 @@ export function useHybridMediaSession() {
     getEffectiveAudioBitrate,
     getIceServers: () => iceServers,
     getMediaCapabilities: () => mediaCapabilities.value,
+    getConnectionEpoch: () => sessionConnectionEpoch,
     getLocalPeerId: () => localPeerId,
     getMessageHandler: (type: string) => messageHandlers.get(type),
     getProviderSocket: () => providerSocket,
@@ -893,10 +894,64 @@ export function useHybridMediaSession() {
     getConnectionEpoch: () => sessionConnectionEpoch,
     setConnectionEpoch: (epoch: number) => {
       sessionConnectionEpoch = epoch;
-      const cloudflareSession = ensureSfu?.() as
-        { controlConnectionEpoch?: number } | undefined;
-      if (cloudflareSession && "controlConnectionEpoch" in cloudflareSession)
-        cloudflareSession.controlConnectionEpoch = epoch;
+      // Never construct a provider from a metadata setter: ensure*() can
+      // materialize the wrong SFU (default provider before topology decides).
+      const existing = sfu as
+        { controlConnectionEpoch?: number } | null | undefined;
+      if (existing && "controlConnectionEpoch" in existing)
+        existing.controlConnectionEpoch = epoch;
+    },
+    handlePublicationsDigest: async (digest: unknown[]) => {
+      if (!Array.isArray(digest)) return;
+      const session = sfu;
+      if (!session) return;
+      for (const entry of digest) {
+        if (
+          !entry ||
+          typeof entry !== "object" ||
+          !("trackName" in entry) ||
+          !("peerId" in entry) ||
+          !("source" in entry) ||
+          !("generation" in entry) ||
+          !("connectionEpoch" in entry)
+        )
+          continue;
+        const pub = entry as Record<string, unknown>;
+        // Update registry so publications survive reconnect
+        cloudflarePublications.update(pub);
+        // Subscription repair only applies to Cloudflare SFU (native/browser).
+        // Mediasoup handles incoming via onRemoteTrack automatically.
+        if ("subscribe" in session && typeof session.subscribe === "function") {
+          const sfuSession = session as unknown as {
+            subscribe: (
+              publication: Record<string, unknown>,
+              generation: number,
+            ) => Promise<unknown>;
+            sessionGeneration: number;
+          };
+          try {
+            await sfuSession.subscribe(
+              {
+                trackName: String(pub.trackName),
+                source: String(pub.source),
+                peerId: String(pub.peerId),
+                generation: Number(pub.generation),
+                connectionEpoch: Number(pub.connectionEpoch),
+                sessionId: String(pub.sessionId || ""),
+                ownerSource: (pub.ownerSource as string) || undefined,
+                variantId: (pub.variantId as string) || undefined,
+                codec: (pub.codec as string) || undefined,
+              },
+              sfuSession.sessionGeneration,
+            );
+          } catch (err) {
+            mediaDebug("publications-digest-subscribe-failed", {
+              trackName: String(pub.trackName),
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
     },
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
     applyRoomRevision,
