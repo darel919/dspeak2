@@ -1,18 +1,40 @@
 const DEVICE_ID_KEY = "dspeak:media:deviceId";
 
+let memoryMediaDeviceId: string | null = null;
+let hasConfirmedStorageId = false;
+
 export function getOrCreateDeviceId(storage = globalThis.localStorage) {
+  if (hasConfirmedStorageId && memoryMediaDeviceId) {
+    return memoryMediaDeviceId;
+  }
+
   const make = () =>
     globalThis.crypto?.randomUUID?.() ??
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
   try {
     const existing = storage?.getItem(DEVICE_ID_KEY);
-    if (existing) return existing;
-    const next = make();
-    storage?.setItem(DEVICE_ID_KEY, next);
-    return next;
+
+    if (existing) {
+      memoryMediaDeviceId = existing;
+      hasConfirmedStorageId = true;
+      return existing;
+    }
+
+    const created = make();
+    storage?.setItem(DEVICE_ID_KEY, created);
+    memoryMediaDeviceId = created;
+    hasConfirmedStorageId = true;
+    return created;
   } catch {
-    return make();
+    memoryMediaDeviceId ??= make();
+    return memoryMediaDeviceId;
   }
+}
+
+export function __resetDeviceIdCacheForTesting() {
+  memoryMediaDeviceId = null;
+  hasConfirmedStorageId = false;
 }
 
 export async function getMediaControlBootstrap({

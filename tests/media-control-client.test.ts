@@ -4,10 +4,12 @@ import {
   buildMediaControlSocketUrl,
   getMediaControlBootstrap,
   getOrCreateDeviceId,
+  __resetDeviceIdCacheForTesting,
 } from "../app/shared/media-control-client.ts";
 
 describe("media-control-client", () => {
   it("builds a wss URL with channelId without exposing the ticket", () => {
+    __resetDeviceIdCacheForTesting();
     const url = buildMediaControlSocketUrl({
       mediaControlUrl: "https://media-control.example.com/ws",
       channelId: "channel-1",
@@ -20,6 +22,7 @@ describe("media-control-client", () => {
   });
 
   it("upgrades http to ws", () => {
+    __resetDeviceIdCacheForTesting();
     const url = buildMediaControlSocketUrl({
       mediaControlUrl: "http://localhost:8787",
       channelId: "c",
@@ -29,6 +32,7 @@ describe("media-control-client", () => {
   });
 
   it("creates and persists a stable device id", () => {
+    __resetDeviceIdCacheForTesting();
     let stored = null;
     const storage = {
       getItem: (k) => stored,
@@ -42,7 +46,52 @@ describe("media-control-client", () => {
     assert.equal(first, second);
   });
 
+  it("returns a stable in-memory id when storage fails", () => {
+    __resetDeviceIdCacheForTesting();
+    const failingStorage: Storage = {
+      getItem: () => {
+        throw new Error("storage unavailable");
+      },
+      setItem: () => {
+        throw new Error("storage unavailable");
+      },
+      length: 0,
+      clear: () => {},
+      key: () => null,
+      removeItem: () => {},
+    };
+    const first = getOrCreateDeviceId(failingStorage);
+    const second = getOrCreateDeviceId(failingStorage);
+    assert.ok(first);
+    assert.equal(first, second);
+  });
+
+  it("prefers persisted id over in-memory fallback when storage recovers", () => {
+    __resetDeviceIdCacheForTesting();
+    let stored = "persisted-id";
+    let fail = true;
+    const storage: Storage = {
+      getItem: (k) => {
+        if (fail) throw new Error("storage unavailable");
+        return stored;
+      },
+      setItem: (k, v) => {
+        stored = v;
+      },
+      length: 0,
+      clear: () => {},
+      key: () => null,
+      removeItem: () => {},
+    };
+    const duringFailure = getOrCreateDeviceId(storage);
+    fail = false;
+    const afterRecovery = getOrCreateDeviceId(storage);
+    assert.equal(afterRecovery, "persisted-id");
+    assert.notEqual(afterRecovery, duringFailure);
+  });
+
   it("sends the Supabase access token to media bootstrap", async () => {
+    __resetDeviceIdCacheForTesting();
     const originalFetch = globalThis.fetch;
     let request;
     globalThis.fetch = async (url, options) => {
