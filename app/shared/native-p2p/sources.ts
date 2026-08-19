@@ -264,8 +264,13 @@ export class NativeP2pSourcesMethods {
         throw error;
       }
       const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+      const restoredGeneration = Number(entry.generation) || 0;
       this.signal(state.peerId, {
-        sourceRestored: { source, connectionEpoch },
+        sourceRestored: {
+          source,
+          connectionEpoch,
+          generation: restoredGeneration,
+        },
       });
       return existing;
     }

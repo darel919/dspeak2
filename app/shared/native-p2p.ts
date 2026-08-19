@@ -57,6 +57,7 @@ export class NativeP2pMesh {
     this.remoteSources = new Map();
     this.remoteSourceOwners = new Map();
     this.remoteSourceGenerations = new Map();
+    this.remoteSourceConnectionEpochs = new Map();
     this.localPeerId = null;
     this.epoch = 0;
     this.mode = "idle";

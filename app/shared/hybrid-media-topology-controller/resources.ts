@@ -102,12 +102,14 @@ export function createTopologyResourceHelpers({
   async function closeP2pSafely() {
     const provider = getP2pMesh();
     setP2pMesh(null);
+    setActiveProvider(null);
     await closeMediaProviderSafely(provider, "P2P");
   }
 
   async function closeSfuSafely() {
     const provider = getSfu();
     setSfu(null);
+    setActiveProvider?.(null);
     await closeMediaProviderSafely(provider, "SFU");
   }
 

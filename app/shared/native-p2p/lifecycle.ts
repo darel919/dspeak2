@@ -191,6 +191,8 @@ export class NativeP2pLifecycleMethods {
       if (key.startsWith(`${state.peerId}:`)) {
         this.remoteSources.delete(key);
         this.remoteSourceOwners.delete(key);
+        this.remoteSourceGenerations.delete(key);
+        this.remoteSourceConnectionEpochs.delete(key);
       }
     state.audioReceivers.clear();
     try {
@@ -212,6 +214,8 @@ export class NativeP2pLifecycleMethods {
       this.closeConnection(peerId);
     this.remoteSources.clear();
     this.remoteSourceOwners.clear();
+    this.remoteSourceGenerations.clear();
+    this.remoteSourceConnectionEpochs.clear();
     this.pendingSignals.clear();
     this.readyReported = false;
   }
