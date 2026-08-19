@@ -668,80 +668,174 @@ export function createMediaSourceController({
     // removed from the server; the FSM tombstone (N+1 inactive) is preserved
     // and phase becomes "reconciling" so a later heartbeat/NACK convergence
     // adopts the canonical outcome instead of pretending the stop settled.
-    const retirement = sendSourceState()
+    // The retirement uses a STABLE operationId: if the ACK is lost after the
+    // server committed (or the request never arrived), retrying the SAME
+    // operationId is safe - the server replays its cached result for a
+    // committed operation, or applies the mutation fresh for a lost request.
+    // A brand-new operationId would be rejected as a stale generation replay.
+    const retirementOperationId = nextOperationId();
+    // Capture the generation this operation was sent with, so a stale timeout
+    // can't overwrite a newer convergent FSM state.
+    const retirementGeneration = sourceFsms.get(entry.source)?.generation ?? 0;
+    const retirement = sendSourceState(retirementOperationId)
       .then(() => {
         // Canonical retirement committed: the FSM settles idle and the
         // provider transport cleanup may proceed. Failures are reported but
         // never resurrect the canonical source.
         setSourcePhase(entry.source, "idle", getActiveProvider());
-        const p2pRemoval = asProvider(getP2pMesh())?.unpublishSource(
-          entry.source,
-        );
-        const trackedP2pRemoval = p2pRemoval
-          ? Promise.resolve(p2pRemoval).catch((sourceError: unknown) => {
-              error.value =
-                sourceError instanceof Error
-                  ? sourceError.message
-                  : `Unable to stop ${entry.source} publication`;
-              throw sourceError;
-            })
-          : Promise.resolve();
-        const sfuRemoval = removeSfuSource(entry.source);
-        Promise.allSettled([trackedP2pRemoval, sfuRemoval]).then((results) => {
-          const p2pResult = results[0];
-          const sfuResult = results[1];
-          if (
-            p2pResult.status === "rejected" &&
-            (p2pResult.reason as Error)?.message?.includes(
-              "MEDIA_SESSION_CLOSED",
-            )
-          ) {
-            // Ignore session-closed during cleanup
-          } else if (p2pResult.status === "rejected") {
-            error.value = `Failed to remove ${entry.source} from P2P: ${p2pResult.reason}`;
-          }
-          if (
-            sfuResult.status === "rejected" &&
-            (sfuResult.reason as Error)?.message?.includes(
-              "MEDIA_SESSION_CLOSED",
-            )
-          ) {
-            // Ignore session-closed during cleanup
-          } else if (sfuResult.status === "rejected") {
-            error.value = `Failed to remove ${entry.source} from SFU: ${sfuResult.reason}`;
-          }
-          if (
-            unexpected &&
-            entry.source === "audio" &&
-            connected.value &&
-            !getIntentionalClose()
-          )
-            error.value =
-              "Microphone capture ended. Click unmute to restore it.";
-          refreshPublicMaps();
-        });
+        completeSourceRemoval(entry.source, { unexpected });
         return true;
       })
       .catch((sourceError: unknown) => {
         // ACK timed out or was rejected: canonical outcome UNKNOWN. Keep the
         // N+1 inactive tombstone and mark the phase reconciling so the next
         // server snapshot converges it. Do not settle idle.
-        mediaDebug("source-state.retire-ack-failed", {
+        // Only update if the FSM still reflects THIS operation's generation
+        // AND the phase is not already "idle" (meaning a newer convergent
+        // operation has already settled the tombstone). If a NACK convergence
+        // has adopted a newer generation, the FSM generation will be >
+        // retirementGeneration, so we don't overwrite. If phase is "idle",
+        // the retirement has already been committed.
+        const fsm = sourceFsms.get(entry.source);
+        mediaDebug("source-state.retire-ack-failed-check", {
           source: entry.source,
-          error:
-            sourceError instanceof Error
-              ? sourceError.message
-              : String(sourceError),
+          expectedGeneration: retirementGeneration,
+          actualGeneration: fsm?.generation,
+          desiredState: fsm?.desiredState,
+          phase: fsm?.phase,
         });
-        setSourcePhase(entry.source, "reconciling", getActiveProvider());
+        if (
+          fsm &&
+          fsm.generation === retirementGeneration &&
+          fsm.phase !== "idle"
+        ) {
+          mediaDebug("source-state.retire-ack-failed", {
+            source: entry.source,
+            error:
+              sourceError instanceof Error
+                ? sourceError.message
+                : String(sourceError),
+          });
+          setSourcePhase(entry.source, "reconciling", getActiveProvider());
+        } else if (fsm) {
+          mediaDebug("source-state.retire-ack-failed-stale", {
+            source: entry.source,
+            expectedGeneration: retirementGeneration,
+            actualGeneration: fsm.generation,
+            reason:
+              fsm.phase === "idle" ? "already-idle" : "generation-mismatch",
+          });
+        }
+        // Retry the SAME operationId: the server's operation-result cache
+        // makes the replay idempotent whether the original request was
+        // committed (cached ACK) or lost (fresh apply). Bounded retries keep
+        // the tombstone converging after transient control-plane failures.
+        void retryRetirementMutation(
+          retirementOperationId,
+          entry.source,
+          { unexpected },
+          1,
+        ).catch(() => {});
         throw sourceError;
       });
     refreshPublicMaps();
     return retirement;
   }
 
-  function sendSourceState() {
-    const operationId = nextOperationId();
+  function completeSourceRemoval(
+    source: string,
+    { unexpected = false }: { unexpected?: boolean } = {},
+  ) {
+    const p2pRemoval = asProvider(getP2pMesh())?.unpublishSource(source);
+    const trackedP2pRemoval = p2pRemoval
+      ? Promise.resolve(p2pRemoval).catch((sourceError: unknown) => {
+          error.value =
+            sourceError instanceof Error
+              ? sourceError.message
+              : `Unable to stop ${source} publication`;
+          throw sourceError;
+        })
+      : Promise.resolve();
+    const sfuRemoval = removeSfuSource(source);
+    void Promise.allSettled([trackedP2pRemoval, sfuRemoval]).then((results) => {
+      const p2pResult = results[0];
+      const sfuResult = results[1];
+      if (
+        p2pResult.status === "rejected" &&
+        (p2pResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
+      ) {
+        // Ignore session-closed during cleanup
+      } else if (p2pResult.status === "rejected") {
+        error.value = `Failed to remove ${source} from P2P: ${p2pResult.reason}`;
+      }
+      if (
+        sfuResult.status === "rejected" &&
+        (sfuResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
+      ) {
+        // Ignore session-closed during cleanup
+      } else if (sfuResult.status === "rejected") {
+        error.value = `Failed to remove ${source} from SFU: ${sfuResult.reason}`;
+      }
+      if (
+        unexpected &&
+        source === "audio" &&
+        connected.value &&
+        !getIntentionalClose()
+      )
+        error.value = "Microphone capture ended. Click unmute to restore it.";
+      refreshPublicMaps();
+    });
+  }
+
+  function retryRetirementMutation(
+    operationId: string,
+    source: string,
+    options: { unexpected?: boolean } = {},
+    attempt: number,
+  ) {
+    const MAX_RETRIES = 3;
+    const delayMs = 500 * attempt;
+    return new Promise<void>((resolve, reject) => {
+      setTimeout(() => {
+        const fsm = sourceFsms.get(source);
+        if (!fsm || fsm.desiredState !== "inactive") {
+          resolve();
+          return;
+        }
+        sendSourceState(operationId)
+          .then(() => {
+            setSourcePhase(source, "idle", getActiveProvider());
+            completeSourceRemoval(source, options);
+            resolve();
+          })
+          .catch((retryError: unknown) => {
+            mediaDebug("source-state.retire-retry-failed", {
+              source,
+              attempt,
+              error:
+                retryError instanceof Error
+                  ? retryError.message
+                  : String(retryError),
+            });
+            if (attempt < MAX_RETRIES) {
+              void retryRetirementMutation(
+                operationId,
+                source,
+                options,
+                attempt + 1,
+              ).then(resolve, reject);
+            } else {
+              // Keep the reconciling tombstone: the reconnect/next snapshot
+              // convergence path retires it against canonical state.
+              reject(retryError);
+            }
+          });
+      }, delayMs);
+    });
+  }
+
+  function sendSourceState(operationIdOverride?: string) {
+    const operationId = operationIdOverride || nextOperationId();
     const sourcesArray = [...localSources.keys()];
     const promise = awaitOperationAck(operationId);
     send({
@@ -894,7 +988,83 @@ export function createMediaSourceController({
     const payload =
       data && typeof data === "object" ? (data as Record<string, unknown>) : {};
     const source = String(payload.source || "");
-    if (!source || !localSources.has(source)) return Promise.resolve(false);
+    if (!source) return Promise.resolve(false);
+    // INACTIVE TOMBSTONE PATH: a stopped source was already deleted from
+    // localSources, so the active-source path below cannot repair it. The
+    // server NACKed the retirement with STALE_SOURCE_GENERATION (or the ACK
+    // timed out): adopt the canonical generation and re-send the inactive
+    // mutation so the tombstone converges to the server's committed outcome.
+    const fsm = sourceFsms.get(source);
+    if (fsm?.desiredState === "inactive") {
+      const expectedGeneration = Number(payload.expectedGeneration);
+      const adoptsCanonical = payload.adoptsCanonicalGeneration === true;
+      const retryable = payload.retryable === true;
+      const canonicalState = payload.canonicalState as
+        { generation: number; desiredState: string } | undefined;
+      if (
+        (payload.code === "STALE_SOURCE_GENERATION" || adoptsCanonical) &&
+        Number.isSafeInteger(expectedGeneration) &&
+        expectedGeneration > 0 &&
+        expectedGeneration !== fsm.generation
+      ) {
+        mediaDebug("source-state.tombstone-adopt-generation", {
+          operationId,
+          source,
+          from: fsm.generation,
+          to: expectedGeneration,
+          adoptsCanonical,
+          retryable,
+        });
+        sourceFsms.set(source, {
+          ...fsm,
+          generation: expectedGeneration,
+          phase: "reconciling",
+        });
+      }
+      // If the server sends canonicalState confirming inactive with this generation
+      // AND indicates no retry is needed (retryable: false), we can complete
+      // the retirement locally without waiting for another ACK.
+      if (
+        !retryable &&
+        adoptsCanonical &&
+        canonicalState &&
+        canonicalState.desiredState === "inactive" &&
+        canonicalState.generation === expectedGeneration
+      ) {
+        mediaDebug("source-state.tombstone-canonical-inactive", {
+          operationId,
+          source,
+          generation: expectedGeneration,
+        });
+        // The server has already committed inactive for this generation.
+        // Complete locally and clean up provider transport.
+        setSourcePhase(source, "idle", getActiveProvider());
+        completeSourceRemoval(source, {});
+        return Promise.resolve(true);
+      }
+      // Re-send the retirement with the adopted generation. The NACKed
+      // operationId is cached server-side and would replay the NACK, so a
+      // fresh operationId carries the adopted generation as a new mutation:
+      // the server accepts inactive >= canonical generation and commits.
+      return sendSourceState()
+        .then(() => {
+          setSourcePhase(source, "idle", getActiveProvider());
+          completeSourceRemoval(source, {});
+          return true;
+        })
+        .catch((sourceError: unknown) => {
+          mediaDebug("source-state.tombstone-reconcile-failed", {
+            operationId,
+            source,
+            error:
+              sourceError instanceof Error
+                ? sourceError.message
+                : String(sourceError),
+          });
+          return false;
+        });
+    }
+    if (!localSources.has(source)) return Promise.resolve(false);
     const entry = localSources.get(source);
     if (!entry) return Promise.resolve(false);
     // Adopt the canonical generation before re-announcing so the retry is

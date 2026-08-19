@@ -170,6 +170,49 @@ export class NativeCloudflareInitializationMethods {
   ) {
     if (!Array.isArray(publications)) return;
 
+    // Revision-stable convergence loop: same semantics as the browser
+    // Cloudflare session. The per-pass fence compares the LIVE retained
+    // canonical content against the snapshot being applied, so a newer
+    // revision that CHANGED content aborts the pass and the loop re-reads
+    // through the LAZY getter. A revision-only advance (content unchanged)
+    // does not abort: the provider state already matches canonical content.
+    let snapshot = publications;
+    for (;;) {
+      const passStale = getLatestCanonical
+        ? () => {
+            const latest = getLatestCanonical();
+            if (!Array.isArray(latest)) return true;
+            return !publicationSnapshotsEqual(latest, snapshot);
+          }
+        : (isStale ?? (() => false));
+      if (this.reconcilePublicationsOnce) {
+        await this.reconcilePublicationsOnce(snapshot, passStale);
+      } else {
+        // Fallback for sessions that don't implement the once method
+        await this.reconcilePublications(
+          snapshot,
+          undefined,
+          passStale,
+          getLatestCanonical,
+        );
+        return;
+      }
+      if (!getLatestCanonical) return;
+      const latest = getLatestCanonical();
+      if (!Array.isArray(latest)) return;
+      // The content just applied is still the current canonical content:
+      // converged, even when the digest revision lagged behind (a
+      // revision-only advance does not require re-applying).
+      if (publicationSnapshotsEqual(latest, snapshot)) return;
+      snapshot = latest;
+    }
+  }
+
+  async reconcilePublicationsOnce(
+    this: NativeCloudflareSessionSurface,
+    publications: CloudflarePublication[],
+    isStale?: () => boolean,
+  ) {
     // Build authoritative server publication map by trackName
     const serverPublications = new Map<string, Record<string, unknown>>();
     for (const pub of publications) {
@@ -232,15 +275,10 @@ export class NativeCloudflareInitializationMethods {
         if (this.sessionId && this.subscriptionsStarted)
           await this.subscribe({ ...pub, trackName });
         // A newer publication revision may have been applied while awaiting
-        // subscription I/O. A stale heartbeat must not continue: its snapshot
-        // could otherwise retire the newer publication in the ghost phase.
-        // Converge against the newest retained canonical snapshot instead so
-        // the provider ends exactly on the newer state (no duplicate feed).
-        if (isStale?.()) {
-          const latest = getLatestCanonical?.() ?? [];
-          await this.reconcilePublications(latest, [], undefined, undefined);
-          return;
-        }
+        // subscription I/O. Abort this pass: the convergence loop re-reads
+        // the newest retained canonical snapshot, so the provider converges
+        // exactly onto the newer state (no duplicate feed, no ghost delete).
+        if (isStale?.()) return;
       }
     }
 
@@ -248,11 +286,7 @@ export class NativeCloudflareInitializationMethods {
     // These must be retired locally even without explicit closed=true from server.
     // Fence again: the removal phase is the destructive one.
     for (const [trackName, _localPub] of this.publications) {
-      if (isStale?.()) {
-        const latest = getLatestCanonical?.() ?? [];
-        await this.reconcilePublications(latest, [], undefined, undefined);
-        return;
-      }
+      if (isStale?.()) return;
       if (!seenTrackNames.has(trackName)) {
         // Local publication not in server snapshot - retire it
         this.publications.delete(trackName);
@@ -270,4 +304,33 @@ export class NativeCloudflareInitializationMethods {
       }
     }
   }
+}
+
+function publicationSnapshotsEqual(
+  left: CloudflarePublication[],
+  right: CloudflarePublication[],
+): boolean {
+  if (left.length !== right.length) return false;
+  const rightByTrack = new Map<string, CloudflarePublication>();
+  for (const publication of right) {
+    const trackName = String(publication?.trackName || "");
+    if (trackName) rightByTrack.set(trackName, publication);
+  }
+  for (const publication of left) {
+    const trackName = String(publication?.trackName || "");
+    if (!trackName) return false;
+    const other = rightByTrack.get(trackName);
+    if (!other) return false;
+    // Compare the incarnation, not reference identity: the digest snapshot
+    // entries and the registry entries are distinct objects that describe
+    // the same authoritative publication.
+    if (
+      Number(publication.connectionEpoch || 0) !==
+        Number(other.connectionEpoch || 0) ||
+      Number(publication.generation || 0) !== Number(other.generation || 0) ||
+      Boolean(publication.closed) !== Boolean(other.closed)
+    )
+      return false;
+  }
+  return true;
 }

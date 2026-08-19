@@ -175,7 +175,10 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   setupMessageHandlers: (options: Record<string, unknown>) => void;
   queueCloudflarePublication: (data: unknown) => unknown;
   queueTargetedReconciliation: (operationId: string, data: unknown) => unknown;
-  handlePublicationsDigest: (publications: unknown[]) => Promise<unknown>;
+  handlePublicationsDigest: (
+    publications: unknown[],
+    publicationRevision?: string | number | null,
+  ) => Promise<unknown>;
   getLocalSources: () => Map<string, unknown>;
   sourceController: {
     getLocalSources?: () => Map<string, unknown>;

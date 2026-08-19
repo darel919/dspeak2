@@ -147,6 +147,10 @@ export interface NativeCloudflareSessionSurface {
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
   ) => Promise<unknown>;
+  reconcilePublicationsOnce?: (
+    publications: CloudflarePublication[],
+    isStale: () => boolean,
+  ) => Promise<unknown>;
   subscribe: (
     publication: import("./native-cloudflare.ts").NativeCloudflarePublication,
     generation?: number,

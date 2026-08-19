@@ -68,10 +68,12 @@
     "tar": "7.5.22"
   },
   "devDependencies": {
-    "axe-core": "^4.13.0",
+    "@oxlint/plugins": "1.79.0",
     "@types/node": "^24.3.0",
+    "axe-core": "^4.13.0",
     "drizzle-kit": "^0.31.10",
     "fake-indexeddb": "^6.2.5",
+    "oxlint": "1.79.0",
     "patch-package": "8.0.1",
     "prettier": "3.9.6",
     "puppeteer": "^25.6.0",

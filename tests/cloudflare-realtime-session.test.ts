@@ -164,6 +164,108 @@ test("stale mid-subscribe convergence treats an empty canonical state as authori
   client.closeMedia();
 });
 
+test("stale mid-subscribe convergence survives an overtaking revision R40→R41→R42", async () => {
+  const client = session();
+  client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
+  const registry = new Map<string, unknown>();
+
+  // R40 heartbeat snapshot: X (generation 8)
+  const oldX = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-X",
+    generation: 8,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  // R41 live push: Y (generation 9)
+  const newY = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Y",
+    generation: 9,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  // R42 live push: Z (generation 10)
+  const newZ = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Z",
+    generation: 10,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+
+  // Subscribe for X defers until we release it (simulates slow provider I/O)
+  let releaseSubscribeX: (() => void) | undefined;
+  const gateX = new Promise<void>((resolve) => {
+    releaseSubscribeX = resolve;
+  });
+  const subscribeCalls: string[] = [];
+  client.subscribe = async (publication) => {
+    const trackName = String(publication.trackName);
+    subscribeCalls.push(trackName);
+    client.subscribedTrackNames.add(trackName);
+    if (trackName === "screen-X") await gateX;
+    return true;
+  };
+
+  interface NarrowedSession {
+    reconcilePublications: (
+      publications: CloudflarePublication[],
+      removedPublications?: CloudflarePublication[],
+      isStale?: () => boolean,
+      getLatestCanonical?: () => CloudflarePublication[],
+    ) => Promise<unknown>;
+  }
+  const sessionNarrowed = client as unknown as NarrowedSession;
+
+  // R40 heartbeat starts reconciliation: inserts X, awaits subscribe(X)
+  let stale = false;
+  const reconcilePromise = sessionNarrowed.reconcilePublications(
+    [oldX],
+    [],
+    () => stale,
+    () => [...registry.values()] as CloudflarePublication[],
+  );
+
+  // While R40 is awaiting subscription I/O, R41 becomes authoritative:
+  // the retained registry mutates BEFORE the stale check runs.
+  registry.set(newY.trackName, newY);
+
+  // R42 overtakes R41: Z replaces Y in the registry (canonical state is
+  // REPLACED, not appended — R42 snapshot is ONLY [Z]).
+  registry.clear();
+  registry.set(newZ.trackName, newZ);
+
+  // R40 subscribe resumes; convergence must read CURRENT canonical [Z]
+  // and retire both X and Y.
+  stale = true;
+  releaseSubscribeX?.();
+
+  await reconcilePromise;
+
+  // Only Z survives; X and Y are fully retired.
+  assert.equal(client.publications.has("screen-Z"), true);
+  assert.equal(client.publications.has("screen-X"), false);
+  assert.equal(client.publications.has("screen-Y"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Z"), true);
+  assert.equal(client.subscribedTrackNames.has("screen-X"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Y"), false);
+  // The convergence re-subscribes Z idempotently; X and Y's subscriptions
+  // are gated away and their publications are never retained.
+  assert.ok(subscribeCalls.includes("screen-X"));
+  assert.ok(subscribeCalls.includes("screen-Z"));
+  // Y may or may not have been subscribed depending on timing, but X is
+  // confirmed and Z is confirmed.
+  client.closeMedia();
+});
+
 function report(type, bytesField, bytes, timestamp) {
   return new Map([["rtp", { type, [bytesField]: bytes, timestamp }]]);
 }

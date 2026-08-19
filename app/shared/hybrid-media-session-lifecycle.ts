@@ -347,8 +347,14 @@ export function createHybridMediaSessionLifecycle({
             );
         }
       },
-      handlePublicationsDigest: async (publications: unknown[]) => {
-        await mediaSessionSetup.handlePublicationsDigest(publications);
+      handlePublicationsDigest: async (
+        publications: unknown[],
+        publicationRevision?: string | number | null,
+      ) => {
+        await mediaSessionSetup.handlePublicationsDigest(
+          publications,
+          publicationRevision,
+        );
       },
       onServerConnected: () => {
         if (

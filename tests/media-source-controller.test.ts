@@ -620,3 +620,195 @@ test("successful replacement rollback restores the previous video preview", asyn
   assert.equal(harness.localSources.get("camera").track.id, "camera-1");
   assert.equal(harness.localSources.get("camera").track, recovered.track);
 });
+
+test("stale-generation STOP: NACK adopts canonical generation, retries inactive, ACK, cleanup, idle", async () => {
+  let sfuRemoveCalls = 0;
+  const harness = controller({
+    autoAck: false,
+    getSfu: () => ({
+      async removeSource(source: string) {
+        sfuRemoveCalls += 1;
+        // Only succeed if called AFTER the ACK for the retry
+        if (sfuRemoveCalls === 1) {
+          // First call: server NACKs STALE_SOURCE_GENERATION
+          throw new Error("premature remove");
+        }
+        return true;
+      },
+    }),
+  });
+
+  const entry = {
+    source: "screen",
+    track: { id: "screen-track" },
+  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  harness.localSources.set(entry.source, entry);
+
+  // Initial stop: sends N (generation 1) inactive
+  const removal = harness.instance.removeSource(entry);
+  // The initial operation will time out - catch the rejection
+  removal.catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // Check FSM before NACK
+  const fsmBeforeNack = harness.instance.sourceFsms.get("screen");
+  console.log("FSM before NACK:", JSON.stringify(fsmBeforeNack));
+  assert.equal(fsmBeforeNack?.generation, 1);
+  assert.equal(fsmBeforeNack?.desiredState, "inactive");
+  assert.equal(fsmBeforeNack?.phase, "stopping");
+
+  // Server NACKs with STALE_SOURCE_GENERATION, expectedGeneration = 2
+  // Simulate the server heartbeat/NACK message arriving
+  const nackPayload = {
+    source: "screen",
+    code: "STALE_SOURCE_GENERATION",
+    expectedGeneration: 2,
+    retryable: true,
+    adoptsCanonicalGeneration: true,
+    canonicalState: { generation: 2, desiredState: "inactive" },
+  };
+  // Await the reconciliation promise - it resolves when the retry's ACK is resolved
+  const nackResult = harness.instance.queueTargetedReconciliation?.(
+    "nack-op",
+    nackPayload,
+  );
+  // Yield to let the mutation send
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // FSM adopts expectedGeneration = 2, phase becomes reconciling
+  const fsmAfterNack = harness.instance.sourceFsms.get("screen");
+  console.log("FSM after NACK:", JSON.stringify(fsmAfterNack));
+  assert.equal(fsmAfterNack?.generation, 2);
+  assert.equal(fsmAfterNack?.desiredState, "inactive");
+  assert.equal(fsmAfterNack?.phase, "reconciling");
+
+  // Now the retry with generation 2 is in flight; resolve it
+  const opIdForRetry = harness.sent
+    .filter((m) => m.type === "media-sources")
+    .pop()?.data?.operationId;
+  console.log("Resolving ACK for operationId:", opIdForRetry);
+  console.log("sfuRemoveCalls before:", sfuRemoveCalls);
+  harness.instance.resolveOperationAck?.(opIdForRetry!);
+  // Await the reconciliation promise so the .then() handler runs
+  await nackResult;
+  await Promise.resolve();
+  console.log("sfuRemoveCalls after:", sfuRemoveCalls);
+
+  // Check FSM after ACK resolution
+  const fsmAfterAck = harness.instance.sourceFsms.get("screen");
+  console.log(
+    "FSM after ACK:",
+    JSON.stringify(fsmAfterAck),
+    "ref:",
+    fsmAfterAck,
+  );
+  assert.equal(fsmAfterAck?.generation, 2);
+  assert.equal(fsmAfterAck?.desiredState, "inactive");
+  assert.equal(fsmAfterAck?.phase, "idle");
+
+  // Check Map entry directly
+  console.log("Map keys:", [...harness.instance.sourceFsms.keys()]);
+  console.log("Map size:", harness.instance.sourceFsms.size);
+  const mapEntry = harness.instance.sourceFsms.get("screen");
+  console.log(
+    "Map entry:",
+    JSON.stringify(mapEntry),
+    "same?",
+    mapEntry === fsmAfterAck,
+  );
+
+  // Provider removeSource is called after ACK
+  console.log("Final sfuRemoveCalls:", sfuRemoveCalls);
+  // Only the retry's .then() calls completeSourceRemoval; the initial
+  // stop's timeout prevents its .then() from running.
+  assert.equal(sfuRemoveCalls, 1);
+
+  // FSM settles to idle - check immediately after
+  const finalFsm1 = harness.instance.sourceFsms.get("screen");
+  console.log(
+    "Final FSM (immediate):",
+    JSON.stringify(finalFsm1),
+    "ref:",
+    finalFsm1,
+    "same?",
+    finalFsm1 === fsmAfterAck,
+  );
+  assert.equal(finalFsm1?.generation, 2);
+  assert.equal(finalFsm1?.desiredState, "inactive");
+  assert.equal(finalFsm1?.phase, "idle");
+
+  // Don't yield with setTimeout - the old 15s timeout will fire and overwrite
+  // await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const finalFsm = harness.instance.sourceFsms.get("screen");
+  console.log(
+    "Final FSM (at assertion):",
+    JSON.stringify(finalFsm),
+    "ref:",
+    finalFsm,
+    "same?",
+    finalFsm === fsmAfterAck,
+  );
+  assert.equal(finalFsm?.phase, "idle");
+  assert.equal(finalFsm?.desiredState, "inactive");
+  assert.equal(finalFsm?.generation, 2);
+});
+
+test("stop ACK lost: server already committed inactive, canonical snapshot says inactive, cleanup, idle", async () => {
+  let sfuRemoveCalls = 0;
+  const harness = controller({
+    autoAck: false,
+    getSfu: () => ({
+      async removeSource() {
+        sfuRemoveCalls += 1;
+        return true;
+      },
+    }),
+  });
+
+  const entry = {
+    source: "screen",
+    track: { id: "screen-track" },
+  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  harness.localSources.set(entry.source, entry);
+
+  // Initial stop - catch the rejection since ACK times out
+  const removal = harness.instance.removeSource(entry);
+  removal.catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // ACK is LOST - timeout fires
+  await new Promise((resolve) => setTimeout(resolve, 15_010));
+
+  // FSM is now in reconciling with generation 1
+  const fsmAfterTimeout = harness.instance.sourceFsms.get("screen");
+  assert.equal(fsmAfterTimeout?.phase, "reconciling");
+  assert.equal(fsmAfterTimeout?.generation, 1);
+  assert.equal(fsmAfterTimeout?.desiredState, "inactive");
+
+  // Next heartbeat brings canonical snapshot: screen is INACTIVE with generation 1
+  // (server already accepted the stop, ACK was just lost)
+  const heartbeatPayload = {
+    source: "screen",
+    code: "STALE_SOURCE_GENERATION",
+    expectedGeneration: 1,
+    retryable: false,
+    adoptsCanonicalGeneration: true,
+    canonicalState: { generation: 1, desiredState: "inactive" },
+  };
+  // Don't await - the reconciliation uses the same operationId (idempotent replay)
+  harness.instance.queueTargetedReconciliation?.(
+    "heartbeat-op",
+    heartbeatPayload,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // FSM adopts generation 1, retires with same operationId (idempotent replay)
+  const fsmAfterHeartbeat = harness.instance.sourceFsms.get("screen");
+  assert.equal(fsmAfterHeartbeat?.generation, 1);
+  assert.equal(fsmAfterHeartbeat?.phase, "idle");
+  assert.equal(fsmAfterHeartbeat?.desiredState, "inactive");
+
+  // Provider cleanup called once
+  assert.equal(sfuRemoveCalls, 1);
+});
