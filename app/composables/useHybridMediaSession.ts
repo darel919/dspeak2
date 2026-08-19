@@ -789,10 +789,6 @@ export function useHybridMediaSession() {
         const peerId = pub.peerId;
         const source = pub.source;
         if (!trackName || !peerId || !source) continue;
-        // Remote publications should be subscribed via the canonical
-        // cloudflare-publication-available handler, not publishSource().
-        // This repairs subscriptions for publications that arrived before
-        // the Cloudflare session existed.
         if ("handle" in session && typeof session.handle === "function") {
           try {
             await session.handle("cloudflare-publication-available", pub);

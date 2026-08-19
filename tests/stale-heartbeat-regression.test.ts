@@ -1,18 +1,24 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert";
+import { ref } from "vue";
 import { setupMediaMessageHandlers } from "../app/shared/media-message-handlers.ts";
 import { createCloudflarePublicationRegistry } from "../app/shared/cloudflare-publication-registry.ts";
 import type { CloudflarePublication } from "../app/shared/types/cloudflare-media.ts";
-import type { MediaMessageHandlersContext } from "../app/shared/types/media-message-handlers.ts";
-import type { Ref } from "vue";
+import type {
+  MediaMessageHandlersContext,
+  MediaMessage,
+} from "../app/shared/types/media-message-handlers.ts";
 import type { TopologyState } from "../app/shared/types/topology-controller.ts";
 import type { TopologySourceEntry } from "../app/shared/types/topology-controller.ts";
 import type { MediaCaptureManager } from "../app/shared/media-capture.ts";
 import type { MediaVideoFeed } from "../app/shared/types/media-source-controller.ts";
-import type { MediaCaptureSettings } from "../app/shared/types/media-capture.ts";
+import type {
+  MediaCaptureEntry,
+  MediaCaptureSettings,
+} from "../app/shared/types/media-capture.ts";
 
 interface RegistryHandle {
-  update: (publication: Record<string, unknown>) => boolean;
+  update: (publication: CloudflarePublication) => boolean;
   values: () => CloudflarePublication[];
   reconcileExact: (snapshot: CloudflarePublication[]) => {
     canonicalSnapshot: CloudflarePublication[];
@@ -20,7 +26,7 @@ interface RegistryHandle {
   };
 }
 
-interface TestPublication extends Record<string, unknown> {
+interface TestPublication {
   peerId: string;
   source: string;
   trackName: string;
@@ -29,45 +35,22 @@ interface TestPublication extends Record<string, unknown> {
   userId: string;
   closed: boolean;
   publicationRevision: number;
+  [key: string]: unknown;
 }
 
-interface HeartbeatMessage {
-  sequence: number;
-  connectionEpoch: number;
-  publishedSourcesDigest: TestPublication[];
-  publicationRevision: number;
-}
-
-function createTestContext(): MediaMessageHandlersContext {
-  let heartbeatAckHandler:
-    ((data: Record<string, unknown>) => Promise<unknown>) | null = null;
-
-  const createMockRef = <T>(value: T): Ref<T> => {
-    const obj = { value } as Ref<T>;
-    // Add the required RefSymbol property
-    Object.defineProperty(obj, Symbol.toStringTag, { value: "Ref" });
-    return obj;
-  };
-
-  const handlers: MediaMessageHandlersContext = {
+function createTestContext(
+  registerHandler: MediaMessageHandlersContext["registerHandler"],
+): MediaMessageHandlersContext {
+  return {
     getHeartbeatSequence: () => 10,
     getLastHeartbeatAckSequence: () => 0,
     getSfu: () => null,
     getSocket: () => ({ close: () => {} }),
-    lastInRoom: createMockRef([]),
-    participantSfuRoundTripTimes: createMockRef({}),
+    lastInRoom: ref([]),
+    participantSfuRoundTripTimes: ref({}),
     queueTopology: () => {},
-    registerHandler: (
-      type: string,
-      handler: (data: Record<string, unknown>) => unknown,
-    ) => {
-      if (type === "heartbeat-ack") {
-        heartbeatAckHandler = handler as (
-          data: Record<string, unknown>,
-        ) => Promise<unknown>;
-      }
-    },
-    remoteProducersCount: createMockRef(0),
+    registerHandler,
+    remoteProducersCount: ref(0),
     setHeartbeatAck: () => {},
     setLocalPeerId: () => {},
     sfuProducerIds: () => [],
@@ -78,19 +61,22 @@ function createTestContext(): MediaMessageHandlersContext {
     },
     ensureP2p: () => null,
     onServerConnected: () => {},
-    onServerHello: () => {},
-    onAttenuationState: () => {},
-    onProviderTicket: () => {},
-    onProviderFailure: () => {},
-    onProviderRecovering: () => {},
-    onProviderRecoveryTopology: () => {},
-    onP2pQualification: () => {},
-    onOperationAck: () => {},
-    onOperationError: () => {},
-    onRoomRevisionApplied: () => {},
+    onServerHello: (_data: MediaMessage) => {},
+    onAttenuationState: (_data: MediaMessage) => {},
+    onProviderTicket: (_data: MediaMessage) => {},
+    onProviderFailure: (_data: MediaMessage) => {},
+    onProviderRecovering: (_data: MediaMessage) => {},
+    onProviderRecoveryTopology: (_data: MediaMessage) => {},
+    onP2pQualification: (_data: MediaMessage) => {},
+    onOperationAck: (_operationId: string, _data?: MediaMessage) => {},
+    onOperationError: (_operationId: string, _error: unknown) => {},
+    onRoomRevisionApplied: (_roomRevision: string) => {},
     onSnapshotRequested: () => {},
-    queueTargetedReconciliation: () => {},
-    onConnectionEpochUpdated: () => {},
+    queueTargetedReconciliation: (
+      _operationId: string,
+      _data: MediaMessage,
+    ) => {},
+    onConnectionEpochUpdated: (_connectionEpoch: number) => {},
     handlePublicationsDigest: async (
       digest: unknown[],
       publicationRevision?: string | number | null,
@@ -115,8 +101,6 @@ function createTestContext(): MediaMessageHandlersContext {
       return { canonicalSnapshot, removed, lastApplied: lastApplied.value };
     },
   };
-
-  return handlers;
 }
 
 let reg: RegistryHandle;
@@ -133,19 +117,12 @@ describe("stale heartbeat regression", () => {
     lastApplied = { value: "0" };
     queuedDigests = [];
     queuedRevisions = [];
-    ctx = createTestContext();
-    heartbeatAckHandler = null;
-
-    // Override registerHandler to capture heartbeat-ack handler
-    const originalRegisterHandler = ctx.registerHandler;
-    ctx.registerHandler = (type: string, handler) => {
+    ctx = createTestContext((type, handler) => {
       if (type === "heartbeat-ack") {
-        heartbeatAckHandler = handler as (
-          data: Record<string, unknown>,
-        ) => Promise<unknown>;
+        heartbeatAckHandler = handler;
       }
-      return originalRegisterHandler(type, handler);
-    };
+    });
+    heartbeatAckHandler = null;
 
     setupMediaMessageHandlers(ctx);
   });
@@ -230,32 +207,31 @@ describe("media source controller tombstone resolution", () => {
     const localPeerId = "local-peer-123";
     const localParticipantKey = "user-1:device-1";
 
-    const createMockRef = <T>(value: T): Ref<T> => {
-      const obj = { value } as Ref<T>;
-      Object.defineProperty(obj, Symbol.toStringTag, { value: "Ref" });
-      return obj;
-    };
-
-    const mockCapture = {
+    const mockCapture: MediaCaptureManager = {
       getSettings: () =>
         ({
           audio: {},
           micDeviceId: null,
           cameraDeviceId: null,
         }) as MediaCaptureSettings,
-      getAudioStereo: (source: string) => false,
-      mediaDevices: undefined,
-      onMicrophoneFallback: (details: unknown) => {},
-      onMicrophoneRestored: (details: unknown) => {},
-      onSource: (entry: unknown) => {},
-      onSourceEnded: (entry: unknown, details?: Record<string, unknown>) => {},
-    } as any as MediaCaptureManager;
+      getAudioStereo: (_source: string) => false,
+      mediaDevices: navigator.mediaDevices,
+      onMicrophoneFallback: (_details: unknown) => {},
+      onMicrophoneRestored: (_details: unknown) => {},
+      onSource: (_entry: unknown) => {},
+      onSourceEnded: (
+        _entry: unknown,
+        _details?: Record<string, unknown>,
+      ) => {},
+      startMicrophone: async () => ({}) as unknown as MediaCaptureEntry,
+      stop: async () => {},
+    };
 
     const controller = createMediaSourceController({
       capture: mockCapture,
-      connected: createMockRef(true),
+      connected: ref(true),
       createSharedAudioSource: async (entry: TopologySourceEntry) => entry,
-      error: createMockRef(null),
+      error: ref(null),
       getActiveProvider: () => "sfu",
       getConnectionEpoch: () => 1,
       getIntentionalClose: () => false,
@@ -265,7 +241,7 @@ describe("media source controller tombstone resolution", () => {
       getP2pMesh: () => null,
       getSfu: () => null,
       localSources: new Map(),
-      localVideoFeeds: createMockRef(new Map<string, MediaVideoFeed>()),
+      localVideoFeeds: ref(new Map<string, MediaVideoFeed>()),
       producerFacade: () => {},
       refreshPublicMaps: () => {},
       reportSfuFailure: () => {},
@@ -274,7 +250,7 @@ describe("media source controller tombstone resolution", () => {
       startSharedAudioMeter: () => {},
       stopLocalVoiceDetection: () => {},
       stopSharedAudioMeter: () => {},
-      topologyState: createMockRef({
+      topologyState: ref({
         mode: "sfu",
         epoch: 1,
         peers: [],
