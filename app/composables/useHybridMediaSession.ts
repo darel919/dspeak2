@@ -1062,9 +1062,10 @@ export function useHybridMediaSession() {
           removed,
           isStale,
           // Retained canonical snapshot for stale-mid-subscribe convergence:
-          // the provider re-converges against this newer snapshot instead of
-          // leaving a duplicate feed from the stale snapshot's insertions.
-          cloudflarePublications.values(),
+          // LAZY getter evaluated only at stale-detection time, so a slow
+          // provider reconciliation always converges against the CURRENT
+          // registry state - never a snapshot frozen before the await.
+          () => cloudflarePublications.values(),
         );
       } catch (err) {
         mediaDebug("publications-digest-reconcile-failed", {

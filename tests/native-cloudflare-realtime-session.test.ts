@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { NativeCloudflareRealtimeSession } from "../app/shared/native-cloudflare-realtime-session.ts";
 import { finalizeVideoMigration as finalizeCloudflareVideoMigration } from "../app/shared/native-cloudflare-realtime-session/remote.ts";
 import { emptyVideoCodecCapabilities } from "../app/shared/types/video-codec-capabilities.ts";
+import type { CloudflarePublication } from "../app/shared/types/cloudflare-media.ts";
 
 function localOffer(trackId, kind = "audio", includeTrackId = true) {
   return [
@@ -1155,6 +1156,134 @@ describe("NativeCloudflareRealtimeSession", () => {
       },
     });
     assert.equal(session.consumers.has("remote-video"), false);
+    session.closeMedia();
+  });
+
+  it("stale mid-subscribe reconciliation converges via the LAZY canonical getter", async () => {
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async () => ({}),
+      send: () => true,
+    });
+    session.closed = false;
+    session.sessionId = "cloudflare-session";
+    session.subscriptionsStarted = true;
+    const registry = new Map<string, unknown>();
+
+    const oldX = {
+      peerId: "peer-1",
+      source: "screen",
+      trackName: "screen-X",
+      generation: 8,
+      connectionEpoch: 1,
+      userId: "user-1",
+      closed: false,
+    };
+    const newY = {
+      peerId: "peer-1",
+      source: "screen",
+      trackName: "screen-Y",
+      generation: 9,
+      connectionEpoch: 1,
+      userId: "user-1",
+      closed: false,
+    };
+
+    let releaseSubscribeX: (() => void) | undefined;
+    const gateX = new Promise<void>((resolve) => {
+      releaseSubscribeX = resolve;
+    });
+    const subscribeCalls: string[] = [];
+    session.subscribe = async (publication: {
+      trackName?: unknown;
+    }): Promise<unknown> => {
+      const trackName = String(publication.trackName);
+      subscribeCalls.push(trackName);
+      session.subscribedTrackNames.add(trackName);
+      if (trackName === "screen-X") await gateX;
+      return true;
+    };
+
+    // R41 live push arrives first: Y is retained
+    await session.handleMessage("cloudflare-publication-available", {
+      ...newY,
+    });
+    assert.equal(session.publications.has("screen-Y"), true);
+
+    // Delayed R40 heartbeat: inserts X, awaits subscribe(X)
+    let stale = false;
+    const reconcilePromise = session.reconcilePublications(
+      [oldX],
+      [],
+      () => stale,
+      // LAZY getter: reads the CURRENT registry at stale-detection time
+      () => [...registry.values()] as CloudflarePublication[],
+    );
+
+    // While R40 awaits subscribe(X), R41 mutates the retained registry
+    registry.set(newY.trackName, newY);
+    stale = true;
+    releaseSubscribeX();
+
+    await reconcilePromise;
+
+    assert.equal(session.publications.has("screen-Y"), true);
+    assert.equal(session.publications.has("screen-X"), false);
+    assert.equal(session.subscribedTrackNames.has("screen-Y"), true);
+    assert.equal(session.subscribedTrackNames.has("screen-X"), false);
+    assert.ok(subscribeCalls.includes("screen-X"));
+    assert.ok(subscribeCalls.includes("screen-Y"));
+    session.closeMedia();
+  });
+
+  it("stale mid-subscribe convergence treats an empty canonical state as authoritative", async () => {
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async () => ({}),
+      send: () => true,
+    });
+    session.closed = false;
+    session.sessionId = "cloudflare-session";
+    session.subscriptionsStarted = true;
+    const registry = new Map<string, unknown>();
+
+    const oldX = {
+      peerId: "peer-1",
+      source: "screen",
+      trackName: "screen-X",
+      generation: 8,
+      connectionEpoch: 1,
+      userId: "user-1",
+      closed: false,
+    };
+
+    let releaseSubscribeX: (() => void) | undefined;
+    const gateX = new Promise<void>((resolve) => {
+      releaseSubscribeX = resolve;
+    });
+    session.subscribe = async (publication: {
+      trackName?: unknown;
+    }): Promise<unknown> => {
+      const trackName = String(publication.trackName);
+      if (trackName === "screen-X") await gateX;
+      return true;
+    };
+
+    let stale = false;
+    const reconcilePromise = session.reconcilePublications(
+      [oldX],
+      [],
+      () => stale,
+      // True newest retained state is EMPTY: convergence must not be blocked
+      // by an empty-set guard, or X would be re-inserted as a ghost.
+      () => [...registry.values()] as CloudflarePublication[],
+    );
+
+    stale = true;
+    releaseSubscribeX();
+
+    await reconcilePromise;
+
+    assert.equal(session.publications.has("screen-X"), false);
+    assert.equal(session.subscribedTrackNames.has("screen-X"), false);
     session.closeMedia();
   });
 });

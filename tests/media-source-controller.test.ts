@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createMediaSourceController } from "../app/shared/media-source-controller.ts";
 
-function controller(overrides = {}) {
+function controller(overrides: Record<string, unknown> = {}) {
   const localSources = new Map();
   const localVideoFeeds = { value: new Map() };
   const error = { value: null };
@@ -11,6 +11,7 @@ function controller(overrides = {}) {
   const meteredSources = [];
   let stoppedMeter = 0;
   let pendingOperationIds: string[] = [];
+  const autoAck = overrides.autoAck !== false;
   const instance = createMediaSourceController({
     capture: { stop() {} },
     connected: { value: true },
@@ -30,8 +31,14 @@ function controller(overrides = {}) {
     send: (message) => {
       sent.push(message);
       // Auto-resolve media-sources ACKs for tests
-      if (message.type === "media-sources" && message.data?.operationId) {
-        pendingOperationIds.push(message.data.operationId as string);
+      if (
+        autoAck &&
+        message.type === "media-sources" &&
+        (message.data as { operationId?: unknown })?.operationId
+      ) {
+        pendingOperationIds.push(
+          (message.data as { operationId: string }).operationId,
+        );
         // Resolve immediately after the send completes
         setTimeout(() => {
           while (pendingOperationIds.length > 0) {
@@ -132,6 +139,43 @@ test("stop commits control intent before provider transport cleanup", async () =
 
   assert.equal(providerRemovalStarted, true);
   assert.ok(removalOrder.includes("sfu:screen"));
+});
+
+test("stop ACK timeout marks the source reconciling and never settles idle", async () => {
+  const harness = controller({ autoAck: false });
+  const entry = {
+    source: "screen",
+    track: { id: "screen-track" },
+  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  harness.localSources.set(entry.source, entry);
+  const timeoutMs = 15_000;
+
+  const removal = harness.instance.removeSource(entry);
+  // Attach a handler immediately so the 15s timeout rejection is observed,
+  // not treated as unhandled while we wait for the timer.
+  const removalOutcome = removal.then(
+    () => "resolved",
+    () => "rejected",
+  );
+  // Before the ACK resolves the FSM must stay in the N+1 inactive tombstone
+  // ("stopping"), NOT idle: the canonical outcome is still unknown.
+  const stoppingFsm = harness.instance.sourceFsms.get("screen");
+  assert.equal(stoppingFsm?.phase, "stopping");
+  assert.equal(stoppingFsm?.desiredState, "inactive");
+
+  // Simulate the 15s operation-ACK timeout.
+  await new Promise((resolve) => setTimeout(resolve, timeoutMs + 10));
+
+  assert.equal(await removalOutcome, "rejected");
+  // The outcome is UNKNOWN: the tombstone is preserved and the phase moves to
+  // reconciling so the next heartbeat/NACK convergence adopts the canonical
+  // state. It must never be treated as settled idle.
+  const reconcilingFsm = harness.instance.sourceFsms.get("screen");
+  assert.equal(reconcilingFsm?.phase, "reconciling");
+  assert.equal(reconcilingFsm?.desiredState, "inactive");
+  assert.equal(reconcilingFsm?.generation, 1);
+  // localSources stays removed: the sender UI is already stopped.
+  assert.equal(harness.localSources.has("screen"), false);
 });
 
 test("unexpected microphone capture loss marks the local participant muted", async () => {

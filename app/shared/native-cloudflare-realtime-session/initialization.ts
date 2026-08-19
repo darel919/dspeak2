@@ -166,7 +166,7 @@ export class NativeCloudflareInitializationMethods {
     publications: CloudflarePublication[],
     _removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
-    latestCanonical?: CloudflarePublication[],
+    getLatestCanonical?: () => CloudflarePublication[],
   ) {
     if (!Array.isArray(publications)) return;
 
@@ -237,13 +237,8 @@ export class NativeCloudflareInitializationMethods {
         // Converge against the newest retained canonical snapshot instead so
         // the provider ends exactly on the newer state (no duplicate feed).
         if (isStale?.()) {
-          if (Array.isArray(latestCanonical) && latestCanonical.length)
-            await this.reconcilePublications(
-              latestCanonical,
-              [],
-              undefined,
-              undefined,
-            );
+          const latest = getLatestCanonical?.() ?? [];
+          await this.reconcilePublications(latest, [], undefined, undefined);
           return;
         }
       }
@@ -254,13 +249,8 @@ export class NativeCloudflareInitializationMethods {
     // Fence again: the removal phase is the destructive one.
     for (const [trackName, _localPub] of this.publications) {
       if (isStale?.()) {
-        if (Array.isArray(latestCanonical) && latestCanonical.length)
-          await this.reconcilePublications(
-            latestCanonical,
-            [],
-            undefined,
-            undefined,
-          );
+        const latest = getLatestCanonical?.() ?? [];
+        await this.reconcilePublications(latest, [], undefined, undefined);
         return;
       }
       if (!seenTrackNames.has(trackName)) {

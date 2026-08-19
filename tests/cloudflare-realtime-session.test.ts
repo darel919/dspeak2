@@ -11,6 +11,7 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
   const client = session();
   client.sessionId = "cloudflare-session";
   client.subscriptionsStarted = true;
+  const registry = new Map<string, unknown>();
 
   // R40 snapshot: old physical track X (generation 8)
   const oldX = {
@@ -53,7 +54,7 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
       publications: CloudflarePublication[],
       removedPublications?: CloudflarePublication[],
       isStale?: () => boolean,
-      latestCanonical?: CloudflarePublication[],
+      getLatestCanonical?: () => CloudflarePublication[],
     ) => Promise<unknown>;
   }
   const sessionNarrowed = client as unknown as NarrowedSession;
@@ -64,15 +65,23 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
 
   // Delayed R40 heartbeat starts reconciliation: inserts X, awaits subscribe(X)
   let stale = false;
+  // The LAZY canonical getter reads the CURRENT retained registry at stale
+  // detection time - exactly like the real caller passing
+  // () => cloudflarePublications.values().
+  let registrySnapshotAtStale: unknown[] | null = null;
   const reconcilePromise = sessionNarrowed.reconcilePublications(
     [oldX],
     [],
     () => stale,
-    // Newest retained canonical snapshot: only Y
-    [newY],
+    () => {
+      registrySnapshotAtStale = [...registry.values()];
+      return [...registry.values()] as CloudflarePublication[];
+    },
   );
 
-  // While R40 is awaiting subscription I/O, R41 becomes authoritative
+  // While R40 is awaiting subscription I/O, R41 becomes authoritative:
+  // the retained registry mutates BEFORE the stale check runs.
+  registry.set(newY.trackName, newY);
   stale = true;
   releaseSubscribeX?.();
 
@@ -87,6 +96,71 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
   // away and its publication is never retained.
   assert.ok(subscribeCalls.includes("screen-X"));
   assert.ok(subscribeCalls.includes("screen-Y"));
+  // The lazy getter was evaluated at stale-detection time and saw the NEWEST
+  // retained state - this is the exact caller-level ordering the frozen
+  // values() snapshot could not provide.
+  assert.deepEqual(registrySnapshotAtStale, [newY]);
+  client.closeMedia();
+});
+
+test("stale mid-subscribe convergence treats an empty canonical state as authoritative", async () => {
+  const client = session();
+  client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
+  const registry = new Map<string, unknown>();
+
+  const oldX = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-X",
+    generation: 8,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+
+  let releaseSubscribeX: (() => void) | undefined;
+  const gateX = new Promise<void>((resolve) => {
+    releaseSubscribeX = resolve;
+  });
+  client.subscribe = async (publication) => {
+    const trackName = String(publication.trackName);
+    if (trackName === "screen-X") await gateX;
+    return true;
+  };
+
+  interface NarrowedSession {
+    reconcilePublications: (
+      publications: CloudflarePublication[],
+      removedPublications?: CloudflarePublication[],
+      isStale?: () => boolean,
+      getLatestCanonical?: () => CloudflarePublication[],
+    ) => Promise<unknown>;
+  }
+  const sessionNarrowed = client as unknown as NarrowedSession;
+
+  // R40 heartbeat starts reconciliation, inserts X, awaits subscribe(X)
+  let stale = false;
+  const reconcilePromise = sessionNarrowed.reconcilePublications(
+    [oldX],
+    [],
+    () => stale,
+    // The true newest retained state is EMPTY: the empty-set guard must NOT
+    // block convergence, or X would be re-inserted as a ghost.
+    () => [...registry.values()] as CloudflarePublication[],
+  );
+
+  // R41 close retires X: the retained registry is now empty before the stale
+  // check runs.
+  stale = true;
+  releaseSubscribeX?.();
+
+  await reconcilePromise;
+
+  // X must be fully retired: the empty canonical snapshot must reach the
+  // removal phase and delete the phanom insertion from the stale snapshot.
+  assert.equal(client.publications.has("screen-X"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-X"), false);
   client.closeMedia();
 });
 

@@ -665,21 +665,15 @@ export function createMediaSourceController({
     // Await the canonical retirement ACK before provider cleanup. Bounded by
     // the 15s operation ACK timeout. If the control plane is unreachable the
     // canonical state stays N (active server-side), so the source is NOT
-    // removed from the server; the caller gets the failure and may retry.
+    // removed from the server; the FSM tombstone (N+1 inactive) is preserved
+    // and phase becomes "reconciling" so a later heartbeat/NACK convergence
+    // adopts the canonical outcome instead of pretending the stop settled.
     const retirement = sendSourceState()
-      .catch((sourceError: unknown) => {
-        mediaDebug("source-state.retire-ack-failed", {
-          source: entry.source,
-          error:
-            sourceError instanceof Error
-              ? sourceError.message
-              : String(sourceError),
-        });
-        throw sourceError;
-      })
       .then(() => {
-        // Canonical retirement committed: clean provider transport now.
-        // Failures are reported but never resurrect the canonical source.
+        // Canonical retirement committed: the FSM settles idle and the
+        // provider transport cleanup may proceed. Failures are reported but
+        // never resurrect the canonical source.
+        setSourcePhase(entry.source, "idle", getActiveProvider());
         const p2pRemoval = asProvider(getP2pMesh())?.unpublishSource(
           entry.source,
         );
@@ -727,8 +721,21 @@ export function createMediaSourceController({
           refreshPublicMaps();
         });
         return true;
+      })
+      .catch((sourceError: unknown) => {
+        // ACK timed out or was rejected: canonical outcome UNKNOWN. Keep the
+        // N+1 inactive tombstone and mark the phase reconciling so the next
+        // server snapshot converges it. Do not settle idle.
+        mediaDebug("source-state.retire-ack-failed", {
+          source: entry.source,
+          error:
+            sourceError instanceof Error
+              ? sourceError.message
+              : String(sourceError),
+        });
+        setSourcePhase(entry.source, "reconciling", getActiveProvider());
+        throw sourceError;
       });
-    setSourcePhase(entry.source, "idle", getActiveProvider());
     refreshPublicMaps();
     return retirement;
   }
