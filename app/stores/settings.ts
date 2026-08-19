@@ -315,9 +315,7 @@ export const useSettingsStore = defineStore("settings", () => {
       if (typeof localStorage === "undefined") return;
       localStorage.setItem(key, JSON.stringify(value));
       reportBrowserStorageMetric(key, value);
-    } catch (_) {
-      /* noop */
-    }
+    } catch (_) {}
   }
 
   return {

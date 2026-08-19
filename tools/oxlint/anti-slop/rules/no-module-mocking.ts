@@ -81,7 +81,6 @@ function moduleMockCall(
   return method !== null && moduleMockMethods.has(method);
 }
 
-/** Ban test framework module mocking in favor of real dependency seams. */
 export const noModuleMockingRule = defineRule({
   meta: {
     type: "problem",

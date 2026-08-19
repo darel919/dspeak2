@@ -895,8 +895,6 @@ export function useHybridMediaSession() {
     handleP2pQualification,
     handleProviderFailure,
     handleProviderRecovering: (data: Record<string, unknown>) => {
-      // Informational: record recovery state only. Re-publication happens in
-      // the committed provider convergence path, never from this message.
       return topologyController?.handleProviderRecovering(data);
     },
     handleProviderTicket: (data: Record<string, unknown>) =>
@@ -919,8 +917,6 @@ export function useHybridMediaSession() {
     getConnectionEpoch: () => sessionConnectionEpoch,
     setConnectionEpoch: (epoch: number) => {
       sessionConnectionEpoch = epoch;
-      // Never construct a provider from a metadata setter: ensure*() can
-      // materialize the wrong SFU (default provider before topology decides).
       const existing = sfu as
         { controlConnectionEpoch?: number } | null | undefined;
       if (existing && "controlConnectionEpoch" in existing)
@@ -948,7 +944,6 @@ export function useHybridMediaSession() {
     },
   } as unknown as RuntimeDependencyContext);
 
-  // Handle publications digest - called by hybrid-media-session-lifecycle
   function normalizeServerRevision(value: unknown): string {
     if (typeof value === "string" && value !== "" && /^\d+$/.test(value)) {
       return value;
@@ -969,10 +964,7 @@ export function useHybridMediaSession() {
   ) {
     if (!Array.isArray(digest)) return;
 
-    // Build server publication map by trackName for authoritative comparison
     const serverPublications: CloudflarePublication[] = [];
-    // Use the revision from the heartbeat envelope if provided, otherwise fall back to per-entry revision.
-    // Media-control emits a numeric room.publicationRevision; accept both numeric and string forms.
     const envelopeRevision = normalizeServerRevision(publicationRevision);
     let maxPublicationRevision = envelopeRevision;
     for (const entry of digest) {
@@ -988,7 +980,6 @@ export function useHybridMediaSession() {
         continue;
       const pub = entry as CloudflarePublication;
       serverPublications.push(pub);
-      // Track max publicationRevision from digest for fence (fallback if no envelope revision)
       if (
         !publicationRevision &&
         "publicationRevision" in entry &&
@@ -1004,8 +995,6 @@ export function useHybridMediaSession() {
       }
     }
 
-    // FENCE: reject stale heartbeat reconciliations that race with newer live publications
-    // If a newer publicationRevision has been applied, this digest is stale
     if (
       BigInt(maxPublicationRevision) <
       BigInt(lastAppliedPublicationRevision.value)
@@ -1017,16 +1006,9 @@ export function useHybridMediaSession() {
       return;
     }
 
-    // Use exact-set reconciliation at the registry level first
-    // This ensures both additions and removals are processed atomically.
-    // Registry reconciliation is provider-independent: it must run even when
-    // no SFU session exists (e.g. P2P topology) so retained publications
-    // cannot resurrect as ghosts when the provider is reconstructed.
     const { canonicalSnapshot, removed } =
       cloudflarePublications.reconcileExact(serverPublications);
 
-    // The authoritative revision comes only from media-control (the heartbeat
-    // envelope). Local registry mutations never advance it.
     if (
       BigInt(maxPublicationRevision) >
       BigInt(lastAppliedPublicationRevision.value)
@@ -1034,7 +1016,6 @@ export function useHybridMediaSession() {
       lastAppliedPublicationRevision.value = maxPublicationRevision;
     }
 
-    // Log removed publications for debugging
     if (removed.length > 0) {
       mediaDebug("publications-digest-removed", {
         count: removed.length,
@@ -1042,11 +1023,6 @@ export function useHybridMediaSession() {
       });
     }
 
-    // Use the new reconcilePublications API for authoritative additions/removals
-    // This passes the complete retained publication incarnation with epoch/generation
-    // so the provider can properly process close events that would otherwise be rejected as stale.
-    // The session may be null (P2P topology) — registry reconciliation above is
-    // still authoritative; provider repair only runs when a session exists.
     const session = sfu;
     if (!session) return;
     if (
@@ -1054,9 +1030,6 @@ export function useHybridMediaSession() {
       typeof session.reconcilePublications === "function"
     ) {
       try {
-        // Fence token: the provider re-checks this after every asynchronous
-        // boundary. A heartbeat that became stale while awaiting subscription
-        // I/O must not delete publications a newer live push added meanwhile.
         const isStale = () =>
           BigInt(maxPublicationRevision) <
           BigInt(lastAppliedPublicationRevision.value);
@@ -1064,14 +1037,7 @@ export function useHybridMediaSession() {
           canonicalSnapshot,
           removed,
           isStale,
-          // Retained canonical snapshot for stale-mid-subscribe convergence:
-          // LAZY getter evaluated only at stale-detection time, so a slow
-          // provider reconciliation always converges against the CURRENT
-          // registry state - never a snapshot frozen before the await.
           () => cloudflarePublications.values(),
-          // Revision getter: the authoritative publication revision from
-          // media-control heartbeat envelope, used for revision-based
-          // convergence instead of content comparison.
           () => lastAppliedPublicationRevision.value,
         );
       } catch (err) {

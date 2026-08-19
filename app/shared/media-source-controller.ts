@@ -68,8 +68,6 @@ export function createMediaSourceController({
   }
   const sourceFsms = new Map<string, SourceFsmState>();
 
-  // Track pending retirements that need provider cleanup after canonical confirmation.
-  // Keyed by source, value contains the generation and operationId for idempotent completion.
   interface PendingRetirement {
     source: string;
     generation: number;
@@ -131,9 +129,6 @@ export function createMediaSourceController({
     );
   }
 
-  // Commit source intent to server (media-sources) and wait for ACK.
-  // This must happen BEFORE provider publication so the server has the
-  // canonical sourceStates entry when the provider announces.
   async function commitSourceIntent(
     source: string,
     options: { isVideo?: boolean; ownerSource?: string } = {},
@@ -143,7 +138,6 @@ export function createMediaSourceController({
     const generation = (currentState?.generation || 0) + 1;
     const desiredState = "active";
 
-    // Bump generation and set desiredState optimistically
     sourceFsms.set(source, {
       phase: "starting",
       generation,
@@ -170,7 +164,6 @@ export function createMediaSourceController({
     try {
       await promise;
     } catch (error) {
-      // On failure, rollback optimistic state
       if (currentState) {
         sourceFsms.set(source, currentState);
       } else {
@@ -255,10 +248,6 @@ export function createMediaSourceController({
     const previousVideoFeed = isVideo
       ? localVideoFeeds.value.get(entry.source)
       : null;
-    // Preflight required providers BEFORE committing source intent to the
-    // server. A missing transport must reject with no canonical mutation, no
-    // optimistic FSM bump, and no provisional preview, so the server never
-    // holds an active source the client cannot publish.
     const activeProvider = getActiveProvider();
     const p2pRequired =
       activeProvider === "p2p" ||
@@ -278,8 +267,6 @@ export function createMediaSourceController({
       throw new Error("The active SFU transport is unavailable");
     }
 
-    // Commit source intent NEXT (media-sources with generation) and wait for ACK.
-    // This ensures server has canonical sourceStates before provider announces.
     const committedGeneration = await commitSourceIntent(entry.source, {
       isVideo,
       ownerSource: entry.ownerSource ?? undefined,
@@ -320,8 +307,6 @@ export function createMediaSourceController({
         entry.track.readyState === "ended"
       )
         throw new Error(`The ${entry.source} track ended during publication`);
-      // If the source changed generation while publishing, fence this
-      // publication: tear down the stale side and keep the newer generation.
       if (sourceFsms.get(entry.source)?.generation !== entry.generation) {
         await Promise.allSettled([
           p2pRequired
@@ -334,19 +319,12 @@ export function createMediaSourceController({
     } catch (sourceError: unknown) {
       setSourcePhase(entry.source, "failed", getActiveProvider());
       const reason = `source-${entry.source}-failed-${sourceError instanceof Error ? sourceError.message : String(sourceError)}`;
-      // Send compensating media-sources mutation to retire the canonical source
-      // that was committed before provider publication failed.
-      // Use the full canonical desired-state builder (sendSourceState pattern)
-      // to avoid partial mutations and generation 0.
       const currentSourceFsm = new Map(sourceFsms);
-      // The failed source's generation was already committed by commitSourceIntent; bump it for retirement/recovery
       const fsm = currentSourceFsm.get(entry.source);
       const isReplacement = !!previous;
       let recoveryGeneration = fsm ? fsm.generation + 1 : 1;
       if (fsm) {
         if (isReplacement) {
-          // Replacement failure: recovery generation is ACTIVE, keep source in sources[]
-          // Update the REAL FSM with recovery generation
           sourceFsms.set(entry.source, {
             ...fsm,
             generation: recoveryGeneration,
@@ -362,7 +340,6 @@ export function createMediaSourceController({
             failedAt: Date.now(),
           });
         } else {
-          // Brand-new source failure: retirement generation is INACTIVE, omit from sources[]
           sourceFsms.set(entry.source, {
             ...fsm,
             generation: recoveryGeneration,
@@ -379,26 +356,21 @@ export function createMediaSourceController({
           });
         }
       }
-      // Send compensation mutation and wait for ACK
       await sendMediaSourcesMutation(
         entry.source,
         isReplacement ? "active" : "inactive",
         currentSourceFsm,
         previous,
       );
-      // Compensation ACK succeeded - persist recovery generation into canonical localSources
       const previousEntry: TopologySourceEntry | undefined = localSources.get(
         entry.source,
       );
       if (previousEntry) {
-        // Update localSources with the recovery generation so future topology transitions use it
         const recoveredEntry = {
           ...previousEntry,
           generation: recoveryGeneration,
         } as TopologySourceEntry;
         localSources.set(entry.source, recoveredEntry);
-        // Re-announce previous with the recovery generation on required transports.
-        // Missing required transports must fail loudly, not report fulfilled.
         const recoveryP2pMesh = asProvider(getP2pMesh());
         const recoverySfu = asProvider(getSfu());
         const p2pResult = !p2pRequired
@@ -419,7 +391,6 @@ export function createMediaSourceController({
             ? Promise.resolve(recoverySfu.addSource(recoveredEntry))
             : Promise.reject(new Error("Required SFU transport unavailable"));
         const results = await Promise.allSettled([p2pResult, sfuResult]);
-        // Check if required transports succeeded
         const requiredResults = [
           p2pRequired ? results[0] : { status: "fulfilled" as const },
           sfuRequired ? results[1] : { status: "fulfilled" as const },
@@ -428,8 +399,6 @@ export function createMediaSourceController({
           (r): r is PromiseRejectedResult => r.status === "rejected",
         );
         if (failedRequired) {
-          // Required transport failed - must send second mutation to retire
-          // the N+2 ACTIVE source that was committed during compensation
           mediaDebug("recovery.provider-restore-failed", {
             source: entry.source,
             error:
@@ -437,7 +406,6 @@ export function createMediaSourceController({
                 ? failedRequired.reason.message
                 : String(failedRequired.reason),
           });
-          // Clean up the failed source from providers
           await Promise.allSettled([
             p2pRequired
               ? asProvider(getP2pMesh())?.unpublishSource(entry.source)
@@ -445,9 +413,7 @@ export function createMediaSourceController({
             sfuRequired ? removeSfuSource(entry.source) : null,
           ]);
           if (entry.source === "screen-audio") stopSharedAudioMeter();
-          // Remove from localSources since recovery failed
           localSources.delete(entry.source);
-          // Send second control-plane mutation: N+3 INACTIVE to retire the N+2 ACTIVE
           const retirementFsm = new Map(sourceFsms);
           const recoveryFsm = retirementFsm.get(entry.source);
           if (recoveryFsm) {
@@ -466,7 +432,6 @@ export function createMediaSourceController({
               retirementFsm,
               undefined,
             );
-            // ACK succeeded - commit N+3 inactive to REAL sourceFsms
             sourceFsms.set(entry.source, {
               ...retiredState,
               phase: "idle" as const,
@@ -476,8 +441,6 @@ export function createMediaSourceController({
           setSourcePhase(entry.source, "idle", getActiveProvider());
           throw failedRequired.reason;
         } else {
-          // Successful replacement recovery - required transports restored
-          // Set FSM phase to "live" (not "idle") since the previous source remains active
           const successFsm = new Map(sourceFsms);
           const recoveryFsm = successFsm.get(entry.source);
           if (recoveryFsm) {
@@ -488,8 +451,6 @@ export function createMediaSourceController({
             });
           }
           setSourcePhase(entry.source, "live", getActiveProvider());
-          // Restore the previous video preview before returning: the failed
-          // replacement's provisional feed must never survive a rollback.
           if (
             isVideo &&
             (
@@ -502,11 +463,9 @@ export function createMediaSourceController({
             else localVideoFeeds.value.delete(entry.source);
             localVideoFeeds.value = new Map(localVideoFeeds.value);
           }
-          // Return the recovered entry with the recovery generation
           return recoveredEntry;
         }
       } else {
-        // Brand-new source that failed - clean up any partial provider state
         await Promise.allSettled([
           asProvider(getP2pMesh())?.unpublishSource(entry.source),
           removeSfuSource(entry.source),
@@ -555,10 +514,6 @@ export function createMediaSourceController({
         }
         throw sourceError;
       }
-      // Only provider-session-scoped failures escalate to provider failover.
-      // Ordinary source errors (tracks-new, sender config, renegotiation)
-      // stay source-scoped; Cloudflare operations throw plain Error objects,
-      // so the fallback must not promote them to a provider fault.
       const errorCode =
         sourceError &&
         typeof sourceError === "object" &&
@@ -640,11 +595,6 @@ export function createMediaSourceController({
       publishedEntry?.captureTrack !== entry.track
     )
       return Promise.resolve(false);
-    // INTENT-FIRST: bump FSM to N+1 inactive and remove the local source
-    // before any provider I/O. The control-plane mutation (media-sources with
-    // the FSM digest) retires the canonical publication immediately; provider
-    // transport cleanup follows asynchronously. Provider cleanup failure must
-    // not keep the logical source active on the server.
     setSourcePhase(entry.source, "stopping", getActiveProvider());
     const pairedScreenAudio =
       entry.source === "screen" ? localSources.get("screen-audio") : null;
@@ -674,22 +624,8 @@ export function createMediaSourceController({
       stopSharedAudioMeter();
       onSharedAudioStopped?.();
     }
-    // Await the canonical retirement ACK before provider cleanup. Bounded by
-    // the 15s operation ACK timeout. If the control plane is unreachable the
-    // canonical state stays N (active server-side), so the source is NOT
-    // removed from the server; the FSM tombstone (N+1 inactive) is preserved
-    // and phase becomes "reconciling" so a later heartbeat/NACK convergence
-    // adopts the canonical outcome instead of pretending the stop settled.
-    // The retirement uses a STABLE operationId: if the ACK is lost after the
-    // server committed (or the request never arrived), retrying the SAME
-    // operationId is safe - the server replays its cached result for a
-    // committed operation, or applies the mutation fresh for a lost request.
-    // A brand-new operationId would be rejected as a stale generation replay.
     const retirementOperationId = nextOperationId();
-    // Capture the generation this operation was sent with, so a stale timeout
-    // can't overwrite a newer convergent FSM state.
     const retirementGeneration = sourceFsms.get(entry.source)?.generation ?? 0;
-    // Track this retirement for reconnect/snapshot convergence
     pendingRetirements.set(entry.source, {
       source: entry.source,
       generation: retirementGeneration,
@@ -698,10 +634,6 @@ export function createMediaSourceController({
     });
     const retirement = sendSourceState(retirementOperationId)
       .then(() => {
-        // Canonical retirement committed: the FSM settles idle and the
-        // provider transport cleanup may proceed. Failures are reported but
-        // never resurrect the canonical source.
-        // Verify this retirement's generation is still current before settling.
         const fsm = sourceFsms.get(entry.source);
         if (
           !fsm ||
@@ -719,7 +651,6 @@ export function createMediaSourceController({
         }
         setSourcePhase(entry.source, "idle", getActiveProvider());
         completeSourceRemoval(entry.source, { unexpected });
-        // Mark cleanup as done and delete the pending retirement entry
         const pending = pendingRetirements.get(entry.source);
         if (pending) {
           pendingRetirements.delete(entry.source);
@@ -727,15 +658,6 @@ export function createMediaSourceController({
         return true;
       })
       .catch((sourceError: unknown) => {
-        // ACK timed out or was rejected: canonical outcome UNKNOWN. Keep the
-        // N+1 inactive tombstone and mark the phase reconciling so the next
-        // server snapshot converges it. Do not settle idle.
-        // Only update if the FSM still reflects THIS operation's generation
-        // AND the phase is not already "idle" (meaning a newer convergent
-        // operation has already settled the tombstone). If a NACK convergence
-        // has adopted a newer generation, the FSM generation will be >
-        // retirementGeneration, so we don't overwrite. If phase is "idle",
-        // the retirement has already been committed.
         const fsm = sourceFsms.get(entry.source);
         mediaDebug("source-state.retire-ack-failed-check", {
           source: entry.source,
@@ -766,10 +688,6 @@ export function createMediaSourceController({
               fsm.phase === "idle" ? "already-idle" : "generation-mismatch",
           });
         }
-        // Retry the SAME operationId: the server's operation-result cache
-        // makes the replay idempotent whether the original request was
-        // committed (cached ACK) or lost (fresh apply). Bounded retries keep
-        // the tombstone converging after transient control-plane failures.
         void retryRetirementMutation(
           retirementOperationId,
           entry.source,
@@ -805,7 +723,6 @@ export function createMediaSourceController({
         p2pResult.status === "rejected" &&
         (p2pResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
       ) {
-        // Ignore session-closed during cleanup
       } else if (p2pResult.status === "rejected") {
         error.value = `Failed to remove ${source} from P2P: ${p2pResult.reason}`;
       }
@@ -813,7 +730,6 @@ export function createMediaSourceController({
         sfuResult.status === "rejected" &&
         (sfuResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
       ) {
-        // Ignore session-closed during cleanup
       } else if (sfuResult.status === "rejected") {
         error.value = `Failed to remove ${source} from SFU: ${sfuResult.reason}`;
       }
@@ -846,7 +762,6 @@ export function createMediaSourceController({
         }
         sendSourceState(operationId)
           .then(() => {
-            // Verify this retirement's generation is still current before settling.
             const fsm = sourceFsms.get(source);
             if (
               !fsm ||
@@ -865,7 +780,6 @@ export function createMediaSourceController({
             }
             setSourcePhase(source, "idle", getActiveProvider());
             completeSourceRemoval(source, options);
-            // Mark cleanup as done and delete the pending retirement entry
             const pending = pendingRetirements.get(source);
             if (pending) {
               pendingRetirements.delete(source);
@@ -890,8 +804,6 @@ export function createMediaSourceController({
                 retirementGeneration,
               ).then(resolve, reject);
             } else {
-              // Keep the reconciling tombstone: the reconnect/next snapshot
-              // convergence path retires it against canonical state.
               reject(retryError);
             }
           });
@@ -965,15 +877,13 @@ export function createMediaSourceController({
     }
   }
 
-  let operationIdCounter = 0;
   const operationWaiters = new Map<
     string,
     { resolve: (value?: unknown) => void; reject: (error: unknown) => void }
   >();
 
   function nextOperationId() {
-    operationIdCounter++;
-    return `op-${operationIdCounter}-${Date.now()}`;
+    return crypto.randomUUID();
   }
 
   function awaitOperationAck(operationId: string) {
@@ -1054,19 +964,11 @@ export function createMediaSourceController({
       data && typeof data === "object" ? (data as Record<string, unknown>) : {};
     const source = String(payload.source || "");
     if (!source) return Promise.resolve(false);
-    // INACTIVE TOMBSTONE PATH: a stopped source was already deleted from
-    // localSources, so the active-source path below cannot repair it. The
-    // server NACKed the retirement with STALE_SOURCE_GENERATION (or the ACK
-    // timed out): adopt the canonical generation and re-send the inactive
-    // mutation so the tombstone converges to the server's committed outcome.
     const fsm = sourceFsms.get(source);
     if (fsm?.desiredState === "inactive") {
       const expectedGeneration = Number(payload.expectedGeneration);
       const adoptsCanonical = payload.adoptsCanonicalGeneration === true;
       const retryable = payload.retryable === true;
-      // Parse canonicalState from the real server topology snapshot:
-      // canonicalState contains { participants, sourceStates, ... }
-      // We need to find our participant's sourceStates entry for this source.
       let canonicalSourceState:
         { generation: number; desiredState: string } | undefined;
       const canonicalState = payload.canonicalState as
@@ -1085,8 +987,6 @@ export function createMediaSourceController({
           }
         | undefined;
       if (canonicalState) {
-        // The topology snapshot has sourceStates keyed by "userId:deviceId"
-        // We need to find the entry for our local peer.
         const localPeerId = getLocalPeerId?.();
         const localParticipantKey = getLocalParticipantKey?.();
 
@@ -1106,7 +1006,6 @@ export function createMediaSourceController({
             }
           }
         }
-        // Fallback: flat sourceStates by participant key
         if (
           !canonicalSourceState &&
           canonicalState.sourceStates &&
@@ -1145,9 +1044,6 @@ export function createMediaSourceController({
           phase: "reconciling",
         });
       }
-      // If the server sends canonicalState confirming inactive with this generation
-      // AND indicates no retry is needed (retryable: false), we can complete
-      // the retirement locally without waiting for another ACK.
       if (
         !retryable &&
         adoptsCanonical &&
@@ -1155,7 +1051,6 @@ export function createMediaSourceController({
         canonicalSourceState.desiredState === "inactive" &&
         canonicalSourceState.generation === expectedGeneration
       ) {
-        // Verify this retirement's generation is still current before settling.
         const fsm = sourceFsms.get(source);
         if (
           !fsm ||
@@ -1176,18 +1071,11 @@ export function createMediaSourceController({
           source,
           generation: expectedGeneration,
         });
-        // The server has already committed inactive for this generation.
-        // Complete locally and clean up provider transport.
         setSourcePhase(source, "idle", getActiveProvider());
         completeSourceRemoval(source, {});
-        // Mark cleanup as done and delete the pending retirement entry
         pendingRetirements.delete(source);
         return Promise.resolve(true);
       }
-      // Re-send the retirement with the adopted generation. The NACKed
-      // operationId is cached server-side and would replay the NACK, so a
-      // fresh operationId carries the adopted generation as a new mutation:
-      // the server accepts inactive >= canonical generation and commits.
       const newOperationId = nextOperationId();
       pendingRetirements.set(source, {
         source,
@@ -1197,7 +1085,6 @@ export function createMediaSourceController({
       });
       return sendSourceState(newOperationId)
         .then(() => {
-          // Verify this retirement's generation is still current before settling.
           const fsm = sourceFsms.get(source);
           if (
             !fsm ||
@@ -1215,7 +1102,6 @@ export function createMediaSourceController({
           }
           setSourcePhase(source, "idle", getActiveProvider());
           completeSourceRemoval(source, {});
-          // Mark cleanup as done and delete the pending retirement entry
           pendingRetirements.delete(source);
           return true;
         })
@@ -1234,8 +1120,6 @@ export function createMediaSourceController({
     if (!localSources.has(source)) return Promise.resolve(false);
     const entry = localSources.get(source);
     if (!entry) return Promise.resolve(false);
-    // Adopt the canonical generation before re-announcing so the retry is
-    // fenced against the server's current incarnation of this source.
     const expectedGeneration = Number(payload.expectedGeneration);
     if (
       payload.code === "STALE_SOURCE_GENERATION" &&
@@ -1244,7 +1128,6 @@ export function createMediaSourceController({
       expectedGeneration !== Number(entry.generation)
     ) {
       entry.generation = expectedGeneration;
-      // Also adopt the generation into sourceFsms so commitSourceIntent uses the correct generation
       const fsm = sourceFsms.get(source);
       if (fsm) {
         sourceFsms.set(source, {
@@ -1292,21 +1175,10 @@ export function createMediaSourceController({
       retryAt: Number.isSafeInteger(retryAt) ? retryAt : null,
       reason: data.reason || "provider-recovering",
     });
-    // Informational only. Actual re-publication happens as part of the
-    // committed provider convergence path (a later topology event), so a
-    // provider recovery never invents a new logical source incarnation.
     return Promise.resolve(true);
   }
 
   function processPendingRetirements() {
-    // Called on reconnect/hello to complete any pending retirements using
-    // the canonical snapshot from the server. The server's topology snapshot
-    // in heartbeat-ack or hello contains sourceStates that confirm inactive
-    // retirements we sent before disconnect.
-    // Do NOT replay old operation IDs across a new connection epoch.
-    // Instead, check if the canonical snapshot already confirms inactive for
-    // the pending generation. If so, complete locally. Otherwise, send a
-    // fresh source state mutation with the current generation.
     const pendingPromises: Promise<void>[] = [];
     for (const [source, pending] of pendingRetirements.entries()) {
       if (!pending.cleanupRequired) continue;
@@ -1317,27 +1189,8 @@ export function createMediaSourceController({
         source,
         pendingGeneration: pending.generation,
         currentGeneration: fsm.generation,
-        // Don't log old operationId since we won't replay it
       });
 
-      // Check if we already have canonical confirmation from the snapshot
-      // that was processed via queueTargetedReconciliation or onServerConnected.
-      // The canonical state would have been delivered via heartbeat-ack/hello
-      // and processed through queueTargetedReconciliation which would have
-      // marked cleanupRequired = false if the server confirmed inactive.
-      //
-      // If cleanupRequired is still true here, it means either:
-      // 1. We haven't received the canonical snapshot yet, OR
-      // 2. The canonical snapshot showed the source as still active
-      //
-      // In either case, we should send a FRESH source state mutation with the
-      // CURRENT generation (not the old pending generation) to converge with
-      // the server's current state.
-      //
-      // The server will respond with its canonical state. If the ACK is
-      // successful, the server has committed the mutation and we can complete
-      // locally. The ACK path does NOT call queueTargetedReconciliation, so
-      // we must handle completion in the sendSourceState resolution.
       const generation = fsm.generation;
       const newOperationId = nextOperationId();
       mediaDebug("source-state.pending-retirement-send-fresh", {
@@ -1348,8 +1201,6 @@ export function createMediaSourceController({
       });
       const promise = sendSourceState(newOperationId)
         .then(() => {
-          // The fresh operation's ACK is canonical evidence that the mutation
-          // committed. Complete the retirement locally if the state hasn't changed.
           const current = sourceFsms.get(source);
           if (
             !current ||
@@ -1362,9 +1213,7 @@ export function createMediaSourceController({
           completeSourceRemoval(source, {});
           pendingRetirements.delete(source);
         })
-        .catch(() => {
-          // Ignore errors - the retirement will be retried on next reconnect
-        });
+        .catch(() => {});
       pendingPromises.push(promise);
     }
     return Promise.all(pendingPromises).then(() => {});
@@ -1407,7 +1256,6 @@ export function createMediaSourceController({
     sourceFsms,
     setSourcePhase,
     getSourceFsmDigest: sourceFsmDigest,
-    // Properties expected by consumers (hybrid-media-session-api.ts)
     restartAudioProduction,
     startAudioProduction,
     stopAudioProduction,

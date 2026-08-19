@@ -62,11 +62,8 @@ export function createHybridMediaSessionTermination({
     setChannelId(null);
     disposeVisibility();
 
-    // Preserve connection state for clean leave
     const wasConnected = connected.value;
 
-    // Phase 1: Clean leave on control socket BEFORE marking intentional close
-    // (signaling.send() checks isIntentionalClose() and blocks if true)
     let leavePromise: Promise<unknown> | null = null;
     if (wasConnected) {
       try {
@@ -82,10 +79,8 @@ export function createHybridMediaSessionTermination({
       }
     }
 
-    // Phase 2: Mark intentional close (blocks further signaling sends)
     setIntentionalClose(true);
 
-    // Phase 3: Immediate teardown of media/capture (audio stop before error-prone I/O per AGENTS.md)
     stopLocalVoiceDetection();
     stopSharedAudioMeter();
     clearAttenuation();
@@ -95,7 +90,7 @@ export function createHybridMediaSessionTermination({
       getP2pMesh,
       getSfu,
       handoff,
-      socket: null, // Do NOT close control socket yet — wait for leave ACK/timeout
+      socket: null,
     });
     getProviderSocket()?.close();
     setProviderSocket(null);
@@ -121,7 +116,6 @@ export function createHybridMediaSessionTermination({
     refreshTopologyGraph();
     mediaDebug("session.disconnected");
 
-    // Phase 4: Wait for leave ACK or timeout (max 750ms), then close signaling
     if (wasConnected && leavePromise) {
       const timeout = new Promise((resolve) => setTimeout(resolve, 750));
       Promise.race([leavePromise, timeout]).then(() => {

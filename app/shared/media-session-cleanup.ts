@@ -62,11 +62,6 @@ export async function closeMediaProviderSafely(
   }
 }
 
-/**
- * Handles a signaling (control-plane) close without killing live media.
- * Media providers (P2P mesh, SFU) must survive transient control-socket
- * loss; only protocol rejection tears media down.
- */
 export function resetMediaTelemetryState({
   iceConnectedBoth,
   mediaPathMetrics,

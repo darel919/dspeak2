@@ -236,7 +236,6 @@ export class NativeMediasoupConsumersMethods {
     getLatestRevision?: () => string | null,
   ) {
     if (!Array.isArray(publications)) return;
-    // Delegate to Cloudflare session if it's the active provider
     if (
       this.selectedProvider === "cloudflare-realtime" &&
       this.cloudflareSession
@@ -250,9 +249,6 @@ export class NativeMediasoupConsumersMethods {
       );
       return;
     }
-    // For mediasoup provider, there's no equivalent heartbeat repair mechanism
-    // because mediasoup uses explicit consumer management. The Cloudflare path
-    // handles this via the heartbeat digest reconciliation in useHybridMediaSession.
   }
 
   async handleNativeAction(
@@ -306,9 +302,6 @@ export class NativeMediasoupConsumersMethods {
           ? "media-flowing"
           : "transport-connecting";
     if (state === "failed" && this.activeSfuProvider === "mediasoup") {
-      // `failed` is stronger than `disconnected`: ICE restart may still restore
-      // connectivity, so report a retryable provider-transport failure and let
-      // handleTransportRecovery drive the ICE restart.
       this.reportProviderFailure(`native-${direction}-transport-failed`);
     }
     this._emitState();

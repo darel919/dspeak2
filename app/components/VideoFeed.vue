@@ -241,7 +241,6 @@ let fullscreenStateInitialized = false;
 let playbackRecoveryTimer = null;
 let nativeFirstFrameEmitted = false;
 
-// Track the feedKey to reset first-frame when stream incarnation changes
 let currentFeedKey = props.feedKey;
 const localScreenPreviewPaused = computed(
   () => props.local && props.source === "screen" && !previewEnabled.value,
@@ -356,7 +355,6 @@ function drawNativeFrame(frame = nativePendingFrame) {
     nativeImageData.data.set(pixels);
   }
   nativeCanvasContext?.putImageData(nativeImageData, 0, 0);
-  // Native first-frame: we just rendered a real decoded frame
   if (props.feedKey && !nativeFirstFrameEmitted) {
     nativeFirstFrameEmitted = true;
     emit("first-frame", props.feedKey);
@@ -426,8 +424,6 @@ function handleVideoReady() {
   clearTimeout(playbackRecoveryTimer);
   playbackRecoveryTimer = null;
   playVideoElement(videoElement.value, "Remote preview");
-  // Real decode evidence: the element reached canplay/loadedmetadata with
-  // frames available. This is the first-frame convergence signal, not ontrack.
   if (props.feedKey) emit("first-frame", props.feedKey);
 }
 
@@ -521,7 +517,6 @@ watch(
 );
 watch(() => props.ownCameraStream, attachStream);
 watch(isFullscreen, attachStream);
-// Reset first-frame when feedKey changes (new stream incarnation)
 watch(
   () => props.feedKey,
   (newFeedKey) => {

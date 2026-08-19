@@ -64,6 +64,7 @@ export interface LifecycleDependencyContext {
     resolveOperationAck: (operationId: string) => unknown;
     rejectOperationAck: (operationId: string, error: unknown) => unknown;
     getConnectionEpoch: () => number;
+    setConnectionEpoch: (epoch: number) => void;
     getLastAppliedRoomRevision: () => string;
     applyRoomRevision: (roomRevision: string) => unknown;
     requestSnapshot: () => unknown;

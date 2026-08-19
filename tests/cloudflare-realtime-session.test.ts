@@ -13,7 +13,6 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
   client.subscriptionsStarted = true;
   const registry = new Map<string, unknown>();
 
-  // R40 snapshot: old physical track X (generation 8)
   const oldX = {
     peerId: "peer-1",
     source: "screen",
@@ -23,7 +22,6 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
     userId: "user-1",
     closed: false,
   };
-  // R41 live push: new physical track Y (generation 9)
   const newY = {
     peerId: "peer-1",
     source: "screen",
@@ -34,7 +32,6 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
     closed: false,
   };
 
-  // Subscribe for X defers until we release it (simulates slow provider I/O)
   let releaseSubscribeX: (() => void) | undefined;
   const gateX = new Promise<void>((resolve) => {
     releaseSubscribeX = resolve;
@@ -63,11 +60,7 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
   });
   assert.equal(client.publications.has("screen-Y"), true);
 
-  // Delayed R40 heartbeat starts reconciliation: inserts X, awaits subscribe(X)
   let stale = false;
-  // The LAZY canonical getter reads the CURRENT retained registry at stale
-  // detection time - exactly like the real caller passing
-  // () => cloudflarePublications.values().
   let registrySnapshotAtStale: unknown[] | null = null;
   const reconcilePromise = sessionNarrowed.reconcilePublications(
     [oldX],
@@ -79,26 +72,18 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
     },
   );
 
-  // While R40 is awaiting subscription I/O, R41 becomes authoritative:
-  // the retained registry mutates BEFORE the stale check runs.
   registry.set(newY.trackName, newY);
   stale = true;
   releaseSubscribeX?.();
 
   await reconcilePromise;
 
-  // Y must survive; X must NOT remain as a duplicate consumer
   assert.equal(client.publications.has("screen-Y"), true);
   assert.equal(client.publications.has("screen-X"), false);
   assert.equal(client.subscribedTrackNames.has("screen-Y"), true);
   assert.equal(client.subscribedTrackNames.has("screen-X"), false);
-  // The convergence re-subscribes Y idempotently; X's subscription is gated
-  // away and its publication is never retained.
   assert.ok(subscribeCalls.includes("screen-X"));
   assert.ok(subscribeCalls.includes("screen-Y"));
-  // The lazy getter was evaluated at stale-detection time and saw the NEWEST
-  // retained state - this is the exact caller-level ordering the frozen
-  // values() snapshot could not provide.
   assert.deepEqual(registrySnapshotAtStale, [newY]);
   client.closeMedia();
 });
@@ -139,26 +124,19 @@ test("stale mid-subscribe convergence treats an empty canonical state as authori
   }
   const sessionNarrowed = client as unknown as NarrowedSession;
 
-  // R40 heartbeat starts reconciliation, inserts X, awaits subscribe(X)
   let stale = false;
   const reconcilePromise = sessionNarrowed.reconcilePublications(
     [oldX],
     [],
     () => stale,
-    // The true newest retained state is EMPTY: the empty-set guard must NOT
-    // block convergence, or X would be re-inserted as a ghost.
     () => [...registry.values()] as CloudflarePublication[],
   );
 
-  // R41 close retires X: the retained registry is now empty before the stale
-  // check runs.
   stale = true;
   releaseSubscribeX?.();
 
   await reconcilePromise;
 
-  // X must be fully retired: the empty canonical snapshot must reach the
-  // removal phase and delete the phanom insertion from the stale snapshot.
   assert.equal(client.publications.has("screen-X"), false);
   assert.equal(client.subscribedTrackNames.has("screen-X"), false);
   client.closeMedia();
@@ -170,7 +148,6 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
   client.subscriptionsStarted = true;
   const registry = new Map<string, unknown>();
 
-  // R40 heartbeat snapshot: X (generation 8)
   const oldX = {
     peerId: "peer-1",
     source: "screen",
@@ -180,7 +157,6 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
     userId: "user-1",
     closed: false,
   };
-  // R41 live push: Y (generation 9)
   const newY = {
     peerId: "peer-1",
     source: "screen",
@@ -190,7 +166,6 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
     userId: "user-1",
     closed: false,
   };
-  // R42 live push: Z (generation 10)
   const newZ = {
     peerId: "peer-1",
     source: "screen",
@@ -201,7 +176,6 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
     closed: false,
   };
 
-  // Subscribe for X defers until we release it (simulates slow provider I/O)
   let releaseSubscribeX: (() => void) | undefined;
   const gateX = new Promise<void>((resolve) => {
     releaseSubscribeX = resolve;
@@ -225,7 +199,6 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
   }
   const sessionNarrowed = client as unknown as NarrowedSession;
 
-  // R40 heartbeat starts reconciliation: inserts X, awaits subscribe(X)
   let stale = false;
   const reconcilePromise = sessionNarrowed.reconcilePublications(
     [oldX],
@@ -234,35 +207,24 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
     () => [...registry.values()] as CloudflarePublication[],
   );
 
-  // While R40 is awaiting subscription I/O, R41 becomes authoritative:
-  // the retained registry mutates BEFORE the stale check runs.
   registry.set(newY.trackName, newY);
 
-  // R42 overtakes R41: Z replaces Y in the registry (canonical state is
-  // REPLACED, not appended — R42 snapshot is ONLY [Z]).
   registry.clear();
   registry.set(newZ.trackName, newZ);
 
-  // R40 subscribe resumes; convergence must read CURRENT canonical [Z]
-  // and retire both X and Y.
   stale = true;
   releaseSubscribeX?.();
 
   await reconcilePromise;
 
-  // Only Z survives; X and Y are fully retired.
   assert.equal(client.publications.has("screen-Z"), true);
   assert.equal(client.publications.has("screen-X"), false);
   assert.equal(client.publications.has("screen-Y"), false);
   assert.equal(client.subscribedTrackNames.has("screen-Z"), true);
   assert.equal(client.subscribedTrackNames.has("screen-X"), false);
   assert.equal(client.subscribedTrackNames.has("screen-Y"), false);
-  // The convergence re-subscribes Z idempotently; X and Y's subscriptions
-  // are gated away and their publications are never retained.
   assert.ok(subscribeCalls.includes("screen-X"));
   assert.ok(subscribeCalls.includes("screen-Z"));
-  // Y may or may not have been subscribed depending on timing, but X is
-  // confirmed and Z is confirmed.
   client.closeMedia();
 });
 
@@ -272,7 +234,6 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
   client.subscriptionsStarted = true;
   const registry = new Map<string, unknown>();
 
-  // R40 heartbeat snapshot: X (generation 8)
   const oldX = {
     peerId: "peer-1",
     source: "screen",
@@ -282,7 +243,6 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
     userId: "user-1",
     closed: false,
   };
-  // R41 live push: Y (generation 9)
   const newY = {
     peerId: "peer-1",
     source: "screen",
@@ -292,7 +252,6 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
     userId: "user-1",
     closed: false,
   };
-  // R42 live push: Z (generation 10)
   const newZ = {
     peerId: "peer-1",
     source: "screen",
@@ -303,7 +262,6 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
     closed: false,
   };
 
-  // Gates for blocking subscribes
   let releaseSubscribeX: (() => void) | undefined;
   let releaseSubscribeY: (() => void) | undefined;
   const gateX = new Promise<void>((resolve) => {
@@ -333,7 +291,6 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
   }
   const sessionNarrowed = client as unknown as NarrowedSession;
 
-  // R40 heartbeat starts reconciliation: inserts X, awaits subscribe(X)
   let stale = false;
   const reconcilePromise = sessionNarrowed.reconcilePublications(
     [oldX],
@@ -342,38 +299,28 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
     () => [...registry.values()] as CloudflarePublication[],
   );
 
-  // While R40 is awaiting subscription I/O, R41 becomes authoritative:
-  // the retained registry mutates BEFORE the stale check runs.
   registry.set(newY.trackName, newY);
 
-  // R40 subscribe resumes; R41 reconciliation begins and blocks on subscribe(Y)
   stale = true;
   releaseSubscribeX?.();
 
-  // Wait for R41's subscribe(Y) to start (it will block on gateY)
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  // R42 arrives: Z replaces Y in the registry (canonical state REPLACED, not appended)
   registry.clear();
   registry.set(newZ.trackName, newZ);
 
-  // R41 subscribe resumes; must abort and reconcile R42
   releaseSubscribeY?.();
 
   await reconcilePromise;
 
-  // Only Z survives; X and Y are fully retired.
   assert.equal(client.publications.has("screen-Z"), true);
   assert.equal(client.publications.has("screen-X"), false);
   assert.equal(client.publications.has("screen-Y"), false);
   assert.equal(client.subscribedTrackNames.has("screen-Z"), true);
   assert.equal(client.subscribedTrackNames.has("screen-X"), false);
   assert.equal(client.subscribedTrackNames.has("screen-Y"), false);
-  // The convergence re-subscribes Z idempotently; X and Y's subscriptions
-  // are gated away and their publications are never retained.
   assert.ok(subscribeCalls.includes("screen-X"));
   assert.ok(subscribeCalls.includes("screen-Z"));
-  // Y may have been subscribed but then aborted; X and Z are confirmed.
   client.closeMedia();
 });
 

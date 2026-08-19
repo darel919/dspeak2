@@ -35,10 +35,6 @@ export class SupabaseTokenIssuerMismatchError extends Error {
   }
 }
 
-/**
- * Extract the non-secret Supabase project reference from a Supabase URL.
- * Example: https://crmucqnebwlssqzthnek.supabase.co -> crmucqnebwlssqzthnek
- */
 export function supabaseProjectRef(url: string): string {
   try {
     return new URL(url).hostname.split(".")[0] || "";

@@ -209,9 +209,7 @@ export const useVoiceStore = defineStore("voice", () => {
               boundedStorageMap(parsed, MAX_USER_VOLUME_ENTRIES),
             );
           }
-        } catch (_) {
-          /* ignore */
-        }
+        } catch (_) {}
       }
       const persistedTrackVolumes = localStorage.getItem("voice.trackVolumes");
       if (persistedTrackVolumes)
@@ -222,9 +220,7 @@ export const useVoiceStore = defineStore("voice", () => {
             MAX_TRACK_VOLUME_ENTRIES,
           ),
         );
-    } catch (_) {
-      /* noop */
-    }
+    } catch (_) {}
   }
 
   if (typeof window !== "undefined") {
@@ -233,9 +229,7 @@ export const useVoiceStore = defineStore("voice", () => {
       (v) => {
         try {
           localStorage.setItem(STORAGE_KEYS.voiceMicMuted, String(!!v));
-        } catch (_) {
-          /* noop */
-        }
+        } catch (_) {}
       },
       { immediate: true },
     );
@@ -244,9 +238,7 @@ export const useVoiceStore = defineStore("voice", () => {
       (v) => {
         try {
           localStorage.setItem(STORAGE_KEYS.voiceDeafened, String(!!v));
-        } catch (_) {
-          /* noop */
-        }
+        } catch (_) {}
       },
       { immediate: true },
     );
@@ -260,9 +252,7 @@ export const useVoiceStore = defineStore("voice", () => {
           }
           localStorage.setItem("voice.userVolumes", JSON.stringify(bounded));
           reportBrowserStorageMetric("voice.userVolumes", bounded);
-        } catch (_) {
-          /* noop */
-        }
+        } catch (_) {}
       },
       { deep: true },
     );
@@ -276,9 +266,7 @@ export const useVoiceStore = defineStore("voice", () => {
           }
           localStorage.setItem("voice.trackVolumes", JSON.stringify(bounded));
           reportBrowserStorageMetric("voice.trackVolumes", bounded);
-        } catch (_) {
-          /* noop */
-        }
+        } catch (_) {}
       },
       { deep: true },
     );
@@ -603,9 +591,7 @@ export const useVoiceStore = defineStore("voice", () => {
               });
             }
           }
-        } catch (_) {
-          /* noop */
-        }
+        } catch (_) {}
       },
       { immediate: true, deep: true },
     );

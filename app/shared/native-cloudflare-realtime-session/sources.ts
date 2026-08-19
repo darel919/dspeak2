@@ -675,7 +675,6 @@ export class NativeCloudflareSourcesMethods {
       previous.paused = this.sourceTransmission.get(source) === false;
       if (variantId) this.producerVariants.set(trackKey, previous);
       else this.producers.set(source, previous);
-      // Always re-announce for both audio and video (not just video)
       if (
         !this.send?.({
           type: "cloudflare-publication",
@@ -1054,11 +1053,8 @@ export class NativeCloudflareSourcesMethods {
   }: {
     connectionEpoch: number;
   }) {
-    // Update control connection epoch for new control-plane identity
     this.controlConnectionEpoch = connectionEpoch;
 
-    // Re-send cloudflare-publication for all local producers + variants with the new epoch
-    // Single pass over both producers and producerVariants to avoid double-announcement
     const allProducers = [
       ...this.producers.values(),
       ...this.producerVariants.values(),
@@ -1087,7 +1083,6 @@ export class NativeCloudflareSourcesMethods {
       const receivers = p.receivers || [];
       const emergency = p.emergency === true;
       const score = p.score;
-      // Resend publication metadata with updated controlConnectionEpoch
       const sent = this.send?.({
         type: "cloudflare-publication",
         data: {

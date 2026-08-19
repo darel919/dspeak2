@@ -172,9 +172,6 @@ export class RemoteMediaRegistry {
     }
     if (!entry?.track) return;
     const trackEntry = { ...entry, track: entry.track };
-    // ontrack proves a MediaStreamTrack exists, not that RTP is flowing or
-    // frames are decodable. Stay at transport-connected until real decode
-    // evidence (canplay/first-frame) arrives via markFirstFrame.
     trackEntry.phase = "transport-connected" as const;
     this.remoteSourcePhases.set(entry.key, "transport-connected");
     if (entry.track.kind === "video") {
@@ -227,10 +224,6 @@ export class RemoteMediaRegistry {
     return true;
   }
 
-  // Real convergence evidence: the receiver decoded and presented a frame
-  // (canplay/loadedmetadata). Promotes the phase from transport-connected to
-  // renderable. Until this fires, the FSM stays at transport-connected even
-  // though the track exists.
   markFirstFrame(key: string) {
     const phase = this.remoteSourcePhases.get(key);
     if (

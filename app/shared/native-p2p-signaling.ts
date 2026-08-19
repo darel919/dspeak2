@@ -238,8 +238,6 @@ export async function applyPeerSignal(
     const generation = Number(sourceSignal.generation) || 0;
     const previousGeneration =
       mesh.remoteSourceGenerations?.get(sourceKey) || 0;
-    // Fence by generation: a stale announce must not overwrite a newer
-    // incarnation of the same logical source.
     if (generation > 0 && generation < previousGeneration) return;
     mesh.remoteSources.set(sourceKey, source);
     mesh.remoteSourceOwners.set(sourceKey, ownerSource);
@@ -291,8 +289,6 @@ export async function applyPeerSignal(
     for (const [key, mappedSource] of mesh.remoteSources) {
       if (!key.startsWith(`${state.peerId}:`) || mappedSource !== source)
         continue;
-      // Fence by participant + source + generation: a removal for an older
-      // incarnation must not retire the current incarnation of this source.
       const currentGeneration = mesh.remoteSourceGenerations?.get(key) || 0;
       if (removedGeneration > 0 && currentGeneration > removedGeneration)
         continue;

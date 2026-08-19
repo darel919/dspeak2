@@ -58,7 +58,8 @@ export async function getMediaControlBootstrap({
   deviceId: string;
   roomId: string;
 }) {
-  const headers: Record<string, string> = {
+  type BootstrapHeaders = { "Content-Type": string; Authorization?: string };
+  const headers: BootstrapHeaders = {
     "Content-Type": "application/json",
   };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
@@ -76,7 +77,7 @@ export async function getMediaControlBootstrap({
 export function buildMediaControlSocketUrl({
   mediaControlUrl,
   channelId,
-  ticket,
+  ticket: _ticket,
 }: {
   mediaControlUrl: string;
   channelId: string;

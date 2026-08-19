@@ -18,7 +18,6 @@ export interface RemoteMediaEntry extends RegistryEntry {
   track?: MediaStreamTrack | null;
   stream?: MediaStream | null;
   receiving?: boolean;
-  // Full receiver FSM for each logical remote source generation
   connectionEpoch?: number;
   sourceGeneration?: number;
   phase?:

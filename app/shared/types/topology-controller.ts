@@ -73,6 +73,7 @@ export interface TopologyNativeP2pOptions {
     track: MediaStreamTrack,
   ) => Record<string, unknown>;
   mediaCapabilities?: ParticipantMediaCapabilities | null;
+  getControlConnectionEpoch: () => number;
 }
 
 export interface TopologyProviderActionsContext {
@@ -139,6 +140,7 @@ export interface TopologyResourceHelpersContext {
   topologyState: Ref<TopologyState>;
   transportReady: Ref<boolean>;
   updateP2pStats: (data: unknown[]) => unknown;
+  getConnectionEpoch: () => number;
 }
 export interface TopologyState {
   mode: string;

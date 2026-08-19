@@ -91,8 +91,6 @@ export function setupMediaMessageHandlers({
       if (data.accepted === false) {
         const error = createOperationError(data);
         onOperationError?.(operationId, error);
-        // Adopt canonical metadata before reconciliation so retries are
-        // fenced against the correct incarnation.
         const nackRoomRevision =
           typeof data.roomRevision === "string" ? data.roomRevision : null;
         if (nackRoomRevision) onRoomRevisionApplied?.(nackRoomRevision);
@@ -170,7 +168,6 @@ export function setupMediaMessageHandlers({
     }
     if (typeof data.roomRevision === "string")
       onRoomRevisionApplied?.(data.roomRevision);
-    // state-nack counts as heartbeat ACK for liveness
     if (typeof data.sequence === "number") acknowledgeHeartbeat(data);
     if (typeof data.connectionEpoch === "number") {
       onConnectionEpochUpdated?.(data.connectionEpoch);
@@ -209,7 +206,6 @@ export function setupMediaMessageHandlers({
       );
     if (typeof data.roomRevision === "string")
       onRoomRevisionApplied?.(data.roomRevision);
-    // Also trigger snapshot request for NACK codes
     if (
       data.code === "ROOM_REVISION_CONFLICT" ||
       data.code === "STALE_CONNECTION_EPOCH"
@@ -218,10 +214,8 @@ export function setupMediaMessageHandlers({
     if (typeof data.connectionEpoch === "number") {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
-    // Use typed failure taxonomy to determine scope
     const scope = getFailureScope(data.code as string);
     const retryable = isFailureRetryable(data.code as string);
-    // Only throw/fail session for control-session or protocol-fatal scope
     if (scope === "control-session" || scope === "protocol-fatal") {
       const error = new Error(
         typeof data.error === "string" ? data.error : "Media control error",
@@ -229,8 +223,6 @@ export function setupMediaMessageHandlers({
       if (typeof data.code === "string") error.code = data.code;
       throw error;
     }
-    // For operation/reconciliation scope, do not throw - let caller handle
-    // The onOperationError callback was already invoked above
   });
   registerHandler("provider-ticket", onProviderTicket);
   registerHandler("provider-failure", (data: MediaMessage) => {
@@ -248,7 +240,6 @@ export function setupMediaMessageHandlers({
       reason: data?.reason,
     });
     onProviderRecovering?.(data);
-    // Trigger topology controller to attempt return to recovered provider
     onProviderRecoveryTopology?.(data);
   });
   registerHandler("participant-voice-state", (data: MediaMessage) => {

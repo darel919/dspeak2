@@ -56,13 +56,11 @@ export class CloudflareSourcesMethods {
       try {
         await current.sender.replaceTrack(entry.track);
         this.assertCurrentSession(peerConnection, generation);
-        // Configure sender and transmission state FIRST, before mutating canonical state
         await this.configureVideoSender(current.sender, entry);
         await this.setSourceTransmission(
           entry.source,
           this.sourceTransmission.get(entry.source) ?? true,
         );
-        // All validations passed - now mutate canonical state and announce
         current.track = entry.track;
         current.ownerSource = entry.ownerSource || null;
         current.generation = entry.generation;
@@ -187,16 +185,29 @@ export class CloudflareSourcesMethods {
         this.peerConnection === peerConnection &&
         this.sessionGeneration === generation
       ) {
-        // Only close media if the entire session is actually invalid
-        // For individual source failures, we should only mark that source as failed
-        // rather than destroying all media
-        if (
-          error instanceof Error &&
-          error.message.includes("MEDIA_SESSION_CLOSED")
-        ) {
-          this.closeMedia();
+        if (sender) {
+          try {
+            const transceiver = peerConnection
+              .getTransceivers()
+              .find((t) => t.sender === sender);
+            if (transceiver && transceiver.direction !== "recvonly") {
+              transceiver.direction = "inactive";
+            }
+            peerConnection.removeTrack(sender);
+          } catch {}
         }
-        // Otherwise, just mark the source as failed and let the recovery layer handle it
+        if (peerConnection.signalingState !== "stable") {
+          try {
+            await peerConnection.setLocalDescription({ type: "rollback" });
+          } catch {}
+        }
+        this.sourceOperations.delete(entry.source);
+      }
+      if (
+        error instanceof Error &&
+        error.message.includes("MEDIA_SESSION_CLOSED")
+      ) {
+        this.closeMedia();
       }
       throw error;
     }
@@ -206,16 +217,13 @@ export class CloudflareSourcesMethods {
     this: CloudflareSessionLike,
     { connectionEpoch }: { connectionEpoch: number },
   ) {
-    // Update control connection epoch for new control-plane identity
     this.controlConnectionEpoch = connectionEpoch;
 
-    // Re-send cloudflare-publication for all local producers with the new epoch
     for (const [source, producer] of this.producers) {
       const trackName = producer.trackName;
       if (!trackName) continue;
       const ownerSource = producer.ownerSource || null;
       const generation = producer.generation || 0;
-      // Resend publication metadata with updated controlConnectionEpoch
       const sent = this.send({
         type: "cloudflare-publication",
         data: {
@@ -415,16 +423,12 @@ export class CloudflareSourcesMethods {
         this.peerConnection === peerConnection &&
         this.sessionGeneration === generation
       ) {
-        // Only close media if the entire session is actually invalid
-        // For individual source failures, we should only mark that source as failed
-        // rather than destroying all media
         if (
           error instanceof Error &&
           error.message.includes("MEDIA_SESSION_CLOSED")
         ) {
           this.closeMedia();
         }
-        // Otherwise, just mark the source as failed and let the recovery layer handle it
       }
       throw error;
     }

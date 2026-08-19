@@ -235,9 +235,7 @@ export class CloudflareNegotiationMethods {
       const publication = data as CloudflarePublication;
       publication.trackName = trackName;
 
-      // Self-publication fence: publishers must never subscribe to themselves
       if (publication.peerId === this.localPeerId) {
-        // Still track our own publication metadata locally for reference
         if (publication.closed === true) {
           this.publications.delete(trackName);
         } else {
@@ -246,9 +244,6 @@ export class CloudflareNegotiationMethods {
         return true;
       }
 
-      // Generation/epoch fencing: ignore stale publications for retired generations
-      // Compare epoch FIRST, then generation. Epoch dominates (control-plane identity),
-      // generation breaks ties within the same epoch.
       const existingPublication = this.publications.get(trackName);
       if (existingPublication) {
         const incomingEpoch = Number(publication.connectionEpoch || 0);
@@ -259,7 +254,7 @@ export class CloudflareNegotiationMethods {
           incomingEpoch < currentEpoch ||
           (incomingEpoch === currentEpoch && incomingGen < currentGen)
         ) {
-          return true; // stale publication, ignore
+          return true;
         }
       }
 
@@ -300,13 +295,6 @@ export class CloudflareNegotiationMethods {
   ) {
     if (!Array.isArray(publications)) return;
 
-    // Revision-stable convergence loop: keep reconciling until the snapshot
-    // whose revision produced the provider state is still current when the
-    // pass completes. The per-pass fence compares the LIVE canonical revision
-    // against the snapshot's revision. A revision advance (whether content
-    // changed or not) aborts the pass and the loop re-reads through the LAZY
-    // getter. This ensures provider state is always produced from a revision
-    // that remains current through completion.
     let snapshot = publications;
     let snapshotRevision = getLatestRevision?.() ?? null;
     for (;;) {
@@ -316,8 +304,6 @@ export class CloudflareNegotiationMethods {
             if (latestRevision !== null && snapshotRevision !== null) {
               return latestRevision !== snapshotRevision;
             }
-            // Fallback: if no revision getter, use the provided isStale or
-            // fall back to content comparison (weaker but safe).
             const latest = getLatestCanonical();
             if (!Array.isArray(latest)) return true;
             return !publicationSnapshotsEqual(latest, snapshot);
@@ -326,7 +312,6 @@ export class CloudflareNegotiationMethods {
       if (this.reconcilePublicationsOnce) {
         await this.reconcilePublicationsOnce(snapshot, passStale);
       } else {
-        // Fallback for sessions that don't implement the once method
         await this.reconcilePublications(
           snapshot,
           undefined,
@@ -339,14 +324,10 @@ export class CloudflareNegotiationMethods {
       if (!getLatestCanonical) return;
       const latest = getLatestCanonical();
       if (!Array.isArray(latest)) return;
-      // The revision just applied is still the current canonical revision:
-      // converged. A revision advance (even content-identical) requires
-      // re-applying to ensure no newer mutations were missed.
       const latestRevision = getLatestRevision?.();
       if (latestRevision !== null && snapshotRevision !== null) {
         if (latestRevision === snapshotRevision) return;
       } else {
-        // Fallback to content comparison when revision unavailable
         if (publicationSnapshotsEqual(latest, snapshot)) return;
       }
       snapshot = latest;
@@ -359,7 +340,6 @@ export class CloudflareNegotiationMethods {
     publications: CloudflarePublication[],
     isStale?: () => boolean,
   ) {
-    // Build authoritative server publication map by trackName
     const serverPublications = new Map<string, Record<string, unknown>>();
     for (const pub of publications) {
       const trackName = String(pub.trackName || "");
@@ -367,21 +347,17 @@ export class CloudflareNegotiationMethods {
       serverPublications.set(trackName, pub);
     }
 
-    // Track which local publications are in the server snapshot
     const seenTrackNames = new Set(serverPublications.keys());
 
-    // 1. Process authoritative additions/repairs from server
     for (const [trackName, pub] of serverPublications) {
       const existingPublication = this.publications.get(trackName);
 
       if (pub.closed === true) {
-        // Server explicitly closed this publication - process if not stale
         if (existingPublication) {
           const incomingEpoch = Number(pub.connectionEpoch || 0);
           const incomingGen = Number(pub.generation || 0);
           const currentEpoch = Number(existingPublication.connectionEpoch || 0);
           const currentGen = Number(existingPublication.generation || 0);
-          // Only process if incoming is not stale
           if (
             incomingEpoch > currentEpoch ||
             (incomingEpoch === currentEpoch && incomingGen >= currentGen)
@@ -404,8 +380,6 @@ export class CloudflareNegotiationMethods {
           }
         }
       } else {
-        // Addition/repair - update with authoritative server state
-        // Check incarnation to prevent delayed heartbeat from downgrading newer publications
         const existingPublication = this.publications.get(trackName);
         if (existingPublication) {
           const incomingEpoch = Number(pub.connectionEpoch || 0);
@@ -416,7 +390,6 @@ export class CloudflareNegotiationMethods {
             incomingEpoch < currentEpoch ||
             (incomingEpoch === currentEpoch && incomingGen < currentGen)
           ) {
-            // Stale publication from delayed heartbeat - ignore
             continue;
           }
         }
@@ -426,21 +399,13 @@ export class CloudflareNegotiationMethods {
             pub as CloudflarePublication,
             this.sessionGeneration,
           );
-        // A newer publication revision may have been applied while awaiting
-        // subscription I/O. Abort this pass: the convergence loop re-reads
-        // the newest retained canonical snapshot, so the provider converges
-        // exactly onto the newer state (no duplicate feed, no ghost delete).
         if (isStale?.()) return;
       }
     }
 
-    // 2. Detect local publications MISSING from server snapshot (ghost tracks)
-    // These must be retired locally even without explicit closed=true from server.
-    // Fence again: the removal phase is the destructive one.
     for (const [trackName, _localPub] of this.publications) {
       if (isStale?.()) return;
       if (!seenTrackNames.has(trackName)) {
-        // Local publication not in server snapshot - retire it
         this.publications.delete(trackName);
         this.subscribedTrackNames.delete(trackName);
         for (const [mid, p] of this.remoteByMid) {
@@ -476,9 +441,6 @@ function publicationSnapshotsEqual(
     if (!trackName) return false;
     const other = rightByTrack.get(trackName);
     if (!other) return false;
-    // Compare the incarnation, not reference identity: the digest snapshot
-    // entries and the registry entries are distinct objects that describe
-    // the same authoritative publication.
     if (
       Number(publication.connectionEpoch || 0) !==
         Number(other.connectionEpoch || 0) ||

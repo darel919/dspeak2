@@ -34,6 +34,7 @@ export class NativeP2pMesh {
     getSenderOptions,
     getAudioStereo,
     mediaCapabilities,
+    getControlConnectionEpoch,
   }: NativeP2pMeshOptions) {
     this.configuration = {
       iceServers: directIceServers(iceServers),
@@ -48,6 +49,7 @@ export class NativeP2pMesh {
     this.onSnapshot = onSnapshot;
     this.getSenderOptions = getSenderOptions;
     this.getAudioStereo = getAudioStereo;
+    this.getControlConnectionEpoch = getControlConnectionEpoch;
     this.mediaCapabilities = mediaCapabilities || null;
     this.connections = new Map();
     this.localSources = new Map();

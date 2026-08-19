@@ -341,10 +341,6 @@ export class NativeMediaEngine extends MediaEngine {
     return emitQoe(this, stats);
   }
 
-  /**
-   * Returns capabilities reported by the native runtime, without enabling a
-   * native media path. This is useful for diagnostics and feature gating.
-   */
   async getNativeCapabilities() {
     return getNativeCapabilities(this);
   }

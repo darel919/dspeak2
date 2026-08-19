@@ -5,9 +5,6 @@ import type {
 } from "../shared/types/composables.ts";
 
 export const useChatUtils = () => {
-  /**
-   * Format a timestamp for display in chat
-   */
   function formatChatTime(dateString: string | number | Date) {
     const date = new Date(dateString);
     const now = new Date();
@@ -34,13 +31,6 @@ export const useChatUtils = () => {
     }
   }
 
-  /**
-   * Format a timestamp for chat display:
-   * - Today: HH:mm
-   * - Yesterday: ddd h:mmA (e.g. Thu 6.52pm)
-   * - Last week: d/M (e.g. 8/8)
-   * - Else: yyyy/M/d
-   */
   function formatChatDisplayTime(dateString: string | number | Date) {
     const date = new Date(dateString);
     const now = new Date();
@@ -81,9 +71,6 @@ export const useChatUtils = () => {
     );
   }
 
-  /**
-   * Format a full date for detailed views
-   */
   function formatFullDate(dateString: string | number | Date) {
     const date = new Date(dateString);
     return date.toLocaleString("en-US", {
@@ -97,17 +84,10 @@ export const useChatUtils = () => {
     });
   }
 
-  /**
-   * Get the protected avatar URL when a profile has one.
-   * Missing avatars are rendered as initials by the caller.
-   */
   function getAvatarUrl(avatarPath: string | null | undefined) {
     return profileAssetUrl(avatarPath) || "";
   }
 
-  /**
-   * Validate message content
-   */
   function validateMessage(content: unknown) {
     if (!content || typeof content !== "string") {
       return { valid: false, error: "Message content is required" };
@@ -128,17 +108,11 @@ export const useChatUtils = () => {
     return { valid: true, content: trimmed };
   }
 
-  /**
-   * Generate a temporary message ID for optimistic updates
-   */
   function generateTempId(userId = "") {
     const ts = Date.now();
     return `msg_${userId ? userId + "_" : ""}${ts}`;
   }
 
-  /**
-   * Check if user is mentioned in message
-   */
   function isUserMentioned(message: string, userId: string) {
     if (!message || !userId) return false;
 
@@ -146,9 +120,6 @@ export const useChatUtils = () => {
     return mentionPattern.test(message);
   }
 
-  /**
-   * Check if two messages should be grouped (same sender, close in time)
-   */
   function shouldGroupMessages(
     prevMessage: ChatMessageInput,
     currentMessage: ChatMessageInput,
@@ -170,9 +141,6 @@ export const useChatUtils = () => {
     return true;
   }
 
-  /**
-   * Get user display name with fallback
-   */
   function getUserDisplayName(user: ChatUserInput, currentUserId: string) {
     if (!user) return "Unknown User";
 
@@ -181,9 +149,6 @@ export const useChatUtils = () => {
     return user.name || user.email || `User ${user.id.slice(0, 8)}`;
   }
 
-  /**
-   * Copy text to clipboard with fallback
-   */
   async function copyToClipboard(text: string) {
     if (!import.meta.client) return false;
 
@@ -199,9 +164,6 @@ export const useChatUtils = () => {
     }
   }
 
-  /**
-   * Debounce function for typing indicators
-   */
   function debounce(func: (...args: unknown[]) => void, delay: number) {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     return (...args: unknown[]) => {

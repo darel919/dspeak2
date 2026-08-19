@@ -56,14 +56,13 @@ export function createHybridMediaSessionLifecycle({
   let lifecycleGeneration = 0;
   let activeConnectionGeneration = 0;
   let reconcileTimer: ReturnType<typeof setInterval> | null = null;
-  let sessionConnectionEpoch = 1;
 
   function getConnectionEpoch() {
-    return sessionConnectionEpoch;
+    return mediaSessionSetup.getConnectionEpoch();
   }
 
   function setConnectionEpoch(epoch: number) {
-    sessionConnectionEpoch = epoch;
+    mediaSessionSetup.setConnectionEpoch(epoch);
   }
 
   function startReconciliation() {
@@ -362,22 +361,10 @@ export function createHybridMediaSessionLifecycle({
         );
         sendParticipantVoiceState();
 
-        // Complete any pending retirements using canonical snapshot from reconnect.
-        // The server's topology snapshot in heartbeat-ack or hello contains
-        // sourceStates that can confirm inactive retirements we sent before disconnect.
-        // The media-source-controller has a pendingRetirements map tracking these.
-        // We trigger a reconciliation check by sending the current source state
-        // which will converge any pending tombstones against canonical state.
         if (typeof mediaSessionSetup.processPendingRetirements === "function") {
           void mediaSessionSetup.processPendingRetirements().catch(() => {});
         }
 
-        // Re-announce existing local Cloudflare publications after reconnect.
-        // A fresh control WebSocket gets a new random peerId, so the server
-        // replaces the participant session and retires old publications.
-        // We must re-announce all live local sources to the new connectionEpoch.
-        // Use explicit re-announcement (sends existing publication metadata with
-        // new controlConnectionEpoch) rather than addSource() which only does replaceTrack().
         const sfu = mediaSessionSetup.getSfu?.();
         if (
           sfu &&
@@ -422,8 +409,6 @@ export function createHybridMediaSessionLifecycle({
     );
     messageHandlers.set("cloudflare-publication-available", (data: unknown) => {
       mediaSessionSetup.queueCloudflarePublication(data);
-      // Update lastAppliedPublicationRevision from live publication push.
-      // Media-control emits the revision as a number; accept both forms.
       const rawRevision =
         data && typeof data === "object" && "publicationRevision" in data
           ? data.publicationRevision

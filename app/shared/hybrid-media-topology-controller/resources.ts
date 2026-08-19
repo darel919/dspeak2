@@ -33,6 +33,7 @@ export function createTopologyResourceHelpers({
   topologyState,
   transportReady,
   updateP2pStats,
+  getConnectionEpoch,
 }: TopologyResourceHelpersContext) {
   function ensureP2p() {
     const existing = getP2pMesh();
@@ -64,6 +65,7 @@ export function createTopologyResourceHelpers({
         updateP2pStats(Array.isArray(snapshot) ? snapshot : []),
       getAudioStereo,
       mediaCapabilities: getMediaCapabilities(),
+      getControlConnectionEpoch: getConnectionEpoch,
       getSenderOptions: (source, track) => {
         if (track.kind === "audio") {
           const options = buildVoiceProducerOptions(
@@ -164,8 +166,6 @@ export function createTopologyResourceHelpers({
       retryAfterMs: data.retryAfterMs,
       reason,
     });
-    // Queue a topology check - the provider will be retried when alarm fires on server
-    // and sends a new route-commit with the recovered provider
   }
 
   function handleP2pQualification(data: Record<string, unknown> = {}) {

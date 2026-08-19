@@ -154,6 +154,7 @@ export function createHybridMediaSessionRuntime({
       resolveOperationAck,
       rejectOperationAck,
       getConnectionEpoch,
+      setConnectionEpoch,
       getLastAppliedRoomRevision,
       getLastAppliedPublicationRevision,
       setLastAppliedPublicationRevision,

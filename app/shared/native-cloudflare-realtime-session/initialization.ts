@@ -139,8 +139,6 @@ export class NativeCloudflareInitializationMethods {
           this._closeConsumer(entry);
       return true;
     }
-    // Generation/epoch fencing: compare epoch FIRST, then generation.
-    // Epoch dominates (control-plane identity), generation breaks ties within the same epoch.
     const existingPublication = this.publications.get(trackName);
     if (existingPublication) {
       const incomingEpoch = Number(data.connectionEpoch || 0);
@@ -151,7 +149,7 @@ export class NativeCloudflareInitializationMethods {
         incomingEpoch < currentEpoch ||
         (incomingEpoch === currentEpoch && incomingGen < currentGen)
       ) {
-        return true; // stale publication, ignore
+        return true;
       }
     }
     const publication = { ...data, trackName };
@@ -171,12 +169,6 @@ export class NativeCloudflareInitializationMethods {
   ) {
     if (!Array.isArray(publications)) return;
 
-    // Revision-stable convergence loop: same semantics as the browser
-    // Cloudflare session. The per-pass fence compares the LIVE retained
-    // canonical content against the snapshot being applied, so a newer
-    // revision that CHANGED content aborts the pass and the loop re-reads
-    // through the LAZY getter. A revision-only advance (content unchanged)
-    // does not abort: the provider state already matches canonical content.
     let snapshot = publications;
     let snapshotRevision = getLatestRevision?.() ?? null;
     for (;;) {
@@ -186,8 +178,6 @@ export class NativeCloudflareInitializationMethods {
             if (latestRevision !== null && snapshotRevision !== null) {
               return latestRevision !== snapshotRevision;
             }
-            // Fallback: if no revision getter, use the provided isStale or
-            // fall back to content comparison (weaker but safe).
             const latest = getLatestCanonical();
             if (!Array.isArray(latest)) return true;
             return !publicationSnapshotsEqual(latest, snapshot);
@@ -196,7 +186,6 @@ export class NativeCloudflareInitializationMethods {
       if (this.reconcilePublicationsOnce) {
         await this.reconcilePublicationsOnce(snapshot, passStale);
       } else {
-        // Fallback for sessions that don't implement the once method
         await this.reconcilePublications(
           snapshot,
           undefined,
@@ -209,14 +198,10 @@ export class NativeCloudflareInitializationMethods {
       if (!getLatestCanonical) return;
       const latest = getLatestCanonical();
       if (!Array.isArray(latest)) return;
-      // The content just applied is still the current canonical content:
-      // converged, even when the digest revision lagged behind (a
-      // revision-only advance does not require re-applying).
       const latestRevision = getLatestRevision?.();
       if (latestRevision !== null && snapshotRevision !== null) {
         if (latestRevision === snapshotRevision) return;
       } else {
-        // Fallback to content comparison when revision unavailable
         if (publicationSnapshotsEqual(latest, snapshot)) return;
       }
       snapshot = latest;
@@ -229,7 +214,6 @@ export class NativeCloudflareInitializationMethods {
     publications: CloudflarePublication[],
     isStale?: () => boolean,
   ) {
-    // Build authoritative server publication map by trackName
     const serverPublications = new Map<string, Record<string, unknown>>();
     for (const pub of publications) {
       const trackName = String(pub.trackName || "");
@@ -237,21 +221,17 @@ export class NativeCloudflareInitializationMethods {
       serverPublications.set(trackName, pub);
     }
 
-    // Track which local publications are in the server snapshot
     const seenTrackNames = new Set(serverPublications.keys());
 
-    // 1. Process authoritative additions/repairs from server
     for (const [trackName, pub] of serverPublications) {
       const existingPublication = this.publications.get(trackName);
 
       if (pub.closed === true) {
-        // Server explicitly closed this publication - process if not stale
         if (existingPublication) {
           const incomingEpoch = Number(pub.connectionEpoch || 0);
           const incomingGen = Number(pub.generation || 0);
           const currentEpoch = Number(existingPublication.connectionEpoch || 0);
           const currentGen = Number(existingPublication.generation || 0);
-          // Only process if incoming is not stale
           if (
             incomingEpoch > currentEpoch ||
             (incomingEpoch === currentEpoch && incomingGen >= currentGen)
@@ -271,8 +251,6 @@ export class NativeCloudflareInitializationMethods {
           }
         }
       } else {
-        // Addition/repair - update with authoritative server state
-        // Check incarnation to prevent delayed heartbeat from downgrading newer publications
         const existingPublication = this.publications.get(trackName);
         if (existingPublication) {
           const incomingEpoch = Number(pub.connectionEpoch || 0);
@@ -283,28 +261,19 @@ export class NativeCloudflareInitializationMethods {
             incomingEpoch < currentEpoch ||
             (incomingEpoch === currentEpoch && incomingGen < currentGen)
           ) {
-            // Stale publication from delayed heartbeat - ignore
             continue;
           }
         }
         this.publications.set(trackName, { ...pub, trackName });
         if (this.sessionId && this.subscriptionsStarted)
           await this.subscribe({ ...pub, trackName });
-        // A newer publication revision may have been applied while awaiting
-        // subscription I/O. Abort this pass: the convergence loop re-reads
-        // the newest retained canonical snapshot, so the provider converges
-        // exactly onto the newer state (no duplicate feed, no ghost delete).
         if (isStale?.()) return;
       }
     }
 
-    // 2. Detect local publications MISSING from server snapshot (ghost tracks)
-    // These must be retired locally even without explicit closed=true from server.
-    // Fence again: the removal phase is the destructive one.
     for (const [trackName, _localPub] of this.publications) {
       if (isStale?.()) return;
       if (!seenTrackNames.has(trackName)) {
-        // Local publication not in server snapshot - retire it
         this.publications.delete(trackName);
         this.subscribedTrackNames.delete(trackName);
         for (const [mid, publication] of this.remoteByMid) {
@@ -337,9 +306,6 @@ function publicationSnapshotsEqual(
     if (!trackName) return false;
     const other = rightByTrack.get(trackName);
     if (!other) return false;
-    // Compare the incarnation, not reference identity: the digest snapshot
-    // entries and the registry entries are distinct objects that describe
-    // the same authoritative publication.
     if (
       Number(publication.connectionEpoch || 0) !==
         Number(other.connectionEpoch || 0) ||

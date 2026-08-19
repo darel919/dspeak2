@@ -101,6 +101,7 @@ export interface NativeP2pMeshOptions {
   ) => Record<string, unknown> | null;
   getAudioStereo: (source: string) => boolean;
   mediaCapabilities?: ParticipantMediaCapabilities | null;
+  getControlConnectionEpoch: () => number;
 }
 
 export interface NativeP2pSignalingMesh {
@@ -128,6 +129,7 @@ export interface NativeP2pSignalingMesh {
     source: string,
     receiving: boolean,
   ) => Promise<unknown>;
+  getControlConnectionEpoch: () => number;
 }
 
 export interface NativeP2pMeshSurface

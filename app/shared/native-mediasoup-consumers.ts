@@ -612,9 +612,6 @@ export function shouldReceive(
 ) {
   const key = `${String(userId)}:${String(source)}`;
   if (session.remoteReceiving.has(key)) return session.remoteReceiving.get(key);
-  // Paired screen-audio consumers stay paused until the user's client is
-  // actually ready to render them — consuming before the video feed is
-  // attached wastes bandwidth and decoder cycles.
   return !isPairedScreenAudio({ source, ownerSource });
 }
 

@@ -139,7 +139,6 @@ describe("stale heartbeat regression", () => {
       publicationRevision: 40,
     };
 
-    // R40: Initial heartbeat with X
     await heartbeatAckHandler?.({
       sequence: 10,
       connectionEpoch: 1,
@@ -151,8 +150,6 @@ describe("stale heartbeat regression", () => {
     assert.equal(reg.values()[0].trackName, "screen-X");
     assert.equal(lastApplied.value, "40");
 
-    // R41: Live close push arrives (simulating server pushing close)
-    // In real flow this comes via cloudflare-publication-available
     const closeX: TestPublication = {
       ...oldX,
       closed: true,
@@ -162,7 +159,6 @@ describe("stale heartbeat regression", () => {
 
     assert.equal(reg.values().length, 0);
 
-    // R41: Heartbeat digest empty
     await heartbeatAckHandler?.({
       sequence: 11,
       connectionEpoch: 1,
@@ -173,19 +169,13 @@ describe("stale heartbeat regression", () => {
     assert.equal(reg.values().length, 0);
     assert.equal(lastApplied.value, "41");
 
-    // DELAYED R40 HEARTBEAT ARRIVES
-    // This used to cause onPublicationsDigest to mutate registry BEFORE revision check
     await heartbeatAckHandler?.({
-      sequence: 10, // stale sequence, but we're testing the digest path
+      sequence: 10,
       connectionEpoch: 1,
       publishedSourcesDigest: [oldX],
       publicationRevision: 40,
     });
 
-    // Registry should STILL be empty because:
-    // 1. The real handler path ONLY calls handlePublicationsDigest
-    // 2. handlePublicationsDigest checks revision fence (40 < 41) and returns early
-    // 3. No preliminary mutation occurs
     assert.equal(
       reg.values().length,
       0,
@@ -269,8 +259,6 @@ describe("media source controller tombstone resolution", () => {
       getLocalParticipantKey: () => localParticipantKey,
     });
 
-    // Set up FSM for local "screen" source at generation 7 (inactive, reconciling)
-    // This simulates a tombstone state where we stopped sharing but haven't completed cleanup
     controller.setSourcePhase("screen", "stopping", "sfu");
     let fsm = controller.sourceFsms.get("screen");
     if (fsm) {
@@ -285,10 +273,6 @@ describe("media source controller tombstone resolution", () => {
       controller.sourceFsms.set("screen", { ...fsm, phase: "reconciling" });
     }
 
-    // Simulate STALE_SOURCE_GENERATION NACK with canonical state showing:
-    // - LOCAL participant: screen generation 7 INACTIVE (our tombstone)
-    // - REMOTE participant (first in array): screen generation 6 ACTIVE (their active screen)
-    // The OLD code would grab the remote participant's state and incorrectly complete
     const payload = {
       source: "screen",
       expectedGeneration: 7,
@@ -326,14 +310,12 @@ describe("media source controller tombstone resolution", () => {
       payload,
     );
 
-    // Should complete the retirement because canonical state for LOCAL participant shows inactive
     assert.equal(
       result,
       true,
       "Should complete retirement when local participant is inactive",
     );
 
-    // FSM should become idle
     const currentFsm = controller.sourceFsms.get("screen");
     assert.ok(currentFsm, "FSM should exist");
     assert.equal(
@@ -343,8 +325,6 @@ describe("media source controller tombstone resolution", () => {
     );
     assert.equal(currentFsm.generation, 7, "Generation should not change");
 
-    // Now test the inverse: local inactive (gen 7), remote active (gen 99)
-    // Reset FSM
     controller.setSourcePhase("screen", "stopping", "sfu");
     fsm = controller.sourceFsms.get("screen");
     if (fsm) {
@@ -396,14 +376,12 @@ describe("media source controller tombstone resolution", () => {
       payload2,
     );
 
-    // Should complete the retirement because LOCAL participant is inactive
     assert.equal(
       result2,
       true,
       "Should complete retirement when local participant is inactive (remote active)",
     );
 
-    // FSM should become idle
     const currentFsm2 = controller.sourceFsms.get("screen");
     assert.ok(currentFsm2, "FSM should exist");
     assert.equal(
@@ -454,8 +432,6 @@ describe("media source controller tombstone resolution", () => {
       getLocalParticipantKey: () => "user-1:device-1",
     });
 
-    // First, create a pending retirement by directly manipulating the internal state
-    // (simulating what happens after a STALE_SOURCE_GENERATION NACK with retryable=true)
     controller.setSourcePhase("screen", "stopping", "sfu");
     let fsm = controller.sourceFsms.get("screen");
     if (fsm) {
@@ -470,7 +446,6 @@ describe("media source controller tombstone resolution", () => {
       controller.sourceFsms.set("screen", { ...fsm, phase: "idle" });
     }
 
-    // Manually add a pending retirement with an OLD operation ID (simulating old epoch)
     controller.pendingRetirements.set("screen", {
       source: "screen",
       generation: 7,
@@ -478,10 +453,8 @@ describe("media source controller tombstone resolution", () => {
       cleanupRequired: true,
     });
 
-    // Change to new connection epoch
     connectionEpoch = 2;
 
-    // Set up send function to auto-resolve ACKs for media-sources
     sendFn = (message: unknown) => {
       const msg = message as { type: string; data?: { operationId?: string } };
       if (msg.type === "media-sources" && msg.data?.operationId) {
@@ -489,12 +462,8 @@ describe("media source controller tombstone resolution", () => {
       }
     };
 
-    // Call processPendingRetirements - this should send a fresh mutation
-    // With the new implementation, the fresh ACK should complete the retirement
     await controller.processPendingRetirements();
 
-    // The pending retirement should be DELETED because the fresh send completed
-    // and the .then() handler completed the cleanup locally
     const pending = controller.pendingRetirements.get("screen");
     assert.equal(
       pending,
@@ -502,7 +471,6 @@ describe("media source controller tombstone resolution", () => {
       "Pending retirement should be deleted after fresh ACK completes cleanup",
     );
 
-    // FSM should be idle
     const currentFsm = controller.sourceFsms.get("screen");
     assert.ok(currentFsm, "FSM should exist");
     assert.equal(

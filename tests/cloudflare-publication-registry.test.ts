@@ -57,9 +57,7 @@ test("every Cloudflare activation path replays retained publications", async () 
     "utf8",
   );
 
-  // ensureQualificationFallback + provider ticket activation both replay
   assert.match(source, /replayCloudflarePublications\(session\)/);
-  // provider-session recovery replay
   assert.match(composable, /replayCloudflarePublications: async \(session\)/);
 });
 
@@ -86,9 +84,6 @@ test("stale same-track heartbeat keeps the newer local incarnation in the canoni
     staleIncoming,
   ]);
 
-  // Provider receives the final canonical registry state, not only the
-  // accepted incoming entries. A rejected stale heartbeat must not cause
-  // the provider to delete the newer X10 publication.
   assert.deepEqual(canonicalSnapshot, [localNewer]);
   assert.ok(!registry.values().includes(staleIncoming));
 });
@@ -116,8 +111,6 @@ test("stale heartbeat with changed trackName cannot displace the same logical sl
     staleOldTrack,
   ]);
 
-  // The old incarnation (track-X) is fenced by logical slot (peer-1:camera):
-  // track-Y generation 9 survives, track-X is never added back.
   assert.deepEqual(canonicalSnapshot, [newerIncarnation]);
   assert.equal(
     registry.values().some((p) => p.trackName === "track-X"),

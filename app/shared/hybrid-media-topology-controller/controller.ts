@@ -113,6 +113,7 @@ export function createHybridMediaTopologyController({
     topologyState,
     transportReady,
     updateP2pStats,
+    getConnectionEpoch,
   });
 
   function ensureSfu(): TopologySfuSession {
@@ -179,8 +180,6 @@ export function createHybridMediaTopologyController({
           return;
         }
         if (state === "failed") {
-          // `failed` is stronger than `disconnected` — ICE restart can restore
-          // connectivity; treat as provider-transport failure (retryable)
           mediaConnectionState.value = "recovering";
           setConnectionPhase("reconnecting", {
             direction,
@@ -305,7 +304,6 @@ export function createHybridMediaTopologyController({
     const previousSfu = getSfu();
     const previousActiveTransport = topologyState.value.activeTransport;
 
-    // Determine canonical mode and active/target transport
     const incomingMode = (data.mode || "idle") as
       "idle" | "probing" | "switching" | "p2p" | "sfu";
     let canonicalMode: "idle" | "probing" | "switching" | "p2p" | "sfu" =
@@ -314,7 +312,6 @@ export function createHybridMediaTopologyController({
     let targetTransport: "p2p" | "sfu" | null = null;
 
     if (incomingMode === "switching") {
-      // switching is a control mode - preserve active transport, set target
       canonicalMode = "switching";
       targetTransport = data.target === "sfu" ? "sfu" : "p2p";
       activeTransport = previousActiveTransport ?? null;
@@ -381,7 +378,6 @@ export function createHybridMediaTopologyController({
       data.mode === getActiveProvider() &&
       (data.mode !== "sfu" || activeSfuMatches)
     ) {
-      // Same provider - start convergence without blocking pipeline
       startConvergence(data, generation, signal);
       return;
     }
@@ -399,8 +395,6 @@ export function createHybridMediaTopologyController({
       return;
     }
     if (data.mode === "probing") {
-      // Canonical state applied immediately; transport convergence runs as an
-      // independently cancellable task so probing never blocks the queue.
       void ensureQualificationFallback(data, generation)
         .then(async () => {
           mediaGeneration.assert(generation);
@@ -428,7 +422,6 @@ export function createHybridMediaTopologyController({
         });
       return;
     }
-    // Mode switch (p2p <-> sfu) - transition with async convergence
     startTopologyTransition(data, generation, signal);
   }
 
@@ -437,7 +430,6 @@ export function createHybridMediaTopologyController({
     generation: number,
     signal?: AbortSignal,
   ) {
-    // Spawn convergence as independent task - doesn't block topology pipeline
     const abort = new AbortController();
     const convergenceSignal = signal
       ? AbortSignal.any([signal, abort.signal])
@@ -484,7 +476,6 @@ export function createHybridMediaTopologyController({
     generation: number,
     signal?: AbortSignal,
   ) {
-    // Mode switch - cleanup old provider, start new one
     const abort = new AbortController();
     const transitionSignal = signal
       ? AbortSignal.any([signal, abort.signal])
@@ -494,9 +485,6 @@ export function createHybridMediaTopologyController({
       const targetMode =
         data.mode === "sfu" ? "sfu" : data.target === "sfu" ? "sfu" : "p2p";
       if (data.mode === "switching") {
-        // switching is a control mode, not a provider: keep the current
-        // active provider authoritative until a committed route arrives.
-        // Prepare the target asynchronously, but never activate it.
         const currentProvider = getActiveProvider();
         const currentMesh = ensureP2p();
         const currentSfu = getSfu();
@@ -528,8 +516,6 @@ export function createHybridMediaTopologyController({
           }
         }
         mediaGeneration.assert(generation);
-        // Record target intent only. The active provider stays unchanged;
-        // setActiveProvider happens on the committed mode event.
         topologyState.value = {
           ...topologyState.value,
           activeTransport:
@@ -561,7 +547,6 @@ export function createHybridMediaTopologyController({
         await ensureQualificationFallback(data, generation);
       }
       mediaGeneration.assert(generation);
-      // Only switch active provider after provider setup succeeds
       setActiveProvider(targetMode);
       topologyState.value = {
         ...topologyState.value,
@@ -575,7 +560,6 @@ export function createHybridMediaTopologyController({
         topologyEpoch: Number(data.epoch),
         topologyMode: data.mode,
       });
-      // Start convergence after provider setup
       startConvergence(data, generation, transitionSignal);
     })();
     transitionPromise.catch((err) => {

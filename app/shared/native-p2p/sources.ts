@@ -263,7 +263,10 @@ export class NativeP2pSourcesMethods {
         this.fail("track-replacement-failed", error);
         throw error;
       }
-      this.signal(state.peerId, { sourceRestored: { source } });
+      const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+      this.signal(state.peerId, {
+        sourceRestored: { source, connectionEpoch },
+      });
       return existing;
     }
     let sender: RTCRtpSender | null = null;
@@ -278,11 +281,13 @@ export class NativeP2pSourcesMethods {
         state.selectedCodec ? [state.selectedCodec] : null,
       );
       state.senders.set(source, sender);
+      const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
       this.signal(state.peerId, {
         source: {
           trackId: entry.track.id,
           source,
           ownerSource: entry.ownerSource || null,
+          connectionEpoch,
           ...(Number.isFinite(Number(entry.generation)) &&
           Number(entry.generation) > 0
             ? { generation: Math.floor(Number(entry.generation)) }
@@ -304,9 +309,11 @@ export class NativeP2pSourcesMethods {
       } catch {}
       if (announced) {
         const removalGeneration = Number(entry.generation) || 0;
+        const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
         this.signal(state.peerId, {
           sourceRemoved: {
             source,
+            connectionEpoch,
             ...(removalGeneration > 0 ? { generation: removalGeneration } : {}),
           },
         });
@@ -356,9 +363,11 @@ export class NativeP2pSourcesMethods {
         state.senders.delete(source);
         state.sourceReceiving.delete(source);
         const removalGeneration = Number(entry?.generation) || 0;
+        const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
         this.signal(state.peerId, {
           sourceRemoved: {
             source,
+            connectionEpoch,
             ...(removalGeneration > 0 ? { generation: removalGeneration } : {}),
           },
         });
