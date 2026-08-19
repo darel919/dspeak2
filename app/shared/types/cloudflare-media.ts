@@ -162,6 +162,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
     removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
   ) => Promise<unknown>;
   reconcilePublicationsOnce?: (
     publications: CloudflarePublication[],

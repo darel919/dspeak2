@@ -665,7 +665,16 @@ test("stale-generation STOP: NACK adopts canonical generation, retries inactive,
     expectedGeneration: 2,
     retryable: true,
     adoptsCanonicalGeneration: true,
-    canonicalState: { generation: 2, desiredState: "inactive" },
+    canonicalState: {
+      participants: [
+        {
+          peerId: "peer-1",
+          sourceStates: {
+            screen: { generation: 2, desiredState: "inactive" },
+          },
+        },
+      ],
+    },
   };
   // Await the reconciliation promise - it resolves when the retry's ACK is resolved
   const nackResult = harness.instance.queueTargetedReconciliation?.(
@@ -794,7 +803,16 @@ test("stop ACK lost: server already committed inactive, canonical snapshot says 
     expectedGeneration: 1,
     retryable: false,
     adoptsCanonicalGeneration: true,
-    canonicalState: { generation: 1, desiredState: "inactive" },
+    canonicalState: {
+      participants: [
+        {
+          peerId: "peer-1",
+          sourceStates: {
+            screen: { generation: 1, desiredState: "inactive" },
+          },
+        },
+      ],
+    },
   };
   // Don't await - the reconciliation uses the same operationId (idempotent replay)
   harness.instance.queueTargetedReconciliation?.(

@@ -233,6 +233,7 @@ export class NativeMediasoupConsumersMethods {
     removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
   ) {
     if (!Array.isArray(publications)) return;
     // Delegate to Cloudflare session if it's the active provider
@@ -245,6 +246,7 @@ export class NativeMediasoupConsumersMethods {
         removedPublications,
         isStale,
         getLatestCanonical,
+        getLatestRevision,
       );
       return;
     }

@@ -82,6 +82,7 @@ export interface LifecycleDependencyContext {
       operationId: string,
       data: unknown,
     ) => unknown;
+    processPendingRetirements?: () => Promise<void>;
     onConnectionEpochUpdated?: (connectionEpoch: number) => unknown;
     handlePublicationsDigest: (
       publications: unknown[],
@@ -92,6 +93,7 @@ export interface LifecycleDependencyContext {
     setLastAppliedPublicationRevision: (value: string) => void;
     sourceController: {
       getLocalSources?: () => Map<string, unknown>;
+      processPendingRetirements?: () => Promise<void>;
     };
   };
   messageHandlers: Map<string, (data: unknown) => unknown>;
@@ -182,5 +184,6 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   getLocalSources: () => Map<string, unknown>;
   sourceController: {
     getLocalSources?: () => Map<string, unknown>;
+    processPendingRetirements?: () => Promise<void>;
   };
 }

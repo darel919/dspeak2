@@ -55,6 +55,7 @@ export interface MediaSourceControllerContext {
   stopSharedAudioMeter: () => unknown;
   topologyState: Ref<TopologyState>;
   queueTargetedReconciliation?: (operationId: string, data: unknown) => unknown;
+  processPendingRetirements?: () => Promise<void>;
   sendParticipantVoiceState: (state: {
     muted?: boolean;
     deafened?: boolean;

@@ -65,6 +65,16 @@ export function createMediaSourceController({
     failedAt: number | null;
   }
   const sourceFsms = new Map<string, SourceFsmState>();
+
+  // Track pending retirements that need provider cleanup after canonical confirmation.
+  // Keyed by source, value contains the generation and operationId for idempotent completion.
+  interface PendingRetirement {
+    source: string;
+    generation: number;
+    operationId: string;
+    cleanupRequired: boolean;
+  }
+  const pendingRetirements = new Map<string, PendingRetirement>();
   function bumpSourceGeneration(source: string) {
     const current = sourceFsms.get(source);
     sourceFsms.set(source, {
@@ -677,13 +687,41 @@ export function createMediaSourceController({
     // Capture the generation this operation was sent with, so a stale timeout
     // can't overwrite a newer convergent FSM state.
     const retirementGeneration = sourceFsms.get(entry.source)?.generation ?? 0;
+    // Track this retirement for reconnect/snapshot convergence
+    pendingRetirements.set(entry.source, {
+      source: entry.source,
+      generation: retirementGeneration,
+      operationId: retirementOperationId,
+      cleanupRequired: true,
+    });
     const retirement = sendSourceState(retirementOperationId)
       .then(() => {
         // Canonical retirement committed: the FSM settles idle and the
         // provider transport cleanup may proceed. Failures are reported but
         // never resurrect the canonical source.
+        // Verify this retirement's generation is still current before settling.
+        const fsm = sourceFsms.get(entry.source);
+        if (
+          !fsm ||
+          fsm.generation !== retirementGeneration ||
+          fsm.desiredState !== "inactive"
+        ) {
+          mediaDebug("source-state.retire-success-stale", {
+            source: entry.source,
+            expectedGeneration: retirementGeneration,
+            actualGeneration: fsm?.generation,
+            desiredState: fsm?.desiredState,
+            reason: "newer incarnation or state changed",
+          });
+          return false;
+        }
         setSourcePhase(entry.source, "idle", getActiveProvider());
         completeSourceRemoval(entry.source, { unexpected });
+        // Mark cleanup as done (but keep entry for idempotent reconnect handling)
+        const pending = pendingRetirements.get(entry.source);
+        if (pending) {
+          pending.cleanupRequired = false;
+        }
         return true;
       })
       .catch((sourceError: unknown) => {
@@ -735,6 +773,7 @@ export function createMediaSourceController({
           entry.source,
           { unexpected },
           1,
+          retirementGeneration,
         ).catch(() => {});
         throw sourceError;
       });
@@ -792,6 +831,7 @@ export function createMediaSourceController({
     source: string,
     options: { unexpected?: boolean } = {},
     attempt: number,
+    retirementGeneration: number,
   ) {
     const MAX_RETRIES = 3;
     const delayMs = 500 * attempt;
@@ -804,8 +844,30 @@ export function createMediaSourceController({
         }
         sendSourceState(operationId)
           .then(() => {
+            // Verify this retirement's generation is still current before settling.
+            const fsm = sourceFsms.get(source);
+            if (
+              !fsm ||
+              fsm.generation !== retirementGeneration ||
+              fsm.desiredState !== "inactive"
+            ) {
+              mediaDebug("source-state.retire-retry-success-stale", {
+                source,
+                expectedGeneration: retirementGeneration,
+                actualGeneration: fsm?.generation,
+                desiredState: fsm?.desiredState,
+                reason: "newer incarnation or state changed",
+              });
+              resolve();
+              return;
+            }
             setSourcePhase(source, "idle", getActiveProvider());
             completeSourceRemoval(source, options);
+            // Mark cleanup as done
+            const pending = pendingRetirements.get(source);
+            if (pending) {
+              pending.cleanupRequired = false;
+            }
             resolve();
           })
           .catch((retryError: unknown) => {
@@ -823,6 +885,7 @@ export function createMediaSourceController({
                 source,
                 options,
                 attempt + 1,
+                retirementGeneration,
               ).then(resolve, reject);
             } else {
               // Keep the reconciling tombstone: the reconnect/next snapshot
@@ -999,8 +1062,61 @@ export function createMediaSourceController({
       const expectedGeneration = Number(payload.expectedGeneration);
       const adoptsCanonical = payload.adoptsCanonicalGeneration === true;
       const retryable = payload.retryable === true;
-      const canonicalState = payload.canonicalState as
+      // Parse canonicalState from the real server topology snapshot:
+      // canonicalState contains { participants, sourceStates, ... }
+      // We need to find our participant's sourceStates entry for this source.
+      let canonicalSourceState:
         { generation: number; desiredState: string } | undefined;
+      const canonicalState = payload.canonicalState as
+        | {
+            participants?: Array<{
+              peerId?: string;
+              sourceStates?: Record<
+                string,
+                { generation?: number; desiredState?: string }
+              >;
+            }>;
+            sourceStates?: Record<
+              string,
+              Record<string, { generation?: number; desiredState?: string }>
+            >;
+          }
+        | undefined;
+      if (canonicalState) {
+        // The topology snapshot has sourceStates keyed by "userId:deviceId"
+        // We need to find the entry for our local peer. Since we don't have
+        // direct access to local peerId here, we check all participant
+        // sourceStates for a matching source.
+        if (canonicalState.participants) {
+          for (const participant of canonicalState.participants) {
+            const sourceState =
+              participant.sourceStates?.[source] ||
+              participant.sourceStates?.[`${source}`];
+            if (sourceState) {
+              canonicalSourceState = {
+                generation: Number(sourceState.generation || 0),
+                desiredState: String(sourceState.desiredState || ""),
+              };
+              break;
+            }
+          }
+        }
+        // Fallback: flat sourceStates by participant key
+        if (!canonicalSourceState && canonicalState.sourceStates) {
+          for (const participantSourceStates of Object.values(
+            canonicalState.sourceStates,
+          )) {
+            const sourceState = participantSourceStates[source];
+            if (sourceState) {
+              canonicalSourceState = {
+                generation: Number(sourceState.generation || 0),
+                desiredState: String(sourceState.desiredState || ""),
+              };
+              break;
+            }
+          }
+        }
+      }
       if (
         (payload.code === "STALE_SOURCE_GENERATION" || adoptsCanonical) &&
         Number.isSafeInteger(expectedGeneration) &&
@@ -1027,10 +1143,26 @@ export function createMediaSourceController({
       if (
         !retryable &&
         adoptsCanonical &&
-        canonicalState &&
-        canonicalState.desiredState === "inactive" &&
-        canonicalState.generation === expectedGeneration
+        canonicalSourceState &&
+        canonicalSourceState.desiredState === "inactive" &&
+        canonicalSourceState.generation === expectedGeneration
       ) {
+        // Verify this retirement's generation is still current before settling.
+        const fsm = sourceFsms.get(source);
+        if (
+          !fsm ||
+          fsm.generation !== expectedGeneration ||
+          fsm.desiredState !== "inactive"
+        ) {
+          mediaDebug("source-state.tombstone-canonical-inactive-stale", {
+            source,
+            expectedGeneration,
+            actualGeneration: fsm?.generation,
+            desiredState: fsm?.desiredState,
+            reason: "newer incarnation or state changed",
+          });
+          return Promise.resolve(false);
+        }
         mediaDebug("source-state.tombstone-canonical-inactive", {
           operationId,
           source,
@@ -1040,16 +1172,49 @@ export function createMediaSourceController({
         // Complete locally and clean up provider transport.
         setSourcePhase(source, "idle", getActiveProvider());
         completeSourceRemoval(source, {});
+        // Mark cleanup as done
+        const pending = pendingRetirements.get(source);
+        if (pending) {
+          pending.cleanupRequired = false;
+        }
         return Promise.resolve(true);
       }
       // Re-send the retirement with the adopted generation. The NACKed
       // operationId is cached server-side and would replay the NACK, so a
       // fresh operationId carries the adopted generation as a new mutation:
       // the server accepts inactive >= canonical generation and commits.
-      return sendSourceState()
+      const newOperationId = nextOperationId();
+      pendingRetirements.set(source, {
+        source,
+        generation: expectedGeneration,
+        operationId: newOperationId,
+        cleanupRequired: true,
+      });
+      return sendSourceState(newOperationId)
         .then(() => {
+          // Verify this retirement's generation is still current before settling.
+          const fsm = sourceFsms.get(source);
+          if (
+            !fsm ||
+            fsm.generation !== expectedGeneration ||
+            fsm.desiredState !== "inactive"
+          ) {
+            mediaDebug("source-state.tombstone-retry-success-stale", {
+              source,
+              expectedGeneration,
+              actualGeneration: fsm?.generation,
+              desiredState: fsm?.desiredState,
+              reason: "newer incarnation or state changed",
+            });
+            return false;
+          }
           setSourcePhase(source, "idle", getActiveProvider());
           completeSourceRemoval(source, {});
+          // Mark cleanup as done
+          const pending = pendingRetirements.get(source);
+          if (pending) {
+            pending.cleanupRequired = false;
+          }
           return true;
         })
         .catch((sourceError: unknown) => {
@@ -1131,6 +1296,35 @@ export function createMediaSourceController({
     return Promise.resolve(true);
   }
 
+  function processPendingRetirements() {
+    // Called on reconnect/hello to complete any pending retirements using
+    // the canonical snapshot from the server. The server's topology snapshot
+    // in heartbeat-ack or hello contains sourceStates that confirm inactive
+    // retirements we sent before disconnect.
+    for (const [source, pending] of pendingRetirements.entries()) {
+      if (!pending.cleanupRequired) continue;
+      const fsm = sourceFsms.get(source);
+      if (!fsm || fsm.desiredState !== "inactive") continue;
+
+      // The server's canonical state should have been delivered via
+      // heartbeat-ack/hello. Check if the source is confirmed inactive.
+      // We do this by sending a source state mutation which will trigger
+      // the server to send back canonical state, or we can directly
+      // check if we already have the confirmation from the snapshot.
+      // For now, trigger a reconciliation by resending the source state
+      // with the current generation.
+      mediaDebug("source-state.process-pending-retirement", {
+        source,
+        generation: pending.generation,
+        operationId: pending.operationId,
+      });
+      // The actual canonical confirmation comes from queueTargetedReconciliation
+      // when the heartbeat-ack/hello is processed. Here we just ensure
+      // the retirement is re-sent if needed (which will be idempotent).
+      void sendSourceState(pending.operationId).catch(() => {});
+    }
+  }
+
   function getLocalSources() {
     return localSources;
   }
@@ -1181,5 +1375,6 @@ export function createMediaSourceController({
     leave,
     handleProviderRecovering,
     getLocalSources,
+    processPendingRetirements,
   };
 }

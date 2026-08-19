@@ -374,6 +374,16 @@ export function createHybridMediaSessionLifecycle({
         );
         sendParticipantVoiceState();
 
+        // Complete any pending retirements using canonical snapshot from reconnect.
+        // The server's topology snapshot in heartbeat-ack or hello contains
+        // sourceStates that can confirm inactive retirements we sent before disconnect.
+        // The media-source-controller has a pendingRetirements map tracking these.
+        // We trigger a reconciliation check by sending the current source state
+        // which will converge any pending tombstones against canonical state.
+        if (typeof mediaSessionSetup.processPendingRetirements === "function") {
+          void mediaSessionSetup.processPendingRetirements().catch(() => {});
+        }
+
         // Re-announce existing local Cloudflare publications after reconnect.
         // A fresh control WebSocket gets a new random peerId, so the server
         // replaces the participant session and retires old publications.

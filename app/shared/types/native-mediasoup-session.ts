@@ -144,6 +144,7 @@ export interface NativeCloudflareSessionLike {
     removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
   ) => Promise<unknown>;
   applyJitterBufferConfig: (entry: NativeConsumerEntry) => unknown;
   setJitterBufferConfig: (config: {
@@ -196,6 +197,7 @@ export interface NativeMediasoupSfuSessionSurface {
     removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
   ) => Promise<unknown>;
   configureControl: (config: Record<string, unknown>) => unknown;
   addSource: (entry: NativeSourceEntry) => Promise<unknown>;

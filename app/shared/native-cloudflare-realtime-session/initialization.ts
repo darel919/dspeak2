@@ -167,6 +167,7 @@ export class NativeCloudflareInitializationMethods {
     _removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
   ) {
     if (!Array.isArray(publications)) return;
 
@@ -177,9 +178,16 @@ export class NativeCloudflareInitializationMethods {
     // through the LAZY getter. A revision-only advance (content unchanged)
     // does not abort: the provider state already matches canonical content.
     let snapshot = publications;
+    let snapshotRevision = getLatestRevision?.() ?? null;
     for (;;) {
       const passStale = getLatestCanonical
         ? () => {
+            const latestRevision = getLatestRevision?.();
+            if (latestRevision !== null && snapshotRevision !== null) {
+              return latestRevision !== snapshotRevision;
+            }
+            // Fallback: if no revision getter, use the provided isStale or
+            // fall back to content comparison (weaker but safe).
             const latest = getLatestCanonical();
             if (!Array.isArray(latest)) return true;
             return !publicationSnapshotsEqual(latest, snapshot);
@@ -194,6 +202,7 @@ export class NativeCloudflareInitializationMethods {
           undefined,
           passStale,
           getLatestCanonical,
+          getLatestRevision,
         );
         return;
       }
@@ -203,8 +212,15 @@ export class NativeCloudflareInitializationMethods {
       // The content just applied is still the current canonical content:
       // converged, even when the digest revision lagged behind (a
       // revision-only advance does not require re-applying).
-      if (publicationSnapshotsEqual(latest, snapshot)) return;
+      const latestRevision = getLatestRevision?.();
+      if (latestRevision !== null && snapshotRevision !== null) {
+        if (latestRevision === snapshotRevision) return;
+      } else {
+        // Fallback to content comparison when revision unavailable
+        if (publicationSnapshotsEqual(latest, snapshot)) return;
+      }
       snapshot = latest;
+      snapshotRevision = latestRevision ?? null;
     }
   }
 

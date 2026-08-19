@@ -296,20 +296,28 @@ export class CloudflareNegotiationMethods {
     _removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
   ) {
     if (!Array.isArray(publications)) return;
 
     // Revision-stable convergence loop: keep reconciling until the snapshot
-    // whose content produced the provider state is still current when the
-    // pass completes. The per-pass fence compares the LIVE retained
-    // canonical content against the snapshot being applied, so a newer
-    // revision that CHANGED content aborts the pass and the loop re-reads
-    // through the LAZY getter. A revision-only advance (content unchanged)
-    // does not abort: the provider state already matches canonical content.
+    // whose revision produced the provider state is still current when the
+    // pass completes. The per-pass fence compares the LIVE canonical revision
+    // against the snapshot's revision. A revision advance (whether content
+    // changed or not) aborts the pass and the loop re-reads through the LAZY
+    // getter. This ensures provider state is always produced from a revision
+    // that remains current through completion.
     let snapshot = publications;
+    let snapshotRevision = getLatestRevision?.() ?? null;
     for (;;) {
       const passStale = getLatestCanonical
         ? () => {
+            const latestRevision = getLatestRevision?.();
+            if (latestRevision !== null && snapshotRevision !== null) {
+              return latestRevision !== snapshotRevision;
+            }
+            // Fallback: if no revision getter, use the provided isStale or
+            // fall back to content comparison (weaker but safe).
             const latest = getLatestCanonical();
             if (!Array.isArray(latest)) return true;
             return !publicationSnapshotsEqual(latest, snapshot);
@@ -324,17 +332,25 @@ export class CloudflareNegotiationMethods {
           undefined,
           passStale,
           getLatestCanonical,
+          getLatestRevision,
         );
         return;
       }
       if (!getLatestCanonical) return;
       const latest = getLatestCanonical();
       if (!Array.isArray(latest)) return;
-      // The content just applied is still the current canonical content:
-      // converged, even when the digest revision lagged behind (a
-      // revision-only advance does not require re-applying).
-      if (publicationSnapshotsEqual(latest, snapshot)) return;
+      // The revision just applied is still the current canonical revision:
+      // converged. A revision advance (even content-identical) requires
+      // re-applying to ensure no newer mutations were missed.
+      const latestRevision = getLatestRevision?.();
+      if (latestRevision !== null && snapshotRevision !== null) {
+        if (latestRevision === snapshotRevision) return;
+      } else {
+        // Fallback to content comparison when revision unavailable
+        if (publicationSnapshotsEqual(latest, snapshot)) return;
+      }
       snapshot = latest;
+      snapshotRevision = latestRevision ?? null;
     }
   }
 

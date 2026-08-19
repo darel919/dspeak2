@@ -166,6 +166,8 @@ export function createHybridMediaSessionRuntime({
       handlePublicationsDigest,
       getLocalSources: () => sourceController?.getLocalSources?.() ?? new Map(),
       sourceController,
+      processPendingRetirements: () =>
+        sourceController?.processPendingRetirements?.() ?? Promise.resolve(),
     },
   });
 }

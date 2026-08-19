@@ -1384,4 +1384,110 @@ describe("NativeCloudflareRealtimeSession", () => {
     // confirmed and Z is confirmed.
     session.closeMedia();
   });
+
+  it("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 overtaking", async () => {
+    const session = new NativeCloudflareRealtimeSession({
+      invoke: async () => ({}),
+      send: () => true,
+    });
+    session.closed = false;
+    session.sessionId = "cloudflare-session";
+    session.subscriptionsStarted = true;
+    const registry = new Map<string, unknown>();
+
+    // R40 heartbeat snapshot: X (generation 8)
+    const oldX = {
+      peerId: "peer-1",
+      source: "screen",
+      trackName: "screen-X",
+      generation: 8,
+      connectionEpoch: 1,
+      userId: "user-1",
+      closed: false,
+    };
+    // R41 live push: Y (generation 9)
+    const newY = {
+      peerId: "peer-1",
+      source: "screen",
+      trackName: "screen-Y",
+      generation: 9,
+      connectionEpoch: 1,
+      userId: "user-1",
+      closed: false,
+    };
+    // R42 live push: Z (generation 10)
+    const newZ = {
+      peerId: "peer-1",
+      source: "screen",
+      trackName: "screen-Z",
+      generation: 10,
+      connectionEpoch: 1,
+      userId: "user-1",
+      closed: false,
+    };
+
+    // Gates for blocking subscribes
+    let releaseSubscribeX: (() => void) | undefined;
+    let releaseSubscribeY: (() => void) | undefined;
+    const gateX = new Promise<void>((resolve) => {
+      releaseSubscribeX = resolve;
+    });
+    const gateY = new Promise<void>((resolve) => {
+      releaseSubscribeY = resolve;
+    });
+    const subscribeCalls: string[] = [];
+    session.subscribe = async (publication: {
+      trackName?: unknown;
+    }): Promise<unknown> => {
+      const trackName = String(publication.trackName);
+      subscribeCalls.push(trackName);
+      session.subscribedTrackNames.add(trackName);
+      if (trackName === "screen-X") await gateX;
+      if (trackName === "screen-Y") await gateY;
+      return true;
+    };
+
+    // R40 heartbeat starts reconciliation: inserts X, awaits subscribe(X)
+    let stale = false;
+    const reconcilePromise = session.reconcilePublications(
+      [oldX],
+      [],
+      () => stale,
+      () => [...registry.values()] as CloudflarePublication[],
+    );
+
+    // While R40 is awaiting subscription I/O, R41 becomes authoritative:
+    // the retained registry mutates BEFORE the stale check runs.
+    registry.set(newY.trackName, newY);
+
+    // R40 subscribe resumes; R41 reconciliation begins and blocks on subscribe(Y)
+    stale = true;
+    releaseSubscribeX?.();
+
+    // Wait for R41's subscribe(Y) to start (it will block on gateY)
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // R42 arrives: Z replaces Y in the registry (canonical state REPLACED, not appended)
+    registry.clear();
+    registry.set(newZ.trackName, newZ);
+
+    // R41 subscribe resumes; must abort and reconcile R42
+    releaseSubscribeY?.();
+
+    await reconcilePromise;
+
+    // Only Z survives; X and Y are fully retired.
+    assert.equal(session.publications.has("screen-Z"), true);
+    assert.equal(session.publications.has("screen-X"), false);
+    assert.equal(session.publications.has("screen-Y"), false);
+    assert.equal(session.subscribedTrackNames.has("screen-Z"), true);
+    assert.equal(session.subscribedTrackNames.has("screen-X"), false);
+    assert.equal(session.subscribedTrackNames.has("screen-Y"), false);
+    // The convergence re-subscribes Z idempotently; X and Y's subscriptions
+    // are gated away and their publications are never retained.
+    assert.ok(subscribeCalls.includes("screen-X"));
+    assert.ok(subscribeCalls.includes("screen-Z"));
+    // Y may have been subscribed but then aborted; X and Z are confirmed.
+    session.closeMedia();
+  });
 });

@@ -943,11 +943,7 @@ export function useHybridMediaSession() {
 
   // Handle publications digest - called by hybrid-media-session-lifecycle
   function normalizeServerRevision(value: unknown): string {
-    if (
-      typeof value === "string" &&
-      value !== "" &&
-      !Number.isNaN(BigInt(value))
-    ) {
+    if (typeof value === "string" && value !== "" && /^\d+$/.test(value)) {
       return value;
     }
     if (
@@ -1066,6 +1062,10 @@ export function useHybridMediaSession() {
           // provider reconciliation always converges against the CURRENT
           // registry state - never a snapshot frozen before the await.
           () => cloudflarePublications.values(),
+          // Revision getter: the authoritative publication revision from
+          // media-control heartbeat envelope, used for revision-based
+          // convergence instead of content comparison.
+          () => lastAppliedPublicationRevision.value,
         );
       } catch (err) {
         mediaDebug("publications-digest-reconcile-failed", {
