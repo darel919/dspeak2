@@ -42,7 +42,6 @@ export function setupMediaMessageHandlers({
   onSnapshotRequested,
   queueTargetedReconciliation,
   onConnectionEpochUpdated,
-  onPublicationsDigest,
   handlePublicationsDigest,
 }: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
@@ -74,7 +73,6 @@ export function setupMediaMessageHandlers({
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
     if (Array.isArray(data.publishedSourcesDigest)) {
-      onPublicationsDigest?.(data.publishedSourcesDigest);
       const publicationRevision =
         typeof data.publicationRevision === "string" ||
         typeof data.publicationRevision === "number"

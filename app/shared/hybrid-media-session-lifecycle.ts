@@ -335,18 +335,6 @@ export function createHybridMediaSessionLifecycle({
       onConnectionEpochUpdated: (connectionEpoch: number) => {
         setConnectionEpoch(connectionEpoch);
       },
-      onPublicationsDigest: (publications: unknown[]) => {
-        for (const publication of publications) {
-          if (
-            publication &&
-            typeof publication === "object" &&
-            "trackName" in publication
-          )
-            mediaSessionSetup.queueCloudflarePublication(
-              publication as Record<string, unknown>,
-            );
-        }
-      },
       handlePublicationsDigest: async (
         publications: unknown[],
         publicationRevision?: string | number | null,

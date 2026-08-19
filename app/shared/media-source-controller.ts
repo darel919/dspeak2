@@ -46,6 +46,8 @@ export function createMediaSourceController({
   stopSharedAudioMeter,
   topologyState,
   voiceStore,
+  getLocalPeerId = () => null,
+  getLocalParticipantKey = () => null,
 }: MediaSourceControllerContext) {
   const asProvider = (value: unknown): SourceProvider | null =>
     value && typeof value === "object" ? (value as SourceProvider) : null;
@@ -1084,35 +1086,41 @@ export function createMediaSourceController({
         | undefined;
       if (canonicalState) {
         // The topology snapshot has sourceStates keyed by "userId:deviceId"
-        // We need to find the entry for our local peer. Since we don't have
-        // direct access to local peerId here, we check all participant
-        // sourceStates for a matching source.
-        if (canonicalState.participants) {
+        // We need to find the entry for our local peer.
+        const localPeerId = getLocalPeerId?.();
+        const localParticipantKey = getLocalParticipantKey?.();
+
+        if (canonicalState.participants && localPeerId) {
           for (const participant of canonicalState.participants) {
-            const sourceState =
-              participant.sourceStates?.[source] ||
-              participant.sourceStates?.[`${source}`];
-            if (sourceState) {
-              canonicalSourceState = {
-                generation: Number(sourceState.generation || 0),
-                desiredState: String(sourceState.desiredState || ""),
-              };
-              break;
+            if (participant.peerId === localPeerId) {
+              const sourceState =
+                participant.sourceStates?.[source] ||
+                participant.sourceStates?.[`${source}`];
+              if (sourceState) {
+                canonicalSourceState = {
+                  generation: Number(sourceState.generation || 0),
+                  desiredState: String(sourceState.desiredState || ""),
+                };
+                break;
+              }
             }
           }
         }
         // Fallback: flat sourceStates by participant key
-        if (!canonicalSourceState && canonicalState.sourceStates) {
-          for (const participantSourceStates of Object.values(
-            canonicalState.sourceStates,
-          )) {
+        if (
+          !canonicalSourceState &&
+          canonicalState.sourceStates &&
+          localParticipantKey
+        ) {
+          const participantSourceStates =
+            canonicalState.sourceStates[localParticipantKey];
+          if (participantSourceStates) {
             const sourceState = participantSourceStates[source];
             if (sourceState) {
               canonicalSourceState = {
                 generation: Number(sourceState.generation || 0),
                 desiredState: String(sourceState.desiredState || ""),
               };
-              break;
             }
           }
         }
@@ -1172,10 +1180,11 @@ export function createMediaSourceController({
         // Complete locally and clean up provider transport.
         setSourcePhase(source, "idle", getActiveProvider());
         completeSourceRemoval(source, {});
-        // Mark cleanup as done
+        // Mark cleanup as done and delete the pending retirement entry
         const pending = pendingRetirements.get(source);
         if (pending) {
           pending.cleanupRequired = false;
+          pendingRetirements.delete(source);
         }
         return Promise.resolve(true);
       }
@@ -1210,10 +1219,11 @@ export function createMediaSourceController({
           }
           setSourcePhase(source, "idle", getActiveProvider());
           completeSourceRemoval(source, {});
-          // Mark cleanup as done
+          // Mark cleanup as done and delete the pending retirement entry
           const pending = pendingRetirements.get(source);
           if (pending) {
             pending.cleanupRequired = false;
+            pendingRetirements.delete(source);
           }
           return true;
         })
@@ -1301,27 +1311,53 @@ export function createMediaSourceController({
     // the canonical snapshot from the server. The server's topology snapshot
     // in heartbeat-ack or hello contains sourceStates that confirm inactive
     // retirements we sent before disconnect.
+    // Do NOT replay old operation IDs across a new connection epoch.
+    // Instead, check if the canonical snapshot already confirms inactive for
+    // the pending generation. If so, complete locally. Otherwise, send a
+    // fresh source state mutation with the current generation.
     for (const [source, pending] of pendingRetirements.entries()) {
       if (!pending.cleanupRequired) continue;
       const fsm = sourceFsms.get(source);
       if (!fsm || fsm.desiredState !== "inactive") continue;
 
-      // The server's canonical state should have been delivered via
-      // heartbeat-ack/hello. Check if the source is confirmed inactive.
-      // We do this by sending a source state mutation which will trigger
-      // the server to send back canonical state, or we can directly
-      // check if we already have the confirmation from the snapshot.
-      // For now, trigger a reconciliation by resending the source state
-      // with the current generation.
       mediaDebug("source-state.process-pending-retirement", {
         source,
-        generation: pending.generation,
-        operationId: pending.operationId,
+        pendingGeneration: pending.generation,
+        currentGeneration: fsm.generation,
+        // Don't log old operationId since we won't replay it
       });
-      // The actual canonical confirmation comes from queueTargetedReconciliation
-      // when the heartbeat-ack/hello is processed. Here we just ensure
-      // the retirement is re-sent if needed (which will be idempotent).
-      void sendSourceState(pending.operationId).catch(() => {});
+
+      // Check if we already have canonical confirmation from the snapshot
+      // that was processed via queueTargetedReconciliation or onServerConnected.
+      // The canonical state would have been delivered via heartbeat-ack/hello
+      // and processed through queueTargetedReconciliation which would have
+      // marked cleanupRequired = false if the server confirmed inactive.
+      //
+      // If cleanupRequired is still true here, it means either:
+      // 1. We haven't received the canonical snapshot yet, OR
+      // 2. The canonical snapshot showed the source as still active
+      //
+      // In either case, we should send a FRESH source state mutation with the
+      // CURRENT generation (not the old pending generation) to converge with
+      // the server's current state.
+      //
+      // The server will respond with its canonical state, which will be
+      // processed through queueTargetedReconciliation to complete the cleanup.
+      const newOperationId = nextOperationId();
+      mediaDebug("source-state.pending-retirement-send-fresh", {
+        source,
+        oldOperationId: pending.operationId,
+        newOperationId,
+        currentGeneration: fsm.generation,
+      });
+      void sendSourceState(newOperationId)
+        .then(() => {
+          // The ACK or subsequent canonical snapshot will trigger
+          // queueTargetedReconciliation which will handle completion.
+        })
+        .catch(() => {
+          // Ignore errors - the retirement will be retried on next reconnect
+        });
     }
   }
 
@@ -1376,5 +1412,6 @@ export function createMediaSourceController({
     handleProviderRecovering,
     getLocalSources,
     processPendingRetirements,
+    pendingRetirements,
   };
 }

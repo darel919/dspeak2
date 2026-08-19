@@ -60,6 +60,8 @@ export interface MediaSourceControllerContext {
     muted?: boolean;
     deafened?: boolean;
   }) => unknown;
+  getLocalPeerId?: () => string | null;
+  getLocalParticipantKey?: () => string | null;
   voiceStore: {
     micMuted: boolean;
     deafened: boolean;

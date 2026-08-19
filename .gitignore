@@ -33,8 +33,6 @@ logs
 /desktop/src-tauri/capabilities/generated-api.json
 /desktop/keys
 
-tools/oxlint
-
 # Local env files
 .env
 .env.*

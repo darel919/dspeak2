@@ -58,6 +58,7 @@ import {
 import type { RtpStatsSample } from "~/shared/rtc-media-stats.ts";
 import { hasUsableVoiceRoute } from "~/shared/voice-join-readiness.ts";
 import { createProviderRecoveryState } from "~/shared/media-provider-recovery.ts";
+import { getDeviceId } from "~/shared/device-identity.ts";
 import {
   buildP2pVideoSenderOptions,
   resolveRequestedVideoSettings,
@@ -566,6 +567,12 @@ export function useHybridMediaSession() {
     stopSharedAudioMeter,
     topologyState,
     voiceStore,
+    getLocalPeerId: () => localPeerId,
+    getLocalParticipantKey: () => {
+      const userId = authStore.getUserData()?.id;
+      if (!userId) return null;
+      return `${userId}:${getDeviceId()}`;
+    },
   });
   const {
     restartAudioProduction,
