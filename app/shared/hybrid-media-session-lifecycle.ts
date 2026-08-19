@@ -416,14 +416,21 @@ export function createHybridMediaSessionLifecycle({
     );
     messageHandlers.set("cloudflare-publication-available", (data: unknown) => {
       mediaSessionSetup.queueCloudflarePublication(data);
-      // Update lastAppliedPublicationRevision from live publication push
-      if (
-        data &&
-        typeof data === "object" &&
-        "publicationRevision" in data &&
-        typeof data.publicationRevision === "string"
-      ) {
-        const rev = data.publicationRevision;
+      // Update lastAppliedPublicationRevision from live publication push.
+      // Media-control emits the revision as a number; accept both forms.
+      const rawRevision =
+        data && typeof data === "object" && "publicationRevision" in data
+          ? data.publicationRevision
+          : undefined;
+      const rev =
+        typeof rawRevision === "string" && rawRevision !== ""
+          ? rawRevision
+          : typeof rawRevision === "number" &&
+              Number.isSafeInteger(rawRevision) &&
+              rawRevision >= 0
+            ? String(rawRevision)
+            : null;
+      if (rev) {
         const currentRev =
           mediaSessionSetup.getLastAppliedPublicationRevision?.();
         if (currentRev && BigInt(rev) > BigInt(currentRev)) {

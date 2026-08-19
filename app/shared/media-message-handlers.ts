@@ -75,7 +75,12 @@ export function setupMediaMessageHandlers({
     }
     if (Array.isArray(data.publishedSourcesDigest)) {
       onPublicationsDigest?.(data.publishedSourcesDigest);
-      await handlePublicationsDigest?.(data.publishedSourcesDigest);
+      await handlePublicationsDigest?.(
+        data.publishedSourcesDigest,
+        typeof data.publicationRevision === "string"
+          ? data.publicationRevision
+          : null,
+      );
     }
   });
   registerHandler("operation-ack", (data: MediaMessage) => {

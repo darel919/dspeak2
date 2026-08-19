@@ -375,3 +375,75 @@ test("source-state mutation carries the connection envelope and FSM digest", asy
   assert.equal(sourceMessage?.connectionEpoch, 1);
   assert.ok(sourceMessage?.sourceStates);
 });
+
+test("replacement restore failure commits N+3 inactive to the real FSM", async () => {
+  let addSourceCalls = 0;
+  const harness = controller({
+    getSfu: () => ({
+      addSource: async () => {
+        addSourceCalls += 1;
+        if (addSourceCalls >= 2) {
+          throw new Error("producer rejected on recovery");
+        }
+      },
+      removeSource: async () => {},
+    }),
+  });
+
+  // Initial publication: N
+  const firstEntry = {
+    source: "camera",
+    stream: {},
+    track: {
+      id: "camera-1",
+      kind: "video",
+      readyState: "live",
+      enabled: true,
+    },
+  };
+  await harness.instance.publishSource(firstEntry);
+
+  // Replacement publication: N+1 FAILS on the provider (second addSource)
+  const replacement = {
+    source: "camera",
+    stream: {},
+    track: {
+      id: "camera-2",
+      kind: "video",
+      readyState: "live",
+      enabled: true,
+    },
+  };
+  await assert.rejects(
+    harness.instance.publishSource(replacement),
+    /producer rejected on recovery/,
+  );
+
+  // The failed replacement must leave the REAL FSM at N+3 inactive:
+  // N (initial) -> N+1 (replacement fail) -> N+2 (active recovery) -> N+3 (retire)
+  const fsm = harness.instance.sourceFsms.get("camera");
+  assert.equal(fsm?.desiredState, "inactive");
+  assert.equal(fsm?.phase, "idle");
+  // localSources must be absent
+  assert.equal(harness.localSources.has("camera"), false);
+});
+
+test("missing required SFU provider rejects recovery, not fulfilled", async () => {
+  const harness = controller();
+  const entry = {
+    source: "audio",
+    stream: {},
+    track: {
+      id: "microphone",
+      kind: "audio",
+      readyState: "live",
+      enabled: true,
+    },
+  };
+
+  // In a required-SFU topology, publishSource without an SFU must reject.
+  await assert.rejects(
+    harness.instance.publishSource(entry),
+    /active SFU transport is unavailable/,
+  );
+});

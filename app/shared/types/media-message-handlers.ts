@@ -49,5 +49,8 @@ export interface MediaMessageHandlersContext {
   ) => unknown;
   onConnectionEpochUpdated?: (connectionEpoch: number) => unknown;
   onPublicationsDigest?: (publications: unknown[]) => unknown;
-  handlePublicationsDigest?: (publications: unknown[]) => Promise<unknown>;
+  handlePublicationsDigest?: (
+    publications: unknown[],
+    publicationRevision?: string | number | null,
+  ) => Promise<unknown>;
 }

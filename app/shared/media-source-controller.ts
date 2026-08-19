@@ -40,7 +40,6 @@ export function createMediaSourceController({
   refreshPublicMaps,
   reportSfuFailure,
   send,
-  sendParticipantVoiceState,
   startLocalVoiceDetection,
   startSharedAudioMeter,
   stopLocalVoiceDetection,
@@ -275,6 +274,13 @@ export function createMediaSourceController({
       topologyState.value.target === "sfu";
     const p2pMesh = asProvider(getP2pMesh());
     const sfu = asProvider(getSfu());
+    // Treat missing required provider as explicit failure BEFORE attempting publication
+    if (p2pRequired && !p2pMesh) {
+      throw new Error("The active P2P transport is unavailable");
+    }
+    if (sfuRequired && !sfu) {
+      throw new Error("The active SFU transport is unavailable");
+    }
     try {
       const publications = await Promise.allSettled([
         p2pRequired
@@ -287,13 +293,6 @@ export function createMediaSourceController({
           : Promise.resolve(),
         sfuRequired ? sfu!.addSource(entry) : Promise.resolve(),
       ]);
-      // Treat missing required provider as explicit failure
-      if (p2pRequired && !p2pMesh) {
-        throw new Error("The active P2P transport is unavailable");
-      }
-      if (sfuRequired && !sfu) {
-        throw new Error("The active SFU transport is unavailable");
-      }
       const rejected = publications.find(
         (publication) => publication.status === "rejected",
       );
@@ -382,18 +381,27 @@ export function createMediaSourceController({
           generation: recoveryGeneration,
         } as TopologySourceEntry;
         localSources.set(entry.source, recoveredEntry);
-        // Re-announce previous with the recovery generation on required transports
-        const p2pResult = p2pRequired
-          ? asProvider(getP2pMesh())?.publishSource(
-              recoveredEntry.source,
-              recoveredEntry.track,
-              recoveredEntry.stream,
-              recoveredEntry,
-            )
-          : Promise.resolve();
-        const sfuResult = sfuRequired
-          ? asProvider(getSfu())?.addSource(recoveredEntry)
-          : Promise.resolve();
+        // Re-announce previous with the recovery generation on required transports.
+        // Missing required transports must fail loudly, not report fulfilled.
+        const recoveryP2pMesh = asProvider(getP2pMesh());
+        const recoverySfu = asProvider(getSfu());
+        const p2pResult = !p2pRequired
+          ? Promise.resolve()
+          : recoveryP2pMesh
+            ? Promise.resolve(
+                recoveryP2pMesh.publishSource(
+                  recoveredEntry.source,
+                  recoveredEntry.track,
+                  recoveredEntry.stream,
+                  recoveredEntry,
+                ),
+              )
+            : Promise.reject(new Error("Required P2P transport unavailable"));
+        const sfuResult = !sfuRequired
+          ? Promise.resolve()
+          : recoverySfu
+            ? Promise.resolve(recoverySfu.addSource(recoveredEntry))
+            : Promise.reject(new Error("Required SFU transport unavailable"));
         const results = await Promise.allSettled([p2pResult, sfuResult]);
         // Check if required transports succeeded
         const requiredResults = [
@@ -428,19 +436,26 @@ export function createMediaSourceController({
           const recoveryFsm = retirementFsm.get(entry.source);
           if (recoveryFsm) {
             const retirementGeneration = recoveryFsm.generation + 1;
-            retirementFsm.set(entry.source, {
+            const retiredState = {
               ...recoveryFsm,
               generation: retirementGeneration,
-              desiredState: "inactive",
-              phase: "failed",
+              desiredState: "inactive" as const,
+              phase: "failed" as const,
               failedAt: Date.now(),
-            });
+            };
+            retirementFsm.set(entry.source, retiredState);
             await sendMediaSourcesMutation(
               entry.source,
               "inactive",
               retirementFsm,
               undefined,
             );
+            // ACK succeeded - commit N+3 inactive to REAL sourceFsms
+            sourceFsms.set(entry.source, {
+              ...retiredState,
+              phase: "idle" as const,
+              failedAt: null,
+            });
           }
           setSourcePhase(entry.source, "idle", getActiveProvider());
           throw failedRequired.reason;
@@ -602,15 +617,13 @@ export function createMediaSourceController({
     localSources.delete(entry.source);
     if (entry.source === "audio" && unexpected) {
       voiceStore.micMuted = true;
-      void (async () => {
-        try {
-          await sendParticipantVoiceState({ muted: true });
-        } catch (error) {
+      void sendParticipantVoiceState({ muted: true }).catch(
+        (error: unknown) => {
           mediaDebug("source-state.voice-ack-failed", {
             error: error instanceof Error ? error.message : String(error),
           });
-        }
-      })();
+        },
+      );
     }
     if (entry.source === "screen") {
       voiceStore.screenSharing = false;
@@ -657,6 +670,13 @@ export function createMediaSourceController({
       } else if (sfuResult.status === "rejected") {
         error.value = `Failed to remove ${entry.source} from SFU: ${sfuResult.reason}`;
       }
+      if (
+        unexpected &&
+        entry.source === "audio" &&
+        connected.value &&
+        !getIntentionalClose()
+      )
+        error.value = "Microphone capture ended. Click unmute to restore it.";
       sendSourceState();
       refreshPublicMaps();
     });
@@ -664,14 +684,25 @@ export function createMediaSourceController({
   }
 
   function sendSourceState() {
+    const operationId = nextOperationId();
     const sourcesArray = [...localSources.keys()];
+    const promise = awaitOperationAck(operationId);
     send({
       type: "media-sources",
       data: {
         sources: sourcesArray,
+        operationId,
+        requestId: operationId,
         connectionEpoch: getConnectionEpoch(),
         sourceStates: sourceFsmDigest(),
       },
+    });
+    return promise.catch((error: unknown) => {
+      mediaDebug("media-sources-mutation.ack-failed", {
+        operationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     });
   }
 
@@ -757,6 +788,149 @@ export function createMediaSourceController({
     }
   }
 
+  async function startAudioProduction() {
+    await Promise.all(
+      [
+        asProvider(getP2pMesh())?.setSourceTransmission?.("audio", true),
+        asProvider(getSfu())?.setSourceTransmission?.("audio", true),
+      ].filter(Boolean),
+    );
+    const entry = await capture.startMicrophone();
+    return producerFacade(entry);
+  }
+
+  function restartAudioProduction() {
+    return capture
+      .restartMicrophone()
+      .then((entry) => (entry ? producerFacade(entry) : null));
+  }
+
+  function startVideoProduction(
+    source: "camera" | "screen",
+    options: MediaCaptureStartOptions = {},
+  ) {
+    return capture
+      .startVideo(source, options)
+      .then((entry) => (entry ? producerFacade(entry) : null));
+  }
+
+  function startSystemAudioProduction(options: MediaCaptureStartOptions = {}) {
+    return capture
+      .startSystemAudio(options)
+      .then((entry) => (entry ? producerFacade(entry) : null));
+  }
+
+  function stopAudioProduction() {
+    return capture.stop("audio");
+  }
+
+  function stopSystemAudioProduction() {
+    const entry = localSources.get("screen-audio");
+    if (entry?.ownerSource === "system-audio") capture.stop("screen-audio");
+  }
+
+  function stopVideoProduction(source: "camera" | "screen") {
+    return capture.stop(source);
+  }
+
+  function queueTargetedReconciliation(operationId: string, data: unknown) {
+    const payload =
+      data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+    const source = String(payload.source || "");
+    if (!source || !localSources.has(source)) return Promise.resolve(false);
+    const entry = localSources.get(source);
+    if (!entry) return Promise.resolve(false);
+    // Adopt the canonical generation before re-announcing so the retry is
+    // fenced against the server's current incarnation of this source.
+    const expectedGeneration = Number(payload.expectedGeneration);
+    if (
+      payload.code === "STALE_SOURCE_GENERATION" &&
+      Number.isSafeInteger(expectedGeneration) &&
+      expectedGeneration > 0 &&
+      expectedGeneration !== Number(entry.generation)
+    ) {
+      entry.generation = expectedGeneration;
+      // Also adopt the generation into sourceFsms so commitSourceIntent uses the correct generation
+      const fsm = sourceFsms.get(source);
+      if (fsm) {
+        sourceFsms.set(source, {
+          ...fsm,
+          generation: expectedGeneration,
+        });
+      }
+    }
+    mediaDebug("source-state.reconcile", {
+      operationId,
+      source,
+      generation: entry.generation,
+      retryable: payload.retryable,
+    });
+    publishSource(entry).catch((sourceError: unknown) => {
+      mediaDebug("source-state.reconcile-failed", {
+        operationId,
+        source,
+        error:
+          sourceError instanceof Error
+            ? sourceError.message
+            : String(sourceError),
+      });
+      return false;
+    });
+    return Promise.resolve(true);
+  }
+
+  async function leave() {
+    const operationId = nextOperationId();
+    send({
+      type: "leave",
+      data: {
+        operationId,
+        requestId: operationId,
+        connectionEpoch: getConnectionEpoch(),
+      },
+    });
+    return awaitOperationAck(operationId);
+  }
+
+  function handleProviderRecovering(data: Record<string, unknown> = {}) {
+    const retryAt = Number(data.retryAt);
+    mediaDebug("source-state.provider-recovering", {
+      retryAt: Number.isSafeInteger(retryAt) ? retryAt : null,
+      reason: data.reason || "provider-recovering",
+    });
+    // Informational only. Actual re-publication happens as part of the
+    // committed provider convergence path (a later topology event), so a
+    // provider recovery never invents a new logical source incarnation.
+    return Promise.resolve(true);
+  }
+
+  function getLocalSources() {
+    return localSources;
+  }
+
+  function sendParticipantVoiceState(
+    state: { muted?: boolean; deafened?: boolean } = {},
+  ) {
+    const operationId = nextOperationId();
+    send({
+      type: "participant-voice-state",
+      data: {
+        muted:
+          typeof state.muted === "boolean"
+            ? state.muted
+            : Boolean(voiceStore.micMuted),
+        deafened:
+          typeof state.deafened === "boolean"
+            ? state.deafened
+            : Boolean(voiceStore.deafened),
+        operationId,
+        requestId: operationId,
+        connectionEpoch: getConnectionEpoch(),
+      },
+    });
+    return awaitOperationAck(operationId);
+  }
+
   return {
     publishSource,
     removeSource,
@@ -768,18 +942,17 @@ export function createMediaSourceController({
     setSourcePhase,
     getSourceFsmDigest: sourceFsmDigest,
     // Properties expected by consumers (hybrid-media-session-api.ts)
-    restartAudioProduction: async () => {},
-    startAudioProduction: async () => {},
-    stopAudioProduction: async () => {},
-    startVideoProduction: async () => {},
-    stopVideoProduction: async () => {},
-    startSystemAudioProduction: async () => {},
-    stopSystemAudioProduction: async () => {},
-    sendParticipantVoiceState: async () => {},
-    queueTargetedReconciliation: async (
-      operationId: string,
-      data: unknown,
-    ) => {},
-    leave: async () => {},
+    restartAudioProduction,
+    startAudioProduction,
+    stopAudioProduction,
+    startVideoProduction,
+    stopVideoProduction,
+    startSystemAudioProduction,
+    stopSystemAudioProduction,
+    sendParticipantVoiceState,
+    queueTargetedReconciliation,
+    leave,
+    handleProviderRecovering,
+    getLocalSources,
   };
 }

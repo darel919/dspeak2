@@ -942,14 +942,38 @@ export function useHybridMediaSession() {
   } as unknown as RuntimeDependencyContext);
 
   // Handle publications digest - called by hybrid-media-session-lifecycle
-  async function handlePublicationsDigest(digest: unknown[]) {
+  function normalizeServerRevision(value: unknown): string {
+    if (
+      typeof value === "string" &&
+      value !== "" &&
+      !Number.isNaN(BigInt(value))
+    ) {
+      return value;
+    }
+    if (
+      typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value >= 0
+    ) {
+      return String(value);
+    }
+    return lastAppliedPublicationRevision.value;
+  }
+
+  async function handlePublicationsDigest(
+    digest: unknown[],
+    publicationRevision?: string | number | null,
+  ) {
     if (!Array.isArray(digest)) return;
     const session = sfu;
     if (!session) return;
 
     // Build server publication map by trackName for authoritative comparison
     const serverPublications: CloudflarePublication[] = [];
-    let maxPublicationRevision = lastAppliedPublicationRevision.value;
+    // Use the revision from the heartbeat envelope if provided, otherwise fall back to per-entry revision.
+    // Media-control emits a numeric room.publicationRevision; accept both numeric and string forms.
+    const envelopeRevision = normalizeServerRevision(publicationRevision);
+    let maxPublicationRevision = envelopeRevision;
     for (const entry of digest) {
       if (
         !entry ||
@@ -963,15 +987,18 @@ export function useHybridMediaSession() {
         continue;
       const pub = entry as CloudflarePublication;
       serverPublications.push(pub);
-      // Track max publicationRevision from digest for fence
+      // Track max publicationRevision from digest for fence (fallback if no envelope revision)
       if (
+        !publicationRevision &&
         "publicationRevision" in entry &&
-        typeof entry.publicationRevision === "string"
+        (typeof entry.publicationRevision === "string" ||
+          typeof entry.publicationRevision === "number")
       ) {
-        if (
-          BigInt(entry.publicationRevision) > BigInt(maxPublicationRevision)
-        ) {
-          maxPublicationRevision = entry.publicationRevision;
+        const entryRevision = normalizeServerRevision(
+          entry.publicationRevision,
+        );
+        if (BigInt(entryRevision) > BigInt(maxPublicationRevision)) {
+          maxPublicationRevision = entryRevision;
         }
       }
     }
@@ -991,15 +1018,16 @@ export function useHybridMediaSession() {
 
     // Use exact-set reconciliation at the registry level first
     // This ensures both additions and removals are processed atomically
-    const { acceptedSnapshot, removed, newRevision } =
-      cloudflarePublications.reconcileExact(
-        serverPublications,
-        maxPublicationRevision,
-      );
+    const { canonicalSnapshot, removed } =
+      cloudflarePublications.reconcileExact(serverPublications);
 
-    // Update lastAppliedPublicationRevision after successful reconciliation
-    if (BigInt(newRevision) > BigInt(lastAppliedPublicationRevision.value)) {
-      lastAppliedPublicationRevision.value = newRevision;
+    // The authoritative revision comes only from media-control (the heartbeat
+    // envelope). Local registry mutations never advance it.
+    if (
+      BigInt(maxPublicationRevision) >
+      BigInt(lastAppliedPublicationRevision.value)
+    ) {
+      lastAppliedPublicationRevision.value = maxPublicationRevision;
     }
 
     // Use the new reconcilePublications API for authoritative additions/removals
@@ -1010,7 +1038,7 @@ export function useHybridMediaSession() {
       typeof session.reconcilePublications === "function"
     ) {
       try {
-        await session.reconcilePublications(acceptedSnapshot, removed);
+        await session.reconcilePublications(canonicalSnapshot, removed);
       } catch (err) {
         mediaDebug("publications-digest-reconcile-failed", {
           error: err instanceof Error ? err.message : String(err),

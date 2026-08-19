@@ -83,7 +83,10 @@ export interface LifecycleDependencyContext {
       data: unknown,
     ) => unknown;
     onConnectionEpochUpdated?: (connectionEpoch: number) => unknown;
-    handlePublicationsDigest: (publications: unknown[]) => Promise<unknown>;
+    handlePublicationsDigest: (
+      publications: unknown[],
+      publicationRevision?: string | number | null,
+    ) => Promise<unknown>;
     getLocalSources: () => Map<string, unknown>;
     getLastAppliedPublicationRevision: () => string;
     setLastAppliedPublicationRevision: (value: string) => void;
