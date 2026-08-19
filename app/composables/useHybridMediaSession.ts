@@ -58,7 +58,6 @@ import {
 import type { RtpStatsSample } from "~/shared/rtc-media-stats.ts";
 import { hasUsableVoiceRoute } from "~/shared/voice-join-readiness.ts";
 import { createProviderRecoveryState } from "~/shared/media-provider-recovery.ts";
-import { getDeviceId } from "~/shared/device-identity.ts";
 import {
   buildP2pVideoSenderOptions,
   resolveRequestedVideoSettings,
@@ -177,6 +176,11 @@ export function useHybridMediaSession() {
   let sessionTermination: HybridSessionTermination | null = null;
   const lifecycleState = createMediaLifecycleState();
   const mediaGeneration = createMediaGeneration();
+  let mediaDeviceId: string | null = null;
+  function getMediaDeviceId() {
+    mediaDeviceId ??= getOrCreateDeviceId();
+    return mediaDeviceId;
+  }
   const setConnectionPhase = lifecycleState.record;
   const providerRecovery = createProviderRecoveryState({
     error,
@@ -571,7 +575,7 @@ export function useHybridMediaSession() {
     getLocalParticipantKey: () => {
       const userId = authStore.getUserData()?.id;
       if (!userId) return null;
-      return `${userId}:${getDeviceId()}`;
+      return `${userId}:${getMediaDeviceId()}`;
     },
   });
   const {
@@ -889,7 +893,7 @@ export function useHybridMediaSession() {
     ensureP2p,
     ensureSfu,
     getChannelId: () => channelId,
-    getDeviceId: getOrCreateDeviceId,
+    getDeviceId: getMediaDeviceId,
     getP2pMesh: () => p2pMesh,
     getBootstrap: getMediaControlBootstrap,
     handleP2pQualification,

@@ -1,5 +1,5 @@
 import { triggerRef } from "vue";
-import { getDeviceId } from "../../shared/device-identity.ts";
+import { getOrCreateDeviceId } from "../../shared/media-control-client.ts";
 import { resolveChannelRoomId } from "../../shared/media/channel-room.ts";
 import {
   EVENT_ALIASES,
@@ -604,7 +604,7 @@ export async function configureNativeControl(
       roomId: resolvedRoomId,
       channelId,
       connectionMode,
-      deviceId: getDeviceId(),
+      deviceId: getOrCreateDeviceId(),
     }),
   });
   if (!response.ok) {

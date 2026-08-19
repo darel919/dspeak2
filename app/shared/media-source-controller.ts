@@ -719,10 +719,10 @@ export function createMediaSourceController({
         }
         setSourcePhase(entry.source, "idle", getActiveProvider());
         completeSourceRemoval(entry.source, { unexpected });
-        // Mark cleanup as done (but keep entry for idempotent reconnect handling)
+        // Mark cleanup as done and delete the pending retirement entry
         const pending = pendingRetirements.get(entry.source);
         if (pending) {
-          pending.cleanupRequired = false;
+          pendingRetirements.delete(entry.source);
         }
         return true;
       })
@@ -865,10 +865,10 @@ export function createMediaSourceController({
             }
             setSourcePhase(source, "idle", getActiveProvider());
             completeSourceRemoval(source, options);
-            // Mark cleanup as done
+            // Mark cleanup as done and delete the pending retirement entry
             const pending = pendingRetirements.get(source);
             if (pending) {
-              pending.cleanupRequired = false;
+              pendingRetirements.delete(source);
             }
             resolve();
           })
@@ -1181,11 +1181,7 @@ export function createMediaSourceController({
         setSourcePhase(source, "idle", getActiveProvider());
         completeSourceRemoval(source, {});
         // Mark cleanup as done and delete the pending retirement entry
-        const pending = pendingRetirements.get(source);
-        if (pending) {
-          pending.cleanupRequired = false;
-          pendingRetirements.delete(source);
-        }
+        pendingRetirements.delete(source);
         return Promise.resolve(true);
       }
       // Re-send the retirement with the adopted generation. The NACKed
@@ -1220,11 +1216,7 @@ export function createMediaSourceController({
           setSourcePhase(source, "idle", getActiveProvider());
           completeSourceRemoval(source, {});
           // Mark cleanup as done and delete the pending retirement entry
-          const pending = pendingRetirements.get(source);
-          if (pending) {
-            pending.cleanupRequired = false;
-            pendingRetirements.delete(source);
-          }
+          pendingRetirements.delete(source);
           return true;
         })
         .catch((sourceError: unknown) => {
@@ -1315,6 +1307,7 @@ export function createMediaSourceController({
     // Instead, check if the canonical snapshot already confirms inactive for
     // the pending generation. If so, complete locally. Otherwise, send a
     // fresh source state mutation with the current generation.
+    const pendingPromises: Promise<void>[] = [];
     for (const [source, pending] of pendingRetirements.entries()) {
       if (!pending.cleanupRequired) continue;
       const fsm = sourceFsms.get(source);
@@ -1341,24 +1334,40 @@ export function createMediaSourceController({
       // CURRENT generation (not the old pending generation) to converge with
       // the server's current state.
       //
-      // The server will respond with its canonical state, which will be
-      // processed through queueTargetedReconciliation to complete the cleanup.
+      // The server will respond with its canonical state. If the ACK is
+      // successful, the server has committed the mutation and we can complete
+      // locally. The ACK path does NOT call queueTargetedReconciliation, so
+      // we must handle completion in the sendSourceState resolution.
+      const generation = fsm.generation;
       const newOperationId = nextOperationId();
       mediaDebug("source-state.pending-retirement-send-fresh", {
         source,
         oldOperationId: pending.operationId,
         newOperationId,
-        currentGeneration: fsm.generation,
+        currentGeneration: generation,
       });
-      void sendSourceState(newOperationId)
+      const promise = sendSourceState(newOperationId)
         .then(() => {
-          // The ACK or subsequent canonical snapshot will trigger
-          // queueTargetedReconciliation which will handle completion.
+          // The fresh operation's ACK is canonical evidence that the mutation
+          // committed. Complete the retirement locally if the state hasn't changed.
+          const current = sourceFsms.get(source);
+          if (
+            !current ||
+            current.generation !== generation ||
+            current.desiredState !== "inactive"
+          ) {
+            return;
+          }
+          setSourcePhase(source, "idle", getActiveProvider());
+          completeSourceRemoval(source, {});
+          pendingRetirements.delete(source);
         })
         .catch(() => {
           // Ignore errors - the retirement will be retried on next reconnect
         });
+      pendingPromises.push(promise);
     }
+    return Promise.all(pendingPromises).then(() => {});
   }
 
   function getLocalSources() {

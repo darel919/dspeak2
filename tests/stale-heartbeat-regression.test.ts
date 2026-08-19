@@ -200,20 +200,25 @@ test("two participants with same source name - tombstone resolves correct partic
     getLocalParticipantKey: () => localParticipantKey,
   });
 
-  // Set up FSM for local "screen" source at generation 6 (active)
-  controller.setSourcePhase("screen", "live", "sfu");
+  // Set up FSM for local "screen" source at generation 7 (inactive, reconciling)
+  // This simulates a tombstone state where we stopped sharing but haven't completed cleanup
+  controller.setSourcePhase("screen", "stopping", "sfu");
   let fsm = controller.sourceFsms.get("screen");
   if (fsm) {
     controller.sourceFsms.set("screen", {
       ...fsm,
-      generation: 6,
-      desiredState: "active",
+      generation: 7,
+      desiredState: "inactive",
     });
+  }
+  fsm = controller.sourceFsms.get("screen");
+  if (fsm) {
+    controller.sourceFsms.set("screen", { ...fsm, phase: "reconciling" });
   }
 
   // Simulate STALE_SOURCE_GENERATION NACK with canonical state showing:
-  // - LOCAL participant: screen generation 6 ACTIVE
-  // - REMOTE participant (first in array): screen generation 7 INACTIVE
+  // - LOCAL participant: screen generation 7 INACTIVE (our tombstone)
+  // - REMOTE participant (first in array): screen generation 6 ACTIVE (their active screen)
   // The OLD code would grab the remote participant's state and incorrectly complete
   const payload = {
     source: "screen",
@@ -226,22 +231,22 @@ test("two participants with same source name - tombstone resolves correct partic
         {
           peerId: "remote-peer-456",
           sourceStates: {
-            screen: { generation: 7, desiredState: "inactive" },
+            screen: { generation: 6, desiredState: "active" },
           },
         },
         {
           peerId: localPeerId,
           sourceStates: {
-            screen: { generation: 6, desiredState: "active" },
+            screen: { generation: 7, desiredState: "inactive" },
           },
         },
       ],
       sourceStates: {
         [localParticipantKey]: {
-          screen: { generation: 6, desiredState: "active" },
+          screen: { generation: 7, desiredState: "inactive" },
         },
         "user-2:device-2": {
-          screen: { generation: 7, desiredState: "inactive" },
+          screen: { generation: 6, desiredState: "active" },
         },
       },
     },
@@ -252,30 +257,100 @@ test("two participants with same source name - tombstone resolves correct partic
     payload as any,
   );
 
-  // Should NOT complete the retirement because canonical state for LOCAL participant shows active
+  // Should complete the retirement because canonical state for LOCAL participant shows inactive
   assert.equal(
     result,
-    false,
-    "Should not complete retirement when local participant is still active",
+    true,
+    "Should complete retirement when local participant is inactive",
   );
 
-  // FSM should still show active
+  // FSM should become idle
   const currentFsm = controller.sourceFsms.get("screen");
   assert.ok(currentFsm, "FSM should exist");
   assert.equal(
-    currentFsm.desiredState,
-    "active",
-    "Local participant should remain active",
+    currentFsm.phase,
+    "idle",
+    "Local participant should become idle",
   );
-  assert.equal(currentFsm.generation, 6, "Generation should not change");
+  assert.equal(currentFsm.generation, 7, "Generation should not change");
+
+  // Now test the inverse: local inactive (gen 7), remote active (gen 99)
+  // Reset FSM
+  controller.setSourcePhase("screen", "stopping", "sfu");
+  fsm = controller.sourceFsms.get("screen");
+  if (fsm) {
+    controller.sourceFsms.set("screen", {
+      ...fsm,
+      generation: 7,
+      desiredState: "inactive",
+    });
+  }
+  fsm = controller.sourceFsms.get("screen");
+  if (fsm) {
+    controller.sourceFsms.set("screen", { ...fsm, phase: "reconciling" });
+  }
+
+  const payload2 = {
+    source: "screen",
+    expectedGeneration: 7,
+    adoptsCanonicalGeneration: true,
+    retryable: false,
+    code: "STALE_SOURCE_GENERATION",
+    canonicalState: {
+      participants: [
+        {
+          peerId: "remote-peer-456",
+          sourceStates: {
+            screen: { generation: 99, desiredState: "active" },
+          },
+        },
+        {
+          peerId: localPeerId,
+          sourceStates: {
+            screen: { generation: 7, desiredState: "inactive" },
+          },
+        },
+      ],
+      sourceStates: {
+        [localParticipantKey]: {
+          screen: { generation: 7, desiredState: "inactive" },
+        },
+        "user-2:device-2": {
+          screen: { generation: 99, desiredState: "active" },
+        },
+      },
+    },
+  };
+
+  const result2 = await controller.queueTargetedReconciliation(
+    "op-test2",
+    payload2 as any,
+  );
+
+  // Should complete the retirement because LOCAL participant is inactive
+  assert.equal(
+    result2,
+    true,
+    "Should complete retirement when local participant is inactive (remote active)",
+  );
+
+  // FSM should become idle
+  const currentFsm2 = controller.sourceFsms.get("screen");
+  assert.ok(currentFsm2, "FSM should exist");
+  assert.equal(
+    currentFsm2.phase,
+    "idle",
+    "Local participant should become idle (remote active)",
+  );
 });
 
-test("pending retirement uses fresh operationId on reconnect", async () => {
+test("pending retirement completes on fresh ACK after reconnect", async () => {
   const { createMediaSourceController } =
     await import("../app/shared/media-source-controller.ts");
 
   let connectionEpoch = 1;
 
+  let sendFn: (message: unknown) => void = () => {};
   const controller = createMediaSourceController({
     capture: {} as any,
     connected: { value: true } as any,
@@ -294,7 +369,7 @@ test("pending retirement uses fresh operationId on reconnect", async () => {
     producerFacade: () => {},
     refreshPublicMaps: () => {},
     reportSfuFailure: () => {},
-    send: () => {},
+    send: (message: unknown) => sendFn(message),
     startLocalVoiceDetection: () => {},
     startSharedAudioMeter: () => {},
     stopLocalVoiceDetection: () => {},
@@ -337,24 +412,38 @@ test("pending retirement uses fresh operationId on reconnect", async () => {
   // Change to new connection epoch
   connectionEpoch = 2;
 
-  // Call processPendingRetirements - this should send a fresh mutation but keep
-  // the pending retirement with the OLD operationId (completion is driven by
-  // server confirmation via ACK or canonical snapshot, not by the fresh send)
+  // Set up send function to auto-resolve ACKs for media-sources
+  sendFn = (message: unknown) => {
+    const msg = message as { type: string; data?: { operationId?: string } };
+    if (msg.type === "media-sources" && msg.data?.operationId) {
+      controller.resolveOperationAck(msg.data.operationId);
+    }
+  };
+
+  // Call processPendingRetirements - this should send a fresh mutation
+  // With the new implementation, the fresh ACK should complete the retirement
   await controller.processPendingRetirements();
 
-  // The pending retirement should still exist with the OLD operationId
-  // because completion is driven by server confirmation (ACK or canonical snapshot)
-  // not by the fresh send attempt
+  // The pending retirement should be DELETED because the fresh send completed
+  // and the .then() handler completed the cleanup locally
   const pending = controller.pendingRetirements.get("screen");
-  assert.ok(pending, "Pending retirement should still exist");
   assert.equal(
-    pending.operationId,
-    "op-old-epoch-123",
-    "Should NOT replay old operation ID - pending entry keeps old ID until server confirms",
+    pending,
+    undefined,
+    "Pending retirement should be deleted after fresh ACK completes cleanup",
+  );
+
+  // FSM should be idle
+  const currentFsm = controller.sourceFsms.get("screen");
+  assert.ok(currentFsm, "FSM should exist");
+  assert.equal(
+    currentFsm.phase,
+    "idle",
+    "FSM should be idle after retirement completes",
   );
   assert.equal(
-    pending.cleanupRequired,
-    true,
-    "Cleanup still required until server confirms",
+    currentFsm.desiredState,
+    "inactive",
+    "FSM desiredState should remain inactive",
   );
 });

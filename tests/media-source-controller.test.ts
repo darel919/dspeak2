@@ -767,6 +767,8 @@ test("stop ACK lost: server already committed inactive, canonical snapshot says 
   let sfuRemoveCalls = 0;
   const harness = controller({
     autoAck: false,
+    getLocalPeerId: () => "peer-1",
+    getLocalParticipantKey: () => "user-1:device-1",
     getSfu: () => ({
       async removeSource() {
         sfuRemoveCalls += 1;
@@ -812,6 +814,11 @@ test("stop ACK lost: server already committed inactive, canonical snapshot says 
           },
         },
       ],
+      sourceStates: {
+        "user-1:device-1": {
+          screen: { generation: 1, desiredState: "inactive" },
+        },
+      },
     },
   };
   // Don't await - the reconciliation uses the same operationId (idempotent replay)
