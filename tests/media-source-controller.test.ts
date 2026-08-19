@@ -88,6 +88,52 @@ test("SFU source removal absorbs an expected session cancellation", async () => 
   assert.equal(harness.error.value, null);
 });
 
+test("stop commits control intent before provider transport cleanup", async () => {
+  const removalOrder: string[] = [];
+  let providerRemovalStarted = false;
+  const harness = controller({
+    getSfu: () => ({
+      removeSource: (source: string) => {
+        removalOrder.push(`sfu:${source}`);
+        providerRemovalStarted = true;
+        // Simulate the Cloudflare Realtime session operation blocking while
+        // the PeerConnection reconnects (documented multi-second stall).
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(true), 5);
+        });
+      },
+    }),
+    getP2pMesh: () => null,
+  });
+  const entry = {
+    source: "screen",
+    track: { id: "screen-track" },
+  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  harness.localSources.set(entry.source, entry);
+
+  const removal = harness.instance.removeSource(entry);
+  // Synchronously after removeSource() the sender UI is already stopped and
+  // the control mutation (media-sources, desiredState inactive) is queued.
+  assert.equal(
+    harness.sent.some((m) => m.type === "media-sources"),
+    true,
+  );
+  const mediaSources = harness.sent.find(
+    (m) => m.type === "media-sources",
+  )?.data;
+  assert.equal(mediaSources.sourceStates?.screen?.desiredState, "inactive");
+
+  // Provider cleanup must NOT have started yet: it waits for the ACK.
+  assert.equal(providerRemovalStarted, false);
+
+  // Auto-ACK resolves; provider cleanup proceeds after the canonical commit.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await removal;
+
+  assert.equal(providerRemovalStarted, true);
+  assert.ok(removalOrder.includes("sfu:screen"));
+});
+
 test("unexpected microphone capture loss marks the local participant muted", async () => {
   const voiceStore = {
     micMuted: false,
@@ -103,6 +149,7 @@ test("unexpected microphone capture loss marks the local participant muted", asy
   harness.localSources.set(entry.source, entry);
 
   harness.instance.removeSource(entry, { unexpected: true });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(voiceStore.micMuted, true);

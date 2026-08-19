@@ -1,10 +1,94 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CloudflareRealtimeSession } from "../app/shared/cloudflare-realtime-session.ts";
+import type { CloudflarePublication } from "../app/shared/types/cloudflare-media.ts";
 
 function session() {
   return new CloudflareRealtimeSession({ send() {}, iceServers: [] });
 }
+
+test("stale mid-subscribe reconciliation converges to the newest canonical snapshot", async () => {
+  const client = session();
+  client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
+
+  // R40 snapshot: old physical track X (generation 8)
+  const oldX = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-X",
+    generation: 8,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  // R41 live push: new physical track Y (generation 9)
+  const newY = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Y",
+    generation: 9,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+
+  // Subscribe for X defers until we release it (simulates slow provider I/O)
+  let releaseSubscribeX: (() => void) | undefined;
+  const gateX = new Promise<void>((resolve) => {
+    releaseSubscribeX = resolve;
+  });
+  const subscribeCalls: string[] = [];
+  client.subscribe = async (publication) => {
+    const trackName = String(publication.trackName);
+    subscribeCalls.push(trackName);
+    client.subscribedTrackNames.add(trackName);
+    if (trackName === "screen-X") await gateX;
+    return true;
+  };
+
+  interface NarrowedSession {
+    handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
+    reconcilePublications: (
+      publications: CloudflarePublication[],
+      removedPublications?: CloudflarePublication[],
+      isStale?: () => boolean,
+      latestCanonical?: CloudflarePublication[],
+    ) => Promise<unknown>;
+  }
+  const sessionNarrowed = client as unknown as NarrowedSession;
+  await sessionNarrowed.handle("cloudflare-publication-available", {
+    ...newY,
+  });
+  assert.equal(client.publications.has("screen-Y"), true);
+
+  // Delayed R40 heartbeat starts reconciliation: inserts X, awaits subscribe(X)
+  let stale = false;
+  const reconcilePromise = sessionNarrowed.reconcilePublications(
+    [oldX],
+    [],
+    () => stale,
+    // Newest retained canonical snapshot: only Y
+    [newY],
+  );
+
+  // While R40 is awaiting subscription I/O, R41 becomes authoritative
+  stale = true;
+  releaseSubscribeX?.();
+
+  await reconcilePromise;
+
+  // Y must survive; X must NOT remain as a duplicate consumer
+  assert.equal(client.publications.has("screen-Y"), true);
+  assert.equal(client.publications.has("screen-X"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Y"), true);
+  assert.equal(client.subscribedTrackNames.has("screen-X"), false);
+  // The convergence re-subscribes Y idempotently; X's subscription is gated
+  // away and its publication is never retained.
+  assert.ok(subscribeCalls.includes("screen-X"));
+  assert.ok(subscribeCalls.includes("screen-Y"));
+  client.closeMedia();
+});
 
 function report(type, bytesField, bytes, timestamp) {
   return new Map([["rtp", { type, [bytesField]: bytes, timestamp }]]);

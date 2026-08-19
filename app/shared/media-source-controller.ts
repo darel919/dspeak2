@@ -628,7 +628,11 @@ export function createMediaSourceController({
       publishedEntry?.captureTrack !== entry.track
     )
       return Promise.resolve(false);
-    // Only bump generation once - setSourcePhase with "stopping" will handle it
+    // INTENT-FIRST: bump FSM to N+1 inactive and remove the local source
+    // before any provider I/O. The control-plane mutation (media-sources with
+    // the FSM digest) retires the canonical publication immediately; provider
+    // transport cleanup follows asynchronously. Provider cleanup failure must
+    // not keep the logical source active on the server.
     setSourcePhase(entry.source, "stopping", getActiveProvider());
     const pairedScreenAudio =
       entry.source === "screen" ? localSources.get("screen-audio") : null;
@@ -651,17 +655,6 @@ export function createMediaSourceController({
     if (entry.source === "screen-audio" && entry.ownerSource === "system-audio")
       voiceStore.systemAudioSharing = false;
     if (entry.source === "audio") stopLocalVoiceDetection();
-    const p2pRemoval = asProvider(getP2pMesh())?.unpublishSource(entry.source);
-    const trackedP2pRemoval = p2pRemoval
-      ? Promise.resolve(p2pRemoval).catch((sourceError: unknown) => {
-          error.value =
-            sourceError instanceof Error
-              ? sourceError.message
-              : `Unable to stop ${entry.source} publication`;
-          throw sourceError;
-        })
-      : Promise.resolve();
-    const sfuRemoval = removeSfuSource(entry.source);
     localVideoFeeds.value.delete(entry.source);
     localVideoFeeds.value = new Map(localVideoFeeds.value);
     if (entry.source === "screen") adaptiveVideo.stop();
@@ -669,36 +662,75 @@ export function createMediaSourceController({
       stopSharedAudioMeter();
       onSharedAudioStopped?.();
     }
-    Promise.allSettled([trackedP2pRemoval, sfuRemoval]).then((results) => {
-      const p2pResult = results[0];
-      const sfuResult = results[1];
-      if (
-        p2pResult.status === "rejected" &&
-        (p2pResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
-      ) {
-        // Ignore session-closed during cleanup
-      } else if (p2pResult.status === "rejected") {
-        error.value = `Failed to remove ${entry.source} from P2P: ${p2pResult.reason}`;
-      }
-      if (
-        sfuResult.status === "rejected" &&
-        (sfuResult.reason as Error)?.message?.includes("MEDIA_SESSION_CLOSED")
-      ) {
-        // Ignore session-closed during cleanup
-      } else if (sfuResult.status === "rejected") {
-        error.value = `Failed to remove ${entry.source} from SFU: ${sfuResult.reason}`;
-      }
-      if (
-        unexpected &&
-        entry.source === "audio" &&
-        connected.value &&
-        !getIntentionalClose()
-      )
-        error.value = "Microphone capture ended. Click unmute to restore it.";
-      void sendSourceState().catch(() => {});
-      refreshPublicMaps();
-    });
-    return Promise.resolve(true);
+    // Await the canonical retirement ACK before provider cleanup. Bounded by
+    // the 15s operation ACK timeout. If the control plane is unreachable the
+    // canonical state stays N (active server-side), so the source is NOT
+    // removed from the server; the caller gets the failure and may retry.
+    const retirement = sendSourceState()
+      .catch((sourceError: unknown) => {
+        mediaDebug("source-state.retire-ack-failed", {
+          source: entry.source,
+          error:
+            sourceError instanceof Error
+              ? sourceError.message
+              : String(sourceError),
+        });
+        throw sourceError;
+      })
+      .then(() => {
+        // Canonical retirement committed: clean provider transport now.
+        // Failures are reported but never resurrect the canonical source.
+        const p2pRemoval = asProvider(getP2pMesh())?.unpublishSource(
+          entry.source,
+        );
+        const trackedP2pRemoval = p2pRemoval
+          ? Promise.resolve(p2pRemoval).catch((sourceError: unknown) => {
+              error.value =
+                sourceError instanceof Error
+                  ? sourceError.message
+                  : `Unable to stop ${entry.source} publication`;
+              throw sourceError;
+            })
+          : Promise.resolve();
+        const sfuRemoval = removeSfuSource(entry.source);
+        Promise.allSettled([trackedP2pRemoval, sfuRemoval]).then((results) => {
+          const p2pResult = results[0];
+          const sfuResult = results[1];
+          if (
+            p2pResult.status === "rejected" &&
+            (p2pResult.reason as Error)?.message?.includes(
+              "MEDIA_SESSION_CLOSED",
+            )
+          ) {
+            // Ignore session-closed during cleanup
+          } else if (p2pResult.status === "rejected") {
+            error.value = `Failed to remove ${entry.source} from P2P: ${p2pResult.reason}`;
+          }
+          if (
+            sfuResult.status === "rejected" &&
+            (sfuResult.reason as Error)?.message?.includes(
+              "MEDIA_SESSION_CLOSED",
+            )
+          ) {
+            // Ignore session-closed during cleanup
+          } else if (sfuResult.status === "rejected") {
+            error.value = `Failed to remove ${entry.source} from SFU: ${sfuResult.reason}`;
+          }
+          if (
+            unexpected &&
+            entry.source === "audio" &&
+            connected.value &&
+            !getIntentionalClose()
+          )
+            error.value =
+              "Microphone capture ended. Click unmute to restore it.";
+          refreshPublicMaps();
+        });
+        return true;
+      });
+    setSourcePhase(entry.source, "idle", getActiveProvider());
+    refreshPublicMaps();
+    return retirement;
   }
 
   function sendSourceState() {

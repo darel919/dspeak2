@@ -166,6 +166,7 @@ export class NativeCloudflareInitializationMethods {
     publications: CloudflarePublication[],
     _removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
+    latestCanonical?: CloudflarePublication[],
   ) {
     if (!Array.isArray(publications)) return;
 
@@ -233,7 +234,18 @@ export class NativeCloudflareInitializationMethods {
         // A newer publication revision may have been applied while awaiting
         // subscription I/O. A stale heartbeat must not continue: its snapshot
         // could otherwise retire the newer publication in the ghost phase.
-        if (isStale?.()) return;
+        // Converge against the newest retained canonical snapshot instead so
+        // the provider ends exactly on the newer state (no duplicate feed).
+        if (isStale?.()) {
+          if (Array.isArray(latestCanonical) && latestCanonical.length)
+            await this.reconcilePublications(
+              latestCanonical,
+              [],
+              undefined,
+              undefined,
+            );
+          return;
+        }
       }
     }
 
@@ -241,7 +253,16 @@ export class NativeCloudflareInitializationMethods {
     // These must be retired locally even without explicit closed=true from server.
     // Fence again: the removal phase is the destructive one.
     for (const [trackName, _localPub] of this.publications) {
-      if (isStale?.()) return;
+      if (isStale?.()) {
+        if (Array.isArray(latestCanonical) && latestCanonical.length)
+          await this.reconcilePublications(
+            latestCanonical,
+            [],
+            undefined,
+            undefined,
+          );
+        return;
+      }
       if (!seenTrackNames.has(trackName)) {
         // Local publication not in server snapshot - retire it
         this.publications.delete(trackName);
