@@ -104,6 +104,9 @@ export class CloudflareSourcesMethods {
       return;
     }
     let sender: RTCRtpSender | null = null;
+    let tracksNewSucceeded = false;
+    let createdTrackName: string | null = null;
+    let createdMid: string | null = null;
     try {
       const stream = entry.stream || new MediaStream([entry.track]);
       sender = peerConnection.addTrack(entry.track, stream);
@@ -150,6 +153,9 @@ export class CloudflareSourcesMethods {
         tracks: [{ location: "local", mid, trackName }],
       });
       this.assertCurrentSession(peerConnection, generation);
+      tracksNewSucceeded = true;
+      createdTrackName = trackName;
+      createdMid = mid;
       if (result.sessionDescription)
         await peerConnection.setRemoteDescription(result.sessionDescription);
       this.assertCurrentSession(peerConnection, generation);
@@ -185,6 +191,17 @@ export class CloudflareSourcesMethods {
         this.peerConnection === peerConnection &&
         this.sessionGeneration === generation
       ) {
+        if (tracksNewSucceeded && createdTrackName && createdMid) {
+          try {
+            const sessionDescription =
+              await getLocalSessionDescription(peerConnection);
+            await this.request("tracks-close", {
+              tracks: [{ mid: createdMid }],
+              sessionDescription,
+              force: false,
+            });
+          } catch {}
+        }
         if (sender) {
           try {
             const transceiver = peerConnection

@@ -230,18 +230,30 @@ export async function applyPeerSignal(
   if (sourceSignal) {
     const source = String(sourceSignal.source || "");
     const trackId = String(sourceSignal.trackId || "");
-    const sourceKey = `${state.peerId}:${trackId}`;
+    const sourceKey = `${state.peerId}:${source}`;
     const ownerSource =
       typeof sourceSignal.ownerSource === "string"
         ? sourceSignal.ownerSource
         : null;
     const generation = Number(sourceSignal.generation) || 0;
+    const connectionEpoch = Number(sourceSignal.connectionEpoch) || 0;
     const previousGeneration =
       mesh.remoteSourceGenerations?.get(sourceKey) || 0;
-    if (generation > 0 && generation < previousGeneration) return;
+    const previousConnectionEpoch =
+      mesh.remoteSourceConnectionEpochs?.get(sourceKey) || 0;
+
+    // Lexicographic comparison: connectionEpoch first, then generation
+    const isStale =
+      connectionEpoch < previousConnectionEpoch ||
+      (connectionEpoch === previousConnectionEpoch &&
+        generation > 0 &&
+        generation < previousGeneration);
+    if (isStale) return;
+
     mesh.remoteSources.set(sourceKey, source);
     mesh.remoteSourceOwners.set(sourceKey, ownerSource);
     mesh.remoteSourceGenerations?.set(sourceKey, generation);
+    mesh.remoteSourceConnectionEpochs?.set(sourceKey, connectionEpoch);
     let current = [...state.remoteTracks.values()].find(
       (entry) => String(entry.track?.id) === trackId,
     );
@@ -285,16 +297,24 @@ export async function applyPeerSignal(
   if (removedSignal) {
     const source = String(removedSignal.source || "");
     const removedGeneration = Number(removedSignal.generation) || 0;
+    const removedConnectionEpoch = Number(removedSignal.connectionEpoch) || 0;
     state.retiredRemoteTracks ||= new Map();
     for (const [key, mappedSource] of mesh.remoteSources) {
       if (!key.startsWith(`${state.peerId}:`) || mappedSource !== source)
         continue;
       const currentGeneration = mesh.remoteSourceGenerations?.get(key) || 0;
-      if (removedGeneration > 0 && currentGeneration > removedGeneration)
-        continue;
+      const currentConnectionEpoch =
+        mesh.remoteSourceConnectionEpochs?.get(key) || 0;
+      const isStale =
+        removedConnectionEpoch < currentConnectionEpoch ||
+        (removedConnectionEpoch === currentConnectionEpoch &&
+          removedGeneration > 0 &&
+          currentGeneration > removedGeneration);
+      if (isStale) continue;
       mesh.remoteSourceOwners.delete(key);
       mesh.remoteSources.delete(key);
       mesh.remoteSourceGenerations?.delete(key);
+      mesh.remoteSourceConnectionEpochs?.delete(key);
     }
     const currentEntry = [...state.remoteTracks.entries()].find(
       ([, entry]) => entry.source === source,
@@ -318,7 +338,13 @@ export async function applyPeerSignal(
       : null;
   if (restoredSignal) {
     const source = String(restoredSignal.source || "");
+    const restoredConnectionEpoch = Number(restoredSignal.connectionEpoch) || 0;
     state.retiredRemoteTracks ||= new Map();
+    const sourceKey = `${state.peerId}:${source}`;
+    const currentConnectionEpoch =
+      mesh.remoteSourceConnectionEpochs?.get(sourceKey) || 0;
+    // Only restore if the connection epoch matches or is newer
+    if (restoredConnectionEpoch < currentConnectionEpoch) return;
     const entry =
       state.remoteTracks.get(source) || state.retiredRemoteTracks.get(source);
     if (entry?.track.readyState === "live") {

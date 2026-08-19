@@ -125,11 +125,13 @@ export class NativeP2pTopologyMethods {
       for (const [source, sender] of state.senders) {
         const entry = this.localSources.get(source);
         if (entry?.track) {
+          const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
           this.signal(state.peerId, {
             source: {
               trackId: entry.track.id,
               source,
               ownerSource: entry.ownerSource || null,
+              connectionEpoch,
               ...(Number.isFinite(Number(entry.generation)) &&
               Number(entry.generation) > 0
                 ? { generation: Math.floor(Number(entry.generation)) }
@@ -138,9 +140,11 @@ export class NativeP2pTopologyMethods {
           });
         } else if (!sender.track) {
           const removalGeneration = Number(entry?.generation) || 0;
+          const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
           this.signal(state.peerId, {
             sourceRemoved: {
               source,
+              connectionEpoch,
               ...(removalGeneration > 0
                 ? { generation: removalGeneration }
                 : {}),

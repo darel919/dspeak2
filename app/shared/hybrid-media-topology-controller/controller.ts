@@ -529,22 +529,65 @@ export function createHybridMediaTopologyController({
         return;
       }
       if (data.mode === "p2p") {
-        await closeP2pSafely();
-        handoff.retire("p2p");
-        const mesh = ensureP2p();
-        if (!mesh) {
-          send({
-            type: "p2p-failed",
-            data: { epoch: data.epoch, reason: "webrtc-unavailable" },
-          });
-          return;
+        const currentProvider = getActiveProvider();
+        if (currentProvider === "p2p") {
+          // Already on P2P, just update topology and converge
+          const mesh = ensureP2p();
+          if (mesh) {
+            await mesh.applyTopology({
+              ...data,
+              localPeerId: getLocalPeerId(),
+            });
+            await publishLocalSources(mesh);
+          }
+        } else if (currentProvider === "sfu") {
+          // Switching from SFU to P2P - retire SFU, promote prepared P2P if available
+          await closeSfuSafely();
+          handoff.retire("sfu");
+          const mesh = ensureP2p();
+          if (!mesh) {
+            send({
+              type: "p2p-failed",
+              data: { epoch: data.epoch, reason: "webrtc-unavailable" },
+            });
+            return;
+          }
+          await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
+          await publishLocalSources(mesh);
+        } else {
+          // No current provider, establish P2P
+          const mesh = ensureP2p();
+          if (!mesh) {
+            send({
+              type: "p2p-failed",
+              data: { epoch: data.epoch, reason: "webrtc-unavailable" },
+            });
+            return;
+          }
+          await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
+          await publishLocalSources(mesh);
         }
-        await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
-        await publishLocalSources(mesh);
       } else if (data.mode === "sfu") {
-        await closeP2pSafely();
-        handoff.retire("p2p");
-        await ensureQualificationFallback(data, generation);
+        const currentProvider = getActiveProvider();
+        if (currentProvider === "sfu") {
+          // Already on SFU, just update topology and converge
+          const session = getSfu();
+          if (session) {
+            for (const entry of localSources.values())
+              await session.addSource(entry);
+            await replayCloudflarePublications(session);
+            await session.startSubscriptions?.();
+            handoff.bind("sfu");
+          }
+        } else if (currentProvider === "p2p") {
+          // Switching from P2P to SFU - retire P2P, promote prepared SFU if available
+          await closeP2pSafely();
+          handoff.retire("p2p");
+          await ensureQualificationFallback(data, generation);
+        } else {
+          // No current provider, establish SFU
+          await ensureQualificationFallback(data, generation);
+        }
       }
       mediaGeneration.assert(generation);
       setActiveProvider(targetMode);

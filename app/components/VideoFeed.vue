@@ -424,7 +424,15 @@ function handleVideoReady() {
   clearTimeout(playbackRecoveryTimer);
   playbackRecoveryTimer = null;
   playVideoElement(videoElement.value, "Remote preview");
-  if (props.feedKey) emit("first-frame", props.feedKey);
+  const element = videoElement.value;
+  if (element && typeof element.requestVideoFrameCallback === "function") {
+    element.requestVideoFrameCallback(() => {
+      if (props.feedKey) emit("first-frame", props.feedKey);
+    });
+  } else if (props.feedKey) {
+    // Fallback for browsers without requestVideoFrameCallback
+    emit("first-frame", props.feedKey);
+  }
 }
 
 function recoverVideoPlayback() {
