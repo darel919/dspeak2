@@ -238,30 +238,15 @@ export function createMediaSourceController({
         ? await createSharedAudioSource(sourceEntry)
         : sourceEntry;
 
-    // Commit source intent FIRST (media-sources with generation) and wait for ACK.
-    // This ensures server has canonical sourceStates before provider announces.
-    const committedGeneration = await commitSourceIntent(entry.source, {
-      isVideo: entry.source === "camera" || entry.source === "screen",
-      ownerSource: entry.ownerSource ?? undefined,
-    });
-    entry.generation = committedGeneration;
-
-    if (entry.source === "audio" && voiceStore.micMuted)
-      entry.track.enabled = false;
-
     const previous = localSources.get(entry.source);
     const isVideo = entry.source === "camera" || entry.source === "screen";
     const previousVideoFeed = isVideo
       ? localVideoFeeds.value.get(entry.source)
       : null;
-    if (isVideo) {
-      localVideoFeeds.value.set(entry.source, {
-        source: entry.source,
-        stream: entry.stream,
-        producerId: `local:${entry.track.id}`,
-      });
-      localVideoFeeds.value = new Map(localVideoFeeds.value);
-    }
+    // Preflight required providers BEFORE committing source intent to the
+    // server. A missing transport must reject with no canonical mutation, no
+    // optimistic FSM bump, and no provisional preview, so the server never
+    // holds an active source the client cannot publish.
     const activeProvider = getActiveProvider();
     const p2pRequired =
       activeProvider === "p2p" ||
@@ -274,12 +259,31 @@ export function createMediaSourceController({
       topologyState.value.target === "sfu";
     const p2pMesh = asProvider(getP2pMesh());
     const sfu = asProvider(getSfu());
-    // Treat missing required provider as explicit failure BEFORE attempting publication
     if (p2pRequired && !p2pMesh) {
       throw new Error("The active P2P transport is unavailable");
     }
     if (sfuRequired && !sfu) {
       throw new Error("The active SFU transport is unavailable");
+    }
+
+    // Commit source intent NEXT (media-sources with generation) and wait for ACK.
+    // This ensures server has canonical sourceStates before provider announces.
+    const committedGeneration = await commitSourceIntent(entry.source, {
+      isVideo,
+      ownerSource: entry.ownerSource ?? undefined,
+    });
+    entry.generation = committedGeneration;
+
+    if (entry.source === "audio" && voiceStore.micMuted)
+      entry.track.enabled = false;
+
+    if (isVideo) {
+      localVideoFeeds.value.set(entry.source, {
+        source: entry.source,
+        stream: entry.stream,
+        producerId: `local:${entry.track.id}`,
+      });
+      localVideoFeeds.value = new Map(localVideoFeeds.value);
     }
     try {
       const publications = await Promise.allSettled([
@@ -472,6 +476,20 @@ export function createMediaSourceController({
             });
           }
           setSourcePhase(entry.source, "live", getActiveProvider());
+          // Restore the previous video preview before returning: the failed
+          // replacement's provisional feed must never survive a rollback.
+          if (
+            isVideo &&
+            (
+              localVideoFeeds.value.get(entry.source) as
+                { stream?: MediaStream } | undefined
+            )?.stream === entry.stream
+          ) {
+            if (previousVideoFeed)
+              localVideoFeeds.value.set(entry.source, previousVideoFeed);
+            else localVideoFeeds.value.delete(entry.source);
+            localVideoFeeds.value = new Map(localVideoFeeds.value);
+          }
           // Return the recovered entry with the recovery generation
           return recoveredEntry;
         }
@@ -595,7 +613,7 @@ export function createMediaSourceController({
       if (entry.source === "screen")
         adaptiveVideo.start(entry as AdaptiveVideoEntry);
     }
-    sendSourceState();
+    void sendSourceState().catch(() => {});
     refreshPublicMaps();
     return entry;
   }
@@ -677,7 +695,7 @@ export function createMediaSourceController({
         !getIntentionalClose()
       )
         error.value = "Microphone capture ended. Click unmute to restore it.";
-      sendSourceState();
+      void sendSourceState().catch(() => {});
       refreshPublicMaps();
     });
     return Promise.resolve(true);

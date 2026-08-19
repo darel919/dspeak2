@@ -965,8 +965,6 @@ export function useHybridMediaSession() {
     publicationRevision?: string | number | null,
   ) {
     if (!Array.isArray(digest)) return;
-    const session = sfu;
-    if (!session) return;
 
     // Build server publication map by trackName for authoritative comparison
     const serverPublications: CloudflarePublication[] = [];
@@ -1017,7 +1015,10 @@ export function useHybridMediaSession() {
     }
 
     // Use exact-set reconciliation at the registry level first
-    // This ensures both additions and removals are processed atomically
+    // This ensures both additions and removals are processed atomically.
+    // Registry reconciliation is provider-independent: it must run even when
+    // no SFU session exists (e.g. P2P topology) so retained publications
+    // cannot resurrect as ghosts when the provider is reconstructed.
     const { canonicalSnapshot, removed } =
       cloudflarePublications.reconcileExact(serverPublications);
 
@@ -1030,28 +1031,42 @@ export function useHybridMediaSession() {
       lastAppliedPublicationRevision.value = maxPublicationRevision;
     }
 
-    // Use the new reconcilePublications API for authoritative additions/removals
-    // This passes the complete retained publication incarnation with epoch/generation
-    // so the provider can properly process close events that would otherwise be rejected as stale
-    if (
-      "reconcilePublications" in session &&
-      typeof session.reconcilePublications === "function"
-    ) {
-      try {
-        await session.reconcilePublications(canonicalSnapshot, removed);
-      } catch (err) {
-        mediaDebug("publications-digest-reconcile-failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-
     // Log removed publications for debugging
     if (removed.length > 0) {
       mediaDebug("publications-digest-removed", {
         count: removed.length,
         tracks: removed.map((p) => p.trackName),
       });
+    }
+
+    // Use the new reconcilePublications API for authoritative additions/removals
+    // This passes the complete retained publication incarnation with epoch/generation
+    // so the provider can properly process close events that would otherwise be rejected as stale.
+    // The session may be null (P2P topology) — registry reconciliation above is
+    // still authoritative; provider repair only runs when a session exists.
+    const session = sfu;
+    if (!session) return;
+    if (
+      "reconcilePublications" in session &&
+      typeof session.reconcilePublications === "function"
+    ) {
+      try {
+        // Fence token: the provider re-checks this after every asynchronous
+        // boundary. A heartbeat that became stale while awaiting subscription
+        // I/O must not delete publications a newer live push added meanwhile.
+        const isStale = () =>
+          BigInt(maxPublicationRevision) <
+          BigInt(lastAppliedPublicationRevision.value);
+        await session.reconcilePublications(
+          canonicalSnapshot,
+          removed,
+          isStale,
+        );
+      } catch (err) {
+        mediaDebug("publications-digest-reconcile-failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 

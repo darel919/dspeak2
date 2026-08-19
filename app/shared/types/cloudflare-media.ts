@@ -160,5 +160,6 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   reconcilePublications: (
     publications: CloudflarePublication[],
     removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
   ) => Promise<unknown>;
 }

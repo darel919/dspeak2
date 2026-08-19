@@ -144,6 +144,7 @@ export interface NativeCloudflareSessionSurface {
   reconcilePublications: (
     publications: CloudflarePublication[],
     removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
   ) => Promise<unknown>;
   subscribe: (
     publication: import("./native-cloudflare.ts").NativeCloudflarePublication,

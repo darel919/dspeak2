@@ -363,7 +363,9 @@ export function createHybridMediaSessionLifecycle({
             protocolVersion: protocolState.value?.protocolVersion,
           });
         }
-        mediaSessionSetup.sendSourceState();
+        void Promise.resolve(mediaSessionSetup.sendSourceState()).catch(
+          () => {},
+        );
         sendParticipantVoiceState();
 
         // Re-announce existing local Cloudflare publications after reconnect.

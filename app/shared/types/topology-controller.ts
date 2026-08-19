@@ -197,6 +197,7 @@ export interface TopologySfuSession {
   reconcilePublications: (
     publications: CloudflarePublication[],
     removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
   ) => Promise<unknown>;
   setJitterBufferConfig: (config: JitterBufferConfig) => unknown;
   [key: string]: unknown;

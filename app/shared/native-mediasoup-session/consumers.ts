@@ -231,6 +231,7 @@ export class NativeMediasoupConsumersMethods {
     this: NativeMediasoupSfuSession,
     publications: CloudflarePublication[],
     removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
   ) {
     if (!Array.isArray(publications)) return;
     // Delegate to Cloudflare session if it's the active provider
@@ -241,6 +242,7 @@ export class NativeMediasoupConsumersMethods {
       await this.cloudflareSession.reconcilePublications(
         publications,
         removedPublications,
+        isStale,
       );
       return;
     }

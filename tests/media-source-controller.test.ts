@@ -283,10 +283,11 @@ test("a missing active transport cannot report publication success", async () =>
   );
 
   assert.equal(harness.localSources.size, 0);
-  // Intent is sent before transport check; rollback on failure
+  // Preflight rejects BEFORE any server mutation: no media-sources intent
+  // may reach the server for a missing required transport.
   assert.equal(
     harness.sent.some((message) => message.type === "media-sources"),
-    true,
+    false,
   );
 });
 
@@ -446,4 +447,85 @@ test("missing required SFU provider rejects recovery, not fulfilled", async () =
     harness.instance.publishSource(entry),
     /active SFU transport is unavailable/,
   );
+});
+
+test("missing required provider preflight does NOT commit server intent", async () => {
+  const harness = controller();
+  const entry = {
+    source: "audio",
+    stream: {},
+    track: {
+      id: "microphone",
+      kind: "audio",
+      readyState: "live",
+      enabled: true,
+    },
+  };
+
+  await assert.rejects(
+    harness.instance.publishSource(entry),
+    /active SFU transport is unavailable/,
+  );
+  // The preflight must reject BEFORE commitSourceIntent: no media-sources
+  // mutation may reach the server, no optimistic FSM state may be created.
+  assert.equal(
+    harness.sent.some((message) => message.type === "media-sources"),
+    false,
+  );
+  assert.equal(harness.instance.sourceFsms.has("audio"), false);
+  assert.equal(harness.localSources.size, 0);
+});
+
+test("successful replacement rollback restores the previous video preview", async () => {
+  let addSourceCalls = 0;
+  const harness = controller({
+    getSfu: () => ({
+      addSource: async () => {
+        addSourceCalls += 1;
+        // First call (N) succeeds; second call (N+1 replacement) fails;
+        // third call (N+2 recovery re-publish) succeeds.
+        if (addSourceCalls === 2) {
+          throw new Error("producer rejected");
+        }
+      },
+      removeSource: async () => {},
+    }),
+  });
+
+  const oldStream = { id: "old-stream" };
+  const firstEntry = {
+    source: "camera",
+    stream: oldStream,
+    track: {
+      id: "camera-1",
+      kind: "video",
+      readyState: "live",
+      enabled: true,
+    },
+  };
+  await harness.instance.publishSource(firstEntry);
+  assert.equal(harness.localVideoFeeds.value.get("camera").stream, oldStream);
+
+  const newStream = { id: "new-stream" };
+  const replacement = {
+    source: "camera",
+    stream: newStream,
+    track: {
+      id: "camera-2",
+      kind: "video",
+      readyState: "live",
+      enabled: true,
+    },
+  };
+  // Replacement provider failure rolls back to the previous source; when the
+  // recovery re-publish succeeds, publishSource RESOLVES with the recovered
+  // entry rather than rejecting.
+  const recovered = await harness.instance.publishSource(replacement);
+  assert.equal(recovered.track.id, "camera-1");
+
+  // The rollback path restores the previous preview feed: the failed
+  // replacement stream must not survive in the UI.
+  assert.equal(harness.localVideoFeeds.value.get("camera").stream, oldStream);
+  assert.equal(harness.localSources.get("camera").track.id, "camera-1");
+  assert.equal(harness.localSources.get("camera").track, recovered.track);
 });

@@ -164,6 +164,8 @@ export class NativeCloudflareInitializationMethods {
   async reconcilePublications(
     this: NativeCloudflareSessionSurface,
     publications: CloudflarePublication[],
+    _removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
   ) {
     if (!Array.isArray(publications)) return;
 
@@ -228,12 +230,18 @@ export class NativeCloudflareInitializationMethods {
         this.publications.set(trackName, { ...pub, trackName });
         if (this.sessionId && this.subscriptionsStarted)
           await this.subscribe({ ...pub, trackName });
+        // A newer publication revision may have been applied while awaiting
+        // subscription I/O. A stale heartbeat must not continue: its snapshot
+        // could otherwise retire the newer publication in the ghost phase.
+        if (isStale?.()) return;
       }
     }
 
     // 2. Detect local publications MISSING from server snapshot (ghost tracks)
-    // These must be retired locally even without explicit closed=true from server
+    // These must be retired locally even without explicit closed=true from server.
+    // Fence again: the removal phase is the destructive one.
     for (const [trackName, _localPub] of this.publications) {
+      if (isStale?.()) return;
       if (!seenTrackNames.has(trackName)) {
         // Local publication not in server snapshot - retire it
         this.publications.delete(trackName);

@@ -75,11 +75,14 @@ export function setupMediaMessageHandlers({
     }
     if (Array.isArray(data.publishedSourcesDigest)) {
       onPublicationsDigest?.(data.publishedSourcesDigest);
+      const publicationRevision =
+        typeof data.publicationRevision === "string" ||
+        typeof data.publicationRevision === "number"
+          ? data.publicationRevision
+          : null;
       await handlePublicationsDigest?.(
         data.publishedSourcesDigest,
-        typeof data.publicationRevision === "string"
-          ? data.publicationRevision
-          : null,
+        publicationRevision,
       );
     }
   });
