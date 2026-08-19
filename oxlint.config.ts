@@ -1,5 +1,4 @@
 import { defineConfig } from "oxlint";
-import antiSlopPlugin from "./tools/oxlint/anti-slop/index.ts";
 
 export default defineConfig({
   ignorePatterns: [

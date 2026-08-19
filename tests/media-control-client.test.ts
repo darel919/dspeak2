@@ -92,7 +92,10 @@ describe("media-control-client", () => {
 
   it("handles localStorage getter throwing", () => {
     __resetDeviceIdCacheForTesting();
-    const originalLocalStorage = globalThis.localStorage;
+    const descriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "localStorage",
+    );
     Object.defineProperty(globalThis, "localStorage", {
       get: () => {
         throw new DOMException("SecurityError", "SecurityError");
@@ -103,10 +106,15 @@ describe("media-control-client", () => {
       const id = getOrCreateDeviceId();
       assert.ok(id);
     } finally {
-      Object.defineProperty(globalThis, "localStorage", {
-        get: () => originalLocalStorage,
-        configurable: true,
-      });
+      if (descriptor) {
+        Object.defineProperty(globalThis, "localStorage", descriptor);
+      } else {
+        Object.defineProperty(globalThis, "localStorage", {
+          value: undefined,
+          writable: true,
+          configurable: true,
+        });
+      }
     }
   });
 
