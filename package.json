@@ -12,6 +12,7 @@
     "dev:desktop": "cd desktop && bash scripts/dev-desktop.sh",
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown",
+    "lint": "oxlint .",
     "postinstall": "patch-package",
     "release:check": "node scripts/sync-release-version.mjs --check",
     "release:sync": "node scripts/sync-release-version.mjs --write",

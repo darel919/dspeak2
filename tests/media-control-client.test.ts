@@ -66,7 +66,7 @@ describe("media-control-client", () => {
     assert.equal(first, second);
   });
 
-  it("prefers persisted id over in-memory fallback when storage recovers", () => {
+  it("returns same in-memory id for process lifetime even if storage recovers", () => {
     __resetDeviceIdCacheForTesting();
     let stored = "persisted-id";
     let fail = true;
@@ -86,8 +86,28 @@ describe("media-control-client", () => {
     const duringFailure = getOrCreateDeviceId(storage);
     fail = false;
     const afterRecovery = getOrCreateDeviceId(storage);
-    assert.equal(afterRecovery, "persisted-id");
-    assert.notEqual(afterRecovery, duringFailure);
+    assert.equal(afterRecovery, duringFailure);
+    assert.notEqual(afterRecovery, "persisted-id");
+  });
+
+  it("handles localStorage getter throwing", () => {
+    __resetDeviceIdCacheForTesting();
+    const originalLocalStorage = globalThis.localStorage;
+    Object.defineProperty(globalThis, "localStorage", {
+      get: () => {
+        throw new DOMException("SecurityError", "SecurityError");
+      },
+      configurable: true,
+    });
+    try {
+      const id = getOrCreateDeviceId();
+      assert.ok(id);
+    } finally {
+      Object.defineProperty(globalThis, "localStorage", {
+        get: () => originalLocalStorage,
+        configurable: true,
+      });
+    }
   });
 
   it("sends the Supabase access token to media bootstrap", async () => {
