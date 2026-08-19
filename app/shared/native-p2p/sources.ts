@@ -54,11 +54,21 @@ export class NativeP2pSourcesMethods {
     const initialStates = new Map(
       [...this.connections.values()].map((state) => [state.peerId, state]),
     );
+    const committedGeneration =
+      Number.isSafeInteger(Number(metadata.generation)) &&
+      Number(metadata.generation) > 0
+        ? Number(metadata.generation)
+        : 0;
     const entry: NativeP2pLocalSourceEntry = {
       track,
       stream,
       ownerSource:
         typeof metadata.ownerSource === "string" ? metadata.ownerSource : null,
+      generation:
+        Number.isSafeInteger(Number(metadata.generation)) &&
+        Number(metadata.generation) > 0
+          ? Number(metadata.generation)
+          : undefined,
     };
     this.localSources.set(source, entry);
     const results = await Promise.allSettled(
@@ -97,13 +107,12 @@ export class NativeP2pSourcesMethods {
         await this.updateTrack(sender, () => sender.replaceTrack(null));
         state.senders.delete(source);
         state.sourceReceiving.delete(source);
-        const rollbackGeneration =
-          Number(
-            (previous as NativeP2pLocalSourceEntry | undefined)?.generation,
-          ) || 0;
+        const rollbackGeneration = committedGeneration;
+        const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
         this.signal(state.peerId, {
           sourceRemoved: {
             source,
+            connectionEpoch,
             ...(rollbackGeneration > 0
               ? { generation: rollbackGeneration }
               : {}),
