@@ -45,12 +45,13 @@ class EmptyEncodingPeerConnection extends FakePeerConnection {
 }
 
 class GatheringPeerConnection {
-  constructor() {
+  constructor(mid = "audio-mid") {
     this.connectionState = "connected";
     this.iceGatheringState = "gathering";
     this.localDescription = null;
     this.listeners = new Map();
     this.sender = { id: "gathering-sender" };
+    this.mid = mid;
   }
 
   addEventListener(type, listener) {
@@ -66,7 +67,7 @@ class GatheringPeerConnection {
   }
 
   getTransceivers() {
-    return [{ sender: this.sender, mid: "audio-mid" }];
+    return [{ sender: this.sender, mid: this.mid }];
   }
 
   async createOffer() {
@@ -339,6 +340,206 @@ test("Cloudflare recovery closes and re-pulls the exact remote publication", asy
   assert.deepEqual(requests[0].data.body.tracks, [{ mid: "remote-mid" }]);
   assert.equal(ended.length, 1);
   assert.equal(client.remoteByMid.get("remote-mid-2"), publication);
+  client.closeMedia();
+});
+
+test("Cloudflare queued recovery cannot retire a replacement consumer", async () => {
+  const requests = [];
+  const ended = [];
+  let client;
+  let runQueued;
+  const peerConnection = new GatheringPeerConnection("remote-mid");
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      return true;
+    },
+    iceServers: [],
+    onRemoteTrackEnded(entry) {
+      ended.push(entry);
+    },
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  client.enqueueNegotiation = (operation) =>
+    new Promise((resolve, reject) => {
+      runQueued = () => operation().then(resolve, reject);
+    });
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  const oldConsumer = {
+    trackName: "remote-track",
+    mid: "remote-mid",
+    track: { stop() {} },
+    receiverIncarnationId: "old-token",
+  };
+  client.publications.set("remote-track", publication);
+  client.consumers.set("remote-track", oldConsumer);
+  client.remoteByMid.set("remote-mid", publication);
+  client.subscribedTrackNames.add("remote-track");
+
+  const recovery = client.recoverRemotePublication(
+    "remote-track",
+    "old-token",
+    1,
+  );
+  let replacementStopped = false;
+  const replacementConsumer = {
+    trackName: "remote-track",
+    mid: "remote-mid-2",
+    track: {
+      stop() {
+        replacementStopped = true;
+      },
+    },
+    receiverIncarnationId: "new-token",
+  };
+  client.consumers.set("remote-track", replacementConsumer);
+  client.remoteByMid.delete("remote-mid");
+  client.remoteByMid.set("remote-mid-2", publication);
+  runQueued();
+
+  assert.equal(await recovery, false);
+  assert.equal(client.consumers.get("remote-track"), replacementConsumer);
+  assert.equal(replacementStopped, false);
+  assert.equal(ended.length, 0);
+  assert.equal(
+    requests.some((message) => message.data?.operation === "tracks-close"),
+    false,
+  );
+  client.closeMedia();
+});
+
+test("Cloudflare queued recovery cannot use a replaced publication", async () => {
+  const requests = [];
+  let client;
+  let runQueued;
+  const peerConnection = new GatheringPeerConnection("remote-mid");
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  client.enqueueNegotiation = (operation) =>
+    new Promise((resolve, reject) => {
+      runQueued = () => operation().then(resolve, reject);
+    });
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  const consumer = {
+    trackName: "remote-track",
+    mid: "remote-mid",
+    track: { stop() {} },
+    receiverIncarnationId: "old-token",
+  };
+  client.publications.set("remote-track", publication);
+  client.consumers.set("remote-track", consumer);
+  client.remoteByMid.set("remote-mid", publication);
+  client.subscribedTrackNames.add("remote-track");
+
+  const recovery = client.recoverRemotePublication(
+    "remote-track",
+    "old-token",
+    1,
+  );
+  client.publications.set("remote-track", {
+    ...publication,
+    generation: 2,
+  });
+  runQueued();
+
+  assert.equal(await recovery, false);
+  assert.equal(client.consumers.get("remote-track"), consumer);
+  assert.equal(requests.length, 0);
+  client.closeMedia();
+});
+
+test("Cloudflare recovery stops before applying a close response for a replacement", async () => {
+  const requests = [];
+  let resolveCloseSent;
+  const closeSent = new Promise((resolve) => {
+    resolveCloseSent = resolve;
+  });
+  let client;
+  const peerConnection = new GatheringPeerConnection("remote-mid");
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      if (message.data?.operation === "tracks-close") resolveCloseSent(message);
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  const oldConsumer = {
+    trackName: "remote-track",
+    mid: "remote-mid",
+    track: { stop() {} },
+    receiverIncarnationId: "old-token",
+  };
+  client.publications.set("remote-track", publication);
+  client.consumers.set("remote-track", oldConsumer);
+  client.remoteByMid.set("remote-mid", publication);
+  client.subscribedTrackNames.add("remote-track");
+
+  const recovery = client.recoverRemotePublication(
+    "remote-track",
+    "old-token",
+    1,
+  );
+  const closeRequest = await closeSent;
+  const replacementConsumer = {
+    trackName: "remote-track",
+    mid: "remote-mid-2",
+    track: { stop() {} },
+    receiverIncarnationId: "new-token",
+  };
+  client.consumers.set("remote-track", replacementConsumer);
+  client.remoteByMid.delete("remote-mid");
+  client.remoteByMid.set("remote-mid-2", publication);
+  client.subscribedTrackNames.add("remote-track");
+  client.handle("cloudflare-response", {
+    requestId: closeRequest.data.requestId,
+    result: { sessionDescription: { type: "answer", sdp: "stale-close" } },
+  });
+
+  assert.equal(await recovery, false);
+  assert.equal(client.consumers.get("remote-track"), replacementConsumer);
+  assert.equal(peerConnection.remoteDescription, undefined);
+  assert.equal(
+    requests.some((message) => message.data?.operation === "tracks-new"),
+    false,
+  );
   client.closeMedia();
 });
 

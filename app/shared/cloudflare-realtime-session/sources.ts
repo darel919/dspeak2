@@ -3,10 +3,12 @@ import { buildVideoProduceOptions } from "../video-settings.ts";
 import { applyRtpSenderSettings } from "../rtp-sender-settings.ts";
 import { mediaDebug } from "../media-debug.ts";
 import type {
+  CloudflareConsumerEntry,
   CloudflarePublication,
   CloudflareSessionLike,
   CloudflareSourceEntry,
   CloudflareSourceInput,
+  CloudflareSubscriptionGuardPhase,
 } from "../types/cloudflare-media.ts";
 
 import {
@@ -309,8 +311,31 @@ export class CloudflareSourcesMethods {
         current.receiverIncarnationId !== expectedReceiverIncarnation)
     )
       return false;
+    let recoveredConsumer: CloudflareConsumerEntry | undefined;
+    const isRecoveryStale = (phase: CloudflareSubscriptionGuardPhase) => {
+      const active = this.consumers.get(trackName);
+      if (
+        this.peerConnection !== peerConnection ||
+        this.sessionGeneration !== generation ||
+        !this.sessionId ||
+        this.publications.get(trackName) !== publication
+      )
+        return true;
+      if (phase === "before-bind")
+        return (
+          (active !== undefined && active !== current) ||
+          (active?.receiverIncarnationId !== undefined &&
+            expectedReceiverIncarnation !== undefined &&
+            active.receiverIncarnationId !== expectedReceiverIncarnation)
+        );
+      if (recoveredConsumer === undefined && active !== undefined) {
+        recoveredConsumer = active;
+        return false;
+      }
+      return recoveredConsumer !== undefined && active !== recoveredConsumer;
+    };
     return this.enqueueNegotiation(async () => {
-      this.assertCurrentSession(peerConnection, generation);
+      if (isRecoveryStale("before-bind")) return false;
       const transceiver = peerConnection
         .getTransceivers()
         .find((candidate) => String(candidate.mid) === String(mid));
@@ -326,29 +351,40 @@ export class CloudflareSourcesMethods {
       } catch {}
       this.onRemoteTrackEnded?.(current);
       const offer = await peerConnection.createOffer();
-      this.assertCurrentSession(peerConnection, generation);
+      if (isRecoveryStale("before-bind")) return false;
       await peerConnection.setLocalDescription(offer);
+      if (isRecoveryStale("before-bind")) return false;
       const sessionDescription =
         await getLocalSessionDescription(peerConnection);
+      if (isRecoveryStale("before-bind")) return false;
       const result = await this.request("tracks-close", {
         tracks: [{ mid }],
         sessionDescription,
         force: false,
       });
-      this.assertCurrentSession(peerConnection, generation);
+      if (isRecoveryStale("before-bind")) return false;
       if (result.sessionDescription?.type === "offer") {
         await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (isRecoveryStale("before-bind")) return false;
         const answer = await peerConnection.createAnswer();
+        if (isRecoveryStale("before-bind")) return false;
         await peerConnection.setLocalDescription(answer);
+        if (isRecoveryStale("before-bind")) return false;
         await this.request("renegotiate", {
           sessionDescription: await getLocalSessionDescription(peerConnection),
         });
+        if (isRecoveryStale("before-bind")) return false;
       } else if (result.sessionDescription) {
+        if (isRecoveryStale("before-bind")) return false;
         await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (isRecoveryStale("before-bind")) return false;
       }
-      this.assertCurrentSession(peerConnection, generation);
       return Boolean(
-        await this.subscribePublicationBatch([publication], generation),
+        await this.subscribePublicationBatch(
+          [publication],
+          generation,
+          isRecoveryStale,
+        ),
       );
     });
   }
@@ -424,13 +460,14 @@ export class CloudflareSourcesMethods {
     this: CloudflareSessionLike,
     publications: CloudflarePublication[],
     generation: number,
+    isStale?: (phase: CloudflareSubscriptionGuardPhase) => boolean,
   ) {
     const active = publications.filter(
       (publication) =>
         publication.trackName != null &&
         this.publications.get(publication.trackName) === publication,
     );
-    if (!active.length) return false;
+    if (!active.length || isStale?.("before-bind")) return false;
     const peerConnection = this.peerConnection;
     if (
       generation !== this.sessionGeneration ||
@@ -446,7 +483,9 @@ export class CloudflareSourcesMethods {
       })),
     });
     this.assertCurrentSession(peerConnection, generation);
+    if (isStale?.("before-bind")) return false;
     for (const publication of active) {
+      if (isStale?.("before-bind")) return false;
       if (
         !publication.trackName ||
         this.publications.get(publication.trackName) !== publication
@@ -465,21 +504,28 @@ export class CloudflareSourcesMethods {
       for (const event of pending) this.handleRemoteTrack(event, publication);
     }
     this.lastReceivedConsumerParams = result;
+    if (isStale?.("after-bind")) return false;
     if (result.sessionDescription?.type === "offer") {
+      if (isStale?.("after-bind")) return false;
       await peerConnection.setRemoteDescription(result.sessionDescription);
       this.assertCurrentSession(peerConnection, generation);
       const answer = await peerConnection.createAnswer();
+      if (isStale?.("after-bind")) return false;
       await peerConnection.setLocalDescription(answer);
       this.assertCurrentSession(peerConnection, generation);
       const sessionDescription =
         await getLocalSessionDescription(peerConnection);
+      if (isStale?.("after-bind")) return false;
       await this.request("renegotiate", {
         sessionDescription,
       });
       this.assertCurrentSession(peerConnection, generation);
+      if (isStale?.("after-bind")) return false;
     } else if (result.sessionDescription) {
+      if (isStale?.("after-bind")) return false;
       await peerConnection.setRemoteDescription(result.sessionDescription);
       this.assertCurrentSession(peerConnection, generation);
+      if (isStale?.("after-bind")) return false;
     }
     return true;
   }

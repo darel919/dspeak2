@@ -33,6 +33,7 @@ export interface CloudflareConsumerEntry extends Record<string, unknown> {
   receiver?: RTCRtpReceiver;
   trackName: string;
   mid?: string | null;
+  receiverIncarnationId?: string;
   source?: string;
   userId?: string;
   receiving?: boolean;
@@ -48,6 +49,7 @@ export interface CloudflareTrackEvent {
   transceiver?: RTCRtpTransceiver;
   receiver?: RTCRtpReceiver;
 }
+export type CloudflareSubscriptionGuardPhase = "before-bind" | "after-bind";
 export interface CloudflarePeerConnectionLike {
   iceGatheringState?: string;
   localDescription?: { type?: string; sdp?: string | null } | null;
@@ -127,6 +129,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   subscribePublicationBatch: (
     publications: CloudflarePublication[],
     generation: number,
+    isStale?: (phase: CloudflareSubscriptionGuardPhase) => boolean,
   ) => Promise<unknown>;
   subscribePublications: (
     publications: CloudflarePublication[],
