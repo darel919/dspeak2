@@ -303,13 +303,24 @@ export class CloudflareSourcesMethods {
       this.peerConnection === peerConnection &&
       this.sessionGeneration === generation &&
       Boolean(this.sessionId);
+    const ownsConsumer = (
+      binding: CloudflareRemoteTrackBinding,
+      current: CloudflareConsumerEntry | undefined,
+    ) =>
+      current !== undefined &&
+      ((binding.consumer !== undefined &&
+        current === binding.consumer &&
+        binding.consumer.mid === binding.mid) ||
+        (expectedConsumer !== undefined &&
+          current === expectedConsumer &&
+          expectedConsumer.mid === binding.mid));
     const safeBindings = uniqueBindings.filter((binding) => {
       const mappedPublication = this.remoteByMid.get(binding.mid);
       const current = this.consumers.get(binding.trackName);
       return (
         (!mappedPublication || mappedPublication === binding.publication) &&
         (!current ||
-          current === expectedConsumer ||
+          ownsConsumer(binding, current) ||
           String(current.mid || "") !== binding.mid)
       );
     });
@@ -327,16 +338,13 @@ export class CloudflareSourcesMethods {
           this.pendingRemoteTracks.delete(binding.mid);
         }
         const current = this.consumers.get(binding.trackName);
-        if (
-          expectedConsumer &&
-          current === expectedConsumer &&
-          expectedConsumer.mid === binding.mid
-        ) {
+        const ownedConsumer = ownsConsumer(binding, current) ? current : null;
+        if (ownedConsumer) {
           try {
-            expectedConsumer.track?.stop?.();
+            ownedConsumer.track?.stop?.();
           } catch {}
           this.consumers.delete(binding.trackName);
-          this.onRemoteTrackEnded?.(expectedConsumer);
+          this.onRemoteTrackEnded?.(ownedConsumer);
         }
       }
       for (const binding of safeBindings) {
@@ -368,7 +376,7 @@ export class CloudflareSourcesMethods {
         return (
           (!mappedPublication || mappedPublication === binding.publication) &&
           (!current ||
-            current === expectedConsumer ||
+            ownsConsumer(binding, current) ||
             String(current.mid || "") !== binding.mid)
         );
       });
@@ -620,6 +628,16 @@ export class CloudflareSourcesMethods {
     });
     this.assertCurrentSession(peerConnection, generation);
     const bindings: CloudflareRemoteTrackBinding[] = [];
+    const captureBoundConsumers = () => {
+      for (const binding of bindings) {
+        const consumer = this.consumers.get(binding.trackName);
+        if (
+          consumer?.mid === binding.mid &&
+          this.remoteByMid.get(binding.mid) === binding.publication
+        )
+          binding.consumer = consumer;
+      }
+    };
     const compensateIfStale = async (
       phase: CloudflareSubscriptionGuardPhase,
     ) => {
@@ -657,11 +675,13 @@ export class CloudflareSourcesMethods {
         this.pendingRemoteTracks.delete(binding.mid);
         for (const event of pending)
           this.handleRemoteTrack(event, binding.publication);
+        captureBoundConsumers();
       }
       if (await compensateIfStale("after-bind")) return false;
       if (result.sessionDescription?.type === "offer") {
         if (await compensateIfStale("after-bind")) return false;
         await peerConnection.setRemoteDescription(result.sessionDescription);
+        captureBoundConsumers();
         this.assertCurrentSession(peerConnection, generation);
         const answer = await peerConnection.createAnswer();
         if (await compensateIfStale("after-bind")) return false;
@@ -678,6 +698,7 @@ export class CloudflareSourcesMethods {
       } else if (result.sessionDescription) {
         if (await compensateIfStale("after-bind")) return false;
         await peerConnection.setRemoteDescription(result.sessionDescription);
+        captureBoundConsumers();
         this.assertCurrentSession(peerConnection, generation);
         if (await compensateIfStale("after-bind")) return false;
       }

@@ -98,6 +98,23 @@ class GatheringPeerConnection {
   }
 }
 
+class FailingAnswerPeerConnection extends GatheringPeerConnection {
+  failNextAnswer: boolean;
+
+  constructor(mid = "audio-mid") {
+    super(mid);
+    this.failNextAnswer = true;
+  }
+
+  async createAnswer() {
+    if (this.failNextAnswer) {
+      this.failNextAnswer = false;
+      throw new Error("answer failed");
+    }
+    return { type: "answer", sdp: "answer" };
+  }
+}
+
 test("Cloudflare session closure marks pending requests as cancellation", async () => {
   const client = new CloudflareRealtimeSession({
     send: () => true,
@@ -596,6 +613,190 @@ test("Cloudflare stale tracks-new compensates with its returned MID", async () =
   assert.equal(client.subscribedTrackNames.has("remote-track"), false);
   assert.equal(client.lastReceivedConsumerParams, null);
   assert.equal(client.publications.get("remote-track"), replacement);
+  client.closeMedia();
+});
+
+test("Cloudflare failed subscription compensates the consumer bound by the batch", async () => {
+  const requests = [];
+  const ended = [];
+  let client;
+  let subscribeAttempt = 0;
+  const peerConnection = new FailingAnswerPeerConnection("remote-mid-2");
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      const { requestId, operation } = message.data;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId,
+          result:
+            operation === "tracks-new"
+              ? {
+                  tracks: [{ trackName: "remote-track", mid: "remote-mid-2" }],
+                  sessionDescription: {
+                    type: "offer",
+                    sdp: `subscribe-${subscribeAttempt++}`,
+                  },
+                }
+              : { sessionDescription: { type: "answer", sdp: operation } },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+    onRemoteTrackEnded(entry) {
+      ended.push(entry);
+    },
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  client.publications.set("remote-track", publication);
+  peerConnection.setRemoteDescription = async (description) => {
+    peerConnection.remoteDescription = description;
+    if (description.sdp?.startsWith("subscribe-"))
+      client.handleRemoteTrack(
+        {
+          track: {
+            id: `remote-track-${subscribeAttempt}`,
+            kind: "audio",
+            addEventListener() {},
+            stop() {},
+          },
+          transceiver: { mid: "remote-mid-2" },
+        },
+        publication,
+      );
+  };
+
+  await assert.rejects(
+    client.subscribePublicationBatch([publication], 1),
+    /answer failed/,
+  );
+
+  assert.deepEqual(
+    requests.map((message) => message.data.operation),
+    ["tracks-new", "tracks-close"],
+  );
+  assert.deepEqual(requests[1].data.body.tracks, [{ mid: "remote-mid-2" }]);
+  assert.equal(client.consumers.has("remote-track"), false);
+  assert.equal(client.remoteByMid.has("remote-mid-2"), false);
+  assert.equal(client.subscribedTrackNames.has("remote-track"), false);
+  assert.equal(ended.length, 1);
+
+  assert.equal(await client.subscribePublicationBatch([publication], 1), true);
+  assert.equal(client.consumers.get("remote-track").mid, "remote-mid-2");
+  assert.equal(ended.length, 1);
+  client.closeMedia();
+});
+
+test("Cloudflare subscription rollback preserves a same-MID replacement consumer", async () => {
+  const requests = [];
+  const ended = [];
+  let client;
+  let replacementConsumer;
+  let replacementTrackStopped = false;
+  const peerConnection = new FailingAnswerPeerConnection("remote-mid-2");
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      const { requestId, operation } = message.data;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId,
+          result:
+            operation === "tracks-new"
+              ? {
+                  tracks: [{ trackName: "remote-track", mid: "remote-mid-2" }],
+                  sessionDescription: {
+                    type: "offer",
+                    sdp: "subscribe-replacement",
+                  },
+                }
+              : { sessionDescription: { type: "answer", sdp: operation } },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+    onRemoteTrackEnded(entry) {
+      ended.push(entry);
+    },
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  client.publications.set("remote-track", publication);
+  peerConnection.setRemoteDescription = async (description) => {
+    peerConnection.remoteDescription = description;
+    client.handleRemoteTrack(
+      {
+        track: {
+          id: "remote-track-old",
+          kind: "audio",
+          addEventListener() {},
+          stop() {},
+        },
+        transceiver: { mid: "remote-mid-2" },
+      },
+      publication,
+    );
+  };
+  const originalCreateAnswer = peerConnection.createAnswer.bind(peerConnection);
+  peerConnection.createAnswer = async () => {
+    const replacementTrack = {
+      id: "remote-track-replacement",
+      kind: "audio",
+      addEventListener() {},
+      stop() {
+        replacementTrackStopped = true;
+      },
+    };
+    client.handleRemoteTrack(
+      {
+        track: replacementTrack,
+        transceiver: { mid: "remote-mid-2" },
+      },
+      publication,
+    );
+    replacementConsumer = client.consumers.get("remote-track");
+    return originalCreateAnswer();
+  };
+
+  await assert.rejects(
+    client.subscribePublicationBatch([publication], 1),
+    /answer failed/,
+  );
+
+  assert.deepEqual(
+    requests.map((message) => message.data.operation),
+    ["tracks-new"],
+  );
+  assert.equal(client.consumers.get("remote-track"), replacementConsumer);
+  assert.equal(replacementTrackStopped, false);
+  assert.equal(client.remoteByMid.get("remote-mid-2"), publication);
+  assert.equal(client.subscribedTrackNames.has("remote-track"), true);
+  assert.equal(ended.length, 1);
   client.closeMedia();
 });
 

@@ -54,6 +54,7 @@ export interface CloudflareRemoteTrackBinding {
   trackName: string;
   mid: string;
   publication: CloudflarePublication;
+  consumer?: CloudflareConsumerEntry;
 }
 export interface CloudflareSubscriptionBatchOptions {
   isStale?: (phase: CloudflareSubscriptionGuardPhase) => boolean;
