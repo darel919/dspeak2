@@ -17,6 +17,7 @@ export class CloudflareRealtimeSession {
   declare publications: CloudflareSessionLike["publications"];
   declare remoteByMid: CloudflareSessionLike["remoteByMid"];
   declare pendingRemoteTracks: CloudflareSessionLike["pendingRemoteTracks"];
+  declare remoteCompensationOwners: CloudflareSessionLike["remoteCompensationOwners"];
   declare rtpSamples: CloudflareSessionLike["rtpSamples"];
   declare subscriptionTasks: CloudflareSessionLike["subscriptionTasks"];
   declare subscribedTrackNames: Set<string>;
@@ -54,6 +55,7 @@ export class CloudflareRealtimeSession {
     this.publications = new Map();
     this.remoteByMid = new Map();
     this.pendingRemoteTracks = new Map();
+    this.remoteCompensationOwners = new Map();
     this.rtpSamples = new Map();
     this.subscriptionTasks = new Map();
     this.subscribedTrackNames = new Set();

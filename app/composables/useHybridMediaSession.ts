@@ -145,8 +145,15 @@ function normalizeReceiverStats(raw: unknown): RemoteReceiverStats | null {
   if (bytesReceived === undefined || packetsReceived === undefined) return null;
   const result: RemoteReceiverStats = { bytesReceived, packetsReceived };
   for (const field of [
+    "framesReceived",
     "framesDecoded",
     "framesRendered",
+    "framesPerSecond",
+    "freezeCount",
+    "totalFreezesDuration",
+    "pauseCount",
+    "totalPausesDuration",
+    "lastPacketReceivedTimestamp",
     "totalAudioEnergy",
     "totalSamplesReceived",
     "jitterBufferEmittedCount",
@@ -1306,6 +1313,15 @@ export function useHybridMediaSession() {
         receiverIncarnationId || null,
         Date.now(),
         fallback,
+      ),
+    markRemoteFramePresented: (
+      key: string,
+      receiverIncarnationId?: string | null,
+    ) =>
+      registry.markFramePresented(
+        key,
+        receiverIncarnationId || null,
+        Date.now(),
       ),
     setRemoteSystemAudioReceiving: (key: string, on: boolean) =>
       registry.setAudioReceiving(key, on),

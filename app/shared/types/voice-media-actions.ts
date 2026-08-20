@@ -102,6 +102,10 @@ export interface VoiceMediaSessionLike {
     receiverIncarnationId?: string | null,
     fallback?: boolean,
   ) => unknown;
+  markRemoteFramePresented?: (
+    key: string,
+    receiverIncarnationId?: string | null,
+  ) => unknown;
   setRemoteSystemAudioReceiving?: (
     feedKey: string,
     receiving: boolean,

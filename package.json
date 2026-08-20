@@ -16,6 +16,7 @@
     "postinstall": "patch-package",
     "release:check": "node scripts/sync-release-version.mjs --check",
     "release:sync": "node scripts/sync-release-version.mjs --write",
+    "verify:media-control-contract": "bun scripts/media-control-contract-compatibility.ts",
     "test": "node --test tests/*.test.ts",
     "typecheck": "nuxt typecheck && node scripts/check-unused.mjs",
     "benchmark:audio": "node scripts/audio-codec-benchmark.mjs",

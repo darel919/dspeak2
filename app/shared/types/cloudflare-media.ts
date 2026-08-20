@@ -56,6 +56,11 @@ export interface CloudflareRemoteTrackBinding {
   publication: CloudflarePublication;
   consumer?: CloudflareConsumerEntry;
 }
+export interface CloudflareCompensationOwner {
+  token: symbol;
+  transceiver: RTCRtpTransceiver;
+  previousDirection: RTCRtpTransceiverDirection | null;
+}
 export interface CloudflareSubscriptionBatchOptions {
   isStale?: (phase: CloudflareSubscriptionGuardPhase) => boolean;
   onTrackBound?: (binding: CloudflareRemoteTrackBinding) => void;
@@ -102,6 +107,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   publications: Map<string, CloudflarePublication>;
   remoteByMid: Map<string, CloudflarePublication>;
   pendingRemoteTracks: Map<string, CloudflareTrackEvent[]>;
+  remoteCompensationOwners: Map<string, CloudflareCompensationOwner>;
   rtpSamples: Map<string, { bytes: number; timestamp: number }>;
   subscriptionTasks: Map<string, Promise<unknown>>;
   subscribedTrackNames: Set<string>;

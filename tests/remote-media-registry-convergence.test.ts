@@ -241,6 +241,60 @@ test("RTP resumption cancels a late recovery attempt", async () => {
   registry.clear();
 });
 
+test("decoder recovery waits for decode progression and ignores packet-only progress", async () => {
+  let resolveRecovery: ((value: boolean) => void) | null = null;
+  const { registry } = createVideoRegistry({
+    onReceiverRecovery: () =>
+      new Promise<boolean>((resolve) => {
+        resolveRecovery = resolve;
+      }),
+  });
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 1000,
+    packetsReceived: 10,
+    framesReceived: 1,
+    framesDecoded: 1,
+  });
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 2000,
+    packetsReceived: 20,
+    framesReceived: 2,
+    framesDecoded: 2,
+  });
+  registry.markFirstFrame(current.key, token);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.phase = "recovering";
+  state.stallState.detected = true;
+  state.stallState.cause = "decoder-stall";
+  state.stallState.recoveryAttempt = 1;
+  const recovery = registry.runReceiverRecovery(current.key, token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 3000,
+    packetsReceived: 30,
+    framesReceived: 3,
+    framesDecoded: 2,
+  });
+  assert.equal(state.stallState.detected, true);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 4000,
+    packetsReceived: 40,
+    framesReceived: 4,
+    framesDecoded: 3,
+  });
+  assert.equal(state.stallState.detected, false);
+  const finishRecovery = resolveRecovery as unknown as (value: boolean) => void;
+  finishRecovery(false);
+  await recovery;
+  assert.equal(state.phase, "renderable");
+  registry.clear();
+});
+
 test("missing receiver stats still trigger the no-RTP timeout", async () => {
   const { registry } = createVideoRegistry({
     getReceiverStats: async () => null,

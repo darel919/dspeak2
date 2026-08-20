@@ -99,6 +99,45 @@ test("RTP statistics include inbound audio playout details", () => {
   assert.equal(stats.jitterBufferMinimumDelayMs, 200);
 });
 
+test("RTP statistics preserve independent inbound video pipeline counters", () => {
+  const report = new Map([
+    [
+      "video",
+      {
+        id: "video",
+        type: "inbound-rtp",
+        kind: "video",
+        timestamp: 2000,
+        packetsReceived: 100,
+        bytesReceived: 9000,
+        framesReceived: 40,
+        framesDecoded: 38,
+        framesRendered: 37,
+        framesPerSecond: 30,
+        freezeCount: 2,
+        totalFreezesDuration: 0.4,
+        pauseCount: 1,
+        totalPausesDuration: 0.8,
+        lastPacketReceivedTimestamp: 1999,
+      },
+    ],
+  ]);
+
+  const { stats } = collectRtpStats(report, "inbound", {}, null, "video");
+  if (!stats || !("framesReceived" in stats))
+    throw new Error("Inbound video stats are missing");
+
+  assert.equal(stats.framesReceived, 40);
+  assert.equal(stats.framesDecoded, 38);
+  assert.equal(stats.framesRendered, 37);
+  assert.equal(stats.framesPerSecond, 30);
+  assert.equal(stats.freezeCount, 2);
+  assert.equal(stats.totalFreezesDuration, 0.4);
+  assert.equal(stats.pauseCount, 1);
+  assert.equal(stats.totalPausesDuration, 0.8);
+  assert.equal(stats.lastPacketReceivedTimestamp, 1999);
+});
+
 test("matches RTP statistics to the requested media track", () => {
   const report = new Map([
     [

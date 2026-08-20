@@ -14,8 +14,7 @@ import {
   clearStall,
   compareIncarnationAuthority,
   isIncarnationCurrent,
-  isIncarnationNewer,
-  isIncarnationOlder,
+  recordFirstFrameEvidence,
   DEFAULT_REMOTE_SOURCE_FSM_CONFIG,
   type RemoteSourceIncarnation,
   type RemoteSourceConvergenceState,
@@ -262,6 +261,164 @@ test("Remote Source Convergence FSM - should detect a frame timeout while RTP fl
   assert.equal(state.stallState.detected, true);
 });
 
+test("Remote Source Convergence FSM - detects decoder stall while packets and frames arrive", () => {
+  const state = createState();
+  advancePhase(state, "transport-connected");
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 1000,
+      packetsReceived: 10,
+      framesReceived: 1,
+      framesDecoded: 1,
+    },
+    1000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 2000,
+      packetsReceived: 20,
+      framesReceived: 2,
+      framesDecoded: 2,
+    },
+    2000,
+  );
+  recordFirstFrameEvidence(state, 2000);
+  state.phase = "renderable";
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 3000,
+      packetsReceived: 30,
+      framesReceived: 3,
+      framesDecoded: 2,
+    },
+    3000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 4000,
+      packetsReceived: 40,
+      framesReceived: 4,
+      framesDecoded: 2,
+    },
+    4000,
+  );
+
+  assert.equal(
+    detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG, 4000),
+    true,
+  );
+  assert.equal(state.stallState.cause, "decoder-stall");
+});
+
+test("Remote Source Convergence FSM - detects render stall when decode continues", () => {
+  const state = createState();
+  advancePhase(state, "transport-connected");
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 1000,
+      packetsReceived: 10,
+      framesReceived: 1,
+      framesDecoded: 1,
+    },
+    1000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 2000,
+      packetsReceived: 20,
+      framesReceived: 2,
+      framesDecoded: 2,
+    },
+    2000,
+  );
+  recordFirstFrameEvidence(state, 2000);
+  state.phase = "renderable";
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 3000,
+      packetsReceived: 30,
+      framesReceived: 3,
+      framesDecoded: 3,
+    },
+    3000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 4000,
+      packetsReceived: 40,
+      framesReceived: 4,
+      framesDecoded: 4,
+    },
+    4000,
+  );
+
+  assert.equal(
+    detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG, 4000),
+    true,
+  );
+  assert.equal(state.stallState.cause, "render-stall");
+});
+
+test("Remote Source Convergence FSM - static screen sharing does not false-stall", () => {
+  const state = createState("screen");
+  advancePhase(state, "transport-connected");
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 1000,
+      packetsReceived: 10,
+      framesReceived: 1,
+      framesDecoded: 1,
+    },
+    1000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 2000,
+      packetsReceived: 20,
+      framesReceived: 2,
+      framesDecoded: 2,
+    },
+    2000,
+  );
+  recordFirstFrameEvidence(state, 2000);
+  state.phase = "renderable";
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 3000,
+      packetsReceived: 30,
+      framesReceived: 2,
+      framesDecoded: 2,
+    },
+    3000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 4000,
+      packetsReceived: 40,
+      framesReceived: 2,
+      framesDecoded: 2,
+    },
+    4000,
+  );
+
+  assert.equal(
+    detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG, 4000),
+    false,
+  );
+});
+
 test("Remote Source Convergence FSM - should not detect stall when intentional receiving is disabled", () => {
   const state = createState();
   advancePhase(state, "transport-connected");
@@ -371,48 +528,24 @@ test("Remote Source Convergence FSM - should compare incarnation authority corre
   assert.strictEqual(compare3, 0);
 });
 
-test("Remote Source Convergence FSM - should identify newer incarnation correctly", () => {
+test("Remote Source Convergence FSM - keeps equal authority separate from receiver identity", () => {
   const current = createRemoteSourceIncarnation({
     ...TEST_INCARNATION,
+    receiverIncarnationId: "receiver-a",
     connectionEpoch: 1,
     sourceGeneration: 1,
   });
-  const newer = createRemoteSourceIncarnation({
+  const replacement = createRemoteSourceIncarnation({
     ...TEST_INCARNATION,
-    connectionEpoch: 2,
-    sourceGeneration: 1,
-  });
-  const older = createRemoteSourceIncarnation({
-    ...TEST_INCARNATION,
+    receiverIncarnationId: "receiver-b",
     connectionEpoch: 1,
     sourceGeneration: 1,
   });
 
-  assert.ok(isIncarnationNewer(current, newer));
-  assert.ok(!isIncarnationNewer(current, older));
-  assert.ok(isIncarnationNewer(null, current));
-});
-
-test("Remote Source Convergence FSM - should identify older incarnation correctly", () => {
-  const current = createRemoteSourceIncarnation({
-    ...TEST_INCARNATION,
-    connectionEpoch: 2,
-    sourceGeneration: 1,
-  });
-  const older = createRemoteSourceIncarnation({
-    ...TEST_INCARNATION,
-    connectionEpoch: 1,
-    sourceGeneration: 1,
-  });
-  const newer = createRemoteSourceIncarnation({
-    ...TEST_INCARNATION,
-    connectionEpoch: 3,
-    sourceGeneration: 1,
-  });
-
-  assert.ok(isIncarnationOlder(current, older));
-  assert.ok(!isIncarnationOlder(current, newer));
-  assert.ok(!isIncarnationOlder(null, current));
+  assert.equal(compareIncarnationAuthority(current, replacement), 0);
+  assert.equal(compareIncarnationAuthority(replacement, current), 0);
+  assert.equal(isIncarnationCurrent(current, replacement), false);
+  assert.equal(isIncarnationCurrent(current, current), true);
 });
 
 test("Remote Source Convergence FSM - should identify current incarnation correctly", () => {

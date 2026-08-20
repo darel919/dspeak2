@@ -221,6 +221,7 @@ export class CloudflareLifecycleMethods {
     this.publications.clear();
     this.remoteByMid.clear();
     this.pendingRemoteTracks.clear();
+    this.remoteCompensationOwners.clear();
     this.rtpSamples.clear();
     this.subscriptionTasks.clear();
     this.subscribedTrackNames.clear();

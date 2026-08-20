@@ -17,6 +17,49 @@ import {
   MAX_TRACKS_PER_REQUEST,
   getLocalSessionDescription,
 } from "./helpers.ts";
+
+export function bindingStillOwnedForCompensation(
+  session: CloudflareSessionLike,
+  binding: CloudflareRemoteTrackBinding,
+  {
+    peerConnection,
+    sessionGeneration,
+    sessionId,
+    expectedConsumer,
+  }: {
+    peerConnection: RTCPeerConnection;
+    sessionGeneration: number;
+    sessionId: string;
+    expectedConsumer?: CloudflareConsumerEntry;
+  },
+): boolean {
+  if (
+    session.peerConnection !== peerConnection ||
+    session.sessionGeneration !== sessionGeneration ||
+    session.sessionId !== sessionId
+  )
+    return false;
+  const mappedPublication = session.remoteByMid.get(binding.mid);
+  if (mappedPublication && mappedPublication !== binding.publication)
+    return false;
+  const current = session.consumers.get(binding.trackName);
+  if (!current) return true;
+  if (current.mid != null && String(current.mid) !== binding.mid) return true;
+  if (
+    binding.consumer &&
+    current === binding.consumer &&
+    String(binding.consumer.mid || "") === binding.mid
+  )
+    return true;
+  if (
+    expectedConsumer &&
+    current === expectedConsumer &&
+    String(expectedConsumer.mid || "") === binding.mid
+  )
+    return true;
+  return false;
+}
+
 export class CloudflareSourcesMethods {
   async addSource(this: CloudflareSessionLike, entry: CloudflareSourceInput) {
     if (!entry?.source)
@@ -299,46 +342,178 @@ export class CloudflareSourcesMethods {
     const uniqueBindings = [
       ...new Map(bindings.map((binding) => [binding.mid, binding])).values(),
     ];
+    const sessionId = this.sessionId;
+    if (!sessionId) return false;
     const isCurrentSession = () =>
       this.peerConnection === peerConnection &&
       this.sessionGeneration === generation &&
-      Boolean(this.sessionId);
-    const ownsConsumer = (
-      binding: CloudflareRemoteTrackBinding,
-      current: CloudflareConsumerEntry | undefined,
+      this.sessionId === sessionId;
+    const isOwned = (binding: CloudflareRemoteTrackBinding) =>
+      bindingStillOwnedForCompensation(this, binding, {
+        peerConnection,
+        sessionGeneration: generation,
+        sessionId,
+        expectedConsumer,
+      });
+    const blockedMids = new Set(
+      uniqueBindings
+        .filter((binding) => this.remoteCompensationOwners.has(binding.mid))
+        .map((binding) => binding.mid),
+    );
+    const candidateBindings = uniqueBindings.filter(
+      (binding) => !blockedMids.has(binding.mid),
+    );
+    const currentBindings = () => candidateBindings.filter(isOwned);
+    const sameBindings = (
+      left: CloudflareRemoteTrackBinding[],
+      right: CloudflareRemoteTrackBinding[],
     ) =>
-      current !== undefined &&
-      ((binding.consumer !== undefined &&
-        current === binding.consumer &&
-        binding.consumer.mid === binding.mid) ||
-        (expectedConsumer !== undefined &&
-          current === expectedConsumer &&
-          expectedConsumer.mid === binding.mid));
-    const safeBindings = uniqueBindings.filter((binding) => {
-      const mappedPublication = this.remoteByMid.get(binding.mid);
-      const current = this.consumers.get(binding.trackName);
-      return (
-        (!mappedPublication || mappedPublication === binding.publication) &&
-        (!current ||
-          ownsConsumer(binding, current) ||
-          String(current.mid || "") !== binding.mid)
+      left.length === right.length &&
+      left.every((binding) =>
+        right.some((candidate) => candidate.mid === binding.mid),
       );
-    });
-    if (!safeBindings.length || !isCurrentSession()) return false;
+    const transceivers = new Map<
+      string,
+      {
+        transceiver: RTCRtpTransceiver;
+        previousDirection: RTCRtpTransceiverDirection | null;
+      }
+    >();
+    const compensationTokens = new Map<string, symbol>();
+    const restoreUnowned = () => {
+      const ownedMids = new Set(
+        currentBindings().map((binding) => binding.mid),
+      );
+      for (const binding of candidateBindings) {
+        if (ownedMids.has(binding.mid)) continue;
+        const token = compensationTokens.get(binding.mid);
+        const owner = this.remoteCompensationOwners.get(binding.mid);
+        const state = transceivers.get(binding.mid);
+        if (
+          !token ||
+          owner?.token !== token ||
+          !state ||
+          !state.previousDirection ||
+          state.transceiver.direction !== "inactive"
+        )
+          continue;
+        state.transceiver.direction = state.previousDirection;
+        this.remoteCompensationOwners.delete(binding.mid);
+      }
+    };
+    const setInactive = (owned: CloudflareRemoteTrackBinding[]) => {
+      for (const binding of owned) {
+        const state = transceivers.get(binding.mid);
+        if (state && state.transceiver.direction !== "inactive")
+          state.transceiver.direction = "inactive";
+      }
+    };
+    const initialBindings = currentBindings();
+    if (!initialBindings.length || !isCurrentSession()) return false;
+    for (const binding of initialBindings) {
+      const transceiver = peerConnection
+        .getTransceivers?.()
+        ?.find((candidate) => String(candidate.mid) === binding.mid);
+      if (transceiver) {
+        const token = Symbol(binding.mid);
+        compensationTokens.set(binding.mid, token);
+        transceivers.set(binding.mid, {
+          transceiver,
+          previousDirection:
+            typeof transceiver.direction === "string"
+              ? transceiver.direction
+              : null,
+        });
+        this.remoteCompensationOwners.set(binding.mid, {
+          token,
+          transceiver,
+          previousDirection:
+            typeof transceiver.direction === "string"
+              ? transceiver.direction
+              : null,
+        });
+      }
+    }
     try {
-      for (const binding of safeBindings) {
-        const transceiver = peerConnection
-          .getTransceivers()
-          .find((candidate) => String(candidate.mid) === binding.mid);
-        if (transceiver && transceiver.direction !== "inactive")
-          transceiver.direction = "inactive";
+      let bindingsToClose: CloudflareRemoteTrackBinding[] | null = null;
+      let sessionDescription: { type: string; sdp: string } | null = null;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (!isCurrentSession()) return false;
+        const owned = currentBindings();
+        if (!owned.length) return false;
+        restoreUnowned();
+        setInactive(owned);
+        const offer = await peerConnection.createOffer();
+        if (!isCurrentSession()) return false;
+        const afterOffer = currentBindings();
+        restoreUnowned();
+        if (!sameBindings(owned, afterOffer)) continue;
+        await peerConnection.setLocalDescription(offer);
+        if (!isCurrentSession()) return false;
+        const afterLocalDescription = currentBindings();
+        restoreUnowned();
+        if (!sameBindings(owned, afterLocalDescription)) continue;
+        const localDescription =
+          await getLocalSessionDescription(peerConnection);
+        if (!isCurrentSession()) return false;
+        const afterGathering = currentBindings();
+        restoreUnowned();
+        if (!sameBindings(owned, afterGathering)) continue;
+        bindingsToClose = afterGathering;
+        sessionDescription = localDescription;
+        break;
+      }
+      if (!bindingsToClose || !sessionDescription) return false;
+      const finalBindings = currentBindings();
+      if (!sameBindings(bindingsToClose, finalBindings)) return false;
+      const result = await this.request("tracks-close", {
+        tracks: finalBindings.map((binding) => ({ mid: binding.mid })),
+        sessionDescription,
+        force: false,
+      });
+      if (!isCurrentSession()) return false;
+      if (!finalBindings.every(isOwned)) return false;
+      if (result.sessionDescription?.type === "offer") {
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        const answer = await peerConnection.createAnswer();
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        await peerConnection.setLocalDescription(answer);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        const renegotiationDescription =
+          await getLocalSessionDescription(peerConnection);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        await this.request("renegotiate", {
+          sessionDescription: renegotiationDescription,
+        });
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+      } else if (result.sessionDescription) {
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+      }
+      restoreUnowned();
+      const cleanupBindings = finalBindings.filter(isOwned);
+      for (const binding of cleanupBindings) {
         const mappedPublication = this.remoteByMid.get(binding.mid);
         if (!mappedPublication || mappedPublication === binding.publication) {
           this.remoteByMid.delete(binding.mid);
           this.pendingRemoteTracks.delete(binding.mid);
         }
         const current = this.consumers.get(binding.trackName);
-        const ownedConsumer = ownsConsumer(binding, current) ? current : null;
+        const ownedConsumer =
+          current &&
+          current.mid != null &&
+          String(current.mid) === binding.mid &&
+          ((binding.consumer && current === binding.consumer) ||
+            (expectedConsumer && current === expectedConsumer))
+            ? current
+            : null;
         if (ownedConsumer) {
           try {
             ownedConsumer.track?.stop?.();
@@ -346,63 +521,26 @@ export class CloudflareSourcesMethods {
           this.consumers.delete(binding.trackName);
           this.onRemoteTrackEnded?.(ownedConsumer);
         }
-      }
-      for (const binding of safeBindings) {
-        const current = this.consumers.get(binding.trackName);
         const hasOtherBinding = [...this.remoteByMid.values()].some(
           (publication) => publication.trackName === binding.trackName,
         );
-        if (!hasOtherBinding && (!current || current === expectedConsumer)) {
+        if (!hasOtherBinding && !this.consumers.has(binding.trackName)) {
           this.subscribedTrackNames.delete(binding.trackName);
           this.rtpSamples.delete(binding.trackName);
         }
       }
-      const offer = await peerConnection.createOffer();
-      if (!isCurrentSession()) return false;
-      await peerConnection.setLocalDescription(offer);
-      if (!isCurrentSession()) return false;
-      const sessionDescription =
-        await getLocalSessionDescription(peerConnection);
-      if (!isCurrentSession()) return false;
-      const result = await this.request("tracks-close", {
-        tracks: safeBindings.map((binding) => ({ mid: binding.mid })),
-        sessionDescription,
-        force: false,
-      });
-      if (!isCurrentSession()) return false;
-      const stillSafe = safeBindings.every((binding) => {
-        const mappedPublication = this.remoteByMid.get(binding.mid);
-        const current = this.consumers.get(binding.trackName);
-        return (
-          (!mappedPublication || mappedPublication === binding.publication) &&
-          (!current ||
-            ownsConsumer(binding, current) ||
-            String(current.mid || "") !== binding.mid)
-        );
-      });
-      if (!stillSafe) return false;
-      if (result.sessionDescription?.type === "offer") {
-        await peerConnection.setRemoteDescription(result.sessionDescription);
-        if (!isCurrentSession()) return false;
-        const answer = await peerConnection.createAnswer();
-        if (!isCurrentSession()) return false;
-        await peerConnection.setLocalDescription(answer);
-        if (!isCurrentSession()) return false;
-        await this.request("renegotiate", {
-          sessionDescription: await getLocalSessionDescription(peerConnection),
-        });
-        if (!isCurrentSession()) return false;
-      } else if (result.sessionDescription) {
-        await peerConnection.setRemoteDescription(result.sessionDescription);
-        if (!isCurrentSession()) return false;
-      }
       return true;
     } catch (error) {
       mediaDebug("cloudflare.remote-track-compensation-failed", {
-        mids: safeBindings.map((binding) => binding.mid),
+        mids: uniqueBindings.map((binding) => binding.mid),
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
+    } finally {
+      for (const [mid, token] of compensationTokens) {
+        if (this.remoteCompensationOwners.get(mid)?.token === token)
+          this.remoteCompensationOwners.delete(mid);
+      }
     }
   }
 

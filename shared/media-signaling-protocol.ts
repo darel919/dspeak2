@@ -48,6 +48,16 @@ export const MEDIA_SIGNALING_CLIENT_PROTOCOL = Object.freeze({
   contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
 });
 
+export function buildMediaSignalingClientHello(
+  mediaSessionId: string,
+): MediaSignalingRecord {
+  return {
+    protocolVersion: MEDIA_SIGNALING_PROTOCOL_VERSION,
+    contractRevision: MEDIA_SIGNALING_CONTRACT_REVISION,
+    mediaSessionId,
+  };
+}
+
 export function isMediaSignalingClientHello(
   data: MediaSignalingRecord | null | undefined,
   mediaSessionId: string,

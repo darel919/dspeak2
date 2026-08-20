@@ -94,6 +94,18 @@ export class CloudflareNegotiationMethods {
     } catch {}
     const mid =
       event.transceiver?.mid == null ? null : String(event.transceiver.mid);
+    if (mid !== null) {
+      const compensationOwner = this.remoteCompensationOwners.get(mid);
+      if (compensationOwner) {
+        if (
+          compensationOwner.transceiver.direction === "inactive" &&
+          compensationOwner.previousDirection
+        )
+          compensationOwner.transceiver.direction =
+            compensationOwner.previousDirection;
+        this.remoteCompensationOwners.delete(mid);
+      }
+    }
     const entry = {
       provider: "sfu",
       participantId: publication.userId,

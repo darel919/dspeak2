@@ -42,6 +42,7 @@ export interface RtpEvidenceBase {
   lastPacketsReceived: number;
   lastRtpSampleAt: number | null;
   lastRtpProgressAt: number | null;
+  lastNetworkProgressAt: number | null;
   samples: Array<{
     timestamp: number;
     bytesReceived: number;
@@ -53,8 +54,18 @@ export interface RtpEvidenceBase {
 
 export interface VideoRtpEvidence extends RtpEvidenceBase {
   kind: "video";
+  lastFramesReceived: number;
   lastFramesDecoded: number;
   lastFramesRendered: number;
+  lastPacketReceivedTimestamp: number | null;
+  lastFrameReceivedProgressAt: number | null;
+  lastDecodeProgressAt: number | null;
+  lastStatsRenderProgressAt: number | null;
+  lastPresentationProgressAt: number | null;
+  presentationProgressCount: number;
+  observedPresentationProgressCount: number;
+  decoderStallSamples: number;
+  renderStallSamples: number;
 }
 
 export interface AudioRtpEvidence extends RtpEvidenceBase {
@@ -66,11 +77,21 @@ export interface AudioRtpEvidence extends RtpEvidenceBase {
 
 export type RemoteSourceRtpEvidence = VideoRtpEvidence | AudioRtpEvidence;
 
+export type RemoteSourceStallCause =
+  "no-rtp" | "first-frame-timeout" | "decoder-stall" | "render-stall";
+
 export interface RemoteReceiverStats {
   bytesReceived: number;
   packetsReceived: number;
+  framesReceived?: number;
   framesDecoded?: number;
   framesRendered?: number;
+  framesPerSecond?: number;
+  freezeCount?: number;
+  totalFreezesDuration?: number;
+  pauseCount?: number;
+  totalPausesDuration?: number;
+  lastPacketReceivedTimestamp?: number;
   totalAudioEnergy?: number;
   totalSamplesReceived?: number;
   jitterBufferEmittedCount?: number;
@@ -94,6 +115,7 @@ export interface RemoteSourceConvergenceState {
   stallState: {
     detected: boolean;
     detectedAt: number | null;
+    cause: RemoteSourceStallCause | null;
     recoveryAttempt: number;
     recoveryTimer: ReturnType<typeof setTimeout> | null;
   };
@@ -107,6 +129,7 @@ export interface RemoteSourceConvergenceState {
 export interface RemoteSourceFSMConfig {
   rtpStallThresholdMs: number;
   firstFrameTimeoutMs: number;
+  videoPipelineStallSamples: number;
   maxRecoveryAttempts: number;
   statsSampleIntervalMs: number;
 }
@@ -114,6 +137,7 @@ export interface RemoteSourceFSMConfig {
 export const DEFAULT_REMOTE_SOURCE_FSM_CONFIG: RemoteSourceFSMConfig = {
   rtpStallThresholdMs: 3000,
   firstFrameTimeoutMs: 5000,
+  videoPipelineStallSamples: 2,
   maxRecoveryAttempts: 3,
   statsSampleIntervalMs: 1000,
 };
@@ -264,38 +288,13 @@ export function isIncarnationCurrent(
   );
 }
 
-export function isIncarnationNewer(
-  current: RemoteSourceIncarnation | null,
-  candidate: RemoteSourceIncarnation,
-): boolean {
-  if (!current) return true;
-  const authority = compareIncarnationAuthority(current, candidate);
-  return (
-    authority < 0 ||
-    (authority === 0 &&
-      current.receiverIncarnationId !== candidate.receiverIncarnationId)
-  );
-}
-
-export function isIncarnationOlder(
-  current: RemoteSourceIncarnation | null,
-  candidate: RemoteSourceIncarnation,
-): boolean {
-  if (!current) return false;
-  const authority = compareIncarnationAuthority(current, candidate);
-  return (
-    authority > 0 ||
-    (authority === 0 &&
-      current.receiverIncarnationId !== candidate.receiverIncarnationId)
-  );
-}
-
 function createRtpEvidence(kind: RemoteSourceKind): RemoteSourceRtpEvidence {
   const base = {
     lastBytesReceived: 0,
     lastPacketsReceived: 0,
     lastRtpSampleAt: null,
     lastRtpProgressAt: null,
+    lastNetworkProgressAt: null,
     samples: [],
     rtpFlowingConfirmed: false,
     rtpFlowingConfirmedAt: null,
@@ -304,8 +303,18 @@ function createRtpEvidence(kind: RemoteSourceKind): RemoteSourceRtpEvidence {
     ? {
         ...base,
         kind,
+        lastFramesReceived: 0,
         lastFramesDecoded: 0,
         lastFramesRendered: 0,
+        lastPacketReceivedTimestamp: null,
+        lastFrameReceivedProgressAt: null,
+        lastDecodeProgressAt: null,
+        lastStatsRenderProgressAt: null,
+        lastPresentationProgressAt: null,
+        presentationProgressCount: 0,
+        observedPresentationProgressCount: 0,
+        decoderStallSamples: 0,
+        renderStallSamples: 0,
       }
     : {
         ...base,
@@ -337,6 +346,7 @@ export function createRemoteSourceConvergenceState(
     stallState: {
       detected: false,
       detectedAt: null,
+      cause: null,
       recoveryAttempt: 0,
       recoveryTimer: null,
     },
@@ -405,17 +415,17 @@ export function advancePhase(
   return true;
 }
 
-function videoProgressed(
+function videoNetworkProgressed(
   evidence: VideoRtpEvidence,
   sample: RemoteReceiverStats,
 ): boolean {
   return (
     sample.bytesReceived > evidence.lastBytesReceived ||
     sample.packetsReceived > evidence.lastPacketsReceived ||
-    (sample.framesDecoded !== undefined &&
-      sample.framesDecoded > evidence.lastFramesDecoded) ||
-    (sample.framesRendered !== undefined &&
-      sample.framesRendered > evidence.lastFramesRendered)
+    (sample.lastPacketReceivedTimestamp !== undefined &&
+      (evidence.lastPacketReceivedTimestamp === null ||
+        sample.lastPacketReceivedTimestamp >
+          evidence.lastPacketReceivedTimestamp))
   );
 }
 
@@ -443,7 +453,10 @@ function recordRtpSample(
 ) {
   const evidence = state.rtpEvidence;
   evidence.lastRtpSampleAt = now;
-  if (progression) evidence.lastRtpProgressAt = now;
+  if (progression) {
+    evidence.lastRtpProgressAt = now;
+    evidence.lastNetworkProgressAt = now;
+  }
   evidence.samples.push({
     timestamp: now,
     bytesReceived: sample.bytesReceived,
@@ -453,10 +466,43 @@ function recordRtpSample(
   evidence.lastBytesReceived = sample.bytesReceived;
   evidence.lastPacketsReceived = sample.packetsReceived;
   if (evidence.kind === "video") {
+    const framesReceivedProgressed =
+      sample.framesReceived !== undefined &&
+      sample.framesReceived > evidence.lastFramesReceived;
+    const framesDecodedProgressed =
+      sample.framesDecoded !== undefined &&
+      sample.framesDecoded > evidence.lastFramesDecoded;
+    const framesRenderedProgressed =
+      sample.framesRendered !== undefined &&
+      sample.framesRendered > evidence.lastFramesRendered;
+    const presentationProgressed =
+      framesRenderedProgressed ||
+      evidence.presentationProgressCount >
+        evidence.observedPresentationProgressCount;
+    if (framesReceivedProgressed) evidence.lastFrameReceivedProgressAt = now;
+    if (framesDecodedProgressed) evidence.lastDecodeProgressAt = now;
+    if (framesRenderedProgressed) evidence.lastStatsRenderProgressAt = now;
+    if (sample.framesReceived !== undefined) {
+      if (framesReceivedProgressed && !framesDecodedProgressed)
+        evidence.decoderStallSamples += 1;
+      else if (framesDecodedProgressed || !framesReceivedProgressed)
+        evidence.decoderStallSamples = 0;
+    }
+    if (framesDecodedProgressed && !presentationProgressed)
+      evidence.renderStallSamples += 1;
+    else if (presentationProgressed || !framesDecodedProgressed)
+      evidence.renderStallSamples = 0;
+    evidence.observedPresentationProgressCount =
+      evidence.presentationProgressCount;
+    evidence.lastFramesReceived =
+      sample.framesReceived ?? evidence.lastFramesReceived;
     evidence.lastFramesDecoded =
       sample.framesDecoded ?? evidence.lastFramesDecoded;
     evidence.lastFramesRendered =
       sample.framesRendered ?? evidence.lastFramesRendered;
+    evidence.lastPacketReceivedTimestamp =
+      sample.lastPacketReceivedTimestamp ??
+      evidence.lastPacketReceivedTimestamp;
   } else {
     evidence.lastTotalAudioEnergy =
       sample.totalAudioEnergy ?? evidence.lastTotalAudioEnergy;
@@ -483,7 +529,7 @@ export function checkRtpProgression(
   if (state.rtpEvidence.kind !== "video") return false;
   const evidence = state.rtpEvidence;
   const progression =
-    evidence.samples.length > 0 && videoProgressed(evidence, sample);
+    evidence.samples.length > 0 && videoNetworkProgressed(evidence, sample);
   recordRtpSample(state, sample, now, progression);
   return progression;
 }
@@ -588,7 +634,23 @@ export function recordFirstFrameEvidence(
   state.firstFrameEvidence.element = options.element ?? null;
   state.firstFrameEvidence.stream = options.stream ?? null;
   state.firstFrameEvidence.track = options.track ?? null;
+  recordPresentationProgress(state, at);
+  if (state.rtpEvidence.kind === "video")
+    state.rtpEvidence.observedPresentationProgressCount =
+      state.rtpEvidence.presentationProgressCount;
   promoteConvergence(state, at);
+  return true;
+}
+
+export function recordPresentationProgress(
+  state: RemoteSourceConvergenceState,
+  at = Date.now(),
+): boolean {
+  if (state.kind !== "video" || state.retired || state.failed) return false;
+  const evidence = state.rtpEvidence;
+  if (evidence.kind !== "video") return false;
+  evidence.lastPresentationProgressAt = at;
+  evidence.presentationProgressCount += 1;
   return true;
 }
 
@@ -668,10 +730,12 @@ export function setIntentionalReceivingDisabled(
 function markStalled(
   state: RemoteSourceConvergenceState,
   now: number,
+  cause: RemoteSourceStallCause,
 ): boolean {
   if (state.stallState.detected) return false;
   state.stallState.detected = true;
   state.stallState.detectedAt = now;
+  state.stallState.cause = cause;
   if (state.phase !== "stalled") advancePhase(state, "stalled", now);
   return true;
 }
@@ -695,10 +759,16 @@ export function detectStall(
   )
     return false;
   const evidence = state.rtpEvidence;
-  const lastProgressAt = evidence.lastRtpProgressAt;
+  const progressTimes = [
+    evidence.lastNetworkProgressAt,
+    evidence.lastRtpProgressAt,
+  ].filter((value): value is number => value !== null);
+  const lastProgressAt = progressTimes.length
+    ? Math.min(...progressTimes)
+    : null;
   if (!hasRtpFlowingEvidence(state))
     return now - state.phaseEnteredAt >= config.rtpStallThresholdMs
-      ? markStalled(state, now)
+      ? markStalled(state, now, "no-rtp")
       : false;
   if (
     state.kind === "video" &&
@@ -706,13 +776,32 @@ export function detectStall(
     state.rtpEvidence.rtpFlowingConfirmedAt !== null &&
     now - state.rtpEvidence.rtpFlowingConfirmedAt >= config.firstFrameTimeoutMs
   )
-    return markStalled(state, now);
+    return markStalled(state, now, "first-frame-timeout");
+  if (
+    state.kind === "video" &&
+    evidence.kind === "video" &&
+    evidence.lastFramesReceived > 0 &&
+    state.phase === "renderable"
+  ) {
+    if (
+      evidence.decoderStallSamples >= config.videoPipelineStallSamples &&
+      lastProgressAt !== null &&
+      now - lastProgressAt < config.rtpStallThresholdMs
+    )
+      return markStalled(state, now, "decoder-stall");
+    if (
+      evidence.renderStallSamples >= config.videoPipelineStallSamples &&
+      lastProgressAt !== null &&
+      now - lastProgressAt < config.rtpStallThresholdMs
+    )
+      return markStalled(state, now, "render-stall");
+  }
   if (
     lastProgressAt === null ||
     now - lastProgressAt < config.rtpStallThresholdMs
   )
     return false;
-  return markStalled(state, now);
+  return markStalled(state, now, "no-rtp");
 }
 
 export function scheduleRecovery(
@@ -756,6 +845,7 @@ export function scheduleRecovery(
 export function clearStall(state: RemoteSourceConvergenceState): void {
   state.stallState.detected = false;
   state.stallState.detectedAt = null;
+  state.stallState.cause = null;
   state.stallState.recoveryAttempt = 0;
   if (state.stallState.recoveryTimer) {
     clearTimeout(state.stallState.recoveryTimer);

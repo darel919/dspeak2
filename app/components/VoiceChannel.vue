@@ -293,6 +293,7 @@
               @focus-popup="focusMediaPopout(tile.feed)"
               @pop-in="closeMediaPopout(tile.feed)"
               @first-frame="onRemoteFirstFrame"
+              @frame-presented="onRemoteFramePresented"
             />
             <div
               v-else-if="tile.type === 'broadcast'"
@@ -1082,6 +1083,17 @@ function onRemoteFirstFrame(event) {
     feedKey,
     receiverIncarnationId,
     typeof event === "object" && event?.fallback === true,
+  );
+}
+
+function onRemoteFramePresented(event) {
+  const feedKey = typeof event === "string" ? event : event?.feedKey;
+  const receiverIncarnationId =
+    typeof event === "string" ? null : event?.receiverIncarnationId || null;
+  if (!feedKey) return;
+  mediaSessionRef.value?.markRemoteFramePresented?.(
+    feedKey,
+    receiverIncarnationId,
   );
 }
 

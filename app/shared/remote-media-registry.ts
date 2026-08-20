@@ -32,6 +32,7 @@ import {
   clearStall,
   promoteConvergence,
   recordFirstFrameEvidence,
+  recordPresentationProgress,
   setIntentionalReceivingDisabled,
   DEFAULT_REMOTE_SOURCE_FSM_CONFIG,
 } from "./remote-source-convergence.ts";
@@ -365,6 +366,8 @@ export class RemoteMediaRegistry {
       fallback,
     });
     if (!changed) return false;
+    if (convergenceState.stallState.cause === "first-frame-timeout")
+      clearStall(convergenceState);
     const video = this.videoFeeds.value.get(key);
     if (video) {
       this.videoFeeds.value.set(key, {
@@ -373,6 +376,27 @@ export class RemoteMediaRegistry {
       });
       triggerRef(this.videoFeeds);
     }
+    return true;
+  }
+
+  markFramePresented(
+    key: string,
+    expectedReceiverIncarnation: string | null = null,
+    at = Date.now(),
+  ) {
+    const convergenceState = this.remoteSourceConvergence.get(key);
+    if (!convergenceState) return false;
+    if (
+      expectedReceiverIncarnation &&
+      convergenceState.incarnation.receiverIncarnationId !==
+        expectedReceiverIncarnation
+    )
+      return false;
+    const changed = recordPresentationProgress(convergenceState, at);
+    if (!changed) return false;
+    if (convergenceState.stallState.cause === "render-stall")
+      clearStall(convergenceState);
+    promoteConvergence(convergenceState, at);
     return true;
   }
 
@@ -1082,10 +1106,45 @@ export class RemoteMediaRegistry {
     if (!this.receiverIsCurrent(key, expectedReceiverIncarnation)) return false;
     const state = this.remoteSourceConvergence.get(key);
     if (!state) return false;
+    const previousNetworkProgressAt = state.rtpEvidence.lastNetworkProgressAt;
+    const previousDecodeProgressAt =
+      state.rtpEvidence.kind === "video"
+        ? state.rtpEvidence.lastDecodeProgressAt
+        : null;
+    const previousDecodedFrames =
+      state.rtpEvidence.kind === "video"
+        ? state.rtpEvidence.lastFramesDecoded
+        : null;
+    const previousPresentationCount =
+      state.rtpEvidence.kind === "video"
+        ? state.rtpEvidence.presentationProgressCount
+        : null;
+    const previousCause = state.stallState.cause;
     const progression = audio
       ? checkAudioRtpProgression(state, stats)
       : checkRtpProgression(state, stats);
-    if (progression && state.stallState.detected) clearStall(state);
+    if (state.stallState.detected) {
+      const networkResumed =
+        state.rtpEvidence.lastNetworkProgressAt !== previousNetworkProgressAt;
+      const decodeResumed =
+        state.rtpEvidence.kind === "video" &&
+        state.rtpEvidence.lastFramesDecoded > (previousDecodedFrames ?? 0) &&
+        (state.rtpEvidence.lastDecodeProgressAt !== previousDecodeProgressAt ||
+          state.rtpEvidence.lastFramesDecoded !== previousDecodedFrames);
+      const presentationResumed =
+        state.rtpEvidence.kind === "video" &&
+        state.rtpEvidence.presentationProgressCount !==
+          previousPresentationCount;
+      if (
+        (previousCause === "no-rtp" && networkResumed) ||
+        (previousCause === "first-frame-timeout" &&
+          state.firstFrameEvidence.received) ||
+        (previousCause === "decoder-stall" && decodeResumed) ||
+        (previousCause === "render-stall" && presentationResumed) ||
+        (!previousCause && progression)
+      )
+        clearStall(state);
+    }
     promoteConvergence(state);
     this.evaluateReceiverHealth(key, expectedReceiverIncarnation);
     return progression || state.rtpEvidence.lastRtpSampleAt !== null;

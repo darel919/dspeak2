@@ -191,6 +191,7 @@
 <script setup>
 import { useSettingsStore } from "~/stores/settings";
 import { playSystemSound } from "~/shared/system-sounds.ts";
+import { isCurrentVideoFrame } from "~/shared/video-frame-fencing.ts";
 
 const settingsStore = useSettingsStore();
 const props = defineProps({
@@ -221,6 +222,7 @@ const emit = defineEmits([
   "focus-popup",
   "pop-in",
   "first-frame",
+  "frame-presented",
 ]);
 
 const videoElement = ref(null);
@@ -247,6 +249,7 @@ let firstFrameFallbackTimer = null;
 let nativeFirstFrameEmitted = false;
 let nativeFirstFrameReceiverId = null;
 let videoFrameCallbackHandle = null;
+let videoFirstFrameEmitted = false;
 
 let currentFeedKey = props.feedKey;
 const localScreenPreviewPaused = computed(
@@ -335,8 +338,13 @@ function drawNativeFrame(
   const canvas = nativeCanvasElement.value;
   if (!frame || !canvas || typeof atob !== "function") return;
   if (
-    feedKey !== props.feedKey ||
-    receiverIncarnationId !== props.receiverIncarnationId
+    !isCurrentVideoFrame(
+      { feedKey, receiverIncarnationId },
+      {
+        feedKey: props.feedKey,
+        receiverIncarnationId: props.receiverIncarnationId,
+      },
+    )
   )
     return;
   const width = Number(frame.width);
@@ -371,6 +379,11 @@ function drawNativeFrame(
     nativeImageData.data.set(pixels);
   }
   nativeCanvasContext?.putImageData(nativeImageData, 0, 0);
+  if (feedKey && receiverIncarnationId)
+    emit("frame-presented", {
+      feedKey,
+      receiverIncarnationId,
+    });
   if (
     feedKey &&
     receiverIncarnationId &&
@@ -467,7 +480,9 @@ function cancelVideoFrameEvidence() {
 }
 
 function emitFirstFrame(fallback = false) {
-  if (!props.feedKey || !props.receiverIncarnationId) return;
+  if (!props.feedKey || !props.receiverIncarnationId || videoFirstFrameEmitted)
+    return;
+  videoFirstFrameEmitted = true;
   emit("first-frame", {
     feedKey: props.feedKey,
     receiverIncarnationId: props.receiverIncarnationId,
@@ -490,18 +505,52 @@ function handleVideoReady() {
     const callbackStream = stream;
     const callbackTrack = track;
     const callbackReceiverIncarnationId = receiverIncarnationId;
-    const handle = element.requestVideoFrameCallback(() => {
-      videoFrameCallbackHandle = null;
+    const schedulePresentation = () => {
       if (
         videoElement.value !== callbackElement ||
         props.stream !== callbackStream ||
         props.track !== callbackTrack ||
-        props.receiverIncarnationId !== callbackReceiverIncarnationId
+        !isCurrentVideoFrame(
+          {
+            feedKey: props.feedKey,
+            receiverIncarnationId: callbackReceiverIncarnationId,
+          },
+          {
+            feedKey: props.feedKey,
+            receiverIncarnationId: props.receiverIncarnationId,
+          },
+        )
       )
         return;
-      emitFirstFrame();
-    });
-    videoFrameCallbackHandle = handle;
+      videoFrameCallbackHandle = callbackElement.requestVideoFrameCallback(
+        () => {
+          videoFrameCallbackHandle = null;
+          if (
+            videoElement.value !== callbackElement ||
+            props.stream !== callbackStream ||
+            props.track !== callbackTrack ||
+            !isCurrentVideoFrame(
+              {
+                feedKey: props.feedKey,
+                receiverIncarnationId: callbackReceiverIncarnationId,
+              },
+              {
+                feedKey: props.feedKey,
+                receiverIncarnationId: props.receiverIncarnationId,
+              },
+            )
+          )
+            return;
+          emit("frame-presented", {
+            feedKey: props.feedKey,
+            receiverIncarnationId: callbackReceiverIncarnationId,
+          });
+          emitFirstFrame();
+          schedulePresentation();
+        },
+      );
+    };
+    schedulePresentation();
   } else {
     firstFrameFallbackTimer = setTimeout(() => {
       firstFrameFallbackTimer = null;
@@ -584,11 +633,18 @@ watch(
   () => props.stream,
   () => {
     if (props.local && props.source === "screen") previewEnabled.value = false;
+    videoFirstFrameEmitted = false;
     cancelVideoFrameEvidence();
     attachStream();
   },
 );
-watch(() => props.track, cancelVideoFrameEvidence);
+watch(
+  () => props.track,
+  () => {
+    videoFirstFrameEmitted = false;
+    cancelVideoFrameEvidence();
+  },
+);
 watch(() => props.nativeFrame, scheduleNativeFrame);
 watch(
   () => props.poppedOut,
@@ -622,6 +678,7 @@ watch(
   (newFeedKey) => {
     if (newFeedKey !== currentFeedKey) {
       currentFeedKey = newFeedKey;
+      videoFirstFrameEmitted = false;
       nativeFirstFrameEmitted = false;
       nativeFirstFrameReceiverId = null;
       nativePendingFrame = null;
@@ -635,6 +692,7 @@ watch(
 watch(
   () => props.receiverIncarnationId,
   () => {
+    videoFirstFrameEmitted = false;
     nativeFirstFrameEmitted = false;
     nativeFirstFrameReceiverId = null;
     nativePendingFrame = null;

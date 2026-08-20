@@ -8,6 +8,7 @@ import type {
   SignalingMessage,
   DispatchMediaSignalingOptions,
 } from "./types/media-signaling.ts";
+import { buildMediaSignalingClientHello } from "../../shared/media-signaling-protocol.ts";
 
 export function mediaSignalingUrl(
   configuredPath: unknown,
@@ -263,8 +264,7 @@ export function createMediaSignalingSocket({
     return send({
       type: protocol.clientHello,
       data: {
-        protocolVersion: protocol.version,
-        contractRevision: protocol.contractRevision,
+        ...buildMediaSignalingClientHello(data.mediaSessionId),
         ...buildClientHelloData?.({ mediaSessionId: data.mediaSessionId }),
         mediaSessionId: data.mediaSessionId,
       },

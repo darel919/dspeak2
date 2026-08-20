@@ -115,6 +115,37 @@ class FailingAnswerPeerConnection extends GatheringPeerConnection {
   }
 }
 
+class BlockingOfferPeerConnection extends GatheringPeerConnection {
+  blockNextOffer = true;
+  offerStarted: Promise<void>;
+  private resolveOfferStarted: (() => void) | null = null;
+  private resolveOffer: (() => void) | null = null;
+  private offerGate: Promise<void>;
+
+  constructor(mid = "audio-mid") {
+    super(mid);
+    this.offerStarted = new Promise((resolve) => {
+      this.resolveOfferStarted = resolve;
+    });
+    this.offerGate = new Promise((resolve) => {
+      this.resolveOffer = resolve;
+    });
+  }
+
+  async createOffer() {
+    if (this.blockNextOffer) {
+      this.blockNextOffer = false;
+      this.resolveOfferStarted?.();
+      await this.offerGate;
+    }
+    return super.createOffer();
+  }
+
+  releaseOffer() {
+    this.resolveOffer?.();
+  }
+}
+
 test("Cloudflare session closure marks pending requests as cancellation", async () => {
   const client = new CloudflareRealtimeSession({
     send: () => true,
@@ -797,6 +828,204 @@ test("Cloudflare subscription rollback preserves a same-MID replacement consumer
   assert.equal(client.remoteByMid.get("remote-mid-2"), publication);
   assert.equal(client.subscribedTrackNames.has("remote-track"), true);
   assert.equal(ended.length, 1);
+  client.closeMedia();
+});
+
+test("Cloudflare compensation does not close a same-MID replacement during offer creation", async () => {
+  const requests = [];
+  let client;
+  const peerConnection = new BlockingOfferPeerConnection("remote-mid");
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  const oldConsumer = {
+    trackName: "remote-track",
+    mid: "remote-mid",
+    track: { stop() {} },
+  };
+  client.publications.set("remote-track", publication);
+  client.consumers.set("remote-track", oldConsumer);
+  client.remoteByMid.set("remote-mid", publication);
+  client.subscribedTrackNames.add("remote-track");
+  const binding = {
+    trackName: "remote-track",
+    mid: "remote-mid",
+    publication,
+    consumer: oldConsumer,
+  };
+
+  const compensation = client.closePulledRemoteTracksSafely(
+    [binding],
+    peerConnection,
+    1,
+  );
+  await peerConnection.offerStarted;
+  let replacementStopped = false;
+  const replacementTrack = {
+    id: "replacement-track",
+    kind: "audio",
+    addEventListener() {},
+    stop() {
+      replacementStopped = true;
+    },
+  };
+  client.handleRemoteTrack(
+    { track: replacementTrack, transceiver: { mid: "remote-mid" } },
+    publication,
+  );
+  peerConnection.releaseOffer();
+
+  assert.equal(await compensation, false);
+  assert.equal(client.consumers.get("remote-track").track, replacementTrack);
+  assert.equal(replacementStopped, false);
+  assert.equal(
+    requests.some((message) => message.data?.operation === "tracks-close"),
+    false,
+  );
+  client.closeMedia();
+});
+
+test("Cloudflare compensation does not close a remapped publication during offer creation", async () => {
+  const requests = [];
+  let client;
+  const peerConnection = new BlockingOfferPeerConnection("remote-mid");
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  const replacement = { ...publication, generation: 2 };
+  client.publications.set("remote-track", publication);
+  client.remoteByMid.set("remote-mid", publication);
+  const binding = {
+    trackName: "remote-track",
+    mid: "remote-mid",
+    publication,
+  };
+
+  const compensation = client.closePulledRemoteTracksSafely(
+    [binding],
+    peerConnection,
+    1,
+  );
+  await peerConnection.offerStarted;
+  client.publications.set("remote-track", replacement);
+  client.remoteByMid.set("remote-mid", replacement);
+  peerConnection.releaseOffer();
+
+  assert.equal(await compensation, false);
+  assert.equal(
+    requests.some((message) => message.data?.operation === "tracks-close"),
+    false,
+  );
+  assert.equal(client.remoteByMid.get("remote-mid"), replacement);
+  client.closeMedia();
+});
+
+test("Cloudflare compensation closes only still-owned bindings in a mixed batch", async () => {
+  const requests = [];
+  let client;
+  const peerConnection = new BlockingOfferPeerConnection("remote-mid-a");
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      if (message.data?.operation === "tracks-close")
+        queueMicrotask(() =>
+          client.handle("cloudflare-response", {
+            requestId: message.data.requestId,
+            result: { sessionDescription: { type: "answer", sdp: "close" } },
+          }),
+        );
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  const publicationA = {
+    trackName: "remote-track-a",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  const publicationB = {
+    trackName: "remote-track-b",
+    sessionId: "remote-session",
+    source: "screen",
+    userId: "user-1",
+    generation: 1,
+  };
+  const replacementB = { ...publicationB, generation: 2 };
+  client.publications.set("remote-track-a", publicationA);
+  client.publications.set("remote-track-b", publicationB);
+  client.remoteByMid.set("remote-mid-a", publicationA);
+  client.remoteByMid.set("remote-mid-b", publicationB);
+  const bindings = [
+    {
+      trackName: "remote-track-a",
+      mid: "remote-mid-a",
+      publication: publicationA,
+    },
+    {
+      trackName: "remote-track-b",
+      mid: "remote-mid-b",
+      publication: publicationB,
+    },
+  ];
+
+  const compensation = client.closePulledRemoteTracksSafely(
+    bindings,
+    peerConnection,
+    1,
+  );
+  await peerConnection.offerStarted;
+  client.publications.set("remote-track-b", replacementB);
+  client.remoteByMid.set("remote-mid-b", replacementB);
+  peerConnection.releaseOffer();
+
+  assert.equal(await compensation, true);
+  const closeRequest = requests.find(
+    (message) => message.data?.operation === "tracks-close",
+  );
+  assert.deepEqual(closeRequest.data.body.tracks, [{ mid: "remote-mid-a" }]);
+  assert.equal(client.remoteByMid.get("remote-mid-b"), replacementB);
   client.closeMedia();
 });
 
