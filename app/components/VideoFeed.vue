@@ -235,6 +235,8 @@ let nativeCanvasHeight = 0;
 let nativePixelBuffer = null;
 let nativeImageData = null;
 let nativePendingFrame = null;
+let nativePendingFeedKey = null;
+let nativePendingReceiverId = null;
 let nativeFrameAnimation = 0;
 let nativeIntersectionObserver = null;
 let nativeFeedVisible = true;
@@ -325,9 +327,18 @@ function playVideoElement(element, label) {
   );
 }
 
-function drawNativeFrame(frame = nativePendingFrame) {
+function drawNativeFrame(
+  frame = nativePendingFrame,
+  feedKey = nativePendingFeedKey,
+  receiverIncarnationId = nativePendingReceiverId,
+) {
   const canvas = nativeCanvasElement.value;
   if (!frame || !canvas || typeof atob !== "function") return;
+  if (
+    feedKey !== props.feedKey ||
+    receiverIncarnationId !== props.receiverIncarnationId
+  )
+    return;
   const width = Number(frame.width);
   const height = Number(frame.height);
   if (
@@ -361,16 +372,16 @@ function drawNativeFrame(frame = nativePendingFrame) {
   }
   nativeCanvasContext?.putImageData(nativeImageData, 0, 0);
   if (
-    props.feedKey &&
-    props.receiverIncarnationId &&
+    feedKey &&
+    receiverIncarnationId &&
     (!nativeFirstFrameEmitted ||
-      nativeFirstFrameReceiverId !== props.receiverIncarnationId)
+      nativeFirstFrameReceiverId !== receiverIncarnationId)
   ) {
     nativeFirstFrameEmitted = true;
-    nativeFirstFrameReceiverId = props.receiverIncarnationId;
+    nativeFirstFrameReceiverId = receiverIncarnationId;
     emit("first-frame", {
-      feedKey: props.feedKey,
-      receiverIncarnationId: props.receiverIncarnationId,
+      feedKey,
+      receiverIncarnationId,
     });
   }
 }
@@ -388,6 +399,8 @@ function scheduleNativeFrame() {
     return;
   }
   nativePendingFrame = props.nativeFrame;
+  nativePendingFeedKey = props.feedKey;
+  nativePendingReceiverId = props.receiverIncarnationId;
   if (
     !props.native ||
     !props.receiving ||
@@ -400,13 +413,19 @@ function scheduleNativeFrame() {
   if (typeof requestAnimationFrame !== "function") {
     drawNativeFrame();
     nativePendingFrame = null;
+    nativePendingFeedKey = null;
+    nativePendingReceiverId = null;
     return;
   }
   nativeFrameAnimation = requestAnimationFrame(() => {
     nativeFrameAnimation = 0;
     const frame = nativePendingFrame;
+    const feedKey = nativePendingFeedKey;
+    const receiverIncarnationId = nativePendingReceiverId;
     nativePendingFrame = null;
-    drawNativeFrame(frame);
+    nativePendingFeedKey = null;
+    nativePendingReceiverId = null;
+    drawNativeFrame(frame, feedKey, receiverIncarnationId);
     if (nativePendingFrame) scheduleNativeFrame();
   });
 }
@@ -548,6 +567,8 @@ onMounted(() => {
       if (nativeFeedVisible) scheduleNativeFrame();
       else {
         nativePendingFrame = null;
+        nativePendingFeedKey = null;
+        nativePendingReceiverId = null;
         cancelNativeFrameAnimation();
       }
     });
@@ -574,6 +595,8 @@ watch(
   (poppedOut) => {
     if (poppedOut) {
       nativePendingFrame = null;
+      nativePendingFeedKey = null;
+      nativePendingReceiverId = null;
       cancelNativeFrameAnimation();
       if (videoElement.value) videoElement.value.srcObject = null;
     } else attachStream();
@@ -585,6 +608,8 @@ watch(
     if (receiving) attachStream();
     else {
       nativePendingFrame = null;
+      nativePendingFeedKey = null;
+      nativePendingReceiverId = null;
       cancelNativeFrameAnimation();
       cancelVideoFrameEvidence();
     }
@@ -599,6 +624,10 @@ watch(
       currentFeedKey = newFeedKey;
       nativeFirstFrameEmitted = false;
       nativeFirstFrameReceiverId = null;
+      nativePendingFrame = null;
+      nativePendingFeedKey = null;
+      nativePendingReceiverId = null;
+      cancelNativeFrameAnimation();
       cancelVideoFrameEvidence();
     }
   },
@@ -608,6 +637,10 @@ watch(
   () => {
     nativeFirstFrameEmitted = false;
     nativeFirstFrameReceiverId = null;
+    nativePendingFrame = null;
+    nativePendingFeedKey = null;
+    nativePendingReceiverId = null;
+    cancelNativeFrameAnimation();
     cancelVideoFrameEvidence();
   },
 );
@@ -618,6 +651,8 @@ onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", handlePageVisible);
   window.removeEventListener("pageshow", handlePageVisible);
   nativePendingFrame = null;
+  nativePendingFeedKey = null;
+  nativePendingReceiverId = null;
   cancelNativeFrameAnimation();
   nativeIntersectionObserver?.disconnect();
   nativeIntersectionObserver = null;

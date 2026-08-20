@@ -343,6 +343,7 @@ export class RemoteMediaRegistry {
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     if (entry.source === "screen" && persistPreference)
       this.setPairedScreenAudioReceiving(entry.userId, receiving);
+    if (receiving) this.startReceiverHealthSampling();
     return true;
   }
 
@@ -404,6 +405,7 @@ export class RemoteMediaRegistry {
     this.audioFeeds.value.set(key, { ...entry });
     triggerRef(this.audioFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
+    if (receiving) this.startReceiverHealthSampling();
     return true;
   }
 
@@ -1083,10 +1085,24 @@ export class RemoteMediaRegistry {
     const progression = audio
       ? checkAudioRtpProgression(state, stats)
       : checkRtpProgression(state, stats);
+    if (progression && state.stallState.detected) clearStall(state);
     promoteConvergence(state);
-    if (detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG))
-      this.scheduleReceiverRecovery(key, state);
+    this.evaluateReceiverHealth(key, expectedReceiverIncarnation);
     return progression || state.rtpEvidence.lastRtpSampleAt !== null;
+  }
+
+  evaluateReceiverHealth(
+    key: string,
+    expectedReceiverIncarnation: string | RemoteSourceIncarnation,
+  ) {
+    if (!this.receiverIsCurrent(key, expectedReceiverIncarnation)) return false;
+    const state = this.remoteSourceConvergence.get(key);
+    if (!state) return false;
+    if (detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG)) {
+      this.scheduleReceiverRecovery(key, state);
+      return true;
+    }
+    return false;
   }
 
   updateRtpStats(
@@ -1149,6 +1165,11 @@ export class RemoteMediaRegistry {
       recovered = false;
     }
     if (!this.receiverIsCurrent(key, expectedReceiverIncarnation)) return;
+    if (
+      !state.stallState.detected ||
+      !["stalled", "recovering"].includes(state.phase)
+    )
+      return;
     if (recovered) {
       clearStall(state);
       return;
@@ -1214,15 +1235,16 @@ export class RemoteMediaRegistry {
           try {
             stats = (await this.getReceiverStats?.(entry)) || null;
           } catch {
-            return;
+            stats = null;
           }
-          if (!stats || !this.receiverIsCurrent(entry.key, expected)) return;
-          this.applyRtpEvidence(
-            entry.key,
-            expected,
-            stats,
-            state.kind === "audio",
-          );
+          if (stats && this.receiverIsCurrent(entry.key, expected))
+            this.applyRtpEvidence(
+              entry.key,
+              expected,
+              stats,
+              state.kind === "audio",
+            );
+          else this.evaluateReceiverHealth(entry.key, expected);
         }),
       );
       this.receiverHealthRunning = false;

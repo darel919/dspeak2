@@ -701,6 +701,13 @@ export function detectStall(
       ? markStalled(state, now)
       : false;
   if (
+    state.kind === "video" &&
+    !state.firstFrameEvidence.received &&
+    state.rtpEvidence.rtpFlowingConfirmedAt !== null &&
+    now - state.rtpEvidence.rtpFlowingConfirmedAt >= config.firstFrameTimeoutMs
+  )
+    return markStalled(state, now);
+  if (
     lastProgressAt === null ||
     now - lastProgressAt < config.rtpStallThresholdMs
   )

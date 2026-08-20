@@ -34,7 +34,6 @@ const EXPECTED_MESSAGE_TYPES = [
   "room-snapshot",
   "leave",
   "request-snapshot",
-  "receiver-evidence",
   "hi919",
   "topology-state",
   "p2p-signal-relay",

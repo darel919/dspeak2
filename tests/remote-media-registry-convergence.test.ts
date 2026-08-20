@@ -187,6 +187,93 @@ test("old recovery completion cannot mutate a replacement receiver", async () =>
   );
 });
 
+test("RTP resumption cancels a late recovery attempt", async () => {
+  let resolveRecovery: ((value: boolean) => void) | null = null;
+  const { registry } = createVideoRegistry({
+    onReceiverRecovery: () =>
+      new Promise<boolean>((resolve) => {
+        resolveRecovery = resolve;
+      }),
+  });
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 1000,
+    packetsReceived: 10,
+    framesDecoded: 1,
+  });
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 2000,
+    packetsReceived: 20,
+    framesDecoded: 2,
+  });
+  registry.markFirstFrame(current.key, token);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.stallState.detected = true;
+  state.stallState.recoveryAttempt = 1;
+  state.phase = "recovering";
+  const recovery = registry.runReceiverRecovery(current.key, token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 3000,
+    packetsReceived: 30,
+    framesDecoded: 3,
+  });
+  const finishRecovery = resolveRecovery as unknown as (value: boolean) => void;
+  finishRecovery(false);
+  await recovery;
+  assert.equal(registry.getConvergenceState(current.key)?.phase, "renderable");
+  assert.equal(
+    registry.getConvergenceState(current.key)?.stallState.detected,
+    false,
+  );
+  assert.equal(
+    registry.getConvergenceState(current.key)?.stallState.recoveryAttempt,
+    0,
+  );
+  assert.equal(
+    registry.getConvergenceState(current.key)?.stallState.recoveryTimer,
+    null,
+  );
+  registry.clear();
+});
+
+test("missing receiver stats still trigger the no-RTP timeout", async () => {
+  const { registry } = createVideoRegistry({
+    getReceiverStats: async () => null,
+  });
+  const current = entry();
+  registry.bind(current);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.phaseEnteredAt = Date.now() - 4000;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.stallState.detected, true);
+  assert.equal(state.phase, "recovering");
+  registry.clear();
+});
+
+test("re-enabling a receiver restarts an idle health sampler", async () => {
+  let sampleCount = 0;
+  const { registry } = createVideoRegistry({
+    getReceiverStats: async () => {
+      sampleCount += 1;
+      return { bytesReceived: sampleCount, packetsReceived: sampleCount };
+    },
+  });
+  const current = entry({ source: "screen", receiving: false });
+  registry.bind(current);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sampleCount, 0);
+  assert.equal(registry.setVideoReceiving(current.key, true), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(sampleCount > 0);
+  registry.clear();
+});
+
 test("provider handoff resets evidence when authority stays unchanged", () => {
   const { registry } = createVideoRegistry();
   const p2p = entry({

@@ -264,6 +264,11 @@ test("Cloudflare compensates a created track when publication registration fails
   );
   assert.ok(closeRequest);
   assert.deepEqual(closeRequest.data.body.tracks, [{ mid: "audio-mid" }]);
+  assert.equal(
+    (peerConnection as unknown as { remoteDescription?: { sdp?: string } })
+      .remoteDescription?.sdp,
+    "close",
+  );
   assert.equal(client.producers.size, 0);
 });
 

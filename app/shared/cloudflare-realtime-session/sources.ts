@@ -196,11 +196,15 @@ export class CloudflareSourcesMethods {
           try {
             const sessionDescription =
               await getLocalSessionDescription(peerConnection);
-            await this.request("tracks-close", {
+            const closeResult = await this.request("tracks-close", {
               tracks: [{ mid: createdMid }],
               sessionDescription,
               force: false,
             });
+            if (closeResult.sessionDescription)
+              await peerConnection.setRemoteDescription(
+                closeResult.sessionDescription,
+              );
           } catch (error) {
             compensationError = error;
             mediaDebug("cloudflare.tracks-close-compensation-failed", {

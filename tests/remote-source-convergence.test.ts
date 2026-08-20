@@ -245,6 +245,23 @@ test("Remote Source Convergence FSM - should detect stall in rtp-flowing phase w
   assert.ok(stalled);
 });
 
+test("Remote Source Convergence FSM - should detect a frame timeout while RTP flows", () => {
+  const state = createState();
+  advancePhase(state, "announced");
+  advancePhase(state, "publication-discovered");
+  advancePhase(state, "subscription-requested");
+  advancePhase(state, "consumer-created");
+  advancePhase(state, "transport-connected");
+  checkRtpProgression(state, { bytesReceived: 1000, packetsReceived: 10 });
+  checkRtpProgression(state, { bytesReceived: 2000, packetsReceived: 20 });
+  state.rtpEvidence.rtpFlowingConfirmedAt =
+    Date.now() - DEFAULT_REMOTE_SOURCE_FSM_CONFIG.firstFrameTimeoutMs;
+  state.rtpEvidence.lastRtpProgressAt = Date.now();
+
+  assert.equal(detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG), true);
+  assert.equal(state.stallState.detected, true);
+});
+
 test("Remote Source Convergence FSM - should not detect stall when intentional receiving is disabled", () => {
   const state = createState();
   advancePhase(state, "transport-connected");
