@@ -249,6 +249,8 @@ export function createMediaSourceController({
       ? localVideoFeeds.value.get(entry.source)
       : null;
     const activeProvider = getActiveProvider();
+    const p2pMesh = asProvider(getP2pMesh());
+    const sfu = asProvider(getSfu());
     const p2pRequired =
       activeProvider === "p2p" ||
       topologyState.value.mode === "p2p" ||
@@ -256,10 +258,9 @@ export function createMediaSourceController({
       topologyState.value.target === "p2p";
     const sfuRequired =
       activeProvider === "sfu" ||
-      topologyState.value.mode === "sfu" ||
-      topologyState.value.target === "sfu";
-    const p2pMesh = asProvider(getP2pMesh());
-    const sfu = asProvider(getSfu());
+      topologyState.value.target === "sfu" ||
+      (topologyState.value.targetTransport === "sfu" && sfu != null) ||
+      (activeProvider === null && topologyState.value.mode === "sfu");
     if (p2pRequired && !p2pMesh) {
       throw new Error("The active P2P transport is unavailable");
     }

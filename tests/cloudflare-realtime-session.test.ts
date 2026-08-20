@@ -486,6 +486,59 @@ class FakePeerConnection {
   }
 }
 
+class EmittingPeerConnection extends FakePeerConnection {
+  close() {
+    this.connectionState = "closed";
+    this.listeners.get("connectionstatechange")?.();
+  }
+}
+
+test("retired Cloudflare peer cannot report a closed state to the session", async () => {
+  const previousPeerConnection = globalThis.RTCPeerConnection;
+  globalThis.RTCPeerConnection = EmittingPeerConnection;
+  const states: string[] = [];
+  let remoteTracks = 0;
+  let client: CloudflareRealtimeSession;
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      const request = message.data as Record<string, unknown>;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId: request.requestId,
+          result: { sessionId: "cloudflare-session" },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+    onRemoteTrack: () => {
+      remoteTracks += 1;
+    },
+    onStateChange: (_direction, state) => {
+      states.push(state);
+    },
+  });
+
+  try {
+    await client.initialize();
+    const peerConnection = client.peerConnection;
+    assert.ok(peerConnection);
+    client.closeMedia();
+    const retiredPeerConnection = peerConnection as unknown as {
+      listeners: Map<string, (event: unknown) => void>;
+    };
+    retiredPeerConnection.listeners.get("track")?.({
+      track: { id: "retired-track", kind: "video" },
+      transceiver: { mid: "0" },
+    });
+    assert.deepEqual(states, []);
+    assert.equal(remoteTracks, 0);
+  } finally {
+    client.closeMedia();
+    globalThis.RTCPeerConnection = previousPeerConnection;
+  }
+});
+
 test("Cloudflare batches queued publications after local bootstrap", async () => {
   const previousPeerConnection = globalThis.RTCPeerConnection;
   globalThis.RTCPeerConnection = FakePeerConnection;

@@ -355,6 +355,35 @@ test("a missing active transport cannot report publication success", async () =>
   );
 });
 
+test("a pending SFU activation keeps publishing on the working P2P route", async () => {
+  const published: string[] = [];
+  const harness = controller({
+    getActiveProvider: () => "p2p",
+    getP2pMesh: () => ({
+      async publishSource(source) {
+        published.push(`p2p:${source}`);
+      },
+    }),
+    topologyState: {
+      value: {
+        mode: "sfu",
+        activeTransport: "p2p",
+        targetTransport: "sfu",
+        epoch: 2,
+        sourceRevision: 3,
+      },
+    },
+  });
+
+  await harness.instance.publishSource({
+    source: "camera",
+    stream: {},
+    track: { id: "camera-track", readyState: "live" },
+  });
+
+  assert.deepEqual(published, ["p2p:camera"]);
+});
+
 test("failed processed shared audio publication closes its processing graph", async () => {
   const harness = controller({
     getSfu: () => ({

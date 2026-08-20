@@ -14,10 +14,16 @@ export class CloudflareNegotiationMethods {
     const generation = this.sessionGeneration;
     mediaDebug("cloudflare.initialize-start", { generation });
     const initializing = (async () => {
-      this.peerConnection = new RTCPeerConnection({
+      const peerConnection = new RTCPeerConnection({
         iceServers: this.iceServers,
       });
-      this.peerConnection.addEventListener("track", (event: RTCTrackEvent) => {
+      this.peerConnection = peerConnection;
+      peerConnection.addEventListener("track", (event: RTCTrackEvent) => {
+        if (
+          this.peerConnection !== peerConnection ||
+          this.sessionGeneration !== generation
+        )
+          return;
         const mid = event.transceiver?.mid;
         const key = mid == null ? null : String(mid);
         const publication = key == null ? null : this.remoteByMid.get(key);
@@ -27,8 +33,13 @@ export class CloudflareNegotiationMethods {
         }
         this.handleRemoteTrack(event, publication);
       });
-      this.peerConnection.addEventListener("connectionstatechange", () => {
-        const state = this.peerConnection?.connectionState || "closed";
+      peerConnection.addEventListener("connectionstatechange", () => {
+        if (
+          this.peerConnection !== peerConnection ||
+          this.sessionGeneration !== generation
+        )
+          return;
+        const state = peerConnection.connectionState || "closed";
         try {
           this.onStateChange?.("cloudflare", state, this.connectionState());
         } catch {}
