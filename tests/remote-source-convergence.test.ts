@@ -429,6 +429,60 @@ test("Remote Source Convergence FSM - disables render stall without ongoing pres
   );
 });
 
+test("Remote Source Convergence FSM - detects decoder stall without presentation observation", () => {
+  const state = createState();
+  advancePhase(state, "transport-connected");
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 1000,
+      packetsReceived: 10,
+      framesReceived: 1,
+      framesDecoded: 1,
+    },
+    1000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 2000,
+      packetsReceived: 20,
+      framesReceived: 2,
+      framesDecoded: 2,
+    },
+    2000,
+  );
+  recordFirstFrameEvidence(state, 2000);
+  state.phase = "renderable";
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 3000,
+      packetsReceived: 30,
+      framesReceived: 3,
+      framesDecoded: 2,
+    },
+    3000,
+  );
+  checkRtpProgression(
+    state,
+    {
+      bytesReceived: 4000,
+      packetsReceived: 40,
+      framesReceived: 4,
+      framesDecoded: 2,
+    },
+    4000,
+  );
+
+  assert.equal(state.presentationObservationMode, "unavailable");
+  assert.equal(
+    detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG, 4000),
+    true,
+  );
+  assert.equal(state.stallState.cause, "decoder-stall");
+});
+
 test("Remote Source Convergence FSM - static screen sharing does not false-stall", () => {
   const state = createState("screen");
   advancePhase(state, "transport-connected");

@@ -789,7 +789,6 @@ export function detectStall(
     state.kind === "video" &&
     evidence.kind === "video" &&
     evidence.lastFramesReceived > 0 &&
-    state.presentationObservationMode !== "unavailable" &&
     state.phase === "renderable"
   ) {
     if (
@@ -799,6 +798,7 @@ export function detectStall(
     )
       return markStalled(state, now, "decoder-stall");
     if (
+      state.presentationObservationMode !== "unavailable" &&
       evidence.renderStallSamples >= config.videoPipelineStallSamples &&
       lastProgressAt !== null &&
       now - lastProgressAt < config.rtpStallThresholdMs
