@@ -68,6 +68,7 @@ export interface MediaSourceControllerContext {
     screenSharing: boolean;
     systemAudioSharing: boolean;
   };
+  onReceiverEvidence?: (data: unknown) => void;
 }
 
 export interface MediaVideoFeed {

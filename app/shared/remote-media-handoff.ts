@@ -9,6 +9,7 @@ interface RemoteMediaEntry {
   source: string;
   provider: RemoteMediaProvider;
   track?: MediaStreamTrack | null;
+  incarnationId?: string;
   [key: string]: unknown;
 }
 
@@ -114,6 +115,7 @@ export class RemoteMediaHandoff {
       ...entry,
       transportKey: entry.key,
       key: remoteMediaFeedKey(entry),
+      incarnationId: entry.incarnationId,
     };
     const tracks = this.provider(normalized.provider);
     const replaced: Array<[string, RemoteMediaEntry]> = [];

@@ -240,6 +240,7 @@ let lastTouchAt = 0;
 let fullscreenStateInitialized = false;
 let playbackRecoveryTimer = null;
 let nativeFirstFrameEmitted = false;
+let videoFrameCallbackHandle = null;
 
 let currentFeedKey = props.feedKey;
 const localScreenPreviewPaused = computed(
@@ -426,7 +427,11 @@ function handleVideoReady() {
   playVideoElement(videoElement.value, "Remote preview");
   const element = videoElement.value;
   if (element && typeof element.requestVideoFrameCallback === "function") {
-    element.requestVideoFrameCallback(() => {
+    if (videoFrameCallbackHandle) {
+      element.cancelVideoFrameCallback(videoFrameCallbackHandle);
+    }
+    videoFrameCallbackHandle = element.requestVideoFrameCallback(() => {
+      videoFrameCallbackHandle = null;
       if (props.feedKey) emit("first-frame", props.feedKey);
     });
   } else if (props.feedKey) {
@@ -531,6 +536,10 @@ watch(
     if (newFeedKey !== currentFeedKey) {
       currentFeedKey = newFeedKey;
       nativeFirstFrameEmitted = false;
+      if (videoFrameCallbackHandle && videoElement.value) {
+        videoElement.value.cancelVideoFrameCallback(videoFrameCallbackHandle);
+        videoFrameCallbackHandle = null;
+      }
     }
   },
 );
@@ -545,7 +554,16 @@ onBeforeUnmount(() => {
   nativeIntersectionObserver?.disconnect();
   nativeIntersectionObserver = null;
   clearTimeout(playbackRecoveryTimer);
-  if (videoElement.value) videoElement.value.srcObject = null;
+  if (videoElement.value) {
+    if (
+      videoFrameCallbackHandle &&
+      typeof videoElement.value.cancelVideoFrameCallback === "function"
+    ) {
+      videoElement.value.cancelVideoFrameCallback(videoFrameCallbackHandle);
+      videoFrameCallbackHandle = null;
+    }
+    videoElement.value.srcObject = null;
+  }
   if (ownCameraElement.value) ownCameraElement.value.srcObject = null;
 });
 </script>

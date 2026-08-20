@@ -80,4 +80,47 @@ export function classifyMediaSignalingClientHello({
     return "accept";
   return "reject";
 }
+
 import type { MediaSignalingRecord } from "./types/media.ts";
+
+// Media control message types (server-side control protocol)
+export const MEDIA_CONTROL_MESSAGE_TYPES = {
+  HELLO: "hello919",
+  P2P_SIGNAL: "p2p-signal",
+  P2P_READY: "p2p-ready",
+  MEDIA_SOURCES: "media-sources",
+  PARTICIPANT_VOICE_STATE: "participant-voice-state",
+  MEDIA_CAPABILITIES: "media-capabilities",
+  CODEC_MIGRATION_STATE: "codec-migration-state",
+  PARTICIPANT_CAPABILITIES: "participant-capabilities",
+  P2P_QUALIFIED: "p2p-qualified",
+  P2P_FAILED: "p2p-failed",
+  PROVIDER_READY: "provider-ready",
+  PROVIDER_FAILURE: "provider-failure",
+  PROVIDER_RECOVERING: "provider-recovering",
+  TOPOLOGY_READY: "topology-ready",
+  TOPOLOGY_FAILED: "topology-failed",
+  CLOUDFLARE_REQUEST: "cloudflare-request",
+  CLOUDFLARE_PUBLICATION: "cloudflare-publication",
+  MEDIA_QOE: "media-qoe",
+  CLIENT_SFU_RTT: "client-sfu-rtt",
+  HEARTBEAT: "heartbeat",
+  RESUME: "resume",
+  STATE_NACK: "state-nack",
+  ROOM_SNAPSHOT: "room-snapshot",
+  LEAVE: "leave",
+  REQUEST_SNAPSHOT: "request-snapshot",
+  RECEIVER_EVIDENCE: "receiver-evidence",
+
+  WELCOME: "hi919",
+  TOPOLOGY_STATE: "topology-state",
+  P2P_SIGNAL_RELAY: "p2p-signal-relay",
+  ROUTE_COMMIT: "route-commit",
+  HEARTBEAT_ACK: "heartbeat-ack",
+  OPERATION_ACK: "operation-ack",
+  ERROR: "error919",
+  PROVIDER_TICKET: "provider-ticket",
+  CLOUDFLARE_RESPONSE: "cloudflare-response",
+  CLOUDFLARE_PUBLICATION_AVAILABLE: "cloudflare-publication-available",
+  PARTICIPANT_SFU_RTT: "participant-sfu-rtt",
+};

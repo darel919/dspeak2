@@ -172,6 +172,7 @@ export interface TopologySourceEntry {
   generation?: number;
   captureTrack?: MediaStreamTrack;
   ownerSource?: string | null;
+  incarnationId?: string;
 }
 export interface TopologyConnectionState {
   ready?: boolean;

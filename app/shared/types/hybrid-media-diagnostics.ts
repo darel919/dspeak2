@@ -1,6 +1,7 @@
 import type { Ref } from "vue";
 import type { SignalingMessage } from "./media-signaling.ts";
 import type { RtpStatsSample } from "../rtc-media-stats.ts";
+import type { RemoteMediaRegistry } from "../remote-media-registry.ts";
 
 export interface DiagnosticSourceEntry {
   source: string;
@@ -8,6 +9,7 @@ export interface DiagnosticSourceEntry {
   peerId?: string | number | null;
   track: MediaStreamTrack;
   consumer?: { getStats: () => Promise<unknown> };
+  incarnationId?: string;
 }
 
 export interface DiagnosticProvider {
@@ -72,6 +74,7 @@ export interface HybridMediaDiagnosticsContext {
   topologyState: Ref<{ epoch?: number }>;
   updateP2pStats: (edges: unknown[]) => unknown;
   rtpStatsSamples: Map<string, RtpStatsSample>;
+  registry: RemoteMediaRegistry;
 }
 
 export interface MediaReadinessContext {

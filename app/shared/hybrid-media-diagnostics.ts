@@ -5,6 +5,7 @@ import type {
   MediaReadinessContext,
 } from "./types/hybrid-media-diagnostics.ts";
 import { getSharedStatsSnapshot } from "./rtc-stats-sampler.ts";
+import type { RemoteMediaRegistry } from "./remote-media-registry.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -43,7 +44,8 @@ export function createHybridMediaDiagnostics({
   topologyState,
   updateP2pStats,
   rtpStatsSamples,
-}: HybridMediaDiagnosticsContext) {
+  registry,
+}: HybridMediaDiagnosticsContext & { registry: RemoteMediaRegistry }) {
   const statsCacheOwner = {};
   function sfuProducerIds() {
     const sfu = getSfu() as DiagnosticProvider | null;
@@ -249,13 +251,16 @@ export function createHybridMediaDiagnostics({
   async function getInboundRtpStats() {
     const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
     const results: Array<Record<string, unknown>> = [];
-    const remoteFeeds = [
-      ...[...remoteAudioFeeds.value.values()].filter(isDiagnosticSourceEntry),
-      ...[...remoteVideoFeeds.value.values()].filter(isDiagnosticSourceEntry),
-    ];
+    const remoteAudioEntries = [...remoteAudioFeeds.value.values()].filter(
+      isDiagnosticSourceEntry,
+    ) as DiagnosticSourceEntry[];
+    const remoteVideoEntries = [...remoteVideoFeeds.value.values()].filter(
+      isDiagnosticSourceEntry,
+    ) as DiagnosticSourceEntry[];
+    const remoteFeeds = [...remoteAudioEntries, ...remoteVideoEntries];
     for (const entry of remoteFeeds) {
       const settings = entry.track.getSettings?.() || {};
-      const key = `inbound:${entry.key}`;
+      const key = `inbound:${entry.key ?? entry.source}`;
       const report = entry.consumer
         ? await entry.consumer.getStats().catch(() => null)
         : p2pMesh?.getInboundTrackStats
@@ -273,8 +278,59 @@ export function createHybridMediaDiagnostics({
           )
         : null;
       if (collected?.sample) rtpStatsSamples.set(key, collected.sample);
+
+      // Update convergence state with RTP evidence
+      if (collected?.stats) {
+        const stats = collected.stats as Record<string, unknown>;
+        const convergenceKey = entry.key ?? entry.source;
+        if (entry.track.kind === "audio") {
+          registry.updateAudioRtpStats(convergenceKey, {
+            bytesReceived: stats.bytesReceived as number,
+            packetsReceived: stats.packetsReceived as number,
+            totalAudioEnergy: stats.totalAudioEnergy as number | undefined,
+            totalSamplesReceived: stats.totalSamplesReceived as
+              number | undefined,
+            jitterBufferEmittedCount: stats.jitterBufferEmittedCount as
+              number | undefined,
+          });
+        } else {
+          registry.updateRtpStats(convergenceKey, {
+            bytesReceived: stats.bytesReceived as number,
+            packetsReceived: stats.packetsReceived as number,
+            framesDecoded: stats.framesDecoded as number | undefined,
+            framesRendered: stats.framesRendered as number | undefined,
+          });
+        }
+
+        // Send receiver evidence to media control for forwarding to publisher
+        const evidence = {
+          bytesReceived: stats.bytesReceived,
+          packetsReceived: stats.packetsReceived,
+          ...(entry.track.kind === "audio"
+            ? {
+                totalAudioEnergy: stats.totalAudioEnergy,
+                totalSamplesReceived: stats.totalSamplesReceived,
+                jitterBufferEmittedCount: stats.jitterBufferEmittedCount,
+              }
+            : {
+                framesDecoded: stats.framesDecoded,
+                framesRendered: stats.framesRendered,
+              }),
+        };
+        send({
+          type: "receiver-evidence",
+          data: {
+            peerId: entry.peerId,
+            source: entry.source,
+            kind: entry.track.kind,
+            incarnationId: entry.incarnationId || "",
+            evidence,
+          },
+        });
+      }
+
       results.push({
-        consumerId: entry.key,
+        consumerId: entry.key ?? entry.source,
         source: entry.source,
         kind: entry.track.kind,
         ...(collected?.stats || {

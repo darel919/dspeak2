@@ -626,6 +626,7 @@ export function useHybridMediaSession() {
     topologyState,
     updateP2pStats,
     rtpStatsSamples,
+    registry,
     getLifecycle: lifecycleState.snapshot,
     getProtocolState: () => protocolState.value,
     getReadiness: () =>

@@ -1,5 +1,10 @@
 import type { Ref } from "vue";
 import type { AttenuationReportInput } from "../media-attenuation-reporter.ts";
+import type {
+  RemoteSourceIncarnation,
+  RemoteSourceConvergenceState,
+  RemoteSourcePhase,
+} from "../remote-source-convergence.ts";
 
 export interface RegistryEntry extends Record<string, unknown> {
   key: string;
@@ -20,24 +25,13 @@ export interface RemoteMediaEntry extends RegistryEntry {
   receiving?: boolean;
   connectionEpoch?: number;
   sourceGeneration?: number;
-  phase?:
-    | "not-announced"
-    | "announced"
-    | "publication-discovered"
-    | "subscription-requested"
-    | "consumer-created"
-    | "transport-connected"
-    | "rtp-flowing"
-    | "first-frame"
-    | "renderable"
-    | "stalled"
-    | "recovering"
-    | "retired"
-    | "failed";
+  phase?: RemoteSourcePhase;
   rtpActivityAt?: number;
   firstFrameAt?: number;
   stallDetectedAt?: number;
   recoveryAttempts?: number;
+  incarnation?: RemoteSourceIncarnation;
+  convergenceState?: RemoteSourceConvergenceState;
 }
 
 export interface AudioGraphTrack {
