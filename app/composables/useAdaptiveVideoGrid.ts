@@ -1,10 +1,4 @@
-import {
-  computed,
-  onBeforeUnmount,
-  onMounted,
-  shallowRef,
-  type Ref,
-} from "vue";
+import { computed, onScopeDispose, shallowRef, type Ref, watch } from "vue";
 
 const TARGET_ASPECT_RATIO = 16 / 9;
 const DEFAULT_GAP = 12;
@@ -126,8 +120,11 @@ export function useAdaptiveVideoGrid(
 
   let observer: ResizeObserver | null = null;
 
-  onMounted(() => {
-    if (typeof ResizeObserver === "undefined") return;
+  const observeStage = (element: HTMLElement | null) => {
+    observer?.disconnect();
+    observer = null;
+
+    if (typeof ResizeObserver === "undefined" || !element) return;
 
     observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
@@ -147,12 +144,16 @@ export function useAdaptiveVideoGrid(
       stageSize.value = { width, height };
     });
 
-    if (stageElement.value) {
-      observer.observe(stageElement.value);
-    }
+    observer.observe(element);
+  };
+
+  const stopStageWatch = watch(stageElement, observeStage, {
+    flush: "post",
+    immediate: true,
   });
 
-  onBeforeUnmount(() => {
+  onScopeDispose(() => {
+    stopStageWatch();
     observer?.disconnect();
     observer = null;
   });

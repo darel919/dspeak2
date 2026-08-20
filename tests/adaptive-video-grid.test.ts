@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { effectScope, nextTick, ref } from "vue";
 import {
   calculateAdaptiveVideoGrid,
   type AdaptiveVideoGridLayout,
+  useAdaptiveVideoGrid,
 } from "../app/composables/useAdaptiveVideoGrid.ts";
 
 function checkLayout(
@@ -191,5 +193,61 @@ describe("calculateAdaptiveVideoGrid", () => {
     const layout = calculateAdaptiveVideoGrid(1, 400, 200);
     assert.ok(layout.tileWidth <= 400);
     assert.ok(layout.tileHeight <= 200);
+  });
+});
+
+describe("useAdaptiveVideoGrid", () => {
+  it("observes a stage element mounted after the composable", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const observers: TestResizeObserver[] = [];
+
+    class TestResizeObserver {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+        observers.push(this);
+      }
+
+      observe() {}
+
+      disconnect() {}
+
+      trigger(width: number, height: number) {
+        this.callback(
+          [
+            {
+              borderBoxSize: [{ inlineSize: width, blockSize: height }],
+              contentRect: { width, height },
+            } as ResizeObserverEntry,
+          ],
+          this as unknown as ResizeObserver,
+        );
+      }
+    }
+
+    globalThis.ResizeObserver =
+      TestResizeObserver as unknown as typeof ResizeObserver;
+
+    const stageElement = ref<HTMLElement | null>(null);
+    const scope = effectScope();
+
+    try {
+      const grid = scope.run(() => useAdaptiveVideoGrid(stageElement, ref(1)));
+      assert.ok(grid);
+
+      stageElement.value = {} as HTMLElement;
+      await nextTick();
+
+      const observer = observers[0];
+      assert.ok(observer);
+      observer.trigger(640, 360);
+
+      assert.deepEqual(grid.stageSize.value, { width: 640, height: 360 });
+      assert.ok(grid.layout.value.tileWidth > 0);
+    } finally {
+      scope.stop();
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 });
