@@ -1,5 +1,5 @@
 export const MEDIA_SIGNALING_PROTOCOL_VERSION = 919;
-export const MEDIA_SIGNALING_CONTRACT_REVISION = 3;
+export const MEDIA_SIGNALING_CONTRACT_REVISION = 5;
 export const MEDIA_SIGNALING_SERVER_HELLO = "hi919";
 export const MEDIA_SIGNALING_CLIENT_HELLO = "hello919";
 export const MEDIA_SIGNALING_PROTOCOL_CLOSE_CODE = 4002;
@@ -8,7 +8,7 @@ export const MEDIA_SIGNALING_PROTOCOL_CLOSE_REASON =
 export const MEDIA_SIGNALING_HANDSHAKE_TIMEOUT_MS = 10_000;
 export const MEDIA_SIGNALING_TRACE_LIMIT = 64;
 export const MEDIA_SIGNALING_HEARTBEAT_INTERVAL_MS = 5_000;
-export const MEDIA_SIGNALING_HEARTBEAT_TIMEOUT_MS = 20_000;
+export const MEDIA_SIGNALING_HEARTBEAT_TIMEOUT_MS = 15_000;
 
 export function isMediaSignalingServerHello(
   data: unknown,
@@ -83,7 +83,6 @@ export function classifyMediaSignalingClientHello({
 
 import type { MediaSignalingRecord } from "./types/media.ts";
 
-// Media control message types (server-side control protocol)
 export const MEDIA_CONTROL_MESSAGE_TYPES = {
   HELLO: "hello919",
   P2P_SIGNAL: "p2p-signal",

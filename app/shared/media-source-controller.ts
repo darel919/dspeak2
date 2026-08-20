@@ -1270,32 +1270,5 @@ export function createMediaSourceController({
     getLocalSources,
     processPendingRetirements,
     pendingRetirements,
-    onReceiverEvidence: (data: unknown) => {
-      // Handle receiver evidence from remote participants
-      // This informs us that our published stream is being received
-      const d = data as Record<string, unknown> | undefined;
-      if (!d) return;
-      const source = d.source;
-      const kind = d.kind;
-      const evidence = d.evidence;
-      const receiverPeerId = d.receiverPeerId;
-      const receiverUserId = d.receiverUserId;
-
-      if (!source || !kind || !evidence) return;
-
-      mediaDebug("source-controller.receiver-evidence", {
-        source,
-        kind,
-        receiverPeerId,
-        receiverUserId,
-        evidence,
-      });
-
-      // Update source FSM with RTP evidence
-      const fsm = sourceFsms.get(String(source));
-      if (fsm && fsm.phase === "live") {
-        // We could track receiver evidence here for quality monitoring
-      }
-    },
   };
 }

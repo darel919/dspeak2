@@ -267,6 +267,8 @@
               v-if="tile.type === 'feed'"
               :feed-key="tile.feed.logicalStreamId || tile.feed.key"
               :stream="tile.feed.stream"
+              :track="tile.feed.track || null"
+              :receiver-incarnation-id="tile.feed.receiverIncarnationId || null"
               :native="tile.feed.native === true"
               :native-frame="tile.feed.frame || null"
               :can-pop-out="
@@ -1071,8 +1073,16 @@ function setScreenReceiving(feed, receiving) {
   voiceStore.setRemoteScreenReceiving(feed.key, receiving);
 }
 
-function onRemoteFirstFrame(feedKey) {
-  mediaSessionRef.value?.markRemoteFirstFrame?.(feedKey);
+function onRemoteFirstFrame(event) {
+  const feedKey = typeof event === "string" ? event : event?.feedKey;
+  const receiverIncarnationId =
+    typeof event === "string" ? null : event?.receiverIncarnationId || null;
+  if (!feedKey) return;
+  mediaSessionRef.value?.markRemoteFirstFrame?.(
+    feedKey,
+    receiverIncarnationId,
+    typeof event === "object" && event?.fallback === true,
+  );
 }
 
 function setLocalPreview(feed, enabled) {

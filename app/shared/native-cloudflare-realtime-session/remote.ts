@@ -624,6 +624,18 @@ export class NativeCloudflareRemoteMethods {
       trackName: publication.trackName,
       provider: "sfu",
       native: true,
+      connectionEpoch:
+        Number(publication.connectionEpoch) ||
+        this.getControlConnectionEpoch?.() ||
+        1,
+      sourceGeneration: generation,
+      receiverIncarnationId: `native-cloudflare:${String(
+        this.sessionId || "",
+      )}:${trackName}:${trackId}:${
+        Number(publication.connectionEpoch) ||
+        this.getControlConnectionEpoch?.() ||
+        1
+      }:${generation}`,
       playback: kind === "audio" ? "coreaudio" : "native-frame",
       frame: null,
       receiving:

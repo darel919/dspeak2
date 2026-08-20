@@ -78,6 +78,7 @@ export const methods: Record<string, unknown> = {
     const entry = {
       key: data.producerId,
       producerId: data.producerId,
+      consumerId: consumer.id,
       userId: data.userId,
       source: data.source || data.appData?.source || data.kind,
       ownerSource: data.ownerSource || data.appData?.ownerSource || null,
@@ -86,6 +87,12 @@ export const methods: Record<string, unknown> = {
       track: consumer.track,
       stream: new MediaStream([consumer.track]),
       receiving: false,
+      connectionEpoch: Number(data.connectionEpoch) || 1,
+      sourceGeneration: Number(data.generation ?? data.sourceGeneration) || 1,
+      receiverIncarnationId: `sfu:${consumer.id}`,
+      logicalStreamId:
+        data.logicalStreamId ?? data.appData?.logicalStreamId ?? null,
+      variantId: data.variantId ?? data.appData?.variantId ?? null,
     } as MediasoupConsumerEntry;
     this.consumers.set(consumer.id, entry);
     this.onStateChange?.(

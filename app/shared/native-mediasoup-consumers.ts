@@ -432,11 +432,15 @@ export async function createConsumer(
       desiredReceiving: false,
       receivingRevision: 0,
       closed: false,
+      connectionEpoch: session.getControlConnectionEpoch?.() || 1,
       logicalStreamId: logicalStream,
       generation: Math.max(
         1,
         Math.floor(Number(data.generation || appData.generation) || 1),
       ),
+      receiverIncarnationId: `native-sfu:${consumerId}:${
+        session.getControlConnectionEpoch?.() || 1
+      }:${Math.max(1, Math.floor(Number(data.generation || appData.generation) || 1))}`,
       variantId:
         typeof (data.variantId || appData.variantId) === "string"
           ? String(data.variantId || appData.variantId)

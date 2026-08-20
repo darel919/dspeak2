@@ -87,6 +87,7 @@ import {
 } from "~/shared/microphone-gate.ts";
 import type { MediaVideoFeed } from "~/shared/types/media-source-controller.ts";
 import type { RemoteMediaEntry } from "~/shared/types/hybrid-media-registry.ts";
+import type { RemoteReceiverStats } from "~/shared/remote-source-convergence.ts";
 import type {
   HybridP2pMesh,
   HybridChannelRecord,
@@ -112,6 +113,50 @@ import type {
 } from "~/shared/types/topology-controller.ts";
 import type { VideoSettings } from "~/shared/types/video-settings.ts";
 import type { ParticipantMediaCapabilities } from "~/shared/types/video-codec-capabilities.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function finiteStat(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+function normalizeReceiverStats(raw: unknown): RemoteReceiverStats | null {
+  const values: unknown[] = [];
+  if (Array.isArray(raw)) values.push(...raw);
+  else if (isRecord(raw) && typeof raw.forEach === "function")
+    raw.forEach((value: unknown) => values.push(value));
+  else if (isRecord(raw)) values.push(raw);
+  const record = values
+    .map((value) => {
+      if (!isRecord(value)) return null;
+      return isRecord(value.stats) ? value.stats : value;
+    })
+    .find(
+      (value) =>
+        isRecord(value) &&
+        (value.type === "inbound-rtp" || value.bytesReceived !== undefined),
+    );
+  if (!isRecord(record)) return null;
+  const bytesReceived = finiteStat(record.bytesReceived);
+  const packetsReceived = finiteStat(record.packetsReceived);
+  if (bytesReceived === undefined || packetsReceived === undefined) return null;
+  const result: RemoteReceiverStats = { bytesReceived, packetsReceived };
+  for (const field of [
+    "framesDecoded",
+    "framesRendered",
+    "totalAudioEnergy",
+    "totalSamplesReceived",
+    "jitterBufferEmittedCount",
+  ] as const) {
+    const value = finiteStat(record[field]);
+    if (value !== undefined) result[field] = value;
+  }
+  return result;
+}
+
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig();
   const authStore = useAuthStore();
@@ -171,6 +216,138 @@ export function useHybridMediaSession() {
   let lastP2pEdges: unknown[] = [];
   const rtpStatsSamples = new Map<string, RtpStatsSample>();
   const reportedSfuFailureState = ref<string | null>(null);
+  let nativeSfuStatsCache: {
+    promise: Promise<unknown>;
+    consumers: number;
+  } | null = null;
+  async function getReceiverStats(
+    entry: RemoteMediaEntry,
+  ): Promise<RemoteReceiverStats | null> {
+    let directStats: unknown = null;
+    try {
+      if (entry.consumer?.getStats)
+        directStats = await entry.consumer.getStats();
+      else if (entry.receiver?.getStats)
+        directStats = await entry.receiver.getStats();
+    } catch {
+      directStats = null;
+    }
+    if (directStats) return normalizeReceiverStats(directStats);
+    if (entry.provider === "p2p" && entry.track) {
+      let report: unknown = null;
+      try {
+        report = await p2pMesh?.getInboundTrackStats?.(
+          entry.peerId ?? "",
+          entry.track,
+        );
+      } catch {
+        report = null;
+      }
+      return normalizeReceiverStats(report);
+    }
+    const nativeSfu = sfu as unknown as {
+      getInboundRtpStats?: () => Promise<unknown>;
+    } | null;
+    let reports: unknown = null;
+    let statsCache: {
+      promise: Promise<unknown>;
+      consumers: number;
+    } | null = null;
+    try {
+      if (!nativeSfu?.getInboundRtpStats) return null;
+      if (!nativeSfuStatsCache) {
+        let value: unknown;
+        try {
+          value = nativeSfu.getInboundRtpStats();
+        } catch {
+          return null;
+        }
+        nativeSfuStatsCache = {
+          promise: Promise.resolve(value),
+          consumers: 0,
+        };
+      }
+      statsCache = nativeSfuStatsCache;
+      statsCache.consumers += 1;
+      reports = await statsCache.promise;
+    } catch {
+      reports = null;
+    } finally {
+      if (statsCache) {
+        statsCache.consumers -= 1;
+        if (statsCache.consumers === 0) nativeSfuStatsCache = null;
+      }
+    }
+    if (!Array.isArray(reports)) return null;
+    const matching = reports.find((report) => {
+      if (!isRecord(report)) return false;
+      return (
+        String(report.consumerId || report.key || "") ===
+          String(entry.consumerId || entry.key || "") ||
+        (String(report.trackName || "") ===
+          String(entry.cloudflareTrackName || entry.trackName || "") &&
+          String(entry.cloudflareTrackName || entry.trackName || "").length >
+            0) ||
+        (String(report.mid || "") === String(entry.mid || "") &&
+          String(entry.mid || "").length > 0) ||
+        (String(report.userId || "") === String(entry.userId || "") &&
+          String(report.source || "") === String(entry.source || ""))
+      );
+    });
+    return normalizeReceiverStats(matching);
+  }
+
+  async function recoverReceiver(
+    entry: RemoteMediaEntry,
+    _attempt: number,
+    signal: AbortSignal,
+  ) {
+    if (signal.aborted) return false;
+    if (entry.provider === "p2p") {
+      const mesh = p2pMesh as unknown as {
+        connections?: Map<
+          string,
+          { pc?: { restartIce?: () => Promise<unknown> } }
+        >;
+      } | null;
+      const peer = mesh?.connections?.get(String(entry.peerId || ""));
+      if (!peer?.pc?.restartIce) return false;
+      await peer.pc.restartIce();
+      return false;
+    }
+    const provider = sfu as unknown as {
+      closeConsumerByProducer?: (producerId: string) => unknown;
+      requestConsumer?: (producerId: string) => unknown;
+      subscribe?: (publication: unknown) => Promise<unknown>;
+    } | null;
+    if (
+      entry.provider === "sfu" &&
+      !entry.producerId &&
+      entry.cloudflareTrackName &&
+      provider?.subscribe
+    ) {
+      const publication = cloudflarePublications
+        .values()
+        .find(
+          (candidate) =>
+            String(candidate.trackName || "") ===
+            String(entry.cloudflareTrackName),
+        );
+      if (publication) await provider.subscribe(publication);
+      return false;
+    }
+    if (entry.provider !== "sfu" || !entry.producerId) return false;
+    if (!provider?.closeConsumerByProducer || !provider.requestConsumer)
+      return false;
+    await provider.closeConsumerByProducer(String(entry.producerId));
+    if (signal.aborted) return false;
+    provider.requestConsumer(String(entry.producerId));
+    return false;
+  }
+
+  function failStalledReceiver(entry: RemoteMediaEntry) {
+    if (entry.provider === "sfu") reportSfuFailure("remote-receiver-stalled");
+  }
   let topologyController: HybridTopologyController | null = null;
   let sessionLifecycle: HybridSessionLifecycle | null = null;
   let sessionTermination: HybridSessionTermination | null = null;
@@ -323,6 +500,9 @@ export function useHybridMediaSession() {
     iceConnectedBoth,
     setConnectionPhase,
     getAttenuationReporter: () => attenuationReporter,
+    getReceiverStats,
+    onReceiverRecovery: recoverReceiver,
+    onReceiverFailed: failStalledReceiver,
   });
   let disposeVisibility: (() => void) | null = null;
   if (import.meta.client) {
@@ -626,7 +806,6 @@ export function useHybridMediaSession() {
     topologyState,
     updateP2pStats,
     rtpStatsSamples,
-    registry,
     getLifecycle: lifecycleState.snapshot,
     getProtocolState: () => protocolState.value,
     getReadiness: () =>
@@ -1106,7 +1285,17 @@ export function useHybridMediaSession() {
     },
     setRemoteScreenReceiving: (feedKey: string, receiving: boolean) =>
       registry.setVideoReceiving(feedKey, receiving),
-    markRemoteFirstFrame: (key: string) => registry.markFirstFrame(key),
+    markRemoteFirstFrame: (
+      key: string,
+      receiverIncarnationId?: string | null,
+      fallback = false,
+    ) =>
+      registry.markFirstFrame(
+        key,
+        receiverIncarnationId || null,
+        Date.now(),
+        fallback,
+      ),
     setRemoteSystemAudioReceiving: (key: string, on: boolean) =>
       registry.setAudioReceiving(key, on),
     setSharedAudioAttenuation,

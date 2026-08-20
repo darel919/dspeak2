@@ -192,6 +192,7 @@ export class CloudflareSourcesMethods {
         this.sessionGeneration === generation
       ) {
         if (tracksNewSucceeded && createdTrackName && createdMid) {
+          let compensationError: unknown = null;
           try {
             const sessionDescription =
               await getLocalSessionDescription(peerConnection);
@@ -200,7 +201,17 @@ export class CloudflareSourcesMethods {
               sessionDescription,
               force: false,
             });
-          } catch {}
+          } catch (error) {
+            compensationError = error;
+            mediaDebug("cloudflare.tracks-close-compensation-failed", {
+              source: entry.source,
+              trackName: createdTrackName,
+              mid: createdMid,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          if (compensationError && error instanceof Error)
+            Object.assign(error, { compensationError });
         }
         if (sender) {
           try {
@@ -212,6 +223,15 @@ export class CloudflareSourcesMethods {
             }
             peerConnection.removeTrack(sender);
           } catch {}
+        }
+        const createdProducer = this.producers.get(entry.source);
+        if (
+          createdProducer &&
+          createdTrackName &&
+          createdProducer.trackName === createdTrackName
+        ) {
+          this.producers.delete(entry.source);
+          this.sourceTransmission.delete(entry.source);
         }
         if (peerConnection.signalingState !== "stable") {
           try {

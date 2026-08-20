@@ -42,6 +42,12 @@ export interface MediasoupConsumerEntry {
   source: string;
   ownerSource?: string | null;
   provider?: string;
+  connectionEpoch?: number;
+  sourceGeneration?: number;
+  consumerId?: string;
+  receiverIncarnationId?: string;
+  logicalStreamId?: string | null;
+  variantId?: string | null;
   consumer: MediasoupConsumerLike;
   track: MediaStreamTrack;
   stream: MediaStream;

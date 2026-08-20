@@ -206,6 +206,67 @@ test("Cloudflare waits for complete ICE before publishing a local offer", async 
   client.closeMedia();
 });
 
+test("Cloudflare compensates a created track when publication registration fails", async () => {
+  const requests = [];
+  let client;
+  const peerConnection = new EmptyEncodingPeerConnection();
+  peerConnection.connectionState = "connected";
+  peerConnection.signalingState = "stable";
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  peerConnection.setRemoteDescription = async (description) => {
+    peerConnection.remoteDescription = description;
+  };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      if (message.type === "cloudflare-publication") return false;
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation, body } = message.data;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId,
+          result:
+            operation === "tracks-new"
+              ? {
+                  tracks: [
+                    {
+                      trackName: body.tracks[0].trackName,
+                      mid: "audio-mid",
+                    },
+                  ],
+                  sessionDescription: { type: "answer", sdp: "answer" },
+                }
+              : { sessionDescription: { type: "answer", sdp: "close" } },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "cloudflare-session";
+  client.initializing = Promise.resolve();
+
+  await assert.rejects(
+    client.addSource({
+      source: "audio",
+      track: { kind: "audio", enabled: true },
+      stream: {},
+    }),
+    /Media control is unavailable/,
+  );
+
+  const closeRequest = requests.find(
+    (message) =>
+      message.type === "cloudflare-request" &&
+      message.data.operation === "tracks-close",
+  );
+  assert.ok(closeRequest);
+  assert.deepEqual(closeRequest.data.body.tracks, [{ mid: "audio-mid" }]);
+  assert.equal(client.producers.size, 0);
+});
+
 test("Cloudflare initialization can retry after a failed request", async () => {
   const previousPeerConnection = globalThis.RTCPeerConnection;
   const requests = [];

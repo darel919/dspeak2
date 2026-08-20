@@ -19,6 +19,7 @@ export type RemoteSourcePhase =
   | "failed";
 
 export interface RemoteSourceIncarnation {
+  receiverIncarnationId: string;
   stableFeedKey: string;
   provider: RemoteSourceProvider;
   peerId: string;
@@ -36,26 +37,52 @@ export interface RemoteSourceIncarnation {
   variantId?: string;
 }
 
+export interface RtpEvidenceBase {
+  lastBytesReceived: number;
+  lastPacketsReceived: number;
+  lastRtpSampleAt: number | null;
+  lastRtpProgressAt: number | null;
+  samples: Array<{
+    timestamp: number;
+    bytesReceived: number;
+    packetsReceived: number;
+  }>;
+  rtpFlowingConfirmed: boolean;
+  rtpFlowingConfirmedAt: number | null;
+}
+
+export interface VideoRtpEvidence extends RtpEvidenceBase {
+  kind: "video";
+  lastFramesDecoded: number;
+  lastFramesRendered: number;
+}
+
+export interface AudioRtpEvidence extends RtpEvidenceBase {
+  kind: "audio";
+  lastTotalAudioEnergy: number;
+  lastTotalSamplesReceived: number;
+  lastJitterBufferEmittedCount: number;
+}
+
+export type RemoteSourceRtpEvidence = VideoRtpEvidence | AudioRtpEvidence;
+
+export interface RemoteReceiverStats {
+  bytesReceived: number;
+  packetsReceived: number;
+  framesDecoded?: number;
+  framesRendered?: number;
+  totalAudioEnergy?: number;
+  totalSamplesReceived?: number;
+  jitterBufferEmittedCount?: number;
+}
+
 export interface RemoteSourceConvergenceState {
   incarnation: RemoteSourceIncarnation;
+  kind: RemoteSourceKind;
   phase: RemoteSourcePhase;
   previousPhase: RemoteSourcePhase | null;
   phaseEnteredAt: number;
-  rtpEvidence: {
-    lastBytesReceived: number;
-    lastPacketsReceived: number;
-    lastFramesDecoded: number;
-    lastFramesRendered: number;
-    samples: Array<{
-      timestamp: number;
-      bytesReceived: number;
-      packetsReceived: number;
-      framesDecoded: number;
-      framesRendered: number;
-    }>;
-    rtpFlowingConfirmed: boolean;
-    rtpFlowingConfirmedAt: number | null;
-  };
+  rtpEvidence: RemoteSourceRtpEvidence;
   firstFrameEvidence: {
     received: boolean;
     receivedAt: number | null;
@@ -70,6 +97,7 @@ export interface RemoteSourceConvergenceState {
     recoveryAttempt: number;
     recoveryTimer: ReturnType<typeof setTimeout> | null;
   };
+  outputBindingReady: boolean;
   intentionalReceivingDisabled: boolean;
   retired: boolean;
   failed: boolean;
@@ -90,7 +118,63 @@ export const DEFAULT_REMOTE_SOURCE_FSM_CONFIG: RemoteSourceFSMConfig = {
   statsSampleIntervalMs: 1000,
 };
 
+function sourceKind(source: string): RemoteSourceKind {
+  return source === "camera" || source === "screen" ? "video" : "audio";
+}
+
+function receiverIdentityPart(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number")
+    return String(value);
+  return "";
+}
+
+export function buildRemoteReceiverIncarnationId({
+  stableFeedKey,
+  provider,
+  connectionEpoch,
+  sourceGeneration,
+  publicationId,
+  producerId,
+  consumerId,
+  cloudflareSessionId,
+  cloudflareTrackName,
+  nativeTrackHandle,
+  logicalStreamId,
+  variantId,
+}: {
+  stableFeedKey: string;
+  provider: RemoteSourceProvider;
+  connectionEpoch: number;
+  sourceGeneration: number;
+  publicationId?: string;
+  producerId?: string;
+  consumerId?: string;
+  cloudflareSessionId?: string;
+  cloudflareTrackName?: string;
+  nativeTrackHandle?: unknown;
+  logicalStreamId?: string;
+  variantId?: string;
+}): string {
+  return [
+    provider,
+    stableFeedKey,
+    connectionEpoch,
+    sourceGeneration,
+    publicationId,
+    producerId,
+    consumerId,
+    cloudflareSessionId,
+    cloudflareTrackName,
+    receiverIdentityPart(nativeTrackHandle),
+    logicalStreamId,
+    variantId,
+  ]
+    .map((value) => receiverIdentityPart(value))
+    .join("|");
+}
+
 export function createRemoteSourceIncarnation({
+  receiverIncarnationId,
   stableFeedKey,
   provider,
   peerId,
@@ -107,6 +191,7 @@ export function createRemoteSourceIncarnation({
   logicalStreamId,
   variantId,
 }: {
+  receiverIncarnationId?: string;
   stableFeedKey: string;
   provider: RemoteSourceProvider;
   peerId: string;
@@ -124,6 +209,22 @@ export function createRemoteSourceIncarnation({
   variantId?: string;
 }): RemoteSourceIncarnation {
   return {
+    receiverIncarnationId: receiverIncarnationId
+      ? `${receiverIncarnationId}|${connectionEpoch}|${sourceGeneration}`
+      : buildRemoteReceiverIncarnationId({
+          stableFeedKey,
+          provider,
+          connectionEpoch,
+          sourceGeneration,
+          publicationId,
+          producerId,
+          consumerId,
+          cloudflareSessionId,
+          cloudflareTrackName,
+          nativeTrackHandle,
+          logicalStreamId,
+          variantId,
+        }),
     stableFeedKey,
     provider,
     peerId,
@@ -146,12 +247,10 @@ export function compareIncarnationAuthority(
   a: RemoteSourceIncarnation,
   b: RemoteSourceIncarnation,
 ): number {
-  if (a.connectionEpoch !== b.connectionEpoch) {
+  if (a.connectionEpoch !== b.connectionEpoch)
     return a.connectionEpoch - b.connectionEpoch;
-  }
-  if (a.sourceGeneration !== b.sourceGeneration) {
+  if (a.sourceGeneration !== b.sourceGeneration)
     return a.sourceGeneration - b.sourceGeneration;
-  }
   return 0;
 }
 
@@ -159,8 +258,10 @@ export function isIncarnationCurrent(
   current: RemoteSourceIncarnation | null,
   candidate: RemoteSourceIncarnation,
 ): boolean {
-  if (!current) return false;
-  return compareIncarnationAuthority(current, candidate) === 0;
+  return Boolean(
+    current &&
+    current.receiverIncarnationId === candidate.receiverIncarnationId,
+  );
 }
 
 export function isIncarnationNewer(
@@ -168,7 +269,12 @@ export function isIncarnationNewer(
   candidate: RemoteSourceIncarnation,
 ): boolean {
   if (!current) return true;
-  return compareIncarnationAuthority(current, candidate) < 0;
+  const authority = compareIncarnationAuthority(current, candidate);
+  return (
+    authority < 0 ||
+    (authority === 0 &&
+      current.receiverIncarnationId !== candidate.receiverIncarnationId)
+  );
 }
 
 export function isIncarnationOlder(
@@ -176,7 +282,38 @@ export function isIncarnationOlder(
   candidate: RemoteSourceIncarnation,
 ): boolean {
   if (!current) return false;
-  return compareIncarnationAuthority(current, candidate) > 0;
+  const authority = compareIncarnationAuthority(current, candidate);
+  return (
+    authority > 0 ||
+    (authority === 0 &&
+      current.receiverIncarnationId !== candidate.receiverIncarnationId)
+  );
+}
+
+function createRtpEvidence(kind: RemoteSourceKind): RemoteSourceRtpEvidence {
+  const base = {
+    lastBytesReceived: 0,
+    lastPacketsReceived: 0,
+    lastRtpSampleAt: null,
+    lastRtpProgressAt: null,
+    samples: [],
+    rtpFlowingConfirmed: false,
+    rtpFlowingConfirmedAt: null,
+  };
+  return kind === "video"
+    ? {
+        ...base,
+        kind,
+        lastFramesDecoded: 0,
+        lastFramesRendered: 0,
+      }
+    : {
+        ...base,
+        kind,
+        lastTotalAudioEnergy: 0,
+        lastTotalSamplesReceived: 0,
+        lastJitterBufferEmittedCount: 0,
+      };
 }
 
 export function createRemoteSourceConvergenceState(
@@ -184,18 +321,11 @@ export function createRemoteSourceConvergenceState(
 ): RemoteSourceConvergenceState {
   return {
     incarnation,
+    kind: sourceKind(incarnation.source),
     phase: "not-announced",
     previousPhase: null,
     phaseEnteredAt: Date.now(),
-    rtpEvidence: {
-      lastBytesReceived: 0,
-      lastPacketsReceived: 0,
-      lastFramesDecoded: 0,
-      lastFramesRendered: 0,
-      samples: [],
-      rtpFlowingConfirmed: false,
-      rtpFlowingConfirmedAt: null,
-    },
+    rtpEvidence: createRtpEvidence(sourceKind(incarnation.source)),
     firstFrameEvidence: {
       received: false,
       receivedAt: null,
@@ -210,6 +340,7 @@ export function createRemoteSourceConvergenceState(
       recoveryAttempt: 0,
       recoveryTimer: null,
     },
+    outputBindingReady: true,
     intentionalReceivingDisabled: false,
     retired: false,
     failed: false,
@@ -217,185 +348,123 @@ export function createRemoteSourceConvergenceState(
   };
 }
 
+const VALID_TRANSITIONS: Record<RemoteSourcePhase, RemoteSourcePhase[]> = {
+  "not-announced": ["announced", "retired", "failed"],
+  announced: [
+    "publication-discovered",
+    "subscription-requested",
+    "transport-connected",
+    "retired",
+    "failed",
+  ],
+  "publication-discovered": [
+    "subscription-requested",
+    "consumer-created",
+    "transport-connected",
+    "retired",
+    "failed",
+  ],
+  "subscription-requested": [
+    "consumer-created",
+    "transport-connected",
+    "retired",
+    "failed",
+  ],
+  "consumer-created": ["transport-connected", "retired", "failed"],
+  "transport-connected": ["rtp-flowing", "stalled", "retired", "failed"],
+  "rtp-flowing": ["first-frame", "renderable", "stalled", "retired", "failed"],
+  "first-frame": ["renderable", "stalled", "retired", "failed"],
+  renderable: ["stalled", "retired", "failed"],
+  stalled: ["recovering", "rtp-flowing", "first-frame", "retired", "failed"],
+  recovering: [
+    "rtp-flowing",
+    "first-frame",
+    "renderable",
+    "stalled",
+    "retired",
+    "failed",
+  ],
+  retired: [],
+  failed: [],
+};
+
 export function advancePhase(
   state: RemoteSourceConvergenceState,
   newPhase: RemoteSourcePhase,
   now = Date.now(),
 ): boolean {
-  const validTransitions: Record<RemoteSourcePhase, RemoteSourcePhase[]> = {
-    "not-announced": ["announced", "retired", "failed"],
-    announced: [
-      "publication-discovered",
-      "subscription-requested",
-      "retired",
-      "failed",
-    ],
-    "publication-discovered": [
-      "subscription-requested",
-      "consumer-created",
-      "retired",
-      "failed",
-    ],
-    "subscription-requested": ["consumer-created", "retired", "failed"],
-    "consumer-created": ["transport-connected", "retired", "failed"],
-    "transport-connected": ["rtp-flowing", "stalled", "retired", "failed"],
-    "rtp-flowing": [
-      "first-frame",
-      "renderable",
-      "stalled",
-      "retired",
-      "failed",
-    ],
-    "first-frame": ["renderable", "stalled", "retired", "failed"],
-    renderable: ["stalled", "retired", "failed"],
-    stalled: ["recovering", "rtp-flowing", "first-frame", "retired", "failed"],
-    recovering: [
-      "rtp-flowing",
-      "first-frame",
-      "renderable",
-      "stalled",
-      "failed",
-    ],
-    retired: [],
-    failed: [],
-  };
-
-  const allowed = validTransitions[state.phase] || [];
-  if (!allowed.includes(newPhase)) {
-    return false;
-  }
-
+  if (!VALID_TRANSITIONS[state.phase]?.includes(newPhase)) return false;
   state.previousPhase = state.phase;
   state.phase = newPhase;
   state.phaseEnteredAt = now;
-
-  // Set terminal state flags
   if (newPhase === "retired") {
     state.retired = true;
     state.abortController.abort();
   }
-  if (newPhase === "failed") {
-    state.failed = true;
-  }
-
+  if (newPhase === "failed") state.failed = true;
   return true;
 }
 
-export function checkRtpProgression(
-  state: RemoteSourceConvergenceState,
-  sample: {
-    bytesReceived: number;
-    packetsReceived: number;
-    framesDecoded?: number;
-    framesRendered?: number;
-  },
-  now = Date.now(),
+function videoProgressed(
+  evidence: VideoRtpEvidence,
+  sample: RemoteReceiverStats,
 ): boolean {
-  const { rtpEvidence } = state;
-
-  // First sample establishes baseline - no progression detected yet
-  const isFirstSample = rtpEvidence.samples.length === 0;
-
-  const progression =
-    !isFirstSample &&
-    (sample.bytesReceived > rtpEvidence.lastBytesReceived ||
-      sample.packetsReceived > rtpEvidence.lastPacketsReceived ||
-      (sample.framesDecoded !== undefined &&
-        sample.framesDecoded > rtpEvidence.lastFramesDecoded) ||
-      (sample.framesRendered !== undefined &&
-        sample.framesRendered > rtpEvidence.lastFramesRendered));
-
-  rtpEvidence.samples.push({
-    timestamp: now,
-    bytesReceived: sample.bytesReceived,
-    packetsReceived: sample.packetsReceived,
-    framesDecoded: sample.framesDecoded ?? rtpEvidence.lastFramesDecoded,
-    framesRendered: sample.framesRendered ?? rtpEvidence.lastFramesRendered,
-  });
-
-  if (rtpEvidence.samples.length > 10) {
-    rtpEvidence.samples.shift();
-  }
-
-  rtpEvidence.lastBytesReceived = sample.bytesReceived;
-  rtpEvidence.lastPacketsReceived = sample.packetsReceived;
-  if (sample.framesDecoded !== undefined)
-    rtpEvidence.lastFramesDecoded = sample.framesDecoded;
-  if (sample.framesRendered !== undefined)
-    rtpEvidence.lastFramesRendered = sample.framesRendered;
-
-  // Require at least 2 samples to confirm RTP flowing (progression over time)
-  if (
-    progression &&
-    rtpEvidence.samples.length >= 2 &&
-    !rtpEvidence.rtpFlowingConfirmed
-  ) {
-    rtpEvidence.rtpFlowingConfirmed = true;
-    rtpEvidence.rtpFlowingConfirmedAt = now;
-  }
-
-  return progression;
+  return (
+    sample.bytesReceived > evidence.lastBytesReceived ||
+    sample.packetsReceived > evidence.lastPacketsReceived ||
+    (sample.framesDecoded !== undefined &&
+      sample.framesDecoded > evidence.lastFramesDecoded) ||
+    (sample.framesRendered !== undefined &&
+      sample.framesRendered > evidence.lastFramesRendered)
+  );
 }
 
-export function checkAudioRtpProgression(
-  state: RemoteSourceConvergenceState,
-  sample: {
-    bytesReceived: number;
-    packetsReceived: number;
-    totalAudioEnergy?: number;
-    totalSamplesReceived?: number;
-    jitterBufferEmittedCount?: number;
-  },
-  now = Date.now(),
+function audioProgressed(
+  evidence: AudioRtpEvidence,
+  sample: RemoteReceiverStats,
 ): boolean {
-  const { rtpEvidence } = state;
-  const evidence = state.rtpEvidence as any;
+  return (
+    sample.bytesReceived > evidence.lastBytesReceived ||
+    sample.packetsReceived > evidence.lastPacketsReceived ||
+    (sample.totalAudioEnergy !== undefined &&
+      sample.totalAudioEnergy > evidence.lastTotalAudioEnergy) ||
+    (sample.totalSamplesReceived !== undefined &&
+      sample.totalSamplesReceived > evidence.lastTotalSamplesReceived) ||
+    (sample.jitterBufferEmittedCount !== undefined &&
+      sample.jitterBufferEmittedCount > evidence.lastJitterBufferEmittedCount)
+  );
+}
 
-  // Initialize audio-specific fields if not present
-  if (evidence.lastTotalAudioEnergy === undefined)
-    evidence.lastTotalAudioEnergy = 0;
-  if (evidence.lastTotalSamplesReceived === undefined)
-    evidence.lastTotalSamplesReceived = 0;
-  if (evidence.lastJitterBufferEmittedCount === undefined)
-    evidence.lastJitterBufferEmittedCount = 0;
-
-  // First sample establishes baseline - no progression detected yet
-  const isFirstSample = evidence.samples.length === 0;
-
-  const progression =
-    !isFirstSample &&
-    (sample.bytesReceived > evidence.lastBytesReceived ||
-      sample.packetsReceived > evidence.lastPacketsReceived ||
-      (sample.totalAudioEnergy !== undefined &&
-        sample.totalAudioEnergy > evidence.lastTotalAudioEnergy) ||
-      (sample.totalSamplesReceived !== undefined &&
-        sample.totalSamplesReceived > evidence.lastTotalSamplesReceived) ||
-      (sample.jitterBufferEmittedCount !== undefined &&
-        sample.jitterBufferEmittedCount >
-          evidence.lastJitterBufferEmittedCount));
-
+function recordRtpSample(
+  state: RemoteSourceConvergenceState,
+  sample: RemoteReceiverStats,
+  now: number,
+  progression: boolean,
+) {
+  const evidence = state.rtpEvidence;
+  evidence.lastRtpSampleAt = now;
+  if (progression) evidence.lastRtpProgressAt = now;
   evidence.samples.push({
     timestamp: now,
     bytesReceived: sample.bytesReceived,
     packetsReceived: sample.packetsReceived,
-    framesDecoded: evidence.lastFramesDecoded,
-    framesRendered: evidence.lastFramesRendered,
   });
-
-  if (evidence.samples.length > 10) {
-    evidence.samples.shift();
-  }
-
+  if (evidence.samples.length > 10) evidence.samples.shift();
   evidence.lastBytesReceived = sample.bytesReceived;
   evidence.lastPacketsReceived = sample.packetsReceived;
-  if (sample.totalAudioEnergy !== undefined)
-    evidence.lastTotalAudioEnergy = sample.totalAudioEnergy;
-  if (sample.totalSamplesReceived !== undefined)
-    evidence.lastTotalSamplesReceived = sample.totalSamplesReceived;
-  if (sample.jitterBufferEmittedCount !== undefined)
-    evidence.lastJitterBufferEmittedCount = sample.jitterBufferEmittedCount;
-
-  // Require at least 2 samples to confirm RTP flowing
+  if (evidence.kind === "video") {
+    evidence.lastFramesDecoded =
+      sample.framesDecoded ?? evidence.lastFramesDecoded;
+    evidence.lastFramesRendered =
+      sample.framesRendered ?? evidence.lastFramesRendered;
+  } else {
+    evidence.lastTotalAudioEnergy =
+      sample.totalAudioEnergy ?? evidence.lastTotalAudioEnergy;
+    evidence.lastTotalSamplesReceived =
+      sample.totalSamplesReceived ?? evidence.lastTotalSamplesReceived;
+    evidence.lastJitterBufferEmittedCount =
+      sample.jitterBufferEmittedCount ?? evidence.lastJitterBufferEmittedCount;
+  }
   if (
     progression &&
     evidence.samples.length >= 2 &&
@@ -404,17 +473,38 @@ export function checkAudioRtpProgression(
     evidence.rtpFlowingConfirmed = true;
     evidence.rtpFlowingConfirmedAt = now;
   }
+}
 
+export function checkRtpProgression(
+  state: RemoteSourceConvergenceState,
+  sample: RemoteReceiverStats,
+  now = Date.now(),
+): boolean {
+  if (state.rtpEvidence.kind !== "video") return false;
+  const evidence = state.rtpEvidence;
+  const progression =
+    evidence.samples.length > 0 && videoProgressed(evidence, sample);
+  recordRtpSample(state, sample, now, progression);
+  return progression;
+}
+
+export function checkAudioRtpProgression(
+  state: RemoteSourceConvergenceState,
+  sample: RemoteReceiverStats,
+  now = Date.now(),
+): boolean {
+  if (state.rtpEvidence.kind !== "audio") return false;
+  const evidence = state.rtpEvidence;
+  const progression =
+    evidence.samples.length > 0 && audioProgressed(evidence, sample);
+  recordRtpSample(state, sample, now, progression);
   return progression;
 }
 
 export function hasRtpFlowingEvidence(
   state: RemoteSourceConvergenceState,
 ): boolean {
-  return (
-    state.rtpEvidence.rtpFlowingConfirmed ||
-    (state.rtpEvidence as any).rtpFlowingConfirmed === true
-  );
+  return state.rtpEvidence.rtpFlowingConfirmed;
 }
 
 export function hasFirstFrameEvidence(
@@ -427,9 +517,11 @@ export function canBecomeRenderable(
   state: RemoteSourceConvergenceState,
 ): boolean {
   return (
+    state.kind === "video" &&
     hasRtpFlowingEvidence(state) &&
     hasFirstFrameEvidence(state) &&
-    state.phase === "first-frame"
+    !state.retired &&
+    !state.failed
   );
 }
 
@@ -437,9 +529,67 @@ export function canBecomeAudioRenderable(
   state: RemoteSourceConvergenceState,
 ): boolean {
   return (
+    state.kind === "audio" &&
     hasRtpFlowingEvidence(state) &&
-    (state.phase === "rtp-flowing" || state.phase === "transport-connected")
+    state.outputBindingReady &&
+    !state.retired &&
+    !state.failed
   );
+}
+
+export function promoteConvergence(
+  state: RemoteSourceConvergenceState,
+  now = Date.now(),
+): boolean {
+  if (state.retired || state.failed) return false;
+  let changed = false;
+  if (
+    hasRtpFlowingEvidence(state) &&
+    ["transport-connected", "recovering"].includes(state.phase)
+  )
+    changed = advancePhase(state, "rtp-flowing", now) || changed;
+  if (state.kind === "audio" && canBecomeAudioRenderable(state))
+    changed = advancePhase(state, "renderable", now) || changed;
+  if (state.kind === "video" && canBecomeRenderable(state)) {
+    if (state.phase === "rtp-flowing")
+      changed = advancePhase(state, "first-frame", now) || changed;
+    if (state.phase === "first-frame")
+      changed = advancePhase(state, "renderable", now) || changed;
+  }
+  return changed;
+}
+
+export function recordFirstFrameEvidence(
+  state: RemoteSourceConvergenceState,
+  at = Date.now(),
+  options: {
+    element?: HTMLVideoElement | null;
+    stream?: MediaStream | null;
+    track?: MediaStreamTrack | null;
+    fallback?: boolean;
+  } = {},
+): boolean {
+  if (
+    state.kind !== "video" ||
+    state.retired ||
+    state.failed ||
+    state.firstFrameEvidence.received
+  )
+    return false;
+  if (
+    options.fallback &&
+    (!hasRtpFlowingEvidence(state) ||
+      state.rtpEvidence.kind !== "video" ||
+      state.rtpEvidence.lastFramesDecoded <= 0)
+  )
+    return false;
+  state.firstFrameEvidence.received = true;
+  state.firstFrameEvidence.receivedAt = at;
+  state.firstFrameEvidence.element = options.element ?? null;
+  state.firstFrameEvidence.stream = options.stream ?? null;
+  state.firstFrameEvidence.track = options.track ?? null;
+  promoteConvergence(state, at);
+  return true;
 }
 
 export function scheduleFirstFrameCallback(
@@ -449,42 +599,40 @@ export function scheduleFirstFrameCallback(
   track: MediaStreamTrack,
   onFirstFrame: () => void,
 ): void {
-  if (state.firstFrameEvidence.callbackHandle) {
-    element.cancelVideoFrameCallback(state.firstFrameEvidence.callbackHandle);
-  }
-
+  cancelFirstFrameCallback(state);
   state.firstFrameEvidence.element = element;
   state.firstFrameEvidence.stream = stream;
   state.firstFrameEvidence.track = track;
-
-  if (typeof element.requestVideoFrameCallback === "function") {
-    const handle = element.requestVideoFrameCallback(() => {
-      if (state.firstFrameEvidence.callbackHandle === handle) {
-        state.firstFrameEvidence.callbackHandle = null;
-        state.firstFrameEvidence.received = true;
-        state.firstFrameEvidence.receivedAt = Date.now();
-        onFirstFrame();
-      }
-    });
-    state.firstFrameEvidence.callbackHandle = handle;
-  } else {
-    state.firstFrameEvidence.received = true;
-    state.firstFrameEvidence.receivedAt = Date.now();
-    onFirstFrame();
-  }
+  if (typeof element.requestVideoFrameCallback !== "function") return;
+  const handle = element.requestVideoFrameCallback(() => {
+    if (
+      state.firstFrameEvidence.callbackHandle !== handle ||
+      state.retired ||
+      state.abortController.signal.aborted ||
+      state.firstFrameEvidence.element !== element ||
+      state.firstFrameEvidence.stream !== stream ||
+      state.firstFrameEvidence.track !== track
+    )
+      return;
+    state.firstFrameEvidence.callbackHandle = null;
+    if (
+      recordFirstFrameEvidence(state, Date.now(), {
+        element,
+        stream,
+        track,
+      })
+    )
+      onFirstFrame();
+  });
+  state.firstFrameEvidence.callbackHandle = handle;
 }
 
 export function cancelFirstFrameCallback(
   state: RemoteSourceConvergenceState,
 ): void {
-  if (
-    state.firstFrameEvidence.callbackHandle &&
-    state.firstFrameEvidence.element
-  ) {
-    state.firstFrameEvidence.element.cancelVideoFrameCallback(
-      state.firstFrameEvidence.callbackHandle,
-    );
-  }
+  const handle = state.firstFrameEvidence.callbackHandle;
+  const element = state.firstFrameEvidence.element;
+  if (handle !== null && element) element.cancelVideoFrameCallback?.(handle);
   state.firstFrameEvidence.callbackHandle = null;
   state.firstFrameEvidence.element = null;
   state.firstFrameEvidence.stream = null;
@@ -492,6 +640,11 @@ export function cancelFirstFrameCallback(
 }
 
 export function retireIncarnation(state: RemoteSourceConvergenceState): void {
+  if (state.phase !== "retired") {
+    state.previousPhase = state.phase;
+    state.phase = "retired";
+    state.phaseEnteredAt = Date.now();
+  }
   state.retired = true;
   state.abortController.abort();
   cancelFirstFrameCallback(state);
@@ -512,6 +665,17 @@ export function setIntentionalReceivingDisabled(
   }
 }
 
+function markStalled(
+  state: RemoteSourceConvergenceState,
+  now: number,
+): boolean {
+  if (state.stallState.detected) return false;
+  state.stallState.detected = true;
+  state.stallState.detectedAt = now;
+  if (state.phase !== "stalled") advancePhase(state, "stalled", now);
+  return true;
+}
+
 export function detectStall(
   state: RemoteSourceConvergenceState,
   config: RemoteSourceFSMConfig,
@@ -521,81 +685,65 @@ export function detectStall(
     state.intentionalReceivingDisabled ||
     state.retired ||
     state.failed ||
-    state.phase === "not-announced" ||
-    state.phase === "announced" ||
-    state.phase === "publication-discovered" ||
-    state.phase === "subscription-requested" ||
-    state.phase === "consumer-created"
-  ) {
+    [
+      "not-announced",
+      "announced",
+      "publication-discovered",
+      "subscription-requested",
+      "consumer-created",
+    ].includes(state.phase)
+  )
     return false;
-  }
-
-  const timeSincePhase = now - state.phaseEnteredAt;
-
-  if (state.phase === "transport-connected") {
-    if (
-      timeSincePhase >= config.rtpStallThresholdMs &&
-      !hasRtpFlowingEvidence(state)
-    ) {
-      state.stallState.detected = true;
-      state.stallState.detectedAt = now;
-      return true;
-    }
-  }
-
-  if (state.phase === "rtp-flowing" || state.phase === "first-frame") {
-    if (
-      timeSincePhase >= config.firstFrameTimeoutMs &&
-      !hasFirstFrameEvidence(state)
-    ) {
-      state.stallState.detected = true;
-      state.stallState.detectedAt = now;
-      return true;
-    }
-  }
-
-  if (state.phase === "renderable" && !hasRtpFlowingEvidence(state)) {
-    if (timeSincePhase >= config.rtpStallThresholdMs) {
-      state.stallState.detected = true;
-      state.stallState.detectedAt = now;
-      return true;
-    }
-  }
-
-  return false;
+  const evidence = state.rtpEvidence;
+  const lastProgressAt = evidence.lastRtpProgressAt;
+  if (!hasRtpFlowingEvidence(state))
+    return now - state.phaseEnteredAt >= config.rtpStallThresholdMs
+      ? markStalled(state, now)
+      : false;
+  if (
+    lastProgressAt === null ||
+    now - lastProgressAt < config.rtpStallThresholdMs
+  )
+    return false;
+  return markStalled(state, now);
 }
 
 export function scheduleRecovery(
   state: RemoteSourceConvergenceState,
   config: RemoteSourceFSMConfig,
   onRecovery: () => void,
-): void {
-  if (state.intentionalReceivingDisabled || state.retired || state.failed) {
-    state.failed = true;
-    return;
-  }
-
-  state.stallState.recoveryAttempt++;
-
+): boolean {
+  if (
+    state.intentionalReceivingDisabled ||
+    state.retired ||
+    state.failed ||
+    state.stallState.recoveryTimer
+  )
+    return false;
   if (state.stallState.recoveryAttempt >= config.maxRecoveryAttempts) {
     state.failed = true;
-    return;
+    state.phase = "failed";
+    return false;
   }
-
+  state.stallState.recoveryAttempt += 1;
   state.phase = "recovering";
-
-  if (state.stallState.recoveryTimer) {
-    clearTimeout(state.stallState.recoveryTimer);
-  }
-
+  state.phaseEnteredAt = Date.now();
   const delay = Math.min(
     1000 * 2 ** (state.stallState.recoveryAttempt - 1),
     10000,
   );
   state.stallState.recoveryTimer = setTimeout(() => {
     state.stallState.recoveryTimer = null;
-    onRecovery();
+    if (
+      !state.retired &&
+      !state.failed &&
+      !state.intentionalReceivingDisabled &&
+      !state.abortController.signal.aborted
+    )
+      onRecovery();
   }, delay);
+  state.stallState.recoveryTimer.unref?.();
+  return true;
 }
 
 export function clearStall(state: RemoteSourceConvergenceState): void {
@@ -607,6 +755,10 @@ export function clearStall(state: RemoteSourceConvergenceState): void {
     state.stallState.recoveryTimer = null;
   }
   if (state.phase === "recovering" || state.phase === "stalled") {
-    state.phase = "rtp-flowing";
+    state.phase = hasRtpFlowingEvidence(state)
+      ? "rtp-flowing"
+      : "transport-connected";
+    state.phaseEnteredAt = Date.now();
+    promoteConvergence(state);
   }
 }

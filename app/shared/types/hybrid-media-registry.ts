@@ -4,6 +4,7 @@ import type {
   RemoteSourceIncarnation,
   RemoteSourceConvergenceState,
   RemoteSourcePhase,
+  RemoteReceiverStats,
 } from "../remote-source-convergence.ts";
 
 export interface RegistryEntry extends Record<string, unknown> {
@@ -25,6 +26,20 @@ export interface RemoteMediaEntry extends RegistryEntry {
   receiving?: boolean;
   connectionEpoch?: number;
   sourceGeneration?: number;
+  receiverIncarnationId?: string;
+  publicationId?: string;
+  producerId?: string;
+  consumerId?: string;
+  mid?: string | null;
+  trackName?: string;
+  cloudflareSessionId?: string;
+  cloudflareTrackName?: string;
+  receiver?: { getStats?: () => Promise<unknown> };
+  consumer?: { getStats?: () => Promise<unknown> };
+  nativeTrackHandle?: unknown;
+  logicalStreamId?: string;
+  variantId?: string;
+  framesDecoded?: number;
   phase?: RemoteSourcePhase;
   rtpActivityAt?: number;
   firstFrameAt?: number;
@@ -92,4 +107,13 @@ export interface HybridMediaRegistryOptions {
     error: { name: string; message: string } | null;
   }) => void;
   onEffectiveGain: (state: AttenuationReportInput) => void;
+  getReceiverStats?: (
+    entry: RemoteMediaEntry,
+  ) => Promise<RemoteReceiverStats | null>;
+  onReceiverRecovery?: (
+    entry: RemoteMediaEntry,
+    attempt: number,
+    signal: AbortSignal,
+  ) => Promise<boolean> | boolean;
+  onReceiverFailed?: (entry: RemoteMediaEntry) => unknown;
 }

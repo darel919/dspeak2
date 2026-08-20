@@ -52,5 +52,4 @@ export interface MediaMessageHandlersContext {
     publications: unknown[],
     publicationRevision?: string | number | null,
   ) => Promise<unknown>;
-  onReceiverEvidence?: (data: MediaMessage) => unknown;
 }

@@ -7,11 +7,8 @@ import type {
 import {
   getFailureScope,
   isFailureRetryable,
-  isFailureSessionFatal,
   createOperationError,
 } from "./types/media-failure.ts";
-import type { TopologyController } from "./types/topology-controller.ts";
-import { MEDIA_CONTROL_MESSAGE_TYPES } from "~~/shared/media-signaling-protocol.ts";
 
 export function setupMediaMessageHandlers({
   getHeartbeatSequence,
@@ -44,7 +41,6 @@ export function setupMediaMessageHandlers({
   queueTargetedReconciliation,
   onConnectionEpochUpdated,
   handlePublicationsDigest,
-  onReceiverEvidence,
 }: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
     handlers: [
@@ -259,25 +255,7 @@ export function setupMediaMessageHandlers({
     onP2pQualification?.({ ...data, type: "p2p-failed", failed: true }),
   );
   registerHandler("attenuation-state", onAttenuationState);
-  registerHandler(
-    MEDIA_CONTROL_MESSAGE_TYPES.RECEIVER_EVIDENCE,
-    (data: MediaMessage) => {
-      // Handle incoming receiver evidence from other participants
-      // This informs us that our published stream is being received
-      mediaDebug("control.receiver-evidence", {
-        receiverPeerId: data?.receiverPeerId,
-        receiverUserId: data?.receiverUserId,
-        source: data?.source,
-        kind: data?.kind,
-        incarnationId: data?.incarnationId,
-        evidence: data?.evidence,
-      });
-      // Forward to source controller or registry for RTP evidence tracking
-      if (typeof onReceiverEvidence === "function") {
-        onReceiverEvidence(data);
-      }
-    },
-  );
+
   registerHandler("p2p-signal", async (data: MediaMessage) => {
     const mesh = ensureP2p();
     if (!mesh) return;

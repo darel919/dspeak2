@@ -43,6 +43,7 @@
       <VideoFeed
         v-else-if="descriptor"
         :feed-key="descriptor.logicalStreamId"
+        :receiver-incarnation-id="descriptor.receiverIncarnationId || null"
         :native="true"
         :native-frame="frame"
         :source="descriptor.source"

@@ -6,6 +6,7 @@ import type {
   RegistryEntry,
   RemoteMediaEntry,
 } from "./types/hybrid-media-registry.ts";
+import type { RemoteReceiverStats } from "./remote-source-convergence.ts";
 
 export function createHybridMediaRegistry({
   audioFeeds,
@@ -22,6 +23,9 @@ export function createHybridMediaRegistry({
   iceConnectedBoth,
   setConnectionPhase,
   getAttenuationReporter,
+  getReceiverStats,
+  onReceiverRecovery,
+  onReceiverFailed,
 }: {
   audioFeeds: Ref<Map<string, RemoteMediaEntry>>;
   videoFeeds: Ref<Map<string, RemoteMediaEntry>>;
@@ -46,6 +50,9 @@ export function createHybridMediaRegistry({
       receiving: boolean,
     ) => unknown;
     connectionState?: () => { ready?: boolean };
+    getInboundRtpStats?: () => Promise<unknown>;
+    requestConsumer?: (producerId: string) => unknown;
+    closeConsumerByProducer?: (producerId: string) => unknown;
   } | null;
   getP2pMesh: () => {
     setRemoteReceiving?: (
@@ -66,6 +73,15 @@ export function createHybridMediaRegistry({
   getAttenuationReporter: () => {
     report: (state: AttenuationReportInput) => void;
   } | null;
+  getReceiverStats?: (
+    entry: RemoteMediaEntry,
+  ) => Promise<RemoteReceiverStats | null>;
+  onReceiverRecovery?: (
+    entry: RemoteMediaEntry,
+    attempt: number,
+    signal: AbortSignal,
+  ) => Promise<boolean> | boolean;
+  onReceiverFailed?: (entry: RemoteMediaEntry) => unknown;
 }) {
   return new RemoteMediaRegistry({
     audioFeeds,
@@ -129,5 +145,8 @@ export function createHybridMediaRegistry({
     },
     onEffectiveGain: (state: AttenuationReportInput) =>
       getAttenuationReporter()?.report(state),
+    getReceiverStats,
+    onReceiverRecovery,
+    onReceiverFailed,
   });
 }

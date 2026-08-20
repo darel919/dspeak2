@@ -9,9 +9,9 @@ import type {
 
 const serverHello = {
   protocolVersion: 919,
-  contractRevision: 3,
+  contractRevision: 5,
   heartbeatIntervalMs: 5000,
-  heartbeatTimeoutMs: 20000,
+  heartbeatTimeoutMs: 15000,
   serverTime: Date.now(),
   mediaSessionId: "native-session",
 };

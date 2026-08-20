@@ -403,10 +403,6 @@ export function createHybridMediaSessionLifecycle({
         mediaSessionSetup.getLastAppliedPublicationRevision?.() || "0",
       setLastAppliedPublicationRevision: (value: string) =>
         mediaSessionSetup.setLastAppliedPublicationRevision?.(value),
-      onReceiverEvidence: (data: unknown) => {
-        // Forward to source controller for RTP evidence tracking
-        mediaSessionSetup.sourceController?.onReceiverEvidence?.(data);
-      },
     });
     messageHandlers.set("cloudflare-response", (data: unknown) =>
       getSfu()?.handle("cloudflare-response", data),

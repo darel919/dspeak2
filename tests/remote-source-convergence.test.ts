@@ -8,8 +8,6 @@ import {
   checkAudioRtpProgression,
   canBecomeRenderable,
   canBecomeAudioRenderable,
-  scheduleFirstFrameCallback,
-  cancelFirstFrameCallback,
   retireIncarnation,
   detectStall,
   scheduleRecovery,
@@ -21,10 +19,10 @@ import {
   DEFAULT_REMOTE_SOURCE_FSM_CONFIG,
   type RemoteSourceIncarnation,
   type RemoteSourceConvergenceState,
-  type RemoteSourcePhase,
 } from "../app/shared/remote-source-convergence.ts";
 
 const TEST_INCARNATION: RemoteSourceIncarnation = {
+  receiverIncarnationId: "receiver:test-feed-key:p2p:1:1",
   stableFeedKey: "test-feed-key",
   provider: "p2p",
   peerId: "peer-1",
@@ -34,8 +32,10 @@ const TEST_INCARNATION: RemoteSourceIncarnation = {
   sourceGeneration: 1,
 };
 
-function createState(): RemoteSourceConvergenceState {
-  return createRemoteSourceConvergenceState(TEST_INCARNATION);
+function createState(
+  source = TEST_INCARNATION.source,
+): RemoteSourceConvergenceState {
+  return createRemoteSourceConvergenceState({ ...TEST_INCARNATION, source });
 }
 
 test("Remote Source Convergence FSM - should start in not-announced phase", () => {
@@ -76,7 +76,7 @@ test("Remote Source Convergence FSM - should advance through valid phase transit
 test("Remote Source Convergence FSM - should reject invalid phase transitions", () => {
   const state = createState();
   assert.ok(advancePhase(state, "announced"));
-  assert.ok(!advancePhase(state, "rtp-flowing")); // Can't skip phases
+  assert.ok(!advancePhase(state, "rtp-flowing"));
   assert.strictEqual(state.phase, "announced");
 });
 
@@ -112,17 +112,15 @@ test("Remote Source Convergence FSM - should track RTP progression with video st
   advancePhase(state, "consumer-created");
   advancePhase(state, "transport-connected");
 
-  // First sample - no progression yet
   let progression = checkRtpProgression(state, {
     bytesReceived: 1000,
     packetsReceived: 10,
     framesDecoded: 5,
     framesRendered: 5,
   });
-  assert.ok(!progression); // No previous sample to compare
+  assert.ok(!progression);
   assert.ok(!state.rtpEvidence.rtpFlowingConfirmed);
 
-  // Second sample - progression detected
   progression = checkRtpProgression(state, {
     bytesReceived: 2000,
     packetsReceived: 20,
@@ -135,7 +133,7 @@ test("Remote Source Convergence FSM - should track RTP progression with video st
 });
 
 test("Remote Source Convergence FSM - should track RTP progression with audio stats", () => {
-  const state = createState();
+  const state = createState("audio");
   advancePhase(state, "transport-connected");
 
   let progression = checkAudioRtpProgression(state, {
@@ -181,7 +179,7 @@ test("Remote Source Convergence FSM - should become renderable for video when RT
 });
 
 test("Remote Source Convergence FSM - should become renderable for audio when RTP flowing", () => {
-  const state = createState();
+  const state = createState("audio");
   advancePhase(state, "announced");
   advancePhase(state, "publication-discovered");
   advancePhase(state, "subscription-requested");
@@ -208,7 +206,7 @@ test("Remote Source Convergence FSM - should detect stall in transport-connected
   advancePhase(state, "subscription-requested");
   advancePhase(state, "consumer-created");
   advancePhase(state, "transport-connected");
-  state.phaseEnteredAt = Date.now() - 5000; // 5 seconds ago
+  state.phaseEnteredAt = Date.now() - 5000;
 
   const stalled = detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG);
   assert.ok(stalled);
@@ -240,7 +238,8 @@ test("Remote Source Convergence FSM - should detect stall in rtp-flowing phase w
   advancePhase(state, "rtp-flowing");
   checkRtpProgression(state, { bytesReceived: 1000, packetsReceived: 10 });
   checkRtpProgression(state, { bytesReceived: 2000, packetsReceived: 20 });
-  state.phaseEnteredAt = Date.now() - 6000; // 6 seconds ago
+  state.rtpEvidence.lastRtpProgressAt = Date.now() - 5000;
+  state.phaseEnteredAt = Date.now() - 6000;
 
   const stalled = detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG);
   assert.ok(stalled);
@@ -262,16 +261,12 @@ test("Remote Source Convergence FSM - should schedule recovery with exponential 
   state.phaseEnteredAt = Date.now() - 5000;
   detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG);
 
-  let recoveryCalled = false;
-  scheduleRecovery(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG, () => {
-    recoveryCalled = true;
-  });
+  scheduleRecovery(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG, () => {});
 
   assert.strictEqual(state.phase, "recovering");
   assert.strictEqual(state.stallState.recoveryAttempt, 1);
   assert.ok(state.stallState.recoveryTimer !== null);
 
-  // Clean up timer
   if (state.stallState.recoveryTimer) {
     clearTimeout(state.stallState.recoveryTimer);
     state.stallState.recoveryTimer = null;
@@ -288,10 +283,9 @@ test("Remote Source Convergence FSM - should fail after max recovery attempts", 
   state.phaseEnteredAt = Date.now() - 5000;
   detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG);
 
-  // Exhaust recovery attempts
   for (
     let i = 0;
-    i < DEFAULT_REMOTE_SOURCE_FSM_CONFIG.maxRecoveryAttempts;
+    i <= DEFAULT_REMOTE_SOURCE_FSM_CONFIG.maxRecoveryAttempts;
     i++
   ) {
     scheduleRecovery(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG, () => {});
@@ -314,6 +308,7 @@ test("Remote Source Convergence FSM - should clear stall and return to rtp-flowi
   advancePhase(state, "rtp-flowing");
   checkRtpProgression(state, { bytesReceived: 1000, packetsReceived: 10 });
   checkRtpProgression(state, { bytesReceived: 2000, packetsReceived: 20 });
+  state.rtpEvidence.lastRtpProgressAt = Date.now() - 5000;
   state.phaseEnteredAt = Date.now() - 5000;
   detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG);
   assert.ok(state.stallState.detected);
@@ -349,15 +344,12 @@ test("Remote Source Convergence FSM - should compare incarnation authority corre
     sourceGeneration: 2,
   });
 
-  // Higher connection epoch wins
   const compare1 = compareIncarnationAuthority(inc1, inc2);
   assert.ok(compare1 < 0);
 
-  // Higher source generation wins when epoch equal
   const compare2 = compareIncarnationAuthority(inc1, inc3);
   assert.ok(compare2 < 0);
 
-  // Same authority
   const compare3 = compareIncarnationAuthority(inc1, inc1);
   assert.strictEqual(compare3, 0);
 });

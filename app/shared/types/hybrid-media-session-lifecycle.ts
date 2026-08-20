@@ -95,7 +95,6 @@ export interface LifecycleDependencyContext {
     sourceController: {
       getLocalSources?: () => Map<string, unknown>;
       processPendingRetirements?: () => Promise<void>;
-      onReceiverEvidence?: (data: unknown) => void;
     };
   };
   messageHandlers: Map<string, (data: unknown) => unknown>;
@@ -187,6 +186,5 @@ export interface RuntimeDependencyContext extends LifecycleDependencyContext {
   sourceController: {
     getLocalSources?: () => Map<string, unknown>;
     processPendingRetirements?: () => Promise<void>;
-    onReceiverEvidence?: (data: unknown) => void;
   };
 }

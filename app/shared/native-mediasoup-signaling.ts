@@ -170,17 +170,28 @@ export async function handleProviderTicket(
 
 export function createSignaling(session: NativeMediasoupSfuSession) {
   session.signaling?.stop?.();
+  const controlState = session as unknown as {
+    controlConnectionEpoch?: number;
+    lastAppliedRoomRevision?: string;
+    lastAppliedPublicationRevision?: string | number;
+  };
   session.signaling = createMediaSignalingSocket({
     buildHeartbeatData: (sequence) => ({
       sequence,
+      connectionEpoch: controlState.controlConnectionEpoch || 1,
       topologyEpoch: Number(session.topologyState?.epoch) || 0,
       sourceRevision: Number(session.topologyState?.sourceRevision) || 0,
+      publicationRevision: controlState.lastAppliedPublicationRevision || "0",
+      lastAppliedRoomRevision: controlState.lastAppliedRoomRevision || "0",
+      localSourceDigest: {},
     }),
     buildUrl: () => session.buildUrl(session.channelId),
     buildClientHelloData: () => ({
       protocolVersion: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
       contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
       mediaSessionId: session.mediaSessionId,
+      connectionEpoch: controlState.controlConnectionEpoch || 1,
+      lastAppliedRoomRevision: controlState.lastAppliedRoomRevision || "0",
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
       mediaCapabilities: session.mediaCapabilities,
       capabilityProtocol: "video-codec-matrix-v1",
@@ -188,7 +199,7 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
     }),
     connectionTimeoutMs: session.requestTimeoutMs,
     defaultHeartbeatIntervalMs: 5000,
-    defaultHeartbeatTimeoutMs: 20000,
+    defaultHeartbeatTimeoutMs: 15000,
     handleMessage: (raw) =>
       dispatchMediaSignalingMessage(raw, {
         getHandler: (type) => session.messageHandlers.get(type),
