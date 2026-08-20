@@ -132,6 +132,11 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
     publications: CloudflarePublication[],
     generation?: number,
   ) => Promise<unknown>;
+  recoverRemotePublication: (
+    trackName: string,
+    expectedReceiverIncarnation?: string,
+    generation?: number,
+  ) => Promise<boolean>;
   removeSourceInternal: (source: string) => Promise<void>;
   setRemoteReceiving: (
     userIdOrKey: string,

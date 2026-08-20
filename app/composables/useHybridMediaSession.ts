@@ -319,21 +319,32 @@ export function useHybridMediaSession() {
       closeConsumerByProducer?: (producerId: string) => unknown;
       requestConsumer?: (producerId: string) => unknown;
       subscribe?: (publication: unknown) => Promise<unknown>;
+      recoverRemotePublication?: (
+        trackName: string,
+        expectedReceiverIncarnation?: string,
+      ) => Promise<boolean>;
     } | null;
     if (
       entry.provider === "sfu" &&
       !entry.producerId &&
       entry.cloudflareTrackName &&
-      provider?.subscribe
+      (provider?.recoverRemotePublication || provider?.subscribe)
     ) {
-      const publication = cloudflarePublications
-        .values()
-        .find(
-          (candidate) =>
-            String(candidate.trackName || "") ===
-            String(entry.cloudflareTrackName),
+      if (provider.recoverRemotePublication)
+        await provider.recoverRemotePublication(
+          String(entry.cloudflareTrackName),
+          entry.receiverIncarnationId,
         );
-      if (publication) await provider.subscribe(publication);
+      else {
+        const publication = cloudflarePublications
+          .values()
+          .find(
+            (candidate) =>
+              String(candidate.trackName || "") ===
+              String(entry.cloudflareTrackName),
+          );
+        if (publication) await provider.subscribe?.(publication);
+      }
       return false;
     }
     if (entry.provider !== "sfu" || !entry.producerId) return false;

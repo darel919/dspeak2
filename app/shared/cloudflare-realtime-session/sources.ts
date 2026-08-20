@@ -285,6 +285,74 @@ export class CloudflareSourcesMethods {
     return Promise.resolve(true);
   }
 
+  async recoverRemotePublication(
+    this: CloudflareSessionLike,
+    trackName: string,
+    expectedReceiverIncarnation?: string,
+    generation = this.sessionGeneration,
+  ) {
+    const publication = this.publications.get(trackName);
+    const current = this.consumers.get(trackName);
+    const peerConnection = this.peerConnection;
+    const mid =
+      current?.mid ||
+      [...this.remoteByMid.entries()].find(
+        ([, candidate]) => candidate.trackName === trackName,
+      )?.[0];
+    if (
+      !publication ||
+      !current ||
+      !peerConnection ||
+      !mid ||
+      generation !== this.sessionGeneration ||
+      (expectedReceiverIncarnation &&
+        current.receiverIncarnationId !== expectedReceiverIncarnation)
+    )
+      return false;
+    return this.enqueueNegotiation(async () => {
+      this.assertCurrentSession(peerConnection, generation);
+      const transceiver = peerConnection
+        .getTransceivers()
+        .find((candidate) => String(candidate.mid) === String(mid));
+      if (transceiver && transceiver.direction !== "inactive")
+        transceiver.direction = "inactive";
+      this.consumers.delete(trackName);
+      this.subscribedTrackNames.delete(trackName);
+      this.remoteByMid.delete(String(mid));
+      this.pendingRemoteTracks.delete(String(mid));
+      this.rtpSamples.delete(trackName);
+      try {
+        current.track?.stop?.();
+      } catch {}
+      this.onRemoteTrackEnded?.(current);
+      const offer = await peerConnection.createOffer();
+      this.assertCurrentSession(peerConnection, generation);
+      await peerConnection.setLocalDescription(offer);
+      const sessionDescription =
+        await getLocalSessionDescription(peerConnection);
+      const result = await this.request("tracks-close", {
+        tracks: [{ mid }],
+        sessionDescription,
+        force: false,
+      });
+      this.assertCurrentSession(peerConnection, generation);
+      if (result.sessionDescription?.type === "offer") {
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        await this.request("renegotiate", {
+          sessionDescription: await getLocalSessionDescription(peerConnection),
+        });
+      } else if (result.sessionDescription) {
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+      }
+      this.assertCurrentSession(peerConnection, generation);
+      return Boolean(
+        await this.subscribePublicationBatch([publication], generation),
+      );
+    });
+  }
+
   subscribe(
     this: CloudflareSessionLike,
     publication: CloudflarePublication,

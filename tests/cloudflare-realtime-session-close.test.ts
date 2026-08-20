@@ -272,6 +272,76 @@ test("Cloudflare compensates a created track when publication registration fails
   assert.equal(client.producers.size, 0);
 });
 
+test("Cloudflare recovery closes and re-pulls the exact remote publication", async () => {
+  const requests = [];
+  const ended = [];
+  let client;
+  const peerConnection = new GatheringPeerConnection();
+  peerConnection.connectionState = "connected";
+  peerConnection.signalingState = "stable";
+  peerConnection.iceGatheringState = "complete";
+  peerConnection.localDescription = { type: "offer", sdp: "offer" };
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      requests.push(message);
+      if (message.type !== "cloudflare-request") return true;
+      const { requestId, operation } = message.data;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId,
+          result:
+            operation === "tracks-close"
+              ? { sessionDescription: { type: "answer", sdp: "close" } }
+              : {
+                  tracks: [{ trackName: "remote-track", mid: "remote-mid-2" }],
+                  sessionDescription: { type: "answer", sdp: "subscribe" },
+                },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+    onRemoteTrackEnded(entry) {
+      ended.push(entry);
+    },
+  });
+  client.peerConnection = peerConnection;
+  client.sessionId = "local-session";
+  client.initializing = Promise.resolve();
+  client.sessionGeneration = 1;
+  const publication = {
+    trackName: "remote-track",
+    sessionId: "remote-session",
+    source: "camera",
+    userId: "user-1",
+    generation: 1,
+  };
+  client.publications.set("remote-track", publication);
+  client.consumers.set("remote-track", {
+    trackName: "remote-track",
+    mid: "remote-mid",
+    track: { stop() {} },
+    receiverIncarnationId: "old-token",
+  });
+  client.remoteByMid.set("remote-mid", publication);
+  client.subscribedTrackNames.add("remote-track");
+
+  assert.equal(
+    await client.recoverRemotePublication("remote-track", "old-token", 1),
+    true,
+  );
+  assert.deepEqual(
+    requests
+      .filter((message) => message.type === "cloudflare-request")
+      .map((message) => message.data.operation),
+    ["tracks-close", "tracks-new"],
+  );
+  assert.deepEqual(requests[0].data.body.tracks, [{ mid: "remote-mid" }]);
+  assert.equal(ended.length, 1);
+  assert.equal(client.remoteByMid.get("remote-mid-2"), publication);
+  client.closeMedia();
+});
+
 test("Cloudflare initialization can retry after a failed request", async () => {
   const previousPeerConnection = globalThis.RTCPeerConnection;
   const requests = [];

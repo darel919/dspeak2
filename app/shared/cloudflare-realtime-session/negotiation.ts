@@ -92,6 +92,8 @@ export class CloudflareNegotiationMethods {
     try {
       event.track.enabled = receiving;
     } catch {}
+    const mid =
+      event.transceiver?.mid == null ? null : String(event.transceiver.mid);
     const entry = {
       provider: "sfu",
       participantId: publication.userId,
@@ -100,8 +102,7 @@ export class CloudflareNegotiationMethods {
       source,
       ownerSource: publication.ownerSource || null,
       kind: event.track.kind,
-      mid:
-        event.transceiver?.mid == null ? null : String(event.transceiver.mid),
+      mid,
       receiver: event.receiver,
       trackName,
       publicationId: trackName,
@@ -109,7 +110,7 @@ export class CloudflareNegotiationMethods {
       sourceGeneration: Number(publication.generation) || 1,
       cloudflareSessionId: this.sessionId || undefined,
       cloudflareTrackName: trackName,
-      receiverIncarnationId: `cloudflare:${this.sessionId || ""}:${trackName}`,
+      receiverIncarnationId: `cloudflare:${this.sessionId || ""}:${trackName}:${event.track.id}:${mid}`,
       logicalStreamId: publication.logicalStreamId || null,
       variantId: publication.variantId || null,
       key: publication.trackName,
