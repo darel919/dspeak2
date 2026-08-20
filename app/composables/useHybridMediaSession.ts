@@ -87,7 +87,10 @@ import {
 } from "~/shared/microphone-gate.ts";
 import type { MediaVideoFeed } from "~/shared/types/media-source-controller.ts";
 import type { RemoteMediaEntry } from "~/shared/types/hybrid-media-registry.ts";
-import type { RemoteReceiverStats } from "~/shared/remote-source-convergence.ts";
+import type {
+  RemotePresentationObservationMode,
+  RemoteReceiverStats,
+} from "~/shared/remote-source-convergence.ts";
 import type {
   HybridP2pMesh,
   HybridChannelRecord,
@@ -1307,21 +1310,31 @@ export function useHybridMediaSession() {
       key: string,
       receiverIncarnationId?: string | null,
       fallback = false,
+      observationMode?: Exclude<
+        RemotePresentationObservationMode,
+        "unavailable"
+      >,
     ) =>
       registry.markFirstFrame(
         key,
         receiverIncarnationId || null,
         Date.now(),
         fallback,
+        observationMode,
       ),
     markRemoteFramePresented: (
       key: string,
       receiverIncarnationId?: string | null,
+      observationMode?: Exclude<
+        RemotePresentationObservationMode,
+        "unavailable"
+      >,
     ) =>
       registry.markFramePresented(
         key,
         receiverIncarnationId || null,
         Date.now(),
+        observationMode,
       ),
     setRemoteSystemAudioReceiving: (key: string, on: boolean) =>
       registry.setAudioReceiving(key, on),

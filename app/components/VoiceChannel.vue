@@ -1078,11 +1078,14 @@ function onRemoteFirstFrame(event) {
   const feedKey = typeof event === "string" ? event : event?.feedKey;
   const receiverIncarnationId =
     typeof event === "string" ? null : event?.receiverIncarnationId || null;
+  const observationMode =
+    typeof event === "object" ? event?.observationMode : undefined;
   if (!feedKey) return;
   mediaSessionRef.value?.markRemoteFirstFrame?.(
     feedKey,
     receiverIncarnationId,
     typeof event === "object" && event?.fallback === true,
+    observationMode,
   );
 }
 
@@ -1090,10 +1093,13 @@ function onRemoteFramePresented(event) {
   const feedKey = typeof event === "string" ? event : event?.feedKey;
   const receiverIncarnationId =
     typeof event === "string" ? null : event?.receiverIncarnationId || null;
+  const observationMode =
+    typeof event === "object" ? event?.observationMode : undefined;
   if (!feedKey) return;
   mediaSessionRef.value?.markRemoteFramePresented?.(
     feedKey,
     receiverIncarnationId,
+    observationMode,
   );
 }
 

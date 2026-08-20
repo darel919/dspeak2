@@ -191,7 +191,10 @@
 <script setup>
 import { useSettingsStore } from "~/stores/settings";
 import { playSystemSound } from "~/shared/system-sounds.ts";
-import { isCurrentVideoFrame } from "~/shared/video-frame-fencing.ts";
+import {
+  isCurrentVideoFrame,
+  scheduleFencedVideoFrame,
+} from "~/shared/video-frame-fencing.ts";
 
 const settingsStore = useSettingsStore();
 const props = defineProps({
@@ -249,6 +252,7 @@ let firstFrameFallbackTimer = null;
 let nativeFirstFrameEmitted = false;
 let nativeFirstFrameReceiverId = null;
 let videoFrameCallbackHandle = null;
+let cancelVideoFramePresentation = null;
 let videoFirstFrameEmitted = false;
 
 let currentFeedKey = props.feedKey;
@@ -383,6 +387,7 @@ function drawNativeFrame(
     emit("frame-presented", {
       feedKey,
       receiverIncarnationId,
+      observationMode: "native",
     });
   if (
     feedKey &&
@@ -395,6 +400,7 @@ function drawNativeFrame(
     emit("first-frame", {
       feedKey,
       receiverIncarnationId,
+      observationMode: "native",
     });
   }
 }
@@ -469,17 +475,12 @@ function attachStream() {
 function cancelVideoFrameEvidence() {
   clearTimeout(firstFrameFallbackTimer);
   firstFrameFallbackTimer = null;
-  const element = videoElement.value;
-  if (
-    videoFrameCallbackHandle !== null &&
-    element &&
-    typeof element.cancelVideoFrameCallback === "function"
-  )
-    element.cancelVideoFrameCallback(videoFrameCallbackHandle);
+  cancelVideoFramePresentation?.();
+  cancelVideoFramePresentation = null;
   videoFrameCallbackHandle = null;
 }
 
-function emitFirstFrame(fallback = false) {
+function emitFirstFrame(fallback = false, observationMode) {
   if (!props.feedKey || !props.receiverIncarnationId || videoFirstFrameEmitted)
     return;
   videoFirstFrameEmitted = true;
@@ -487,6 +488,7 @@ function emitFirstFrame(fallback = false) {
     feedKey: props.feedKey,
     receiverIncarnationId: props.receiverIncarnationId,
     fallback,
+    ...(observationMode ? { observationMode } : {}),
   });
 }
 
@@ -522,33 +524,40 @@ function handleVideoReady() {
         )
       )
         return;
-      videoFrameCallbackHandle = callbackElement.requestVideoFrameCallback(
+      const scheduled = scheduleFencedVideoFrame(
+        {
+          request: (callback) =>
+            callbackElement.requestVideoFrameCallback(() => callback()),
+          cancel: (handle) => callbackElement.cancelVideoFrameCallback(handle),
+        },
+        {
+          feedKey: props.feedKey,
+          receiverIncarnationId: callbackReceiverIncarnationId,
+        },
+        () => ({
+          feedKey: props.feedKey,
+          receiverIncarnationId: props.receiverIncarnationId,
+        }),
         () => {
           videoFrameCallbackHandle = null;
+          cancelVideoFramePresentation = null;
           if (
             videoElement.value !== callbackElement ||
             props.stream !== callbackStream ||
-            props.track !== callbackTrack ||
-            !isCurrentVideoFrame(
-              {
-                feedKey: props.feedKey,
-                receiverIncarnationId: callbackReceiverIncarnationId,
-              },
-              {
-                feedKey: props.feedKey,
-                receiverIncarnationId: props.receiverIncarnationId,
-              },
-            )
+            props.track !== callbackTrack
           )
             return;
           emit("frame-presented", {
             feedKey: props.feedKey,
             receiverIncarnationId: callbackReceiverIncarnationId,
+            observationMode: "rvfc",
           });
-          emitFirstFrame();
+          emitFirstFrame(false, "rvfc");
           schedulePresentation();
         },
       );
+      videoFrameCallbackHandle = scheduled.handle;
+      cancelVideoFramePresentation = scheduled.cancel;
     };
     schedulePresentation();
   } else {

@@ -80,6 +80,9 @@ export type RemoteSourceRtpEvidence = VideoRtpEvidence | AudioRtpEvidence;
 export type RemoteSourceStallCause =
   "no-rtp" | "first-frame-timeout" | "decoder-stall" | "render-stall";
 
+export type RemotePresentationObservationMode =
+  "rvfc" | "native" | "stats" | "unavailable";
+
 export interface RemoteReceiverStats {
   bytesReceived: number;
   packetsReceived: number;
@@ -100,6 +103,7 @@ export interface RemoteReceiverStats {
 export interface RemoteSourceConvergenceState {
   incarnation: RemoteSourceIncarnation;
   kind: RemoteSourceKind;
+  presentationObservationMode: RemotePresentationObservationMode;
   phase: RemoteSourcePhase;
   previousPhase: RemoteSourcePhase | null;
   phaseEnteredAt: number;
@@ -331,6 +335,7 @@ export function createRemoteSourceConvergenceState(
   return {
     incarnation,
     kind: sourceKind(incarnation.source),
+    presentationObservationMode: "unavailable",
     phase: "not-announced",
     previousPhase: null,
     phaseEnteredAt: Date.now(),
@@ -482,6 +487,11 @@ function recordRtpSample(
     if (framesReceivedProgressed) evidence.lastFrameReceivedProgressAt = now;
     if (framesDecodedProgressed) evidence.lastDecodeProgressAt = now;
     if (framesRenderedProgressed) evidence.lastStatsRenderProgressAt = now;
+    if (
+      sample.framesRendered !== undefined &&
+      state.presentationObservationMode === "unavailable"
+    )
+      state.presentationObservationMode = "stats";
     if (sample.framesReceived !== undefined) {
       if (framesReceivedProgressed && !framesDecodedProgressed)
         evidence.decoderStallSamples += 1;
@@ -634,10 +644,6 @@ export function recordFirstFrameEvidence(
   state.firstFrameEvidence.element = options.element ?? null;
   state.firstFrameEvidence.stream = options.stream ?? null;
   state.firstFrameEvidence.track = options.track ?? null;
-  recordPresentationProgress(state, at);
-  if (state.rtpEvidence.kind === "video")
-    state.rtpEvidence.observedPresentationProgressCount =
-      state.rtpEvidence.presentationProgressCount;
   promoteConvergence(state, at);
   return true;
 }
@@ -645,10 +651,12 @@ export function recordFirstFrameEvidence(
 export function recordPresentationProgress(
   state: RemoteSourceConvergenceState,
   at = Date.now(),
+  mode: Exclude<RemotePresentationObservationMode, "unavailable"> = "native",
 ): boolean {
   if (state.kind !== "video" || state.retired || state.failed) return false;
   const evidence = state.rtpEvidence;
   if (evidence.kind !== "video") return false;
+  state.presentationObservationMode = mode;
   evidence.lastPresentationProgressAt = at;
   evidence.presentationProgressCount += 1;
   return true;
@@ -781,6 +789,7 @@ export function detectStall(
     state.kind === "video" &&
     evidence.kind === "video" &&
     evidence.lastFramesReceived > 0 &&
+    state.presentationObservationMode !== "unavailable" &&
     state.phase === "renderable"
   ) {
     if (
@@ -843,6 +852,11 @@ export function scheduleRecovery(
 }
 
 export function clearStall(state: RemoteSourceConvergenceState): void {
+  const cause = state.stallState.cause;
+  if (state.rtpEvidence.kind === "video") {
+    if (cause === "decoder-stall") state.rtpEvidence.decoderStallSamples = 0;
+    if (cause === "render-stall") state.rtpEvidence.renderStallSamples = 0;
+  }
   state.stallState.detected = false;
   state.stallState.detectedAt = null;
   state.stallState.cause = null;

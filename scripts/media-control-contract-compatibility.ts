@@ -13,7 +13,7 @@ export async function runMediaControlContractCompatibility(
     resolve(process.cwd(), "../dspeak-media-control"),
 ) {
   const protocolPath = pathToFileURL(
-    resolve(mediaControlPath, "src/protocol.js"),
+    resolve(mediaControlPath, "src/protocol.ts"),
   );
   const server = await import(protocolPath.href);
   const sessionId = "contract-session";
@@ -104,7 +104,7 @@ if (import.meta.main) {
   const mediaControlPath =
     process.env.DSPEAK_MEDIA_CONTROL_PATH ||
     resolve(process.cwd(), "../dspeak-media-control");
-  if (!existsSync(resolve(mediaControlPath, "src/protocol.js"))) {
+  if (!existsSync(resolve(mediaControlPath, "src/protocol.ts"))) {
     throw new Error(`media-control protocol not found at ${mediaControlPath}`);
   }
   const result = await runMediaControlContractCompatibility(mediaControlPath);

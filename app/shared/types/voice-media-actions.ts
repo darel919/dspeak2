@@ -2,6 +2,7 @@ import type { Ref } from "vue";
 import type { MediaCaptureStartOptions } from "./media-capture.ts";
 import type { SoundSettings } from "../system-sounds.ts";
 import type { RtcStatsSnapshot } from "./rtc-stats.ts";
+import type { RemotePresentationObservationMode } from "../remote-source-convergence.ts";
 
 export interface VoiceUserRecord {
   id: string;
@@ -101,10 +102,12 @@ export interface VoiceMediaSessionLike {
     key: string,
     receiverIncarnationId?: string | null,
     fallback?: boolean,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
   ) => unknown;
   markRemoteFramePresented?: (
     key: string,
     receiverIncarnationId?: string | null,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
   ) => unknown;
   setRemoteSystemAudioReceiving?: (
     feedKey: string,

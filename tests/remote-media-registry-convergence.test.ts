@@ -295,6 +295,32 @@ test("decoder recovery waits for decode progression and ignores packet-only prog
   registry.clear();
 });
 
+test("presentation recovery clears the render counter before a missing-stats sample", () => {
+  const { registry } = createVideoRegistry();
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.presentationObservationMode = "rvfc";
+  state.phase = "recovering";
+  state.stallState.detected = true;
+  state.stallState.cause = "render-stall";
+  if (state.rtpEvidence.kind !== "video")
+    throw new Error("Expected video convergence evidence");
+  state.rtpEvidence.renderStallSamples = 2;
+
+  assert.equal(
+    registry.markFramePresented(current.key, token, Date.now(), "rvfc"),
+    true,
+  );
+  assert.equal(state.stallState.detected, false);
+  assert.equal(state.rtpEvidence.renderStallSamples, 0);
+  assert.equal(registry.evaluateReceiverHealth(current.key, token), false);
+});
+
 test("missing receiver stats still trigger the no-RTP timeout", async () => {
   const { registry } = createVideoRegistry({
     getReceiverStats: async () => null,

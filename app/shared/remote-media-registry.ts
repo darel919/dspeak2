@@ -17,7 +17,7 @@ import type { AttenuationReportInput } from "./media-attenuation-reporter.ts";
 import type {
   RemoteSourceIncarnation,
   RemoteSourceConvergenceState,
-  RemoteSourcePhase,
+  RemotePresentationObservationMode,
 } from "./remote-source-convergence.ts";
 import {
   createRemoteSourceIncarnation,
@@ -353,6 +353,7 @@ export class RemoteMediaRegistry {
     expectedReceiverIncarnation: string | null = null,
     at = Date.now(),
     fallback = false,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
   ) {
     const convergenceState = this.remoteSourceConvergence.get(key);
     if (!convergenceState) return false;
@@ -366,6 +367,12 @@ export class RemoteMediaRegistry {
       fallback,
     });
     if (!changed) return false;
+    if (observationMode) {
+      convergenceState.presentationObservationMode = observationMode;
+      if (convergenceState.rtpEvidence.kind === "video")
+        convergenceState.rtpEvidence.observedPresentationProgressCount =
+          convergenceState.rtpEvidence.presentationProgressCount;
+    }
     if (convergenceState.stallState.cause === "first-frame-timeout")
       clearStall(convergenceState);
     const video = this.videoFeeds.value.get(key);
@@ -383,6 +390,7 @@ export class RemoteMediaRegistry {
     key: string,
     expectedReceiverIncarnation: string | null = null,
     at = Date.now(),
+    mode: Exclude<RemotePresentationObservationMode, "unavailable"> = "native",
   ) {
     const convergenceState = this.remoteSourceConvergence.get(key);
     if (!convergenceState) return false;
@@ -392,7 +400,7 @@ export class RemoteMediaRegistry {
         expectedReceiverIncarnation
     )
       return false;
-    const changed = recordPresentationProgress(convergenceState, at);
+    const changed = recordPresentationProgress(convergenceState, at, mode);
     if (!changed) return false;
     if (convergenceState.stallState.cause === "render-stall")
       clearStall(convergenceState);
